@@ -3,24 +3,18 @@
   "version": "3.0.0",
   "type": "module",
   "imports": {
-    "#*": {
-      "types": ["./src/*.ts", "./src/*.tsx"],
-      "default": "./src/*"
-    }
+    "#*": { "development": ["./src/*.ts", "./src/*.tsx"], "default": ["./dist/*.js", "./dist/*.jsx"] }
   },
   "exports": {
-    ".": "./src/index.ts",
-    "./ui/*": {
-      "types": ["./src/components/ui/*.ts", "./src/components/ui/*.tsx"],
-      "default": "./src/components/ui/*"
-    },
-    "./*": {
-      "types": ["./src/*.ts", "./src/*.tsx"],
-      "default": "./src/*"
-    }
+    ".":      { "development": "./src/index.ts", "types": "./dist/index.d.ts", "default": "./dist/index.js" },
+    "./ui/*": { "development": ["./src/components/ui/*.ts", "./src/components/ui/*.tsx"], "types": "./dist/components/ui/*.d.ts", "default": "./dist/components/ui/*.js" },
+    "./*":    { "development": ["./src/*.ts", "./src/*.tsx"], "types": ["./dist/*.d.ts"], "default": ["./dist/*.js"] }
   },
+  "files": ["dist", "src"],
   "scripts": {
-    "test": "tsx --test src/**/*.test.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "prepack": "npm run build",
+    "test": "tsx --conditions development --test src/**/*.test.ts",
     "dev": "vite"
   },
   "peerDependencies": {

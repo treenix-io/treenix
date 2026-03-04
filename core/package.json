@@ -3,16 +3,19 @@
   "version": "3.0.0",
   "type": "module",
   "imports": {
-    "#*": "./src/*.ts"
+    "#*": { "development": "./src/*.ts", "default": "./dist/*.js" }
   },
   "exports": {
-    ".":   "./src/index.ts",
-    "./*": "./src/*.ts"
+    ".":   { "development": "./src/index.ts", "types": "./dist/index.d.ts", "default": "./dist/index.js" },
+    "./*": { "development": "./src/*.ts", "types": "./dist/*.d.ts", "default": "./dist/*.js" }
   },
+  "files": ["dist", "src"],
   "scripts": {
-    "test": "tsx --test src/**/*.test.ts",
-    "dev:server": "tsx --watch src/server/main.ts ../root.json",
-    "schema": "tsx src/schema/extract-schemas.ts ../mods ../packages"
+    "build": "tsc -p tsconfig.build.json",
+    "prepack": "npm run build",
+    "test": "tsx --conditions development --test src/**/*.test.ts",
+    "dev:server": "tsx --conditions development --watch src/server/main.ts ../root.json",
+    "schema": "tsx --conditions development src/schema/extract-schemas.ts ../mods ../packages"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.58",

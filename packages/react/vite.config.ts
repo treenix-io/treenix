@@ -7,6 +7,7 @@ import modsPlugin from './vite-plugin-mods';
 const apiPort = process.env.VITE_API_PORT || '3211';
 
 export default defineConfig({
+  resolve: { conditions: ['development'] },
   plugins: [
     modsPlugin(),
     tsconfigPaths(),
