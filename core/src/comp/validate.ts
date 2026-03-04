@@ -1,0 +1,125 @@
+// Component validation — shared between client and server
+// Type-dispatched validator tree: type check → dispatch → type-specific constraints + recurse
+
+import { AnyType, type ComponentData, getComponents, type NodeData } from '#core';
+import { resolve } from '#core/registry';
+import type { PropertySchema, TypeSchema } from '#schema/types';
+
+export type ValidationError = {
+  path: string;
+  message: string;
+};
+
+// ── Type-dispatched validator tree ──
+
+type TypeValidator = (value: unknown, def: PropertySchema, path: string, errors: ValidationError[]) => void;
+
+const typeValidators: Record<string, TypeValidator> = {
+  string(value, def, path, errors) {
+    if (typeof value !== 'string') { errors.push({ path, message: `expected string, got ${typeof value}` }); return; }
+    const d = def as any;
+    if (typeof d.minLength === 'number' && value.length < d.minLength)
+      errors.push({ path, message: `min length ${d.minLength}, got ${value.length}` });
+    if (typeof d.maxLength === 'number' && value.length > d.maxLength)
+      errors.push({ path, message: `max length ${d.maxLength}, got ${value.length}` });
+    if (typeof d.pattern === 'string' && !new RegExp(d.pattern).test(value))
+      errors.push({ path, message: `must match /${d.pattern}/` });
+    if (def.enum && !def.enum.includes(value))
+      errors.push({ path, message: `must be one of: ${def.enum.join(', ')}` });
+  },
+
+  number(value, def, path, errors) {
+    if (typeof value !== 'number') { errors.push({ path, message: `expected number, got ${typeof value}` }); return; }
+    const d = def as any;
+    if (typeof d.minimum === 'number' && value < d.minimum)
+      errors.push({ path, message: `minimum ${d.minimum}, got ${value}` });
+    if (typeof d.maximum === 'number' && value > d.maximum)
+      errors.push({ path, message: `maximum ${d.maximum}, got ${value}` });
+  },
+
+  boolean(value, _def, path, errors) {
+    if (typeof value !== 'boolean') errors.push({ path, message: `expected boolean, got ${typeof value}` });
+  },
+
+  array(value, def, path, errors) {
+    if (!Array.isArray(value)) { errors.push({ path, message: `expected array, got ${typeof value}` }); return; }
+    const d = def as any;
+    if (typeof d.minItems === 'number' && value.length < d.minItems)
+      errors.push({ path, message: `min items ${d.minItems}, got ${value.length}` });
+    if (typeof d.maxItems === 'number' && value.length > d.maxItems)
+      errors.push({ path, message: `max items ${d.maxItems}, got ${value.length}` });
+
+    if (!def.items) return;
+    const items = def.items;
+
+    for (let i = 0; i < value.length; i++) {
+      if (value[i] === undefined || value[i] === null) continue;
+      const ip = `${path}[${i}]`;
+
+      if (items.properties) {
+        if (typeof value[i] !== 'object' || value[i] === null) {
+          errors.push({ path: ip, message: `expected object, got ${typeof value[i]}` });
+        } else {
+          validateObject(value[i] as Record<string, unknown>, items.properties as Record<string, PropertySchema>, ip, errors);
+        }
+      } else if (items.type) {
+        validateValue(value[i], items as PropertySchema, ip, errors);
+      }
+    }
+  },
+
+  object(value, def, path, errors) {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      errors.push({ path, message: `expected object, got ${Array.isArray(value) ? 'array' : typeof value}` });
+      return;
+    }
+    const props = (def as any).properties as Record<string, PropertySchema> | undefined;
+    if (props) validateObject(value as Record<string, unknown>, props, path, errors);
+  },
+};
+
+// ── Extension point ──
+
+export function addTypeValidator(type: string, fn: TypeValidator): void {
+  typeValidators[type] = fn;
+}
+
+// ── Core ──
+
+export function validateValue(value: unknown, def: PropertySchema, path: string, errors: ValidationError[]): void {
+  if (!def.type) return;
+  const validator = typeValidators[def.type];
+  if (validator) validator(value, def, path, errors);
+}
+
+function validateObject(obj: Record<string, unknown>, properties: Record<string, PropertySchema>, basePath: string, errors: ValidationError[]): void {
+  for (const [prop, propDef] of Object.entries(properties)) {
+    const val = obj[prop];
+    if (val === undefined || val === null) continue;
+    validateValue(val, propDef, basePath ? `${basePath}.${prop}` : prop, errors);
+  }
+}
+
+export function validateComponent(comp: ComponentData, schema: TypeSchema, field: string): ValidationError[] {
+  if (!schema.properties) return [];
+  const errors: ValidationError[] = [];
+  const basePath = field || comp.$type;
+  validateObject(comp as unknown as Record<string, unknown>, schema.properties, basePath, errors);
+  return errors;
+}
+
+export function validateNode(node: NodeData): ValidationError[] {
+  const errors: ValidationError[] = [];
+
+  for (const [name, comp] of getComponents(node, AnyType)) {
+    const schemaHandler = resolve(comp.$type, 'schema');
+    if (!schemaHandler) continue;
+
+    const schema = (schemaHandler as () => TypeSchema)();
+    if (!schema?.properties) continue;
+
+    errors.push(...validateComponent(comp, schema, name));
+  }
+
+  return errors;
+}

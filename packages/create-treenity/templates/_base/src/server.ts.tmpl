@@ -1,0 +1,13 @@
+import 'dotenv/config'
+import { treenity } from '@treenity/core/server'
+import { seed } from './seed.js'
+
+const app = await treenity({
+  dataDir: process.env.DATA_DIR || './data',
+  modsDir: new URL('./mods', import.meta.url).pathname,
+  seed,
+})
+
+await app.listen(Number(process.env.PORT) || 3211, {
+  allowedOrigins: ['http://localhost:3210'],
+})

@@ -1,0 +1,116 @@
+import { NodeViewWrapper } from '@tiptap/react';
+import { getContextsForType } from '@treenity/core/core';
+import { getRegistryVersion, subscribeRegistry } from '@treenity/core/core/registry';
+import { Render, RenderContext } from '@treenity/react/context';
+import { usePath } from '@treenity/react/hooks';
+import { useSyncExternalStore } from 'react';
+
+export function TreenityBlockView({ node, updateAttributes, deleteNode, editor }: any) {
+  const ref = node.attrs.ref as string | null;
+  const type = node.attrs.type as string | null;
+  const ctx = (node.attrs.context as string | null) ?? 'react';
+  const refNode = usePath(ref);
+  const editable = editor?.isEditable;
+
+  // Re-check available contexts when registry changes (views load asynchronously)
+  useSyncExternalStore(subscribeRegistry, getRegistryVersion);
+
+  const effectiveType = refNode?.$type ?? type ?? '';
+  const availableContexts = effectiveType
+    ? getContextsForType(effectiveType).filter((c) => c.startsWith('react')).sort()
+    : [];
+
+  const renderContent = () => {
+    if (ref && refNode) {
+      return (
+        <RenderContext name={ctx}>
+          <Render value={refNode} />
+        </RenderContext>
+      );
+    }
+
+    if (ref && !refNode) {
+      return (
+        <div className="text-sm italic p-4" style={{ color: 'var(--text-3)' }}>
+          Loading {ref}…
+        </div>
+      );
+    }
+
+    if (type && node.attrs.props) {
+      return (
+        <RenderContext name={ctx}>
+          <Render value={{ $type: type, ...node.attrs.props }} />
+        </RenderContext>
+      );
+    }
+
+    return (
+      <div className="text-sm italic p-4" style={{ color: 'var(--text-3)' }}>
+        Empty component block
+      </div>
+    );
+  };
+
+  const label = effectiveType || ref?.split('/').at(-1) || '?';
+  const shortLabel = label.includes('.') ? label.slice(label.lastIndexOf('.') + 1) : label;
+  const shortCtx = ctx.startsWith('react:') ? ctx.slice(6) : ctx;
+
+  return (
+    <NodeViewWrapper className="my-2">
+      <div
+        className="relative group"
+        style={{ border: '1px solid var(--border)', borderRadius: 6, overflow: 'hidden', background: 'var(--surface)' }}
+      >
+        {editable && (
+          <div
+            className="absolute top-1 right-1 z-10 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
+            contentEditable={false}
+          >
+            {/* type badge */}
+            <span
+              className="text-[10px] px-1.5 py-0.5 rounded font-mono"
+              style={{ background: 'var(--surface-3)', color: 'var(--text-3)' }}
+            >
+              {shortLabel}
+            </span>
+
+            {/* context switcher — only when multiple react* contexts registered */}
+            {availableContexts.length > 1 ? (
+              <select
+                value={ctx}
+                onChange={(e) => updateAttributes({ context: e.target.value })}
+                className="text-[10px] rounded px-1 py-0.5 cursor-pointer"
+                style={{ background: 'var(--surface-3)', color: 'var(--text-2)', border: 'none' }}
+              >
+                {availableContexts.map((c) => (
+                  <option key={c} value={c}>
+                    {c.startsWith('react:') ? c.slice(6) : c}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <span
+                className="text-[10px] px-1.5 py-0.5 rounded font-mono"
+                style={{ background: 'var(--surface-3)', color: 'var(--text-3)' }}
+              >
+                {shortCtx}
+              </span>
+            )}
+
+            {/* delete */}
+            <button
+              onClick={deleteNode}
+              className="text-[12px] px-1.5 py-0.5 rounded leading-none cursor-pointer"
+              style={{ background: 'var(--surface-3)', color: 'var(--text-3)' }}
+            >
+              ×
+            </button>
+          </div>
+        )}
+
+        <div contentEditable={false}>{renderContent()}</div>
+      </div>
+    </NodeViewWrapper>
+  );
+}

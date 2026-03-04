@@ -1,0 +1,20 @@
+{
+  "name": "{{PROJECT_NAME}}",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx --watch src/server.ts",
+    "dev:front": "vite",
+    "start": "tsx src/server.ts",
+    "build": "tsc",
+    "schema": "tsx node_modules/@treenity/core/src/schema/extract-schemas.ts"
+  },
+  "dependencies": {
+    "@treenity/core": "^0.1.0",
+    "dotenv": "^17.0.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.0"
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "core",
+    "packages/*",
+    "mods/*"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/treenity-ai/treenity.git"
+  },
+  "scripts": {
+    "test": "npm test --workspaces --if-present",
+    "dev:server": "npm run dev:server -w @treenity/core",
+    "dev:front": "npm run dev -w @treenity/react",
+    "schema": "npm run schema -w @treenity/core",
+    "typecheck": "tsc -p core --noEmit && tsc -p packages/react --noEmit"
+  },
+  "devDependencies": {
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  },
+  "overrides": {
+    "onnxruntime-node": "1.24.2"
+  }
+}

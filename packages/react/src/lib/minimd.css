@@ -1,0 +1,28 @@
+/* minimd — lightweight markdown rendering */
+.minimd *:first-child { margin-top: 0; }
+.minimd h1, .minimd h2, .minimd h3 { font-weight: 600; margin: 14px 0 6px; color: var(--text); }
+.minimd h1 { font-size: 1.3em; border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+.minimd h2 { font-size: 1.15em; }
+.minimd h3 { font-size: 1.05em; color: var(--text-2); }
+.minimd p { margin: 4px 0; }
+.minimd ul, .minimd ol { padding-left: 20px; margin: 4px 0; }
+.minimd li { margin: 2px 0; }
+.minimd li::marker { color: var(--text-3); }
+.minimd code {
+  font-family: var(--mono); font-size: 0.88em;
+  background: var(--surface-3); padding: 1px 5px; border-radius: 4px; color: #f0abfc;
+}
+.minimd pre {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 10px 12px; margin: 8px 0; overflow-x: auto; font-size: 12px; line-height: 1.5;
+}
+.minimd pre code { background: none; padding: 0; color: var(--text); font-size: inherit; }
+.minimd strong { font-weight: 600; }
+.minimd em { color: var(--text-2); }
+.minimd a { color: #58a6ff; text-decoration: none; }
+.minimd a:hover { text-decoration: underline; }
+.minimd blockquote { border-left: 3px solid var(--border); padding-left: 12px; color: var(--text-2); margin: 6px 0; }
+.minimd hr { border: none; border-top: 1px solid var(--border); margin: 10px 0; }
+.minimd table { border-collapse: collapse; margin: 8px 0; font-size: 12px; width: 100%; }
+.minimd th, .minimd td { border: 1px solid var(--border); padding: 6px 12px; }
+.minimd th { background: var(--surface-3); font-weight: 600; color: var(--text); text-align: left; }

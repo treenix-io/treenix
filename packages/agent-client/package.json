@@ -1,0 +1,16 @@
+{
+  "name": "@treenity/agent-client",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Treenity agent client — TOFU connection to a Treenity server",
+  "imports": {
+    "#*": "./src/*.ts"
+  },
+  "exports": {
+    ".":   "./src/index.ts",
+    "./*": "./src/*"
+  },
+  "peerDependencies": {
+    "@treenity/core": "^3.0.0"
+  }
+}

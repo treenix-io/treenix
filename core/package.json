@@ -1,0 +1,47 @@
+{
+  "name": "@treenity/core",
+  "version": "3.0.0",
+  "type": "module",
+  "imports": {
+    "#*": "./src/*.ts"
+  },
+  "exports": {
+    ".":   "./src/index.ts",
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "test": "tsx --test src/**/*.test.ts",
+    "dev:server": "tsx --watch src/server/main.ts ../root.json",
+    "schema": "tsx src/schema/extract-schemas.ts ../mods ../packages"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.58",
+    "@grammyjs/runner": "^2.0.3",
+    "@huggingface/transformers": "^3.8.1",
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "@orama/orama": "^3.1.18",
+    "@trpc/server": "^11.9.0",
+    "dotenv": "^17.2.4",
+    "fast-json-patch": "^3.1.1",
+    "grammy": "^1.39.3",
+    "immer": "^11.1.4",
+    "quickjs-emscripten": "^0.32.0",
+    "sift": "^17.1.3",
+    "uuid": "^13.0.0",
+    "wavefile": "^11.0.0",
+    "zod": "^4.3.6"
+  },
+  "peerDependencies": {
+    "mongodb": ">=6"
+  },
+  "peerDependenciesMeta": {
+    "mongodb": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "mongodb": "^7.1.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}

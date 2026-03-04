@@ -1,0 +1,60 @@
+/* Launcher — iPhone home screen styles */
+
+/* Wiggle animation for edit mode */
+@keyframes launcher-wiggle {
+  0%   { rotate: -0.7deg; }
+  25%  { rotate:  0.5deg; }
+  50%  { rotate: -0.4deg; }
+  75%  { rotate:  0.7deg; }
+  100% { rotate: -0.7deg; }
+}
+
+.launcher-wiggle {
+  animation: launcher-wiggle 0.5s ease-in-out infinite;
+  transform-origin: center center;
+}
+
+/* Stagger for organic feel — each item slightly out of phase */
+.launcher-wiggle:nth-child(2n)  { animation-duration: 0.45s; animation-delay: 0.06s; }
+.launcher-wiggle:nth-child(3n)  { animation-duration: 0.55s; animation-delay: 0.12s; }
+.launcher-wiggle:nth-child(5n)  { animation-duration: 0.48s; animation-delay: 0.03s; }
+.launcher-wiggle:nth-child(7n)  { animation-duration: 0.52s; animation-delay: 0.09s; }
+
+/* Kill wiggle during active drag/resize — prevents fighting with RGL positioning */
+.react-draggable-dragging .launcher-wiggle,
+.resizing .launcher-wiggle {
+  animation: none;
+}
+
+/* Glass-morphism for widgets */
+.launcher-glass {
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+/* Override react-grid-layout defaults for launcher */
+.launcher-grid .react-grid-item {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.launcher-grid .react-grid-item.react-draggable-dragging {
+  z-index: 100;
+  transition: none !important;
+  filter: drop-shadow(0 12px 24px rgba(0, 0, 0, 0.4));
+}
+
+.launcher-grid .react-grid-item > .react-resizable-handle {
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.launcher-editing .react-grid-item > .react-resizable-handle {
+  opacity: 0.6;
+}
+
+/* Grid placeholder during drag */
+.launcher-grid .react-grid-placeholder {
+  background: rgba(255, 255, 255, 0.1) !important;
+  border: 2px dashed rgba(255, 255, 255, 0.3) !important;
+  border-radius: 1rem;
+}
