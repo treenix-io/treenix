@@ -8,7 +8,7 @@
 import { type Class, getComp, type TypeProxy } from '@treenity/core/comp';
 import { getComponent, type NodeData, normalizeType } from '@treenity/core/core';
 import { deriveURI, parseURI } from '@treenity/core/uri';
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import * as cache from './cache';
 import { tree } from './client';
 import { trpc } from './trpc';
@@ -113,6 +113,31 @@ export async function set(next: NodeData) {
 export const execute = (
   path: string, action: string, data?: unknown, type?: string, key?: string,
 ) => trpc.execute.mutate({ path, type, key, action, data });
+
+// ── useCanWrite: ACL-based write permission check ──
+
+const W = 2;
+const permCache = new Map<string, { perm: number; ts: number }>();
+const PERM_TTL = 30_000; // 30s cache
+
+export function useCanWrite(path: string | null): boolean {
+  const [perm, setPerm] = useState<number>(0);
+
+  useEffect(() => {
+    if (!path) return;
+    const cached = permCache.get(path);
+    if (cached && Date.now() - cached.ts < PERM_TTL) {
+      setPerm(cached.perm);
+      return;
+    }
+    trpc.getPerm.query({ path }).then((p) => {
+      permCache.set(path, { perm: p, ts: Date.now() });
+      setPerm(p);
+    }).catch(() => setPerm(0));
+  }, [path]);
+
+  return (perm & W) !== 0;
+}
 
 // ── Internals ──
 

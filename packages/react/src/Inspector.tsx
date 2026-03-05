@@ -287,6 +287,7 @@ function renderField(
   plainData: Record<string, unknown>,
   setPlainData: (fn: (prev: Record<string, unknown>) => Record<string, unknown>) => void,
 ) {
+  if (!fieldSchema.type) return null;
   const ctx = fieldSchema.readOnly ? 'react' : 'react:form';
   const handler = resolveExact(fieldSchema.type, ctx) ?? resolveExact('string', ctx);
   if (!handler)

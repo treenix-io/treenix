@@ -214,10 +214,11 @@ export function createTreeRouter(baseStore: ReactiveTree, watcher: WatchManager)
         const userPath = `/auth/users/${input.userId}`;
         const user = await baseStore.get(userPath);
         const cv = user ? user['credentials'] : undefined;
-        const creds = isComponent(cv) ? cv as { $type: string; hash?: string } : undefined;
+        const creds = isComponent(cv) ? cv : undefined;
         // Always run scrypt to prevent timing-based user enumeration
-        const ok = await verifyPassword(input.password, creds?.hash ?? DUMMY_HASH);
-        if (!user || !creds?.hash || !ok) throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Invalid credentials' });
+        const hash = typeof creds?.['hash'] === 'string' ? creds['hash'] : undefined;
+        const ok = await verifyPassword(input.password, hash ?? DUMMY_HASH);
+        if (!user || !hash || !ok) throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Invalid credentials' });
         const token = await createSession(baseStore, input.userId);
         return { token, userId: input.userId };
       }),
@@ -226,6 +227,10 @@ export function createTreeRouter(baseStore: ReactiveTree, watcher: WatchManager)
       if (!ctx.session) return null;
       return { userId: ctx.session.userId };
     }),
+
+    getPerm: authed
+      .input(z.object({ path: z.string() }))
+      .query(async ({ input, ctx }) => ctx.store.getPerm(input.path)),
 
     logout: authed.mutation(async ({ ctx }) => {
       if (!ctx.session || !ctx.token) return { ok: false };

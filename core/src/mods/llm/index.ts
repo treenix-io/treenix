@@ -32,7 +32,7 @@ export function exportSchemaForLLM(): SchemaExport {
 }
 
 export async function describeTree(ctx: ActionCtx, data: unknown): Promise<string> {
-  const { depth = 3 } = (data as { depth?: number }) ?? {};
+  const { depth = 3 } = (data as Record<string, unknown>) ?? {};
   const path = ctx.node.$path;
   const lines: string[] = [];
 

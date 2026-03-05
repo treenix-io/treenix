@@ -52,7 +52,7 @@ export async function runPath(target: any, path: PathSection[]): Promise<any> {
 export async function runPathWithRefs(
   target: any,
   path: PathSection[],
-  resolveRef: (ref: { $ref: string }) => Promise<any>,
+  resolveRef: (ref: Ref) => Promise<any>,
 ): Promise<any> {
   let cur = target, prev = target
   for (const step of path) {

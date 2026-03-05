@@ -274,8 +274,8 @@ export async function buildClaims(store: Tree, userId: string): Promise<string[]
   const userNode = await store.get(`/auth/users/${userId}`);
   if (userNode) {
     const gv = userNode['groups'];
-    const groups = isComponent(gv) ? gv as { $type: string; list?: string[] } : undefined;
-    if (groups?.list) claims.push(...groups.list);
+    const groups = isComponent(gv) ? gv : undefined;
+    if (Array.isArray(groups?.['list'])) claims.push(...groups['list']);
   }
   return claims;
 }
