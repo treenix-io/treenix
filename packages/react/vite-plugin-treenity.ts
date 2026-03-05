@@ -129,9 +129,36 @@ function scanClients(dir: string): string[] {
   return clients;
 }
 
+// Scan node_modules for @treenity/* packages with treenity.clients field
+function discoverPackageClients(): string[] {
+  const imports: string[] = [];
+  let current = process.cwd();
+
+  while (current !== dirname(current)) {
+    const nmDir = join(current, 'node_modules', '@treenity');
+    if (existsSync(nmDir)) {
+      for (const entry of readdirSync(nmDir, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        const pkgPath = join(nmDir, entry.name, 'package.json');
+        if (!existsSync(pkgPath)) continue;
+        const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+        if (pkg.treenity?.clients) {
+          const realDir = realpathSync(join(nmDir, entry.name));
+          const clientsPath = resolve(realDir, pkg.treenity.clients);
+          if (existsSync(clientsPath)) imports.push(clientsPath);
+        }
+      }
+      break; // found node_modules, stop walking up
+    }
+    current = dirname(current);
+  }
+
+  return imports;
+}
+
 // ── Plugin ──
 
-export default function treenityPlugin(): Plugin {
+export default function treenityPlugin(opts?: { modsDirs?: string[] }): Plugin {
   const engineRoot = resolve(import.meta.dirname, '../..');
   let conditions: string[] = [];
 
@@ -180,13 +207,23 @@ export default function treenityPlugin(): Plugin {
     load(id) {
       if (id !== RESOLVED_ID) return;
 
-      const dirs = [
-        resolve(engineRoot, 'core/src/mods'),
-        resolve(engineRoot, 'mods'),
-        resolve(process.cwd(), 'mods'),
-      ];
+      // 1. Auto-discover @treenity/* packages with treenity.clients
+      const pkgClients = discoverPackageClients();
 
-      const imports = [...new Set(dirs.map(d => resolve(d)))].flatMap(scanClients);
+      // 2. Engine mods (sibling to this plugin's package)
+      const engineMods = scanClients(resolve(engineRoot, 'mods'));
+
+      // 3. Extra mods dirs (passed explicitly from project vite config)
+      const extraMods = (opts?.modsDirs ?? []).flatMap(d => scanClients(resolve(d)));
+
+      // Dedupe by realpath
+      const seen = new Set<string>();
+      const imports: string[] = [];
+      for (const p of [...pkgClients, ...engineMods, ...extraMods]) {
+        const real = realpathSync(p);
+        if (!seen.has(real)) { seen.add(real); imports.push(p); }
+      }
+
       return imports.map(p => `import '${p}';`).join('\n') + '\n';
     },
   };

@@ -1,14 +1,16 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
+import { resolve } from 'node:path';
 import treenityPlugin from './vite-plugin-treenity';
 
+const projectRoot = process.env.INIT_CWD || process.cwd();
 const apiPort = process.env.VITE_API_PORT || '3211';
 
 export default defineConfig({
   resolve: { conditions: ['development'] },
   plugins: [
-    treenityPlugin(),
+    treenityPlugin({ modsDirs: [resolve(projectRoot, 'mods')] }),
     tailwindcss(),
     react({ babel: { plugins: ['babel-plugin-react-compiler'] } }),
   ],

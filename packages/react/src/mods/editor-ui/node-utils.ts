@@ -78,7 +78,6 @@ export function getActionSchema(type: string, action: string): TypeSchema | null
   };
 }
 
-export function pickDefaultContext(type: string): string {
-  const ctxs = getViewContexts(type);
-  return ctxs.includes('react') ? 'react' : ctxs[0] ?? 'react';
+export function pickDefaultContext(_type: string): string {
+  return 'react';
 }

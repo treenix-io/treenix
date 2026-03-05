@@ -1,7 +1,7 @@
 // Inspector — view + edit panel for selected node (Unity-style inspector)
 // Shell only: delegates rendering to registered views, provides generic edit UI
 
-import { Render, RenderContext } from '#context';
+import { NodeProvider, Render, RenderContext } from '#context';
 import {
   getActions,
   getActionSchema,
@@ -11,9 +11,10 @@ import {
   getViewContexts,
   pickDefaultContext,
 } from '#mods/editor-ui/node-utils';
-import { type ComponentData, type GroupPerm, type NodeData, resolve, resolveExact } from '@treenity/core/core';
+import { type ComponentData, type GroupPerm, type NodeData, resolve } from '@treenity/core/core';
+import { renderField, StringArrayField } from '#mods/editor-ui/form-field';
 import type { TypeSchema } from '@treenity/core/schema/types';
-import { createElement, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AclEditor } from './AclEditor';
 import * as cache from './cache';
 import { ErrorBoundary } from './ErrorBoundary';
@@ -273,114 +274,7 @@ function ActionCardList({
   );
 }
 
-function renderField(
-  name: string,
-  fieldSchema: {
-    type: string;
-    label: string;
-    placeholder?: string;
-    readOnly?: boolean;
-    enum?: string[];
-    items?: { type?: string; properties?: Record<string, unknown> };
-    refType?: string;
-  },
-  plainData: Record<string, unknown>,
-  setPlainData: (fn: (prev: Record<string, unknown>) => Record<string, unknown>) => void,
-) {
-  if (!fieldSchema.type) return null;
-  const ctx = fieldSchema.readOnly ? 'react' : 'react:form';
-  const handler = resolveExact(fieldSchema.type, ctx) ?? resolveExact('string', ctx);
-  if (!handler)
-    return (
-      <div key={name} className="text-[--danger] text-xs">
-        No form handler: {fieldSchema.type}
-      </div>
-    );
-  const fieldData: { $type: string; [k: string]: unknown } = {
-    $type: fieldSchema.type,
-    value: plainData[name],
-    label: fieldSchema.label,
-    placeholder: fieldSchema.placeholder,
-  };
-  if (fieldSchema.items) fieldData.items = fieldSchema.items;
-  if (fieldSchema.enum) fieldData.enum = fieldSchema.enum;
-  if (fieldSchema.refType) fieldData.refType = fieldSchema.refType;
-  const isComplex = fieldSchema.type === 'object' || fieldSchema.type === 'array';
-  return (
-    <div key={name} className={isComplex ? 'field stack' : 'field'}>
-      {fieldSchema.type !== 'boolean' && <label>{fieldSchema.label}</label>}
-      {createElement(handler as any, {
-        value: fieldData,
-        onChange: fieldSchema.readOnly
-          ? undefined
-          : (next: { value: unknown }) => setPlainData((prev) => ({ ...prev, [name]: next.value })),
-      })}
-    </div>
-  );
-}
 
-// Inline string-array editor for raw component fields without schema
-function StringArrayField({
-  value,
-  onChange,
-}: {
-  value: unknown[];
-  onChange: (next: unknown[]) => void;
-}) {
-  const [input, setInput] = useState('');
-  const isStrings = value.every((v) => typeof v === 'string');
-
-  if (!isStrings) {
-    return (
-      <textarea
-        value={JSON.stringify(value, null, 2)}
-        onChange={(e) => {
-          try {
-            onChange(JSON.parse(e.target.value));
-          } catch {
-            /* typing */
-          }
-        }}
-      />
-    );
-  }
-
-  const tags = value as string[];
-  return (
-    <div className="flex-1 space-y-1">
-      <div className="flex flex-wrap gap-1">
-        {tags.map((tag, i) => (
-          <span
-            key={i}
-            className="inline-flex items-center gap-0.5 text-[11px] font-mono bg-muted text-foreground/70 px-1.5 py-0.5 rounded"
-          >
-            {tag}
-            <button
-              type="button"
-              className="ml-0.5 border-0 bg-transparent p-0 text-muted-foreground/40 hover:text-foreground leading-none cursor-pointer"
-              onClick={() => onChange(tags.filter((_, j) => j !== i))}
-            >
-              ×
-            </button>
-          </span>
-        ))}
-      </div>
-      <input
-        className="text-xs w-full"
-        placeholder="Add item..."
-        value={input}
-        onChange={(e) => setInput(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key !== 'Enter') return;
-          e.preventDefault();
-          const t = input.trim();
-          if (t && !tags.includes(t)) onChange([...tags, t]);
-          setInput('');
-        }}
-      />
-    </div>
-  );
-}
 
 function NodeCard({
   path,
@@ -425,75 +319,6 @@ function NodeCard({
   );
 }
 
-function ComponentBody({
-  ctype, cdata, setCD, path, componentName, toast, onActionComplete,
-}: {
-  ctype: string;
-  cdata: Record<string, unknown>;
-  setCD: (fn: (prev: Record<string, unknown>) => Record<string, unknown>) => void;
-  path: string;
-  componentName: string;
-  toast: (msg: string) => void;
-  onActionComplete?: () => void;
-}) {
-  const cschema = useSchema(ctype);
-  if (cschema === undefined) return null;
-
-  return (
-    <div className="card-body">
-      {cschema && Object.keys(cschema.properties).length > 0 ? (
-        Object.entries(cschema.properties).map(([field, prop]) => {
-          const p = prop as {
-            type: string; title: string; format?: string; description?: string;
-            readOnly?: boolean; enum?: string[]; items?: { type?: string; properties?: Record<string, unknown> };
-            refType?: string;
-          };
-          return renderField(field, {
-            type: p.format ?? p.type, label: p.title ?? field, placeholder: p.description,
-            readOnly: p.readOnly, enum: p.enum, items: p.items, refType: p.refType,
-          }, cdata, setCD);
-        })
-      ) : Object.keys(cdata).length > 0 ? (
-        Object.entries(cdata).map(([k, v]) => (
-          <div key={k} className={`field${Array.isArray(v) || (typeof v === 'object' && v !== null) ? ' stack' : ''}`}>
-            <label>{k}</label>
-            {typeof v === 'boolean' ? (
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" checked={!!cdata[k]} className="w-auto"
-                  onChange={(e) => setCD((prev) => ({ ...prev, [k]: e.target.checked }))} />
-                {cdata[k] ? 'true' : 'false'}
-              </label>
-            ) : typeof v === 'number' ? (
-              <input type="number" value={String(cdata[k] ?? 0)}
-                onChange={(e) => setCD((prev) => ({ ...prev, [k]: Number(e.target.value) }))} />
-            ) : Array.isArray(v) ? (
-              <StringArrayField value={cdata[k] as unknown[]}
-                onChange={(next) => setCD((prev) => ({ ...prev, [k]: next }))} />
-            ) : typeof v === 'object' ? (
-              (() => {
-                const h = resolve('object', 'react:form');
-                return h
-                  ? createElement(h as any, {
-                      value: { $type: 'object', value: cdata[k] },
-                      onChange: (next: { value: unknown }) => setCD((prev) => ({ ...prev, [k]: next.value })),
-                    })
-                  : <pre className="text-[11px] font-mono text-foreground/60">{JSON.stringify(cdata[k], null, 2)}</pre>;
-              })()
-            ) : (
-              <input value={String(cdata[k] ?? '')}
-                onChange={(e) => setCD((prev) => ({ ...prev, [k]: e.target.value }))} />
-            )}
-          </div>
-        ))
-      ) : (
-        <pre className="text-[11px] font-mono text-foreground/60 bg-muted/30 rounded p-2 whitespace-pre-wrap">
-          {JSON.stringify(cdata, null, 2)}
-        </pre>
-      )}
-      <ActionCardList path={path} componentName={componentName} compType={ctype} compData={cdata} toast={toast} onActionComplete={onActionComplete} />
-    </div>
-  );
-}
 
 export function Inspector({ path, currentUserId, onDelete, onAddComponent, onSelect, onSetRoot, toast }: Props) {
   const node = usePath(path);
@@ -695,7 +520,7 @@ export function Inspector({ path, currentUserId, onDelete, onAddComponent, onSel
                   className={`sm context-btn${context === c ? ' active' : ''}`}
                   onClick={() => setContext(c)}
                 >
-                  {c}
+                  {c.replace('react:', '')}
                 </button>
               ))}
             </span>
@@ -802,12 +627,23 @@ export function Inspector({ path, currentUserId, onDelete, onAddComponent, onSel
                   </div>
                   {!collapsed.has(name) && (
                     <ErrorBoundary>
-                      <ComponentBody
-                        ctype={(comp as ComponentData).$type}
-                        cdata={compData[name] ?? {}}
-                        setCD={(fn) => dSetCompData((prev) => ({ ...prev, [name]: fn(prev[name] ?? {}) }))}
+                      <RenderContext name="react:edit">
+                        <Render
+                          value={{ $type: (comp as ComponentData).$type, ...(compData[name] ?? {}) } as ComponentData}
+                          onChange={(next: ComponentData) => {
+                            const d: Record<string, unknown> = {};
+                            for (const [k, v] of Object.entries(next as Record<string, unknown>)) {
+                              if (!k.startsWith('$')) d[k] = v;
+                            }
+                            dSetCompData((prev) => ({ ...prev, [name]: d }));
+                          }}
+                        />
+                      </RenderContext>
+                      <ActionCardList
                         path={node.$path}
                         componentName={name}
+                        compType={(comp as ComponentData).$type}
+                        compData={compData[name] ?? {}}
                         toast={toast}
                         onActionComplete={handleReset}
                       />
