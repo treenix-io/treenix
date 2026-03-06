@@ -70,13 +70,17 @@ export function assertNonSystemName(name: string) {
   if (name.startsWith('$')) throw new Error(`Component name cannot start with $: ${name}`);
 }
 
+export function createNode<T, C = Record<string, ComponentData<any>>>(
+  path: string, type: Class<T>, data?: Partial<T>, components?: C): NodeData<T & C>;
 export function createNode<T = any, C = Record<string, ComponentData<any>>>(
+  path: string, type: string, data?: T, components?: C): NodeData<T & C>;
+export function createNode(
   path: string,
   type: TypeId,
-  data?: T,
-  components?: C): NodeData<T & C> {
+  data?: any,
+  components?: any): NodeData {
 
-  const node: NodeData<T & C> = { $path: path, $type: normalizeType(type) } as NodeData<T & C>;
+  const node: NodeData = { $path: path, $type: normalizeType(type) } as NodeData;
   if (components) Object.keys(components).forEach(assertNonSystemName);
   if (data) Object.keys(data).forEach(assertNonSystemName);
 

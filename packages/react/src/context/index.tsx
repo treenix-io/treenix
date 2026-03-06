@@ -60,17 +60,20 @@ export function viewCtx(value: ComponentData): ViewCtx | null {
 // ── Handler type for React context ──
 // value is ComponentData (base type). NodeData IS ComponentData.
 
-export type RenderProps = {
-  value: ComponentData;
-  onChange?: (next: ComponentData) => void;
+export type RenderProps<T = ComponentData> = {
+  value: T;
+  onChange?: (next: T) => void;
   ctx?: ViewCtx | null;
 };
 
-export type ReactHandler = FC<RenderProps>;
+export type ReactHandler = FC<RenderProps<any>>;
+
+/** Typed view component. Use: `const MyView: View<MyType> = ({ value, ctx }) => ...` */
+export type View<T> = FC<RenderProps<T>>;
 
 declare module '@treenity/core/core/context' {
-  interface ContextHandlers {
-    react: ReactHandler;
+  interface ContextHandlers<T> {
+    react: FC<RenderProps<T>>;
   }
 }
 

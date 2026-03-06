@@ -1,4 +1,4 @@
-import { ComponentData, normalizeType, type TypeId } from './component';
+import { type Class, ComponentData, normalizeType, type TypeId } from './component';
 import { ContextHandler, Handler } from './context';
 
 const registry = new Map<string, Handler>();
@@ -21,12 +21,9 @@ function key(type: string, context: string): string {
   return `${type}@${context}`;
 }
 
-export function register<C extends string>(
-  type: string,
-  context: C,
-  handler: ContextHandler<C>,
-  meta?: Record<string, unknown>,
-): void {
+export function register<C extends string>(type: string, context: C, handler: ContextHandler<C>, meta?: Record<string, unknown>): void;
+export function register<T, C extends string>(type: Class<T>, context: C, handler: ContextHandler<C, T>, meta?: Record<string, unknown>): void;
+export function register(type: TypeId, context: string, handler: Handler, meta?: Record<string, unknown>): void {
   const k = key(normalizeType(type), context);
   // Sealed: no overrides. In dev (HMR) modules re-execute, so we allow silent replace.
   // In production, duplicate register = bug, caught by tests.

@@ -4,8 +4,7 @@
 
 ```ts
 // src/mods/sensor/types.ts
-import { getCtx, registerComp } from '#comp';
-import { join, type NodeData } from '#core';
+import { getCtx, registerComp, getComp } from '#comp';
 
 export class SensorConfig {
   /** @title Интервал @description Секунды между замерами */
@@ -20,7 +19,10 @@ export class SensorConfig {
   async history() {
     const { node, store } = getCtx();
     const { items } = await store.getChildren(node.$path, { limit: 100 });
-    return { items: items.map(n => ({ value: (n as any).value, ts: (n as any).ts })) };
+    return { items: items.map(n => {
+      const r = getComp(n, SensorReading);
+      return r ? { value: r.value, ts: r.ts } : null;
+    }).filter(Boolean) };
   }
 }
 
@@ -38,7 +40,7 @@ registerComp('sensor.reading', SensorReading);
 
 ```ts
 // src/mods/sensor/service.ts
-import { register, type NodeData } from '#core';
+import { register, createNode, type NodeData } from '#core';
 import { getComp } from '#comp';
 import { type ServiceHandle, type ServiceCtx } from '#contexts/service';
 import { SensorConfig } from './types';
@@ -48,12 +50,11 @@ register('sensor', 'service', async (node: NodeData, ctx: ServiceCtx) => {
   const interval = (config?.interval ?? 5) * 1000;
 
   const timer = setInterval(async () => {
-    await ctx.store.set({
-      $path: `${node.$path}/${Date.now()}`,
-      $type: 'sensor.reading',
-      value: Math.random() * 100,
-      ts: Date.now(),
-    } as NodeData);
+    await ctx.store.set(createNode(
+      `${node.$path}/${Date.now()}`,
+      'sensor.reading',
+      { value: Math.random() * 100, ts: Date.now() },
+    ));
   }, interval);
 
   return { stop: async () => clearInterval(timer) } satisfies ServiceHandle;
@@ -64,34 +65,39 @@ register('sensor', 'service', async (node: NodeData, ctx: ServiceCtx) => {
 
 ```tsx
 // src/mods/sensor/view.tsx
-import { register, type ComponentData } from '#core';
-import { useCurrentNode } from '#contexts/react';
-import { useChildren } from '#front/hooks';
+import { register } from '#core';
+import type { View } from '@treenity/react/context';
+import { useChildren } from '@treenity/react/hooks';
+import { SensorConfig, SensorReading } from './types';
 
-register('sensor.config', 'react', ({ value, onChange }) => {
+// View<T> — типизированный компонент. value: T, ctx: ViewCtx
+const ConfigView: View<SensorConfig> = ({ value }) => {
   return (
     <div>
-      <label>Interval: {(value as any).interval}s</label>
-      <label>Source: {(value as any).source}</label>
+      <label>Interval: {value.interval}s</label>
+      <label>Source: {value.source}</label>
     </div>
   );
-});
+};
 
-register('sensor', 'react', ({ value }) => {
-  const node = useCurrentNode();
-  const readings = useChildren(node.$path, { limit: 10, watchNew: true });
+const SensorView: View<SensorConfig> = ({ value, ctx }) => {
+  const readings = useChildren(ctx!.node.$path, { limit: 10, watchNew: true });
 
   return (
     <div>
-      <h3>Sensor: {node.$path}</h3>
+      <h3>Sensor: {ctx!.node.$path}</h3>
       {readings.map(r => (
         <div key={r.$path}>
-          {(r as any).value?.toFixed(1)} @ {new Date((r as any).ts).toLocaleTimeString()}
+          {(r as SensorReading).value?.toFixed(1)} @ {new Date((r as SensorReading).ts).toLocaleTimeString()}
         </div>
       ))}
     </div>
   );
-});
+};
+
+// register принимает Class<T> — типы пробрасываются автоматически
+register(SensorConfig, 'react', ConfigView);
+register(SensorConfig, 'react:list', SensorView);
 ```
 
 ## 4. schemas.ts — JSON Schema
@@ -124,9 +130,13 @@ import './sensor/schemas';
 ## 6. Seed-данные
 
 ```ts
-await store.set({ $path: '/sensors/temp', $type: 'sensor',
-  config: { $type: 'sensor.config', interval: 10, source: 'internal' },
-} as NodeData);
+import { createNode } from '#core';
 
-await store.set({ $path: '/sys/autostart/temp-sensor', $type: 'ref', $ref: '/sensors/temp' } as NodeData);
+await store.set(createNode('/sensors/temp', 'sensor', {
+  config: { $type: 'sensor.config', interval: 10, source: 'internal' },
+}));
+
+await store.set(createNode('/sys/autostart/temp-sensor', 'ref', {
+  $ref: '/sensors/temp',
+}));
 ```

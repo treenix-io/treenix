@@ -40,6 +40,49 @@ t.*             → treenity infrastructure: t.mount.fs, t.mount.mongo, t.llm
 | `class`         | `Class<T>`                       | Registered component class  |
 | `telegram`      | `(node, tgCtx) => void`         | Telegram-хэндлер            |
 
+## TypeScript — дисциплина типов
+
+**`as any` ЗАПРЕЩЁН.** Не "только в emergency" — НИКОГДА. Если типы не сходятся, чини типы. `as any` прячет баги, ломает inference, расползается как рак.
+
+Допустимые касты:
+- `as const` — сужение литерала
+- `as 'idle'` — сужение к известному union-варианту
+- `as SensorReading` — сужение к конкретному типу (когда ты знаешь что это он)
+
+**Создание нод — ВСЕГДА через `createNode()`:**
+```ts
+// Со строковым типом — T выводится из data:
+await store.set(createNode('/path', 'my.type', { field: 'value' }));
+
+// С Class<T> — data проверяется по полям класса (Partial<T>):
+await store.set(createNode('/sensors/temp', SensorConfig, { interval: 10, source: 'api' }));
+//                                                         ^^^^^^^^ autocomplete + type check
+
+// С компонентами:
+await store.set(createNode('/path', 'sensor', { interval: 5 }, {
+  config: { $type: 'sensor.config', source: 'api' },
+}));
+
+// ЗАПРЕЩЕНО — as NodeData убивает типизацию
+await store.set({ $path: '/path', $type: 'my.type', field: 'value' } as NodeData);
+```
+
+**Views — типизированные через `View<T>`:**
+```tsx
+import type { View } from '@treenity/react/context';
+
+// value — данные компонента. path — через ctx!.node.$path
+const MyView: View<MyType> = ({ value, ctx }) => { ... };
+
+// register принимает Class<T> — T пробрасывается автоматически
+register(MyType, 'react', MyView);
+```
+
+**Запрещённые паттерны:**
+- `value as NodeData & MyType` — value УЖЕ типизирован через View<T>
+- `(node as any).field` — используй `getComp(node, Class)` для типобезопасного доступа
+- `register('type', 'react', handler as any)` — используй `register(Class, 'react', handler)`
+
 ## Ошибки
 
 ```ts

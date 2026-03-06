@@ -66,19 +66,23 @@ function MyRenderer({ value, onChange }) {
 ## react:list — самодостаточные list-item компоненты
 
 ```tsx
-function DefaultListItem({ value }: { value: NodeData }) {
+import type { View } from '@treenity/react/context';
+
+// View для default — value: ComponentData (базовый тип, есть $type)
+const DefaultListItem: View<ComponentData> = ({ value, ctx }) => {
+  const node = ctx!.node;
   return (
-    <div className="child-card" onClick={() => navigate(value.$path)}>
-      <span className="child-icon">{typeIcon(value.$type)}</span>
+    <div className="child-card" onClick={() => navigate(node.$path)}>
+      <span className="child-icon">{typeIcon(node.$type)}</span>
       <div className="child-info">
-        <span className="child-name">{pathName(value.$path)}</span>
-        <span className="child-type">{value.$type}</span>
+        <span className="child-name">{pathName(node.$path)}</span>
+        <span className="child-type">{node.$type}</span>
       </div>
       <span className="child-chevron">&#8250;</span>
     </div>
   );
-}
-register('default', 'react:list', DefaultListItem as any);
+};
+register('default', 'react:list', DefaultListItem);
 ```
 
 Fallback: `react:list` → `default@react:list` → strip `:list` → `react`.
@@ -88,11 +92,15 @@ Fallback: `react:list` → `default@react:list` → strip `:list` → `react`.
 Когда `node.$type` совпадает с `$type` компонента, нода **сама является** компонентом. Поля лежат плоско:
 
 ```ts
-// Правильно
-await store.set({ $path: '/bot', $type: 'brahman.bot', token: '...', alias: '@bot' } as NodeData);
+import { createNode } from '#core';
 
-// Неправильно
-await store.set({ $path: '/bot', $type: 'brahman.bot', config: { $type: 'brahman.bot', token: '...' } });
+// Правильно — createNode создаёт типизированную ноду
+await store.set(createNode('/bot', 'brahman.bot', { token: '...', alias: '@bot' }));
+
+// Неправильно — вложенный компонент с тем же $type что и нода
+await store.set(createNode('/bot', 'brahman.bot', {
+  config: { $type: 'brahman.bot', token: '...' },  // WRONG: дублирует $type
+}));
 ```
 
 ## Views — read-only

@@ -46,7 +46,7 @@ const validated = withValidation(store);
 import { withVolatile } from '#server/volatile';
 
 const store = withVolatile(backingStore);
-await store.set({ $path: '/temp', $type: 'session', $volatile: true } as NodeData);
+await store.set(createNode('/temp', 'session', { $volatile: true }));
 ```
 
 ## Server Pipeline

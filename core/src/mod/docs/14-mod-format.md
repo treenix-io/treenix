@@ -71,17 +71,13 @@ export default defineMod({
     const existing = await store.get('/sensors/weather');
     if (existing) return; // идемпотентно
 
-    await store.set({
-      $path: '/sensors/weather',
-      $type: 'weather.sensor',
+    await store.set(createNode('/sensors/weather', 'weather.sensor', {
       config: { $type: 'weather.config', location: 'Moscow', interval: 60 },
-    } as any);
+    }));
 
-    await store.set({
-      $path: '/sys/autostart/weather',
-      $type: 'ref',
+    await store.set(createNode('/sys/autostart/weather', 'ref', {
       $ref: '/sensors/weather',
-    } as any);
+    }));
   },
 
   onLoad: () => console.log('Weather mod loaded'),
@@ -309,14 +305,36 @@ buf.clear();                         // сбросить всё
 
 Вьюхи НИКОГДА не рендерят дочерние компоненты напрямую. Всё через реестр:
 
-### Регистрация
+### Регистрация — типобезопасная
 
 ```tsx
 import { register } from '@treenity/core/core';
+import type { View } from '@treenity/react/context';
 import { Render, RenderContext } from '@treenity/react/context';
 
-register('weather.sensor', 'react', SensorView as any);        // detail view
-register('weather.sensor', 'react:list', SensorRow as any);    // compact list view
+// View<T> — типизированный React-компонент: { value: T, ctx?, onChange? }
+const SensorView: View<WeatherSensor> = ({ value, ctx }) => {
+  const path = ctx!.node.$path;  // путь ноды — через ctx, НЕ из value
+  return <div>{value.location} — {value.temperature}°C</div>;
+};
+
+const SensorRow: View<WeatherSensor> = ({ value, ctx }) => { ... };
+
+// register принимает Class<T> — T пробрасывается в handler автоматически
+register(WeatherSensor, 'react', SensorView);          // detail view
+register(WeatherSensor, 'react:list', SensorRow);      // compact list view
+```
+
+**ЗАПРЕЩЕНО:**
+```tsx
+// WRONG — as any убивает типизацию, прячет ошибки:
+register('weather.sensor', 'react', SensorView as any);
+
+// WRONG — NodeData не смешивать с типами компонентов:
+function SensorRow({ value }: { value: NodeData & WeatherSensor }) { ... }
+
+// WRONG — путь из value (value — данные компонента, не нода):
+const path = value.$path;  // может не существовать!
 ```
 
 ### Рендер дочерних — ТОЛЬКО через `<Render>`
@@ -344,8 +362,12 @@ Fallback автоматический: `react:list` → `react` → `default`.
 ### Сигнатура view-функции
 
 ```tsx
-// value типизирован — НЕ any!
-function SensorRow({ value }: { value: NodeData & WeatherSensor }) { ... }
+// View<T> даёт: value: T, ctx: ViewCtx (node, path, execute), onChange
+const SensorView: View<WeatherSensor> = ({ value, ctx }) => {
+  // value — данные компонента (WeatherSensor fields)
+  // ctx!.node — полная NodeData (с $path, $type, $acl и т.д.)
+  // ctx!.execute(action, data) — вызов экшена
+};
 ```
 
 ### Почему это важно
