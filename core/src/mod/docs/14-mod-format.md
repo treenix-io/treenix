@@ -302,3 +302,54 @@ buf.clear();                         // сбросить всё
 4. `expire()` — таймаут для зависших мутаций (сервер не ответил)
 
 **Почему хранится method + data:** `structuredClone()` стирает прототипы. Без сохранённой ссылки на метод rebase не может переиграть мутации.
+
+---
+
+## Views — register / Render / RenderContext
+
+Вьюхи НИКОГДА не рендерят дочерние компоненты напрямую. Всё через реестр:
+
+### Регистрация
+
+```tsx
+import { register } from '@treenity/core/core';
+import { Render, RenderContext } from '@treenity/react/context';
+
+register('weather.sensor', 'react', SensorView as any);        // detail view
+register('weather.sensor', 'react:list', SensorRow as any);    // compact list view
+```
+
+### Рендер дочерних — ТОЛЬКО через `<Render>`
+
+```tsx
+// WRONG — хардкод, обходит реестр:
+{sensors.map(s => <SensorRow key={s.$path} sensor={s} />)}
+
+// RIGHT — через реестр, композабельно:
+<RenderContext name="react:list">
+  {sensors.map(s => <Render key={s.$path} value={s} />)}
+</RenderContext>
+```
+
+### Контексты
+
+| Контекст | Назначение |
+|----------|-----------|
+| `react` | default/detail view |
+| `react:list` | компактная карточка для списков |
+| `react:edit` | форма редактирования |
+
+Fallback автоматический: `react:list` → `react` → `default`.
+
+### Сигнатура view-функции
+
+```tsx
+// value типизирован — НЕ any!
+function SensorRow({ value }: { value: NodeData & WeatherSensor }) { ... }
+```
+
+### Почему это важно
+
+- **Композиция:** любой тип рендерит чужих детей, не зная их вьюх
+- **Переопределение:** зарегистрируй новый `react:list` для типа → все списки обновятся
+- **AI visibility:** реестр интроспектируемый, AI находит доступные вьюхи
