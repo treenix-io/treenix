@@ -8,7 +8,12 @@
   "exports": {
     ".":      { "development": "./src/index.ts", "types": "./dist/index.d.ts", "default": "./dist/index.js" },
     "./ui/*": { "development": ["./src/components/ui/*.ts", "./src/components/ui/*.tsx"], "types": "./dist/components/ui/*.d.ts", "default": "./dist/components/ui/*.js" },
+    "./*.css": "./src/*.css",
     "./*":    { "development": ["./src/*.ts", "./src/*.tsx"], "types": ["./dist/*.d.ts"], "default": ["./dist/*.js"] }
+  },
+  "treenity": {
+    "clients": "./src/mods/clients.ts",
+    "servers": "./src/mods/servers.ts"
   },
   "files": ["dist", "src"],
   "scripts": {

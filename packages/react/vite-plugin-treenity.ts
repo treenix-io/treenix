@@ -138,7 +138,7 @@ function discoverPackageClients(): string[] {
     const nmDir = join(current, 'node_modules', '@treenity');
     if (existsSync(nmDir)) {
       for (const entry of readdirSync(nmDir, { withFileTypes: true })) {
-        if (!entry.isDirectory()) continue;
+        if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
         const pkgPath = join(nmDir, entry.name, 'package.json');
         if (!existsSync(pkgPath)) continue;
         const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));

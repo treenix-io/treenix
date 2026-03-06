@@ -48,3 +48,26 @@ scripts/                  — Dev/ops scripts
 | Application module  | `mods/{name}/`                     |
 | React components    | `packages/react/src/`              |
 | Tests               | Co-located `{file}.test.ts`        |
+
+## Mod structure
+
+Every mod in `mods/{name}/` follows this convention:
+
+```
+mods/{name}/
+  types.ts          — Type classes + registerType()
+  server.ts         — Server entry: imports types (+ seed, actions)
+  client.ts         — Client entry: imports types + view
+  view.tsx          — React views + register(type, 'react', View)
+  seed.ts           — Optional: seed data
+  {name}.test.ts    — Tests
+```
+
+- `server.ts` loaded by `loadLocalMods(modsDir, 'server')`. Makes type visible in `/sys/types`.
+- `client.ts` loaded by Vite `virtual:mod-clients` plugin. Registers React views.
+- Without `server.ts` the type won't appear in "Add Component" picker.
+- Imports in mods: relative (`./types`), cross-package (`@treenity/core/*`, `@treenity/react/*`). Never `#` imports.
+
+## Loading pipeline
+
+See [loading.md](loading.md) for dev/build/release mode details.
