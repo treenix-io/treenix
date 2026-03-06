@@ -29,10 +29,12 @@ export function parseURI(uri: string): TreenityURI {
     const dot = clean.indexOf('.')
     const key = dot > -1 ? clean.slice(0, dot) : undefined
     const name = dot > -1 ? clean.slice(dot + 1) : clean
-    if (!name) throw new Error('Empty name in URI fragment')
+    if (dot > -1 && !name) throw new Error('Empty name in URI fragment')
 
     if (key) result.key = key
-    if (isCall) result.action = name; else result.field = name
+    if (isCall) { result.action = name }
+    else if (key) { result.field = name }
+    else { result.key = name }
   }
 
   const data = url.search ? expandDots(url.searchParams) : undefined

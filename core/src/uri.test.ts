@@ -3,22 +3,22 @@ import { describe, it } from 'node:test';
 import { parseURI } from './uri';
 
 describe('parseURI', () => {
-  it('read field on $type', () => {
+  it('#name = key (component/field access)', () => {
     const r = parseURI('/sys/types/cafe/contact#schema')
-    assert.deepEqual(r, { path: '/sys/types/cafe/contact', field: 'schema' })
+    assert.deepEqual(r, { path: '/sys/types/cafe/contact', key: 'schema' })
   })
 
-  it('read field on named component', () => {
+  it('#key.field = sub-field within component', () => {
     const r = parseURI('/users/me#profile.email')
     assert.deepEqual(r, { path: '/users/me', key: 'profile', field: 'email' })
   })
 
-  it('action without key', () => {
+  it('#action() = node-level action (no key)', () => {
     const r = parseURI('/cafe/contact#submit()')
     assert.deepEqual(r, { path: '/cafe/contact', action: 'submit' })
   })
 
-  it('action on named component', () => {
+  it('#key.action() = action on named component', () => {
     const r = parseURI('/cafe/contact#contact.submit()')
     assert.deepEqual(r, { path: '/cafe/contact', key: 'contact', action: 'submit' })
   })
@@ -82,5 +82,32 @@ describe('parseURI', () => {
   it('no query = no data field', () => {
     const r = parseURI('/x#submit()')
     assert.equal(r.data, undefined)
+  })
+
+  it('#key does not set field or action', () => {
+    const r = parseURI('/x#view')
+    assert.equal(r.key, 'view')
+    assert.equal(r.field, undefined)
+    assert.equal(r.action, undefined)
+  })
+
+  it('#key.field does not set action', () => {
+    const r = parseURI('/x#profile.name')
+    assert.equal(r.key, 'profile')
+    assert.equal(r.field, 'name')
+    assert.equal(r.action, undefined)
+  })
+
+  it('#action() does not set key', () => {
+    const r = parseURI('/x#run()')
+    assert.equal(r.action, 'run')
+    assert.equal(r.key, undefined)
+  })
+
+  it('#key.action() sets both key and action', () => {
+    const r = parseURI('/x#comp.run()')
+    assert.equal(r.key, 'comp')
+    assert.equal(r.action, 'run')
+    assert.equal(r.field, undefined)
   })
 })
