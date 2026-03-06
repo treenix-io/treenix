@@ -165,7 +165,8 @@ export function createMemoryTree(): Tree {
   return {
     async get(path, _ctx) {
       if (typeof path !== 'string') throw new Error(`store.get: path must be string, got ${typeof path}`);
-      return navigate(path)?.data;
+      const data = navigate(path)?.data;
+      return data ? structuredClone(data) : data;
     },
 
     async getChildren(parent, opts, _ctx) {

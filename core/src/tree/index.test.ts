@@ -106,6 +106,32 @@ describe('MemoryStore', () => {
     assert.deepEqual(result.items, all.items.slice(1, 3));
   });
 
+  it('get returns isolated copy — mutating result does not affect stored node', async () => {
+    const store = createMemoryTree();
+    await store.set(createNode('/x', 'item', { tags: ['a', 'b'] }));
+
+    const copy = await store.get('/x') as any;
+    copy.tags.push('mutated');
+    copy.extra = 'injected';
+
+    const stored = await store.get('/x') as any;
+    assert.deepEqual(stored.tags, ['a', 'b']);
+    assert.equal(stored.extra, undefined);
+  });
+
+  it('set stores isolated copy — mutating original after set does not affect stored node', async () => {
+    const store = createMemoryTree();
+    const node = createNode('/y', 'item', { value: 1 }) as any;
+    await store.set(node);
+
+    node.value = 999;
+    node.injected = true;
+
+    const stored = await store.get('/y') as any;
+    assert.equal(stored.value, 1);
+    assert.equal(stored.injected, undefined);
+  });
+
 });
 
 describe('OverlayStore', () => {
