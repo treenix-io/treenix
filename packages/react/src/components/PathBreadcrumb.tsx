@@ -21,12 +21,14 @@ export function PathBreadcrumb({ path, onSelect }: { path: string; onSelect: (p:
     <Breadcrumb className="mb-2 text-xs">
       <BreadcrumbList className="text-xs gap-1 sm:gap-1">
         {crumbs.map((c, i) => (
-          <BreadcrumbItem key={c.path}>
+          <span key={c.path} className="contents">
             {i > 0 && <BreadcrumbSeparator className="[&>svg]:size-3" />}
-            {i === last
-              ? <BreadcrumbPage>{c.label}</BreadcrumbPage>
-              : <BreadcrumbLink className="cursor-pointer" onClick={() => onSelect(c.path)}>{c.label}</BreadcrumbLink>}
-          </BreadcrumbItem>
+            <BreadcrumbItem>
+              {i === last
+                ? <BreadcrumbPage>{c.label}</BreadcrumbPage>
+                : <BreadcrumbLink className="cursor-pointer" onClick={() => onSelect(c.path)}>{c.label}</BreadcrumbLink>}
+            </BreadcrumbItem>
+          </span>
         ))}
       </BreadcrumbList>
     </Breadcrumb>

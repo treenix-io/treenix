@@ -3,9 +3,12 @@ import * as cache from '#cache';
 import { tree as clientStore } from '#client';
 // react view handlers — readOnly display for same types
 // Covers: string, text, textarea, number, integer, boolean, array, object, image, uri, url, select, timestamp, path
+import { Button } from '#components/ui/button';
+import { Input } from '#components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '#components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '#components/ui/select';
 import { Switch } from '#components/ui/switch';
+import { Textarea } from '#components/ui/textarea';
 import { useSchema } from '#schema-loader';
 import { register, resolve as resolveHandler } from '@treenity/core';
 import dayjs from 'dayjs';
@@ -114,7 +117,8 @@ function StringForm({ value, onChange }: FP) {
   }
 
   return (
-    <input
+    <Input
+      className="h-7 text-xs"
       value={String(value.value ?? '')}
       placeholder={value.placeholder}
       onChange={(e) => onChange?.({ ...value, value: e.target.value })}
@@ -124,7 +128,8 @@ function StringForm({ value, onChange }: FP) {
 
 function TextForm({ value, onChange }: FP) {
   return (
-    <textarea
+    <Textarea
+      className="text-xs"
       value={String(value.value ?? '')}
       placeholder={value.placeholder}
       onChange={(e) => onChange?.({ ...value, value: e.target.value })}
@@ -134,8 +139,9 @@ function TextForm({ value, onChange }: FP) {
 
 function NumberForm({ value, onChange }: FP) {
   return (
-    <input
+    <Input
       type="number"
+      className="h-7 text-xs"
       value={String(value.value ?? 0)}
       onChange={(e) => onChange?.({ ...value, value: Number(e.target.value) })}
     />
@@ -144,9 +150,10 @@ function NumberForm({ value, onChange }: FP) {
 
 function IntegerForm({ value, onChange }: FP) {
   return (
-    <input
+    <Input
       type="number"
       step="1"
+      className="h-7 text-xs"
       value={String(value.value ?? 0)}
       onChange={(e) => onChange?.({ ...value, value: Math.round(Number(e.target.value)) })}
     />
@@ -169,7 +176,8 @@ function ImageForm({ value, onChange }: FP) {
   const src = typeof value.value === 'string' ? value.value : '';
   return (
     <div className="space-y-2">
-      <input
+      <Input
+        className="h-7 text-xs"
         value={src}
         placeholder="Image URL"
         onChange={(e) => onChange?.({ ...value, value: e.target.value })}
@@ -183,7 +191,8 @@ function UriForm({ value, onChange }: FP) {
   const url = String(value.value ?? '');
   return (
     <div className="space-y-1">
-      <input
+      <Input
+        className="h-7 text-xs"
         value={url}
         placeholder={value.placeholder ?? 'https://...'}
         onChange={(e) => onChange?.({ ...value, value: e.target.value })}
@@ -202,9 +211,9 @@ function TimestampForm({ value, onChange }: FP) {
   const formatted = ts ? dayjs(ts > 1e12 ? ts : ts * 1000).format('YYYY-MM-DD HH:mm:ss') : '—';
   return (
     <div className="flex items-center gap-2">
-      <input
+      <Input
         type="number"
-        className="flex-1"
+        className="h-7 text-xs flex-1"
         value={String(ts)}
         onChange={(e) => onChange?.({ ...value, value: Number(e.target.value) })}
       />
@@ -243,16 +252,20 @@ function ObjectForm({ value, onChange }: FP) {
 
   const modeToggle = (
     <div className="flex gap-1 mb-1">
-      <button
+      <Button
+        variant="ghost"
+        size="sm"
         type="button"
-        className={`border-0 px-2 py-0.5 text-[10px] rounded ${mode === 'fields' ? 'bg-muted text-foreground' : 'bg-transparent text-muted-foreground hover:text-foreground'}`}
+        className={`h-6 px-2 text-[10px] ${mode === 'fields' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
         onClick={() => setMode('fields')}
       >
         Fields
-      </button>
-      <button
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
         type="button"
-        className={`border-0 px-2 py-0.5 text-[10px] rounded ${mode === 'json' ? 'bg-muted text-foreground' : 'bg-transparent text-muted-foreground hover:text-foreground'}`}
+        className={`h-6 px-2 text-[10px] ${mode === 'json' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
         onClick={() => {
           setJsonDraft(JSON.stringify(obj, null, 2));
           setJsonError(false);
@@ -260,7 +273,7 @@ function ObjectForm({ value, onChange }: FP) {
         }}
       >
         JSON
-      </button>
+      </Button>
     </div>
   );
 
@@ -268,7 +281,7 @@ function ObjectForm({ value, onChange }: FP) {
     return (
       <div className="rounded border border-border/50 bg-muted/30 p-2">
         {modeToggle}
-        <textarea
+        <Textarea
           className={`text-[11px] min-h-[60px] ${jsonError ? 'border-destructive' : ''}`}
           value={jsonDraft}
           onChange={(e) => {
@@ -308,20 +321,20 @@ function ObjectForm({ value, onChange }: FP) {
                   onCheckedChange={(checked) => emit({ ...obj, [k]: checked })}
                 />
               ) : typeof v === 'number' ? (
-                <input
+                <Input
                   type="number"
-                  className="flex-1 min-w-0 text-[11px]"
+                  className="h-7 text-[11px] flex-1 min-w-0"
                   value={String(v)}
                   onChange={(e) => emit({ ...obj, [k]: Number(e.target.value) })}
                 />
               ) : typeof v === 'string' ? (
-                <input
-                  className="flex-1 min-w-0 text-[11px]"
+                <Input
+                  className="h-7 text-[11px] flex-1 min-w-0"
                   value={v}
                   onChange={(e) => emit({ ...obj, [k]: e.target.value })}
                 />
               ) : (
-                <textarea
+                <Textarea
                   className="flex-1 min-w-0 text-[11px] font-mono min-h-[40px]"
                   value={JSON.stringify(v, null, 2)}
                   onChange={(e) => {
@@ -333,9 +346,11 @@ function ObjectForm({ value, onChange }: FP) {
                   }}
                 />
               )}
-              <button
+              <Button
+                variant="ghost"
+                size="icon"
                 type="button"
-                className="border-0 bg-transparent p-0 mt-1 text-muted-foreground/30 opacity-0 group-hover:opacity-100 hover:text-destructive shrink-0 cursor-pointer transition-opacity"
+                className="h-5 w-5 p-0 mt-1 text-muted-foreground/30 opacity-0 group-hover:opacity-100 hover:text-destructive shrink-0 transition-opacity"
                 onClick={() => {
                   const next = { ...obj };
                   delete next[k];
@@ -343,15 +358,15 @@ function ObjectForm({ value, onChange }: FP) {
                 }}
               >
                 <X className="h-3 w-3" />
-              </button>
+              </Button>
             </div>
           ))}
         </div>
       )}
 
       <div className="flex gap-1 items-center border-t border-border/30 pt-1.5">
-        <input
-          className="flex-1 min-w-0 text-[11px] bg-transparent border-dashed"
+        <Input
+          className="h-7 text-[11px] flex-1 min-w-0 bg-transparent border-dashed"
           placeholder="new key..."
           value={newKey}
           onChange={(e) => setNewKey(e.target.value)}
@@ -365,9 +380,11 @@ function ObjectForm({ value, onChange }: FP) {
             }
           }}
         />
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
           type="button"
-          className="border-0 bg-transparent p-0 text-[11px] text-muted-foreground hover:text-foreground shrink-0 cursor-pointer"
+          className="h-6 px-2 text-[10px] text-muted-foreground hover:text-foreground shrink-0"
           onClick={() => {
             const k = newKey.trim();
             if (k && !(k in obj)) {
@@ -377,7 +394,7 @@ function ObjectForm({ value, onChange }: FP) {
           }}
         >
           +
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -400,19 +417,21 @@ function ArrayForm({ value, onChange }: FP) {
                 className="inline-flex items-center gap-0.5 text-[11px] font-mono bg-muted text-foreground/70 px-1.5 py-0.5 rounded"
               >
                 {tag}
-                <button
+                <Button
+                  variant="ghost"
+                  size="icon"
                   type="button"
-                  className="ml-0.5 border-0 bg-transparent p-0 text-muted-foreground/40 hover:text-foreground leading-none cursor-pointer"
+                  className="h-5 w-5 p-0 ml-0.5 text-muted-foreground/40 hover:text-foreground leading-none"
                   onClick={() => emit(arr.filter((_, j) => j !== i))}
                 >
                   ×
-                </button>
+                </Button>
               </span>
             ))}
           </div>
         )}
-        <input
-          className="text-[11px] bg-transparent border-dashed"
+        <Input
+          className="h-7 text-[11px] bg-transparent border-dashed"
           placeholder="add item..."
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -433,35 +452,39 @@ function ArrayForm({ value, onChange }: FP) {
       <div className="rounded border border-border/50 bg-muted/30 p-2 space-y-1">
         {arr.map((item, i) => (
           <div key={i} className="flex gap-1 items-center group">
-            <input
+            <Input
               type="number"
-              className="flex-1 text-[11px]"
+              className="h-7 text-[11px] flex-1"
               value={String(item ?? 0)}
               onChange={(e) => emit(arr.map((v, j) => (j === i ? Number(e.target.value) : v)))}
             />
-            <button
+            <Button
+              variant="ghost"
+              size="icon"
               type="button"
-              className="border-0 bg-transparent p-0 text-muted-foreground/30 opacity-0 group-hover:opacity-100 hover:text-destructive cursor-pointer transition-opacity"
+              className="h-5 w-5 p-0 text-muted-foreground/30 opacity-0 group-hover:opacity-100 hover:text-destructive transition-opacity"
               onClick={() => emit(arr.filter((_, j) => j !== i))}
             >
               <X className="h-3 w-3" />
-            </button>
+            </Button>
           </div>
         ))}
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
           type="button"
-          className="border-0 bg-transparent p-0 text-[11px] text-muted-foreground hover:text-foreground cursor-pointer"
+          className="h-6 px-2 text-[10px] text-muted-foreground hover:text-foreground"
           onClick={() => emit([...arr, 0])}
         >
           + add
-        </button>
+        </Button>
       </div>
     );
   }
 
   // object/other — textarea fallback
   return (
-    <textarea
+    <Textarea
       value={JSON.stringify(arr, null, 2)}
       onChange={(e) => {
         try {
@@ -588,8 +611,8 @@ export function MiniTree({ onSelect }: { onSelect: (path: string) => void }) {
   return (
     <>
       <div className="p-1.5 border-b border-border">
-        <input
-          className="text-[11px] w-full"
+        <Input
+          className="h-7 text-[11px] w-full"
           placeholder="Filter..."
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
@@ -657,8 +680,8 @@ function EmbeddedFields({ data, type, setData }: {
       {entries.map(([k, v]) => (
         <div key={k} className="field">
           <label>{k}</label>
-          <input
-            className="text-[11px]"
+          <Input
+            className="h-7 text-[11px]"
             value={typeof v === 'string' ? v : JSON.stringify(v)}
             onChange={(e) => setData((prev) => ({ ...prev, [k]: e.target.value }))}
           />
@@ -738,9 +761,11 @@ function PathForm({ value, onChange }: FP) {
         {/* Header row: mode switch + input + controls */}
         <div className="flex items-center gap-1">
           {/* Mode toggle — always visible */}
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             type="button"
-            className={`border-0 bg-transparent p-0 px-1 cursor-pointer shrink-0 text-[10px] font-bold font-mono ${
+            className={`h-6 px-1 text-[10px] font-bold font-mono shrink-0 ${
               mode === 'val' ? 'text-amber-500' : 'text-primary'
             }`}
             onClick={() => {
@@ -756,7 +781,7 @@ function PathForm({ value, onChange }: FP) {
             title={mode === 'val' ? 'Value mode — embeds node data' : 'Ref mode — stores path'}
           >
             {mode}
-          </button>
+          </Button>
 
           {/* Type badge when refType is known */}
           {refType && (
@@ -773,8 +798,8 @@ function PathForm({ value, onChange }: FP) {
               )}
             </span>
           ) : (
-            <input
-              className="flex-1 min-w-0 text-[11px] font-mono border-0 bg-transparent"
+            <Input
+              className="h-7 text-[11px] font-mono flex-1 min-w-0 border-0 bg-transparent"
               value={refPath}
               placeholder="drop or pick a node"
               onChange={(e) => setRef(e.target.value)}
@@ -782,23 +807,27 @@ function PathForm({ value, onChange }: FP) {
           )}
 
           {hasValue && (
-            <button
+            <Button
+              variant="ghost"
+              size="icon"
               type="button"
-              className="border-0 bg-transparent p-0 px-0.5 text-muted-foreground/40 hover:text-foreground cursor-pointer shrink-0"
+              className="h-5 w-5 p-0 text-muted-foreground/40 hover:text-foreground shrink-0"
               onClick={() => { onChange?.({ ...value, value: '' }); setMode('ref'); }}
             >
               <X className="h-3 w-3" />
-            </button>
+            </Button>
           )}
           <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
             <PopoverTrigger asChild>
-              <button
+              <Button
+                variant="ghost"
+                size="icon"
                 type="button"
-                className="border-0 bg-transparent p-0 px-1 text-muted-foreground hover:text-foreground cursor-pointer shrink-0 text-[11px]"
+                className="h-5 w-5 p-0 text-muted-foreground hover:text-foreground shrink-0 text-[11px]"
                 title="Browse tree"
               >
                 &#9776;
-              </button>
+              </Button>
             </PopoverTrigger>
             <PopoverContent align="end" className="w-64 max-h-60 overflow-auto p-0">
               <MiniTree

@@ -1,4 +1,5 @@
 import './editor-ui.css';
+import { Button } from '#components/ui/button';
 import { Render, RenderContext } from '#context';
 import { useChildren } from '#hooks';
 import { trpc } from '#trpc';
@@ -80,12 +81,14 @@ export function GenerateViewButton({ type, sample, context, label }: { type: str
   }
 
   return (
-    <button
+    <Button
+      variant="outline"
+      size="sm"
       onClick={generate}
-      className="text-sm text-blue-400 hover:text-blue-300 border border-blue-400/30 rounded px-3 py-1.5 my-2"
+      className="text-blue-400 border-blue-400/30 hover:text-blue-300 my-2"
     >
       {label ?? 'Generate AI View'}
-    </button>
+    </Button>
   );
 }
 

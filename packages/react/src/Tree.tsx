@@ -64,7 +64,7 @@ function BadgeMenu({
         <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
           <Badge
             variant="secondary"
-            className="tree-badge cursor-pointer text-[10px] px-1.5 py-0 h-5 font-mono"
+            className="tree-badge cursor-pointer text-[10px] px-1.5 py-0 h-5 font-mono font-normal"
             title={fullType}
           >
             {typeLabel}

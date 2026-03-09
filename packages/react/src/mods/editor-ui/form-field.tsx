@@ -1,3 +1,5 @@
+import { Button } from '#components/ui/button';
+import { Input } from '#components/ui/input';
 import { isRef, resolveExact } from '@treenity/core';
 import { createElement, useState } from 'react';
 import { FieldLabel, RefEditor } from './FieldLabel';
@@ -112,18 +114,20 @@ export function StringArrayField({
             className="inline-flex items-center gap-0.5 text-[11px] font-mono bg-muted text-foreground/70 px-1.5 py-0.5 rounded"
           >
             {tag}
-            <button
+            <Button
+              variant="ghost"
+              size="icon"
               type="button"
-              className="ml-0.5 border-0 bg-transparent p-0 text-muted-foreground/40 hover:text-foreground leading-none cursor-pointer"
+              className="h-5 w-5 p-0 ml-0.5 text-muted-foreground/40 hover:text-foreground leading-none"
               onClick={() => onChange(tags.filter((_, j) => j !== i))}
             >
               x
-            </button>
+            </Button>
           </span>
         ))}
       </div>
-      <input
-        className="text-xs w-full"
+      <Input
+        className="h-7 text-xs w-full"
         placeholder="Add item..."
         value={input}
         onChange={(e) => setInput(e.target.value)}

@@ -116,16 +116,9 @@
   border-radius: var(--radius);
   cursor: pointer;
   transition: all var(--transition);
-  animation: child-in 0.25s ease both;
 }
 .child-card:hover {
   background: var(--surface);
-}
-@keyframes child-in {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
 }
 
 .child-icon {
