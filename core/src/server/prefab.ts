@@ -92,12 +92,13 @@ export async function deployByKey(
   return deployNodes(store, prefab, target, opts);
 }
 
-/** Deploy all seed prefabs. Respects TENANT env (only core-tier seeds). */
-export async function deploySeedPrefabs(store: Tree): Promise<void> {
+/** Deploy seed prefabs. If filter provided, only deploy seeds whose mod is in the list. */
+export async function deploySeedPrefabs(store: Tree, filter?: string[]): Promise<void> {
   const isTenant = !!process.env.TENANT;
   const seeds = getSeedPrefabs();
 
   for (const [mod, prefab] of seeds) {
+    if (filter && !filter.includes(mod)) continue;
     if (isTenant && prefab.meta?.tier !== 'core') continue;
     await deployNodes(store, prefab, '/', { allowAbsolute: true, params: { store } });
   }

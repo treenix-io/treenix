@@ -1,16 +1,23 @@
-// treenity() — server factory
-// Builds the full pipeline from config, returns a composable server instance.
+// treenity() — universal server factory
+// Single entry point: loads infrastructure, mods, builds pipeline, wires logging.
+
+import '#contexts/schema/index';
+import '#contexts/text/index';
+import '#schema/load';
+import './mount-adapters';
 
 import { type ServiceHandle, startServices } from '#contexts/service/index';
-import { A, createNode, R, S, W } from '#core';
+import { A, createNode, type NodeData, R, S, W } from '#core';
 import { addOnLog, makeLogPath } from '#log';
-import { loadLocalMods } from '#mod';
+import { loadAllMods } from '#mod';
 import { createMemoryTree, type Tree } from '#tree';
 import type { Server } from 'node:http';
-import { createEnsure, type Ensure, seed as defaultSeed } from './seed';
+import { deploySeedPrefabs } from './prefab';
+import { createEnsure, type Ensure } from './seed';
 import { createHttpServer, createPipeline, type Pipeline } from './server';
 
 export type TreenityConfig = {
+  rootNode?: NodeData;
   dataDir?: string;
   modsDir?: string | false;
   seed?: (store: Tree, ensure: Ensure) => Promise<void>;
@@ -37,37 +44,44 @@ export async function treenity(config?: TreenityConfig): Promise<TreenityServer>
 
   // 1. Load mods
   if (config?.modsDir !== false) {
-    const modsDir = config?.modsDir ?? new URL('../mods', import.meta.url).pathname;
-    const { loaded, failed } = await loadLocalMods(modsDir, 'server');
-    if (failed.length) console.error('failed mods:', failed.map(f => `${f.name}: ${f.error.message}`).join(', '));
-    if (loaded.length) console.log(`mods: ${loaded.join(', ')}`);
+    const extraDirs = config?.modsDir ? [config.modsDir] : [];
+    await loadAllMods('server', ...extraDirs);
   }
 
-  // 2. Bootstrap: root node with overlay(base, work)
+  // 2. Bootstrap: root node
   const bootstrap = createMemoryTree();
-  const rootNode = createNode('/', 'root', {}, {
-    mount: { $type: 't.mount.overlay', layers: ['base', 'work'] },
-    base: { $type: 't.mount.fs', root: dataDir + '/base' },
-    work: { $type: 't.mount.fs', root: dataDir + '/work' },
-  });
-  rootNode.$acl = [
-    { g: 'authenticated', p: R | S },
-    { g: 'admins', p: R | W | A | S },
-  ];
+  let rootNode: NodeData;
+  if (config?.rootNode) {
+    rootNode = config.rootNode;
+  } else {
+    rootNode = createNode('/', 'root', {}, {
+      mount: { $type: 't.mount.overlay', layers: ['base', 'work'] },
+      base: { $type: 't.mount.fs', root: dataDir + '/base' },
+      work: { $type: 't.mount.fs', root: dataDir + '/work' },
+    });
+    rootNode.$acl = [
+      { g: 'authenticated', p: R | S },
+      { g: 'admins', p: R | W | A | S },
+    ];
+  }
   await bootstrap.set(rootNode);
 
   // 3. Build pipeline
   const pipeline = createPipeline(bootstrap);
   const { store, mountable } = pipeline;
 
-  // 4. Seed
-  const seedFn = config?.seed ?? defaultSeed;
-  await seedFn(mountable, createEnsure(mountable));
+  // 4. Seed — if rootNode declares seeds, only deploy those mods
+  if (config?.seed) {
+    await config.seed(mountable, createEnsure(mountable));
+  } else {
+    const seedFilter = (rootNode as Record<string, unknown>).seeds as string[] | undefined;
+    await deploySeedPrefabs(mountable, seedFilter);
+  }
 
   // 5. Wire log → tree
   addOnLog(entry => {
     const p = makeLogPath()
-    process.stderr.write(`[log hit] ${p} ${entry.level}: ${entry.msg.slice(0, 60)}\n`)
+    process.stderr.write(`[log→tree] ${p} ${entry.level}: ${entry.msg.slice(0, 60)}\n`)
     mountable.set({ $path: p, $type: 't.log', ...entry })
       .catch(e => process.stderr.write(`[log write err] ${e.message}\n`))
   })
