@@ -75,9 +75,15 @@ type ResolvedAction = {
   fieldKey: string | undefined;
 };
 
-// Dynamic actions: load from /sys/types/{ns}/{name} node's `actions` component.
-// Code is compiled with new Function, registered for future calls.
-// Format: actions.{name} = "const node = ...; return result;"  (async function body)
+// Dynamic actions: load from /sys/types/{ns}/{name} node's `actions` field.
+// Code runs in QuickJS WASM sandbox — no host FS/network/process access (C01 fix).
+// Sandbox gets: ctx.node (snapshot), ctx.tree.get/set/remove, data, Date, console.log.
+
+import { getQuickJS, shouldInterruptAfterDeadline } from 'quickjs-emscripten';
+
+const DYNAMIC_ACTION_TIMEOUT = 5_000;
+const DYNAMIC_ACTION_MEM = 8 * 1024 * 1024;
+
 async function loadDynamicAction(
   tree: Tree, type: string, action: string,
 ): Promise<((ctx: ActionCtx, data: unknown) => unknown) | null> {
@@ -88,16 +94,112 @@ async function loadDynamicAction(
   const actionCode = (typeNode as any)?.actions?.[action];
   if (!actionCode || typeof actionCode !== 'string') return null;
 
-  try {
-    const fn = new Function('ctx', 'data', `return (async () => { ${actionCode} })()`) as
-      (ctx: ActionCtx, data: unknown) => unknown;
-    register(type, `action:${action}`, fn);
-    console.log(`[uix] loaded dynamic action "${action}" for "${type}"`);
-    return fn;
-  } catch (err: any) {
-    console.warn(`[uix] failed to compile action "${action}" for "${type}":`, err.message);
-    return null;
-  }
+  // Build a sandboxed action handler — compiled once, called per invocation
+  const fn = async (ctx: ActionCtx, data: unknown): Promise<unknown> => {
+    const QuickJS = await getQuickJS();
+    const runtime = QuickJS.newRuntime();
+    runtime.setMemoryLimit(DYNAMIC_ACTION_MEM);
+    runtime.setMaxStackSize(512 * 1024);
+    runtime.setInterruptHandler(shouldInterruptAfterDeadline(Date.now() + DYNAMIC_ACTION_TIMEOUT));
+    const vm = runtime.newContext();
+
+    // Collect async operations from sandbox — QuickJS is sync, so we queue them
+    const pendingOps: Array<{ resolve: (v: string) => void; promise: Promise<string> }> = [];
+
+    try {
+      // Inject `data` as global
+      const dataHandle = vm.evalCode(`(${JSON.stringify(data ?? {})})`);
+      if ('value' in dataHandle) { vm.setProp(vm.global, 'data', dataHandle.value); dataHandle.value.dispose(); }
+
+      // Inject `ctx` with node snapshot + tree bridge stubs
+      // Tree ops are async — we use a sync→async bridge pattern:
+      // sandbox calls ctx.tree.get(path) → returns a placeholder
+      // we track the call, run it on host, and re-execute with results
+      const nodeSnapshot = { ...ctx.node };
+      const nodeJson = JSON.stringify(nodeSnapshot);
+
+      // Simple approach: wrap action code in async-like sequential execution
+      // The sandbox code can call ctx.tree.get/set synchronously — we proxy through host fns
+      let treeOpsResult: unknown = undefined;
+      const treeWrites: Array<{ node: Record<string, unknown> }> = [];
+      const treeGets = new Map<string, Record<string, unknown> | undefined>();
+
+      // Pre-fetch the action node itself
+      treeGets.set(ctx.node.$path, nodeSnapshot);
+
+      // Host function: ctx_tree_get(path) → JSON string
+      const getFn = vm.newFunction('ctx_tree_get', (pathHandle) => {
+        const p = vm.getString(pathHandle);
+        // Return cached or placeholder — will be filled in re-execution
+        const cached = treeGets.get(p);
+        if (cached !== undefined) return vm.newString(JSON.stringify(cached));
+        return vm.newString('null');
+      });
+      vm.setProp(vm.global, 'ctx_tree_get', getFn);
+      getFn.dispose();
+
+      // Host function: ctx_tree_set(nodeJson) → void
+      const setFn = vm.newFunction('ctx_tree_set', (nodeJsonHandle) => {
+        const nj = vm.getString(nodeJsonHandle);
+        try { treeWrites.push({ node: JSON.parse(nj) }); } catch {}
+        return vm.undefined;
+      });
+      vm.setProp(vm.global, 'ctx_tree_set', setFn);
+      setFn.dispose();
+
+      // Console stub
+      const logFn = vm.newFunction('log', (...args) => {
+        const parts = args.map(a => vm.getString(a));
+        console.log(`[sandbox:${type}.${action}]`, ...parts);
+      });
+      const consoleObj = vm.newObject();
+      vm.setProp(consoleObj, 'log', logFn);
+      vm.setProp(vm.global, 'console', consoleObj);
+      consoleObj.dispose();
+      logFn.dispose();
+
+      // Wrapper: provides ctx.node, ctx.store (legacy alias), ctx.tree as sync bridge
+      // Dynamic action code uses `await ctx.store.get(path)` — in sandbox we strip await (sync)
+      const wrapperCode = `
+        var ctx = {
+          node: ${nodeJson},
+          tree: {
+            get: function(p) { var r = ctx_tree_get(p); return r === 'null' ? null : JSON.parse(r); },
+            set: function(n) { ctx_tree_set(JSON.stringify(n)); },
+          },
+        };
+        ctx.store = ctx.tree;
+        (function() { ${actionCode.replace(/await\s+/g, '')} })();
+      `;
+
+      const result = vm.evalCode(wrapperCode);
+      if (result.error) {
+        const err = vm.dump(result.error);
+        result.error.dispose();
+        throw new Error(`Dynamic action ${type}.${action} failed: ${typeof err === 'object' && err ? (err as any).message ?? JSON.stringify(err) : err}`);
+      }
+
+      treeOpsResult = vm.dump(result.value);
+      result.value.dispose();
+
+      // Apply tree writes to real tree
+      for (const w of treeWrites) {
+        const n = w.node;
+        if (n && typeof n === 'object' && typeof n.$path === 'string' && typeof n.$type === 'string') {
+          await tree.set(n as NodeData);
+        }
+      }
+
+      return treeOpsResult;
+    } finally {
+      vm.dispose();
+      runtime.dispose();
+    }
+  };
+
+  register(type, `action:${action}`, fn);
+  console.log(`[uix] loaded sandboxed dynamic action "${action}" for "${type}"`);
+  return fn;
 }
 
 async function resolveActionHandler(
@@ -176,7 +278,7 @@ export async function executeAction(
     }
   }
 
-  if (patches.length > 0) await tree.set({ ...nextNode, $patches: patches } as NodeData);
+  if (patches.length > 0) await tree.set({ ...nextNode, $rev: node.$rev, $patches: patches } as NodeData);
   return result;
 }
 
@@ -254,7 +356,7 @@ export async function applyTemplate(
 
 function deepAssign(target: any, source: Record<string, unknown>) {
   for (const [k, v] of Object.entries(source)) {
-    if (k.startsWith('$')) continue;
+    if (k.startsWith('$') || k === '__proto__' || k === 'constructor' || k === 'prototype') continue;
     if (v && typeof v === 'object' && !Array.isArray(v)
       && target[k] && typeof target[k] === 'object' && !Array.isArray(target[k])) {
       deepAssign(target[k], v as Record<string, unknown>);

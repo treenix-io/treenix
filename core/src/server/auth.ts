@@ -10,6 +10,7 @@ import {
   type NodeData,
   R,
   resolve as resolveHandler,
+  S,
   W,
 } from '#core';
 import { paginate, type Tree } from '#tree';
@@ -43,6 +44,7 @@ export async function createSession(
   const now = Date.now();
   const sessionNode: SessionNode = {
     $path: `/auth/sessions/${token}`, $type: 'session',
+    $acl: [{ g: 'admins', p: R | W | A | S }],
     userId, createdAt: now, expiresAt: now + (opts?.ttlMs ?? SESSION_TTL_MS),
     ...(opts?.claims && { claims: opts.claims }),
   };
@@ -51,6 +53,8 @@ export async function createSession(
 }
 
 export async function resolveToken(tree: Tree, token: string): Promise<Session | null> {
+  // B03: reject non-hex tokens to prevent path traversal via /auth/sessions/../../
+  if (!/^[0-9a-f]{64}$/.test(token)) return null;
   const node = await tree.get(`/auth/sessions/${token}`) as SessionNode | undefined;
   if (!node) return null;
   if (!node.userId || !node.expiresAt) {
@@ -317,7 +321,8 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
       const MAX_ACL_SCAN = 10_000;
       // Fetch up to limit from underlying — ACL filters first, then paginate
       const raw = await rawStore.getChildren(path, { depth: opts?.depth, limit: MAX_ACL_SCAN }, ctx);
-      if (raw.items.length >= MAX_ACL_SCAN) {
+      const truncated = raw.items.length >= MAX_ACL_SCAN;
+      if (truncated) {
         console.warn(`[acl] getChildren(${path}): hit scan limit ${MAX_ACL_SCAN}, results may be incomplete`);
       }
       const filtered: NodeData[] = [];
@@ -333,6 +338,7 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
       }
       // Preserve queryMount for CDC Matrix (sub.ts active query registration)
       const result = paginate(filtered, opts);
+      if (truncated) result.truncated = true;
       if (raw.queryMount) result.queryMount = raw.queryMount;
       return result;
     },

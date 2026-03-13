@@ -269,4 +269,62 @@ describe('defineComponent', () => {
     const result = await executeAction(tree, '/s', 't.svc', undefined, 'ping', undefined);
     assert.equal(result, 'pong');
   });
+
+  it('deepAssign blocks __proto__, constructor, prototype keys (F17)', async () => {
+    registerBuiltinActions();
+    const tree = createMemoryTree();
+    await tree.set(createNode('/n', 'mytype', { title: 'ok' }));
+
+    await executeAction(tree, '/n', undefined, undefined, 'patch', {
+      __proto__: { polluted: true },
+      constructor: { polluted: true },
+      prototype: { polluted: true },
+      title: 'patched',
+    });
+
+    const result = (await tree.get('/n'))!;
+    assert.equal(result.title, 'patched');
+    assert.equal(({} as any).polluted, undefined, 'Object.prototype must not be polluted');
+  });
+
+  it('sandboxed dynamic action executes in QuickJS (C01)', async () => {
+    registerBuiltinActions();
+    const tree = createMemoryTree();
+
+    // Create a type node with dynamic action
+    await tree.set({
+      $path: '/sys/types/test/demo',
+      $type: 'dir',
+      actions: {
+        greet: 'var node = ctx.tree.get(ctx.node.$path); node.greeting = "hello " + (data.name || "world"); ctx.tree.set(node); return { ok: true };',
+      },
+    } as NodeData);
+
+    // Create an instance
+    await tree.set(createNode('/demo1', 'test.demo', { greeting: '' }));
+
+    const result = await executeAction(tree, '/demo1', undefined, undefined, 'greet', { name: 'sandbox' });
+    assert.deepEqual(result, { ok: true });
+
+    const updated = await tree.get('/demo1');
+    assert.equal(updated!.greeting, 'hello sandbox');
+  });
+
+  it('sandboxed dynamic action cannot access host process/require (C01)', async () => {
+    registerBuiltinActions();
+    const tree = createMemoryTree();
+
+    await tree.set({
+      $path: '/sys/types/test/evil',
+      $type: 'dir',
+      actions: {
+        pwn: 'return typeof process !== "undefined" ? "FAIL" : "safe";',
+      },
+    } as NodeData);
+
+    await tree.set(createNode('/evil1', 'test.evil', {}));
+
+    const result = await executeAction(tree, '/evil1', undefined, undefined, 'pwn', {});
+    assert.equal(result, 'safe', 'process must not be accessible in sandbox');
+  });
 });
