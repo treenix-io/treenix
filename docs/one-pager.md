@@ -1,6 +1,6 @@
 # Treenity
 
-**A spatial protocol for typed data. Three primitives. 197 lines of core. Everything else composes.**
+**A spatial protocol for typed data. Three primitives. Minimal core. Everything else composes.**
 
 ## The Problem
 
@@ -71,7 +71,7 @@ The AI doesn't write code. It takes the cafe template, adds `delivery`, `address
 
 | | |
 |---|---|
-| Core | 197 lines, zero dependencies |
+| Core | < 500 lines, zero dependencies |
 | Store layer | 502 lines — 3 backends, 3 composable wrappers |
 | Server | ~2,200 lines — mounts, ACL, tRPC, MCP, subscriptions (deps: sift, immer, tRPC) |
 | Frontend | ~2,900 lines — tree navigator, inspector, reactive cache |
@@ -84,7 +84,7 @@ Seven layers, strict downward dependency. Core has zero awareness of storage, tr
 ## Where It Stands
 
 ```
-Step 0: Core — three primitives, 197 lines              ✓
+Step 0: Core — three primitives                          ✓
 Step 1: Telegram bot built from tree (cafe demo)         ✓
 Step 2: One business end-to-end through the tree         ← here
 Step 3: Second business — extract shared domain types
@@ -100,6 +100,6 @@ Protocols outlive corporations. Email is 53 years old. HTTP is 35. Linux is 34. 
 
 The tree has no center. Every instance is a node in a network. Mounts connect them. Each participant owns their data, their processes, their subtree. The platform amplifies users instead of extracting from them.
 
-Three prototypes died so this one could be distilled to its essence. 197 lines of core. Three primitives that fit in one sentence each. Ten years of saying NO to everything that wasn't strictly necessary.
+Three prototypes died so this one could be distilled to its essence. Minimal core. Three primitives that fit in one sentence each. Ten years of saying NO to everything that wasn't strictly necessary.
 
 What remains is sufficient.
