@@ -59,6 +59,8 @@ export async function treenity(config?: TreenityConfig): Promise<TreenityServer>
       base: { $type: 't.mount.fs', root: dataDir + '/base' },
       work: { $type: 't.mount.fs', root: dataDir + '/work' },
     });
+    // FAIL CLOSED: no public access by default. Override via config.rootNode if needed.
+    // NEVER add 'public' group here — tests that need it must pass their own rootNode.
     rootNode.$acl = [
       { g: 'authenticated', p: R | S },
       { g: 'admins', p: R | W | A | S },

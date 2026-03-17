@@ -63,12 +63,16 @@ register('t.mount.rawfs', 'mount', async (config: NodeData) => {
 // F18: reject private/internal IP ranges to prevent SSRF via mount creation.
 const PRIVATE_HOST_RE = /^(?:localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+|169\.254\.\d+\.\d+|0\.0\.0\.0|\[::1?\])(?::\d+)?$/i;
 
+// Test-only: allow private URLs for integration tests. NEVER set in production.
+let _allowPrivateUrls = false;
+export function setAllowPrivateUrls(v: boolean) { _allowPrivateUrls = v; }
+
 register('t.mount.tree.trpc', 'mount', async (config: NodeData) => {
   const conn = getComponent<{ url?: string; path?: string; token?: string }>(config, 'connection');
   if (!conn?.url) throw new Error('t.mount.trpc: connection.url required');
   try {
     const host = new URL(conn.url).host;
-    if (PRIVATE_HOST_RE.test(host)) throw new Error(`t.mount.trpc: private/internal URL denied: ${host}`);
+    if (!_allowPrivateUrls && PRIVATE_HOST_RE.test(host)) throw new Error(`t.mount.trpc: private/internal URL denied: ${host}`);
   } catch (e) {
     if (e instanceof TypeError) throw new Error(`t.mount.trpc: invalid URL: ${conn.url}`);
     throw e;

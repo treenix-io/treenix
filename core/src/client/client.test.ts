@@ -4,13 +4,13 @@
 import { registerType } from '#comp';
 import { createNode, R, S, W } from '#core';
 import { withMounts } from '#server/mount';
-import '#server/mount-adapters';
+import { setAllowPrivateUrls } from '#server/mount-adapters';
 import { createTreenityServer } from '#server/server';
 import { createMemoryTree } from '#tree';
 import { createRepathTree } from '#tree/repath';
 import assert from 'node:assert/strict';
 import type { Socket } from 'node:net';
-import { afterEach, before, beforeEach, describe, it } from 'node:test';
+import { after, afterEach, before, beforeEach, describe, it } from 'node:test';
 import { createTrpcTransport } from './trpc';
 
 // ── Helpers ──
@@ -137,6 +137,9 @@ describe('Treenity Client SDK', () => {
   // ── t.mount.tree.trpc ──
 
   describe('t.mount.tree.trpc', () => {
+    before(() => setAllowPrivateUrls(true));
+    after(() => setAllowPrivateUrls(false));
+
     it('mounts remote tree with path translation', async () => {
       // Set up content on the remote server
       const { tree: remote } = createTrpcTransport({ url });
