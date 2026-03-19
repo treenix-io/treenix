@@ -1,6 +1,6 @@
 import { Button } from '#components/ui/button';
 import { Input } from '#components/ui/input';
-import { Textarea } from '#components/ui/textarea';
+import { DraftTextarea } from '#mods/editor-ui/DraftTextarea';
 import { isRef, resolveExact } from '@treenity/core';
 import { createElement, useState } from 'react';
 import { FieldLabel, RefEditor } from './FieldLabel';
@@ -92,12 +92,12 @@ export function StringArrayField({
 
   if (!isStrings) {
     return (
-      <Textarea
+      <DraftTextarea
         className="min-h-16 text-xs font-mono"
         value={JSON.stringify(value, null, 2)}
-        onChange={(e) => {
+        onChange={(text) => {
           try {
-            onChange(JSON.parse(e.target.value));
+            onChange(JSON.parse(text));
           } catch {
             /* typing */
           }

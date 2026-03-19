@@ -96,7 +96,7 @@ export function ComponentSection({
       </div>
 
       {!collapsed && (
-        <ErrorBoundary>
+        <ErrorBoundary key={`${node.$path}:${compType}`}>
           <EditPanel node={node} type={compType} data={data} onData={onData} />
           <ActionCardList
             path={node.$path}

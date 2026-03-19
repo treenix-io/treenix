@@ -28,7 +28,7 @@ export function Inspector({ path, currentUserId, onDelete, onAddComponent, onSel
   const node = usePath(path);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [context, setContext] = useState('react');
+  const [context, setContext] = useState('react:layout');
 
   // Reset context when path changes
   const [prevPath, setPrevPath] = useState(path);
@@ -113,7 +113,7 @@ export function Inspector({ path, currentUserId, onDelete, onAddComponent, onSel
       {/* Rendered view */}
       <ScrollArea className="flex-1">
         <div className="p-4">
-          <ErrorBoundary>
+          <ErrorBoundary key={node.$path}>
             <RenderContext name={context}>
               <div className="node-view">
                 <Render value={node} />

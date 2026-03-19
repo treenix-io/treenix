@@ -1,6 +1,6 @@
 {
   "name": "@treenity/mods",
-  "version": "3.0.6",
+  "version": "3.0.7",
   "description": "Official Treenity modules — board, sim, cafe, doc, mindmap, and more.",
   "type": "module",
   "publishConfig": {

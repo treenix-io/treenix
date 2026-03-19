@@ -9,6 +9,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '#components/ui/popover'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '#components/ui/select';
 import { Switch } from '#components/ui/switch';
 import { Textarea } from '#components/ui/textarea';
+import { DraftTextarea } from '#mods/editor-ui/DraftTextarea';
 import { useSchema } from '#schema-loader';
 import { register, resolve as resolveHandler } from '@treenity/core';
 import dayjs from 'dayjs';
@@ -281,13 +282,13 @@ function ObjectForm({ value, onChange }: FP) {
     return (
       <div className="rounded border border-border/50 bg-muted/30 p-2">
         {modeToggle}
-        <Textarea
+        <DraftTextarea
           className={`text-[11px] min-h-[60px] ${jsonError ? 'border-destructive' : ''}`}
           value={jsonDraft}
-          onChange={(e) => {
-            setJsonDraft(e.target.value);
+          onChange={(text) => {
+            setJsonDraft(text);
             try {
-              const parsed = JSON.parse(e.target.value);
+              const parsed = JSON.parse(text);
               if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
                 emit(parsed);
                 setJsonError(false);
@@ -334,12 +335,12 @@ function ObjectForm({ value, onChange }: FP) {
                   onChange={(e) => emit({ ...obj, [k]: e.target.value })}
                 />
               ) : (
-                <Textarea
+                <DraftTextarea
                   className="flex-1 min-w-0 text-[11px] font-mono min-h-[40px]"
                   value={JSON.stringify(v, null, 2)}
-                  onChange={(e) => {
+                  onChange={(text) => {
                     try {
-                      emit({ ...obj, [k]: JSON.parse(e.target.value) });
+                      emit({ ...obj, [k]: JSON.parse(text) });
                     } catch {
                       /* typing */
                     }
@@ -484,11 +485,11 @@ function ArrayForm({ value, onChange }: FP) {
 
   // object/other — textarea fallback
   return (
-    <Textarea
+    <DraftTextarea
       value={JSON.stringify(arr, null, 2)}
-      onChange={(e) => {
+      onChange={(text) => {
         try {
-          emit(JSON.parse(e.target.value));
+          emit(JSON.parse(text));
         } catch {
           /* let user keep typing */
         }

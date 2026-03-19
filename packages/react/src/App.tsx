@@ -42,7 +42,8 @@ export function App() {
     const token = getToken();
     if (!token) {
       try {
-        const { token: anonToken, userId } = await trpc.anonLogin.mutate();
+        const login = import.meta.env.VITE_DEV_LOGIN ? trpc.devLogin : trpc.anonLogin;
+        const { token: anonToken, userId } = await login.mutate();
         setToken(anonToken);
         setAuthed(userId);
         setAuthChecked(true);
@@ -439,7 +440,7 @@ export function App() {
   if (!authed) return <LoginScreen onLogin={(uid) => setAuthed(uid)} />;
 
   const isAnon = authed.startsWith('anon:');
-  const needsLogin = isAnon || showLoginModal;
+  const needsLogin = showLoginModal;
   if (mode === 'view') return <NavigateProvider value={navigate}><ViewPage path={viewPath} /></NavigateProvider>;
   if (mode === 'preview') return <NavigateProvider value={navigate}><ViewPage path={viewPath} editorLink /></NavigateProvider>;
 

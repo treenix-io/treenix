@@ -2,31 +2,20 @@
 // StreamableHTTP transport, stateless, token auth via ?token= or Authorization header
 
 import { requestApproval } from '#agent/guardian';
-import { matchesAny } from '@treenity/core/glob';
 import { AiPolicy } from '#agent/types';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { createNode, getComponent } from '@treenity/core';
+import { matchesAny } from '@treenity/core/glob';
 import { verifyViewSource } from '@treenity/core/mods/uix/verify';
 import { TypeCatalog } from '@treenity/core/schema/catalog';
 import { executeAction } from '@treenity/core/server/actions';
 import { buildClaims, resolveToken, type Session, withAcl } from '@treenity/core/server/auth';
 import { deployPrefab } from '@treenity/core/server/prefab';
 import type { Tree } from '@treenity/core/tree';
-import { existsSync, readFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
-import { createServer as createHttpsServer } from 'node:https';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
 import { z } from 'zod/v3';
 
-function loadDevCerts(): { key: Buffer; cert: Buffer } | null {
-  const home = homedir();
-  const keyPath = join(home, 'localhost+2-key.pem');
-  const certPath = join(home, 'localhost+2.pem');
-  if (!existsSync(keyPath) || !existsSync(certPath)) return null;
-  return { key: readFileSync(keyPath), cert: readFileSync(certPath) };
-}
 
 // Guardian policy check for MCP write operations
 // Reads global policy from /agents/guardian, checks deny → escalate → allow
@@ -346,7 +335,6 @@ export function extractToken(req: import('node:http').IncomingMessage): string |
 
 /** Create MCP HTTP server. Returns server handle for lifecycle management. */
 export function createMcpHttpServer(store: Tree, port: number): Server {
-  const tls = loadDevCerts();
 
   const handler = async (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -387,7 +375,7 @@ export function createMcpHttpServer(store: Tree, port: number): Server {
     await transport.handleRequest(req, res);
   };
 
-  const server = tls ? createHttpsServer(tls, handler) : createServer(handler);
-  server.listen(port, '127.0.0.1', () => console.log(`treenity mcp ${tls ? 'https' : 'http'}://localhost:${port}/mcp`));
+  const server = createServer(handler);
+  server.listen(port, '127.0.0.1', () => console.log(`treenity mcp http://localhost:${port}/mcp`));
   return server;
 }

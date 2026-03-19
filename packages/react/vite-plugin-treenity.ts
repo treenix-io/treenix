@@ -4,7 +4,7 @@
 // 3. Auto-discover mod client.ts → virtual:mod-clients
 // 4. Block server.ts from frontend bundle
 
-import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import type { Plugin } from 'vite';
 
@@ -189,7 +189,13 @@ export default function treenityPlugin(opts?: { modsDirs?: string[] }): Plugin {
       // Resolve # imports via nearest package.json imports field
       if (id.startsWith('#')) {
         const pkg = readPkg(dirname(importer));
-        if (pkg?.imports) return matchPattern(id, pkg.imports, pkg.dir, conditions);
+        if (pkg?.imports) {
+          // Inside node_modules: skip 'development' condition to stay in dist/
+          // (dist files use relative ./hooks, # must resolve to same dist files)
+          const isNm = importer.includes('/node_modules/');
+          const conds = isNm ? conditions.filter(c => c !== 'development') : conditions;
+          return matchPattern(id, pkg.imports, pkg.dir, conds);
+        }
       }
 
       // Resolve @treenity/* exports (Vite doesn't handle array conditions)

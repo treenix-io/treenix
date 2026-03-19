@@ -3,8 +3,10 @@
 // Responsibilities: input validation (Zod), error mapping (OpError → TRPCError), watch wiring.
 
 import { createNode, getComponentField, isComponent, type NodeData, R, resolve, S, W } from '#core';
+import { assertSafePath } from '#core/path';
 import { initTRPC, TRPCError } from '@trpc/server';
 import { observable } from '@trpc/server/observable';
+import type { Operation } from 'fast-json-patch';
 import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import {
@@ -29,12 +31,10 @@ import {
   withAcl,
 } from './auth';
 import { OpError } from './errors';
-import { assertSafePath } from '#core/path';
 import { deployPrefab as deployPrefabOp } from './prefab';
 import { type NodeEvent, type ReactiveTree, unwatchQuery, watchQuery } from './sub';
 import { extractPaths } from './volatile';
 import { type WatchManager } from './watch';
-import type { Operation } from 'fast-json-patch';
 
 export type TrpcContext = { session: Session | null; token: string | null };
 
@@ -336,6 +336,21 @@ export function createTreeRouter(baseStore: ReactiveTree, watcher: WatchManager)
     anonLogin: t.procedure.mutation(async () => {
       checkRate('anonLogin', 30);
       const userId = `anon:${randomBytes(16).toString('hex')}`;
+      const token = await createSession(baseStore, userId);
+      return { token, userId };
+    }),
+
+    devLogin: t.procedure.mutation(async () => {
+      if (!process.env.VITE_DEV_LOGIN) throw new TRPCError({ code: 'FORBIDDEN', message: 'Dev-only' });
+      const userId = 'dev';
+      const userPath = `/auth/users/${userId}`;
+      if (!await baseStore.get(userPath)) {
+        const node = createNode(userPath, 'user', {}, {
+          groups: { $type: 'groups', list: ['admins'] },
+        });
+        node.$owner = userId;
+        await baseStore.set(node);
+      }
       const token = await createSession(baseStore, userId);
       return { token, userId };
     }),

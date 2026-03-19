@@ -7,6 +7,7 @@ import { Input } from '#components/ui/input';
 import { ScrollArea } from '#components/ui/scroll-area';
 import { Tabs, TabsList, TabsTrigger } from '#components/ui/tabs';
 import { toPlain } from '#lib/to-plain';
+import { DraftTextarea } from '#mods/editor-ui/DraftTextarea';
 import { FieldLabel, RefEditor } from '#mods/editor-ui/FieldLabel';
 import { getComponents, getPlainFields, getSchema } from '#mods/editor-ui/node-utils';
 import { type ComponentData, type GroupPerm, isRef, type NodeData, resolve } from '@treenity/core';
@@ -272,9 +273,9 @@ export function NodeEditor({ node, open, onClose, currentUserId, toast, onAddCom
             )}
           </>
         ) : (
-          <textarea
+          <DraftTextarea
             value={snap.jsonText}
-            onChange={(e) => { st.jsonText = e.target.value; st.dirty = true; }}
+            onChange={(text) => { st.jsonText = text; st.dirty = true; }}
             spellCheck={false}
           />
         )}

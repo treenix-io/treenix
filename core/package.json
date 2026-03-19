@@ -1,6 +1,6 @@
 {
   "name": "@treenity/core",
-  "version": "3.0.6",
+  "version": "3.0.7",
   "description": "Composable typed tree engine — three primitives, everything else composes. Nodes, components, contexts.",
   "type": "module",
   "publishConfig": {

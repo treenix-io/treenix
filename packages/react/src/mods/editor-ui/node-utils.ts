@@ -79,5 +79,5 @@ export function getActionSchema(type: string, action: string): TypeSchema | null
 }
 
 export function pickDefaultContext(_type: string): string {
-  return 'react';
+  return 'react:layout';
 }
