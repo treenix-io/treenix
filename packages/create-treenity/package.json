@@ -1,10 +1,14 @@
 {
   "name": "create-treenity",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "license": "FSL-1.1-MIT",
-  "bin": { "create-treenity": "dist/index.js" },
-  "files": ["dist"],
+  "bin": {
+    "create-treenity": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsx build.ts",
     "dev": "tsx src/index.ts",

@@ -11,25 +11,6 @@
     "sourceMap": true,
     "jsx": "react-jsx"
   },
-  "include": [
-    "agent",
-    "board",
-    "brahman",
-    "cafe",
-    "canary",
-    "doc",
-    "launcher",
-    "mcp",
-    "metatron",
-    "mindmap",
-    "sensor-demo",
-    "sensor-generator",
-    "sim",
-    "table",
-    "tasks",
-    "three",
-    "todo",
-    "whisper"
-  ],
-  "exclude": ["**/*.test.ts"]
+  "include": ["**/*.ts", "**/*.tsx"],
+  "exclude": ["dist", "**/*.test.ts"]
 }

@@ -1,13 +1,22 @@
 {
   "name": "treerun",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Run Treenity — typed world engine for AI agents",
   "type": "module",
   "bin": {
     "treerun": "./bin.mjs"
   },
-  "files": ["bin.mjs"],
-  "keywords": ["treenity", "ai", "agents", "mcp", "tree", "ecs"],
+  "files": [
+    "bin.mjs"
+  ],
+  "keywords": [
+    "treenity",
+    "ai",
+    "agents",
+    "mcp",
+    "tree",
+    "ecs"
+  ],
   "license": "FSL-1.1-MIT",
   "repository": {
     "type": "git",
