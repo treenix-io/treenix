@@ -17,6 +17,14 @@ import { getModPrefabs, getPrefab, getRegisteredMods } from '#mod/prefab';
 import { paginate, type Tree } from '#tree';
 import { getModInfo } from './mod-catalog';
 
+// Mark mount components as disabled on prefab catalog nodes —
+// they're data for inspection, not live mount points
+function disableMount(node: NodeData): NodeData {
+  const mount = node['mount'];
+  if (!mount || typeof mount !== 'object' || !('$type' in mount)) return node;
+  return { ...node, mount: { ...mount, disabled: true } };
+}
+
 type ParsedPath = {
   mod?: string;
   sub?: 'types' | 'prefabs';
@@ -108,7 +116,7 @@ export function createModsStore(_backingStore: Tree, modsPath = '/sys/mods'): Tr
         const clean = np.startsWith('/') ? np.slice(1) : np;
         return clean === p.rest;
       });
-      return found ? { ...found, $path: path } : undefined;
+      return found ? disableMount({ ...found, $path: path }) : undefined;
     },
 
     async getChildren(path, opts) {
@@ -154,7 +162,7 @@ export function createModsStore(_backingStore: Tree, modsPath = '/sys/mods'): Tr
           for (const node of prefab.nodes) {
             if (node.$path === '.' || node.$path.startsWith('/')) continue;
             if (node.$path.includes('/')) continue;
-            items.push({ ...node, $path: `${path}/${node.$path}` });
+            items.push(disableMount({ ...node, $path: `${path}/${node.$path}` }));
           }
         }
       }

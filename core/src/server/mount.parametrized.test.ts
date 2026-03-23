@@ -23,7 +23,8 @@ describe('Parametrized Mounts', () => {
     tree = withMounts(rootStore);
   });
 
-  it('resolves parametrized mount correctly', async () => {
+  // TODO: parametrized mounts disabled — depth:5 scan removed, needs explicit registry
+  it.todo('resolves parametrized mount correctly', async () => {
     await tree.set({ ...createNode('/', 'root') });
     await tree.set({ ...createNode('/users', 'folder') });
     

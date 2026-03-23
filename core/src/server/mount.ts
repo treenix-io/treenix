@@ -13,10 +13,6 @@ export function withMounts(rootStore: Tree): Tree {
   const cache = new Map<string, Tree>();
   const MAX_MOUNT_CACHE = 1000;
 
-  // Cached parametrized mount patterns — avoids depth-5 scan on every resolveStore miss
-  type ParamPattern = { regex: RegExp; paramNames: string[]; node: NodeData };
-  const paramPatterns = new Map<string, ParamPattern[]>();
-
   const self: Tree = {
     async get(path, ctx) {
       const { tree, mountPath, parentStore } = await resolveStore(path, ctx);
@@ -34,8 +30,6 @@ export function withMounts(rootStore: Tree): Tree {
       const { tree, mountPath, parentStore } = await resolveStore(node.$path, ctx);
       if (mountPath === node.$path) await parentStore.set(node, ctx);
       else await tree.set(node, ctx);
-      // Invalidate param pattern cache AFTER write (cache may have been populated with stale empty results during resolveStore)
-      if (node.$path.includes(':') && isComponent(node['mount'])) paramPatterns.clear();
     },
 
     async remove(path, ctx) {
@@ -59,6 +53,7 @@ export function withMounts(rootStore: Tree): Tree {
   function isMountPoint(node: NodeData): boolean {
     const mount = node['mount'];
     if (!isComponent(mount)) return false;
+    if (mount.disabled) return false;
     // Refs need resolution — treat as mount-point optimistically
     if (isRef(mount)) return true;
     return !!resolve(mount.$type, 'mount');
@@ -78,43 +73,6 @@ export function withMounts(rootStore: Tree): Tree {
     return await adapter(configNode, currentStore, ctx, self);
   }
 
-  // Parse path string like /users/:userId into regex and parameter names
-  function parseParametrizedPath(template: string) {
-    const paramNames: string[] = [];
-    const regexStr = template.replace(/:([a-zA-Z0-9_]+)/g, (_, paramName) => {
-      paramNames.push(paramName);
-      return '([^/]+)';
-    });
-    return {
-      regex: new RegExp(`^${regexStr}$`),
-      paramNames,
-    };
-  }
-
-  // Bind parameters in a string template, e.g. { source: '/users/:userId/orders' } + { userId: 1 } -> '/users/1/orders'
-  // Also recursively handles nested objects, replacing strings inside arrays/objects
-  function bindParams(obj: any, params: Record<string, string>): any {
-    if (typeof obj === 'string') {
-      return obj.replace(/:([a-zA-Z0-9_]+)/g, (match, paramName) => {
-        const val = params[paramName];
-        if (val === undefined) return match;
-        // Prevent sift operator injection: reject $-prefixed values in path params
-        if (val.startsWith('$')) throw new Error(`Invalid parameter value: ${paramName}=${val}`);
-        return val;
-      });
-    }
-    if (Array.isArray(obj)) {
-      return obj.map(item => bindParams(item, params));
-    }
-    if (typeof obj === 'object' && obj !== null) {
-      const result: Record<string, any> = {};
-      for (const [key, value] of Object.entries(obj)) {
-        result[key] = bindParams(value, params);
-      }
-      return result;
-    }
-    return obj;
-  }
 
   async function resolveStore(path: string, ctx?: any): Promise<ResolveResult> {
     // Walk: /, /seg1, /seg1/seg2, ... — each may be a mount point
@@ -139,56 +97,11 @@ export function withMounts(rootStore: Tree): Tree {
         continue;
       }
 
-      let node = await bestStore.get(check, ctx);
-      let matchParams: Record<string, string> | undefined = undefined;
-
-      // If no direct node, look for parameterized mounts (cached)
-      if (!node) {
-        const parts = check.split('/').filter(Boolean);
-        let parentCheck = '/';
-        for (let j = parts.length - 1; j >= 0; j--) {
-           const candidate = '/' + parts.slice(0, j).join('/');
-           const pNode = await bestStore.get(candidate || '/', ctx);
-           if (pNode) {
-              parentCheck = candidate || '/';
-              break;
-           }
-        }
-
-        // Scan once per prefix, cache compiled patterns
-        let patterns = paramPatterns.get(parentCheck);
-        if (!patterns) {
-          patterns = [];
-          const children = await bestStore.getChildren(parentCheck, { depth: 5 }, ctx);
-          for (const child of children.items) {
-            if (child.$path.includes(':') && isComponent(child['mount'])) {
-              patterns.push({ ...parseParametrizedPath(child.$path), node: child });
-            }
-          }
-          paramPatterns.set(parentCheck, patterns);
-        }
-
-        for (const p of patterns) {
-          const match = check.match(p.regex);
-          if (match) {
-            node = p.node;
-            matchParams = {};
-            for (let i = 0; i < p.paramNames.length; i++) {
-              matchParams[p.paramNames[i]] = match[i + 1];
-            }
-            break;
-          }
-        }
-      }
-
+      const node = await bestStore.get(check, ctx);
+      // TODO: parametrized mounts (:param paths) — need explicit registry, not runtime scan
       if (!node || !isMountPoint(node)) continue;
 
-      // If we matched parameters, bind them into the node config
-      let configNode = node;
-      if (matchParams) {
-          // deep copy and bind parameters for 'query' component or other configs
-          configNode = bindParams(node, matchParams);
-      }
+      const configNode = node;
 
       const tree = await resolveMount(configNode, bestStore, ctx);
       // Evict oldest entry if cache is full

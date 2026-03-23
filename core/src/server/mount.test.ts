@@ -270,6 +270,51 @@ describe('Mounts', () => {
     // The spy adapter should have received dataStore (parent mount)
     assert.equal(receivedDeps, dataStore);
   });
+
+  it('disabled mount is not resolved', async () => {
+    await rootStore.set(
+      createNode('/catalog', 'dir', {}, {
+        mount: { $type: 'test.mount.memory', disabled: true },
+      }),
+    );
+    await usersStore.set(createNode('/catalog/item', 'thing'));
+
+    const ms = withMounts(rootStore);
+    // Mount is disabled — should NOT delegate to usersStore
+    const item = await ms.get('/catalog/item');
+    assert.equal(item, undefined);
+
+    // The mount-point node itself should still be readable
+    const node = await ms.get('/catalog');
+    assert.equal(node?.$type, 't.dir');
+    assert.equal(node?.mount.disabled, true);
+  });
+
+  it('enabled mount still works normally', async () => {
+    await rootStore.set(
+      createNode('/active', 'dir', {}, {
+        mount: { $type: 'test.mount.memory', disabled: false },
+      }),
+    );
+    await usersStore.set(createNode('/active/item', 'thing'));
+
+    const ms = withMounts(rootStore);
+    const item = await ms.get('/active/item');
+    assert.equal(item?.$path, '/active/item');
+  });
+
+  it('mount without disabled flag works as before', async () => {
+    await rootStore.set(
+      createNode('/normal', 'dir', {}, {
+        mount: { $type: 'test.mount.memory' },
+      }),
+    );
+    await usersStore.set(createNode('/normal/item', 'thing'));
+
+    const ms = withMounts(rootStore);
+    const item = await ms.get('/normal/item');
+    assert.equal(item?.$path, '/normal/item');
+  });
 });
 
 describe('Query mount (t.mount.query)', () => {
@@ -562,4 +607,5 @@ describe('FS mount repath (dedicated)', () => {
     const paths = children.items.map(n => n.$path).sort();
     assert.deepEqual(paths, ['/data/files/a', '/data/files/b']);
   });
+
 });
