@@ -24,6 +24,7 @@ import { LoginModal, LoginScreen } from './Login';
 import { Tree } from './Tree';
 import { AUTH_EXPIRED_EVENT, clearToken, getToken, setToken, trpc } from './trpc';
 import { getModErrors } from './load-client';
+import { RoutedPage } from './RoutedPage';
 import { ViewPage } from './ViewPage';
 
 // Hydrate from IDB before first render — fires bump() when done → reactive re-render
@@ -86,11 +87,14 @@ export function App() {
   }, []);
 
   // ── Route detection ──
-  const [mode, setMode] = useState<'editor' | 'view' | 'preview'>(() => {
+  // /t/...  → editor (tree inspector)
+  // /v/...  → view (direct node render by path)
+  // /*      → routed (dynamic router via /sys/routes refs)
+  const [mode, setMode] = useState<'editor' | 'view' | 'routed'>(() => {
     const p = location.pathname;
     if (p.startsWith('/t')) return 'editor';
-    if (p.startsWith('/v/') || p === '/v') return 'preview';
-    return 'view';
+    if (p.startsWith('/v/') || p === '/v') return 'view';
+    return 'routed';
   });
   const [viewPath, setViewPath] = useState<string>(() => {
     const p = location.pathname;
@@ -175,10 +179,10 @@ export function App() {
         setSelected(p.slice(2) || '/');
         setRoot(new URLSearchParams(location.search).get('root') || '/');
       } else if (p.startsWith('/v/') || p === '/v') {
-        setMode('preview');
+        setMode('view');
         setViewPath(p.slice(2) || '/');
       } else {
-        setMode('view');
+        setMode('routed');
         setViewPath(p || '/');
       }
     };
@@ -224,7 +228,7 @@ export function App() {
 
   useEffect(() => {
     if (!authed) return;
-    if (mode === 'view') return; // ViewPage fetches its own node
+    if (mode !== 'editor') return; // RoutedPage/ViewPage fetch their own data
     cache.clear();
     setLoaded(new Set());
     (async () => {
@@ -441,7 +445,7 @@ export function App() {
       handleSelect(path);
     } else {
       setViewPath(path);
-      const prefix = mode === 'preview' ? '/v' : '';
+      const prefix = mode === 'view' ? '/v' : '';
       history.pushState(null, '', prefix + path);
     }
   }, [mode, handleSelect]);
@@ -451,8 +455,8 @@ export function App() {
 
   const isAnon = authed.startsWith('anon:');
   const needsLogin = showLoginModal;
+  if (mode === 'routed') return <NavigateProvider value={navigate}><RoutedPage path={viewPath} /></NavigateProvider>;
   if (mode === 'view') return <NavigateProvider value={navigate}><ViewPage path={viewPath} /></NavigateProvider>;
-  if (mode === 'preview') return <NavigateProvider value={navigate}><ViewPage path={viewPath} editorLink /></NavigateProvider>;
 
   const handleSetRoot = (path: string) => {
     setRoot(path);

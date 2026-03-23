@@ -12,7 +12,7 @@ import {
   resolveExact,
   subscribeRegistry,
 } from '@treenity/core';
-import { createContext, createElement, type FC, type ReactNode, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, createElement, type FC, type ReactNode, use, useContext, useEffect, useMemo, useState } from 'react';
 
 // ── Tree context (rendering context string) ──
 

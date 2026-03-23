@@ -2,7 +2,7 @@
 // Thin transport wrapper over shared ops (actions.ts).
 // Responsibilities: input validation (Zod), error mapping (OpError → TRPCError), watch wiring.
 
-import { createNode, getComponentField, isComponent, type NodeData, R, resolve, S, W } from '#core';
+import { createNode, getComponentField, isComponent, isRef, type NodeData, R, resolve, S, W } from '#core';
 import { assertSafePath } from '#core/path';
 import { initTRPC, TRPCError } from '@trpc/server';
 import { observable } from '@trpc/server/observable';
@@ -123,9 +123,32 @@ export function createTreeRouter(baseStore: ReactiveTree, watcher: WatchManager)
       .input(z.object({ path: safePath, watch: z.boolean().optional() }))
       .query(async ({ input, ctx }) => {
         const node = await ctx.tree.get(input.path);
-        if (input.watch && ctx.session && (await ctx.tree.getPerm(input.path)) & S)
+        if (input.watch && node && ctx.session && (await ctx.tree.getPerm(input.path)) & S)
           watcher.watch(ctx.session.userId, [input.path]);
         return node;
+      }),
+
+    // Fetch node + resolve $ref targets. Returns [requested, ...resolved].
+    resolve: authed
+      .input(z.object({ path: safePath, watch: z.boolean().optional() }))
+      .query(async ({ input, ctx }) => {
+        const node = await ctx.tree.get(input.path);
+        if (!node) return [];
+        const result: NodeData[] = [node];
+
+        if (input.watch && ctx.session && (await ctx.tree.getPerm(input.path)) & S)
+          watcher.watch(ctx.session.userId, [input.path]);
+
+        if (isRef(node)) {
+          const target = await ctx.tree.get(node.$ref as string);
+          if (target) {
+            result.push(target);
+            if (input.watch && ctx.session && (await ctx.tree.getPerm(target.$path)) & S)
+              watcher.watch(ctx.session.userId, [target.$path]);
+          }
+        }
+
+        return result;
       }),
 
     getChildren: authed
@@ -247,7 +270,11 @@ export function createTreeRouter(baseStore: ReactiveTree, watcher: WatchManager)
           { g: 'owner', p: R | W },
           { g: 'authenticated', p: 0 },
         ];
+        console.log(`[register] writing user to ${node.$path}`);
         await baseStore.set(node);
+        console.log(`[register] set() done, verifying...`);
+        const verify = await baseStore.get(node.$path);
+        console.log(`[register] verify get: ${verify ? 'found' : 'NOT FOUND'}`);
         if (!isFirstUser) {
           return { token: null, userId: input.userId, pending: true };
         }

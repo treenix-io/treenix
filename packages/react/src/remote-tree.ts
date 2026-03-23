@@ -10,15 +10,33 @@ import type { trpc } from './trpc';
 
 type TrpcClient = typeof trpc;
 
+function debugPath(path: string, op: string) {
+  if (path.includes('//')) {
+    console.error(`[remote-tree] double slash in ${op}: ${JSON.stringify(path)}`, new Error('stack'));
+  }
+}
+
 export function createRemoteTree(client: TrpcClient): Tree {
-  const get = (path: string) => client.get.query({ path }) as Promise<NodeData | undefined>;
-  const set = (node: NodeData) => client.set.mutate({ node: node as Record<string, unknown> });
+  const get = (path: string) => {
+    debugPath(path, 'get');
+    return client.get.query({ path }) as Promise<NodeData | undefined>;
+  };
+  const set = (node: NodeData) => {
+    debugPath(node.$path, 'set');
+    return client.set.mutate({ node: node as Record<string, unknown> });
+  };
 
   return {
     get,
-    getChildren: (path, opts) => client.getChildren.query({ path, ...opts }),
+    getChildren: (path, opts) => {
+      debugPath(path, 'getChildren');
+      return client.getChildren.query({ path, ...opts });
+    },
     set,
-    remove: (path) => client.remove.mutate({ path }).then(() => true),
+    remove: (path) => {
+      debugPath(path, 'remove');
+      return client.remove.mutate({ path }).then(() => true);
+    },
     // TODO: add tRPC patch endpoint for single-RPC atomic patch
     patch: (path, ops) => defaultPatch(get, set, path, ops),
   };

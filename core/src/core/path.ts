@@ -31,8 +31,8 @@ export function isChildPath(parent: string, candidate: string, directOnly = true
 
 /** Validate a tree path — rejects traversal, double-slash, null bytes */
 export function assertSafePath(path: string): void {
-  if (!path.startsWith('/')) throw new Error(`Invalid path: must start with /`);
+  if (!path.startsWith('/')) throw new Error(`Invalid path: must start with /: ${JSON.stringify(path)}`);
   if (path.includes('\0')) throw new Error(`Invalid path: null byte`);
-  if (path.includes('//')) throw new Error(`Invalid path: double slash`);
+  if (path.includes('//')) throw new Error(`Invalid path: double slash at ${JSON.stringify(path)}`);
   if (path.split('/').some(s => s === '..')) throw new Error(`Invalid path: traversal`);
 }

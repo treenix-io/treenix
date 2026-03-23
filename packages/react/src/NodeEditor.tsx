@@ -222,9 +222,7 @@ export function NodeEditor({ node, open, onClose, currentUserId, toast, onAddCom
             <ComponentSection
               node={node}
               name=""
-              compType={node.$type}
-              data={snap.plainData as Record<string, unknown>}
-              onData={(d) => { st.plainData = d; st.dirty = true; }}
+              value={node as ComponentData}
               toast={toast}
               onActionComplete={handleReset}
             />
@@ -235,9 +233,7 @@ export function NodeEditor({ node, open, onClose, currentUserId, toast, onAddCom
                 key={name}
                 node={node}
                 name={name}
-                compType={(comp as ComponentData).$type}
-                data={(snap.compData[name] ?? {}) as Record<string, unknown>}
-                onData={(d) => { st.compData[name] = d; st.dirty = true; }}
+                value={comp as ComponentData}
                 collapsed={!!snap.collapsed[name]}
                 onToggle={() => { st.collapsed[name] = !st.collapsed[name]; }}
                 onRemove={() => handleRemoveComponent(name)}

@@ -9,7 +9,10 @@ const projectRoot = process.env.INIT_CWD || process.cwd();
 const apiPort = process.env.VITE_API_PORT || '3211';
 
 export default defineConfig({
-  resolve: { conditions: ['development'] },
+  resolve: {
+    conditions: ['development'],
+    dedupe: ['react', 'react-dom'],
+  },
   plugins: [
     treenityPlugin({ modsDirs: [resolve(projectRoot, 'mods')] }),
     // tailwindcss(), // disabled — using CDN in index.html

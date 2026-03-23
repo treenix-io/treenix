@@ -65,6 +65,7 @@ export function usePath<T extends object>(
 
   useEffect(() => {
     if (!path) return;
+    debugPath(path, 'usePath');
     trpc.get.query({ path, watch: !opts?.once }).then((n: unknown) => {
       if (n) cache.put(n as NodeData);
     });
@@ -74,6 +75,12 @@ export function usePath<T extends object>(
     if (cls && path) return makeProxy(path, cls, node, key);
     return parsed ? deriveURI<T>(node, parsed) : node;
   }, [node, cls, key, path, parsed?.key, parsed?.field]);
+}
+
+function debugPath(path: string, hook: string) {
+  if (path.includes('//')) {
+    console.error(`[hooks] double slash in ${hook}: ${JSON.stringify(path)}`, new Error('stack'));
+  }
 }
 
 // ── useChildren: reactive children list ──
@@ -90,6 +97,8 @@ export function useChildren(parentPath: string, opts?: WatchOpts) {
     if (loaded.current === parentPath && !reconnected) return;
     loaded.current = parentPath;
     prevGen.current = gen;
+
+    debugPath(parentPath, 'useChildren');
 
     if (!cache.has(parentPath) && parentPath !== '/') {
       trpc.get.query({ path: parentPath }).then(n => {

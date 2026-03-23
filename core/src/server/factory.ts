@@ -56,12 +56,15 @@ export async function treenity(config: TreenityConfig): Promise<TreenityServer> 
   const pipeline = createPipeline(bootstrap);
   const { tree, mountable } = pipeline;
 
-  // 4. Seed — if rootNode declares seeds, only deploy those mods
-  if (config.seed) {
-    await config.seed(mountable, createEnsure(mountable));
-  } else {
-    const seedFilter = (rootNode as Record<string, unknown>).seeds as string[] | undefined;
-    await deploySeedPrefabs(mountable, seedFilter);
+  // 4. Seed — only on first run (skip if already initialized)
+  const initialized = !!(await mountable.get('/sys'));
+  if (!initialized) {
+    if (config.seed) {
+      await config.seed(mountable, createEnsure(mountable));
+    } else {
+      const seedFilter = (rootNode as Record<string, unknown>).seeds as string[] | undefined;
+      await deploySeedPrefabs(mountable, seedFilter);
+    }
   }
 
   // 5. Wire log → tree

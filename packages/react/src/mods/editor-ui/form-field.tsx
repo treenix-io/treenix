@@ -39,8 +39,10 @@ export function renderField(
     );
   }
 
-  const ctx = fieldSchema.readOnly ? 'react' : 'react:form';
-  const handler = resolveExact(fieldSchema.type, ctx) ?? resolveExact('string', ctx);
+  const ctx = fieldSchema.readOnly ? 'react:compact' : 'react:form';
+  const handler = fieldSchema.readOnly
+    ? (resolveExact(fieldSchema.type, 'react:compact') ?? resolveExact(fieldSchema.type, 'react'))
+    : (resolveExact(fieldSchema.type, ctx) ?? resolveExact('string', ctx));
   if (!handler)
     return (
       <div key={name} className="text-destructive text-xs">
@@ -65,7 +67,7 @@ export function renderField(
 
   return (
     <div key={name} className={isComplex ? 'field stack' : 'field'}>
-      {fieldSchema.type !== 'boolean' && (
+      {(fieldSchema.type !== 'boolean' || fieldSchema.readOnly) && (
         <FieldLabel
           label={fieldSchema.label}
           value={rawValue}

@@ -101,6 +101,27 @@
   white-space: nowrap;
 }
 
+/* Default view — vertical key-value rows */
+.dv-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 16px;
+}
+.dv-meta-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 13px;
+  padding: 3px 0;
+}
+.dv-meta-label {
+  color: var(--text-3);
+  min-width: 80px;
+  flex-shrink: 0;
+  font-size: 12px;
+}
+
 /* Children grid — file explorer cards with staggered reveal */
 .children-grid {
   display: flex;

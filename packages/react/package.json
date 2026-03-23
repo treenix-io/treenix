@@ -1,6 +1,6 @@
 {
   "name": "@treenity/react",
-  "version": "3.0.9",
+  "version": "3.0.10",
   "description": "React binding for Treenity — reactive hooks, admin UI, and context-based component rendering.",
   "type": "module",
   "publishConfig": {
@@ -49,8 +49,7 @@
       "types": "./dist/components/ui/*.d.ts",
       "default": "./dist/components/ui/*.js"
     },
-    "./vite-plugin-treenity": "./vite-plugin-treenity.ts",
-    "./*.css": "./src/*.css",
+        "./*.css": "./src/*.css",
     "./*": {
       "development": [
         "./src/*.ts",
@@ -61,8 +60,8 @@
     }
   },
   "treenity": {
-    "clients": "./mods/clients.ts",
-    "servers": "./mods/servers.ts"
+    "clients": "./src/mods/clients.ts",
+    "servers": "./src/mods/servers.ts"
   },
   "files": [
     "dist",

@@ -44,8 +44,8 @@
     }
   },
   "treenity": {
-    "clients": "./mods/clients.ts",
-    "servers": "./mods/servers.ts"
+    "clients": "./src/mods/clients.ts",
+    "servers": "./src/mods/servers.ts"
   },
   "bin": {
     "fix-hash-imports": "./bin/fix-hash-imports.mjs"

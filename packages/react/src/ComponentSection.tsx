@@ -9,26 +9,15 @@ import { Trash2 } from 'lucide-react';
 import { ActionCardList } from './ActionCards';
 import { ErrorBoundary } from './ErrorBoundary';
 
-function EditPanel({ node, type, data, onData }: {
+function EditPanel({ node, value, onChange }: {
   node: NodeData;
-  type: string;
-  data: Record<string, unknown>;
-  onData: (d: Record<string, unknown>) => void;
+  value: ComponentData;
+  onChange?: (partial: Partial<ComponentData>) => void;
 }) {
   return (
     <NodeProvider value={node}>
       <RenderContext name="react:edit">
-        <Render
-          value={{ $type: type, ...data } as ComponentData}
-          onChange={(next: ComponentData) => {
-            const d: Record<string, unknown> = {};
-            for (const [k, v] of Object.entries(next as Record<string, unknown>)) {
-              if (k === '$type' || k === '$path') continue;
-              d[k] = v;
-            }
-            onData(d);
-          }}
-        />
+        <Render value={value} onChange={onChange} />
       </RenderContext>
     </NodeProvider>
   );
@@ -37,9 +26,8 @@ function EditPanel({ node, type, data, onData }: {
 export type ComponentSectionProps = {
   node: NodeData;
   name: string;
-  compType: string;
-  data: Record<string, unknown>;
-  onData: (d: Record<string, unknown>) => void;
+  value: ComponentData;
+  onChange?: (partial: Partial<ComponentData>) => void;
   collapsed?: boolean;
   onToggle?: () => void;
   onRemove?: () => void;
@@ -50,9 +38,8 @@ export type ComponentSectionProps = {
 export function ComponentSection({
   node,
   name,
-  compType,
-  data,
-  onData,
+  value,
+  onChange,
   collapsed,
   onToggle,
   onRemove,
@@ -60,6 +47,7 @@ export function ComponentSection({
   onActionComplete,
 }: ComponentSectionProps) {
   const isMain = !name;
+  const compType = value.$type;
 
   return (
     <div className="border-t border-border mt-2 pt-0.5 first:border-t-0 first:mt-0 first:pt-0">
@@ -97,12 +85,12 @@ export function ComponentSection({
 
       {!collapsed && (
         <ErrorBoundary key={`${node.$path}:${compType}`}>
-          <EditPanel node={node} type={compType} data={data} onData={onData} />
+          <EditPanel node={node} value={value} onChange={onChange} />
           <ActionCardList
             path={node.$path}
             componentName={name}
             compType={compType}
-            compData={data}
+            compData={value}
             toast={toast}
             onActionComplete={onActionComplete}
           />

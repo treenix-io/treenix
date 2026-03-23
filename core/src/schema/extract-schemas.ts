@@ -48,7 +48,7 @@ function findDefineComponents(program: ts.Program): ComponentEntry[] {
   return entries;
 }
 
-type ExternalAction = { name: string; description?: string; arguments?: any[] };
+type ExternalAction = { name: string; description?: string; arguments?: any[]; fileName: string };
 
 // Find server-side register(type, 'action:name', handler) calls — actions without class methods.
 // These are invisible to clients unless declared in the schema.
@@ -77,7 +77,7 @@ function findExternalActions(program: ts.Program): Map<string, ExternalAction[]>
           const typeName = typeArg.text;
           const actionName = ctxArg.text.slice(7);
           if (!actionName.startsWith('_')) {
-            const action: ExternalAction = { name: actionName };
+            const action: ExternalAction = { name: actionName, fileName: sf.fileName };
 
             // 1. Description from meta arg: register(type, ctx, handler, { description: '...' })
             if (metaArg && ts.isObjectLiteralExpression(metaArg)) {
@@ -377,14 +377,12 @@ function generateClassSchema(program: ts.Program, entry: ComponentEntry, classTo
   };
 }
 
-export async function exec(tsconfigPath = 'tsconfig.json', outDir = new URL('./generated', import.meta.url).pathname, extraDirs: string[] = []): Promise<void> {
+export async function exec(tsconfigPath = 'tsconfig.json', extraDirs: string[] = []): Promise<void> {
   const extraFiles = await globSourceFiles(extraDirs);
   const program = createProgram(tsconfigPath, extraFiles);
   const entries = findDefineComponents(program);
   const externalActions = findExternalActions(program);
   console.log(`Found ${entries.length} component(s), ${externalActions.size} type(s) with external actions`);
-
-  await fs.mkdir(outDir, { recursive: true });
 
   // Build className → typeName map for refType detection
   const classToType = new Map<string, string>();
@@ -408,7 +406,7 @@ export async function exec(tsconfigPath = 'tsconfig.json', outDir = new URL('./g
       const methods: Record<string, any> = schema.methods ?? {};
       for (const act of external) {
         if (!methods[act.name]) {
-          const { name, ...rest } = act;
+          const { name, fileName: _, ...rest } = act;
           methods[name] = { arguments: [], ...rest };
         }
       }
@@ -416,16 +414,19 @@ export async function exec(tsconfigPath = 'tsconfig.json', outDir = new URL('./g
       externalActions.delete(entry.typeName);
     }
 
-    const outFile = path.join(outDir, `${entry.typeName}.json`);
+    // Write schema next to source file in schemas/ subdir
+    const schemasDir = path.join(path.dirname(entry.fileName), 'schemas');
+    await fs.mkdir(schemasDir, { recursive: true });
+    const outFile = path.join(schemasDir, `${entry.typeName}.json`);
     await fs.writeFile(outFile, JSON.stringify(schema, null, 2) + '\n');
-    console.log(`  ${entry.typeName} → ${outFile}`);
+    console.log(`  ${entry.typeName} → ${path.relative(process.cwd(), outFile)}`);
   }
 
   // Types with external actions but no registerType class — generate action-only schemas
   for (const [typeName, actions] of externalActions) {
     const methods: Record<string, any> = {};
     for (const act of actions) {
-      const { name, ...rest } = act;
+      const { name, fileName: _, ...rest } = act;
       methods[name] = { arguments: [], ...rest };
     }
     const schema = {
@@ -435,9 +436,12 @@ export async function exec(tsconfigPath = 'tsconfig.json', outDir = new URL('./g
       properties: {},
       methods,
     };
-    const outFile = path.join(outDir, `${typeName}.json`);
+    // Write next to source of first action
+    const schemasDir = path.join(path.dirname(actions[0].fileName), 'schemas');
+    await fs.mkdir(schemasDir, { recursive: true });
+    const outFile = path.join(schemasDir, `${typeName}.json`);
     await fs.writeFile(outFile, JSON.stringify(schema, null, 2) + '\n');
-    console.log(`  ${typeName} (actions only) → ${outFile}`);
+    console.log(`  ${typeName} (actions only) → ${path.relative(process.cwd(), outFile)}`);
   }
 }
 
@@ -459,4 +463,4 @@ async function globSourceFiles(dirs: string[]): Promise<string[]> {
 
 // CLI: tsx extract-schemas.ts [extraDir...]
 const extraDirs = process.argv.slice(2);
-exec(undefined, undefined, extraDirs).catch(console.error);
+exec(undefined, extraDirs).catch(console.error);
