@@ -1,0 +1,16 @@
+{
+  "$id": "examples.demo.generator",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {},
+  "methods": {
+    "scan": {
+      "arguments": [
+        {
+          "name": "data"
+        }
+      ],
+      "description": "Stream N sensor readings as a generator, persisting each as a child node"
+    }
+  }
+}

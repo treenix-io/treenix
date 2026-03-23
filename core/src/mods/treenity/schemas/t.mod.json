@@ -1,0 +1,27 @@
+{
+  "$id": "t.mod",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Mod catalog entry",
+  "properties": {
+    "name": {
+      "type": "string",
+      "default": ""
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "discovered",
+        "loading",
+        "loaded",
+        "failed",
+        "disabled"
+      ],
+      "default": "loaded"
+    }
+  },
+  "required": [
+    "name",
+    "state"
+  ]
+}

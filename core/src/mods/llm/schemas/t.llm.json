@@ -1,0 +1,20 @@
+{
+  "$id": "t.llm",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {},
+  "methods": {
+    "schema": {
+      "arguments": [],
+      "description": "Export all registered types with schemas, contexts, and actions for LLM consumption"
+    },
+    "describe": {
+      "arguments": [
+        {
+          "name": "data"
+        }
+      ],
+      "description": "Describe the subtree under this node as indented text (depth-limited)"
+    }
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "$id": "metatron.config",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "AI orchestrator config — model, system prompt, session tracking",
+  "properties": {
+    "model": {
+      "type": "string",
+      "default": "claude-opus-4-6"
+    },
+    "systemPrompt": {
+      "type": "string",
+      "format": "textarea",
+      "default": ""
+    },
+    "sessionId": {
+      "type": "string",
+      "default": ""
+    },
+    "lastRun": {
+      "type": "number",
+      "default": 0
+    }
+  },
+  "required": [
+    "model",
+    "systemPrompt",
+    "sessionId",
+    "lastRun"
+  ],
+  "methods": {
+    "task": {
+      "arguments": [
+        {
+          "name": "data",
+          "type": "object",
+          "properties": {
+            "prompt": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "prompt"
+          ]
+        }
+      ],
+      "description": "Create a task for AI"
+    }
+  }
+}

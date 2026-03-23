@@ -1,0 +1,74 @@
+{
+  "$id": "t.agent.port",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "label": {
+      "type": "string",
+      "title": "Label",
+      "default": ""
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "idle",
+        "approved",
+        "revoked"
+      ],
+      "title": "Status",
+      "default": "idle"
+    },
+    "connected": {
+      "type": "boolean",
+      "title": "Connected",
+      "default": false
+    },
+    "pendingKey": {
+      "anyOf": [
+        {},
+        {
+          "type": "string"
+        }
+      ],
+      "title": "@hidden"
+    },
+    "approvedKey": {
+      "anyOf": [
+        {},
+        {
+          "type": "string"
+        }
+      ],
+      "title": "@hidden"
+    },
+    "connectedAt": {
+      "anyOf": [
+        {},
+        {
+          "type": "number"
+        }
+      ],
+      "title": "Connected At"
+    }
+  },
+  "required": [
+    "label",
+    "status",
+    "connected"
+  ],
+  "methods": {
+    "approve": {
+      "title": "Approve pending agent — locks the key, creates user, sets ACL",
+      "arguments": []
+    },
+    "revoke": {
+      "title": "Revoke agent access — clears key, removes ACL entry",
+      "arguments": []
+    },
+    "reset": {
+      "title": "Reset to idle — allows re-pairing with a different agent",
+      "arguments": []
+    }
+  }
+}

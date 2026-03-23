@@ -1,0 +1,50 @@
+{
+  "$id": "t3d.camera",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "3D Camera",
+  "properties": {
+    "kind": {
+      "type": "string",
+      "enum": [
+        "perspective",
+        "orthographic"
+      ],
+      "title": "Kind",
+      "default": "perspective"
+    },
+    "fov": {
+      "type": "number",
+      "title": "FOV",
+      "default": 75
+    },
+    "near": {
+      "type": "number",
+      "title": "Near Clip",
+      "default": 0.1
+    },
+    "far": {
+      "type": "number",
+      "title": "Far Clip",
+      "default": 1000
+    },
+    "orthoSize": {
+      "type": "number",
+      "title": "Ortho Size",
+      "default": 10
+    },
+    "active": {
+      "type": "boolean",
+      "title": "Active",
+      "default": true
+    }
+  },
+  "required": [
+    "kind",
+    "fov",
+    "near",
+    "far",
+    "orthoSize",
+    "active"
+  ]
+}

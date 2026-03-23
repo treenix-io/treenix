@@ -1,0 +1,58 @@
+{
+  "$id": "brahman.user",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Bot user profile — Telegram identity, language, tags, ban status",
+  "properties": {
+    "tid": {
+      "type": "number",
+      "default": 0
+    },
+    "firstName": {
+      "type": "string",
+      "default": ""
+    },
+    "lastName": {
+      "type": "string",
+      "default": ""
+    },
+    "username": {
+      "type": "string",
+      "default": ""
+    },
+    "lang": {
+      "type": "string",
+      "default": "ru"
+    },
+    "isAdmin": {
+      "type": "boolean",
+      "default": false
+    },
+    "blocked": {
+      "type": "boolean",
+      "default": false
+    },
+    "banned": {
+      "type": "boolean",
+      "default": false
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "title": "User tags"
+    }
+  },
+  "required": [
+    "tid",
+    "firstName",
+    "lastName",
+    "username",
+    "lang",
+    "isAdmin",
+    "blocked",
+    "banned",
+    "tags"
+  ]
+}

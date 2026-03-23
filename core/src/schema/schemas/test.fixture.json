@@ -1,0 +1,43 @@
+{
+  "$id": "test.fixture",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Test fixture with properties and methods",
+  "properties": {
+    "name": {
+      "type": "string",
+      "title": "Name",
+      "default": ""
+    },
+    "count": {
+      "type": "number",
+      "title": "Count",
+      "default": 0
+    }
+  },
+  "required": [
+    "name",
+    "count"
+  ],
+  "methods": {
+    "rename": {
+      "arguments": [
+        {
+          "name": "data",
+          "type": "object",
+          "properties": {
+            "newName": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "newName"
+          ]
+        }
+      ]
+    },
+    "clear": {
+      "arguments": []
+    }
+  }
+}

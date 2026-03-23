@@ -1,0 +1,45 @@
+{
+  "$id": "t3d.trail",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "3D Trail — trail renderer behind moving objects",
+  "properties": {
+    "width": {
+      "type": "number",
+      "title": "Width",
+      "default": 0.2
+    },
+    "length": {
+      "type": "number",
+      "title": "Length (s)",
+      "default": 1
+    },
+    "colorStart": {
+      "type": "string",
+      "title": "Color Start",
+      "default": "#ffffff"
+    },
+    "colorEnd": {
+      "type": "string",
+      "title": "Color End",
+      "default": "#ffffff00"
+    },
+    "attenuation": {
+      "type": "string",
+      "enum": [
+        "none",
+        "linear",
+        "squared"
+      ],
+      "title": "Attenuation",
+      "default": "linear"
+    }
+  },
+  "required": [
+    "width",
+    "length",
+    "colorStart",
+    "colorEnd",
+    "attenuation"
+  ]
+}

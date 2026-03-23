@@ -1,0 +1,46 @@
+{
+  "$id": "ui.table",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Table view — paginates children, auto-columns from schema, per-column filters",
+  "properties": {
+    "displayType": {
+      "type": "string",
+      "default": ""
+    },
+    "field": {
+      "type": "string",
+      "default": ""
+    },
+    "pageSize": {
+      "type": "number",
+      "default": 25
+    },
+    "page": {
+      "type": "number",
+      "default": 0
+    },
+    "sort": {
+      "type": "string",
+      "default": ""
+    },
+    "sortDir": {
+      "type": "string",
+      "enum": [
+        "asc",
+        "desc"
+      ],
+      "default": "asc"
+    },
+    "columns": {}
+  },
+  "required": [
+    "displayType",
+    "field",
+    "pageSize",
+    "page",
+    "sort",
+    "sortDir",
+    "columns"
+  ]
+}

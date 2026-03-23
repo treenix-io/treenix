@@ -1,0 +1,58 @@
+{
+  "$id": "t3d.audio",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "3D Audio — positional sound",
+  "properties": {
+    "src": {
+      "type": "string",
+      "title": "Source URL",
+      "default": ""
+    },
+    "volume": {
+      "type": "number",
+      "title": "Volume",
+      "default": 1
+    },
+    "loop": {
+      "type": "boolean",
+      "title": "Loop",
+      "default": false
+    },
+    "autoplay": {
+      "type": "boolean",
+      "title": "Autoplay",
+      "default": false
+    },
+    "spatial": {
+      "type": "boolean",
+      "title": "Spatial",
+      "default": true
+    },
+    "refDistance": {
+      "type": "number",
+      "title": "Ref Distance",
+      "default": 1
+    },
+    "maxDistance": {
+      "type": "number",
+      "title": "Max Distance",
+      "default": 100
+    },
+    "rolloffFactor": {
+      "type": "number",
+      "title": "Rolloff Factor",
+      "default": 1
+    }
+  },
+  "required": [
+    "src",
+    "volume",
+    "loop",
+    "autoplay",
+    "spatial",
+    "refDistance",
+    "maxDistance",
+    "rolloffFactor"
+  ]
+}

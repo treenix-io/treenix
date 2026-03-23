@@ -1,0 +1,64 @@
+{
+  "$id": "sim.round",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Current simulation round — phase and event log",
+  "properties": {
+    "current": {
+      "type": "number",
+      "default": 0
+    },
+    "phase": {
+      "type": "string",
+      "default": "idle"
+    },
+    "log": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "round": {
+            "type": "number"
+          },
+          "agent": {
+            "type": "string"
+          },
+          "icon": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
+          },
+          "data": {},
+          "heardBy": {
+            "anyOf": [
+              {},
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "ts": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "round",
+          "agent",
+          "icon",
+          "action",
+          "data",
+          "ts"
+        ]
+      }
+    }
+  },
+  "required": [
+    "current",
+    "phase",
+    "log"
+  ]
+}

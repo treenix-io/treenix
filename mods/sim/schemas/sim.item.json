@@ -1,0 +1,20 @@
+{
+  "$id": "sim.item",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {},
+  "methods": {
+    "examine": {
+      "arguments": [],
+      "description": "Look at the item closely"
+    },
+    "use": {
+      "arguments": [
+        {
+          "name": "params"
+        }
+      ],
+      "description": "Interact with the item"
+    }
+  }
+}

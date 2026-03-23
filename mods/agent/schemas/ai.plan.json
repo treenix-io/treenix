@@ -1,0 +1,84 @@
+{
+  "$id": "ai.plan",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "AI execution plan — lives as named component on board.task node.\nAgent writes plan first, human reviews + approves before execution.",
+  "properties": {
+    "text": {
+      "type": "string",
+      "format": "textarea",
+      "default": ""
+    },
+    "approved": {
+      "type": "boolean",
+      "default": false
+    },
+    "feedback": {
+      "type": "string",
+      "format": "textarea",
+      "default": ""
+    },
+    "createdAt": {
+      "type": "number",
+      "default": 0
+    }
+  },
+  "required": [
+    "text",
+    "approved",
+    "feedback",
+    "createdAt"
+  ],
+  "methods": {
+    "approvePlan": {
+      "description": "Approve the plan — agent will proceed to execute",
+      "arguments": [
+        {
+          "name": "data",
+          "anyOf": [
+            {},
+            {
+              "type": "object",
+              "properties": {
+                "feedback": {
+                  "anyOf": [
+                    {},
+                    {
+                      "type": "string"
+                    }
+                  ],
+                  "title": "Optional feedback/adjustments for the agent"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "rejectPlan": {
+      "description": "Reject the plan — agent will re-plan with feedback",
+      "arguments": [
+        {
+          "name": "data",
+          "anyOf": [
+            {},
+            {
+              "type": "object",
+              "properties": {
+                "feedback": {
+                  "anyOf": [
+                    {},
+                    {
+                      "type": "string"
+                    }
+                  ],
+                  "title": "What to change"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

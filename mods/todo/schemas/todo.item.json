@@ -1,0 +1,25 @@
+{
+  "$id": "todo.item",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "title": {
+      "type": "string",
+      "default": ""
+    },
+    "done": {
+      "type": "boolean",
+      "default": false
+    }
+  },
+  "required": [
+    "title",
+    "done"
+  ],
+  "methods": {
+    "toggle": {
+      "description": "Toggle done state",
+      "arguments": []
+    }
+  }
+}

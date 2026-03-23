@@ -1,0 +1,30 @@
+{
+  "$id": "whisper.config",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Speech-to-text config — Whisper model, language, audio path",
+  "properties": {
+    "model": {
+      "type": "string",
+      "default": "small"
+    },
+    "language": {
+      "type": "string",
+      "default": "ru"
+    },
+    "audioDir": {
+      "type": "string",
+      "default": "./data/audio"
+    },
+    "url": {
+      "type": "string",
+      "default": ""
+    }
+  },
+  "required": [
+    "model",
+    "language",
+    "audioDir",
+    "url"
+  ]
+}

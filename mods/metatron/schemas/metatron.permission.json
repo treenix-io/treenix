@@ -1,0 +1,36 @@
+{
+  "$id": "metatron.permission",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Permission rule — controls which tools Metatron is allowed to use",
+  "properties": {
+    "tool": {
+      "type": "string",
+      "title": "Tool name or glob pattern: 'mcp__treenity__*', '*'",
+      "default": ""
+    },
+    "pathPattern": {
+      "type": "string",
+      "title": "Optional input.path pattern",
+      "default": ""
+    },
+    "policy": {
+      "type": "string",
+      "enum": [
+        "allow",
+        "deny"
+      ],
+      "default": "allow"
+    },
+    "createdAt": {
+      "type": "number",
+      "default": 0
+    }
+  },
+  "required": [
+    "tool",
+    "pathPattern",
+    "policy",
+    "createdAt"
+  ]
+}

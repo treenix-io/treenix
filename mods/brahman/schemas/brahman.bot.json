@@ -1,0 +1,68 @@
+{
+  "$id": "brahman.bot",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Telegram bot instance — token, proxy, language, maintenance",
+  "properties": {
+    "token": {
+      "type": "string",
+      "title": "Token",
+      "description": "Telegram bot token",
+      "default": ""
+    },
+    "proxy": {
+      "type": "string",
+      "title": "Proxy",
+      "description": "SOCKS proxy URL",
+      "default": ""
+    },
+    "alias": {
+      "type": "string",
+      "title": "Alias",
+      "description": "Bot username",
+      "default": ""
+    },
+    "name": {
+      "type": "string",
+      "title": "Name",
+      "description": "Display name",
+      "default": ""
+    },
+    "langs": {
+      "type": "string",
+      "title": "Langs",
+      "description": "Comma-separated: ru,en,de,uz",
+      "default": "ru,en"
+    },
+    "maintenance": {
+      "type": "string",
+      "title": "Maintenance",
+      "description": "Non-empty = paused",
+      "default": ""
+    },
+    "running": {
+      "type": "boolean",
+      "title": "Running",
+      "default": true
+    }
+  },
+  "required": [
+    "token",
+    "proxy",
+    "alias",
+    "name",
+    "langs",
+    "maintenance",
+    "running"
+  ],
+  "methods": {
+    "start": {
+      "arguments": [],
+      "description": "Start the Telegram bot polling loop via autostart service"
+    },
+    "stop": {
+      "arguments": [],
+      "description": "Stop the Telegram bot polling loop via autostart service"
+    }
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "$id": "cafe.contact",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Contact form use case — receives form submissions, logs them",
+  "properties": {
+    "recipient": {
+      "type": "string",
+      "title": "Recipient",
+      "format": "email",
+      "default": ""
+    },
+    "mailService": {
+      "type": "string",
+      "format": "path",
+      "refType": "cafe.mail",
+      "title": "Mail service"
+    },
+    "lastSubmission": {
+      "type": "string",
+      "title": "Last submission",
+      "default": ""
+    }
+  },
+  "required": [
+    "recipient",
+    "lastSubmission"
+  ],
+  "methods": {
+    "submit": {
+      "description": "Submit contact form — validates and logs submission",
+      "arguments": [
+        {
+          "name": "data",
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "email": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "email",
+            "message"
+          ]
+        }
+      ]
+    }
+  }
+}

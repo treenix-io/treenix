@@ -1,0 +1,32 @@
+{
+  "$id": "sim.world",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {},
+  "methods": {
+    "start": {
+      "arguments": [],
+      "description": "Start the simulation"
+    },
+    "stop": {
+      "arguments": [],
+      "description": "Stop the simulation"
+    },
+    "set-config": {
+      "arguments": [
+        {
+          "name": "params"
+        }
+      ],
+      "description": "Update simulation settings"
+    },
+    "add-entity": {
+      "arguments": [
+        {
+          "name": "params"
+        }
+      ],
+      "description": "Add agent or item to the world"
+    }
+  }
+}

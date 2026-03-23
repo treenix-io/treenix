@@ -1,0 +1,96 @@
+{
+  "$id": "task",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Agent task — question/answer workflow with status tracking",
+  "properties": {
+    "status": {
+      "type": "string",
+      "default": "pending"
+    },
+    "question": {
+      "type": "string",
+      "format": "textarea",
+      "default": ""
+    },
+    "from": {
+      "type": "string",
+      "default": ""
+    },
+    "answer": {
+      "type": "string",
+      "format": "textarea",
+      "default": ""
+    },
+    "answeredBy": {
+      "type": "string",
+      "default": ""
+    },
+    "answeredAt": {
+      "type": "number",
+      "default": 0
+    }
+  },
+  "required": [
+    "status",
+    "question",
+    "from",
+    "answer",
+    "answeredBy",
+    "answeredAt"
+  ],
+  "methods": {
+    "respond": {
+      "description": "Answer the task — sets status to answered",
+      "arguments": [
+        {
+          "name": "data",
+          "type": "object",
+          "properties": {
+            "answer": {
+              "type": "string"
+            },
+            "by": {
+              "anyOf": [
+                {},
+                {
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "required": [
+            "answer"
+          ]
+        }
+      ]
+    },
+    "reject": {
+      "description": "Reject the task — sets status to rejected with optional reason",
+      "arguments": [
+        {
+          "name": "data",
+          "type": "object",
+          "properties": {
+            "reason": {
+              "anyOf": [
+                {},
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "by": {
+              "anyOf": [
+                {},
+                {
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "$id": "brahman.action.getvalue",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Read session value — extract data from user session",
+  "properties": {
+    "path": {
+      "type": "string",
+      "title": "Source path",
+      "description": "Dot-path in session data",
+      "default": ""
+    },
+    "saveTo": {
+      "type": "string",
+      "title": "Save to",
+      "default": ""
+    }
+  },
+  "required": [
+    "path",
+    "saveTo"
+  ],
+  "methods": {
+    "run": {
+      "arguments": []
+    }
+  }
+}

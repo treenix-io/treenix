@@ -1,0 +1,38 @@
+{
+  "$id": "sim.config",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Simulation world config — dimensions, round timing",
+  "properties": {
+    "width": {
+      "type": "number",
+      "default": 600
+    },
+    "height": {
+      "type": "number",
+      "default": 400
+    },
+    "roundDelay": {
+      "type": "number",
+      "default": 5000
+    },
+    "running": {
+      "type": "boolean",
+      "default": false
+    },
+    "model": {
+      "anyOf": [
+        {},
+        {
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "required": [
+    "width",
+    "height",
+    "roundDelay",
+    "running"
+  ]
+}

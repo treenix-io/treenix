@@ -1,0 +1,26 @@
+{
+  "$id": "sim.descriptive",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Agent identity — name, icon, description",
+  "properties": {
+    "name": {
+      "type": "string",
+      "default": ""
+    },
+    "icon": {
+      "type": "string",
+      "default": ""
+    },
+    "description": {
+      "type": "string",
+      "format": "textarea",
+      "default": ""
+    }
+  },
+  "required": [
+    "name",
+    "icon",
+    "description"
+  ]
+}

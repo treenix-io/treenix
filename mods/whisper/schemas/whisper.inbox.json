@@ -1,0 +1,24 @@
+{
+  "$id": "whisper.inbox",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Bridge: auto-send whisper transcriptions to a task inbox",
+  "properties": {
+    "source": {
+      "type": "string",
+      "format": "path",
+      "description": "Whisper channel to watch, e.g. /whisper/kriz",
+      "default": ""
+    },
+    "target": {
+      "type": "string",
+      "format": "path",
+      "description": "Target inbox, e.g. /agent",
+      "default": ""
+    }
+  },
+  "required": [
+    "source",
+    "target"
+  ]
+}

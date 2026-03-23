@@ -1,0 +1,65 @@
+{
+  "$id": "t3d.mesh",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "3D Mesh — geometry shape",
+  "properties": {
+    "geometry": {
+      "type": "string",
+      "enum": [
+        "box",
+        "sphere",
+        "plane",
+        "cylinder",
+        "torus",
+        "cone",
+        "capsule",
+        "ring",
+        "dodecahedron",
+        "icosahedron",
+        "octahedron"
+      ],
+      "title": "Geometry",
+      "default": "box"
+    },
+    "width": {
+      "type": "number",
+      "title": "Width / Radius",
+      "default": 1
+    },
+    "height": {
+      "type": "number",
+      "title": "Height",
+      "default": 1
+    },
+    "depth": {
+      "type": "number",
+      "title": "Depth",
+      "default": 1
+    },
+    "segments": {
+      "type": "number",
+      "title": "Segments",
+      "default": 32
+    },
+    "castShadow": {
+      "type": "boolean",
+      "title": "Cast Shadow",
+      "default": true
+    },
+    "receiveShadow": {
+      "type": "boolean",
+      "title": "Receive Shadow",
+      "default": true
+    }
+  },
+  "required": [
+    "geometry",
+    "width",
+    "height",
+    "depth",
+    "segments",
+    "castShadow",
+    "receiveShadow"
+  ]
+}

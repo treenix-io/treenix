@@ -1,0 +1,109 @@
+{
+  "$id": "t3d.particles",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "3D Particles — particle emitter",
+  "properties": {
+    "count": {
+      "type": "number",
+      "title": "Count",
+      "default": 100
+    },
+    "size": {
+      "type": "number",
+      "title": "Size",
+      "default": 0.1
+    },
+    "color": {
+      "type": "string",
+      "title": "Color",
+      "default": "#ffffff"
+    },
+    "lifetime": {
+      "type": "number",
+      "title": "Lifetime (s)",
+      "default": 2
+    },
+    "speed": {
+      "type": "number",
+      "title": "Speed",
+      "default": 1
+    },
+    "spread": {
+      "type": "number",
+      "title": "Spread",
+      "default": 1
+    },
+    "shape": {
+      "type": "string",
+      "enum": [
+        "box",
+        "sphere",
+        "cone",
+        "point"
+      ],
+      "title": "Shape",
+      "default": "sphere"
+    },
+    "emitter": {
+      "type": "string",
+      "enum": [
+        "point",
+        "volume"
+      ],
+      "title": "Emitter",
+      "default": "point"
+    },
+    "particleShape": {
+      "type": "string",
+      "enum": [
+        "sphere",
+        "plane",
+        "triangle"
+      ],
+      "title": "Particle Shape",
+      "default": "sphere"
+    },
+    "gravity": {
+      "type": "number",
+      "title": "Gravity",
+      "default": 0
+    },
+    "sizeOverLifetime": {
+      "type": "boolean",
+      "title": "Size Over Lifetime",
+      "default": false
+    },
+    "opacityOverLifetime": {
+      "type": "boolean",
+      "title": "Opacity Over Lifetime",
+      "default": true
+    },
+    "emissive": {
+      "type": "boolean",
+      "title": "Emissive",
+      "default": false
+    },
+    "loop": {
+      "type": "boolean",
+      "title": "Loop",
+      "default": true
+    }
+  },
+  "required": [
+    "count",
+    "size",
+    "color",
+    "lifetime",
+    "speed",
+    "spread",
+    "shape",
+    "emitter",
+    "particleShape",
+    "gravity",
+    "sizeOverLifetime",
+    "opacityOverLifetime",
+    "emissive",
+    "loop"
+  ]
+}

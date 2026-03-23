@@ -1,0 +1,158 @@
+{
+  "$id": "board.task",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Task card — status-driven workflow with assignment and priority",
+  "properties": {
+    "title": {
+      "type": "string",
+      "default": ""
+    },
+    "description": {
+      "type": "string",
+      "format": "textarea",
+      "default": ""
+    },
+    "status": {
+      "type": "string",
+      "default": "backlog"
+    },
+    "assignee": {
+      "type": "string",
+      "default": ""
+    },
+    "priority": {
+      "type": "string",
+      "enum": [
+        "low",
+        "normal",
+        "high",
+        "urgent"
+      ],
+      "default": "normal"
+    },
+    "result": {
+      "type": "string",
+      "format": "textarea",
+      "default": ""
+    },
+    "createdAt": {
+      "type": "number",
+      "default": 0
+    },
+    "updatedAt": {
+      "type": "number",
+      "default": 0
+    }
+  },
+  "required": [
+    "title",
+    "description",
+    "status",
+    "assignee",
+    "priority",
+    "result",
+    "createdAt",
+    "updatedAt"
+  ],
+  "methods": {
+    "assign": {
+      "description": "Assign task to a person or AI, moves to todo",
+      "arguments": [
+        {
+          "name": "data",
+          "type": "object",
+          "properties": {
+            "to": {
+              "type": "string",
+              "title": "Assignee name or 'ai' for AI agent"
+            }
+          },
+          "required": [
+            "to"
+          ]
+        }
+      ]
+    },
+    "start": {
+      "description": "Start working on this task",
+      "arguments": []
+    },
+    "submit": {
+      "description": "Submit task for review",
+      "arguments": [
+        {
+          "name": "data",
+          "anyOf": [
+            {},
+            {
+              "type": "object",
+              "properties": {
+                "result": {
+                  "anyOf": [
+                    {},
+                    {
+                      "type": "string"
+                    }
+                  ],
+                  "title": "Result notes"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "approve": {
+      "description": "Approve task — mark as done",
+      "arguments": []
+    },
+    "reject": {
+      "description": "Reject task — send back to doing",
+      "arguments": [
+        {
+          "name": "data",
+          "anyOf": [
+            {},
+            {
+              "type": "object",
+              "properties": {
+                "reason": {
+                  "anyOf": [
+                    {},
+                    {
+                      "type": "string"
+                    }
+                  ],
+                  "title": "Reason for rejection"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "move": {
+      "description": "Move task to any status (kanban DnD)",
+      "arguments": [
+        {
+          "name": "data",
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "title": "Target status"
+            }
+          },
+          "required": [
+            "status"
+          ]
+        }
+      ]
+    },
+    "reopen": {
+      "description": "Reopen task — reset to backlog",
+      "arguments": []
+    }
+  }
+}

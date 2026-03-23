@@ -1,0 +1,105 @@
+{
+  "$id": "ai.approval",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "agentPath": {
+      "type": "string",
+      "default": ""
+    },
+    "agentRole": {
+      "type": "string",
+      "default": ""
+    },
+    "tool": {
+      "type": "string",
+      "default": ""
+    },
+    "input": {
+      "type": "string",
+      "format": "textarea",
+      "default": ""
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "approved",
+        "denied"
+      ],
+      "default": "pending"
+    },
+    "reason": {
+      "type": "string",
+      "default": ""
+    },
+    "createdAt": {
+      "type": "number",
+      "default": 0
+    },
+    "resolvedAt": {
+      "type": "number",
+      "default": 0
+    }
+  },
+  "required": [
+    "agentPath",
+    "agentRole",
+    "tool",
+    "input",
+    "status",
+    "reason",
+    "createdAt",
+    "resolvedAt"
+  ],
+  "methods": {
+    "approve": {
+      "description": "Approve this tool usage",
+      "arguments": [
+        {
+          "name": "data",
+          "anyOf": [
+            {},
+            {
+              "type": "object",
+              "properties": {
+                "remember": {
+                  "anyOf": [
+                    {},
+                    {},
+                    {}
+                  ],
+                  "title": "Remember this decision for future calls"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "deny": {
+      "description": "Deny this tool usage",
+      "arguments": [
+        {
+          "name": "data",
+          "anyOf": [
+            {},
+            {
+              "type": "object",
+              "properties": {
+                "remember": {
+                  "anyOf": [
+                    {},
+                    {},
+                    {}
+                  ],
+                  "title": "Remember this decision for future calls"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

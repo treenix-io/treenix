@@ -1,0 +1,16 @@
+{
+  "$id": "whisper.text",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Transcription result — recognized text content",
+  "properties": {
+    "content": {
+      "type": "string",
+      "format": "textarea",
+      "default": ""
+    }
+  },
+  "required": [
+    "content"
+  ]
+}

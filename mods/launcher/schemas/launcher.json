@@ -1,0 +1,91 @@
+{
+  "$id": "launcher",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Home screen with icon grid + widgets. Layout via react-grid-layout.",
+  "properties": {
+    "columns": {
+      "type": "number",
+      "default": 4
+    },
+    "wallpaper": {
+      "type": "string",
+      "default": "linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%)"
+    },
+    "layout": {
+      "type": "string",
+      "title": "JSON-stringified RGL layout: [{i, x, y, w, h}]",
+      "default": "[]"
+    }
+  },
+  "required": [
+    "columns",
+    "wallpaper",
+    "layout"
+  ],
+  "methods": {
+    "addApp": {
+      "title": "Add an app shortcut (ref) to the launcher",
+      "arguments": [
+        {
+          "name": "data",
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "title": "Target node path"
+            },
+            "id": {
+              "anyOf": [
+                {},
+                {
+                  "type": "string"
+                }
+              ],
+              "title": "Layout item id"
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      ]
+    },
+    "removeApp": {
+      "title": "Remove an app from the launcher",
+      "arguments": [
+        {
+          "name": "data",
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "title": "Child id (last path segment)"
+            }
+          },
+          "required": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "updateLayout": {
+      "title": "Persist layout after drag/resize",
+      "arguments": [
+        {
+          "name": "data",
+          "type": "object",
+          "properties": {
+            "layout": {
+              "type": "string",
+              "title": "JSON-stringified RGL layout"
+            }
+          },
+          "required": [
+            "layout"
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -2,12 +2,12 @@
 JSON Schema generation and loading for registerType/defineComponent classes.
 
 ### Файлы
-- extract-schemas.ts — CLI: AST walk via TypeScript compiler API → JSON Schema per class, writes to generated/
-- load.ts — loadSchemas(): reads generated/*.json, registers each as register($id, 'schema', () => schema)
+- extract-schemas.ts — CLI: AST walk via TypeScript compiler API → JSON Schema per class, writes to `mods/*/schemas/`
+- load.ts — `loadSchemasFromDir(dir)`: reads `*.json` from dir, registers each as `register($id, 'schema', () => schema)`
 - types.ts — PropertySchema, TypeSchema — shared types for SchemaForm/NodeEditor
-- generated/ — auto-generated JSON schemas (git-ignored, run extract-schemas.ts to rebuild)
 
 ### Конвенции
-- Run `tsx src/schema/extract-schemas.ts` to regenerate after component class changes
+- Schemas are colocated: each mod has its own `schemas/` dir next to source
+- Mod loader calls `loadSchemasFromDir()` per mod during startup
+- Run `npm run schema` to regenerate after component class changes
 - JSDoc on class → schema title; @format/@description on properties → schema annotations
-- load.ts auto-executes on import (call loadSchemas() or just import the file)

@@ -1,0 +1,25 @@
+{
+  "$id": "board.column",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Kanban column — label + color + sort order. Query mount provides filtered tasks.",
+  "properties": {
+    "label": {
+      "type": "string",
+      "default": ""
+    },
+    "color": {
+      "type": "string",
+      "default": "border-zinc-400"
+    },
+    "order": {
+      "type": "number",
+      "default": 0
+    }
+  },
+  "required": [
+    "label",
+    "color",
+    "order"
+  ]
+}

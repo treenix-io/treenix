@@ -1,0 +1,60 @@
+{
+  "$id": "metatron.workspace",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Multi-task workspace — side-by-side columns of conversations",
+  "properties": {
+    "name": {
+      "type": "string",
+      "default": ""
+    },
+    "columns": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "name",
+    "columns"
+  ],
+  "methods": {
+    "addColumn": {
+      "description": "Add a task as a column",
+      "arguments": [
+        {
+          "name": "data",
+          "type": "object",
+          "properties": {
+            "taskPath": {
+              "type": "string",
+              "title": "Task path"
+            }
+          },
+          "required": [
+            "taskPath"
+          ]
+        }
+      ]
+    },
+    "removeColumn": {
+      "description": "Remove a column by task path",
+      "arguments": [
+        {
+          "name": "data",
+          "type": "object",
+          "properties": {
+            "taskPath": {
+              "type": "string",
+              "title": "Task path"
+            }
+          },
+          "required": [
+            "taskPath"
+          ]
+        }
+      ]
+    }
+  }
+}

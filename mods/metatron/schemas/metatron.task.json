@@ -1,0 +1,115 @@
+{
+  "$id": "metatron.task",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "AI task — prompt with status and result of LLM execution",
+  "properties": {
+    "prompt": {
+      "type": "string",
+      "format": "textarea",
+      "default": ""
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "running",
+        "error",
+        "aborted",
+        "done",
+        "pending"
+      ],
+      "default": "pending"
+    },
+    "result": {
+      "type": "string",
+      "format": "textarea",
+      "default": ""
+    },
+    "log": {
+      "type": "string",
+      "format": "textarea",
+      "default": ""
+    },
+    "createdAt": {
+      "type": "number",
+      "default": 0
+    },
+    "injected": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "title": "Queued user messages to process after current run"
+    },
+    "forkedFrom": {
+      "type": "string",
+      "title": "Source task path if forked",
+      "default": ""
+    },
+    "forkIndex": {
+      "type": "number",
+      "title": "Log position where the fork was made",
+      "default": 0
+    }
+  },
+  "required": [
+    "prompt",
+    "status",
+    "result",
+    "log",
+    "createdAt",
+    "injected",
+    "forkedFrom",
+    "forkIndex"
+  ],
+  "methods": {
+    "stop": {
+      "description": "Stop the running task",
+      "arguments": []
+    },
+    "inject": {
+      "description": "Queue a follow-up message for the running task",
+      "arguments": [
+        {
+          "name": "data",
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string",
+              "title": "Message text"
+            }
+          },
+          "required": [
+            "text"
+          ]
+        }
+      ]
+    },
+    "fork": {
+      "description": "Fork this conversation at a specific log position",
+      "arguments": [
+        {
+          "name": "data",
+          "type": "object",
+          "properties": {
+            "atIndex": {
+              "type": "number",
+              "title": "Character position in log to fork at"
+            }
+          },
+          "required": [
+            "atIndex"
+          ]
+        }
+      ],
+      "return": {
+        "type": "object",
+        "properties": {
+          "taskPath": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

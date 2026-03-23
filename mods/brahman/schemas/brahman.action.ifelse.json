@@ -1,0 +1,42 @@
+{
+  "$id": "brahman.action.ifelse",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Conditional branch — evaluate JS expression, run if/else action",
+  "properties": {
+    "condition": {
+      "type": "string",
+      "title": "Condition",
+      "format": "textarea",
+      "description": "JS expression evaluated at runtime",
+      "default": ""
+    },
+    "actionIf": {
+      "type": "string",
+      "title": "Action if true",
+      "description": "Path to action node",
+      "default": ""
+    },
+    "actionElse": {
+      "type": "string",
+      "title": "Action if false",
+      "default": ""
+    },
+    "stopAfterAction": {
+      "type": "boolean",
+      "title": "Stop after action",
+      "default": false
+    }
+  },
+  "required": [
+    "condition",
+    "actionIf",
+    "actionElse",
+    "stopAfterAction"
+  ],
+  "methods": {
+    "run": {
+      "arguments": []
+    }
+  }
+}

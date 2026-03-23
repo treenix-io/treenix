@@ -1,0 +1,131 @@
+{
+  "$id": "t3d.material",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "3D Material — surface appearance",
+  "properties": {
+    "kind": {
+      "type": "string",
+      "enum": [
+        "standard",
+        "physical",
+        "basic",
+        "phong",
+        "toon",
+        "lambert"
+      ],
+      "title": "Type",
+      "default": "standard"
+    },
+    "color": {
+      "type": "string",
+      "title": "Color",
+      "default": "#6366f1"
+    },
+    "emissive": {
+      "type": "string",
+      "title": "Emissive Color",
+      "default": "#000000"
+    },
+    "emissiveIntensity": {
+      "type": "number",
+      "title": "Emissive Intensity",
+      "default": 0
+    },
+    "metalness": {
+      "type": "number",
+      "title": "Metalness",
+      "default": 0
+    },
+    "roughness": {
+      "type": "number",
+      "title": "Roughness",
+      "default": 0.5
+    },
+    "opacity": {
+      "type": "number",
+      "title": "Opacity",
+      "default": 1
+    },
+    "transparent": {
+      "type": "boolean",
+      "title": "Transparent",
+      "default": false
+    },
+    "wireframe": {
+      "type": "boolean",
+      "title": "Wireframe",
+      "default": false
+    },
+    "side": {
+      "type": "string",
+      "enum": [
+        "front",
+        "back",
+        "double"
+      ],
+      "title": "Side",
+      "default": "front"
+    },
+    "flatShading": {
+      "type": "boolean",
+      "title": "Flat Shading",
+      "default": false
+    },
+    "map": {
+      "type": "string",
+      "title": "Texture URL",
+      "default": ""
+    },
+    "normalMap": {
+      "type": "string",
+      "title": "Normal Map URL",
+      "default": ""
+    },
+    "roughnessMap": {
+      "type": "string",
+      "title": "Roughness Map URL",
+      "default": ""
+    },
+    "metalnessMap": {
+      "type": "string",
+      "title": "Metalness Map URL",
+      "default": ""
+    },
+    "emissiveMap": {
+      "type": "string",
+      "title": "Emissive Map URL",
+      "default": ""
+    },
+    "aoMap": {
+      "type": "string",
+      "title": "AO Map URL",
+      "default": ""
+    },
+    "envMapIntensity": {
+      "type": "number",
+      "title": "Env Map Intensity",
+      "default": 1
+    }
+  },
+  "required": [
+    "kind",
+    "color",
+    "emissive",
+    "emissiveIntensity",
+    "metalness",
+    "roughness",
+    "opacity",
+    "transparent",
+    "wireframe",
+    "side",
+    "flatShading",
+    "map",
+    "normalMap",
+    "roughnessMap",
+    "metalnessMap",
+    "emissiveMap",
+    "aoMap",
+    "envMapIntensity"
+  ]
+}

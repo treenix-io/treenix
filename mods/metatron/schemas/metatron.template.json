@@ -1,0 +1,26 @@
+{
+  "$id": "metatron.template",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Reusable prompt template for quick task creation",
+  "properties": {
+    "name": {
+      "type": "string",
+      "default": ""
+    },
+    "prompt": {
+      "type": "string",
+      "format": "textarea",
+      "default": ""
+    },
+    "category": {
+      "type": "string",
+      "default": ""
+    }
+  },
+  "required": [
+    "name",
+    "prompt",
+    "category"
+  ]
+}

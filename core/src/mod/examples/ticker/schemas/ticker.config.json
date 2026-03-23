@@ -1,0 +1,43 @@
+{
+  "$id": "ticker.config",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Price feed config — trading symbol and polling interval",
+  "properties": {
+    "symbol": {
+      "type": "string",
+      "default": "BTC"
+    },
+    "intervalSec": {
+      "type": "number",
+      "default": 10
+    }
+  },
+  "required": [
+    "symbol",
+    "intervalSec"
+  ],
+  "methods": {
+    "configure": {
+      "description": "Update symbol and polling interval",
+      "arguments": [
+        {
+          "name": "data",
+          "type": "object",
+          "properties": {
+            "symbol": {
+              "type": "string"
+            },
+            "intervalSec": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "symbol",
+            "intervalSec"
+          ]
+        }
+      ]
+    }
+  }
+}

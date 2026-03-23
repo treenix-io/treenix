@@ -1,0 +1,28 @@
+{
+  "$id": "t3d.lod",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "3D LOD — level of detail",
+  "properties": {
+    "d0": {
+      "type": "number",
+      "title": "Distance 0 (high)",
+      "default": 0
+    },
+    "d1": {
+      "type": "number",
+      "title": "Distance 1 (mid)",
+      "default": 10
+    },
+    "d2": {
+      "type": "number",
+      "title": "Distance 2 (low)",
+      "default": 25
+    }
+  },
+  "required": [
+    "d0",
+    "d1",
+    "d2"
+  ]
+}

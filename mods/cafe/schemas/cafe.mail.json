@@ -1,0 +1,29 @@
+{
+  "$id": "cafe.mail",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Mail delivery settings",
+  "properties": {
+    "host": {
+      "type": "string",
+      "title": "SMTP host",
+      "default": "smtp.example.com"
+    },
+    "port": {
+      "type": "number",
+      "title": "Port",
+      "default": 587
+    },
+    "from": {
+      "type": "string",
+      "title": "Sender address",
+      "format": "email",
+      "default": ""
+    }
+  },
+  "required": [
+    "host",
+    "port",
+    "from"
+  ]
+}

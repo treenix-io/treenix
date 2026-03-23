@@ -1,0 +1,81 @@
+{
+  "$id": "t3d.rigidbody",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "3D Rigidbody — physics body",
+  "properties": {
+    "kind": {
+      "type": "string",
+      "enum": [
+        "dynamic",
+        "static",
+        "kinematic"
+      ],
+      "title": "Kind",
+      "default": "dynamic"
+    },
+    "mass": {
+      "type": "number",
+      "title": "Mass",
+      "default": 1
+    },
+    "linearDamping": {
+      "type": "number",
+      "title": "Linear Drag",
+      "default": 0
+    },
+    "angularDamping": {
+      "type": "number",
+      "title": "Angular Drag",
+      "default": 0.05
+    },
+    "useGravity": {
+      "type": "boolean",
+      "title": "Use Gravity",
+      "default": true
+    },
+    "freezePx": {
+      "type": "boolean",
+      "title": "Freeze Position X",
+      "default": false
+    },
+    "freezePy": {
+      "type": "boolean",
+      "title": "Freeze Position Y",
+      "default": false
+    },
+    "freezePz": {
+      "type": "boolean",
+      "title": "Freeze Position Z",
+      "default": false
+    },
+    "freezeRx": {
+      "type": "boolean",
+      "title": "Freeze Rotation X",
+      "default": false
+    },
+    "freezeRy": {
+      "type": "boolean",
+      "title": "Freeze Rotation Y",
+      "default": false
+    },
+    "freezeRz": {
+      "type": "boolean",
+      "title": "Freeze Rotation Z",
+      "default": false
+    }
+  },
+  "required": [
+    "kind",
+    "mass",
+    "linearDamping",
+    "angularDamping",
+    "useGravity",
+    "freezePx",
+    "freezePy",
+    "freezePz",
+    "freezeRx",
+    "freezeRy",
+    "freezeRz"
+  ]
+}

@@ -1,0 +1,64 @@
+{
+  "$id": "t3d.object",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "3D Object — spatial entity in the scene graph",
+  "properties": {
+    "px": {
+      "type": "number",
+      "title": "Position X",
+      "default": 0
+    },
+    "py": {
+      "type": "number",
+      "title": "Position Y",
+      "default": 0
+    },
+    "pz": {
+      "type": "number",
+      "title": "Position Z",
+      "default": 0
+    },
+    "rx": {
+      "type": "number",
+      "title": "Rotation X (rad)",
+      "default": 0
+    },
+    "ry": {
+      "type": "number",
+      "title": "Rotation Y (rad)",
+      "default": 0
+    },
+    "rz": {
+      "type": "number",
+      "title": "Rotation Z (rad)",
+      "default": 0
+    },
+    "sx": {
+      "type": "number",
+      "title": "Scale X",
+      "default": 1
+    },
+    "sy": {
+      "type": "number",
+      "title": "Scale Y",
+      "default": 1
+    },
+    "sz": {
+      "type": "number",
+      "title": "Scale Z",
+      "default": 1
+    }
+  },
+  "required": [
+    "px",
+    "py",
+    "pz",
+    "rx",
+    "ry",
+    "rz",
+    "sx",
+    "sy",
+    "sz"
+  ]
+}

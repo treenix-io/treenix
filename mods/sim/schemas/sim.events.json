@@ -1,0 +1,47 @@
+{
+  "$id": "sim.events",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Agent event inbox — received events per round",
+  "properties": {
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "round": {
+            "type": "number"
+          },
+          "type": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "anyOf": [
+              {},
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "data": {},
+          "ts": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "round",
+          "type",
+          "from",
+          "data",
+          "ts"
+        ]
+      }
+    }
+  },
+  "required": [
+    "entries"
+  ]
+}

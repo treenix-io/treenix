@@ -1,0 +1,31 @@
+{
+  "$id": "brahman.action.broadcast",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Broadcast message — send action to users matching tag filter",
+  "properties": {
+    "userTags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "title": "User tags filter",
+      "format": "tags"
+    },
+    "action": {
+      "type": "string",
+      "title": "Action to broadcast",
+      "description": "Path to action node",
+      "default": ""
+    }
+  },
+  "required": [
+    "userTags",
+    "action"
+  ],
+  "methods": {
+    "run": {
+      "arguments": []
+    }
+  }
+}

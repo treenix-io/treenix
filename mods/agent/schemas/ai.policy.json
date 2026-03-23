@@ -1,0 +1,105 @@
+{
+  "$id": "ai.policy",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Persistent tool policy — lives on agent (per-agent) or /agents/guardian (global)",
+  "properties": {
+    "allow": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "deny": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "escalate": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "allow",
+    "deny",
+    "escalate"
+  ],
+  "methods": {
+    "addAllow": {
+      "description": "Add a tool to allow list",
+      "arguments": [
+        {
+          "name": "data",
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "title": "Tool name or glob pattern"
+            }
+          },
+          "required": [
+            "pattern"
+          ]
+        }
+      ]
+    },
+    "addDeny": {
+      "description": "Add a tool to deny list",
+      "arguments": [
+        {
+          "name": "data",
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "title": "Tool name or glob pattern"
+            }
+          },
+          "required": [
+            "pattern"
+          ]
+        }
+      ]
+    },
+    "addEscalate": {
+      "description": "Add a tool to escalate list (requires human approval)",
+      "arguments": [
+        {
+          "name": "data",
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "title": "Tool name or glob pattern"
+            }
+          },
+          "required": [
+            "pattern"
+          ]
+        }
+      ]
+    },
+    "removeRule": {
+      "description": "Remove a rule from all lists",
+      "arguments": [
+        {
+          "name": "data",
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "title": "Pattern to remove"
+            }
+          },
+          "required": [
+            "pattern"
+          ]
+        }
+      ]
+    }
+  }
+}

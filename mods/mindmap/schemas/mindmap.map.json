@@ -1,0 +1,22 @@
+{
+  "$id": "mindmap.map",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "description": "Mind map visualization — radial tree of Treenity nodes",
+  "properties": {
+    "root": {
+      "type": "string",
+      "title": "Root path to visualize (empty = this node's path)",
+      "default": ""
+    },
+    "maxChildren": {
+      "type": "number",
+      "title": "Max children per expanded level",
+      "default": 50
+    }
+  },
+  "required": [
+    "root",
+    "maxChildren"
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "$id": "metatron.skill",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Modular prompt fragment — learned skill or injected capability",
+  "properties": {
+    "name": {
+      "type": "string",
+      "default": ""
+    },
+    "prompt": {
+      "type": "string",
+      "format": "textarea",
+      "default": ""
+    },
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "category": {
+      "type": "string",
+      "default": ""
+    },
+    "updatedAt": {
+      "type": "number",
+      "default": 0
+    }
+  },
+  "required": [
+    "name",
+    "prompt",
+    "enabled",
+    "category",
+    "updatedAt"
+  ]
+}

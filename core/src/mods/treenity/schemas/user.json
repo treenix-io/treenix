@@ -1,0 +1,20 @@
+{
+  "$id": "user",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "pending",
+        "blocked"
+      ],
+      "title": "Status",
+      "default": "pending"
+    }
+  },
+  "required": [
+    "status"
+  ]
+}

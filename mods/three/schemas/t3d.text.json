@@ -1,0 +1,86 @@
+{
+  "$id": "t3d.text",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "3D Text — floating text in scene",
+  "properties": {
+    "text": {
+      "type": "string",
+      "title": "Text",
+      "format": "textarea",
+      "default": "Hello"
+    },
+    "fontSize": {
+      "type": "number",
+      "title": "Font Size",
+      "default": 1
+    },
+    "color": {
+      "type": "string",
+      "title": "Color",
+      "default": "#ffffff"
+    },
+    "maxWidth": {
+      "type": "number",
+      "title": "Max Width",
+      "default": 10
+    },
+    "align": {
+      "type": "string",
+      "enum": [
+        "left",
+        "center",
+        "right"
+      ],
+      "title": "Align",
+      "default": "center"
+    },
+    "anchorX": {
+      "type": "string",
+      "enum": [
+        "left",
+        "center",
+        "right"
+      ],
+      "title": "Anchor X",
+      "default": "center"
+    },
+    "anchorY": {
+      "type": "string",
+      "enum": [
+        "top",
+        "middle",
+        "bottom"
+      ],
+      "title": "Anchor Y",
+      "default": "middle"
+    },
+    "billboard": {
+      "type": "boolean",
+      "title": "Billboard (face camera)",
+      "default": false
+    },
+    "outlineWidth": {
+      "type": "number",
+      "title": "Outline Width",
+      "default": 0
+    },
+    "outlineColor": {
+      "type": "string",
+      "title": "Outline Color",
+      "default": "#000000"
+    }
+  },
+  "required": [
+    "text",
+    "fontSize",
+    "color",
+    "maxWidth",
+    "align",
+    "anchorX",
+    "anchorY",
+    "billboard",
+    "outlineWidth",
+    "outlineColor"
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "$id": "doc.page",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Rich document — Tiptap JSON with embedded Treenity components",
+  "properties": {
+    "title": {
+      "type": "string",
+      "title": "Title",
+      "default": ""
+    },
+    "content": {
+      "type": "string",
+      "title": "Content",
+      "format": "hidden",
+      "default": ""
+    }
+  },
+  "required": [
+    "title",
+    "content"
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "$id": "canary.item",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "value": {
+      "type": "number",
+      "default": 0
+    },
+    "label": {
+      "type": "string",
+      "default": "canary"
+    }
+  },
+  "required": [
+    "value",
+    "label"
+  ],
+  "methods": {
+    "increment": {
+      "arguments": []
+    },
+    "setLabel": {
+      "arguments": [
+        {
+          "name": "data",
+          "type": "object",
+          "properties": {
+            "label": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "label"
+          ]
+        }
+      ]
+    }
+  }
+}

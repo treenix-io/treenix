@@ -1,0 +1,62 @@
+{
+  "$id": "t.prefab",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "mod": {
+      "type": "string",
+      "default": ""
+    },
+    "name": {
+      "type": "string",
+      "default": ""
+    }
+  },
+  "required": [
+    "mod",
+    "name"
+  ],
+  "methods": {
+    "deploy": {
+      "description": "Deploy this prefab's nodes into target path. Idempotent — skips existing nodes",
+      "arguments": [
+        {
+          "name": "data",
+          "type": "object",
+          "properties": {
+            "target": {
+              "type": "string",
+              "title": "Target path where nodes will be created, e.g. \"/\" or \"/my/site\""
+            },
+            "allowAbsolute": {
+              "anyOf": [
+                {},
+                {},
+                {}
+              ],
+              "title": "Allow writing outside target (e.g. /sys/autostart refs)"
+            }
+          },
+          "required": [
+            "target"
+          ]
+        }
+      ],
+      "return": {
+        "type": "object",
+        "properties": {
+          "deployed": {
+            "type": "number"
+          },
+          "skipped": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "deployed",
+          "skipped"
+        ]
+      }
+    }
+  }
+}

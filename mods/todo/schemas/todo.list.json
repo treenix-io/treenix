@@ -1,0 +1,33 @@
+{
+  "$id": "todo.list",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "title": {
+      "type": "string",
+      "default": "My Todos"
+    }
+  },
+  "required": [
+    "title"
+  ],
+  "methods": {
+    "add": {
+      "description": "Add a new todo item",
+      "arguments": [
+        {
+          "name": "data",
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "title"
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "$id": "ai.approvals",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Approval inbox — field-level ref points to the approvals dir",
+  "properties": {
+    "source": {
+      "type": "object",
+      "properties": {
+        "$type": {},
+        "$ref": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "$type",
+        "$ref"
+      ]
+    }
+  },
+  "required": [
+    "source"
+  ]
+}

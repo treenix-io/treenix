@@ -1,0 +1,43 @@
+{
+  "$id": "brahman.action.question",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Ask question — prompt for text/photo input, save answer",
+  "properties": {
+    "text": {
+      "title": "Prompt text",
+      "format": "tstring"
+    },
+    "inputType": {
+      "type": "string",
+      "enum": [
+        "text",
+        "photo"
+      ],
+      "title": "Input type",
+      "default": "text"
+    },
+    "saveTo": {
+      "type": "string",
+      "title": "Save answer to",
+      "default": ""
+    },
+    "deleteMessages": {
+      "type": "boolean",
+      "title": "Delete messages",
+      "description": "Delete question and answer after receiving",
+      "default": false
+    }
+  },
+  "required": [
+    "text",
+    "inputType",
+    "saveTo",
+    "deleteMessages"
+  ],
+  "methods": {
+    "run": {
+      "arguments": []
+    }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "$id": "groups",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "User group memberships — ACL group list for access control",
+  "properties": {
+    "list": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "title": "Groups",
+      "format": "tags",
+      "description": "User group memberships"
+    }
+  },
+  "required": [
+    "list"
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "$id": "ai.assignment",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "AI workflow on a board.task — routing + discussion cursor",
+  "properties": {
+    "origin": {
+      "type": "string",
+      "title": "Who created the task",
+      "default": ""
+    },
+    "nextRoles": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "title": "Roles to wake for discussion (empty = no discussion pending)"
+    },
+    "cursors": {
+      "title": "agentPath → last read message index (don't re-send old messages)"
+    }
+  },
+  "required": [
+    "origin",
+    "nextRoles",
+    "cursors"
+  ]
+}

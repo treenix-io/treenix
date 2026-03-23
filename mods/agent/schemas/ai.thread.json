@@ -1,0 +1,64 @@
+{
+  "$id": "ai.thread",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Discussion thread on a task — lightweight multi-agent chat",
+  "properties": {
+    "messages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "ts": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "role",
+          "from",
+          "text",
+          "ts"
+        ]
+      }
+    }
+  },
+  "required": [
+    "messages"
+  ],
+  "methods": {
+    "post": {
+      "description": "Post a message to the discussion",
+      "arguments": [
+        {
+          "name": "data",
+          "type": "object",
+          "properties": {
+            "role": {
+              "type": "string"
+            },
+            "from": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "role",
+            "from",
+            "text"
+          ]
+        }
+      ]
+    }
+  }
+}

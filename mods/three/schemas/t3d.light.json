@@ -1,0 +1,90 @@
+{
+  "$id": "t3d.light",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "3D Light — light source",
+  "properties": {
+    "kind": {
+      "type": "string",
+      "enum": [
+        "directional",
+        "point",
+        "spot",
+        "ambient",
+        "hemisphere",
+        "rect-area"
+      ],
+      "title": "Kind",
+      "default": "point"
+    },
+    "color": {
+      "type": "string",
+      "title": "Color",
+      "default": "#ffffff"
+    },
+    "groundColor": {
+      "type": "string",
+      "title": "Ground Color (hemisphere)",
+      "default": "#444444"
+    },
+    "intensity": {
+      "type": "number",
+      "title": "Intensity",
+      "default": 1
+    },
+    "distance": {
+      "type": "number",
+      "title": "Distance (0=infinite)",
+      "default": 0
+    },
+    "decay": {
+      "type": "number",
+      "title": "Decay",
+      "default": 2
+    },
+    "castShadow": {
+      "type": "boolean",
+      "title": "Cast Shadow",
+      "default": true
+    },
+    "angle": {
+      "type": "number",
+      "title": "Spot Angle",
+      "default": 0.5
+    },
+    "penumbra": {
+      "type": "number",
+      "title": "Spot Penumbra",
+      "default": 0.5
+    },
+    "shadowMapSize": {
+      "type": "number",
+      "title": "Shadow Map Size",
+      "default": 1024
+    },
+    "rectWidth": {
+      "type": "number",
+      "title": "Rect Width",
+      "default": 1
+    },
+    "rectHeight": {
+      "type": "number",
+      "title": "Rect Height",
+      "default": 1
+    }
+  },
+  "required": [
+    "kind",
+    "color",
+    "groundColor",
+    "intensity",
+    "distance",
+    "decay",
+    "castShadow",
+    "angle",
+    "penumbra",
+    "shadowMapSize",
+    "rectWidth",
+    "rectHeight"
+  ]
+}

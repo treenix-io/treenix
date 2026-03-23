@@ -1,0 +1,36 @@
+{
+  "$id": "brahman.action.params",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Parse parameters — split and name input parts",
+  "properties": {
+    "base64": {
+      "type": "boolean",
+      "title": "Base64 decode",
+      "default": false
+    },
+    "split": {
+      "type": "string",
+      "title": "Split delimiter",
+      "default": ","
+    },
+    "names": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "title": "Parameter names",
+      "format": "tags"
+    }
+  },
+  "required": [
+    "base64",
+    "split",
+    "names"
+  ],
+  "methods": {
+    "run": {
+      "arguments": []
+    }
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "$id": "t3d.line",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "3D Line Renderer",
+  "properties": {
+    "color": {
+      "type": "string",
+      "title": "Color",
+      "default": "#ffffff"
+    },
+    "lineWidth": {
+      "type": "number",
+      "title": "Line Width",
+      "default": 1
+    },
+    "dashed": {
+      "type": "boolean",
+      "title": "Dashed",
+      "default": false
+    },
+    "dashSize": {
+      "type": "number",
+      "title": "Dash Size",
+      "default": 0.1
+    },
+    "gapSize": {
+      "type": "number",
+      "title": "Gap Size",
+      "default": 0.05
+    },
+    "points": {
+      "type": "string",
+      "title": "Points (JSON array of [x,y,z])",
+      "format": "textarea",
+      "default": "[[0,0,0],[1,1,0],[2,0,0]]"
+    }
+  },
+  "required": [
+    "color",
+    "lineWidth",
+    "dashed",
+    "dashSize",
+    "gapSize",
+    "points"
+  ]
+}

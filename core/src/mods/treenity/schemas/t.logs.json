@@ -1,0 +1,155 @@
+{
+  "$id": "t.logs",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "description": "Server log buffer — query, grep, filter by level",
+  "properties": {},
+  "methods": {
+    "query": {
+      "description": "Query log buffer with grep, level filter, head/tail",
+      "arguments": [
+        {
+          "name": "data",
+          "type": "object",
+          "properties": {
+            "grep": {
+              "anyOf": [
+                {},
+                {
+                  "type": "string"
+                }
+              ],
+              "title": "Regex pattern to filter messages"
+            },
+            "level": {
+              "anyOf": [
+                {},
+                {},
+                {},
+                {},
+                {},
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "debug",
+                      "info",
+                      "warn",
+                      "error"
+                    ]
+                  }
+                }
+              ],
+              "title": "Log level(s) to include"
+            },
+            "head": {
+              "anyOf": [
+                {},
+                {
+                  "type": "number"
+                }
+              ],
+              "title": "Return first N entries"
+            },
+            "tail": {
+              "anyOf": [
+                {},
+                {
+                  "type": "number"
+                }
+              ],
+              "title": "Return last N entries"
+            }
+          }
+        }
+      ],
+      "return": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "t": {
+              "type": "number"
+            },
+            "level": {
+              "type": "string",
+              "enum": [
+                "debug",
+                "info",
+                "warn",
+                "error"
+              ]
+            },
+            "msg": {
+              "type": "string"
+            },
+            "code": {
+              "anyOf": [
+                {},
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "sub": {
+              "anyOf": [
+                {},
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "userId": {
+              "anyOf": [
+                {},
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "method": {
+              "anyOf": [
+                {},
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "path": {
+              "anyOf": [
+                {},
+                {
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "required": [
+            "t",
+            "level",
+            "msg"
+          ]
+        }
+      }
+    },
+    "stats": {
+      "description": "Buffer stats: buffered count, total ever, max capacity",
+      "arguments": [],
+      "return": {
+        "type": "object",
+        "properties": {
+          "buffered": {
+            "type": "number"
+          },
+          "total": {
+            "type": "number"
+          },
+          "max": {
+            "type": "number"
+          }
+        }
+      }
+    }
+  }
+}

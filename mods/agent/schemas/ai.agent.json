@@ -1,0 +1,133 @@
+{
+  "$id": "ai.agent",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "AI Agent — autonomous worker node at /agents/{name}\nLLM config (model, systemPrompt, sessionId) lives in named metatron.config component.\nWork creates metatron.task nodes under /agents/{name}/tasks/.",
+  "properties": {
+    "role": {
+      "type": "string",
+      "title": "Open-ended role string. Guardian policies keyed by role.",
+      "default": "qa"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "working",
+        "idle",
+        "error",
+        "blocked",
+        "offline"
+      ],
+      "default": "offline"
+    },
+    "currentTask": {
+      "type": "string",
+      "title": "Path to current board.task being worked on",
+      "default": ""
+    },
+    "taskRef": {
+      "type": "string",
+      "title": "Path to current metatron.task (live log)",
+      "default": ""
+    },
+    "lastRunAt": {
+      "type": "number",
+      "default": 0
+    },
+    "totalTokens": {
+      "type": "number",
+      "title": "Total tokens used across all tasks",
+      "default": 0
+    }
+  },
+  "required": [
+    "role",
+    "status",
+    "currentTask",
+    "taskRef",
+    "lastRunAt",
+    "totalTokens"
+  ],
+  "methods": {
+    "online": {
+      "description": "Bring agent online",
+      "arguments": []
+    },
+    "offline": {
+      "description": "Take agent offline",
+      "arguments": []
+    },
+    "assign": {
+      "description": "Assign a board task to this agent",
+      "arguments": [
+        {
+          "name": "data",
+          "type": "object",
+          "properties": {
+            "task": {
+              "type": "string",
+              "title": "Path to board.task"
+            }
+          },
+          "required": [
+            "task"
+          ]
+        }
+      ]
+    },
+    "complete": {
+      "description": "Agent finished current task",
+      "arguments": []
+    },
+    "block": {
+      "description": "Agent is blocked",
+      "arguments": [
+        {
+          "name": "data",
+          "anyOf": [
+            {},
+            {
+              "type": "object",
+              "properties": {
+                "reason": {
+                  "anyOf": [
+                    {},
+                    {
+                      "type": "string"
+                    }
+                  ],
+                  "title": "Reason"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "fail": {
+      "description": "Agent hit an error",
+      "arguments": [
+        {
+          "name": "data",
+          "anyOf": [
+            {},
+            {
+              "type": "object",
+              "properties": {
+                "error": {
+                  "anyOf": [
+                    {},
+                    {
+                      "type": "string"
+                    }
+                  ],
+                  "title": "Error message"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

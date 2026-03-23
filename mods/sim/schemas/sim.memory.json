@@ -1,0 +1,17 @@
+{
+  "$id": "sim.memory",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Agent memory — accumulated observations",
+  "properties": {
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "entries"
+  ]
+}

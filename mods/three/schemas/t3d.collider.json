@@ -1,0 +1,84 @@
+{
+  "$id": "t3d.collider",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "3D Collider — collision shape",
+  "properties": {
+    "shape": {
+      "type": "string",
+      "enum": [
+        "box",
+        "sphere",
+        "cylinder",
+        "capsule",
+        "mesh",
+        "convex"
+      ],
+      "title": "Shape",
+      "default": "box"
+    },
+    "isTrigger": {
+      "type": "boolean",
+      "title": "Is Trigger",
+      "default": false
+    },
+    "sizeX": {
+      "type": "number",
+      "title": "Size X",
+      "default": 1
+    },
+    "sizeY": {
+      "type": "number",
+      "title": "Size Y",
+      "default": 1
+    },
+    "sizeZ": {
+      "type": "number",
+      "title": "Size Z",
+      "default": 1
+    },
+    "radius": {
+      "type": "number",
+      "title": "Radius",
+      "default": 0.5
+    },
+    "offsetX": {
+      "type": "number",
+      "title": "Offset X",
+      "default": 0
+    },
+    "offsetY": {
+      "type": "number",
+      "title": "Offset Y",
+      "default": 0
+    },
+    "offsetZ": {
+      "type": "number",
+      "title": "Offset Z",
+      "default": 0
+    },
+    "friction": {
+      "type": "number",
+      "title": "Friction",
+      "default": 0.5
+    },
+    "restitution": {
+      "type": "number",
+      "title": "Restitution (bounce)",
+      "default": 0
+    }
+  },
+  "required": [
+    "shape",
+    "isTrigger",
+    "sizeX",
+    "sizeY",
+    "sizeZ",
+    "radius",
+    "offsetX",
+    "offsetY",
+    "offsetZ",
+    "friction",
+    "restitution"
+  ]
+}

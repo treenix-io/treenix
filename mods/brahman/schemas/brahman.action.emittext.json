@@ -1,0 +1,23 @@
+{
+  "$id": "brahman.action.emittext",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Emit synthetic text — inject text for re-processing",
+  "properties": {
+    "from": {
+      "type": "string",
+      "title": "Text template",
+      "format": "textarea",
+      "description": "Template for text to re-process",
+      "default": ""
+    }
+  },
+  "required": [
+    "from"
+  ],
+  "methods": {
+    "run": {
+      "arguments": []
+    }
+  }
+}

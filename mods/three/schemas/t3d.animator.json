@@ -1,0 +1,46 @@
+{
+  "$id": "t3d.animator",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "3D Animator — animation state",
+  "properties": {
+    "src": {
+      "type": "string",
+      "title": "GLTF URL",
+      "default": ""
+    },
+    "clip": {
+      "type": "string",
+      "title": "Current Clip",
+      "default": ""
+    },
+    "playing": {
+      "type": "boolean",
+      "title": "Playing",
+      "default": true
+    },
+    "loop": {
+      "type": "boolean",
+      "title": "Loop",
+      "default": true
+    },
+    "speed": {
+      "type": "number",
+      "title": "Speed",
+      "default": 1
+    },
+    "crossfadeDuration": {
+      "type": "number",
+      "title": "Crossfade Duration (s)",
+      "default": 0.3
+    }
+  },
+  "required": [
+    "src",
+    "clip",
+    "playing",
+    "loop",
+    "speed",
+    "crossfadeDuration"
+  ]
+}
