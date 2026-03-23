@@ -1,0 +1,20 @@
+#!/bin/sh
+# Pre-commit: typecheck + tests
+
+echo "🔍 Typecheck..."
+npm run typecheck 2>&1
+if [ $? -ne 0 ]; then
+  echo ""
+  echo "❌ TYPECHECK FAILED — fix errors before committing"
+  exit 1
+fi
+
+echo "🧪 Tests..."
+npm test 2>&1
+if [ $? -ne 0 ]; then
+  echo ""
+  echo "❌ TESTS FAILED — fix errors before committing"
+  exit 1
+fi
+
+echo "✅ All checks passed"

@@ -1,10 +1,13 @@
 // Treenity Module Loader — dependency sort, load, seed
 
+import { createLogger } from '#log';
 import type { Tree } from '#tree';
 import { readdir, stat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { setCurrentMod } from './tracking';
 import type { LoadedMod, ModManifest, TreenityMod } from './types';
+
+const log = createLogger('mod');
 
 // ── Dependency sorting (Kahn's algorithm) ──
 
@@ -143,7 +146,7 @@ export async function loadMods(
       }
 
       const elapsed = Math.round(performance.now() - t0);
-      console.log(`[mod] ${manifest.name} loaded in ${elapsed}ms`);
+      log.info(`${manifest.name} loaded in ${elapsed}ms`);
 
       entry.mod = mod;
       entry.state = 'loaded';
@@ -228,8 +231,8 @@ export async function loadAllMods(target: LoadTarget, ...extraDirs: string[]): P
     result.failed.push(...r.failed);
   }
 
-  if (result.failed.length) console.error('failed mods:', result.failed.map(f => `${f.name}: ${f.error.message}`).join(', '));
-  console.log(`mods: ${result.loaded.join(', ')}`);
+  for (const f of result.failed) log.error(`${f.name}: ${f.error.message}`);
+  log.info(`loaded: ${result.loaded.join(', ')}`);
 
   return result;
 }

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { clearModRegistry, getLoadedMods, getMod, isModLoaded, loadLocalMods, loadMods, sortByDependencies } from './loader';
 import type { ModManifest } from './types';
@@ -227,6 +227,23 @@ describe('loadMods', () => {
     assert.equal(result.failed.length, 1);
     assert.equal(isModLoaded('ok-mod'), true);
     assert.equal(isModLoaded('fail-mod'), false);
+  });
+});
+
+describe('all engine mods import', () => {
+  beforeEach(() => clearModRegistry());
+
+  it('every engine mod server.ts imports without error', async () => {
+    // engine/core/src/mod/ → engine/mods (3 levels up + sibling)
+    const modsDir = resolve(import.meta.dirname, '../../../mods');
+    const result = await loadLocalMods(modsDir, 'server');
+
+    if (result.failed.length) {
+      const details = result.failed.map(f => `  ${f.name}: ${f.error.message}`).join('\n');
+      assert.fail(`${result.failed.length} mod(s) failed:\n${details}`);
+    }
+
+    assert.ok(result.loaded.length > 0, 'should discover at least one mod');
   });
 });
 

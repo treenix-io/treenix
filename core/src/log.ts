@@ -164,13 +164,20 @@ if (typeof process !== 'undefined' && process.env?.DEBUG) {
 
 ;(globalThis as Record<string, unknown>).setDebug = setDebug
 
+const isTTY = typeof process !== 'undefined' && process.stderr?.isTTY
+
 export function createLogger(name: string) {
   const tag = `[${name}]`
+  const fmt = (color: string, args: unknown[]) => {
+    if (!isTTY) return [tag, ...args]
+    const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ')
+    return [`${color}[${name}] ${msg}\x1b[0m`]
+  }
   return {
-    debug(...args: unknown[]) { if (all || enabled.has(name)) console.debug(tag, ...args) },
-    info(...args: unknown[]) { console.info(tag, ...args) },
-    warn(...args: unknown[]) { console.warn(tag, ...args) },
-    error(...args: unknown[]) { console.error(tag, ...args) },
+    debug(...args: unknown[]) { if (all || enabled.has(name)) console.debug(...fmt('\x1b[36m', args)) },
+    info(...args: unknown[]) { console.info(...fmt('\x1b[36m', args)) },
+    warn(...args: unknown[]) { console.warn(...fmt('\x1b[33m', args)) },
+    error(...args: unknown[]) { console.error(...fmt('\x1b[31m', args)) },
   }
 }
 
