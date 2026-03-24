@@ -5,16 +5,16 @@ import { createQueryTree } from '#tree/query';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 import { withMounts } from './mount';
+import { MountQuery } from './mount-adapters';
 
 describe('Query Mount', () => {
   let rootStore: Tree;
 
   beforeEach(() => {
     clearRegistry();
-    register('t.mount.query', 'mount', (config, parentStore) => {
-            const n = config as any;
-      const query = n['query'] as { source: string; match: Record<string, unknown> } | undefined;
-      return createQueryTree({ source: query!.source, match: query!.match }, parentStore);
+    register(MountQuery, 'mount', (mount, ctx) => {
+      if (!mount.source || !mount.match) throw new Error('t.mount.query: source and match required');
+      return createQueryTree(mount, ctx.globalStore || ctx.parentStore);
     });
     rootStore = createMemoryTree();
   });
@@ -26,8 +26,7 @@ describe('Query Mount', () => {
 
     await rootStore.set(
       createNode('/workflows/new', 'folder', {}, {
-        mount: { $type: 't.mount.query' },
-        query: { $type: 'query', source: '/entities/orders', match: { status: 'new' } }
+        mount: { $type: 't.mount.query', source: '/entities/orders', match: { status: 'new' } }
       })
     );
 
@@ -43,8 +42,7 @@ describe('Query Mount', () => {
     await rootStore.set(createNode('/entities/orders/1', 'order', { status: 'new' }));
     await rootStore.set(
       createNode('/workflows/new', 'folder', {}, {
-        mount: { $type: 't.mount.query' },
-        query: { $type: 'query', source: '/entities/orders', match: { status: 'new' } },
+        mount: { $type: 't.mount.query', source: '/entities/orders', match: { status: 'new' } },
       }),
     );
     const ms = withMounts(rootStore);
@@ -57,8 +55,7 @@ describe('Query Mount', () => {
   it('mount config accessible via get', async () => {
     await rootStore.set(
       createNode('/workflows/new', 'folder', {}, {
-        mount: { $type: 't.mount.query' },
-        query: { $type: 'query', source: '/entities/orders', match: { status: 'new' } },
+        mount: { $type: 't.mount.query', source: '/entities/orders', match: { status: 'new' } },
       }),
     );
     const ms = withMounts(rootStore);
@@ -77,12 +74,10 @@ describe('Query Mount', () => {
     await rootStore.set(createNode('/agent/tasks/t3', 'task', { status: 'pending' }));
 
     await rootStore.set(createNode('/agent/inbox', 'mount-point', {}, {
-      mount: { $type: 't.mount.query' },
-      query: { $type: 'query', source: '/agent/tasks', match: { $type: 't.task', status: 'pending' } },
+      mount: { $type: 't.mount.query', source: '/agent/tasks', match: { $type: 't.task', status: 'pending' } },
     }));
     await rootStore.set(createNode('/agent/done', 'mount-point', {}, {
-      mount: { $type: 't.mount.query' },
-      query: { $type: 'query', source: '/agent/tasks', match: { $type: 't.task', status: 'done' } },
+      mount: { $type: 't.mount.query', source: '/agent/tasks', match: { $type: 't.task', status: 'done' } },
     }));
 
     const ms = withMounts(rootStore);
@@ -104,12 +99,10 @@ describe('Query Mount', () => {
     await rootStore.set(createNode('/parent/t2', 'task', { status: 'done' }));
 
     await rootStore.set(createNode('/parent/inbox', 'mount-point', {}, {
-      mount: { $type: 't.mount.query' },
-      query: { $type: 'query', source: '/parent', match: { $type: 't.task', status: 'pending' } },
+      mount: { $type: 't.mount.query', source: '/parent', match: { $type: 't.task', status: 'pending' } },
     }));
     await rootStore.set(createNode('/parent/done', 'mount-point', {}, {
-      mount: { $type: 't.mount.query' },
-      query: { $type: 'query', source: '/parent', match: { $type: 't.task', status: 'done' } },
+      mount: { $type: 't.mount.query', source: '/parent', match: { $type: 't.task', status: 'done' } },
     }));
 
     const ms = withMounts(rootStore);

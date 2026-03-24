@@ -3,7 +3,6 @@
 
 import '#contexts/schema/index';
 import '#contexts/text/index';
-import '#schema/load';
 import './mount-adapters';
 
 import { type ServiceHandle, startServices } from '#contexts/service/index';

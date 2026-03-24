@@ -5,7 +5,7 @@ import { createQueryTree } from '#tree/query';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 import { withMounts } from './mount';
-import './mount-adapters'; // ensure registrations
+import { MountQuery } from './mount-adapters';
 
 describe('Parametrized Mounts', () => {
   let rootStore: Tree;
@@ -13,11 +13,9 @@ describe('Parametrized Mounts', () => {
 
   beforeEach(() => {
     clearRegistry();
-    // Direct registration for tests due to module caching issues
-    register('t.mount.query', 'mount', (config, parentStore) => {
-      const n = config as any;
-      const query = n['query'] as { source: string; match: Record<string, unknown> } | undefined;
-      return createQueryTree({ source: query!.source, match: query!.match }, parentStore);
+    register(MountQuery, 'mount', (mount, ctx) => {
+      if (!mount.source || !mount.match) throw new Error('t.mount.query: source and match required');
+      return createQueryTree(mount, ctx.globalStore || ctx.parentStore);
     });
     rootStore = createMemoryTree();
     tree = withMounts(rootStore);
@@ -35,8 +33,7 @@ describe('Parametrized Mounts', () => {
     // Parametrized mount point
     await tree.set({
       ...createNode('/users/:userId/orders', 'folder', {}, {
-        mount: { $type: 't.mount.query' },
-        query: { $type: 'query', source: '/data/orders', match: { ownerId: ':userId' } } // the :userId should be bound
+        mount: { $type: 't.mount.query', source: '/data/orders', match: { ownerId: ':userId' } } // the :userId should be bound
       })
     });
 

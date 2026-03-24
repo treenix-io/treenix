@@ -22,6 +22,7 @@ import { afterEach, beforeEach, describe, it } from 'node:test';
 import { applyTemplate, executeAction, executeStream, setComponent } from './actions';
 import { OpError } from './errors';
 import { withMounts } from './mount';
+import { MountMemory, MountOverlay, MountQuery, MountTypes } from './mount-adapters';
 import { getActiveQueryCount, unwatchAllQueries, unwatchQuery, watchQuery, withSubscriptions } from './sub';
 import { createTypesStore } from './types-mount';
 import { withValidation } from './validate';
@@ -45,27 +46,23 @@ describe('Mount adapters', () => {
   beforeEach(() => {
     clearRegistry();
 
-    // Register mount adapters manually (same as mount-adapters.ts but without Mongo import side effects)
-    register('t.mount.memory', 'mount', () => createMemoryTree());
-    register('t.mount.types', 'mount', (_node: any, deps: Tree) => createTypesStore(deps));
-    register('t.mount.query', 'mount', (config: any, parentStore: Tree, _ctx: any, globalStore?: Tree) => {
-      const n = config as NodeData;
-      const qv = n['query'];
-      const query = isComponent(qv) ? qv as unknown as { source: string; match: Record<string, unknown> } : undefined;
-      if (!query?.source || !query?.match) throw new Error("t.mount.query requires 'query' component with source and match");
-      return createQueryTree({ source: query.source, match: query.match }, globalStore || parentStore);
+    // Register mount adapters using typed classes (same as mount-adapters.ts but without Mongo import side effects)
+    register(MountMemory, 'mount', () => createMemoryTree());
+    register(MountTypes, 'mount', (_mount, ctx) => createTypesStore(ctx.parentStore));
+    register(MountQuery, 'mount', (mount, ctx) => {
+      if (!mount.source || !mount.match) throw new Error('t.mount.query: source and match required');
+      return createQueryTree(mount, ctx.globalStore || ctx.parentStore);
     });
-    register('t.mount.overlay', 'mount', async (config: any, parentStore: Tree, ctx: any, globalStore?: Tree) => {
-      const n = config as NodeData;
-      const mount = n['mount'] as any;
-      if (!mount?.layers?.length) throw new Error('t.mount.overlay: layers required');
+    register(MountOverlay, 'mount', async (mount, ctx) => {
+      if (!mount.layers?.length) throw new Error('t.mount.overlay: layers required');
       const stores: Tree[] = [];
       for (const name of mount.layers) {
-        const comp = n[name] as any;
-        if (!comp) throw new Error(`t.mount.overlay: component "${name}" not found`);
+        const comp = ctx.node[name];
+        if (!isComponent(comp)) throw new Error(`t.mount.overlay: component "${name}" not found`);
         const adapter = resolve(comp.$type, 'mount');
         if (!adapter) throw new Error(`No mount adapter for "${comp.$type}"`);
-        stores.push(await adapter(comp, stores[0] ?? ({} as Tree), ctx, globalStore));
+        const subCtx = { node: ctx.node, path: ctx.path, parentStore: stores[0] ?? ({} as Tree), globalStore: ctx.globalStore };
+        stores.push(await adapter(comp, subCtx));
       }
       let result = stores[0];
       for (let i = 1; i < stores.length; i++) result = createOverlayTree(stores[i], result);
@@ -86,11 +83,11 @@ describe('Mount adapters', () => {
     assert.equal(await root.get('/mnt/a'), undefined);
   });
 
-  it('t.mount.query requires query component', async () => {
+  it('t.mount.query requires source and match', async () => {
     const root = createMemoryTree();
     await root.set(createNode('/bad', 'folder', {}, {
       mount: { $type: 't.mount.query' },
-      // missing 'query' component
+      // missing source and match
     }));
     const ms = withMounts(root);
 

@@ -1,4 +1,4 @@
-import { type NodeData, A, R, S, W } from '@treenity/core';
+import { A, type NodeData, R, S, W } from '@treenity/core';
 import { registerPrefab } from '@treenity/core/mod';
 
 // Universal infra — works with any storage backend (FS, memory, Mongo)
@@ -18,15 +18,9 @@ registerPrefab('core', 'seed', [
     mount: { $type: 't.mount.memory' },
     $acl: [{ g: 'public', p: R }],
   },
-  { $path: 'llm', $type: 't.llm' },
-  { $path: 'demo', $type: 'dir',
-    metadata: { $type: 'metadata', title: 'Demo Node', description: 'Try calling actions' },
-    status: { $type: 'status', value: 'draft' },
-    counter: { $type: 'counter', count: 0 },
-  },
-  { $path: 'demo/sensors', $type: 'examples.demo.sensor',
-    mount: { $type: 't.mount.memory' },
-  },
+  { $path: 'sys/autostart/mcp', $type: 'ref', $ref: '/sys/mcp' },
+  { $path: 'sys/routes', $type: 'dir' },
+  { $path: 'sys/llm', $type: 't.llm' },
 ] as NodeData[], (nodes) => {
   const mcpPort = Number(process.env.MCP_PORT) || 3212;
   return nodes.map(n =>
@@ -34,22 +28,15 @@ registerPrefab('core', 'seed', [
   );
 }, { tier: 'core' });
 
-// Mongo-dependent infra — auth, orders, entities
+// Mongo-dependent infra — auth
 registerPrefab('mongo', 'seed', [
   { $path: 'auth', $type: 'dir', $acl: [{ g: 'admins', p: R | W | A | S }, { g: 'public', p: 0 }] },
   { $path: 'auth/users', $type: 'mount-point',
-    connection: { $type: 'connection', db: 'treenity', collection: 'users' },
-    mount: { $type: 't.mount.mongo' },
+    mount: { $type: 't.mount.mongo', db: 'treenity', collection: 'users' },
     $acl: [{ g: 'authenticated', p: R | S }, { g: 'public', p: 0 }],
   },
   { $path: 'auth/sessions', $type: 'mount-point',
-    connection: { $type: 'connection', db: 'treenity', collection: 'sessions' },
-    mount: { $type: 't.mount.mongo' },
+    mount: { $type: 't.mount.mongo', db: 'treenity', collection: 'sessions' },
     $acl: [{ g: 'admins', p: R | W | A | S }, { g: 'authenticated', p: 0 }, { g: 'public', p: 0 }],
   },
-  { $path: 'mnt', $type: 'dir' },
-  { $path: 'mnt/orders', $type: 't.mount.mongo',
-    connection: { $type: 'connection', db: 'treenity', collection: 'orders' },
-  },
-  { $path: 'entities', $type: 'dir' },
 ] as NodeData[]);

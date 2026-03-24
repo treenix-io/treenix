@@ -60,17 +60,19 @@ export function withMounts(rootStore: Tree): Tree {
   }
 
   async function resolveMount(node: NodeData, currentStore: Tree, ctx?: any): Promise<Tree> {
-    const mount = node['mount'];
+    let mount = node['mount'];
     if (!isComponent(mount)) throw new Error(`Mount component missing on ${node.$path}`);
     let configNode = node;
     if (isRef(mount)) {
       configNode = (await currentStore.get(mount.$ref, ctx)) as NodeData;
       if (!configNode) throw new Error(`Mount ref not found: ${mount.$ref}`);
+      mount = configNode['mount'];
+      if (!isComponent(mount)) throw new Error(`Mount component missing on ref target ${configNode.$path}`);
     }
-    const adapterType = isRef(mount) ? configNode.$type : mount.$type;
-    const adapter = resolve(adapterType, 'mount');
-    if (!adapter) throw new Error(`No adapter for type "${adapterType}"`);
-    return await adapter(configNode, currentStore, ctx, self);
+    const adapter = resolve(mount.$type, 'mount');
+    if (!adapter) throw new Error(`No adapter for type "${mount.$type}"`);
+    const mountCtx = { node: configNode, path: node.$path, parentStore: currentStore, globalStore: self };
+    return await adapter(mount, mountCtx);
   }
 
 

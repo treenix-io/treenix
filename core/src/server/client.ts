@@ -1,10 +1,49 @@
 // Treenity tRPC Client — Node.js
 // Creates tRPC client for tests and scripts (not browser).
 // Uses `eventsource` npm package for SSE subscriptions.
+// Each EventSource gets its own node:http connection to avoid undici pool contention
+// when multiple SSE streams are open to the same origin.
 
 import { createTRPCClient, httpBatchLink, httpSubscriptionLink, splitLink } from '@trpc/client';
-import { EventSource } from 'eventsource';
+import { EventSource as BaseEventSource } from 'eventsource';
+import http from 'node:http';
+import { Readable } from 'node:stream';
 import type { TreeRouter } from './trpc';
+
+/** fetch via node:http — each call opens its own socket, no pool contention */
+function httpFetch(url: string | URL, init?: any): Promise<any> {
+  console.log('[httpFetch] SSE request:', String(url).slice(0, 120), new Error().stack?.split('\n')[2]?.trim());
+  const parsed = new URL(String(url));
+  return new Promise((resolve, reject) => {
+    const req = http.request({
+      hostname: parsed.hostname,
+      port: parsed.port,
+      path: parsed.pathname + parsed.search,
+      method: init?.method || 'GET',
+      headers: init?.headers,
+      signal: init?.signal,
+    }, (res) => {
+      resolve({
+        status: res.statusCode,
+        headers: new Headers(
+          Object.entries(res.headers)
+            .filter((e): e is [string, string] => typeof e[1] === 'string'),
+        ),
+        body: Readable.toWeb(res),
+      });
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+function createIsolatedEventSource() {
+  return class IsolatedEventSource extends BaseEventSource {
+    constructor(url: string | URL, init?: EventSourceInit) {
+      super(url, { ...init, fetch: httpFetch as any });
+    }
+  };
+}
 
 export function createClient(url: string, token?: string) {
   const headers = token ? { Authorization: `Bearer ${token}` } : {};
@@ -14,7 +53,7 @@ export function createClient(url: string, token?: string) {
         condition: (op) => op.type === 'subscription',
         true: httpSubscriptionLink({
           url,
-          EventSource: EventSource as any,
+          EventSource: createIsolatedEventSource() as any,
           connectionParams: () => (token ? { token } : {}),
         }),
         false: httpBatchLink({ url, maxURLLength: 2048, headers: () => headers }),

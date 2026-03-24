@@ -1,17 +1,32 @@
 import { registerType } from '#comp';
 import { getRegisteredTypes, register, resolve } from '#core';
 import { clearRegistry } from '#core/index.test';
-import { loadSchemas } from '#schema/load';
+import { loadSchemasFromDir } from '#schema/load';
 import assert from 'node:assert/strict';
+import { readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { before, describe, it } from 'node:test';
-import './load';
+
+// Recursively find and load all schemas/ dirs under a root
+function loadSchemasRecursive(root: string) {
+  let entries: import('node:fs').Dirent[];
+  try { entries = readdirSync(root, { withFileTypes: true }); } catch { return; }
+  for (const e of entries) {
+    if (!e.isDirectory() || e.name === 'node_modules') continue;
+    if (e.name === 'schemas') loadSchemasFromDir(join(root, e.name));
+    else loadSchemasRecursive(join(root, e.name));
+  }
+}
 
 describe('schema loader', () => {
   before(() => {
-    loadSchemas();
-  })
+    // engine/core/src/ — core internal mods, schema fixtures, server actions
+    loadSchemasRecursive(new URL('..', import.meta.url).pathname);
+    // engine/mods/ — board, cafe, agent, etc.
+    loadSchemasRecursive(new URL('../../../mods', import.meta.url).pathname);
+  });
 
-  it('loads JSON schemas from dist/schema/ into registry', () => {
+  it('loads JSON schemas into registry', () => {
     const types = getRegisteredTypes('schema');
     assert.ok(types.length > 0, 'no schemas loaded');
   });
@@ -31,7 +46,6 @@ describe('schema loader', () => {
   it('schemas with properties have titled properties', () => {
     const types = getRegisteredTypes('schema');
     assert.ok(types.length > 0);
-    // At least some schemas should have property titles (quality check)
     let withTitles = 0;
     for (const type of types) {
       const schema = (resolve(type, 'schema') as () => any)();
@@ -60,7 +74,6 @@ describe('schema loader', () => {
     assert.ok(ms, 'mailService property missing');
     assert.equal(ms.format, 'path', 'format should be path');
     assert.equal(ms.refType, 'cafe.mail', 'refType should reference cafe.mail');
-    // Non-component fields should NOT have refType
     assert.equal(schema.properties.recipient.refType, undefined, 'recipient should not have refType');
   });
 

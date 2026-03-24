@@ -46,7 +46,7 @@ export async function checkMcpGuardian(store: Tree, toolName: string, input?: st
       });
       return approved
         ? { allowed: true }
-        : { allowed: false, reason: 'denied by human' };
+        : { allowed: false, reason: `🔐 "${toolName}" was denied or timed out. Use guardian_approve to pre-approve this pattern.` };
     }
 
     if (matchesAny(allow, toolName)) return { allowed: true };
@@ -222,10 +222,15 @@ export async function buildMcpServer(store: Tree, session: Session, claims?: str
     async ({ path, action, type, key, data }) => {
       const guard = await checkMcpGuardian(store, 'mcp__treenity__execute', JSON.stringify({ path, action }));
       if (!guard.allowed) return text(`🛑 Guardian: ${guard.reason}`);
-      // Action-level Guardian check — allows operators to deny/escalate specific actions
-      // e.g. deny "mcp__treenity__execute:run" to block flow execution
-      const actionGuard = await checkMcpGuardian(store, `mcp__treenity__execute:${action}`, JSON.stringify({ path }));
-      if (!actionGuard.allowed) return text(`🛑 Guardian: ${actionGuard.reason}`);
+      // Action-level deny check — blocks only explicitly denied actions (e.g. "mcp__treenity__execute:run")
+      // Main execute check above already handles allow/escalate; this is an additional deny filter
+      const guardianNode = await store.get('/agents/guardian');
+      if (guardianNode) {
+        const p = getComponent(guardianNode, AiPolicy);
+        if (p && matchesAny((p.deny as string[]) ?? [], `mcp__treenity__execute:${action}`)) {
+          return text(`🛑 Guardian: denied action "${action}"`);
+        }
+      }
       const result = await executeAction(aclStore, path, type, key, action, data);
       return text(yaml(result ?? { ok: true }));
     },

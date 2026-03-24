@@ -1,0 +1,16 @@
+{
+  "$id": "t.mount.query",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "source": {
+      "type": "string",
+      "default": ""
+    },
+    "match": {}
+  },
+  "required": [
+    "source",
+    "match"
+  ]
+}

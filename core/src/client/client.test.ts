@@ -154,8 +154,7 @@ describe('Treenity Client SDK', () => {
       await local.set({
         $path: '/remote',
         $type: 'dir',
-        mount: { $type: 't.mount.tree.trpc' },
-        connection: { $type: 'connection', url, path: '/strategies' },
+        mount: { $type: 't.mount.tree.trpc', url, path: '/strategies' },
       });
 
       const tree = withMounts(local);
@@ -180,8 +179,7 @@ describe('Treenity Client SDK', () => {
       await local.set({
         $path: '/fed',
         $type: 'dir',
-        mount: { $type: 't.mount.tree.trpc' },
-        connection: { $type: 'connection', url, path: '/items' },
+        mount: { $type: 't.mount.tree.trpc', url, path: '/items' },
       });
 
       const tree = withMounts(local);

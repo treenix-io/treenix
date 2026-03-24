@@ -1,9 +1,10 @@
 // Treenity Module Loader — dependency sort, load, seed
 
 import { createLogger } from '#log';
+import { loadSchemasFromDir } from '#schema/load';
 import type { Tree } from '#tree';
 import { readdir, stat } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { setCurrentMod } from './tracking';
 import type { LoadedMod, ModManifest, TreenityMod } from './types';
 
@@ -153,6 +154,12 @@ export async function loadMods(
       entry.loadedAt = Date.now();
       entry.loadDurationMs = elapsed;
       result.loaded.push(manifest.name);
+
+      // Load per-mod schemas
+      if (manifest.packagePath) {
+        const entryPath = target === 'server' ? manifest.server : manifest.client;
+        if (entryPath) loadSchemasFromDir(join(manifest.packagePath, dirname(entryPath), 'schemas'));
+      }
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
       entry.state = 'failed';
@@ -193,6 +200,7 @@ export async function loadLocalMods(modsDir: string, target: LoadTarget): Promis
       modEntry.state = 'loaded';
       modEntry.loadedAt = Date.now();
       result.loaded.push(entry.name);
+      loadSchemasFromDir(join(modsDir, entry.name, 'schemas'));
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
       modEntry.state = 'failed';

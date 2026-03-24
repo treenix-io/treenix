@@ -1,0 +1,16 @@
+{
+  "$id": "t.mount.overlay",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "layers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "layers"
+  ]
+}

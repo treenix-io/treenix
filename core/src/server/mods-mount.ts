@@ -8,12 +8,13 @@
 //   /sys/mods/{mod}/types/               → dir (list type CatalogEntries)
 //   /sys/mods/{mod}/types/{typeName}     → CatalogEntry node
 //   /sys/mods/{mod}/prefabs/             → dir (list prefabs)
-//   /sys/mods/{mod}/prefabs/{name}/      → prefab root (dir)
+//   /sys/mods/{mod}/prefabs/{name}/      → t.prefab node (mod, name, deploy action)
 //   /sys/mods/{mod}/prefabs/{name}/{...} → prefab nodes
 
 import { createNode, type NodeData } from '#core';
 import { getLoadedMods } from '#mod/loader';
 import { getModPrefabs, getPrefab, getRegisteredMods } from '#mod/prefab';
+import { Prefab } from '#mods/treenity/prefab-type';
 import { paginate, type Tree } from '#tree';
 import { getModInfo } from './mod-catalog';
 
@@ -72,15 +73,13 @@ export function createModsStore(_backingStore: Tree, modsPath = '/sys/mods'): Tr
       // /sys/mods/{mod} → t.mod node
       if (!p.sub) {
         const info = getModInfo(p.mod);
-        return {
-          $path: path,
-          $type: 't.mod',
+        return createNode(path, 't.mod', {
           name: info.name,
           state: info.state,
           ...(info.error ? { error: info.error } : {}),
           types: info.types.map(t => t.name),
           prefabs: info.prefabs,
-        } as unknown as NodeData;
+        });
       }
 
       // /sys/mods/{mod}/types
@@ -91,14 +90,12 @@ export function createModsStore(_backingStore: Tree, modsPath = '/sys/mods'): Tr
         const info = getModInfo(p.mod);
         const entry = info?.types.find(t => t.name === p.name);
         if (!entry) return undefined;
-        return {
-          $path: path,
-          $type: 'type',
+        return createNode(path, 'type', {
           name: entry.name,
           ...(entry.title ? { title: entry.title } : {}),
           properties: entry.properties,
           actions: entry.actions,
-        } as unknown as NodeData;
+        });
       }
 
       // /sys/mods/{mod}/prefabs
@@ -108,7 +105,7 @@ export function createModsStore(_backingStore: Tree, modsPath = '/sys/mods'): Tr
       const prefab = getPrefab(p.mod, p.name!);
       if (!prefab) return undefined;
 
-      if (!p.rest) return createNode(path, 'dir');
+      if (!p.rest) return createNode(path, Prefab, { mod: p.mod, name: p.name! });
 
       // /sys/mods/{mod}/prefabs/{name}/{rest}
       const found = prefab.nodes.find(n => {
@@ -140,20 +137,18 @@ export function createModsStore(_backingStore: Tree, modsPath = '/sys/mods'): Tr
         const info = getModInfo(p.mod);
         if (info) {
           for (const t of info.types) {
-            items.push({
-              $path: `${path}/${t.name}`,
-              $type: 'type',
+            items.push(createNode(`${path}/${t.name}`, 'type', {
               name: t.name,
               ...(t.title ? { title: t.title } : {}),
               properties: t.properties,
               actions: t.actions,
-            } as unknown as NodeData);
+            }));
           }
         }
       } else if (p.sub === 'prefabs' && !p.name) {
         // List prefabs for mod
         for (const [name] of getModPrefabs(p.mod)) {
-          items.push(createNode(`${path}/${name}`, 'dir'));
+          items.push(createNode(`${path}/${name}`, Prefab, { mod: p.mod, name }));
         }
       } else if (p.sub === 'prefabs' && p.name) {
         // List prefab nodes (direct children only)

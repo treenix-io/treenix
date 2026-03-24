@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 import { executeAction } from './actions';
 import { withMounts } from './mount';
+import { MountQuery } from './mount-adapters';
 import { type NodeEvent, type ReactiveTree, unwatchAllQueries, watchQuery, withSubscriptions } from './sub';
 import { withValidation } from './validate';
 import { withVolatile } from './volatile';
@@ -424,9 +425,9 @@ describe('Stress: query mounts + CDC', () => {
 
   beforeEach(() => {
     clearRegistry();
-    register('t.mount.query', 'mount', (config: any, parentStore: Tree) => {
-      const query = config['query'] as unknown as { source: string; match: Record<string, unknown> };
-      return createQueryTree({ source: query.source, match: query.match }, parentStore);
+    register(MountQuery, 'mount', (mount, ctx) => {
+      if (!mount.source || !mount.match) throw new Error('t.mount.query: source and match required');
+      return createQueryTree(mount, ctx.parentStore);
     });
     ({ bootstrap, tree, watcher } = fullPipeline());
   });
@@ -434,8 +435,7 @@ describe('Stress: query mounts + CDC', () => {
   it('query mount filters correctly under load', async () => {
     await bootstrap.set(
       createNode('/views/active', 'folder', {}, {
-        mount: { $type: 't.mount.query' },
-        query: { $type: 'query', source: '/entities/tasks', match: { status: 'active' } },
+        mount: { $type: 't.mount.query', source: '/entities/tasks', match: { status: 'active' } },
       }),
     );
 
@@ -461,8 +461,7 @@ describe('Stress: query mounts + CDC', () => {
   it('CDC: node entering/leaving virtual parent', async () => {
     await bootstrap.set(
       createNode('/views/urgent', 'folder', {}, {
-        mount: { $type: 't.mount.query' },
-        query: { $type: 'query', source: '/entities/tickets', match: { priority: 'high' } },
+        mount: { $type: 't.mount.query', source: '/entities/tickets', match: { priority: 'high' } },
       }),
     );
 
@@ -495,8 +494,7 @@ describe('Stress: query mounts + CDC', () => {
   it('CDC under load — 100 create + 50 transition', async () => {
     await bootstrap.set(
       createNode('/views/new', 'folder', {}, {
-        mount: { $type: 't.mount.query' },
-        query: { $type: 'query', source: '/entities/orders', match: { status: 'new' } },
+        mount: { $type: 't.mount.query', source: '/entities/orders', match: { status: 'new' } },
       }),
     );
 
@@ -536,14 +534,12 @@ describe('Stress: query mounts + CDC', () => {
   it('multiple query mounts on same source — CDC dispatches to both', async () => {
     await bootstrap.set(
       createNode('/views/new', 'folder', {}, {
-        mount: { $type: 't.mount.query' },
-        query: { $type: 'query', source: '/entities/items', match: { status: 'new' } },
+        mount: { $type: 't.mount.query', source: '/entities/items', match: { status: 'new' } },
       }),
     );
     await bootstrap.set(
       createNode('/views/flagged', 'folder', {}, {
-        mount: { $type: 't.mount.query' },
-        query: { $type: 'query', source: '/entities/items', match: { flagged: true } },
+        mount: { $type: 't.mount.query', source: '/entities/items', match: { flagged: true } },
       }),
     );
 
@@ -840,17 +836,16 @@ describe('Stress: full watch pipeline', () => {
   });
 
   it('watch + watchChildren + CDC — mixed scenario', async () => {
-    register('t.mount.query', 'mount', (config: any, parentStore: Tree) => {
-      const query = config['query'] as unknown as { source: string; match: Record<string, unknown> };
-      return createQueryTree({ source: query.source, match: query.match }, parentStore);
+    register(MountQuery, 'mount', (mount, ctx) => {
+      if (!mount.source || !mount.match) throw new Error('t.mount.query: source and match required');
+      return createQueryTree(mount, ctx.parentStore);
     });
 
     const { bootstrap: bs2, tree: store2, watcher: w2 } = fullPipeline();
 
     await bs2.set(
       createNode('/views/hot', 'folder', {}, {
-        mount: { $type: 't.mount.query' },
-        query: { $type: 'query', source: '/data', match: { hot: true } },
+        mount: { $type: 't.mount.query', source: '/data', match: { hot: true } },
       }),
     );
 

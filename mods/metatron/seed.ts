@@ -11,11 +11,9 @@ registerPrefab('metatron', 'seed', [
 
   // Query mounts — virtual folders filtered by task status
   { $path: 'metatron/inbox', $type: 'mount-point',
-    mount: { $type: 't.mount.query' },
-    query: { $type: 'query', source: '/metatron/tasks', match: { $type: 'metatron.task', status: { $in: ['pending', 'running'] } } } },
+    mount: { $type: 't.mount.query', source: '/metatron/tasks', match: { $type: 'metatron.task', status: { $in: ['pending', 'running'] } } } },
   { $path: 'metatron/done', $type: 'mount-point',
-    mount: { $type: 't.mount.query' },
-    query: { $type: 'query', source: '/metatron/tasks', match: { $type: 'metatron.task', status: 'done' } } },
+    mount: { $type: 't.mount.query', source: '/metatron/tasks', match: { $type: 'metatron.task', status: 'done' } } },
 
   // Skills — modular prompt fragments
   { $path: 'metatron/skills', $type: 'dir' },

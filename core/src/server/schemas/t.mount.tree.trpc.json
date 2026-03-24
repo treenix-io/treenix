@@ -1,0 +1,24 @@
+{
+  "$id": "t.mount.tree.trpc",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "url": {
+      "type": "string",
+      "default": ""
+    },
+    "path": {
+      "type": "string",
+      "default": "/"
+    },
+    "token": {
+      "type": "string",
+      "default": ""
+    }
+  },
+  "required": [
+    "url",
+    "path",
+    "token"
+  ]
+}

@@ -9,27 +9,25 @@ registerPrefab('agent', 'seed', [
     maxConcurrent: 2, active: [], queue: [] },
 
   // Guardian — global base policy (applies to ALL agents)
+  // $type: 'ai.policy' so getComponent(node, AiPolicy) returns node itself.
   // Read-only by default. Destructive ops denied. Writes require approval.
-  { $path: 'agents/guardian', $type: 'dir',
-    policy: {
-      $type: 'ai.policy',
-      allow: [
-        'mcp__treenity__get_node', 'mcp__treenity__list_children',
-        'mcp__treenity__catalog', 'mcp__treenity__describe_type',
-        'mcp__treenity__search_types', 'mcp__treenity__compile_view',
-      ],
-      deny: [
-        'mcp__treenity__remove_node',
-        'Bash:git checkout *', 'Bash:git checkout -- *',
-        'Bash:git reset --hard*', 'Bash:git push --force*', 'Bash:git clean*',
-        'Bash:rm -rf *', 'Bash:rm -r *', 'Bash:cat *.env*',
-      ],
-      escalate: [
-        'mcp__treenity__set_node', 'mcp__treenity__execute', 'mcp__treenity__deploy_prefab',
-        'Bash:git add *', 'Bash:git commit *', 'Bash:git push *',
-        'Bash:sed *', 'Bash:mv *', 'Bash:cp *',
-      ],
-    },
+  { $path: 'agents/guardian', $type: 'ai.policy',
+    allow: [
+      'mcp__treenity__get_node', 'mcp__treenity__list_children',
+      'mcp__treenity__catalog', 'mcp__treenity__describe_type',
+      'mcp__treenity__search_types', 'mcp__treenity__compile_view',
+    ],
+    deny: [
+      'mcp__treenity__remove_node',
+      'Bash:git checkout *', 'Bash:git checkout -- *',
+      'Bash:git reset --hard*', 'Bash:git push --force*', 'Bash:git clean*',
+      'Bash:rm -rf *', 'Bash:rm -r *', 'Bash:cat *.env*',
+    ],
+    escalate: [
+      'mcp__treenity__set_node', 'mcp__treenity__execute', 'mcp__treenity__deploy_prefab',
+      'Bash:git add *', 'Bash:git commit *', 'Bash:git push *',
+      'Bash:sed *', 'Bash:mv *', 'Bash:cp *',
+    ],
   },
 
   // Approvals queue

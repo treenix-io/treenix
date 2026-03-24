@@ -42,14 +42,12 @@ describe('Workflow & Spatial Gravity', () => {
     // 2. Setup query mounts
     await trpcStore.set(
       createNode('/workflows/new', 'folder', {}, {
-        mount: { $type: 't.mount.query' },
-        query: { $type: 'query', source: '/entities/orders', match: { status: 'new' } }
+        mount: { $type: 't.mount.query', source: '/entities/orders', match: { status: 'new' } }
       })
     );
     await trpcStore.set(
       createNode('/workflows/kitchen', 'folder', {}, {
-        mount: { $type: 't.mount.query' },
-        query: { $type: 'query', source: '/entities/orders', match: { status: 'kitchen' } }
+        mount: { $type: 't.mount.query', source: '/entities/orders', match: { status: 'kitchen' } }
       })
     );
 

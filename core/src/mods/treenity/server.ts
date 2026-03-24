@@ -1,6 +1,7 @@
 import './builtins';
 import './system';
 import './mod-type';
+import './prefab-type';
 import './user';
 import './groups';
 import './agent-port';

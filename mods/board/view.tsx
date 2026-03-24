@@ -27,9 +27,19 @@ import { Input } from '@treenity/react/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@treenity/react/ui/select';
 import { Textarea } from '@treenity/react/ui/textarea';
 import { useMemo, useRef, useState } from 'react';
+import { toast } from 'sonner';
 import { BoardColumn, BoardKanban, BoardTask } from './types';
 
-type TaskStatus = BoardTask['status'];
+type TaskStatus = string;
+
+async function withToast(fn: () => Promise<unknown>, successMsg?: string) {
+  try {
+    await fn();
+    if (successMsg) toast.success(successMsg);
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : 'Operation failed');
+  }
+}
 
 const PRIORITY_COLOR: Record<string, string> = {
   urgent: 'bg-red-500',
@@ -64,9 +74,9 @@ function AiBadge() {
 
 // ── board.task view — editable task detail ──
 
-const TaskView: View<BoardTask> = ({ ctx }) => {
+const TaskView: View<BoardTask> = ({ value, ctx }) => {
   const path = ctx?.path ?? '';
-  const node = usePath<NodeData>(path);
+  const node = ctx?.node;
   const proxy = usePath(path, BoardTask);
   const [editingDesc, setEditingDesc] = useState(false);
   if (!node || !proxy) return null;
@@ -79,7 +89,7 @@ const TaskView: View<BoardTask> = ({ ctx }) => {
   const result = typeof proxy.result === 'string' ? proxy.result : '';
 
   const save = (patch: Record<string, unknown>) => {
-    set({ ...node, ...patch, updatedAt: Date.now() });
+    withToast(() => set({ ...node, ...patch, updatedAt: Date.now() }));
   };
 
   return (
@@ -103,20 +113,21 @@ const TaskView: View<BoardTask> = ({ ctx }) => {
             setEditingDesc(false);
           }}
         />
-      ) : description ? (
-        <div
-          className="cursor-pointer whitespace-pre-wrap rounded border border-transparent p-2 text-sm line-clamp-4 hover:border-border"
-          onClick={() => setEditingDesc(true)}
-          title="Click to edit"
-        >
-          {description}
-        </div>
       ) : (
         <div
-          className="cursor-pointer rounded border border-dashed border-border p-2 text-sm text-muted-foreground hover:border-foreground/30"
+          tabIndex={0}
+          role="button"
+          className={cn(
+            'cursor-pointer rounded border p-2 text-sm',
+            description
+              ? 'whitespace-pre-wrap border-transparent line-clamp-4 hover:border-border'
+              : 'border-dashed border-border text-muted-foreground hover:border-foreground/30',
+          )}
           onClick={() => setEditingDesc(true)}
+          onFocus={() => setEditingDesc(true)}
+          title="Click to edit"
         >
-          Add a description...
+          {description || 'Add a description...'}
         </div>
       )}
 
@@ -165,6 +176,7 @@ const TaskView: View<BoardTask> = ({ ctx }) => {
       <NamedComponents node={node} />
 
       <EmbeddedTaskLog taskRef={typeof node.taskRef === 'string' ? node.taskRef : ''} />
+
     </div>
   );
 };
@@ -251,18 +263,19 @@ function EmbeddedTaskLog({ taskRef }: { taskRef: string }) {
 
 register('board.task', 'react', TaskView);
 
-function TaskListItem({ value }: { value: NodeData }) {
+const TaskListItem: View<BoardTask> = ({ value }) => {
   const nav = useNavigate();
-  const priority = typeof value.priority === 'string' ? value.priority : 'normal';
-  const title = typeof value.title === 'string' && value.title
-    ? value.title
-    : value.$path.split('/').at(-1);
-  const aiStatus = typeof (value as any).aiStatus === 'string' ? (value as any).aiStatus : '';
-  const assignee = typeof value.assignee === 'string' ? value.assignee : '';
+  const v = value as NodeData;
+  const priority = typeof v.priority === 'string' ? v.priority : 'normal';
+  const title = typeof v.title === 'string' && v.title
+    ? v.title
+    : v.$path.split('/').at(-1);
+  const aiStatus = typeof v.aiStatus === 'string' ? v.aiStatus : '';
+  const assignee = typeof v.assignee === 'string' ? v.assignee : '';
 
   return (
     <button
-      onClick={() => nav(value.$path)}
+      onClick={() => nav(v.$path)}
       className="flex w-full items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-left transition-colors hover:bg-accent/50"
     >
       <PriorityDot priority={priority} />
@@ -277,9 +290,9 @@ function TaskListItem({ value }: { value: NodeData }) {
       )}
     </button>
   );
-}
+};
 
-register('board.task', 'react:list', TaskListItem as any);
+register('board.task', 'react:list', TaskListItem);
 
 // ── Helpers ──
 
@@ -287,20 +300,20 @@ function TaskActions({ proxy, status }: { proxy: ReturnType<typeof usePath<Board
   const btn = 'h-7 text-xs';
   switch (status) {
     case 'backlog':
-      return <Button variant="outline" size="sm" className={btn} onClick={() => proxy.start()}>Start</Button>;
+      return <Button tabIndex={-1} variant="outline" size="sm" className={btn} onClick={() => withToast(() => proxy.start())}>Start</Button>;
     case 'todo':
-      return <Button variant="outline" size="sm" className={btn} onClick={() => proxy.start()}>Begin</Button>;
+      return <Button tabIndex={-1} variant="outline" size="sm" className={btn} onClick={() => withToast(() => proxy.start())}>Begin</Button>;
     case 'doing':
-      return <Button variant="outline" size="sm" className={btn} onClick={() => proxy.submit()}>Submit</Button>;
+      return <Button tabIndex={-1} variant="outline" size="sm" className={btn} onClick={() => withToast(() => proxy.submit())}>Submit</Button>;
     case 'review':
       return (
         <div className="flex gap-1">
-          <Button variant="outline" size="sm" className={btn} onClick={() => proxy.approve()}>Approve</Button>
-          <Button variant="ghost" size="sm" className={btn} onClick={() => proxy.reject()}>Reject</Button>
+          <Button tabIndex={-1} variant="outline" size="sm" className={btn} onClick={() => withToast(() => proxy.approve())}>Approve</Button>
+          <Button tabIndex={-1} variant="ghost" size="sm" className={btn} onClick={() => withToast(() => proxy.reject())}>Reject</Button>
         </div>
       );
     case 'done':
-      return <Button variant="ghost" size="sm" className={btn} onClick={() => proxy.reopen()}>Reopen</Button>;
+      return <Button tabIndex={-1} variant="ghost" size="sm" className={btn} onClick={() => withToast(() => proxy.reopen())}>Reopen</Button>;
     default:
       return null;
   }
@@ -387,7 +400,7 @@ function TaskCard({ task, onSelect, colStatus }: { task: NodeData; onSelect: (pa
 
 // ── Column ──
 
-function Column({ col, onSelect, highlighted }: { col: NodeData; onSelect: (path: string) => void; highlighted?: boolean }) {
+function Column({ col, onSelect, onAddTask, highlighted }: { col: NodeData; onSelect: (path: string) => void; onAddTask: (status: string) => void; highlighted?: boolean }) {
   const proxy = usePath(col.$path, BoardColumn);
   const tasks = useChildren(col.$path, { watch: true, watchNew: true });
   const status = col.$path.split('/').at(-1) ?? '';
@@ -398,10 +411,24 @@ function Column({ col, onSelect, highlighted }: { col: NodeData; onSelect: (path
   const taskIds = useMemo(() => tasks.map(t => t.$path), [tasks]);
 
   return (
-    <div className="flex min-w-40 flex-1 flex-col">
+    <div className="group flex min-w-40 flex-1 flex-col">
       <div className={cn('mb-2 flex items-center gap-2 border-b-2 pb-1.5', color)}>
-        <span className="text-sm font-bold">{label}</span>
+        <BlurInput
+          value={label}
+          className="h-auto border-none bg-transparent p-0 text-sm font-bold shadow-none focus-visible:ring-0"
+          onSave={v => withToast(() => set({ ...col, label: v, updatedAt: Date.now() }))}
+        />
         <span className="text-xs text-muted-foreground">({tasks.length})</span>
+        <button
+          onClick={async () => {
+            if (!confirm(`Delete column "${label}"?`)) return;
+            await withToast(() => trpc.remove.mutate({ path: col.$path }), 'Column deleted');
+          }}
+          className="ml-auto hidden text-xs text-muted-foreground group-hover:block hover:text-destructive"
+          title="Delete column"
+        >
+          ✕
+        </button>
       </div>
 
       <SortableContext items={taskIds} strategy={verticalListSortingStrategy}>
@@ -416,11 +443,15 @@ function Column({ col, onSelect, highlighted }: { col: NodeData; onSelect: (path
             <TaskCard key={task.$path} task={task} onSelect={onSelect} colStatus={status} />
           ))}
 
-          {tasks.length === 0 && (
-            <div className="rounded-md border border-dashed border-border py-6 text-center text-xs text-muted-foreground">
-              {highlighted ? 'Drop here' : 'Empty'}
-            </div>
-          )}
+          <button
+            onClick={() => onAddTask(status)}
+            className={cn(
+              'w-full rounded-md border border-dashed border-border py-2 text-center text-xs text-muted-foreground hover:border-foreground/30 hover:text-foreground',
+              tasks.length === 0 && 'py-6',
+            )}
+          >
+            {highlighted ? 'Drop here' : '+ Add task'}
+          </button>
         </div>
       </SortableContext>
     </div>
@@ -449,22 +480,48 @@ const KanbanView: View<BoardKanban> = ({ value, ctx }) => {
       return oa - ob;
     });
 
-  const createTask = async () => {
-    const id = Date.now().toString(36).toUpperCase();
-    await trpc.set.mutate({
-      node: {
-        $path: `${basePath}/data/${id}`,
-        $type: 'board.task',
-        title: `Task #${id}`,
-        status: 'backlog',
-        priority: 'normal',
-        assignee: '',
-        description: '',
-        result: '',
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      } as NodeData,
+  const createTask = async (status: string) => {
+    await withToast(async () => {
+      await trpc.set.mutate({ node: { $path: `${basePath}/data`, $type: 'dir' } as NodeData });
+      const id = Date.now().toString(36).toUpperCase();
+      const taskPath = `${basePath}/data/${id}`;
+      await trpc.set.mutate({
+        node: {
+          $path: taskPath,
+          $type: 'board.task',
+          title: '',
+          status,
+          priority: 'normal',
+          assignee: '',
+          description: '',
+          result: '',
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        } as NodeData,
+      });
+      setSelectedTask(taskPath);
     });
+  };
+
+  const createColumn = async () => {
+    const label = window.prompt('Column name:');
+    if (!label?.trim()) return;
+    const slug = label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    const maxOrder = Math.max(0, ...columns.map(c => typeof c.order === 'number' ? c.order : 0));
+
+    await withToast(async () => {
+      await trpc.set.mutate({
+        node: {
+          $path: `${basePath}/${slug}`,
+          $type: 'board.column',
+          label: label.trim(),
+          color: 'border-zinc-400',
+          order: maxOrder + 1,
+          mount: { $type: 't.mount.query' },
+          query: { $type: 'query', source: `${basePath}/data`, match: { status: slug } },
+        } as NodeData,
+      });
+    }, `Column "${label.trim()}" created`);
   };
 
   const handleDragStart = (event: DragStartEvent) => {
@@ -504,21 +561,26 @@ const KanbanView: View<BoardKanban> = ({ value, ctx }) => {
     if (src.task.status === targetStatus) return;
 
     const move = src.move;
-    if (typeof move === 'function') move({ status: targetStatus });
+    if (typeof move === 'function') withToast(() => move({ status: targetStatus }));
   };
 
   return (
     <div className="view-full px-4 py-3">
-      <div className="mb-3 flex items-center justify-between">
+      <div className="mb-3">
         <h2 className="text-lg font-bold">Task Board</h2>
-        <Button onClick={createTask}>+ New Task</Button>
       </div>
 
       <DndContext sensors={sensors} collisionDetection={closestCorners} onDragStart={handleDragStart} onDragOver={handleDragOver} onDragEnd={handleDragEnd}>
         <div className="flex gap-3 overflow-x-auto pb-2">
           {columns.map(col => (
-            <Column key={col.$path} col={col} onSelect={setSelectedTask} highlighted={overColumn === (col.$path.split('/').at(-1) ?? '')} />
+            <Column key={col.$path} col={col} onSelect={setSelectedTask} onAddTask={createTask} highlighted={overColumn === (col.$path.split('/').at(-1) ?? '')} />
           ))}
+          <button
+            onClick={createColumn}
+            className="flex min-w-32 items-center justify-center rounded-md border border-dashed border-border text-sm text-muted-foreground hover:border-foreground/30 hover:text-foreground"
+          >
+            + Column
+          </button>
         </div>
 
         <DragOverlay>
@@ -535,9 +597,25 @@ const KanbanView: View<BoardKanban> = ({ value, ctx }) => {
           <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-[960px]" aria-describedby={undefined}>
             <DialogTitle className="sr-only">Task</DialogTitle>
             <Render value={selectedNode} />
+            <div className="flex justify-between pt-2 border-t border-border">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-xs text-destructive hover:text-destructive"
+                onClick={async () => {
+                  if (!confirm('Delete this task?')) return;
+                  await withToast(() => trpc.remove.mutate({ path: selectedTask }), 'Task deleted');
+                  setSelectedTask(null);
+                }}
+              >
+                Delete
+              </Button>
+              <Button onClick={() => setSelectedTask(null)}>Done</Button>
+            </div>
           </DialogContent>
         </Dialog>
       )}
+
     </div>
   );
 };
@@ -546,10 +624,11 @@ register('board.kanban', 'react', KanbanView);
 
 // ── board.column view ──
 
-function ColumnView({ value }: { value: NodeData & BoardColumn }) {
-  const tasks = useChildren(value.$path, { watch: true, watchNew: true });
-  const label = typeof value.label === 'string' ? value.label : value.$path.split('/').at(-1);
-  const color = typeof value.color === 'string' ? value.color : 'border-zinc-400';
+const ColumnView: View<BoardColumn> = ({ value }) => {
+  const v = value as NodeData;
+  const tasks = useChildren(v.$path, { watch: true, watchNew: true });
+  const label = typeof v.label === 'string' ? v.label : v.$path.split('/').at(-1);
+  const color = typeof v.color === 'string' ? v.color : 'border-zinc-400';
 
   return (
     <div className="flex flex-col gap-2 p-3">
@@ -569,6 +648,6 @@ function ColumnView({ value }: { value: NodeData & BoardColumn }) {
       </RenderContext>
     </div>
   );
-}
+};
 
-register('board.column', 'react', ColumnView as any);
+register('board.column', 'react', ColumnView);

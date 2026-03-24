@@ -67,7 +67,7 @@ function listen(server: import('node:http').Server): Promise<number> {
 // Uses `any` for onData param to avoid mismatch between our NodeEvent and tRPC's inferred type.
 function collectEvents<T>(
   subscribe: (callbacks: { onData: (d: any) => void; onComplete: () => void; onError: (e: unknown) => void }) => { unsubscribe: () => void },
-  opts: { count?: number; timeoutMs?: number } = {},
+  opts: { count?: number; timeoutMs?: number; onReady?: () => void } = {},
 ): Promise<T[]> {
   const { count = Infinity, timeoutMs = 3000 } = opts;
   return new Promise((resolve) => {
@@ -75,7 +75,7 @@ function collectEvents<T>(
     let timer: ReturnType<typeof setTimeout>;
     const sub = subscribe({
       onData(d: NodeEvent) {
-        if (d.type === 'reconnect') return; // skip protocol event
+        if (d.type === 'reconnect') { opts.onReady?.(); return; }
         items.push(d as T);
         if (items.length >= count) { clearTimeout(timer); sub.unsubscribe(); resolve(items); }
       },
@@ -84,6 +84,23 @@ function collectEvents<T>(
     });
     timer = setTimeout(() => { sub.unsubscribe(); resolve(items); }, timeoutMs);
   });
+}
+
+/** Subscribe to SSE events, returning both the events promise and a ready signal.
+ *  `ready` resolves on first `reconnect` event (SSE connected) or when collectEvents settles. */
+function subscribeEvents<T = DataEvent>(
+  client: ReturnType<typeof createClient>,
+  opts: { count?: number; timeoutMs?: number } = {},
+) {
+  let resolveReady!: () => void;
+  const ready = new Promise<void>(r => { resolveReady = r; });
+  const events = collectEvents<T>(
+    (cbs) => client.events.subscribe(undefined, cbs),
+    { ...opts, onReady: () => resolveReady() },
+  );
+  // If collectEvents settles before reconnect arrives, unblock ready too
+  events.then(() => resolveReady());
+  return { events, ready };
 }
 
 describe('e2e: tRPC over HTTP', () => {
@@ -458,13 +475,11 @@ describe('e2e: tRPC over HTTP', () => {
       } });
       await client.set.mutate({ node: {
         $path: '/orders/new', $type: 'folder',
-        mount: { $type: 't.mount.query' },
-        query: { $type: 'query', source: '/orders/data', match: { 'status.status': 'new' } },
+        mount: { $type: 't.mount.query', source: '/orders/data', match: { 'status.status': 'new' } },
       } });
       await client.set.mutate({ node: {
         $path: '/orders/kitchen', $type: 'folder',
-        mount: { $type: 't.mount.query' },
-        query: { $type: 'query', source: '/orders/data', match: { 'status.status': 'kitchen' } },
+        mount: { $type: 't.mount.query', source: '/orders/data', match: { 'status.status': 'kitchen' } },
       } });
 
       let newOrders = await client.getChildren.query({ path: '/orders/new' });
@@ -489,8 +504,7 @@ describe('e2e: tRPC over HTTP', () => {
   ) {
     await client.set.mutate({ node: {
       $path: vpPath, $type: 'folder',
-      mount: { $type: 't.mount.query' },
-      query: { $type: 'query', source: sourcePath, match },
+      mount: { $type: 't.mount.query', source: sourcePath, match },
     } });
   }
 
@@ -796,11 +810,8 @@ describe('e2e: tRPC over HTTP', () => {
       // VP2: matches any node with pri component (level exists)
       await setupQueryMount(pub, '/qme/all', '/multi', { 'pri.level': { $exists: true } });
 
-      const events = collectEvents<DataEvent>(
-        (cbs) => client.events.subscribe(undefined, cbs),
-        { count: 1, timeoutMs: 3000 },
-      );
-      await new Promise(r => setTimeout(r, 300));
+      const { events, ready } = subscribeEvents(client, { count: 1, timeoutMs: 3000 });
+      await ready;
 
       await client.getChildren.query({ path: '/qme/high', watchNew: true, watch: true });
       await client.getChildren.query({ path: '/qme/all', watchNew: true, watch: true });
@@ -828,11 +839,8 @@ describe('e2e: tRPC over HTTP', () => {
       await pub.set.mutate({ node: { $path: '/qmaw', $type: 'folder' } });
       await setupQueryMount(pub, '/qmaw/hot', '/aw', { 'pri.level': 'high' });
 
-      const events = collectEvents<DataEvent>(
-        (cbs) => client.events.subscribe(undefined, cbs),
-        { count: 2, timeoutMs: 4000 },
-      );
-      await new Promise(r => setTimeout(r, 300));
+      const { events, ready } = subscribeEvents(client, { count: 2, timeoutMs: 4000 });
+      await ready;
 
       // watchNew + watch = autoWatch enabled
       await client.getChildren.query({ path: '/qmaw/hot', watchNew: true, watch: true });
@@ -873,15 +881,9 @@ describe('e2e: tRPC over HTTP', () => {
       await setupQueryMount(pub, '/qmu/hot', '/mu', { 'pri.level': 'high' });
 
       // Both users subscribe
-      const events1 = collectEvents<DataEvent>(
-        (cbs) => c1.events.subscribe(undefined, cbs),
-        { count: 1, timeoutMs: 3000 },
-      );
-      const events2 = collectEvents<DataEvent>(
-        (cbs) => c2.events.subscribe(undefined, cbs),
-        { count: 1, timeoutMs: 3000 },
-      );
-      await new Promise(r => setTimeout(r, 300));
+      const sub1 = subscribeEvents(c1, { count: 1, timeoutMs: 5000 });
+      const sub2 = subscribeEvents(c2, { count: 1, timeoutMs: 5000 });
+      await Promise.all([sub1.ready, sub2.ready]);
 
       // Both watch the same VP
       await c1.getChildren.query({ path: '/qmu/hot', watchNew: true, watch: true });
@@ -893,7 +895,7 @@ describe('e2e: tRPC over HTTP', () => {
         pri: { $type: 'task.priority', level: 'high' },
       } });
 
-      const [r1, r2] = await Promise.all([events1, events2]);
+      const [r1, r2] = await Promise.all([sub1.events, sub2.events]);
       assert.ok(r1.length >= 1, 'User 1 should receive event');
       assert.ok(r2.length >= 1, 'User 2 should receive event');
       assert.ok((r1[0] as any).addVps?.includes('/qmu/hot'));

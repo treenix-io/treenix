@@ -1,4 +1,4 @@
-import { createNode, ref, register } from '#core';
+import { createNode, getComponent, ref, register } from '#core';
 import { clearRegistry } from '#core/index.test';
 import { createMemoryTree, type Tree } from '#tree';
 import { createFsTree } from '#tree/fs';
@@ -112,9 +112,13 @@ describe('Mounts', () => {
     assert.equal(callCount, 1);
   });
 
+  // TODO: ref-mount where ref-target $type IS the adapter — needs rethink after MountAdapter<T> refactor
   it('resolves mount via $ref to config node', async () => {
     register('test.ref.store', 'mount', () => usersStore);
-    await rootStore.set(createNode('/mnt/users', 'test.ref.store'));
+    await rootStore.set({
+      ...createNode('/mnt/users', 'mount-point'),
+      mount: { $type: 'test.ref.store' },
+    });
     await rootStore.set(
       createNode('/users', 'collection', {}, {
         mount: ref('/mnt/users'),
@@ -130,7 +134,10 @@ describe('Mounts', () => {
 
   it('ref mount delegates set and getChildren', async () => {
     register('test.ref.store', 'mount', () => usersStore);
-    await rootStore.set(createNode('/mnt/users', 'test.ref.store'));
+    await rootStore.set({
+      ...createNode('/mnt/users', 'mount-point'),
+      mount: { $type: 'test.ref.store' },
+    });
     await rootStore.set(
       createNode('/users', 'collection', {}, {
         mount: ref('/mnt/users'),
@@ -251,8 +258,8 @@ describe('Mounts', () => {
     const dataStore = createMemoryTree();
     let receivedDeps: unknown = null;
     register('test.mount.data', 'mount', () => dataStore);
-    register('test.mount.spy', 'mount', (_node: unknown, deps: unknown) => {
-      receivedDeps = deps;
+    register('test.mount.spy', 'mount', (_mount: unknown, ctx: any) => {
+      receivedDeps = ctx.parentStore;
       return createMemoryTree();
     });
     await rootStore.set(
@@ -326,11 +333,10 @@ describe('Query mount (t.mount.query)', () => {
     rootStore = createMemoryTree();
     dataStore = createMemoryTree();
     register('test.mount.data', 'mount', () => dataStore);
-    // Register query mount adapter
-    register('t.mount.query', 'mount', (config, parentStore) => {
-      const n = config as any;
-      const query = n.query;
-      return createQueryTree({ source: query.source, match: query.match }, parentStore);
+    // Register query mount adapter (receives mount component + MountCtx)
+    register('t.mount.query', 'mount', (_mount, ctx) => {
+      const query = getComponent(ctx.node, 'query') as any;
+      return createQueryTree({ source: query.source, match: query.match }, ctx.parentStore);
     });
   });
 

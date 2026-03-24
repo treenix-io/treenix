@@ -7,7 +7,7 @@ export class BoardTask {
   title = '';
   /** @format textarea */
   description = '';
-  status: 'backlog' | 'todo' | 'doing' | 'review' | 'done' = 'backlog';
+  status = 'backlog';
   assignee = '';
   priority: 'low' | 'normal' | 'high' | 'urgent' = 'normal';
   /** @format textarea */
@@ -55,7 +55,7 @@ export class BoardTask {
   }
 
   /** @description Move task to any status (kanban DnD) */
-  move(data: { /** Target status */ status: 'backlog' | 'todo' | 'doing' | 'review' | 'done' }) {
+  move(data: { /** Target */ status: string }) {
     if (this.status === data.status) return;
     this.status = data.status;
     this.updatedAt = Date.now();

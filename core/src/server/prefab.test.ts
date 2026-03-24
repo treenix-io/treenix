@@ -1,8 +1,10 @@
 import { createNode, type NodeData } from '#core';
 import { clearPrefabs, getModPrefabs, getPrefab, getRegisteredMods, getSeedPrefabs, registerPrefab } from '#mod/prefab';
+import '#mods/treenity/prefab-type';
 import { createMemoryTree, type Tree } from '#tree';
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
+import { executeAction } from './actions';
 import { createModsStore } from './mods-mount';
 import { deployByKey, deployPrefab, deploySeedPrefabs } from './prefab';
 
@@ -411,5 +413,52 @@ describe('deploySeedPrefabs', () => {
     await deploySeedPrefabs(tree);
     await deploySeedPrefabs(tree); // should not throw
     assert.equal((await tree.get('/idem'))?.$type, 'dir');
+  });
+});
+
+describe('t.prefab deploy action', () => {
+  let tree: Tree;
+
+  beforeEach(() => {
+    clearPrefabs();
+    tree = createMemoryTree();
+  });
+  afterEach(() => clearPrefabs());
+
+  it('deploys prefab nodes via executeAction on t.prefab node', async () => {
+    registerPrefab('cafe', 'seed', [
+      { $path: 'menu', $type: 'dir' } as NodeData,
+      { $path: 'contact', $type: 'cafe.contact' } as NodeData,
+    ]);
+
+    const { Prefab } = await import('#mods/treenity/prefab-type');
+    await tree.set(createNode('/sys/mods/cafe/prefabs/seed', Prefab, { mod: 'cafe', name: 'seed' }));
+
+    await executeAction(tree, '/sys/mods/cafe/prefabs/seed', 't.prefab', undefined, 'deploy', {
+      target: '/sites/demo',
+    });
+
+    assert.ok(await tree.get('/sites/demo/menu'));
+    assert.equal((await tree.get('/sites/demo/contact'))?.$type, 'cafe.contact');
+  });
+
+  it('deploy is idempotent — skips existing nodes', async () => {
+    registerPrefab('cafe', 'seed', [
+      { $path: 'menu', $type: 'dir' } as NodeData,
+    ]);
+
+    const { Prefab } = await import('#mods/treenity/prefab-type');
+    await tree.set(createNode('/sys/mods/cafe/prefabs/seed', Prefab, { mod: 'cafe', name: 'seed' }));
+
+    const r1 = await executeAction(tree, '/sys/mods/cafe/prefabs/seed', 't.prefab', undefined, 'deploy', {
+      target: '/x',
+    }) as { deployed: number; skipped: number };
+    assert.equal(r1.deployed, 1);
+
+    const r2 = await executeAction(tree, '/sys/mods/cafe/prefabs/seed', 't.prefab', undefined, 'deploy', {
+      target: '/x',
+    }) as { deployed: number; skipped: number };
+    assert.equal(r2.deployed, 0);
+    assert.equal(r2.skipped, 1);
   });
 });

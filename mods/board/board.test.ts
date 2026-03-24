@@ -28,12 +28,13 @@ async function execAction(tree: ReturnType<typeof createMemoryTree>, path: strin
   const node = await tree.get(path);
   assert.ok(node, `node at ${path} must exist`);
   await handler({ node, comp: node, tree, signal: AbortSignal.timeout(5000) }, data);
+  await tree.set(node);
   return node;
 }
 
 describe('board.task registration', () => {
   it('registers all expected actions', () => {
-    const actions = ['assign', 'start', 'submit', 'approve', 'reject', 'reopen'];
+    const actions = ['assign', 'start', 'submit', 'approve', 'reject', 'reopen', 'move'];
     for (const action of actions) {
       assert.ok(resolve('board.task', `action:${action}`), `action:${action} should be registered`);
     }
@@ -184,6 +185,33 @@ describe('board.task.reopen', () => {
     assert.equal(node.assignee, '');
     assert.equal(node.result, '');
     assert.ok((node.updatedAt as number) > 0);
+  });
+});
+
+describe('board.task.move', () => {
+  it('moves to a standard status', async () => {
+    const tree = createMemoryTree();
+    await tree.set(makeTask({ status: 'backlog' }));
+
+    const node = await execAction(tree, '/board/data/t-1', 'move', { status: 'doing' });
+    assert.equal(node.status, 'doing');
+    assert.ok((node.updatedAt as number) > 0);
+  });
+
+  it('moves to a custom status string', async () => {
+    const tree = createMemoryTree();
+    await tree.set(makeTask({ status: 'backlog' }));
+
+    const node = await execAction(tree, '/board/data/t-1', 'move', { status: 'blocked' });
+    assert.equal(node.status, 'blocked');
+  });
+
+  it('no-ops when target equals current status', async () => {
+    const tree = createMemoryTree();
+    await tree.set(makeTask({ status: 'doing', updatedAt: 0 }));
+
+    const node = await execAction(tree, '/board/data/t-1', 'move', { status: 'doing' });
+    assert.equal(node.updatedAt, 0);
   });
 });
 
