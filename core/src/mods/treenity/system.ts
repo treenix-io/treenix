@@ -5,6 +5,7 @@
 import { getCtx, registerType } from '@treenity/core/comp';
 import { verifyViewSource } from '@treenity/core/mods/uix/verify';
 import { TypeCatalog } from '@treenity/core/schema/catalog';
+import { applyTemplate } from '@treenity/core/server/actions';
 import { deployPrefab } from '@treenity/core/server/prefab';
 
 const catalog = new TypeCatalog();
@@ -54,6 +55,15 @@ export class SystemActions {
       }
     }
     return check;
+  }
+
+  /** @description Apply template: copy children from template path to target path */
+  async apply_template(data: {
+    /** Source template path, e.g. /templates/blog */ templatePath: string;
+    /** Target path where template children will be copied */ targetPath: string;
+  }) {
+    const { tree } = getCtx();
+    return applyTemplate(tree, data.templatePath, data.targetPath);
   }
 
   /** @description Deploy module prefab template to target path. Idempotent */
