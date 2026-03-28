@@ -20,6 +20,7 @@ function LoginForm({ onLogin }: { onLogin: (userId: string) => void }) {
     try {
       const fn = mode === 'register' ? trpc.register : trpc.login;
       const res = await fn.mutate({ userId: userId.trim(), password });
+      if (!res.token) throw new Error('No token received');
       setToken(res.token);
       onLogin(res.userId);
     } catch (e) {

@@ -58,9 +58,9 @@ export function createTrpcTransport(opts: TrpcTransportOpts): TreenityClient & {
     tree: {
       get: (path) => trpc.get.query({ path }) as Promise<NodeData | undefined>,
       getChildren: (path, opts) => trpc.getChildren.query({ path, ...opts }),
-      set: (node) => trpc.set.mutate({ node: node as Record<string, unknown> }),
+      set: (node) => trpc.set.mutate({ node: node as Record<string, unknown> }).then(() => {}),
       remove: (path) => trpc.remove.mutate({ path }).then(() => true),
-      patch: (path, ops) => trpc.patch.mutate({ path, ops: ops as PatchOp[] }),
+      patch: (path, ops) => trpc.patch.mutate({ path, ops }).then(() => {}),
     },
     execute: (path, action, data, o) =>
       trpc.execute.mutate({ path, action, data, type: o?.type, key: o?.key }),

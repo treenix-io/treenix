@@ -70,10 +70,12 @@ const safePath = z.string().superRefine((p, ctx) => {
   }
 });
 
-/** Zod schema for idempotent patch ops: replace and delete only */
+/** Zod schema matching PatchOp — test, replace, add, delete */
 const patchOps = z.array(z.union([
-  z.tuple([z.literal('r'), z.string(), z.unknown()]),
-  z.tuple([z.literal('d'), z.string()]),
+  z.tuple([z.literal('t'), z.string(), z.unknown()]).readonly(),
+  z.tuple([z.literal('r'), z.string(), z.unknown()]).readonly(),
+  z.tuple([z.literal('a'), z.string(), z.unknown()]).readonly(),
+  z.tuple([z.literal('d'), z.string()]).readonly(),
 ]));
 
 // ── Rate limiter (in-memory, per key) ──

@@ -23,7 +23,7 @@ export function createRemoteTree(client: TrpcClient): Tree {
   };
   const set = (node: NodeData) => {
     debugPath(node.$path, 'set');
-    return client.set.mutate({ node: node as Record<string, unknown> });
+    return client.set.mutate({ node: node as Record<string, unknown> }).then(() => {});
   };
 
   return {

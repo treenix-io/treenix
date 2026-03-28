@@ -22,6 +22,11 @@ import { set } from './hooks';
 
 type AnyClass = { new(): Record<string, unknown> };
 
+// Overlay local edits for controlled inputs — returns original ref when no edits
+function withEdits(base: ComponentData, edits?: Record<string, unknown>): ComponentData {
+  return edits && Object.keys(edits).length > 0 ? { ...base, ...edits } : base;
+}
+
 function NodeCard({ path, type, onChangeType }: {
   path: string;
   type: string;
@@ -222,7 +227,11 @@ export function NodeEditor({ node, open, onClose, currentUserId, toast, onAddCom
             <ComponentSection
               node={node}
               name=""
-              value={node as ComponentData}
+              value={withEdits(node as ComponentData, snap.plainData)}
+              onChange={(partial) => {
+                for (const [k, v] of Object.entries(partial)) if (!k.startsWith('$')) st.plainData[k] = v;
+                st.dirty = true;
+              }}
               toast={toast}
               onActionComplete={handleReset}
             />
@@ -233,7 +242,11 @@ export function NodeEditor({ node, open, onClose, currentUserId, toast, onAddCom
                 key={name}
                 node={node}
                 name={name}
-                value={comp as ComponentData}
+                value={withEdits(comp as ComponentData, snap.compData[name])}
+                onChange={(partial) => {
+                  for (const [k, v] of Object.entries(partial)) if (!k.startsWith('$')) st.compData[name][k] = v;
+                  st.dirty = true;
+                }}
                 collapsed={!!snap.collapsed[name]}
                 onToggle={() => { st.collapsed[name] = !st.collapsed[name]; }}
                 onRemove={() => handleRemoveComponent(name)}
