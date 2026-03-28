@@ -12,12 +12,14 @@
   },
   "scripts": {
     "test": "npm test --workspaces --if-present",
+    "test:e2e": "playwright test",
     "dev:server": "npm run dev:server -w @treenity/core",
     "dev:front": "npm run dev -w @treenity/react",
     "schema": "npm run schema -w @treenity/core",
     "typecheck": "tsc -p core --noEmit && tsc -p packages/react --noEmit"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
     "@types/d3-hierarchy": "^3.1.7",
     "@types/d3-selection": "^3.0.11",
     "@types/d3-shape": "^3.1.8",
