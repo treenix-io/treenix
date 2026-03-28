@@ -12,7 +12,7 @@ import {
   resolveExact,
   subscribeRegistry,
 } from '@treenity/core';
-import { createContext, createElement, type FC, type ReactNode, use, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, createElement, type FC, type ReactNode, useContext, useEffect, useMemo, useState } from 'react';
 
 // ── Tree context (rendering context string) ──
 
@@ -60,9 +60,14 @@ export function viewCtx(value: ComponentData): ViewCtx | null {
 // ── Handler type for React context ──
 // value is ComponentData (base type). NodeData IS ComponentData.
 
+import { type OnChange, scopeOnChange } from '#on-change';
+
+export type { OnChange };
+export { scopeOnChange };
+
 export type RenderProps<T = ComponentData> = {
   value: T;
-  onChange?: (next: T) => void;
+  onChange?: (partial: OnChange<T>) => void;
   ctx?: ViewCtx | null;
 };
 

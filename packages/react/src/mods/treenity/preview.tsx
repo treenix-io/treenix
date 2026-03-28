@@ -87,8 +87,8 @@ export function TypePreview({ typeName, properties }: {
 
   if (reactContexts.length === 0) return null;
 
-  const handleFormChange = (next: ComponentData) => {
-    setNode({ ...next, $path: initial.$path, $type: initial.$type } as NodeData);
+  const handleFormChange = (partial: Record<string, unknown>) => {
+    setNode(prev => ({ ...prev, ...partial, $path: initial.$path, $type: initial.$type }) as NodeData);
   };
 
   return (
