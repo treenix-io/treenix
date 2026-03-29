@@ -292,6 +292,14 @@ export async function executeAction(
   // comp must be the draft version so Immer captures mutations via `this.*`
   const dc = fieldKey ? draft[fieldKey] : undefined;
   const draftComp = isComponent(dc) ? dc as ComponentData : undefined;
+
+  // Remap sibling deps to draft so Immer captures mutations through deps too
+  for (const key of Object.keys(deps)) {
+    if (deps[key] === node[key]) {
+      deps[key] = draft[key] as ComponentData;
+    }
+  }
+
   const nc = serverNodeHandle(tree);
   const actx: ActionCtx = { node: draft, comp: draftComp, deps, tree, signal: AbortSignal.timeout(ACTION_TIMEOUT), nc, userId: opts?.userId };
   const result = await handler(actx, data ?? {});
