@@ -2,7 +2,7 @@
 // Key behavior: when node.$type matches component $type, node itself IS the component.
 
 import { getCtx, newComponent, registerType, setComponent } from '#comp';
-import { createNode, getComponent, type NodeData } from '#core';
+import { createNode, getComponent, getMeta, type NodeData, resolve } from '#core';
 import { clearRegistry } from '#core/index.test';
 import { executeAction } from '#server/actions';
 import { createMemoryTree } from '#tree';
@@ -161,5 +161,92 @@ describe('getCtx', () => {
 
     assert.equal(pathA, '/a');
     assert.equal(pathB, '/b');
+  });
+});
+
+// ── registerType: override ──
+
+describe('registerType override', () => {
+  it('override replaces previously registered actions', () => {
+    clearRegistry();
+
+    class BaseWidget { greet() { return 'base'; } }
+    registerType('test.widget', BaseWidget);
+
+    const before = resolve('test.widget', 'action:greet', false) as Function;
+    assert.ok(before);
+
+    class ServerWidget extends BaseWidget { greet() { return 'server'; } }
+    registerType('test.widget', ServerWidget, { override: true });
+
+    const after = resolve('test.widget', 'action:greet', false) as Function;
+    assert.ok(after);
+    assert.notEqual(before, after);
+
+    const tree = createMemoryTree();
+    const node = createNode('/w', 'test.widget');
+    return tree.set(node).then(() =>
+      executeAction(tree, '/w', undefined, undefined, 'greet').then(result => {
+        assert.equal(result, 'server');
+      })
+    );
+  });
+
+  it('without override, second registerType is ignored', () => {
+    clearRegistry();
+
+    class First { value() { return 1; } }
+    registerType('test.first', First);
+
+    class Second extends First { value() { return 2; } }
+    registerType('test.first', Second);
+
+    const tree = createMemoryTree();
+    const node = createNode('/f', 'test.first');
+    return tree.set(node).then(() =>
+      executeAction(tree, '/f', undefined, undefined, 'value').then(result => {
+        assert.equal(result, 1);
+      })
+    );
+  });
+});
+
+// ── registerType: noOptimistic meta ──
+
+describe('registerType noOptimistic', () => {
+  it('sets noOptimistic meta on specified actions', () => {
+    clearRegistry();
+
+    class TokenMgr {
+      create() {}
+      list() { return []; }
+    }
+    registerType('test.tokens', TokenMgr, { noOptimistic: ['create'] });
+
+    const createMeta = getMeta('test.tokens', 'action:create');
+    assert.ok(createMeta?.noOptimistic);
+
+    const listMeta = getMeta('test.tokens', 'action:list');
+    assert.equal(listMeta?.noOptimistic, undefined);
+  });
+});
+
+// ── registerType: stream meta ──
+
+describe('registerType stream', () => {
+  it('sets stream meta on async generator methods', () => {
+    clearRegistry();
+
+    class Streamer {
+      async *follow() { yield 1; }
+      ping() { return 'pong'; }
+    }
+    registerType('test.streamer', Streamer);
+
+    const followMeta = getMeta('test.streamer', 'action:follow');
+    assert.ok(followMeta?.stream);
+
+    const pingMeta = getMeta('test.streamer', 'action:ping');
+    assert.equal(pingMeta?.stream, undefined);
   });
 });

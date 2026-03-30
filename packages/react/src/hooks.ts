@@ -5,7 +5,7 @@
 // execute:     action caller
 // watch:       universal async generator
 
-import { getComponent, type NodeData, normalizeType, resolve } from '@treenity/core';
+import { getComponent, getMeta, type NodeData, normalizeType, resolve } from '@treenity/core';
 import { type Class, type TypeProxy } from '@treenity/core/comp';
 import { deriveURI, parseURI } from '@treenity/core/uri';
 import {
@@ -152,10 +152,11 @@ export const execute = (
   const cached = cache.get(path);
   if (cached) {
     const compType = type ?? cached.$type;
-    const cls = resolve(compType, 'class');
-    if (cls) {
-      const fn = cls.prototype?.[action];
-      if (fn) predictOptimistic(path, cls, key, fn, data);
+    const meta = getMeta(compType, `action:${action}`);
+    if (!meta?.noOptimistic) {
+      const cls = resolve(compType, 'class');
+      const actionFn = resolve(compType, `action:${action}`, false);
+      if (cls && actionFn) predictOptimistic(path, cls, key, actionFn, data);
     }
   }
 
@@ -248,25 +249,20 @@ export function useAutoSave(node: NodeData) {
 
 // ── Internals ──
 
-const AsyncGenFn = Object.getPrototypeOf(async function* () { }).constructor;
-const AsyncFn = Object.getPrototypeOf(async function () { }).constructor;
-
-/** Optimistic prediction: run a sync method locally on a cloned cached node */
+/** Optimistic prediction: run action handler locally on a cloned cached node */
 export function predictOptimistic<T extends object>(
   path: string, cls: Class<T>, key: string | undefined,
-  fn: Function, data: unknown,
+  actionHandler: Function, data: unknown,
 ): void {
-  if (fn instanceof AsyncFn) return;
-
   const cached = cache.get(path);
   if (!cached) return;
 
   try {
     const draft = structuredClone(cached);
-    const target = getComponent(draft, cls, key);
-    if (!target) return;
+    const comp = getComponent(draft, cls, key);
+    if (!comp) return;
 
-    fn.call(target, data);
+    actionHandler({ comp, node: draft }, data);
     cache.put(draft);
   } catch { /* prediction failed — server-only */ }
 }
@@ -315,17 +311,19 @@ function makeProxy<T extends object>(
 
   return new Proxy(comp ?? {}, {
     get: (_target, prop: string) => {
-      const fn = (cls.prototype as any)[prop];
-      if (typeof fn === 'function') {
-        if (fn instanceof AsyncGenFn)
-          return (data?: unknown) => streamToAsyncIterable({ path, type, key, action: prop, data });
+      const meta = getMeta(type, `action:${prop}`);
+      if (!meta) return (comp as any)?.[prop];
 
-        return (data?: unknown) => {
-          predictOptimistic(path, cls, key, fn, data);
-          return trpc.execute.mutate({ path, type, key, action: prop, data });
-        };
-      }
-      return (comp as any)?.[prop];
+      if (meta.stream)
+        return (data?: unknown) => streamToAsyncIterable({ path, type, key, action: prop, data });
+
+      return (data?: unknown) => {
+        if (!meta.noOptimistic) {
+          const actionFn = resolve(type, `action:${prop}`, false);
+          if (actionFn) predictOptimistic(path, cls, key, actionFn, data);
+        }
+        return trpc.execute.mutate({ path, type, key, action: prop, data });
+      };
     },
   }) as TypeProxy<T>;
 }

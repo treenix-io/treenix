@@ -6,11 +6,13 @@ import {
   type Class,
   ComponentData,
   getComponent,
+  getContextsForType,
   NodeData,
   normalizeType,
   register,
   resolve,
   type TypeId,
+  unregister,
 } from '#core';
 // Wire ExecCtx into logger — safe (returns null outside action context)
 import { setCtxProvider } from '#log';
@@ -84,9 +86,15 @@ export function getCtx(): ExecCtx {
 // Port declaration: which component fields an action reads (pre) and writes (post).
 // Stored as registry meta on action:* contexts. Queried via comp/ports.ts and comp/planner.ts.
 export type PortDecl = { pre?: string[]; post?: string[] };
-type CompOptions = { needs?: string[]; ports?: Record<string, PortDecl> };
+type CompOptions = { needs?: string[]; ports?: Record<string, PortDecl>; override?: boolean; noOptimistic?: string[] };
+const AsyncGenFn = Object.getPrototypeOf(async function* () { }).constructor;
 
 export function registerType<T extends object>(type: string, cls: Class<T>, opts?: CompOptions): TypeClass<T> {
+  if (opts?.override) {
+    const n = normalizeType(type);
+    for (const ctx of getContextsForType(n)) unregister(n, ctx);
+  }
+
   const compClass = cls as TypeClass<T>;
   compClass.$type = normalizeType(type);
   // Bracket access in treeChain: proxy[Counter] → Proxy.get(_, "§app.counter")
@@ -109,13 +117,17 @@ export function registerType<T extends object>(type: string, cls: Class<T>, opts
   for (const name of Object.getOwnPropertyNames(proto)) {
     if (name === 'constructor') continue;
     if (typeof proto[name] === 'function') {
+      const meta: Record<string, unknown> = { ...opts?.ports?.[name] };
+      if (opts?.noOptimistic?.includes(name)) meta.noOptimistic = true;
+      if (proto[name] instanceof AsyncGenFn) meta.stream = true;
+
       register(type, `action:${name}`, (ctx: any, data: unknown) => {
         const target = ctx.comp ?? ctx.node;
         if (_als) return _als.run(ctx, () => proto[name].call(target, data, ctx.deps));
         _ctx = ctx;
         try { return proto[name].call(target, data, ctx.deps); }
         finally { _ctx = null; }
-      }, opts?.ports?.[name]);
+      }, Object.keys(meta).length ? meta : undefined);
     }
   }
   return compClass;
