@@ -6,9 +6,15 @@
     "port": {
       "type": "number",
       "default": 3212
+    },
+    "host": {
+      "type": "string",
+      "title": "Bind host",
+      "default": "127.0.0.1"
     }
   },
   "required": [
-    "port"
+    "port",
+    "host"
   ]
 }

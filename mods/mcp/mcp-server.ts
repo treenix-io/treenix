@@ -13,6 +13,7 @@ import { executeAction } from '@treenity/core/server/actions';
 import { buildClaims, resolveToken, type Session, withAcl } from '@treenity/core/server/auth';
 import { deployPrefab } from '@treenity/core/server/prefab';
 import type { Tree } from '@treenity/core/tree';
+import { randomUUID } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
 import { z } from 'zod/v3';
 
@@ -34,6 +35,7 @@ export async function checkMcpGuardian(store: Tree, toolName: string, input?: st
     const deny = (policy.deny as string[]) ?? [];
     const escalate = (policy.escalate as string[]) ?? [];
 
+    // Check both specific subject and coarse fallback: deny wins if either matches
     if (matchesAny(deny, toolName)) return { allowed: false, reason: `denied by Guardian: ${toolName}` };
 
     if (matchesAny(escalate, toolName)) {
@@ -339,12 +341,16 @@ export function extractToken(req: import('node:http').IncomingMessage): string |
 }
 
 /** Create MCP HTTP server. Returns server handle for lifecycle management. */
-export function createMcpHttpServer(store: Tree, port: number): Server {
+export function createMcpHttpServer(store: Tree, port: number, host = '127.0.0.1'): Server {
+
+  // Session map: sessionId → { transport, mcp } — keeps connections alive for reconnect
+  const sessions = new Map<string, { transport: StreamableHTTPServerTransport; mcp: McpServer }>();
 
   const handler = async (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, mcp-session-id');
+    res.setHeader('Access-Control-Expose-Headers', 'mcp-session-id');
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
       res.end();
@@ -353,11 +359,26 @@ export function createMcpHttpServer(store: Tree, port: number): Server {
 
     const url = (req.url ?? '/').split('?')[0];
     if (url !== '/mcp') {
-      res.writeHead(404);
-      res.end('not found');
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'not_found' }));
       return;
     }
 
+    // Reconnect: existing session
+    const sessionId = req.headers['mcp-session-id'] as string | undefined;
+    if (sessionId) {
+      const entry = sessions.get(sessionId);
+      if (entry) {
+        await entry.transport.handleRequest(req, res);
+        return;
+      }
+      // Stale session — tell client to re-initialize
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'session_not_found' }));
+      return;
+    }
+
+    // Auth
     const token = extractToken(req);
     let session: Session | null = null;
     let devClaims: string[] | undefined;
@@ -369,18 +390,31 @@ export function createMcpHttpServer(store: Tree, port: number): Server {
       devClaims = ['u:mcp-dev', 'authenticated', 'admins'];
     }
     if (!session) {
-      res.writeHead(401, { 'Content-Type': 'text/plain' });
-      res.end('token required (?token= or Authorization: Bearer)');
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'token_required', message: 'Pass token via ?token= or Authorization: Bearer' }));
       return;
     }
 
-    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    // New session
+    const transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: () => randomUUID(),
+    });
     const mcp = await buildMcpServer(store, session, devClaims);
     await mcp.connect(transport);
+
+    // Track session for reconnect, clean up on close
+    transport.onclose = () => {
+      const sid = transport.sessionId;
+      if (sid) sessions.delete(sid);
+    };
+
     await transport.handleRequest(req, res);
+
+    const sid = transport.sessionId;
+    if (sid) sessions.set(sid, { transport, mcp });
   };
 
   const server = createServer(handler);
-  server.listen(port, '127.0.0.1', () => console.log(`treenity mcp http://localhost:${port}/mcp`));
+  server.listen(port, host, () => console.log(`treenity mcp http://${host}:${port}/mcp`));
   return server;
 }
