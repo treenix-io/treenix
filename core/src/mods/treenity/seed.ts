@@ -28,8 +28,8 @@ registerPrefab('core', 'seed', [
   );
 }, { tier: 'core' });
 
-// Mongo-dependent infra — auth
-registerPrefab('mongo', 'seed', [
+// Auth infra — users, sessions, API tokens
+registerPrefab('auth', 'seed', [
   { $path: 'auth', $type: 'dir', $acl: [{ g: 'admins', p: R | W | A | S }, { g: 'public', p: 0 }] },
   { $path: 'auth/users', $type: 'mount-point',
     mount: { $type: 't.mount.mongo', db: 'treenity', collection: 'users' },
@@ -39,4 +39,8 @@ registerPrefab('mongo', 'seed', [
     mount: { $type: 't.mount.mongo', db: 'treenity', collection: 'sessions' },
     $acl: [{ g: 'admins', p: R | W | A | S }, { g: 'authenticated', p: 0 }, { g: 'public', p: 0 }],
   },
-] as NodeData[]);
+  { $path: 'auth/api-tokens', $type: 't.api.tokens',
+    mount: { $type: 't.mount.mongo', db: 'treenity', collection: 'api-tokens' },
+    $acl: [{ g: 'admins', p: R | W | A | S }, { g: 'authenticated', p: 0 }],
+  },
+] as NodeData[], undefined, { tier: 'core' });

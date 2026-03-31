@@ -209,6 +209,44 @@
         ]
       }
     },
+    "apply_template": {
+      "description": "Apply template: copy children from template path to target path",
+      "arguments": [
+        {
+          "name": "data",
+          "type": "object",
+          "properties": {
+            "templatePath": {
+              "type": "string",
+              "title": "Source template path, e.g. /templates/blog"
+            },
+            "targetPath": {
+              "type": "string",
+              "title": "Target path where template children will be copied"
+            }
+          },
+          "required": [
+            "templatePath",
+            "targetPath"
+          ]
+        }
+      ],
+      "return": {
+        "type": "object",
+        "properties": {
+          "applied": {
+            "type": "string"
+          },
+          "blocks": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "applied",
+          "blocks"
+        ]
+      }
+    },
     "deploy_prefab": {
       "description": "Deploy module prefab template to target path. Idempotent",
       "arguments": [

@@ -10,6 +10,9 @@
           "name": "data"
         }
       ]
+    },
+    "$schema": {
+      "arguments": []
     }
   }
 }
