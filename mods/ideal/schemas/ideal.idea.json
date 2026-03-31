@@ -1,0 +1,40 @@
+{
+  "$id": "ideal.idea",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "title": {
+      "type": "string",
+      "default": ""
+    },
+    "votes": {
+      "type": "number",
+      "default": 0
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "approved",
+        "new",
+        "rejected"
+      ],
+      "default": "new"
+    }
+  },
+  "required": [
+    "title",
+    "votes",
+    "status"
+  ],
+  "methods": {
+    "upvote": {
+      "arguments": []
+    },
+    "approve": {
+      "arguments": []
+    },
+    "reject": {
+      "arguments": []
+    }
+  }
+}
