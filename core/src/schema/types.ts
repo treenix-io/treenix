@@ -1,8 +1,14 @@
 // Schema types — used by SchemaForm, NodeEditor, PageEditor
 
+declare module '#core/context' {
+  interface ContextHandlers {
+    schema: () => TypeSchema;
+  }
+}
+
 export type PropertySchema = {
   type: string; // JSON Schema type or custom (e.g. "image")
-  title: string;
+  title?: string;
   description?: string;
   format?: string; // JSON Schema format hint (e.g. "uri", "textarea", "integer", "timestamp")
   refType?: string; // component type name — field can hold ref or embedded value of this type
@@ -24,6 +30,8 @@ export type MethodSchema = {
   }>;
   yields?: { type: string }; // yield type for streaming actions
   return?: { type: string };
+  pre?: string[];  // @pre fields — Design by Contract preconditions
+  post?: string[]; // @post fields — Design by Contract postconditions
 };
 
 export type TypeSchema = {

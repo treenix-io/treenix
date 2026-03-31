@@ -7,9 +7,31 @@ import { Class, type TypeProxy } from '#comp';
 import { type ExecuteFn, makeTypedProxy, type StreamFn } from '#comp/handle';
 import { collectDeps as _collectDeps, type ResolvedDeps } from '#comp/needs';
 import { type ComponentData, getComponentField, isComponent, type NodeData, register, resolve } from '#core';
+import { validateValue, type ValidationError } from '#comp/validate';
 import { type PatchOp, type Tree } from '#tree';
 import { createDraft, enablePatches, finishDraft, type Patch } from 'immer';
 import { OpError } from './errors';
+
+function validateActionArgs(type: string, action: string, data: unknown): void {
+  const schemaFn = resolve(type, 'schema');
+  const methodSchema = schemaFn?.()?.methods?.[action];
+
+  if (!methodSchema) {
+    const msg = `[SECURITY] No schema for ${type}.${action} — action args not validated`;
+    if (process.env.NODE_ENV === 'development') { console.error(msg); return; }
+    throw new OpError('BAD_REQUEST', msg);
+  }
+
+  const argSchema = methodSchema.arguments?.[0];
+  if (!argSchema?.type) return;
+
+  const actual = data ?? {};
+  const errors: ValidationError[] = [];
+  validateValue(actual, argSchema, `${type}.${action}`, errors);
+  if (errors.length) {
+    throw new OpError('BAD_REQUEST', `Invalid action args: ${errors.map(e => `${e.path}: ${e.message}`).join('; ')}`);
+  }
+}
 
 function immerToPatchOps(patches: Patch[]): PatchOp[] {
   return patches.map(p => {
@@ -273,8 +295,10 @@ export async function executeAction(
   );
 
   // Pre/post condition checking (Design by Contract)
-  const schemaHandler = resolve(type, 'schema') as (() => any) | null;
+  const schemaHandler = resolve(type, 'schema');
   const methodSchema = schemaHandler?.()?.methods?.[action];
+  validateActionArgs(type, action, data, methodSchema);
+
   const preFields: string[] = methodSchema?.pre ?? [];
   const postFields: string[] = methodSchema?.post ?? [];
   const target = fieldKey ? node[fieldKey] as Record<string, unknown> : node as Record<string, unknown>;
@@ -334,9 +358,14 @@ export async function* executeStream(
   signal?: AbortSignal,
   opts?: { userId?: string | null },
 ): AsyncGenerator<unknown> {
-  const { node, handler, comp, deps } = await resolveActionHandler(
+  const { node, handler, type, comp, deps } = await resolveActionHandler(
     tree, path, componentType, componentKey, action,
   );
+
+  const streamSchemaHandler = resolve(type, 'schema');
+  const streamMethodSchema = streamSchemaHandler?.()?.methods?.[action];
+  validateActionArgs(type, action, data, streamMethodSchema);
+
   // comp is already node[fieldKey] from resolution — no Immer draft needed for generators
   const nc = serverNodeHandle(tree);
   const actx: ActionCtx = { node, comp, deps, tree, signal: signal ?? AbortSignal.timeout(STREAM_TIMEOUT), nc, userId: opts?.userId };
