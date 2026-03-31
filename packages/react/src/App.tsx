@@ -221,7 +221,7 @@ export function App() {
   }, [showToast]);
 
   const loadChildren = useCallback(async (path: string) => {
-    const { items: children } = await tree.getChildren(path);
+    const { items: children } = await tree.getChildren(path, { watch: true, watchNew: true });
     cache.putMany(children, path);
     setLoaded((prev) => new Set(prev).add(path));
   }, []);

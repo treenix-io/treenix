@@ -69,7 +69,7 @@ await item.toggle(); // tRPC mutation → Immer patch → SSE broadcast
 
 ## Links
 
-- [Quickstart — Todo App in 5 Minutes](https://github.com/treenity-ai/treenity/blob/main/docs/quickstart.md)
+- [Getting Started](https://github.com/treenity-ai/treenity/blob/main/docs/getting-started.md)
 - [Architecture & Decisions](https://github.com/treenity-ai/treenity/blob/main/CLAUDE.md)
 - [GitHub](https://github.com/treenity-ai/treenity)
 

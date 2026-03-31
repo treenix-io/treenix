@@ -84,7 +84,7 @@ import { Slider } from '@treenity/react/ui/slider';
 
 - [@treenity/core](https://www.npmjs.com/package/@treenity/core)
 - [GitHub](https://github.com/treenity-ai/treenity)
-- [Quickstart](https://github.com/treenity-ai/treenity/blob/main/docs/quickstart.md)
+- [Getting Started](https://github.com/treenity-ai/treenity/blob/main/docs/getting-started.md)
 
 ## License
 

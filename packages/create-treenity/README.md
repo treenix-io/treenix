@@ -53,7 +53,7 @@ mods/
     └── client.ts    # client entry (imports types, registers React views)
 ```
 
-See the [Quickstart guide](https://github.com/treenity-ai/treenity/blob/main/docs/quickstart.md) for a full walkthrough.
+See the [Getting Started guide](https://github.com/treenity-ai/treenity/blob/main/docs/getting-started.md) for a full walkthrough.
 
 ## License
 

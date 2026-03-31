@@ -80,18 +80,20 @@ export type View<T> = FC<RenderProps<T>>;
 
 type Actions<T> = {
   [K in keyof T as T[K] extends (...args: any[]) => any ? K : never]:
-    T[K] extends (data: infer D) => any
-      ? (data: D) => Promise<unknown>
-      : () => Promise<unknown>;
+    T[K] extends () => any
+      ? () => Promise<unknown>
+      : T[K] extends (data: infer D) => any
+        ? (data: D) => Promise<unknown>
+        : () => Promise<unknown>;
 };
 
-export function useActions<T extends ComponentData>(value: T): Actions<T> {
-  const ctx = viewCtx(value);
-  if (!ctx) throw new Error('useActions: value has no node context (missing $node symbol)');
+export function useActions<T>(value: T): Actions<T> {
+  const node: NodeData | undefined = (value as any)[$node];
+  if (!node) throw new Error('useActions: value has no node context (missing $node symbol)');
 
   return useMemo(() => new Proxy({} as Actions<T>, {
-    get: (_target, prop: string) => (data?: unknown) => ctx.execute(prop, data),
-  }), [ctx.path]);
+    get: (_target, prop: string) => (data?: unknown) => execute(node.$path, prop, data),
+  }), [node.$path]);
 }
 
 declare module '@treenity/core/core/context' {
