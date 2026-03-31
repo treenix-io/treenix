@@ -517,8 +517,8 @@ const KanbanView: View<BoardKanban> = ({ value, ctx }) => {
           label: label.trim(),
           color: 'border-zinc-400',
           order: maxOrder + 1,
-          mount: { $type: 't.mount.query' },
-          query: { $type: 'query', source: `${basePath}/data`, match: { status: slug } },
+          mount: { $type: 't.mount.query', source: `${basePath}/data`, match: { status: slug } },
+          query: { $type: 'query',  },
         } as NodeData,
       });
     }, `Column "${label.trim()}" created`);
