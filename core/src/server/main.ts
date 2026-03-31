@@ -8,6 +8,7 @@ import { treenity } from './factory';
 process.chdir = () => { throw new Error('process.chdir is forbidden'); };
 
 const rootPath = resolve(process.argv[2] || 'root.json');
+console.log(`[boot] root: ${rootPath}`);
 const rootNode = JSON.parse(await readFile(rootPath, 'utf-8')) as NodeData;
 
 const modsDir = process.env.MODS_DIR || undefined;

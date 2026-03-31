@@ -3,6 +3,7 @@
 
 import '#contexts/schema/index';
 import '#contexts/text/index';
+import '#schema/action';
 import './mount-adapters';
 
 import { type ServiceHandle, startServices } from '#contexts/service/index';
@@ -54,15 +55,13 @@ export async function treenity(config: TreenityConfig): Promise<TreenityServer> 
   const pipeline = createPipeline(bootstrap);
   const { tree, cdc, mountable } = pipeline;
 
-  // 4. Seed — only on first run (skip if already initialized)
-  const initialized = !!(await mountable.get('/sys'));
-  if (!initialized) {
-    if (config.seed) {
-      await config.seed(mountable, createEnsure(mountable));
-    } else {
-      const seedFilter = (rootNode as Record<string, unknown>).seeds as string[] | undefined;
-      await deploySeedPrefabs(mountable, seedFilter);
-    }
+  // 4. Seed — always run, deployNodes is idempotent per-node (skips existing)
+  if (config.seed) {
+    await config.seed(mountable, createEnsure(mountable));
+  } else {
+    const seedFilter = (rootNode as Record<string, unknown>).seeds as string[] | undefined;
+    console.log(`[seed] deploying prefabs, filter: ${JSON.stringify(seedFilter)}`);
+    await deploySeedPrefabs(mountable, seedFilter);
   }
 
   // 5. Wire log → tree
