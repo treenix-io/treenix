@@ -12,11 +12,11 @@
     "status": {
       "type": "string",
       "enum": [
-        "running",
+        "pending",
         "error",
-        "aborted",
+        "running",
         "done",
-        "pending"
+        "aborted"
       ],
       "default": "pending"
     },

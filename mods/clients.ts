@@ -15,4 +15,5 @@ await Promise.allSettled([
   loadMod('table', () => import('./table/client')),
   loadMod('todo', () => import('./todo/client')),
   loadMod('whisper', () => import('./whisper/client')),
+  loadMod('mcp', () => import('./mcp/client')),
 ]);

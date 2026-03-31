@@ -12,10 +12,10 @@
     "status": {
       "type": "string",
       "enum": [
-        "working",
+        "blocked",
         "idle",
         "error",
-        "blocked",
+        "working",
         "offline"
       ],
       "default": "offline"

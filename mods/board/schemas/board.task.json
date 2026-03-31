@@ -141,7 +141,7 @@
           "properties": {
             "status": {
               "type": "string",
-              "title": "Target status"
+              "title": "Target"
             }
           },
           "required": [

@@ -419,12 +419,53 @@ const PlanView: View<AiPlan> = ({ value, ctx }) => {
   );
 };
 
+// ── ApprovalRow (compact — react:list context) ──
+
+const ApprovalRow: View<AiApproval> = ({ value, ctx }) => {
+  const nav = useNavigate();
+  const status = value.status || 'pending';
+  const s = APPROVAL_STATUS[status] ?? APPROVAL_STATUS.pending;
+
+  return (
+    <button
+      onClick={() => nav(ctx!.node.$path)}
+      className={cn(
+        'flex items-center gap-3 px-3 py-2 rounded-lg border transition-colors',
+        'text-left w-full group',
+        s.border, s.bg,
+        'hover:brightness-125',
+      )}
+    >
+      <span className={cn('text-[10px] font-mono px-1.5 py-0.5 rounded shrink-0', s.bg, s.text)}>
+        {status}
+      </span>
+
+      <span className="text-sm text-zinc-300 truncate">
+        {value.agentRole || 'agent'}
+      </span>
+
+      <span className="text-[11px] text-zinc-500 font-mono truncate">
+        → {value.tool || '?'}
+      </span>
+
+      <div className="flex-1" />
+
+      {value.createdAt > 0 && (
+        <span className="text-[10px] text-zinc-600 shrink-0">{timeAgo(value.createdAt)}</span>
+      )}
+
+      <span className="text-zinc-700 group-hover:text-zinc-500 transition-colors">›</span>
+    </button>
+  );
+};
+
 // ── Register views ──
 
 register(AiPool, 'react', PoolView);
 register(AiAgent, 'react', AgentView);
 register(AiAgent, 'react:list', AgentRow);
 register(AiApproval, 'react', ApprovalView);
+register(AiApproval, 'react:list', ApprovalRow);
 register(AiApprovals, 'react', ApprovalsView);
 register(AiThread, 'react', ThreadView);
 register(AiPlan, 'react', PlanView);

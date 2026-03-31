@@ -7,8 +7,8 @@
     "kind": {
       "type": "string",
       "enum": [
-        "directional",
         "point",
+        "directional",
         "spot",
         "ambient",
         "hemisphere",
