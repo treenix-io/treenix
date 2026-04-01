@@ -129,10 +129,35 @@ describe('e2e: tRPC over HTTP', () => {
 
   before(async () => {
     registerType('order.status', OrderStatus);
+    register('order.status', 'schema', () => ({
+      $id: 'order.status', title: 'OrderStatus', type: 'object' as const,
+      properties: { status: { type: 'string' } },
+      methods: { cook: { arguments: [] }, deliver: { arguments: [] } },
+    }));
+
     registerType('returner', Returner);
+    register('returner', 'schema', () => ({
+      $id: 'returner', title: 'Returner', type: 'object' as const, properties: {},
+      methods: { getObject: { arguments: [] }, getArray: { arguments: [] }, getNull: { arguments: [] }, getNumber: { arguments: [] } },
+    }));
+
     registerType('streamer', Streamer);
+    register('streamer', 'schema', () => ({
+      $id: 'streamer', title: 'Streamer', type: 'object' as const, properties: {},
+      methods: {
+        count: { arguments: [{ name: 'data', type: 'object', properties: { n: { type: 'number' } }, required: ['n'] }], streaming: true },
+        objects: { arguments: [], streaming: true },
+      },
+    }));
+
     registerType('secret', Secret);
     registerType('task.priority', Priority);
+    register('task.priority', 'schema', () => ({
+      $id: 'task.priority', title: 'Priority', type: 'object' as const,
+      properties: { level: { type: 'string' } },
+      methods: { escalate: { arguments: [] }, deescalate: { arguments: [] } },
+    }));
+
     register('test.task', 'schema', () => ({ type: 'object', title: 'Test Task' }));
   });
 

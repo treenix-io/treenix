@@ -2,7 +2,7 @@
 // Tests createTrpcTransport + createRepathTree + t.mount.tree.trpc
 
 import { registerType } from '#comp';
-import { createNode, R, S, W } from '#core';
+import { createNode, R, register, S, W } from '#core';
 import { withMounts } from '#server/mount';
 import { setAllowPrivateUrls } from '#server/mount-adapters';
 import { createTreenityServer } from '#server/server';
@@ -37,6 +37,11 @@ describe('Treenity Client SDK', () => {
 
   before(() => {
     registerType('counter', Counter);
+    register('counter', 'schema', () => ({
+      $id: 'counter', title: 'Counter', type: 'object' as const,
+      properties: { count: { type: 'number' } },
+      methods: { increment: { arguments: [] } },
+    }));
   });
 
   beforeEach(async () => {

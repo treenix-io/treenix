@@ -1,6 +1,6 @@
 import { registerType } from '#comp';
 import { collectDeps, collectSiblings, getActionNeeds, parseNeedPattern } from '#comp/needs';
-import { createNode } from '#core';
+import { createNode, register } from '#core';
 import { clearRegistry } from '#core/index.test';
 import { executeAction } from '#server/actions';
 import { createMemoryTree } from '#tree';
@@ -418,6 +418,11 @@ describe('executeAction with deps', () => {
     }
 
     registerType('t.article', Article);
+    register('t.article', 'schema', () => ({
+      $id: 't.article', title: 'Article', type: 'object' as const,
+      properties: { title: { type: 'string' } },
+      methods: { publishAndRename: { arguments: [{ name: 'data', type: 'object', properties: { title: { type: 'string' } }, required: ['title'] }] } },
+    }));
     registerType('t.status', Status);
 
     const tree = createMemoryTree();
@@ -452,6 +457,11 @@ describe('executeAction with deps', () => {
     }
 
     registerType('t.processor', Processor);
+    register('t.processor', 'schema', () => ({
+      $id: 't.processor', title: 'Processor', type: 'object' as const,
+      properties: { value: { type: 'string' } },
+      methods: { quick: { arguments: [] }, full: { arguments: [] } },
+    }));
     registerType('t.status', Status);
     registerType('t.payment', Payment);
 
@@ -484,6 +494,11 @@ describe('executeAction with deps', () => {
     }
 
     registerType('t.connector', Connector);
+    register('t.connector', 'schema', () => ({
+      $id: 't.connector', title: 'Connector', type: 'object' as const,
+      properties: { targetRef: { type: 'string' }, result: { type: 'string' } },
+      methods: { fetch: { arguments: [] } },
+    }));
 
     const tree = createMemoryTree();
     await tree.set(createNode('/config/wh', 'warehouse', { capacity: 50 }));

@@ -1,6 +1,7 @@
 // Treenity Stress Tests — E2E through full server pipeline
 // Tests: throughput, race conditions, OCC, subscriptions, CDC, query mounts, watch fan-out
 
+import { registerType } from '#comp';
 import { createNode, type NodeData, register } from '#core';
 import { clearRegistry } from '#core/index.test';
 import { createMemoryTree, type Tree } from '#tree';
@@ -571,15 +572,20 @@ describe('Stress: actions + patches', () => {
   beforeEach(() => {
     clearRegistry();
 
-    register('counter', 'action:increment', (ctx: any) => {
-      ctx.node.count = (ctx.node.count ?? 0) + 1;
-      return ctx.node.count;
-    });
-
-    register('counter', 'action:add', (ctx: any, data: any) => {
-      ctx.node.count = (ctx.node.count ?? 0) + (data?.amount ?? 1);
-      return ctx.node.count;
-    });
+    class Counter {
+      count = 0;
+      increment() { this.count++; return this.count; }
+      add({ amount }: { amount?: number }) { this.count += amount ?? 1; return this.count; }
+    }
+    registerType('counter', Counter);
+    register('counter', 'schema', () => ({
+      $id: 't.counter', title: 'Counter', type: 'object' as const,
+      properties: { count: { type: 'number' } },
+      methods: {
+        increment: { arguments: [] },
+        add: { arguments: [{ name: 'data', type: 'object', properties: { amount: { type: 'number' } } }] },
+      },
+    }));
 
     ({ tree, cdc } = fullPipeline());
   });

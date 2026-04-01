@@ -1,6 +1,11 @@
 import { createNode, type NodeData } from '#core';
 import { clearPrefabs, getModPrefabs, getPrefab, getRegisteredMods, getSeedPrefabs, registerPrefab } from '#mod/prefab';
 import '#mods/treenity/prefab-type';
+import { loadSchemasFromDir } from '#schema/load';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+loadSchemasFromDir(join(dirname(fileURLToPath(import.meta.url)), '../mods/treenity/schemas'));
 import { createMemoryTree, type Tree } from '#tree';
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';

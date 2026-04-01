@@ -3,7 +3,7 @@
 // exercises every operation, verifies ACL, events, CDC Matrix, and OpError mapping.
 
 import { registerType } from '#comp';
-import { createNode, R, S, W } from '#core';
+import { createNode, R, register, S, W } from '#core';
 import { createMemoryTree, type Tree } from '#tree';
 import assert from 'node:assert/strict';
 import { before, beforeEach, describe, it } from 'node:test';
@@ -41,7 +41,17 @@ describe('tRPC API integration', () => {
 
   before(() => {
     registerType('order.status', OrderStatus);
+    register('order.status', 'schema', () => ({
+      $id: 'order.status', title: 'OrderStatus', type: 'object' as const,
+      properties: { status: { type: 'string' } },
+      methods: { cook: { arguments: [] }, deliver: { arguments: [] } },
+    }));
     registerType('metadata', Metadata);
+    register('metadata', 'schema', () => ({
+      $id: 'metadata', title: 'Metadata', type: 'object' as const,
+      properties: { title: { type: 'string' }, description: { type: 'string' } },
+      methods: { rename: { arguments: [{ name: 'data', type: 'object', properties: { title: { type: 'string' } }, required: ['title'] }] } },
+    }));
   });
 
   beforeEach(async () => {

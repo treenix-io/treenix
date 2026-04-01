@@ -391,7 +391,7 @@ export async function exec(tsconfigPath = 'tsconfig.json', extraDirs: string[] =
   const generated = new Set<string>();
 
   for (const entry of entries) {
-    if (generated.has(entry.typeName)) throw new Error(`Duplicate registerType('${entry.typeName}') in ${entry.fileName}`);
+    if (generated.has(entry.typeName)) continue; // override registration — schema already extracted from base class
 
     const schema = generateClassSchema(program, entry, classToType);
     if (!schema) {

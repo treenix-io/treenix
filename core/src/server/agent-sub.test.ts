@@ -15,7 +15,11 @@ describe('Agent task subscription', () => {
   beforeEach(() => clearRegistry());
 
   it('new child created via action triggers prefix watcher', async () => {
-    // Register the action (simulates agent's action:task)
+    // Register schema + action (simulates agent's action:task)
+    register('agent.config', 'schema', () => ({
+      $id: 'agent.config', title: 'AgentConfig', type: 'object' as const, properties: {},
+      methods: { task: { arguments: [{ name: 'data', type: 'object', properties: { prompt: { type: 'string' } }, required: ['prompt'] }] } },
+    }));
     register('agent.config', 'action:task', async (ctx: ActionCtx, data: { prompt: string }) => {
       const id = `t-${Date.now()}`;
       const taskPath = `${ctx.node.$path}/tasks/${id}`;
@@ -53,6 +57,10 @@ describe('Agent task subscription', () => {
   });
 
   it('new child event includes correct node data for cache.put', async () => {
+    register('agent.config', 'schema', () => ({
+      $id: 'agent.config', title: 'AgentConfig', type: 'object' as const, properties: {},
+      methods: { task: { arguments: [{ name: 'data', type: 'object', properties: { prompt: { type: 'string' } }, required: ['prompt'] }] } },
+    }));
     register('agent.config', 'action:task', async (ctx: ActionCtx, data: { prompt: string }) => {
       const taskPath = `${ctx.node.$path}/tasks/t-1`;
       await ctx.tree.set(createNode(taskPath, 'agent.task', {

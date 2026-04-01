@@ -1,0 +1,42 @@
+{
+  "$id": "t.api.tokens",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {},
+  "methods": {
+    "create": {
+      "mutation": "Create API token for an agent",
+      "arguments": [
+        {
+          "name": "_data",
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name"
+          ]
+        }
+      ]
+    },
+    "revoke": {
+      "mutation": "Revoke an API token by name",
+      "arguments": [
+        {
+          "name": "_data",
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name"
+          ]
+        }
+      ]
+    }
+  }
+}

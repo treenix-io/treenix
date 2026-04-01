@@ -1,5 +1,5 @@
 import { registerType } from '#comp';
-import { createNode, isComponent, type NodeData, normalizeType, resolve } from '#core';
+import { createNode, isComponent, type NodeData, normalizeType, register, resolve } from '#core';
 import { clearRegistry } from '#core/index.test';
 import { createMemoryTree } from '#tree';
 import { withCache } from '#tree/cache';
@@ -35,6 +35,41 @@ class Status {
   }
 }
 
+// ── Schemas ──
+
+const metadataSchema = () => ({
+  $id: 'metadata', title: 'Metadata', type: 'object' as const,
+  properties: { title: { type: 'string' }, description: { type: 'string' } },
+  methods: {
+    rename: { arguments: [{ name: 'data', type: 'object', properties: { title: { type: 'string' } }, required: ['title'] }] },
+    clear: { arguments: [] },
+  },
+});
+
+const statusSchema = () => ({
+  $id: 'status', title: 'Status', type: 'object' as const,
+  properties: { value: { type: 'string' } },
+  methods: { publish: { arguments: [] }, draft: { arguments: [] } },
+});
+
+const mytypeSchema = () => ({
+  $id: 'mytype', title: 'MyType', type: 'object' as const,
+  properties: {},
+  methods: { patch: { arguments: [{ name: 'data', type: 'object', properties: {} }] } },
+});
+
+const svcSchema = () => ({
+  $id: 'svc', title: 'Svc', type: 'object' as const,
+  properties: {},
+  methods: { ping: { arguments: [] } },
+});
+
+const articleSchema = () => ({
+  $id: 'article', title: 'Article', type: 'object' as const,
+  properties: { title: { type: 'string' } },
+  methods: { publishAndRename: { arguments: [{ name: 'data', type: 'object', properties: { title: { type: 'string' } }, required: ['title'] }] } },
+});
+
 // ── Tests ──
 
 describe('defineComponent', () => {
@@ -45,6 +80,8 @@ describe('defineComponent', () => {
   function setup() {
     registerType('metadata', Metadata);
     registerType('status', Status);
+    register('metadata', 'schema', metadataSchema);
+    register('status', 'schema', statusSchema);
   }
 
   it('registers methods as action:name', () => {
@@ -167,6 +204,7 @@ describe('defineComponent', () => {
 
   it('patch action: shallow fields', async () => {
     registerBuiltinActions();
+    register('mytype', 'schema', mytypeSchema);
     const tree = createMemoryTree();
     await tree.set(createNode('/n', 'mytype', { title: 'old', count: 1 }));
 
@@ -179,6 +217,7 @@ describe('defineComponent', () => {
 
   it('patch action: deep merges nested objects', async () => {
     registerBuiltinActions();
+    register('mytype', 'schema', mytypeSchema);
     const tree = createMemoryTree();
     await tree.set(createNode('/n', 'mytype', {
       mesh: { $type: 't3d.mesh', width: 5, height: 10 },
@@ -197,6 +236,7 @@ describe('defineComponent', () => {
 
   it('patch action: guards $ fields', async () => {
     registerBuiltinActions();
+    register('mytype', 'schema', mytypeSchema);
     const tree = createMemoryTree();
     await tree.set(createNode('/n', 'mytype', { title: 'ok' }));
 
@@ -212,6 +252,7 @@ describe('defineComponent', () => {
 
   it('patch action: replaces arrays wholesale', async () => {
     registerBuiltinActions();
+    register('mytype', 'schema', mytypeSchema);
     const tree = createMemoryTree();
     await tree.set(createNode('/n', 'mytype', { tags: ['a', 'b'] }));
 
@@ -262,6 +303,7 @@ describe('defineComponent', () => {
       async ping() { return 'pong'; }
     }
     registerType('svc', Svc);
+    register('svc', 'schema', svcSchema);
 
     const tree = createMemoryTree();
     await tree.set({ $path: '/s', $type: 'svc' } as NodeData);
@@ -273,6 +315,7 @@ describe('defineComponent', () => {
 
   it('deepAssign blocks __proto__, constructor, prototype keys (F17)', async () => {
     registerBuiltinActions();
+    register('mytype', 'schema', mytypeSchema);
     const tree = createMemoryTree();
     await tree.set(createNode('/n', 'mytype', { title: 'ok' }));
 
@@ -299,6 +342,9 @@ describe('defineComponent', () => {
       actions: {
         greet: 'var node = ctx.tree.get(ctx.node.$path); node.greeting = "hello " + (data.name || "world"); ctx.tree.set(node); return { ok: true };',
       },
+      schema: {
+        methods: { greet: { arguments: [{ name: 'data', type: 'object', properties: { name: { type: 'string' } } }] } },
+      },
     } as NodeData);
 
     // Create an instance
@@ -321,6 +367,7 @@ describe('defineComponent', () => {
       actions: {
         pwn: 'return typeof process !== "undefined" ? "FAIL" : "safe";',
       },
+      schema: { methods: { pwn: { arguments: [] } } },
     } as NodeData);
 
     await tree.set(createNode('/evil1', 'test.evil', {}));
@@ -339,6 +386,7 @@ describe('defineComponent', () => {
       actions: {
         steal: 'ctx.tree.set({ $path: "/auth/sessions/evil", $type: "session", hacked: true }); return "tried";',
       },
+      schema: { methods: { steal: { arguments: [] } } },
     } as NodeData);
 
     await tree.set(createNode('/esc1', 'test.escape', {}));
@@ -361,6 +409,7 @@ describe('defineComponent', () => {
       actions: {
         check: 'var n = ctx.node; return { hasAcl: "$acl" in n, hasOwner: "$owner" in n, hasRefs: "$refs" in n };',
       },
+      schema: { methods: { check: { arguments: [] } } },
     } as NodeData);
 
     await tree.set({
@@ -387,6 +436,7 @@ describe('defineComponent', () => {
       actions: {
         writeChild: 'ctx.tree.set({ $path: ctx.node.$path + "/child1", $type: "test.writer", created: true }); return "ok";',
       },
+      schema: { methods: { writeChild: { arguments: [] } } },
     } as NodeData);
 
     await tree.set(createNode('/writer1', 'test.writer', {}));
@@ -407,6 +457,7 @@ describe('defineComponent', () => {
       $path: '/sys/types/test/mutable',
       $type: 'dir',
       actions: { calc: 'return 1;' },
+      schema: { methods: { calc: { arguments: [] } } },
     } as NodeData);
     await tree.set(createNode('/mut1', 'test.mutable', {}));
 

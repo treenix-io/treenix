@@ -2,7 +2,7 @@
 // Key behavior: when node.$type matches component $type, node itself IS the component.
 
 import { getCtx, newComponent, registerType, setComponent } from '#comp';
-import { createNode, getComponent, getMeta, type NodeData, resolve } from '#core';
+import { createNode, getComponent, getMeta, type NodeData, register, resolve } from '#core';
 import { clearRegistry } from '#core/index.test';
 import { executeAction } from '#server/actions';
 import { createMemoryTree } from '#tree';
@@ -149,6 +149,10 @@ describe('getCtx', () => {
       }
     }
     registerType('als.test', AlsNode);
+    register('als.test', 'schema', () => ({
+      $id: 'als.test', title: 'AlsNode', type: 'object' as const, properties: {},
+      methods: { whoami: { arguments: [] } },
+    }));
 
     const tree = createMemoryTree();
     await tree.set(createNode('/a', 'als.test'));
@@ -172,12 +176,18 @@ describe('registerType override', () => {
 
     class BaseWidget { greet() { return 'base'; } }
     registerType('test.widget', BaseWidget);
+    const widgetSchema = () => ({
+      $id: 'test.widget', title: 'Widget', type: 'object' as const, properties: {},
+      methods: { greet: { arguments: [] } },
+    });
+    register('test.widget', 'schema', widgetSchema);
 
     const before = resolve('test.widget', 'action:greet', false) as Function;
     assert.ok(before);
 
     class ServerWidget extends BaseWidget { greet() { return 'server'; } }
     registerType('test.widget', ServerWidget, { override: true });
+    register('test.widget', 'schema', widgetSchema);
 
     const after = resolve('test.widget', 'action:greet', false) as Function;
     assert.ok(after);
@@ -197,6 +207,10 @@ describe('registerType override', () => {
 
     class First { value() { return 1; } }
     registerType('test.first', First);
+    register('test.first', 'schema', () => ({
+      $id: 'test.first', title: 'First', type: 'object' as const, properties: {},
+      methods: { value: { arguments: [] } },
+    }));
 
     class Second extends First { value() { return 2; } }
     registerType('test.first', Second);

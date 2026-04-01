@@ -389,6 +389,11 @@ describe('actions.ts operations', () => {
       increment() { this.count++; }
     }
     registerType('counter', Counter);
+    register('counter', 'schema', () => ({
+      $id: 'counter', title: 'Counter', type: 'object' as const,
+      properties: { count: { type: 'number' } },
+      methods: { increment: { arguments: [] } },
+    }));
 
     const tree = createMemoryTree();
     await tree.set(createNode('/c', 'item', {}, {
@@ -408,6 +413,10 @@ describe('actions.ts operations', () => {
       actx.node.result = 42;
       return 'ok';
     });
+    register('mytype', 'schema', () => ({
+      $id: 'mytype', title: 'MyType', type: 'object' as const, properties: {},
+      methods: { doStuff: { arguments: [] } },
+    }));
 
     const tree = createMemoryTree();
     await tree.set(createNode('/n', 'mytype'));
@@ -452,6 +461,10 @@ describe('actions.ts operations', () => {
     register('reader', 'action:read', (_actx: any, data: any) => {
       return { echo: data };
     });
+    register('reader', 'schema', () => ({
+      $id: 'reader', title: 'Reader', type: 'object' as const, properties: {},
+      methods: { read: { arguments: [{ name: 'data', type: 'object', properties: { msg: { type: 'string' } } }] } },
+    }));
 
     const tree = createMemoryTree();
     await tree.set(createNode('/r', 'reader'));
@@ -478,6 +491,10 @@ describe('actions.ts operations', () => {
       }
     }
     registerType('emitter', Emitter);
+    register('emitter', 'schema', () => ({
+      $id: 'emitter', title: 'Emitter', type: 'object' as const, properties: {},
+      methods: { emit: { arguments: [{ name: 'data', type: 'object', properties: { n: { type: 'number' } }, required: ['n'] }], streaming: true } },
+    }));
 
     const tree = createMemoryTree();
     await tree.set(createNode('/e', 'item', {}, {
@@ -494,6 +511,10 @@ describe('actions.ts operations', () => {
   it('executeStream: BAD_REQUEST for non-generator action', async () => {
     class Plain { run() { return 42; } }
     registerType('plain', Plain);
+    register('plain', 'schema', () => ({
+      $id: 'plain', title: 'Plain', type: 'object' as const, properties: {},
+      methods: { run: { arguments: [] } },
+    }));
 
     const tree = createMemoryTree();
     await tree.set(createNode('/p', 'item', {}, { plain: { $type: 'plain' } }));

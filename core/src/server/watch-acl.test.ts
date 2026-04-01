@@ -1,9 +1,11 @@
 // Tests for watch event ACL filtering:
 // - filterPatches: component-level patch filtering
 // - filteredPush behavior: claims caching, set/patch/remove event handling
+// - remove event ACL: parent-based permission check for deleted nodes
 
-import { createNode, isComponent, R, register } from '#core';
-import { componentPerm } from './auth';
+import { createNode, isComponent, R, W, register } from '#core';
+import { componentPerm, resolvePermission } from './auth';
+import { createMemoryTree } from '#tree';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { Operation } from 'fast-json-patch';
@@ -111,5 +113,57 @@ describe('filterPatches — component-level ACL on patch events', () => {
     // seg = '' after split('/')[1] → !seg guard → passes through
     const filtered = filterPatches(patches, node, 'bob', ['authenticated', 'u:bob']);
     assert.equal(filtered.length, 1);
+  });
+});
+
+// ── Remove event ACL — root cause and fix verification ──
+
+describe('remove event ACL — parent-based permission', () => {
+  it('resolvePermission returns 0 for deleted node (root cause)', async () => {
+    const tree = createMemoryTree();
+
+    // Node whose only R grant comes from its own $acl via $owner
+    const task = createNode('/tasks/t1', 'task');
+    task.$owner = 'alice';
+    task.$acl = [{ g: 'owner', p: R | W }];
+    await tree.set(task);
+
+    const before = await resolvePermission(tree, '/tasks/t1', 'alice', ['u:alice', 'authenticated']);
+    assert.ok(before & R, 'alice can read before delete');
+
+    await tree.remove('/tasks/t1');
+
+    const after = await resolvePermission(tree, '/tasks/t1', 'alice', ['u:alice', 'authenticated']);
+    assert.equal(after, 0, 'ACL check on deleted node returns 0 — this caused remove events to be silently dropped');
+  });
+
+  it('parent ACL resolves correctly after child is deleted', async () => {
+    const tree = createMemoryTree();
+
+    const parent = createNode('/tasks', 'dir');
+    parent.$acl = [{ g: 'authenticated', p: R }];
+    await tree.set(parent);
+
+    await tree.set(createNode('/tasks/t1', 'task'));
+    await tree.remove('/tasks/t1');
+
+    // Parent still grants R — remove event should be delivered via parent check
+    const perm = await resolvePermission(tree, '/tasks', 'alice', ['u:alice', 'authenticated']);
+    assert.ok(perm & R, 'parent perm survives child deletion');
+  });
+
+  it('unauthorized user cannot read parent — remove event should be blocked', async () => {
+    const tree = createMemoryTree();
+
+    const parent = createNode('/secret', 'dir');
+    parent.$acl = [{ g: 'admins', p: R | W }, { g: 'authenticated', p: 0 }];
+    await tree.set(parent);
+
+    await tree.set(createNode('/secret/doc1', 'doc'));
+    await tree.remove('/secret/doc1');
+
+    // bob is authenticated but parent denies authenticated — remove must NOT be delivered
+    const perm = await resolvePermission(tree, '/secret', 'bob', ['u:bob', 'authenticated']);
+    assert.equal(perm, 0, 'unauthorized user blocked by parent ACL');
   });
 });

@@ -1,5 +1,5 @@
 import { registerType } from '#comp';
-import { createNode } from '#core';
+import { createNode, register } from '#core';
 import { clearRegistry } from '#core/index.test';
 import { createMemoryTree, type Tree } from '#tree';
 import assert from 'node:assert/strict';
@@ -25,6 +25,13 @@ describe('Workflow & Spatial Gravity', () => {
     // We register the query mount manually or import it
     await import('./mount-adapters');
     registerType('order', Order);
+    register('order', 'schema', () => ({
+      $id: 'order',
+      title: 'Order',
+      type: 'object' as const,
+      properties: { status: { type: 'string' } },
+      methods: { cook: { arguments: [] } },
+    }));
     rootStore = createMemoryTree();
     trpcStore = withMounts(rootStore);
   });

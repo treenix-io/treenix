@@ -49,6 +49,8 @@ const ApiTokensView: View<ApiTokenManager> = ({ value, ctx }) => {
       ) : (
         <div className="space-y-2">
           {children.map(child => {
+            // TODO: use get(SomeType) to cast to component needed
+            // TODO: get name with some good util function
             const tokenName = child.name || child.$path.split('/').pop();
             return (
               <div key={child.$path} className="flex items-center justify-between rounded bg-zinc-800/50 px-3 py-2 border border-zinc-700/50">

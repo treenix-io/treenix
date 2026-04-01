@@ -2,14 +2,12 @@
 // Thin transport wrapper over shared ops (actions.ts).
 // Responsibilities: input validation (Zod), error mapping (OpError → TRPCError), watch wiring.
 
-import { createNode, getComponentField, isComponent, isRef, type NodeData, R, resolve, S, W } from '#core';
+import { getComponentField, isRef, type NodeData, resolve, S } from '#core';
 import { assertSafePath } from '#core/path';
 import type { Tree } from '#tree';
 import { createTreeP } from '#protocol/treep';
 import { initTRPC, TRPCError } from '@trpc/server';
 import { observable } from '@trpc/server/observable';
-import type { Operation } from 'fast-json-patch';
-import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import {
   type ActionCtx,
@@ -18,48 +16,16 @@ import {
   serverNodeHandle,
   setComponent as setComponentOp,
 } from './actions';
-import { AGENT_SESSION_TTL, hashAgentKey, timingSafeCompare } from './agent';
-import {
-  buildClaims,
-  componentPerm,
-  createSession,
-  DUMMY_HASH,
-  hashPassword,
-  resolvePermission,
-  revokeSession,
-  type Session,
-  stripComponents,
-  verifyPassword,
-  withAcl,
-} from './auth';
+import { buildClaims, type Session, withAcl } from './auth';
+import { agentConnect, anonLogin, devLogin, loginUser, logoutUser, registerUser } from './auth-ops';
 import { OpError } from './errors';
 import { deployPrefab as deployPrefabOp } from './prefab';
 import { type CdcRegistry, type NodeEvent } from './sub';
 import { extractPaths } from './volatile';
 import { type WatchManager } from './watch';
+import { createFilteredPush } from './watch-filter';
 
 export type TrpcContext = { session: Session | null; token: string | null };
-
-/**
- * Filter RFC 6902 patch operations, removing ops that target restricted components.
- * Patch paths are like "/componentKey/field" — first segment is the node key.
- */
-function filterPatches(
-  patches: Operation[],
-  node: NodeData,
-  userId: string | null,
-  claims: string[],
-): Operation[] {
-  return patches.filter(op => {
-    // Extract first path segment: "/foo/bar" → "foo"
-    const seg = op.path.split('/')[1];
-    if (!seg || seg.startsWith('$')) return true; // system fields pass through
-    const val = node[seg];
-    if (!isComponent(val)) return true; // plain fields pass through
-    // Component — check component-level R permission
-    return !!(componentPerm(val, userId, claims, node.$owner) & R);
-  });
-}
 
 /** Zod schema that validates tree paths — rejects traversal, null bytes, double slashes */
 const safePath = z.string().superRefine((p, ctx) => {
@@ -78,29 +44,6 @@ const patchOps = z.array(z.union([
   z.tuple([z.literal('d'), z.string()]).readonly(),
 ]));
 
-// ── Rate limiter (in-memory, per key) ──
-
-const rateBuckets = new Map<string, { count: number; resetAt: number }>();
-const RATE_WINDOW_MS = 60_000;
-const RATE_LIMIT_AUTH = 10; // max attempts per key per minute
-
-function checkRate(key: string, limit = RATE_LIMIT_AUTH): void {
-  const now = Date.now();
-  const bucket = rateBuckets.get(key);
-  if (!bucket || now > bucket.resetAt) {
-    rateBuckets.set(key, { count: 1, resetAt: now + RATE_WINDOW_MS });
-    return;
-  }
-  if (bucket.count >= limit) throw new TRPCError({ code: 'TOO_MANY_REQUESTS', message: 'Too many requests' });
-  bucket.count++;
-}
-
-// Periodic cleanup (every 5 min)
-setInterval(() => {
-  const now = Date.now();
-  for (const [k, v] of rateBuckets) if (now > v.resetAt) rateBuckets.delete(k);
-}, 5 * 60_000).unref();
-
 export type TreeRouterOpts = {
   /** TTL for cached claims in SSE connections (ms). Default 30s. 0 = no cache. */
   claimsTtlMs?: number;
@@ -112,30 +55,33 @@ export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: 
   const claimsTtlMs = opts?.claimsTtlMs ?? DEFAULT_CLAIMS_TTL_MS;
   const t = initTRPC.context<TrpcContext>().create();
 
-  // Map domain errors → TRPCError by inspecting result.error.cause
-  // tRPC v11 middleware: next() returns { ok, error } — doesn't throw
-  const authed = t.procedure.use(async ({ ctx, next }) => {
+  // Map domain errors → TRPCError. Base middleware for all procedures.
+  function mapErrors(result: { ok: boolean; error?: { cause?: unknown } }) {
+    if (result.ok) return;
+    const cause = result.error?.cause;
+    if (cause instanceof Error) {
+      if (cause.name === 'OpError')
+        throw new TRPCError({ code: (cause as OpError).code, message: cause.message });
+      if (cause.message.startsWith('Access denied'))
+        throw new TRPCError({ code: 'FORBIDDEN', message: cause.message });
+      if (cause.message.startsWith('OptimisticConcurrencyError'))
+        throw new TRPCError({ code: 'CONFLICT', message: cause.message });
+    }
+  }
+
+  const base = t.procedure.use(async ({ next }) => {
+    const result = await next();
+    mapErrors(result);
+    return result;
+  });
+
+  const authed = base.use(async ({ ctx, next }) => {
     const userId = ctx.session?.userId ?? null;
-    // Session-level claims (agents) override dynamic buildClaims (users)
     const claims = ctx.session?.claims ?? (userId ? await buildClaims(baseStore, userId) : ['public']);
     const tree = withAcl(baseStore, userId, claims);
     const tp = createTreeP(tree, (path, key, action, data) =>
       executeAction(tree, path, undefined, key, action, data, { userId }));
-
-    const result = await next({ ctx: { ...ctx, tree, tp } });
-
-    if (!result.ok) {
-      const cause = result.error.cause;
-      if (cause instanceof Error) {
-        if (cause.name === 'OpError')
-          throw new TRPCError({ code: (cause as OpError).code, message: cause.message });
-        if (cause.message.startsWith('Access denied'))
-          throw new TRPCError({ code: 'FORBIDDEN', message: cause.message });
-        if (cause.message.startsWith('OptimisticConcurrencyError'))
-          throw new TRPCError({ code: 'CONFLICT', message: cause.message });
-      }
-    }
-    return result;
+    return next({ ctx: { ...ctx, tree, tp } });
   });
 
   return t.router({
@@ -273,59 +219,13 @@ export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: 
           params: input.params,
         })),
 
-    register: t.procedure
+    register: base
       .input(z.object({ userId: z.string().min(1), password: z.string().min(1) }))
-      .mutation(async ({ input }) => {
-        checkRate(`register:${input.userId}`);
-        if (/[/\\\0]/.test(input.userId)) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Invalid userId' });
-        const userPath = `/auth/users/${input.userId}`;
-        const existing = await baseStore.get(userPath);
-        if (existing) throw new TRPCError({ code: 'CONFLICT', message: 'User already exists' });
-        // First user → admin + active, rest → pending activation by admin
-        const { items } = await baseStore.getChildren('/auth/users', { limit: 1 });
-        const isFirstUser = items.length === 0;
+      .mutation(({ input }) => registerUser(baseStore, input.userId, input.password)),
 
-        const hash = await hashPassword(input.password);
-        const node = createNode(userPath, 'user', {
-          status: isFirstUser ? 'active' : 'pending',
-        }, {
-          credentials: { $type: 'credentials', hash },
-          groups: { $type: 'groups', list: isFirstUser ? ['admins'] : [] },
-        });
-        node.$owner = input.userId;
-        node.$acl = [
-          { g: 'owner', p: R | W },
-          { g: 'authenticated', p: 0 },
-        ];
-        console.log(`[register] writing user to ${node.$path}`);
-        await baseStore.set(node);
-        console.log(`[register] set() done, verifying...`);
-        const verify = await baseStore.get(node.$path);
-        console.log(`[register] verify get: ${verify ? 'found' : 'NOT FOUND'}`);
-        if (!isFirstUser) {
-          return { token: null, userId: input.userId, pending: true };
-        }
-        const token = await createSession(baseStore, input.userId);
-        return { token, userId: input.userId, pending: false };
-      }),
-
-    login: t.procedure
+    login: base
       .input(z.object({ userId: z.string().min(1), password: z.string().min(1) }))
-      .mutation(async ({ input }) => {
-        checkRate(`login:${input.userId}`);
-        if (/[/\\\0]/.test(input.userId)) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Invalid userId' });
-        const userPath = `/auth/users/${input.userId}`;
-        const user = await baseStore.get(userPath);
-        const cv = user ? user['credentials'] : undefined;
-        const creds = isComponent(cv) ? cv : undefined;
-        // Always run scrypt to prevent timing-based user enumeration
-        const hash = typeof creds?.['hash'] === 'string' ? creds['hash'] : undefined;
-        const ok = await verifyPassword(input.password, hash ?? DUMMY_HASH);
-        if (!user || !hash || !ok) throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Invalid credentials' });
-        if (user.status !== 'active') throw new TRPCError({ code: 'FORBIDDEN', message: 'Account not activated' });
-        const token = await createSession(baseStore, input.userId);
-        return { token, userId: input.userId };
-      }),
+      .mutation(({ input }) => loginUser(baseStore, input.userId, input.password)),
 
     me: authed.query(({ ctx }) => {
       if (!ctx.session) return null;
@@ -338,54 +238,12 @@ export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: 
 
     logout: authed.mutation(async ({ ctx }) => {
       if (!ctx.session || !ctx.token) return { ok: false };
-      await revokeSession(baseStore, ctx.token);
-      return { ok: true };
+      return logoutUser(baseStore, ctx.token);
     }),
 
-    // Agent TOFU handshake — public endpoint (no auth required)
-    agentConnect: t.procedure
+    agentConnect: base
       .input(z.object({ path: safePath, key: z.string().min(1) }))
-      .mutation(async ({ input }) => {
-        checkRate(`agent:${input.path}`);
-        const node = await baseStore.get(input.path);
-        if (!node) throw new TRPCError({ code: 'NOT_FOUND', message: 'Agent port not found' });
-        if (node.$type !== 't.agent.port') throw new TRPCError({ code: 'BAD_REQUEST', message: 'Not an agent port' });
-
-        const keyHash = hashAgentKey(input.key);
-        const status = (node as any).status as string ?? 'idle';
-
-        if (status === 'revoked')
-          throw new TRPCError({ code: 'FORBIDDEN', message: 'Agent access revoked' });
-
-        // TOFU: first key presented goes to pending
-        if (status === 'idle') {
-          await baseStore.set({ ...node, status: 'pending', pendingKey: keyHash });
-          return { status: 'pending' as const };
-        }
-
-        // Pending: same key = still waiting, different key = reject
-        if (status === 'pending') {
-          if (!timingSafeCompare(keyHash, (node as any).pendingKey))
-            throw new TRPCError({ code: 'FORBIDDEN', message: 'Key mismatch' });
-          return { status: 'pending' as const };
-        }
-
-        // Approved: verify key, create session
-        if (status === 'approved') {
-          if (!timingSafeCompare(keyHash, (node as any).approvedKey))
-            throw new TRPCError({ code: 'FORBIDDEN', message: 'Key mismatch' });
-
-          const agentUserId = `agent:${input.path}`;
-          const token = await createSession(baseStore, agentUserId, { ttlMs: AGENT_SESSION_TTL });
-
-          // Mark connected
-          await baseStore.set({ ...node, connected: true, connectedAt: Date.now() });
-
-          return { status: 'approved' as const, token, userId: agentUserId };
-        }
-
-        throw new TRPCError({ code: 'BAD_REQUEST', message: `Unknown agent status: ${status}` });
-      }),
+      .mutation(({ input }) => agentConnect(baseStore, input.path, input.key)),
 
     unwatch: authed.input(z.object({ paths: z.array(z.string()) })).mutation(({ input, ctx }) => {
       if (ctx.session) watcher.unwatch(ctx.session.userId, input.paths);
@@ -400,27 +258,9 @@ export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: 
         }
       }),
 
-    anonLogin: t.procedure.mutation(async () => {
-      checkRate('anonLogin', 30);
-      const userId = `anon:${randomBytes(16).toString('hex')}`;
-      const token = await createSession(baseStore, userId);
-      return { token, userId };
-    }),
+    anonLogin: base.mutation(() => anonLogin(baseStore)),
 
-    devLogin: t.procedure.mutation(async () => {
-      if (!process.env.VITE_DEV_LOGIN) throw new TRPCError({ code: 'FORBIDDEN', message: 'Dev-only' });
-      const userId = 'dev';
-      const userPath = `/auth/users/${userId}`;
-      if (!await baseStore.get(userPath)) {
-        const node = createNode(userPath, 'user', {}, {
-          groups: { $type: 'groups', list: ['admins'] },
-        });
-        node.$owner = userId;
-        await baseStore.set(node);
-      }
-      const token = await createSession(baseStore, userId);
-      return { token, userId };
-    }),
+    devLogin: base.mutation(() => devLogin(baseStore)),
 
     streamAction: authed
       .input(z.object({ path: safePath, type: z.string().optional(), key: z.string().optional(), action: z.string(), data: z.unknown().optional() }))
@@ -484,47 +324,10 @@ export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: 
         const claims = ctx.session?.claims ?? [];
         const connId = `${userId}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
 
-        // Session-provided claims (agents) are static — never refetch.
-        // Dynamic claims (users) use TTL cache for authorization freshness.
         const sessionClaims = claims.length ? claims : null;
-        let dynamicClaims: string[] | null = null;
-        let dynamicAt = 0;
-        const getClaims = async () => {
-          if (sessionClaims) return sessionClaims;
-          if (!dynamicClaims || Date.now() - dynamicAt > claimsTtlMs) {
-            dynamicClaims = await buildClaims(baseStore, userId);
-            dynamicAt = Date.now();
-          }
-          return dynamicClaims;
-        };
+        const push = createFilteredPush(baseStore, userId, sessionClaims, (e) => emit.next(e), { claimsTtlMs });
 
-        const filteredPush = async (event: NodeEvent) => {
-          if (event.type === 'reconnect') { emit.next(event); return; }
-
-          // ACL check: verify user can still read this path
-          const userClaims = await getClaims();
-          const perm = await resolvePermission(baseStore, event.path, userId, userClaims);
-          if (!(perm & R)) return; // silently drop — user lost read access
-
-          if (event.type === 'set' && event.node) {
-            // Strip forbidden components from full node
-            const fullNode = { $path: event.path, ...event.node } as NodeData;
-            const stripped = stripComponents(fullNode, userId, userClaims);
-            const { $path, ...body } = stripped;
-            emit.next({ ...event, node: body });
-          } else if (event.type === 'patch' && event.patches.length > 0) {
-            // Filter patch ops targeting restricted components
-            const node = await baseStore.get(event.path);
-            if (!node) { emit.next(event); return; }
-            const filtered = filterPatches(event.patches, node, userId, userClaims);
-            if (filtered.length === 0) return; // all ops were restricted — skip entirely
-            emit.next(filtered.length === event.patches.length ? event : { ...event, patches: filtered });
-          } else {
-            emit.next(event);
-          }
-        };
-
-        const preserved = watcher.connect(connId, userId, (event) => { filteredPush(event).catch(() => {}); });
+        const preserved = watcher.connect(connId, userId, push);
         emit.next({ type: 'reconnect', preserved });
         return () => watcher.disconnect(connId);
       });

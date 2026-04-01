@@ -8,6 +8,7 @@ import { type ExecuteFn, makeTypedProxy, type StreamFn } from '#comp/handle';
 import { collectDeps as _collectDeps, type ResolvedDeps } from '#comp/needs';
 import { type ComponentData, getComponentField, isComponent, type NodeData, register, resolve } from '#core';
 import { validateValue, type ValidationError } from '#comp/validate';
+import { type TypeSchema } from '#schema/types';
 import { type PatchOp, type Tree } from '#tree';
 import { createDraft, enablePatches, finishDraft, type Patch } from 'immer';
 import { OpError } from './errors';
@@ -125,6 +126,14 @@ async function loadDynamicAction(
   const typeNode = await tree.get(typePath);
   const actionCode = (typeNode as any)?.actions?.[action];
   if (!actionCode || typeof actionCode !== 'string') return null;
+
+  // Register schema from type node's `schema` field
+  if (!resolve(type, 'schema')) {
+    const nodeSchema = (typeNode as Record<string, unknown>).schema;
+    if (!nodeSchema || typeof nodeSchema !== 'object') return null;
+    const s = { $id: type, ...(nodeSchema as Record<string, unknown>) };
+    register(type, 'schema', () => s as unknown as TypeSchema);
+  }
 
   // Build a sandboxed action handler — compiled once, called per invocation
   const fn = async (ctx: ActionCtx, data: unknown): Promise<unknown> => {
@@ -297,7 +306,7 @@ export async function executeAction(
   // Pre/post condition checking (Design by Contract)
   const schemaHandler = resolve(type, 'schema');
   const methodSchema = schemaHandler?.()?.methods?.[action];
-  validateActionArgs(type, action, data, methodSchema);
+  validateActionArgs(type, action, data);
 
   const preFields: string[] = methodSchema?.pre ?? [];
   const postFields: string[] = methodSchema?.post ?? [];
@@ -362,9 +371,7 @@ export async function* executeStream(
     tree, path, componentType, componentKey, action,
   );
 
-  const streamSchemaHandler = resolve(type, 'schema');
-  const streamMethodSchema = streamSchemaHandler?.()?.methods?.[action];
-  validateActionArgs(type, action, data, streamMethodSchema);
+  validateActionArgs(type, action, data);
 
   // comp is already node[fieldKey] from resolution — no Immer draft needed for generators
   const nc = serverNodeHandle(tree);

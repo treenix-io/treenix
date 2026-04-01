@@ -92,11 +92,9 @@ export function startEvents(config: EventsConfig) {
         if (event.addVps) event.addVps.forEach((vp: string) => cache.addToParent(event.path, vp));
         if (event.rmVps) event.rmVps.forEach((vp: string) => cache.removeFromParent(event.path, vp));
       } else if (event.type === 'remove') {
-        if (event.rmVps && event.rmVps.length > 0) {
-          event.rmVps.forEach((vp: string) => cache.removeFromParent(event.path, vp));
-        } else {
-          cache.remove(event.path);
-        }
+        cache.remove(event.path);
+        // Also clean up virtual parents (CDC queries)
+        if (event.rmVps) event.rmVps.forEach((vp: string) => cache.removeFromParent(event.path, vp));
       }
     },
   });
