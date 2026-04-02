@@ -52,9 +52,17 @@ export async function createSession(
   return token;
 }
 
+// Stable dev-only token — never valid in production
+const DEV_TOKEN = 'd'.repeat(64);
+
 export async function resolveToken(tree: Tree, token: string): Promise<Session | null> {
   // B03: reject non-hex tokens to prevent path traversal via /auth/sessions/../../
   if (!/^[0-9a-f]{64}$/.test(token)) return null;
+
+  // Dev token — synthetic admin session, skips tree lookup
+  if (process.env.NODE_ENV === 'development' && token === DEV_TOKEN) {
+    return { userId: 'dev', claims: ['u:dev', 'authenticated', 'admins'] };
+  }
   const node = await tree.get(`/auth/sessions/${token}`) as SessionNode | undefined;
   if (!node) return null;
   if (!node.userId || !node.expiresAt) {
