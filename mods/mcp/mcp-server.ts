@@ -357,6 +357,42 @@ export async function buildMcpServer(store: Tree, session: Session, claims?: str
     async ({ query }) => text(yaml(catalog.search(query))),
   );
 
+  // ── Guardian approval — lets the agent ask user and grant access ──
+
+  mcp.registerTool(
+    'guardian_approve',
+    {
+      description: 'Add a pattern to the Guardian allow list. Use when a previous tool call returned "Requires approval". The user must confirm before calling this.',
+      inputSchema: {
+        pattern: z.string().describe('The subject pattern to allow, e.g. "mcp__treenity__execute:run"'),
+        scope: z.enum(['session', 'permanent']).optional().describe('session = until restart (default), permanent = persisted to guardian policy'),
+      },
+    },
+    async ({ pattern, scope }) => {
+      const guardianNode = await store.get('/agents/guardian');
+      if (!guardianNode) return text('🛑 No guardian node at /agents/guardian');
+      const policy = getComponent(guardianNode, AiPolicy);
+      if (!policy || policy.$type !== 'ai.policy') return text('🛑 Invalid guardian policy');
+
+      if (scope === 'permanent') {
+        // Persist to tree — survives restarts
+        if (!policy.allow.includes(pattern)) {
+          policy.allow.push(pattern);
+          policy.escalate = policy.escalate.filter((e: string) => e !== pattern);
+          await store.set(guardianNode);
+        }
+        return text(`✅ Permanently allowed: ${pattern}`);
+      }
+
+      // Session scope — add to in-memory policy, lost on restart
+      if (!policy.allow.includes(pattern)) {
+        policy.allow.push(pattern);
+        policy.escalate = policy.escalate.filter((e: string) => e !== pattern);
+      }
+      return text(`✅ Allowed for this session: ${pattern}`);
+    },
+  );
+
   return mcp;
 }
 
