@@ -97,15 +97,6 @@ export function useActions<T>(value: T): Actions<T> {
   }), [path]);
 }
 
-// ── useViewCtx — non-nullable ctx for node-level views ──
-
-export function useViewCtx(): ViewCtx {
-  const node = useContext(NodeCtx);
-  if (!node) throw new Error('useViewCtx: not inside a node render');
-  const path = node.$path;
-  return useMemo(() => ({ node, path, execute: (action: string, data?: unknown) => execute(path, action, data) }), [node, path]);
-}
-
 declare module '@treenity/core/core/context' {
   interface ContextHandlers<T> {
     react: FC<RenderProps<T>>;
