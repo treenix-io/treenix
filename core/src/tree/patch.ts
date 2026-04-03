@@ -84,7 +84,12 @@ function deleteByPath(obj: any, path: string): void {
     if (cur[parts[i]] == null) return;
     cur = cur[parts[i]];
   }
-  delete cur[parts[parts.length - 1]];
+  const key = parts[parts.length - 1];
+  if (Array.isArray(cur)) {
+    const idx = Number(key);
+    if (Number.isInteger(idx)) { cur.splice(idx, 1); return; }
+  }
+  delete cur[key];
 }
 
 // ── RFC 6902 conversion ──

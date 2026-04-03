@@ -67,6 +67,24 @@ describe('applyOps', () => {
     assert.equal('b' in obj.meta, false);
   });
 
+  it('delete array item by index splices instead of nulling', () => {
+    const obj = { items: ['a', 'b', 'c'] } as any;
+    applyOps(obj, [['d', 'items.1']]);
+    assert.deepEqual(obj.items, ['a', 'c']);
+  });
+
+  it('delete first array item', () => {
+    const obj = { items: ['x', 'y'] } as any;
+    applyOps(obj, [['d', 'items.0']]);
+    assert.deepEqual(obj.items, ['y']);
+  });
+
+  it('delete nested array item', () => {
+    const obj = { checklist: { items: ['do a', 'do b', 'do c'] } } as any;
+    applyOps(obj, [['d', 'checklist.items.0']]);
+    assert.deepEqual(obj.checklist.items, ['do b', 'do c']);
+  });
+
   it('creates intermediate objects on set', () => {
     const obj = {} as any;
     applyOps(obj, [['r', 'deep.nested.field', 'ok']]);
