@@ -12,6 +12,7 @@ import {
   ref,
   register,
   removeComponent,
+  onResolveMiss,
   render,
   resolve,
   unregister,
@@ -242,7 +243,6 @@ describe('Context + missResolver fallback', () => {
   it('resolve returns default handler when miss resolver exists but no exact match', () => {
     clearRegistry();
     const missed: string[] = [];
-    const { onResolveMiss } = require('#core');
     onResolveMiss('test-miss', (type: string) => missed.push(type));
     register('default', 'test-miss', () => 'fallback');
 
@@ -256,7 +256,6 @@ describe('Context + missResolver fallback', () => {
 
   it('resolve prefers exact match over default even with miss resolver', () => {
     clearRegistry();
-    const { onResolveMiss } = require('#core');
     onResolveMiss('test-miss2', () => {});
     register('default', 'test-miss2', () => 'fallback');
     register('exact.type', 'test-miss2', () => 'exact');

@@ -61,4 +61,24 @@ describe('viewCtx', () => {
     assert.equal(ctx.path, '/org/acme#settings');
     assert.equal(ctx.node, node);
   });
+
+  it('execute uses node path for node-level value', () => {
+    const node = makeNode('/tasks/1', 'task');
+    const ctx = viewCtx(node)!;
+    assert.ok(ctx.execute);
+    assert.equal(ctx.path, '/tasks/1');
+  });
+
+  it('execute uses path#key for named component', () => {
+    const node = makeNode('/tasks/1', 'task', {
+      checklist: { $type: 'simple.checklist' },
+    });
+    const ctx = viewCtx((node as any).checklist)!;
+    assert.equal(ctx.path, '/tasks/1#checklist');
+  });
+
+  it('returns null for value without $node symbol', () => {
+    const plain = { $type: 'simple.checklist', items: [] };
+    assert.equal(viewCtx(plain), null);
+  });
 });
