@@ -1,7 +1,7 @@
 // Treenity Service Context — Layer 2
 // Service = register(type, "service", handler) → returns { stop() }
 
-import { type NodeData, resolve as resolveCtx } from '#core';
+import { resolve as resolveCtx } from '#core';
 import { type Tree } from '#tree';
 
 // ── Types ──
@@ -15,13 +15,13 @@ export type StoreListener = (event: StoreEvent) => void;
 export type SubscribeOpts = { children?: boolean };
 export type ServiceCtx = {
   tree: Tree;
+  path: string;
   subscribe: (path: string, cb: StoreListener, opts?: SubscribeOpts) => () => void;
 };
-export type ServiceHandler = (node: NodeData, ctx: ServiceCtx) => Promise<ServiceHandle>;
 
 declare module '#core/context' {
-  interface ContextHandlers {
-    service: ServiceHandler;
+  interface ContextHandlers<T> {
+    service: (value: T, ctx: ServiceCtx) => Promise<ServiceHandle>;
   }
 }
 
@@ -39,5 +39,5 @@ export async function startServices(
     console.error(`[service] no handler for ${node.$type}`);
     return null;
   }
-  return await handler(node, { tree, subscribe });
+  return await handler(node, { tree, path: node.$path, subscribe });
 }

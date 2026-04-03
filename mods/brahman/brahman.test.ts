@@ -200,6 +200,7 @@ async function startTestBot(tree: Tree): Promise<FakeBot> {
   setBotFactory(() => fakeBot);
   const svcCtx: ServiceCtx = {
     tree,
+    path: botNode.$path,
     subscribe: () => () => {},
   };
 

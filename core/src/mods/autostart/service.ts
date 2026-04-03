@@ -23,7 +23,7 @@ async function _startService(path: string): Promise<void> {
   const handler = coreResolve(node.$type, 'service');
   if (!handler) throw new Error(`autostart: no service handler for ${node.$type}`);
 
-  handles.set(path, await handler(node, _svcCtx));
+  handles.set(path, await handler(node, { ..._svcCtx, path }));
   console.log(`[autostart] started ${path}`);
 }
 
