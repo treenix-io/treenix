@@ -6,7 +6,8 @@
   "properties": {
     "text": {
       "title": "Prompt text",
-      "format": "tstring"
+      "format": "tstring",
+      "default": {}
     },
     "inputType": {
       "type": "string",

@@ -41,7 +41,8 @@
       "items": {
         "type": "string"
       },
-      "title": "User tags"
+      "title": "User tags",
+      "default": []
     }
   },
   "required": [

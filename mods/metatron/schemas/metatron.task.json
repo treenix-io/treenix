@@ -39,7 +39,8 @@
       "items": {
         "type": "string"
       },
-      "title": "Queued user messages to process after current run"
+      "title": "Queued user messages to process after current run",
+      "default": []
     },
     "forkedFrom": {
       "type": "string",

@@ -15,7 +15,11 @@
       "required": [
         "$type",
         "$ref"
-      ]
+      ],
+      "default": {
+        "$type": "ref",
+        "$ref": ""
+      }
     }
   },
   "required": [

@@ -8,16 +8,20 @@
       "type": "number",
       "default": 0
     },
-    "data": {},
+    "data": {
+      "default": {}
+    },
     "history": {
       "type": "array",
       "items": {
         "type": "string"
-      }
+      },
+      "default": []
     },
     "callbacks": {
       "title": "Pending callbacks",
-      "description": "messageType → action path"
+      "description": "messageType → action path",
+      "default": {}
     }
   },
   "required": [

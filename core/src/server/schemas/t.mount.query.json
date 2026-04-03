@@ -7,7 +7,9 @@
       "type": "string",
       "default": ""
     },
-    "match": {}
+    "match": {
+      "default": {}
+    }
   },
   "required": [
     "source",

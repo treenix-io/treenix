@@ -15,7 +15,8 @@
       "items": {
         "type": "string"
       },
-      "description": "Ordered child action paths"
+      "description": "Ordered child action paths",
+      "default": []
     }
   },
   "required": [

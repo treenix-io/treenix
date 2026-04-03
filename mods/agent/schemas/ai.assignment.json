@@ -14,10 +14,12 @@
       "items": {
         "type": "string"
       },
-      "title": "Roles to wake for discussion (empty = no discussion pending)"
+      "title": "Roles to wake for discussion (empty = no discussion pending)",
+      "default": []
     },
     "cursors": {
-      "title": "agentPath → last read message index (don't re-send old messages)"
+      "title": "agentPath → last read message index (don't re-send old messages)",
+      "default": {}
     }
   },
   "required": [

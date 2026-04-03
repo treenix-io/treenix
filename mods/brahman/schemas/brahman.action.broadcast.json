@@ -10,7 +10,8 @@
         "type": "string"
       },
       "title": "User tags filter",
-      "format": "tags"
+      "format": "tags",
+      "default": []
     },
     "action": {
       "type": "string",

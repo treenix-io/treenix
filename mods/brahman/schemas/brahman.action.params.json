@@ -20,7 +20,8 @@
         "type": "string"
       },
       "title": "Parameter names",
-      "format": "tags"
+      "format": "tags",
+      "default": []
     }
   },
   "required": [

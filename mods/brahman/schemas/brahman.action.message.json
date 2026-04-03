@@ -6,7 +6,8 @@
   "properties": {
     "text": {
       "title": "Text",
-      "format": "tstring"
+      "format": "tstring",
+      "default": {}
     },
     "disableLinks": {
       "type": "boolean",
@@ -96,7 +97,8 @@
           "buttons"
         ]
       },
-      "title": "Menu rows"
+      "title": "Menu rows",
+      "default": []
     },
     "chatId": {
       "type": "string",

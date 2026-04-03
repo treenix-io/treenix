@@ -11,7 +11,8 @@
       },
       "title": "Groups",
       "format": "tags",
-      "description": "User group memberships"
+      "description": "User group memberships",
+      "default": []
     }
   },
   "required": [

@@ -31,7 +31,8 @@
         ]
       },
       "title": "Keyword entries",
-      "description": "Array of {keywords, message} pairs"
+      "description": "Array of {keywords, message} pairs",
+      "default": []
     }
   },
   "required": [

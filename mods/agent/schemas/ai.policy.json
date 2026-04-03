@@ -8,19 +8,22 @@
       "type": "array",
       "items": {
         "type": "string"
-      }
+      },
+      "default": []
     },
     "deny": {
       "type": "array",
       "items": {
         "type": "string"
-      }
+      },
+      "default": []
     },
     "escalate": {
       "type": "array",
       "items": {
         "type": "string"
-      }
+      },
+      "default": []
     }
   },
   "required": [

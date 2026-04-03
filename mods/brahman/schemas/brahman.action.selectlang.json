@@ -6,7 +6,8 @@
   "properties": {
     "text": {
       "title": "Text",
-      "format": "tstring"
+      "format": "tstring",
+      "default": {}
     }
   },
   "required": [

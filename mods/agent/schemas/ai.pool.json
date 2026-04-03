@@ -13,14 +13,16 @@
       "items": {
         "type": "string"
       },
-      "title": "Paths of currently active agent nodes"
+      "title": "Paths of currently active agent nodes",
+      "default": []
     },
     "queue": {
       "type": "array",
       "items": {
         "type": "string"
       },
-      "title": "Paths of agents waiting for a slot"
+      "title": "Paths of agents waiting for a slot",
+      "default": []
     }
   },
   "required": [
