@@ -1,22 +1,15 @@
 // Universal component views — compact, embeddable in any node
 
 import { type NodeData, register } from '@treenity/core';
-import { type View } from '@treenity/react/context';
+import { type Actions, type View, useActions } from '@treenity/react/context';
 import { trpc } from '@treenity/react/trpc';
 import { cn } from '@treenity/react/lib/utils';
-import { Badge } from '@treenity/react/ui/badge';
 import { Button } from '@treenity/react/ui/button';
 import { Input } from '@treenity/react/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@treenity/react/ui/select';
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { ATTACHABLE_COMPONENTS, TChecklist, TComments, TEstimate, TLinks, TTags, TTimeTrack } from './types';
-
-async function exec(ctx: { execute: (a: string, d?: unknown) => Promise<unknown> } | null | undefined, action: string, data?: unknown) {
-  if (!ctx) return;
-  try { await ctx.execute(action, data); }
-  catch (err) { toast.error(err instanceof Error ? err.message : 'Failed'); }
-}
 
 // ── Section wrapper ──
 
@@ -31,7 +24,8 @@ function Section({ label, children }: { label: string; children: React.ReactNode
 
 // ── Checklist ──
 
-const ChecklistView: View<TChecklist> = ({ value, ctx }) => {
+const ChecklistView: View<TChecklist> = ({ value }) => {
+  const actions = useActions(value);
   const [draft, setDraft] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const items = Array.isArray(value.items) ? value.items.filter(Boolean) : [];
@@ -56,14 +50,14 @@ const ChecklistView: View<TChecklist> = ({ value, ctx }) => {
                 'flex h-4 w-4 shrink-0 items-center justify-center rounded border text-[10px]',
                 item.done ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-zinc-600',
               )}
-              onClick={() => exec(ctx, 'toggle', { id: item.id })}
+              onClick={() => actions.toggle({ id: item.id })}
             >
               {item.done ? '✓' : ''}
             </button>
             <span className={cn('flex-1 text-sm', item.done && 'text-muted-foreground line-through')}>{item.text}</span>
             <button
               className="hidden text-xs text-muted-foreground hover:text-destructive group-hover:block"
-              onClick={() => exec(ctx, 'remove', { id: item.id })}
+              onClick={() => actions.remove({ id: item.id })}
             >
               ✕
             </button>
@@ -71,27 +65,25 @@ const ChecklistView: View<TChecklist> = ({ value, ctx }) => {
         ))}
       </ul>
 
-      {ctx && (
-        <form
-          className="mt-2 flex gap-1.5"
-          onSubmit={e => {
-            e.preventDefault();
-            if (!draft.trim()) return;
-            exec(ctx, 'add', { text: draft });
-            setDraft('');
-            inputRef.current?.focus();
-          }}
-        >
-          <Input
-            ref={inputRef}
-            value={draft}
-            onChange={e => setDraft(e.target.value)}
-            placeholder="Add item..."
-            className="h-7 flex-1 text-xs"
-          />
-          <Button type="submit" size="sm" variant="ghost" className="h-7 px-2 text-xs">+</Button>
-        </form>
-      )}
+      <form
+        className="mt-2 flex gap-1.5"
+        onSubmit={e => {
+          e.preventDefault();
+          if (!draft.trim()) return;
+          actions.add({ text: draft });
+          setDraft('');
+          inputRef.current?.focus();
+        }}
+      >
+        <Input
+          ref={inputRef}
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          placeholder="Add item..."
+          className="h-7 flex-1 text-xs"
+        />
+        <Button type="submit" size="sm" variant="ghost" className="h-7 px-2 text-xs">+</Button>
+      </form>
     </Section>
   );
 };
@@ -117,7 +109,8 @@ function tagColor(tag: string) {
   return TAG_COLORS[Math.abs(hash) % TAG_COLORS.length];
 }
 
-const TagsView: View<TTags> = ({ value, ctx }) => {
+const TagsView: View<TTags> = ({ value }) => {
+  const actions = useActions(value);
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState('');
   const items = Array.isArray(value.items) ? value.items : [];
@@ -128,15 +121,13 @@ const TagsView: View<TTags> = ({ value, ctx }) => {
         {items.map(tag => (
           <span key={tag} className={cn('group inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium', tagColor(tag))}>
             {tag}
-            {ctx && (
-              <button className="hidden hover:text-white group-hover:inline" onClick={() => exec(ctx, 'remove', { tag })}>
-                ✕
-              </button>
-            )}
+            <button className="hidden hover:text-white group-hover:inline" onClick={() => actions.remove({ tag })}>
+              ✕
+            </button>
           </span>
         ))}
 
-        {ctx && !adding && (
+        {!adding && (
           <button
             className="rounded-full border border-dashed border-zinc-600 px-2 py-0.5 text-xs text-muted-foreground hover:border-zinc-400 hover:text-foreground"
             onClick={() => setAdding(true)}
@@ -150,7 +141,7 @@ const TagsView: View<TTags> = ({ value, ctx }) => {
             className="inline-flex"
             onSubmit={e => {
               e.preventDefault();
-              if (draft.trim()) exec(ctx, 'add', { tag: draft });
+              if (draft.trim()) actions.add({ tag: draft });
               setDraft('');
               setAdding(false);
             }}
@@ -160,7 +151,7 @@ const TagsView: View<TTags> = ({ value, ctx }) => {
               value={draft}
               onChange={e => setDraft(e.target.value)}
               onBlur={() => {
-                if (draft.trim()) exec(ctx, 'add', { tag: draft });
+                if (draft.trim()) actions.add({ tag: draft });
                 setDraft('');
                 setAdding(false);
               }}
@@ -180,17 +171,18 @@ register(TTags, 'react', TagsView);
 
 const UNIT_LABELS: Record<string, string> = { hours: 'h', points: 'pts', days: 'd' };
 
-const EstimateView: View<TEstimate> = ({ value, ctx }) => {
+const EstimateView: View<TEstimate> = ({ value }) => {
+  const actions = useActions(value);
   const [editing, setEditing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const [draftUnit, setDraftUnit] = useState(typeof value.unit === 'string' ? value.unit : 'hours');
   const v = typeof value.value === 'number' ? value.value : 0;
   const unit = typeof value.unit === 'string' ? value.unit : 'hours';
 
-  if (editing && ctx) {
+  if (editing) {
     const save = () => {
       const num = parseFloat(inputRef.current?.value ?? '0');
-      if (!isNaN(num) && num >= 0) exec(ctx, 'update', { value: num, unit: draftUnit });
+      if (!isNaN(num) && num >= 0) actions.update({ value: num, unit: draftUnit });
       setEditing(false);
     };
 
@@ -239,7 +231,8 @@ register(TEstimate, 'react', EstimateView);
 
 // ── Links ──
 
-const LinksView: View<TLinks> = ({ value, ctx }) => {
+const LinksView: View<TLinks> = ({ value }) => {
+  const actions = useActions(value);
   const [adding, setAdding] = useState(false);
   const [url, setUrl] = useState('');
   const [label, setLabel] = useState('');
@@ -259,16 +252,14 @@ const LinksView: View<TLinks> = ({ value, ctx }) => {
             >
               {link.label || link.url}
             </a>
-            {ctx && (
-              <button className="hidden text-xs text-muted-foreground hover:text-destructive group-hover:block" onClick={() => exec(ctx, 'remove', { id: link.id })}>
-                ✕
-              </button>
-            )}
+            <button className="hidden text-xs text-muted-foreground hover:text-destructive group-hover:block" onClick={() => actions.remove({ id: link.id })}>
+              ✕
+            </button>
           </li>
         ))}
       </ul>
 
-      {ctx && !adding && (
+      {!adding && (
         <button
           className="mt-1 text-xs text-muted-foreground hover:text-foreground"
           onClick={() => setAdding(true)}
@@ -282,7 +273,7 @@ const LinksView: View<TLinks> = ({ value, ctx }) => {
           className="mt-2 flex flex-col gap-1.5"
           onSubmit={e => {
             e.preventDefault();
-            if (url.trim()) exec(ctx, 'add', { url, label });
+            if (url.trim()) actions.add({ url, label });
             setUrl('');
             setLabel('');
             setAdding(false);
@@ -304,7 +295,8 @@ register(TLinks, 'react', LinksView);
 
 // ── Comments ──
 
-const CommentsView: View<TComments> = ({ value, ctx }) => {
+const CommentsView: View<TComments> = ({ value }) => {
+  const actions = useActions(value);
   const [draft, setDraft] = useState('');
   const items = Array.isArray(value.items) ? value.items : [];
 
@@ -326,25 +318,23 @@ const CommentsView: View<TComments> = ({ value, ctx }) => {
         </div>
       )}
 
-      {ctx && (
-        <form
-          className="flex gap-1.5"
-          onSubmit={e => {
-            e.preventDefault();
-            if (!draft.trim()) return;
-            exec(ctx, 'add', { text: draft });
-            setDraft('');
-          }}
-        >
-          <Input
-            value={draft}
-            onChange={e => setDraft(e.target.value)}
-            placeholder="Add comment..."
-            className="h-7 flex-1 text-xs"
-          />
-          <Button type="submit" size="sm" variant="ghost" className="h-7 px-2 text-xs">Send</Button>
-        </form>
-      )}
+      <form
+        className="flex gap-1.5"
+        onSubmit={e => {
+          e.preventDefault();
+          if (!draft.trim()) return;
+          actions.add({ text: draft });
+          setDraft('');
+        }}
+      >
+        <Input
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          placeholder="Add comment..."
+          className="h-7 flex-1 text-xs"
+        />
+        <Button type="submit" size="sm" variant="ghost" className="h-7 px-2 text-xs">Send</Button>
+      </form>
     </Section>
   );
 };
@@ -361,7 +351,8 @@ function formatDuration(ms: number) {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
 }
 
-const TimeTrackView: View<TTimeTrack> = ({ value, ctx }) => {
+const TimeTrackView: View<TTimeTrack> = ({ value }) => {
+  const actions = useActions(value);
   const entries = Array.isArray(value.entries) ? value.entries : [];
   const running = !!value.running;
   const [tick, setTick] = useState(0);
@@ -384,16 +375,14 @@ const TimeTrackView: View<TTimeTrack> = ({ value, ctx }) => {
           {formatDuration(total)}
         </span>
 
-        {ctx && (
-          running ? (
-            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => exec(ctx, 'stop')}>
-              Stop
-            </Button>
-          ) : (
-            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => exec(ctx, 'start')}>
-              Start
-            </Button>
-          )
+        {running ? (
+          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => actions.stop()}>
+            Stop
+          </Button>
+        ) : (
+          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => actions.start()}>
+            Start
+          </Button>
         )}
       </div>
 

@@ -70,6 +70,14 @@ Context   = Map<type+context, handler>
 - **NEVER use `tree.set()` from client code.** All client mutations go through **`execute(path, action, data)`**.
 - Direct `set` is only valid for: admin tools, form editors, seed scripts, server-side actions.
 
+## Views — useActions, not ctx.execute
+- **Always use `useActions(value)`** in React views for calling actions. Never build custom `exec()` wrappers around `ctx.execute`.
+- Pattern: `const actions = useActions(value); actions.add({ text });` — typed, with autocomplete.
+- **Never `ctx.execute('action', data)`** — untyped string, no autocomplete, violates conventions.
+
+## Node creation — use core helpers
+- **Use `createNode(path, type, data)` from `@treenity/core`** to construct NodeData. Never build `{ $path, $type, ... }` objects manually — `createNode` validates system field names and normalizes types.
+
 ## Tech
 - TypeScript strict, ES2022, ESM
 - tsx to run

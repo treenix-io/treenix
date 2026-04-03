@@ -1,19 +1,10 @@
 // Universal component tests — action contracts
 
-import { resolve } from '@treenity/core';
+import { createNode, resolve } from '@treenity/core';
 import './types';
 import { createMemoryTree } from '@treenity/core/tree';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import type { NodeData } from '@treenity/core';
-
-function makeNode(componentKey: string, componentType: string, componentData: Record<string, unknown>): NodeData {
-  return {
-    $path: '/test/node',
-    $type: 'dir',
-    [componentKey]: { $type: componentType, ...componentData },
-  } as NodeData;
-}
 
 async function execComp(tree: ReturnType<typeof createMemoryTree>, path: string, compType: string, action: string, data?: unknown) {
   const handler = resolve(compType, `action:${action}`) as any;
