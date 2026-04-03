@@ -90,10 +90,12 @@ type Actions<T> = {
 export function useActions<T>(value: T): Actions<T> {
   const node: NodeData | undefined = (value as any)[$node];
   if (!node) throw new Error('useActions: value has no node context (missing $node symbol)');
+  const key: string = (value as any)[$key] ?? '';
+  const path = key ? `${node.$path}#${key}` : node.$path;
 
   return useMemo(() => new Proxy({} as Actions<T>, {
-    get: (_target, prop: string) => (data?: unknown) => execute(node.$path, prop, data),
-  }), [node.$path]);
+    get: (_target, prop: string) => (data?: unknown) => execute(path, prop, data),
+  }), [path]);
 }
 
 declare module '@treenity/core/core/context' {
