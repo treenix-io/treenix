@@ -13,12 +13,14 @@ import { Input } from '#components/ui/input';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '#components/ui/resizable';
 import { TypePicker } from '#mods/editor-ui/type-picker';
 import type { NodeData } from '@treenity/core';
+import { getDefaults } from '@treenity/core/comp';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { toast } from 'sonner';
 import * as cache from './cache';
 import { tree } from './client';
 import { SSE_CONNECTED, SSE_DISCONNECTED, startEvents, stopEvents } from './events';
-import { NavigateProvider } from './hooks';
+import { addComponent, createNode } from './hooks';
+import { checkBeforeNavigate, NavigateProvider, pushHistory } from './navigate';
 import { Inspector } from './Inspector';
 import { LoginModal, LoginScreen } from './Login';
 import { Tree } from './Tree';
@@ -165,13 +167,17 @@ export function App() {
     const url = base + search;
     if (location.pathname + location.search !== url) {
       if (navFromPopstate.current) navFromPopstate.current = false;
-      else history.pushState(null, '', url);
+      else pushHistory(url);
     }
   }, [selected, root, mode]);
 
   // Handle browser back/forward
   useEffect(() => {
     const onPop = () => {
+      if (!checkBeforeNavigate()) {
+        pushHistory(location.href);
+        return;
+      }
       const p = location.pathname;
       navFromPopstate.current = true;
       if (p.startsWith('/t')) {
@@ -282,6 +288,7 @@ export function App() {
 
   const handleSelect = useCallback(
     async (path: string) => {
+      if (!checkBeforeNavigate()) return;
       setSelected(path);
       if (!cache.has(path)) {
         const node = (await trpc.get.query({ path, watch: true })) as NodeData | undefined;
@@ -334,7 +341,7 @@ export function App() {
       const parentPath = creatingAt!;
       setCreatingAt(null);
       const childPath = parentPath === '/' ? `/${name}` : `${parentPath}/${name}`;
-      await tree.set({ $path: childPath, $type: type } as NodeData);
+      await createNode(childPath, type, getDefaults(type));
       await loadChildren(parentPath);
       if (!expanded.has(parentPath)) {
         setExpanded((prev) => new Set(prev).add(parentPath));
@@ -355,11 +362,7 @@ export function App() {
     async (name: string, type: string) => {
       const path = addingComponentAt!;
       setAddingComponentAt(null);
-      const node = cache.get(path);
-      if (!node) return;
-      const updated = { ...node, [name]: { $type: type } };
-      cache.put(updated);
-      await tree.set(updated);
+      await addComponent(path, name, type);
       showToast(`Added ${name}`);
     },
     [addingComponentAt, showToast],
@@ -441,12 +444,13 @@ export function App() {
   };
 
   const navigate = useCallback((path: string) => {
+    if (!checkBeforeNavigate()) return;
     if (mode === 'editor') {
       handleSelect(path);
     } else {
       setViewPath(path);
       const prefix = mode === 'view' ? '/v' : '';
-      history.pushState(null, '', prefix + path);
+      pushHistory(prefix + path);
     }
   }, [mode, handleSelect]);
 

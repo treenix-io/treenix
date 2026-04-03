@@ -6,12 +6,10 @@
 // watch:       universal async generator
 
 import { getComponent, getMeta, type NodeData, normalizeType, resolve } from '@treenity/core';
-import { type Class, type TypeProxy } from '@treenity/core/comp';
+import { type Class, getDefaults, type TypeProxy } from '@treenity/core/comp';
 import { deriveURI, parseURI } from '@treenity/core/uri';
 import {
-  createContext,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -21,18 +19,6 @@ import {
 import * as cache from './cache';
 import { tree } from './client';
 import { trpc } from './trpc';
-
-// ── Navigation context — shell provides, views consume ──
-
-export type NavigateFn = (path: string) => void;
-const NavigateCtx = createContext<NavigateFn | null>(null);
-export const NavigateProvider = NavigateCtx.Provider;
-
-export function useNavigate(): NavigateFn {
-  const nav = useContext(NavigateCtx);
-  if (!nav) throw new Error('useNavigate: no NavigateProvider');
-  return nav;
-}
 
 // ── usePath: universal reactive hook ──
 // URI mode:   usePath('/path#comp.field')      → derived value
@@ -137,6 +123,21 @@ export async function set(next: NodeData) {
     if (prev) cache.put(prev); else cache.remove(next.$path);
     throw err;
   }
+}
+
+// ── createNode: create a new node with defaults ──
+
+export async function createNode(path: string, type: string, defaults: Record<string, unknown> = {}) {
+  await tree.set({ $path: path, $type: type, ...defaults } as NodeData);
+}
+
+// ── addComponent: attach a typed component to a node (optimistic + patch) ──
+
+export async function addComponent(path: string, name: string, type: string) {
+  const comp = { $type: type, ...getDefaults(type) };
+  const node = cache.get(path);
+  if (node) cache.put({ ...node, [name]: comp });
+  await trpc.patch.mutate({ path, ops: [['r', name, comp]] });
 }
 
 // ── execute: action caller ──

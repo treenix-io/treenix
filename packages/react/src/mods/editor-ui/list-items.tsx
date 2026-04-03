@@ -1,7 +1,7 @@
 // Universal list item components for react:list context
 // Self-contained: include card styling, click navigation, chevron
 
-import { useNavigate } from '#hooks';
+import { useNavigate } from '#navigate';
 import type { NodeData } from '@treenity/core';
 import { register } from '@treenity/core';
 

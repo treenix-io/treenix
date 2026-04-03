@@ -279,6 +279,34 @@ function unwrapOptional(type: ts.Type): ts.Type {
   return type;
 }
 
+// Evaluate simple JSON-like AST literals → runtime value (string, number, bool, array, object)
+function evalLiteral(node: ts.Expression): unknown {
+  if (ts.isStringLiteral(node)) return node.text;
+  if (ts.isNumericLiteral(node)) return Number(node.text);
+  if (node.kind === ts.SyntaxKind.TrueKeyword) return true;
+  if (node.kind === ts.SyntaxKind.FalseKeyword) return false;
+  if (ts.isArrayLiteralExpression(node)) {
+    const arr: unknown[] = [];
+    for (const el of node.elements) {
+      const v = evalLiteral(el);
+      if (v === undefined) return undefined;
+      arr.push(v);
+    }
+    return arr;
+  }
+  if (ts.isObjectLiteralExpression(node)) {
+    const obj: Record<string, unknown> = {};
+    for (const prop of node.properties) {
+      if (!ts.isPropertyAssignment(prop) || !ts.isIdentifier(prop.name)) return undefined;
+      const v = evalLiteral(prop.initializer);
+      if (v === undefined) return undefined;
+      obj[prop.name.text] = v;
+    }
+    return obj;
+  }
+  return undefined;
+}
+
 function generateClassSchema(program: ts.Program, entry: ComponentEntry, classToType: Map<string, string>) {
   const checker = program.getTypeChecker();
   const sf = program.getSourceFile(entry.fileName);
@@ -323,14 +351,8 @@ function generateClassSchema(program: ts.Program, entry: ComponentEntry, classTo
       Object.assign(properties[name], collectJSDoc(member));
       // Default value
       if (member.initializer) {
-        if (ts.isStringLiteral(member.initializer))
-          properties[name].default = member.initializer.text;
-        else if (ts.isNumericLiteral(member.initializer))
-          properties[name].default = Number(member.initializer.text);
-        else if (member.initializer.kind === ts.SyntaxKind.TrueKeyword)
-          properties[name].default = true;
-        else if (member.initializer.kind === ts.SyntaxKind.FalseKeyword)
-          properties[name].default = false;
+        const def = evalLiteral(member.initializer);
+        if (def !== undefined) properties[name].default = def;
       }
       if (!member.questionToken) required.push(name);
     }

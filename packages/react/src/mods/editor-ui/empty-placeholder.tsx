@@ -1,5 +1,5 @@
 import { Button } from '#components/ui/button';
-import { set } from '#hooks';
+import { addComponent } from '#hooks';
 import type { NodeData } from '@treenity/core';
 import { Plus } from 'lucide-react';
 import { useState } from 'react';
@@ -30,7 +30,7 @@ export function EmptyNodePlaceholder({ value }: { value: NodeData }) {
           onCancel={() => setPicking(false)}
           onSelect={async (name, type) => {
             setPicking(false);
-            await set({ ...value, [name]: { $type: type } });
+            await addComponent(value.$path, name, type);
           }}
         />
       )}

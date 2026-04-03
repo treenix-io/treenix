@@ -1,10 +1,11 @@
 import { Button } from '#components/ui/button';
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '#components/ui/command';
+import { Command, CommandGroup, CommandInput, CommandItem, CommandList } from '#components/ui/command';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '#components/ui/dialog';
 import { Input } from '#components/ui/input';
+import { typeFilter } from '#mods/editor-ui/string-utils';
 import { trpc } from '#trpc';
 import { isOfType, type NodeData } from '@treenity/core';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 export type TypeInfo = { type: string; label: string; description: string };
 
@@ -58,6 +59,7 @@ export function TypePicker({
   const [name, setName] = useState('');
   const [nameManual, setNameManual] = useState(false);
   const [selectedType, setSelectedType] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
   const nameRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -70,40 +72,54 @@ export function TypePicker({
       .finally(() => setLoading(false));
   }, []);
 
+  const visibleTypes = useMemo(() => {
+    const s = search.trim();
+    if (!s) return types;
+    return types
+      .map((t) => ({ ...t, score: typeFilter(t.type, s, [t.label, t.description].filter(Boolean)) }))
+      .filter((t) => t.score > 0)
+      .sort((a, b) => b.score - a.score);
+  }, [search, types]);
+
   function handleSelectType(type: string) {
     setSelectedType(type);
     if (autoName && !nameManual) {
       const lastSegment = type.includes('.') ? type.slice(type.lastIndexOf('.') + 1) : type;
       setName(lastSegment);
     }
-    requestAnimationFrame(() => nameRef.current?.focus());
+    requestAnimationFrame(() => {
+      nameRef.current?.focus();
+      nameRef.current?.select();
+    });
   }
 
   function handleSubmit() {
     if (name && selectedType) onSelect(name, selectedType);
   }
 
-  const groups = groupByNamespace(types);
+  const groups = groupByNamespace(visibleTypes);
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onCancel(); }}>
-      <DialogContent className="p-0 gap-0 max-w-[380px]" showCloseButton={false}>
+      <DialogContent className="p-0 gap-0 max-w-[380px] overflow-hidden" showCloseButton={false}>
         <DialogHeader className="px-4 pt-4 pb-2">
           <DialogTitle className="text-[15px]">{title}</DialogTitle>
         </DialogHeader>
 
-        <Command className="rounded-none border-none" shouldFilter>
-          <CommandInput placeholder="Search types..." />
+        <Command className="rounded-none border-none" shouldFilter={false}>
+          <CommandInput placeholder="Search types..." onValueChange={setSearch} />
           <CommandList className="max-h-[280px]">
             {loading && <div className="p-3 text-muted-foreground text-[13px]">Loading types...</div>}
             {error && <div className="p-3 text-destructive text-[13px]">{error}</div>}
-            <CommandEmpty>No types found</CommandEmpty>
+            {!loading && visibleTypes.length === 0 && (
+              <div className="py-6 text-center text-sm text-muted-foreground">No types found</div>
+            )}
             {[...groups.entries()].map(([ns, items]) => (
               <CommandGroup key={ns} heading={ns}>
                 {items.map((t) => (
                   <CommandItem
                     key={t.type}
-                    value={`${t.type} ${t.label} ${t.description}`}
+                    value={t.type}
                     onSelect={() => handleSelectType(t.type)}
                     className={selectedType === t.type ? 'bg-accent text-accent-foreground' : ''}
                   >
