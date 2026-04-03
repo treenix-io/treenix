@@ -34,41 +34,27 @@ describe('simple.checklist', () => {
     assert.ok(resolve('simple.checklist', 'action:remove'));
   });
 
-  it('add creates an item', async () => {
-    const tree = createMemoryTree();
-    const node = makeNode('checklist', 'simple.checklist', { items: [] });
-    await tree.set(node);
-
+  it('add creates an item with id', async () => {
     const handler = resolve('simple.checklist', 'action:add') as any;
-    const n = await tree.get('/test/node');
-    const comp = (n as any).checklist;
-    await handler({ node: n, comp, tree, signal: AbortSignal.timeout(5000) }, { text: 'Buy milk' });
+    const comp = { items: [] as { id: number; text: string; done: boolean }[] };
+    await handler({ node: {}, comp, tree: null, signal: AbortSignal.timeout(5000) }, { text: 'Buy milk' });
     assert.equal(comp.items.length, 1);
     assert.equal(comp.items[0].text, 'Buy milk');
     assert.equal(comp.items[0].done, false);
+    assert.equal(typeof comp.items[0].id, 'number');
   });
 
-  it('toggle flips done state', async () => {
-    const tree = createMemoryTree();
-    const node = makeNode('checklist', 'simple.checklist', { items: [{ text: 'A', done: false }] });
-    await tree.set(node);
-
+  it('toggle flips done state by id', async () => {
     const handler = resolve('simple.checklist', 'action:toggle') as any;
-    const n = await tree.get('/test/node');
-    const comp = (n as any).checklist;
-    await handler({ node: n, comp, tree, signal: AbortSignal.timeout(5000) }, { index: 0 });
+    const comp = { items: [{ id: 1, text: 'A', done: false }] };
+    await handler({ node: {}, comp, tree: null, signal: AbortSignal.timeout(5000) }, { id: 1 });
     assert.equal(comp.items[0].done, true);
   });
 
-  it('remove deletes item', async () => {
-    const tree = createMemoryTree();
-    const node = makeNode('checklist', 'simple.checklist', { items: [{ text: 'A', done: false }, { text: 'B', done: false }] });
-    await tree.set(node);
-
+  it('remove deletes item by id', async () => {
     const handler = resolve('simple.checklist', 'action:remove') as any;
-    const n = await tree.get('/test/node');
-    const comp = (n as any).checklist;
-    await handler({ node: n, comp, tree, signal: AbortSignal.timeout(5000) }, { index: 0 });
+    const comp = { items: [{ id: 1, text: 'A', done: false }, { id: 2, text: 'B', done: false }] };
+    await handler({ node: {}, comp, tree: null, signal: AbortSignal.timeout(5000) }, { id: 1 });
     assert.equal(comp.items.length, 1);
     assert.equal(comp.items[0].text, 'B');
   });
@@ -81,11 +67,11 @@ describe('simple.checklist', () => {
     );
   });
 
-  it('toggle throws on invalid index', async () => {
+  it('toggle throws on invalid id', async () => {
     const handler = resolve('simple.checklist', 'action:toggle') as any;
     await assert.rejects(
-      async () => { await handler({ node: {}, comp: { items: [] }, tree: null, signal: AbortSignal.timeout(5000) }, { index: 5 }); },
-      (err: Error) => err.message.includes('index'),
+      async () => { await handler({ node: {}, comp: { items: [] }, tree: null, signal: AbortSignal.timeout(5000) }, { id: 999 }); },
+      (err: Error) => err.message.includes('id'),
     );
   });
 });
@@ -168,26 +154,27 @@ describe('simple.links', () => {
     assert.ok(resolve('simple.links', 'action:remove'));
   });
 
-  it('add creates a link', async () => {
+  it('add creates a link with id', async () => {
     const handler = resolve('simple.links', 'action:add') as any;
-    const comp = { items: [] as { url: string; label: string }[] };
+    const comp = { items: [] as { id: number; url: string; label: string }[] };
     await handler({ node: {}, comp, tree: null, signal: AbortSignal.timeout(5000) }, { url: 'https://x.com', label: 'X' });
     assert.equal(comp.items.length, 1);
     assert.equal(comp.items[0].url, 'https://x.com');
     assert.equal(comp.items[0].label, 'X');
+    assert.equal(typeof comp.items[0].id, 'number');
   });
 
   it('add uses empty label by default', async () => {
     const handler = resolve('simple.links', 'action:add') as any;
-    const comp = { items: [] as { url: string; label: string }[] };
+    const comp = { items: [] as { id: number; url: string; label: string }[] };
     await handler({ node: {}, comp, tree: null, signal: AbortSignal.timeout(5000) }, { url: 'https://x.com' });
     assert.equal(comp.items[0].label, '');
   });
 
-  it('remove deletes by index', async () => {
+  it('remove deletes by id', async () => {
     const handler = resolve('simple.links', 'action:remove') as any;
-    const comp = { items: [{ url: 'a', label: '' }, { url: 'b', label: '' }] };
-    await handler({ node: {}, comp, tree: null, signal: AbortSignal.timeout(5000) }, { index: 0 });
+    const comp = { items: [{ id: 1, url: 'a', label: '' }, { id: 2, url: 'b', label: '' }] };
+    await handler({ node: {}, comp, tree: null, signal: AbortSignal.timeout(5000) }, { id: 1 });
     assert.equal(comp.items.length, 1);
     assert.equal(comp.items[0].url, 'b');
   });

@@ -49,21 +49,21 @@ const ChecklistView: View<TChecklist> = ({ value, ctx }) => {
       )}
 
       <ul className="space-y-1">
-        {items.map((item, i) => (
-          <li key={i} className="group flex items-center gap-2 rounded px-1 py-0.5 hover:bg-white/[0.04]">
+        {items.map((item) => (
+          <li key={item.id} className="group flex items-center gap-2 rounded px-1 py-0.5 hover:bg-white/[0.04]">
             <button
               className={cn(
                 'flex h-4 w-4 shrink-0 items-center justify-center rounded border text-[10px]',
                 item.done ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-zinc-600',
               )}
-              onClick={() => exec(ctx, 'toggle', { index: i })}
+              onClick={() => exec(ctx, 'toggle', { id: item.id })}
             >
               {item.done ? '✓' : ''}
             </button>
             <span className={cn('flex-1 text-sm', item.done && 'text-muted-foreground line-through')}>{item.text}</span>
             <button
               className="hidden text-xs text-muted-foreground hover:text-destructive group-hover:block"
-              onClick={() => exec(ctx, 'remove', { index: i })}
+              onClick={() => exec(ctx, 'remove', { id: item.id })}
             >
               ✕
             </button>
@@ -248,8 +248,8 @@ const LinksView: View<TLinks> = ({ value, ctx }) => {
   return (
     <Section label="Links">
       <ul className="space-y-1">
-        {items.map((link, i) => (
-          <li key={i} className="group flex items-center gap-2">
+        {items.map((link) => (
+          <li key={link.id} className="group flex items-center gap-2">
             <a
               href={link.url}
               target="_blank"
@@ -260,7 +260,7 @@ const LinksView: View<TLinks> = ({ value, ctx }) => {
               {link.label || link.url}
             </a>
             {ctx && (
-              <button className="hidden text-xs text-muted-foreground hover:text-destructive group-hover:block" onClick={() => exec(ctx, 'remove', { index: i })}>
+              <button className="hidden text-xs text-muted-foreground hover:text-destructive group-hover:block" onClick={() => exec(ctx, 'remove', { id: link.id })}>
                 ✕
               </button>
             )}

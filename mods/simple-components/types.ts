@@ -6,25 +6,27 @@ import { registerType } from '@treenity/core/comp';
 // ── Checklist ──
 
 export class TChecklist {
-  items: { text: string; done: boolean }[] = [];
+  items: { id: number; text: string; done: boolean }[] = [];
 
   /** @description Add a checklist item */
   add(data: { /** Item text */ text: string }) {
     if (!data.text?.trim()) throw new Error('text required');
-    this.items.push({ text: data.text.trim(), done: false });
+    const id = this.items.reduce((max, i) => Math.max(max, i.id), 0) + 1;
+    this.items.push({ id, text: data.text.trim(), done: false });
   }
 
   /** @description Toggle checklist item */
-  toggle(data: { /** Item index */ index: number }) {
-    const item = this.items[data.index];
-    if (!item) throw new Error('invalid index');
+  toggle(data: { /** Item id */ id: number }) {
+    const item = this.items.find(i => i.id === data.id);
+    if (!item) throw new Error('invalid id');
     item.done = !item.done;
   }
 
   /** @description Remove checklist item */
-  remove(data: { /** Item index */ index: number }) {
-    if (data.index < 0 || data.index >= this.items.length) throw new Error('invalid index');
-    this.items.splice(data.index, 1);
+  remove(data: { /** Item id */ id: number }) {
+    const idx = this.items.findIndex(i => i.id === data.id);
+    if (idx < 0) throw new Error('invalid id');
+    this.items.splice(idx, 1);
   }
 }
 
@@ -71,18 +73,20 @@ registerType('simple.estimate', TEstimate);
 // ── Links ──
 
 export class TLinks {
-  items: { url: string; label: string }[] = [];
+  items: { id: number; url: string; label: string }[] = [];
 
   /** @description Add a link */
   add(data: { /** URL */ url: string; /** Display label */ label?: string }) {
     if (!data.url?.trim()) throw new Error('url required');
-    this.items.push({ url: data.url.trim(), label: data.label?.trim() || '' });
+    const id = this.items.reduce((max, i) => Math.max(max, i.id), 0) + 1;
+    this.items.push({ id, url: data.url.trim(), label: data.label?.trim() || '' });
   }
 
-  /** @description Remove a link by index */
-  remove(data: { /** Item index */ index: number }) {
-    if (data.index < 0 || data.index >= this.items.length) throw new Error('invalid index');
-    this.items.splice(data.index, 1);
+  /** @description Remove a link by id */
+  remove(data: { /** Item id */ id: number }) {
+    const idx = this.items.findIndex(i => i.id === data.id);
+    if (idx < 0) throw new Error('invalid id');
+    this.items.splice(idx, 1);
   }
 }
 
