@@ -9,13 +9,12 @@ import '#agent/guardian';
 import { AiPolicy } from '#agent/types';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { createNode, R, S, W } from '@treenity/core';
+import { createNode, getComponent, R, S, W } from '@treenity/core';
 import { createMemoryTree, type Tree } from '@treenity/core/tree';
 import { buildClaims, createSession, withAcl } from '@treenity/core/server/auth';
 import assert from 'node:assert/strict';
 import { afterEach, before, beforeEach, describe, it } from 'node:test';
 
-import { pendingPermissions } from '#metatron/permissions';
 import { buildMcpServer, buildSubjects, checkMcpGuardian, extractToken, type GuardianRequest } from './mcp-server';
 
 // ── Helpers ──
@@ -179,11 +178,11 @@ describe('checkMcpGuardian', () => {
     assert.equal(result.allowed, true);
   });
 
-  it('denies unknown tool not in any list', async () => {
+  it('prompts for unknown tool not in any list', async () => {
     await setGuardian({ allow: ['mcp__treenity__get_node'], deny: [], escalate: [] });
     const result = await checkMcpGuardian(store, req('unknown_tool'));
-    assert.equal(result.allowed, false);
-    assert.ok(!result.allowed && result.reason.includes('not in Guardian allow list'));
+    assert.equal(result.allowed, 'prompt');
+    assert.ok(result.allowed === 'prompt' && result.subjects[0] === 'mcp__treenity__unknown_tool');
   });
 
   it('denies when guardian node has no policy component (F01)', async () => {
@@ -218,23 +217,15 @@ describe('checkMcpGuardian', () => {
     assert.equal(result.allowed, true);
   });
 
-  it('non-allowed action hits coarse escalate (denied by auto-resolve)', async () => {
+  it('non-allowed action hits coarse escalate → prompt', async () => {
     await setGuardian({
       allow: ['mcp__treenity__execute:$schema'],
       deny: [],
       escalate: ['mcp__treenity__execute:*'],
     });
-    await store.set(createNode('/agents/approvals', 'ai.approvals'));
-    // Auto-deny any pending permission as soon as it appears
-    const interval = setInterval(() => {
-      for (const [id, resolve] of pendingPermissions) {
-        resolve(false);
-        pendingPermissions.delete(id);
-      }
-    }, 5);
     const result = await checkMcpGuardian(store, req('execute', { path: '/agents/qa', action: 'run' }));
-    clearInterval(interval);
-    assert.equal(result.allowed, false);
+    assert.equal(result.allowed, 'prompt');
+    assert.ok(result.allowed === 'prompt' && result.subjects[0].includes('execute:run'));
   });
 
   it('action-specific deny blocks even if coarse tool is allowed', async () => {
@@ -336,7 +327,8 @@ describe('checkMcpGuardian', () => {
     });
     assert.equal((await checkMcpGuardian(store, req('get_node', { path: '/' }))).allowed, true);
     assert.equal((await checkMcpGuardian(store, req('list_children', { path: '/' }))).allowed, true);
-    assert.equal((await checkMcpGuardian(store, req('set_node', { path: '/' }))).allowed, false);
+    // set_node not in any list → prompt (not deny)
+    assert.equal((await checkMcpGuardian(store, req('set_node', { path: '/' }))).allowed, 'prompt');
   });
 
   // ── Real seed policy: $schema allowed, other execute escalated ──
@@ -366,13 +358,10 @@ describe('checkMcpGuardian', () => {
     // remove_node: denied
     assert.equal((await checkMcpGuardian(store, req('remove_node', { path: '/x' }))).allowed, false);
 
-    // set_node: escalated → auto-denied
-    const interval = setInterval(() => {
-      for (const [id, resolve] of pendingPermissions) { resolve(false); pendingPermissions.delete(id); }
-    }, 5);
-    await store.set(createNode('/agents/approvals', 'ai.approvals'));
-    assert.equal((await checkMcpGuardian(store, req('set_node', { path: '/x', type: 'dir' }))).allowed, false);
-    clearInterval(interval);
+    // set_node: escalated → prompt
+    const setResult = await checkMcpGuardian(store, req('set_node', { path: '/x', type: 'dir' }));
+    assert.equal(setResult.allowed, 'prompt');
+    assert.ok(setResult.allowed === 'prompt' && setResult.subjects[0].includes('set_node'));
   });
 
   // ── Edge cases ──
@@ -383,29 +372,169 @@ describe('checkMcpGuardian', () => {
     assert.equal(result.allowed, true);
   });
 
-  it('full args preserved in escalation context', async () => {
-    // Verify Guardian receives and passes full args — escalation creates approval node
+  it('full args preserved in prompt result', async () => {
     await setGuardian({ allow: [], deny: [], escalate: ['mcp__treenity__set_node'] });
-    await store.set(createNode('/agents/mcp', 'ai.agent', {
-      role: 'mcp', status: 'idle', currentTask: '', taskRef: '',
-      lastRunAt: 0, totalTokens: 0,
-    }));
-    await store.set(createNode('/agents/approvals', 'ai.approvals'));
 
     const bigData = { path: '/test', type: 'dir', components: { x: { $type: 'foo', data: 'bar' } } };
-    // Auto-deny so the test doesn't hang
-    const interval = setInterval(() => {
-      for (const [id, resolve] of pendingPermissions) { resolve(false); pendingPermissions.delete(id); }
-    }, 5);
-    await checkMcpGuardian(store, req('set_node', bigData));
-    clearInterval(interval);
+    const result = await checkMcpGuardian(store, req('set_node', bigData));
 
-    // Approval node should have been created with full context
-    const { items } = await store.getChildren('/agents/approvals');
-    assert.ok(items.length > 0, 'approval node should be created');
-    const approval = items[0];
-    assert.ok(typeof approval.input === 'string', 'input should be string');
-    assert.ok((approval.input as string).includes('components'), 'input should contain full args including components');
+    assert.equal(result.allowed, 'prompt');
+    assert.ok(result.allowed === 'prompt');
+    assert.equal(result.subjects[0], 'mcp__treenity__set_node:/test');
+    assert.deepEqual(result.args, bigData);
+    assert.equal(result.args.components?.x?.$type, 'foo');
+  });
+
+  // ── Escalate vs prompt for different scenarios ──
+
+  it('escalate pattern returns prompt with matching subject', async () => {
+    await setGuardian({
+      allow: [],
+      deny: [],
+      escalate: ['mcp__treenity__deploy_prefab'],
+    });
+    const result = await checkMcpGuardian(store, req('deploy_prefab', { source: '/sys/mods/x', target: '/foo' }));
+    assert.equal(result.allowed, 'prompt');
+    assert.ok(result.allowed === 'prompt' && result.subjects[0] === 'mcp__treenity__deploy_prefab:/foo');
+  });
+
+  it('prompt result includes all original args', async () => {
+    await setGuardian({ allow: [], deny: [], escalate: ['mcp__treenity__execute:*'] });
+    const result = await checkMcpGuardian(store, req('execute', {
+      path: '/x', action: 'create', type: 'board.task', key: undefined, data: { title: 'hi' },
+    }));
+    assert.equal(result.allowed, 'prompt');
+    assert.ok(result.allowed === 'prompt');
+    assert.equal(result.args.action, 'create');
+    assert.deepEqual(result.args.data, { title: 'hi' });
+  });
+});
+
+// ── 3a. guardian_approve ──
+
+describe('guardian_approve', () => {
+  let store: Tree;
+
+  async function setGuardian(policy: { allow: string[]; deny: string[]; escalate: string[] }) {
+    await store.set(createNode('/agents/guardian', 'ai.policy', { ...policy }));
+  }
+
+  beforeEach(() => {
+    store = createMemoryTree();
+  });
+
+  it('adds pattern to allow list and removes from escalate', async () => {
+    await setGuardian({
+      allow: ['mcp__treenity__get_node'],
+      deny: [],
+      escalate: ['mcp__treenity__set_node'],
+    });
+
+    // Before: set_node is escalated → prompt
+    const before = await checkMcpGuardian(store, { tool: 'set_node', args: { path: '/x' } });
+    assert.equal(before.allowed, 'prompt');
+
+    // Simulate guardian_approve: add to allow, remove from escalate
+    const guardianNode = await store.get('/agents/guardian');
+    assert.ok(guardianNode);
+    const policy = getComponent(guardianNode, AiPolicy);
+    assert.ok(policy);
+    policy.allow.push('mcp__treenity__set_node');
+    policy.escalate = policy.escalate.filter((e: string) => e !== 'mcp__treenity__set_node');
+    await store.set(guardianNode);
+
+    // After: set_node is allowed
+    const after = await checkMcpGuardian(store, { tool: 'set_node', args: { path: '/x' } });
+    assert.equal(after.allowed, true);
+  });
+
+  it('approve with specific subject allows that subject', async () => {
+    await setGuardian({
+      allow: ['mcp__treenity__execute:$schema'],
+      deny: [],
+      escalate: ['mcp__treenity__execute:*'],
+    });
+
+    // run action is escalated
+    const before = await checkMcpGuardian(store, { tool: 'execute', args: { action: 'run', path: '/x' } });
+    assert.equal(before.allowed, 'prompt');
+
+    // Approve the specific subject
+    const guardianNode = await store.get('/agents/guardian');
+    assert.ok(guardianNode);
+    const policy = getComponent(guardianNode, AiPolicy);
+    assert.ok(policy);
+    policy.allow.push('mcp__treenity__execute:run');
+    await store.set(guardianNode);
+
+    // After: run is allowed
+    const after = await checkMcpGuardian(store, { tool: 'execute', args: { action: 'run', path: '/x' } });
+    assert.equal(after.allowed, true);
+  });
+
+  it('approve does not affect deny list', async () => {
+    await setGuardian({
+      allow: [],
+      deny: ['mcp__treenity__remove_node'],
+      escalate: [],
+    });
+
+    // Add remove_node to allow — deny still wins
+    const guardianNode = await store.get('/agents/guardian');
+    assert.ok(guardianNode);
+    const policy = getComponent(guardianNode, AiPolicy);
+    assert.ok(policy);
+    policy.allow.push('mcp__treenity__remove_node');
+    await store.set(guardianNode);
+
+    const result = await checkMcpGuardian(store, { tool: 'remove_node', args: { path: '/x' } });
+    assert.equal(result.allowed, false);
+  });
+
+  it('guardian_approve MCP tool via client adds pattern', async () => {
+    await store.set({ ...createNode('/', 'root'), $acl: [{ g: 'public', p: R | W | S }] });
+    await setGuardian({
+      allow: ['mcp__treenity__get_node', 'mcp__treenity__guardian_approve'],
+      deny: [],
+      escalate: ['mcp__treenity__set_node'],
+    });
+
+    const { client } = await createTestClient(store, 'test-user', ['u:test-user', 'public']);
+
+    // Call guardian_approve tool
+    const result = await client.callTool({
+      name: 'guardian_approve',
+      arguments: { pattern: 'mcp__treenity__set_node' },
+    });
+    assert.ok(textContent(result).includes('Allowed'));
+
+    // Verify: set_node now allowed in policy
+    const after = await checkMcpGuardian(store, { tool: 'set_node', args: { path: '/x' } });
+    assert.equal(after.allowed, true);
+  });
+
+  it('guardian_approve is idempotent', async () => {
+    await setGuardian({
+      allow: ['mcp__treenity__set_node'],
+      deny: [],
+      escalate: [],
+    });
+    await store.set({ ...createNode('/', 'root'), $acl: [{ g: 'public', p: R | W | S }] });
+
+    const { client } = await createTestClient(store, 'test-user', ['u:test-user', 'public']);
+    const result = await client.callTool({
+      name: 'guardian_approve',
+      arguments: { pattern: 'mcp__treenity__set_node' },
+    });
+    assert.ok(textContent(result).includes('Already allowed'));
+
+    // Allow list not duplicated
+    const node = await store.get('/agents/guardian');
+    assert.ok(node);
+    const policy = getComponent(node, AiPolicy);
+    assert.ok(policy);
+    const count = policy.allow.filter((a: string) => a === 'mcp__treenity__set_node').length;
+    assert.equal(count, 1);
   });
 });
 

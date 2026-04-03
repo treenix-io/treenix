@@ -24,7 +24,7 @@ import { z } from 'zod/v3';
 export type McpGuardianResult =
   | { allowed: true }
   | { allowed: false; reason: string }
-  | { allowed: 'prompt'; subject: string; args: Record<string, unknown> };
+  | { allowed: 'prompt'; subjects: string[]; args: Record<string, unknown> };
 
 // Guardian receives the complete MCP call — tool name + all arguments
 export type GuardianRequest = {
@@ -73,15 +73,14 @@ export async function checkMcpGuardian(store: Tree, req: GuardianRequest): Promi
       if (matchesAny(allow, s)) return { allowed: true };
     }
 
-    // Escalate: return prompt for the agent to ask the user
+    // Escalate or unknown: return prompt with ALL subjects for user to choose granularity
     for (const s of subjects) {
       if (matchesAny(escalate, s)) {
-        return { allowed: 'prompt', subject: s, args: req.args };
+        return { allowed: 'prompt', subjects, args: req.args };
       }
     }
 
-    // Unknown: also prompt (safer than silent deny for MCP agents)
-    return { allowed: 'prompt', subject: subjects[0], args: req.args };
+    return { allowed: 'prompt', subjects, args: req.args };
   } catch (err) {
     console.error('[mcp-guardian] policy check failed:', err);
     return { allowed: false, reason: 'Guardian check failed — writes denied for safety' };
@@ -129,13 +128,36 @@ function yaml(val: unknown, depth = 0, maxStr = 300): string {
 
 const text = (s: string) => ({ content: [{ type: 'text' as const, text: s }] });
 
+/** Build human-friendly label from subject pattern */
+function subjectLabel(subject: string): string {
+  // mcp__treenity__execute:add:/board → "execute:add on /board"
+  const short = subject.replace('mcp__treenity__', '');
+  const parts = short.split(':');
+  if (parts.length === 3) return `${parts[0]}:${parts[1]} on ${parts[2]}`;
+  if (parts.length === 2) return `all ${parts[1]} actions via ${parts[0]}`;
+  return `all ${parts[0]} calls`;
+}
+
 /** Check guardian and return MCP response if blocked or needs approval */
 function guardBlock(guard: McpGuardianResult) {
   if (guard.allowed === true) return null;
   if (guard.allowed === false) return text(`🛑 Guardian: ${guard.reason}`);
-  // prompt — ask the agent to get user approval
-  const hint = `🔐 Requires approval: ${guard.subject}\nCall guardian_approve({ pattern: "${guard.subject}" }) to allow this and future calls.\nFull args: ${JSON.stringify(guard.args).slice(0, 500)}`;
-  return text(hint);
+
+  // Structured poll — agent presents to user via AskUserQuestion, then calls guardian_approve
+  const poll = {
+    type: 'guardian_poll',
+    question: `Agent wants to call: ${guard.subjects[0].replace('mcp__treenity__', '')}`,
+    hint: 'Ask user via AskUserQuestion → guardian_approve({ pattern }) → retry.',
+    args: guard.args,
+    options: [
+      ...guard.subjects.map(s => ({
+        label: subjectLabel(s),
+        pattern: s,
+      })),
+      { label: 'Deny', pattern: null },
+    ],
+  };
+  return text(JSON.stringify(poll));
 }
 
 const catalog = new TypeCatalog();
@@ -365,31 +387,20 @@ export async function buildMcpServer(store: Tree, session: Session, claims?: str
       description: 'Add a pattern to the Guardian allow list. Use when a previous tool call returned "Requires approval". The user must confirm before calling this.',
       inputSchema: {
         pattern: z.string().describe('The subject pattern to allow, e.g. "mcp__treenity__execute:run"'),
-        scope: z.enum(['session', 'permanent']).optional().describe('session = until restart (default), permanent = persisted to guardian policy'),
       },
     },
-    async ({ pattern, scope }) => {
+    async ({ pattern }) => {
       const guardianNode = await store.get('/agents/guardian');
       if (!guardianNode) return text('🛑 No guardian node at /agents/guardian');
       const policy = getComponent(guardianNode, AiPolicy);
       if (!policy || policy.$type !== 'ai.policy') return text('🛑 Invalid guardian policy');
 
-      if (scope === 'permanent') {
-        // Persist to tree — survives restarts
-        if (!policy.allow.includes(pattern)) {
-          policy.allow.push(pattern);
-          policy.escalate = policy.escalate.filter((e: string) => e !== pattern);
-          await store.set(guardianNode);
-        }
-        return text(`✅ Permanently allowed: ${pattern}`);
-      }
+      if (policy.allow.includes(pattern)) return text(`Already allowed: ${pattern}`);
 
-      // Session scope — add to in-memory policy, lost on restart
-      if (!policy.allow.includes(pattern)) {
-        policy.allow.push(pattern);
-        policy.escalate = policy.escalate.filter((e: string) => e !== pattern);
-      }
-      return text(`✅ Allowed for this session: ${pattern}`);
+      policy.allow.push(pattern);
+      policy.escalate = policy.escalate.filter((e: string) => e !== pattern);
+      await store.set(guardianNode);
+      return text(`✅ Allowed: ${pattern}`);
     },
   );
 
