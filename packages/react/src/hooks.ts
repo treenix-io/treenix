@@ -374,6 +374,3 @@ export async function* watch<T = unknown>(uri: string): AsyncGenerator<T> {
     unsub();
   }
 }
-
-// Re-export navigate primitives (moved to navigate.ts, but mods import from hooks)
-export { useNavigate, useBeforeNavigate } from '#navigate';
