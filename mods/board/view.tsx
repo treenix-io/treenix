@@ -1,12 +1,12 @@
 // Board views — kanban board + task detail (editable)
 
 import {
-  closestCorners,
   DndContext,
   type DragEndEvent,
   type DragOverEvent,
   DragOverlay,
   type DragStartEvent,
+  pointerWithin,
   PointerSensor,
   useDroppable,
   useSensor,
@@ -22,12 +22,14 @@ import { cn } from '@treenity/react';
 import { trpc } from '@treenity/react';
 import { Button } from '@treenity/react/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@treenity/react/ui/dialog';
+import { createPortal } from 'react-dom';
 import { FormField } from '@treenity/react/ui/form-field';
 import { Input } from '@treenity/react/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@treenity/react/ui/select';
 import { Textarea } from '@treenity/react/ui/textarea';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
+import { AttachMenu } from '../simple-components/view';
 import { BoardColumn, BoardKanban, BoardTask } from './types';
 
 type TaskStatus = string;
@@ -89,7 +91,9 @@ const TaskView: View<BoardTask> = ({ value, ctx }) => {
   const result = typeof proxy.result === 'string' ? proxy.result : '';
 
   const save = (patch: Record<string, unknown>) => {
-    withToast(() => set({ ...node, ...patch, updatedAt: Date.now() }));
+    const ops: ['r', string, unknown][] = Object.entries({ ...patch, updatedAt: Date.now() })
+      .map(([k, v]) => ['r', k, v]);
+    withToast(() => trpc.patch.mutate({ path: node.$path, ops }));
   };
 
   return (
@@ -144,7 +148,7 @@ const TaskView: View<BoardTask> = ({ value, ctx }) => {
             <SelectTrigger className="h-8 w-32">
               <SelectValue />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent position="popper" portal={false} className="min-w-32">
               {PRIORITIES.map(p => (
                 <SelectItem key={p.value} value={p.value}>
                   <span className="flex items-center gap-1.5">
@@ -174,6 +178,8 @@ const TaskView: View<BoardTask> = ({ value, ctx }) => {
 
       {/* Named components (ai.plan, ai.thread, etc.) */}
       <NamedComponents node={node} />
+
+      <AttachMenu node={node} />
 
       <EmbeddedTaskLog taskRef={typeof node.taskRef === 'string' ? node.taskRef : ''} />
 
@@ -299,10 +305,6 @@ register('board.task', 'react:list', TaskListItem);
 function TaskActions({ proxy, status }: { proxy: ReturnType<typeof usePath<BoardTask>>; status: TaskStatus }) {
   const btn = 'h-7 text-xs';
   switch (status) {
-    case 'backlog':
-      return <Button tabIndex={-1} variant="outline" size="sm" className={btn} onClick={() => withToast(() => proxy.start())}>Start</Button>;
-    case 'todo':
-      return <Button tabIndex={-1} variant="outline" size="sm" className={btn} onClick={() => withToast(() => proxy.start())}>Begin</Button>;
     case 'doing':
       return <Button tabIndex={-1} variant="outline" size="sm" className={btn} onClick={() => withToast(() => proxy.submit())}>Submit</Button>;
     case 'review':
@@ -342,6 +344,7 @@ function TaskCardContent({ task, isDragging }: { task: NodeData; isDragging?: bo
   const title = typeof proxy?.title === 'string' && proxy.title
     ? proxy.title
     : task.$path.split('/').at(-1);
+  const description = typeof proxy?.description === 'string' ? proxy.description : '';
   const assignee = typeof proxy?.assignee === 'string' ? proxy.assignee : '';
   const priority = typeof proxy?.priority === 'string' ? proxy.priority : 'normal';
   const result = typeof proxy?.result === 'string' ? proxy.result : '';
@@ -350,25 +353,28 @@ function TaskCardContent({ task, isDragging }: { task: NodeData; isDragging?: bo
 
   return (
     <div className={cn(
-      'mb-2 rounded-md border border-border bg-card p-3 shadow-sm transition-colors',
-      isDragging ? 'opacity-50' : 'hover:bg-accent/50',
+      'mb-1.5 rounded-lg border border-white/5 bg-white/[0.03] px-3 py-2 transition-all',
+      isDragging ? 'opacity-50 rotate-1 scale-105' : 'hover:bg-white/[0.06] hover:border-white/10',
     )}>
-      <div className="mb-1 flex items-center gap-2">
+      <div className="flex items-center gap-2">
         <PriorityDot priority={priority} />
-        <span className="flex-1 text-sm font-semibold leading-tight">{title}</span>
+        <span className="flex-1 text-sm font-medium leading-snug truncate">{title}</span>
         {aiStatus ? (
-          <span className="rounded bg-violet-500/20 px-1.5 py-0.5 text-[10px] font-medium text-violet-400">
+          <span className="shrink-0 rounded bg-violet-500/20 px-1.5 py-0.5 text-[10px] font-medium text-violet-400">
             {String(aiStatus)}
           </span>
         ) : isAi ? <AiBadge /> : null}
       </div>
 
-      {assignee && !isAi && (
-        <div className="mb-1 text-xs text-muted-foreground">{assignee}</div>
+      {description && (
+        <div className="mt-0.5 line-clamp-2 text-[11px] leading-tight text-muted-foreground pl-4">{description}</div>
       )}
 
-      {result && (
-        <div className="line-clamp-2 text-xs text-muted-foreground">{result}</div>
+      {assignee && (
+        <div className="mt-1 flex items-center gap-1.5 pl-4 text-[11px] text-sky-400/70">
+          <span className="inline-block h-3.5 w-3.5 rounded-full bg-sky-400/15 text-center text-[9px] font-bold leading-3.5 text-sky-400">{assignee.charAt(0).toUpperCase()}</span>
+          {assignee}
+        </div>
       )}
     </div>
   );
@@ -378,7 +384,7 @@ function TaskCard({ task, onSelect, colStatus }: { task: NodeData; onSelect: (pa
   const proxy = usePath(task.$path, BoardTask);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: task.$path,
-    data: { task, status: colStatus, move: proxy.move },
+    data: { task, status: colStatus },
   });
 
   // dnd-kit requires inline style for runtime-computed transforms
@@ -411,7 +417,7 @@ function Column({ col, onSelect, onAddTask, highlighted }: { col: NodeData; onSe
   const taskIds = useMemo(() => tasks.map(t => t.$path), [tasks]);
 
   return (
-    <div className="group flex min-w-40 flex-1 flex-col">
+    <div className="group flex w-[240px] shrink-0 flex-col">
       <div className={cn('mb-2 flex items-center gap-2 border-b-2 pb-1.5', color)}>
         <BlurInput
           value={label}
@@ -435,7 +441,7 @@ function Column({ col, onSelect, onAddTask, highlighted }: { col: NodeData; onSe
         <div
           ref={setNodeRef}
           className={cn(
-            'flex-1 rounded-md p-1 transition-colors min-h-16',
+            'flex-1 rounded-md p-1 transition-colors min-h-32',
             highlighted && 'bg-accent/30 ring-1 ring-accent',
           )}
         >
@@ -506,7 +512,7 @@ const KanbanView: View<BoardKanban> = ({ value, ctx }) => {
   const createColumn = async () => {
     const label = window.prompt('Column name:');
     if (!label?.trim()) return;
-    const slug = label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    const slug = Date.now().toString(36);
     const maxOrder = Math.max(0, ...columns.map(c => typeof c.order === 'number' ? c.order : 0));
 
     await withToast(async () => {
@@ -559,8 +565,8 @@ const KanbanView: View<BoardKanban> = ({ value, ctx }) => {
     if (!src?.task || typeof src.task !== 'object' || !('status' in src.task)) return;
     if (src.task.status === targetStatus) return;
 
-    const move = src.move;
-    if (typeof move === 'function') withToast(() => move({ status: targetStatus }));
+    const taskPath = (src.task as NodeData).$path;
+    withToast(() => trpc.execute.mutate({ path: taskPath, type: 'board.task', action: 'move', data: { status: targetStatus } }));
   };
 
   return (
@@ -569,7 +575,7 @@ const KanbanView: View<BoardKanban> = ({ value, ctx }) => {
         <h2 className="text-lg font-bold">Task Board</h2>
       </div>
 
-      <DndContext sensors={sensors} collisionDetection={closestCorners} onDragStart={handleDragStart} onDragOver={handleDragOver} onDragEnd={handleDragEnd}>
+      <DndContext sensors={sensors} collisionDetection={pointerWithin} onDragStart={handleDragStart} onDragOver={handleDragOver} onDragEnd={handleDragEnd}>
         <div className="flex gap-3 overflow-x-auto pb-2">
           {columns.map(col => (
             <Column key={col.$path} col={col} onSelect={setSelectedTask} onAddTask={createTask} highlighted={overColumn === (col.$path.split('/').at(-1) ?? '')} />
@@ -582,7 +588,7 @@ const KanbanView: View<BoardKanban> = ({ value, ctx }) => {
           </button>
         </div>
 
-        <DragOverlay>
+        <DragOverlay dropAnimation={null}>
           {activeTask && (
             <div className="w-60 rotate-2 opacity-90">
               <TaskCardContent task={activeTask} />
@@ -592,7 +598,7 @@ const KanbanView: View<BoardKanban> = ({ value, ctx }) => {
       </DndContext>
 
       {selectedTask && selectedNode && (
-        <Dialog open onOpenChange={open => { if (!open) setSelectedTask(null); }}>
+        <Dialog open modal={false} onOpenChange={open => { if (!open) setSelectedTask(null); }}>
           <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-[960px]" aria-describedby={undefined}>
             <DialogTitle className="sr-only">Task</DialogTitle>
             <Render value={selectedNode} />
@@ -651,3 +657,51 @@ const ColumnView: View<BoardColumn> = ({ value }) => {
 };
 
 register('board.column', 'react', ColumnView);
+
+// ── Task modal (plain portal, no Radix) ──
+
+function TaskModal({ task, node, onClose }: { task: string; node: NodeData; onClose: () => void }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [onClose]);
+
+  return createPortal(
+    <div ref={containerRef} className="fixed inset-0 z-50 flex items-center justify-center">
+      {/* Backdrop — click to close */}
+      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+      {/* Content — stop propagation so clicks inside don't close */}
+      <div
+        className="relative z-10 w-full max-w-[720px] max-h-[85vh] overflow-y-auto rounded-2xl bg-zinc-900/95 backdrop-blur-xl border border-white/10 shadow-2xl shadow-black/50 p-6 mx-4"
+        onClick={e => e.stopPropagation()}
+      >
+        <button
+          onClick={onClose}
+          className="absolute top-3 right-3 rounded-lg p-1.5 text-zinc-400 hover:text-white hover:bg-white/10 transition-all z-20"
+        >
+          ✕
+        </button>
+        <Render value={node} />
+        <div className="flex justify-between pt-3 mt-4 border-t border-white/5">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-xs text-destructive hover:text-destructive"
+            onClick={async () => {
+              if (!confirm('Delete this task?')) return;
+              await withToast(() => trpc.remove.mutate({ path: task }), 'Task deleted');
+              onClose();
+            }}
+          >
+            Delete
+          </Button>
+          <Button onClick={onClose}>Done</Button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}

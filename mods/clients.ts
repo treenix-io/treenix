@@ -3,6 +3,7 @@ import { loadMod } from '@treenity/react/mod-errors';
 
 await Promise.allSettled([
   loadMod('agent', () => import('./agent/client')),
+  loadMod('simple-components', () => import('./simple-components/client')),
   loadMod('board', () => import('./board/client')),
   loadMod('brahman', () => import('./brahman/client')),
   loadMod('doc', () => import('./doc/client')),
