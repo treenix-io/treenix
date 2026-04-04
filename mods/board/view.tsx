@@ -1,12 +1,12 @@
 // Board views — kanban board + task detail (editable)
 
 import {
-  closestCorners,
   DndContext,
   type DragEndEvent,
   type DragOverEvent,
   DragOverlay,
   type DragStartEvent,
+  pointerWithin,
   PointerSensor,
   useDroppable,
   useSensor,
@@ -441,7 +441,7 @@ function Column({ col, onSelect, onAddTask, highlighted }: { col: NodeData; onSe
         <div
           ref={setNodeRef}
           className={cn(
-            'flex-1 rounded-md p-1 transition-colors min-h-16',
+            'flex-1 rounded-md p-1 transition-colors min-h-32',
             highlighted && 'bg-accent/30 ring-1 ring-accent',
           )}
         >
@@ -575,7 +575,7 @@ const KanbanView: View<BoardKanban> = ({ value, ctx }) => {
         <h2 className="text-lg font-bold">Task Board</h2>
       </div>
 
-      <DndContext sensors={sensors} collisionDetection={closestCorners} onDragStart={handleDragStart} onDragOver={handleDragOver} onDragEnd={handleDragEnd}>
+      <DndContext sensors={sensors} collisionDetection={pointerWithin} onDragStart={handleDragStart} onDragOver={handleDragOver} onDragEnd={handleDragEnd}>
         <div className="flex gap-3 overflow-x-auto pb-2">
           {columns.map(col => (
             <Column key={col.$path} col={col} onSelect={setSelectedTask} onAddTask={createTask} highlighted={overColumn === (col.$path.split('/').at(-1) ?? '')} />
