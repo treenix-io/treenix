@@ -13,12 +13,12 @@ export function FormField({ label, labelClass, className, children }: {
   const contentRef = useRef<HTMLDivElement>(null);
   const [stacked, setStacked] = useState(true); // start stacked — safe default, no jump
 
-  // Measure once before paint — switch to inline if content is small
+  // Measure once on mount — switch to inline if content is small
   useLayoutEffect(() => {
     if (contentRef.current) {
       setStacked(contentRef.current.scrollHeight > STACK_THRESHOLD);
     }
-  });
+  }, [contentRef.current]);
 
   return (
     <div className={cn(stacked ? 'flex flex-col gap-1' : 'flex items-center gap-4', className)}>

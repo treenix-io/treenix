@@ -54,10 +54,10 @@ function SelectContent({
   children,
   position = "item-aligned",
   align = "center",
+  noPortal,
   ...props
-}: React.ComponentProps<typeof SelectPrimitive.Content>) {
-  return (
-    <SelectPrimitive.Portal>
+}: React.ComponentProps<typeof SelectPrimitive.Content> & { noPortal?: boolean }) {
+  const content = (
       <SelectPrimitive.Content
         data-slot="select-content"
         className={cn(
@@ -82,8 +82,10 @@ function SelectContent({
         </SelectPrimitive.Viewport>
         <SelectScrollDownButton />
       </SelectPrimitive.Content>
-    </SelectPrimitive.Portal>
-  )
+  );
+
+  if (noPortal) return content;
+  return <SelectPrimitive.Portal>{content}</SelectPrimitive.Portal>;
 }
 
 function SelectLabel({
