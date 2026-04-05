@@ -14,20 +14,19 @@ import {
 } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { type ComponentData, type NodeData, register } from '@treenity/core';
+import { type ComponentData, type NodeData, type PatchOp, register } from '@treenity/core';
 import { Render, RenderContext, type View } from '@treenity/react';
-import { set, useChildren, useNavigate, usePath } from '@treenity/react';
+import { execute, set, useChildren, useNavigate, usePath } from '@treenity/react';
 import { minimd } from '@treenity/react';
 import { cn } from '@treenity/react';
 import { trpc } from '@treenity/react';
 import { Button } from '@treenity/react/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@treenity/react/ui/dialog';
-import { createPortal } from 'react-dom';
 import { FormField } from '@treenity/react/ui/form-field';
 import { Input } from '@treenity/react/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@treenity/react/ui/select';
 import { Textarea } from '@treenity/react/ui/textarea';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { AttachMenu } from '../simple-components/view';
 import { BoardColumn, BoardKanban, BoardTask } from './types';
@@ -91,8 +90,8 @@ const TaskView: View<BoardTask> = ({ value, ctx }) => {
   const result = typeof proxy.result === 'string' ? proxy.result : '';
 
   const save = (patch: Record<string, unknown>) => {
-    const ops: ['r', string, unknown][] = Object.entries({ ...patch, updatedAt: Date.now() })
-      .map(([k, v]) => ['r', k, v]);
+    const ops: PatchOp[] = Object.entries({ ...patch, updatedAt: Date.now() })
+      .map(([k, v]) => ['r', k, v] as const);
     withToast(() => trpc.patch.mutate({ path: node.$path, ops }));
   };
 
@@ -512,7 +511,7 @@ const KanbanView: View<BoardKanban> = ({ value, ctx }) => {
   const createColumn = async () => {
     const label = window.prompt('Column name:');
     if (!label?.trim()) return;
-    const slug = Date.now().toString(36);
+    const slug = label.trim().toLowerCase().replace(/[\s\/\\#?&]+/g, '-');
     const maxOrder = Math.max(0, ...columns.map(c => typeof c.order === 'number' ? c.order : 0));
 
     await withToast(async () => {
@@ -566,7 +565,7 @@ const KanbanView: View<BoardKanban> = ({ value, ctx }) => {
     if (src.task.status === targetStatus) return;
 
     const taskPath = (src.task as NodeData).$path;
-    withToast(() => trpc.execute.mutate({ path: taskPath, type: 'board.task', action: 'move', data: { status: targetStatus } }));
+    withToast(() => execute(taskPath, 'move', { status: targetStatus }, 'board.task'));
   };
 
   return (
@@ -657,51 +656,3 @@ const ColumnView: View<BoardColumn> = ({ value }) => {
 };
 
 register('board.column', 'react', ColumnView);
-
-// ── Task modal (plain portal, no Radix) ──
-
-function TaskModal({ task, node, onClose }: { task: string; node: NodeData; onClose: () => void }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, [onClose]);
-
-  return createPortal(
-    <div ref={containerRef} className="fixed inset-0 z-50 flex items-center justify-center">
-      {/* Backdrop — click to close */}
-      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
-      {/* Content — stop propagation so clicks inside don't close */}
-      <div
-        className="relative z-10 w-full max-w-[720px] max-h-[85vh] overflow-y-auto rounded-2xl bg-zinc-900/95 backdrop-blur-xl border border-white/10 shadow-2xl shadow-black/50 p-6 mx-4"
-        onClick={e => e.stopPropagation()}
-      >
-        <button
-          onClick={onClose}
-          className="absolute top-3 right-3 rounded-lg p-1.5 text-zinc-400 hover:text-white hover:bg-white/10 transition-all z-20"
-        >
-          ✕
-        </button>
-        <Render value={node} />
-        <div className="flex justify-between pt-3 mt-4 border-t border-white/5">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-xs text-destructive hover:text-destructive"
-            onClick={async () => {
-              if (!confirm('Delete this task?')) return;
-              await withToast(() => trpc.remove.mutate({ path: task }), 'Task deleted');
-              onClose();
-            }}
-          >
-            Delete
-          </Button>
-          <Button onClick={onClose}>Done</Button>
-        </div>
-      </div>
-    </div>,
-    document.body,
-  );
-}

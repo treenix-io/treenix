@@ -18,7 +18,7 @@ export function FormField({ label, labelClass, className, children }: {
     if (contentRef.current) {
       setStacked(contentRef.current.scrollHeight > STACK_THRESHOLD);
     }
-  }, []);
+  }, [contentRef.current]);
 
   return (
     <div className={cn(stacked ? 'flex flex-col gap-1' : 'flex items-center gap-4', className)}>
