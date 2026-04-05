@@ -14,9 +14,11 @@ import {
 } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { type ComponentData, type NodeData, type PatchOp, register } from '@treenity/core';
-import { Render, RenderContext, type View } from '@treenity/react';
+import { type ComponentData, type NodeData, register } from '@treenity/core';
+import type { PatchOp } from '@treenity/core/tree';
+import { Render, RenderContext, useActions, type View } from '@treenity/react';
 import { execute, set, useChildren, useNavigate, usePath } from '@treenity/react';
+import { transliterate } from '@treenity/react/lib/string-utils';
 import { minimd } from '@treenity/react';
 import { cn } from '@treenity/react';
 import { trpc } from '@treenity/react';
@@ -76,18 +78,17 @@ function AiBadge() {
 // ── board.task view — editable task detail ──
 
 const TaskView: View<BoardTask> = ({ value, ctx }) => {
-  const path = ctx?.path ?? '';
   const node = ctx?.node;
-  const proxy = usePath(path, BoardTask);
+  const actions = useActions(value);
   const [editingDesc, setEditingDesc] = useState(false);
-  if (!node || !proxy) return null;
+  if (!node || !value) return null;
 
-  const title = typeof proxy.title === 'string' ? proxy.title : '';
-  const description = typeof proxy.description === 'string' ? proxy.description : '';
-  const status = (typeof proxy.status === 'string' ? proxy.status : 'backlog') as TaskStatus;
-  const priority = typeof proxy.priority === 'string' ? proxy.priority : 'normal';
-  const assignee = typeof proxy.assignee === 'string' ? proxy.assignee : '';
-  const result = typeof proxy.result === 'string' ? proxy.result : '';
+  const title = typeof value.title === 'string' ? value.title : '';
+  const description = typeof value.description === 'string' ? value.description : '';
+  const status = (typeof value.status === 'string' ? value.status : 'backlog') as TaskStatus;
+  const priority = typeof value.priority === 'string' ? value.priority : 'normal';
+  const assignee = typeof value.assignee === 'string' ? value.assignee : '';
+  const result = typeof value.result === 'string' ? value.result : '';
 
   const save = (patch: Record<string, unknown>) => {
     const ops: PatchOp[] = Object.entries({ ...patch, updatedAt: Date.now() })
@@ -138,7 +139,7 @@ const TaskView: View<BoardTask> = ({ value, ctx }) => {
         <FormField label="Status">
           <div className="flex items-center gap-2">
             <span className="rounded bg-muted px-2 py-0.5 text-xs font-medium capitalize">{status}</span>
-            <TaskActions proxy={proxy} status={status} />
+            <TaskActions actions={actions} status={status} />
           </div>
         </FormField>
 
@@ -268,19 +269,18 @@ function EmbeddedTaskLog({ taskRef }: { taskRef: string }) {
 
 register('board.task', 'react', TaskView);
 
-const TaskListItem: View<BoardTask> = ({ value }) => {
+const TaskListItem: View<BoardTask> = ({ value, ctx }) => {
   const nav = useNavigate();
-  const v = value as NodeData;
-  const priority = typeof v.priority === 'string' ? v.priority : 'normal';
-  const title = typeof v.title === 'string' && v.title
-    ? v.title
-    : v.$path.split('/').at(-1);
-  const aiStatus = typeof v.aiStatus === 'string' ? v.aiStatus : '';
-  const assignee = typeof v.assignee === 'string' ? v.assignee : '';
+  const node = ctx?.node;
+  const path = node?.$path ?? '';
+  const priority = value.priority || 'normal';
+  const title = value.title || path.split('/').at(-1);
+  const aiStatus = node && typeof node.aiStatus === 'string' ? node.aiStatus : '';
+  const assignee = value.assignee || '';
 
   return (
     <button
-      onClick={() => nav(v.$path)}
+      onClick={() => nav(path)}
       className="flex w-full items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-left transition-colors hover:bg-accent/50"
     >
       <PriorityDot priority={priority} />
@@ -301,20 +301,20 @@ register('board.task', 'react:list', TaskListItem);
 
 // ── Helpers ──
 
-function TaskActions({ proxy, status }: { proxy: ReturnType<typeof usePath<BoardTask>>; status: TaskStatus }) {
+function TaskActions({ actions, status }: { actions: ReturnType<typeof useActions<BoardTask>>; status: TaskStatus }) {
   const btn = 'h-7 text-xs';
   switch (status) {
     case 'doing':
-      return <Button tabIndex={-1} variant="outline" size="sm" className={btn} onClick={() => withToast(() => proxy.submit())}>Submit</Button>;
+      return <Button tabIndex={-1} variant="outline" size="sm" className={btn} onClick={() => withToast(() => actions.submit())}>Submit</Button>;
     case 'review':
       return (
         <div className="flex gap-1">
-          <Button tabIndex={-1} variant="outline" size="sm" className={btn} onClick={() => withToast(() => proxy.approve())}>Approve</Button>
-          <Button tabIndex={-1} variant="ghost" size="sm" className={btn} onClick={() => withToast(() => proxy.reject())}>Reject</Button>
+          <Button tabIndex={-1} variant="outline" size="sm" className={btn} onClick={() => withToast(() => actions.approve())}>Approve</Button>
+          <Button tabIndex={-1} variant="ghost" size="sm" className={btn} onClick={() => withToast(() => actions.reject())}>Reject</Button>
         </div>
       );
     case 'done':
-      return <Button tabIndex={-1} variant="ghost" size="sm" className={btn} onClick={() => withToast(() => proxy.reopen())}>Reopen</Button>;
+      return <Button tabIndex={-1} variant="ghost" size="sm" className={btn} onClick={() => withToast(() => actions.reopen())}>Reopen</Button>;
     default:
       return null;
   }
@@ -511,7 +511,7 @@ const KanbanView: View<BoardKanban> = ({ value, ctx }) => {
   const createColumn = async () => {
     const label = window.prompt('Column name:');
     if (!label?.trim()) return;
-    const slug = label.trim().toLowerCase().replace(/[\s\/\\#?&]+/g, '-');
+    const slug = transliterate(label).trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
     const maxOrder = Math.max(0, ...columns.map(c => typeof c.order === 'number' ? c.order : 0));
 
     await withToast(async () => {
@@ -629,11 +629,11 @@ register('board.kanban', 'react', KanbanView);
 
 // ── board.column view ──
 
-const ColumnView: View<BoardColumn> = ({ value }) => {
-  const v = value as NodeData;
-  const tasks = useChildren(v.$path, { watch: true, watchNew: true });
-  const label = typeof v.label === 'string' ? v.label : v.$path.split('/').at(-1);
-  const color = typeof v.color === 'string' ? v.color : 'border-zinc-400';
+const ColumnView: View<BoardColumn> = ({ value, ctx }) => {
+  const path = ctx?.node?.$path ?? '';
+  const tasks = useChildren(path, { watch: true, watchNew: true });
+  const label = value.label || path.split('/').at(-1);
+  const color = value.color || 'border-zinc-400';
 
   return (
     <div className="flex flex-col gap-2 p-3">

@@ -2,7 +2,7 @@ import { Button } from '#components/ui/button';
 import { Command, CommandGroup, CommandInput, CommandItem, CommandList } from '#components/ui/command';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '#components/ui/dialog';
 import { Input } from '#components/ui/input';
-import { typeFilter } from '#mods/editor-ui/string-utils';
+import { typeFilter } from '#lib/string-utils';
 import { trpc } from '#tree/trpc';
 import { isOfType, type NodeData } from '@treenity/core';
 import { useEffect, useMemo, useRef, useState } from 'react';
