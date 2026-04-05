@@ -148,7 +148,7 @@ const TaskView: View<BoardTask> = ({ value, ctx }) => {
             <SelectTrigger className="h-8 w-32">
               <SelectValue />
             </SelectTrigger>
-            <SelectContent position="popper" portal={false} className="min-w-32">
+            <SelectContent position="popper" noPortal className="min-w-32">
               {PRIORITIES.map(p => (
                 <SelectItem key={p.value} value={p.value}>
                   <span className="flex items-center gap-1.5">

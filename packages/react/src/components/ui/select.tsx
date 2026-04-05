@@ -54,9 +54,9 @@ function SelectContent({
   children,
   position = "item-aligned",
   align = "center",
-  portal = true,
+  noPortal,
   ...props
-}: React.ComponentProps<typeof SelectPrimitive.Content> & { portal?: boolean }) {
+}: React.ComponentProps<typeof SelectPrimitive.Content> & { noPortal?: boolean }) {
   const content = (
       <SelectPrimitive.Content
         data-slot="select-content"
@@ -84,7 +84,7 @@ function SelectContent({
       </SelectPrimitive.Content>
   );
 
-  if (!portal) return content;
+  if (noPortal) return content;
   return <SelectPrimitive.Portal>{content}</SelectPrimitive.Portal>;
 }
 
