@@ -123,7 +123,7 @@ const TaskView: View<BoardTask> = ({ value, ctx }) => {
           className={cn(
             'cursor-pointer rounded border p-2 text-sm',
             description
-              ? 'whitespace-pre-wrap border-transparent line-clamp-4 hover:border-border'
+              ? 'whitespace-pre-wrap border-transparent hover:border-border'
               : 'border-dashed border-border text-muted-foreground hover:border-foreground/30',
           )}
           onClick={() => setEditingDesc(true)}
