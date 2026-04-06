@@ -1,6 +1,6 @@
 // NodeEditor — self-contained edit panel for a node (properties, components, actions)
 // Reusable: Inspector uses it as a slide-out, but can be embedded anywhere.
-// State model: valtio holds only USER EDITS (deltas). Node data is always read fresh from props.
+// Data fields auto-save via patch (no $rev). System fields ($type, $acl) use Save button.
 
 import { Button } from '#components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#components/ui/collapsible';
@@ -9,7 +9,7 @@ import { ScrollArea } from '#components/ui/scroll-area';
 import { Tabs, TabsList, TabsTrigger } from '#components/ui/tabs';
 import { DraftTextarea } from '#mods/editor-ui/DraftTextarea';
 import { FieldLabel, RefEditor } from '#mods/editor-ui/FieldLabel';
-import { getComponents, getPlainFields, getSchema } from '#mods/editor-ui/node-utils';
+import { getComponents, getPlainFields } from '#mods/editor-ui/node-utils';
 import { type ComponentData, type GroupPerm, isRef, type NodeData, resolve } from '@treenity/core';
 import { getDefaults } from '@treenity/core/comp';
 import type { TypeSchema } from '@treenity/core/schema/types';
@@ -17,15 +17,10 @@ import { ChevronRight } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { proxy, snapshot, useSnapshot } from 'valtio';
 import { AclEditor } from './AclEditor';
-import * as cache from '#tree/cache';
 import { ComponentSection } from './ComponentSection';
 import { set } from '#hooks';
 import { trpc } from '#tree/trpc';
-
-// Overlay local edits for controlled inputs — returns original ref when no edits
-function withEdits(base: ComponentData, edits?: Record<string, unknown>): ComponentData {
-  return edits && Object.keys(edits).length > 0 ? { ...base, ...edits } : base;
-}
+import type { SaveHandle } from '#tree/auto-save';
 
 function NodeCard({ path, type, onChangeType }: {
   path: string;
@@ -60,6 +55,7 @@ function NodeCard({ path, type, onChangeType }: {
 
 export type NodeEditorProps = {
   node: NodeData;
+  save: SaveHandle;
   open: boolean;
   onClose: () => void;
   currentUserId?: string;
@@ -67,40 +63,34 @@ export type NodeEditorProps = {
   onAddComponent: (path: string) => void;
 };
 
-export function NodeEditor({ node, open, onClose, currentUserId, toast, onAddComponent }: NodeEditorProps) {
+export function NodeEditor({ node, save, open, onClose, currentUserId, toast, onAddComponent }: NodeEditorProps) {
+  const { onChange, scope, flush, reset: resetSave, dirty, stale } = save;
+
+  // Valtio only for system fields ($type, $acl) and UI state
   const [st] = useState(() => proxy({
-    // User edits only — empty means "use node data as-is"
     typeEdit: null as string | null,
     aclEdit: null as { owner: string; rules: GroupPerm[] } | null,
-    compEdits: {} as Record<string, Record<string, unknown>>,
-    plainEdits: {} as Record<string, unknown>,
     tab: 'properties' as 'properties' | 'json',
     jsonText: '',
     collapsed: { $node: true } as Record<string, boolean>,
-    dirty: false,
-    editRev: null as unknown,
   }));
   const snap = useSnapshot(st);
 
-  // Reset edits on path change
+  // Reset on path change
   const prevPathRef = useRef<string | null>(null);
   if (node.$path !== prevPathRef.current) {
     prevPathRef.current = node.$path;
     st.typeEdit = null;
     st.aclEdit = null;
-    st.compEdits = {};
-    st.plainEdits = {};
-    st.dirty = false;
-    st.editRev = null;
     st.tab = 'properties';
     st.jsonText = '';
   }
 
-  // Derived from node + edits
+  // Derived from node + system edits
   const nodeType = snap.typeEdit ?? node.$type;
   const aclOwner = snap.aclEdit?.owner ?? (node.$owner as string) ?? '';
   const aclRules = snap.aclEdit?.rules ?? (node.$acl as GroupPerm[]) ?? [];
-  const stale = snap.dirty && node.$rev !== snap.editRev;
+  const hasPendingSystemEdits = snap.typeEdit != null || snap.aclEdit != null;
 
   const nodeName = node.$path === '/' ? '/' : node.$path.slice(node.$path.lastIndexOf('/') + 1);
   const components = getComponents(node);
@@ -110,66 +100,46 @@ export function NodeEditor({ node, open, onClose, currentUserId, toast, onAddCom
   const mainCompCls = resolve(node.$type, 'class') as (new () => Record<string, unknown>) | null;
   const mainCompDefaults = mainCompCls ? new mainCompCls() : null;
 
-  function markDirty() {
-    if (!st.dirty) {
-      st.editRev = node.$rev;
-      st.dirty = true;
-    }
-  }
-
   function handleReset() {
     st.typeEdit = null;
     st.aclEdit = null;
-    st.compEdits = {};
-    st.plainEdits = {};
-    st.dirty = false;
-    st.editRev = null;
+    resetSave();
   }
 
   async function handleSave() {
-    // snapshot() strips valtio proxies — without this, nested arrays/objects
-    // (e.g. groups.value) stay as Proxy in the cache and break structuredClone
-    const s = snapshot(st);
-    let toSave: NodeData;
-    if (s.tab === 'json') {
+    if (snap.tab === 'json') {
+      // JSON tab — full node replacement via set()
       try {
-        toSave = JSON.parse(s.jsonText);
+        const toSave = JSON.parse(snap.jsonText);
+        await set(toSave);
       } catch {
         toast('Invalid JSON');
         return;
       }
-    } else {
-      const mergedPlain = { ...plainFields, ...s.plainEdits };
-      toSave = { ...mergedPlain, $path: node.$path, $type: nodeType, $rev: node.$rev } as NodeData;
-
-      if (aclOwner) toSave.$owner = aclOwner;
-      if (aclRules.length > 0) toSave.$acl = [...aclRules] as GroupPerm[];
-
-      for (const [name, comp] of components) {
-        const ctype = (comp as ComponentData).$type;
-        const edits = s.compEdits[name];
-        toSave[name] = { $type: ctype, ...getDefaults(ctype), ...comp, ...edits };
+    } else if (hasPendingSystemEdits) {
+      // System field changes ($type, $acl) — need set()
+      const toSave = { ...node };
+      if (snap.typeEdit) toSave.$type = snap.typeEdit;
+      if (snap.aclEdit) {
+        toSave.$owner = aclOwner;
+        toSave.$acl = [...aclRules] as GroupPerm[];
       }
+      await set(toSave);
     }
-    await set(toSave);
+
+    // Flush any pending auto-save data
+    await flush();
     handleReset();
     toast('Saved');
   }
 
   async function handleRemoveComponent(name: string) {
-    const fresh = cache.get(node.$path) ?? node;
-    const optimistic = { ...fresh };
-    delete optimistic[name];
-    cache.put(optimistic);
     await trpc.patch.mutate({ path: node.$path, ops: [['d', name]] });
   }
 
-  // Build the main component value for ComponentSection: node's own fields ($type + plain data)
-  // merged with any pending user edits. This is needed because the main component = node-level fields
-  // (per getComponent convention), so we construct it explicitly rather than reading a named key.
-  const mainValue = withEdits({ $type: node.$type, ...plainFields } as ComponentData, snap.plainEdits as Record<string, unknown>);
-  const displayPlainFields = { ...plainFields, ...(snap.plainEdits as Record<string, unknown>) };
-  const hasPlainFields = Object.keys(displayPlainFields).length > 0;
+  // Main component value: node's own fields (cache has optimistic updates from auto-save)
+  const mainValue = { $type: node.$type, ...plainFields } as ComponentData;
+  const hasPlainFields = Object.keys(plainFields).length > 0;
 
   return (
     <div className={`edit-panel${open ? ' open' : ''}`}>
@@ -183,12 +153,7 @@ export function NodeEditor({ node, open, onClose, currentUserId, toast, onAddCom
       <Tabs value={snap.tab} onValueChange={(v) => {
         st.tab = v as 'properties' | 'json';
         if (v === 'json') {
-          const merged = { ...node, ...st.plainEdits };
-          for (const [name, comp] of components) {
-            const edits = st.compEdits[name];
-            if (edits && Object.keys(edits).length > 0) merged[name] = { ...comp, ...edits };
-          }
-          st.jsonText = JSON.stringify(merged, null, 2);
+          st.jsonText = JSON.stringify(node, null, 2);
         }
       }} className="px-3 pt-2 shrink-0">
         <TabsList className="h-8 bg-secondary">
@@ -201,40 +166,33 @@ export function NodeEditor({ node, open, onClose, currentUserId, toast, onAddCom
         <div className="p-3.5">
         {snap.tab === 'properties' ? (
           <>
-            <NodeCard path={node.$path} type={nodeType} onChangeType={(v) => { st.typeEdit = v; markDirty(); }} />
+            <NodeCard path={node.$path} type={nodeType} onChangeType={(v) => { st.typeEdit = v; }} />
             <AclEditor
               path={node.$path}
               owner={aclOwner}
               rules={aclRules as GroupPerm[]}
               currentUserId={currentUserId}
-              onChange={(o, r) => { st.aclEdit = { owner: o, rules: r }; markDirty(); }}
+              onChange={(o, r) => { st.aclEdit = { owner: o, rules: r }; }}
             />
 
-            {/* Main type section */}
+            {/* Main type section — auto-save onChange */}
             <ComponentSection
               node={node}
               name=""
               value={mainValue}
-              onChange={(partial) => {
-                for (const [k, v] of Object.entries(partial)) if (!k.startsWith('$')) st.plainEdits[k] = v;
-                markDirty();
-              }}
+              onChange={onChange}
               toast={toast}
               onActionComplete={handleReset}
             />
 
-            {/* Named components */}
+            {/* Named components — scoped auto-save onChange */}
             {components.map(([name, comp]) => (
               <ComponentSection
                 key={name}
                 node={node}
                 name={name}
-                value={withEdits(comp as ComponentData, snap.compEdits[name] as Record<string, unknown>)}
-                onChange={(partial) => {
-                  if (!st.compEdits[name]) st.compEdits[name] = {};
-                  for (const [k, v] of Object.entries(partial)) if (!k.startsWith('$')) st.compEdits[name][k] = v;
-                  markDirty();
-                }}
+                value={comp as ComponentData}
+                onChange={scope(name)}
                 collapsed={!!snap.collapsed[name]}
                 onToggle={() => { st.collapsed[name] = !st.collapsed[name]; }}
                 onRemove={() => handleRemoveComponent(name)}
@@ -248,8 +206,8 @@ export function NodeEditor({ node, open, onClose, currentUserId, toast, onAddCom
               <div className="border-t border-border mt-2 pt-0.5 first:border-t-0 first:mt-0 first:pt-0">
                 <div className="flex items-center justify-between py-2 pb-1.5 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Data</div>
                 <div className="py-0.5 pb-2.5">
-                  {Object.entries(displayPlainFields).map(([k, v]) => {
-                    const onCh = (next: unknown) => { st.plainEdits[k] = next; markDirty(); };
+                  {Object.entries(plainFields).map(([k, v]) => {
+                    const onCh = (next: unknown) => onChange({ [k]: next });
                     return (
                       <div key={k} className={`field${typeof v === 'object' && v !== null ? ' stack' : ''}`}>
                         <FieldLabel label={k} value={v} onChange={onCh} />
@@ -259,7 +217,7 @@ export function NodeEditor({ node, open, onClose, currentUserId, toast, onAddCom
                           <Input
                             className="h-7 text-xs"
                             value={typeof v === 'string' ? v : JSON.stringify(v)}
-                            onChange={(e) => { st.plainEdits[k] = e.target.value; markDirty(); }}
+                            onChange={(e) => onChange({ [k]: e.target.value })}
                           />
                         )}
                       </div>
@@ -272,7 +230,7 @@ export function NodeEditor({ node, open, onClose, currentUserId, toast, onAddCom
         ) : (
           <DraftTextarea
             value={snap.jsonText}
-            onChange={(text) => { st.jsonText = text; markDirty(); }}
+            onChange={(text) => { st.jsonText = text; }}
             spellCheck={false}
           />
         )}
@@ -280,14 +238,17 @@ export function NodeEditor({ node, open, onClose, currentUserId, toast, onAddCom
       </ScrollArea>
 
       <div className="edit-panel-actions">
-        {stale && (
-          <Button variant="ghost" size="sm" onClick={handleReset} title="Node updated externally">
+        {(dirty || hasPendingSystemEdits) && (
+          <Button size="sm" onClick={handleSave}>Save</Button>
+        )}
+        {(dirty || hasPendingSystemEdits) && (
+          <Button variant="ghost" size="sm" onClick={handleReset} title="Discard all changes">
             Reset
           </Button>
         )}
-        <Button size="sm" onClick={handleSave}>
-          Save
-        </Button>
+        {stale && (
+          <span className="text-[10px] text-orange-500" title="Node changed externally">stale</span>
+        )}
         {snap.tab === 'properties' && (
           <Button variant="outline" size="sm" onClick={() => onAddComponent(node.$path)}>+ Component</Button>
         )}

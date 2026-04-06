@@ -27,8 +27,8 @@ function DocPageView({ value, onChange }: BlockProps) {
     if (suppressRef.current) return;
     const json = JSON.stringify(editor.getJSON());
     contentRef.current = json;
-    onChange?.({ ...value, content: json });
-  }, [onChange, value]);
+    onChange?.({ content: json });
+  }, [onChange]);
 
   const editor = useEditor({
     extensions: [
@@ -74,7 +74,7 @@ function DocPageView({ value, onChange }: BlockProps) {
           <Input
             type="text"
             value={value.title || ''}
-            onChange={(e) => onChange({ ...value, title: e.target.value })}
+            onChange={(e) => onChange({ title: e.target.value })}
             placeholder="Untitled"
             className="w-full text-2xl font-semibold tracking-tight bg-transparent border-none shadow-none outline-none text-foreground placeholder:text-muted-foreground/50"
           />
@@ -123,5 +123,6 @@ function parseContent(content: string | undefined): any {
 }
 
 export function registerDocViews() {
-  register('doc.page', 'react', DocPageView);
+  register('doc.page', 'react', ({ onChange, ...props }) => DocPageView(props));
+  register('doc.page', 'react:edit', DocPageView);
 }

@@ -12,6 +12,7 @@ import { getViewContexts, pickDefaultContext } from '#mods/editor-ui/node-utils'
 import { useState } from 'react';
 import { ErrorBoundary } from '#app/ErrorBoundary';
 import { usePath } from '#hooks';
+import { useAutoSave } from '#tree/auto-save';
 import { NodeEditor } from './NodeEditor';
 
 type Props = {
@@ -26,6 +27,7 @@ type Props = {
 
 export function Inspector({ path, currentUserId, onDelete, onAddComponent, onSelect, onSetRoot, toast }: Props) {
   const node = usePath(path);
+  const save = useAutoSave(path ?? '');
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [editing, setEditing] = useState(false);
   const [context, setContext] = useState('react:layout');
@@ -116,7 +118,7 @@ export function Inspector({ path, currentUserId, onDelete, onAddComponent, onSel
           <ErrorBoundary key={node.$path}>
             <RenderContext name={context}>
               <div className="node-view">
-                <Render value={node} />
+                <Render value={node} onChange={save.onChange} />
               </div>
             </RenderContext>
           </ErrorBoundary>
@@ -126,6 +128,7 @@ export function Inspector({ path, currentUserId, onDelete, onAddComponent, onSel
       {/* Slide-out edit panel */}
       <NodeEditor
         node={node}
+        save={save}
         open={editing}
         onClose={() => setEditing(false)}
         currentUserId={currentUserId}
