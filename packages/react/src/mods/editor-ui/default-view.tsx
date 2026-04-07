@@ -1,10 +1,7 @@
 import './editor-ui.css';
-import { Button } from '#components/ui/button';
 import { Render, RenderContext } from '#context';
 import { useChildren } from '#hooks';
-import { trpc } from '#tree/trpc';
 import { type ComponentData, type NodeData, register } from '@treenity/core';
-import { useCallback, useState } from 'react';
 import { EmptyNodePlaceholder } from './empty-placeholder';
 import { renderField } from './form-field';
 import { getComponents, getPlainFields, getSchema } from './node-utils';
@@ -66,50 +63,6 @@ function ComponentFieldsView({ value }: { value: ComponentData }) {
         </div>
       )}
     </>
-  );
-}
-
-export function GenerateViewButton({ type, sample, context, label }: { type: string; sample: NodeData; context?: string; label?: string }) {
-  const [status, setStatus] = useState<'idle' | 'generating' | 'done' | 'error'>('idle');
-  const [error, setError] = useState('');
-
-  const generate = useCallback(async () => {
-    setStatus('generating');
-    try {
-      const clean = Object.fromEntries(
-        Object.entries(sample).filter(([k]) => !['$rev', '$acl', '$owner'].includes(k)),
-      );
-      await trpc.execute.mutate({
-        path: '/metatron',
-        action: 'task',
-        data: { prompt: `Generate a React view for type "${type}"${context ? ` in context "${context}"` : ''}. Sample data:\n${JSON.stringify(clean, null, 2)}` },
-      });
-      setStatus('done');
-    } catch (err: any) {
-      setError(err.message);
-      setStatus('error');
-    }
-  }, [type, sample]);
-
-  if (status === 'generating') {
-    return <div className="text-sm text-blue-400 animate-pulse py-2">Creating task...</div>;
-  }
-  if (status === 'error') {
-    return <div className="text-sm text-red-400 py-2">{error}</div>;
-  }
-  if (status === 'done') {
-    return <div className="text-sm text-green-400 py-2">Task created in /metatron — waiting for AI</div>;
-  }
-
-  return (
-    <Button
-      variant="outline"
-      size="sm"
-      onClick={generate}
-      className="text-blue-400 border-blue-400/30 hover:text-blue-300 my-2"
-    >
-      {label ?? 'Generate AI View'}
-    </Button>
   );
 }
 
@@ -184,12 +137,9 @@ function DefaultNodeView({ value }: { value: NodeData }) {
   const plain = getPlainFields(value);
   const components = getComponents(value);
   const hasInfo = Object.keys(plain).length > 0 || components.length > 0;
-  const canGenerate = value.$type.includes('.');
 
   return (
     <div className="node-default-view">
-      {canGenerate && <GenerateViewButton type={value.$type} sample={value} />}
-
       <PlainFieldsView plain={plain} typeName={value.$type} />
 
       {components.map(([name, comp]) => {

@@ -22,6 +22,10 @@ export function transliterate(str: string, extra?: Record<string, string>): stri
   return out;
 }
 
+export function cleanSlug(str: string) {
+  return transliterate(str.trim()).toLowerCase().replace(/[^a-z0-9_\-]+/g, '-').replace(/^-|-$/g, '');
+}
+
 // Fuzzy string matching utilities for type search
 
 export function editDistance(a: string, b: string): number {

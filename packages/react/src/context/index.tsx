@@ -3,8 +3,8 @@
 // Depends on: core (resolve), React
 
 import { execute } from '#hooks';
-import { type OnChange, scopeOnChange } from '#tree/on-change';
 import { $key, $node } from '#symbols';
+import { type OnChange, scopeOnChange } from '#tree/on-change';
 import {
   type ComponentData,
   hasMissResolver,
@@ -73,7 +73,7 @@ export type RenderProps<T = ComponentData> = {
 export type ReactHandler = FC<RenderProps<any>>;
 
 /** Typed view component. Use: `const MyView: View<MyType> = ({ value, ctx }) => ...` */
-export type View<T> = FC<RenderProps<T>>;
+export type View<T, Extra = {}> = FC<RenderProps<T> & Extra>;
 
 // ── useActions — proxy that turns value's symbol metadata into action calls ──
 
@@ -114,7 +114,7 @@ export const UixNoView: FC<RenderProps> = ({ value, onChange }) => {
 
 // ── <Render> — component/node-level rendering ──
 
-export function Render({ value, onChange }: RenderProps) {
+export function Render<E extends Record<string, unknown> = {}>({ value, onChange, ...extra }: RenderProps & E) {
   const context = useTreeContext();
   const type = value.$type;
 
@@ -146,7 +146,7 @@ export function Render({ value, onChange }: RenderProps) {
   }
 
   const ctx = viewCtx(value);
-  const el = createElement(Handler, { value, onChange, ctx });
+  const el = createElement(Handler, { value, onChange, ctx, ...extra } as RenderProps);
   return ctx?.node ? createElement(NodeProvider, { value: ctx.node }, el) : el;
 }
 

@@ -4,12 +4,13 @@ import { Button } from '#components/ui/button';
 import { Checkbox } from '#components/ui/checkbox';
 import { Input } from '#components/ui/input';
 import { Render } from '#context';
+import { execute } from '#hooks';
 import { getActions, getActionSchema } from '#mods/editor-ui/node-utils';
+import { useSchema } from '#schema-loader';
+import * as cache from '#tree/cache';
+import { trpc } from '#tree/trpc';
 import type { ComponentData, NodeData } from '@treenity/core';
 import { useState } from 'react';
-import * as cache from '#tree/cache';
-import { useSchema } from '#schema-loader';
-import { trpc } from '#tree/trpc';
 
 function ResultView({ value }: { value: unknown }) {
   if (value === undefined || value === null) return null;
@@ -78,7 +79,7 @@ export function ActionCardList({
           catch { toast('Invalid JSON params'); setRunning(null); return; }
         }
       }
-      const result = await trpc.execute.mutate({ path, key: componentName, action: a, data });
+      const result = await execute(path, a, data, undefined, componentName);
       const fresh = (await trpc.get.query({ path, watch: true })) as NodeData | undefined;
       if (fresh) cache.put(fresh);
       onActionComplete?.();
