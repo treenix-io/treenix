@@ -156,3 +156,99 @@ export function useSave(path: string, options?: SaveOptions): SaveHandle {
 export function useAutoSave(path: string, options?: Omit<SaveOptions, 'autoSave'>): SaveHandle {
   return useSave(path, { ...options, autoSave: true });
 }
+
+// ── usePathSave: multi-path saving for child nodes ──
+
+export type PathHandle = {
+  onChange: (partial: OnChange) => void;
+  scope: (key: string) => (partial: OnChange) => void;
+};
+
+export type PathSaveHandle = {
+  /** Direct partial update for any path */
+  change: (path: string, partial: OnChange) => void;
+  /** Cached handle for a specific path — stable reference */
+  path: (path: string) => PathHandle;
+  /** Flush all pending changes to server */
+  flush: () => Promise<void>;
+};
+
+export function usePathSave(options?: { delay?: number }): PathSaveHandle {
+  const delay = options?.delay ?? DEFAULT_DELAY;
+
+  const pending = useRef(new Map<string, Record<string, unknown>>());
+  const handleCache = useRef(new Map<string, PathHandle>());
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const flush = useCallback(async () => {
+    if (timer.current) { clearTimeout(timer.current); timer.current = null; }
+
+    const entries = [...pending.current.entries()];
+    pending.current.clear();
+
+    if (entries.length === 0) return;
+
+    await Promise.allSettled(
+      entries.map(([path, partial]) => {
+        const ops = mergeToOps(partial);
+        return ops.length > 0
+          ? trpc.patch.mutate({ path, ops })
+          : Promise.resolve();
+      }),
+    );
+  }, []);
+
+  const change = useCallback((path: string, partial: OnChange) => {
+    if (!partial || typeof partial !== 'object') return;
+
+    // Optimistic cache update
+    const node = cache.get(path);
+    if (node) cache.put(mergeIntoNode(node, partial as Record<string, unknown>));
+
+    // Accumulate per-path
+    const prev = pending.current.get(path);
+    pending.current.set(path, prev
+      ? { ...prev, ...(partial as Record<string, unknown>) }
+      : { ...(partial as Record<string, unknown>) },
+    );
+
+    // Shared timer for all paths (delay=0 → no auto-flush)
+    if (delay > 0 && !timer.current) {
+      timer.current = setTimeout(flush, delay);
+    }
+  }, [flush, delay]);
+
+  // Ref so cached handles always call latest change (no stale closures)
+  const changeRef = useRef(change);
+  changeRef.current = change;
+
+  const getHandle = useCallback((childPath: string): PathHandle => {
+    const cached = handleCache.current.get(childPath);
+    if (cached) return cached;
+
+    const handle: PathHandle = {
+      onChange: (partial) => changeRef.current(childPath, partial),
+      scope: (key) => scopeOnChange((partial) => changeRef.current(childPath, partial), key),
+    };
+    handleCache.current.set(childPath, handle);
+    return handle;
+  }, []);
+
+  // Flush on unmount
+  useEffect(() => {
+    return () => {
+      if (timer.current) clearTimeout(timer.current);
+      for (const [path, partial] of pending.current.entries()) {
+        const ops = mergeToOps(partial);
+        if (ops.length > 0) trpc.patch.mutate({ path, ops }).catch(() => {});
+      }
+      pending.current.clear();
+      handleCache.current.clear();
+    };
+  }, []);
+
+  return useMemo(
+    () => ({ change, path: getHandle, flush }),
+    [change, getHandle, flush],
+  );
+}

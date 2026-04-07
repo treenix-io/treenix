@@ -49,7 +49,7 @@
       "types": "./dist/components/ui/*.d.ts",
       "default": "./dist/components/ui/*.js"
     },
-        "./*.css": "./src/*.css",
+    "./*.css": "./src/*.css",
     "./*": {
       "development": [
         "./src/*.ts",
@@ -102,10 +102,12 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.18",
+    "@testing-library/react": "^16.3.2",
     "@types/react": "^19.2.13",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.3",
     "babel-plugin-react-compiler": "^1.0.0",
+    "happy-dom": "^20.8.9",
     "tailwindcss": "^4.1.18",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",

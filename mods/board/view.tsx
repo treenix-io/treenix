@@ -3,7 +3,6 @@
 import {
   DndContext,
   type DragEndEvent,
-  type DragOverEvent,
   DragOverlay,
   type DragStartEvent,
   pointerWithin,
@@ -15,13 +14,12 @@ import {
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { type ComponentData, type NodeData, register } from '@treenity/core';
-import type { PatchOp } from '@treenity/core/tree';
-import { Render, RenderContext, useActions, type View } from '@treenity/react';
-import { execute, set, useChildren, useNavigate, usePath } from '@treenity/react';
-import { transliterate } from '@treenity/react/lib/string-utils';
+import { Render, RenderContext, useActions, useDraft, type View } from '@treenity/react';
+import { createNode, execute, removeNode, useChildren, useNavigate, usePath } from '@treenity/react';
+import { usePathSave } from '@treenity/react';
+import { cleanSlug } from '@treenity/react/lib/string-utils';
 import { minimd } from '@treenity/react';
 import { cn } from '@treenity/react';
-import { trpc } from '@treenity/react';
 import { Button } from '@treenity/react/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@treenity/react/ui/dialog';
 import { FormField } from '@treenity/react/ui/form-field';
@@ -77,7 +75,7 @@ function AiBadge() {
 
 // ── board.task view — editable task detail ──
 
-const TaskView: View<BoardTask> = ({ value, ctx }) => {
+const TaskView: View<BoardTask, { draft?: boolean }> = ({ value, onChange, ctx, draft }) => {
   const node = ctx?.node;
   const actions = useActions(value);
   const [editingDesc, setEditingDesc] = useState(false);
@@ -91,9 +89,7 @@ const TaskView: View<BoardTask> = ({ value, ctx }) => {
   const result = typeof value.result === 'string' ? value.result : '';
 
   const save = (patch: Record<string, unknown>) => {
-    const ops: PatchOp[] = Object.entries({ ...patch, updatedAt: Date.now() })
-      .map(([k, v]) => ['r', k, v] as const);
-    withToast(() => trpc.patch.mutate({ path: node.$path, ops }));
+    onChange?.({ ...patch, updatedAt: Date.now() });
   };
 
   return (
@@ -139,7 +135,7 @@ const TaskView: View<BoardTask> = ({ value, ctx }) => {
         <FormField label="Status">
           <div className="flex items-center gap-2">
             <span className="rounded bg-muted px-2 py-0.5 text-xs font-medium capitalize">{status}</span>
-            <TaskActions actions={actions} status={status} />
+            {!draft && <TaskActions actions={actions} status={status} />}
           </div>
         </FormField>
 
@@ -405,29 +401,32 @@ function TaskCard({ task, onSelect, colStatus }: { task: NodeData; onSelect: (pa
 
 // ── Column ──
 
-function Column({ col, onSelect, onAddTask, highlighted }: { col: NodeData; onSelect: (path: string) => void; onAddTask: (status: string) => void; highlighted?: boolean }) {
-  const proxy = usePath(col.$path, BoardColumn);
-  const tasks = useChildren(col.$path, { watch: true, watchNew: true });
-  const status = col.$path.split('/').at(-1) ?? '';
-  const { setNodeRef } = useDroppable({ id: `col:${status}`, data: { status } });
+// ── KanbanColumn — View<BoardColumn>, self-contained ──
 
-  const label = typeof proxy?.label === 'string' ? proxy.label : status;
-  const color = typeof proxy?.color === 'string' ? proxy.color : 'border-zinc-400';
+type ColumnExtra = { onSelect: (path: string) => void; onCreate: (status: string) => void };
+
+const KanbanColumn: View<BoardColumn, ColumnExtra> = ({ value, onChange, ctx, onSelect, onCreate }) => {
+  const path = ctx!.node.$path;
+  const tasks = useChildren(path, { watch: true, watchNew: true });
+  const status = path.split('/').at(-1) ?? '';
+  const { setNodeRef, isOver } = useDroppable({ id: `col:${status}`, data: { status } });
+
+  const label = value.label || status;
   const taskIds = useMemo(() => tasks.map(t => t.$path), [tasks]);
 
   return (
     <div className="group flex w-[240px] shrink-0 flex-col">
-      <div className={cn('mb-2 flex items-center gap-2 border-b-2 pb-1.5', color)}>
+      <div className={cn('mb-2 flex items-center gap-2 border-b-2 pb-1.5', value.color || 'border-zinc-400')}>
         <BlurInput
           value={label}
           className="h-auto border-none bg-transparent p-0 text-sm font-bold shadow-none focus-visible:ring-0"
-          onSave={v => withToast(() => set({ ...col, label: v, updatedAt: Date.now() }))}
+          onSave={v => onChange?.({ label: v, updatedAt: Date.now() })}
         />
         <span className="text-xs text-muted-foreground">({tasks.length})</span>
         <button
           onClick={async () => {
             if (!confirm(`Delete column "${label}"?`)) return;
-            await withToast(() => trpc.remove.mutate({ path: col.$path }), 'Column deleted');
+            await withToast(() => removeNode(path), 'Column deleted');
           }}
           className="ml-auto hidden text-xs text-muted-foreground group-hover:block hover:text-destructive"
           title="Delete column"
@@ -441,7 +440,7 @@ function Column({ col, onSelect, onAddTask, highlighted }: { col: NodeData; onSe
           ref={setNodeRef}
           className={cn(
             'flex-1 rounded-md p-1 transition-colors min-h-32',
-            highlighted && 'bg-accent/30 ring-1 ring-accent',
+            isOver && 'bg-accent/30 ring-1 ring-accent',
           )}
         >
           {tasks.map(task => (
@@ -449,17 +448,59 @@ function Column({ col, onSelect, onAddTask, highlighted }: { col: NodeData; onSe
           ))}
 
           <button
-            onClick={() => onAddTask(status)}
+            onClick={() => onCreate(status)}
             className={cn(
               'w-full rounded-md border border-dashed border-border py-2 text-center text-xs text-muted-foreground hover:border-foreground/30 hover:text-foreground',
               tasks.length === 0 && 'py-6',
             )}
           >
-            {highlighted ? 'Drop here' : '+ Add task'}
+            {isOver ? 'Drop here' : '+ Add task'}
           </button>
         </div>
       </SortableContext>
     </div>
+  );
+};
+
+register('board.column', 'react:kanban', KanbanColumn);
+
+function TaskDialog({ node, onChange, onClose, onSave }: {
+  node: NodeData;
+  onChange: (partial: Record<string, unknown>) => void;
+  onClose: () => void;
+  onSave?: () => void;
+}) {
+  return (
+    <Dialog open modal={false} onOpenChange={open => { if (!open) onClose(); }}>
+      <DialogContent className="max-w-lg">
+        <DialogTitle className="sr-only">Task</DialogTitle>
+        <Render value={node} onChange={onChange} draft={!!onSave} />
+        <div className="flex justify-end gap-2 pt-2 border-t border-border">
+          {onSave ? (
+            <>
+              <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
+              <Button size="sm" onClick={onSave}>Create</Button>
+            </>
+          ) : (
+            <>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={async () => {
+                  const hasEdits = node.title || node.description;
+                  if (hasEdits && !confirm('Delete this task?')) return;
+                  await withToast(() => removeNode(node.$path), 'Task deleted');
+                  onClose();
+                }}
+              >
+                Delete
+              </Button>
+              <Button size="sm" onClick={onClose}>Done</Button>
+            </>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -467,10 +508,27 @@ function Column({ col, onSelect, onAddTask, highlighted }: { col: NodeData; onSe
 
 const KanbanView: View<BoardKanban> = ({ value, ctx }) => {
   const [selectedTask, setSelectedTask] = useState<string | null>(null);
+  const draft = useDraft('board.task');
   const [activeTask, setActiveTask] = useState<NodeData | null>(null);
-  const [overColumn, setOverColumn] = useState<string | null>(null);
   const selectedNode = usePath(selectedTask ?? '') as NodeData | undefined;
   const basePath = ctx!.path;
+  const saves = usePathSave();
+
+  const handleCreate = (status: string) => {
+    draft.create({
+      title: '', status, priority: 'normal',
+      assignee: '', description: '', result: '',
+      createdAt: Date.now(), updatedAt: Date.now(),
+    });
+  };
+
+  const handleDraftSave = async () => {
+    if (!draft.node) return;
+    const title = typeof draft.node.title === 'string' ? draft.node.title.trim() : '';
+    const slug = cleanSlug(title);
+    if (!slug) { toast.error('Title is required'); return; }
+    await withToast(() => draft.commit(`${basePath}/data/${slug}`));
+  };
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -485,45 +543,18 @@ const KanbanView: View<BoardKanban> = ({ value, ctx }) => {
       return oa - ob;
     });
 
-  const createTask = async (status: string) => {
-    await withToast(async () => {
-      await trpc.set.mutate({ node: { $path: `${basePath}/data`, $type: 'dir' } as NodeData });
-      const id = Date.now().toString(36).toUpperCase();
-      const taskPath = `${basePath}/data/${id}`;
-      await trpc.set.mutate({
-        node: {
-          $path: taskPath,
-          $type: 'board.task',
-          title: '',
-          status,
-          priority: 'normal',
-          assignee: '',
-          description: '',
-          result: '',
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-        } as NodeData,
-      });
-      setSelectedTask(taskPath);
-    });
-  };
-
-  const createColumn = async () => {
+  const addColumn = async () => {
     const label = window.prompt('Column name:');
     if (!label?.trim()) return;
-    const slug = transliterate(label).trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const slug = cleanSlug(label);
     const maxOrder = Math.max(0, ...columns.map(c => typeof c.order === 'number' ? c.order : 0));
 
     await withToast(async () => {
-      await trpc.set.mutate({
-        node: {
-          $path: `${basePath}/${slug}`,
-          $type: 'board.column',
-          label: label.trim(),
-          color: 'border-zinc-400',
-          order: maxOrder + 1,
-          mount: { $type: 't.mount.query', source: `${basePath}/data`, match: { status: slug } },
-        } as NodeData,
+      await createNode(`${basePath}/${slug}`, 'board.column', {
+        label: label.trim(),
+        color: 'border-zinc-400',
+        order: maxOrder + 1,
+        mount: { $type: 't.mount.query', source: `${basePath}/data`, match: { status: slug } },
       });
     }, `Column "${label.trim()}" created`);
   };
@@ -535,26 +566,11 @@ const KanbanView: View<BoardKanban> = ({ value, ctx }) => {
     }
   };
 
-  const handleDragOver = (event: DragOverEvent) => {
-    const over = event.over;
-    if (!over) { setOverColumn(null); return; }
-
-    // Over a column droppable
-    const overId = String(over.id);
-    if (overId.startsWith('col:')) { setOverColumn(overId.slice(4)); return; }
-
-    // Over a card — get its column status
-    const status = over.data.current?.status;
-    setOverColumn(typeof status === 'string' ? status : null);
-  };
-
   const handleDragEnd = (event: DragEndEvent) => {
     setActiveTask(null);
-    setOverColumn(null);
     const { active, over } = event;
     if (!over) return;
 
-    // Target is either a column droppable (col:status) or a card sortable (has data.status)
     const overId = String(over.id);
     const targetStatus = over.data.current?.status
       ?? (overId.startsWith('col:') ? overId.slice(4) : undefined);
@@ -574,18 +590,20 @@ const KanbanView: View<BoardKanban> = ({ value, ctx }) => {
         <h2 className="text-lg font-bold">Task Board</h2>
       </div>
 
-      <DndContext sensors={sensors} collisionDetection={pointerWithin} onDragStart={handleDragStart} onDragOver={handleDragOver} onDragEnd={handleDragEnd}>
-        <div className="flex gap-3 overflow-x-auto pb-2">
-          {columns.map(col => (
-            <Column key={col.$path} col={col} onSelect={setSelectedTask} onAddTask={createTask} highlighted={overColumn === (col.$path.split('/').at(-1) ?? '')} />
-          ))}
-          <button
-            onClick={createColumn}
-            className="flex min-w-32 items-center justify-center rounded-md border border-dashed border-border text-sm text-muted-foreground hover:border-foreground/30 hover:text-foreground"
-          >
-            + Column
-          </button>
-        </div>
+      <DndContext sensors={sensors} collisionDetection={pointerWithin} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+        <RenderContext name="react:kanban">
+          <div className="flex gap-3 overflow-x-auto pb-2">
+            {columns.map(col => (
+              <Render key={col.$path} value={col} onChange={saves.path(col.$path).onChange} onSelect={setSelectedTask} onCreate={handleCreate} />
+            ))}
+            <button
+              onClick={addColumn}
+              className="flex min-w-32 items-center justify-center rounded-md border border-dashed border-border text-sm text-muted-foreground hover:border-foreground/30 hover:text-foreground"
+            >
+              + Column
+            </button>
+          </div>
+        </RenderContext>
 
         <DragOverlay dropAnimation={null}>
           {activeTask && (
@@ -597,30 +615,21 @@ const KanbanView: View<BoardKanban> = ({ value, ctx }) => {
       </DndContext>
 
       {selectedTask && selectedNode && (
-        <Dialog open modal={false} onOpenChange={open => { if (!open) setSelectedTask(null); }}>
-          <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-[960px]" aria-describedby={undefined}>
-            <DialogTitle className="sr-only">Task</DialogTitle>
-            <Render value={selectedNode} />
-            <div className="flex justify-between pt-2 border-t border-border">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-xs text-destructive hover:text-destructive"
-                onClick={async () => {
-                  const hasEdits = selectedNode.title || selectedNode.description;
-                  if (hasEdits && !confirm('Delete this task?')) return;
-                  await withToast(() => trpc.remove.mutate({ path: selectedTask }), 'Task deleted');
-                  setSelectedTask(null);
-                }}
-              >
-                Delete
-              </Button>
-              <Button onClick={() => setSelectedTask(null)}>Done</Button>
-            </div>
-          </DialogContent>
-        </Dialog>
+        <TaskDialog
+          node={selectedNode}
+          onChange={saves.path(selectedTask).onChange}
+          onClose={() => setSelectedTask(null)}
+        />
       )}
 
+      {draft.node && (
+        <TaskDialog
+          node={draft.node}
+          onChange={draft.onChange}
+          onClose={draft.close}
+          onSave={handleDraftSave}
+        />
+      )}
     </div>
   );
 };

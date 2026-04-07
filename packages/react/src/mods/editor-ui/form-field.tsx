@@ -17,7 +17,7 @@ export function renderField(
     refType?: string;
   },
   data: Record<string, unknown>,
-  setData: (fn: (prev: Record<string, unknown>) => Record<string, unknown>) => void,
+  set: (field: string, value: unknown) => void,
 ) {
   if (!fieldSchema.type) return null;
 
@@ -28,7 +28,7 @@ export function renderField(
   if (isRefValue) {
     const onFieldChange = fieldSchema.readOnly
       ? undefined
-      : (next: unknown) => setData((prev) => ({ ...prev, [name]: next }));
+      : (next: unknown) => set(name, next);
     return (
       <div key={name} className="field">
         <FieldLabel label={fieldSchema.label} value={rawValue} onChange={onFieldChange} />
@@ -63,7 +63,7 @@ export function renderField(
   const isComplex = fieldSchema.type === 'object' || fieldSchema.type === 'array';
   const onFieldChange = fieldSchema.readOnly
     ? undefined
-    : (next: unknown) => setData((prev) => ({ ...prev, [name]: (next as { value: unknown }).value }));
+    : (next: unknown) => set(name, (next as { value: unknown }).value);
 
   return (
     <div key={name} className={isComplex ? 'field stack' : 'field'}>
@@ -71,7 +71,7 @@ export function renderField(
         <FieldLabel
           label={fieldSchema.label}
           value={rawValue}
-          onChange={fieldSchema.readOnly ? undefined : (next: unknown) => setData((prev) => ({ ...prev, [name]: next }))}
+          onChange={fieldSchema.readOnly ? undefined : (next: unknown) => set(name, next)}
         />
       )}
       {createElement(handler as any, {

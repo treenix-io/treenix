@@ -127,10 +127,17 @@ export async function set(next: NodeData) {
   }
 }
 
-// ── createNode: create a new node with defaults ──
+// ── createNode: optimistic create + server persist ──
 
 export async function createNode(path: string, type: string, defaults: Record<string, unknown> = {}) {
-  await tree.set({ $path: path, $type: type, ...defaults } as NodeData);
+  const node: NodeData = { $path: path, $type: type, ...defaults };
+  cache.put(node);
+  try {
+    await tree.set(node);
+  } catch (err) {
+    cache.remove(path);
+    throw err;
+  }
 }
 
 // ── addComponent: attach a typed component to a node (optimistic + patch) ──
@@ -140,6 +147,19 @@ export async function addComponent(path: string, name: string, type: string) {
   const node = cache.get(path);
   if (node) cache.put({ ...node, [name]: comp });
   await trpc.patch.mutate({ path, ops: [['r', name, comp]] });
+}
+
+// ── removeNode: optimistic delete + server persist ──
+
+export async function removeNode(path: string) {
+  const prev = cache.get(path);
+  cache.remove(path);
+  try {
+    await tree.remove(path);
+  } catch (err) {
+    if (prev) cache.put(prev);
+    throw err;
+  }
 }
 
 // ── execute: action caller ──

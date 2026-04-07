@@ -2,11 +2,12 @@ import { Checkbox } from '#components/ui/checkbox';
 import { Input } from '#components/ui/input';
 import { useSchema } from '#schema-loader';
 import { type ComponentData, isRef, register, resolve } from '@treenity/core';
+import type { View } from '#context';
 import { createElement } from 'react';
 import { FieldLabel, RefEditor } from './FieldLabel';
 import { renderField, StringArrayField } from './form-field';
 
-function DefaultEditForm({ value, onChange }: { value: ComponentData; onChange?: (next: ComponentData) => void }) {
+const DefaultEditForm: View<ComponentData> = ({ value, onChange }) => {
   const schema = useSchema(value.$type);
   if (schema === undefined) return null;
 
@@ -15,11 +16,7 @@ function DefaultEditForm({ value, onChange }: { value: ComponentData; onChange?:
     if (!k.startsWith('$')) data[k] = v;
   }
 
-  const setData = (fn: (prev: Record<string, unknown>) => Record<string, unknown>) => {
-    if (!onChange) return;
-    const next = fn(data);
-    onChange(next);
-  };
+  const set = (field: string, val: unknown) => onChange?.({ [field]: val });
 
   // Schema-driven form
   if (schema && Object.keys(schema.properties).length > 0) {
@@ -34,7 +31,7 @@ function DefaultEditForm({ value, onChange }: { value: ComponentData; onChange?:
           return renderField(field, {
             type: p.format ?? p.type, label: p.title ?? field, placeholder: p.description,
             readOnly: p.readOnly || !onChange, enum: p.enum, items: p.items, refType: p.refType,
-          }, data, setData);
+          }, data, set);
         })}
       </div>
     );
@@ -45,7 +42,7 @@ function DefaultEditForm({ value, onChange }: { value: ComponentData; onChange?:
     return (
       <div className="py-0.5 pb-2.5">
         {Object.entries(data).map(([k, v]) => {
-          const onCh = (next: unknown) => setData((prev) => ({ ...prev, [k]: next }));
+          const onCh = (next: unknown) => set(k, next);
           if (v && typeof v === 'object' && isRef(v)) {
             return (
               <div key={k} className="field">
@@ -60,28 +57,28 @@ function DefaultEditForm({ value, onChange }: { value: ComponentData; onChange?:
               {typeof v === 'boolean' ? (
                 <label className="flex items-center gap-2 cursor-pointer">
                   <Checkbox checked={!!data[k]}
-                    onChange={(e) => setData((prev) => ({ ...prev, [k]: (e.target as HTMLInputElement).checked }))} />
+                    onChange={(e) => set(k, (e.target as HTMLInputElement).checked)} />
                   {data[k] ? 'true' : 'false'}
                 </label>
               ) : typeof v === 'number' ? (
                 <Input type="number" className="h-7 text-xs" value={String(data[k] ?? 0)}
-                  onChange={(e) => setData((prev) => ({ ...prev, [k]: Number(e.target.value) }))} />
+                  onChange={(e) => set(k, Number(e.target.value))} />
               ) : Array.isArray(v) ? (
                 <StringArrayField value={data[k] as unknown[]}
-                  onChange={(next) => setData((prev) => ({ ...prev, [k]: next }))} />
+                  onChange={(next) => set(k, next)} />
               ) : typeof v === 'object' ? (
                 (() => {
                   const h = resolve('object', 'react:form');
                   return h
                     ? createElement(h as any, {
                         value: { $type: 'object', value: data[k] },
-                        onChange: (next: { value: unknown }) => setData((prev) => ({ ...prev, [k]: next.value })),
+                        onChange: (next: { value: unknown }) => set(k, next.value),
                       })
                     : <pre className="text-[11px] font-mono text-foreground/60">{JSON.stringify(data[k], null, 2)}</pre>;
                 })()
               ) : (
                 <Input className="h-7 text-xs" value={String(data[k] ?? '')}
-                  onChange={(e) => setData((prev) => ({ ...prev, [k]: e.target.value }))} />
+                  onChange={(e) => set(k, e.target.value)} />
               )}
             </div>
           );
@@ -96,6 +93,6 @@ function DefaultEditForm({ value, onChange }: { value: ComponentData; onChange?:
       {JSON.stringify(data, null, 2)}
     </pre>
   );
-}
+};
 
-register('default', 'react:edit', DefaultEditForm as any);
+register('default', 'react:edit', DefaultEditForm);
