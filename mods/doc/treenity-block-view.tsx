@@ -3,14 +3,33 @@ import { getContextsForType } from '@treenity/core';
 import { getRegistryVersion, subscribeRegistry } from '@treenity/core/core/registry';
 import { Render, RenderContext } from '@treenity/react';
 import { usePath } from '@treenity/react';
-import { useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 
-export function TreenityBlockView({ node, updateAttributes, deleteNode, editor }: any) {
+export function TreenityBlockView({ node, updateAttributes, deleteNode, editor, getPos }: any) {
   const ref = node.attrs.ref as string | null;
   const type = node.attrs.type as string | null;
-  const ctx = (node.attrs.context as string | null) ?? 'react';
   const refNode = usePath(ref);
   const editable = editor?.isEditable;
+
+  const attrCtx = (node.attrs.context as string | null) ?? 'react';
+  const ctx = editable && attrCtx === 'react' ? 'react:edit' : attrCtx;
+
+  // Range selection highlight (not click/NodeSelection)
+  const [rangeSelected, setRangeSelected] = useState(false);
+  useEffect(() => {
+    if (!editor) return;
+    const check = () => {
+      const pos = typeof getPos === 'function' ? getPos() : -1;
+      if (pos === -1) { setRangeSelected(false); return; }
+      const { from, to } = editor.state.selection;
+      const end = pos + node.nodeSize;
+      const covers = from < end && to > pos;
+      const isNodeSel = from === pos && to === end;
+      setRangeSelected(covers && !isNodeSel);
+    };
+    editor.on('selectionUpdate', check);
+    return () => editor.off('selectionUpdate', check);
+  }, [editor, node.nodeSize, getPos]);
 
   // Re-check available contexts when registry changes (views load asynchronously)
   useSyncExternalStore(subscribeRegistry, getRegistryVersion);
@@ -110,6 +129,10 @@ export function TreenityBlockView({ node, updateAttributes, deleteNode, editor }
         )}
 
         <div contentEditable={false}>{renderContent()}</div>
+
+        {rangeSelected && (
+          <div className="absolute inset-0 rounded-[6px] pointer-events-none" style={{ background: 'rgba(46, 204, 113, 0.2)' }} />
+        )}
       </div>
     </NodeViewWrapper>
   );

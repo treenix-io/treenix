@@ -57,6 +57,13 @@ function DocPageView({ value, onChange }: BlockProps) {
     suppressRef.current = false;
   }, [editor, value.content]);
 
+  // Sync docPath for slash commands (e.g. /component)
+  useEffect(() => {
+    if (editor && value.$path) {
+      editor.storage.slashCommand.docPath = value.$path;
+    }
+  }, [editor, value.$path]);
+
   // Sync editable state
   useEffect(() => {
     if (editor && editor.isEditable !== !!onChange) {
@@ -76,7 +83,7 @@ function DocPageView({ value, onChange }: BlockProps) {
             value={value.title || ''}
             onChange={(e) => onChange({ title: e.target.value })}
             placeholder="Untitled"
-            className="w-full text-2xl font-semibold tracking-tight bg-transparent border-none shadow-none outline-none text-foreground placeholder:text-muted-foreground/50"
+            className="w-full text-2xl font-semibold tracking-tight bg-transparent border-none shadow-none outline-none text-foreground placeholder:text-muted-foreground/50 p-0 m-0 leading-tight [font-family:inherit]"
           />
         ) : (
           value.title && <h1 className="text-2xl font-semibold tracking-tight text-foreground">{value.title}</h1>

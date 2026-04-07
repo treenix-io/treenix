@@ -45,15 +45,31 @@ const defaultItems: SlashMenuItem[] = [
     command: ({ editor, range }) => editor.chain().focus().deleteRange(range).setHorizontalRule().run(),
   },
   {
+    title: 'Ref',
+    group: 'Treenity',
+    command: () => {},
+    picker: 'ref',
+  },
+  {
     title: 'Component',
     group: 'Treenity',
     command: () => {},
-    pickComponent: true,
+    picker: 'component',
+  },
+  {
+    title: 'Node Link',
+    group: 'Treenity',
+    command: () => {},
+    picker: 'link',
   },
 ];
 
 export const SlashCommand = Extension.create({
   name: 'slashCommand',
+
+  addStorage() {
+    return { docPath: '' };
+  },
 
   addOptions() {
     return {
@@ -81,16 +97,15 @@ export const SlashCommand = Extension.create({
           return {
             onStart: (props: any) => {
               component = new ReactRenderer(SlashMenu, {
-                props,
+                props: { ...props, docPath: this.editor.storage.slashCommand.docPath },
                 editor: props.editor,
               });
-              // ReactRenderer.element is a detached div — must add to DOM
               document.body.appendChild(component.element);
               positionElement(component.element, props.clientRect);
             },
 
             onUpdate: (props: any) => {
-              component.updateProps(props);
+              component.updateProps({ ...props, docPath: this.editor.storage.slashCommand.docPath });
               positionElement(component.element, props.clientRect);
             },
 
@@ -118,7 +133,7 @@ function positionElement(el: HTMLElement, clientRect: (() => DOMRect | null) | n
   const rect = clientRect?.();
   if (!rect) return;
 
-  const menuH = 300; // approximate max height
+  const menuH = 300;
   const menuW = 210;
   const vw = window.innerWidth;
   const vh = window.innerHeight;

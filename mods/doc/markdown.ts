@@ -14,6 +14,11 @@ export type TiptapNode = {
 export function inlineToMd(node: TiptapNode): string {
   if (node.text) {
     let t = node.text;
+    const nodeLink = node.marks?.find((m) => m.type === 'nodeLink');
+    if (nodeLink) {
+      const path = (nodeLink as { type: string; attrs?: Record<string, unknown> }).attrs?.path ?? '';
+      t = `[${t}](treenity:${path})`;
+    }
     if (node.marks?.some((m) => m.type === 'bold')) t = `**${t}**`;
     if (node.marks?.some((m) => m.type === 'italic')) t = `*${t}*`;
     if (node.marks?.some((m) => m.type === 'code')) t = `\`${t}\``;
@@ -95,6 +100,16 @@ export function tiptapToMd(node: TiptapNode): string {
       const type = node.attrs?.type as string | null;
       if (ref) return `[Component: ${type ?? 'unknown'} at ${ref}]`;
       return `[Component: ${type ?? 'unknown'} (inline)]`;
+    }
+
+    case 'queryBlock': {
+      const qPath = node.attrs?.path as string | null;
+      const qType = node.attrs?.type as string | null;
+      const qFilters = node.attrs?.filters as { field: string; value: string }[] | null;
+      const parts = [`[Query: ${qPath ?? '/'}`];
+      if (qType) parts.push(`type=${qType}`);
+      if (qFilters?.length) parts.push(qFilters.map(f => `${f.field}=${f.value}`).join(', '));
+      return parts.join(' ') + ']';
     }
 
     default:

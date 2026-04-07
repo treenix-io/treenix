@@ -120,6 +120,18 @@
   text-underline-offset: 2px;
 }
 
+/* Node links — internal tree references */
+.ProseMirror a.node-link {
+  color: #2ecc71;
+  text-decoration: none;
+  border-bottom: 1px dashed rgba(46, 204, 113, 0.4);
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.ProseMirror a.node-link:hover {
+  border-bottom-color: #2ecc71;
+}
+
 /* Bold — full text color for contrast */
 .ProseMirror strong { font-weight: 600; color: var(--text); }
 .ProseMirror em     { font-style: italic; }
@@ -256,6 +268,8 @@
   background: var(--surface);
 }
 
+/* TreenityBlock range-selection overlay is handled in JS (treenity-block-view.tsx) */
+
 /* Treenity embedded block */
 .treenity-block-wrapper {
   margin: 0.6em 0;
@@ -280,4 +294,47 @@
 }
 .treenity-block-content {
   padding: 8px;
+}
+
+/* Slash picker (ref / component / link) */
+.slash-picker {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+  width: 280px;
+  max-height: 340px;
+  display: flex;
+  flex-direction: column;
+}
+.slash-picker-header {
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-3);
+  border-bottom: 1px solid var(--border);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.slash-picker-input-wrap {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.slash-picker-input {
+  width: 100%;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 5px 8px;
+  font-size: 13px;
+  color: var(--text);
+  outline: none;
+}
+.slash-picker-input:focus {
+  border-color: var(--accent-color);
+}
+.slash-picker-list {
+  overflow-y: auto;
+  max-height: 240px;
 }

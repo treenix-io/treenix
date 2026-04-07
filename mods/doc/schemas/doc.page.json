@@ -5,12 +5,12 @@
     "title": {
       "type": "string",
       "title": "Title",
-      "default": ""
+      "default": "Untitled"
     },
     "content": {
       "type": "string",
-      "title": "Content @format hidden",
-      "default": ""
+      "title": "Content",
+      "default": "{\"type\":\"doc\",\"content\":[{\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":\"Нажмите кнопку Edit чтобы начать редактирование.\"}]}]}"
     }
   },
   "required": [
