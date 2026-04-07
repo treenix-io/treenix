@@ -193,3 +193,66 @@
   padding: 40px;
   text-align: center;
 }
+
+/* JSON editor — shared font metrics for textarea + pre alignment */
+.json-ed-pre,
+.json-ed-ta {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 20px;
+  letter-spacing: 0;
+  word-spacing: 0;
+  tab-size: 2;
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-wrap: break-word;
+}
+
+/* Gutter space — room for line numbers + fold icon */
+.json-ed-pre { padding-left: 52px; }
+.json-ed-ta  { padding-left: 52px; }
+
+/* Per-line div inside pre — line number via ::before */
+.json-ed-line {
+  position: relative;
+  min-height: 20px;
+}
+.json-ed-line::before {
+  content: attr(data-line);
+  position: absolute;
+  left: -44px;
+  width: 28px;
+  text-align: right;
+  color: color-mix(in srgb, currentColor 30%, transparent);
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Fold toggle — sits in the gutter area */
+.json-ed-fold {
+  position: absolute;
+  left: -14px;
+  top: 0;
+  width: 14px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: var(--text-3);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  pointer-events: auto;
+  opacity: 0.5;
+  transition: opacity 0.15s;
+}
+.json-ed-fold:hover { opacity: 1; color: var(--text); }
+
+/* JSON editor syntax highlighting */
+.jk { color: #7dd3fc; }  /* keys — sky-300 */
+.js { color: #86efac; }  /* strings — green-300 */
+.jn { color: #fdba74; }  /* numbers — orange-300 */
+.jl { color: #c4b5fd; }  /* literals (true/false/null) — violet-300 */
+.jf { color: #a1a1aa; font-style: italic; }  /* fold summary — zinc-400 */

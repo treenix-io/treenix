@@ -7,13 +7,14 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#components
 import { Input } from '#components/ui/input';
 import { ScrollArea } from '#components/ui/scroll-area';
 import { Tabs, TabsList, TabsTrigger } from '#components/ui/tabs';
-import { DraftTextarea } from '#mods/editor-ui/DraftTextarea';
+import { ConfirmPopover } from '#components/ConfirmPopover';
+import { JsonEditor } from '#mods/editor-ui/JsonEditor';
 import { FieldLabel, RefEditor } from '#mods/editor-ui/FieldLabel';
 import { getComponents, getPlainFields } from '#mods/editor-ui/node-utils';
 import { type ComponentData, type GroupPerm, isRef, type NodeData, resolve } from '@treenity/core';
 import { getDefaults } from '@treenity/core/comp';
 import type { TypeSchema } from '@treenity/core/schema/types';
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, Trash2 } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { proxy, snapshot, useSnapshot } from 'valtio';
 import { AclEditor } from './AclEditor';
@@ -58,12 +59,13 @@ export type NodeEditorProps = {
   save: SaveHandle;
   open: boolean;
   onClose: () => void;
+  onDelete?: () => void;
   currentUserId?: string;
   toast: (msg: string) => void;
   onAddComponent: (path: string) => void;
 };
 
-export function NodeEditor({ node, save, open, onClose, currentUserId, toast, onAddComponent }: NodeEditorProps) {
+export function NodeEditor({ node, save, open, onClose, onDelete, currentUserId, toast, onAddComponent }: NodeEditorProps) {
   const { onChange, scope, flush, reset: resetSave, dirty, stale } = save;
 
   // Valtio only for system fields ($type, $acl) and UI state
@@ -90,6 +92,7 @@ export function NodeEditor({ node, save, open, onClose, currentUserId, toast, on
   const nodeType = snap.typeEdit ?? node.$type;
   const aclOwner = snap.aclEdit?.owner ?? (node.$owner as string) ?? '';
   const aclRules = snap.aclEdit?.rules ?? (node.$acl as GroupPerm[]) ?? [];
+  const jsonDirty = snap.jsonText !== '' && snap.jsonText !== JSON.stringify(node, null, 2);
   const hasPendingSystemEdits = snap.typeEdit != null || snap.aclEdit != null;
 
   const nodeName = node.$path === '/' ? '/' : node.$path.slice(node.$path.lastIndexOf('/') + 1);
@@ -103,6 +106,7 @@ export function NodeEditor({ node, save, open, onClose, currentUserId, toast, on
   function handleReset() {
     st.typeEdit = null;
     st.aclEdit = null;
+    st.jsonText = '';
     resetSave();
   }
 
@@ -152,7 +156,7 @@ export function NodeEditor({ node, save, open, onClose, currentUserId, toast, on
 
       <Tabs value={snap.tab} onValueChange={(v) => {
         st.tab = v as 'properties' | 'json';
-        if (v === 'json') {
+        if (v === 'json' && !st.jsonText) {
           st.jsonText = JSON.stringify(node, null, 2);
         }
       }} className="px-3 pt-2 shrink-0">
@@ -228,20 +232,19 @@ export function NodeEditor({ node, save, open, onClose, currentUserId, toast, on
             )}
           </>
         ) : (
-          <DraftTextarea
+          <JsonEditor
             value={snap.jsonText}
             onChange={(text) => { st.jsonText = text; }}
-            spellCheck={false}
           />
         )}
         </div>
       </ScrollArea>
 
       <div className="edit-panel-actions">
-        {(dirty || hasPendingSystemEdits) && (
+        {(dirty || hasPendingSystemEdits || jsonDirty) && (
           <Button size="sm" onClick={handleSave}>Save</Button>
         )}
-        {(dirty || hasPendingSystemEdits) && (
+        {(dirty || hasPendingSystemEdits || jsonDirty) && (
           <Button variant="ghost" size="sm" onClick={handleReset} title="Discard all changes">
             Reset
           </Button>
@@ -251,6 +254,14 @@ export function NodeEditor({ node, save, open, onClose, currentUserId, toast, on
         )}
         {snap.tab === 'properties' && (
           <Button variant="outline" size="sm" onClick={() => onAddComponent(node.$path)}>+ Component</Button>
+        )}
+        <span className="flex-1" />
+        {onDelete && (
+          <ConfirmPopover title={`Delete "${nodeName}"?`} variant="destructive" onConfirm={onDelete}>
+            <Button variant="ghost" size="sm" className="text-muted-foreground/50 hover:text-destructive">
+              <Trash2 className="size-3.5" />
+            </Button>
+          </ConfirmPopover>
         )}
       </div>
 
