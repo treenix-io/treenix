@@ -1,0 +1,45 @@
+{
+  "type": "object",
+  "properties": {
+    "source": {
+      "type": "string",
+      "title": "Source path",
+      "default": "/"
+    },
+    "filterType": {
+      "type": "string",
+      "title": "Type filter",
+      "default": ""
+    },
+    "filters": {
+      "type": "array",
+      "items": {},
+      "title": "Filters @format hidden",
+      "default": []
+    },
+    "mode": {
+      "type": "string",
+      "enum": [
+        "list",
+        "table",
+        "kanban"
+      ],
+      "title": "Render mode",
+      "default": "list"
+    },
+    "groupBy": {
+      "type": "string",
+      "title": "Group by field (for kanban mode)",
+      "default": "status"
+    }
+  },
+  "required": [
+    "source",
+    "filterType",
+    "filters",
+    "mode",
+    "groupBy"
+  ],
+  "$id": "t.query",
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}
