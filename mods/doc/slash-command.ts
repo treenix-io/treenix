@@ -64,7 +64,13 @@ const defaultItems: SlashMenuItem[] = [
   },
 ];
 
-export const SlashCommand = Extension.create({
+declare module '@tiptap/core' {
+  interface Storage {
+    slashCommand: { docPath: string };
+  }
+}
+
+export const SlashCommand = Extension.create<any, { docPath: string }>({
   name: 'slashCommand',
 
   addStorage() {
@@ -97,7 +103,7 @@ export const SlashCommand = Extension.create({
           return {
             onStart: (props: any) => {
               component = new ReactRenderer(SlashMenu, {
-                props: { ...props, docPath: this.editor.storage.slashCommand.docPath },
+                props: { ...props, docPath: this.storage.docPath },
                 editor: props.editor,
               });
               document.body.appendChild(component.element);
@@ -105,7 +111,7 @@ export const SlashCommand = Extension.create({
             },
 
             onUpdate: (props: any) => {
-              component.updateProps({ ...props, docPath: this.editor.storage.slashCommand.docPath });
+              component.updateProps({ ...props, docPath: this.storage.docPath });
               positionElement(component.element, props.clientRect);
             },
 

@@ -5,73 +5,71 @@ import TableHeader from '@tiptap/extension-table-header';
 import TableRow from '@tiptap/extension-table-row';
 import TaskItem from '@tiptap/extension-task-item';
 import TaskList from '@tiptap/extension-task-list';
-import { EditorContent, useEditor } from '@tiptap/react';
+import { Editor, EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import { register } from '@treenity/core';
 import { Input } from '@treenity/react/ui/input';
 import { common, createLowlight } from 'lowlight';
-import { useCallback, useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { SlashCommand } from './slash-command';
 import { Toolbar } from './toolbar';
 import { TreenityBlock } from './treenity-block';
 
 const lowlight = createLowlight(common);
 
+const extensions = [
+  StarterKit.configure({ codeBlock: false }),
+  CodeBlockLowlight.configure({ lowlight }),
+  TaskList,
+  TaskItem.configure({ nested: true }),
+  Table.configure({ resizable: false }),
+  TableRow,
+  TableCell,
+  TableHeader,
+  TreenityBlock,
+  SlashCommand,
+];
+
 type BlockProps = { value: any; onChange?: (data: any) => void };
 
 function DocPageView({ value, onChange }: BlockProps) {
   const suppressRef = useRef(false);
   const contentRef = useRef(value.content);
+  const parsedContent = useMemo(() => parseContent(value.content), [value.content]);
+  const editable = !!onChange;
 
-  const handleUpdate = useCallback(({ editor }: any) => {
-    if (suppressRef.current) return;
-    const json = JSON.stringify(editor.getJSON());
-    contentRef.current = json;
-    onChange?.({ content: json });
-  }, [onChange]);
+  const editorOptions = useMemo(() => ({
+    extensions,
+    content: parsedContent,
+    editable,
+    onUpdate: ({ editor }: { editor: Editor }) => {
+      if (suppressRef.current) return;
+      const json = JSON.stringify(editor.getJSON());
+      contentRef.current = json;
+      onChange?.({ content: json });
+    },
+  }), [editable]);
 
-  const editor = useEditor({
-    extensions: [
-      StarterKit.configure({ codeBlock: false }),
-      CodeBlockLowlight.configure({ lowlight }),
-      TaskList,
-      TaskItem.configure({ nested: true }),
-      Table.configure({ resizable: false }),
-      TableRow,
-      TableCell,
-      TableHeader,
-      TreenityBlock,
-      SlashCommand,
-    ],
-    content: parseContent(value.content),
-    editable: !!onChange,
-    onUpdate: handleUpdate,
-  });
+  const editor = useEditor(editorOptions);
 
   // Sync editor content when node changes (navigating between docs)
   useEffect(() => {
-    if (!editor || value.content === contentRef.current) return;
+    if (value.content === contentRef.current) return;
     contentRef.current = value.content;
     suppressRef.current = true;
-    editor.commands.setContent(parseContent(value.content));
+    editor.commands.setContent(parsedContent);
     suppressRef.current = false;
-  }, [editor, value.content]);
+  }, [editor, parsedContent]);
 
   // Sync docPath for slash commands (e.g. /component)
   useEffect(() => {
-    if (editor && value.$path) {
-      editor.storage.slashCommand.docPath = value.$path;
-    }
+    if (value.$path) editor.storage.slashCommand.docPath = value.$path;
   }, [editor, value.$path]);
 
   // Sync editable state
   useEffect(() => {
-    if (editor && editor.isEditable !== !!onChange) {
-      editor.setEditable(!!onChange);
-    }
-  }, [editor, onChange]);
-
-  if (!editor) return null;
+    if (editor.isEditable !== editable) editor.setEditable(editable);
+  }, [editor, editable]);
 
   return (
     <div className="max-w-3xl mx-auto py-6 px-4">
