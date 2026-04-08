@@ -13,8 +13,8 @@ import { getViewContexts, pickDefaultContext } from '#mods/editor-ui/node-utils'
 import { useState } from 'react';
 import { ErrorBoundary } from '#app/ErrorBoundary';
 import { usePath } from '#hooks';
-import { NodeEditor } from './NodeEditor';
 import { useAutoSave } from '#tree/auto-save';
+import { NodeEditor } from './NodeEditor';
 
 type Props = {
   path: string | null;
@@ -74,7 +74,7 @@ export function Inspector({ path, currentUserId, onDelete, onAddComponent, onSel
                   onClick={() => setContext(c)}
                   className={context === c ? 'bg-accent font-medium' : ''}
                 >
-                  {c.startsWith('react:') ? c.slice(6) : c}
+                  {c.replace('react:', '')}
                 </DropdownMenuItem>
               ))}
               <DropdownMenuSeparator />

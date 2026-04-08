@@ -1,7 +1,8 @@
 // Lightweight JSON editor — no deps. Textarea + highlighted overlay.
 // Features: syntax highlighting, auto-close quotes/brackets, auto-commas, format, virtual folding.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent } from 'react';
+import { useDebounce } from '#lib/use-debounce';
 import './editor-ui.css';
 
 type Props = {
@@ -47,6 +48,13 @@ function handleKeyDown(
   }
 
   if (PAIRS[e.key] && s === end) {
+    const after = value[s];
+    // Don't auto-pair quote when next char is a word char (user is quoting an existing identifier)
+    if (e.key === '"' && after && /\w/.test(after)) {
+      e.preventDefault();
+      insert(ta, '"', onChange, 0);
+      return;
+    }
     e.preventDefault();
     insert(ta, e.key + PAIRS[e.key], onChange, -1);
     return;
@@ -61,7 +69,8 @@ function handleKeyDown(
   if (e.key === 'Backspace' && s === end && s > 0) {
     const before = value[s - 1];
     const after = value[s];
-    if (PAIRS[before] === after) {
+    // Only delete pair if it's truly an empty pair (no word char after closer)
+    if (PAIRS[before] === after && !(before === '"' && value[s + 1] && /\w/.test(value[s + 1]))) {
       e.preventDefault();
       ta.value = value.slice(0, s - 1) + value.slice(s + 1);
       ta.selectionStart = ta.selectionEnd = s - 1;
@@ -131,6 +140,26 @@ function autofix(src: string): string {
   return fixed;
 }
 
+// --- Paste normalization ---
+
+function normalizePaste(text: string): string {
+  // Escaped JSON string: "{ \"key\": \"val\" }" → { "key": "val" }
+  if (text.startsWith('"') && text.endsWith('"')) {
+    try {
+      const unescaped = JSON.parse(text);
+      if (typeof unescaped === 'string') {
+        try { JSON.parse(unescaped); return unescaped; } catch {}
+      }
+    } catch {}
+  }
+
+  // JS-style: unquoted keys → quoted keys
+  const jsFixed = text.replace(/(?<=[\{,\n]\s*)([a-zA-Z_$][\w$]*)\s*:/g, '"$1":');
+  try { JSON.parse(jsFixed); return jsFixed; } catch {}
+
+  return text;
+}
+
 function insert(ta: HTMLTextAreaElement, text: string, onChange: (t: string) => void, cursorOffset = 0) {
   const { selectionStart: s, selectionEnd: end, value } = ta;
   ta.value = value.slice(0, s) + text + value.slice(end);
@@ -194,25 +223,41 @@ function computeFoldRanges(
   return ranges;
 }
 
-// Count items inside a bracket block (for the summary label)
-function countItems(value: string, startLine: number): number {
+// Summary for folded block: first property/item + count
+function foldSummary(value: string, startLine: number): string {
   const lines = value.split('\n');
   const line = lines[startLine];
   const trimmed = line.trimEnd();
   const bracket = trimmed[trimmed.length - 1];
+  const closeBracket = bracket === '{' ? '}' : ']';
 
   let charPos = 0;
   for (let i = 0; i < startLine; i++) charPos += lines[i].length + 1;
   charPos += line.lastIndexOf(bracket);
 
   const matchPos = findMatchingBracket(value, charPos);
-  if (matchPos === -1) return 0;
+  if (matchPos === -1) return `${bracket} … ${closeBracket}`;
 
   const block = value.slice(charPos, matchPos + 1);
+
+  let count = 0;
+  let firstLine = '';
   try {
     const parsed = JSON.parse(block);
-    return Array.isArray(parsed) ? parsed.length : Object.keys(parsed).length;
-  } catch { return 0; }
+    count = Array.isArray(parsed) ? parsed.length : Object.keys(parsed).length;
+  } catch {}
+
+  // Grab first non-empty inner line as preview
+  for (let i = startLine + 1; i < lines.length; i++) {
+    const inner = lines[i].trim();
+    if (!inner || inner === closeBracket || inner === closeBracket + ',') break;
+    firstLine = inner.replace(/,\s*$/, '');
+    break;
+  }
+
+  const preview = firstLine.length > 50 ? firstLine.slice(0, 50) + '…' : firstLine;
+  const suffix = count > 1 ? ` … ${count} items` : '';
+  return `${bracket} ${preview}${suffix} ${closeBracket}`;
 }
 
 // --- Component ---
@@ -239,7 +284,13 @@ export function JsonEditor({ value, onChange }: Props) {
     if (preRef.current) preRef.current.scrollTop = ta.scrollTop;
   }, []);
 
-  const error = useMemo(() => validate(value), [value]);
+  const [error, setError] = useState<string | null>(null);
+  useDebounce(() => setError(validate(value)), 3000, [value]);
+
+  const handleChange = useCallback((text: string) => {
+    setError(null);
+    onChange(text);
+  }, [onChange]);
 
   const format = useCallback(() => {
     let src = value;
@@ -309,9 +360,17 @@ export function JsonEditor({ value, onChange }: Props) {
         <textarea
           ref={taRef}
           defaultValue={value}
-          onChange={(e) => { onChange(e.target.value); syncScroll(); }}
+          onChange={(e) => { handleChange(e.target.value); syncScroll(); }}
           onScroll={syncScroll}
-          onKeyDown={(e) => handleKeyDown(e, onChange)}
+          onKeyDown={(e) => handleKeyDown(e, handleChange)}
+          onPaste={(e: ClipboardEvent<HTMLTextAreaElement>) => {
+            const raw = e.clipboardData.getData('text/plain');
+            const normalized = normalizePaste(raw);
+            if (normalized !== raw) {
+              e.preventDefault();
+              insert(e.currentTarget, normalized, handleChange, 0);
+            }
+          }}
           spellCheck={false}
           className="json-ed-ta relative w-full min-h-[200px] m-0 p-2 bg-transparent resize-y outline-none border-none text-transparent caret-foreground [field-sizing:content]"
         />
@@ -335,7 +394,7 @@ export function JsonEditor({ value, onChange }: Props) {
                 ) : null}
                 <span dangerouslySetInnerHTML={{
                   __html: isFolded
-                    ? highlight(line.slice(0, line.trimEnd().length - 1)) + `<span class="jf">${line.trimEnd().slice(-1)} … ${line.trimEnd().slice(-1) === '{' ? '}' : ']'}</span>`
+                    ? highlight(line.slice(0, line.trimEnd().length - 1)) + `<span class="jf">${esc(foldSummary(value, i))}</span>`
                     : (highlight(line) || ' ')
                 }} />
               </div>
