@@ -16,7 +16,7 @@ function EditPanel({ node, value, onChange }: {
 }) {
   return (
     <NodeProvider value={node}>
-      <RenderContext name="react:edit">
+      <RenderContext name="react:edit:props">
         <Render value={value} onChange={onChange} />
       </RenderContext>
     </NodeProvider>

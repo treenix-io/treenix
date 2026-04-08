@@ -96,3 +96,4 @@ const DefaultEditForm: View<ComponentData> = ({ value, onChange }) => {
 };
 
 register('default', 'react:edit', DefaultEditForm);
+register('default', 'react:edit:props', DefaultEditForm);
