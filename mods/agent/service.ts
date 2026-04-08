@@ -141,6 +141,10 @@ function buildPlanPrompt(role: string, task: NodeData, agent: NodeData, cursor: 
     ? String(agentComp.systemPrompt)
     : `You are a ${role} agent for the Treenity project.`;
 
+  const hat = agent.$type === 'org.post' && typeof agent.hat === 'string' && agent.hat
+    ? `\n## Hat\n${agent.hat}\n`
+    : '';
+
   const plan = getComponent(task, AiPlan);
   const prevPlanSection = plan?.text && plan.feedback
     ? `\n## Your previous plan (REJECTED)\n${plan.text}\n`
@@ -150,7 +154,7 @@ function buildPlanPrompt(role: string, task: NodeData, agent: NodeData, cursor: 
     : '';
 
   return `${base}
-
+${hat}
 ## Task — PLAN ONLY
 **${title}**
 ${desc}
@@ -555,9 +559,9 @@ register('ai.pool', 'service', async (node: NodeData, ctx: ServiceCtx) => {
   async function getOrgAgents(): Promise<NodeData[]> {
     const orgPosts: NodeData[] = [];
     try {
-      const orgNode = await ctx.tree.get('org');
+      const orgNode = await ctx.tree.get('/org');
       if (!orgNode) return orgPosts;
-      const { items: divisions } = await ctx.tree.getChildren('org');
+      const { items: divisions } = await ctx.tree.getChildren('/org');
       for (const div of divisions) {
         if (div.$type !== 'org.division') continue;
         const { items: posts } = await ctx.tree.getChildren(div.$path);
