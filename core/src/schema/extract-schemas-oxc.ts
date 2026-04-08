@@ -38,7 +38,13 @@ function buildJSDocMap(comments: Comment[], source: string): Map<number, Record<
 
 // ── Type → JSON Schema ──
 
-function typeToSchema(node: N | null | undefined, jsDocMap?: Map<number, Record<string, string>>): any {
+interface SchemaCtx {
+  jsDocMap?: Map<number, Record<string, string>>;
+  typeAliases?: Map<string, N>;
+  resolving?: Set<string>;
+}
+
+function typeToSchema(node: N | null | undefined, ctx: SchemaCtx = {}): any {
   if (!node) return {};
 
   switch (node.type) {
@@ -48,7 +54,7 @@ function typeToSchema(node: N | null | undefined, jsDocMap?: Map<number, Record<
     case 'TSBigIntKeyword': return { type: 'integer' };
 
     case 'TSArrayType':
-      return { type: 'array', items: typeToSchema(node.elementType, jsDocMap) };
+      return { type: 'array', items: typeToSchema(node.elementType, ctx) };
 
     case 'TSUnionType': {
       const types = node.types as N[];
@@ -57,8 +63,8 @@ function typeToSchema(node: N | null | undefined, jsDocMap?: Map<number, Record<
       if (types.every(t => t.type === 'TSLiteralType' && typeof t.literal?.value === 'boolean'))
         return { type: 'boolean' };
       const nonUndef = types.filter(t => t.type !== 'TSUndefinedKeyword');
-      if (nonUndef.length === 1) return typeToSchema(nonUndef[0], jsDocMap);
-      return { anyOf: nonUndef.map(t => typeToSchema(t, jsDocMap)) };
+      if (nonUndef.length === 1) return typeToSchema(nonUndef[0], ctx);
+      return { anyOf: nonUndef.map(t => typeToSchema(t, ctx)) };
     }
 
     case 'TSLiteralType': {
@@ -74,8 +80,8 @@ function typeToSchema(node: N | null | undefined, jsDocMap?: Map<number, Record<
       const required: string[] = [];
       for (const m of node.members ?? []) {
         if (m.type === 'TSPropertySignature' && m.key?.name) {
-          properties[m.key.name] = typeToSchema(m.typeAnnotation?.typeAnnotation, jsDocMap);
-          if (jsDocMap) Object.assign(properties[m.key.name], jsDocMap.get(m.start) ?? {});
+          properties[m.key.name] = typeToSchema(m.typeAnnotation?.typeAnnotation, ctx);
+          if (ctx.jsDocMap) Object.assign(properties[m.key.name], ctx.jsDocMap.get(m.start) ?? {});
           if (!m.optional) required.push(m.key.name);
         }
       }
@@ -88,15 +94,26 @@ function typeToSchema(node: N | null | undefined, jsDocMap?: Map<number, Record<
       if (name === 'Date') return { type: 'string', format: 'date-time' };
       if (name === 'Record') return { type: 'object' };
       if (name === 'Array' && tparams?.[0])
-        return { type: 'array', items: typeToSchema(tparams[0], jsDocMap) };
+        return { type: 'array', items: typeToSchema(tparams[0], ctx) };
       if (name === 'Promise' && tparams?.[0])
-        return typeToSchema(tparams[0], jsDocMap);
+        return typeToSchema(tparams[0], ctx);
       if ((name === 'AsyncGenerator' || name === 'Generator') && tparams?.[0])
-        return typeToSchema(tparams[0], jsDocMap);
+        return typeToSchema(tparams[0], ctx);
+
+      // Resolve local type aliases (e.g. `type ThreadMessage = { ... }`)
+      if (name && ctx.typeAliases?.has(name)) {
+        const resolving = ctx.resolving ?? new Set();
+        if (resolving.has(name)) return {};
+        resolving.add(name);
+        const result = typeToSchema(ctx.typeAliases.get(name), { ...ctx, resolving });
+        resolving.delete(name);
+        return result;
+      }
+
       return {};
     }
 
-    case 'TSTypeAnnotation': return typeToSchema(node.typeAnnotation, jsDocMap);
+    case 'TSTypeAnnotation': return typeToSchema(node.typeAnnotation, ctx);
 
     default: return {};
   }
@@ -178,6 +195,15 @@ function findClasses(ast: N): Map<string, N> {
   return classes;
 }
 
+function findTypeAliases(ast: N): Map<string, N> {
+  const aliases = new Map<string, N>();
+  walk(ast, node => {
+    if (node.type === 'TSTypeAliasDeclaration' && node.id?.name && node.typeAnnotation)
+      aliases.set(node.id.name, node.typeAnnotation);
+  });
+  return aliases;
+}
+
 function findExternalActions(ast: N, fileName: string): Map<string, ExternalAction[]> {
   const byType = new Map<string, ExternalAction[]>();
   walk(ast, node => {
@@ -226,7 +252,9 @@ function generateClassSchema(
   classNode: N,
   jsDocMap: Map<number, Record<string, string>>,
   classToType: Map<string, string>,
+  typeAliases?: Map<string, N>,
 ): any {
+  const ctx: SchemaCtx = { jsDocMap, typeAliases };
   const properties: Record<string, any> = {};
   const required: string[] = [];
   const methods: Record<string, any> = {};
@@ -242,7 +270,7 @@ function generateClassSchema(
       if (ta?.type === 'TSTypeReference' && ta.typeName?.name && classToType.has(ta.typeName.name)) {
         properties[name] = { type: 'string', format: 'path', refType: classToType.get(ta.typeName.name) };
       } else {
-        properties[name] = ta ? typeToSchema(ta, jsDocMap) : typeFromInit(member.value);
+        properties[name] = ta ? typeToSchema(ta, ctx) : typeFromInit(member.value);
       }
 
       Object.assign(properties[name], jsDocMap.get(member.start) ?? {});
@@ -266,7 +294,7 @@ function generateClassSchema(
       const args: any[] = [];
       for (const param of params) {
         const p = param.type === 'AssignmentPattern' ? param.left : param;
-        args.push({ name: p.name ?? 'arg', ...typeToSchema(p.typeAnnotation?.typeAnnotation, jsDocMap) });
+        args.push({ name: p.name ?? 'arg', ...typeToSchema(p.typeAnnotation?.typeAnnotation, ctx) });
       }
 
       const isGenerator = !!fn.generator;
@@ -278,11 +306,11 @@ function generateClassSchema(
         const genName = returnTa.typeName?.name;
         if (genName === 'AsyncGenerator' || genName === 'Generator') {
           const yieldType = (returnTa.typeArguments?.params ?? returnTa.typeParameters?.params)?.[0];
-          if (yieldType) yieldsSchema = typeToSchema(yieldType);
+          if (yieldType) yieldsSchema = typeToSchema(yieldType, ctx);
         }
       }
 
-      const ret = isGenerator ? {} : typeToSchema(returnTa);
+      const ret = isGenerator ? {} : typeToSchema(returnTa, ctx);
       const methodDoc = { ...(jsDocMap.get(member.start) ?? {}) };
 
       if (typeof methodDoc.pre === 'string') (methodDoc as any).pre = methodDoc.pre.split(/\s+/).filter(Boolean);
@@ -334,11 +362,15 @@ export async function generateSchemas(dirs: string[]): Promise<void> {
   const allEntries: ComponentEntry[] = [];
   const allClasses = new Map<string, { node: N; jsDocMap: Map<number, Record<string, string>> }>();
   const allExternalActions = new Map<string, ExternalAction[]>();
+  const allTypeAliases = new Map<string, N>();
 
   for (const file of files) {
     const source = await fs.readFile(file, 'utf-8');
     const { program: ast, comments } = parseSync(path.basename(file), source);
     const jsDocMap = buildJSDocMap(comments as Comment[], source);
+
+    for (const [name, node] of findTypeAliases(ast as N))
+      allTypeAliases.set(name, node);
 
     for (const e of findRegistrations(ast as N, file)) allEntries.push(e);
 
@@ -364,7 +396,7 @@ export async function generateSchemas(dirs: string[]): Promise<void> {
     const classInfo = allClasses.get(entry.className + '\0' + entry.fileName);
     if (!classInfo) continue;
 
-    const schema = generateClassSchema(classInfo.node, classInfo.jsDocMap, classToType);
+    const schema = generateClassSchema(classInfo.node, classInfo.jsDocMap, classToType, allTypeAliases);
     schema.$id = entry.typeName;
     schema.$schema = 'http://json-schema.org/draft-07/schema#';
     generated.add(entry.typeName);

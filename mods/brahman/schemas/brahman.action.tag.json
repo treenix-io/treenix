@@ -20,7 +20,47 @@
     "run": {
       "arguments": [
         {
-          "name": "bCtx"
+          "name": "bCtx",
+          "type": "object",
+          "properties": {
+            "ctx": {},
+            "tree": {},
+            "session": {
+              "type": "object"
+            },
+            "sessionNode": {},
+            "user": {},
+            "lang": {
+              "type": "string"
+            },
+            "botPath": {
+              "type": "string"
+            },
+            "userTags": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "botLangs": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "error": {}
+          },
+          "required": [
+            "ctx",
+            "tree",
+            "session",
+            "sessionNode",
+            "user",
+            "lang",
+            "botPath",
+            "userTags",
+            "botLangs"
+          ]
         }
       ]
     }

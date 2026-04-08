@@ -404,7 +404,14 @@ function ObjectForm({ value, onChange }: FP) {
 function ArrayForm({ value, onChange }: FP) {
   const [input, setInput] = useState('');
   const arr = Array.isArray(value.value) ? (value.value as unknown[]) : [];
-  const itemType = value.items?.type ?? 'string';
+  const schemaType = value.items?.type;
+  const sniffed = arr.length > 0
+    ? typeof arr[0] === 'object' && arr[0] !== null ? 'object'
+      : typeof arr[0] === 'number' ? 'number'
+      : typeof arr[0] === 'boolean' ? 'boolean'
+      : 'string'
+    : undefined;
+  const itemType = schemaType ?? sniffed ?? 'string';
   const emit = (next: unknown[]) => onChange?.({ ...value, value: next });
 
   if (itemType === 'string') {

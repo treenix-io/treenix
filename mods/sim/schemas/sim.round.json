@@ -11,7 +11,43 @@
     },
     "log": {
       "type": "array",
-      "items": {},
+      "items": {
+        "type": "object",
+        "properties": {
+          "round": {
+            "type": "number"
+          },
+          "agent": {
+            "type": "string"
+          },
+          "icon": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
+          },
+          "data": {
+            "type": "object"
+          },
+          "heardBy": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "ts": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "round",
+          "agent",
+          "icon",
+          "action",
+          "data",
+          "ts"
+        ]
+      },
       "default": []
     }
   },

@@ -1,0 +1,56 @@
+{
+  "type": "object",
+  "properties": {
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "ts": {
+            "type": "number"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "text",
+              "tool_call",
+              "tool_result",
+              "thinking",
+              "approval",
+              "embed"
+            ]
+          },
+          "tool": {
+            "type": "string"
+          },
+          "input": {
+            "type": "object"
+          },
+          "output": {
+            "type": "string"
+          },
+          "duration": {
+            "type": "number"
+          },
+          "approved": {
+            "type": "boolean"
+          },
+          "ref": {
+            "type": "string",
+            "title": "Treenity node path — UI can render via <Render />"
+          }
+        },
+        "required": [
+          "ts",
+          "type"
+        ]
+      },
+      "default": []
+    }
+  },
+  "required": [
+    "entries"
+  ],
+  "$id": "ai.log",
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}

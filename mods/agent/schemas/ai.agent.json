@@ -7,16 +7,69 @@
       "default": "qa"
     },
     "status": {
+      "type": "string",
+      "enum": [
+        "idle",
+        "working",
+        "blocked",
+        "error",
+        "offline"
+      ],
       "default": "offline"
+    },
+    "trustLevel": {
+      "anyOf": [
+        {
+          "type": "number",
+          "enum": [
+            0
+          ]
+        },
+        {
+          "type": "number",
+          "enum": [
+            1
+          ]
+        },
+        {
+          "type": "number",
+          "enum": [
+            2
+          ]
+        },
+        {
+          "type": "number",
+          "enum": [
+            3
+          ]
+        },
+        {
+          "type": "number",
+          "enum": [
+            4
+          ]
+        }
+      ],
+      "title": "Trust level: 0=sandbox 1=observer 2=worker 3=operator 4=admin",
+      "default": 2
+    },
+    "model": {
+      "type": "string",
+      "default": "claude-opus-4-6"
+    },
+    "systemPrompt": {
+      "type": "string",
+      "format": "textarea",
+      "default": ""
     },
     "currentTask": {
       "type": "string",
       "title": "Path to current board.task being worked on",
       "default": ""
     },
-    "taskRef": {
+    "currentRun": {
       "type": "string",
-      "title": "Path to current metatron.task (live log)",
+      "title": "Path to current ai.run (live log)",
       "default": ""
     },
     "lastRunAt": {
@@ -32,8 +85,11 @@
   "required": [
     "role",
     "status",
+    "trustLevel",
+    "model",
+    "systemPrompt",
     "currentTask",
-    "taskRef",
+    "currentRun",
     "lastRunAt",
     "totalTokens"
   ],

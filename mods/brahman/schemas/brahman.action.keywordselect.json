@@ -8,7 +8,24 @@
     },
     "elements": {
       "type": "array",
-      "items": {},
+      "items": {
+        "type": "object",
+        "properties": {
+          "keywords": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "keywords",
+          "message"
+        ]
+      },
       "title": "Keyword entries @description Array of {keywords, message} pairs",
       "default": []
     }
@@ -21,7 +38,47 @@
     "run": {
       "arguments": [
         {
-          "name": "bCtx"
+          "name": "bCtx",
+          "type": "object",
+          "properties": {
+            "ctx": {},
+            "tree": {},
+            "session": {
+              "type": "object"
+            },
+            "sessionNode": {},
+            "user": {},
+            "lang": {
+              "type": "string"
+            },
+            "botPath": {
+              "type": "string"
+            },
+            "userTags": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "botLangs": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "error": {}
+          },
+          "required": [
+            "ctx",
+            "tree",
+            "session",
+            "sessionNode",
+            "user",
+            "lang",
+            "botPath",
+            "userTags",
+            "botLangs"
+          ]
         }
       ]
     }

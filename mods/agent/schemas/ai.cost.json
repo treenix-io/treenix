@@ -1,0 +1,29 @@
+{
+  "type": "object",
+  "properties": {
+    "inputTokens": {
+      "type": "number",
+      "default": 0
+    },
+    "outputTokens": {
+      "type": "number",
+      "default": 0
+    },
+    "costUsd": {
+      "type": "number",
+      "default": 0
+    },
+    "model": {
+      "type": "string",
+      "default": ""
+    }
+  },
+  "required": [
+    "inputTokens",
+    "outputTokens",
+    "costUsd",
+    "model"
+  ],
+  "$id": "ai.cost",
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}

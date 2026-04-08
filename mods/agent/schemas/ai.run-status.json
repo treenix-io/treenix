@@ -1,0 +1,36 @@
+{
+  "type": "object",
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "running",
+        "done",
+        "error",
+        "aborted"
+      ],
+      "default": "pending"
+    },
+    "startedAt": {
+      "type": "number",
+      "default": 0
+    },
+    "finishedAt": {
+      "type": "number",
+      "default": 0
+    },
+    "error": {
+      "type": "string",
+      "default": ""
+    }
+  },
+  "required": [
+    "status",
+    "startedAt",
+    "finishedAt",
+    "error"
+  ],
+  "$id": "ai.run-status",
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}

@@ -1,5 +1,11 @@
-// Test fixture for OXC schema extraction — covers all AST patterns
+// Test data for OXC schema extraction — covers all AST patterns
 import { registerType } from '#comp';
+
+type HistoryEntry = {
+  action: string;
+  actor: string;
+  ts: number;
+};
 
 /** A complex widget for testing schema extraction */
 class SchemaTestWidget {
@@ -93,6 +99,9 @@ class SchemaTestWidget {
 
   /** @format password */
   apiKey = '';
+
+  // Array of type alias — tests that local `type X = {...}` gets resolved
+  changelog: HistoryEntry[] = [];
 
   /**
    * Widget action — increment the counter.

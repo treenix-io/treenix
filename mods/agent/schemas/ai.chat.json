@@ -1,0 +1,35 @@
+{
+  "type": "object",
+  "properties": {
+    "streaming": {
+      "type": "boolean",
+      "default": false
+    },
+    "sessionId": {
+      "type": "string",
+      "default": ""
+    }
+  },
+  "required": [
+    "streaming",
+    "sessionId"
+  ],
+  "methods": {
+    "clear": {
+      "description": "Clear chat history and reset session",
+      "arguments": []
+    },
+    "send": {
+      "arguments": [
+        {
+          "name": "data"
+        }
+      ]
+    },
+    "stop": {
+      "arguments": []
+    }
+  },
+  "$id": "ai.chat",
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}

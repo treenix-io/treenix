@@ -102,6 +102,15 @@ describe('extract-schemas-oxc', () => {
     });
   });
 
+  it('array of type alias resolves to object schema', () => {
+    const p = schema.properties.changelog;
+    assert.equal(p.type, 'array');
+    assert.deepEqual(p.items.properties, {
+      action: { type: 'string' }, actor: { type: 'string' }, ts: { type: 'number' },
+    });
+    assert.deepEqual(p.items.required, ['action', 'actor', 'ts']);
+  });
+
   it('array with default values', () => {
     assert.deepEqual(schema.properties.defaultArr.default, ['a', 'b']);
   });

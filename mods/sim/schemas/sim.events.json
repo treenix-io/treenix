@@ -3,7 +3,36 @@
   "properties": {
     "entries": {
       "type": "array",
-      "items": {},
+      "items": {
+        "type": "object",
+        "properties": {
+          "round": {
+            "type": "number"
+          },
+          "type": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "data": {
+            "type": "object"
+          },
+          "ts": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "round",
+          "type",
+          "from",
+          "data",
+          "ts"
+        ]
+      },
       "default": []
     }
   },

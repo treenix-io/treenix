@@ -2,6 +2,7 @@
   "type": "object",
   "properties": {
     "text": {
+      "type": "object",
       "title": "Text @format tstring",
       "default": {}
     },
@@ -11,12 +12,70 @@
       "default": false
     },
     "menuType": {
+      "type": "string",
+      "enum": [
+        "none",
+        "inline",
+        "inline_new",
+        "inline_close",
+        "keyboard",
+        "remove",
+        "force_reply"
+      ],
       "title": "Menu type",
       "default": "none"
     },
     "rows": {
       "type": "array",
-      "items": {},
+      "items": {
+        "type": "object",
+        "properties": {
+          "buttons": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "number"
+                },
+                "title": {
+                  "type": "object"
+                },
+                "url": {
+                  "type": "string"
+                },
+                "tags": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "action": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "target": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "title"
+              ]
+            }
+          }
+        },
+        "required": [
+          "buttons"
+        ]
+      },
       "title": "Menu rows",
       "default": []
     },
@@ -43,7 +102,47 @@
     "run": {
       "arguments": [
         {
-          "name": "bCtx"
+          "name": "bCtx",
+          "type": "object",
+          "properties": {
+            "ctx": {},
+            "tree": {},
+            "session": {
+              "type": "object"
+            },
+            "sessionNode": {},
+            "user": {},
+            "lang": {
+              "type": "string"
+            },
+            "botPath": {
+              "type": "string"
+            },
+            "userTags": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "botLangs": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "error": {}
+          },
+          "required": [
+            "ctx",
+            "tree",
+            "session",
+            "sessionNode",
+            "user",
+            "lang",
+            "botPath",
+            "userTags",
+            "botLangs"
+          ]
         }
       ]
     }

@@ -3,7 +3,29 @@
   "properties": {
     "messages": {
       "type": "array",
-      "items": {},
+      "items": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "ts": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "role",
+          "from",
+          "text",
+          "ts"
+        ]
+      },
       "default": []
     }
   },
