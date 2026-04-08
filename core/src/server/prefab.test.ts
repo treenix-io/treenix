@@ -164,8 +164,8 @@ describe('deployPrefab', () => {
     ]);
 
     const result = await deployPrefab(tree, '/sys/mods/test/prefabs/basic', '/app', {});
-    assert.equal(result.deployed, 2);
-    assert.equal(result.skipped, 0);
+    assert.equal(result.deployed.length, 2);
+    assert.equal(result.skipped.length, 0);
 
     const root = await tree.get('/app');
     assert.equal(root?.$type, 'dir');
@@ -183,8 +183,8 @@ describe('deployPrefab', () => {
 
     await deployPrefab(tree, '/sys/mods/test/prefabs/idem', '/x', {});
     const result = await deployPrefab(tree, '/sys/mods/test/prefabs/idem', '/x', {});
-    assert.equal(result.deployed, 0);
-    assert.equal(result.skipped, 2);
+    assert.equal(result.deployed.length, 0);
+    assert.equal(result.skipped.length, 2);
   });
 
   it('rejects absolute paths without allowAbsolute', async () => {
@@ -207,7 +207,7 @@ describe('deployPrefab', () => {
     const result = await deployPrefab(tree, '/sys/mods/test/prefabs/abs2', '/app', {
       allowAbsolute: true,
     });
-    assert.equal(result.deployed, 2);
+    assert.equal(result.deployed.length, 2);
 
     const ref = await tree.get('/sys/autostart/svc');
     assert.equal(ref?.$type, 'ref');
@@ -289,7 +289,7 @@ describe('deployByKey', () => {
     ]);
 
     const result = await deployByKey(tree, 'mymod', 'stuff', '/target');
-    assert.equal(result.deployed, 2);
+    assert.equal(result.deployed.length, 2);
 
     assert.equal((await tree.get('/target'))?.$type, 'dir');
     assert.equal((await tree.get('/target/child'))?.$type, 'item');
@@ -457,13 +457,13 @@ describe('t.prefab deploy action', () => {
 
     const r1 = await executeAction(tree, '/sys/mods/cafe/prefabs/seed', 't.prefab', undefined, 'deploy', {
       target: '/x',
-    }) as { deployed: number; skipped: number };
-    assert.equal(r1.deployed, 1);
+    }) as { deployed: string[]; skipped: string[] };
+    assert.equal(r1.deployed.length, 1);
 
     const r2 = await executeAction(tree, '/sys/mods/cafe/prefabs/seed', 't.prefab', undefined, 'deploy', {
       target: '/x',
-    }) as { deployed: number; skipped: number };
-    assert.equal(r2.deployed, 0);
-    assert.equal(r2.skipped, 1);
+    }) as { deployed: string[]; skipped: string[] };
+    assert.equal(r2.deployed.length, 0);
+    assert.equal(r2.skipped.length, 1);
   });
 });

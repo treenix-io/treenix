@@ -30,14 +30,14 @@ async function deployNodes(
   prefab: PrefabEntry,
   target: string,
   opts?: DeployOpts,
-): Promise<{ deployed: number; skipped: number }> {
+): Promise<{ deployed: string[]; skipped: string[] }> {
   let nodes = prefab.nodes;
   if (prefab.setup) {
     nodes = await prefab.setup([...nodes], opts?.params);
   }
 
-  let deployed = 0;
-  let skipped = 0;
+  const deployed: string[] = [];
+  const skipped: string[] = [];
 
   for (const node of nodes) {
     const isAbsolute = node.$path.startsWith('/');
@@ -50,13 +50,13 @@ async function deployNodes(
 
     // Idempotent: skip if exists
     if (await tree.get(resolvedPath)) {
-      skipped++;
+      skipped.push(resolvedPath);
       continue;
     }
 
     const { $rev, $path, ...rest } = node;
     await tree.set({ ...rest, $path: resolvedPath } as NodeData);
-    deployed++;
+    deployed.push(resolvedPath);
   }
 
   return { deployed, skipped };
@@ -68,7 +68,7 @@ export async function deployPrefab(
   source: string,
   target: string,
   opts?: DeployOpts,
-): Promise<{ deployed: number; skipped: number }> {
+): Promise<{ deployed: string[]; skipped: string[] }> {
   const parsed = parseSourcePath(source);
   if (!parsed) throw new OpError('BAD_REQUEST', `Invalid prefab path: ${source}`);
 
@@ -85,7 +85,7 @@ export async function deployByKey(
   name: string,
   target: string,
   opts?: DeployOpts,
-): Promise<{ deployed: number; skipped: number }> {
+): Promise<{ deployed: string[]; skipped: string[] }> {
   const prefab = getPrefab(mod, name);
   if (!prefab) throw new OpError('NOT_FOUND', `Prefab not found: ${mod}/${name}`);
 
@@ -103,6 +103,10 @@ export async function deploySeedPrefabs(tree: Tree, filter?: string[]): Promise<
     // Tenant mode: only deploy core-tier seeds, unless explicitly listed in config
     if (isTenant && !explicit && prefab.meta?.tier !== 'core') continue;
     const result = await deployNodes(tree, prefab, '/', { allowAbsolute: true, params: { tree } });
-    if (result.deployed > 0) console.log(`[seed] ${mod}: deployed ${result.deployed}`);
+    if (result.deployed.length > 0) {
+      const parts = [`deployed ${result.deployed.length} — ${result.deployed.join(', ')}`];
+      if (result.skipped.length > 0) parts.push(`skipped ${result.skipped.length} — ${result.skipped.join(', ')}`);
+      console.log(`[seed] ${mod}: ${parts.join(' | ')}`);
+    }
   }
 }
