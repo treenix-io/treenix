@@ -599,7 +599,8 @@ export function createCanUseTool(
     // Non-Bash tools — build ordered subjects (most specific → least)
     // Same format as MCP buildSubjects: tool:action:path, tool:action, tool:path, tool
     const action = typeof input.action === 'string' && input.action ? input.action : null;
-    const target = typeof input.path === 'string' && input.path ? input.path : null;
+    const target = typeof input.path === 'string' && input.path ? input.path
+      : typeof input.target === 'string' && input.target ? input.target : null;
     const subjects: string[] = [];
     if (action && target) subjects.push(`${toolName}:${action}:${target}`);
     if (action) subjects.push(`${toolName}:${action}`);
@@ -609,12 +610,19 @@ export function createCanUseTool(
     // Most specific subject for cache/approval key
     const toolSubject = subjects[0];
 
-    // Deny: any subject match → deny
+    // Evaluation order matches MCP: deny → allow → escalate
+    // Deny always wins
     for (const s of subjects) {
       if (matchesAny(policy.deny, s)) return deny(`${role}: denied: ${s}`);
     }
 
-    // Escalate: any subject match → escalate (beats allow)
+    // Allow beats escalate — specific allow (e.g. execute:$schema) takes priority
+    // over wildcard escalate (e.g. execute:*)
+    for (const s of subjects) {
+      if (matchesAny(policy.allow, s)) return allow();
+    }
+
+    // Escalate: any subject match → request human approval
     let shouldEscalate = false;
     for (const s of subjects) {
       if (matchesAny(policy.escalate, s)) { shouldEscalate = true; break; }
@@ -633,11 +641,6 @@ export function createCanUseTool(
         return approved ? allow() : deny('denied by human');
       }
       return deny(`${role}: escalated but no store: ${toolName}`);
-    }
-
-    // Allow: any subject match → allow
-    for (const s of subjects) {
-      if (matchesAny(policy.allow, s)) return allow();
     }
 
     // Unknown tool — escalate to human

@@ -445,9 +445,9 @@ describe('canUseTool pipe-aware', () => {
   });
 });
 
-// ── escalate beats wildcard allow (regression: wildcard allow was swallowing escalate) ──
+// ── Policy precedence: deny → allow → escalate (matches MCP guardian) ──
 
-describe('canUseTool: escalate beats wildcard allow', () => {
+describe('canUseTool: policy precedence', () => {
   // Mock store that returns agent/guardian nodes with policies
   function mockStore(agentPolicy?: { allow: string[]; deny: string[]; escalate: string[] },
                      globalPolicy?: { allow: string[]; deny: string[]; escalate: string[] }) {
@@ -487,11 +487,37 @@ describe('canUseTool: escalate beats wildcard allow', () => {
     }
   }
 
-  it('escalate wins over wildcard allow for non-bash tools', async (t) => {
+  it('allow beats escalate (deny → allow → escalate order)', async () => {
+    // Wildcard allow + specific escalate → allow wins (MCP semantics)
+    const store = mockStore(undefined, {
+      allow: ['mcp__treenity__*'],
+      deny: [],
+      escalate: ['mcp__treenity__set_node'],
+    });
+
+    const canUse = createCanUseTool('dev', '/agents/test', store);
+    const r = await canUse('mcp__treenity__set_node', { path: '/foo' });
+    assert.equal(r.behavior, 'allow', 'allow should beat escalate (MCP order)');
+  });
+
+  it('specific allow beats wildcard escalate (execute:$schema)', async () => {
+    // Regression: execute:$schema should be allowed, not escalated by execute:*
+    const store = mockStore(undefined, {
+      allow: ['mcp__treenity__execute:$schema'],
+      deny: [],
+      escalate: ['mcp__treenity__execute:*'],
+    });
+
+    const canUse = createCanUseTool('dev', '/agents/test', store);
+    const r = await canUse('mcp__treenity__execute', { action: '$schema', path: '/foo' });
+    assert.equal(r.behavior, 'allow', 'specific allow should beat wildcard escalate');
+  });
+
+  it('escalate applies when no allow matches', async (t) => {
     t.mock.timers.enable({ apis: ['setTimeout'] });
 
     const store = mockStore(undefined, {
-      allow: ['mcp__treenity__*'],
+      allow: ['mcp__treenity__get_node'],
       deny: [],
       escalate: ['mcp__treenity__set_node'],
     });
@@ -506,7 +532,7 @@ describe('canUseTool: escalate beats wildcard allow', () => {
     );
 
     await flush();
-    assert.ok(escalated, 'set_node should escalate even when wildcard allow matches');
+    assert.ok(escalated, 'set_node should escalate when not in allow list');
 
     await resolveAllPending(false);
     await resultPromise;
@@ -533,28 +559,28 @@ describe('canUseTool: escalate beats wildcard allow', () => {
     await resultPromise;
   });
 
-  it('exact allow still works when no escalate matches', async () => {
+  it('deny beats both allow and escalate', async () => {
     const store = mockStore(undefined, {
-      allow: ['mcp__treenity__get_node'],
-      deny: [],
-      escalate: ['mcp__treenity__set_node'],
-    });
-
-    const canUse = createCanUseTool('dev', '/agents/test', store);
-    const r = await canUse('mcp__treenity__get_node', { path: '/foo' });
-    assert.equal(r.behavior, 'allow', 'exact allow should work when not in escalate');
-  });
-
-  it('deny still beats escalate', async () => {
-    const store = mockStore(undefined, {
-      allow: [],
+      allow: ['mcp__treenity__remove_node'],
       deny: ['mcp__treenity__remove_node'],
       escalate: ['mcp__treenity__remove_node'],
     });
 
     const canUse = createCanUseTool('dev', '/agents/test', store);
     const r = await canUse('mcp__treenity__remove_node', { path: '/foo' });
-    assert.equal(r.behavior, 'deny', 'deny should beat escalate');
+    assert.equal(r.behavior, 'deny', 'deny should beat both allow and escalate');
+  });
+
+  it('target field used as fallback for path in subject building', async () => {
+    const store = mockStore(undefined, {
+      allow: ['mcp__treenity__deploy_prefab:*/agents/*'],
+      deny: [],
+      escalate: [],
+    });
+
+    const canUse = createCanUseTool('dev', '/agents/test', store);
+    const r = await canUse('mcp__treenity__deploy_prefab', { target: '/agents/bot' });
+    assert.equal(r.behavior, 'allow', 'target should work as path fallback in subjects');
   });
 });
 
