@@ -684,6 +684,57 @@ describe('canUseTool: policy precedence', () => {
     const r = await canUse('mcp__treenity__deploy_prefab', { target: '/foo/agents/bar' });
     assert.equal(r.behavior, 'allow', 'infix wildcard allow should beat broader wildcard escalate');
   });
+
+  it('mixed bash: allowed + unallowed parts → falls to classifier (not blanket allow)', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+
+    const store = mockStore(undefined, {
+      allow: ['Bash:cat /safe/*'],
+      deny: [],
+      escalate: [],
+    });
+
+    let escalated = false;
+    store.set = async (node: any) => {
+      if (node?.$type === 'ai.approval') escalated = true;
+    };
+
+    // cat /safe/x is allowed, but python script.py has no policy match → classifier → unknown → escalate
+    const resultPromise = createCanUseTool('dev', '/agents/test', store)(
+      'Bash', { command: 'cat /safe/x && python script.py' },
+    );
+
+    await flush();
+    assert.ok(escalated, 'mixed bash: unmatched part should escalate, not be blanket-allowed');
+
+    await resolveAllPending(false);
+    await resultPromise;
+  });
+
+  it('mixed bash: allowed + escalated parts → escalate wins', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+
+    const store = mockStore(undefined, {
+      allow: ['Bash:cat /safe/*'],
+      deny: [],
+      escalate: ['Bash:cat *'],
+    });
+
+    let escalated = false;
+    store.set = async (node: any) => {
+      if (node?.$type === 'ai.approval') escalated = true;
+    };
+
+    const resultPromise = createCanUseTool('dev', '/agents/test', store)(
+      'Bash', { command: 'cat /safe/x && cat /unsafe/x' },
+    );
+
+    await flush();
+    assert.ok(escalated, 'mixed bash: escalated part should escalate the whole command');
+
+    await resolveAllPending(false);
+    await resultPromise;
+  });
 });
 
 // ── Session approval cache ──

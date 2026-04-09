@@ -574,15 +574,25 @@ export function createCanUseTool(
         }
       }
 
-      // Build Bash subjects for each sub-command and use specificity-aware resolution
-      const bashSubjects = parts.map(p => `Bash:${p.trim()}`);
+      // Evaluate each sub-command independently via policy, take strictest verdict.
+      // deny > escalate > null > allow — one denied part denies all, one escalated part
+      // escalates all, one unmatched part (null) prevents blanket allow.
+      let strictVerdict: 'allow' | 'escalate' | 'deny' | null = null;
+      let allExplicit = true;
+      let escalatedSubject = '';
 
-      // Check policy via resolveVerdict (same specificity logic as non-Bash)
-      const bashVerdict = resolveVerdict(policy, bashSubjects);
+      for (const part of parts) {
+        const subject = `Bash:${part.trim()}`;
+        const v = resolveVerdict(policy, [subject]);
 
-      if (bashVerdict === 'deny') {
-        const denied = bashSubjects.find(s => matchesAny(policy.deny, s)) ?? bashSubjects[0];
-        return deny(`${role}: denied: ${denied}`);
+        if (v === 'deny') return deny(`${role}: denied: ${subject}`);
+        if (v === 'escalate') {
+          strictVerdict = 'escalate';
+          if (!escalatedSubject) escalatedSubject = subject;
+        } else if (v === null) {
+          allExplicit = false; // at least one part not covered by policy
+        }
+        // allow → fine, but only if ALL parts are explicit
       }
 
       // Read-only Bash: after deny checks, only allow whitelisted read commands
@@ -597,8 +607,7 @@ export function createCanUseTool(
         return allow();
       }
 
-      if (bashVerdict === 'escalate') {
-        const escalatedSubject = bashSubjects.find(s => matchesAny(policy.escalate, s)) ?? bashSubjects[0];
+      if (strictVerdict === 'escalate') {
         const cached = sessionApproved.get(escalatedSubject);
         if (cached !== undefined) return cached ? allow() : deny('session-denied');
         if (!store) return deny(`${role}: not allowed: ${escalatedSubject}`);
@@ -610,7 +619,8 @@ export function createCanUseTool(
         return approved ? allow() : deny('denied by human');
       }
 
-      if (bashVerdict === 'allow') return allow();
+      // Only blanket-allow if every part was explicitly allowed by policy
+      if (strictVerdict !== 'escalate' && allExplicit) return allow();
 
       // Fallback: classify each sub-command
       let strictest: ReturnType<typeof classifyBashCommand> = 'auto';
