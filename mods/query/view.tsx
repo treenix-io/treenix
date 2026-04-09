@@ -189,7 +189,7 @@ const QueryViewComponent: View<QueryView> = ({ value, onChange }) => {
           {MODES.map(m => (
             <button
               key={m.id}
-              onClick={() => onChange({ mode: m.id })}
+              onClick={() => onChange?.({ mode: m.id })}
               title={m.label}
               className={`p-1.5 rounded transition-colors ${mode === m.id ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:text-foreground'}`}
             >
@@ -223,29 +223,29 @@ const QueryEditView: View<QueryView> = ({ value, onChange }) => {
 
   const updateFilter = (i: number, patch: Partial<QueryFilter>) => {
     const next = filters.map((fl, j) => j === i ? { ...fl, ...patch } : fl);
-    onChange({ filters: next });
+    onChange?.({ filters: next });
   };
 
-  const addFilter = () => onChange({ filters: [...filters, { field: '', value: '' }] });
-  const removeFilter = (i: number) => onChange({ filters: filters.filter((_, j) => j !== i) });
+  const addFilter = () => onChange?.({ filters: [...filters, { field: '', value: '' }] });
+  const removeFilter = (i: number) => onChange?.({ filters: filters.filter((_, j) => j !== i) });
 
   return (
     <div className="rounded-lg border border-dashed border-emerald-600/40 overflow-hidden bg-card">
       <div className="px-3 py-2 border-b border-border bg-emerald-950/20 flex flex-col gap-1.5">
         <div className="flex items-center gap-2">
           <span className="text-[10px] text-muted-foreground w-12 shrink-0">source</span>
-          <input className={inputCls} value={source} onChange={e => onChange({ source: e.target.value })} placeholder="/path" />
+          <input className={inputCls} value={source} onChange={e => onChange?.({ source: e.target.value })} placeholder="/path" />
         </div>
 
         <div className="flex items-center gap-2">
           <span className="text-[10px] text-muted-foreground w-12 shrink-0">type</span>
           {childTypes.length > 0 ? (
-            <select className={selectCls + ' flex-1'} value={typeFilter} onChange={e => onChange({ typeFilter: e.target.value })}>
+            <select className={selectCls + ' flex-1'} value={typeFilter} onChange={e => onChange?.({ typeFilter: e.target.value })}>
               <option value="">all types</option>
               {childTypes.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
           ) : (
-            <input className={inputCls} value={typeFilter} onChange={e => onChange({ typeFilter: e.target.value })} placeholder="e.g. doc.page" />
+            <input className={inputCls} value={typeFilter} onChange={e => onChange?.({ typeFilter: e.target.value })} placeholder="e.g. doc.page" />
           )}
         </div>
 
@@ -255,7 +255,7 @@ const QueryEditView: View<QueryView> = ({ value, onChange }) => {
             {MODES.map(m => (
               <button
                 key={m.id}
-                onClick={() => onChange({ mode: m.id })}
+                onClick={() => onChange?.({ mode: m.id })}
                 title={m.label}
                 className={`p-1 rounded transition-colors ${mode === m.id ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:text-foreground'}`}
               >
@@ -268,12 +268,12 @@ const QueryEditView: View<QueryView> = ({ value, onChange }) => {
         <div className="flex items-center gap-2">
           <span className="text-[10px] text-muted-foreground w-12 shrink-0">group</span>
           {fields.length > 0 ? (
-            <select className={selectCls + ' flex-1'} value={groupBy} onChange={e => onChange({ groupBy: e.target.value })}>
+            <select className={selectCls + ' flex-1'} value={groupBy} onChange={e => onChange?.({ groupBy: e.target.value })}>
               <option value="">none</option>
               {fields.map(fl => <option key={fl} value={fl}>{fl}</option>)}
             </select>
           ) : (
-            <input className={inputCls} value={groupBy} onChange={e => onChange({ groupBy: e.target.value })} placeholder="field name" />
+            <input className={inputCls} value={groupBy} onChange={e => onChange?.({ groupBy: e.target.value })} placeholder="field name" />
           )}
         </div>
 

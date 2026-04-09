@@ -421,7 +421,7 @@ const KanbanColumn: View<BoardColumn, ColumnExtra> = ({ value, onChange, ctx, on
         <BlurInput
           value={label}
           className="h-auto border-none bg-transparent p-0 text-sm font-bold shadow-none focus-visible:ring-0"
-          onSave={v => onChange?.({ label: v, updatedAt: Date.now() })}
+          onSave={v => onChange?.({ label: v })}
         />
         <span className="text-xs text-muted-foreground">({tasks.length})</span>
         <button
@@ -463,7 +463,7 @@ const KanbanColumn: View<BoardColumn, ColumnExtra> = ({ value, onChange, ctx, on
   );
 };
 
-register('board.column', 'react:kanban', KanbanColumn);
+register('board.column', 'react:kanban', KanbanColumn as View<BoardColumn>);
 
 function TaskDialog({ node, onChange, onClose, onSave }: {
   node: NodeData;

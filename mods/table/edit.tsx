@@ -62,7 +62,7 @@ function resolveDisplayType(child: NodeData, field: string): string {
 
 // ── Edit View ──
 
-function TableEditView({ value, onChange }: { value: ComponentData; onChange?: (next: ComponentData) => void }) {
+function TableEditView({ value, onChange }: { value: ComponentData; onChange?: (next: Record<string, unknown>) => void }) {
   const node = useCurrentNode();
   const children = useChildren(node.$path, { watch: true, limit: 1000 });
 

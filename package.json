@@ -21,6 +21,7 @@
   "devDependencies": {
     "@playwright/test": "^1.58.2",
     "@types/d3-selection": "^3.0.11",
+    "@types/d3-transition": "^3.0.9",
     "@types/d3-zoom": "^3.0.8",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3"

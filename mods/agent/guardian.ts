@@ -10,20 +10,56 @@ import { globMatch, matchesAny } from '@treenity/core/glob';
 import type { Tree } from '@treenity/core/tree';
 import { AiAgent, AiChat, AiPolicy, AiRunStatus } from './types';
 
-// ── Pattern specificity — exact match (no wildcard) > wildcard, longer > shorter ──
+// ── Specificity-aware policy resolution ──
 
-/** Return specificity score of the best matching pattern for any subject, or -1 if none match.
- *  Exact match = pattern length + 1000 (always beats wildcard). Wildcard = pattern length. */
-function bestMatchSpecificity(patterns: string[], subjects: string[]): number {
-  let best = -1;
+/** Non-wildcard prefix length — longer prefix = more constrained pattern.
+ *  "set_node:/safe/*" → 15, "set_node" → 8, "execute:*" → 8, "*" → 0 */
+function patternSpecificity(pattern: string): number {
+  const starIdx = pattern.indexOf('*');
+  return starIdx < 0 ? pattern.length : starIdx;
+}
+
+/** Resolve policy verdict across all subjects.
+ *  Deny is absolute (any match → deny). For allow/escalate, we find the best
+ *  matching pattern across ALL subjects using (subject_index, pattern_specificity).
+ *  More specific subject (lower index) always wins. At same subject, exact pattern
+ *  beats wildcard. At same specificity, escalate beats allow (fail-closed). */
+function resolveVerdict(
+  policy: ToolPolicy,
+  subjects: string[],
+): 'allow' | 'escalate' | 'deny' | null {
+  // Deny is absolute — check all subjects
   for (const s of subjects) {
-    for (const p of patterns) {
+    if (matchesAny(policy.deny, s)) return 'deny';
+  }
+
+  // Find best allow and escalate patterns by specificity.
+  // Specificity = length of non-wildcard prefix (longer = more specific constraint).
+  // e.g. "set_node:/safe/*" (prefix 15) > "set_node" (prefix 8) > "execute:*" (prefix 8) > "*" (prefix 0)
+  let bestAllow = -1;
+  let bestEsc = -1;
+
+  for (const s of subjects) {
+    for (const p of policy.allow) {
       if (!globMatch(p, s)) continue;
-      const score = p.includes('*') ? p.length : p.length + 1000;
-      if (score > best) best = score;
+      const score = patternSpecificity(p);
+      if (score > bestAllow) bestAllow = score;
+    }
+    for (const p of policy.escalate) {
+      if (!globMatch(p, s)) continue;
+      const score = patternSpecificity(p);
+      if (score > bestEsc) bestEsc = score;
     }
   }
-  return best;
+
+  if (bestAllow < 0 && bestEsc < 0) return null;
+  if (bestAllow >= 0 && bestEsc < 0) return 'allow';
+  if (bestAllow < 0 && bestEsc >= 0) return 'escalate';
+
+  // Both match — higher specificity wins; escalate wins ties (fail-closed)
+  if (bestAllow > bestEsc) return 'allow';
+  if (bestEsc > bestAllow) return 'escalate';
+  return 'escalate'; // tie → fail-closed
 }
 
 // ── ToolPolicy shape (runtime, with RegExp) ──
@@ -627,31 +663,16 @@ export function createCanUseTool(
     // Most specific subject for cache/approval key
     const toolSubject = subjects[0];
 
-    // Specificity-aware evaluation: most specific matching pattern wins.
-    // Deny is absolute. Between allow and escalate, the more specific pattern wins.
-    // Exact match beats wildcard. At same specificity, escalate beats allow (fail-closed).
+    // Resolve verdict via subject-level specificity (deny > escalate > allow per subject)
+    const verdict = resolveVerdict(policy, subjects);
 
-    // Deny: absolute — any subject match → deny
-    for (const s of subjects) {
-      if (matchesAny(policy.deny, s)) return deny(`${role}: denied: ${s}`);
+    if (verdict === 'deny') {
+      const deniedSubject = subjects.find(s => matchesAny(policy.deny, s)) ?? toolName;
+      return deny(`${role}: denied: ${deniedSubject}`);
     }
 
     // Read-only mode: if tool passed deny checks, allow (readOnly whitelist already checked above)
     if (opts?.readOnly) return allow();
-
-    // Find best allow and best escalate matches (by pattern specificity)
-    const allowSpec = bestMatchSpecificity(policy.allow, subjects);
-    const escalateSpec = bestMatchSpecificity(policy.escalate, subjects);
-
-    let verdict: 'allow' | 'escalate' | null = null;
-    if (allowSpec >= 0 && escalateSpec >= 0) {
-      // Both match — higher specificity wins, escalate wins ties (fail-closed)
-      verdict = allowSpec > escalateSpec ? 'allow' : 'escalate';
-    } else if (allowSpec >= 0) {
-      verdict = 'allow';
-    } else if (escalateSpec >= 0) {
-      verdict = 'escalate';
-    }
 
     if (verdict === 'allow') return allow();
 

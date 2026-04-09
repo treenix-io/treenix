@@ -311,6 +311,11 @@ export class AiChat {
   streaming = false;
   sessionId = '';
 
+  /** @description Stop current streaming */
+  stop() {
+    this.streaming = false;
+  }
+
   /** @description Clear chat history and reset session */
   clear() {
     const { node } = getCtx();

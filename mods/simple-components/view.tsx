@@ -1,7 +1,7 @@
 // Universal component views — compact, embeddable in any node
 
 import { type NodeData, register } from '@treenity/core';
-import { type Actions, type View, useActions } from '@treenity/react';
+import { type View, useActions } from '@treenity/react';
 import { trpc } from '@treenity/react';
 import { cn } from '@treenity/react';
 import { Button } from '@treenity/react/ui/button';
@@ -175,7 +175,7 @@ const EstimateView: View<TEstimate> = ({ value }) => {
   const actions = useActions(value);
   const [editing, setEditing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  const [draftUnit, setDraftUnit] = useState(typeof value.unit === 'string' ? value.unit : 'hours');
+  const [draftUnit, setDraftUnit] = useState<'hours' | 'points' | 'days'>(typeof value.unit === 'string' ? value.unit as 'hours' | 'points' | 'days' : 'hours');
   const v = typeof value.value === 'number' ? value.value : 0;
   const unit = typeof value.unit === 'string' ? value.unit : 'hours';
 
@@ -199,7 +199,7 @@ const EstimateView: View<TEstimate> = ({ value }) => {
             className="h-7 w-20 text-xs"
             onKeyDown={e => { if (e.key === 'Enter') save(); }}
           />
-          <Select value={draftUnit} onValueChange={setDraftUnit}>
+          <Select value={draftUnit} onValueChange={v => setDraftUnit(v as 'hours' | 'points' | 'days')}>
             <SelectTrigger className="h-7 w-24 text-xs">
               <SelectValue />
             </SelectTrigger>

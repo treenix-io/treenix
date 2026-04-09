@@ -49,29 +49,30 @@ const ApiTokensView: View<ApiTokenManager> = ({ value, ctx }) => {
       ) : (
         <div className="space-y-2">
           {children.map(child => {
-            // TODO: use get(SomeType) to cast to component needed
-            // TODO: get name with some good util function
-            const tokenName = child.name || child.$path.split('/').pop();
+            const tokenName = typeof child.name === 'string' ? child.name : child.$path.split('/').pop() ?? '';
+            const userId = typeof child.userId === 'string' ? child.userId : '';
+            const createdAt = typeof child.createdAt === 'number' || typeof child.createdAt === 'string' ? child.createdAt : null;
+            const token = typeof child.token === 'string' ? child.token : null;
             return (
               <div key={child.$path} className="flex items-center justify-between rounded bg-zinc-800/50 px-3 py-2 border border-zinc-700/50">
                 <div className="space-y-1 min-w-0 flex-1">
                   <div className="text-sm font-medium text-zinc-200">{tokenName}</div>
                   <div className="text-xs text-zinc-500">
-                    {child.userId}{child.createdAt ? ` · ${new Date(child.createdAt).toLocaleDateString()}` : ''}
+                    {userId}{createdAt ? ` · ${new Date(createdAt).toLocaleDateString()}` : ''}
                   </div>
-                  {typeof child.token === 'string' && (
+                  {token && (
                     <code
                       className="block text-xs text-zinc-400 cursor-pointer hover:text-zinc-200 truncate"
-                      onClick={() => copyToken(child.token)}
+                      onClick={() => copyToken(token)}
                       title="Click to copy"
                     >
-                      {copied === child.token ? 'Copied!' : child.token}
+                      {copied === token ? 'Copied!' : token}
                     </code>
                   )}
                 </div>
                 <button
                   className="ml-2 shrink-0 rounded bg-red-600/20 px-2 py-1 text-xs text-red-400 hover:bg-red-600/40"
-                  onClick={() => actions.revoke({ name: tokenName! })}
+                  onClick={() => actions.revoke({ name: tokenName })}
                 >
                   Revoke
                 </button>

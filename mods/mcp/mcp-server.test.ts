@@ -30,9 +30,11 @@ async function createTestClient(store: Tree, userId: string, claims?: string[]) 
   return { client, mcp };
 }
 
-function textContent(result: { content: Array<{ type: string; text?: string }> }): string {
-  const t = result.content.find((c: any) => c.type === 'text');
-  return (t as any)?.text ?? '';
+function textContent(result: Record<string, unknown>): string {
+  const content = result.content;
+  if (!Array.isArray(content)) return '';
+  const t = content.find((c: { type: string; text?: string }) => c.type === 'text');
+  return t?.text ?? '';
 }
 
 // ── 1. Token Extraction ──

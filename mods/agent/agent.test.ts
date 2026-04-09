@@ -619,6 +619,59 @@ describe('canUseTool: policy precedence', () => {
     const r = await canUse('mcp__treenity__get_node', { path: '/public/data' });
     assert.equal(r.behavior, 'allow', 'non-denied path should be allowed in plan mode');
   });
+
+  it('path-specific allow beats coarse exact escalate (subject specificity)', async () => {
+    // allow: set_node:/safe/* should win over escalate: set_node (coarser subject)
+    const store = mockStore(undefined, {
+      allow: ['mcp__treenity__set_node:/safe/*'],
+      deny: [],
+      escalate: ['mcp__treenity__set_node'],
+    });
+
+    const canUse = createCanUseTool('dev', '/agents/test', store);
+    const r = await canUse('mcp__treenity__set_node', { path: '/safe/x' });
+    assert.equal(r.behavior, 'allow', 'path-specific allow should beat coarse escalate');
+  });
+
+  it('action-level allow beats tool-level escalate (subject specificity)', async () => {
+    // allow: execute:* matches more specific subject (execute:run) than escalate: execute
+    // Subject hierarchy wins: action-level match > tool-level match
+    const store = mockStore(undefined, {
+      allow: ['mcp__treenity__execute:*'],
+      deny: [],
+      escalate: ['mcp__treenity__execute'],
+    });
+
+    const canUse = createCanUseTool('dev', '/agents/test', store);
+    const r = await canUse('mcp__treenity__execute', { action: 'run' });
+    assert.equal(r.behavior, 'allow', 'action-level allow should beat tool-level escalate');
+  });
+
+  it('exact escalate beats wildcard allow at SAME subject level', async (t) => {
+    // Both patterns match at the same subject (execute:run) — exact escalate wins
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+
+    const store = mockStore(undefined, {
+      allow: ['mcp__treenity__execute:*'],
+      deny: [],
+      escalate: ['mcp__treenity__execute:run'],
+    });
+
+    let escalated = false;
+    store.set = async (node: any) => {
+      if (node?.$type === 'ai.approval') escalated = true;
+    };
+
+    const resultPromise = createCanUseTool('dev', '/agents/test', store)(
+      'mcp__treenity__execute', { action: 'run' },
+    );
+
+    await flush();
+    assert.ok(escalated, 'exact escalate should beat wildcard allow at same subject');
+
+    await resolveAllPending(false);
+    await resultPromise;
+  });
 });
 
 // ── Session approval cache ──

@@ -1,6 +1,6 @@
 // Agent Office — views for ai.pool, ai.agent, ai.approval, ai.thread, ai.run
 
-import { register } from '@treenity/core';
+import { type ComponentData, register } from '@treenity/core';
 import {
   cn,
   execute,
@@ -138,7 +138,7 @@ const PoolView: View<AiPool> = ({ value, ctx }) => {
             Current Runs ({activeRuns.length})
           </h3>
           {activeRuns.map(a => (
-            <ActiveRun key={a.$path} runPath={a.currentRun} />
+            <ActiveRun key={a.$path} runPath={a.currentRun as string} />
           ))}
         </div>
       )}
@@ -555,7 +555,7 @@ const AgentLayout: View<AiAgent> = ({ value, ctx }) => {
       </div>
       <div className="flex-1 min-h-0 overflow-hidden">
         <RenderContext name="react">
-          <Render value={node.chat} />
+          <Render value={node.chat as ComponentData} />
         </RenderContext>
       </div>
     </div>

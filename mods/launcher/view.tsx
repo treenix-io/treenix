@@ -4,7 +4,6 @@ import { isRef, type NodeData, register, resolveExact } from '@treenity/core';
 import { Render, RenderContext, type View } from '@treenity/react';
 import { useChildren, useNavigate, usePath } from '@treenity/react';
 import { cn } from '@treenity/react';
-import { GenerateViewButton } from '@treenity/react/mods/editor-ui/default-view';
 import { Button } from '@treenity/react/ui/button';
 import {
   DropdownMenu,
@@ -128,7 +127,7 @@ function AppItem({
   // No view registered for this context — offer AI generation
   const renderContent = hasView
     ? <RenderContext name={context}><Render value={target} /></RenderContext>
-    : <GenerateViewButton type={target.$type} sample={target} context={context} label="Make AI" />;
+    : <span className="text-xs text-muted-foreground italic">No view for {target.$type}</span>;
 
   // Icon-style: centered icon + label
   if (context === 'react:icon') {
