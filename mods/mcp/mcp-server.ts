@@ -1,7 +1,7 @@
 // Treenity MCP Server — exposes tree store as MCP tools
 // StreamableHTTP transport, stateless, token auth via ?token= or Authorization header
 
-import { requestApproval } from '#agent/guardian';
+import { requestApproval, resolveVerdict } from '#agent/guardian';
 import { AiPolicy } from '#agent/types';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -58,28 +58,22 @@ export async function checkMcpGuardian(store: Tree, req: GuardianRequest): Promi
     const policy = getComponent(guardianNode, AiPolicy);
     if (!policy || policy.$type !== 'ai.policy') return { allowed: false, reason: 'invalid Guardian policy type — writes denied' };
 
-    const allow = (policy.allow as string[]) ?? [];
-    const deny = (policy.deny as string[]) ?? [];
-    const escalate = (policy.escalate as string[]) ?? [];
+    const policyData = {
+      allow: (policy.allow as string[]) ?? [],
+      deny: (policy.deny as string[]) ?? [],
+      escalate: (policy.escalate as string[]) ?? [],
+    };
     const subjects = buildSubjects(req);
 
-    // Deny always wins
-    for (const s of subjects) {
-      if (matchesAny(deny, s)) return { allowed: false, reason: `denied by Guardian: ${s}` };
-    }
+    // Shared specificity-aware resolution (same as agent guardian)
+    const verdict = resolveVerdict(policyData, subjects);
 
-    // Allow any subject matches → permit (allow beats escalate)
-    for (const s of subjects) {
-      if (matchesAny(allow, s)) return { allowed: true };
+    if (verdict === 'deny') {
+      const denied = subjects.find(s => matchesAny(policyData.deny, s)) ?? subjects[0];
+      return { allowed: false, reason: `denied by Guardian: ${denied}` };
     }
-
-    // Escalate if any subject matches
-    for (const s of subjects) {
-      if (matchesAny(escalate, s)) {
-        return { allowed: 'prompt', subjects, args: req.args };
-      }
-    }
-
+    if (verdict === 'allow') return { allowed: true };
+    // escalate or unknown → prompt human
     return { allowed: 'prompt', subjects, args: req.args };
   } catch (err) {
     console.error('[mcp-guardian] policy check failed:', err);

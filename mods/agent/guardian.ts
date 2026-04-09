@@ -23,7 +23,7 @@ function patternSpecificity(pattern: string): number {
  *  matching pattern across ALL subjects using (subject_index, pattern_specificity).
  *  More specific subject (lower index) always wins. At same subject, exact pattern
  *  beats wildcard. At same specificity, escalate beats allow (fail-closed). */
-function resolveVerdict(
+export function resolveVerdict(
   policy: ToolPolicy,
   subjects: string[],
 ): 'allow' | 'escalate' | 'deny' | null {
