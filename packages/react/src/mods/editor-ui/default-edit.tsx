@@ -37,7 +37,8 @@ const DefaultEditForm: View<ComponentData> = ({ value, onChange }) => {
           return renderField(
             field,
             {
-              type: p.format ?? p.type,
+              type: p.type,
+              format: p.format,
               label: p.title ?? field,
               placeholder: p.description,
               readOnly: p.readOnly || !onChange,

@@ -24,19 +24,27 @@ function DefaultSchemaForm({ value, onChange }: RenderProps) {
   return (
     <div className="flex flex-col gap-3">
       {Object.entries(properties).map(([name, fieldSchema]) => {
-        const fieldType = String(fieldSchema.format ?? fieldSchema.type ?? 'string');
+        const rawType = String(fieldSchema.type ?? 'string');
+        const rawFormat = fieldSchema.format ? String(fieldSchema.format) : undefined;
         const isReadOnly = !!fieldSchema.readOnly;
-        const handler = resolve(fieldType, isReadOnly ? 'react' : 'react:form');
+        const ctx = isReadOnly ? 'react' : 'react:form';
+        // Resolve: format widget → base type → generic string. Unknown format must
+        // not mask the underlying structural type.
+        const resolvedType =
+          (rawFormat && resolve(rawFormat, ctx) ? rawFormat : null) ??
+          (resolve(rawType, ctx) ? rawType : null) ??
+          'string';
+        const handler = resolve(resolvedType, ctx);
         if (!handler) {
           return (
             <div key={name} className="text-xs text-destructive">
-              No form handler for type: {fieldType}
+              No form handler for type: {rawFormat ?? rawType}
             </div>
           );
         }
 
         const fieldData: Record<string, unknown> = {
-          $type: fieldType,
+          $type: resolvedType,
           value: (value as any)[name],
           label: String(fieldSchema.label ?? fieldSchema.title ?? name),
           placeholder: fieldSchema.description ? String(fieldSchema.description) : undefined,
@@ -47,7 +55,7 @@ function DefaultSchemaForm({ value, onChange }: RenderProps) {
 
         return (
           <div key={name} className="flex flex-col gap-1">
-            {fieldType !== 'boolean' && (
+            {resolvedType !== 'boolean' && (
               <label className="text-xs font-medium text-muted-foreground">
                 {fieldData.label as string}
               </label>

@@ -48,7 +48,8 @@ function ComponentFieldsView({ value }: { value: ComponentData }) {
             return renderField(
               k,
               {
-                type: p.format ?? p.type,
+                type: p.type,
+                format: p.format,
                 label: p.title ?? k,
                 readOnly: true,
                 enum: p.enum,
@@ -164,7 +165,8 @@ export function PlainFieldsView({
             return renderField(
               k,
               {
-                type: p.format ?? p.type,
+                type: p.type,
+                format: p.format,
                 label: p.title ?? k,
                 readOnly: true,
                 enum: p.enum,

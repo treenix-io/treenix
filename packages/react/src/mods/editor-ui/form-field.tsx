@@ -9,6 +9,7 @@ export function renderField(
   name: string,
   fieldSchema: {
     type: string;
+    format?: string;
     label: string;
     placeholder?: string;
     readOnly?: boolean;
@@ -38,19 +39,29 @@ export function renderField(
     );
   }
 
+  // Resolve handler: try format first (specific widget), fall back to base type,
+  // then to a generic 'string' handler. This keeps unknown formats from masking
+  // the underlying structural type.
   const ctx = fieldSchema.readOnly ? 'react:compact' : 'react:form';
-  const handler = fieldSchema.readOnly
-    ? (resolveExact(fieldSchema.type, 'react:compact') ?? resolveExact(fieldSchema.type, 'react'))
-    : (resolveExact(fieldSchema.type, ctx) ?? resolveExact('string', ctx));
+  const altCtx = fieldSchema.readOnly ? 'react' : ctx;
+  const tryResolve = (t: string) =>
+    fieldSchema.readOnly
+      ? (resolveExact(t, 'react:compact') ?? resolveExact(t, 'react'))
+      : resolveExact(t, ctx);
+  const resolvedType =
+    (fieldSchema.format && tryResolve(fieldSchema.format) ? fieldSchema.format : null) ??
+    (tryResolve(fieldSchema.type) ? fieldSchema.type : null) ??
+    'string';
+  const handler = tryResolve(resolvedType) ?? resolveExact('string', altCtx);
   if (!handler)
     return (
       <div key={name} className="text-destructive text-xs">
-        No form handler: {fieldSchema.type}
+        No form handler: {fieldSchema.format ?? fieldSchema.type}
       </div>
     );
 
   const fieldData: { $type: string; [k: string]: unknown } = {
-    $type: fieldSchema.type,
+    $type: resolvedType,
     value: rawValue,
     label: fieldSchema.label,
     placeholder: fieldSchema.placeholder,

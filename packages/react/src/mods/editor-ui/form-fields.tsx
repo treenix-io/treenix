@@ -272,6 +272,275 @@ function UriForm({ value, onChange }: FP) {
   );
 }
 
+// ── Simple typed inputs (email / tel / date / date-time / color / password) ──
+
+function EmailForm({ value, onChange }: FP) {
+  return (
+    <Input
+      type="email"
+      className="h-7 text-xs"
+      value={String(value.value ?? '')}
+      placeholder={value.placeholder ?? 'name@example.com'}
+      onChange={(e) => onChange?.({ ...value, value: e.target.value })}
+    />
+  );
+}
+
+function EmailView({ value }: FP) {
+  const v = String(value.value ?? '');
+  return v ? (
+    <a href={`mailto:${v}`} className="text-xs text-primary hover:underline truncate block">
+      {v}
+    </a>
+  ) : null;
+}
+
+function TelForm({ value, onChange }: FP) {
+  return (
+    <Input
+      type="tel"
+      className="h-7 text-xs"
+      value={String(value.value ?? '')}
+      placeholder={value.placeholder ?? '+1 555 0100'}
+      onChange={(e) => onChange?.({ ...value, value: e.target.value })}
+    />
+  );
+}
+
+function TelView({ value }: FP) {
+  const v = String(value.value ?? '');
+  return v ? (
+    <a href={`tel:${v}`} className="text-xs text-primary hover:underline">
+      {v}
+    </a>
+  ) : null;
+}
+
+function DateForm({ value, onChange }: FP) {
+  return (
+    <Input
+      type="date"
+      className="h-7 text-xs"
+      value={String(value.value ?? '')}
+      onChange={(e) => onChange?.({ ...value, value: e.target.value })}
+    />
+  );
+}
+
+function DateTimeForm({ value, onChange }: FP) {
+  // HTML `datetime-local` expects `YYYY-MM-DDTHH:mm`; schemas commonly store ISO strings with a Z.
+  const raw = typeof value.value === 'string' ? value.value : '';
+  const local = raw ? dayjs(raw).format('YYYY-MM-DDTHH:mm') : '';
+  return (
+    <Input
+      type="datetime-local"
+      className="h-7 text-xs"
+      value={local}
+      onChange={(e) =>
+        onChange?.({ ...value, value: e.target.value ? dayjs(e.target.value).toISOString() : '' })
+      }
+    />
+  );
+}
+
+function DateView({ value }: FP) {
+  const v = String(value.value ?? '');
+  return <span className="text-xs tabular-nums text-foreground/70">{v || '—'}</span>;
+}
+
+function ColorForm({ value, onChange }: FP) {
+  const v = typeof value.value === 'string' && value.value ? value.value : '#000000';
+  return (
+    <div className="flex items-center gap-2">
+      <input
+        type="color"
+        className="h-7 w-10 rounded border border-border bg-transparent cursor-pointer"
+        value={v}
+        onChange={(e) => onChange?.({ ...value, value: e.target.value })}
+      />
+      <Input
+        className="h-7 text-xs font-mono flex-1"
+        value={String(value.value ?? '')}
+        placeholder="#rrggbb"
+        onChange={(e) => onChange?.({ ...value, value: e.target.value })}
+      />
+    </div>
+  );
+}
+
+function ColorView({ value }: FP) {
+  const v = String(value.value ?? '');
+  if (!v) return <span className="text-xs text-muted-foreground">—</span>;
+  return (
+    <div className="flex items-center gap-2">
+      <span
+        className="h-4 w-4 rounded border border-border shrink-0"
+        style={{ backgroundColor: v }}
+      />
+      <span className="text-xs font-mono text-foreground/70">{v}</span>
+    </div>
+  );
+}
+
+function PasswordForm({ value, onChange }: FP) {
+  return (
+    <Input
+      type="password"
+      className="h-7 text-xs font-mono"
+      value={String(value.value ?? '')}
+      placeholder={value.placeholder ?? '••••••••'}
+      onChange={(e) => onChange?.({ ...value, value: e.target.value })}
+    />
+  );
+}
+
+function PasswordView({ value }: FP) {
+  const v = String(value.value ?? '');
+  return <span className="text-xs font-mono text-foreground/70">{v ? '••••••••' : '—'}</span>;
+}
+
+// ── Tags: string array with inline chips ──
+
+function TagsForm({ value, onChange }: FP) {
+  const [input, setInput] = useState('');
+  const arr = Array.isArray(value.value) ? (value.value as unknown[]).map(String) : [];
+  const emit = (next: string[]) => onChange?.({ ...value, value: next });
+  return (
+    <div className="flex-1 space-y-1">
+      {arr.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {arr.map((tag, i) => (
+            <span
+              key={i}
+              className="inline-flex items-center gap-0.5 text-[11px] font-mono bg-muted text-foreground/70 px-1.5 py-0.5 rounded"
+            >
+              {tag}
+              <Button
+                variant="ghost"
+                size="icon"
+                type="button"
+                className="h-5 w-5 p-0 ml-0.5 text-muted-foreground/40 hover:text-foreground leading-none"
+                onClick={() => emit(arr.filter((_, j) => j !== i))}
+              >
+                <X className="h-3 w-3" />
+              </Button>
+            </span>
+          ))}
+        </div>
+      )}
+      <Input
+        className="h-7 text-xs w-full"
+        placeholder={value.placeholder ?? 'Add tag...'}
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key !== 'Enter') return;
+          e.preventDefault();
+          const t = input.trim();
+          if (t && !arr.includes(t)) emit([...arr, t]);
+          setInput('');
+        }}
+      />
+    </div>
+  );
+}
+
+function TagsView({ value }: FP) {
+  const arr = Array.isArray(value.value) ? (value.value as unknown[]).map(String) : [];
+  if (arr.length === 0) return <span className="text-xs text-muted-foreground">—</span>;
+  return (
+    <div className="flex flex-wrap gap-1">
+      {arr.map((tag, i) => (
+        <span
+          key={i}
+          className="text-[11px] font-mono bg-muted text-foreground/70 px-1.5 py-0.5 rounded"
+        >
+          {tag}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+// ── Translated string: { ru: '...', en: '...', ... } ──
+
+function TstringForm({ value, onChange }: FP) {
+  const obj = (
+    typeof value.value === 'object' && value.value !== null ? value.value : {}
+  ) as Record<string, string>;
+  const entries = Object.entries(obj);
+  const [newLang, setNewLang] = useState('');
+  const emit = (next: Record<string, string>) => onChange?.({ ...value, value: next });
+
+  return (
+    <div className="space-y-1">
+      {entries.map(([lang, text]) => (
+        <div key={lang} className="flex gap-1 items-start">
+          <span className="text-[10px] font-mono text-muted-foreground w-8 pt-1.5 shrink-0">
+            {lang}
+          </span>
+          <Input
+            className="h-7 text-xs flex-1"
+            value={text}
+            onChange={(e) => emit({ ...obj, [lang]: e.target.value })}
+          />
+          <Button
+            variant="ghost"
+            size="icon"
+            type="button"
+            className="h-7 w-7 p-0 text-muted-foreground/40 hover:text-foreground shrink-0"
+            onClick={() => {
+              const next = { ...obj };
+              delete next[lang];
+              emit(next);
+            }}
+          >
+            <X className="h-3 w-3" />
+          </Button>
+        </div>
+      ))}
+      <div className="flex gap-1">
+        <Input
+          className="h-7 text-[10px] font-mono w-12 shrink-0"
+          placeholder="lang"
+          value={newLang}
+          onChange={(e) => setNewLang(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key !== 'Enter') return;
+            e.preventDefault();
+            const l = newLang.trim().toLowerCase();
+            if (l && !(l in obj)) {
+              emit({ ...obj, [l]: '' });
+              setNewLang('');
+            }
+          }}
+        />
+        <span className="text-[10px] text-muted-foreground self-center">
+          press Enter to add language
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function TstringView({ value }: FP) {
+  const obj = (
+    typeof value.value === 'object' && value.value !== null ? value.value : {}
+  ) as Record<string, string>;
+  const entries = Object.entries(obj);
+  if (entries.length === 0) return <span className="text-xs text-muted-foreground">—</span>;
+  return (
+    <div className="space-y-0.5">
+      {entries.map(([lang, text]) => (
+        <div key={lang} className="flex gap-2 text-[11px]">
+          <span className="font-mono text-muted-foreground shrink-0 w-6">{lang}</span>
+          <span className="text-foreground/70 truncate">{text}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function TimestampForm({ value, onChange }: FP) {
   const ts = Number(value.value ?? 0);
   const formatted = ts ? dayjs(ts > 1e12 ? ts : ts * 1000).format('YYYY-MM-DD HH:mm:ss') : '—';
@@ -739,13 +1008,17 @@ function EmbeddedFields({
             enumNames?: string[];
             items?: { type?: string };
           };
-          const fieldType = p.format ?? p.type;
-          if (fieldType === 'path') return null; // avoid infinite nesting for now
-          const handler =
-            resolveHandler(fieldType, 'react:form') ?? resolveHandler('string', 'react:form');
+          // Resolve: format widget → base type → generic string. Unknown format must
+          // not mask the underlying structural type.
+          const resolvedType =
+            (p.format && resolveHandler(p.format, 'react:form') ? p.format : null) ??
+            (resolveHandler(p.type, 'react:form') ? p.type : null) ??
+            'string';
+          if (resolvedType === 'path') return null; // avoid infinite nesting for now
+          const handler = resolveHandler(resolvedType, 'react:form');
           if (!handler) return null;
           const fieldData = {
-            $type: fieldType,
+            $type: resolvedType,
             value: data[field],
             label: p.title ?? field,
             placeholder: p.description,
@@ -755,7 +1028,7 @@ function EmbeddedFields({
           };
           return (
             <div key={field} className="field">
-              {fieldType !== 'boolean' && <label>{p.title ?? field}</label>}
+              {resolvedType !== 'boolean' && <label>{p.title ?? field}</label>}
               {createElement(handler as any, {
                 value: fieldData,
                 onChange: p.readOnly
@@ -974,6 +1247,14 @@ const fields: [string, Function, Function][] = [
   ['select', StringView, SelectForm],
   ['timestamp', TimestampView, TimestampForm],
   ['path', PathView, PathForm],
+  ['email', EmailView, EmailForm],
+  ['tel', TelView, TelForm],
+  ['date', DateView, DateForm],
+  ['date-time', DateView, DateTimeForm],
+  ['color', ColorView, ColorForm],
+  ['password', PasswordView, PasswordForm],
+  ['tags', TagsView, TagsForm],
+  ['tstring', TstringView, TstringForm],
 ];
 
 export function registerFormFields() {
