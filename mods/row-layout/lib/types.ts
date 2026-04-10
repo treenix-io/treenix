@@ -1,4 +1,6 @@
+import type { Raw } from '@treenity/core/comp'
 import type { ReactNode } from 'react'
+import type { RowColLayout } from '../types'
 
 export type LayoutItem = {
   ref: string
@@ -13,15 +15,13 @@ export type LayoutRow = {
   gap?: string
 }
 
-export type RowColGridProps = {
-  gap?: string
-  padding?: string
-  context?: string
-  rows: LayoutRow[]
-  hidden: string[]
+export type RowColGridProps = Raw<RowColLayout> & {
   renderItem: (ref: string) => ReactNode
+  renderItemMenuExtras?: (item: LayoutItem) => ReactNode
+  renderGlobalMenuExtras?: () => ReactNode
   editable?: boolean
-  onChange?: (patch: Partial<{ rows: LayoutRow[]; hidden: string[]; gap: string; padding: string; context: string }>) => void
+  onExitEdit?: () => void
+  onChange?: (patch: Partial<Raw<RowColLayout>>) => void
 }
 
 export const isComponentRef = (ref: string) => ref.startsWith('#')

@@ -13,6 +13,7 @@ export class RowColLayout {
     const tpl = templates.find(t => t.name === data.name)
     if (!tpl) throw new Error(`Unknown template: ${data.name}`)
     this.rows = tpl.apply(data.refs)
+    this.hidden = []
   }
 }
 

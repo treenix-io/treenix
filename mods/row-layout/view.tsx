@@ -1,10 +1,13 @@
-import { type ComponentData, getComponents, type NodeData, register } from '@treenity/core'
+import { type ComponentData, getComponents, getContextsForType, type NodeData, register } from '@treenity/core'
 import { Render, RenderContext, type View } from '@treenity/react'
 import { useChildren } from '@treenity/react'
+import {
+  DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub,
+  DropdownMenuSubContent, DropdownMenuSubTrigger,
+} from '@treenity/react/ui/dropdown-menu'
 import { useEffect, useState } from 'react'
 import { RowColGrid } from './lib/row-col-grid'
-import { isComponentRef } from './lib/types'
-import type { LayoutRow } from './lib/types'
+import { isComponentRef, type LayoutItem, type LayoutRow } from './lib/types'
 import type { RowColLayout } from './types'
 
 let _counter = 0
@@ -46,7 +49,7 @@ const RowColLayoutView: View<RowColLayout> = ({ value, onChange, ctx }) => {
 
   const compMap = new Map<string, ComponentData>()
   for (const [name, comp] of allComps) {
-    if (comp.$type === 'layout.row-col') continue
+    if (name === 'layout') continue
     compMap.set(toLayoutRef(name), comp)
   }
 
@@ -113,14 +116,121 @@ const RowColLayoutView: View<RowColLayout> = ({ value, onChange, ctx }) => {
     )
   }
 
+  function resolveRefType(ref: string): string | undefined {
+    if (isComponentRef(ref)) {
+      const comp = compMap.get(ref)
+      return comp?.$type
+    }
+    const child = childMap.get(ref)
+    return child?.$type
+  }
+
+  function setItemContext(ref: string, ctx: string | undefined) {
+    const newRows = effectiveRows.map(r => ({
+      ...r,
+      items: r.items.map(i => i.ref === ref ? { ...i, context: ctx } : i),
+    }))
+    onChange?.({ rows: newRows })
+  }
+
+  function renderItemMenuExtras(item: LayoutItem) {
+    const type = resolveRefType(item.ref)
+    if (!type) return null
+    const contexts = getContextsForType(type)
+    if (!contexts.length) return null
+
+    return (
+      <>
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger className="text-xs">Context</DropdownMenuSubTrigger>
+          <DropdownMenuSubContent>
+            <DropdownMenuItem
+              className={`text-xs ${item.context === undefined ? 'font-bold' : ''}`}
+              onSelect={() => setItemContext(item.ref, undefined)}
+            >
+              None (inherit)
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            {contexts.map(c => (
+              <DropdownMenuItem
+                key={c}
+                className={`text-xs font-mono ${item.context === c ? 'font-bold' : ''}`}
+                onSelect={() => setItemContext(item.ref, c)}
+              >
+                {c}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+        <DropdownMenuSeparator />
+      </>
+    )
+  }
+
+  function renderGlobalMenuExtras() {
+    // Union of contexts discovered across all items currently in the layout
+    const discovered = new Set<string>()
+    for (const row of effectiveRows) {
+      for (const item of row.items) {
+        const type = resolveRefType(item.ref)
+        if (!type) continue
+        for (const c of getContextsForType(type)) discovered.add(c)
+      }
+    }
+    const contexts = [...discovered].sort()
+
+    return (
+      <DropdownMenuSub>
+        <DropdownMenuSubTrigger className="text-xs">Default context</DropdownMenuSubTrigger>
+        <DropdownMenuSubContent>
+          <DropdownMenuItem
+            className={`text-xs ${!value.context ? 'font-bold' : ''}`}
+            onSelect={() => onChange?.({ context: undefined })}
+          >
+            None
+          </DropdownMenuItem>
+          {contexts.length > 0 && <DropdownMenuSeparator />}
+          {contexts.map(c => (
+            <DropdownMenuItem
+              key={c}
+              className={`text-xs font-mono ${value.context === c ? 'font-bold' : ''}`}
+              onSelect={() => onChange?.({ context: c })}
+            >
+              {c}
+            </DropdownMenuItem>
+          ))}
+          <DropdownMenuSeparator />
+          <div className="p-1" onPointerDown={(e) => e.stopPropagation()}>
+            <input
+              type="text"
+              defaultValue={value.context ?? ''}
+              placeholder="Custom context…"
+              className="w-full text-xs font-mono px-1 py-0.5 rounded border border-[--border] bg-[--bg-1]"
+              onKeyDown={(e) => {
+                e.stopPropagation()
+                if (e.key === 'Enter') {
+                  const v = (e.target as HTMLInputElement).value.trim()
+                  onChange?.({ context: v || undefined })
+                }
+              }}
+            />
+          </div>
+        </DropdownMenuSubContent>
+      </DropdownMenuSub>
+    )
+  }
+
   return (
-    <div className="relative">
-      <button
-        onClick={() => setEditable(!editable)}
-        className="absolute top-1 right-1 z-30 p-1 rounded hover:bg-[--card] text-[--text-3]"
-      >
-        {editable ? '\u2715' : '\u2699'}
-      </button>
+    <div className="relative group/layout">
+      {!editable && (
+        <button
+          onClick={() => setEditable(true)}
+          className="absolute top-1 right-1 z-40 p-1 rounded bg-[--bg-1]/80 hover:bg-[--card] text-[--text-3] opacity-0 group-hover/layout:opacity-100 transition-opacity"
+          title="Edit layout"
+        >
+          {'\u2699'}
+        </button>
+      )}
 
       <RowColGrid
         rows={effectiveRows}
@@ -129,11 +239,14 @@ const RowColLayoutView: View<RowColLayout> = ({ value, onChange, ctx }) => {
         padding={value.padding}
         context={value.context}
         renderItem={renderItem}
+        renderItemMenuExtras={renderItemMenuExtras}
+        renderGlobalMenuExtras={renderGlobalMenuExtras}
         editable={editable}
+        onExitEdit={() => setEditable(false)}
         onChange={(patch) => onChange?.(patch)}
       />
     </div>
   )
 }
 
-register('layout.row-col', 'react', RowColLayoutView)
+register('layout.row-col', 'react:layout', RowColLayoutView)

@@ -1,13 +1,28 @@
-// Default react:layout handler — delegates to react context
-// Types can register custom react:layout handlers to override arrangement
+// Default react:layout handler
+// If node has a named component 'layout' (any type) — render it
+// Otherwise — fall through to react context
 
-import { Render, RenderContext } from '#context';
-import { type ComponentData, register } from '@treenity/core';
+import { Render, RenderContext, scopeOnChange, type OnChange } from '#context';
+import { type ComponentData, type NodeData, register } from '@treenity/core';
+import { useMemo } from 'react';
 
-function DefaultLayout({ value }: { value: ComponentData }) {
+function DefaultLayout({ value, onChange }: { value: ComponentData; onChange?: (p: OnChange) => void }) {
+  const scopedOnChange = useMemo(
+    () => onChange ? scopeOnChange(onChange, 'layout') : undefined,
+    [onChange],
+  )
+
+  if ('$path' in value) {
+    const node = value as NodeData;
+    const layout = node.layout;
+    if (layout && typeof layout === 'object' && '$type' in layout) {
+      return <Render value={layout as ComponentData} onChange={scopedOnChange} />;
+    }
+  }
+
   return (
     <RenderContext name="react">
-      <Render value={value} />
+      <Render value={value} onChange={onChange} />
     </RenderContext>
   );
 }
