@@ -80,11 +80,48 @@ function buildJSDocMap(comments: Comment[], source: string): Map<number, Record<
 
 // ── Type → JSON Schema ──
 
+interface ImportEntry {
+  importedName: string; // name as exported from source file
+  sourceFile: string; // absolute path
+}
+
 interface SchemaCtx {
   jsDocMap?: Map<number, Record<string, string>>;
-  typeAliases?: Map<string, N>;
-  enums?: Map<string, N>;
-  resolving?: Set<string>;
+  // File-scoped aliases/enums: two modules may each define `type Entry = {...}` or `enum Status`
+  // with different shapes. A global map silently corrupts whichever class is parsed second.
+  aliasesByFile?: Map<string, Map<string, N>>;
+  enumsByFile?: Map<string, Map<string, N>>;
+  importsByFile?: Map<string, Map<string, ImportEntry>>;
+  currentFile?: string; // active file scope for name lookups
+  resolving?: Set<string>; // cycle guard keyed by "file::name"
+}
+
+// Lookup a type alias or enum by name in the current file's scope, following
+// ES imports across file boundaries. Returns both the node and the file where
+// it was defined, so callers can switch currentFile when recursing.
+function lookupType(
+  name: string,
+  ctx: SchemaCtx,
+): { kind: 'alias' | 'enum'; node: N; file: string } | undefined {
+  const { currentFile } = ctx;
+  if (!currentFile) return undefined;
+
+  const localAlias = ctx.aliasesByFile?.get(currentFile)?.get(name);
+  if (localAlias) return { kind: 'alias', node: localAlias, file: currentFile };
+
+  const localEnum = ctx.enumsByFile?.get(currentFile)?.get(name);
+  if (localEnum) return { kind: 'enum', node: localEnum, file: currentFile };
+
+  const imp = ctx.importsByFile?.get(currentFile)?.get(name);
+  if (!imp) return undefined;
+
+  const importedAlias = ctx.aliasesByFile?.get(imp.sourceFile)?.get(imp.importedName);
+  if (importedAlias) return { kind: 'alias', node: importedAlias, file: imp.sourceFile };
+
+  const importedEnum = ctx.enumsByFile?.get(imp.sourceFile)?.get(imp.importedName);
+  if (importedEnum) return { kind: 'enum', node: importedEnum, file: imp.sourceFile };
+
+  return undefined;
 }
 
 // TS enum members: numeric by default (auto-incrementing from 0 or last explicit number),
@@ -198,18 +235,26 @@ function typeToSchema(node: N | null | undefined, ctx: SchemaCtx = {}): any {
       if ((name === 'AsyncGenerator' || name === 'Generator') && tparams?.[0])
         return typeToSchema(tparams[0], ctx);
 
-      // Resolve local type aliases (e.g. `type ThreadMessage = { ... }`)
-      if (name && ctx.typeAliases?.has(name)) {
-        const resolving = ctx.resolving ?? new Set();
-        if (resolving.has(name)) return {};
-        resolving.add(name);
-        const result = typeToSchema(ctx.typeAliases.get(name), { ...ctx, resolving });
-        resolving.delete(name);
-        return result;
+      // Resolve type aliases and TS enums — local first, then follow ES imports
+      // to the source file scope. Cycle guard is keyed by (file, name) so two
+      // different files can share a type name without cross-contamination.
+      if (name) {
+        const found = lookupType(name, ctx);
+        if (found) {
+          if (found.kind === 'enum') return enumToSchema(found.node);
+          const key = found.file + '::' + name;
+          const resolving = ctx.resolving ?? new Set();
+          if (resolving.has(key)) return {};
+          resolving.add(key);
+          const result = typeToSchema(found.node, {
+            ...ctx,
+            currentFile: found.file,
+            resolving,
+          });
+          resolving.delete(key);
+          return result;
+        }
       }
-
-      // Resolve TS enum references → { type, enum: [...runtime values] }
-      if (name && ctx.enums?.has(name)) return enumToSchema(ctx.enums.get(name)!);
 
       return {};
     }
@@ -234,7 +279,19 @@ function typeFromInit(value: N | null | undefined): any {
   return {};
 }
 
-function evalInit(node: N | null | undefined, enums?: Map<string, N>): unknown {
+// Resolve a MemberExpression target like `Level` in `Level.Medium` to its enum
+// declaration, following file-local scope first and ES imports second. Returns
+// undefined if the name isn't a known enum.
+function resolveEnum(name: string, ctx: SchemaCtx): N | undefined {
+  if (!ctx.currentFile) return undefined;
+  const local = ctx.enumsByFile?.get(ctx.currentFile)?.get(name);
+  if (local) return local;
+  const imp = ctx.importsByFile?.get(ctx.currentFile)?.get(name);
+  if (!imp) return undefined;
+  return ctx.enumsByFile?.get(imp.sourceFile)?.get(imp.importedName);
+}
+
+function evalInit(node: N | null | undefined, ctx: SchemaCtx = {}): unknown {
   if (!node) return undefined;
   if (node.type === 'Literal')
     return typeof node.value === 'bigint' ? Number(node.value) : node.value;
@@ -242,17 +299,16 @@ function evalInit(node: N | null | undefined, enums?: Map<string, N>): unknown {
     return -(node.argument.value as number);
   if (
     node.type === 'MemberExpression' &&
-    enums &&
     node.object?.type === 'Identifier' &&
     node.property?.type === 'Identifier'
   ) {
-    const enumNode = enums.get(node.object.name);
+    const enumNode = resolveEnum(node.object.name, ctx);
     if (enumNode) return getEnumValues(enumNode).find((e) => e.name === node.property.name)?.value;
   }
   if (node.type === 'ArrayExpression') {
     const arr: unknown[] = [];
     for (const el of node.elements ?? []) {
-      const v = evalInit(el, enums);
+      const v = evalInit(el, ctx);
       if (v === undefined) return undefined;
       arr.push(v);
     }
@@ -262,7 +318,7 @@ function evalInit(node: N | null | undefined, enums?: Map<string, N>): unknown {
     const obj: Record<string, unknown> = {};
     for (const prop of node.properties ?? []) {
       if (prop.type !== 'Property' || !prop.key?.name) return undefined;
-      const v = evalInit(prop.value, enums);
+      const v = evalInit(prop.value, ctx);
       if (v === undefined) return undefined;
       obj[prop.key.name] = v;
     }
@@ -319,6 +375,138 @@ function findTypeAliases(ast: N): Map<string, N> {
       aliases.set(node.id.name, node.typeAnnotation);
   });
   return aliases;
+}
+
+// ── Import resolution ──
+// Cross-file type resolution needs to follow ES imports (relative paths and
+// Node `imports` field aliases like `#log`). We walk ImportDeclaration nodes,
+// resolve the source spec to an absolute file path, and build a per-file map
+// of localName → (importedName, sourceFile) so same-name collisions across
+// files stay isolated.
+
+// Cache: dir → { dir, imports } walked to nearest package.json with an imports field.
+// Null means "no imports field found above this dir".
+const packageImportsCache = new Map<
+  string,
+  { dir: string; imports: Record<string, any> } | null
+>();
+
+async function findPackageImports(
+  fromFile: string,
+): Promise<{ dir: string; imports: Record<string, any> } | null> {
+  let dir = path.dirname(fromFile);
+  const visited: string[] = [];
+  while (true) {
+    const cached = packageImportsCache.get(dir);
+    if (cached !== undefined) {
+      for (const v of visited) packageImportsCache.set(v, cached);
+      return cached;
+    }
+    visited.push(dir);
+
+    const pkgPath = path.join(dir, 'package.json');
+    let pkg: any = null;
+    try {
+      pkg = JSON.parse(await fs.readFile(pkgPath, 'utf-8'));
+    } catch {}
+
+    // Node ESM semantics: `imports` field is scoped to the nearest package.
+    // Once we find a package.json, stop — do NOT walk past it looking for an
+    // ancestor's imports, even if this package has no imports field itself.
+    if (pkg) {
+      const result =
+        pkg.imports && typeof pkg.imports === 'object'
+          ? { dir, imports: pkg.imports as Record<string, any> }
+          : null;
+      for (const v of visited) packageImportsCache.set(v, result);
+      return result;
+    }
+
+    const parent = path.dirname(dir);
+    if (parent === dir) {
+      for (const v of visited) packageImportsCache.set(v, null);
+      return null;
+    }
+    dir = parent;
+  }
+}
+
+async function tryResolveFile(base: string): Promise<string | null> {
+  // Candidates mirror what `globSourceFiles` actually scans (.ts only, not .tsx).
+  // Resolving to a file that's never parsed would leave it absent from
+  // aliasesByFile/enumsByFile and defeat the lookup anyway.
+  // TS ESM rewrite: `./foo.js` specifiers map to `./foo.ts` source.
+  let candidates: string[];
+  const ext = path.extname(base);
+  if (ext === '.ts') {
+    candidates = [base];
+  } else if (ext === '.js' || ext === '.mjs' || ext === '.cjs') {
+    candidates = [base.slice(0, -ext.length) + '.ts'];
+  } else {
+    candidates = [base + '.ts', path.join(base, 'index.ts')];
+  }
+  for (const c of candidates) {
+    try {
+      const stat = await fs.stat(c);
+      if (stat.isFile()) return path.resolve(c);
+    } catch {}
+  }
+  return null;
+}
+
+async function resolveImportSource(fromFile: string, source: string): Promise<string | null> {
+  // Relative: ./foo, ../bar
+  if (source.startsWith('.')) {
+    return tryResolveFile(path.resolve(path.dirname(fromFile), source));
+  }
+  // Node `imports` field alias (e.g. `#log`)
+  if (source.startsWith('#')) {
+    const pkg = await findPackageImports(fromFile);
+    if (!pkg) return null;
+    for (const [pattern, target] of Object.entries(pkg.imports)) {
+      const targetPath =
+        typeof target === 'string' ? target : target?.development ?? target?.default;
+      if (typeof targetPath !== 'string') continue;
+
+      if (pattern === source) {
+        return tryResolveFile(path.resolve(pkg.dir, targetPath));
+      }
+      if (pattern.endsWith('*') && targetPath.includes('*')) {
+        const prefix = pattern.slice(0, -1);
+        if (source.startsWith(prefix)) {
+          const rest = source.slice(prefix.length);
+          return tryResolveFile(path.resolve(pkg.dir, targetPath.replace('*', rest)));
+        }
+      }
+    }
+    return null;
+  }
+  // External package — not worth resolving for schema purposes
+  return null;
+}
+
+async function findImports(ast: N, fileName: string): Promise<Map<string, ImportEntry>> {
+  const imports = new Map<string, ImportEntry>();
+  const pending: Array<{ localName: string; importedName: string; source: string }> = [];
+
+  walk(ast, (node) => {
+    if (node.type === 'ImportDeclaration' && typeof node.source?.value === 'string') {
+      for (const spec of node.specifiers ?? []) {
+        if (spec.type !== 'ImportSpecifier' || !spec.local?.name) continue;
+        pending.push({
+          localName: spec.local.name,
+          importedName: spec.imported?.name ?? spec.local.name,
+          source: node.source.value,
+        });
+      }
+    }
+  });
+
+  for (const { localName, importedName, source } of pending) {
+    const sourceFile = await resolveImportSource(fileName, source);
+    if (sourceFile) imports.set(localName, { importedName, sourceFile });
+  }
+  return imports;
 }
 
 function findEnums(ast: N, fileName: string): Map<string, N> {
@@ -392,10 +580,18 @@ function generateClassSchema(
   classNode: N,
   jsDocMap: Map<number, Record<string, string>>,
   classToType: Map<string, string>,
-  typeAliases?: Map<string, N>,
-  enums?: Map<string, N>,
+  currentFile: string,
+  aliasesByFile: Map<string, Map<string, N>>,
+  enumsByFile: Map<string, Map<string, N>>,
+  importsByFile: Map<string, Map<string, ImportEntry>>,
 ): any {
-  const ctx: SchemaCtx = { jsDocMap, typeAliases, enums };
+  const ctx: SchemaCtx = {
+    jsDocMap,
+    currentFile,
+    aliasesByFile,
+    enumsByFile,
+    importsByFile,
+  };
   const properties: Record<string, any> = {};
   const required: string[] = [];
   const methods: Record<string, any> = {};
@@ -424,7 +620,7 @@ function generateClassSchema(
 
       Object.assign(properties[name], jsDocMap.get(member.start) ?? {});
 
-      const def = evalInit(member.value, enums);
+      const def = evalInit(member.value, ctx);
       if (def !== undefined) properties[name].default = def;
 
       // `?` or `| undefined` in union → optional
@@ -534,10 +730,11 @@ export async function generateSchemas(dirs: string[]): Promise<void> {
   const allExternalActions = new Map<string, ExternalAction[]>();
   // Type aliases and enums are file-scoped: two modules may each define `type Entry = {...}`
   // or `enum Status` with different shapes. A global map would silently corrupt whichever
-  // class was parsed second. Same-file references are supported; cross-file imports would
-  // require import resolution (out of scope).
+  // class was parsed second. Cross-file references are followed via the per-file import
+  // map (ES imports), so `type X` in file A is resolvable from file B iff B imports X from A.
   const aliasesByFile = new Map<string, Map<string, N>>();
   const enumsByFile = new Map<string, Map<string, N>>();
+  const importsByFile = new Map<string, Map<string, ImportEntry>>();
 
   for (const file of files) {
     const source = await fs.readFile(file, 'utf-8');
@@ -549,6 +746,9 @@ export async function generateSchemas(dirs: string[]): Promise<void> {
 
     const fileEnums = findEnums(ast as N, file);
     if (fileEnums.size) enumsByFile.set(file, fileEnums);
+
+    const fileImports = await findImports(ast as N, file);
+    if (fileImports.size) importsByFile.set(file, fileImports);
 
     for (const e of findRegistrations(ast as N, file)) allEntries.push(e);
 
@@ -585,14 +785,14 @@ export async function generateSchemas(dirs: string[]): Promise<void> {
     const classInfo = allClasses.get(entry.className + '\0' + entry.fileName);
     if (!classInfo) continue;
 
-    const fileAliases = aliasesByFile.get(entry.fileName);
-    const fileEnums = enumsByFile.get(entry.fileName);
     const schema = generateClassSchema(
       classInfo.node,
       classInfo.jsDocMap,
       classToType,
-      fileAliases,
-      fileEnums,
+      entry.fileName,
+      aliasesByFile,
+      enumsByFile,
+      importsByFile,
     );
     schema.$id = entry.typeName;
     schema.$schema = 'http://json-schema.org/draft-07/schema#';

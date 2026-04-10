@@ -15,7 +15,44 @@
     },
     "rows": {
       "type": "array",
-      "items": {},
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "ref": {
+                  "type": "string"
+                },
+                "context": {
+                  "type": "string"
+                },
+                "padding": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "ref"
+              ]
+            }
+          },
+          "grid": {
+            "type": "string"
+          },
+          "gap": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "items"
+        ]
+      },
       "default": []
     },
     "hidden": {

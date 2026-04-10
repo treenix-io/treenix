@@ -6,22 +6,34 @@ import { generateSchemas } from '#schema/extract-schemas-oxc';
 
 const SCHEMAS_DIR = path.resolve(import.meta.dirname, 'schemas');
 const SCHEMA_FILE = path.join(SCHEMAS_DIR, 'test.schema-widget.json');
+const IMPORT_FIXTURES_DIR = path.resolve(import.meta.dirname, '_import-fixtures');
+const IMPORT_SCHEMAS_DIR = path.join(IMPORT_FIXTURES_DIR, 'schemas');
 
 describe('extract-schemas-oxc', () => {
   let schema: any;
+  let alphaSchema: any;
+  let betaSchema: any;
 
   before(async () => {
-    // Clean previous test artifact
+    // Clean previous test artifacts
     await fs.rm(SCHEMA_FILE, { force: true });
+    await fs.rm(IMPORT_SCHEMAS_DIR, { recursive: true, force: true });
 
     // Generate from fixture
     await generateSchemas([import.meta.dirname]);
 
     schema = JSON.parse(await fs.readFile(SCHEMA_FILE, 'utf-8'));
+    alphaSchema = JSON.parse(
+      await fs.readFile(path.join(IMPORT_SCHEMAS_DIR, 'test.import-collision-alpha.json'), 'utf-8'),
+    );
+    betaSchema = JSON.parse(
+      await fs.readFile(path.join(IMPORT_SCHEMAS_DIR, 'test.import-collision-beta.json'), 'utf-8'),
+    );
   });
 
   after(async () => {
     await fs.rm(SCHEMA_FILE, { force: true });
+    await fs.rm(IMPORT_SCHEMAS_DIR, { recursive: true, force: true });
   });
 
   it('sets $id and $schema', () => {
@@ -368,6 +380,43 @@ describe('extract-schemas-oxc', () => {
     for (const name of ['description', 'metadata', 'dueDate', 'linkedWidget', 'nickname']) {
       assert.ok(!schema.required.includes(name), `${name} should not be required`);
     }
+  });
+
+  // ── Cross-file type imports (with name collision) ──
+
+  it('resolves imported type alias across files', () => {
+    // Both widgets import `Entry` from different files — regression for
+    // f1135ce which broke cross-file resolution by scoping aliases per file.
+    assert.equal(alphaSchema.properties.entries.type, 'array');
+    assert.equal(alphaSchema.properties.entries.items.type, 'object');
+    assert.deepEqual(alphaSchema.properties.entries.items.properties, {
+      kind: { type: 'string', enum: ['alpha'] },
+      count: { type: 'number' },
+    });
+  });
+
+  it('same-name type in different files resolves independently (no collision)', () => {
+    assert.equal(betaSchema.properties.entries.type, 'array');
+    assert.equal(betaSchema.properties.entries.items.type, 'object');
+    assert.deepEqual(betaSchema.properties.entries.items.properties, {
+      label: { type: 'string' },
+      active: { type: 'boolean' },
+    });
+    // Neither widget should leak the other's shape.
+    assert.ok(!('kind' in betaSchema.properties.entries.items.properties));
+    assert.ok(!('label' in alphaSchema.properties.entries.items.properties));
+  });
+
+  it('cross-file enum import: type + Enum.Member default both resolve', () => {
+    // `mode: Mode = Mode.Fast` where Mode is imported from entries-beta.ts.
+    // Exercises lookupType() for the TSTypeReference and resolveEnum() for
+    // the default value expression.
+    assert.deepEqual(alphaSchema.properties.mode, {
+      type: 'number',
+      enum: [0, 1, 2],
+      enumNames: ['Normal', 'Fast', 'Slow'],
+      default: 1,
+    });
   });
 
   // ── Incremental: second run is no-op ──
