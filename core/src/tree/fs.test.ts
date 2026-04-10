@@ -300,6 +300,16 @@ describe('FsStore', () => {
     assert.equal(raw.$type, 't.test');
     assert.equal(raw.x, 1);
 
+    // Read via get() — $path must be stamped from logical path
+    const read = await tree.get('/foo/bar');
+    assert.equal(read?.$path, '/foo/bar');
+    assert.equal(read?.$type, 't.test');
+    assert.equal(read?.x, 1);
+
+    // Read via getChildren — $path must be stamped from FS location
+    const kids = await tree.getChildren('/foo');
+    assert.deepEqual(kids.items.map(n => n.$path), ['/foo/bar']);
+
     // Physically move the file — get() must return node with updated $path
     await mkdir(join(dir, 'moved'), { recursive: true });
     await rename(leaf, join(dir, 'moved', 'bar.json'));
