@@ -75,7 +75,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json && fix-hash-imports --copy-assets",
     "prepack": "npm run build",
-    "test": "tsx --conditions development --import ./test/register-css.mjs --test src/**/*.test.ts",
+    "test": "tsx --conditions development --experimental-test-module-mocks --import ./test/register-dom.mjs --import ./test/register-css.mjs --test src/**/*.test.ts",
     "dev": "vite"
   },
   "peerDependencies": {
