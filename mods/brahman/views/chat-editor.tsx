@@ -471,7 +471,7 @@ function SortableAction({
   onDelete: () => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: node.$path });
-  const n = usePath(node.$path);
+  const { data: n } = usePath(node.$path);
   const [showSettings, setShowSettings] = useState(false);
 
   if (!n) return null;
@@ -661,9 +661,9 @@ function ChatActionPalette({ onSelect }: { onSelect: (type: string) => void }) {
 // ── Main component ──
 
 export function PageChatEditor({ value }: { value: NodeData }) {
-  const node = usePath(value.$path);
+  const { data: node } = usePath(value.$path);
   const actionsPath = value.$path + '/_actions';
-  const children = useChildren(actionsPath, { watch: true, watchNew: true });
+  const { data: children } = useChildren(actionsPath, { watch: true, watchNew: true });
 
   const positions: string[] = (node?.positions as string[]) ?? [];
   const tracked = new Set(positions);

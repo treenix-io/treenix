@@ -14,7 +14,8 @@ const KanbanWidget: FC<RenderProps> = ({ value }) => {
 
 // Separate component to use hooks properly per column
 function KanbanWidgetInner({ path }: { path: string }) {
-  const columns = useChildren(path, { watch: true, watchNew: true })
+  const { data: children } = useChildren(path, { watch: true, watchNew: true });
+  const columns = children
     .filter(c => c.$type === 'board.column')
     .sort((a, b) => ((a as any).order ?? 0) - ((b as any).order ?? 0));
 
@@ -28,7 +29,7 @@ function KanbanWidgetInner({ path }: { path: string }) {
 }
 
 function ColumnRow({ col }: { col: NodeData }) {
-  const tasks = useChildren(col.$path, { watch: true, watchNew: true });
+  const { data: tasks } = useChildren(col.$path, { watch: true, watchNew: true });
   const label = typeof col.label === 'string' ? col.label : col.$path.split('/').at(-1) || '?';
   const color = typeof col.color === 'string' ? col.color : 'border-zinc-400';
   // Extract bg color from border color class
@@ -50,7 +51,7 @@ register('board.kanban', 'react:widget', KanbanWidget as any);
 const TodoWidget: FC<RenderProps> = ({ value }) => {
   const node = value as NodeData;
   // value might be the todo dir — find the list child
-  const children = useChildren(node.$path, { watch: true, watchNew: true });
+  const { data: children } = useChildren(node.$path, { watch: true, watchNew: true });
   const list = children.find(c => c.$type === 'todo.list');
 
   if (list) return <TodoListItems path={list.$path} />;
@@ -60,7 +61,7 @@ const TodoWidget: FC<RenderProps> = ({ value }) => {
 };
 
 function TodoListItems({ path }: { path: string }) {
-  const items = useChildren(path, { watch: true, watchNew: true });
+  const { data: items } = useChildren(path, { watch: true, watchNew: true });
   const doneCount = items.filter(i => i.done).length;
 
   return (
@@ -82,7 +83,7 @@ function TodoListItems({ path }: { path: string }) {
 }
 
 function TodoItemCompact({ value }: { value: NodeData }) {
-  const item = usePath(value.$path, TodoItem);
+  const { data: item } = usePath(value.$path, TodoItem);
 
   return (
     <div className="flex items-center gap-1.5">
@@ -110,7 +111,7 @@ register('todo.list', 'react:widget', TodoWidget as any);
 
 const SensorWidget: FC<RenderProps> = ({ value }) => {
   const node = value as NodeData;
-  const children = useChildren(node.$path, { watch: true, watchNew: true });
+  const { data: children } = useChildren(node.$path, { watch: true, watchNew: true });
   const last5 = children.slice(-5);
   const latest = last5[last5.length - 1];
 

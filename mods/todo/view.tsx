@@ -6,8 +6,8 @@ import { useState } from 'react';
 import { TodoItem, TodoList } from './types';
 
 function TodoListView({ value }: { value: NodeData }) {
-  const list = usePath(value.$path, TodoList);
-  const children = useChildren(value.$path, { watch: true, watchNew: true });
+  const { data: list } = usePath(value.$path, TodoList);
+  const { data: children } = useChildren(value.$path, { watch: true, watchNew: true });
   const [draft, setDraft] = useState('');
 
   const handleAdd = async () => {
@@ -41,7 +41,7 @@ function TodoListView({ value }: { value: NodeData }) {
 }
 
 function TodoItemRow({ value }: { value: NodeData }) {
-  const item = usePath(value.$path, TodoItem);
+  const { data: item } = usePath(value.$path, TodoItem);
 
   return (
     <li

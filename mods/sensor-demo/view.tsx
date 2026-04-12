@@ -6,7 +6,7 @@ import { useChildren } from '@treenity/react';
 const MAX = 10;
 
 function SensorFeed({ value }: { value: NodeData }) {
-  const children = useChildren(value.$path, { watch: true, watchNew: true });
+  const { data: children } = useChildren(value.$path, { watch: true, watchNew: true });
   const last = children.slice(-MAX).reverse();
 
   return (

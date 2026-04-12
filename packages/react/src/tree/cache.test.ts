@@ -86,16 +86,154 @@ describe('cache', () => {
     assert.strictEqual(called, 1);
   });
 
-  it('putMany() stores all nodes, fires subs', () => {
+  it('replaceChildren() stores all nodes, fires subs', () => {
     let parentFired = 0;
     cache.subscribeChildren('/p', () => parentFired++);
-    cache.putMany([
+    cache.replaceChildren('/p', [
       { $path: '/p/a', $type: 'x' } as any,
       { $path: '/p/b', $type: 'x' } as any,
-    ], '/p');
+    ]);
     assert.ok(cache.get('/p/a'));
     assert.ok(cache.get('/p/b'));
     assert.ok(parentFired >= 1);
+  });
+
+  it('replaceChildren() unlinks removed children from parent index', () => {
+    cache.replaceChildren('/p', [
+      { $path: '/p/a', $type: 'x' } as any,
+      { $path: '/p/b', $type: 'x' } as any,
+    ]);
+    cache.replaceChildren('/p', [
+      { $path: '/p/a', $type: 'x' } as any,
+      // /p/b removed
+    ]);
+    const kids = cache.getChildren('/p');
+    assert.strictEqual(kids.length, 1);
+    assert.strictEqual(kids[0].$path, '/p/a');
+    // Soft cache: removed node stays accessible via direct get
+    assert.ok(cache.get('/p/b'));
+  });
+
+  it('replaceChildren() marks parent as authoritatively loaded', () => {
+    assert.strictEqual(cache.hasChildrenCollectionLoaded('/p'), false);
+    cache.replaceChildren('/p', []);
+    assert.strictEqual(cache.hasChildrenCollectionLoaded('/p'), true);
+  });
+
+  it('appendChildren() merges without removing existing', () => {
+    cache.replaceChildren('/p', [{ $path: '/p/a', $type: 'x' } as any]);
+    cache.appendChildren('/p', [{ $path: '/p/b', $type: 'x' } as any]);
+    const kids = cache.getChildren('/p');
+    assert.strictEqual(kids.length, 2);
+  });
+
+  it('put() does NOT mark parent as authoritatively loaded', () => {
+    cache.put({ $path: '/a/child', $type: 'x' } as any);
+    assert.strictEqual(cache.hasChildrenCollectionLoaded('/a'), false);
+  });
+
+  it('hydrate pathStatus: put() sets ready, markPathMissing sets not_found', () => {
+    assert.strictEqual(cache.getPathStatus('/a'), undefined);
+    cache.put({ $path: '/a', $type: 'x' } as any);
+    assert.strictEqual(cache.getPathStatus('/a'), 'ready');
+    cache.markPathMissing('/a');
+    assert.strictEqual(cache.getPathStatus('/a'), 'not_found');
+    assert.strictEqual(cache.get('/a'), undefined);
+  });
+
+  it('markPathMissing fires both path and path-error subs', () => {
+    cache.put({ $path: '/a', $type: 'x' } as any);
+    let pathFired = 0;
+    let errFired = 0;
+    cache.subscribePath('/a', () => pathFired++);
+    cache.subscribePathError('/a', () => errFired++);
+    cache.markPathMissing('/a');
+    assert.ok(pathFired >= 1);
+    assert.ok(errFired >= 1);
+  });
+
+  it('setPathError sets and clears error, fires error subs', () => {
+    let errFired = 0;
+    cache.subscribePathError('/a', () => errFired++);
+    cache.setPathError('/a', new Error('boom'));
+    assert.ok(cache.getPathError('/a'));
+    assert.strictEqual(errFired, 1);
+    cache.setPathError('/a', null);
+    assert.strictEqual(cache.getPathError('/a'), null);
+    assert.strictEqual(errFired, 2);
+  });
+
+  it('put() clears prior path error', () => {
+    cache.setPathError('/a', new Error('boom'));
+    cache.put({ $path: '/a', $type: 'x' } as any);
+    assert.strictEqual(cache.getPathError('/a'), null);
+  });
+
+  it('children phase transitions', () => {
+    assert.strictEqual(cache.getChildrenPhase('/p'), 'idle');
+    cache.setChildrenPhase('/p', 'initial');
+    assert.strictEqual(cache.getChildrenPhase('/p'), 'initial');
+    cache.setChildrenPhase('/p', 'ready');
+    assert.strictEqual(cache.getChildrenPhase('/p'), 'ready');
+  });
+
+  it('childPageSize first-wins lock', () => {
+    const first = cache.lockChildPageSize('/p', 10);
+    assert.strictEqual(first, 10);
+    const second = cache.lockChildPageSize('/p', 50);
+    assert.strictEqual(second, 10);
+    assert.strictEqual(cache.getChildPageSize('/p'), 10);
+  });
+
+  it('subscriber ref-count releases page size on last unmount', () => {
+    cache.retainChildSubscriber('/p');
+    cache.retainChildSubscriber('/p');
+    cache.lockChildPageSize('/p', 25);
+    cache.releaseChildSubscriber('/p');
+    assert.strictEqual(cache.getChildPageSize('/p'), 25);  // still locked
+    cache.releaseChildSubscriber('/p');
+    assert.strictEqual(cache.getChildPageSize('/p'), undefined);  // released
+    // New subscriber can re-lock with a different value
+    const next = cache.lockChildPageSize('/p', 77);
+    assert.strictEqual(next, 77);
+  });
+
+  it('loadedCount clamps to items.length on replaceChildren', () => {
+    cache.replaceChildren('/p', [
+      { $path: '/p/a', $type: 'x' } as any,
+      { $path: '/p/b', $type: 'x' } as any,
+      { $path: '/p/c', $type: 'x' } as any,
+    ]);
+    assert.strictEqual(cache.getLoadedCount('/p'), 3);
+    // Server returns fewer — loadedCount shrinks
+    cache.replaceChildren('/p', [{ $path: '/p/a', $type: 'x' } as any]);
+    assert.strictEqual(cache.getLoadedCount('/p'), 1);
+  });
+
+  it('appendChildren increments loadedCount by new items only (dedupes)', () => {
+    cache.replaceChildren('/p', [{ $path: '/p/a', $type: 'x' } as any]);
+    assert.strictEqual(cache.getLoadedCount('/p'), 1);
+    cache.appendChildren('/p', [
+      { $path: '/p/a', $type: 'x' } as any,  // duplicate
+      { $path: '/p/b', $type: 'x' } as any,
+    ]);
+    assert.strictEqual(cache.getLoadedCount('/p'), 2);
+  });
+
+  it('signalReconnect clears fetch state but preserves subscribers', () => {
+    cache.retainChildSubscriber('/p');
+    cache.replaceChildren('/p', [{ $path: '/p/a', $type: 'x' } as any]);
+    cache.setChildrenTotal('/p', 42);
+    cache.setChildrenPhase('/p', 'ready');
+    cache.put({ $path: '/x', $type: 'y' } as any);
+    cache.signalReconnect();
+    assert.strictEqual(cache.hasChildrenCollectionLoaded('/p'), false);
+    assert.strictEqual(cache.getChildrenTotal('/p'), null);
+    assert.strictEqual(cache.getChildrenPhase('/p'), 'idle');
+    assert.strictEqual(cache.getPathStatus('/x'), undefined);
+    // Soft cache node data stays — hooks revalidate via gen bump
+    assert.ok(cache.get('/x'));
+    cache.releaseChildSubscriber('/p');
   });
 
   it('direct mutation of get() result changes cached value', () => {

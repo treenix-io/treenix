@@ -330,7 +330,7 @@ function ScriptRunner({ path, code, groupRef }: {
   groupRef: React.RefObject<THREE.Group | null>;
 }) {
   const fnRef = useRef<((ctx: unknown) => void) | null>(null);
-  const node = usePath(path);
+  const { data: node } = usePath(path);
 
   useEffect(() => {
     try {
@@ -375,7 +375,7 @@ function ScriptRunner({ path, code, groupRef }: {
 
 function TreeNode({ path }: { path: string }) {
   const [node] = useResolvedNode(path);
-  const children = useChildren(path);
+  const { data: children } = useChildren(path);
   const groupRef = useRef<THREE.Group>(null);
 
   if (!node) return null;
@@ -423,7 +423,7 @@ function TreeNode({ path }: { path: string }) {
 // --- Scene root (inside Canvas) ---
 
 function SceneRoot({ path }: { path: string }) {
-  const children = useChildren(path, { watch: true, watchNew: true });
+  const { data: children } = useChildren(path, { watch: true, watchNew: true });
 
   return (
     <>

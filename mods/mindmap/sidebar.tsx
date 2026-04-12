@@ -17,7 +17,7 @@ function shortType(type: string): string {
 }
 
 export function MindMapSidebar({ path, onClose, onNavigate }: Props) {
-  const node = usePath(path);
+  const { data: node } = usePath(path);
 
   if (!node) {
     return (

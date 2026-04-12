@@ -143,7 +143,7 @@ function getLangs(node: NodeData): string[] {
 
 // Generic component updater — debounced persist (500ms), instant UI via local state
 function useActionComp(path: string) {
-  const node = usePath(path);
+  const { data: node } = usePath(path);
   const [pending, setPending] = useState<Record<string, unknown>>({});
   const pendingRef = useRef<Record<string, unknown>>({});
   const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);

@@ -10,7 +10,7 @@ import { LogRenderer } from './log';
 const ChatView: View<AiChat> = ({ value }) => {
   const node = useCurrentNode();
   const path = node.$path;
-  const thread = usePath(path, AiThread, 'thread');
+  const { data: thread } = usePath(path, AiThread, 'thread');
   const messages: ThreadMessage[] = thread?.messages ?? [];
 
   const [input, setInput] = useState('');

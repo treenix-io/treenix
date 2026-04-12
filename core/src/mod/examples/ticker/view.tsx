@@ -4,7 +4,7 @@ import { useChildren } from '@treenity/react';
 
 register('ticker', 'react', () => {
   const node = useCurrentNode();
-  const prices = useChildren(node.$path, { limit: 20, watchNew: true });
+  const { data: prices } = useChildren(node.$path, { limit: 20, watchNew: true });
 
   return (
     <div className="space-y-1 p-2">

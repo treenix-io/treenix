@@ -80,7 +80,7 @@ function errMsg(e: unknown): string {
 
 function WorldView() {
   const node = useCurrentNode();
-  const children = useChildren(node.$path, { watchNew: true });
+  const { data: children } = useChildren(node.$path, { watchNew: true });
   const [selected, setSelected] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const mapRef = useRef<HTMLDivElement>(null);

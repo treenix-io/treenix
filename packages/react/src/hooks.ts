@@ -1,6 +1,6 @@
-// Treenity Hooks — reactive node access
-// usePath:     universal reactive read (URI or typed proxy)
-// useChildren: reactive children list
+// Treenity Hooks — reactive node access with Query<T> shape
+// usePath:     reactive path read (URI or typed proxy) → Query<T>
+// useChildren: reactive children list with pagination → ChildrenQuery
 // set:         persist node (optimistic + server)
 // execute:     action caller
 // watch:       universal async generator
@@ -13,7 +13,6 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
   useSyncExternalStore,
 } from 'react';
@@ -22,6 +21,36 @@ import { tree } from '#tree/client';
 import { trpc } from '#tree/trpc';
 import { ensureType } from '#schema-loader';
 export { useNavigate, useBeforeNavigate } from '#navigate';
+
+// Server default matches trpc.getChildren schema (engine/core/src/server/trpc.ts:125).
+// Consumers who want more per page must pass `limit` explicitly.
+const DEFAULT_PAGE_SIZE = 100;
+
+// ── Query<T> — industry-standard reactive fetch shape ──
+// Matches React Query / SWR / Apollo / RTK Query. Boring, familiar, trivially
+// mockable. See temp/deepthink/hooks-api-redesign.md §2.1.
+
+export type Query<T> = {
+  readonly data: T;
+  readonly loading: boolean;       // initial fetch in flight, data not yet valid
+  readonly error: Error | null;    // last error; cleared on refetch success
+  readonly stale: boolean;         // have data, background revalidate in flight
+  refetch(): void;                 // stable callback, coalesces if already in flight
+};
+
+export type ChildrenQuery = Query<NodeData[]> & {
+  readonly total: number | null;   // server-reported total; null until first response
+  readonly hasMore: boolean;       // false when total===null; true when data.length < total
+  readonly loadingMore: boolean;   // next page append in flight; mutually exclusive with stale
+  readonly truncated: boolean | null; // null until first response; true if server hit cap
+  loadMore(): void;                // no-op if !hasMore or already loadingMore
+};
+
+export type ChildrenOpts = {
+  limit?: number;                  // page size; absent = DEFAULT_PAGE_SIZE
+  watch?: boolean;                 // subscribe to path updates
+  watchNew?: boolean;              // subscribe to new children appearing
+};
 
 // ── Watch ref-counting ──
 // Multiple components may watch the same path; ref-count to avoid premature unwatch.
@@ -41,20 +70,32 @@ function unrefWatch(map: Map<string, number>, path: string): boolean {
   return false;
 }
 
-// ── usePath: universal reactive hook ──
-// URI mode:   usePath('/path#comp.field')      → derived value
-// Typed mode: usePath('/path', MyClass)        → TypeProxy<T>
+// ── usePath: reactive path read → Query<T> ──
+//
+// URI mode:   usePath('/path#comp.field')      → Query<derived | undefined>
+// Typed mode: usePath('/path', MyClass)        → Query<TypeProxy<T>>
 // Options:    usePath('/path', { once: true })  → no server watch
+//
+// Typed mode is the ONE semantic exception where `data` is not fetched content —
+// it's a façade proxy whose method calls always work (route to execute()) while
+// field reads yield undefined during loading. See plan §2.3.
 
 type PathOpts = { once?: boolean };
 
-export function usePath<T = NodeData>(uri: string | null, opts?: PathOpts): T | undefined;
-export function usePath<T extends object>(path: string, cls: Class<T>, key?: string): TypeProxy<T>;
+export function usePath<T = NodeData>(
+  uri: string | null,
+  opts?: PathOpts,
+): Query<T | undefined>;
+export function usePath<T extends object>(
+  path: string,
+  cls: Class<T>,
+  key?: string,
+): Query<TypeProxy<T>>;
 export function usePath<T extends object>(
   pathOrUri: string | null,
   clsOrOpts?: Class<T> | PathOpts,
   key?: string,
-) {
+): Query<unknown> {
   const isTyped = typeof clsOrOpts === 'function';
   const cls = isTyped ? clsOrOpts as Class<T> : undefined;
   const opts = isTyped ? undefined : clsOrOpts as PathOpts | undefined;
@@ -69,16 +110,39 @@ export function usePath<T extends object>(
   const gen = useSyncExternalStore(cache.subscribeSSEGen, cache.getSSEGen);
 
   const node = useSyncExternalStore(
-    useCallback((cb: () => void) => (path ? cache.subscribePath(path, cb) : () => { }), [path]),
+    useCallback((cb: () => void) => (path ? cache.subscribePath(path, cb) : () => {}), [path]),
     useCallback(() => (path ? cache.get(path) : undefined), [path]),
   );
 
+  const status = useSyncExternalStore(
+    useCallback((cb: () => void) => (path ? cache.subscribePath(path, cb) : () => {}), [path]),
+    useCallback(() => (path ? cache.getPathStatus(path) : undefined), [path]),
+  );
+
+  const error = useSyncExternalStore(
+    useCallback((cb: () => void) => (path ? cache.subscribePathError(path, cb) : () => {}), [path]),
+    useCallback(() => (path ? cache.getPathError(path) : null), [path]),
+  );
+
+  // Fetch effect — always settles the status, even on null response.
   useEffect(() => {
     if (!path) return;
     debugPath(path, 'usePath');
-    trpc.get.query({ path, watch: !opts?.once }).then((n: unknown) => {
-      if (n) cache.put(n as NodeData);
-    });
+    cache.setPathStatus(path, 'loading');
+    trpc.get.query({ path, watch: !opts?.once })
+      .then((n: unknown) => {
+        if (n) {
+          cache.put(n as NodeData);  // put() sets pathStatus='ready'
+        } else {
+          // Atomic evict + flip status + fire subs once — prevents stale data
+          // from coexisting with not_found status.
+          cache.markPathMissing(path);
+        }
+      })
+      .catch((err: unknown) => {
+        cache.setPathError(path, err instanceof Error ? err : new Error(String(err)));
+        cache.setPathStatus(path, 'error');
+      });
   }, [path, opts?.once, gen]);
 
   // Watch cleanup — unwatch on unmount or path change (ref-counted)
@@ -92,10 +156,40 @@ export function usePath<T extends object>(
     };
   }, [path, opts?.once]);
 
+  const refetch = useCallback(() => {
+    if (!path) return;
+    cache.setPathStatus(path, 'loading');
+    trpc.get.query({ path, watch: !opts?.once })
+      .then((n: unknown) => {
+        if (n) cache.put(n as NodeData);
+        else cache.markPathMissing(path);
+      })
+      .catch((err: unknown) => {
+        cache.setPathError(path, err instanceof Error ? err : new Error(String(err)));
+        cache.setPathStatus(path, 'error');
+      });
+  }, [path, opts?.once]);
+
+  // Derived flags — `loading` is status-driven, NOT presence-driven.
+  // A null tRPC response settles to 'not_found' → loading flips to false
+  // with data:undefined, which is the key fix over the old model.
+  const loading = !path || status === undefined || status === 'loading';
+  // Path mode: refetch re-enters 'loading' fully; no background revalidate layer.
+  const stale = false;
+
+  // Typed mode — façade proxy (method calls work regardless of data state)
+  const proxy = useMemo(() => {
+    if (!cls || !path) return undefined;
+    return makeProxy(path, cls, node, key);
+  }, [cls, path, node, key]);
+
   return useMemo(() => {
-    if (cls && path) return makeProxy(path, cls, node, key);
-    return parsed ? deriveURI<T>(node, parsed) : node;
-  }, [node, cls, key, path, parsed?.key, parsed?.field]);
+    if (cls && path) {
+      return { data: proxy, loading, error, stale, refetch };
+    }
+    const derived = parsed ? deriveURI(node, parsed) : node;
+    return { data: derived, loading, error, stale, refetch };
+  }, [cls, path, proxy, parsed, node, loading, error, stale, refetch]);
 }
 
 function debugPath(path: string, hook: string) {
@@ -104,40 +198,90 @@ function debugPath(path: string, hook: string) {
   }
 }
 
-// ── useChildren: reactive children list ──
+// ── useChildren: reactive children list → ChildrenQuery ──
 
-type WatchOpts = { watch?: boolean; watchNew?: boolean; limit?: number };
-
-export function useChildren(parentPath: string, opts?: WatchOpts) {
-  const loaded = useRef<string | null>(null);
+export function useChildren(parentPath: string, opts?: ChildrenOpts): ChildrenQuery {
   const gen = useSyncExternalStore(cache.subscribeSSEGen, cache.getSSEGen);
-  const prevGen = useRef(gen);
 
+  // Data subscription — children set is the primary reactive source
+  const data = useSyncExternalStore(
+    useCallback((cb: () => void) => cache.subscribeChildren(parentPath, cb), [parentPath]),
+    useCallback(() => cache.getChildren(parentPath), [parentPath]),
+  );
+
+  const error = useSyncExternalStore(
+    useCallback((cb: () => void) => cache.subscribeChildrenError(parentPath, cb), [parentPath]),
+    useCallback(() => cache.getChildrenError(parentPath), [parentPath]),
+  );
+
+  const phase = useSyncExternalStore(
+    useCallback((cb: () => void) => cache.subscribeChildren(parentPath, cb), [parentPath]),
+    useCallback(() => cache.getChildrenPhase(parentPath), [parentPath]),
+  );
+
+  const total = useSyncExternalStore(
+    useCallback((cb: () => void) => cache.subscribeChildren(parentPath, cb), [parentPath]),
+    useCallback(() => cache.getChildrenTotal(parentPath), [parentPath]),
+  );
+
+  const truncated = useSyncExternalStore(
+    useCallback((cb: () => void) => cache.subscribeChildren(parentPath, cb), [parentPath]),
+    useCallback(() => cache.getChildrenTruncated(parentPath), [parentPath]),
+  );
+
+  // Subscriber lifecycle — retain on mount, release on unmount. Drives
+  // childPageSize + loadedCount release when the last consumer for this
+  // parent unmounts.
   useEffect(() => {
-    const reconnected = prevGen.current !== gen;
-    if (loaded.current === parentPath && !reconnected) return;
-    loaded.current = parentPath;
-    prevGen.current = gen;
+    cache.retainChildSubscriber(parentPath);
+    return () => cache.releaseChildSubscriber(parentPath);
+  }, [parentPath]);
 
+  // Fetch effect — initial load OR reconnect OR opts change → REPLACE semantics.
+  useEffect(() => {
     debugPath(parentPath, 'useChildren');
 
-    if (!cache.has(parentPath) && parentPath !== '/') {
-      trpc.get.query({ path: parentPath }).then(n => {
-        if (n) cache.put(n as NodeData);
-      });
-    }
+    // First-wins page size lock. Second caller with a different limit gets
+    // the locked value + a dev warn.
+    const effectiveLimit = cache.lockChildPageSize(
+      parentPath,
+      opts?.limit ?? DEFAULT_PAGE_SIZE,
+    );
+
+    // Decide phase: cold (no authoritative collection yet) vs warm
+    // (in-session cached → stale data + background refetch).
+    // CRITICAL: check `hasChildrenCollectionLoaded`, NOT `parentIndex.has`.
+    // The latter conflates "some child cached" with "children list fetched".
+    const hasAuthoritative = cache.hasChildrenCollectionLoaded(parentPath);
+    cache.setChildrenPhase(parentPath, hasAuthoritative ? 'refetch' : 'initial');
+
+    let cancelled = false;
 
     trpc.getChildren
-      .query({ path: parentPath, limit: opts?.limit, watch: opts?.watch, watchNew: opts?.watchNew })
+      .query({
+        path: parentPath,
+        limit: effectiveLimit,
+        watch: opts?.watch,
+        watchNew: opts?.watchNew,
+      })
       .then((result: any) => {
-        if (result.truncated) console.warn(`[tree] Children of ${parentPath} truncated — results may be incomplete`);
-        cache.putMany(result.items as NodeData[], parentPath);
+        if (cancelled) return;
+        cache.replaceChildren(parentPath, result.items as NodeData[]);
+        cache.setChildrenTotal(parentPath, result.total);
+        cache.setChildrenTruncated(parentPath, !!result.truncated);
+        cache.setChildrenError(parentPath, null);
+        cache.setChildrenPhase(parentPath, 'ready');
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        cache.setChildrenError(parentPath, err instanceof Error ? err : new Error(String(err)));
+        cache.setChildrenPhase(parentPath, 'error');
       });
+
+    return () => { cancelled = true; };
   }, [parentPath, gen, opts?.limit, opts?.watch, opts?.watchNew]);
 
   // Watch cleanup — unwatchChildren on unmount or path change (ref-counted)
-  // Separate effect: the data-fetching effect above has an early-return guard
-  // that would prevent cleanup from being returned consistently.
   useEffect(() => {
     if (!(opts?.watch || opts?.watchNew)) return;
     refWatch(childrenWatchRefs, parentPath);
@@ -148,22 +292,76 @@ export function useChildren(parentPath: string, opts?: WatchOpts) {
     };
   }, [parentPath, opts?.watch, opts?.watchNew]);
 
-  return useSyncExternalStore(
-    useCallback((cb: () => void) => cache.subscribeChildren(parentPath, cb), [parentPath]),
-    useCallback(() => cache.getChildren(parentPath), [parentPath]),
-  );
-}
+  // Derived flags — each state derives from exactly one source.
+  const loading = phase === 'idle' || phase === 'initial';
+  const stale = phase === 'refetch';
+  const loadingMore = phase === 'append';
+  const hasMore = total !== null && data.length < total;
 
-// ── useChildrenLoaded: reactive "first fetch completed?" flag ──
-// useChildren returns [] in two indistinguishable states: (1) cache empty, tRPC in
-// flight, (2) fetch completed, zero children. Consumers that must gate initial
-// rendering on the first real response use this hook alongside useChildren.
+  const loadMore = useCallback(() => {
+    if (!hasMore || loadingMore) return;
+    const pageSize = cache.getChildPageSize(parentPath) ?? DEFAULT_PAGE_SIZE;
+    const offset = cache.getLoadedCount(parentPath);
+    cache.setChildrenPhase(parentPath, 'append');
+    trpc.getChildren
+      .query({
+        path: parentPath,
+        limit: pageSize,
+        offset,
+      })
+      .then((result: any) => {
+        cache.appendChildren(parentPath, result.items as NodeData[]);
+        cache.setChildrenTotal(parentPath, result.total);
+        cache.setChildrenPhase(parentPath, 'ready');
+      })
+      .catch((err: unknown) => {
+        cache.setChildrenError(parentPath, err instanceof Error ? err : new Error(String(err)));
+        cache.setChildrenPhase(parentPath, 'error');
+      });
+  }, [parentPath, hasMore, loadingMore]);
 
-export function useChildrenLoaded(parentPath: string): boolean {
-  return useSyncExternalStore(
-    useCallback((cb: () => void) => cache.subscribeChildren(parentPath, cb), [parentPath]),
-    useCallback(() => cache.hasChildrenLoaded(parentPath), [parentPath]),
-  );
+  const refetch = useCallback(() => {
+    // Reload the CURRENTLY LOADED WINDOW in one call — preserves scroll position.
+    // If user scrolled 60 items via loadMore, refetch issues `limit:60,offset:0`
+    // so all 60 rows get replaced.
+    const windowSize = cache.getLoadedCount(parentPath)
+      || cache.getChildPageSize(parentPath)
+      || DEFAULT_PAGE_SIZE;
+    cache.setChildrenPhase(parentPath, 'refetch');
+    trpc.getChildren
+      .query({
+        path: parentPath,
+        limit: windowSize,
+        offset: 0,
+        watch: opts?.watch,
+        watchNew: opts?.watchNew,
+      })
+      .then((result: any) => {
+        // replaceChildren clamps loadedCount to result.items.length
+        cache.replaceChildren(parentPath, result.items as NodeData[]);
+        cache.setChildrenTotal(parentPath, result.total);
+        cache.setChildrenTruncated(parentPath, !!result.truncated);
+        cache.setChildrenError(parentPath, null);
+        cache.setChildrenPhase(parentPath, 'ready');
+      })
+      .catch((err: unknown) => {
+        cache.setChildrenError(parentPath, err instanceof Error ? err : new Error(String(err)));
+        cache.setChildrenPhase(parentPath, 'error');
+      });
+  }, [parentPath, opts?.watch, opts?.watchNew]);
+
+  return useMemo(() => ({
+    data,
+    total,
+    hasMore,
+    loading,
+    loadingMore,
+    error,
+    stale,
+    truncated,
+    refetch,
+    loadMore,
+  }), [data, total, hasMore, loading, loadingMore, error, stale, truncated, refetch, loadMore]);
 }
 
 // ── set: optimistic update + server persist ──
@@ -266,6 +464,8 @@ export const execute = (
 };
 
 // ── useCanWrite: ACL-based write permission check ──
+// Returns plain boolean — NOT wrapped in Query<T>. See plan §2.4:
+// derived ACL bit, false-until-loaded is the safe conservative default.
 
 const W = 2;
 const permCache = new Map<string, { perm: number; ts: number }>();

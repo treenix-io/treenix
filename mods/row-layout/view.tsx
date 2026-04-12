@@ -53,7 +53,7 @@ const RowColLayoutView: View<RowColLayout> = ({ value, onChange, ctx }) => {
     compMap.set(toLayoutRef(name), comp)
   }
 
-  const children = useChildren(node.$path)
+  const { data: children } = useChildren(node.$path)
   const childMap = new Map<string, NodeData>()
   for (const child of children) {
     const ref = childToRef(child.$path, node.$path)

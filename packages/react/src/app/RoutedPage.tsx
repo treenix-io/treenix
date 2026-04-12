@@ -30,7 +30,7 @@ export function RoutedPage({ path }: { path: string }) {
   }, [routePath]);
 
   // Reactively subscribe to target node via cache
-  const targetNode = usePath(targetPath, { once: true });
+  const { data: targetNode, loading: targetLoading } = usePath(targetPath, { once: true });
 
   if (notFound) {
     return (
@@ -41,7 +41,7 @@ export function RoutedPage({ path }: { path: string }) {
     );
   }
 
-  if (!targetNode) {
+  if (targetLoading || !targetNode) {
     return (
       <div className="flex flex-col items-center justify-center h-screen gap-2 text-muted-foreground">
         <div className="text-sm">Loading…</div>

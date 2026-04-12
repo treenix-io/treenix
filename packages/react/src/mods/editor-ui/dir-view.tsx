@@ -9,7 +9,7 @@ const STATUS_COLORS: Record<string, [string, string]> = {
 };
 
 function FolderView({ value }: { value: NodeData }) {
-  const children = useChildren(value.$path);
+  const { data: children } = useChildren(value.$path);
   const meta = value.metadata as
     | { $type: string; title?: string; description?: string }
     | undefined;

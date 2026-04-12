@@ -27,7 +27,7 @@ const ctx = {
 function fetchChildren(path: string): void {
   trpc.getChildren
     .query({ path, watch: true, watchNew: true })
-    .then((r: any) => cache.putMany(r.items as NodeData[], path));
+    .then((r: any) => cache.replaceChildren(path, r.items as NodeData[]));
 }
 
 /** Ensure source data is in cache by fetching from server */

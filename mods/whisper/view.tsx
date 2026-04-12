@@ -4,8 +4,8 @@ import { type NodeData, register } from '@treenity/core';
 import { set, useChildren, usePath } from '@treenity/react';
 
 function ChannelView({ value }: { value: NodeData }) {
-  const children = useChildren(value.$path, { watchNew: true });
-  const node = usePath(value.$path);
+  const { data: children } = useChildren(value.$path, { watchNew: true });
+  const { data: node } = usePath(value.$path);
   const checklist = node?.checklist as { $type: string; checked?: string[] } | undefined;
 
   const checked = new Set<string>(checklist?.checked ?? []);

@@ -110,7 +110,7 @@ function AppItem({
   onContextChange?: (ctx: string) => void;
 }) {
   const targetPath = isRef(refNode) ? refNode.$ref : null;
-  const target = usePath(targetPath) as NodeData | undefined;
+  const { data: target } = usePath(targetPath);
   const navigate = useNavigate();
 
   if (!target) {
@@ -185,8 +185,8 @@ function DropZone({ visible }: { visible: boolean }) {
 // ── Main Launcher View ──
 
 const LauncherView: View<NodeData> = ({ value }) => {
-  const launcher = usePath(value.$path, Launcher);
-  const children = useChildren(value.$path, { watch: true, watchNew: true });
+  const { data: launcher } = usePath(value.$path, Launcher);
+  const { data: children } = useChildren(value.$path, { watch: true, watchNew: true });
 
   const [editing, setEditing] = useState(false);
   const [dragOver, setDragOver] = useState(false);

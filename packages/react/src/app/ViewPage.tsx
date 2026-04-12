@@ -5,12 +5,12 @@ import { usePath } from '#hooks';
 import { useAutoSave } from '#tree/auto-save';
 
 export function ViewPage({ path, editorLink }: { path: string; editorLink?: boolean }) {
-  const node = usePath(path);
+  const { data: node, loading } = usePath(path);
   const { onChange } = useAutoSave(path);
 
   const name = path === '/' ? '/' : path.slice(path.lastIndexOf('/') + 1);
 
-  if (!node) {
+  if (loading || !node) {
     return (
       <div className="flex flex-col items-center justify-center h-screen gap-4 text-[--text-3]">
         <div className="text-4xl">404</div>

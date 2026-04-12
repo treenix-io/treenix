@@ -218,9 +218,9 @@ function renderAction(node: NodeData, index: number, isFirstBubble: boolean): Re
 // ── Main component ──
 
 export function PageChatPreview({ value }: { value: NodeData }) {
-  const node = usePath(value.$path);
+  const { data: node } = usePath(value.$path);
   const actionsPath = value.$path + '/_actions';
-  const children = useChildren(actionsPath, { watch: true, watchNew: true });
+  const { data: children } = useChildren(actionsPath, { watch: true, watchNew: true });
 
   const positions: string[] = (node?.positions as string[]) ?? [];
   const tracked = new Set(positions);

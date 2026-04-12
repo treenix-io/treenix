@@ -6,7 +6,7 @@ import { ApiTokenManager } from './types';
 
 const ApiTokensView: View<ApiTokenManager> = ({ value, ctx }) => {
   const path = ctx!.node.$path;
-  const children = useChildren(path) ?? [];
+  const { data: children } = useChildren(path);
   const actions = useActions(value);
   const [name, setName] = useState('');
   const [copied, setCopied] = useState<string | null>(null);

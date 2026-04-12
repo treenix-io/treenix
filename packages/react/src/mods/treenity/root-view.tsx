@@ -4,7 +4,9 @@ import { usePath } from '#hooks';
 import type { View } from '#context';
 
 const RootView: View<{ $type: 'root' }> = () => {
-  const page = usePath('/home');
+  const { data: page, loading } = usePath('/home');
+
+  if (loading) return null;
 
   if (!page) {
     return (

@@ -57,7 +57,7 @@ function StatusDot({ status }: { status: string }) {
 // ── ActiveRun (renders a single run node by path — hook-safe) ──
 
 function ActiveRun({ runPath }: { runPath: string }) {
-  const runNode = usePath(runPath);
+  const { data: runNode } = usePath(runPath);
   if (!runNode) return null;
   return <Render value={runNode} />;
 }
@@ -66,8 +66,8 @@ function ActiveRun({ runPath }: { runPath: string }) {
 
 const PoolView: View<AiPool> = ({ value, ctx }) => {
   const path = ctx!.node.$path;
-  const agents = useChildren(path);
-  const approvals = useChildren('/guardian/approvals');
+  const { data: agents } = useChildren(path);
+  const { data: approvals } = useChildren('/guardian/approvals');
 
   const agentNodes = (agents ?? []).filter(n => n.$type === 'ai.agent');
   const approvalNodes = (approvals ?? []).filter(n => n.$type === 'ai.approval');
@@ -199,8 +199,8 @@ const AgentView: View<AiAgent> = ({ value, ctx }) => {
   const path = ctx!.node.$path;
   const status = value.status || 'offline';
   const s = statusStyle(status);
-  const runNode = usePath(value.currentRun || null);
-  const runs = useChildren(path + '/runs');
+  const { data: runNode } = usePath(value.currentRun || null);
+  const { data: runs } = useChildren(path + '/runs');
 
   const sortedRuns = useMemo(() => {
     if (!runs?.length) return [];
@@ -302,7 +302,7 @@ function ActionBtn({ label, color, onClick }: { label: string; color: string; on
 // ── ApprovalsView (ai.approvals — container) ──
 
 const ApprovalsView: View<AiApprovals> = ({ value, ctx }) => {
-  const children = useChildren(ctx!.node.$path, { watch: true, watchNew: true });
+  const { data: children } = useChildren(ctx!.node.$path, { watch: true, watchNew: true });
   const pending = children.filter(n => n.$type === 'ai.approval' && n.status === 'pending');
   const resolved = children.filter(n => n.$type === 'ai.approval' && n.status !== 'pending');
 

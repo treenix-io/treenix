@@ -227,7 +227,7 @@ export function App() {
 
   const loadChildren = useCallback(async (path: string) => {
     const { items: children } = await tree.getChildren(path, { watch: true, watchNew: true });
-    cache.putMany(children, path);
+    cache.replaceChildren(path, children);
     setLoaded((prev) => new Set(prev).add(path));
   }, []);
 

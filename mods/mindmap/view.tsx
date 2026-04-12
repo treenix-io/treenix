@@ -47,7 +47,7 @@ const MindMapView: View<MindMapConfig> = ({ value, ctx }) => {
   const zoomRef = useRef<ZoomBehavior<SVGSVGElement, unknown> | null>(null);
   const [dims, setDims] = useState({ w: 800, h: 600 });
 
-  const rootChildren = useChildren(rootPath, { watch: true, watchNew: true });
+  const { data: rootChildren } = useChildren(rootPath, { watch: true, watchNew: true });
 
   const left = useMemo(() => rootChildren.filter((_, i) => i % 2 === 1), [rootChildren]);
   const right = useMemo(() => rootChildren.filter((_, i) => i % 2 === 0), [rootChildren]);

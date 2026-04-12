@@ -196,7 +196,7 @@ export function PlainFieldsView({
 }
 
 function DefaultNodeView({ value }: { value: NodeData }) {
-  const children = useChildren(value.$path);
+  const { data: children } = useChildren(value.$path);
   const plain = getPlainFields(value);
   const components = getComponents(value);
   const hasInfo = Object.keys(plain).length > 0 || components.length > 0;

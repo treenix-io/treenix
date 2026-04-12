@@ -36,7 +36,7 @@ function RefListItem({ value }: { value: NodeData }) {
 
 function RefDisplay({ target, onSelect }: { target: string; onSelect?: (p: string) => void }) {
   const [resolved, setResolved] = useState(false);
-  const targetNode = usePath(resolved ? target : null);
+  const { data: targetNode } = usePath(resolved ? target : null);
 
   return (
     <div className="space-y-3">

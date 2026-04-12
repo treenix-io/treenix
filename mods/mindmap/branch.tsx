@@ -193,7 +193,7 @@ type ChildrenProps = {
 
 function BranchChildren({ path, side, color, depth, strokeW }: ChildrenProps) {
   const { editingAt, onCommitAdd, onCancelAdd } = useContext(MindMapCtx);
-  const children = useChildren(path, { watch: true, watchNew: true });
+  const { data: children } = useChildren(path, { watch: true, watchNew: true });
 
   const isLeft = side === 'left';
   const dx = isLeft ? -LEVEL_W : LEVEL_W;

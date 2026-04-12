@@ -146,9 +146,9 @@ function SortableAction({
 
 export function PageLayoutView({ value }: { value: NodeData }) {
   const navigate = useNavigate();
-  const node = usePath(value.$path);
+  const { data: node } = usePath(value.$path);
   const actionsPath = value.$path + '/_actions';
-  const children = useChildren(actionsPath, { watch: true, watchNew: true });
+  const { data: children } = useChildren(actionsPath, { watch: true, watchNew: true });
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
   // Read command & positions from node top-level (getComponent returns node itself)

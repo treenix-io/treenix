@@ -9,7 +9,7 @@ import { useEffect, useState, useSyncExternalStore } from 'react';
 export function TreenityBlockView({ node, updateAttributes, deleteNode, editor, getPos }: any) {
   const ref = node.attrs.ref as string | null;
   const type = node.attrs.type as string | null;
-  const refNode = usePath(ref);
+  const { data: refNode } = usePath(ref);
   const editable = editor?.isEditable;
   const save = useAutoSave(ref ?? '');
 

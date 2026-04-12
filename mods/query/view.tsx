@@ -182,7 +182,7 @@ const QueryViewComponent: View<QueryView> = ({ value, onChange }) => {
     else setLocalMode(m);
   };
 
-  const children = useChildren(source, { limit: 50 }) ?? [];
+  const { data: children } = useChildren(source, { limit: 50 });
   const filtered = useFiltered(children, typeFilter, filters);
 
   return (
@@ -223,7 +223,7 @@ const QueryEditView: View<QueryView> = ({ value, onChange }) => {
   const mode = value.mode || 'list';
   const groupBy = value.groupBy || '';
 
-  const children = useChildren(source, { limit: 50 }) ?? [];
+  const { data: children } = useChildren(source, { limit: 50 });
   const fields = useMemo(() => collectFields(children), [children]);
   const childTypes = useChildTypes(children);
   const filtered = useFiltered(children, typeFilter, filters);

@@ -89,7 +89,7 @@ function TableView({ value, ctx }: { value: ComponentData; ctx?: ViewCtx | null 
   }, [node, value]);
 
   const [state, update] = useDebouncedSync<UITable>(node, componentKey, TABLE_DEFAULTS);
-  const children = useChildren(node.$path, { watch: true, limit: 1000 });
+  const { data: children } = useChildren(node.$path, { watch: true, limit: 1000 });
 
   // Collect unique types from children (resolved through field)
   const { typeMap, types } = useMemo(() => {

@@ -64,7 +64,7 @@ function resolveDisplayType(child: NodeData, field: string): string {
 
 function TableEditView({ value, onChange }: { value: ComponentData; onChange?: (next: Record<string, unknown>) => void }) {
   const node = useCurrentNode();
-  const children = useChildren(node.$path, { watch: true, limit: 1000 });
+  const { data: children } = useChildren(node.$path, { watch: true, limit: 1000 });
 
   const state = value as unknown as UITable;
   const emit = (patch: Partial<UITable>) => {

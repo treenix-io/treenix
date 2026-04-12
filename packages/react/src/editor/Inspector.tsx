@@ -27,7 +27,7 @@ type Props = {
 };
 
 export function Inspector({ path, currentUserId, onDelete, onAddComponent, onSelect, onSetRoot, toast }: Props) {
-  const node = usePath(path);
+  const { data: node } = usePath(path);
   const save = useAutoSave(path ?? '');
   const [propsOpen, setPropsOpen] = useState(false);
   const [context, setContext] = useState('react:layout');

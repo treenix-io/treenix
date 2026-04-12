@@ -18,7 +18,7 @@ function Field({ label, value }: { label: string; value: string }) {
 
 export function BotView({ value }: { value: NodeData }) {
   const bot = value as NodeData & BotConfig;
-  const pages = useChildren(`${value.$path}/pages`, { watch: true, watchNew: true });
+  const { data: pages } = useChildren(`${value.$path}/pages`, { watch: true, watchNew: true });
   const isActive = !bot.maintenance;
 
   return (

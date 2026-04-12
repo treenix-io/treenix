@@ -4,7 +4,7 @@ import { Idea, IdeasBoard } from './types';
 // ── Board view — renders children in list context ──
 
 view(IdeasBoard, ({ value, ctx }) => {
-  const children = useChildren(ctx.path);
+  const { data: children } = useChildren(ctx.path);
 
   return (
     <div className="p-4 space-y-3">
