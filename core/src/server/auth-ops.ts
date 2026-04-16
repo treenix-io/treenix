@@ -67,13 +67,6 @@ export async function logoutUser(store: Tree, token: string) {
   return { ok: true };
 }
 
-export async function anonLogin(store: Tree) {
-  checkRate('anonLogin', 30);
-  const userId = `anon:${randomBytes(16).toString('hex')}`;
-  const token = await createSession(store, userId);
-  return { token, userId };
-}
-
 export async function devLogin(store: Tree) {
   if (!process.env.VITE_DEV_LOGIN) throw new OpError('FORBIDDEN', 'Dev-only');
   const userId = 'dev';

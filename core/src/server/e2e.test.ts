@@ -245,12 +245,6 @@ describe('e2e: tRPC over HTTP', () => {
       assert.equal(me, null);
     });
 
-    it('anonLogin returns anon user', async () => {
-      const client = createClient(url);
-      const res = await client.anonLogin.mutate();
-      assert.ok(res.userId.startsWith('anon:'));
-      assert.ok(res.token);
-    });
   });
 
   // ── Error codes over HTTP ──

@@ -44,16 +44,22 @@ export function App() {
   const initAuth = useCallback(async () => {
     const token = getToken();
     if (!token) {
-      try {
-        const login = import.meta.env.VITE_DEV_LOGIN ? trpc.devLogin : trpc.anonLogin;
-        const { token: anonToken, userId } = await login.mutate();
-        setToken(anonToken);
-        setAuthed(userId);
-        setAuthChecked(true);
-      } catch {
-        toast.error('Server unavailable, retrying…');
-        retryTimer.current = setTimeout(initAuth, 3000);
+      // Dev mode: auto-login as dev admin. Otherwise no session — user is public
+      // until explicit login. Anonymous auto-login removed (was a fake session).
+      if (import.meta.env.VITE_DEV_LOGIN) {
+        try {
+          const { token: devToken, userId } = await trpc.devLogin.mutate();
+          setToken(devToken);
+          setAuthed(userId);
+          setAuthChecked(true);
+        } catch {
+          toast.error('Server unavailable, retrying…');
+          retryTimer.current = setTimeout(initAuth, 3000);
+        }
+        return;
       }
+      setAuthed(null);
+      setAuthChecked(true);
       return;
     }
     try {
@@ -410,29 +416,21 @@ export function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showLoginModal, setShowLoginModal] = useState(false);
 
-  // Re-auth as anon + show login modal when session expires mid-use
+  // Clear session + show login modal when session expires mid-use
   useEffect(() => {
-    const handler = async () => {
+    const handler = () => {
       if (showLoginModal) return;
       clearToken();
-      try {
-        const { token, userId } = await trpc.anonLogin.mutate();
-        setToken(token);
-        setAuthed(userId);
-        setShowLoginModal(true);
-      } catch {
-        toast.error('Server unavailable');
-      }
+      setAuthed(null);
+      setShowLoginModal(true);
     };
     window.addEventListener(AUTH_EXPIRED_EVENT, handler);
     return () => window.removeEventListener(AUTH_EXPIRED_EVENT, handler);
   }, [showLoginModal]);
 
-  const handleLogout = async () => {
+  const handleLogout = () => {
     clearToken();
-    const { token, userId } = await trpc.anonLogin.mutate();
-    setToken(token);
-    setAuthed(userId);
+    setAuthed(null);
     setShowLoginModal(true);
   };
 

@@ -8,7 +8,8 @@ import { createTreeP } from '#protocol/treep';
 import type { Tree } from '#tree';
 import { initTRPC, TRPCError } from '@trpc/server';
 import { observable } from '@trpc/server/observable';
-// TS2742: declaration emit needs access to internal trpc types
+// Pin @trpc/server internal types to a public subpath so declaration emit stays portable (TS2742).
+import type {} from '@trpc/server/unstable-core-do-not-import';
 import { z } from 'zod';
 import {
   type ActionCtx,
@@ -18,7 +19,7 @@ import {
   setComponent as setComponentOp,
 } from './actions';
 import { buildClaims, type Session, withAcl } from './auth';
-import { agentConnect, anonLogin, devLogin, loginUser, logoutUser, registerUser } from './auth-ops';
+import { agentConnect, devLogin, loginUser, logoutUser, registerUser } from './auth-ops';
 import { OpError } from '#errors';
 import { deployPrefab as deployPrefabOp } from './prefab';
 import { type CdcRegistry, type NodeEvent } from './sub';
@@ -252,8 +253,6 @@ export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: 
           for (const p of input.paths) cdc?.unwatchQuery(p, ctx.session.userId);
         }
       }),
-
-    anonLogin: base.mutation(() => anonLogin(baseStore)),
 
     devLogin: base.mutation(() => devLogin(baseStore)),
 

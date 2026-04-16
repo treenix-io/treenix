@@ -50,7 +50,6 @@ applyTemplate({ templatePath, targetPath })      // → { applied, blocks }
 ```ts
 register({ userId, password })   // → { token, userId }
 login({ userId, password })      // → { token, userId }
-anonLogin()                      // → { token, userId }
 me()                             // → { userId } | null
 ```
 

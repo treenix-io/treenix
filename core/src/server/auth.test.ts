@@ -504,6 +504,27 @@ describe('getChildren truncation', () => {
   });
 });
 
+describe('buildClaims — groups from user record', () => {
+  it('includes authenticated + u:<id> + user groups list', async () => {
+    await tree.set({
+      ...createNode('/auth/users/carol', 'user'),
+      $owner: 'carol',
+      groups: { $type: 'groups', list: ['editors', 'reviewers'] },
+    });
+    const claims = await buildClaims(tree, 'carol');
+    assert.ok(claims.includes('u:carol'), 'u:carol present');
+    assert.ok(claims.includes('authenticated'), 'authenticated present');
+    assert.ok(claims.includes('editors'), 'editors group present');
+    assert.ok(claims.includes('reviewers'), 'reviewers group present');
+  });
+
+  it('anon:* users get public group, never authenticated', async () => {
+    const claims = await buildClaims(tree, 'anon:abc123');
+    assert.ok(claims.includes('public'));
+    assert.ok(!claims.includes('authenticated'));
+  });
+});
+
 describe('withAcl denial — typed OpError', () => {
   it('set without W throws OpError with code FORBIDDEN', async () => {
     const s = withAcl(tree, 'bob', ['u:bob', 'authenticated']);

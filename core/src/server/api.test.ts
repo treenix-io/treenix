@@ -340,11 +340,6 @@ describe('tRPC API integration', () => {
       assert.equal(await caller.me(), null);
     });
 
-    it('anonLogin', async () => {
-      const res = await caller.anonLogin();
-      assert.ok(res.userId.startsWith('anon:'));
-      assert.ok(res.token);
-    });
   });
 
   // ── ACL ──
