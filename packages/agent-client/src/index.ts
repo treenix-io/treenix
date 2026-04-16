@@ -39,6 +39,7 @@ function scopeClient(raw: TreenityClient, base: string): TreenityClient {
     execute: (path, action, data, o) => raw.execute(scopePath(base, path), action, data, o),
     watch: raw.watch,
     watchPath: (path, onEvent) => raw.watchPath(scopePath(base, path), onEvent),
+    destroy: () => raw.destroy(),
   };
 }
 
