@@ -5,6 +5,7 @@
 
 import type { NodeData } from '#core';
 import { dirname as treeDirname, isInsideRoot } from '#core/path';
+import { OpError } from '#errors';
 import { mkdir, readdir, readFile, realpath, rmdir, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import sift from 'sift';
@@ -210,10 +211,10 @@ export async function createFsTree(rootDir: string): Promise<Tree> {
         if (node.$rev != null) {
           const existing = await readNode(path);
           if (!existing) {
-            throw new Error(`OptimisticConcurrencyError: node ${path} does not exist but $rev was provided`);
+            throw new OpError('CONFLICT', `OptimisticConcurrencyError: node ${path} does not exist but $rev was provided`);
           }
           if (existing.$rev !== node.$rev) {
-            throw new Error(`OptimisticConcurrencyError: node ${path} modified by another transaction. Expected $rev ${existing.$rev}, got ${node.$rev}`);
+            throw new OpError('CONFLICT', `OptimisticConcurrencyError: node ${path} modified by another transaction. Expected $rev ${existing.$rev}, got ${node.$rev}`);
           }
         }
 

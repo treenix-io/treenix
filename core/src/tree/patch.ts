@@ -3,6 +3,7 @@
 // Maps 1:1 to RFC 6902 JSON Patch.
 
 import type { NodeData } from '#core';
+import { OpError } from '#errors';
 
 // ── Types ──
 
@@ -131,7 +132,7 @@ export async function defaultPatch(
   ctx?: unknown,
 ): Promise<void> {
   const node = await get(path, ctx);
-  if (!node) throw new Error(`Node not found: ${path}`);
+  if (!node) throw new OpError('NOT_FOUND', `Node not found: ${path}`);
   const copy = structuredClone(node);
   applyOps(copy, ops);
   await set(copy, ctx);
@@ -146,7 +147,7 @@ export async function patchViaSet(
   ctx?: unknown,
 ): Promise<void> {
   const node = await self.get(path, ctx);
-  if (!node) throw new Error(`Node not found: ${path}`);
+  if (!node) throw new OpError('NOT_FOUND', `Node not found: ${path}`);
   const copy = structuredClone(node);
   applyOps(copy, ops);
   await self.set(copy, ctx);

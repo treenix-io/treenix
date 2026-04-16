@@ -86,9 +86,9 @@ register(MyType, 'react', MyView);
 ## Ошибки
 
 ```ts
-import { OpError } from '#server/errors';
+import { OpError } from '#errors';
 
-// Коды: 'NOT_FOUND' | 'BAD_REQUEST' | 'CONFLICT' | 'FORBIDDEN'
+// Коды: 'NOT_FOUND' | 'BAD_REQUEST' | 'CONFLICT' | 'FORBIDDEN' | 'UNAUTHORIZED' | 'TOO_MANY_REQUESTS'
 throw new OpError('NOT_FOUND', 'Node not found: /path');
 throw new OpError('CONFLICT', 'Stale revision');
 ```

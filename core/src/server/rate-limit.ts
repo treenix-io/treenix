@@ -1,7 +1,7 @@
 // In-memory rate limiter (per key, sliding window).
 // Transport-agnostic — throws OpError, not TRPCError.
 
-import { OpError } from './errors';
+import { OpError } from '#errors';
 
 const buckets = new Map<string, { count: number; resetAt: number }>();
 const WINDOW_MS = 60_000;

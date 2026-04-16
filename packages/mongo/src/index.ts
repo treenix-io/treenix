@@ -2,6 +2,7 @@
 // Drop-in replacement for MemoryStore.
 
 import { type NodeData, toStorageKeys, fromStorageKeys } from '@treenity/core';
+import { OpError } from '@treenity/core/errors';
 import { type Collection, type Db, MongoClient } from 'mongodb';
 import { type Tree } from '@treenity/core/tree';
 import { defaultPatch } from '@treenity/core/tree/patch';
@@ -90,13 +91,13 @@ export async function createMongoTree(
          try {
            await col.insertOne(doc);
          } catch(e: any) {
-           if (e.code === 11000) throw new Error(`OptimisticConcurrencyError: node ${node.$path} already exists ($rev not set — did you mean to update?)`);
+           if (e.code === 11000) throw new OpError('CONFLICT', `OptimisticConcurrencyError: node ${node.$path} already exists ($rev not set — did you mean to update?)`);
            throw e;
          }
       } else {
          const result = await col.replaceOne({ _path: doc._path, _rev: prevRev }, doc);
          if (result.matchedCount === 0) {
-           throw new Error(`OptimisticConcurrencyError: node ${node.$path} modified by another transaction`);
+           throw new OpError('CONFLICT', `OptimisticConcurrencyError: node ${node.$path} modified by another transaction`);
          }
       }
       node.$rev = doc._rev as number;

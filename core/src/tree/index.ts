@@ -3,6 +3,7 @@
 // Depends only on core types.
 
 import { isRef, type NodeData, type Ref, toStorageKeys } from '#core';
+import { OpError } from '#errors';
 import sift from 'sift';
 import { applyOps, defaultPatch, type PatchOp } from './patch';
 
@@ -80,7 +81,7 @@ export function createFilterTree(
     },
     async patch(path, ops, ctx) {
       const node = await upper.get(path, ctx) ?? await lower.get(path, ctx);
-      if (!node) throw new Error(`Node not found: ${path}`);
+      if (!node) throw new OpError('NOT_FOUND', `Node not found: ${path}`);
       const wasUpper = toUpper(node);
 
       // Apply ops to a copy to check if routing changes
@@ -202,7 +203,7 @@ export function createMemoryTree(): Tree {
         // OCC: caller knows about rev — must match stored
         const prevRev = treeNode.data?.$rev;
         if (node.$rev !== prevRev) {
-          throw new Error(`OptimisticConcurrencyError: node ${node.$path} modified by another transaction. Expected $rev ${prevRev}, got ${node.$rev}`);
+          throw new OpError('CONFLICT', `OptimisticConcurrencyError: node ${node.$path} modified by another transaction. Expected $rev ${prevRev}, got ${node.$rev}`);
         }
       }
 
@@ -219,7 +220,7 @@ export function createMemoryTree(): Tree {
 
     async patch(path, ops, _ctx) {
       const treeNode = navigate(path);
-      if (!treeNode?.data) throw new Error(`Node not found: ${path}`);
+      if (!treeNode?.data) throw new OpError('NOT_FOUND', `Node not found: ${path}`);
       const copy = structuredClone(treeNode.data);
       applyOps(copy, ops);
       copy.$rev = (copy.$rev ?? 0) + 1;

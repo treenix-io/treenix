@@ -6,7 +6,7 @@ import type { Tree } from '#tree';
 import { randomBytes } from 'node:crypto';
 import { AGENT_SESSION_TTL, hashAgentKey, timingSafeCompare } from './agent';
 import { createSession, DUMMY_HASH, hashPassword, revokeSession, verifyPassword } from './auth';
-import { OpError } from './errors';
+import { OpError } from '#errors';
 import { checkRate } from './rate-limit';
 
 function assertUserId(userId: string): void {

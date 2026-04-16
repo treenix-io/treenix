@@ -1,6 +1,7 @@
 import { createNode } from '#core';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { OpError } from '#errors';
 import { createMemoryTree, createOverlayTree } from './index';
 
 describe('MemoryStore', () => {
@@ -197,5 +198,27 @@ describe('OverlayStore', () => {
     const tree = createOverlayTree(upper, lower);
     assert.equal(await tree.remove('/x'), true);
     assert.equal(await tree.remove('/y'), false);
+  });
+});
+
+describe('MemoryStore OCC — typed OpError', () => {
+  it('set with stale $rev throws OpError with code CONFLICT', async () => {
+    const tree = createMemoryTree();
+    await tree.set(createNode('/n', 'doc', { title: 'a' }));
+    const stored = (await tree.get('/n'))!;
+    assert.ok(stored.$rev !== undefined, 'node should have $rev after set');
+    await tree.set({ ...stored, title: 'b' }); // advances rev
+    await assert.rejects(
+      () => tree.set({ ...stored, title: 'c' }), // stale rev
+      (e: unknown) => e instanceof OpError && e.code === 'CONFLICT',
+    );
+  });
+
+  it('patch on missing node throws OpError with code NOT_FOUND', async () => {
+    const tree = createMemoryTree();
+    await assert.rejects(
+      () => tree.patch('/nope', [['r', 'x', 1]]),
+      (e: unknown) => e instanceof OpError && e.code === 'NOT_FOUND',
+    );
   });
 });

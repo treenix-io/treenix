@@ -12,7 +12,7 @@ import { type TypeSchema } from '#schema/types';
 import { type PatchOp, type Tree } from '#tree';
 import { createDraft, enablePatches, finishDraft, type Patch } from 'immer';
 import { createPathLock } from '#util/path-lock';
-import { OpError } from './errors';
+import { OpError } from '#errors';
 
 function validateActionArgs(type: string, action: string, data: unknown): void {
   const schemaFn = resolve(type, 'schema');

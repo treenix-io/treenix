@@ -14,6 +14,7 @@ import {
   stripComponents,
   withAcl,
 } from './auth';
+import { OpError } from '#errors';
 
 let tree: Tree;
 
@@ -500,5 +501,31 @@ describe('getChildren truncation', () => {
     const result = await s.getChildren('/small');
     assert.equal(result.truncated, undefined);
     assert.equal(result.items.length, 2);
+  });
+});
+
+describe('withAcl denial — typed OpError', () => {
+  it('set without W throws OpError with code FORBIDDEN', async () => {
+    const s = withAcl(tree, 'bob', ['u:bob', 'authenticated']);
+    await assert.rejects(
+      () => s.set(createNode('/users/alice/page', 'page', { title: 'hijacked' })),
+      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+    );
+  });
+
+  it('remove without W throws OpError with code FORBIDDEN', async () => {
+    const s = withAcl(tree, 'bob', ['u:bob', 'authenticated']);
+    await assert.rejects(
+      () => s.remove('/users/alice/page'),
+      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+    );
+  });
+
+  it('patch without W throws OpError with code FORBIDDEN', async () => {
+    const s = withAcl(tree, 'bob', ['u:bob', 'authenticated']);
+    await assert.rejects(
+      () => s.patch('/users/alice/page', [['r', 'title', 'hijacked']]),
+      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+    );
   });
 });

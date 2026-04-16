@@ -7,6 +7,7 @@ import { invokeClaude } from '#metatron/claude';
 import { type Class, type ComponentData, createNode, getComponent, type NodeData, register } from '@treenity/core';
 import { setComponent } from '@treenity/core/comp';
 import type { ServiceCtx } from '@treenity/core/contexts/service';
+import { OpError } from '@treenity/core/errors';
 import { createLogger } from '@treenity/core/log';
 import type { ActionCtx } from '@treenity/core/server/actions';
 import { debouncedWrite } from '@treenity/core/util/debounced-write';
@@ -46,7 +47,7 @@ async function updateNode(
       await store.set(node);
       return node;
     } catch (err) {
-      if (err instanceof Error && err.message.startsWith('OptimisticConcurrencyError') && attempt < MAX_OCC_RETRIES - 1) {
+      if (err instanceof OpError && err.code === 'CONFLICT' && attempt < MAX_OCC_RETRIES - 1) {
         log.warn(`OCC conflict on ${path}, retry ${attempt + 1}`);
         continue;
       }

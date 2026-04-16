@@ -1,6 +1,7 @@
 import { createNode } from '#core';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { OpError } from '#errors';
 import { createMemoryTree } from './index';
 import { applyOps, fromRfc6902, type PatchOp, PatchTestError, toRfc6902 } from './patch';
 
@@ -153,11 +154,11 @@ describe('Tree.patch', () => {
     assert.equal((await tree.get('/n'))!.title, 'y');
   });
 
-  it('throws on missing node', async () => {
+  it('throws OpError NOT_FOUND on missing node', async () => {
     const tree = createMemoryTree();
     await assert.rejects(
       () => tree.patch('/nonexistent', [['r', 'x', 1]]),
-      /Node not found/,
+      (e: unknown) => e instanceof OpError && e.code === 'NOT_FOUND',
     );
   });
 

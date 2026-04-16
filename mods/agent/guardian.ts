@@ -6,6 +6,7 @@ import { pendingPermissions, type PermissionMeta, type PermissionRule } from '#m
 import type { PermissionResult } from '@anthropic-ai/claude-agent-sdk';
 import { createNode, getComponent, type NodeData } from '@treenity/core';
 import { setComponent } from '@treenity/core/comp';
+import { OpError } from '@treenity/core/errors';
 import { globMatch, matchesAny } from '@treenity/core/glob';
 import type { Tree } from '@treenity/core/tree';
 import { AiAgent, AiChat, AiPolicy, AiRunStatus } from './types';
@@ -345,7 +346,7 @@ async function rememberRule(store: Tree, tool: string, _input: string, allow: bo
       console.log(`[guardian] remembered: ${allow ? 'allow' : 'deny'} ${tool} → ${targetPath}`);
       return;
     } catch (err) {
-      if (err instanceof Error && err.message.startsWith('OptimisticConcurrencyError') && attempt < MAX_RETRIES - 1) {
+      if (err instanceof OpError && err.code === 'CONFLICT' && attempt < MAX_RETRIES - 1) {
         console.warn(`[guardian] OCC conflict on ${targetPath}, retry ${attempt + 1}`);
         continue;
       }

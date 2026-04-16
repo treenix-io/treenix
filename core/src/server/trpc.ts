@@ -19,7 +19,7 @@ import {
 } from './actions';
 import { buildClaims, type Session, withAcl } from './auth';
 import { agentConnect, anonLogin, devLogin, loginUser, logoutUser, registerUser } from './auth-ops';
-import { OpError } from './errors';
+import { OpError } from '#errors';
 import { deployPrefab as deployPrefabOp } from './prefab';
 import { type CdcRegistry, type NodeEvent } from './sub';
 import { extractPaths } from './volatile';
@@ -60,14 +60,8 @@ export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: 
   function mapErrors(result: { ok: boolean; error?: { cause?: unknown } }) {
     if (result.ok) return;
     const cause = result.error?.cause;
-    if (cause instanceof Error) {
-      if (cause.name === 'OpError')
-        throw new TRPCError({ code: (cause as OpError).code, message: cause.message });
-      if (cause.message.startsWith('Access denied'))
-        throw new TRPCError({ code: 'FORBIDDEN', message: cause.message });
-      if (cause.message.startsWith('OptimisticConcurrencyError'))
-        throw new TRPCError({ code: 'CONFLICT', message: cause.message });
-    }
+    if (cause instanceof OpError)
+      throw new TRPCError({ code: cause.code, message: cause.message });
   }
 
   const base = t.procedure.use(async ({ next }) => {

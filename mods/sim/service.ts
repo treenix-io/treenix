@@ -15,6 +15,7 @@ import {
 } from '@treenity/core';
 import '@treenity/core/contexts/service';
 import { newComponent, setComponent } from '@treenity/core/comp';
+import { OpError } from '@treenity/core/errors';
 import { type ActionCtx, serverNodeHandle } from '@treenity/core/server/actions';
 import {
   type AgentEvent,
@@ -576,8 +577,8 @@ register('sim.world', 'service', async (node, ctx) => {
         const cfg = w ? getComponent(w, SimConfig) : null;
         if (cfg?.running) await runRound();
         await new Promise((r) => setTimeout(r, cfg?.roundDelay ?? 5000));
-      } catch (e: any) {
-        if (e?.message?.startsWith('OptimisticConcurrencyError')) {
+      } catch (e) {
+        if (e instanceof OpError && e.code === 'CONFLICT') {
           continue;
         }
         console.error('[sim] error:', e);

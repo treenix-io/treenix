@@ -13,6 +13,7 @@ import {
   S,
   W,
 } from '#core';
+import { OpError } from '#errors';
 import { paginate, type Tree } from '#tree';
 import { randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
 
@@ -352,7 +353,7 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
 
     async set(node, ctx) {
       const perm = await getPerm(node.$path);
-      if (!(perm & W)) throw new Error(`Access denied: ${node.$path}`);
+      if (!(perm & W)) throw new OpError('FORBIDDEN', `Access denied: ${node.$path}`);
       const existing = await rawStore.get(node.$path, ctx);
       const safe = { ...node };
       // Non-admin: preserve existing $acl/$owner
@@ -387,13 +388,13 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
 
     async remove(path, ctx) {
       const perm = await getPerm(path);
-      if (!(perm & W)) throw new Error(`Access denied: ${path}`);
+      if (!(perm & W)) throw new OpError('FORBIDDEN', `Access denied: ${path}`);
       return rawStore.remove(path, ctx);
     },
 
     async patch(path, ops, ctx) {
       const perm = await getPerm(path);
-      if (!(perm & W)) throw new Error(`Access denied: ${path}`);
+      if (!(perm & W)) throw new OpError('FORBIDDEN', `Access denied: ${path}`);
       return rawStore.patch(path, ops, ctx);
     },
   };

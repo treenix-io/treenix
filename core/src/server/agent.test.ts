@@ -1,5 +1,6 @@
 import { createNode, R, S, W } from '#core';
 import { clearRegistry } from '#core/index.test';
+import { OpError } from '#errors';
 import { createMemoryTree, type Tree } from '#tree';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
@@ -244,7 +245,7 @@ describe('agent TOFU flow', () => {
     // Agent cannot write to root-level paths (root ACL: public R only)
     await assert.rejects(
       () => aclStore.set(createNode('/something-else', 'dir')),
-      (err: Error) => err.message.includes('Access denied'),
+      (err: unknown) => err instanceof OpError && err.code === 'FORBIDDEN',
     );
   });
 

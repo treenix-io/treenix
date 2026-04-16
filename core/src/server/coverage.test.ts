@@ -20,7 +20,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { applyTemplate, executeAction, executeStream, setComponent } from './actions';
-import { OpError } from './errors';
+import { OpError } from '#errors';
 import { withMounts } from './mount';
 import { MountMemory, MountOverlay, MountQuery, MountTypes } from './mount-adapters';
 import { type CdcRegistry, withSubscriptions } from './sub';

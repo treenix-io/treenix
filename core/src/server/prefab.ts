@@ -5,7 +5,7 @@
 import { type NodeData } from '#core';
 import { getPrefab, getSeedPrefabs, type PrefabEntry } from '#mod/prefab';
 import { type Tree } from '#tree';
-import { OpError } from './errors';
+import { OpError } from '#errors';
 
 export type DeployOpts = {
   allowAbsolute?: boolean;

@@ -4,7 +4,7 @@
 import { validateNode } from '#comp/validate';
 import type { Tree } from '#tree';
 import { patchViaSet } from '#tree';
-import { OpError } from './errors';
+import { OpError } from '#errors';
 
 export function withValidation(tree: Tree): Tree {
   const wrapper: Tree = {
