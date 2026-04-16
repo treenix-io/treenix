@@ -4,8 +4,7 @@
 // Each EventSource gets its own node:http connection to avoid undici pool contention
 // when multiple SSE streams are open to the same origin.
 
-import { createTRPCClient, httpBatchLink, httpSubscriptionLink, splitLink } from '@trpc/client';
-// TS2742: declaration emit needs access to internal trpc types
+import { createTRPCClient, httpBatchLink, httpSubscriptionLink, splitLink, type TRPCClient } from '@trpc/client';
 import { EventSource as BaseEventSource } from 'eventsource';
 import http from 'node:http';
 import { Readable } from 'node:stream';
@@ -45,7 +44,7 @@ function createIsolatedEventSource() {
   };
 }
 
-export function createClient(url: string, token?: string | null) {
+export function createClient(url: string, token?: string | null): TRPCClient<TreeRouter> {
   const headers = token ? { Authorization: `Bearer ${token}` } : {};
   return createTRPCClient<TreeRouter>({
     links: [
