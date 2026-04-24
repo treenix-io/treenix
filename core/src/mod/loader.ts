@@ -173,17 +173,31 @@ export async function loadMods(
 
 // ── Local mod loader (side-effect imports from src/mods/) ──
 
-// Convention files for auto-discovery when server.ts/client.ts is absent
-const SERVER_CONVENTION = ['types.ts', 'seed.ts', 'service.ts'];
-const CLIENT_CONVENTION = ['types.ts', 'view.tsx'];
+// Convention files for auto-discovery when server/client entry is absent.
+// Each bare name is tried with both .ts (source-shipped packages) and .js (dist-shipped).
+const SERVER_CONVENTION = ['types', 'seed', 'service'];
+const CLIENT_CONVENTION = ['types', 'view'];
+const SERVER_EXT = ['.ts', '.js'];
+const CLIENT_EXT = ['.tsx', '.ts', '.jsx', '.js'];
 
 async function exists(path: string): Promise<boolean> {
   try { await stat(path); return true; } catch { return false; }
 }
 
+async function resolveFirst(dir: string, bases: string[], exts: string[]): Promise<string | null> {
+  for (const base of bases) {
+    for (const ext of exts) {
+      const p = join(dir, base + ext);
+      if (await exists(p)) return p;
+    }
+  }
+  return null;
+}
+
 export async function loadLocalMods(modsDir: string, target: LoadTarget): Promise<LoadResult> {
   const result: LoadResult = { loaded: [], failed: [] };
-  const entryFile = target === 'server' ? 'server.ts' : 'client.ts';
+  const entryBase = target === 'server' ? 'server' : 'client';
+  const exts = target === 'server' ? SERVER_EXT : CLIENT_EXT;
   const convention = target === 'server' ? SERVER_CONVENTION : CLIENT_CONVENTION;
   let entries: import('node:fs').Dirent[];
 
@@ -197,17 +211,16 @@ export async function loadLocalMods(modsDir: string, target: LoadTarget): Promis
     if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
 
     const modDir = join(modsDir, entry.name);
-    const entryPath = join(modDir, entryFile);
-    const hasEntry = await exists(entryPath);
+    const entryPath = await resolveFirst(modDir, [entryBase], exts);
 
     // Discover convention files if no explicit entry
     const filesToImport: string[] = [];
-    if (hasEntry) {
+    if (entryPath) {
       filesToImport.push(entryPath);
     } else {
-      for (const f of convention) {
-        const p = join(modDir, f);
-        if (await exists(p)) filesToImport.push(p);
+      for (const base of convention) {
+        const p = await resolveFirst(modDir, [base], exts);
+        if (p) filesToImport.push(p);
       }
     }
 

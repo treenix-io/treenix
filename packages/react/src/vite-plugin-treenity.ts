@@ -122,8 +122,11 @@ const CLIENT_CONVENTION = ['types.ts', 'view.tsx'];
 
 type ModEntry = { name: string; files: string[] };
 
-function scanClients(dir: string): ModEntry[] {
-  if (!existsSync(dir)) return [];
+function scanClients(dir: string, warnIfMissing = true): ModEntry[] {
+  if (!existsSync(dir)) {
+    if (warnIfMissing) console.warn(`[treenity] modsDir not found, skipped: ${dir}`);
+    return [];
+  }
   const mods: ModEntry[] = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
@@ -172,6 +175,9 @@ function discoverPackageClients(): string[] {
 
 export default function treenityPlugin(opts?: { modsDirs?: string[] }): Plugin {
   const engineRoot = resolve(import.meta.dirname, '../../..');
+  // In npm installs engineRoot = node_modules/, which has no sibling mods/ —
+  // engine mods scan is a monorepo-dev convenience only.
+  const inNodeModules = import.meta.dirname.includes('/node_modules/');
   let conditions: string[] = [];
 
   return {
@@ -236,8 +242,8 @@ export default function treenityPlugin(opts?: { modsDirs?: string[] }): Plugin {
       // 1. Auto-discover @treenity/* packages with treenity.clients
       const pkgClients = discoverPackageClients();
 
-      // 2. Engine mods (sibling to this plugin's package)
-      const engineMods = scanClients(resolve(engineRoot, 'mods'));
+      // 2. Engine mods (sibling to this plugin's package) — monorepo-dev only
+      const engineMods = inNodeModules ? [] : scanClients(resolve(engineRoot, 'mods'));
 
       // 3. Extra mods dirs (passed explicitly from project vite config)
       const extraMods = (opts?.modsDirs ?? []).flatMap(d => scanClients(resolve(d)));

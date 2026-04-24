@@ -1,6 +1,0 @@
-import { register } from '@treenity/core'
-
-register('{{NAMESPACE}}.hello', 'service', async (_node, ctx) => {
-  console.log('hello mod started')
-  return { stop: async () => {} }
-})

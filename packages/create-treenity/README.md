@@ -1,60 +1,59 @@
 # create-treenity
 
-**Scaffold a new Treenity project in seconds.**
+**Scaffold a Treenity project in seconds.**
 
 ## Usage
+
+### Try it without committing
+
+```bash
+npx create-treenity start
+```
+
+Downloads the starter into a cached playground, installs deps once, starts the dev server. Re-run to jump back in; `--reset` wipes and re-downloads.
+
+### Scaffold a named project
 
 ```bash
 npx create-treenity my-app
 ```
 
-Interactive prompts will guide you through setup. Or skip prompts:
+Downloads the starter into `./my-app`, installs deps, tells you how to run it. Add `-y` to skip prompts.
+
+### Add a mod to an existing project
 
 ```bash
-npx create-treenity my-app -y
+npx create-treenity mod create my-mod
 ```
 
-## What You Get
+Must be run inside a Treenity project (walks up to find `root.json`). Creates `types.ts`, `view.tsx`, `seed.ts`; registers the seed in `root.json`.
+
+## What you get
+
+Whatever `github.com/treenity-ai/starter` contains at `main`. Currently:
+
+- Vite 8 frontend on `:3210`, Treenity server on `:3211` (single process).
+- Admin UI (tree browser, node editor, context-aware views) auto-loaded from `@treenity/mods` and `@treenity/react`.
+- `root.json` with FS overlay (`data/base` + `data/work`).
+- `mods/example` and `mods/profile` — edit or delete.
 
 ```
 my-app/
-├── mods/
-│   └── todo/          example mod (type + actions + React view)
-├── data/              seed data
-├── root.json          server config
-├── package.json
-└── tsconfig.json
+├── data/base/       seed tree (checked in)
+├── data/work/       runtime overlay (gitignored)
+├── mods/            your mods
+├── src/main.tsx     `import '@treenity/react/main'`
+├── root.json        server config
+├── vite.config.ts   Vite + Treenity plugin
+└── package.json
 ```
 
-A working Treenity project with:
-- **Server** with memory store, tRPC, and MCP
-- **Frontend** with React, Tailwind CSS v4, admin UI
-- **Example mod** showing the type → action → view pattern
+Open `http://localhost:3210` — you'll see the admin UI.
 
-## Development
+## Under the hood
 
-```bash
-cd my-app
-npm run dev:server   # start backend (port 3211)
-npm run dev:front    # start frontend (port 3210)
-```
-
-Open `http://localhost:3210` — you'll see the admin UI with your example mod running.
-
-## Next Steps
-
-Create a new mod:
-
-```
-mods/
-└── my-mod/
-    ├── types.ts     # type class (fields = schema, methods = actions)
-    ├── server.ts    # server entry (imports types, registers services)
-    └── client.ts    # client entry (imports types, registers React views)
-```
-
-See the [Getting Started guide](https://github.com/treenity-ai/treenity/blob/main/docs/getting-started.md) for a full walkthrough.
+The CLI fetches a tarball from GitHub and extracts it — no git, no submodules. The starter repo is the single source of truth; updates to it ship immediately without republishing this CLI.
 
 ## License
 
-Licensed under FSL-1.1-MIT. Free to use for any purpose. Converts to MIT automatically after two years from each release date.
+FSL-1.1-MIT.

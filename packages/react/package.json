@@ -1,6 +1,6 @@
 {
   "name": "@treenity/react",
-  "version": "3.0.10",
+  "version": "3.0.13",
   "description": "React binding for Treenity — reactive hooks, admin UI, and context-based component rendering.",
   "type": "module",
   "publishConfig": {
@@ -95,6 +95,7 @@
     "next-themes": "^0.4.6",
     "radix-ui": "^1.4.3",
     "react-resizable-panels": "^4.7.2",
+    "reflect-metadata": "^0.2.2",
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.4.0",
     "valtio": "^2.1.2",
