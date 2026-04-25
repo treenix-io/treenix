@@ -182,7 +182,7 @@ const QueryViewComponent: View<QueryView> = ({ value, onChange }) => {
     else setLocalMode(m);
   };
 
-  const { data: children } = useChildren(source, { limit: 50 });
+  const { data: children }  = useChildren(source, { limit: 50, watchNew: true, watch: true });
   const filtered = useFiltered(children, typeFilter, filters);
 
   return (
