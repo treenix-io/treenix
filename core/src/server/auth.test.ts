@@ -550,3 +550,364 @@ describe('withAcl denial — typed OpError', () => {
     );
   });
 });
+
+// Comprehensive C1 fix tests for withAcl.patch (per plan
+// /Users/kriz/.claude/plans/c1-acl-patch-bypass.md). TDD order:
+// - B* baseline: legitimate flows that must already pass and stay green
+// - N* new: behaviors the fix must add (red until fix lands)
+// - I* integration: cross-layer guards
+describe('withAcl.patch — C1 ACL enforcement', () => {
+  // ── Baseline (must be green even before the fix) ──
+
+  // B1: $rev OCC test op succeeds with R+W; subsequent op applies; rev bumps.
+  it('B1: $rev OCC test op succeeds with R+W', async () => {
+    await tree.set({
+      ...createNode('/n', 'doc'),
+      $acl: [{ g: 'authenticated', p: R | W }],
+      title: 'orig',
+    });
+    const rev = (await tree.get('/n'))!.$rev!;
+    const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);
+    await s.patch('/n', [['t', '$rev', rev], ['r', 'title', 'new']]);
+    const after = (await tree.get('/n'))!;
+    assert.equal(after.title, 'new');
+    assert.equal(after.$rev, rev + 1);
+  });
+
+  // B2: stale $rev throws PatchTestError (not FORBIDDEN); state untouched.
+  it('B2: $rev OCC mismatch throws PatchTestError, state untouched', async () => {
+    await tree.set({
+      ...createNode('/n', 'doc'),
+      $acl: [{ g: 'authenticated', p: R | W }],
+      title: 'orig',
+    });
+    const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);
+    await assert.rejects(
+      () => s.patch('/n', [['t', '$rev', 9999], ['r', 'title', 'hijacked']]),
+      (e: any) => e?.code === 'TEST_FAILED',
+    );
+    assert.equal((await tree.get('/n'))!.title, 'orig');
+  });
+
+  // B3: ordinary patch on accessible component succeeds.
+  it('B3: patch on accessible non-system component succeeds', async () => {
+    await tree.set({
+      ...createNode('/n', 'doc'),
+      $acl: [{ g: 'authenticated', p: R | W }],
+      meta: { $type: 'meta', count: 1 },
+    });
+    const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);
+    await s.patch('/n', [['r', 'meta.count', 42]]);
+    assert.equal(((await tree.get('/n'))!.meta as any).count, 42);
+  });
+
+  // B4: patch on missing node throws NOT_FOUND (preserves rawStore semantics).
+  it('B4: patch on non-existent node throws NOT_FOUND', async () => {
+    const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);
+    // Need R+W on the path inheritance chain; /users grants authenticated R only.
+    await tree.set({ ...createNode('/r', 'dir'), $acl: [{ g: 'authenticated', p: R | W }] });
+    await assert.rejects(
+      () => s.patch('/r/missing', [['r', 'x', 1]]),
+      (e: unknown) => e instanceof OpError && e.code === 'NOT_FOUND',
+    );
+  });
+
+  // B5: patch without W → FORBIDDEN (existing behavior).
+  it('B5: patch without W throws FORBIDDEN', async () => {
+    const s = withAcl(tree, 'bob', ['u:bob', 'authenticated']);
+    await assert.rejects(
+      () => s.patch('/users/alice/page', [['r', 'title', 'hijacked']]),
+      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+    );
+  });
+
+  // ── Gate ──
+
+  // N1: patch needs R AND W (not only W). Closes test-op oracle gate.
+  // Setup: grant only W bit (no R). Alice cannot read but could probe via t-op
+  // before the fix.
+  it('N1: patch with W but no R throws FORBIDDEN', async () => {
+    await tree.set({
+      ...createNode('/n', 'doc'),
+      $acl: [{ g: 'authenticated', p: W }],   // W only, no R
+    });
+    const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);
+    await assert.rejects(
+      () => s.patch('/n', [['t', '$rev', 1]]),
+      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+    );
+  });
+
+  // ── Test-op rules (per stripComponents visibility) ──
+
+  // N2: t on visible system fields ($rev/$path/$type/$ref) allowed with R+W.
+  it('N2: t on visible system fields allowed with R+W', async () => {
+    await tree.set({
+      ...createNode('/n', 'doc'),
+      $acl: [{ g: 'authenticated', p: R | W }],
+    });
+    const node = (await tree.get('/n'))!;
+    const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);
+    // Single-batch mixes test-on-$rev/$path/$type with a real mutation
+    await s.patch('/n', [
+      ['t', '$rev', node.$rev],
+      ['t', '$path', '/n'],
+      ['t', '$type', node.$type],
+      ['r', 'mark', 1],
+    ]);
+    assert.equal((await tree.get('/n'))!.mark, 1);
+  });
+
+  // N3 (= old FX1): t on $refs is FORBIDDEN — $refs always stripped from get.
+  it('N3: t on $refs (always-hidden) FORBIDDEN even with R+W+A', async () => {
+    await tree.set({
+      ...createNode('/probe', 'doc'),
+      $acl: [{ g: 'authenticated', p: R | W | A }],
+      $refs: [{ t: '/some/target' }],
+    });
+    const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);
+    await assert.rejects(
+      () => s.patch('/probe', [['t', '$refs', [{ t: '/some/target' }]]]),
+      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+    );
+  });
+
+  // N4: t on $acl/$owner without A → FORBIDDEN (oracle on stripped fields).
+  it('N4: t on $acl/$owner without A FORBIDDEN', async () => {
+    await tree.set({
+      ...createNode('/n', 'doc'),
+      $owner: 'someone',
+      $acl: [{ g: 'authenticated', p: R | W }],   // no A
+    });
+    const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);
+    await assert.rejects(
+      () => s.patch('/n', [['t', '$acl', [{ g: 'authenticated', p: R | W }]]]),
+      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+    );
+    await assert.rejects(
+      () => s.patch('/n', [['t', '$owner', 'someone']]),
+      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+    );
+  });
+
+  // N5: t on protected component (no R) → FORBIDDEN.
+  it('N5: t on component with no R FORBIDDEN', async () => {
+    register('secret', 'acl', () => [{ g: 'owner', p: R | W | A }]);
+    await tree.set({
+      ...createNode('/n', 'doc'),
+      $owner: 'bob',
+      $acl: [{ g: 'authenticated', p: R | W }],
+      secret: { $type: 'secret', x: 'hidden' },
+    });
+    const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);   // alice not owner
+    await assert.rejects(
+      () => s.patch('/n', [['t', 'secret.x', 'guess']]),
+      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+    );
+  });
+
+  // ── Mutation rules ──
+
+  // N6: $acl mutation without A → FORBIDDEN.
+  it('N6: $acl mutation without A FORBIDDEN', async () => {
+    await tree.set({
+      ...createNode('/n', 'doc'),
+      $acl: [{ g: 'authenticated', p: R | W }],   // no A
+    });
+    const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);
+    await assert.rejects(
+      () => s.patch('/n', [['r', '$acl', [{ g: 'public', p: R | W | A }]]]),
+      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+    );
+  });
+
+  // N7: $owner mutation without A → FORBIDDEN.
+  it('N7: $owner mutation without A FORBIDDEN', async () => {
+    await tree.set({
+      ...createNode('/n', 'doc'),
+      $owner: 'bob',
+      $acl: [{ g: 'authenticated', p: R | W }],   // no A
+    });
+    const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);
+    await assert.rejects(
+      () => s.patch('/n', [['r', '$owner', 'alice']]),
+      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+    );
+  });
+
+  // N8: admin can mutate $acl/$owner.
+  it('N8: admin can mutate $acl and $owner', async () => {
+    await tree.set({
+      ...createNode('/n', 'doc'),
+      $owner: 'bob',
+      $acl: [{ g: 'admins', p: R | W | A }],
+    });
+    const admin = withAcl(tree, 'adm', ['u:adm', 'admins', 'authenticated']);
+    await admin.patch('/n', [['r', '$owner', 'alice']]);
+    await admin.patch('/n', [['r', '$acl', [{ g: 'admins', p: R | W | A }, { g: 'public', p: R }]]]);
+    const after = (await tree.get('/n')) as any;
+    assert.equal(after.$owner, 'alice');
+    assert.deepEqual(after.$acl, [{ g: 'admins', p: R | W | A }, { g: 'public', p: R }]);
+  });
+
+  // N9: $type/$path/$rev/$refs mutations FORBIDDEN even for admin.
+  it('N9: $type/$path/$rev/$refs mutations FORBIDDEN even for admin', async () => {
+    await tree.set({
+      ...createNode('/n', 'doc'),
+      $acl: [{ g: 'admins', p: R | W | A }],
+    });
+    const admin = withAcl(tree, 'adm', ['u:adm', 'admins', 'authenticated']);
+    for (const op of [
+      ['r', '$type', 'evil'] as const,
+      ['r', '$rev', 999] as const,
+      ['r', '$path', '/evil'] as const,
+      ['d', '$refs'] as const,
+    ]) {
+      await assert.rejects(
+        () => admin.patch('/n', [op]),
+        (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+        `should FORBIDDEN ${op[0]} ${op[1]}`,
+      );
+    }
+  });
+
+  // N10 (= old FX2): legitimate $ref retarget on ref nodes with R+W.
+  it('N10: $ref retarget on a ref node with R+W succeeds', async () => {
+    await tree.set({
+      ...createNode('/sys/autostart/bot', 'ref'),
+      $ref: '/bot',
+      $acl: [{ g: 'authenticated', p: R | W }],
+    } as any);
+    const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);
+    await s.patch('/sys/autostart/bot', [['r', '$ref', '/new-bot']]);
+    assert.equal(((await tree.get('/sys/autostart/bot')) as any).$ref, '/new-bot');
+  });
+
+  // ── Component-W rules ──
+
+  // N11: modify-existing-protected-component → FORBIDDEN.
+  it('N11: modify existing component with no W FORBIDDEN', async () => {
+    register('secret', 'acl', () => [{ g: 'owner', p: R | W | A }]);
+    await tree.set({
+      ...createNode('/n', 'doc'),
+      $owner: 'bob',
+      $acl: [{ g: 'authenticated', p: R | W }],
+      secret: { $type: 'secret', x: 'orig' },
+    });
+    const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);
+    await assert.rejects(
+      () => s.patch('/n', [['r', 'secret.x', 'hacked']]),
+      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+    );
+  });
+
+  // N12: replace-existing-protected → FORBIDDEN.
+  it('N12: replace existing component with no W FORBIDDEN', async () => {
+    register('secret', 'acl', () => [{ g: 'owner', p: R | W | A }]);
+    await tree.set({
+      ...createNode('/n', 'doc'),
+      $owner: 'bob',
+      $acl: [{ g: 'authenticated', p: R | W }],
+      secret: { $type: 'secret', x: 'orig' },
+    });
+    const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);
+    await assert.rejects(
+      () => s.patch('/n', [['r', 'secret', { $type: 'secret', x: 'new' }]]),
+      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+    );
+  });
+
+  // N13: delete-existing-protected → FORBIDDEN.
+  it('N13: delete existing component with no W FORBIDDEN', async () => {
+    register('secret', 'acl', () => [{ g: 'owner', p: R | W | A }]);
+    await tree.set({
+      ...createNode('/n', 'doc'),
+      $owner: 'bob',
+      $acl: [{ g: 'authenticated', p: R | W }],
+      secret: { $type: 'secret', x: 'orig' },
+    });
+    const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);
+    await assert.rejects(
+      () => s.patch('/n', [['d', 'secret']]),
+      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+    );
+  });
+
+  // N14: incoming new component requires W on the new value.
+  it('N14: add new component requires W on incoming value', async () => {
+    // Type-acl on `restricted`: only `staff` group can W.
+    register('restricted', 'acl', () => [{ g: 'staff', p: R | W }]);
+    await tree.set({
+      ...createNode('/n', 'doc'),
+      $acl: [{ g: 'authenticated', p: R | W }],
+    });
+    const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);   // not in 'staff'
+    await assert.rejects(
+      () => s.patch('/n', [['a', 'newComp', { $type: 'restricted', data: 'x' }]]),
+      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+    );
+  });
+
+  // N15 (= old FX3): component check sees post-mutation $owner in same batch.
+  it('N15: component ACL in batch sees post-mutation $owner', async () => {
+    register('secret', 'acl', () => [{ g: 'owner', p: R | W | A }]);
+    await tree.set({
+      ...createNode('/n', 'doc'),
+      $owner: 'bob',
+      $acl: [{ g: 'admins', p: R | W | A }, { g: 'public', p: 0 }],
+      secret: { $type: 'secret', x: 'orig' },
+    });
+    // Admin reassigns owner to himself first, then writes secret.x.
+    // Stale-owner impl would deny secret.x (admin not bob); fresh-owner allows.
+    const s = withAcl(tree, 'adm', ['u:adm', 'admins', 'authenticated']);
+    await s.patch('/n', [
+      ['r', '$owner', 'adm'],
+      ['r', 'secret.x', 'updated'],
+    ]);
+    const after = (await tree.get('/n')) as any;
+    assert.equal(after.$owner, 'adm');
+    assert.equal(after.secret.x, 'updated');
+  });
+
+  // N16 (= old FX4): action-emitted $-field op from non-admin → FORBIDDEN.
+  it('N16: simulated action $-field injection from non-admin FORBIDDEN', async () => {
+    await tree.set({
+      ...createNode('/target', 'doc'),
+      $owner: 'bob',
+      $acl: [{ g: 'authenticated', p: R | W }, { g: 'public', p: 0 }],
+    });
+    const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);
+    // Equivalent to executeAction(s, '/target', undefined, undefined, 'default.patch',
+    //   { $owner: 'evil' }) — handler deep-merges $owner; immerToPatchOps emits this op.
+    await assert.rejects(
+      () => s.patch('/target', [['r', '$owner', 'evil']]),
+      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+    );
+    assert.equal(((await tree.get('/target')) as any).$owner, 'bob');
+  });
+
+  // ── Integration ──
+
+  // I1: full pipeline composition (withRefIndex below withAcl) — internal $refs
+  // replay still works after the fix; user patches that touch ref-bearing fields
+  // do NOT trip the system-field guard since the [r, $refs, ...] op is appended
+  // BELOW withAcl (in withRefIndex), where applyOps's own assertSafePatchPath
+  // permits $refs.
+  it('I1: withAcl → withRefIndex pipeline preserves auto-$refs derivation', async () => {
+    const inner = createMemoryTree();
+    await inner.set({ ...createNode('/', 'root'), $acl: [{ g: 'public', p: R | W | A }] });
+    const refsIndexed = (await import('./refs')).withRefIndex(inner);
+    const s = withAcl(refsIndexed, 'alice', ['u:alice', 'public']);
+
+    await s.set({
+      ...createNode('/order', 'doc'),
+      $acl: [{ g: 'public', p: R | W }],
+      customer: { $type: 'ref', $ref: '/customers/alice' },
+    });
+    await s.patch('/order', [['r', 'customer', { $type: 'ref', $ref: '/customers/bob' }]]);
+
+    const after = (await inner.get('/order')) as any;
+    assert.ok(Array.isArray(after.$refs) && after.$refs.length === 1);
+    assert.equal(after.$refs[0].t, '/customers/bob');
+  });
+});

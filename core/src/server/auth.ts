@@ -14,7 +14,7 @@ import {
   W,
 } from '#core';
 import { OpError } from '#errors';
-import { paginate, type Tree } from '#tree';
+import { assertSafePatchPath, paginate, type Tree } from '#tree';
 import { randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
 
 export type AclHandler = () => GroupPerm[];
@@ -293,6 +293,47 @@ export async function buildClaims(tree: Tree, userId: string): Promise<string[]>
   return claims;
 }
 
+// ── Patch op rules ──
+// Mirrors stripComponents visibility (lines 268-279, 320-324, 340-344):
+//   $path/$type/$rev/$ref always visible → t allowed; only $ref mutable.
+//   $acl/$owner visible only with A → both gates require A.
+//   $refs always stripped → both ops forbidden (oracle).
+//   other $-fields → forbidden (unknown system fields).
+function assertMutationSystemField(firstSeg: string, isAdmin: boolean): void {
+  if (!firstSeg.startsWith('$')) return;
+  if (firstSeg === '$ref') return;
+  if (firstSeg === '$acl' || firstSeg === '$owner') {
+    if (isAdmin) return;
+    throw new OpError('FORBIDDEN', `Access denied: ${firstSeg} requires A permission`);
+  }
+  throw new OpError('FORBIDDEN', `Access denied: ${firstSeg} is system-managed`);
+}
+
+function assertTestSystemField(firstSeg: string, isAdmin: boolean): void {
+  if (!firstSeg.startsWith('$')) return;
+  if (firstSeg === '$path' || firstSeg === '$type' || firstSeg === '$rev' || firstSeg === '$ref') return;
+  if (firstSeg === '$acl' || firstSeg === '$owner') {
+    if (isAdmin) return;
+    throw new OpError('FORBIDDEN', `Access denied: ${firstSeg} requires A permission`);
+  }
+  throw new OpError('FORBIDDEN', `Access denied: ${firstSeg} is hidden from reads`);
+}
+
+function assertComponentPerm(
+  bit: number,            // R for `t`, W for r/a/d
+  firstSeg: string,
+  existing: NodeData | undefined,
+  userId: string | null,
+  claims: string[],
+  owner: string | undefined,
+): void {
+  if (firstSeg.startsWith('$')) return;
+  const existingVal = existing?.[firstSeg];
+  if (isComponent(existingVal) && !(componentPerm(existingVal, userId, claims, owner) & bit)) {
+    throw new OpError('FORBIDDEN', `Access denied: component ${firstSeg}`);
+  }
+}
+
 // ── Tree wrapper ──
 
 export type AclStore = Tree & {
@@ -394,7 +435,46 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
 
     async patch(path, ops, ctx) {
       const perm = await getPerm(path);
-      if (!(perm & W)) throw new OpError('FORBIDDEN', `Access denied: ${path}`);
+      // Patch = read-modify-write. R+W gate closes the test-op oracle (no R →
+      // no probing via [t, $field, guess]). Per-op checks below cover hidden
+      // $-fields, hidden components, and $owner mutation in the same batch.
+      if (!((perm & R) && (perm & W))) {
+        throw new OpError('FORBIDDEN', `Access denied: ${path}`);
+      }
+
+      const isAdmin = !!(perm & A);
+      const existing = await rawStore.get(path, ctx);   // may be undefined
+      // Track owner across the batch so component checks see post-mutation $owner
+      // (parity with set() at lines 367-383).
+      let currentOwner = existing?.$owner;
+
+      for (const op of ops) {
+        assertSafePatchPath(op[1]);
+        const firstSeg = op[1].split('.', 1)[0];
+
+        if (op[0] === 't') {
+          assertTestSystemField(firstSeg, isAdmin);
+          assertComponentPerm(R, firstSeg, existing, userId, claims, currentOwner);
+          continue;
+        }
+
+        // r/a/d — mutation
+        assertMutationSystemField(firstSeg, isAdmin);
+        assertComponentPerm(W, firstSeg, existing, userId, claims, currentOwner);
+
+        // Incoming new component value (single-segment r/a) needs W on the new value.
+        if ((op[0] === 'r' || op[0] === 'a') && op[1] === firstSeg) {
+          const newVal = (op as readonly ['r' | 'a', string, unknown])[2];
+          if (isComponent(newVal) && !(componentPerm(newVal, userId, claims, currentOwner) & W)) {
+            throw new OpError('FORBIDDEN', `Access denied: cannot write component ${firstSeg}`);
+          }
+        }
+
+        // Update tracked $owner for subsequent component checks in this batch.
+        if (op[0] === 'r' && op[1] === '$owner') currentOwner = op[2] as string | undefined;
+        else if (op[0] === 'd' && op[1] === '$owner') currentOwner = undefined;
+      }
+
       return rawStore.patch(path, ops, ctx);
     },
   };
