@@ -175,7 +175,7 @@ const TaskView: View<BoardTask, { draft?: boolean }> = ({ value, onChange, ctx, 
       </div>
 
       {/* Named components (ai.plan, ai.thread, etc.) */}
-      <NamedComponents node={node} current={value} />
+      <NamedComponents node={node} />
 
       <AttachMenu node={node} />
 
@@ -185,8 +185,8 @@ const TaskView: View<BoardTask, { draft?: boolean }> = ({ value, onChange, ctx, 
   );
 };
 
-function NamedComponents({ node, current }: { node: NodeData; current?: unknown }) {
-  const entries = getNamedComponents(node, current);
+function NamedComponents({ node }: { node: NodeData }) {
+  const entries = getNamedComponents(node);
   if (!entries.length) return null;
 
   return (

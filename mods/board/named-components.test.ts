@@ -4,7 +4,7 @@ import { describe, it } from 'node:test';
 import { getNamedComponents } from './named-components';
 
 describe('getNamedComponents', () => {
-  it('keeps sibling components for node-level board.task', () => {
+  it('returns sibling components, dropping the node-level component', () => {
     const node = {
       $path: '/board/data/t-1',
       $type: 'board.task',
@@ -14,35 +14,18 @@ describe('getNamedComponents', () => {
       taskRef: '/agents/task-1',
     } as NodeData;
 
-    const entries = getNamedComponents(node, node);
+    const entries = getNamedComponents(node);
 
     assert.deepEqual(entries.map(([key]) => key), ['chat', 'plan']);
   });
 
-  it('skips current attached component to avoid self-recursive render', () => {
-    const task = { $type: 'board.task', title: 'Attached task' };
+  it('returns empty when node has no named component fields', () => {
     const node = {
-      $path: '/scratch/x',
-      $type: 't.dir',
-      task,
-      chat: { $type: 'metatron.chat', title: 'Chat' },
+      $path: '/board/data/solo',
+      $type: 'board.task',
+      title: 'Solo task',
     } as NodeData;
 
-    const entries = getNamedComponents(node, task);
-
-    assert.deepEqual(entries.map(([key]) => key), ['chat']);
-  });
-
-  it('returns empty when attached board.task is the only component', () => {
-    const task = { $type: 'board.task', title: 'Attached task' };
-    const node = {
-      $path: '/scratch/solo',
-      $type: 't.dir',
-      task,
-    } as NodeData;
-
-    const entries = getNamedComponents(node, task);
-
-    assert.equal(entries.length, 0);
+    assert.equal(getNamedComponents(node).length, 0);
   });
 });
