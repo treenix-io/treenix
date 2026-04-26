@@ -13,7 +13,7 @@ import {
 } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { type ComponentData, type NodeData, register } from '@treenity/core';
+import { type NodeData, register } from '@treenity/core';
 import { Render, RenderContext, useActions, useDraft, type View } from '@treenity/react';
 import { createNode, execute, removeNode, useChildren, useNavigate, usePath } from '@treenity/react';
 import { usePathSave } from '@treenity/react';
@@ -29,6 +29,7 @@ import { Textarea } from '@treenity/react/ui/textarea';
 import { useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { AttachMenu } from '../simple-components/view';
+import { getNamedComponents } from './named-components';
 import { BoardColumn, BoardKanban, BoardTask } from './types';
 
 type TaskStatus = string;
@@ -185,17 +186,13 @@ const TaskView: View<BoardTask, { draft?: boolean }> = ({ value, onChange, ctx, 
 };
 
 function NamedComponents({ node }: { node: NodeData }) {
-  const keys = Object.keys(node).filter(k => {
-    if (k.startsWith('$') || k === 'currentRun') return false;
-    const v = node[k];
-    return v && typeof v === 'object' && '$type' in v;
-  });
-  if (!keys.length) return null;
+  const entries = getNamedComponents(node);
+  if (!entries.length) return null;
 
   return (
     <div className="flex flex-col gap-3">
-      {keys.map(k => (
-        <Render key={k} value={node[k] as ComponentData} />
+      {entries.map(([key, value]) => (
+        <Render key={key} value={value} />
       ))}
     </div>
   );
@@ -244,7 +241,7 @@ function ResultField({ path, result, onSave }: { path: string; result: string; o
 
 function EmbeddedTaskLog({ taskRef }: { taskRef: string }) {
   const { data: mtTask } = usePath(taskRef || null);
-  if (!mtTask) return null;
+  if (!mtTask || mtTask.$type === 'board.task') return null;
 
   return (
     <div className="mt-2 rounded-md border border-border p-2">
