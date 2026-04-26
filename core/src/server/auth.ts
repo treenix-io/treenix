@@ -450,16 +450,20 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
 
       for (const op of ops) {
         assertSafePatchPath(op[1]);
-        const firstSeg = op[1].split('.', 1)[0];
+        const segments = op[1].split('.');
+        const firstSeg = segments[0];
 
+        // Apply system-field rule to EVERY $-segment at any depth: prevents
+        // component-envelope bypass like `[r, secret.$acl, …]` followed by
+        // mutations to secret.* under stale ACL.
         if (op[0] === 't') {
-          assertTestSystemField(firstSeg, isAdmin);
+          for (const seg of segments) if (seg.startsWith('$')) assertTestSystemField(seg, isAdmin);
           assertComponentPerm(R, firstSeg, existing, userId, claims, currentOwner);
           continue;
         }
 
         // r/a/d — mutation
-        assertMutationSystemField(firstSeg, isAdmin);
+        for (const seg of segments) if (seg.startsWith('$')) assertMutationSystemField(seg, isAdmin);
         assertComponentPerm(W, firstSeg, existing, userId, claims, currentOwner);
 
         // Incoming new component value (single-segment r/a) needs W on the new value.
@@ -471,8 +475,12 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
         }
 
         // Update tracked $owner for subsequent component checks in this batch.
-        if (op[0] === 'r' && op[1] === '$owner') currentOwner = op[2] as string | undefined;
-        else if (op[0] === 'd' && op[1] === '$owner') currentOwner = undefined;
+        // `a` is also a setter (patch.ts:58-66); `d` clears.
+        if ((op[0] === 'r' || op[0] === 'a') && op[1] === '$owner') {
+          currentOwner = op[2] as string | undefined;
+        } else if (op[0] === 'd' && op[1] === '$owner') {
+          currentOwner = undefined;
+        }
       }
 
       return rawStore.patch(path, ops, ctx);

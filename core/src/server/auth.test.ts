@@ -886,6 +886,62 @@ describe('withAcl.patch — C1 ACL enforcement', () => {
     assert.equal(((await tree.get('/target')) as any).$owner, 'bob');
   });
 
+  // ── Codex round 2 findings ──
+
+  // N17: nested $-segment in path (component envelope) follows same rules.
+  // User has W on `secret` initially → could patch `secret.$acl` to relax/tighten,
+  // then keep mutating `secret.*` under stale ACL. Forbid envelope mutation
+  // unless admin (matches assertMutationSystemField for $acl).
+  it('N17: non-admin nested $acl mutation FORBIDDEN', async () => {
+    register('secret', 'acl', () => [{ g: 'authenticated', p: R | W }]);
+    await tree.set({
+      ...createNode('/n', 'doc'),
+      $acl: [{ g: 'authenticated', p: R | W }],
+      secret: { $type: 'secret', x: 'orig' },
+    });
+    const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);
+    await assert.rejects(
+      () => s.patch('/n', [['r', 'secret.$acl', [{ g: 'others', p: W }]]]),
+      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+    );
+  });
+
+  // N18: $type at any depth FORBIDDEN even for admin (identity at any level).
+  it('N18: nested $type mutation FORBIDDEN even for admin', async () => {
+    register('secret', 'acl', () => [{ g: 'admins', p: R | W | A }]);
+    await tree.set({
+      ...createNode('/n', 'doc'),
+      $acl: [{ g: 'admins', p: R | W | A }],
+      secret: { $type: 'secret', x: 'orig' },
+    });
+    const s = withAcl(tree, 'adm', ['u:adm', 'admins', 'authenticated']);
+    await assert.rejects(
+      () => s.patch('/n', [['r', 'secret.$type', 'evil']]),
+      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+    );
+  });
+
+  // N19: `a` (add) op on $owner is also a setter (patch.ts:58-66 setByPath);
+  // owner-tracking must handle it the same as `r`. Without the fix, subsequent
+  // component checks see stale owner.
+  it('N19: $owner tracking includes `a` op (not just `r`/`d`)', async () => {
+    register('secret', 'acl', () => [{ g: 'owner', p: R | W | A }]);
+    // Existing node has no $owner — `a/$owner` is the natural way to add it.
+    await tree.set({
+      ...createNode('/n', 'doc'),
+      $acl: [{ g: 'admins', p: R | W | A }, { g: 'public', p: 0 }],
+      secret: { $type: 'secret', x: 'orig' },
+    });
+    const s = withAcl(tree, 'adm', ['u:adm', 'admins', 'authenticated']);
+    await s.patch('/n', [
+      ['a', '$owner', 'adm'],
+      ['r', 'secret.x', 'updated'],
+    ]);
+    const after = (await tree.get('/n')) as any;
+    assert.equal(after.$owner, 'adm');
+    assert.equal(after.secret.x, 'updated');
+  });
+
   // ── Integration ──
 
   // I1: full pipeline composition (withRefIndex below withAcl) — internal $refs
