@@ -3,19 +3,15 @@ import { describe, it } from 'node:test';
 import { getNodeEditorJsonText, parseNodeEditorJson } from './node-editor-state';
 
 describe('getNodeEditorJsonText', () => {
-  const node = {
-    $path: '/docs/page',
-    $type: 'doc.page',
-    title: 'Hello',
-    published: true,
-  };
+  it('returns the node serialized as pretty JSON', () => {
+    const node = {
+      $path: '/docs/page',
+      $type: 'doc.page',
+      title: 'Hello',
+      published: true,
+    };
 
-  it('returns formatted node JSON in json tab', () => {
-    assert.equal(getNodeEditorJsonText(node, 'json'), JSON.stringify(node, null, 2));
-  });
-
-  it('keeps properties tab editor text empty', () => {
-    assert.equal(getNodeEditorJsonText(node, 'properties'), '');
+    assert.equal(getNodeEditorJsonText(node), JSON.stringify(node, null, 2));
   });
 });
 
@@ -32,8 +28,14 @@ describe('parseNodeEditorJson', () => {
     assert.equal(node.title, 'Hello');
   });
 
-  it('rejects malformed JSON', () => {
-    assert.throws(() => parseNodeEditorJson('{'), /Invalid JSON/);
+  it('keeps the underlying parser message on malformed JSON', () => {
+    assert.throws(() => parseNodeEditorJson('{'), (err: unknown) => {
+      assert.ok(err instanceof Error);
+      assert.match(err.message, /^Invalid JSON: /);
+      // Original parser message is preserved after the prefix
+      assert.ok(err.message.length > 'Invalid JSON: '.length);
+      return true;
+    });
   });
 
   it('rejects non-object JSON', () => {

@@ -1,9 +1,7 @@
 import type { NodeData } from '@treenity/core';
 
-export type NodeEditorTab = 'properties' | 'json';
-
-export function getNodeEditorJsonText(node: NodeData, tab: NodeEditorTab): string {
-  return tab === 'json' ? JSON.stringify(node, null, 2) : '';
+export function getNodeEditorJsonText(node: NodeData): string {
+  return JSON.stringify(node, null, 2);
 }
 
 export function parseNodeEditorJson(text: string): NodeData {
@@ -11,8 +9,9 @@ export function parseNodeEditorJson(text: string): NodeData {
 
   try {
     parsed = JSON.parse(text);
-  } catch {
-    throw new Error('Invalid JSON');
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    throw new Error(`Invalid JSON: ${reason}`);
   }
 
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {

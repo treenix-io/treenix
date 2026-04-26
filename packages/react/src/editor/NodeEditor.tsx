@@ -88,7 +88,7 @@ export function NodeEditor({ node, save, open, onClose, onDelete, currentUserId,
   }
 
   // Derived from node + system edits
-  const formattedNodeJson = getNodeEditorJsonText(node, 'json');
+  const formattedNodeJson = getNodeEditorJsonText(node);
   const nodeType = snap.typeEdit ?? node.$type;
   const aclOwner = snap.aclEdit?.owner ?? (node.$owner as string) ?? '';
   const aclRules = snap.aclEdit?.rules ?? (node.$acl as GroupPerm[]) ?? [];
@@ -103,21 +103,22 @@ export function NodeEditor({ node, save, open, onClose, onDelete, currentUserId,
   const mainCompCls = resolve(node.$type, 'class') as (new () => Record<string, unknown>) | null;
   const mainCompDefaults = mainCompCls ? new mainCompCls() : null;
 
-  function handleReset() {
+  // Reset only the properties tab state (system field edits + auto-save buffer)
+  function resetProperties() {
     st.typeEdit = null;
     st.aclEdit = null;
-    st.jsonText = getNodeEditorJsonText(node, st.tab);
     resetSave();
   }
 
-  async function handleSave() {
+  // Reset only the JSON tab buffer back to current node
+  function resetJson() {
+    st.jsonText = formattedNodeJson;
+  }
+
+  // Save properties tab: $type/$acl via set(), then flush auto-save buffer
+  async function handleSaveProperties() {
     try {
-      if (snap.tab === 'json') {
-        // JSON tab — full node replacement via set()
-        const toSave = parseNodeEditorJson(snap.jsonText);
-        await set(toSave);
-      } else if (hasPendingSystemEdits) {
-        // System field changes ($type, $acl) — need set()
+      if (hasPendingSystemEdits) {
         const toSave = { ...node };
         if (snap.typeEdit) toSave.$type = snap.typeEdit;
         if (snap.aclEdit) {
@@ -126,10 +127,20 @@ export function NodeEditor({ node, save, open, onClose, onDelete, currentUserId,
         }
         await set(toSave);
       }
-
-      // Flush any pending auto-save data
       await flush();
-      handleReset();
+      resetProperties();
+      toast('Saved');
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Save failed');
+    }
+  }
+
+  // Save JSON tab: full-node replacement via set()
+  async function handleSaveJson() {
+    try {
+      const toSave = parseNodeEditorJson(snap.jsonText);
+      await set(toSave);
+      st.jsonText = getNodeEditorJsonText(toSave);
       toast('Saved');
     } catch (error) {
       toast(error instanceof Error ? error.message : 'Save failed');
@@ -185,7 +196,7 @@ export function NodeEditor({ node, save, open, onClose, onDelete, currentUserId,
               value={mainValue}
               onChange={onChange}
               toast={toast}
-              onActionComplete={handleReset}
+              onActionComplete={resetProperties}
             />
 
             {/* Named components — scoped auto-save onChange */}
@@ -200,7 +211,7 @@ export function NodeEditor({ node, save, open, onClose, onDelete, currentUserId,
                 onToggle={() => { st.collapsed[name] = !st.collapsed[name]; }}
                 onRemove={() => handleRemoveComponent(name)}
                 toast={toast}
-                onActionComplete={handleReset}
+                onActionComplete={resetProperties}
               />
             ))}
 
@@ -240,19 +251,32 @@ export function NodeEditor({ node, save, open, onClose, onDelete, currentUserId,
       </ScrollArea>
 
       <div className="edit-panel-actions">
-        {(dirty || hasPendingSystemEdits || jsonDirty) && (
-          <Button size="sm" onClick={handleSave}>Save</Button>
-        )}
-        {(dirty || hasPendingSystemEdits || jsonDirty) && (
-          <Button variant="ghost" size="sm" onClick={handleReset} title="Discard all changes">
-            Reset
-          </Button>
-        )}
-        {stale && (
-          <span className="text-[10px] text-orange-500" title="Node changed externally">stale</span>
-        )}
-        {snap.tab === 'properties' && (
-          <Button variant="outline" size="sm" onClick={() => onAddComponent(node.$path)}>+ Component</Button>
+        {snap.tab === 'properties' ? (
+          <>
+            {(dirty || hasPendingSystemEdits) && (
+              <Button size="sm" onClick={handleSaveProperties}>Save</Button>
+            )}
+            {(dirty || hasPendingSystemEdits) && (
+              <Button variant="ghost" size="sm" onClick={resetProperties} title="Discard property changes">
+                Reset
+              </Button>
+            )}
+            {stale && (
+              <span className="text-[10px] text-orange-500" title="Node changed externally">stale</span>
+            )}
+            <Button variant="outline" size="sm" onClick={() => onAddComponent(node.$path)}>+ Component</Button>
+          </>
+        ) : (
+          <>
+            {jsonDirty && (
+              <Button size="sm" onClick={handleSaveJson}>Save JSON</Button>
+            )}
+            {jsonDirty && (
+              <Button variant="ghost" size="sm" onClick={resetJson} title="Discard JSON edits">
+                Reset
+              </Button>
+            )}
+          </>
         )}
         <span className="flex-1" />
         {onDelete && (
