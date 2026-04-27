@@ -1,5 +1,5 @@
 // Treenity MCP Server — exposes tree store as MCP tools
-// StreamableHTTP transport, stateless, token auth via ?token= or Authorization header
+// StreamableHTTP transport, stateful sessions, token auth via Authorization: Bearer header
 
 import { requestApproval, resolveVerdict } from '#agent/guardian';
 import { AiPolicy } from '#agent/types';
@@ -384,7 +384,30 @@ export function extractToken(req: import('node:http').IncomingMessage): string |
 
 // ── C5: auth resolution & session binding ──
 
-const DEV_SESSION_TTL_MS = Number(process.env.MCP_DEV_SESSION_TTL_MS ?? 60 * 60 * 1000);
+const PROXY_HEADERS = ['forwarded', 'x-forwarded-for', 'x-real-ip', 'via'] as const;
+
+export function hasProxyHeaders(req: import('node:http').IncomingMessage): boolean {
+  for (const h of PROXY_HEADERS) {
+    if (req.headers[h]) return true;
+  }
+  return false;
+}
+
+const TTL_FLOOR_MS = 60_000;                   // 1 minute
+const TTL_CEILING_MS = 24 * 60 * 60_000;       // 24 hours
+const TTL_DEFAULT_MS = 60 * 60_000;            // 1 hour
+
+export function parseDevTtlMs(raw: string | undefined): number {
+  if (raw === undefined) return TTL_DEFAULT_MS;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < TTL_FLOOR_MS || n > TTL_CEILING_MS) {
+    console.warn(`[mcp] MCP_DEV_SESSION_TTL_MS=${raw} invalid (must be ${TTL_FLOOR_MS}..${TTL_CEILING_MS}), using default ${TTL_DEFAULT_MS}`);
+    return TTL_DEFAULT_MS;
+  }
+  return Math.floor(n);
+}
+
+const DEV_SESSION_TTL_MS = parseDevTtlMs(process.env.MCP_DEV_SESSION_TTL_MS);
 
 export function isLoopbackHost(host: string): boolean {
   return host === '127.0.0.1' || host === 'localhost' || host === '::1';
@@ -398,7 +421,12 @@ export function isLoopbackPeer(addr: string | undefined): boolean {
   return false;
 }
 
-export function isDevAdminEnabled(configuredHost: string, peerAddr: string | undefined): boolean {
+export function isDevAdminEnabled(
+  configuredHost: string,
+  peerAddr: string | undefined,
+  hasProxy = false,
+): boolean {
+  if (hasProxy) return false;   // C5 round 2: never trust dev fallback through any proxy
   return (
     process.env.NODE_ENV === 'development' &&
     process.env.MCP_DEV_ADMIN === '1' &&
@@ -408,7 +436,7 @@ export function isDevAdminEnabled(configuredHost: string, peerAddr: string | und
 }
 
 export type SessionAuth =
-  | { kind: 'token'; userId: string; token: string }
+  | { kind: 'token'; userId: string; token: string; claims: string[] }
   | { kind: 'dev'; expiresAt: number };
 
 export type AuthResolution =
@@ -420,6 +448,7 @@ export async function resolveMcpAuth(
   token: string | null,
   configuredHost: string,
   peerAddr: string | undefined,
+  hasProxy = false,
 ): Promise<AuthResolution> {
   if (token) {
     const session = await resolveToken(store, token);
@@ -427,10 +456,11 @@ export async function resolveMcpAuth(
       ok: false, status: 401,
       body: { error: 'invalid_token', message: 'Token expired or unknown' },
     };
-    return { ok: true, session, auth: { kind: 'token', userId: session.userId, token } };
+    const claims = session.claims ?? await buildClaims(store, session.userId);
+    return { ok: true, session, auth: { kind: 'token', userId: session.userId, token, claims } };
   }
-  if (isDevAdminEnabled(configuredHost, peerAddr)) {
-    console.warn('[mcp] ⚠️  DEV MODE: NODE_ENV=development + MCP_DEV_ADMIN=1 + loopback host & peer — granting admin without token.');
+  if (isDevAdminEnabled(configuredHost, peerAddr, hasProxy)) {
+    console.warn('[mcp] ⚠️  DEV MODE: NODE_ENV=development + MCP_DEV_ADMIN=1 + loopback host & peer (no proxy) — granting admin without token.');
     return {
       ok: true,
       session: { userId: 'mcp-dev' } as Session,
@@ -444,7 +474,16 @@ export async function resolveMcpAuth(
   };
 }
 
-export type RevalResult = { ok: true } | { ok: false; status: 401; body: { error: string; message?: string } };
+export type RevalResult =
+  | { ok: true }
+  | { ok: false; status: 401; body: { error: string; message?: string }; evict: boolean };
+
+function sameClaimSet(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false;
+  const set = new Set(a);
+  for (const c of b) if (!set.has(c)) return false;
+  return true;
+}
 
 export async function revalidateSessionAuth(
   store: Tree,
@@ -452,26 +491,39 @@ export async function revalidateSessionAuth(
   token: string | null,
   configuredHost: string,
   peerAddr: string | undefined,
+  hasProxy = false,
 ): Promise<RevalResult> {
   if (cached.kind === 'token') {
+    // Wrong token but legit cached session must NOT be evicted (sid-disclosure DoS guard).
     if (token !== cached.token) return {
       ok: false, status: 401,
       body: { error: 'token_mismatch', message: 'Reconnect must present the original Bearer token' },
+      evict: false,
     };
     const fresh = await resolveToken(store, token);
     if (!fresh || fresh.userId !== cached.userId) return {
       ok: false, status: 401,
       body: { error: 'token_invalid', message: 'Token revoked or expired' },
+      evict: true,
+    };
+    // Claims drift detection (round 2): user demoted while session live.
+    const currentClaims = fresh.claims ?? await buildClaims(store, fresh.userId);
+    if (!sameClaimSet(currentClaims, cached.claims)) return {
+      ok: false, status: 401,
+      body: { error: 'claims_changed', message: 'User permissions changed; reinitialize' },
+      evict: true,
     };
     return { ok: true };
   }
   if (Date.now() > cached.expiresAt) return {
     ok: false, status: 401,
     body: { error: 'dev_session_expired', message: 'Reinitialize MCP session' },
+    evict: true,
   };
-  if (!isDevAdminEnabled(configuredHost, peerAddr)) return {
+  if (!isDevAdminEnabled(configuredHost, peerAddr, hasProxy)) return {
     ok: false, status: 401,
     body: { error: 'dev_mode_disabled' },
+    evict: true,
   };
   return { ok: true };
 }
@@ -537,6 +589,7 @@ export function createMcpHttpServer(store: Tree, port: number, host = '127.0.0.1
 
     const token = extractToken(req);
     const peerAddr = req.socket.remoteAddress;
+    const proxy = hasProxyHeaders(req);
 
     // Reconnect: revalidate session auth on every hit
     const sessionId = req.headers['mcp-session-id'] as string | undefined;
@@ -547,10 +600,15 @@ export function createMcpHttpServer(store: Tree, port: number, host = '127.0.0.1
         res.end(JSON.stringify({ error: 'session_not_found' }));
         return;
       }
-      const reval = await revalidateSessionAuth(store, entry.auth, token, host, peerAddr);
+      const reval = await revalidateSessionAuth(store, entry.auth, token, host, peerAddr, proxy);
       if (!reval.ok) {
-        sessions.delete(sessionId);
-        try { entry.transport.close(); } catch { /* ignore */ }
+        // sid-disclosure DoS guard: only evict when failure proves the cached
+        // session is no longer valid (token revoked, dev mode dropped, TTL).
+        // Wrong-token reconnect MUST NOT kill a legit session.
+        if (reval.evict) {
+          sessions.delete(sessionId);
+          try { entry.transport.close(); } catch { /* ignore */ }
+        }
         send401(res, reval.body);
         return;
       }
@@ -558,7 +616,7 @@ export function createMcpHttpServer(store: Tree, port: number, host = '127.0.0.1
       return;
     }
 
-    const auth = await resolveMcpAuth(store, token, host, peerAddr);
+    const auth = await resolveMcpAuth(store, token, host, peerAddr, proxy);
     if (!auth.ok) {
       send401(res, auth.body);
       return;

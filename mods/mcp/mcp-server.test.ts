@@ -850,14 +850,16 @@ describe('revalidateSessionAuth', { concurrency: 1 }, () => {
     const store = createMemoryTree();
     await store.set({ ...createNode('/', 'root'), $acl: [{ g: 'admins', p: R | W | S }] });
     const token = await createSession(store, 'alice');
-    const cached: SessionAuth = { kind: 'token', userId: 'alice', token };
+    // Match what buildClaims would yield for alice (session has no explicit claims):
+    //   ['u:alice', 'authenticated']  (no extra groups since /auth/users/alice doesn't exist)
+    const cached: SessionAuth = { kind: 'token', userId: 'alice', token, claims: ['u:alice', 'authenticated'] };
     const r = await revalidateSessionAuth(store, cached, token, '127.0.0.1', '127.0.0.1');
     assert.ok(r.ok);
   });
 
   it('token-bound: token mismatch → 401 token_mismatch', async () => {
     const store = createMemoryTree();
-    const cached: SessionAuth = { kind: 'token', userId: 'alice', token: 'a'.repeat(64) };
+    const cached: SessionAuth = { kind: 'token', userId: 'alice', token: 'a'.repeat(64), claims: [] };
     const r = await revalidateSessionAuth(store, cached, 'b'.repeat(64), '127.0.0.1', '127.0.0.1');
     assert.ok(!r.ok);
     if (!r.ok) assert.equal(r.body.error, 'token_mismatch');
@@ -867,7 +869,7 @@ describe('revalidateSessionAuth', { concurrency: 1 }, () => {
     const store = createMemoryTree();
     await store.set({ ...createNode('/', 'root'), $acl: [{ g: 'admins', p: R | W | S }] });
     const token = await createSession(store, 'alice');
-    const cached: SessionAuth = { kind: 'token', userId: 'alice', token };
+    const cached: SessionAuth = { kind: 'token', userId: 'alice', token, claims: ['u:alice', 'authenticated'] };
     // revoke
     await store.remove(`/auth/sessions/${token}`);
     const r = await revalidateSessionAuth(store, cached, token, '127.0.0.1', '127.0.0.1');
@@ -1039,7 +1041,7 @@ describe('mcp http server integration', { concurrency: 1 }, () => {
     } finally { srv.close(); }
   });
 
-  it('I4: reconnect with different token → 401 token_mismatch, session evicted', async () => {
+  it('I4: reconnect with different token → 401 token_mismatch BUT legit session preserved (DoS guard)', async () => {
     process.env.NODE_ENV = 'production';
     const store = createMemoryTree();
     await store.set({ ...createNode('/', 'root'), $acl: [{ g: 'admins', p: R | W | S }] });
@@ -1074,7 +1076,9 @@ describe('mcp http server integration', { concurrency: 1 }, () => {
       const body = await reuse.json();
       assert.equal(body.error, 'token_mismatch');
 
-      // Same sid now evicted: should now answer 404 session_not_found
+      // C5 round 2 (DoS guard): mismatch must NOT evict — sid disclosure should
+      // not allow an unauthenticated client to kill the legit session.
+      // Owner's reconnect with original token must still succeed.
       const after = await fetch(`http://127.0.0.1:${srv.port}/mcp`, {
         method: 'POST',
         headers: {
@@ -1085,7 +1089,107 @@ describe('mcp http server integration', { concurrency: 1 }, () => {
         },
         body: JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/list', params: {} }),
       });
-      assert.equal(after.status, 404);
+      assert.notEqual(after.status, 404, 'session must survive token mismatch');
     } finally { srv.close(); }
+  });
+});
+
+// ── 12. C5 round 2: bounded TTL parsing ──
+
+import { parseDevTtlMs, hasProxyHeaders } from './mcp-server';
+
+describe('parseDevTtlMs (C5 round 2 — bounded TTL)', () => {
+  const DEFAULT = 60 * 60 * 1000;
+  it('undefined → default 1h', () => {
+    assert.equal(parseDevTtlMs(undefined), DEFAULT);
+  });
+  it('valid integer in range → parsed', () => {
+    assert.equal(parseDevTtlMs('120000'), 120_000);
+  });
+  it('NaN-source rejected → default', () => {
+    assert.equal(parseDevTtlMs('abc'), DEFAULT);
+  });
+  it('Infinity rejected → default', () => {
+    assert.equal(parseDevTtlMs('Infinity'), DEFAULT);
+  });
+  it('below floor (1m) rejected → default', () => {
+    assert.equal(parseDevTtlMs('1000'), DEFAULT);   // 1s, too short
+  });
+  it('above ceiling (24h) rejected → default', () => {
+    assert.equal(parseDevTtlMs('999999999'), DEFAULT);   // > 24h
+  });
+  it('negative rejected → default', () => {
+    assert.equal(parseDevTtlMs('-60000'), DEFAULT);
+  });
+});
+
+// ── 13. C5 round 2: proxy-header rejection in dev fallback ──
+
+describe('hasProxyHeaders (C5 round 2)', () => {
+  it('detects each proxy header', () => {
+    for (const h of ['forwarded', 'x-forwarded-for', 'x-real-ip', 'via']) {
+      const req = { headers: { [h]: 'something' } } as any;
+      assert.equal(hasProxyHeaders(req), true, h);
+    }
+  });
+  it('returns false when none present', () => {
+    assert.equal(hasProxyHeaders({ headers: {} } as any), false);
+  });
+});
+
+describe('isDevAdminEnabled with proxy header (C5 round 2)', { concurrency: 1 }, () => {
+  let savedNodeEnv: string | undefined;
+  let savedDevAdmin: string | undefined;
+  beforeEach(() => { savedNodeEnv = process.env.NODE_ENV; savedDevAdmin = process.env.MCP_DEV_ADMIN; });
+  afterEach(() => {
+    if (savedNodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = savedNodeEnv;
+    if (savedDevAdmin === undefined) delete process.env.MCP_DEV_ADMIN; else process.env.MCP_DEV_ADMIN = savedDevAdmin;
+  });
+
+  it('proxy-header present → false even with all other gates open', () => {
+    process.env.NODE_ENV = 'development';
+    process.env.MCP_DEV_ADMIN = '1';
+    assert.equal(isDevAdminEnabled('127.0.0.1', '127.0.0.1', true), false);
+  });
+  it('proxy-header absent → unaffected (true if other gates open)', () => {
+    process.env.NODE_ENV = 'development';
+    process.env.MCP_DEV_ADMIN = '1';
+    assert.equal(isDevAdminEnabled('127.0.0.1', '127.0.0.1', false), true);
+  });
+});
+
+// ── 14. C5 round 2: claims drift on token reconnect ──
+
+describe('revalidateSessionAuth claims drift (C5 round 2)', { concurrency: 1 }, () => {
+  it('token-bound: claims set changed since init → 401 claims_changed (forces reinit)', async () => {
+    const store = createMemoryTree();
+    await store.set({ ...createNode('/', 'root'), $acl: [{ g: 'admins', p: R | W | S }] });
+    // Create user with `editor` group claim, then session
+    await store.set({
+      ...createNode('/auth/users/alice', 'user'),
+      $owner: 'alice',
+      groups: { $type: 'groups', list: ['editors'] },
+    });
+    const initialClaims = ['u:alice', 'authenticated', 'editors'];
+    const token = await createSession(store, 'alice', { claims: initialClaims });
+    const cached: SessionAuth = { kind: 'token', userId: 'alice', token, claims: initialClaims };
+
+    // Drift the user's groups: drop editors
+    const userNode = (await store.get('/auth/users/alice'))!;
+    (userNode.groups as any).list = [];
+    await store.set(userNode);
+
+    // Recreate session with new claims via createSession to mirror handler-side update
+    const driftedClaims = ['u:alice', 'authenticated'];
+    await store.remove(`/auth/sessions/${token}`);
+    // Re-issue new token with new claims (we pretend the auth layer re-issues)
+    const token2 = await createSession(store, 'alice', { claims: driftedClaims });
+    // Cached pre-drift: token would be old token, but here we'll test: matching
+    // token but downgraded user → revalidate should detect via fresh claims
+    // resolution and reject as claims_changed.
+    const cached2: SessionAuth = { kind: 'token', userId: 'alice', token: token2, claims: initialClaims };
+    const r = await revalidateSessionAuth(store, cached2, token2, '127.0.0.1', '127.0.0.1');
+    assert.ok(!r.ok);
+    if (!r.ok) assert.equal(r.body.error, 'claims_changed');
   });
 });
