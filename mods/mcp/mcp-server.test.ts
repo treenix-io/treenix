@@ -802,7 +802,7 @@ describe('resolveMcpAuth', { concurrency: 1 }, () => {
     assert.ok(r.ok);
     if (r.ok) {
       assert.equal(r.auth.kind, 'dev');
-      assert.deepEqual(r.devClaims, ['u:mcp-dev', 'authenticated', 'admins']);
+      assert.deepEqual(r.claims, ['u:mcp-dev', 'authenticated', 'admins']);
       if (r.auth.kind === 'dev') assert.ok(r.auth.expiresAt > Date.now());
     }
   });
@@ -1038,6 +1038,67 @@ describe('mcp http server integration', { concurrency: 1 }, () => {
       });
       assert.equal(res.status, 200);
       assert.ok(res.headers.get('mcp-session-id'), 'session-id header present');
+    } finally { srv.close(); }
+  });
+
+  it('I0 (round 4): token with explicit `admins` claim BUT user not in admins group must NOT bootstrap admin MCP', async () => {
+    // Codex round 4: previously buildMcpServer used session.claims when set,
+    // bypassing the always-buildClaims policy on initial auth. After fix the
+    // handler passes the computed (buildClaims-derived) claims, so an
+    // explicit-claims token can no longer escalate beyond the user's actual
+    // group membership.
+    process.env.NODE_ENV = 'production';
+    const store = createMemoryTree();
+    await store.set({ ...createNode('/', 'root'), $acl: [{ g: 'public', p: R | S }] });
+    await store.set({
+      ...createNode('/admin-data', 'dir'),
+      $acl: [{ g: 'admins', p: R | W | S }, { g: 'public', p: 0 }],
+    });
+    await store.set(createNode('/admin-data/secret', 't.default'));
+    // User exists but is NOT in admins group
+    await store.set({
+      ...createNode('/auth/users/alice', 'user'),
+      $owner: 'alice',
+      groups: { $type: 'groups', list: [] },
+    });
+    // Token issued with explicit elevated claims (forged or stale grant)
+    const token = await createSession(store, 'alice', { claims: ['u:alice', 'authenticated', 'admins'] });
+    const srv = await listen(store);
+    try {
+      const init = await fetch(`http://127.0.0.1:${srv.port}/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json, text/event-stream',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: initBody(),
+      });
+      // 200 ok — auth itself succeeds, but with downgraded (buildClaims) effective claims
+      assert.equal(init.status, 200);
+      const sid = init.headers.get('mcp-session-id')!;
+
+      // Now call get_node on /admin-data/secret. Without the round-4 fix, the
+      // explicit `admins` claim grants access. With fix, buildClaims = ['u:alice',
+      // 'authenticated'] → no `admins` → access denied (returned as "not found"
+      // from MCP because withAcl strips the node).
+      const callRes = await fetch(`http://127.0.0.1:${srv.port}/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json, text/event-stream',
+          'Authorization': `Bearer ${token}`,
+          'mcp-session-id': sid,
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0', id: 2, method: 'tools/call',
+          params: { name: 'get_node', arguments: { path: '/admin-data/secret' } },
+        }),
+      });
+      const body = await callRes.text();
+      // Result is text/event-stream or json; either way, must say not found, not the node
+      assert.ok(body.includes('not found') || body.includes('"isError":true'),
+        `expected access denial, got: ${body.slice(0, 200)}`);
     } finally { srv.close(); }
   });
 

@@ -446,7 +446,10 @@ export type SessionAuth =
   | { kind: 'dev'; expiresAt: number };
 
 export type AuthResolution =
-  | { ok: true; session: Session; devClaims?: string[]; auth: SessionAuth }
+  // claims is the EFFECTIVE claim set used for ACL — derived from buildClaims
+  // (token kind) or hardcoded admin (dev kind). Handler must pass these into
+  // buildMcpServer; do NOT fall back to session.claims on the bootstrap path.
+  | { ok: true; session: Session; claims: string[]; auth: SessionAuth }
   | { ok: false; status: 401; body: { error: string; message?: string } };
 
 export async function resolveMcpAuth(
@@ -465,14 +468,15 @@ export async function resolveMcpAuth(
     // C5 r3: always recompute via buildClaims for MCP — explicit session claims
     // are not trusted as static grants here; user/group changes must propagate.
     const claims = await buildClaims(store, session.userId);
-    return { ok: true, session, auth: { kind: 'token', userId: session.userId, token, claims } };
+    return { ok: true, session, claims, auth: { kind: 'token', userId: session.userId, token, claims } };
   }
   if (isDevAdminEnabled(configuredHost, peerAddr, hasProxy)) {
     console.warn('[mcp] ⚠️  DEV MODE: NODE_ENV=development + MCP_DEV_ADMIN=1 + loopback host & peer (no proxy) — granting admin without token.');
+    const claims = ['u:mcp-dev', 'authenticated', 'admins'];
     return {
       ok: true,
       session: { userId: 'mcp-dev' } as Session,
-      devClaims: ['u:mcp-dev', 'authenticated', 'admins'],
+      claims,
       auth: { kind: 'dev', expiresAt: Date.now() + DEV_SESSION_TTL_MS },
     };
   }
@@ -634,7 +638,7 @@ export function createMcpHttpServer(store: Tree, port: number, host = '127.0.0.1
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
     });
-    const mcp = await buildMcpServer(store, auth.session, auth.devClaims);
+    const mcp = await buildMcpServer(store, auth.session, auth.claims);
     await mcp.connect(transport);
 
     transport.onclose = () => {
