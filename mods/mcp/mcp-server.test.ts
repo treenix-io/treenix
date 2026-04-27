@@ -45,22 +45,23 @@ describe('extractToken', () => {
     assert.equal(extractToken(req), 'abc123');
   });
 
-  it('extracts token from query parameter', () => {
-    const req = { headers: {}, url: '/mcp?token=xyz' } as any;
-    assert.equal(extractToken(req), 'xyz');
-  });
-
   it('returns null when no token provided', () => {
     const req = { headers: {}, url: '/mcp' } as any;
     assert.equal(extractToken(req), null);
   });
 
-  it('decodes URL-encoded query token', () => {
-    const req = { headers: {}, url: '/mcp?token=a%20b%3Dc' } as any;
-    assert.equal(extractToken(req), 'a b=c');
+  // C5: query-string token rejected (was an oracle for access logs/Referer leak)
+  it('ignores ?token= query parameter (Bearer header only)', () => {
+    const req = { headers: {}, url: '/mcp?token=xyz' } as any;
+    assert.equal(extractToken(req), null);
   });
 
-  it('prefers Bearer header over query param', () => {
+  it('ignores URL-encoded query token', () => {
+    const req = { headers: {}, url: '/mcp?token=a%20b%3Dc' } as any;
+    assert.equal(extractToken(req), null);
+  });
+
+  it('Bearer header still wins regardless of query', () => {
     const req = { headers: { authorization: 'Bearer fromHeader' }, url: '/mcp?token=fromQuery' } as any;
     assert.equal(extractToken(req), 'fromHeader');
   });
@@ -646,69 +647,445 @@ describe('ACL filtering', () => {
   });
 });
 
-// ── 6. Dev Mode Session Fallback ──
+// ── 6. buildMcpServer claims contract ──
+// (renamed from "dev mode session fallback" — the old name implied this tested
+// the HTTP gate, but createTestClient bypasses the handler. Real gate coverage
+// lives in `mcp http server integration` below.)
 
-describe('dev mode session fallback', { concurrency: 1 }, () => {
-  let savedTenant: string | undefined;
-
-  beforeEach(() => {
-    savedTenant = process.env.TENANT;
-  });
-
-  afterEach(() => {
-    // Unconditional restore via try/finally pattern
-    try {
-      if (savedTenant === undefined) delete process.env.TENANT;
-      else process.env.TENANT = savedTenant;
-    } finally {
-      // Guarantee env is always restored even if test cleanup itself throws
-    }
-  });
-
-  it('dev mode (no TENANT) creates admin session without token', async () => {
-    delete process.env.TENANT;
+describe('buildMcpServer claims contract', () => {
+  it('admin claims grant access to admin-only data', async () => {
     const store = createMemoryTree();
-    await store.set({
-      ...createNode('/', 'root'),
-      $acl: [{ g: 'admins', p: R | W | S }],
-    });
+    await store.set({ ...createNode('/', 'root'), $acl: [{ g: 'admins', p: R | W | S }] });
     await store.set(createNode('/admin-only', 't.default'));
-
-    // Dev mode: session = { userId: 'mcp-dev' }, claims = ['u:mcp-dev', 'authenticated', 'admins']
     const { client } = await createTestClient(store, 'mcp-dev', ['u:mcp-dev', 'authenticated', 'admins']);
     const result = await client.callTool({ name: 'get_node', arguments: { path: '/admin-only' } });
-    assert.ok(!textContent(result).includes('not found'), 'dev mode should have admin access');
+    assert.ok(!textContent(result).includes('not found'));
   });
 
-  it('dev mode claims include admins group', () => {
-    // The handler hardcodes these claims for dev mode
-    // Verify the contract: when no TENANT and no token, claims are ['u:mcp-dev', 'authenticated', 'admins']
-    delete process.env.TENANT;
-    const devClaims = ['u:mcp-dev', 'authenticated', 'admins'];
-    assert.ok(devClaims.includes('admins'), 'dev claims must include admins');
-    assert.ok(devClaims.includes('authenticated'), 'dev claims must include authenticated');
-    assert.equal(devClaims.length, 3, 'dev claims should have exactly 3 entries');
-  });
-
-  it('production mode (TENANT set) without token gets no access', async () => {
-    process.env.TENANT = 'prod';
+  it('non-admin claims cannot read admin-only data', async () => {
     const store = createMemoryTree();
-    await store.set({
-      ...createNode('/', 'root'),
-      $acl: [{ g: 'public', p: R | S }],
-    });
-
-    // In production with no token, createMcpHttpServer returns 401
-    // We test this at the contract level: if session is null, no MCP server is built
-    // buildMcpServer always requires a session, so the 401 is at the HTTP handler layer
-    // Here we verify that a non-admin user can't see admin content
-    const { client } = await createTestClient(store, 'nobody', ['u:nobody']);
+    await store.set({ ...createNode('/', 'root'), $acl: [{ g: 'public', p: R | S }] });
     await store.set({
       ...createNode('/admin-data', 'dir'),
       $acl: [{ g: 'admins', p: R | W | S }, { g: 'public', p: 0 }],
     });
     await store.set(createNode('/admin-data/item', 't.default'));
+    const { client } = await createTestClient(store, 'nobody', ['u:nobody']);
     const result = await client.callTool({ name: 'get_node', arguments: { path: '/admin-data/item' } });
-    assert.ok(textContent(result).includes('not found'), 'non-admin should not see admin data');
+    assert.ok(textContent(result).includes('not found'));
+  });
+});
+
+// ── 7. C5: loopback / dev gate ──
+
+import {
+  isLoopbackHost,
+  isLoopbackPeer,
+  isDevAdminEnabled,
+  parseAllowedOrigins,
+  setCorsHeaders,
+  resolveMcpAuth,
+  revalidateSessionAuth,
+  type SessionAuth,
+} from './mcp-server';
+
+describe('isLoopbackHost', () => {
+  it('accepts 127.0.0.1, localhost, ::1', () => {
+    for (const h of ['127.0.0.1', 'localhost', '::1']) assert.equal(isLoopbackHost(h), true, h);
+  });
+  it('rejects 0.0.0.0, public IP, uppercase LOCALHOST (case-sensitive)', () => {
+    for (const h of ['0.0.0.0', '192.168.1.1', '10.0.0.1', 'LOCALHOST', '']) assert.equal(isLoopbackHost(h), false, h);
+  });
+});
+
+describe('isLoopbackPeer', () => {
+  it('accepts 127.x, ::1, ::ffff:127.x', () => {
+    for (const a of ['127.0.0.1', '127.255.255.254', '::1', '::ffff:127.0.0.1']) assert.equal(isLoopbackPeer(a), true, a);
+  });
+  it('rejects undefined and non-loopback addresses', () => {
+    for (const a of [undefined, '', '10.0.0.1', '192.168.1.50', '::', '2001:db8::1']) assert.equal(isLoopbackPeer(a), false, String(a));
+  });
+});
+
+describe('isDevAdminEnabled', { concurrency: 1 }, () => {
+  let savedNodeEnv: string | undefined;
+  let savedDevAdmin: string | undefined;
+  beforeEach(() => { savedNodeEnv = process.env.NODE_ENV; savedDevAdmin = process.env.MCP_DEV_ADMIN; });
+  afterEach(() => {
+    if (savedNodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = savedNodeEnv;
+    if (savedDevAdmin === undefined) delete process.env.MCP_DEV_ADMIN; else process.env.MCP_DEV_ADMIN = savedDevAdmin;
+  });
+
+  it('all 4 conditions present → true', () => {
+    process.env.NODE_ENV = 'development';
+    process.env.MCP_DEV_ADMIN = '1';
+    assert.equal(isDevAdminEnabled('127.0.0.1', '127.0.0.1'), true);
+  });
+
+  it('NODE_ENV != development → false', () => {
+    process.env.NODE_ENV = 'production';
+    process.env.MCP_DEV_ADMIN = '1';
+    assert.equal(isDevAdminEnabled('127.0.0.1', '127.0.0.1'), false);
+  });
+
+  it('MCP_DEV_ADMIN unset or wrong value → false', () => {
+    process.env.NODE_ENV = 'development';
+    delete process.env.MCP_DEV_ADMIN;
+    assert.equal(isDevAdminEnabled('127.0.0.1', '127.0.0.1'), false);
+    process.env.MCP_DEV_ADMIN = '0';
+    assert.equal(isDevAdminEnabled('127.0.0.1', '127.0.0.1'), false);
+    process.env.MCP_DEV_ADMIN = 'true';
+    assert.equal(isDevAdminEnabled('127.0.0.1', '127.0.0.1'), false);
+  });
+
+  it('configured host not loopback → false', () => {
+    process.env.NODE_ENV = 'development';
+    process.env.MCP_DEV_ADMIN = '1';
+    assert.equal(isDevAdminEnabled('0.0.0.0', '127.0.0.1'), false);
+  });
+
+  it('peer not loopback → false (proxy / port-forward bypass blocked)', () => {
+    process.env.NODE_ENV = 'development';
+    process.env.MCP_DEV_ADMIN = '1';
+    assert.equal(isDevAdminEnabled('127.0.0.1', '192.168.1.50'), false);
+    assert.equal(isDevAdminEnabled('127.0.0.1', undefined), false);
+  });
+});
+
+// ── 8. C5: resolveMcpAuth ──
+
+describe('resolveMcpAuth', { concurrency: 1 }, () => {
+  let savedNodeEnv: string | undefined;
+  let savedDevAdmin: string | undefined;
+  beforeEach(() => { savedNodeEnv = process.env.NODE_ENV; savedDevAdmin = process.env.MCP_DEV_ADMIN; });
+  afterEach(() => {
+    if (savedNodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = savedNodeEnv;
+    if (savedDevAdmin === undefined) delete process.env.MCP_DEV_ADMIN; else process.env.MCP_DEV_ADMIN = savedDevAdmin;
+  });
+
+  it('valid token → ok with auth.kind=token', async () => {
+    const store = createMemoryTree();
+    await store.set({ ...createNode('/', 'root'), $acl: [{ g: 'admins', p: R | W | S }] });
+    const token = await createSession(store, 'alice');
+    const r = await resolveMcpAuth(store, token, '127.0.0.1', '127.0.0.1');
+    assert.ok(r.ok);
+    if (r.ok) {
+      assert.equal(r.auth.kind, 'token');
+      assert.equal(r.session.userId, 'alice');
+    }
+  });
+
+  it('invalid token → 401 invalid_token', async () => {
+    const store = createMemoryTree();
+    const r = await resolveMcpAuth(store, 'a'.repeat(64), '127.0.0.1', '127.0.0.1');
+    assert.ok(!r.ok);
+    if (!r.ok) {
+      assert.equal(r.status, 401);
+      assert.equal(r.body.error, 'invalid_token');
+    }
+  });
+
+  it('no token + production → 401 token_required', async () => {
+    process.env.NODE_ENV = 'production';
+    delete process.env.MCP_DEV_ADMIN;
+    const store = createMemoryTree();
+    const r = await resolveMcpAuth(store, null, '127.0.0.1', '127.0.0.1');
+    assert.ok(!r.ok);
+    if (!r.ok) assert.equal(r.body.error, 'token_required');
+  });
+
+  it('no token + dev gate complete → ok with auth.kind=dev', async () => {
+    process.env.NODE_ENV = 'development';
+    process.env.MCP_DEV_ADMIN = '1';
+    const store = createMemoryTree();
+    const r = await resolveMcpAuth(store, null, '127.0.0.1', '127.0.0.1');
+    assert.ok(r.ok);
+    if (r.ok) {
+      assert.equal(r.auth.kind, 'dev');
+      assert.deepEqual(r.devClaims, ['u:mcp-dev', 'authenticated', 'admins']);
+      if (r.auth.kind === 'dev') assert.ok(r.auth.expiresAt > Date.now());
+    }
+  });
+
+  it('no token + NODE_ENV=development without MCP_DEV_ADMIN → 401', async () => {
+    process.env.NODE_ENV = 'development';
+    delete process.env.MCP_DEV_ADMIN;
+    const store = createMemoryTree();
+    const r = await resolveMcpAuth(store, null, '127.0.0.1', '127.0.0.1');
+    assert.ok(!r.ok);
+    if (!r.ok) assert.equal(r.body.error, 'token_required');
+  });
+
+  it('no token + dev opts on but peer not loopback → 401', async () => {
+    process.env.NODE_ENV = 'development';
+    process.env.MCP_DEV_ADMIN = '1';
+    const store = createMemoryTree();
+    const r = await resolveMcpAuth(store, null, '127.0.0.1', '192.168.1.50');
+    assert.ok(!r.ok);
+    if (!r.ok) assert.equal(r.body.error, 'token_required');
+  });
+
+  it('no token + dev opts on but configured host not loopback → 401', async () => {
+    process.env.NODE_ENV = 'development';
+    process.env.MCP_DEV_ADMIN = '1';
+    const store = createMemoryTree();
+    const r = await resolveMcpAuth(store, null, '0.0.0.0', '127.0.0.1');
+    assert.ok(!r.ok);
+    if (!r.ok) assert.equal(r.body.error, 'token_required');
+  });
+});
+
+// ── 9. C5: revalidateSessionAuth ──
+
+describe('revalidateSessionAuth', { concurrency: 1 }, () => {
+  let savedNodeEnv: string | undefined;
+  let savedDevAdmin: string | undefined;
+  beforeEach(() => { savedNodeEnv = process.env.NODE_ENV; savedDevAdmin = process.env.MCP_DEV_ADMIN; });
+  afterEach(() => {
+    if (savedNodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = savedNodeEnv;
+    if (savedDevAdmin === undefined) delete process.env.MCP_DEV_ADMIN; else process.env.MCP_DEV_ADMIN = savedDevAdmin;
+  });
+
+  it('token-bound: matching token + still resolvable → ok', async () => {
+    const store = createMemoryTree();
+    await store.set({ ...createNode('/', 'root'), $acl: [{ g: 'admins', p: R | W | S }] });
+    const token = await createSession(store, 'alice');
+    const cached: SessionAuth = { kind: 'token', userId: 'alice', token };
+    const r = await revalidateSessionAuth(store, cached, token, '127.0.0.1', '127.0.0.1');
+    assert.ok(r.ok);
+  });
+
+  it('token-bound: token mismatch → 401 token_mismatch', async () => {
+    const store = createMemoryTree();
+    const cached: SessionAuth = { kind: 'token', userId: 'alice', token: 'a'.repeat(64) };
+    const r = await revalidateSessionAuth(store, cached, 'b'.repeat(64), '127.0.0.1', '127.0.0.1');
+    assert.ok(!r.ok);
+    if (!r.ok) assert.equal(r.body.error, 'token_mismatch');
+  });
+
+  it('token-bound: token revoked since session creation → 401 token_invalid', async () => {
+    const store = createMemoryTree();
+    await store.set({ ...createNode('/', 'root'), $acl: [{ g: 'admins', p: R | W | S }] });
+    const token = await createSession(store, 'alice');
+    const cached: SessionAuth = { kind: 'token', userId: 'alice', token };
+    // revoke
+    await store.remove(`/auth/sessions/${token}`);
+    const r = await revalidateSessionAuth(store, cached, token, '127.0.0.1', '127.0.0.1');
+    assert.ok(!r.ok);
+    if (!r.ok) assert.equal(r.body.error, 'token_invalid');
+  });
+
+  it('dev-bound: TTL ok + dev gate ok → ok', async () => {
+    process.env.NODE_ENV = 'development';
+    process.env.MCP_DEV_ADMIN = '1';
+    const store = createMemoryTree();
+    const cached: SessionAuth = { kind: 'dev', expiresAt: Date.now() + 60_000 };
+    const r = await revalidateSessionAuth(store, cached, null, '127.0.0.1', '127.0.0.1');
+    assert.ok(r.ok);
+  });
+
+  it('dev-bound: TTL expired → 401 dev_session_expired', async () => {
+    process.env.NODE_ENV = 'development';
+    process.env.MCP_DEV_ADMIN = '1';
+    const store = createMemoryTree();
+    const cached: SessionAuth = { kind: 'dev', expiresAt: Date.now() - 1_000 };
+    const r = await revalidateSessionAuth(store, cached, null, '127.0.0.1', '127.0.0.1');
+    assert.ok(!r.ok);
+    if (!r.ok) assert.equal(r.body.error, 'dev_session_expired');
+  });
+
+  it('dev-bound: dev gate dropped (env-flip) → 401 dev_mode_disabled', async () => {
+    process.env.NODE_ENV = 'production';
+    process.env.MCP_DEV_ADMIN = '1';
+    const store = createMemoryTree();
+    const cached: SessionAuth = { kind: 'dev', expiresAt: Date.now() + 60_000 };
+    const r = await revalidateSessionAuth(store, cached, null, '127.0.0.1', '127.0.0.1');
+    assert.ok(!r.ok);
+    if (!r.ok) assert.equal(r.body.error, 'dev_mode_disabled');
+  });
+});
+
+// ── 10. C5: CORS ──
+
+describe('parseAllowedOrigins', () => {
+  it('empty/undefined → []', () => {
+    assert.deepEqual(parseAllowedOrigins(undefined), []);
+    assert.deepEqual(parseAllowedOrigins(''), []);
+  });
+  it('comma + whitespace → trimmed list', () => {
+    assert.deepEqual(parseAllowedOrigins('https://a.com, https://b.com,https://c.com '),
+      ['https://a.com', 'https://b.com', 'https://c.com']);
+  });
+  it('wildcard * is rejected (warn)', () => {
+    assert.deepEqual(parseAllowedOrigins('*'), []);
+    assert.deepEqual(parseAllowedOrigins('*,https://a.com'), ['https://a.com']);
+  });
+});
+
+describe('setCorsHeaders', { concurrency: 1 }, () => {
+  let savedOrigins: string | undefined;
+  beforeEach(() => { savedOrigins = process.env.MCP_CORS_ORIGINS; });
+  afterEach(() => {
+    if (savedOrigins === undefined) delete process.env.MCP_CORS_ORIGINS;
+    else process.env.MCP_CORS_ORIGINS = savedOrigins;
+  });
+
+  function mkRes() {
+    const headers: Record<string, string> = {};
+    return { headers, setHeader: (k: string, v: string) => { headers[k] = v; } } as any;
+  }
+
+  it('origin in allowlist → Allow-Origin echoes + Vary: Origin', () => {
+    process.env.MCP_CORS_ORIGINS = 'https://app.example.com';
+    const req = { headers: { origin: 'https://app.example.com' } } as any;
+    const res = mkRes();
+    setCorsHeaders(req, res);
+    assert.equal(res.headers['Access-Control-Allow-Origin'], 'https://app.example.com');
+    assert.equal(res.headers.Vary, 'Origin');
+  });
+
+  it('origin not in allowlist → no Allow-Origin, but Vary still set', () => {
+    process.env.MCP_CORS_ORIGINS = 'https://app.example.com';
+    const req = { headers: { origin: 'https://evil.com' } } as any;
+    const res = mkRes();
+    setCorsHeaders(req, res);
+    assert.equal(res.headers['Access-Control-Allow-Origin'], undefined);
+    assert.equal(res.headers.Vary, 'Origin');
+  });
+
+  it('no Origin header → neither Allow-Origin nor Vary', () => {
+    process.env.MCP_CORS_ORIGINS = 'https://a.com';
+    const req = { headers: {} } as any;
+    const res = mkRes();
+    setCorsHeaders(req, res);
+    assert.equal(res.headers['Access-Control-Allow-Origin'], undefined);
+    assert.equal(res.headers.Vary, undefined);
+  });
+
+  it('Method/Header allowlists set unconditionally', () => {
+    const req = { headers: {} } as any;
+    const res = mkRes();
+    setCorsHeaders(req, res);
+    assert.ok(res.headers['Access-Control-Allow-Methods'].includes('OPTIONS'));
+    assert.ok(res.headers['Access-Control-Allow-Headers'].includes('Authorization'));
+  });
+});
+
+// ── 11. C5: HTTP integration ──
+
+import { createMcpHttpServer } from './mcp-server';
+import { AddressInfo } from 'node:net';
+
+describe('mcp http server integration', { concurrency: 1 }, () => {
+  let savedNodeEnv: string | undefined;
+  let savedDevAdmin: string | undefined;
+  beforeEach(() => { savedNodeEnv = process.env.NODE_ENV; savedDevAdmin = process.env.MCP_DEV_ADMIN; });
+  afterEach(() => {
+    if (savedNodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = savedNodeEnv;
+    if (savedDevAdmin === undefined) delete process.env.MCP_DEV_ADMIN; else process.env.MCP_DEV_ADMIN = savedDevAdmin;
+  });
+
+  async function listen(store: Tree): Promise<{ port: number; close: () => void }> {
+    const server = createMcpHttpServer(store, 0);   // ephemeral port
+    await new Promise<void>(r => server.once('listening', () => r()));
+    const port = (server.address() as AddressInfo).port;
+    return { port, close: () => server.close() };
+  }
+
+  function initBody(): string {
+    return JSON.stringify({
+      jsonrpc: '2.0', id: 1, method: 'initialize',
+      params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 't', version: '1' } },
+    });
+  }
+
+  it('I1: no token + production → 401 with WWW-Authenticate: Bearer', async () => {
+    process.env.NODE_ENV = 'production';
+    delete process.env.MCP_DEV_ADMIN;
+    const store = createMemoryTree();
+    await store.set({ ...createNode('/', 'root'), $acl: [{ g: 'public', p: R }] });
+    const srv = await listen(store);
+    try {
+      const res = await fetch(`http://127.0.0.1:${srv.port}/mcp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream' },
+        body: initBody(),
+      });
+      assert.equal(res.status, 401);
+      assert.match(res.headers.get('www-authenticate') ?? '', /^Bearer/);
+      const body = await res.json();
+      assert.equal(body.error, 'token_required');
+    } finally { srv.close(); }
+  });
+
+  it('I2: valid Bearer token → 200, mcp-session-id echoed', async () => {
+    process.env.NODE_ENV = 'production';
+    const store = createMemoryTree();
+    await store.set({ ...createNode('/', 'root'), $acl: [{ g: 'admins', p: R | W | S }] });
+    const token = await createSession(store, 'alice', { claims: ['u:alice', 'admins'] });
+    const srv = await listen(store);
+    try {
+      const res = await fetch(`http://127.0.0.1:${srv.port}/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json, text/event-stream',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: initBody(),
+      });
+      assert.equal(res.status, 200);
+      assert.ok(res.headers.get('mcp-session-id'), 'session-id header present');
+    } finally { srv.close(); }
+  });
+
+  it('I4: reconnect with different token → 401 token_mismatch, session evicted', async () => {
+    process.env.NODE_ENV = 'production';
+    const store = createMemoryTree();
+    await store.set({ ...createNode('/', 'root'), $acl: [{ g: 'admins', p: R | W | S }] });
+    const token1 = await createSession(store, 'alice', { claims: ['u:alice', 'admins'] });
+    const token2 = await createSession(store, 'bob', { claims: ['u:bob', 'admins'] });
+    const srv = await listen(store);
+    try {
+      const init = await fetch(`http://127.0.0.1:${srv.port}/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json, text/event-stream',
+          'Authorization': `Bearer ${token1}`,
+        },
+        body: initBody(),
+      });
+      const sid = init.headers.get('mcp-session-id')!;
+      assert.ok(sid);
+
+      // Reconnect with bob's token (different) — must fail
+      const reuse = await fetch(`http://127.0.0.1:${srv.port}/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json, text/event-stream',
+          'Authorization': `Bearer ${token2}`,
+          'mcp-session-id': sid,
+        },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }),
+      });
+      assert.equal(reuse.status, 401);
+      const body = await reuse.json();
+      assert.equal(body.error, 'token_mismatch');
+
+      // Same sid now evicted: should now answer 404 session_not_found
+      const after = await fetch(`http://127.0.0.1:${srv.port}/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json, text/event-stream',
+          'Authorization': `Bearer ${token1}`,
+          'mcp-session-id': sid,
+        },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/list', params: {} }),
+      });
+      assert.equal(after.status, 404);
+    } finally { srv.close(); }
   });
 });
