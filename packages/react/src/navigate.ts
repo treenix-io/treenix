@@ -1,6 +1,6 @@
 // Navigation primitives — context, guards, history helpers
 
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useSyncExternalStore } from 'react';
 
 // ── Navigation context — shell provides, views consume ──
 
@@ -45,27 +45,16 @@ export function pushHistory(url: string) {
   history.pushState(null, '', url);
 }
 
-// ── useLocation — track window.location through popstate, gated by checkBeforeNavigate ──
+// ── useLocation — subscribe a component to window.location via popstate ──
 
-export type Location = { pathname: string; search: string };
+function subscribeLocation(callback: () => void) {
+  window.addEventListener('popstate', callback);
+  return () => window.removeEventListener('popstate', callback);
+}
+
+const getLocationHref = () => location.href;
 
 export function useLocation(): Location {
-  const [loc, setLoc] = useState<Location>(() => ({
-    pathname: location.pathname,
-    search: location.search,
-  }));
-
-  useEffect(() => {
-    const onPop = () => {
-      if (!checkBeforeNavigate()) {
-        pushHistory(location.href);
-        return;
-      }
-      setLoc({ pathname: location.pathname, search: location.search });
-    };
-    window.addEventListener('popstate', onPop);
-    return () => window.removeEventListener('popstate', onPop);
-  }, []);
-
-  return loc;
+  useSyncExternalStore(subscribeLocation, getLocationHref);
+  return location;
 }
