@@ -384,17 +384,23 @@ export function extractToken(req: import('node:http').IncomingMessage): string |
 
 // ── C5: auth resolution & session binding ──
 
-const PROXY_HEADERS = ['forwarded', 'x-forwarded-for', 'x-real-ip', 'via'] as const;
+const PROXY_HEADERS = [
+  'forwarded', 'x-forwarded-for', 'x-real-ip', 'via',
+  'x-forwarded-host', 'x-forwarded-proto', 'x-forwarded-port',
+  'x-client-ip', 'cf-connecting-ip', 'true-client-ip', 'cdn-loop',
+] as const;
 
 export function hasProxyHeaders(req: import('node:http').IncomingMessage): boolean {
+  // Presence-check (not truthiness): empty-string header value is still a
+  // proxy indicator. Headers are normalized lowercase by Node's HTTP parser.
   for (const h of PROXY_HEADERS) {
-    if (req.headers[h]) return true;
+    if (h in req.headers) return true;
   }
   return false;
 }
 
 const TTL_FLOOR_MS = 60_000;                   // 1 minute
-const TTL_CEILING_MS = 24 * 60 * 60_000;       // 24 hours
+const TTL_CEILING_MS = 60 * 60_000;            // 1 hour (was 24h — tightened r3)
 const TTL_DEFAULT_MS = 60 * 60_000;            // 1 hour
 
 export function parseDevTtlMs(raw: string | undefined): number {
@@ -456,7 +462,9 @@ export async function resolveMcpAuth(
       ok: false, status: 401,
       body: { error: 'invalid_token', message: 'Token expired or unknown' },
     };
-    const claims = session.claims ?? await buildClaims(store, session.userId);
+    // C5 r3: always recompute via buildClaims for MCP — explicit session claims
+    // are not trusted as static grants here; user/group changes must propagate.
+    const claims = await buildClaims(store, session.userId);
     return { ok: true, session, auth: { kind: 'token', userId: session.userId, token, claims } };
   }
   if (isDevAdminEnabled(configuredHost, peerAddr, hasProxy)) {
@@ -506,8 +514,9 @@ export async function revalidateSessionAuth(
       body: { error: 'token_invalid', message: 'Token revoked or expired' },
       evict: true,
     };
-    // Claims drift detection (round 2): user demoted while session live.
-    const currentClaims = fresh.claims ?? await buildClaims(store, fresh.userId);
+    // Claims drift detection (round 2 + 3): always recompute from current state
+    // (ignore stored session.claims for MCP — see resolveMcpAuth comment).
+    const currentClaims = await buildClaims(store, fresh.userId);
     if (!sameClaimSet(currentClaims, cached.claims)) return {
       ok: false, status: 401,
       body: { error: 'claims_changed', message: 'User permissions changed; reinitialize' },

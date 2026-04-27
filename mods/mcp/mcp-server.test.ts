@@ -1115,8 +1115,12 @@ describe('parseDevTtlMs (C5 round 2 — bounded TTL)', () => {
   it('below floor (1m) rejected → default', () => {
     assert.equal(parseDevTtlMs('1000'), DEFAULT);   // 1s, too short
   });
-  it('above ceiling (24h) rejected → default', () => {
-    assert.equal(parseDevTtlMs('999999999'), DEFAULT);   // > 24h
+  it('above ceiling (1h) rejected → default (round 3: tighter cap)', () => {
+    assert.equal(parseDevTtlMs(String(60 * 60 * 1000 + 1)), DEFAULT);
+    assert.equal(parseDevTtlMs('999999999'), DEFAULT);
+  });
+  it('exactly at ceiling (1h) accepted', () => {
+    assert.equal(parseDevTtlMs('3600000'), 3600000);
   });
   it('negative rejected → default', () => {
     assert.equal(parseDevTtlMs('-60000'), DEFAULT);
@@ -1125,15 +1129,23 @@ describe('parseDevTtlMs (C5 round 2 — bounded TTL)', () => {
 
 // ── 13. C5 round 2: proxy-header rejection in dev fallback ──
 
-describe('hasProxyHeaders (C5 round 2)', () => {
-  it('detects each proxy header', () => {
-    for (const h of ['forwarded', 'x-forwarded-for', 'x-real-ip', 'via']) {
+describe('hasProxyHeaders (C5 round 2 + 3)', () => {
+  it('detects each proxy header (incl. round-3 expansions)', () => {
+    for (const h of [
+      'forwarded', 'x-forwarded-for', 'x-real-ip', 'via',
+      'x-forwarded-host', 'x-forwarded-proto', 'x-forwarded-port',
+      'x-client-ip', 'cf-connecting-ip', 'true-client-ip', 'cdn-loop',
+    ]) {
       const req = { headers: { [h]: 'something' } } as any;
       assert.equal(hasProxyHeaders(req), true, h);
     }
   });
   it('returns false when none present', () => {
     assert.equal(hasProxyHeaders({ headers: {} } as any), false);
+  });
+  // round 3: presence not truthiness — empty string still counts
+  it('treats empty-string header value as present (presence-check)', () => {
+    assert.equal(hasProxyHeaders({ headers: { 'x-forwarded-for': '' } } as any), true);
   });
 });
 
@@ -1160,7 +1172,34 @@ describe('isDevAdminEnabled with proxy header (C5 round 2)', { concurrency: 1 },
 
 // ── 14. C5 round 2: claims drift on token reconnect ──
 
-describe('revalidateSessionAuth claims drift (C5 round 2)', { concurrency: 1 }, () => {
+describe('revalidateSessionAuth claims drift (C5 round 2 + 3)', { concurrency: 1 }, () => {
+  // Round 3: same-token group demotion via buildClaims (the realistic attack).
+  // User's groups changed mid-session; old MCP session must die on reconnect.
+  it('token-bound: same-token user-groups demotion → claims_changed', async () => {
+    const store = createMemoryTree();
+    await store.set({ ...createNode('/', 'root'), $acl: [{ g: 'admins', p: R | W | S }] });
+    await store.set({
+      ...createNode('/auth/users/alice', 'user'),
+      $owner: 'alice',
+      groups: { $type: 'groups', list: ['editors'] },
+    });
+    // Session created WITHOUT explicit claims → claims resolved dynamically via buildClaims
+    const token = await createSession(store, 'alice');
+    const initialClaims = await buildClaims(store, 'alice');
+    assert.ok(initialClaims.includes('editors'));
+    const cached: SessionAuth = { kind: 'token', userId: 'alice', token, claims: initialClaims };
+
+    // Demote alice — drop 'editors' group
+    const userNode = (await store.get('/auth/users/alice'))!;
+    (userNode.groups as any).list = [];
+    await store.set(userNode);
+
+    // Reconnect with same token: revalidate must detect group demotion
+    const r = await revalidateSessionAuth(store, cached, token, '127.0.0.1', '127.0.0.1');
+    assert.ok(!r.ok);
+    if (!r.ok) assert.equal(r.body.error, 'claims_changed');
+  });
+
   it('token-bound: claims set changed since init → 401 claims_changed (forces reinit)', async () => {
     const store = createMemoryTree();
     await store.set({ ...createNode('/', 'root'), $acl: [{ g: 'admins', p: R | W | S }] });
