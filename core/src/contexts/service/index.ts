@@ -1,4 +1,4 @@
-// Treenity Service Context — Layer 2
+// Treenix Service Context — Layer 2
 // Service = register(type, "service", handler) → returns { stop() }
 
 import { resolve as resolveCtx } from '#core';

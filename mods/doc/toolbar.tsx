@@ -1,6 +1,6 @@
 import type { Editor } from '@tiptap/react';
-import { cn } from '@treenity/react';
-import { Button } from '@treenity/react/ui/button';
+import { cn } from '@treenx/react';
+import { Button } from '@treenx/react/ui/button';
 import {
   Bold,
   Code,

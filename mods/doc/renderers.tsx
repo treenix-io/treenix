@@ -1,6 +1,6 @@
 // Lazy loader: registers doc.page view but defers tiptap import until render
 
-import { register } from '@treenity/core';
+import { register } from '@treenx/core';
 import { lazy, Suspense } from 'react';
 
 const DocPageViewLazy = lazy(() =>

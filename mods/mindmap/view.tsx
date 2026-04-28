@@ -1,11 +1,11 @@
 // MindMap View — Miro-style horizontal tree with organic curves
 // Each node fetches its own children via useChildren when expanded
 
-import type { NodeData } from '@treenity/core';
-import { register } from '@treenity/core';
-import type { View } from '@treenity/react';
-import { useChildren } from '@treenity/react';
-import { trpc } from '@treenity/react';
+import type { NodeData } from '@treenx/core';
+import { register } from '@treenx/core';
+import type { View } from '@treenx/react';
+import { useChildren } from '@treenx/react';
+import { trpc } from '@treenx/react';
 import { select } from 'd3-selection';
 import 'd3-transition';
 import { zoom as d3zoom, type ZoomBehavior, zoomIdentity } from 'd3-zoom';

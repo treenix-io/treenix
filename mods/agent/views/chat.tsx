@@ -1,8 +1,8 @@
 // Chat view — interactive AI chat on any node with ai.chat + ai.thread + ai.agent
 // Registered on ai.chat component. Streams via trpc.streamAction.subscribe.
 
-import { register } from '@treenity/core';
-import { cn, execute, trpc, useActions, useCurrentNode, usePath, type View } from '@treenity/react';
+import { register } from '@treenx/core';
+import { cn, execute, trpc, useActions, useCurrentNode, usePath, type View } from '@treenx/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AiChat, AiThread, type ThreadMessage } from '../types';
 import { LogRenderer } from './log';

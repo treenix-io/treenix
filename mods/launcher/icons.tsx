@@ -1,7 +1,7 @@
 // Launcher icons — react:icon context with iOS-style SVG icons
 
-import { register } from '@treenity/core';
-import type { RenderProps } from '@treenity/react';
+import { register } from '@treenx/core';
+import type { RenderProps } from '@treenx/react';
 import type { FC, ReactNode } from 'react';
 
 // ── Icon shell — rounded rect with gradient + glow ──
@@ -228,7 +228,7 @@ register('board.task', 'react:icon', BoardIcon);
 register('todo.list', 'react:icon', TodoIcon);
 register('cafe.contact', 'react:icon', ContactIcon);
 register('mount-point', 'react:icon', DocsIcon);
-register('treenity.system', 'react:icon', SystemIcon);
+register('treenix.system', 'react:icon', SystemIcon);
 register('whisper.service', 'react:icon', WhisperIcon);
 register('examples.demo.sensor', 'react:icon', SensorIcon);
 register('t.llm', 'react:icon', LlmIcon);

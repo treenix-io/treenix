@@ -1,11 +1,11 @@
-// Treenity Mongo Tree — Layer 1
+// Treenix Mongo Tree — Layer 1
 // Drop-in replacement for MemoryStore.
 
-import { type NodeData, toStorageKeys, fromStorageKeys } from '@treenity/core';
-import { OpError } from '@treenity/core/errors';
+import { type NodeData, toStorageKeys, fromStorageKeys } from '@treenx/core';
+import { OpError } from '@treenx/core/errors';
 import { type Collection, type Db, MongoClient } from 'mongodb';
-import { type Tree } from '@treenity/core/tree';
-import { defaultPatch } from '@treenity/core/tree/patch';
+import { type Tree } from '@treenx/core/tree';
+import { defaultPatch } from '@treenx/core/tree/patch';
 
 const toStorage = (node: NodeData) => toStorageKeys(node);
 const fromStorage = (doc: Record<string, unknown>) => fromStorageKeys(doc) as NodeData;
@@ -36,7 +36,7 @@ function getSharedClient(uri: string): { client: MongoClient; ready: Promise<Mon
 
 export async function createMongoTree(
   uri: string,
-  dbName = 'treenity',
+  dbName = 'treenix',
   collectionName = 'nodes',
 ): Promise<Tree & { close(): Promise<void> }> {
   const { client, ready, release } = getSharedClient(uri);

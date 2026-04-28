@@ -1,7 +1,7 @@
 // Tests for metatron resolveContext — ACL enforcement + sensitive field filtering
 
-import { createNode, type NodeData } from '@treenity/core';
-import { createMemoryTree } from '@treenity/core/tree';
+import { createNode, type NodeData } from '@treenx/core';
+import { createMemoryTree } from '@treenx/core/tree';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { resolveContext } from './service';

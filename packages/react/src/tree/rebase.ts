@@ -2,8 +2,8 @@
 // Applies server patches to pre-optimistic state, replays remaining pending ops.
 // Zero React deps, pure logic.
 
-import { getComponent, type NodeData } from '@treenity/core';
-import type { Class } from '@treenity/core/comp';
+import { getComponent, type NodeData } from '@treenx/core';
+import type { Class } from '@treenx/core/comp';
 import fjp from 'fast-json-patch';
 import type { Operation } from 'fast-json-patch';
 

@@ -1,6 +1,6 @@
-// Board task — universal task management, dogfooded inside Treenity
+// Board task — universal task management, dogfooded inside Treenix
 
-import { registerType } from '@treenity/core/comp';
+import { registerType } from '@treenx/core/comp';
 
 /** Task card — status-driven workflow with assignment and priority */
 export class BoardTask {

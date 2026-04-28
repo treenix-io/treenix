@@ -1,13 +1,13 @@
-// Three.js scene view — renders Treenity node tree as a 3D scene graph
+// Three.js scene view — renders Treenix node tree as a 3D scene graph
 // SceneView registered for t3d.scene in "react" context
 
 import { Billboard, OrbitControls, Text, Trail } from '@react-three/drei';
 import { Canvas, useFrame } from '@react-three/fiber';
-import { getComponent, type NodeData } from '@treenity/core';
-import { useResolvedNode } from '@treenity/react/bind/hook';
-import { cache } from '@treenity/react';
-import { useCurrentNode } from '@treenity/react';
-import { execute, useChildren, usePath } from '@treenity/react';
+import { getComponent, type NodeData } from '@treenx/core';
+import { useResolvedNode } from '@treenx/react/bind/hook';
+import { cache } from '@treenx/react';
+import { useCurrentNode } from '@treenx/react';
+import { execute, useChildren, usePath } from '@treenx/react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import {

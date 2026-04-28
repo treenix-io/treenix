@@ -1,7 +1,7 @@
 // Rebase tests — confirmed + pending + replay
 
-import { registerType } from '@treenity/core/comp';
-import { resolve } from '@treenity/core';
+import { registerType } from '@treenx/core/comp';
+import { resolve } from '@treenx/core';
 import assert from 'node:assert';
 import { afterEach, describe, it } from 'node:test';
 import * as cache from './cache';

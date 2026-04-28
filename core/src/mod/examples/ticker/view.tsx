@@ -1,6 +1,6 @@
 import { register } from '#core';
-import { useCurrentNode } from '@treenity/react';
-import { useChildren } from '@treenity/react';
+import { useCurrentNode } from '@treenx/react';
+import { useChildren } from '@treenx/react';
 
 register('ticker', 'react', () => {
   const node = useCurrentNode();

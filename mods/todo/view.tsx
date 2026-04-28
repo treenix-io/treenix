@@ -1,7 +1,7 @@
-import { type NodeData, register } from '@treenity/core';
-import { useChildren, usePath } from '@treenity/react';
-import { Button } from '@treenity/react/ui/button';
-import { Input } from '@treenity/react/ui/input';
+import { type NodeData, register } from '@treenx/core';
+import { useChildren, usePath } from '@treenx/react';
+import { Button } from '@treenx/react/ui/button';
+import { Input } from '@treenx/react/ui/input';
 import { useState } from 'react';
 import { TodoItem, TodoList } from './types';
 

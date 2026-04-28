@@ -37,7 +37,7 @@
           },
           "ref": {
             "type": "string",
-            "title": "Treenity node path — UI can render via <Render />"
+            "title": "Treenix node path — UI can render via <Render />"
           }
         },
         "required": [

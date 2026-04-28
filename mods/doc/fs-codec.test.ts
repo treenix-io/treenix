@@ -1,6 +1,6 @@
-import type { NodeData } from '@treenity/core';
-import type { Tree } from '@treenity/core/tree';
-import { createRawFsStore } from '@treenity/core/tree/mimefs';
+import type { NodeData } from '@treenx/core';
+import type { Tree } from '@treenx/core/tree';
+import { createRawFsStore } from '@treenx/core/tree/mimefs';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -15,7 +15,7 @@ describe('doc fs-codec', () => {
   let tree: Tree;
 
   beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'treenity-doc-codec-'));
+    dir = await mkdtemp(join(tmpdir(), 'treenix-doc-codec-'));
     tree = await createRawFsStore(dir);
   });
 
@@ -126,7 +126,7 @@ describe('doc fs-codec — mounted rawfs link resolution', () => {
   let dir: string;
 
   beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'treenity-doc-codec-mount-'));
+    dir = await mkdtemp(join(tmpdir(), 'treenix-doc-codec-mount-'));
   });
 
   afterEach(async () => {
@@ -209,7 +209,7 @@ describe('doc fs-codec — YAML frontmatter', () => {
   let dir: string;
 
   beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'treenity-doc-codec-fm-'));
+    dir = await mkdtemp(join(tmpdir(), 'treenix-doc-codec-fm-'));
   });
 
   afterEach(async () => {

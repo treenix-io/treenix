@@ -250,7 +250,7 @@ export type { RenderContextType };
 
 <file path="src/form/exmapleSchemas/apply.method.json">
 {
-  "$id": "https://treenity.pro/schemas/schema.json",
+  "$id": "https://treenix.pro/schemas/schema.json",
   "title": "k8s.method.apply",
   "description": "k8s Service Apply method",
   "type": "object",
@@ -324,7 +324,7 @@ export type { RenderContextType };
 
 <file path="src/form/exmapleSchemas/array-schema.method.json">
 {
-  "$id": "https://treenity.pro/schemas/schema.json",
+  "$id": "https://treenix.pro/schemas/schema.json",
   "title": "k8s.method.apply",
   "description": "k8s Service Apply method",
   "type": "object",
@@ -719,33 +719,33 @@ export const useFieldValueSubscribe = (form: FormInstance, formPath: string[]) =
 import { createContext, FC, memo, PropsWithChildren, useContext, useMemo } from 'react';
 import { IRegistryComponentProps } from './types';
 
-type TreenityContext = {
+type TreenixContext = {
   isForm: boolean;
   Title?: FC<PropsWithChildren<IRegistryComponentProps>>;
   fieldProps?: Record<string, any>;
 };
 
-const TreenityFormContext = createContext<TreenityContext>({ isForm: false });
+const TreenixFormContext = createContext<TreenixContext>({ isForm: false });
 
-const useTreenityForm = () => {
-  const context = useContext(TreenityFormContext);
+const useTreenixForm = () => {
+  const context = useContext(TreenixFormContext);
   if (!context) {
-    throw new Error('TreenityFormContext not found');
+    throw new Error('TreenixFormContext not found');
   }
   return context;
 };
 
-const TreenityFormProvider: FC<PropsWithChildren<TreenityContext>> = ({
+const TreenixFormProvider: FC<PropsWithChildren<TreenixContext>> = ({
   isForm,
   fieldProps,
   Title,
   children,
 }) => {
   const value = useMemo(() => ({ isForm: true, fieldProps, Title }), [fieldProps, Title]);
-  return <TreenityFormContext.Provider value={value}>{children}</TreenityFormContext.Provider>;
+  return <TreenixFormContext.Provider value={value}>{children}</TreenixFormContext.Provider>;
 };
 
-export { TreenityFormProvider, useTreenityForm, TreenityContext };
+export { TreenixFormProvider, useTreenixForm, TreenixContext };
 </file>
 
 <file path="src/form/formItem.tsx">
@@ -795,15 +795,15 @@ export default memo(FormItemHandler);
 <file path="src/form/index.tsx">
 import styled from '@emotion/styled';
 import { throttle } from '@s-libs/micro-dash';
-import { JSONSchema7 } from '@treenity/json-schema';
+import { JSONSchema7 } from '@treenx/json-schema';
 import { Button, Form } from 'antd';
 import type { FormLayout } from 'antd/es/form/Form';
 import { createContext, FC, memo, PropsWithChildren, useEffect, useMemo } from 'react';
-import { TreenityFormProvider, useTreenityForm } from './context';
+import { TreenixFormProvider, useTreenixForm } from './context';
 import ParseForm from './parser';
 import { IRegistryComponentProps, TSizeForm } from './types';
 
-const TreenityFormContext = createContext<boolean>(false);
+const TreenixFormContext = createContext<boolean>(false);
 
 export type { TSizeForm };
 
@@ -847,7 +847,7 @@ const FormHandler: FC<IMetaFormProps> = ({
     throttledSetFieldsVlaue(initialValues);
   }, [initialValues, throttledSetFieldsVlaue]);
 
-  const { isForm } = useTreenityForm();
+  const { isForm } = useTreenixForm();
 
   if (isForm) {
     return (
@@ -866,9 +866,9 @@ const FormHandler: FC<IMetaFormProps> = ({
       onFinish={onSubmit}
       onValuesChange={onChange}
     >
-      <TreenityFormProvider isForm={true} fieldProps={fieldProps} Title={Title}>
+      <TreenixFormProvider isForm={true} fieldProps={fieldProps} Title={Title}>
         <ParseForm formSize={formSize} item={schema} form={form} renderContext={renderContext} />
-      </TreenityFormProvider>
+      </TreenixFormProvider>
       {!onChange && (
         <FormItemStyled>
           <Button type="primary" htmlType="submit">
@@ -934,10 +934,10 @@ import { FormInstance } from 'antd/es/form/hooks/useForm';
 import { FC, memo, useMemo } from 'react';
 import FormOptions, { ISizeForm } from './types';
 import FormItemHandler from './formItem';
-import { JsonObjectSchema, JSONSchema7, refResolver } from '@treenity/json-schema';
+import { JsonObjectSchema, JSONSchema7, refResolver } from '@treenx/json-schema';
 import { Render } from '#render/Render';
 import { useSwrSync } from '#hooks/useSwrSync';
-import { useTreenityForm } from './context';
+import { useTreenixForm } from './context';
 
 interface IParseForm extends ISizeForm {
   item: JSONSchema7;
@@ -1000,7 +1000,7 @@ const ParseForm: FC<IParseForm> = ({
     // @ts-ignore
     return resolvedRef ? { ...resolvedRef, ...item } : item;
   }
-  const { Title, fieldProps } = useTreenityForm();
+  const { Title, fieldProps } = useTreenixForm();
 
   const options = useMemo(
     () =>
@@ -1053,8 +1053,8 @@ export default memo(ParseForm);
 
 <file path="src/form/ref.tsx">
 import { IRegistryComponentProps } from '#form/types';
-import { types } from '@treenity/core';
-import { JSONSchema7, refResolver } from '@treenity/json-schema';
+import { types } from '@treenx/core';
+import { JSONSchema7, refResolver } from '@treenx/json-schema';
 import { FC } from 'react';
 import { Render } from '#render/Render';
 import { useSwrSync } from '#hooks/useSwrSync';
@@ -1101,7 +1101,7 @@ export default RefParser;
 </file>
 
 <file path="src/form/types.ts">
-import { JSONSchema7 } from '@treenity/json-schema';
+import { JSONSchema7 } from '@treenx/json-schema';
 import { FormInstance } from 'antd/es/form/hooks/useForm';
 import { FC, ReactNode } from 'react';
 
@@ -1734,7 +1734,7 @@ import {
   Node,
   ReactTypeContextInfo,
   types,
-} from '@treenity/core';
+} from '@treenx/core';
 import { FC, PropsWithChildren } from 'react';
 
 export type TFC<T, P = {}, N extends Node = Node> = FC<IReactContextProps<T, P, N>>;
@@ -2002,7 +2002,7 @@ export const useLoading = createStore<LoadersStore>((set, get, store) => ({
 
 <file path="src/theme/provider/emotion.d.ts">
 /*
- * Copyright (c) 2024. Treenity Inc.
+ * Copyright (c) 2024. Treenix Inc.
  */
 
 import { MergedTokensComponents } from '../types';
@@ -2032,11 +2032,11 @@ declare namespace antd {
 
 <file path="src/theme/provider/theme-entity.ts">
 /*
- * Copyright (c) 2024. Treenity Inc.
+ * Copyright (c) 2024. Treenix Inc.
  */
 
-import { metaType } from '@treenity/core';
-import { entity, writeMethod } from '@treenity/entity';
+import { metaType } from '@treenx/core';
+import { entity, writeMethod } from '@treenx/entity';
 import { MergedConfig, Theme, ThemeConfig } from '../types';
 
 @entity('theme')
@@ -2057,7 +2057,7 @@ export class ThemeEntity implements Theme {
 
 <file path="src/theme/provider/ThemeProvider.tsx">
 /*
- * Copyright (c) 2024. Treenity Inc.
+ * Copyright (c) 2024. Treenix Inc.
  */
 
 import { Theme as ETheme, ThemeProvider as EmotionThemeProvider } from '@emotion/react';
@@ -2155,7 +2155,7 @@ export const ThemeProvider: FC<
 
 <file path="src/theme/provider/types.ts">
 /*
- * Copyright (c) 2024. Treenity Inc.
+ * Copyright (c) 2024. Treenix Inc.
  */
 
 import { Theme } from '../types';
@@ -2170,7 +2170,7 @@ export interface IThemeContext {
 
 <file path="src/theme/provider/use-token.ts">
 /*
- * Copyright (c) 2024. Treenity Inc.
+ * Copyright (c) 2024. Treenix Inc.
  */
 
 import { theme } from 'antd';
@@ -2188,7 +2188,7 @@ export function useToken(): UseTokenResult {
 
 <file path="src/theme/additional-tokens.ts">
 /*
- * Copyright (c) 2024. Treenity Inc.
+ * Copyright (c) 2024. Treenix Inc.
  */
 
 export interface AdditionalTokens {
@@ -2307,7 +2307,7 @@ export interface AdditionalTokens {
 
 <file path="src/theme/index.ts">
 /*
- * Copyright (c) 2024. Treenity Inc.
+ * Copyright (c) 2024. Treenix Inc.
  */
 
 export * from './types';
@@ -2321,7 +2321,7 @@ export type { IThemeContext } from './provider/types';
 
 <file path="src/theme/types.ts">
 /*
- * Copyright (c) 2024. Treenity Inc.
+ * Copyright (c) 2024. Treenix Inc.
  */
 
 import type { ThemeConfig as AntdThemeConfig } from 'antd';
@@ -2452,10 +2452,10 @@ export const omitProps = (...props: string[]) => ({
 
 <file path="src/utils/image.ts">
 /*
- * Copyright (c) 2024. Treenity Inc.
+ * Copyright (c) 2024. Treenix Inc.
  */
 
-import { isClient } from '@treenity/js-shared';
+import { isClient } from '@treenx/js-shared';
 
 // @ts-ignore
 const API_URL = () => (isClient ? window.ENV.WS_API_URL : process.env.WS_API_URL);
@@ -2490,7 +2490,7 @@ export const getImageAction = () => `${API_URL()}/api/sys/file`;
 
 <file path="src/utils/normalizeComponentSize.tsx">
 /*
- * Copyright (c) 2024. Treenity Inc.
+ * Copyright (c) 2024. Treenix Inc.
  */
 
 export type NormalizeSizeType = 'x-small' | 'small' | 'middle' | 'large' | 'x-large';
@@ -2615,7 +2615,7 @@ dist/**/stats.html
 </file>
 
 <file path="CHANGELOG.md">
-# @treenity/ui-components
+# @treenx/ui-components
 
 ## 2.1.80
 
@@ -2623,10 +2623,10 @@ dist/**/stats.html
 
 - Update version
 - Updated dependencies
-  - @treenity/json-schema@0.1.41
-  - @treenity/js-shared@1.0.35
-  - @treenity/entity@0.5.41
-  - @treenity/core@1.0.48
+  - @treenx/json-schema@0.1.41
+  - @treenx/js-shared@1.0.35
+  - @treenx/entity@0.5.41
+  - @treenx/core@1.0.48
 
 ## 2.1.79
 
@@ -2640,9 +2640,9 @@ dist/**/stats.html
 
 - update version
 - Updated dependencies
-  - @treenity/json-schema@0.1.40
-  - @treenity/core@1.0.47
-  - @treenity/entity@0.5.40
+  - @treenx/json-schema@0.1.40
+  - @treenx/core@1.0.47
+  - @treenx/entity@0.5.40
 
 ## 2.1.77
 
@@ -2668,17 +2668,17 @@ dist/**/stats.html
 
 - Update version
 - Updated dependencies
-  - @treenity/js-shared@1.0.34
-  - @treenity/entity@0.5.39
-  - @treenity/core@1.0.46
+  - @treenx/js-shared@1.0.34
+  - @treenx/entity@0.5.39
+  - @treenx/core@1.0.46
 
 ## 2.1.73
 
 ### Patch Changes
 
 - Updated dependencies
-  - @treenity/entity@0.5.38
-  - @treenity/core@1.0.45
+  - @treenx/entity@0.5.38
+  - @treenx/core@1.0.45
 
 ## 2.1.72
 
@@ -2686,9 +2686,9 @@ dist/**/stats.html
 
 - Update libs
 - Updated dependencies
-  - @treenity/js-shared@1.0.33
-  - @treenity/entity@0.5.37
-  - @treenity/core@1.0.44
+  - @treenx/js-shared@1.0.33
+  - @treenx/entity@0.5.37
+  - @treenx/core@1.0.44
 
 ## 2.1.71
 
@@ -2696,16 +2696,16 @@ dist/**/stats.html
 
 - Update version
 - Updated dependencies
-  - @treenity/js-shared@1.0.32
-  - @treenity/entity@0.5.36
-  - @treenity/core@1.0.43
+  - @treenx/js-shared@1.0.32
+  - @treenx/entity@0.5.36
+  - @treenx/core@1.0.43
 
 ## 2.1.70
 
 ### Patch Changes
 
 - Updated dependencies
-  - @treenity/entity@0.5.35
+  - @treenx/entity@0.5.35
 
 ## 2.1.69
 
@@ -2713,9 +2713,9 @@ dist/**/stats.html
 
 - Update version
 - Updated dependencies
-  - @treenity/js-shared@1.0.31
-  - @treenity/entity@0.5.34
-  - @treenity/core@1.0.42
+  - @treenx/js-shared@1.0.31
+  - @treenx/entity@0.5.34
+  - @treenx/core@1.0.42
 
 ## 2.1.68
 
@@ -2723,31 +2723,31 @@ dist/**/stats.html
 
 - Update version
 - Updated dependencies
-  - @treenity/entity@0.5.33
+  - @treenx/entity@0.5.33
 
 ## 2.1.67
 
 ### Patch Changes
 
 - Updated dependencies
-  - @treenity/core@1.0.41
-  - @treenity/entity@0.5.32
+  - @treenx/core@1.0.41
+  - @treenx/entity@0.5.32
 
 ## 2.1.66
 
 ### Patch Changes
 
 - Updated dependencies
-  - @treenity/js-shared@1.0.30
-  - @treenity/core@1.0.40
-  - @treenity/entity@0.5.31
+  - @treenx/js-shared@1.0.30
+  - @treenx/core@1.0.40
+  - @treenx/entity@0.5.31
 
 ## 2.1.65
 
 ### Patch Changes
 
 - Updated dependencies
-  - @treenity/entity@0.5.30
+  - @treenx/entity@0.5.30
 
 ## 2.1.64
 
@@ -2761,7 +2761,7 @@ dist/**/stats.html
 
 - Update version
 - Updated dependencies
-  - @treenity/entity@0.5.29
+  - @treenx/entity@0.5.29
 
 ## 2.1.62
 
@@ -2787,26 +2787,26 @@ dist/**/stats.html
 
 - Update libs
 - Updated dependencies
-  - @treenity/js-shared@1.0.29
-  - @treenity/entity@0.5.28
-  - @treenity/core@1.0.39
+  - @treenx/js-shared@1.0.29
+  - @treenx/entity@0.5.28
+  - @treenx/core@1.0.39
 
 ## 2.1.58
 
 ### Patch Changes
 
 - Updated dependencies
-  - @treenity/core@1.0.38
-  - @treenity/entity@0.5.27
+  - @treenx/core@1.0.38
+  - @treenx/entity@0.5.27
 
 ## 2.1.57
 
 ### Patch Changes
 
 - Updated dependencies
-  - @treenity/js-shared@1.0.28
-  - @treenity/core@1.0.37
-  - @treenity/entity@0.5.26
+  - @treenx/js-shared@1.0.28
+  - @treenx/core@1.0.37
+  - @treenx/entity@0.5.26
 
 ## 2.1.56
 
@@ -2837,7 +2837,7 @@ dist/**/stats.html
 ### Patch Changes
 
 - Updated dependencies
-  - @treenity/entity@0.5.25
+  - @treenx/entity@0.5.25
 
 ## 2.1.51
 
@@ -2845,8 +2845,8 @@ dist/**/stats.html
 
 - Update versions
 - Updated dependencies
-  - @treenity/entity@0.5.24
-  - @treenity/core@1.0.36
+  - @treenx/entity@0.5.24
+  - @treenx/core@1.0.36
 
 ## 2.1.50
 
@@ -2854,8 +2854,8 @@ dist/**/stats.html
 
 - Update version
 - Updated dependencies
-  - @treenity/entity@0.5.23
-  - @treenity/core@1.0.35
+  - @treenx/entity@0.5.23
+  - @treenx/core@1.0.35
 
 ## 2.1.49
 
@@ -2863,9 +2863,9 @@ dist/**/stats.html
 
 - update create feathers client in repositroy
 - Updated dependencies
-  - @treenity/js-shared@1.0.27
-  - @treenity/core@1.0.34
-  - @treenity/entity@0.5.22
+  - @treenx/js-shared@1.0.27
+  - @treenx/core@1.0.34
+  - @treenx/entity@0.5.22
 
 ## 2.1.48
 
@@ -2873,9 +2873,9 @@ dist/**/stats.html
 
 - update version
 - Updated dependencies
-  - @treenity/js-shared@1.0.26
-  - @treenity/entity@0.5.21
-  - @treenity/core@1.0.33
+  - @treenx/js-shared@1.0.26
+  - @treenx/entity@0.5.21
+  - @treenx/core@1.0.33
 
 ## 2.1.47
 
@@ -2883,7 +2883,7 @@ dist/**/stats.html
 
 - Update webeditor
 - Updated dependencies
-  - @treenity/entity@0.5.20
+  - @treenx/entity@0.5.20
 
 ## 2.1.46
 
@@ -2891,15 +2891,15 @@ dist/**/stats.html
 
 - Some change
 - Updated dependencies
-  - @treenity/js-shared@1.0.25
-  - @treenity/entity@0.5.19
-  - @treenity/core@1.0.32
+  - @treenx/js-shared@1.0.25
+  - @treenx/entity@0.5.19
+  - @treenx/core@1.0.32
 
 ## 2.1.45
 
 ### Patch Changes
 
-- @treenity/entity@0.5.18
+- @treenx/entity@0.5.18
 
 ## 2.1.44
 
@@ -2912,9 +2912,9 @@ dist/**/stats.html
 ### Patch Changes
 
 - Updated dependencies
-  - @treenity/js-shared@1.0.24
-  - @treenity/entity@0.5.17
-  - @treenity/core@1.0.31
+  - @treenx/js-shared@1.0.24
+  - @treenx/entity@0.5.17
+  - @treenx/core@1.0.31
 
 ## 2.1.42
 
@@ -2928,8 +2928,8 @@ dist/**/stats.html
 
 - Update libs
 - Updated dependencies
-  - @treenity/entity@0.5.16
-  - @treenity/core@1.0.30
+  - @treenx/entity@0.5.16
+  - @treenx/core@1.0.30
 
 ## 2.1.40
 
@@ -2937,8 +2937,8 @@ dist/**/stats.html
 
 - Update webeditor and add new register component
 - Updated dependencies
-  - @treenity/core@1.0.29
-  - @treenity/entity@0.5.15
+  - @treenx/core@1.0.29
+  - @treenx/entity@0.5.15
 
 ## 2.1.39
 
@@ -2946,7 +2946,7 @@ dist/**/stats.html
 
 - Updated libs
 - Updated dependencies
-  - @treenity/entity@0.5.14
+  - @treenx/entity@0.5.14
 
 ## 2.1.38
 
@@ -2978,8 +2978,8 @@ dist/**/stats.html
 
 - Fix styles in admin components
 - Updated dependencies
-  - @treenity/entity@0.5.13
-  - @treenity/core@1.0.28
+  - @treenx/entity@0.5.13
+  - @treenx/core@1.0.28
 
 ## 2.1.33
 
@@ -2999,8 +2999,8 @@ dist/**/stats.html
 
 - Giga update
 - Updated dependencies
-  - @treenity/entity@0.5.12
-  - @treenity/core@1.0.27
+  - @treenx/entity@0.5.12
+  - @treenx/core@1.0.27
 
 ## 2.1.30
 
@@ -3068,7 +3068,7 @@ dist/**/stats.html
 
 - Update libs
 - Updated dependencies
-  - @treenity/entity@0.5.11
+  - @treenx/entity@0.5.11
 
 ## 2.1.19
 
@@ -3076,9 +3076,9 @@ dist/**/stats.html
 
 - Many updates
 - Updated dependencies
-  - @treenity/js-shared@1.0.23
-  - @treenity/core@1.0.26
-  - @treenity/entity@0.5.10
+  - @treenx/js-shared@1.0.23
+  - @treenx/core@1.0.26
+  - @treenx/entity@0.5.10
 
 ## 2.1.18
 
@@ -3104,15 +3104,15 @@ dist/**/stats.html
 
 - Update libs
 - Updated dependencies
-  - @treenity/core@1.0.25
+  - @treenx/core@1.0.25
 
 ## 2.1.14
 
 ### Patch Changes
 
 - Updated dependencies
-  - @treenity/js-shared@1.0.22
-  - @treenity/core@1.0.24
+  - @treenx/js-shared@1.0.22
+  - @treenx/core@1.0.24
 
 ## 2.1.13
 
@@ -3120,8 +3120,8 @@ dist/**/stats.html
 
 - Add entity and other changes
 - Updated dependencies
-  - @treenity/js-shared@1.0.21
-  - @treenity/core@1.0.23
+  - @treenx/js-shared@1.0.21
+  - @treenx/core@1.0.23
 
 ## 2.1.12
 
@@ -3135,23 +3135,23 @@ dist/**/stats.html
 
 - Update deps
 - Updated dependencies
-  - @treenity/js-shared@1.0.20
-  - @treenity/core@1.0.22
+  - @treenx/js-shared@1.0.20
+  - @treenx/core@1.0.22
 
 ## 2.1.10
 
 ### Patch Changes
 
 - Updated dependencies
-  - @treenity/core@1.0.21
+  - @treenx/core@1.0.21
 
 ## 2.1.9
 
 ### Patch Changes
 
 - Updated dependencies
-  - @treenity/js-shared@1.0.19
-  - @treenity/core@1.0.20
+  - @treenx/js-shared@1.0.19
+  - @treenx/core@1.0.20
 
 ## 2.1.8
 
@@ -3159,8 +3159,8 @@ dist/**/stats.html
 
 - Update something
 - Updated dependencies
-  - @treenity/js-shared@1.0.18
-  - @treenity/core@1.0.19
+  - @treenx/js-shared@1.0.18
+  - @treenx/core@1.0.19
 
 ## 2.1.7
 
@@ -3168,7 +3168,7 @@ dist/**/stats.html
 
 - Update version for stabilization build
 - Updated dependencies
-  - @treenity/js-shared@1.0.17
+  - @treenx/js-shared@1.0.17
 
 ## 2.1.6
 
@@ -3176,14 +3176,14 @@ dist/**/stats.html
 
 - Add types
 - Updated dependencies
-  - @treenity/js-shared@1.0.16
+  - @treenx/js-shared@1.0.16
 
 ## 2.1.5
 
 ### Patch Changes
 
 - Updated dependencies
-  - @treenity/js-shared@1.0.15
+  - @treenx/js-shared@1.0.15
 
 ## 2.1.4
 
@@ -3191,7 +3191,7 @@ dist/**/stats.html
 
 - Update versions
 - Updated dependencies
-  - @treenity/js-shared@1.0.14
+  - @treenx/js-shared@1.0.14
 
 ## 2.1.3
 
@@ -3223,7 +3223,7 @@ dist/**/stats.html
 
 - Some changes
 - Updated dependencies
-  - @treenity/js-shared@1.0.13
+  - @treenx/js-shared@1.0.13
 
 ## 2.0.7
 
@@ -3231,7 +3231,7 @@ dist/**/stats.html
 
 - Updated packages version
 - Updated dependencies
-  - @treenity/js-shared@1.0.12
+  - @treenx/js-shared@1.0.12
 
 ## 2.0.6
 
@@ -3250,7 +3250,7 @@ dist/**/stats.html
 ### Patch Changes
 
 - Updated dependencies
-  - @treenity/streams@1.0.20
+  - @treenx/streams@1.0.20
 
 ## 2.0.3
 
@@ -3258,15 +3258,15 @@ dist/**/stats.html
 
 - Updated libs
 - Updated dependencies
-  - @treenity/streams@1.0.19
-  - @treenity/js-shared@1.0.11
+  - @treenx/streams@1.0.19
+  - @treenx/js-shared@1.0.11
 
 ## 2.0.2
 
 ### Patch Changes
 
 - Updated dependencies
-  - @treenity/streams@1.0.18
+  - @treenx/streams@1.0.18
 
 ## 2.0.1
 
@@ -3274,8 +3274,8 @@ dist/**/stats.html
 
 - Changed version
 - Updated dependencies
-  - @treenity/streams@1.0.17
-  - @treenity/js-shared@1.0.10
+  - @treenx/streams@1.0.17
+  - @treenx/js-shared@1.0.10
 
 ## 2.0.0
 
@@ -3295,7 +3295,7 @@ dist/**/stats.html
 
 - Updated libs
 - Updated dependencies
-  - @treenity/js-shared@1.0.9
+  - @treenx/js-shared@1.0.9
 
 ## 1.0.5
 
@@ -3308,7 +3308,7 @@ dist/**/stats.html
 ### Patch Changes
 
 - Updated dependencies
-  - @treenity/js-shared@1.0.8
+  - @treenx/js-shared@1.0.8
 
 ## 1.0.4
 
@@ -3322,7 +3322,7 @@ dist/**/stats.html
 
 - Updated versions
 - Updated dependencies
-  - @treenity/js-shared@1.0.5
+  - @treenx/js-shared@1.0.5
 
 ## 1.0.2
 
@@ -3330,7 +3330,7 @@ dist/**/stats.html
 
 - Updated version to update new front-proxy
 - Updated dependencies
-  - @treenity/js-shared@1.0.4
+  - @treenx/js-shared@1.0.4
 </file>
 
 <file path="emotion.d.ts">
@@ -3347,15 +3347,15 @@ declare module '*.module.scss';
 
 <file path="package.json">
 {
-  "name": "@treenity/ui-kit",
+  "name": "@treenx/ui-kit",
   "version": "2.1.80",
   "description": "txt.dev ui kit",
-  "author": "Treenity",
+  "author": "Treenix",
   "license": "ISC",
   "scripts": {
     "build": "rollup -c",
     "watch": "rollup -c -w",
-    "clean": "treenity-clean",
+    "clean": "treenix-clean",
     "portmanager:test": "jest ./src/test/*"
   },
   "bin": {
@@ -3423,10 +3423,10 @@ declare module '*.module.scss';
   "dependencies": {
     "@ant-design/cssinjs": "^1.22.0",
     "@s-libs/micro-dash": "^17.1.0",
-    "@treenity/core": "1.0.48",
-    "@treenity/entity": "0.5.41",
-    "@treenity/js-shared": "1.0.35",
-    "@treenity/json-schema": "0.1.41",
+    "@treenx/core": "1.0.48",
+    "@treenx/entity": "0.5.41",
+    "@treenx/js-shared": "1.0.35",
+    "@treenx/json-schema": "0.1.41",
     "antd-token-previewer": "^2.0.8",
     "classnames": "^2.5.1",
     "immer": "10.0.3",
@@ -3450,8 +3450,8 @@ declare module '*.module.scss';
   "devDependencies": {
     "@emotion/react": "^11.13.5",
     "@emotion/styled": "^11.13.5",
-    "@treenity/build-utils": "1.1.32",
-    "@treenity/tsconfig": "1.0.14",
+    "@treenx/build-utils": "1.1.32",
+    "@treenx/tsconfig": "1.0.14",
     "@types/lodash": "npm:@s-libs/micro-dash@^18.0.0",
     "@types/react": "18.2.51",
     "@types/react-dom": "18.2.18",
@@ -3468,7 +3468,7 @@ declare module '*.module.scss';
 </file>
 
 <file path="rollup.config.mjs">
-import { libraryConfig } from '@treenity/build-utils/library-config.js';
+import { libraryConfig } from '@treenx/build-utils/library-config.js';
 
 const inputs = [
   'src/index.ts',
@@ -3490,7 +3490,7 @@ export default [
 
 <file path="tsconfig.json">
 {
-  "extends": "@treenity/tsconfig/react-library.json",
+  "extends": "@treenx/tsconfig/react-library.json",
   "include": ["src"],
   "skipLibCheck": true,
   "compilerOptions": {

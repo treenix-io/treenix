@@ -1,4 +1,4 @@
-// Treenity WatchManager — Layer 5
+// Treenix WatchManager — Layer 5
 // Exact-path + prefix (children) watch/unwatch per user.
 // Supports multiple connections per user (multi-tab).
 // Grace period: on last disconnect, watches survive briefly for SSE auto-reconnect.

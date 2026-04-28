@@ -2,9 +2,9 @@
 // Walks the live Fiber tree on each query — no state, no tracking.
 // Registered as t.mount.react — isomorphic mount, same as server-side mounts.
 
-import type { NodeData } from '@treenity/core';
-import { register } from '@treenity/core';
-import type { Tree } from '@treenity/core/tree';
+import type { NodeData } from '@treenx/core';
+import { register } from '@treenx/core';
+import type { Tree } from '@treenx/core/tree';
 
 const PREFIX = '/local/react'
 

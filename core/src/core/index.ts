@@ -1,4 +1,4 @@
-// Treenity Core — Layer 0
+// Treenix Core — Layer 0
 // Node + Component + Context + Ref
 // Zero dependencies. < 500 lines.
 

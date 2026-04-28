@@ -3,7 +3,7 @@
 
 import { onResolveMiss, register, unregister } from '#core';
 import { createInflight } from '#tree/inflight';
-import { cache, tree, UixNoView } from '@treenity/react';
+import { cache, tree, UixNoView } from '@treenx/react';
 import React from 'react';
 import { compileComponent, invalidateCache } from './compile';
 

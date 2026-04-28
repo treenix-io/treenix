@@ -1,12 +1,12 @@
-import { type ComponentData, isComponent, type NodeData, register } from '@treenity/core';
-import type { TypeSchema } from '@treenity/core/schema/types';
-import { useCurrentNode } from '@treenity/react';
-import { useChildren } from '@treenity/react';
-import { useSchema } from '@treenity/react/schema-loader';
-import { Button } from '@treenity/react/ui/button';
-import { Checkbox } from '@treenity/react/ui/checkbox';
-import { Input } from '@treenity/react/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@treenity/react/ui/select';
+import { type ComponentData, isComponent, type NodeData, register } from '@treenx/core';
+import type { TypeSchema } from '@treenx/core/schema/types';
+import { useCurrentNode } from '@treenx/react';
+import { useChildren } from '@treenx/react';
+import { useSchema } from '@treenx/react/schema-loader';
+import { Button } from '@treenx/react/ui/button';
+import { Checkbox } from '@treenx/react/ui/checkbox';
+import { Input } from '@treenx/react/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@treenx/react/ui/select';
 import { useMemo, useState } from 'react';
 import type { UITable } from './types';
 

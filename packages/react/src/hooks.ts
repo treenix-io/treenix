@@ -1,13 +1,13 @@
-// Treenity Hooks — reactive node access with Query<T> shape
+// Treenix Hooks — reactive node access with Query<T> shape
 // usePath:     reactive path read (URI or typed proxy) → Query<T>
 // useChildren: reactive children list with pagination → ChildrenQuery
 // set:         persist node (optimistic + server)
 // execute:     action caller
 // watch:       universal async generator
 
-import { getComponent, getMeta, type NodeData, normalizeType, resolve } from '@treenity/core';
-import { type Class, getDefaults, type TypeProxy } from '@treenity/core/comp';
-import { deriveURI, parseURI } from '@treenity/core/uri';
+import { getComponent, getMeta, type NodeData, normalizeType, resolve } from '@treenx/core';
+import { type Class, getDefaults, type TypeProxy } from '@treenx/core/comp';
+import { deriveURI, parseURI } from '@treenx/core/uri';
 import { pushOptimistic, rollback } from '#tree/rebase';
 import {
   useCallback,

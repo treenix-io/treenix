@@ -1,4 +1,4 @@
-// Treenity LLM Context — Layer 6
+// Treenix LLM Context — Layer 6
 // Schema export + tree description for LLM consumption
 // Type: t.llm — node at /llm, actions: schema, describe
 

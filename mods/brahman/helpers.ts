@@ -1,8 +1,8 @@
 // Brahman helpers — template engine, formatting, keyboards, execution runtime
 // Shared between action handlers and bot service
 
-import { getComponent, type NodeData, resolve as resolveCtx } from '@treenity/core';
-import type { Tree } from '@treenity/core/tree';
+import { getComponent, type NodeData, resolve as resolveCtx } from '@treenx/core';
+import type { Tree } from '@treenx/core/tree';
 import { type Context, InlineKeyboard, Keyboard } from 'grammy';
 import { BrahmanUser, type MenuRow, type MenuType, PageConfig, type TString, type WaitState } from './types';
 

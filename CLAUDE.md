@@ -1,4 +1,4 @@
-## Treenity
+## Treenix
 
 Low-code RAD platform. Tree of typed components with context-aware rendering.
 Inspired by Unity3D component model, Plan9 filesystem, Unix pipes.
@@ -11,7 +11,7 @@ Inspired by Unity3D component model, Plan9 filesystem, Unix pipes.
 - Prefer small focused files — large files are hard to edit and reason about.
 - Use blank lines to separate logical blocks within functions.
 - Always use ES `import`. Never use `require()`.
-- **`#` imports for package-internal paths.** Inside packages use `#core`, `#tree/cache`, `#components/ui/button` — NOT `@/`. This is Node.js native `imports` field (package.json), works in tsx, Node, Vite, everywhere. Each package maps `"#*"` → `"./src/*"`. Cross-package imports use full package name: `@treenity/core/tree`, `@treenity/react/hooks`.
+- **`#` imports for package-internal paths.** Inside packages use `#core`, `#tree/cache`, `#components/ui/button` — NOT `@/`. This is Node.js native `imports` field (package.json), works in tsx, Node, Vite, everywhere. Each package maps `"#*"` → `"./src/*"`. Cross-package imports use full package name: `@treenx/core/tree`, `@treenx/react/hooks`.
 - Fix imports at source. Never create re-export wrappers.
 - Minimal comments — only for genuinely ambiguous logic. Minimal logging.
 
@@ -63,7 +63,7 @@ Context   = Map<type+context, handler>
 ## Type Naming Convention
 - Separator: `.` only
 - **No dot = core built-in** (`dir`, `ref`, `root`, `user`, `type`, `mount-point`, `autostart`)
-- **`t.*` = treenity infrastructure** (`t.mount.fs`, `t.mount.overlay`, `t.mount.mongo`)
+- **`t.*` = treenix infrastructure** (`t.mount.fs`, `t.mount.overlay`, `t.mount.mongo`)
 - **`{vendor}.*` = package types** (`acme.block.hero`, `acme.template`)
 
 ## Mutations — Actions, Not set()
@@ -76,7 +76,7 @@ Context   = Map<type+context, handler>
 - **Never `ctx.execute('action', data)`** — untyped string, no autocomplete, violates conventions.
 
 ## Node creation — use core helpers
-- **Use `createNode(path, type, data)` from `@treenity/core`** to construct NodeData. Never build `{ $path, $type, ... }` objects manually — `createNode` validates system field names and normalizes types.
+- **Use `createNode(path, type, data)` from `@treenx/core`** to construct NodeData. Never build `{ $path, $type, ... }` objects manually — `createNode` validates system field names and normalizes types.
 
 ## Tech
 - TypeScript strict, ES2022, ESM

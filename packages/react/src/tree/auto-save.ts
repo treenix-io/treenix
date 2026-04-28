@@ -3,7 +3,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { mergeIntoNode, mergeToOps, type OnChange, scopeOnChange } from '#tree/on-change';
-import type { NodeData } from '@treenity/core';
+import type { NodeData } from '@treenx/core';
 import * as cache from '#tree/cache';
 import { trpc } from './trpc';
 

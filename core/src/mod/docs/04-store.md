@@ -28,7 +28,7 @@ await store.set(node); // если $rev изменился — OptimisticConcurr
 ```ts
 import { createMemoryStore } from '#tree';
 import { createFsStore } from '#tree/fs';
-import { createMongoTree } from '@treenity/mongo';
+import { createMongoTree } from '@treenx/mongo';
 
 const mem   = createMemoryStore();
 const fs    = await createFsStore('./data/base');

@@ -1,12 +1,12 @@
-// treenity.system — system actions: type discovery, view compilation, prefab deployment
+// treenix.system — system actions: type discovery, view compilation, prefab deployment
 // Registered as a class so actions appear in catalog and are callable via execute tool.
-// Node at /sys has $type: treenity.system — all system actions route there.
+// Node at /sys has $type: treenix.system — all system actions route there.
 
-import { getCtx, registerType } from '@treenity/core/comp';
-import { verifyViewSource } from '@treenity/core/mods/uix/verify';
-import { TypeCatalog } from '@treenity/core/schema/catalog';
-import { applyTemplate } from '@treenity/core/server/actions';
-import { deployPrefab } from '@treenity/core/server/prefab';
+import { getCtx, registerType } from '@treenx/core/comp';
+import { verifyViewSource } from '@treenx/core/mods/uix/verify';
+import { TypeCatalog } from '@treenx/core/schema/catalog';
+import { applyTemplate } from '@treenx/core/server/actions';
+import { deployPrefab } from '@treenx/core/server/prefab';
 
 const catalog = new TypeCatalog();
 
@@ -77,4 +77,4 @@ export class SystemActions {
   }
 }
 
-registerType('treenity.system', SystemActions);
+registerType('treenix.system', SystemActions);

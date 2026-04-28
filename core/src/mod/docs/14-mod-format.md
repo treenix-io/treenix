@@ -1,11 +1,11 @@
-# Treenity Module Format
+# Treenix Module Format
 
-Модуль — отдельный npm-пакет, подключаемый к любому инстансу Treenity.
+Модуль — отдельный npm-пакет, подключаемый к любому инстансу Treenix.
 
 ## Структура пакета
 
 ```
-treenity-mod-weather/
+treenix-mod-weather/
   package.json
   src/
     index.ts          — defineMod() — точка входа
@@ -19,12 +19,12 @@ treenity-mod-weather/
 
 ```json
 {
-  "name": "treenity-mod-weather",
+  "name": "treenix-mod-weather",
   "version": "1.0.0",
   "peerDependencies": {
-    "@treenity/core": "^0.1.0"
+    "@treenx/core": "^0.1.0"
   },
-  "treenity": {
+  "treenix": {
     "name": "weather",
     "version": "1.0.0",
     "types": ["weather.sensor", "weather.config", "weather.reading"],
@@ -36,7 +36,7 @@ treenity-mod-weather/
 }
 ```
 
-Поле `treenity` — маркер для автоматического обнаружения. Без него пакет игнорируется.
+Поле `treenix` — маркер для автоматического обнаружения. Без него пакет игнорируется.
 
 | Поле | Назначение |
 |------|-----------|
@@ -52,7 +52,7 @@ treenity-mod-weather/
 
 ```ts
 // src/index.ts
-import { defineMod } from '@treenity/core';
+import { defineMod } from '@treenx/core';
 
 export default defineMod({
   name: 'weather',
@@ -90,12 +90,12 @@ export default defineMod({
 ```ts
 import { discoverMods } from '#mod';
 
-// Сканирует node_modules, ищет пакеты с полем "treenity" в package.json
+// Сканирует node_modules, ищет пакеты с полем "treenix" в package.json
 const manifests = await discoverMods('./node_modules');
 // → [{ name: 'weather', version: '1.0.0', types: [...], server: '...', ... }]
 ```
 
-Поддерживает: обычные пакеты, scoped пакеты (`@org/treenity-mod-*`), произвольные имена.
+Поддерживает: обычные пакеты, scoped пакеты (`@org/treenix-mod-*`), произвольные имена.
 
 ## Загрузка
 
@@ -167,9 +167,9 @@ npx tsx --test src/mods/ticker/ticker.test.ts
 
 **Готово → npm:**
 ```bash
-mkdir treenity-mod-ticker && cd treenity-mod-ticker
+mkdir treenix-mod-ticker && cd treenix-mod-ticker
 npm init
-# Скопировать файлы, заменить @/ на @treenity/core, добавить "treenity" в package.json
+# Скопировать файлы, заменить @/ на @treenx/core, добавить "treenix" в package.json
 npm publish
 ```
 
@@ -180,7 +180,7 @@ npm publish
 Модули связываются через типы. Класс компонента — экспортируемый контракт:
 
 ```ts
-// treenity-mod-accounting
+// treenix-mod-accounting
 export class Account {
   static $type = 'accounting.account'
   balance = 0
@@ -190,8 +190,8 @@ export class Account {
 ```
 
 ```ts
-// treenity-mod-billing — зависит от accounting
-import { Account } from 'treenity-mod-accounting'
+// treenix-mod-billing — зависит от accounting
+import { Account } from 'treenix-mod-accounting'
 
 export class Invoice {
   static $type = 'billing.invoice'
@@ -308,9 +308,9 @@ buf.clear();                         // сбросить всё
 ### Регистрация — типобезопасная
 
 ```tsx
-import { register } from '@treenity/core/core';
-import type { View } from '@treenity/react/context';
-import { Render, RenderContext } from '@treenity/react/context';
+import { register } from '@treenx/core/core';
+import type { View } from '@treenx/react/context';
+import { Render, RenderContext } from '@treenx/react/context';
 
 // View<T> — типизированный React-компонент: { value: T, ctx?, onChange? }
 const SensorView: View<WeatherSensor> = ({ value, ctx }) => {

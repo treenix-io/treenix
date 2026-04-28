@@ -1,5 +1,5 @@
-import { type NodeData } from '@treenity/core';
-import { registerPrefab } from '@treenity/core/mod';
+import { type NodeData } from '@treenx/core';
+import { registerPrefab } from '@treenx/core/mod';
 
 registerPrefab('three', 'seed', [
   { $path: 'demo', $type: 'dir' },

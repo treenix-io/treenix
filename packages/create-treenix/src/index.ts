@@ -5,8 +5,8 @@ import { homedir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { modCreate } from './mod-create';
 
-const STARTER_URL = process.env.TREENITY_STARTER_URL
-  ?? 'https://codeload.github.com/treenity-ai/starter/tar.gz/refs/heads/main';
+const STARTER_URL = process.env.TREENIX_STARTER_URL
+  ?? 'https://codeload.github.com/treenix-ai/starter/tar.gz/refs/heads/main';
 
 async function downloadStarter(targetDir: string) {
   mkdirSync(targetDir, { recursive: true });
@@ -45,7 +45,7 @@ function rewritePackageName(targetDir: string, name: string) {
 }
 
 function normalizeName(raw: string): string {
-  return basename(raw).toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/^-+|-+$/g, '') || 'treenity-app';
+  return basename(raw).toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/^-+|-+$/g, '') || 'treenix-app';
 }
 
 function detectPm(): 'npm' | 'pnpm' | 'bun' {
@@ -65,12 +65,12 @@ const sub = process.argv[2];
 if (sub === 'mod') {
   const action = process.argv[3];
   if (action !== 'create') {
-    log.error(`Unknown mod action "${action}". Usage: create-treenity mod create <name>`);
+    log.error(`Unknown mod action "${action}". Usage: create-treenix mod create <name>`);
     process.exit(1);
   }
   const yes = process.argv.includes('-y') || process.argv.includes('--yes');
   const rest = process.argv.slice(4).filter(a => !a.startsWith('-'));
-  intro('create-treenity mod');
+  intro('create-treenix mod');
   await modCreate(rest, yes);
   outro('Done!');
   process.exit(0);
@@ -79,20 +79,20 @@ if (sub === 'mod') {
 // --- Subcommand: start (ephemeral playground) ---
 if (sub === 'start') {
   const reset = process.argv.includes('--reset');
-  const playDir = join(homedir(), '.cache', 'treenity', 'play');
+  const playDir = join(homedir(), '.cache', 'treenix', 'play');
   const pm = detectPm();
 
   if (reset && existsSync(playDir)) {
     rmSync(playDir, { recursive: true, force: true });
   }
 
-  intro('create-treenity start');
+  intro('create-treenix start');
 
   if (!existsSync(playDir)) {
     const s = spinner();
     s.start('Downloading starter...');
     await downloadStarter(playDir);
-    rewritePackageName(playDir, 'treenity-play');
+    rewritePackageName(playDir, 'treenix-play');
     s.stop('Starter ready.');
 
     log.step(`Installing dependencies (one-time) via ${pm}...`);
@@ -110,24 +110,24 @@ if (sub === 'start') {
   process.exit(0);
 }
 
-// --- Default: create-treenity [name] [-y] ---
+// --- Default: create-treenix [name] [-y] ---
 const args = process.argv.slice(2);
 const yes = args.includes('-y') || args.includes('--yes');
 const rawName = args.find(a => !a.startsWith('-'));
 
-if (!yes) intro('create-treenity');
+if (!yes) intro('create-treenix');
 
 let input = rawName;
 if (!input && !yes) {
   const result = await text({
     message: 'Project name',
-    placeholder: 'my-treenity-app',
+    placeholder: 'my-treenix-app',
     validate: v => v.length === 0 ? 'Required' : undefined,
   });
   if (isCancel(result)) { cancel(); process.exit(0); }
   input = String(result);
 }
-input ??= 'my-treenity-app';
+input ??= 'my-treenix-app';
 
 const targetDir = resolve(input);
 const pkgName = normalizeName(input);

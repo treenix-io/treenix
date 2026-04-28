@@ -8,7 +8,7 @@ Researched Dolt, Noms, TerminusDB, XTDB, Irmin, and lakeFS for the use case of "
 
 **Key finding:** Dolt's Prolly Tree architecture (content-addressed B-trees with structural sharing) is the most mature and relevant technology. Branch creation is O(1) — just a pointer to a commit hash. Millions of branches confirmed by DoltHub. Performance now matches MySQL on Sysbench (Dec 2025). However, embedding requires Go — for TypeScript/Node.js, Dolt runs as a MySQL-compatible server.
 
-**Recommendation:** Short-term, use Dolt as a MySQL server behind a `createDoltTree` adapter. Medium-term, implement a lightweight content-addressable store in TypeScript inspired by Prolly Trees, tailored to Treenity's node/component model.
+**Recommendation:** Short-term, use Dolt as a MySQL server behind a `createDoltTree` adapter. Medium-term, implement a lightweight content-addressable store in TypeScript inspired by Prolly Trees, tailored to Treenix's node/component model.
 
 ---
 
@@ -119,7 +119,7 @@ Requires cgo (zstd compression). Go-only — no Node.js/TypeScript embedded driv
 - Full versioning: branch, merge, diff, clone
 - Rust storage backend reduces latency (v11)
 - Schema constraints for data quality
-- **Not a good fit for Treenity**: Prolog-based, graph model is overkill, small community (3.2k stars)
+- **Not a good fit for Treenix**: Prolog-based, graph model is overkill, small community (3.2k stars)
 
 ---
 
@@ -152,7 +152,7 @@ Requires cgo (zstd compression). Go-only — no Node.js/TypeScript embedded driv
 - Custom merge functions per data type
 - Built-in snapshotting
 - Used in MirageOS unikernels
-- **Not practical for Treenity**: OCaml ecosystem, library-level only, no JS/TS bindings
+- **Not practical for Treenix**: OCaml ecosystem, library-level only, no JS/TS bindings
 
 ---
 
@@ -165,11 +165,11 @@ Requires cgo (zstd compression). Go-only — no Node.js/TypeScript embedded driv
 - Atomic commits, merging, conflict detection
 - ML experiment reproducibility
 - **Not a database** — versioning layer on object storage
-- Interesting model but wrong abstraction level for Treenity
+- Interesting model but wrong abstraction level for Treenix
 
 ---
 
-## Treenity Integration Analysis
+## Treenix Integration Analysis
 
 ### The Use Case
 Branch the entire tree state → run experiment variations → compare/merge results. Potentially millions of concurrent branches.
@@ -177,7 +177,7 @@ Branch the entire tree state → run experiment variations → compare/merge res
 ### Option A: Dolt as MySQL Server + Storage Adapter
 
 ```
-Treenity Server → createDoltTree(mysqlConnection) → Dolt Server (MySQL protocol)
+Treenix Server → createDoltTree(mysqlConnection) → Dolt Server (MySQL protocol)
 ```
 
 **Schema mapping:**
@@ -195,7 +195,7 @@ CREATE INDEX idx_parent ON nodes (path(256));
 ```sql
 CALL DOLT_BRANCH('experiment-42');
 CALL DOLT_CHECKOUT('experiment-42');
--- Treenity operations run against this branch
+-- Treenix operations run against this branch
 CALL DOLT_COMMIT('-Am', 'experiment result');
 CALL DOLT_DIFF('main', 'experiment-42', 'nodes');  -- see what changed
 CALL DOLT_MERGE('experiment-42');  -- merge back if successful
@@ -206,16 +206,16 @@ CALL DOLT_MERGE('experiment-42');  -- merge back if successful
 
 ### Option B: Native Content-Addressable Store in TypeScript
 
-Implement Prolly Tree concepts directly, tailored to Treenity's model:
+Implement Prolly Tree concepts directly, tailored to Treenix's model:
 
 - Content-address each node: `hash(path + JSON.stringify(sortedComponents))`
 - Store chunks in a key-value store (could be backed by SQLite, files, or MongoDB)
 - Branch = pointer to root hash. O(1) creation.
 - Diff two branches: compare root hashes, walk down where hashes differ
-- Merge at component level (Treenity already understands component boundaries)
+- Merge at component level (Treenix already understands component boundaries)
 - Structural sharing: unchanged subtrees share storage
 
-**Pros:** Native TypeScript, perfect fit for Treenity's tree model, no external dependencies.
+**Pros:** Native TypeScript, perfect fit for Treenix's tree model, no external dependencies.
 **Cons:** Significant implementation effort, need to handle chunking/gc/persistence.
 
 ### Option C: Hybrid — MongoDB + Lightweight Branching

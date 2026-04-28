@@ -8,7 +8,7 @@
 // "Front matter" comes from book printing — material that appears before the main text
 // (title page, copyright, toc). SSGs adopted the term for header metadata.
 
-import { parseYaml, type YamlValue } from '@treenity/core/util/yaml';
+import { parseYaml, type YamlValue } from '@treenx/core/util/yaml';
 
 const KNOWN_KEYS = ['title', 'description', 'tags', 'section', 'order'] as const;
 type KnownKey = typeof KNOWN_KEYS[number];

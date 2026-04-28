@@ -24,7 +24,7 @@ mock.module('./trpc', {
 const { renderHook, act } = await import('@testing-library/react');
 const { mergeToOps, mergeIntoNode, useSave, usePathSave } = await import('./auto-save');
 const cache = await import('#tree/cache');
-const { makeNode } = await import('@treenity/core');
+const { makeNode } = await import('@treenx/core');
 
 function seed(path: string, type: string, data?: Record<string, unknown>) {
   cache.put(makeNode(path, type, data));

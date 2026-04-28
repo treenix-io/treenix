@@ -1,4 +1,4 @@
-// Treenity Subscriptions — Layer 3
+// Treenix Subscriptions — Layer 3
 // Wraps any Tree, emits events on set/remove.
 // No dependencies beyond Tree + core types.
 

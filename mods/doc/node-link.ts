@@ -1,4 +1,4 @@
-// TipTap Mark: inline link to a Treenity tree node
+// TipTap Mark: inline link to a Treenix tree node
 // Renders as <a href={makeHref(path)} data-node-path> — href makes right-click "open in new tab" work.
 // Click delegation in renderers-impl.tsx intercepts left-click for SPA navigation.
 // Input rule: [[/path]] or [[/path|label]] → creates node link

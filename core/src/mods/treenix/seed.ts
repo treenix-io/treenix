@@ -1,9 +1,9 @@
-import { A, type NodeData, R, S, W } from '@treenity/core';
-import { registerPrefab } from '@treenity/core/mod';
+import { A, type NodeData, R, S, W } from '@treenx/core';
+import { registerPrefab } from '@treenx/core/mod';
 
 // Universal infra — works with any storage backend (FS, memory, Mongo)
 registerPrefab('core', 'seed', [
-  { $path: 'sys', $type: 'treenity.system' },
+  { $path: 'sys', $type: 'treenix.system' },
   { $path: 'sys/types', $type: 'mount-point',
     mount: { $type: 't.mount.types' },
     $acl: [{ g: 'public', p: R }],
@@ -32,15 +32,15 @@ registerPrefab('core', 'seed', [
 registerPrefab('auth', 'seed', [
   { $path: 'auth', $type: 'dir', $acl: [{ g: 'admins', p: R | W | A | S }, { g: 'public', p: 0 }] },
   { $path: 'auth/users', $type: 'mount-point',
-    mount: { $type: 't.mount.mongo', db: 'treenity', collection: 'users' },
+    mount: { $type: 't.mount.mongo', db: 'treenix', collection: 'users' },
     $acl: [{ g: 'authenticated', p: R | S }, { g: 'public', p: 0 }],
   },
   { $path: 'auth/sessions', $type: 'mount-point',
-    mount: { $type: 't.mount.mongo', db: 'treenity', collection: 'sessions' },
+    mount: { $type: 't.mount.mongo', db: 'treenix', collection: 'sessions' },
     $acl: [{ g: 'admins', p: R | W | A | S }, { g: 'authenticated', p: 0 }, { g: 'public', p: 0 }],
   },
   { $path: 'auth/api-tokens', $type: 't.api.tokens',
-    mount: { $type: 't.mount.mongo', db: 'treenity', collection: 'api-tokens' },
+    mount: { $type: 't.mount.mongo', db: 'treenix', collection: 'api-tokens' },
     $acl: [{ g: 'admins', p: R | W | A | S }, { g: 'authenticated', p: 0 }],
   },
 ] as NodeData[], undefined, { tier: 'core' });

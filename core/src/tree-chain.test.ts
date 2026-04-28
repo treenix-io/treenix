@@ -277,7 +277,7 @@ describe('treeChain — composition', () => {
 })
 
 // ── Real-world usage examples ──
-// These show how treeChain would be used on a real Treenity tree.
+// These show how treeChain would be used on a real Treenix tree.
 // Seed mimics actual /board, /cafe, /agent structure.
 
 class BoardTask {
@@ -325,7 +325,7 @@ async function seedRealWorld(): Promise<Tree> {
   await tree.set({
     $path: '/board/landing',
     $type: 'tch.board.task',
-    title: 'Landing treenity.land',
+    title: 'Landing treenix.land',
     status: 'doing',
     priority: 'urgent',
   })
@@ -362,7 +362,7 @@ async function seedRealWorld(): Promise<Tree> {
   await tree.set({
     $path: '/brahman',
     $type: 'tch.brahman.bot',
-    alias: '@treenitybot',
+    alias: '@treenixbot',
     running: true,
   })
 
@@ -373,7 +373,7 @@ describe('real-world: board tasks', () => {
   test('read task title by path', async () => {
     const tree = await seedRealWorld()
     const task = await treeChain(tree).board.landing
-    assert.equal(task.title, 'Landing treenity.land')
+    assert.equal(task.title, 'Landing treenix.land')
     assert.equal(task.status, 'doing')
   })
 
@@ -387,7 +387,7 @@ describe('real-world: board tasks', () => {
     const tree = await seedRealWorld()
     const doing = await treeChain(tree).board.$children({ status: 'doing' })
     assert.equal(doing.length, 1)
-    assert.equal(doing[0].title, 'Landing treenity.land')
+    assert.equal(doing[0].title, 'Landing treenix.land')
   })
 
   test('move task via action', async () => {
@@ -417,7 +417,7 @@ describe('real-world: cross-node refs', () => {
   test('agent → bot ref auto-follow', async () => {
     const tree = await seedRealWorld()
     const bot = await treeChain(tree).agent.$get(AgentConfig).bot
-    assert.equal(bot.alias, '@treenitybot')
+    assert.equal(bot.alias, '@treenixbot')
     assert.equal(bot.running, true)
   })
 
@@ -433,7 +433,7 @@ describe('real-world: cross-node refs', () => {
   test('read field through ref', async () => {
     const tree = await seedRealWorld()
     const alias = await treeChain(tree).agent.$get(AgentConfig).bot.alias
-    assert.equal(alias, '@treenitybot')
+    assert.equal(alias, '@treenixbot')
   })
 })
 
@@ -441,7 +441,7 @@ describe('real-world: (Class) bracket access', () => {
   test('agent(AgentConfig).bot auto-follows ref', async () => {
     const tree = await seedRealWorld()
     const bot = await treeChain(tree).agent(AgentConfig).bot
-    assert.equal(bot.alias, '@treenitybot')
+    assert.equal(bot.alias, '@treenixbot')
     assert.equal(bot.running, true)
   })
 
@@ -454,7 +454,7 @@ describe('real-world: (Class) bracket access', () => {
   test('(Class) → ref → field', async () => {
     const tree = await seedRealWorld()
     const alias = await treeChain(tree).agent(AgentConfig).bot.alias
-    assert.equal(alias, '@treenitybot')
+    assert.equal(alias, '@treenixbot')
   })
 })
 

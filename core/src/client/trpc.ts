@@ -1,11 +1,11 @@
-// tRPC transport for Treenity Client.
+// tRPC transport for Treenix Client.
 // HTTP batch for queries/mutations, SSE for subscriptions.
 
 import type { NodeData } from '#core';
 import type { PatchOp } from '#tree';
 import type { TreeRouter } from '#server/trpc';
 import { createTRPCClient, httpBatchLink, httpSubscriptionLink, splitLink } from '@trpc/client';
-import type { TreenityClient, WatchSub } from './index';
+import type { TreenixClient, WatchSub } from './index';
 
 export type TrpcTransportOpts = {
   url: string;
@@ -14,7 +14,7 @@ export type TrpcTransportOpts = {
   fetch?: (input: any, init?: any) => Promise<Response>;
 };
 
-export function createTrpcTransport(opts: TrpcTransportOpts): TreenityClient & { trpc: ReturnType<typeof createTRPCClient<TreeRouter>> } {
+export function createTrpcTransport(opts: TrpcTransportOpts): TreenixClient & { trpc: ReturnType<typeof createTRPCClient<TreeRouter>> } {
   const getToken = opts.getToken ?? (() => opts.token ?? null);
 
   const trpc = createTRPCClient<TreeRouter>({

@@ -1,8 +1,8 @@
 // E2E rebase tests — simulates full flow: execute → optimistic → deferred server → verify
 // Reproduces: "first server return resets state" bug
 
-import { registerType } from '@treenity/core/comp';
-import { resolve } from '@treenity/core';
+import { registerType } from '@treenx/core/comp';
+import { resolve } from '@treenx/core';
 import assert from 'node:assert';
 import { afterEach, describe, it } from 'node:test';
 import * as cache from './cache';

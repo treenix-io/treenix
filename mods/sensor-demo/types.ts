@@ -1,4 +1,4 @@
-import { registerType } from '@treenity/core/comp';
+import { registerType } from '@treenx/core/comp';
 
 /** @description Fake sensor that generates readings around a base value */
 export class SensorDemo {

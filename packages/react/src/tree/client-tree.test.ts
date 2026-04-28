@@ -1,4 +1,4 @@
-import type { NodeData } from '@treenity/core';
+import type { NodeData } from '@treenx/core';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { createClientTree } from './client-tree';
@@ -120,7 +120,7 @@ describe('createClientTree — unified client tree', () => {
   //   ed09479 (core):  deepFreeze-on-write → froze nodes upper layer must stamp
   //   a51f64b:         surfaced it via engine bump
   //
-  // Symptom in UI: "Cannot define property Symbol(treenity.$key), object is
+  // Symptom in UI: "Cannot define property Symbol(treenix.$key), object is
   // not extensible" when loading the tree editor. App.tsx calls
   // tree.getChildren() then cache.replaceChildren() which calls stampNode()
   // on every returned node. If ANY layer between createRemoteTree and the

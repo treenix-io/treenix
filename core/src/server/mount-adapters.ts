@@ -38,7 +38,7 @@ registerType('mount-point', MountPoint);
 export class MountMongo {
   shared = false;
   uri = '';
-  db = 'treenity';
+  db = 'treenix';
   collection = 'nodes';
 }
 registerType('t.mount.mongo', MountMongo);
@@ -87,7 +87,7 @@ registerType('t.mount.tree.trpc', MountTreeTrpc);
 register(MountMongo, 'mount', async (mount, ctx) => {
   const uri = mount.uri || process.env.MONGO_URI;
   if (!uri) throw new Error('t.mount.mongo: no uri and MONGO_URI not set');
-  const { createMongoTree } = await import('@treenity/mongo');
+  const { createMongoTree } = await import('@treenx/mongo');
   const tree = await createMongoTree(uri, mount.db, mount.collection);
   return mount.shared ? tree : createRepathTree(tree, ctx.path, '/');
 });
@@ -117,7 +117,7 @@ register(MountRawFs, 'mount', async (mount, ctx) => {
   return mount.shared ? tree : createRepathTree(tree, ctx.path, '/');
 });
 
-// Federation: mount a remote Treenity instance's tree via tRPC.
+// Federation: mount a remote Treenix instance's tree via tRPC.
 // F18: reject private/internal IP ranges to prevent SSRF via mount creation.
 const PRIVATE_HOST_RE = /^(?:localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+|169\.254\.\d+\.\d+|0\.0\.0\.0|\[::1?\])(?::\d+)?$/i;
 

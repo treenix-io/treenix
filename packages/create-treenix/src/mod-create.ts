@@ -1,4 +1,4 @@
-// create-treenity mod create <name>
+// create-treenix mod create <name>
 // Scaffolds a new mod inside the current project's mods/ directory
 
 import { cancel, isCancel, log, text } from '@clack/prompts';
@@ -87,7 +87,7 @@ export async function modCreate(args: string[], yes: boolean) {
   mkdirSync(modDir, { recursive: true });
 
   writeFileSync(join(modDir, 'types.ts'),
-`import { registerType } from '@treenity/core/comp';
+`import { registerType } from '@treenx/core/comp';
 
 export class ${cls} {
   title = '';
@@ -97,8 +97,8 @@ registerType('${name}', ${cls});
 `);
 
   writeFileSync(join(modDir, 'seed.ts'),
-`import type { NodeData } from '@treenity/core';
-import { registerPrefab } from '@treenity/core/mod';
+`import type { NodeData } from '@treenx/core';
+import { registerPrefab } from '@treenx/core/mod';
 
 registerPrefab('${name}', 'seed', [
   { $path: '${name}', $type: 'dir' },
@@ -107,7 +107,7 @@ registerPrefab('${name}', 'seed', [
 `);
 
   writeFileSync(join(modDir, 'view.tsx'),
-`import { view } from '@treenity/react';
+`import { view } from '@treenx/react';
 import { ${cls} } from './types';
 
 view(${cls}, ({ value }) => (

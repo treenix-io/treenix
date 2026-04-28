@@ -1,4 +1,4 @@
-// Treenity Optimistic Updates — predict locally, reconcile with server
+// Treenix Optimistic Updates — predict locally, reconcile with server
 // Component class methods are the shared kernel: same code runs on client (optimistic)
 // and server (authoritative). Server patches confirm or override.
 

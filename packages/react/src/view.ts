@@ -4,7 +4,7 @@
 // view.compact(Type, Component)      → register(Type, 'react:compact', Component)
 // view(Type, 'custom', Component)    → register(Type, 'react:custom', Component)
 
-import { register, type Class } from '@treenity/core';
+import { register, type Class } from '@treenx/core';
 import type { FC } from 'react';
 import type { OnChange, ViewCtx } from '#context';
 

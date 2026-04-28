@@ -1,4 +1,4 @@
-// Treenity Client Cache — reactive node store
+// Treenix Client Cache — reactive node store
 // useSyncExternalStore-friendly: stable snapshots, targeted notifications
 // IDB persistence: fire-and-forget writes, hydrate() on startup.
 //
@@ -8,7 +8,7 @@
 // `childrenLoaded` is the authoritative "children list fetched" flag, kept
 // separate from `parentIndex` (incidental node cache).
 
-import type { NodeData } from '@treenity/core';
+import type { NodeData } from '@treenx/core';
 import * as idb from './idb';
 import { stampNode } from '#symbols';
 

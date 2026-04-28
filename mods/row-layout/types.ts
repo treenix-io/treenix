@@ -1,4 +1,4 @@
-import { registerType } from '@treenity/core/comp'
+import { registerType } from '@treenx/core/comp'
 import { templates } from './lib/templates'
 import type { LayoutRow } from './lib/types'
 

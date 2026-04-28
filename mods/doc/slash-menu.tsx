@@ -1,8 +1,8 @@
 import type { Editor, Range } from '@tiptap/core';
-import { createNode, getRegisteredTypes } from '@treenity/core';
-import { getDefaults } from '@treenity/core/comp';
-import { MiniTree } from '@treenity/react/mods/editor-ui/form-fields';
-import { set } from '@treenity/react/hooks';
+import { createNode, getRegisteredTypes } from '@treenx/core';
+import { getDefaults } from '@treenx/core/comp';
+import { MiniTree } from '@treenx/react/mods/editor-ui/form-fields';
+import { set } from '@treenx/react/hooks';
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 
 export type SlashMenuItem = {
@@ -79,7 +79,7 @@ export const SlashMenu = forwardRef<unknown, Props>(({ items, command, editor, r
 
   const insertRef = (path: string) => {
     editor.chain().focus().deleteRange(range).insertContent({
-      type: 'treenityBlock',
+      type: 'treenixBlock',
       attrs: { ref: path, type: null, props: {} },
     }).run();
     close();
@@ -108,7 +108,7 @@ export const SlashMenu = forwardRef<unknown, Props>(({ items, command, editor, r
       const node = createNode(childPath, typeName, getDefaults(typeName));
       await set(node);
       editor.chain().focus().deleteRange(range).insertContent({
-        type: 'treenityBlock',
+        type: 'treenixBlock',
         attrs: { ref: childPath, type: null, props: {} },
       }).run();
     } catch (err) {

@@ -1,6 +1,6 @@
 // Type node views — react + react:list + live preview
 
-import { getContextsForType, type NodeData, register } from '@treenity/core';
+import { getContextsForType, type NodeData, register } from '@treenx/core';
 import { TypePreview } from './preview';
 
 // ── Helpers ──

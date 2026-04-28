@@ -3,7 +3,7 @@
 Monorepo with npm workspaces. Three workspace roots: `core/`, `packages/*`, `mods/*`.
 
 ```
-core/                     — @treenity/core (npm workspace)
+core/                     — @treenx/core (npm workspace)
   src/
     core/                 — L0: Node, Component, Context, Ref, Registry (<500 lines)
     comp/                 — L2: registerType, action discovery, needs
@@ -11,14 +11,14 @@ core/                     — @treenity/core (npm workspace)
     store/                — L1: Store interface + adapters (memory, fs, mongo)
     schema/               — JSON Schema generation from registered types
     contexts/             — L2-3: context handlers (service, text, telegram)
-    client/               — Client SDK (transport-agnostic TreenityClient)
+    client/               — Client SDK (transport-agnostic TreenixClient)
     server/               — L4-5: HTTP server, tRPC, auth, mounts, MCP, subscriptions
     mod/                  — Module system (discovery, prefabs, dependency sort)
-    mods/                 — Core infrastructure mods (treenity, uix)
+    mods/                 — Core infrastructure mods (treenix, uix)
 
 packages/                 — Additional npm workspaces
-  react/                  — @treenity/react (frontend: hooks, views, Vite dev server)
-  create-treenity/        — CLI scaffolding tool
+  react/                  — @treenx/react (frontend: hooks, views, Vite dev server)
+  create-treenix/        — CLI scaffolding tool
   agent-client/           — Headless agent client
   recall/                 — Memory/recall utilities
 
@@ -66,7 +66,7 @@ mods/{name}/
 - `server.ts` loaded by `loadLocalMods(modsDir, 'server')`. Makes type visible in `/sys/types`.
 - `client.ts` loaded by Vite `virtual:mod-clients` plugin. Registers React views.
 - Without `server.ts` the type won't appear in "Add Component" picker.
-- Imports in mods: relative (`./types`), cross-package (`@treenity/core/*`, `@treenity/react/*`). Never `#` imports.
+- Imports in mods: relative (`./types`), cross-package (`@treenx/core/*`, `@treenx/react/*`). Never `#` imports.
 
 ## Loading pipeline
 

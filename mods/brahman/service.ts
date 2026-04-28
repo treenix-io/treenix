@@ -2,10 +2,10 @@
 // Session + auth middleware, command routing, callback queries, start/stop lifecycle
 
 import { run as runBot, type RunnerHandle } from '@grammyjs/runner';
-import { getComponent, type NodeData, register } from '@treenity/core';
-import type { ServiceCtx, ServiceHandle } from '@treenity/core/contexts/service';
-import { Autostart } from '@treenity/core/mods/autostart/service';
-import type { ActionCtx } from '@treenity/core/server/actions';
+import { getComponent, type NodeData, register } from '@treenx/core';
+import type { ServiceCtx, ServiceHandle } from '@treenx/core/contexts/service';
+import { Autostart } from '@treenx/core/mods/autostart/service';
+import type { ActionCtx } from '@treenx/core/server/actions';
 import { Bot } from 'grammy';
 import { type BrahmanCtx, executeAction, executePage, findActionComp, formatTString, resolveWait } from './helpers';
 import { BotConfig, BrahmanSession, BrahmanUser, PageConfig } from './types';

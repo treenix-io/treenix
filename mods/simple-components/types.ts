@@ -1,7 +1,7 @@
 // Universal ECS components — attach to any node via named key
 // Pattern: node.checklist = { $type: 'simple.checklist', items: [...] }
 
-import { registerType } from '@treenity/core/comp';
+import { registerType } from '@treenx/core/comp';
 
 // ── Checklist ──
 

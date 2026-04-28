@@ -1,8 +1,8 @@
 // Chat preview — Telegram-style visualization of page actions
 // Registered as react:chat for brahman.page
 
-import type { NodeData } from '@treenity/core';
-import { useChildren, usePath } from '@treenity/react';
+import type { NodeData } from '@treenx/core';
+import { useChildren, usePath } from '@treenx/react';
 import { Camera, File, Mic, Video } from 'lucide-react';
 import type { MenuRow, MenuType, TString } from '../types';
 import { actionIcon, actionSummary } from './action-cards';

@@ -1,9 +1,9 @@
 // API Token server actions — create/revoke long-lived tokens for MCP agents
 // Extends shared type from types.ts with server-only implementations.
 
-import { createNode } from '@treenity/core';
-import { getCtx, registerType } from '@treenity/core/comp';
-import { createSession, revokeSession } from '@treenity/core/server/auth';
+import { createNode } from '@treenx/core';
+import { getCtx, registerType } from '@treenx/core/comp';
+import { createSession, revokeSession } from '@treenx/core/server/auth';
 import { ApiTokenManager } from './types';
 
 class ApiTokenServer extends ApiTokenManager {

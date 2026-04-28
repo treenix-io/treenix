@@ -3,8 +3,8 @@
 // Agent = node, tree = protocol.
 
 import { resolvePermission } from '#metatron/permissions';
-import { getComponent } from '@treenity/core';
-import { getCtx, registerType } from '@treenity/core/comp';
+import { getComponent } from '@treenx/core';
+import { getCtx, registerType } from '@treenx/core/comp';
 
 // ── Active query registry ──
 // Server-only runtime state: tracks running Claude queries so AiRun.stop()
@@ -51,7 +51,7 @@ export type LogEntry = {
   output?: string
   duration?: number
   approved?: boolean
-  /** Treenity node path — UI can render via <Render /> */
+  /** Treenix node path — UI can render via <Render /> */
   ref?: string
 };
 

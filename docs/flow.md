@@ -1,6 +1,6 @@
 # Flow — Visual Workflow Engine
 
-Flow is the declarative wiring layer for Treenity. It replaces invisible `ctx.subscribe()` calls in service.ts with observable, editable workflow nodes in the tree.
+Flow is the declarative wiring layer for Treenix. It replaces invisible `ctx.subscribe()` calls in service.ts with observable, editable workflow nodes in the tree.
 
 ## Architecture
 
@@ -54,7 +54,7 @@ items.length > 0   // ✅ works
 
 ## Cross-mod wiring via flow.node.action
 
-The action node bridges flows to any registered Treenity action:
+The action node bridges flows to any registered Treenix action:
 
 ```
 targetPath:    "/counter"           — supports {{var}} interpolation

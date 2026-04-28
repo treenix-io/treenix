@@ -1,6 +1,6 @@
 // Lazy registry loader — fetches type nodes from /sys/types on demand
-import { type ContextHandlers, register, resolve } from '@treenity/core';
-import type { TypeSchema } from '@treenity/core/schema/types';
+import { type ContextHandlers, register, resolve } from '@treenx/core';
+import type { TypeSchema } from '@treenx/core/schema/types';
 import { useEffect, useState } from 'react';
 import { trpc } from '#tree/trpc';
 

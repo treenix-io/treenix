@@ -1,9 +1,9 @@
 import { mergeAttributes, Node } from '@tiptap/core';
 import { ReactNodeViewRenderer } from '@tiptap/react';
-import { TreenityBlockView } from './treenity-block-view';
+import { TreenixBlockView } from './treenix-block-view';
 
-export const TreenityBlock = Node.create({
-  name: 'treenityBlock',
+export const TreenixBlock = Node.create({
+  name: 'treenixBlock',
   group: 'block',
   atom: true,
   draggable: true,
@@ -18,14 +18,14 @@ export const TreenityBlock = Node.create({
   },
 
   parseHTML() {
-    return [{ tag: 'div[data-treenity-block]' }];
+    return [{ tag: 'div[data-treenix-block]' }];
   },
 
   renderHTML({ HTMLAttributes }) {
-    return ['div', mergeAttributes(HTMLAttributes, { 'data-treenity-block': '' })];
+    return ['div', mergeAttributes(HTMLAttributes, { 'data-treenix-block': '' })];
   },
 
   addNodeView() {
-    return ReactNodeViewRenderer(TreenityBlockView);
+    return ReactNodeViewRenderer(TreenixBlockView);
   },
 });

@@ -3,9 +3,9 @@
 // Enables client to use the same combinators as server:
 //   withSubscriptions(withCache(createRemoteTree(trpc)))
 
-import type { NodeData } from '@treenity/core';
-import type { Tree } from '@treenity/core/tree';
-import { defaultPatch } from '@treenity/core/tree/patch';
+import type { NodeData } from '@treenx/core';
+import type { Tree } from '@treenx/core/tree';
+import { defaultPatch } from '@treenx/core/tree/patch';
 import type { trpc } from './trpc';
 
 type TrpcClient = typeof trpc;

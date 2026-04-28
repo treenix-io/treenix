@@ -3,7 +3,7 @@
 // Commit persists to the real tree via createNode().
 // See docs/research/drafts/ for architecture.
 
-import { makeNode, type NodeData } from '@treenity/core';
+import { makeNode, type NodeData } from '@treenx/core';
 import { stampNode } from '#symbols';
 import { createNode } from '#hooks';
 import { proxy, useSnapshot } from 'valtio';

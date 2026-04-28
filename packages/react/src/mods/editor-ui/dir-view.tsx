@@ -1,6 +1,6 @@
 import { Render, RenderContext } from '#context';
 import { useChildren } from '#hooks';
-import { type NodeData } from '@treenity/core';
+import { type NodeData } from '@treenx/core';
 
 const STATUS_PILL: Record<string, string> = {
   draft: 'border-yellow-300/25 bg-yellow-300/10 text-yellow-300',

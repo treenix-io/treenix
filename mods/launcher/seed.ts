@@ -1,7 +1,7 @@
 // Launcher seed — demo home screen with app shortcuts
 
-import type { NodeData } from '@treenity/core';
-import { registerPrefab } from '@treenity/core/mod';
+import type { NodeData } from '@treenx/core';
+import { registerPrefab } from '@treenx/core/mod';
 
 const layout = JSON.stringify([
   { i: 'board', x: 0, y: 0, w: 1, h: 1 },

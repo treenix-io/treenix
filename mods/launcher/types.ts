@@ -1,7 +1,7 @@
-// Launcher — iPhone-like home screen for Treenity
+// Launcher — iPhone-like home screen for Treenix
 
-import type { NodeData } from '@treenity/core';
-import { getCtx, registerType } from '@treenity/core/comp';
+import type { NodeData } from '@treenx/core';
+import { getCtx, registerType } from '@treenx/core/comp';
 
 /** Home screen with icon grid + widgets. Layout via react-grid-layout. */
 export class Launcher {

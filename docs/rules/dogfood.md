@@ -1,4 +1,4 @@
-# Dogfood: Build Treenity WITH Treenity
+# Dogfood: Build Treenix WITH Treenix
 
 ## Principle
 
@@ -69,9 +69,9 @@ Dogfood is a tool, not a religion. When an industry standard exists — **use it
 - Config that benefits from ACL, AI visibility, reactivity
 - State that users/agents need to observe and act on
 
-**The rule:** If a well-adopted standard solves the problem — adopt it. Dogfood only what standards can't cover. Wrapping `package.json` in a node adds complexity without value. Writing mod dependency manifests as nodes adds value because no standard describes cross-ecosystem Treenity mod dependencies.
+**The rule:** If a well-adopted standard solves the problem — adopt it. Dogfood only what standards can't cover. Wrapping `package.json` in a node adds complexity without value. Writing mod dependency manifests as nodes adds value because no standard describes cross-ecosystem Treenix mod dependencies.
 
-**Package Calculus example:** npm resolves JS deps. Cargo resolves Rust deps. But nobody resolves deps *between* a JS mod and a Rust WASM mod in Treenity's context. THAT gap is where dogfood adds value — `t.mod` manifests bridge what standards can't.
+**Package Calculus example:** npm resolves JS deps. Cargo resolves Rust deps. But nobody resolves deps *between* a JS mod and a Rust WASM mod in Treenix's context. THAT gap is where dogfood adds value — `t.mod` manifests bridge what standards can't.
 
 ## Quick test
 

@@ -1,4 +1,4 @@
-// Treenity Tree — Layer 1
+// Treenix Tree — Layer 1
 // Storage interface + in-memory implementation
 // Depends only on core types.
 

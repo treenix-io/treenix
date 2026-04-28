@@ -9,7 +9,7 @@ const cmd = args[0];
 
 // ── treenix init [name] ──
 if (cmd === 'init') {
-  const name = args[1] || 'my-treenity-app';
+  const name = args[1] || 'my-treenix-app';
   const target = resolve(name);
 
   if (existsSync(target)) {
@@ -19,7 +19,7 @@ if (cmd === 'init') {
 
   console.log(`\n  Creating ${name}...\n`);
   execSync(
-    `git clone --recurse-submodules --depth 1 https://github.com/treenity-ai/starter.git ${name}`,
+    `git clone --recurse-submodules --depth 1 https://github.com/treenix-ai/starter.git ${name}`,
     { stdio: 'inherit' },
   );
 
@@ -49,7 +49,7 @@ if (!existsSync(rootJson)) {
     npx treenix init my-app
 
   To run an existing project:
-    cd your-treenity-project && npx treenix
+    cd your-treenix-project && npx treenix
 `);
   process.exit(1);
 }
@@ -57,11 +57,11 @@ if (!existsSync(rootJson)) {
 // Find server entry
 const serverPath = resolve('engine/core/src/server/main.ts');
 if (!existsSync(serverPath)) {
-  console.error('engine/core/src/server/main.ts not found. Is this a Treenity project?');
+  console.error('engine/core/src/server/main.ts not found. Is this a Treenix project?');
   process.exit(1);
 }
 
-console.log('\n  Starting Treenity...\n');
+console.log('\n  Starting Treenix...\n');
 
 // Start server
 const server = spawn('npx', ['tsx', '--conditions', 'development', '--watch', serverPath, 'root.json'], {
@@ -69,12 +69,12 @@ const server = spawn('npx', ['tsx', '--conditions', 'development', '--watch', se
   cwd: process.cwd(),
 });
 
-// Start frontend if @treenity/react is available
+// Start frontend if @treenx/react is available
 const frontPkg = resolve('engine/packages/react/package.json');
 if (existsSync(frontPkg)) {
   // Small delay so server is up before vite tries to proxy
   setTimeout(() => {
-    const front = spawn('npm', ['run', 'dev', '-w', '@treenity/react'], {
+    const front = spawn('npm', ['run', 'dev', '-w', '@treenx/react'], {
       stdio: 'inherit',
       cwd: process.cwd(),
     });

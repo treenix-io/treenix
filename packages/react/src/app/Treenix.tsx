@@ -4,13 +4,13 @@ import { type ReactNode } from 'react'
 import { App } from './App'
 import '#tree/load-client'
 import { Toaster } from '#components/ui/sonner'
-// CSS must be imported by the consumer: import '@treenity/react/root.css'
+// CSS must be imported by the consumer: import '@treenx/react/root.css'
 
 enablePatches()
 
 const queryClient = new QueryClient()
 
-export interface TreenityProps {
+export interface TreenixProps {
   /** Override initial path */
   path?: string
   /** Wrap with custom providers */
@@ -18,10 +18,10 @@ export interface TreenityProps {
 }
 
 /**
- * Treenity as a single React component.
+ * Treenix as a single React component.
  * Includes all providers, auth, SSE, cache.
  */
-export function Treenity({ children }: TreenityProps) {
+export function Treenix({ children }: TreenixProps) {
   return (
     <QueryClientProvider client={queryClient}>
       <App />

@@ -557,7 +557,7 @@ describe('FS mount repath (dedicated)', () => {
   beforeEach(async () => {
     clearRegistry();
     rootStore = createMemoryTree();
-    tmpDir = await mkdtemp(join(tmpdir(), 'treenity-fs-mount-'));
+    tmpDir = await mkdtemp(join(tmpdir(), 'treenix-fs-mount-'));
   });
 
   afterEach(async () => {

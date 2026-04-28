@@ -9,7 +9,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { renderHook, act } from '@testing-library/react';
-import { makeNode, type NodeData } from '@treenity/core';
+import { makeNode, type NodeData } from '@treenx/core';
 import { $key, $node, stampNode } from '#symbols';
 import { viewCtx } from '#context';
 import { proxy, snapshot } from 'valtio/vanilla';

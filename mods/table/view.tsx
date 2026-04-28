@@ -1,10 +1,10 @@
-import { type ComponentData, isComponent, type NodeData, register } from '@treenity/core';
-import type { TypeSchema } from '@treenity/core/schema/types';
-import { Render, RenderContext, type ViewCtx } from '@treenity/react';
-import { useChildren } from '@treenity/react';
-import { useSchema } from '@treenity/react/schema-loader';
-import { Button } from '@treenity/react/ui/button';
-import { Input } from '@treenity/react/ui/input';
+import { type ComponentData, isComponent, type NodeData, register } from '@treenx/core';
+import type { TypeSchema } from '@treenx/core/schema/types';
+import { Render, RenderContext, type ViewCtx } from '@treenx/react';
+import { useChildren } from '@treenx/react';
+import { useSchema } from '@treenx/react/schema-loader';
+import { Button } from '@treenx/react/ui/button';
+import { Input } from '@treenx/react/ui/input';
 import {
   Pagination,
   PaginationContent,
@@ -13,8 +13,8 @@ import {
   PaginationLink,
   PaginationNext,
   PaginationPrevious,
-} from '@treenity/react/ui/pagination';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@treenity/react/ui/table';
+} from '@treenx/react/ui/pagination';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@treenx/react/ui/table';
 import { useMemo } from 'react';
 import type { ColumnConfig, UITable } from './types';
 import { useDebouncedSync } from './use-debounced-sync';

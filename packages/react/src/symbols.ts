@@ -2,10 +2,10 @@
 // Stamped on deserialization (cache.put). Non-enumerable so they're
 // invisible to structuredClone, spread, and JSON/keys/entries.
 
-import { isComponent, type NodeData } from '@treenity/core';
+import { isComponent, type NodeData } from '@treenx/core';
 
-export const $key = Symbol.for('treenity.$key');
-export const $node = Symbol.for('treenity.$node');
+export const $key = Symbol.for('treenix.$key');
+export const $node = Symbol.for('treenix.$node');
 
 function hide(obj: object, sym: symbol, value: unknown): void {
   Object.defineProperty(obj, sym, { value, enumerable: false, writable: false, configurable: true });

@@ -1,4 +1,4 @@
-// Build create-treenity CLI → single dist/index.js
+// Build create-treenix CLI → single dist/index.js
 
 import { buildSync } from 'esbuild';
 import { mkdirSync } from 'node:fs';

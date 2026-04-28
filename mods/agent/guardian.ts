@@ -4,11 +4,11 @@
 
 import { pendingPermissions, type PermissionMeta, type PermissionRule } from '#metatron/permissions';
 import type { PermissionResult } from '@anthropic-ai/claude-agent-sdk';
-import { createNode, getComponent, type NodeData } from '@treenity/core';
-import { setComponent } from '@treenity/core/comp';
-import { OpError } from '@treenity/core/errors';
-import { globMatch, matchesAny } from '@treenity/core/glob';
-import type { Tree } from '@treenity/core/tree';
+import { createNode, getComponent, type NodeData } from '@treenx/core';
+import { setComponent } from '@treenx/core/comp';
+import { OpError } from '@treenx/core/errors';
+import { globMatch, matchesAny } from '@treenx/core/glob';
+import type { Tree } from '@treenx/core/tree';
 import { AiAgent, AiChat, AiPolicy, AiRunStatus } from './types';
 
 // ── Specificity-aware policy resolution ──
@@ -74,18 +74,18 @@ export type ToolPolicy = {
 
 const FALLBACK_POLICY: ToolPolicy = {
   allow: [
-    'mcp__treenity__get_node', 'mcp__treenity__list_children',
-    'mcp__treenity__catalog', 'mcp__treenity__describe_type',
-    'mcp__treenity__search_types',
-    'mcp__treenity__execute:$schema',
+    'mcp__treenix__get_node', 'mcp__treenix__list_children',
+    'mcp__treenix__catalog', 'mcp__treenix__describe_type',
+    'mcp__treenix__search_types',
+    'mcp__treenix__execute:$schema',
   ],
   deny: [
-    'mcp__treenity__guardian_approve',
+    'mcp__treenix__guardian_approve',
     'Bash:git checkout *', 'Bash:git checkout -- *',
     'Bash:git reset --hard*', 'Bash:git push --force*', 'Bash:git clean*',
     'Bash:rm -rf *', 'Bash:rm -r *', 'Bash:cat *.env*',
   ],
-  escalate: ['mcp__treenity__set_node', 'mcp__treenity__execute:*', 'mcp__treenity__remove_node'],
+  escalate: ['mcp__treenix__set_node', 'mcp__treenix__execute:*', 'mcp__treenix__remove_node'],
 };
 
 // ── Convert ai.policy node data → runtime ToolPolicy ──
@@ -479,10 +479,10 @@ const CLASS_PRIORITY: Record<ReturnType<typeof classifyBashCommand>, number> = {
 
 // Read-only tools that plan mode is allowed to use
 const READ_ONLY_TOOLS = new Set([
-  'mcp__treenity__get_node', 'mcp__treenity__list_children',
-  'mcp__treenity__catalog', 'mcp__treenity__describe_type',
-  'mcp__treenity__search_types',
-  'mcp__treenity__compile_view',
+  'mcp__treenix__get_node', 'mcp__treenix__list_children',
+  'mcp__treenix__catalog', 'mcp__treenix__describe_type',
+  'mcp__treenix__search_types',
+  'mcp__treenix__compile_view',
 ]);
 
 const READ_ONLY_BASH = new Set([

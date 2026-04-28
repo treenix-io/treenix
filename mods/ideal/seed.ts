@@ -1,4 +1,4 @@
-import { registerPrefab } from '@treenity/core/mod';
+import { registerPrefab } from '@treenx/core/mod';
 
 registerPrefab('ideal', 'seed', [
   { $path: 'ideal', $type: 'ideal.board', autoApproveThreshold: 5 },

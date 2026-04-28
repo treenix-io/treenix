@@ -1,8 +1,8 @@
 import { Button } from '#components/ui/button';
 import { Input } from '#components/ui/input';
 import { DraftTextarea } from '#mods/editor-ui/DraftTextarea';
-import { isRef, resolveExact } from '@treenity/core';
-import type { PropertySchema } from '@treenity/core/schema/types';
+import { isRef, resolveExact } from '@treenx/core';
+import type { PropertySchema } from '@treenx/core/schema/types';
 import { createElement, useState } from 'react';
 import { FieldLabel, RefEditor } from './FieldLabel';
 

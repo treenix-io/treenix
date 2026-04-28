@@ -1,13 +1,13 @@
-# create-treenity
+# create-treenix
 
-**Scaffold a Treenity project in seconds.**
+**Scaffold a Treenix project in seconds.**
 
 ## Usage
 
 ### Try it without committing
 
 ```bash
-npx create-treenity start
+npx create-treenix start
 ```
 
 Downloads the starter into a cached playground, installs deps once, starts the dev server. Re-run to jump back in; `--reset` wipes and re-downloads.
@@ -15,7 +15,7 @@ Downloads the starter into a cached playground, installs deps once, starts the d
 ### Scaffold a named project
 
 ```bash
-npx create-treenity my-app
+npx create-treenix my-app
 ```
 
 Downloads the starter into `./my-app`, installs deps, tells you how to run it. Add `-y` to skip prompts.
@@ -23,17 +23,17 @@ Downloads the starter into `./my-app`, installs deps, tells you how to run it. A
 ### Add a mod to an existing project
 
 ```bash
-npx create-treenity mod create my-mod
+npx create-treenix mod create my-mod
 ```
 
-Must be run inside a Treenity project (walks up to find `root.json`). Creates `types.ts`, `view.tsx`, `seed.ts`; registers the seed in `root.json`.
+Must be run inside a Treenix project (walks up to find `root.json`). Creates `types.ts`, `view.tsx`, `seed.ts`; registers the seed in `root.json`.
 
 ## What you get
 
-Whatever `github.com/treenity-ai/starter` contains at `main`. Currently:
+Whatever `github.com/treenix-ai/starter` contains at `main`. Currently:
 
-- Vite 8 frontend on `:3210`, Treenity server on `:3211` (single process).
-- Admin UI (tree browser, node editor, context-aware views) auto-loaded from `@treenity/mods` and `@treenity/react`.
+- Vite 8 frontend on `:3210`, Treenix server on `:3211` (single process).
+- Admin UI (tree browser, node editor, context-aware views) auto-loaded from `@treenx/mods` and `@treenx/react`.
 - `root.json` with FS overlay (`data/base` + `data/work`).
 - `mods/example` and `mods/profile` — edit or delete.
 
@@ -42,9 +42,9 @@ my-app/
 ├── data/base/       seed tree (checked in)
 ├── data/work/       runtime overlay (gitignored)
 ├── mods/            your mods
-├── src/main.tsx     `import '@treenity/react/main'`
+├── src/main.tsx     `import '@treenx/react/main'`
 ├── root.json        server config
-├── vite.config.ts   Vite + Treenity plugin
+├── vite.config.ts   Vite + Treenix plugin
 └── package.json
 ```
 

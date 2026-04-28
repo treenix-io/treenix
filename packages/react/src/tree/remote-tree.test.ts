@@ -1,5 +1,5 @@
-import type { NodeData } from '@treenity/core';
-import { withCache } from '@treenity/core/tree/cache';
+import type { NodeData } from '@treenx/core';
+import { withCache } from '@treenx/core/tree/cache';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { createRemoteTree } from './remote-tree';

@@ -10,7 +10,7 @@ import type { Socket } from 'node:net';
 import './mount-adapters';
 import { afterEach, before, beforeEach, describe, it } from 'node:test';
 import { createClient } from './client';
-import { createTreenityServer, type TreenityServer } from './server';
+import { createTreenixServer, type TreenixServer } from './server';
 import { type NodeEvent } from './sub';
 
 // ── Test components ──
@@ -105,7 +105,7 @@ function subscribeEvents<T = DataEvent>(
 
 /** Activate a pending user and return a login token (for 2nd+ registrations in tests) */
 async function activateAndLogin(
-  tree: TreenityServer['tree'],
+  tree: TreenixServer['tree'],
   pub: ReturnType<typeof createClient>,
   userId: string,
   password: string,
@@ -123,7 +123,7 @@ async function activateAndLogin(
 }
 
 describe('e2e: tRPC over HTTP', () => {
-  let ts: TreenityServer;
+  let ts: TreenixServer;
   let url: string;
   const sockets = new Set<Socket>();
 
@@ -168,7 +168,7 @@ describe('e2e: tRPC over HTTP', () => {
       $acl: [{ g: 'public', p: R | W | S }, { g: 'authenticated', p: R | W | S }],
     });
 
-    ts = createTreenityServer(bootstrap);
+    ts = createTreenixServer(bootstrap);
     ts.server.on('connection', (socket: Socket) => {
       sockets.add(socket);
       socket.on('close', () => sockets.delete(socket));

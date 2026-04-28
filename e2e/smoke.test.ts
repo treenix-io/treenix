@@ -16,7 +16,7 @@ test('app loads without JS errors', async ({ page }) => {
 
 test('app renders title', async ({ page }) => {
   await page.goto('/t/demo');
-  await expect(page).toHaveTitle(/Treenity/i, { timeout: 10_000 });
+  await expect(page).toHaveTitle(/Treenix/i, { timeout: 10_000 });
 });
 
 test('tree sidebar shows nodes', async ({ page }) => {

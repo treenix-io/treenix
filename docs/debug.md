@@ -1,4 +1,4 @@
-# Debugging Treenity
+# Debugging Treenix
 
 ## Prerequisites
 
@@ -53,9 +53,9 @@ async () => {
 }
 ```
 
-## MCP Treenity (server-side)
+## MCP Treenix (server-side)
 
-The `treenity` MCP server connects directly to the running server (port 3212).
+The `treenix` MCP server connects directly to the running server (port 3212).
 
 ```
 get_node     { path: "/" }

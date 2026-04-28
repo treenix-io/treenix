@@ -1,8 +1,8 @@
 #!/usr/bin/env tsx
-// CLI: treenity-mount <mountpoint> [--url=http://localhost:3211] [--token=...] [--debug]
+// CLI: treenix-mount <mountpoint> [--url=http://localhost:3211] [--token=...] [--debug]
 
 import { createFuseMount } from '#index';
-import { createTrpcTransport } from '@treenity/core/client';
+import { createTrpcTransport } from '@treenx/core/client';
 import { mkdir } from 'node:fs/promises';
 
 const args = process.argv.slice(2);
@@ -16,7 +16,7 @@ const positional = args.filter(a => !a.startsWith('--'));
 
 const mountpoint = positional[0];
 if (!mountpoint) {
-  console.error('Usage: treenity-mount <mountpoint> [--url=http://localhost:3211] [--token=...] [--debug]');
+  console.error('Usage: treenix-mount <mountpoint> [--url=http://localhost:3211] [--token=...] [--debug]');
   process.exit(1);
 }
 

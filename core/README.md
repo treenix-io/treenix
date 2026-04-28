@@ -1,10 +1,10 @@
-# @treenity/core
+# @treenx/core
 
 **A spatial protocol for typed data. Three primitives. Everything else composes.**
 
 A single business concept — say, an Order — lives in five places: database schema, ORM, API DTO, frontend state, validation rules. Each copy drifts. Each sync layer adds bugs. Meanwhile, AI agents drown in infinite code grammar with no structural guardrails.
 
-Treenity solves this with three primitives:
+Treenix solves this with three primitives:
 
 ```
 Node      = { $path, $type, ...components }
@@ -15,19 +15,19 @@ Context   = (Type, Context) → Handler
 ## Install
 
 ```bash
-npm install @treenity/core
+npm install @treenx/core
 ```
 
 Or scaffold a full project:
 
 ```bash
-npx create-treenity my-app
+npx create-treenix my-app
 ```
 
 ## Quick Example
 
 ```typescript
-import { registerType } from '@treenity/core/comp';
+import { registerType } from '@treenx/core/comp';
 
 class TodoItem {
   title = '';
@@ -60,18 +60,18 @@ await item.toggle(); // tRPC mutation → Immer patch → SSE broadcast
 | **ACL** | Per-node bitmask permissions inherited down the tree |
 | **AI access** | Every node readable via MCP — Claude can query and mutate your data |
 | **Multi-surface** | Same type renders in React, Telegram, CLI — register context handlers |
-| **Mounts** | Mount MongoDB, REST APIs, other Treenity instances into one namespace |
+| **Mounts** | Mount MongoDB, REST APIs, other Treenix instances into one namespace |
 
 ## Packages
 
-- **@treenity/core** — primitives, store, server, schema, actions
-- **@treenity/react** — hooks, admin UI, reactive cache
+- **@treenx/core** — primitives, store, server, schema, actions
+- **@treenx/react** — hooks, admin UI, reactive cache
 
 ## Links
 
-- [Getting Started](https://github.com/treenity-ai/treenity/blob/main/docs/getting-started.md)
-- [Architecture & Decisions](https://github.com/treenity-ai/treenity/blob/main/CLAUDE.md)
-- [GitHub](https://github.com/treenity-ai/treenity)
+- [Getting Started](https://github.com/treenix-ai/treenix/blob/main/docs/getting-started.md)
+- [Architecture & Decisions](https://github.com/treenix-ai/treenix/blob/main/CLAUDE.md)
+- [GitHub](https://github.com/treenix-ai/treenix)
 
 ## License
 

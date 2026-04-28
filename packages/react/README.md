@@ -1,19 +1,19 @@
-# @treenity/react
+# @treenx/react
 
-**React binding for Treenity — reactive hooks, admin UI, and component rendering.**
+**React binding for Treenix — reactive hooks, admin UI, and component rendering.**
 
-Built on top of `@treenity/core`. Provides hooks for reading and mutating tree nodes, a context-based component renderer, and a full admin interface with node editor, inspector, and tree browser.
+Built on top of `@treenx/core`. Provides hooks for reading and mutating tree nodes, a context-based component renderer, and a full admin interface with node editor, inspector, and tree browser.
 
 ## Install
 
 ```bash
-npm install @treenity/react @treenity/core react react-dom
+npm install @treenx/react @treenx/core react react-dom
 ```
 
 ## Hooks
 
 ```typescript
-import { usePath, useChildren } from '@treenity/react/hooks';
+import { usePath, useChildren } from '@treenx/react/hooks';
 import { TodoItem } from './types';
 
 // Typed proxy — reactive data + action methods
@@ -47,7 +47,7 @@ const children = useChildren('/todo/list');
 Register React views per type + context:
 
 ```typescript
-import { register } from '@treenity/core';
+import { register } from '@treenx/core';
 
 register('todo.item', 'react', ({ value, onChange }) => (
   <div>
@@ -62,7 +62,7 @@ register('todo.item', 'react', ({ value, onChange }) => (
 Render any node with automatic type resolution:
 
 ```typescript
-import { Render } from '@treenity/react/context';
+import { Render } from '@treenx/react/context';
 
 <Render value={node} onChange={handleChange} />
 ```
@@ -72,8 +72,8 @@ import { Render } from '@treenity/react/context';
 Ships with shadcn/ui components (Tailwind CSS v4):
 
 ```typescript
-import { Button } from '@treenity/react/ui/button';
-import { Slider } from '@treenity/react/ui/slider';
+import { Button } from '@treenx/react/ui/button';
+import { Slider } from '@treenx/react/ui/slider';
 ```
 
 ## Admin UI
@@ -82,9 +82,9 @@ import { Slider } from '@treenity/react/ui/slider';
 
 ## Links
 
-- [@treenity/core](https://www.npmjs.com/package/@treenity/core)
-- [GitHub](https://github.com/treenity-ai/treenity)
-- [Getting Started](https://github.com/treenity-ai/treenity/blob/main/docs/getting-started.md)
+- [@treenx/core](https://www.npmjs.com/package/@treenx/core)
+- [GitHub](https://github.com/treenix-ai/treenix)
+- [Getting Started](https://github.com/treenix-ai/treenix/blob/main/docs/getting-started.md)
 
 ## License
 

@@ -3,7 +3,7 @@
 // Otherwise — fall through to react context
 
 import { Render, RenderContext, scopeOnChange, type OnChange } from '#context';
-import { type ComponentData, type NodeData, register } from '@treenity/core';
+import { type ComponentData, type NodeData, register } from '@treenx/core';
 import { useMemo } from 'react';
 
 function DefaultLayout({ value, onChange }: { value: ComponentData; onChange?: (p: OnChange) => void }) {

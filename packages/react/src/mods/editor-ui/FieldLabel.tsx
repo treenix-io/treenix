@@ -9,7 +9,7 @@ import {
   DropdownMenuTrigger,
 } from '#components/ui/dropdown-menu';
 import { Input } from '#components/ui/input';
-import { isRef } from '@treenity/core';
+import { isRef } from '@treenx/core';
 import { useState } from 'react';
 
 type FieldMode = 'value' | 'ref' | 'map';
@@ -56,7 +56,7 @@ export function FieldLabel({ label, value, onChange }: {
     <label
       className={dragOver ? 'text-primary cursor-pointer' : 'cursor-pointer'}
       onDragOver={(e) => {
-        if (e.dataTransfer.types.includes('application/treenity-path')) {
+        if (e.dataTransfer.types.includes('application/treenix-path')) {
           e.preventDefault();
           setDragOver(true);
         }
@@ -65,7 +65,7 @@ export function FieldLabel({ label, value, onChange }: {
       onDrop={(e) => {
         e.preventDefault();
         setDragOver(false);
-        const path = e.dataTransfer.getData('application/treenity-path');
+        const path = e.dataTransfer.getData('application/treenix-path');
         if (path && onChange) {
           const existing = isRef(value) ? (value as { $map?: string }).$map : undefined;
           onChange(existing !== undefined ? { $ref: path, $map: existing } : { $ref: path });

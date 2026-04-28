@@ -136,7 +136,7 @@ Layer 5 (tRPC). Core and store don't know about subscriptions.
 
 **Disconnect:** full cleanup of all client subscriptions.
 
-## D17: Treenity URI — universal intra-node addressing
+## D17: Treenix URI — universal intra-node addressing
 
 **Format:** `/path[?query]#[key.]name[()]` — standard URL order (path → query → fragment).
 

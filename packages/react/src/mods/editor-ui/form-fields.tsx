@@ -11,7 +11,7 @@ import { DraftTextarea } from '#mods/editor-ui/DraftTextarea';
 import { useSchema } from '#schema-loader';
 import * as cache from '#tree/cache';
 import { tree as clientStore } from '#tree/client';
-import { register, resolve as resolveHandler } from '@treenity/core';
+import { register, resolve as resolveHandler } from '@treenx/core';
 import dayjs from 'dayjs';
 import { X } from 'lucide-react';
 import { createElement, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
@@ -1109,7 +1109,7 @@ function PathForm({ value, onChange }: FP) {
           dragOver ? 'border-primary ring-2 ring-primary/30 bg-primary/5' : 'border-border'
         }`}
         onDragOver={(e) => {
-          if (e.dataTransfer.types.includes('application/treenity-path')) {
+          if (e.dataTransfer.types.includes('application/treenix-path')) {
             e.preventDefault();
             e.dataTransfer.dropEffect = 'link';
             setDragOver(true);
@@ -1119,7 +1119,7 @@ function PathForm({ value, onChange }: FP) {
         onDrop={(e) => {
           e.preventDefault();
           setDragOver(false);
-          const dropped = e.dataTransfer.getData('application/treenity-path');
+          const dropped = e.dataTransfer.getData('application/treenix-path');
           if (dropped) applyNode(dropped);
         }}
       >

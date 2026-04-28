@@ -1,6 +1,6 @@
-// Treenity vite plugin:
+// Treenix vite plugin:
 // 1. Resolve #subpath imports via nearest package.json (Vite doesn't support them)
-// 2. Resolve @treenity/* exports with array conditions (Vite bug #16153)
+// 2. Resolve @treenx/* exports with array conditions (Vite bug #16153)
 // 3. Auto-discover mod client.ts → virtual:mod-clients
 // 4. Block server.ts from frontend bundle
 
@@ -36,13 +36,13 @@ function readPkg(startDir: string) {
   return null;
 }
 
-// Cache for @treenity/* package dirs
-const treenityPkgCache = new Map<string, { dir: string; exports: FieldMap } | null>();
+// Cache for @treenx/* package dirs
+const treenixPkgCache = new Map<string, { dir: string; exports: FieldMap } | null>();
 
-function findTreenityPkg(name: string): { dir: string; exports: FieldMap } | null {
-  if (treenityPkgCache.has(name)) return treenityPkgCache.get(name)!;
+function findTreenixPkg(name: string): { dir: string; exports: FieldMap } | null {
+  if (treenixPkgCache.has(name)) return treenixPkgCache.get(name)!;
 
-  // Walk up from CWD to find node_modules/@treenity/<name>
+  // Walk up from CWD to find node_modules/@treenx/<name>
   let current = process.cwd();
   while (current !== dirname(current)) {
     const pkgDir = join(current, 'node_modules', name);
@@ -52,13 +52,13 @@ function findTreenityPkg(name: string): { dir: string; exports: FieldMap } | nul
       // Follow symlink to real path for resolution
       const realDir = realpathSync(pkgDir);
       const result = pkg.exports ? { dir: realDir, exports: pkg.exports as FieldMap } : null;
-      treenityPkgCache.set(name, result);
+      treenixPkgCache.set(name, result);
       return result;
     }
     current = dirname(current);
   }
 
-  treenityPkgCache.set(name, null);
+  treenixPkgCache.set(name, null);
   return null;
 }
 
@@ -124,7 +124,7 @@ type ModEntry = { name: string; files: string[] };
 
 function scanClients(dir: string, warnIfMissing = true): ModEntry[] {
   if (!existsSync(dir)) {
-    if (warnIfMissing) console.warn(`[treenity] modsDir not found, skipped: ${dir}`);
+    if (warnIfMissing) console.warn(`[treenix] modsDir not found, skipped: ${dir}`);
     return [];
   }
   const mods: ModEntry[] = [];
@@ -144,22 +144,22 @@ function scanClients(dir: string, warnIfMissing = true): ModEntry[] {
   return mods;
 }
 
-// Scan node_modules for @treenity/* packages with treenity.clients field
+// Scan node_modules for @treenx/* packages with treenix.clients field
 function discoverPackageClients(): string[] {
   const imports: string[] = [];
   let current = process.cwd();
 
   while (current !== dirname(current)) {
-    const nmDir = join(current, 'node_modules', '@treenity');
+    const nmDir = join(current, 'node_modules', '@treenix');
     if (existsSync(nmDir)) {
       for (const entry of readdirSync(nmDir, { withFileTypes: true })) {
         if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
         const pkgPath = join(nmDir, entry.name, 'package.json');
         if (!existsSync(pkgPath)) continue;
         const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
-        if (pkg.treenity?.clients) {
+        if (pkg.treenix?.clients) {
           const realDir = realpathSync(join(nmDir, entry.name));
-          const clientsPath = resolve(realDir, pkg.treenity.clients);
+          const clientsPath = resolve(realDir, pkg.treenix.clients);
           if (existsSync(clientsPath)) imports.push(clientsPath);
         }
       }
@@ -173,7 +173,7 @@ function discoverPackageClients(): string[] {
 
 // ── Plugin ──
 
-export default function treenityPlugin(opts?: { modsDirs?: string[] }): Plugin {
+export default function treenixPlugin(opts?: { modsDirs?: string[] }): Plugin {
   const engineRoot = resolve(import.meta.dirname, '../../..');
   // In npm installs engineRoot = node_modules/, which has no sibling mods/ —
   // engine mods scan is a monorepo-dev convenience only.
@@ -181,7 +181,7 @@ export default function treenityPlugin(opts?: { modsDirs?: string[] }): Plugin {
   let conditions: string[] = [];
 
   return {
-    name: 'treenity',
+    name: 'treenix',
     enforce: 'pre',
 
     configResolved(config) {
@@ -193,13 +193,13 @@ export default function treenityPlugin(opts?: { modsDirs?: string[] }): Plugin {
       if (!importer) return;
 
 
-      // Block server.ts from frontend + resolve relative imports in @treenity packages
+      // Block server.ts from frontend + resolve relative imports in @treenix packages
       if (id.startsWith('.')) {
         const resolved = resolve(importer, '..', id).replace(/\\/g, '/');
 
-        // Relative imports within @treenity packages: resolve explicitly so module IDs
-        // match plugin-resolved @treenity/* paths (prevents ?v= hash mismatch → dual modules)
-        if (importer.includes('/node_modules/@treenity/')) {
+        // Relative imports within @treenix packages: resolve explicitly so module IDs
+        // match plugin-resolved @treenx/* paths (prevents ?v= hash mismatch → dual modules)
+        if (importer.includes('/node_modules/@treenx/')) {
           return tryResolve([resolved]);
         }
 
@@ -224,12 +224,12 @@ export default function treenityPlugin(opts?: { modsDirs?: string[] }): Plugin {
         }
       }
 
-      // Resolve @treenity/* exports (Vite doesn't handle array conditions)
-      if (id.startsWith('@treenity/')) {
+      // Resolve @treenx/* exports (Vite doesn't handle array conditions)
+      if (id.startsWith('@treenx/')) {
         const parts = id.split('/');
         const pkgName = parts.slice(0, 2).join('/');
         const subpath = './' + parts.slice(2).join('/');
-        const pkg = findTreenityPkg(pkgName);
+        const pkg = findTreenixPkg(pkgName);
         if (pkg?.exports) {
           return matchPattern(parts.length > 2 ? subpath : '.', pkg.exports, pkg.dir, conditions);
         }
@@ -239,7 +239,7 @@ export default function treenityPlugin(opts?: { modsDirs?: string[] }): Plugin {
     load(id) {
       if (id !== RESOLVED_ID) return;
 
-      // 1. Auto-discover @treenity/* packages with treenity.clients
+      // 1. Auto-discover @treenx/* packages with treenix.clients
       const pkgClients = discoverPackageClients();
 
       // 2. Engine mods (sibling to this plugin's package) — monorepo-dev only
@@ -274,7 +274,7 @@ export default function treenityPlugin(opts?: { modsDirs?: string[] }): Plugin {
       });
 
       return [
-        `import { loadMod } from '@treenity/react/mod-errors';`,
+        `import { loadMod } from '@treenx/react/mod-errors';`,
         'await Promise.allSettled([',
         lines.join(',\n'),
         ']);',

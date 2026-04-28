@@ -1,4 +1,4 @@
-import { cn } from '@treenity/react';
+import { cn } from '@treenx/react';
 import dayjs from 'dayjs';
 
 // ── Design tokens ──

@@ -14,14 +14,14 @@ Registered on `text/markdown` mime type:
 
 ## Markdown ↔ Tiptap
 
-`markdown.ts` — bidirectional converter. Supports: headings, paragraphs, bold/italic/code, bullet/ordered lists, code blocks, blockquotes, horizontal rules, treenityBlock references.
+`markdown.ts` — bidirectional converter. Supports: headings, paragraphs, bold/italic/code, bullet/ordered lists, code blocks, blockquotes, horizontal rules, treenixBlock references.
 
 ## Editor (frontend)
 
 Tiptap WYSIWYG with:
 - Toolbar: bold, italic, code, H1-H3, lists, quote, code block, HR
-- Slash commands: `/` opens menu for formatting + embedding Treenity nodes
-- Drag-and-drop: drop tree nodes to embed as `treenityBlock`
+- Slash commands: `/` opens menu for formatting + embedding Treenix nodes
+- Drag-and-drop: drop tree nodes to embed as `treenixBlock`
 - Embedded nodes rendered via `<Render>` with live data
 
 ## Prefabs
@@ -37,8 +37,8 @@ fs-codec.ts       — text/markdown decode/encode for FS store
 markdown.ts       — mdToTiptap / tiptapToMd converters
 text.ts           — text context (Tiptap → plain text/markdown)
 renderers.tsx     — Tiptap editor view
-treenity-block.ts — custom Tiptap node type for embedded components
-treenity-block-view.tsx — renders embedded Treenity nodes
+treenix-block.ts — custom Tiptap node type for embedded components
+treenix-block-view.tsx — renders embedded Treenix nodes
 toolbar.tsx       — editor toolbar
 slash-command.ts  — Tiptap Suggestion extension
 slash-menu.tsx    — slash command popup

@@ -1,7 +1,7 @@
 // AgentSim shared types — used by both service (backend) and view (frontend)
 // Classes per CLAUDE.md: "Exception: for entity definition could be used"
 
-import { registerType } from '@treenity/core/comp';
+import { registerType } from '@treenx/core/comp';
 
 /** Agent 2D map position and interaction radius */
 export class SimPosition {

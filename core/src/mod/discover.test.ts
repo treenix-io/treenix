@@ -14,18 +14,18 @@ async function makePkg(dir: string, pkg: Record<string, unknown>) {
 
 describe('discoverMods', () => {
   beforeEach(async () => {
-    tmp = await mkdtemp(join(tmpdir(), 'treenity-discover-'));
+    tmp = await mkdtemp(join(tmpdir(), 'treenix-discover-'));
   });
 
   afterEach(async () => {
     await rm(tmp, { recursive: true, force: true });
   });
 
-  it('finds packages with "treenity" field', async () => {
-    await makePkg(join(tmp, 'treenity-mod-weather'), {
-      name: 'treenity-mod-weather',
+  it('finds packages with "treenix" field', async () => {
+    await makePkg(join(tmp, 'treenix-mod-weather'), {
+      name: 'treenix-mod-weather',
       version: '1.2.3',
-      treenity: {
+      treenix: {
         name: 'weather',
         types: ['weather.sensor', 'weather.config'],
         server: './dist/server.js',
@@ -39,14 +39,14 @@ describe('discoverMods', () => {
     assert.equal(mods[0].version, '1.2.3');
     assert.deepEqual(mods[0].types, ['weather.sensor', 'weather.config']);
     assert.equal(mods[0].server, './dist/server.js');
-    assert.equal(mods[0].packagePath, join(tmp, 'treenity-mod-weather'));
+    assert.equal(mods[0].packagePath, join(tmp, 'treenix-mod-weather'));
   });
 
-  it('ignores packages without "treenity" field', async () => {
+  it('ignores packages without "treenix" field', async () => {
     await makePkg(join(tmp, 'express'), { name: 'express', version: '4.0.0' });
-    await makePkg(join(tmp, 'treenity-mod-foo'), {
-      name: 'treenity-mod-foo',
-      treenity: { name: 'foo' },
+    await makePkg(join(tmp, 'treenix-mod-foo'), {
+      name: 'treenix-mod-foo',
+      treenix: { name: 'foo' },
     });
 
     const mods = await discoverMods(tmp);
@@ -55,10 +55,10 @@ describe('discoverMods', () => {
   });
 
   it('discovers scoped packages (@scope/pkg)', async () => {
-    await makePkg(join(tmp, '@myorg', 'treenity-mod-billing'), {
-      name: '@myorg/treenity-mod-billing',
+    await makePkg(join(tmp, '@myorg', 'treenix-mod-billing'), {
+      name: '@myorg/treenix-mod-billing',
       version: '2.0.0',
-      treenity: { name: 'billing', dependencies: ['auth'] },
+      treenix: { name: 'billing', dependencies: ['auth'] },
     });
 
     const mods = await discoverMods(tmp);
@@ -68,8 +68,8 @@ describe('discoverMods', () => {
   });
 
   it('handles multiple mods including mixed scoped/unscoped', async () => {
-    await makePkg(join(tmp, 'treenity-mod-a'), { name: 'a', treenity: { name: 'alpha' } });
-    await makePkg(join(tmp, '@org', 'mod-b'), { name: 'b', treenity: { name: 'beta' } });
+    await makePkg(join(tmp, 'treenix-mod-a'), { name: 'a', treenix: { name: 'alpha' } });
+    await makePkg(join(tmp, '@org', 'mod-b'), { name: 'b', treenix: { name: 'beta' } });
     await makePkg(join(tmp, 'lodash'), { name: 'lodash' });
     await makePkg(join(tmp, '@org', 'other'), { name: 'other' });
 
@@ -87,7 +87,7 @@ describe('discoverMods', () => {
   it('skips packages with malformed package.json', async () => {
     await mkdir(join(tmp, 'broken-mod'), { recursive: true });
     await writeFile(join(tmp, 'broken-mod', 'package.json'), 'NOT JSON{{{');
-    await makePkg(join(tmp, 'good-mod'), { name: 'g', treenity: { name: 'good' } });
+    await makePkg(join(tmp, 'good-mod'), { name: 'g', treenix: { name: 'good' } });
 
     const mods = await discoverMods(tmp);
     assert.equal(mods.length, 1);
@@ -95,28 +95,28 @@ describe('discoverMods', () => {
   });
 
   it('skips dot-directories', async () => {
-    await makePkg(join(tmp, '.cache'), { name: 'cache', treenity: { name: 'cache' } });
+    await makePkg(join(tmp, '.cache'), { name: 'cache', treenix: { name: 'cache' } });
     const mods = await discoverMods(tmp);
     assert.equal(mods.length, 0);
   });
 
-  it('falls back to pkg.name and pkg.version when treenity field is minimal', async () => {
-    await makePkg(join(tmp, 'treenity-mod-simple'), {
-      name: '@scope/treenity-mod-simple',
+  it('falls back to pkg.name and pkg.version when treenix field is minimal', async () => {
+    await makePkg(join(tmp, 'treenix-mod-simple'), {
+      name: '@scope/treenix-mod-simple',
       version: '3.0.0',
-      treenity: {},
+      treenix: {},
     });
 
     const mods = await discoverMods(tmp);
     assert.equal(mods.length, 1);
-    assert.equal(mods[0].name, '@scope/treenity-mod-simple');
+    assert.equal(mods[0].name, '@scope/treenix-mod-simple');
     assert.equal(mods[0].version, '3.0.0');
   });
 
   it('handles missing version gracefully', async () => {
     await makePkg(join(tmp, 'mod-no-ver'), {
       name: 'mod-no-ver',
-      treenity: { name: 'no-ver' },
+      treenix: { name: 'no-ver' },
     });
 
     const mods = await discoverMods(tmp);
@@ -125,7 +125,7 @@ describe('discoverMods', () => {
 
   it('handles packages with no package.json at all', async () => {
     await mkdir(join(tmp, 'empty-dir'), { recursive: true });
-    await makePkg(join(tmp, 'real-mod'), { name: 'r', treenity: { name: 'real' } });
+    await makePkg(join(tmp, 'real-mod'), { name: 'r', treenix: { name: 'real' } });
 
     const mods = await discoverMods(tmp);
     assert.equal(mods.length, 1);

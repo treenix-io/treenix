@@ -1,8 +1,8 @@
-// Treenity Module System — type definitions
+// Treenix Module System — type definitions
 
 import type { Tree } from '#tree';
 
-export interface TreenityMod {
+export interface TreenixMod {
   name: string;
   dependencies?: string[];
   server?: () => Promise<unknown>;
@@ -12,7 +12,7 @@ export interface TreenityMod {
   onUnload?: () => Promise<void>;
 }
 
-// package.json "treenity" field shape (npm discovery)
+// package.json "treenix" field shape (npm discovery)
 export interface ModManifest {
   name: string;
   version: string;
@@ -28,7 +28,7 @@ export type ModState = 'discovered' | 'loading' | 'loaded' | 'failed' | 'disable
 
 export interface LoadedMod {
   manifest?: ModManifest;
-  mod?: TreenityMod;
+  mod?: TreenixMod;
   name: string;
   state: ModState;
   error?: Error;
@@ -36,6 +36,6 @@ export interface LoadedMod {
   loadDurationMs?: number;
 }
 
-export function defineMod(mod: TreenityMod): TreenityMod {
+export function defineMod(mod: TreenixMod): TreenixMod {
   return mod;
 }

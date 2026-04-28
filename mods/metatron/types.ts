@@ -1,4 +1,4 @@
-import { registerType } from '@treenity/core/comp';
+import { registerType } from '@treenx/core/comp';
 
 // Legacy types — kept for schema compatibility, no active code references.
 // TODO: remove once existing data is migrated.

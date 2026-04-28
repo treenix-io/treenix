@@ -2,11 +2,11 @@
 // FilterTree: /local/* → memory+mounts, everything else → remote.
 // Reads merge both — /local visible alongside server nodes.
 
-import type { NodeData } from '@treenity/core';
-import { withMounts } from '@treenity/core/server/mount';
+import type { NodeData } from '@treenx/core';
+import { withMounts } from '@treenx/core/server/mount';
 import './fiber-tree'; // registers t.mount.react
-import { createFilterTree, createMemoryTree } from '@treenity/core/tree';
-import { withCache } from '@treenity/core/tree/cache';
+import { createFilterTree, createMemoryTree } from '@treenx/core/tree';
+import { withCache } from '@treenx/core/tree/cache';
 import { createRemoteTree } from './remote-tree';
 import type { trpc } from './trpc';
 

@@ -7,7 +7,7 @@ Build a working todo list with types, actions, reactive UI, and real-time update
 ## 1. Setup
 
 ```bash
-npx create-treenity my-todo-app
+npx create-treenix my-todo-app
 cd my-todo-app
 ```
 
@@ -24,7 +24,7 @@ Open [http://localhost:3210](http://localhost:3210). You should see the admin UI
 
 ## 2. Your First Mod
 
-Treenity code lives in **mods** — self-contained modules under `mods/`. Each mod has:
+Treenix code lives in **mods** — self-contained modules under `mods/`. Each mod has:
 
 ```
 mods/todo/
@@ -40,7 +40,7 @@ The server auto-discovers `server.ts`, the frontend loads `client.ts` via explic
 ### types.ts — Define Your Data
 
 ```typescript
-import { registerType } from '@treenity/core/comp';
+import { registerType } from '@treenx/core/comp';
 
 class TodoItem {
   title = '';
@@ -71,7 +71,7 @@ class TodoList {
   /** @description Add a new todo item */
   async add(data: { title: string }) {
     if (!data.title?.trim()) throw new Error('Title required');
-    const { node, store } = (await import('@treenity/core/comp')).getCtx();
+    const { node, store } = (await import('@treenx/core/comp')).getCtx();
     const id = Date.now().toString(36);
     await store.set({
       $path: `${node.$path}/${id}`,
@@ -91,8 +91,8 @@ export { TodoList };
 ### seed.ts — Initial Data
 
 ```typescript
-import { type NodeData } from '@treenity/core/core';
-import { registerPrefab } from '@treenity/core/mod';
+import { type NodeData } from '@treenx/core/core';
+import { registerPrefab } from '@treenx/core/mod';
 
 registerPrefab('todo', 'seed', [
   { $path: 'todo', $type: 'dir' },
@@ -133,8 +133,8 @@ This already works: typed data, validated actions, real-time updates, persistenc
 Create `view.tsx` for a proper UI:
 
 ```tsx
-import { register, type NodeData } from '@treenity/core/core';
-import { usePath, useChildren } from '@treenity/react/hooks';
+import { register, type NodeData } from '@treenx/core/core';
+import { usePath, useChildren } from '@treenx/react/hooks';
 import { useState } from 'react';
 import { TodoItem, TodoList } from './types';
 

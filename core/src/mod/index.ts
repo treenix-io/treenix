@@ -1,7 +1,7 @@
-// Treenity Module System — public API
+// Treenix Module System — public API
 
 export { defineMod } from './types';
-export type { TreenityMod, ModManifest, ModState, LoadedMod } from './types';
+export type { TreenixMod, ModManifest, ModState, LoadedMod } from './types';
 export { discoverMods } from './discover';
 export { sortByDependencies, loadMods, loadLocalMods, loadAllMods, getLoadedMods, getMod, isModLoaded, clearModRegistry } from './loader';
 export type { LoadTarget, LoadResult } from './loader';

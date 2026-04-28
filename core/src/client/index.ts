@@ -1,11 +1,11 @@
-// Treenity Client SDK — transport-agnostic tree client interface.
+// Treenix Client SDK — transport-agnostic tree client interface.
 // Transports: trpc (now), ws (future), http (future).
 
 import type { Tree } from '#tree';
 
 export type WatchSub = { unsubscribe(): void };
 
-export type TreenityClient = {
+export type TreenixClient = {
   tree: Tree;
   execute(path: string, action: string, data?: unknown, opts?: { type?: string; key?: string }): Promise<unknown>;
   // TODO: merge watch + watch path via setting `/` or `*` as path.

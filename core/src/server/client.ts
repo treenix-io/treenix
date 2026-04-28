@@ -1,4 +1,4 @@
-// Treenity tRPC Client — Node.js
+// Treenix tRPC Client — Node.js
 // Creates tRPC client for tests and scripts (not browser).
 // Uses `eventsource` npm package for SSE subscriptions.
 // Each EventSource gets its own node:http connection to avoid undici pool contention

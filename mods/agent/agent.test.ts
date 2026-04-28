@@ -1,6 +1,6 @@
 // Agent Office tests — types (state machine) + guardian (policy registry)
 
-import { createNode, getComponent, resolve } from '@treenity/core';
+import { createNode, getComponent, resolve } from '@treenx/core';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
@@ -136,8 +136,8 @@ describe('Guardian', () => {
     const rules = buildPermissionRules('any-role');
     assert.ok(rules.some(r => r.policy === 'ask-once'));
     assert.ok(rules.some(r => r.policy === 'allow'));
-    assert.ok(rules.some(r => r.tool === 'mcp__treenity__remove_node' && r.policy === 'ask-once'));
-    assert.ok(rules.some(r => r.tool === 'mcp__treenity__get_node' && r.policy === 'allow'));
+    assert.ok(rules.some(r => r.tool === 'mcp__treenix__remove_node' && r.policy === 'ask-once'));
+    assert.ok(rules.some(r => r.tool === 'mcp__treenix__get_node' && r.policy === 'allow'));
   });
 });
 
@@ -312,8 +312,8 @@ describe('canUseTool', () => {
 
   it('allows tools in fallback allow list', async () => {
     const canUse = createCanUseTool('qa', '/agents/qa');
-    assert.equal((await canUse('mcp__treenity__get_node', { path: '/foo' })).behavior, 'allow');
-    assert.equal((await canUse('mcp__treenity__list_children', { path: '/foo' })).behavior, 'allow');
+    assert.equal((await canUse('mcp__treenix__get_node', { path: '/foo' })).behavior, 'allow');
+    assert.equal((await canUse('mcp__treenix__list_children', { path: '/foo' })).behavior, 'allow');
   });
 });
 
@@ -322,16 +322,16 @@ describe('canUseTool', () => {
 describe('canUseTool: readOnly mode', () => {
   it('allows read-only tools', async () => {
     const canUse = createCanUseTool('qa', '/agents/qa', undefined, { readOnly: true });
-    assert.equal((await canUse('mcp__treenity__get_node', { path: '/foo' })).behavior, 'allow');
-    assert.equal((await canUse('mcp__treenity__list_children', { path: '/foo' })).behavior, 'allow');
-    assert.equal((await canUse('mcp__treenity__catalog', {})).behavior, 'allow');
+    assert.equal((await canUse('mcp__treenix__get_node', { path: '/foo' })).behavior, 'allow');
+    assert.equal((await canUse('mcp__treenix__list_children', { path: '/foo' })).behavior, 'allow');
+    assert.equal((await canUse('mcp__treenix__catalog', {})).behavior, 'allow');
   });
 
   it('denies write tools in read-only mode', async () => {
     const canUse = createCanUseTool('qa', '/agents/qa', undefined, { readOnly: true });
-    assert.equal((await canUse('mcp__treenity__set_node', { path: '/foo' })).behavior, 'deny');
-    assert.equal((await canUse('mcp__treenity__remove_node', { path: '/foo' })).behavior, 'deny');
-    assert.equal((await canUse('mcp__treenity__execute', { path: '/foo', action: 'doStuff' })).behavior, 'deny');
+    assert.equal((await canUse('mcp__treenix__set_node', { path: '/foo' })).behavior, 'deny');
+    assert.equal((await canUse('mcp__treenix__remove_node', { path: '/foo' })).behavior, 'deny');
+    assert.equal((await canUse('mcp__treenix__execute', { path: '/foo', action: 'doStuff' })).behavior, 'deny');
   });
 
   it('allows read-only bash in read-only mode', async () => {
@@ -492,9 +492,9 @@ describe('canUseTool: policy precedence', () => {
     t.mock.timers.enable({ apis: ['setTimeout'] });
 
     const store = mockStore(undefined, {
-      allow: ['mcp__treenity__*'],
+      allow: ['mcp__treenix__*'],
       deny: [],
-      escalate: ['mcp__treenity__set_node'],
+      escalate: ['mcp__treenix__set_node'],
     });
 
     let escalated = false;
@@ -503,7 +503,7 @@ describe('canUseTool: policy precedence', () => {
     };
 
     const resultPromise = createCanUseTool('dev', '/agents/test', store)(
-      'mcp__treenity__set_node', { path: '/foo' },
+      'mcp__treenix__set_node', { path: '/foo' },
     );
 
     await flush();
@@ -516,13 +516,13 @@ describe('canUseTool: policy precedence', () => {
   it('specific allow beats wildcard escalate (execute:$schema)', async () => {
     // Regression: execute:$schema should be allowed, not escalated by execute:*
     const store = mockStore(undefined, {
-      allow: ['mcp__treenity__execute:$schema'],
+      allow: ['mcp__treenix__execute:$schema'],
       deny: [],
-      escalate: ['mcp__treenity__execute:*'],
+      escalate: ['mcp__treenix__execute:*'],
     });
 
     const canUse = createCanUseTool('dev', '/agents/test', store);
-    const r = await canUse('mcp__treenity__execute', { action: '$schema', path: '/foo' });
+    const r = await canUse('mcp__treenix__execute', { action: '$schema', path: '/foo' });
     assert.equal(r.behavior, 'allow', 'specific allow should beat wildcard escalate');
   });
 
@@ -530,9 +530,9 @@ describe('canUseTool: policy precedence', () => {
     t.mock.timers.enable({ apis: ['setTimeout'] });
 
     const store = mockStore(undefined, {
-      allow: ['mcp__treenity__get_node'],
+      allow: ['mcp__treenix__get_node'],
       deny: [],
-      escalate: ['mcp__treenity__set_node'],
+      escalate: ['mcp__treenix__set_node'],
     });
 
     let escalated = false;
@@ -541,7 +541,7 @@ describe('canUseTool: policy precedence', () => {
     };
 
     const resultPromise = createCanUseTool('dev', '/agents/test', store)(
-      'mcp__treenity__set_node', { path: '/foo' },
+      'mcp__treenix__set_node', { path: '/foo' },
     );
 
     await flush();
@@ -574,62 +574,62 @@ describe('canUseTool: policy precedence', () => {
 
   it('deny beats both allow and escalate', async () => {
     const store = mockStore(undefined, {
-      allow: ['mcp__treenity__remove_node'],
-      deny: ['mcp__treenity__remove_node'],
-      escalate: ['mcp__treenity__remove_node'],
+      allow: ['mcp__treenix__remove_node'],
+      deny: ['mcp__treenix__remove_node'],
+      escalate: ['mcp__treenix__remove_node'],
     });
 
     const canUse = createCanUseTool('dev', '/agents/test', store);
-    const r = await canUse('mcp__treenity__remove_node', { path: '/foo' });
+    const r = await canUse('mcp__treenix__remove_node', { path: '/foo' });
     assert.equal(r.behavior, 'deny', 'deny should beat both allow and escalate');
   });
 
   it('target field used as fallback for path in subject building', async () => {
     const store = mockStore(undefined, {
-      allow: ['mcp__treenity__deploy_prefab:*/agents/*'],
+      allow: ['mcp__treenix__deploy_prefab:*/agents/*'],
       deny: [],
       escalate: [],
     });
 
     const canUse = createCanUseTool('dev', '/agents/test', store);
-    const r = await canUse('mcp__treenity__deploy_prefab', { target: '/agents/bot' });
+    const r = await canUse('mcp__treenix__deploy_prefab', { target: '/agents/bot' });
     assert.equal(r.behavior, 'allow', 'target should work as path fallback in subjects');
   });
 
   it('plan mode respects path-scoped denies on read tools', async () => {
     const store = mockStore(undefined, {
-      allow: ['mcp__treenity__get_node'],
-      deny: ['mcp__treenity__get_node:/secret/*'],
+      allow: ['mcp__treenix__get_node'],
+      deny: ['mcp__treenix__get_node:/secret/*'],
       escalate: [],
     });
 
     const canUse = createCanUseTool('dev', '/agents/test', store, { readOnly: true });
-    const r = await canUse('mcp__treenity__get_node', { path: '/secret/keys' });
+    const r = await canUse('mcp__treenix__get_node', { path: '/secret/keys' });
     assert.equal(r.behavior, 'deny', 'path-scoped deny must apply even in plan mode');
   });
 
   it('plan mode allows read tools on non-denied paths', async () => {
     const store = mockStore(undefined, {
-      allow: ['mcp__treenity__get_node'],
-      deny: ['mcp__treenity__get_node:/secret/*'],
+      allow: ['mcp__treenix__get_node'],
+      deny: ['mcp__treenix__get_node:/secret/*'],
       escalate: [],
     });
 
     const canUse = createCanUseTool('dev', '/agents/test', store, { readOnly: true });
-    const r = await canUse('mcp__treenity__get_node', { path: '/public/data' });
+    const r = await canUse('mcp__treenix__get_node', { path: '/public/data' });
     assert.equal(r.behavior, 'allow', 'non-denied path should be allowed in plan mode');
   });
 
   it('path-specific allow beats coarse exact escalate (subject specificity)', async () => {
     // allow: set_node:/safe/* should win over escalate: set_node (coarser subject)
     const store = mockStore(undefined, {
-      allow: ['mcp__treenity__set_node:/safe/*'],
+      allow: ['mcp__treenix__set_node:/safe/*'],
       deny: [],
-      escalate: ['mcp__treenity__set_node'],
+      escalate: ['mcp__treenix__set_node'],
     });
 
     const canUse = createCanUseTool('dev', '/agents/test', store);
-    const r = await canUse('mcp__treenity__set_node', { path: '/safe/x' });
+    const r = await canUse('mcp__treenix__set_node', { path: '/safe/x' });
     assert.equal(r.behavior, 'allow', 'path-specific allow should beat coarse escalate');
   });
 
@@ -637,13 +637,13 @@ describe('canUseTool: policy precedence', () => {
     // allow: execute:* matches more specific subject (execute:run) than escalate: execute
     // Subject hierarchy wins: action-level match > tool-level match
     const store = mockStore(undefined, {
-      allow: ['mcp__treenity__execute:*'],
+      allow: ['mcp__treenix__execute:*'],
       deny: [],
-      escalate: ['mcp__treenity__execute'],
+      escalate: ['mcp__treenix__execute'],
     });
 
     const canUse = createCanUseTool('dev', '/agents/test', store);
-    const r = await canUse('mcp__treenity__execute', { action: 'run' });
+    const r = await canUse('mcp__treenix__execute', { action: 'run' });
     assert.equal(r.behavior, 'allow', 'action-level allow should beat tool-level escalate');
   });
 
@@ -652,9 +652,9 @@ describe('canUseTool: policy precedence', () => {
     t.mock.timers.enable({ apis: ['setTimeout'] });
 
     const store = mockStore(undefined, {
-      allow: ['mcp__treenity__execute:*'],
+      allow: ['mcp__treenix__execute:*'],
       deny: [],
-      escalate: ['mcp__treenity__execute:run'],
+      escalate: ['mcp__treenix__execute:run'],
     });
 
     let escalated = false;
@@ -663,7 +663,7 @@ describe('canUseTool: policy precedence', () => {
     };
 
     const resultPromise = createCanUseTool('dev', '/agents/test', store)(
-      'mcp__treenity__execute', { action: 'run' },
+      'mcp__treenix__execute', { action: 'run' },
     );
 
     await flush();
@@ -675,13 +675,13 @@ describe('canUseTool: policy precedence', () => {
 
   it('infix wildcard: deploy_prefab:*/agents/* beats deploy_prefab:*', async () => {
     const store = mockStore(undefined, {
-      allow: ['mcp__treenity__deploy_prefab:*/agents/*'],
+      allow: ['mcp__treenix__deploy_prefab:*/agents/*'],
       deny: [],
-      escalate: ['mcp__treenity__deploy_prefab:*'],
+      escalate: ['mcp__treenix__deploy_prefab:*'],
     });
 
     const canUse = createCanUseTool('dev', '/agents/test', store);
-    const r = await canUse('mcp__treenity__deploy_prefab', { target: '/foo/agents/bar' });
+    const r = await canUse('mcp__treenix__deploy_prefab', { target: '/foo/agents/bar' });
     assert.equal(r.behavior, 'allow', 'infix wildcard allow should beat broader wildcard escalate');
   });
 
@@ -966,8 +966,8 @@ describe('AiPolicy', () => {
     const node = createNode('/guardian', 'ai.policy', { allow: [], deny: [], escalate: [] });
     const handler = resolve('ai.policy', 'action:addAllow')!;
     assert.ok(handler);
-    (handler as any)({ node, comp: getComponent(node, AiPolicy), store: {} }, { pattern: 'mcp__treenity__*' });
-    assert.deepEqual(node.allow, ['mcp__treenity__*']);
+    (handler as any)({ node, comp: getComponent(node, AiPolicy), store: {} }, { pattern: 'mcp__treenix__*' });
+    assert.deepEqual(node.allow, ['mcp__treenix__*']);
   });
 
   it('addDeny action appends rule', () => {
@@ -986,11 +986,11 @@ describe('AiPolicy', () => {
 
   it('removeRule action removes from correct list', () => {
     const node = createNode('/guardian', 'ai.policy', {
-      allow: ['mcp__treenity__*'], deny: ['rm -rf'], escalate: ['git push'],
+      allow: ['mcp__treenix__*'], deny: ['rm -rf'], escalate: ['git push'],
     });
     const handler = resolve('ai.policy', 'action:removeRule')!;
     (handler as any)({ node, comp: getComponent(node, AiPolicy), store: {} }, { pattern: 'rm -rf' });
     assert.deepEqual(node.deny, []);
-    assert.deepEqual(node.allow, ['mcp__treenity__*'], 'other lists untouched');
+    assert.deepEqual(node.allow, ['mcp__treenix__*'], 'other lists untouched');
   });
 });

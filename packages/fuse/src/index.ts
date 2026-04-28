@@ -1,9 +1,9 @@
-// Treenity FUSE mount — expose tree as a filesystem via libfuse FFI.
+// Treenix FUSE mount — expose tree as a filesystem via libfuse FFI.
 // Every node = directory. $.json = node data. Children = subdirs.
 // Read-write: read $.json, write $.json, mkdir = create node, rmdir = remove node.
 
-import type { NodeData } from '@treenity/core';
-import type { TreenityClient } from '@treenity/core/client';
+import type { NodeData } from '@treenx/core';
+import type { TreenixClient } from '@treenx/core/client';
 import koffi from 'koffi';
 
 // --- libfuse FFI bindings ---
@@ -127,7 +127,7 @@ function parsePath(fusePath: string): { treePath: string; isData: boolean } {
 // --- Mount ---
 
 export type MountOpts = {
-  client: TreenityClient;
+  client: TreenixClient;
   mountpoint: string;
   debug?: boolean;
 };
@@ -332,7 +332,7 @@ export function createFuseMount({ client, mountpoint, debug }: MountOpts) {
 
   return {
     mount(extraArgs: string[] = []) {
-      const argv = ['treenity-fuse', mountpoint, '-f', '-s', ...extraArgs];
+      const argv = ['treenix-fuse', mountpoint, '-f', '-s', ...extraArgs];
       if (debug) argv.push('-d');
 
       console.log(`[fuse] mounting tree → ${mountpoint}`);

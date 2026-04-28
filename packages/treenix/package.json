@@ -1,7 +1,7 @@
 {
   "name": "treenix",
   "version": "0.1.1",
-  "description": "Run Treenity — typed world engine for AI agents",
+  "description": "Run Treenix — typed world engine for AI agents",
   "type": "module",
   "bin": {
     "treenix": "./bin.mjs"
@@ -10,7 +10,7 @@
     "bin.mjs"
   ],
   "keywords": [
-    "treenity",
+    "treenix",
     "ai",
     "agents",
     "mcp",
@@ -20,6 +20,6 @@
   "license": "FSL-1.1-MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/treenity-ai/treenity"
+    "url": "https://github.com/treenix-ai/treenix"
   }
 }

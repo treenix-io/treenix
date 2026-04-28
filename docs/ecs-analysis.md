@@ -1,4 +1,4 @@
-# ECS в Treenity — анализ и решение
+# ECS в Treenix — анализ и решение
 
 ## Что такое ECS
 
@@ -10,9 +10,9 @@ Entity-Component-System — архитектурный паттерн из gamed
 
 **S — ключевая инновация.** "Дай мне все entity с Position И Velocity" → System Physics обрабатывает пакетом. Это не OOP (нет наследования), не event-driven (нет подписок) — это batch processing по component queries.
 
-## Что есть в Treenity
+## Что есть в Treenix
 
-| ECS | Treenity | Статус |
+| ECS | Treenix | Статус |
 |-----|----------|--------|
 | Entity = ID | Node = $path + $type + components | ✅ Есть, даже лучше — путь даёт иерархию, ACL, mount points |
 | Component = pure data | Component = data + methods | ⚠️ Методы нарушают чистый ECS, но дают typed actions бесплатно |
@@ -85,15 +85,15 @@ type QueryFilter = {
 
 Unity: 30+ лет, тысячи инженеров, PhysX, HDRP, asset pipeline, cross-platform compilation, C# IL2CPP.
 
-Treenity на JavaScript с async store **не может** быть Unity. Другой runtime, constraints, target.
+Treenix на JavaScript с async store **не может** быть Unity. Другой runtime, constraints, target.
 
 ## Реалистичная ниша: "Unity-like experience для non-game apps"
 
 Unity слаб в: business apps, dashboards, collaborative tools, digital twins. Unity DOTS (их ECS) оптимизирован для performance, не для composition.
 
-**Treenity покрывает:**
+**Treenix покрывает:**
 
-| Компонент | Unity | Treenity | Статус |
+| Компонент | Unity | Treenix | Статус |
 |-----------|-------|----------|--------|
 | Hierarchy panel | ✅ | Tree browser | ✅ |
 | Inspector | ✅ | Inspector + schema forms | ✅ |
@@ -124,7 +124,7 @@ Unity слаб в: business apps, dashboards, collaborative tools, digital twins
 ## Вывод
 
 1. **ECS label честен ПОСЛЕ добавления query + systems.** До этого — нет.
-2. **Query — единственная фича, трансформирующая Treenity.** ~5 дней работы.
+2. **Query — единственная фича, трансформирующая Treenix.** ~5 дней работы.
 3. **"Клон Unity" — wrong goal.** "Unity-like experience для non-game apps" — right goal.
 4. **Не приоритет сейчас — стабилизация первична.** Query добавляем после зелёных тестов и стабильной базы.
 5. **Физика = сервисы на поддеревьях.** Глобальный tick loop не нужен.

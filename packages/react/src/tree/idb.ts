@@ -1,10 +1,10 @@
-// Treenity IDB — thin IndexedDB wrapper for client node cache
+// Treenix IDB — thin IndexedDB wrapper for client node cache
 // Raw IDB API, no dependencies. Fire-and-forget friendly.
 // Degrades silently if IDB unavailable (private browsing, SSR).
 
-import type { NodeData } from '@treenity/core';
+import type { NodeData } from '@treenx/core';
 
-const DB_NAME = 'treenity';
+const DB_NAME = 'treenix';
 const DB_VERSION = 1;
 const STORE = 'nodes';
 

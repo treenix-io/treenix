@@ -1,12 +1,12 @@
 // Mod load error tracking — shared between barrel, vite plugin virtual module, and App UI
 
-const errors: Map<string, string> = ((globalThis as Record<string, unknown>).__treenityModErrors ??= new Map()) as Map<string, string>;
+const errors: Map<string, string> = ((globalThis as Record<string, unknown>).__treenixModErrors ??= new Map()) as Map<string, string>;
 
 /** Dynamic import wrapper — catches failures and records them */
 export function loadMod(name: string, load: () => Promise<unknown>): Promise<unknown> {
   return load().catch((e: Error) => {
     errors.set(name, e.message);
-    console.warn(`[treenity] mod ${name} skipped:`, e.message);
+    console.warn(`[treenix] mod ${name} skipped:`, e.message);
   });
 }
 

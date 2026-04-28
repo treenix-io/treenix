@@ -46,19 +46,19 @@ const defaultItems: SlashMenuItem[] = [
   },
   {
     title: 'Ref',
-    group: 'Treenity',
+    group: 'Treenix',
     command: () => {},
     picker: 'ref',
   },
   {
     title: 'Component',
-    group: 'Treenity',
+    group: 'Treenix',
     command: () => {},
     picker: 'component',
   },
   {
     title: 'Node Link',
-    group: 'Treenity',
+    group: 'Treenix',
     command: () => {},
     picker: 'link',
   },

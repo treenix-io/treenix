@@ -66,7 +66,7 @@ function MyRenderer({ value, onChange }) {
 ## react:list — самодостаточные list-item компоненты
 
 ```tsx
-import type { View } from '@treenity/react/context';
+import type { View } from '@treenx/react/context';
 
 // View для default — value: ComponentData (базовый тип, есть $type)
 const DefaultListItem: View<ComponentData> = ({ value, ctx }) => {

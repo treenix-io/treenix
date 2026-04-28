@@ -9,7 +9,7 @@ import { getActions, getActionSchema } from '#mods/editor-ui/node-utils';
 import { useSchema } from '#schema-loader';
 import * as cache from '#tree/cache';
 import { trpc } from '#tree/trpc';
-import type { ComponentData, NodeData } from '@treenity/core';
+import type { ComponentData, NodeData } from '@treenx/core';
 import { useState } from 'react';
 
 function ResultView({ value }: { value: unknown }) {

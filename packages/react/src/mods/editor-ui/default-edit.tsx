@@ -1,8 +1,8 @@
 import { Checkbox } from '#components/ui/checkbox';
 import { Input } from '#components/ui/input';
 import { useSchema } from '#schema-loader';
-import { type ComponentData, isRef, register, resolve } from '@treenity/core';
-import type { PropertySchema } from '@treenity/core/schema/types';
+import { type ComponentData, isRef, register, resolve } from '@treenx/core';
+import type { PropertySchema } from '@treenx/core/schema/types';
 import type { View } from '#context';
 import { createElement } from 'react';
 import { FieldLabel, RefEditor } from './FieldLabel';

@@ -3,8 +3,8 @@
 // Encode: doc.page node → .md file (Tiptap JSON → markdown)
 // Paths are extensionless — encode appends .md
 
-import type { NodeData } from '@treenity/core';
-import { register } from '@treenity/core';
+import type { NodeData } from '@treenx/core';
+import { register } from '@treenx/core';
 import { readFile, writeFile } from 'node:fs/promises';
 import { type DocFrontmatterData, serializeFrontmatter, splitFrontmatter } from './frontmatter';
 import { mdToTiptap, type TiptapNode, tiptapToMd } from './markdown';

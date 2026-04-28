@@ -2,8 +2,8 @@
 // Lives at /sys/mods/{mod}/prefabs/{name} in the virtual mods mount.
 // deploy() seeds the prefab's nodes into the target path.
 
-import { getCtx, registerType } from '@treenity/core/comp';
-import { deployByKey } from '@treenity/core/server/prefab';
+import { getCtx, registerType } from '@treenx/core/comp';
+import { deployByKey } from '@treenx/core/server/prefab';
 
 export class Prefab {
   mod = '';

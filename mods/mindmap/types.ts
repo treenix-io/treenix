@@ -1,6 +1,6 @@
-import { registerType } from '@treenity/core/comp';
+import { registerType } from '@treenx/core/comp';
 
-/** @description Mind map visualization — radial tree of Treenity nodes */
+/** @description Mind map visualization — radial tree of Treenix nodes */
 export class MindMapConfig {
   /** Root path to visualize (empty = this node's path) */
   root = '';

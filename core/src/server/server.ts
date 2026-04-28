@@ -1,7 +1,7 @@
-// Treenity HTTP Server — Layer 5
+// Treenix HTTP Server — Layer 5
 // createPipeline: pure tree composition (no HTTP).
 // createHttpServer: HTTP + CORS + tRPC + static serving.
-// createTreenityServer: backward-compat (pipeline + HTTP in one call).
+// createTreenixServer: backward-compat (pipeline + HTTP in one call).
 
 import { createLogger } from '#log';
 import type { Tree } from '#tree';
@@ -159,9 +159,9 @@ export function createHttpServer(pipeline: Pipeline, opts?: HttpServerOpts): Ser
 }
 
 // Backward-compat wrapper — used by main.ts, e2e tests
-export type TreenityServer = Pipeline & { server: Server };
+export type TreenixServer = Pipeline & { server: Server };
 
-export function createTreenityServer(bootstrap: Tree): TreenityServer {
+export function createTreenixServer(bootstrap: Tree): TreenixServer {
   const pipeline = createPipeline(bootstrap);
   const server = createHttpServer(pipeline);
   return { ...pipeline, server };

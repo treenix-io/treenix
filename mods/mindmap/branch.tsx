@@ -1,8 +1,8 @@
 // MindMapBranch — recursive node component
 // Each instance calls useChildren when expanded, parent draws curves
 
-import type { NodeData } from '@treenity/core';
-import { useChildren } from '@treenity/react';
+import type { NodeData } from '@treenx/core';
+import { useChildren } from '@treenx/react';
 import { createContext, useContext, useEffect, useRef } from 'react';
 
 export type EditingAt = {

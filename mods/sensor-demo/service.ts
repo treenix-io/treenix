@@ -1,8 +1,8 @@
 // Sensor demo — generates fake readings every second as children
 
-import { createNode, register } from '@treenity/core';
-import '@treenity/core/contexts/service';
-import { safeInterval } from '@treenity/core/util/safe-timers';
+import { createNode, register } from '@treenx/core';
+import '@treenx/core/contexts/service';
+import { safeInterval } from '@treenx/core/util/safe-timers';
 import { SensorReading } from './types';
 
 register('examples.demo.sensor', 'service', async (node, ctx) => {

@@ -1,18 +1,18 @@
-// Treenity MCP Server — exposes tree store as MCP tools
+// Treenix MCP Server — exposes tree store as MCP tools
 // StreamableHTTP transport, stateful sessions, token auth via Authorization: Bearer header
 
 import { requestApproval, resolveVerdict } from '#agent/guardian';
 import { AiPolicy } from '#agent/types';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { createNode, getComponent } from '@treenity/core';
-import { matchesAny } from '@treenity/core/glob';
-import { verifyViewSource } from '@treenity/core/mods/uix/verify';
-import { TypeCatalog } from '@treenity/core/schema/catalog';
-import { executeAction } from '@treenity/core/server/actions';
-import { buildClaims, resolveToken, type Session, withAcl } from '@treenity/core/server/auth';
-import { deployPrefab } from '@treenity/core/server/prefab';
-import type { Tree } from '@treenity/core/tree';
+import { createNode, getComponent } from '@treenx/core';
+import { matchesAny } from '@treenx/core/glob';
+import { verifyViewSource } from '@treenx/core/mods/uix/verify';
+import { TypeCatalog } from '@treenx/core/schema/catalog';
+import { executeAction } from '@treenx/core/server/actions';
+import { buildClaims, resolveToken, type Session, withAcl } from '@treenx/core/server/auth';
+import { deployPrefab } from '@treenx/core/server/prefab';
+import type { Tree } from '@treenx/core/tree';
 import { randomUUID } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
 import { z } from 'zod/v3';
@@ -35,7 +35,7 @@ export type GuardianRequest = {
 // Build glob subjects from request: most specific → least specific
 // Extracts action + target path from args (handles path, target, source)
 export function buildSubjects(req: GuardianRequest): string[] {
-  const base = `mcp__treenity__${req.tool}`;
+  const base = `mcp__treenix__${req.tool}`;
   const subjects: string[] = [];
 
   const action = typeof req.args?.action === 'string' && req.args.action ? req.args.action : null;
@@ -124,8 +124,8 @@ const text = (s: string) => ({ content: [{ type: 'text' as const, text: s }] });
 
 /** Build human-friendly label from subject pattern */
 function subjectLabel(subject: string): string {
-  // mcp__treenity__execute:add:/board → "execute:add on /board"
-  const short = subject.replace('mcp__treenity__', '');
+  // mcp__treenix__execute:add:/board → "execute:add on /board"
+  const short = subject.replace('mcp__treenix__', '');
   const parts = short.split(':');
   if (parts.length === 3) return `${parts[0]}:${parts[1]} on ${parts[2]}`;
   if (parts.length === 2) return `all ${parts[1]} actions via ${parts[0]}`;
@@ -144,7 +144,7 @@ async function guardBlock(guard: McpGuardianResult, store: Tree, userId: string)
     role: 'mcp',
     tool,
     input,
-    reason: `MCP escalation: ${tool.replace('mcp__treenity__', '')}`,
+    reason: `MCP escalation: ${tool.replace('mcp__treenix__', '')}`,
   });
   return approved ? null : text(`🛑 Guardian: denied by human`);
 }
@@ -167,7 +167,7 @@ export async function buildMcpServer(store: Tree, session: Session, claims?: str
     return guardBlock(guard, store, session.userId);
   }
 
-  const mcp = new McpServer({ name: 'treenity', version: '1.0.0' });
+  const mcp = new McpServer({ name: 'treenix', version: '1.0.0' });
 
   mcp.registerTool(
     'get_node',
@@ -653,6 +653,6 @@ export function createMcpHttpServer(store: Tree, port: number, host = '127.0.0.1
   };
 
   const server = createServer(handler);
-  server.listen(port, host, () => console.log(`treenity mcp http://${host}:${port}/mcp`));
+  server.listen(port, host, () => console.log(`treenix mcp http://${host}:${port}/mcp`));
   return server;
 }

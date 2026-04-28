@@ -2,7 +2,7 @@
 // Any type without a specific react:form handler falls here via resolve('default', 'react:form')
 
 import { type RenderProps } from '#context';
-import { register, resolve } from '@treenity/core';
+import { register, resolve } from '@treenx/core';
 import { createElement } from 'react';
 
 function DefaultSchemaForm({ value, onChange }: RenderProps) {

@@ -2,7 +2,7 @@
 
 import { Button } from '#components/ui/button';
 import { Render, RenderContext } from '#context';
-import { type ComponentData, getContextsForType, type NodeData } from '@treenity/core';
+import { type ComponentData, getContextsForType, type NodeData } from '@treenx/core';
 import { useMemo, useState } from 'react';
 
 // ── Mock data generator (by JSON Schema field type) ──

@@ -11,7 +11,7 @@
     },
     "db": {
       "type": "string",
-      "default": "treenity"
+      "default": "treenix"
     },
     "collection": {
       "type": "string",

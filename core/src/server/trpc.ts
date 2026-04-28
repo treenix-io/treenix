@@ -1,4 +1,4 @@
-// Treenity tRPC Router — Layer 4
+// Treenix tRPC Router — Layer 4
 // Thin transport wrapper over shared ops (actions.ts).
 // Responsibilities: input validation (Zod), error mapping (OpError → TRPCError), watch wiring.
 

@@ -19,7 +19,7 @@ describe('RawFsStore', () => {
   });
 
   async function setup() {
-    dir = await mkdtemp(join(tmpdir(), 'treenity-rawfs-test-'));
+    dir = await mkdtemp(join(tmpdir(), 'treenix-rawfs-test-'));
     return createRawFsStore(dir);
   }
 
@@ -215,7 +215,7 @@ describe('RawFsStore', () => {
 
   it('.env file → application/x-env', async () => {
     const tree = await setup();
-    await writeFile(join(dir, 'config.env'), 'PORT=3000\nDB=treenity\n');
+    await writeFile(join(dir, 'config.env'), 'PORT=3000\nDB=treenix\n');
 
     const node = await tree.get('/config.env');
     assert.equal(node?.$type, 'application/x-env');
@@ -250,18 +250,18 @@ describe('RawFsStore', () => {
     await tree.set({
       $path: '/config.env',
       $type: 'application/x-env',
-      env: { PORT: '3000', DB_NAME: 'treenity', FEATURE_X: 'true' },
+      env: { PORT: '3000', DB_NAME: 'treenix', FEATURE_X: 'true' },
     } as any);
 
     // Verify file on disk
     const raw = await readFile(join(dir, 'config.env'), 'utf-8');
     assert.ok(raw.includes('PORT=3000'));
-    assert.ok(raw.includes('DB_NAME=treenity'));
+    assert.ok(raw.includes('DB_NAME=treenix'));
 
     // Read back via tree — roundtrip
     const node = await tree.get('/config.env');
     assert.equal(node?.$type, 'application/x-env');
-    assert.deepEqual((node as any).env, { PORT: '3000', DB_NAME: 'treenity', FEATURE_X: 'true' });
+    assert.deepEqual((node as any).env, { PORT: '3000', DB_NAME: 'treenix', FEATURE_X: 'true' });
 
   });
 

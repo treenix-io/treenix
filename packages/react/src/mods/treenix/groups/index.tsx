@@ -3,7 +3,7 @@
 import { Badge } from '#components/ui/badge';
 import { Button } from '#components/ui/button';
 import { Input } from '#components/ui/input';
-import { register } from '@treenity/core';
+import { register } from '@treenx/core';
 import { X } from 'lucide-react';
 import { useState } from 'react';
 

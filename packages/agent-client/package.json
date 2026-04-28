@@ -1,21 +1,21 @@
 {
-  "name": "@treenity/agent-client",
+  "name": "@treenx/agent-client",
   "version": "1.0.1",
-  "description": "Treenity agent client — TOFU connection to a Treenity server",
+  "description": "Treenix agent client — TOFU connection to a Treenix server",
   "type": "module",
   "publishConfig": {
     "access": "public"
   },
   "license": "FSL-1.1-MIT",
-  "author": "Treenity <hello@treenity.ai> (https://treenity.ai)",
-  "homepage": "https://github.com/treenity-ai/treenity",
+  "author": "Treenix <hello@treenix.ai> (https://treenix.ai)",
+  "homepage": "https://github.com/treenix-ai/treenix",
   "repository": {
     "type": "git",
-    "url": "https://github.com/treenity-ai/treenity.git",
+    "url": "https://github.com/treenix-ai/treenix.git",
     "directory": "packages/agent-client"
   },
   "keywords": [
-    "treenity",
+    "treenix",
     "agent",
     "client",
     "tofu",
@@ -49,6 +49,6 @@
     "prepack": "npm run build"
   },
   "peerDependencies": {
-    "@treenity/core": "^3.0.0"
+    "@treenx/core": "^3.0.0"
   }
 }

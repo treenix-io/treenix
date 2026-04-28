@@ -1,4 +1,4 @@
-# Treenity
+# Treenix
 
 **A spatial protocol for typed data. Three primitives. Minimal core. Everything else composes.**
 
@@ -38,24 +38,24 @@ These three — plus a 76-line registry that connects them — are the entire co
 
 ## The Unified Tree
 
-URLs, filesystem paths, and Treenity paths share one structure: an address in a tree. The only differences are transport and serialization. Treenity's mount system makes the equivalence explicit:
+URLs, filesystem paths, and Treenix paths share one structure: an address in a tree. The only differences are transport and serialization. Treenix's mount system makes the equivalence explicit:
 
 - Mount `~/Photos` → every JPEG becomes a typed node with EXIF components
 - Mount a Swagger spec → every API endpoint becomes a node with actions and request schemas
-- Mount another Treenity instance → transparent cross-organization federation
+- Mount another Treenix instance → transparent cross-organization federation
 - Mount MongoDB → business data lives alongside local files in one namespace
 
-Treenity is a lens, not a container. It doesn't copy your data — it mounts it. The data stays where it is. Treenity adds: type, contexts, permissions, subscriptions, actions. A transparent layer over existing reality.
+Treenix is a lens, not a container. It doesn't copy your data — it mounts it. The data stays where it is. Treenix adds: type, contexts, permissions, subscriptions, actions. A transparent layer over existing reality.
 
 The overlay combinator makes this precise. Mount a photo folder as a read-only lower store. Add a writable upper store for metadata. The overlay merges them: files are untouched, but now every image has ACL, tags, AI-readable descriptions, and context-aware rendering. Annotate any filesystem without modifying a single byte of it.
 
 An OpenAPI spec is already a tree: paths are nodes, operations are actions, request schemas become write-barriers. One mount adapter unlocks thousands of public APIs — zero integration code.
 
-**You don't import data into Treenity. You mount the world into your tree.**
+**You don't import data into Treenix. You mount the world into your tree.**
 
 ## AI-Native by Design
 
-Programming languages: infinite vocabulary, infinite grammar. Treenity with a Type Library: **finite vocabulary, strict grammar**. For an LLM, this changes the task from "write code" to "assemble from typed blocks."
+Programming languages: infinite vocabulary, infinite grammar. Treenix with a Type Library: **finite vocabulary, strict grammar**. For an LLM, this changes the task from "write code" to "assemble from typed blocks."
 
 - Constrained type set prevents hallucination
 - Typed connections — can't plug garbage into a typed input
@@ -96,7 +96,7 @@ Each step proves the previous one. No skipping ahead.
 
 ## The Bet
 
-Protocols outlive corporations. Email is 53 years old. HTTP is 35. Linux is 34. Treenity takes the same form: FSL-1.1-MIT license (converts to MIT after two years), protocol specification over product, local-first architecture where data stays on the user's device.
+Protocols outlive corporations. Email is 53 years old. HTTP is 35. Linux is 34. Treenix takes the same form: FSL-1.1-MIT license (converts to MIT after two years), protocol specification over product, local-first architecture where data stays on the user's device.
 
 The tree has no center. Every instance is a node in a network. Mounts connect them. Each participant owns their data, their processes, their subtree. The platform amplifies users instead of extracting from them.
 

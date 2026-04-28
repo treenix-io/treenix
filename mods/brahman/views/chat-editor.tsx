@@ -19,16 +19,16 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import type { NodeData } from '@treenity/core';
-import { getDefaults } from '@treenity/core/comp';
-import { Button } from '@treenity/react/components/ui/button';
-import { Checkbox } from '@treenity/react/components/ui/checkbox';
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@treenity/react/components/ui/dialog';
-import { Input } from '@treenity/react/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@treenity/react/components/ui/select';
-import { set, useChildren, usePath } from '@treenity/react';
-import { sanitizeHref } from '@treenity/react';
-import { trpc } from '@treenity/react';
+import type { NodeData } from '@treenx/core';
+import { getDefaults } from '@treenx/core/comp';
+import { Button } from '@treenx/react/components/ui/button';
+import { Checkbox } from '@treenx/react/components/ui/checkbox';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@treenx/react/components/ui/dialog';
+import { Input } from '@treenx/react/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@treenx/react/components/ui/select';
+import { set, useChildren, usePath } from '@treenx/react';
+import { sanitizeHref } from '@treenx/react';
+import { trpc } from '@treenx/react';
 import { Camera, File, GripVertical, Mic, MoreHorizontal, Plus, Trash2, Video } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ACTION_TYPES, MENU_TYPES, type MenuButton, type MenuRow, type MenuType, type TString } from '../types';

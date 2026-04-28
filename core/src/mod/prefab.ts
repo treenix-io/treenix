@@ -1,4 +1,4 @@
-// Treenity Prefab Registry — in-memory tree for module prefab declarations
+// Treenix Prefab Registry — in-memory tree for module prefab declarations
 // Modules call registerPrefab() during import; mods-mount exposes data as virtual tree.
 // Prefabs named 'seed' are auto-deployed at startup by deploySeedPrefabs().
 

@@ -1,4 +1,4 @@
-// Treenity Mount — Layer 4
+// Treenix Mount — Layer 4
 // Mount = component on node. Adapter resolved via context system.
 // Core untouched. Tree interface preserved.
 

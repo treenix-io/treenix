@@ -1,6 +1,6 @@
 // MCP autostart service — starts/stops the MCP HTTP server via tree lifecycle
 
-import { getComponent, register } from '@treenity/core';
+import { getComponent, register } from '@treenx/core';
 import { createMcpHttpServer } from './mcp-server';
 import { McpConfig } from './types';
 

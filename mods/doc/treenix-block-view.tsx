@@ -1,12 +1,12 @@
 import { NodeViewWrapper } from '@tiptap/react';
-import { getContextsForType } from '@treenity/core';
-import { getRegistryVersion, subscribeRegistry } from '@treenity/core/core/registry';
-import { Render, RenderContext } from '@treenity/react';
-import { usePath } from '@treenity/react';
-import { useAutoSave } from '@treenity/react/tree/auto-save';
+import { getContextsForType } from '@treenx/core';
+import { getRegistryVersion, subscribeRegistry } from '@treenx/core/core/registry';
+import { Render, RenderContext } from '@treenx/react';
+import { usePath } from '@treenx/react';
+import { useAutoSave } from '@treenx/react/tree/auto-save';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 
-export function TreenityBlockView({ node, updateAttributes, deleteNode, editor, getPos }: any) {
+export function TreenixBlockView({ node, updateAttributes, deleteNode, editor, getPos }: any) {
   const ref = node.attrs.ref as string | null;
   const type = node.attrs.type as string | null;
   const { data: refNode } = usePath(ref);

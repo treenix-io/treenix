@@ -17,7 +17,7 @@ tsx --conditions development --watch src/server/main.ts ../root.json
    - Engine mods (`engine/mods/*/server.ts`) — directory scan
    - Project mods (`mods/*/server.ts`) — directory scan from CWD
 4. Create bootstrap tree from `root.json`
-5. `createTreenityServer(bootstrap)` — pipeline: mounts → volatile → validation → subscriptions
+5. `createTreenixServer(bootstrap)` — pipeline: mounts → volatile → validation → subscriptions
 6. Seed data
 7. Start services (MCP, autostart)
 8. Listen on PORT (default 3211)
@@ -41,10 +41,10 @@ import.meta.glob('./mods/*/client.ts', { eager: true });  // internal react mods
 import 'virtual:mod-clients';                               // external mods
 ```
 
-**`virtual:mod-clients`** (`packages/react/vite-plugin-treenity.ts`):
+**`virtual:mod-clients`** (`packages/react/vite-plugin-treenix.ts`):
 - Vite plugin generates a virtual module with import statements
 - Discovers mods from two sources:
-  1. npm packages with `treenity.clients` field in package.json (e.g. `@treenity/core`)
+  1. npm packages with `treenix.clients` field in package.json (e.g. `@treenx/core`)
   2. `mods/*/client.ts` files (directory scan)
 - Result: all mod `client.ts` files imported at build time
 
@@ -64,7 +64,7 @@ Node.js native `imports` field in `package.json`:
 
 - **Server (Node/tsx):** respects `--conditions` natively
 - **Client (Vite):** custom plugin resolves `#*` by reading importer's `package.json` and matching conditions
-- **Mods** use full package names (`@treenity/core/*`, `@treenity/react/*`), not `#` imports
+- **Mods** use full package names (`@treenx/core/*`, `@treenx/react/*`), not `#` imports
 
 ## Mod File Convention
 

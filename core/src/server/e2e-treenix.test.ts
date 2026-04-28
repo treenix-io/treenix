@@ -1,4 +1,4 @@
-// E2E test for the treenix (create-treenity) experience.
+// E2E test for the treenix (create-treenix) experience.
 // Tests: factory boot → seed → tRPC → persistence across restart
 // Covers both: default ACL (authenticated only) and public ACL via custom rootNode.
 
@@ -13,7 +13,7 @@ import { after, before, describe, it } from 'node:test'
 import { createNode, R, S, W } from '#core'
 import type { Tree } from '#tree'
 import { createClient } from './client'
-import { treenity } from './factory'
+import { treenix } from './factory'
 
 // -- Seeds --
 
@@ -25,9 +25,9 @@ async function agentRuntimeSeed(tree: Tree) {
   await tree.set({ $path: '/agents', $type: 'ai.pool', maxConcurrent: 2, active: [], queue: [] })
   await tree.set({
     $path: '/guardian', $type: 'ai.policy',
-    allow: ['mcp__treenity__get_node', 'mcp__treenity__list_children'],
-    deny: ['mcp__treenity__remove_node'],
-    escalate: ['mcp__treenity__set_node'],
+    allow: ['mcp__treenix__get_node', 'mcp__treenix__list_children'],
+    deny: ['mcp__treenix__remove_node'],
+    escalate: ['mcp__treenix__set_node'],
   })
   await tree.set({ $path: '/guardian/approvals', $type: 'ai.approvals' })
   await tree.set({
@@ -54,7 +54,7 @@ async function agentRuntimeSeed(tree: Tree) {
 // -- Infra --
 
 type Ctx = {
-  app: Awaited<ReturnType<typeof treenity>>
+  app: Awaited<ReturnType<typeof treenix>>
   server: Server
   url: string
   tmpDir: string
@@ -87,7 +87,7 @@ async function boot(
 ): Promise<Ctx> {
   const dir = tmpDir ?? mkdtempSync(join(tmpdir(), 'treenix-e2e-'))
   const rootNode = makeRootNode(dir, opts)
-  const app = await treenity({ modsDir: false, seed, autostart: false, rootNode })
+  const app = await treenix({ modsDir: false, seed, autostart: false, rootNode })
   const server = await app.listen(0, { allowedOrigins: ['*'] })
   const sockets = new Set<Socket>()
   server.on('connection', (s: Socket) => {

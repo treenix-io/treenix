@@ -4,7 +4,7 @@
 import { ConfirmPopover } from '#components/ConfirmPopover';
 import { Button } from '#components/ui/button';
 import { NodeProvider, Render, RenderContext, type OnChange } from '#context';
-import type { ComponentData, NodeData } from '@treenity/core';
+import type { ComponentData, NodeData } from '@treenx/core';
 import { Trash2 } from 'lucide-react';
 import { ActionCardList } from './ActionCards';
 import { ErrorBoundary } from '#app/ErrorBoundary';

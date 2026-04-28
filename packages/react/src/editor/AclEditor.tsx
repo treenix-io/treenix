@@ -1,7 +1,7 @@
 import { Button } from '#components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#components/ui/collapsible';
 import { Input } from '#components/ui/input';
-import { A, type GroupPerm, R, S, W } from '@treenity/core';
+import { A, type GroupPerm, R, S, W } from '@treenx/core';
 import { ChevronRight, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import * as cache from '#tree/cache';

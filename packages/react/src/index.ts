@@ -1,6 +1,6 @@
-// @treenity/react — root barrel for package consumers
-// Mods should import from here: import { usePath, trpc, cn } from '@treenity/react'
-// UI components stay at: @treenity/react/ui/button, etc.
+// @treenx/react — root barrel for package consumers
+// Mods should import from here: import { usePath, trpc, cn } from '@treenx/react'
+// UI components stay at: @treenx/react/ui/button, etc.
 
 export * from './context/index.tsx';
 export * from './hooks';

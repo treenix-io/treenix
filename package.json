@@ -8,14 +8,14 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/treenity-ai/treenity.git"
+    "url": "https://github.com/treenix-ai/treenix.git"
   },
   "scripts": {
     "test": "npm test --workspaces --if-present",
     "test:e2e": "playwright test",
-    "dev:server": "npm run dev:server -w @treenity/core",
-    "dev:front": "npm run dev -w @treenity/react",
-    "schema": "npm run schema -w @treenity/core",
+    "dev:server": "npm run dev:server -w @treenx/core",
+    "dev:front": "npm run dev -w @treenx/react",
+    "schema": "npm run schema -w @treenx/core",
     "typecheck": "tsc -p core --noEmit && tsc -p packages/react --noEmit"
   },
   "devDependencies": {

@@ -3,7 +3,7 @@
 import { Button } from '#components/ui/button';
 import { Render } from '#context';
 import { usePath } from '#hooks';
-import { type NodeData, register } from '@treenity/core';
+import { type NodeData, register } from '@treenx/core';
 import { useState } from 'react';
 
 // ── Node-level view (for ref nodes like /sys/autostart/xxx) ──

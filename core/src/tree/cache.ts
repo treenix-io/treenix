@@ -1,4 +1,4 @@
-// Treenity Cache Tree — Layer 1
+// Treenix Cache Tree — Layer 1
 // Write-populate tree cache wrapping any Tree.
 // Tree structure mirrors path hierarchy — O(depth) navigation, O(1) subtree drop.
 // Populate on read AND write. Inflight dedup prevents thundering herd.
@@ -11,7 +11,7 @@ import { patchViaSet } from './patch';
 // Cache stores live refs. Callers MUST clone before mutating —
 // patchViaSet / applyOps / set() already do. Previously `deepFreeze`d on write
 // for belt-and-suspenders protection, but that broke upper layers that need
-// to attach metadata (e.g. `@treenity/react` stamps $key/$node symbols on
+// to attach metadata (e.g. `@treenx/react` stamps $key/$node symbols on
 // returned nodes) — `Object.defineProperty` throws on frozen objects.
 
 export function withCache(tree: Tree): Tree {
