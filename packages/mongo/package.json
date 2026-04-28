@@ -53,6 +53,6 @@
     "mongodb": ">=6"
   },
   "devDependencies": {
-    "mongodb": "^7.1.0"
+    "mongodb": "^7.2.0"
   }
 }

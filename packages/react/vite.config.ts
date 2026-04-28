@@ -1,14 +1,16 @@
-// import tailwindcss from '@tailwindcss/vite'; // disabled — using CDN in index.html
 import react from '@vitejs/plugin-react';
-import { readdirSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { defineConfig } from 'vite';
 import treenixPlugin from './src/vite-plugin-treenix';
 
-const projectRoot = process.env.INIT_CWD || process.cwd();
+const repoRoot = resolve(import.meta.dirname, '../../..');
+const initCwd = process.env.INIT_CWD;
+const projectRoot = initCwd && existsSync(resolve(initCwd, 'node_modules')) ? initCwd : repoRoot;
 const apiPort = process.env.VITE_API_PORT || '3211';
 
 export default defineConfig({
+  cacheDir: resolve(projectRoot, 'node_modules/.vite/treenx-react'),
   resolve: {
     conditions: ['development'],
     dedupe: ['react', 'react-dom'],

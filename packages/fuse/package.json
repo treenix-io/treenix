@@ -15,7 +15,7 @@
   },
   "optionalDependencies": {
     "fuse-native": "^2.2.6",
-    "koffi": "^2.15.1"
+    "koffi": "^2.16.1"
   },
   "peerDependencies": {
     "@treenx/core": "^3.0.0"
