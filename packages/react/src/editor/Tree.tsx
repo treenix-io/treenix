@@ -7,6 +7,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '#components/ui/dropdown-menu';
+import { ChevronRightIcon } from 'lucide-react';
 import { useCallback, useRef, useState, useSyncExternalStore } from 'react';
 import * as cache from '#tree/cache';
 
@@ -64,7 +65,7 @@ function BadgeMenu({
         <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
           <Badge
             variant="secondary"
-            className="tree-badge cursor-pointer text-[10px] px-1.5 py-0 h-5 font-mono font-normal"
+            className="tree-badge"
             title={fullType}
           >
             {typeLabel}
@@ -146,16 +147,26 @@ function TreeNode({
     return null;
   }
 
-  const indent = depth * 12 + 4;
+  const indent = depth * 16 + 6;
   const typeLabel = node.$type.includes('.') ? node.$type.slice(node.$type.lastIndexOf('.') + 1) : node.$type;
+  const canExpand = knownChildren.length > 0 || !loaded.has(path);
 
   return (
     <div className="tree-node">
       <div
         ref={rowRef}
-        className={`tree-row${selected === path ? ' selected' : ''}${dragOver === 'above' ? ' tree-drop-above' : ''}${dragOver === 'below' ? ' tree-drop-below' : ''}`}
+        className={`tree-row${selected === path ? ' selected' : ''}${depth === 0 ? ' root' : ''}${dragOver === 'above' ? ' tree-drop-above' : ''}${dragOver === 'below' ? ' tree-drop-below' : ''}`}
         style={{ paddingLeft: indent }}
+        role="treeitem"
+        aria-selected={selected === path}
+        aria-expanded={canExpand ? isExp : undefined}
+        tabIndex={0}
         onClick={() => onSelect(path)}
+        onKeyDown={(e) => {
+          if (e.key !== 'Enter' && e.key !== ' ') return;
+          e.preventDefault();
+          onSelect(path);
+        }}
         draggable={false}
         onDragStart={(e) => {
           e.dataTransfer.setData('text/plain', path);
@@ -176,20 +187,25 @@ function TreeNode({
           if (from && from !== path && onMove) onMove(from, path);
         }}
       >
-        {knownChildren.length > 0 || !loaded.has(path) ? (
+        {canExpand ? (
           <span
             className="tree-toggle"
+            role="button"
+            aria-label={isExp ? 'Collapse node' : 'Expand node'}
+            aria-expanded={isExp}
             onClick={(e) => {
               e.stopPropagation();
               onExpand(path);
             }}
           >
-            {isExp ? '\u25BE' : '\u25B8'}
+            <ChevronRightIcon className={`tree-chevron${isExp ? ' open' : ''}`} strokeWidth={2} />
           </span>
         ) : (
-          <span className="tree-toggle" />
+          <span className="tree-toggle" aria-hidden="true" />
         )}
-        <span className="tree-label">{name}</span>
+        <span className="tree-label-wrap">
+          <span className="tree-label" title={path}>{name}</span>
+        </span>
         <BadgeMenu
           path={path}
           typeLabel={typeLabel}
@@ -225,7 +241,7 @@ function TreeNode({
 
 export function Tree(props: TreeProps) {
   return (
-    <div>
+    <div className="tree-root" role="tree">
       {props.roots.map((r) => (
         <TreeNode key={r} path={r} depth={0} {...props} />
       ))}

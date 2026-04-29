@@ -14,7 +14,7 @@
 
 /* Tailwind theme tokens — aligned with mods/prod-landing (dark + green-400 on white-alpha surfaces) */
 :root {
-  --color-background: #0f0f0f;
+  --color-background: #151515;
   --color-foreground: #fafafa;
   --color-card: rgba(255, 255, 255, 0.02);
   --color-card-foreground: #fafafa;
@@ -28,6 +28,8 @@
   --color-muted-foreground: #71717a;
   --color-accent: rgba(134, 239, 172, 0.10);
   --color-accent-foreground: #86efac;
+  --color-brand: #4ade80;
+  --color-brand-hover: #86efac;
   --color-destructive: #f87171;
   --color-destructive-foreground: #fafafa;
   --color-border: rgba(255, 255, 255, 0.08);
@@ -115,4 +117,45 @@ body {
     resize: vertical;
     line-height: 1.5;
   }
+}
+
+/* Treenix-branded scrollbars — subtle primary-green tint on transparent track.
+   Applies to native overflow scrollbars (Tree sidebar, JsonEditor, etc).
+   Radix ScrollArea has its own thumb styling in components/ui/scroll-area.tsx. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(134, 239, 172, 0.18) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(134, 239, 172, 0.18);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  transition: background var(--transition);
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(134, 239, 172, 0.45);
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:active {
+  background: var(--accent);
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+[data-editor-sidebar-panel][data-sidebar-animation="expanding"] {
+  transition: flex 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+[data-editor-sidebar-panel][data-sidebar-animation="collapsing"] {
+  transition: flex 0.5s cubic-bezier(0.22, 1, 0.36, 1);
 }

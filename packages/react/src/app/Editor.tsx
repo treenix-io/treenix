@@ -8,12 +8,22 @@ import {
   AlertDialogTitle,
 } from '#components/ui/alert-dialog';
 import { Button } from '#components/ui/button';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '#components/ui/dropdown-menu';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '#components/ui/dropdown-menu';
 import { Input } from '#components/ui/input';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '#components/ui/resizable';
 import { TypePicker } from '#mods/editor-ui/type-picker';
 import type { NodeData } from '@treenx/core';
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { flushSync } from 'react-dom';
+import type { PanelImperativeHandle } from 'react-resizable-panels';
+import { ChevronDown, Eye, EyeOff, LogIn, LogOut, RotateCcw } from 'lucide-react';
 import * as cache from '#tree/cache';
 import { tree } from '#tree/client';
 import { SSE_CONNECTED, SSE_DISCONNECTED, startEvents, stopEvents } from '#tree/events';
@@ -28,6 +38,33 @@ import { toast } from 'sonner';
 function NodeCount() {
   return <>{useSyncExternalStore(cache.subscribeGlobal, cache.size)}</>;
 }
+
+function SidebarToggleIcon({ collapsed }: { collapsed: boolean }) {
+  return (
+    <svg viewBox="0 0 16 16" className="size-4" fill="none" aria-hidden="true">
+      <rect x="2.25" y="2.5" width="11.5" height="11" rx="2.25" stroke="currentColor" strokeWidth="1.4" />
+      <path d="M6.25 3.25v9.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" opacity="0.55" />
+      <path
+        d={collapsed ? 'M9 6.25 11 8l-2 1.75' : 'M11 6.25 9 8l2 1.75'}
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function MenuItemIcon({ children }: { children: ReactNode }) {
+  return (
+    <span className="flex size-4 items-center justify-center">
+      {children}
+    </span>
+  );
+}
+
+const SIDEBAR_EXPAND_MS = 200;
+const SIDEBAR_COLLAPSE_MS = 500;
 
 export interface EditorProps {
   authed: string;
@@ -308,6 +345,8 @@ export function Editor({ authed, onLogout }: EditorProps) {
 
   const [rootPromptOpen, setRootPromptOpen] = useState(false);
   const [rootPromptType, setRootPromptType] = useState('root');
+  const sidebarPanelRef = useRef<PanelImperativeHandle | null>(null);
+  const sidebarAnimationTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const handleCreateRoot = useCallback(async (type: string) => {
     if (!type) return;
@@ -324,6 +363,56 @@ export function Editor({ authed, onLogout }: EditorProps) {
   }, []);
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarContentHidden, setSidebarContentHidden] = useState(false);
+  const [sidebarFadeContent, setSidebarFadeContent] = useState(false);
+  const [sidebarAnimating, setSidebarAnimating] = useState(false);
+  const [sidebarButtonCollapsed, setSidebarButtonCollapsed] = useState(false);
+  const [sidebarButtonHidden, setSidebarButtonHidden] = useState(false);
+  const [sidebarAnimationMode, setSidebarAnimationMode] = useState<'expanding' | 'collapsing' | null>(null);
+
+  useEffect(() => () => {
+    if (sidebarAnimationTimer.current) clearTimeout(sidebarAnimationTimer.current);
+  }, []);
+
+  const toggleSidebar = useCallback(() => {
+    if (sidebarAnimationTimer.current) clearTimeout(sidebarAnimationTimer.current);
+
+    if (sidebarCollapsed) {
+      setSidebarCollapsed(false);
+      setSidebarButtonCollapsed(false);
+      setSidebarContentHidden(true);
+      setSidebarFadeContent(false);
+      setSidebarButtonHidden(true);
+      setSidebarAnimating(true);
+      setSidebarAnimationMode('expanding');
+      sidebarPanelRef.current?.expand();
+      sidebarAnimationTimer.current = setTimeout(() => {
+        setSidebarContentHidden(false);
+        setSidebarButtonHidden(false);
+        setSidebarAnimating(false);
+        setSidebarAnimationMode(null);
+        sidebarAnimationTimer.current = undefined;
+      }, SIDEBAR_EXPAND_MS);
+      return;
+    }
+
+    flushSync(() => {
+      setSidebarFadeContent(false);
+      setSidebarContentHidden(true);
+      setSidebarButtonCollapsed(true);
+      setSidebarButtonHidden(false);
+      setSidebarAnimating(true);
+      setSidebarAnimationMode('collapsing');
+    });
+    sidebarPanelRef.current?.collapse();
+    sidebarAnimationTimer.current = setTimeout(() => {
+      setSidebarCollapsed(true);
+      setSidebarFadeContent(false);
+      setSidebarAnimating(false);
+      setSidebarAnimationMode(null);
+      sidebarAnimationTimer.current = undefined;
+    }, SIDEBAR_COLLAPSE_MS);
+  }, [sidebarCollapsed]);
 
   const handleClearCache = () => {
     cache.clear();
@@ -332,6 +421,11 @@ export function Editor({ authed, onLogout }: EditorProps) {
   };
 
   const handleSetRoot = (path: string) => setRoot(path);
+  const sidebarCompact = sidebarCollapsed || sidebarAnimating;
+  const sidebarButtonCompact = sidebarButtonCollapsed;
+  const sidebarContentClass = sidebarContentHidden
+    ? `${sidebarFadeContent ? 'transition-opacity duration-[120ms] ease-out' : ''} opacity-0 pointer-events-none`
+    : `${sidebarFadeContent ? 'transition-opacity duration-[120ms] ease-out' : ''} opacity-100`;
 
   // Editor owns in-subtree navigation — children call navigate(path), we select it.
   const makeHref = useCallback((path: string) => `/t${path === '/' ? '' : path}`, []);
@@ -365,28 +459,95 @@ export function Editor({ authed, onLogout }: EditorProps) {
       <div className="flex h-screen bg-background text-foreground overflow-hidden">
         <ResizablePanelGroup orientation="horizontal" className="h-full">
           <ResizablePanel
-            defaultSize={28}
-            minSize={150}
-            maxSize={450}
+            data-editor-sidebar-panel
+            data-sidebar-animation={sidebarAnimationMode ?? undefined}
+            panelRef={sidebarPanelRef}
+            defaultSize="28%"
+            minSize="240px"
+            maxSize="450px"
+            collapsible
+            collapsedSize="50px"
             className="flex flex-col border-r border-border"
           >
-            <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border/50 shrink-0">
-              <img src="/treenix.svg" alt="" width="20" height="20" />
-              {!sidebarCollapsed && <span className="text-sm font-semibold tracking-tight">Treenix</span>}
-              {!sidebarCollapsed && root !== '/' && (
-                <Button variant="ghost" size="sm" className="h-5 px-1.5 font-mono text-[10px] text-muted-foreground" onClick={() => setRoot('/')}>
-                  &#8962; {root}
-                </Button>
+            <div className={`relative shrink-0 overflow-hidden border-b border-border ${sidebarCompact ? 'h-[74px]' : 'h-[44px]'}`}>
+              <div className="absolute left-0 top-1">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      className={`group relative flex h-9 min-w-0 shrink-0 select-none items-center overflow-hidden rounded-lg text-left outline-none transition-colors focus-visible:ring-1 focus-visible:ring-primary/50 ${sidebarCompact ? 'w-[50px] hover:bg-white/[0.035]' : 'w-auto pr-3 before:absolute before:inset-y-0 before:left-2 before:right-0 before:rounded-lg before:transition-colors hover:before:bg-white/[0.035]'}`}
+                      title="System menu"
+                    >
+                      <span className="relative z-10 flex h-9 w-[50px] shrink-0 items-center justify-center">
+                        <img src="/treenix.svg" alt="" width="22" height="22" className="shrink-0" />
+                      </span>
+                      {!sidebarCompact && (
+                        <>
+                          <span className={`relative z-10 -ml-1 text-[17px] font-semibold leading-none tracking-tight ${sidebarContentClass}`}>Treenix</span>
+                          <ChevronDown className={`relative z-10 ml-2 size-3 self-center text-muted-foreground transition-[color,opacity] group-hover:text-primary ${sidebarContentClass}`} />
+                        </>
+                      )}
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" side="bottom" className="inspector-debug-menu">
+                    <DropdownMenuLabel className="px-2 py-1.5">
+                      <div className="truncate text-[11px] font-normal text-muted-foreground">
+                        {authed.startsWith('anon:') ? `anon:${authed.slice(5, 13)}` : authed} · <NodeCount /> nodes
+                      </div>
+                    </DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onClick={() => setShowHidden((value) => !value)}
+                      className={showHidden ? 'bg-accent text-accent-foreground font-medium' : ''}
+                    >
+                      <MenuItemIcon>
+                        {showHidden ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+                      </MenuItemIcon>
+                      <span className="truncate">Show hidden</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={handleClearCache}>
+                      <MenuItemIcon>
+                        <RotateCcw className="size-3.5" />
+                      </MenuItemIcon>
+                      <span className="truncate">Clear cache</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={onLogout}>
+                      <MenuItemIcon>
+                        {authed.startsWith('anon:') ? <LogIn className="size-3.5" /> : <LogOut className="size-3.5" />}
+                      </MenuItemIcon>
+                      <span className="truncate">{authed.startsWith('anon:') ? 'Login' : 'Logout'}</span>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+
+              {!sidebarCompact && (
+                <div className="absolute left-[148px] right-12 top-1/2 flex -translate-y-1/2 items-center gap-2 overflow-hidden">
+                  {root !== '/' && (
+                    <Button variant="ghost" size="sm" className="h-5 px-1.5 font-mono text-[10px] text-muted-foreground" onClick={() => setRoot('/')}>
+                      &#8962; {root}
+                    </Button>
+                  )}
+                  {roots.length === 0 && (
+                    <Button variant="ghost" size="sm" className="h-5 text-[10px]" onClick={() => { setRootPromptType('root'); setRootPromptOpen(true); }}>
+                      Create root
+                    </Button>
+                  )}
+                </div>
               )}
-              {!sidebarCollapsed && roots.length === 0 && (
-                <Button variant="ghost" size="sm" className="h-5 text-[10px]" onClick={() => { setRootPromptType('root'); setRootPromptOpen(true); }}>
-                  Create root
-                </Button>
-              )}
+
+              <button
+                type="button"
+                className={`absolute flex items-center justify-center rounded-lg text-muted-foreground outline-none transition-colors hover:bg-white/[0.04] hover:text-foreground focus-visible:ring-1 focus-visible:ring-primary/50 ${sidebarButtonHidden ? 'opacity-0 pointer-events-none' : 'opacity-100'} ${sidebarButtonCompact ? 'left-1/2 top-[40px] size-8 -translate-x-1/2' : 'right-3 top-1/2 size-8 -translate-y-1/2'}`}
+                onClick={toggleSidebar}
+                title={sidebarButtonCompact ? 'Expand sidebar' : 'Collapse sidebar'}
+              >
+                <SidebarToggleIcon collapsed={sidebarButtonCompact} />
+              </button>
             </div>
 
             {!sidebarCollapsed && (
-              <div className="flex items-center gap-1 px-2 py-1.5 shrink-0">
+              <div className={`flex items-center gap-1 px-2 pt-2 pb-1.5 shrink-0 overflow-hidden ${sidebarContentClass}`}>
                 <Input
                   ref={searchRef}
                   placeholder="Search nodes..."
@@ -394,54 +555,34 @@ export function Editor({ authed, onLogout }: EditorProps) {
                   onChange={(e) => setFilter(e.target.value)}
                   className="h-7 text-xs bg-muted/50 border-border"
                 />
-                <Button
-                  variant={showHidden ? 'secondary' : 'ghost'}
-                  size="sm"
-                  className="h-7 w-7 p-0 text-xs text-muted-foreground shrink-0"
-                  onClick={() => setShowHidden(v => !v)}
-                  title={showHidden ? 'Hide _ prefixed nodes' : 'Show _ prefixed nodes'}
-                >
-                  _
-                </Button>
               </div>
             )}
 
-            <div className="flex-1 overflow-y-auto overflow-x-hidden">
-              <Tree
-                roots={roots}
-                expanded={expanded}
-                loaded={loaded}
-                selected={selected}
-                filter={filter}
-                showHidden={showHidden}
-                onSelect={handleSelect}
-                onExpand={handleExpand}
-                onCreateChild={handleCreateChild}
-                onDelete={handleDelete}
-                onMove={handleMove}
-              />
-            </div>
+            {!sidebarCollapsed && (
+              <>
+                <div className={`flex-1 overflow-y-auto overflow-x-hidden ${sidebarContentClass}`}>
+                  <Tree
+                    roots={roots}
+                    expanded={expanded}
+                    loaded={loaded}
+                    selected={selected}
+                    filter={filter}
+                    showHidden={showHidden}
+                    onSelect={handleSelect}
+                    onExpand={handleExpand}
+                    onCreateChild={handleCreateChild}
+                    onDelete={handleDelete}
+                    onMove={handleMove}
+                  />
+                </div>
 
-            <div className="flex items-center justify-between px-3 py-1.5 border-t border-border/50 text-[11px] text-muted-foreground shrink-0">
-              <span className="truncate">
-                {authed.startsWith('anon:') ? `anon:${authed.slice(5, 13)}` : authed} &middot; <NodeCount /> nodes
-              </span>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-muted-foreground hover:text-foreground">
-                    &#9776;
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" side="top" className="w-36">
-                  <DropdownMenuItem onClick={onLogout}>
-                    {authed.startsWith('anon:') ? 'Login' : 'Logout'}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={handleClearCache}>
-                    Clear cache
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
+                <div className={`flex items-center overflow-hidden px-3 py-1.5 border-t border-border/50 text-[11px] text-muted-foreground shrink-0 ${sidebarContentClass}`}>
+                  <span className="truncate">
+                    {authed.startsWith('anon:') ? `anon:${authed.slice(5, 13)}` : authed} &middot; <NodeCount /> nodes
+                  </span>
+                </div>
+              </>
+            )}
           </ResizablePanel>
 
           <ResizableHandle withHandle />
