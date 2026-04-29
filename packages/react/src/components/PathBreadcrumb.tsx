@@ -7,7 +7,27 @@ import {
   BreadcrumbSeparator,
 } from '#components/ui/breadcrumb';
 
-export function PathBreadcrumb({ path, onSelect }: { path: string; onSelect: (p: string) => void }) {
+type PathBreadcrumbProps = {
+  path: string;
+  onSelect: (path: string) => void;
+  className?: string;
+  listClassName?: string;
+  itemClassName?: string;
+  linkClassName?: string;
+  pageClassName?: string;
+  separatorClassName?: string;
+};
+
+export function PathBreadcrumb({
+  path,
+  onSelect,
+  className = 'mb-2 text-xs',
+  listClassName = 'text-xs gap-1 sm:gap-1',
+  itemClassName,
+  linkClassName = 'cursor-pointer',
+  pageClassName,
+  separatorClassName = '[&>svg]:size-3',
+}: PathBreadcrumbProps) {
   const parts = path.split('/').filter(Boolean);
   const crumbs: { label: string; path: string }[] = [{ label: 'root', path: '/' }];
   let cur = '';
@@ -18,15 +38,15 @@ export function PathBreadcrumb({ path, onSelect }: { path: string; onSelect: (p:
   const last = crumbs.length - 1;
 
   return (
-    <Breadcrumb className="mb-2 text-xs">
-      <BreadcrumbList className="text-xs gap-1 sm:gap-1">
+    <Breadcrumb className={className}>
+      <BreadcrumbList className={listClassName}>
         {crumbs.map((c, i) => (
           <span key={c.path} className="contents">
-            {i > 0 && <BreadcrumbSeparator className="[&>svg]:size-3" />}
-            <BreadcrumbItem>
+            {i > 0 && <BreadcrumbSeparator className={separatorClassName} />}
+            <BreadcrumbItem className={itemClassName}>
               {i === last
-                ? <BreadcrumbPage>{c.label}</BreadcrumbPage>
-                : <BreadcrumbLink className="cursor-pointer" onClick={() => onSelect(c.path)}>{c.label}</BreadcrumbLink>}
+                ? <BreadcrumbPage className={pageClassName}>{c.label}</BreadcrumbPage>
+                : <BreadcrumbLink className={linkClassName} onClick={() => onSelect(c.path)}>{c.label}</BreadcrumbLink>}
             </BreadcrumbItem>
           </span>
         ))}

@@ -1,0 +1,306 @@
+.inspector-topbar {
+  position: relative;
+  min-height: 44px;
+  display: flex;
+  align-items: stretch;
+  padding-right: 12px;
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-background);
+  flex-shrink: 0;
+}
+
+.inspector-spine {
+  width: 0;
+  flex-shrink: 0;
+  margin-right: 16px;
+}
+
+.inspector-identity-wrap {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  align-self: stretch;
+  gap: 14px;
+  margin-right: 16px;
+  border-right: 1px solid var(--color-border);
+  padding-right: 16px;
+  user-select: none;
+}
+
+.inspector-id-stack {
+  display: flex;
+  min-width: 0;
+  align-self: center;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.inspector-id-title-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+}
+
+.inspector-id-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-foreground);
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inspector-id-kind {
+  max-width: 220px;
+  overflow: hidden;
+  color: var(--color-muted-foreground);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inspector-switcher {
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  align-items: center;
+  align-self: center;
+  justify-content: center;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-muted-foreground);
+  cursor: pointer;
+  outline: none;
+  transition:
+    background var(--transition),
+    border-color var(--transition),
+    color var(--transition);
+}
+
+.inspector-switcher:hover,
+.inspector-switcher:focus-visible,
+.inspector-switcher[data-state='open'] {
+  border-color: var(--color-input);
+  background: var(--color-secondary);
+  color: var(--color-primary);
+}
+
+.inspector-switcher[data-state='open'] svg {
+  transform: rotate(180deg);
+}
+
+.inspector-switcher svg {
+  transition: transform var(--transition);
+}
+
+.inspector-path {
+  min-width: 0;
+  flex: 1;
+  align-self: center;
+  overflow: hidden;
+  color: var(--color-muted-foreground);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.inspector-crumb-list {
+  flex-wrap: nowrap;
+  gap: 6px;
+  overflow: hidden;
+  color: inherit;
+  font-size: inherit;
+}
+
+.inspector-crumb-part {
+  min-width: 0;
+  gap: 4px;
+}
+
+.inspector-crumb-separator {
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
+  color: var(--color-muted-foreground);
+}
+
+.inspector-crumb-link {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 400;
+  line-height: 1;
+  padding: 4px 6px;
+  border-radius: 4px;
+  transition:
+    background var(--transition),
+    color var(--transition);
+}
+
+.inspector-crumb-link:hover,
+.inspector-crumb-link:focus-visible {
+  background: var(--color-secondary);
+  color: var(--color-secondary-foreground);
+  outline: none;
+}
+
+.inspector-crumb-current {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--color-foreground);
+  font-weight: 500;
+  line-height: 1;
+  padding: 4px 6px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inspector-toolbar {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  align-self: center;
+  gap: 12px;
+}
+
+.inspector-icon-action {
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  color: var(--color-primary);
+  transition: background var(--transition), color var(--transition);
+}
+
+.inspector-icon-action:hover,
+.inspector-icon-action:focus-visible {
+  background: var(--color-secondary);
+  color: var(--color-brand-hover);
+  outline: none;
+}
+
+.inspector-segment {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.inspector-mode-button,
+.inspector-props-button {
+  display: inline-flex;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  border: 0;
+  background: transparent;
+  color: var(--color-secondary-foreground);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  gap: 6px;
+  padding: 0 12px;
+  box-shadow: none;
+  cursor: pointer;
+  outline: none;
+  transition:
+    background var(--transition),
+    color var(--transition);
+}
+
+.inspector-mode-button svg,
+.inspector-props-button svg {
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  color: currentColor;
+  opacity: 1;
+  transition: color var(--transition);
+}
+
+.inspector-mode-button:hover,
+.inspector-mode-button:focus-visible,
+.inspector-props-button:hover,
+.inspector-props-button:focus-visible {
+  background: var(--color-secondary);
+  color: var(--color-foreground);
+}
+
+.inspector-mode-button[aria-pressed='true'] {
+  background: var(--color-primary);
+  color: var(--color-primary-foreground);
+  font-weight: 600;
+}
+
+.inspector-mode-button[aria-pressed='true'] svg {
+  color: currentColor;
+}
+
+.inspector-props-button {
+  padding: 0 8px;
+  color: var(--color-secondary-foreground);
+}
+
+.inspector-props-button[aria-pressed='true'] {
+  color: var(--color-primary);
+}
+
+.inspector-debug-menu {
+  width: 220px;
+  border-color: var(--color-border);
+  background: var(--color-popover);
+}
+
+.inspector-menu-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-primary);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+@media (max-width: 720px) {
+  .inspector-topbar {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px;
+  }
+
+  .inspector-identity-wrap {
+    width: 100%;
+    align-self: auto;
+    border-right: 0;
+    margin-right: 0;
+    padding-right: 0;
+  }
+
+  .inspector-id-title {
+    font-size: 14px;
+  }
+
+  .inspector-path,
+  .inspector-toolbar {
+    width: 100%;
+  }
+
+  .inspector-toolbar {
+    justify-content: flex-end;
+  }
+}
