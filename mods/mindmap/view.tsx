@@ -8,7 +8,7 @@ import { useChildren } from '@treenx/react';
 import { trpc } from '@treenx/react';
 import { select } from 'd3-selection';
 import 'd3-transition';
-import { zoom as d3zoom, type ZoomBehavior, zoomIdentity } from 'd3-zoom';
+import { zoom as d3zoom, type D3ZoomEvent, type ZoomBehavior, zoomIdentity } from 'd3-zoom';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { type EditingAt, MindMapBranch, MindMapCtx, type MindMapState } from './branch';
 import { MindMapSidebar } from './sidebar';
@@ -69,7 +69,7 @@ const MindMapView: View<MindMapConfig> = ({ value, ctx }) => {
 
     const zoomBehavior = d3zoom<SVGSVGElement, unknown>()
       .scaleExtent([0.1, 4])
-      .on('zoom', event => g.attr('transform', event.transform.toString()));
+      .on('zoom', (event: D3ZoomEvent<SVGSVGElement, unknown>) => g.attr('transform', event.transform.toString()));
 
     svg.call(zoomBehavior);
     svg.call(zoomBehavior.transform, zoomIdentity.translate(dims.w / 2, dims.h / 2).scale(0.85));

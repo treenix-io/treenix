@@ -122,6 +122,9 @@
     }
   },
   "devDependencies": {
+    "@types/d3-selection": "^3.0.11",
+    "@types/d3-transition": "^3.0.9",
+    "@types/d3-zoom": "^3.0.8",
     "tsx": "^4.21.0",
     "typescript": "^6.0.3"
   }
