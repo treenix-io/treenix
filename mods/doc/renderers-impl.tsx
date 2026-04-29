@@ -15,6 +15,7 @@ import { Input } from '@treenx/react/ui/input';
 import { useNavigate } from '@treenx/react/hooks';
 import { common, createLowlight } from 'lowlight';
 import { type MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef } from 'react';
+import { CodeCopyButtons } from './code-copy-buttons';
 import { sanitizeTiptap, type TiptapNode } from './markdown';
 import { SlashCommand } from './slash-command';
 import { Toolbar } from './toolbar';
@@ -145,8 +146,8 @@ export function DocPageView({ value, onChange }: BlockProps) {
         }}
       >
         <EditorContent editor={editor} />
+        <CodeCopyButtons editor={editor} enabled={!editable} contentVersion={value.content} />
       </div>
     </div>
   );
 }
-
