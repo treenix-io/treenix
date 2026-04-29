@@ -1,4 +1,4 @@
-// Treenity Stress Tests — E2E through full server pipeline
+// Treenix Stress Tests — E2E through full server pipeline
 // Tests: throughput, race conditions, OCC, subscriptions, CDC, query mounts, watch fan-out
 
 import { registerType } from '#comp';

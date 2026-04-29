@@ -10,15 +10,16 @@ import { NodeLink } from './node-link';
 import { buildNodeLinkHref, getNodeLinkPath } from './node-link-click';
 import { Editor, EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
-import { checkBeforeNavigate, pushHistory } from '@treenity/react';
-import { Input } from '@treenity/react/ui/input';
-import { useNavigate } from '@treenity/react/hooks';
+import { checkBeforeNavigate, pushHistory } from '@treenx/react';
+import { Input } from '@treenx/react/ui/input';
+import { useNavigate } from '@treenx/react/hooks';
 import { common, createLowlight } from 'lowlight';
 import { type MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef } from 'react';
+import { CodeCopyButtons } from './code-copy-buttons';
 import { sanitizeTiptap, type TiptapNode } from './markdown';
 import { SlashCommand } from './slash-command';
 import { Toolbar } from './toolbar';
-import { TreenityBlock } from './treenity-block';
+import { TreenixBlock } from './treenix-block';
 
 const lowlight = createLowlight(common);
 
@@ -32,7 +33,7 @@ const baseExtensions = [
   TableCell,
   TableHeader,
   NodeLink,
-  TreenityBlock,
+  TreenixBlock,
   SlashCommand,
 ];
 
@@ -128,25 +129,25 @@ export function DocPageView({ value, onChange }: BlockProps) {
         onClickCapture={handleNodeLinkClick}
         onDrop={(e) => {
           if (!editor || !onChange) return;
-          const path = e.dataTransfer.getData('application/treenity-path');
+          const path = e.dataTransfer.getData('application/treenix-path');
           if (!path) return;
           e.preventDefault();
           e.stopPropagation();
           editor.chain().focus().insertContent({
-            type: 'treenityBlock',
+            type: 'treenixBlock',
             attrs: { ref: path, type: null, props: {} },
           }).run();
         }}
         onDragOver={(e) => {
-          if (e.dataTransfer.types.includes('application/treenity-path')) {
+          if (e.dataTransfer.types.includes('application/treenix-path')) {
             e.preventDefault();
             e.dataTransfer.dropEffect = 'copy';
           }
         }}
       >
         <EditorContent editor={editor} />
+        <CodeCopyButtons editor={editor} enabled={!editable} contentVersion={value.content} />
       </div>
     </div>
   );
 }
-

@@ -1,4 +1,4 @@
-import { registerType } from '@treenity/core/comp';
+import { registerType } from '@treenx/core/comp';
 
 /** Speech-to-text config — Whisper model, language, audio path */
 export class WhisperConfig {

@@ -1,4 +1,4 @@
-import { register } from '@treenity/core';
+import { register } from '@treenx/core';
 import { type TiptapNode, tiptapToMd } from './markdown';
 
 register('doc.page', 'text', (data: unknown) => {

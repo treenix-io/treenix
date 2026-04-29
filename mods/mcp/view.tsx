@@ -1,6 +1,6 @@
-import { register } from '@treenity/core';
-import { type View, useActions } from '@treenity/react';
-import { useChildren } from '@treenity/react';
+import { register } from '@treenx/core';
+import { type View, useActions } from '@treenx/react';
+import { useChildren } from '@treenx/react';
 import { useState } from 'react';
 import { ApiTokenManager } from './types';
 

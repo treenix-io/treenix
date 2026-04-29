@@ -1,6 +1,6 @@
 import { Button } from '#components/ui/button';
 import { addComponent } from '#hooks';
-import type { NodeData } from '@treenity/core';
+import type { NodeData } from '@treenx/core';
 import { Plus } from 'lucide-react';
 import { useState } from 'react';
 import { TypePicker } from './type-picker';

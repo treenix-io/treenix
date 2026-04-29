@@ -598,7 +598,7 @@ describe('FsStore OCC', () => {
   });
 
   it('OCC rejects stale rev', async () => {
-    dir = await mkdtemp(join(tmpdir(), 'treenity-fs-occ-'));
+    dir = await mkdtemp(join(tmpdir(), 'treenix-fs-occ-'));
     const tree = await createFsTree(dir);
 
     await tree.set(createNode('/n', 'item')); // rev becomes 1
@@ -612,7 +612,7 @@ describe('FsStore OCC', () => {
   });
 
   it('OCC throws when node does not exist but rev provided', async () => {
-    dir = await mkdtemp(join(tmpdir(), 'treenity-fs-occ2-'));
+    dir = await mkdtemp(join(tmpdir(), 'treenix-fs-occ2-'));
     const tree = await createFsTree(dir);
 
     await assert.rejects(

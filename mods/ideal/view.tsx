@@ -1,4 +1,4 @@
-import { Render, RenderContext, useActions, useChildren, view } from '@treenity/react';
+import { Render, RenderContext, useActions, useChildren, view } from '@treenx/react';
 import { Idea, IdeasBoard } from './types';
 
 // ── Board view — renders children in list context ──

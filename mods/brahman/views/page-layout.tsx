@@ -20,13 +20,13 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import type { NodeData } from '@treenity/core';
-import { getDefaults } from '@treenity/core/comp';
-import { Button } from '@treenity/react/components/ui/button';
-import { Input } from '@treenity/react/components/ui/input';
-import { Render } from '@treenity/react';
-import { set, useChildren, useNavigate, usePath } from '@treenity/react';
-import { trpc } from '@treenity/react';
+import type { NodeData } from '@treenx/core';
+import { getDefaults } from '@treenx/core/comp';
+import { Button } from '@treenx/react/components/ui/button';
+import { Input } from '@treenx/react/components/ui/input';
+import { Render } from '@treenx/react';
+import { set, useChildren, useNavigate, usePath } from '@treenx/react';
+import { trpc } from '@treenx/react';
 import { ChevronDown, ChevronRight, GripVertical, Plus, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ACTION_TYPES } from '../types';

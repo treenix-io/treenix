@@ -1,4 +1,4 @@
-// Treenity Patch — Layer 1
+// Treenix Patch — Layer 1
 // Compact [op, path, value?] tuples with dot-notation paths.
 // Maps 1:1 to RFC 6902 JSON Patch.
 

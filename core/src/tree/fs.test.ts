@@ -15,7 +15,7 @@ describe('FsStore', () => {
   });
 
   async function setup() {
-    dir = await mkdtemp(join(tmpdir(), 'treenity-fs-test-'));
+    dir = await mkdtemp(join(tmpdir(), 'treenix-fs-test-'));
     return createFsTree(dir);
   }
 
@@ -249,7 +249,7 @@ describe('FsStore', () => {
 
   it('blocks symlink that escapes root', async () => {
     const tree = await setup();
-    const outsideDir = await mkdtemp(join(tmpdir(), 'treenity-fs-escape-'));
+    const outsideDir = await mkdtemp(join(tmpdir(), 'treenix-fs-escape-'));
     try {
       // Symlink inside root pointing outside
       await symlink(outsideDir, join(dir, 'escape'));
@@ -268,7 +268,7 @@ describe('FsStore', () => {
     await tree.set(createNode('/safe', 'dir'));
     await tree.set(createNode('/safe/real', 'test'));
     // Create symlink inside safe/ pointing elsewhere
-    const outsideDir = await mkdtemp(join(tmpdir(), 'treenity-fs-sym-'));
+    const outsideDir = await mkdtemp(join(tmpdir(), 'treenix-fs-sym-'));
     await writeFile(join(outsideDir, 'evil.json'), '{"$path":"/safe/evil","$type":"t.hack"}');
     // safe/ is in dir form (has child real.json), so symlink goes inside safe/
     await symlink(outsideDir, join(dir, 'safe', 'linked'));

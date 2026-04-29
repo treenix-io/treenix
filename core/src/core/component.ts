@@ -29,7 +29,7 @@ export type Class<T = unknown> = new (...args: any[]) => T;
 export type TypeId<T = unknown> = string | Class<T>;
 
 // ── Type normalization ──
-// Dot-less types belong to treenity namespace: 'dir' → 't.dir', 'ref' → 't.ref'
+// Dot-less types belong to treenix namespace: 'dir' → 't.dir', 'ref' → 't.ref'
 // Types with dots are already namespaced and returned as-is
 export function normalizeType(type: TypeId): string {
   if (typeof type === 'string') return type.includes('.') ? type : `t.${type}`;

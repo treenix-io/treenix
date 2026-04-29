@@ -1,18 +1,18 @@
-// @treenity/agent-client — TOFU agent connection SDK
-// Connect an external agent to a Treenity server with Trust On First Use handshake.
+// @treenx/agent-client — TOFU agent connection SDK
+// Connect an external agent to a Treenix server with Trust On First Use handshake.
 // All paths are relative to agent's subtree — agent writes "config", gets /agents/bot/config.
 
-import { createTrpcTransport, type TreenityClient } from '@treenity/core/client';
+import { createTrpcTransport, type TreenixClient } from '@treenx/core/client';
 
 export type AgentOpts = {
-  url: string;   // Treenity server URL, e.g. 'http://localhost:3211'
+  url: string;   // Treenix server URL, e.g. 'http://localhost:3211'
   path: string;  // agent port path, e.g. '/agents/my-bot'
   key: string;   // secret key for TOFU authentication
 };
 
 export type ConnectResult =
   | { status: 'pending' }
-  | { status: 'approved'; client: TreenityClient; token: string; userId: string };
+  | { status: 'approved'; client: TreenixClient; token: string; userId: string };
 
 export type WaitOpts = {
   interval?: number;  // poll interval in ms (default: 5000)
@@ -26,8 +26,8 @@ function scopePath(base: string, rel: string): string {
   return clean ? `${base}/${clean}` : base;
 }
 
-/** Wrap TreenityClient so all paths are relative to agent's subtree */
-function scopeClient(raw: TreenityClient, base: string): TreenityClient {
+/** Wrap TreenixClient so all paths are relative to agent's subtree */
+function scopeClient(raw: TreenixClient, base: string): TreenixClient {
   return {
     tree: {
       get: (path, ctx) => raw.tree.get(scopePath(base, path), ctx),
@@ -65,7 +65,7 @@ export function createAgentClient(opts: AgentOpts) {
   }
 
   /** Poll until admin approves. Throws on timeout. */
-  async function waitForApproval(waitOpts?: WaitOpts): Promise<TreenityClient> {
+  async function waitForApproval(waitOpts?: WaitOpts): Promise<TreenixClient> {
     const interval = waitOpts?.interval ?? 5000;
     const timeout = waitOpts?.timeout ?? 5 * 60 * 1000;
     const deadline = Date.now() + timeout;
@@ -88,5 +88,5 @@ export function createAgentClient(opts: AgentOpts) {
   return { connect, waitForApproval };
 }
 
-export type { TreenityClient } from '@treenity/core/client';
-export { createNodeClient } from '@treenity/core/client';
+export type { TreenixClient } from '@treenx/core/client';
+export { createNodeClient } from '@treenx/core/client';

@@ -1,4 +1,4 @@
-// Treenity FS Tree — Layer 1
+// Treenix FS Tree — Layer 1
 // Stores nodes as JSON files on disk.
 // Leaf nodes → name.json, directory nodes (with children) → name/$.json
 // Auto-promotes leaf→dir when children appear, demotes dir→leaf when last child removed.

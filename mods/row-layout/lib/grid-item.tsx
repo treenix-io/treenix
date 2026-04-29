@@ -4,7 +4,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent,
   DropdownMenuSubTrigger, DropdownMenuTrigger,
-} from '@treenity/react/ui/dropdown-menu'
+} from '@treenx/react/ui/dropdown-menu'
 import { EllipsisVertical } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { isComponentRef, type LayoutItem } from './types'

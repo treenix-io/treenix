@@ -2,9 +2,9 @@
 // Registered on ai.chat component. Works on any node with ai.chat + ai.thread + ai.agent.
 
 import { abortQuery, invokeClaude } from '#metatron/claude';
-import { getComponent, register } from '@treenity/core';
-import { setComponent } from '@treenity/core/comp';
-import type { ActionCtx } from '@treenity/core/server/actions';
+import { getComponent, register } from '@treenx/core';
+import { setComponent } from '@treenx/core/comp';
+import type { ActionCtx } from '@treenx/core/server/actions';
 import { createCanUseTool } from './guardian';
 import { AiAgent, AiChat, AiThread, type ThreadMessage } from './types';
 
@@ -44,7 +44,7 @@ register(
     setComponent(node, AiThread, thread);
     await ctx.tree.set(node);
 
-    const systemPrompt = agent?.systemPrompt || 'You are an AI assistant for the Treenity platform.';
+    const systemPrompt = agent?.systemPrompt || 'You are an AI assistant for the Treenix platform.';
     const model = agent?.model || 'claude-opus-4-6';
     const prompt = buildChatPrompt(systemPrompt, thread.messages);
     const canUseTool = createCanUseTool(agent?.role || 'assistant', path, ctx.tree);

@@ -48,7 +48,7 @@ describe('withCache — reads', () => {
   });
 
   // Regression: prior deepFreeze on cached nodes broke upper layers that
-  // attach metadata via Object.defineProperty (e.g. @treenity/react stamps
+  // attach metadata via Object.defineProperty (e.g. @treenx/react stamps
   // $key/$node symbols on returned nodes). Extensibility is part of the
   // cache's contract — consumers must be able to annotate results.
   it('returned nodes are extensible', async () => {

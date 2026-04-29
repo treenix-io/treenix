@@ -12,7 +12,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Input } from '#components/ui/input';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '#components/ui/resizable';
 import { TypePicker } from '#mods/editor-ui/type-picker';
-import type { NodeData } from '@treenity/core';
+import type { NodeData } from '@treenx/core';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import * as cache from '#tree/cache';
 import { tree } from '#tree/client';
@@ -372,7 +372,7 @@ export function Editor({ authed, onLogout }: EditorProps) {
           >
             <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border/50 shrink-0">
               <img src="/treenix.svg" alt="" width="20" height="20" />
-              {!sidebarCollapsed && <span className="text-sm font-semibold tracking-tight">Treenity</span>}
+              {!sidebarCollapsed && <span className="text-sm font-semibold tracking-tight">Treenix</span>}
               {!sidebarCollapsed && root !== '/' && (
                 <Button variant="ghost" size="sm" className="h-5 px-1.5 font-mono text-[10px] text-muted-foreground" onClick={() => setRoot('/')}>
                   &#8962; {root}

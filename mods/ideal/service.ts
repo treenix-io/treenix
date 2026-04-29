@@ -1,8 +1,8 @@
 // IdeasBoard service — auto-approves ideas with enough votes
 
-import { getComponent, register } from '@treenity/core';
-import '@treenity/core/contexts/service';
-import { safeInterval } from '@treenity/core/util/safe-timers';
+import { getComponent, register } from '@treenx/core';
+import '@treenx/core/contexts/service';
+import { safeInterval } from '@treenx/core/util/safe-timers';
 import { Idea, IdeasBoard } from './types';
 
 register(IdeasBoard, 'service', async (board, ctx) => {

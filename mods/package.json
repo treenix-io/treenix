@@ -1,24 +1,24 @@
 {
-  "name": "@treenity/mods",
+  "name": "@treenx/mods",
   "version": "3.0.10",
-  "description": "Official Treenity modules — board, sim, cafe, doc, mindmap, and more.",
+  "description": "Official Treenix modules — board, sim, cafe, doc, mindmap, and more.",
   "type": "module",
   "publishConfig": {
     "access": "public"
   },
   "license": "FSL-1.1-MIT",
-  "author": "Treenity <hello@treenity.ai> (https://treenity.ai)",
-  "homepage": "https://github.com/treenity-ai/treenity",
+  "author": "Treenix <hello@treenix.ai> (https://treenix.ai)",
+  "homepage": "https://github.com/treenix-ai/treenix",
   "repository": {
     "type": "git",
-    "url": "https://github.com/treenity-ai/treenity.git",
+    "url": "https://github.com/treenix-ai/treenix.git",
     "directory": "mods"
   },
-  "treenity": {
+  "treenix": {
     "clients": "./clients.ts"
   },
   "keywords": [
-    "treenity",
+    "treenix",
     "mods",
     "modules",
     "ecs",
@@ -80,41 +80,41 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@grammyjs/runner": "^2.0.3",
-    "@modelcontextprotocol/sdk": "^1.27.1",
-    "@tiptap/extension-code-block-lowlight": "^3.20.0",
-    "@tiptap/extension-table": "^3.20.0",
-    "@tiptap/extension-table-cell": "^3.20.0",
-    "@tiptap/extension-table-header": "^3.20.0",
-    "@tiptap/extension-table-row": "^3.20.0",
-    "@tiptap/extension-task-item": "^3.20.0",
-    "@tiptap/extension-task-list": "^3.20.0",
-    "@tiptap/react": "^3.20.0",
-    "@tiptap/starter-kit": "^3.20.0",
-    "@tiptap/suggestion": "^3.22.2",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@tiptap/extension-code-block-lowlight": "^3.22.5",
+    "@tiptap/extension-table": "^3.22.5",
+    "@tiptap/extension-table-cell": "^3.22.5",
+    "@tiptap/extension-table-header": "^3.22.5",
+    "@tiptap/extension-table-row": "^3.22.5",
+    "@tiptap/extension-task-item": "^3.22.5",
+    "@tiptap/extension-task-list": "^3.22.5",
+    "@tiptap/react": "^3.22.5",
+    "@tiptap/starter-kit": "^3.22.5",
+    "@tiptap/suggestion": "^3.22.5",
     "d3-selection": "^3.0.0",
     "d3-zoom": "^3.0.0",
     "lowlight": "^3.3.0",
-    "lucide-react": "^0.563.0",
-    "react-grid-layout": "^2.2.2"
+    "lucide-react": "^1.12.0",
+    "react-grid-layout": "^2.2.3"
   },
   "optionalDependencies": {
-    "@huggingface/transformers": "^3.8.1",
+    "@huggingface/transformers": "^4.2.0",
     "@react-three/drei": "^10.7.7",
-    "@react-three/fiber": "^9.5.0",
-    "three": "^0.183.2",
+    "@react-three/fiber": "^9.6.0",
+    "three": "^0.184.0",
     "wavefile": "^11.0.0"
   },
   "peerDependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.0",
-    "@treenity/core": "^3.0.0",
-    "@treenity/react": "^3.0.0",
+    "@treenx/core": "^3.0.0",
+    "@treenx/react": "^3.0.0",
     "grammy": "^1.39.0"
   },
   "peerDependenciesMeta": {
     "@anthropic-ai/claude-agent-sdk": {
       "optional": true
     },
-    "@treenity/react": {
+    "@treenx/react": {
       "optional": true
     },
     "grammy": {
@@ -122,7 +122,10 @@
     }
   },
   "devDependencies": {
+    "@types/d3-selection": "^3.0.11",
+    "@types/d3-transition": "^3.0.9",
+    "@types/d3-zoom": "^3.0.8",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.3"
+    "typescript": "^6.0.3"
   }
 }

@@ -1,4 +1,4 @@
-// Treenity RawFS Tree — Layer 1
+// Treenix RawFS Tree — Layer 1
 // Bidirectional tree that maps real filesystem files to typed nodes.
 // Files become nodes with $type from mime type. Directories become $type "dir".
 // "decode" context: file → node (read). "encode" context: node → file (write).

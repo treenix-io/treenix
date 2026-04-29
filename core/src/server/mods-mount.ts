@@ -1,4 +1,4 @@
-// Treenity Mods Mount — Layer 4
+// Treenix Mods Mount — Layer 4
 // Virtual read-only tree exposing loaded mods as rich catalog nodes.
 // Sources: mod loader (all loaded mods) + tracking + TypeCatalog + prefab registry.
 //
@@ -14,7 +14,7 @@
 import { createNode, type NodeData } from '#core';
 import { getLoadedMods } from '#mod/loader';
 import { getModPrefabs, getPrefab, getRegisteredMods } from '#mod/prefab';
-import { Prefab } from '#mods/treenity/prefab-type';
+import { Prefab } from '#mods/treenix/prefab-type';
 import { paginate, type Tree } from '#tree';
 import { getModInfo } from './mod-catalog';
 

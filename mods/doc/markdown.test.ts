@@ -164,8 +164,8 @@ describe('resolveLinkPath', () => {
     assert.equal(resolveLinkPath('#section', '/docs/a.md'), null);
   });
 
-  it('strips treenity: scheme', () => {
-    assert.equal(resolveLinkPath('treenity:/foo/bar'), '/foo/bar');
+  it('strips treenix: scheme', () => {
+    assert.equal(resolveLinkPath('treenix:/foo/bar'), '/foo/bar');
   });
 
   it('returns absolute paths as-is', () => {
@@ -215,8 +215,8 @@ describe('mdToTiptap link parsing', () => {
     assert.equal(linkNode!.marks![0].attrs?.path, '/docs/public/concepts/types.md');
   });
 
-  it('parses [text](treenity:/path) as nodeLink', () => {
-    const doc = mdToTiptap('go [home](treenity:/foo)');
+  it('parses [text](treenix:/path) as nodeLink', () => {
+    const doc = mdToTiptap('go [home](treenix:/foo)');
     const link = doc.content?.[0].content?.find((n) => n.marks?.[0]?.type === 'nodeLink');
     assert.ok(link);
     assert.equal(link!.marks![0].attrs?.path, '/foo');

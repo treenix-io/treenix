@@ -1,5 +1,5 @@
-// Treenity Telegram Binding — Layer 2
-// Connects Grammy bot to Treenity tree.
+// Treenix Telegram Binding — Layer 2
+// Connects Grammy bot to Treenix tree.
 // Supports middleware pipelines, event routing, callback params.
 
 import { type ComponentData, isComponent, type NodeData, resolve } from '#core';

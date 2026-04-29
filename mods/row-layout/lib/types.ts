@@ -1,4 +1,4 @@
-import type { Raw } from '@treenity/core/comp'
+import type { Raw } from '@treenx/core/comp'
 import type { ReactNode } from 'react'
 import type { RowColLayout } from '../types'
 

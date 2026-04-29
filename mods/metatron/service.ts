@@ -2,13 +2,13 @@
 // Uses ACL-wrapped tree scoped to the task creator's permissions.
 // withAcl.get() returns undefined for denied paths — no existence leakage.
 
-import { buildClaims, withAcl } from '@treenity/core/server/auth';
+import { buildClaims, withAcl } from '@treenx/core/server/auth';
 import { uniqueMentionPaths } from './mentions';
 
 const SENSITIVE_RE = /(password|secret|token|key|hash|credentials|apiKey|api_key)/i;
 
 export async function resolveContext(
-  store: import('@treenity/core/tree').Tree,
+  store: import('@treenx/core/tree').Tree,
   prompts: string[],
   createdBy: string | null,
 ): Promise<string> {

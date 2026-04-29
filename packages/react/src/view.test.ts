@@ -1,7 +1,7 @@
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { registerType } from '@treenity/core/comp';
-import { resolve, unregister } from '@treenity/core';
+import { registerType } from '@treenx/core/comp';
+import { resolve, unregister } from '@treenx/core';
 import { view } from '#view';
 
 class TestWidget {

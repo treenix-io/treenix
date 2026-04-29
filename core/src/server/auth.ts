@@ -1,4 +1,4 @@
-// Treenity Auth — ACL on nodes
+// Treenix Auth — ACL on nodes
 // Group-based permissions, tree inheritance, deny-is-sticky.
 // Tree wrapper: resolves ACL per path, strips forbidden components.
 

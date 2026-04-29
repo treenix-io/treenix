@@ -1,8 +1,8 @@
 // Universal component tests — action contracts
 
-import { createNode, resolve } from '@treenity/core';
+import { createNode, resolve } from '@treenx/core';
 import './types';
-import { createMemoryTree } from '@treenity/core/tree';
+import { createMemoryTree } from '@treenx/core/tree';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 

@@ -1,0 +1,88 @@
+{
+  "sections": [
+    {
+      "title": "Start",
+      "items": [
+        { "path": "index", "title": "Introduction" },
+        { "path": "getting-started/installation", "title": "Quickstart & Setup" },
+        { "path": "getting-started/tutorial", "title": "Tutorial" },
+        { "path": "getting-started/project-structure", "title": "Project Structure" },
+        { "path": "getting-started/thinking-in-treenix", "title": "Thinking in Treenix" }
+      ]
+    },
+    {
+      "title": "Learn",
+      "items": [
+        { "path": "concepts/overview", "title": "Overview" },
+        { "path": "concepts/composition", "title": "Composition", "anchors": [
+          { "id": "component", "title": "Component" },
+          { "id": "node", "title": "Node" },
+          { "id": "forest", "title": "Forest" }
+        ]},
+        { "path": "concepts/tree", "title": "The Tree" },
+        { "path": "concepts/types", "title": "Type", "anchors": [
+          { "id": "storage", "title": "Storage" },
+          { "id": "schema", "title": "Schema" },
+          { "id": "rpc", "title": "RPC" },
+          { "id": "optimistic-update", "title": "Optimistic Update" },
+          { "id": "forms", "title": "Forms" }
+        ]},
+        { "path": "concepts/context", "title": "Contexts", "anchors": [
+          { "id": "views", "title": "Views" },
+          { "id": "services", "title": "Services" }
+        ]},
+        { "path": "concepts/actions", "title": "Actions" },
+        { "path": "concepts/reactivity", "title": "Reactivity" },
+        { "path": "concepts/mounts", "title": "Mounts" },
+        { "path": "concepts/security", "title": "Security", "anchors": [
+          { "id": "acl", "title": "ACL" },
+          { "id": "validation", "title": "Validation" }
+        ]},
+        { "path": "concepts/audit", "title": "Audit Trail" },
+        { "path": "concepts/ai-mcp", "title": "AI / MCP" },
+        { "path": "concepts/roadmap", "title": "Roadmap", "anchors": [
+          { "id": "federation", "title": "Federation" },
+          { "id": "mod-marketplace", "title": "Mod Marketplace" }
+        ]},
+        { "path": "concepts/zen", "title": "The Zen of Treenix" }
+      ]
+    },
+    {
+      "title": "Guides",
+      "items": [
+        { "path": "guides/create-a-mod", "title": "Build a Mod" },
+        { "path": "guides/react-views", "title": "Write React Views" },
+        { "path": "guides/documenting-types", "title": "Document Your Types" },
+        { "path": "guides/security", "title": "Secure an App" },
+        { "path": "guides/mounts-federation", "title": "Federate Trees" },
+        { "path": "guides/go-realtime", "title": "Go Realtime" },
+        { "path": "guides/services", "title": "Run Services" },
+        { "path": "guides/troubleshooting", "title": "Troubleshooting" }
+      ]
+    },
+    {
+      "title": "Platform",
+      "items": [
+        { "path": "platform/cli", "title": "CLI Reference" },
+        { "path": "platform/deployment", "title": "Deployment" },
+        { "path": "platform/storage-adapters", "title": "Storage Adapters" },
+        { "path": "platform/self-hosting", "title": "Self-Hosting Checklist" }
+      ]
+    },
+    {
+      "title": "Reference",
+      "items": [
+        { "path": "api/overview", "title": "Overview" },
+        { "path": "api/hooks", "title": "Hooks & APIs" }
+      ]
+    },
+    {
+      "title": "Resources",
+      "items": [
+        { "path": "resources/cookbook", "title": "Cookbook" },
+        { "path": "examples/index", "title": "Examples" },
+        { "path": "resources/glossary", "title": "Glossary" }
+      ]
+    }
+  ]
+}

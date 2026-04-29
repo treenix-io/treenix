@@ -1,10 +1,10 @@
-import { type ComponentData, getComponents, getContextsForType, type NodeData, register } from '@treenity/core'
-import { Render, RenderContext, type View } from '@treenity/react'
-import { useChildren } from '@treenity/react'
+import { type ComponentData, getComponents, getContextsForType, type NodeData, register } from '@treenx/core'
+import { Render, RenderContext, type View } from '@treenx/react'
+import { useChildren } from '@treenx/react'
 import {
   DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub,
   DropdownMenuSubContent, DropdownMenuSubTrigger,
-} from '@treenity/react/ui/dropdown-menu'
+} from '@treenx/react/ui/dropdown-menu'
 import { useEffect, useState } from 'react'
 import { RowColGrid } from './lib/row-col-grid'
 import { isComponentRef, type LayoutItem, type LayoutRow } from './lib/types'

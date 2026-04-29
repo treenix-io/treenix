@@ -1,4 +1,4 @@
-import { getCtx, registerType } from '@treenity/core/comp';
+import { getCtx, registerType } from '@treenx/core/comp';
 
 class TodoItem {
   title = '';

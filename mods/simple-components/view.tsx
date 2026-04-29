@@ -1,12 +1,12 @@
 // Universal component views — compact, embeddable in any node
 
-import { type NodeData, register } from '@treenity/core';
-import { type View, useActions } from '@treenity/react';
-import { trpc } from '@treenity/react';
-import { cn } from '@treenity/react';
-import { Button } from '@treenity/react/ui/button';
-import { Input } from '@treenity/react/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@treenity/react/ui/select';
+import { type NodeData, register } from '@treenx/core';
+import { type View, useActions } from '@treenx/react';
+import { trpc } from '@treenx/react';
+import { cn } from '@treenx/react';
+import { Button } from '@treenx/react/ui/button';
+import { Input } from '@treenx/react/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@treenx/react/ui/select';
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { ATTACHABLE_COMPONENTS, TChecklist, TComments, TEstimate, TLinks, TTags, TTimeTrack } from './types';

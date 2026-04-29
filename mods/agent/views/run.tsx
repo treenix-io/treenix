@@ -1,9 +1,9 @@
 // ai.run view — structured log with ECS components
 
-import { getComponent, register } from '@treenity/core';
-import { type View } from '@treenity/react';
-import { execute, useNavigate } from '@treenity/react';
-import { cn } from '@treenity/react';
+import { getComponent, register } from '@treenx/core';
+import { type View } from '@treenx/react';
+import { execute, useNavigate } from '@treenx/react';
+import { cn } from '@treenx/react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { AiCost, AiLog, AiRun, AiRunStatus, type LogEntry } from '../types';

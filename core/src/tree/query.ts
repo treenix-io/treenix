@@ -1,4 +1,4 @@
-// Treenity Query Tree — Layer 1
+// Treenix Query Tree — Layer 1
 // Virtual filtered view over a parent tree's children.
 // Used by t.mount.query to create virtual folders (e.g., /orders/incoming shows orders where status.value === 'incoming').
 

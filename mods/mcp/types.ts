@@ -1,4 +1,4 @@
-import { registerType } from '@treenity/core/comp';
+import { registerType } from '@treenx/core/comp';
 
 export class McpConfig {
   port = 3212;

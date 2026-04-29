@@ -164,7 +164,7 @@ describe('loadMods', () => {
   });
 
   it('times out on hanging onLoad', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'treenity-timeout-'));
+    const dir = mkdtempSync(join(tmpdir(), 'treenix-timeout-'));
     const modDir = join(dir, 'hang-mod');
     mkdirSync(modDir);
     writeFileSync(join(modDir, 'server.mjs'), `
@@ -190,7 +190,7 @@ describe('loadMods', () => {
   });
 
   it('times out on hanging seed', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'treenity-timeout-'));
+    const dir = mkdtempSync(join(tmpdir(), 'treenix-timeout-'));
     const modDir = join(dir, 'hang-seed');
     mkdirSync(modDir);
     writeFileSync(join(modDir, 'server.mjs'), `
@@ -252,7 +252,7 @@ describe('loadLocalMods', () => {
 
   beforeEach(() => {
     clearModRegistry();
-    tmpDir = mkdtempSync(join(tmpdir(), 'treenity-mods-'));
+    tmpDir = mkdtempSync(join(tmpdir(), 'treenix-mods-'));
   });
 
   it('discovers mod with server.ts in a directory', async () => {

@@ -1,18 +1,18 @@
-// Treenity MCP Server — exposes tree store as MCP tools
-// StreamableHTTP transport, stateless, token auth via ?token= or Authorization header
+// Treenix MCP Server — exposes tree store as MCP tools
+// StreamableHTTP transport, stateful sessions, token auth via Authorization: Bearer header
 
 import { requestApproval, resolveVerdict } from '#agent/guardian';
 import { AiPolicy } from '#agent/types';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { createNode, getComponent } from '@treenity/core';
-import { matchesAny } from '@treenity/core/glob';
-import { verifyViewSource } from '@treenity/core/mods/uix/verify';
-import { TypeCatalog } from '@treenity/core/schema/catalog';
-import { executeAction } from '@treenity/core/server/actions';
-import { buildClaims, resolveToken, type Session, withAcl } from '@treenity/core/server/auth';
-import { deployPrefab } from '@treenity/core/server/prefab';
-import type { Tree } from '@treenity/core/tree';
+import { createNode, getComponent } from '@treenx/core';
+import { matchesAny } from '@treenx/core/glob';
+import { verifyViewSource } from '@treenx/core/mods/uix/verify';
+import { TypeCatalog } from '@treenx/core/schema/catalog';
+import { executeAction } from '@treenx/core/server/actions';
+import { buildClaims, resolveToken, type Session, withAcl } from '@treenx/core/server/auth';
+import { deployPrefab } from '@treenx/core/server/prefab';
+import type { Tree } from '@treenx/core/tree';
 import { randomUUID } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
 import { z } from 'zod/v3';
@@ -35,7 +35,7 @@ export type GuardianRequest = {
 // Build glob subjects from request: most specific → least specific
 // Extracts action + target path from args (handles path, target, source)
 export function buildSubjects(req: GuardianRequest): string[] {
-  const base = `mcp__treenity__${req.tool}`;
+  const base = `mcp__treenix__${req.tool}`;
   const subjects: string[] = [];
 
   const action = typeof req.args?.action === 'string' && req.args.action ? req.args.action : null;
@@ -124,8 +124,8 @@ const text = (s: string) => ({ content: [{ type: 'text' as const, text: s }] });
 
 /** Build human-friendly label from subject pattern */
 function subjectLabel(subject: string): string {
-  // mcp__treenity__execute:add:/board → "execute:add on /board"
-  const short = subject.replace('mcp__treenity__', '');
+  // mcp__treenix__execute:add:/board → "execute:add on /board"
+  const short = subject.replace('mcp__treenix__', '');
   const parts = short.split(':');
   if (parts.length === 3) return `${parts[0]}:${parts[1]} on ${parts[2]}`;
   if (parts.length === 2) return `all ${parts[1]} actions via ${parts[0]}`;
@@ -144,7 +144,7 @@ async function guardBlock(guard: McpGuardianResult, store: Tree, userId: string)
     role: 'mcp',
     tool,
     input,
-    reason: `MCP escalation: ${tool.replace('mcp__treenity__', '')}`,
+    reason: `MCP escalation: ${tool.replace('mcp__treenix__', '')}`,
   });
   return approved ? null : text(`🛑 Guardian: denied by human`);
 }
@@ -167,7 +167,7 @@ export async function buildMcpServer(store: Tree, session: Session, claims?: str
     return guardBlock(guard, store, session.userId);
   }
 
-  const mcp = new McpServer({ name: 'treenity', version: '1.0.0' });
+  const mcp = new McpServer({ name: 'treenix', version: '1.0.0' });
 
   mcp.registerTool(
     'get_node',
@@ -378,26 +378,215 @@ export async function buildMcpServer(store: Tree, session: Session, claims?: str
 export function extractToken(req: import('node:http').IncomingMessage): string | null {
   const auth = req.headers.authorization;
   if (typeof auth === 'string' && auth.startsWith('Bearer ')) return auth.slice(7);
-
-  const qs = (req.url ?? '').split('?')[1];
-  if (qs) {
-    const match = qs.match(/(?:^|&)token=([^&]+)/);
-    if (match) return decodeURIComponent(match[1]);
-  }
+  // C5: query-string `?token=` rejected — leaks to access logs/Referer/history
   return null;
 }
 
+// ── C5: auth resolution & session binding ──
+
+const PROXY_HEADERS = [
+  'forwarded', 'x-forwarded-for', 'x-real-ip', 'via',
+  'x-forwarded-host', 'x-forwarded-proto', 'x-forwarded-port',
+  'x-client-ip', 'cf-connecting-ip', 'true-client-ip', 'cdn-loop',
+] as const;
+
+export function hasProxyHeaders(req: import('node:http').IncomingMessage): boolean {
+  // Presence-check (not truthiness): empty-string header value is still a
+  // proxy indicator. Headers are normalized lowercase by Node's HTTP parser.
+  for (const h of PROXY_HEADERS) {
+    if (h in req.headers) return true;
+  }
+  return false;
+}
+
+const TTL_FLOOR_MS = 60_000;                   // 1 minute
+const TTL_CEILING_MS = 60 * 60_000;            // 1 hour (was 24h — tightened r3)
+const TTL_DEFAULT_MS = 60 * 60_000;            // 1 hour
+
+export function parseDevTtlMs(raw: string | undefined): number {
+  if (raw === undefined) return TTL_DEFAULT_MS;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < TTL_FLOOR_MS || n > TTL_CEILING_MS) {
+    console.warn(`[mcp] MCP_DEV_SESSION_TTL_MS=${raw} invalid (must be ${TTL_FLOOR_MS}..${TTL_CEILING_MS}), using default ${TTL_DEFAULT_MS}`);
+    return TTL_DEFAULT_MS;
+  }
+  return Math.floor(n);
+}
+
+const DEV_SESSION_TTL_MS = parseDevTtlMs(process.env.MCP_DEV_SESSION_TTL_MS);
+
+export function isLoopbackHost(host: string): boolean {
+  return host === '127.0.0.1' || host === 'localhost' || host === '::1';
+}
+
+export function isLoopbackPeer(addr: string | undefined): boolean {
+  if (!addr) return false;
+  if (addr === '::1') return true;
+  if (addr.startsWith('127.')) return true;
+  if (addr.startsWith('::ffff:127.')) return true;
+  return false;
+}
+
+export function isDevAdminEnabled(
+  configuredHost: string,
+  peerAddr: string | undefined,
+  hasProxy = false,
+): boolean {
+  if (hasProxy) return false;   // C5 round 2: never trust dev fallback through any proxy
+  return (
+    process.env.NODE_ENV === 'development' &&
+    process.env.MCP_DEV_ADMIN === '1' &&
+    isLoopbackHost(configuredHost) &&
+    isLoopbackPeer(peerAddr)
+  );
+}
+
+export type SessionAuth =
+  | { kind: 'token'; userId: string; token: string; claims: string[] }
+  | { kind: 'dev'; expiresAt: number };
+
+export type AuthResolution =
+  // claims is the EFFECTIVE claim set used for ACL — derived from buildClaims
+  // (token kind) or hardcoded admin (dev kind). Handler must pass these into
+  // buildMcpServer; do NOT fall back to session.claims on the bootstrap path.
+  | { ok: true; session: Session; claims: string[]; auth: SessionAuth }
+  | { ok: false; status: 401; body: { error: string; message?: string } };
+
+export async function resolveMcpAuth(
+  store: Tree,
+  token: string | null,
+  configuredHost: string,
+  peerAddr: string | undefined,
+  hasProxy = false,
+): Promise<AuthResolution> {
+  if (token) {
+    const session = await resolveToken(store, token);
+    if (!session) return {
+      ok: false, status: 401,
+      body: { error: 'invalid_token', message: 'Token expired or unknown' },
+    };
+    // C5 r3: always recompute via buildClaims for MCP — explicit session claims
+    // are not trusted as static grants here; user/group changes must propagate.
+    const claims = await buildClaims(store, session.userId);
+    return { ok: true, session, claims, auth: { kind: 'token', userId: session.userId, token, claims } };
+  }
+  if (isDevAdminEnabled(configuredHost, peerAddr, hasProxy)) {
+    console.warn('[mcp] ⚠️  DEV MODE: NODE_ENV=development + MCP_DEV_ADMIN=1 + loopback host & peer (no proxy) — granting admin without token.');
+    const claims = ['u:mcp-dev', 'authenticated', 'admins'];
+    return {
+      ok: true,
+      session: { userId: 'mcp-dev' } as Session,
+      claims,
+      auth: { kind: 'dev', expiresAt: Date.now() + DEV_SESSION_TTL_MS },
+    };
+  }
+  return {
+    ok: false, status: 401,
+    body: { error: 'token_required', message: 'Pass token via Authorization: Bearer <token>' },
+  };
+}
+
+export type RevalResult =
+  | { ok: true }
+  | { ok: false; status: 401; body: { error: string; message?: string }; evict: boolean };
+
+function sameClaimSet(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false;
+  const set = new Set(a);
+  for (const c of b) if (!set.has(c)) return false;
+  return true;
+}
+
+export async function revalidateSessionAuth(
+  store: Tree,
+  cached: SessionAuth,
+  token: string | null,
+  configuredHost: string,
+  peerAddr: string | undefined,
+  hasProxy = false,
+): Promise<RevalResult> {
+  if (cached.kind === 'token') {
+    // Wrong token but legit cached session must NOT be evicted (sid-disclosure DoS guard).
+    if (token !== cached.token) return {
+      ok: false, status: 401,
+      body: { error: 'token_mismatch', message: 'Reconnect must present the original Bearer token' },
+      evict: false,
+    };
+    const fresh = await resolveToken(store, token);
+    if (!fresh || fresh.userId !== cached.userId) return {
+      ok: false, status: 401,
+      body: { error: 'token_invalid', message: 'Token revoked or expired' },
+      evict: true,
+    };
+    // Claims drift detection (round 2 + 3): always recompute from current state
+    // (ignore stored session.claims for MCP — see resolveMcpAuth comment).
+    const currentClaims = await buildClaims(store, fresh.userId);
+    if (!sameClaimSet(currentClaims, cached.claims)) return {
+      ok: false, status: 401,
+      body: { error: 'claims_changed', message: 'User permissions changed; reinitialize' },
+      evict: true,
+    };
+    return { ok: true };
+  }
+  if (Date.now() > cached.expiresAt) return {
+    ok: false, status: 401,
+    body: { error: 'dev_session_expired', message: 'Reinitialize MCP session' },
+    evict: true,
+  };
+  if (!isDevAdminEnabled(configuredHost, peerAddr, hasProxy)) return {
+    ok: false, status: 401,
+    body: { error: 'dev_mode_disabled' },
+    evict: true,
+  };
+  return { ok: true };
+}
+
+export function parseAllowedOrigins(raw: string | undefined): string[] {
+  if (!raw) return [];
+  return raw.split(',').map(s => s.trim()).filter(s => {
+    if (!s) return false;
+    if (s === '*') {
+      console.warn('[mcp] CORS: wildcard `*` in MCP_CORS_ORIGINS rejected (auth-capable endpoint requires exact origins)');
+      return false;
+    }
+    return true;
+  });
+}
+
+export function setCorsHeaders(
+  req: import('node:http').IncomingMessage,
+  res: import('node:http').ServerResponse,
+): void {
+  const origin = req.headers.origin;
+  const allowed = parseAllowedOrigins(process.env.MCP_CORS_ORIGINS);
+  if (typeof origin === 'string') {
+    res.setHeader('Vary', 'Origin');
+    if (allowed.includes(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+    }
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, mcp-session-id');
+  res.setHeader('Access-Control-Expose-Headers', 'mcp-session-id');
+}
+
+function send401(
+  res: import('node:http').ServerResponse,
+  body: { error: string; message?: string },
+): void {
+  res.setHeader('WWW-Authenticate', 'Bearer realm="mcp"');
+  res.writeHead(401, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(body));
+}
+
+type SessionEntry = { transport: StreamableHTTPServerTransport; mcp: McpServer; auth: SessionAuth };
+
 /** Create MCP HTTP server. Returns server handle for lifecycle management. */
 export function createMcpHttpServer(store: Tree, port: number, host = '127.0.0.1'): Server {
-
-  // Session map: sessionId → { transport, mcp } — keeps connections alive for reconnect
-  const sessions = new Map<string, { transport: StreamableHTTPServerTransport; mcp: McpServer }>();
+  const sessions = new Map<string, SessionEntry>();
 
   const handler = async (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, mcp-session-id');
-    res.setHeader('Access-Control-Expose-Headers', 'mcp-session-id');
+    setCorsHeaders(req, res);
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
       res.end();
@@ -411,45 +600,47 @@ export function createMcpHttpServer(store: Tree, port: number, host = '127.0.0.1
       return;
     }
 
-    // Reconnect: existing session
+    const token = extractToken(req);
+    const peerAddr = req.socket.remoteAddress;
+    const proxy = hasProxyHeaders(req);
+
+    // Reconnect: revalidate session auth on every hit
     const sessionId = req.headers['mcp-session-id'] as string | undefined;
     if (sessionId) {
       const entry = sessions.get(sessionId);
-      if (entry) {
-        await entry.transport.handleRequest(req, res);
+      if (!entry) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'session_not_found' }));
         return;
       }
-      // Stale session — tell client to re-initialize
-      res.writeHead(404, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'session_not_found' }));
+      const reval = await revalidateSessionAuth(store, entry.auth, token, host, peerAddr, proxy);
+      if (!reval.ok) {
+        // sid-disclosure DoS guard: only evict when failure proves the cached
+        // session is no longer valid (token revoked, dev mode dropped, TTL).
+        // Wrong-token reconnect MUST NOT kill a legit session.
+        if (reval.evict) {
+          sessions.delete(sessionId);
+          try { entry.transport.close(); } catch { /* ignore */ }
+        }
+        send401(res, reval.body);
+        return;
+      }
+      await entry.transport.handleRequest(req, res);
       return;
     }
 
-    // Auth
-    const token = extractToken(req);
-    let session: Session | null = null;
-    let devClaims: string[] | undefined;
-    if (token) {
-      session = await resolveToken(store, token);
-    } else if (!process.env.TENANT) {
-      console.warn('[mcp] ⚠️  DEV MODE: no TENANT set — all MCP requests have ADMIN access. Set TENANT env for production.');
-      session = { userId: 'mcp-dev' } as Session;
-      devClaims = ['u:mcp-dev', 'authenticated', 'admins'];
-    }
-    if (!session) {
-      res.writeHead(401, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'token_required', message: 'Pass token via ?token= or Authorization: Bearer' }));
+    const auth = await resolveMcpAuth(store, token, host, peerAddr, proxy);
+    if (!auth.ok) {
+      send401(res, auth.body);
       return;
     }
 
-    // New session
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
     });
-    const mcp = await buildMcpServer(store, session, devClaims);
+    const mcp = await buildMcpServer(store, auth.session, auth.claims);
     await mcp.connect(transport);
 
-    // Track session for reconnect, clean up on close
     transport.onclose = () => {
       const sid = transport.sessionId;
       if (sid) sessions.delete(sid);
@@ -458,10 +649,10 @@ export function createMcpHttpServer(store: Tree, port: number, host = '127.0.0.1
     await transport.handleRequest(req, res);
 
     const sid = transport.sessionId;
-    if (sid) sessions.set(sid, { transport, mcp });
+    if (sid) sessions.set(sid, { transport, mcp, auth: auth.auth });
   };
 
   const server = createServer(handler);
-  server.listen(port, host, () => console.log(`treenity mcp http://${host}:${port}/mcp`));
+  server.listen(port, host, () => console.log(`treenix mcp http://${host}:${port}/mcp`));
   return server;
 }

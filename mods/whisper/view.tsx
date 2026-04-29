@@ -1,7 +1,7 @@
 // Whisper channel view — checklist of transcribed audio notes
 
-import { type NodeData, register } from '@treenity/core';
-import { set, useChildren, usePath } from '@treenity/react';
+import { type NodeData, register } from '@treenx/core';
+import { set, useChildren, usePath } from '@treenx/react';
 
 function ChannelView({ value }: { value: NodeData }) {
   const { data: children } = useChildren(value.$path, { watchNew: true });

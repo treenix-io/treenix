@@ -1,4 +1,4 @@
-// Treenity Component Registration — between core and server
+// Treenix Component Registration — between core and server
 // registerType(type, cls) → stamps $type, registers class, auto-registers actions from methods
 
 import { registerActionNeeds } from '#comp/needs';

@@ -1,4 +1,4 @@
-import { registerType } from '@treenity/core/comp';
+import { registerType } from '@treenx/core/comp';
 
 /** Board of ideas — container that auto-approves popular ones */
 export class IdeasBoard {

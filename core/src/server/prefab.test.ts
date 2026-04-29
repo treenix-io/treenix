@@ -1,11 +1,11 @@
 import { createNode, type NodeData } from '#core';
 import { clearPrefabs, getModPrefabs, getPrefab, getRegisteredMods, getSeedPrefabs, registerPrefab } from '#mod/prefab';
-import '#mods/treenity/prefab-type';
+import '#mods/treenix/prefab-type';
 import { loadSchemasFromDir } from '#schema/load';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-loadSchemasFromDir(join(dirname(fileURLToPath(import.meta.url)), '../mods/treenity/schemas'));
+loadSchemasFromDir(join(dirname(fileURLToPath(import.meta.url)), '../mods/treenix/schemas'));
 import { createMemoryTree, type Tree } from '#tree';
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
@@ -436,7 +436,7 @@ describe('t.prefab deploy action', () => {
       { $path: 'contact', $type: 'cafe.contact' } as NodeData,
     ]);
 
-    const { Prefab } = await import('#mods/treenity/prefab-type');
+    const { Prefab } = await import('#mods/treenix/prefab-type');
     await tree.set(createNode('/sys/mods/cafe/prefabs/seed', Prefab, { mod: 'cafe', name: 'seed' }));
 
     await executeAction(tree, '/sys/mods/cafe/prefabs/seed', 't.prefab', undefined, 'deploy', {
@@ -452,7 +452,7 @@ describe('t.prefab deploy action', () => {
       { $path: 'menu', $type: 'dir' } as NodeData,
     ]);
 
-    const { Prefab } = await import('#mods/treenity/prefab-type');
+    const { Prefab } = await import('#mods/treenix/prefab-type');
     await tree.set(createNode('/sys/mods/cafe/prefabs/seed', Prefab, { mod: 'cafe', name: 'seed' }));
 
     const r1 = await executeAction(tree, '/sys/mods/cafe/prefabs/seed', 't.prefab', undefined, 'deploy', {

@@ -6,7 +6,7 @@
 export type PermissionPolicy = 'allow' | 'ask-once' | 'ask-always' | 'deny';
 
 export type PermissionRule = {
-  tool: string;         // glob pattern: 'mcp__treenity__*', '*'
+  tool: string;         // glob pattern: 'mcp__treenix__*', '*'
   pathPattern: string;  // optional input.path pattern
   policy: PermissionPolicy;
 };
@@ -29,7 +29,7 @@ export function resolvePermission(id: string, allow: boolean, meta?: PermissionM
   resolve(allow, meta);
 }
 
-import { globMatch } from '@treenity/core/glob';
+import { globMatch } from '@treenx/core/glob';
 
 // ── Rule specificity (more specific = higher score) ──
 

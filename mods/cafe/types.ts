@@ -1,5 +1,5 @@
 // Cafe use cases — domain types for a cafe landing page
-import { registerType } from '@treenity/core/comp';
+import { registerType } from '@treenx/core/comp';
 
 /** Mail delivery settings */
 class CafeMailService {

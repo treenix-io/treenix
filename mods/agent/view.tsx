@@ -1,6 +1,6 @@
 // Agent Office — views for ai.pool, ai.agent, ai.approval, ai.thread, ai.run
 
-import { type ComponentData, register } from '@treenity/core';
+import { type ComponentData, register } from '@treenx/core';
 import {
   cn,
   execute,
@@ -11,7 +11,7 @@ import {
   useNavigate,
   usePath,
   type View,
-} from '@treenity/react';
+} from '@treenx/react';
 import { useMemo, useState } from 'react';
 import { type AgentStatus, AiAgent, AiApproval, AiApprovals, AiPlan, AiPool, AiThread } from './types';
 

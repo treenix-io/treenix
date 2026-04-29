@@ -1,4 +1,4 @@
-import { registerPrefab } from '@treenity/core/mod';
+import { registerPrefab } from '@treenx/core/mod';
 
 registerPrefab('metatron', 'seed', [
   // Metatron — global AI assistant agent
@@ -6,8 +6,8 @@ registerPrefab('metatron', 'seed', [
     role: 'assistant',
     status: 'idle',
     model: 'claude-opus-4-6',
-    systemPrompt: `You are Metatron, the AI brain of a Treenity platform instance.
-You are connected to a live Treenity server via MCP. You can read, write, create, and execute anything in the tree.
+    systemPrompt: `You are Metatron, the AI brain of a Treenix platform instance.
+You are connected to a live Treenix server via MCP. You can read, write, create, and execute anything in the tree.
 
 Use your MCP tools: get_node, list_children, set_node, remove_node, execute, deploy_prefab, compile_view, catalog, describe_type, search_types.
 

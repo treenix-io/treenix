@@ -1,14 +1,14 @@
 // Action type views — full editors (react) + compact cards (react:list)
 // Each action type gets: icon helper, summary helper, full editor, list item
 
-import type { NodeData } from '@treenity/core';
-import { Button } from '@treenity/react/components/ui/button';
-import { Checkbox } from '@treenity/react/components/ui/checkbox';
-import { Input } from '@treenity/react/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@treenity/react/components/ui/select';
-import { Textarea } from '@treenity/react/components/ui/textarea';
-import { set, usePath } from '@treenity/react';
-import { trpc } from '@treenity/react';
+import type { NodeData } from '@treenx/core';
+import { Button } from '@treenx/react/components/ui/button';
+import { Checkbox } from '@treenx/react/components/ui/checkbox';
+import { Input } from '@treenx/react/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@treenx/react/components/ui/select';
+import { Textarea } from '@treenx/react/components/ui/textarea';
+import { set, usePath } from '@treenx/react';
+import { trpc } from '@treenx/react';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -284,7 +284,7 @@ export function PageNavEditor({ value }: { value: NodeData }) {
         <div
           className={`rounded-md transition-colors ${dragOver ? 'ring-1 ring-primary bg-primary/5' : ''}`}
           onDragOver={e => {
-            if (e.dataTransfer.types.includes('application/treenity-path')) {
+            if (e.dataTransfer.types.includes('application/treenix-path')) {
               e.preventDefault();
               e.dataTransfer.dropEffect = 'link';
               setDragOver(true);
@@ -292,7 +292,7 @@ export function PageNavEditor({ value }: { value: NodeData }) {
           }}
           onDragLeave={() => setDragOver(false)}
           onDrop={async e => {
-            const path = e.dataTransfer.getData('application/treenity-path');
+            const path = e.dataTransfer.getData('application/treenix-path');
             setDragOver(false);
             if (!path) return;
             e.preventDefault();

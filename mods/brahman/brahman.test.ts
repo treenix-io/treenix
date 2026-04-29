@@ -1,11 +1,11 @@
 // Brahman bot tests — fake Grammy, real tree, full signal flow
 // Tests: template engine, keyboards, tag filtering, page/action execution, middleware
 
-import { type NodeData, register, resolve } from '@treenity/core';
-import { registerType } from '@treenity/core/comp';
-import type { ServiceCtx } from '@treenity/core/contexts/service';
-import { serverNodeHandle } from '@treenity/core/server/actions';
-import { createMemoryTree, type Tree } from '@treenity/core/tree';
+import { type NodeData, register, resolve } from '@treenx/core';
+import { registerType } from '@treenx/core/comp';
+import type { ServiceCtx } from '@treenx/core/contexts/service';
+import { serverNodeHandle } from '@treenx/core/server/actions';
+import { createMemoryTree, type Tree } from '@treenx/core/tree';
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import { buildReplyMarkup, checkTags, formatTString, renderTemplate } from './helpers';

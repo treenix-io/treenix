@@ -1,5 +1,5 @@
-import { type NodeData } from '@treenity/core';
-import { registerPrefab } from '@treenity/core/mod';
+import { type NodeData } from '@treenx/core';
+import { registerPrefab } from '@treenx/core/mod';
 import { mdToTiptap } from './markdown';
 
 // FS mount-point for a docs directory
@@ -17,7 +17,7 @@ const welcomeMd = `A rich document with **bold**, *italic*, and \`code\`.
 
 - Stored as Tiptap JSON
 - Editable with WYSIWYG toolbar
-- Supports embedded Treenity components via /slash commands`;
+- Supports embedded Treenix components via /slash commands`;
 
 const welcomeContent = mdToTiptap(welcomeMd);
 

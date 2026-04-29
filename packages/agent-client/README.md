@@ -1,19 +1,19 @@
-# @treenity/agent-client
+# @treenx/agent-client
 
-TOFU (Trust On First Use) client for connecting agents to a Treenity server.
+TOFU (Trust On First Use) client for connecting agents to a Treenix server.
 
 ## Install
 
 ```bash
-npm install @treenity/agent-client
+npm install @treenx/agent-client
 # or link from monorepo
-npm link @treenity/core @treenity/agent-client
+npm link @treenx/core @treenx/agent-client
 ```
 
 ## Usage
 
 ```ts
-import { createAgentClient, createNodeClient } from '@treenity/agent-client'
+import { createAgentClient, createNodeClient } from '@treenx/agent-client'
 import { BotConfig } from './types' // your type class
 
 const agent = createAgentClient({
@@ -70,7 +70,7 @@ All paths are scoped to the agent's subtree automatically:
 
 | Option | Type | Description |
 |--------|------|-------------|
-| `url` | `string` | Treenity server URL |
+| `url` | `string` | Treenix server URL |
 | `path` | `string` | Agent port node path |
 | `key` | `string` | Secret key |
 
@@ -82,7 +82,7 @@ Single attempt:
 - `{ status: 'pending' }` — waiting for admin approval
 - `{ status: 'approved', client, token, userId }` — ready
 
-### `waitForApproval(opts?): Promise<TreenityClient>`
+### `waitForApproval(opts?): Promise<TreenixClient>`
 
 Polls until approved.
 

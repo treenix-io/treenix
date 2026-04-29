@@ -1,4 +1,4 @@
-// Treenity React Binding — Layer 2
+// Treenix React Binding — Layer 2
 // <Render> + <RenderContext> + <NodeProvider>
 // Depends on: core (resolve), React
 
@@ -12,7 +12,7 @@ import {
   resolve,
   resolveExact,
   subscribeRegistry,
-} from '@treenity/core';
+} from '@treenx/core';
 import { createContext, createElement, type FC, type ReactNode, useContext, useEffect, useMemo, useState } from 'react';
 
 // ── Tree context (rendering context string) ──
@@ -97,7 +97,7 @@ export function useActions<T>(value: T): Actions<T> {
   }), [path]);
 }
 
-declare module '@treenity/core/core/context' {
+declare module '@treenx/core' {
   interface ContextHandlers<T> {
     // method syntax = bivariant: View<T, Extra> assignable without casts
     react(props: RenderProps<T>): ReturnType<FC>;

@@ -1,10 +1,10 @@
-// Treenity URI — universal intra-node addressing (D17)
+// Treenix URI — universal intra-node addressing (D17)
 // Standard URL order: /path[?query]#[key.]name[()]
 // Parsed via native URL — free encoding, edge case handling.
 // () = action call, no () = field read
 // Query: dot-notation for nesting (age.$gt=10 → { age: { $gt: 10 } })
 
-export interface TreenityURI {
+export interface TreenixURI {
   path: string
   key?: string
   field?: string
@@ -12,13 +12,13 @@ export interface TreenityURI {
   data?: Record<string, unknown>
 }
 
-export function parseURI(uri: string): TreenityURI {
-  const url = new URL(uri, 'treenity://t')
+export function parseURI(uri: string): TreenixURI {
+  const url = new URL(uri, 'treenix://t')
 
   const path = url.pathname
   if (!path.startsWith('/')) throw new Error('Path must start with /')
 
-  const result: TreenityURI = { path }
+  const result: TreenixURI = { path }
 
   const fragment = url.hash.slice(1) // strip leading #
   if (fragment) {
@@ -43,7 +43,7 @@ export function parseURI(uri: string): TreenityURI {
 }
 
 /** Extract value from node by parsed URI (key + field) */
-export function deriveURI<T>(node: Record<string, unknown> | undefined, uri: TreenityURI): T | undefined {
+export function deriveURI<T>(node: Record<string, unknown> | undefined, uri: TreenixURI): T | undefined {
   if (!node) return undefined
   if (!uri.key && !uri.field) return node as T
   const comp = uri.key ? node[uri.key] : node

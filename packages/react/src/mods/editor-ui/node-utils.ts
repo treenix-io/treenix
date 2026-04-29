@@ -1,5 +1,5 @@
-import { getComponents as getComps, getContextsForType, type NodeData, resolve } from '@treenity/core';
-import type { PropertySchema, TypeSchema } from '@treenity/core/schema/types';
+import { getComponents as getComps, getContextsForType, type NodeData, resolve } from '@treenx/core';
+import type { PropertySchema, TypeSchema } from '@treenx/core/schema/types';
 
 export function getComponents(node: NodeData): [string, Record<string, unknown>][] {
   return getComps(node).slice(1);

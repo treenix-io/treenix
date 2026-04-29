@@ -6,9 +6,9 @@
 import { type Class, type TypeProxy } from '#comp';
 import { makeTypedProxy, type ExecuteFn } from '#comp/handle';
 import type { NodeData } from '#core';
-import type { TreenityClient } from './index';
+import type { TreenixClient } from './index';
 
-export function createNodeClient(client: TreenityClient) {
+export function createNodeClient(client: TreenixClient) {
   const execute: ExecuteFn = (input) =>
     client.execute(input.path, input.action, input.data, { type: input.type, key: input.key });
 

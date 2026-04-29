@@ -1,8 +1,8 @@
 // Brahman — Telegram bot constructor
 // Component types for bot config, pages, actions, users, sessions
 
-import { getComponent } from '@treenity/core';
-import { getCtx, registerType } from '@treenity/core/comp';
+import { getComponent } from '@treenx/core';
+import { getCtx, registerType } from '@treenx/core/comp';
 import type { BrahmanCtx } from './helpers';
 
 // ── Shared types ──
@@ -643,7 +643,7 @@ registerType('brahman.action.keywordselect', KeywordSelectAction);
 
 // ── Call tree action ──
 
-/** Call tree action — execute any Treenity action from bot flow */
+/** Call tree action — execute any Treenix action from bot flow */
 export class CallAction {
   /** @title Node path @description Template with {session.vars} */
   path = '';
@@ -660,7 +660,7 @@ export class CallAction {
 
   async run(bCtx: BrahmanCtx) {
     const { format } = await import('./helpers');
-    const { executeAction } = await import('@treenity/core/server/actions');
+    const { executeAction } = await import('@treenx/core/server/actions');
 
     const path = format(this.path, bCtx);
     if (!path || !this.action) return;

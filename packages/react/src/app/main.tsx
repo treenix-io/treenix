@@ -16,10 +16,10 @@ const queryClient = new QueryClient();
 // https://github.com/bytedance/flowgram.ai/issues/402
 const Strict = ({ children }: { children: ReactNode }) => children;
 
-/** Mount Treenity UI into a DOM element */
+/** Mount Treenix UI into a DOM element */
 export function boot(el: HTMLElement | string = '#root') {
   const root = typeof el === 'string' ? document.querySelector(el) : el;
-  if (!root) throw new Error(`Treenity boot: element "${el}" not found`);
+  if (!root) throw new Error(`Treenix boot: element "${el}" not found`);
   createRoot(root as HTMLElement).render(
     <Strict>
       <QueryClientProvider client={queryClient}>

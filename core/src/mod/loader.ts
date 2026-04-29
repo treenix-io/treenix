@@ -1,4 +1,4 @@
-// Treenity Module Loader — dependency sort, load, seed
+// Treenix Module Loader — dependency sort, load, seed
 
 import { createLogger } from '#log';
 import { loadSchemasFromDir } from '#schema/load';
@@ -6,7 +6,7 @@ import type { Tree } from '#tree';
 import { readdir, stat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { setCurrentMod } from './tracking';
-import type { LoadedMod, ModManifest, TreenityMod } from './types';
+import type { LoadedMod, ModManifest, TreenixMod } from './types';
 
 const log = createLogger('mod');
 
@@ -120,14 +120,14 @@ export async function loadMods(
       }
 
       const entryPath = target === 'server' ? manifest.server : manifest.client;
-      let mod: TreenityMod | undefined;
+      let mod: TreenixMod | undefined;
 
       if (entryPath && manifest.packagePath) {
         const fullPath = join(manifest.packagePath, entryPath);
         setCurrentMod(manifest.name);
         const exported = await import(fullPath);
         setCurrentMod(null);
-        mod = exported.default as TreenityMod;
+        mod = exported.default as TreenixMod;
       }
 
       const t0 = performance.now();

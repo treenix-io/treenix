@@ -2,7 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { $key, $node, stampNode } from '#symbols';
 import { viewCtx } from '#context';
-import type { NodeData } from '@treenity/core';
+import type { NodeData } from '@treenx/core';
 
 function makeNode(path: string, type: string, components?: Record<string, { $type: string }>): NodeData {
   const node = { $path: path, $type: type, ...components } as NodeData;

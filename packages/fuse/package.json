@@ -1,8 +1,8 @@
 {
-  "name": "@treenity/fuse",
+  "name": "@treenx/fuse",
   "version": "1.0.1",
   "type": "module",
-  "description": "Mount Treenity tree as a FUSE filesystem",
+  "description": "Mount Treenix tree as a FUSE filesystem",
   "imports": {
     "#*": "./src/*.ts"
   },
@@ -11,13 +11,13 @@
     "./*": "./src/*"
   },
   "bin": {
-    "treenity-mount": "./src/cli.ts"
+    "treenix-mount": "./src/cli.ts"
   },
   "optionalDependencies": {
     "fuse-native": "^2.2.6",
-    "koffi": "^2.15.1"
+    "koffi": "^2.16.1"
   },
   "peerDependencies": {
-    "@treenity/core": "^3.0.0"
+    "@treenx/core": "^3.0.0"
   }
 }

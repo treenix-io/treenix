@@ -3,10 +3,10 @@
 // AgentView: profile, editable prompt, memory, event inbox
 // ItemView: description card
 
-import { getComponent, type NodeData, register } from '@treenity/core';
-import { useCurrentNode } from '@treenity/react';
-import { useChildren } from '@treenity/react';
-import { trpc } from '@treenity/react';
+import { getComponent, type NodeData, register } from '@treenx/core';
+import { useCurrentNode } from '@treenx/react';
+import { useChildren } from '@treenx/react';
+import { trpc } from '@treenx/react';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   type EventEntry,

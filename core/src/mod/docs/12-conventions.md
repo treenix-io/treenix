@@ -4,7 +4,7 @@
 
 ```
 string          → core built-in: dir, ref, root, user, type, mount-point, autostart
-t.*             → treenity infrastructure: t.mount.fs, t.mount.mongo, t.llm
+t.*             → treenix infrastructure: t.mount.fs, t.mount.mongo, t.llm
 {vendor}.*      → package types: acme.block.hero, acme.bot, order.status
 ```
 
@@ -69,7 +69,7 @@ await store.set({ $path: '/path', $type: 'my.type', field: 'value' } as NodeData
 
 **Views — типизированные через `View<T>`:**
 ```tsx
-import type { View } from '@treenity/react/context';
+import type { View } from '@treenx/react/context';
 
 // value — данные компонента. path — через ctx!.node.$path
 const MyView: View<MyType> = ({ value, ctx }) => { ... };

@@ -1,7 +1,7 @@
 // RoutedPage — dynamic router via /sys/routes refs
 // Fetches route ref + target in one call, then reactively renders target via cache.
 
-import { isRef, type NodeData } from '@treenity/core';
+import { isRef, type NodeData } from '@treenx/core';
 import { Render, RenderContext } from '#context';
 import { useEffect, useState } from 'react';
 import * as cache from '#tree/cache';

@@ -1,5 +1,5 @@
-import type { NodeData } from '@treenity/core';
-import { getComponents } from '@treenity/core';
+import type { NodeData } from '@treenx/core';
+import { getComponents } from '@treenx/core';
 import { useMemo } from 'react';
 import { type QueryFilter } from './types';
 

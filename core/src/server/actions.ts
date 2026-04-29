@@ -1,4 +1,4 @@
-// Treenity Actions — Layer 4
+// Treenix Actions — Layer 4
 // Server-specific: ActionCtx, SchemaHandler, client proxy
 // Component registration lives in @/comp
 

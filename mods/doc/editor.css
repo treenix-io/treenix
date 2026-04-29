@@ -79,6 +79,38 @@
   overflow-x: auto;
   margin: 0.75em 0;
 }
+.ProseMirror pre.doc-code-copyable {
+  position: relative;
+  padding-right: 38px;
+}
+.doc-code-copy {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  opacity: 0.75;
+}
+.doc-code-copy:hover,
+.doc-code-copy:focus-visible {
+  opacity: 1;
+  color: var(--text);
+  background: transparent;
+}
+.doc-code-copy svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
 .ProseMirror pre code {
   background: none;
   padding: 0;
@@ -272,10 +304,10 @@
   background: var(--surface);
 }
 
-/* TreenityBlock range-selection overlay is handled in JS (treenity-block-view.tsx) */
+/* TreenixBlock range-selection overlay is handled in JS (treenix-block-view.tsx) */
 
-/* Treenity embedded block */
-.treenity-block-wrapper {
+/* Treenix embedded block */
+.treenix-block-wrapper {
   margin: 0.6em 0;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -283,10 +315,10 @@
   background: var(--surface);
   transition: border-color 0.15s;
 }
-.treenity-block-wrapper:hover {
+.treenix-block-wrapper:hover {
   border-color: var(--accent-color);
 }
-.treenity-block-header {
+.treenix-block-header {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -296,7 +328,7 @@
   color: var(--text-3);
   border-bottom: 1px solid var(--border);
 }
-.treenity-block-content {
+.treenix-block-content {
   padding: 8px;
 }
 

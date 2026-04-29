@@ -1,7 +1,7 @@
 // Whisper → Agent bridge service
 // Watches a whisper channel for completed transcriptions, creates agent tasks
 
-import { createNode, getComponent, type NodeData, register } from '@treenity/core';
+import { createNode, getComponent, type NodeData, register } from '@treenx/core';
 import { WhisperInbox, WhisperText } from './types';
 
 const log = (msg: string) => console.log(`[whisper.inbox] ${msg}`);

@@ -1,8 +1,8 @@
 // Canary smoke tests — run at server startup to verify core mechanics
 
-import { getComponent, type NodeData, register } from '@treenity/core';
-import { executeAction } from '@treenity/core/server/actions';
-import '@treenity/core/contexts/service';
+import { getComponent, type NodeData, register } from '@treenx/core';
+import { executeAction } from '@treenx/core/server/actions';
+import '@treenx/core/contexts/service';
 import { CanaryItem } from './types';
 
 const PREFIX = '[canary]';

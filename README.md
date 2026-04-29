@@ -1,6 +1,6 @@
-# Treenity
+# Treenix
 
-**Composable app engine.** What Unity did for games, Treenity does for AI-native apps.
+**Composable app engine.** What Unity did for games, Treenix does for AI-native apps.
 
 Tree of typed components with context-aware rendering. Inspired by Unity3D ECS, Plan9 filesystem, Unix pipes.
 
@@ -23,7 +23,7 @@ Context   = Map<type+context, handler>   // how it BEHAVES
 ## Quick Start
 
 ```bash
-npx create-treenity my-app
+npx -y create-treenix my-app
 cd my-app
 npm run dev
 ```
@@ -32,10 +32,10 @@ npm run dev
 
 | Package | Description |
 |---------|-------------|
-| `@treenity/core` | Engine: nodes, components, contexts, tree adapters, server, MCP |
-| `@treenity/react` | React binding: hooks, admin shell, Inspector |
-| `@treenity/agent-client` | Headless Node.js client for AI agents |
-| `@treenity/recall` | Standalone RAG: BM25 + vector hybrid search |
+| `@treenx/core` | Engine: nodes, components, contexts, tree adapters, server, MCP |
+| `@treenx/react` | React binding: hooks, admin shell, Inspector |
+| `@treenx/agent-client` | Headless Node.js client for AI agents |
+| `@treenx/recall` | Standalone RAG: BM25 + vector hybrid search |
 
 ## Mods
 

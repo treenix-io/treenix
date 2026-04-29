@@ -3,7 +3,7 @@
   "properties": {
     "tool": {
       "type": "string",
-      "title": "Tool name or glob pattern: 'mcp__treenity__*', '*'",
+      "title": "Tool name or glob pattern: 'mcp__treenix__*', '*'",
       "default": ""
     },
     "pathPattern": {

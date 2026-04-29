@@ -1,10 +1,10 @@
-// Treenity Module Discovery
-// npm: scan node_modules for packages with "treenity" field
+// Treenix Module Discovery
+// npm: scan node_modules for packages with "treenix" field
 // local: scan dir for subdirs with index.ts exporting defineMod()
 
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { ModManifest, TreenityMod } from './types';
+import type { ModManifest, TreenixMod } from './types';
 
 // ── npm discovery ──
 
@@ -46,9 +46,9 @@ async function readManifest(packageDir: string): Promise<ModManifest | null> {
   try {
     const raw = await readFile(join(packageDir, 'package.json'), 'utf-8');
     const pkg = JSON.parse(raw);
-    if (!pkg.treenity) return null;
+    if (!pkg.treenix) return null;
 
-    const t = pkg.treenity;
+    const t = pkg.treenix;
     return {
       name: t.name ?? pkg.name,
       version: t.version ?? pkg.version ?? '0.0.0',
@@ -66,8 +66,8 @@ async function readManifest(packageDir: string): Promise<ModManifest | null> {
 
 // ── Local discovery (server-side, dynamic import) ──
 
-export async function discoverLocalMods(modsDir: string): Promise<TreenityMod[]> {
-  const results: TreenityMod[] = [];
+export async function discoverLocalMods(modsDir: string): Promise<TreenixMod[]> {
+  const results: TreenixMod[] = [];
   let entries: import('node:fs').Dirent[];
 
   try {
@@ -89,7 +89,7 @@ export async function discoverLocalMods(modsDir: string): Promise<TreenityMod[]>
 
     try {
       const exported = await import(indexPath);
-      const mod = exported.default as TreenityMod;
+      const mod = exported.default as TreenixMod;
       if (mod?.name) results.push(mod);
     } catch (err) {
       console.warn(`[mod] failed to load ${entry.name}:`, err instanceof Error ? err.message : err);

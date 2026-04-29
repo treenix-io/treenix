@@ -1,7 +1,7 @@
 // Agent Office seed — /agents pool + agents, /guardian policies
 
-import { type NodeData } from '@treenity/core';
-import { registerPrefab } from '@treenity/core/mod';
+import { type NodeData } from '@treenx/core';
+import { registerPrefab } from '@treenx/core/mod';
 
 registerPrefab('agent', 'seed', [
   // Pool node — orchestrator service lives here
@@ -12,20 +12,20 @@ registerPrefab('agent', 'seed', [
   // Top-level node, not under agents — guardian is data, not a service.
   { $path: 'guardian', $type: 'ai.policy',
     allow: [
-      'mcp__treenity__get_node', 'mcp__treenity__list_children',
-      'mcp__treenity__catalog', 'mcp__treenity__describe_type',
-      'mcp__treenity__search_types', 'mcp__treenity__compile_view',
-      'mcp__treenity__execute:$schema',
+      'mcp__treenix__get_node', 'mcp__treenix__list_children',
+      'mcp__treenix__catalog', 'mcp__treenix__describe_type',
+      'mcp__treenix__search_types', 'mcp__treenix__compile_view',
+      'mcp__treenix__execute:$schema',
     ],
     deny: [
-      'mcp__treenity__remove_node',
-      'mcp__treenity__guardian_approve',
+      'mcp__treenix__remove_node',
+      'mcp__treenix__guardian_approve',
       'Bash:git checkout *', 'Bash:git checkout -- *',
       'Bash:git reset --hard*', 'Bash:git push --force*', 'Bash:git clean*',
       'Bash:rm -rf *', 'Bash:rm -r *', 'Bash:cat *.env*',
     ],
     escalate: [
-      'mcp__treenity__set_node', 'mcp__treenity__execute:*', 'mcp__treenity__deploy_prefab',
+      'mcp__treenix__set_node', 'mcp__treenix__execute:*', 'mcp__treenix__deploy_prefab',
       'Bash:git add *', 'Bash:git commit *', 'Bash:git push *',
       'Bash:sed *', 'Bash:mv *', 'Bash:cp *',
     ],
@@ -50,7 +50,7 @@ registerPrefab('agent', 'seed', [
     role: 'qa',
     status: 'idle',
     model: 'claude-opus-4-6',
-    systemPrompt: `You are a QA agent for the Treenity project.
+    systemPrompt: `You are a QA agent for the Treenix project.
 Your job: run tests, check for errors, verify code quality.
 
 ## QA Checklist

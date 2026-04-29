@@ -1,8 +1,8 @@
 // AgentSim tests — round engine, proximity, tools, quorum
 
-import { createNode, getComponent, resolve } from '@treenity/core';
-import type { ServiceHandle } from '@treenity/core/contexts/service';
-import { createMemoryTree, type Tree } from '@treenity/core/tree';
+import { createNode, getComponent, resolve } from '@treenx/core';
+import type { ServiceHandle } from '@treenx/core/contexts/service';
+import { createMemoryTree, type Tree } from '@treenx/core/tree';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 import './service'; // registers handlers once (ESM cache)

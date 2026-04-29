@@ -1,4 +1,4 @@
-// Treenity Prefab Deploy — Layer 4
+// Treenix Prefab Deploy — Layer 4
 // Source path addresses prefab in tree (/sys/mods/{mod}/prefabs/{name}).
 // Actual data comes from in-memory registry (functions can't live in tree).
 

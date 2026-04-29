@@ -1,4 +1,4 @@
-// Treenity Volatile Nodes — Layer 3
+// Treenix Volatile Nodes — Layer 3
 // Nodes with $volatile go to memory, rest to backing tree.
 // Cascade: $volatile on instance > register(type, 'volatile') > false
 

@@ -1,7 +1,7 @@
 // Task type — agents create tasks, Claude (or humans) answer them
 // Spatial routing: status change → node "moves" between query mount folders
 
-import { registerType } from '@treenity/core/comp';
+import { registerType } from '@treenx/core/comp';
 
 /** Agent task — question/answer workflow with status tracking */
 export class Task {

@@ -1,4 +1,4 @@
-// Treenity Types Mount — Layer 4
+// Treenix Types Mount — Layer 4
 // Union of registry (code-defined types) + backing tree (dynamic types)
 
 import { type ComponentData, createNode, getContextsForType, getRegisteredTypes, type NodeData, resolve } from '#core';

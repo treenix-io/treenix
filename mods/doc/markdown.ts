@@ -17,7 +17,7 @@ export function inlineToMd(node: TiptapNode): string {
     const nodeLink = node.marks?.find((m) => m.type === 'nodeLink');
     if (nodeLink) {
       const path = (nodeLink as { type: string; attrs?: Record<string, unknown> }).attrs?.path ?? '';
-      t = `[${t}](treenity:${path})`;
+      t = `[${t}](treenix:${path})`;
     }
     if (node.marks?.some((m) => m.type === 'bold')) t = `**${t}**`;
     if (node.marks?.some((m) => m.type === 'italic')) t = `*${t}*`;
@@ -95,7 +95,7 @@ export function tiptapToMd(node: TiptapNode): string {
     case 'horizontalRule':
       return '---';
 
-    case 'treenityBlock': {
+    case 'treenixBlock': {
       const ref = node.attrs?.ref as string | null;
       const type = node.attrs?.type as string | null;
       if (ref) return `[Component: ${type ?? 'unknown'} at ${ref}]`;
@@ -121,13 +121,13 @@ export function tiptapToMd(node: TiptapNode): string {
 
 // Resolve a markdown link href to an absolute tree path, or null if external.
 // External: http(s)://, mailto:, fragment-only (#anchor)
-// treenity:/path → /path
+// treenix:/path → /path
 // /abs → /abs
 // relative (./, ../, foo.md) → resolved against dirname(basePath)
 export function resolveLinkPath(href: string, basePath?: string): string | null {
   if (!href) return null;
   if (/^(?:[a-z][a-z0-9+.-]*:)/i.test(href)) {
-    if (href.startsWith('treenity:')) return href.slice('treenity:'.length) || null;
+    if (href.startsWith('treenix:')) return href.slice('treenix:'.length) || null;
     return null; // http(s), mailto, etc — external
   }
   if (href.startsWith('#')) return null; // fragment only — same-page anchor, not a node

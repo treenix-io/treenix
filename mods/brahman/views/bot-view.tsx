@@ -1,9 +1,9 @@
 // Bot view — read-only display of bot config + pages list
 
-import type { NodeData } from '@treenity/core';
-import { Badge } from '@treenity/react/components/ui/badge';
-import { Render, RenderContext } from '@treenity/react';
-import { useChildren } from '@treenity/react';
+import type { NodeData } from '@treenx/core';
+import { Badge } from '@treenx/react/components/ui/badge';
+import { Render, RenderContext } from '@treenx/react';
+import { useChildren } from '@treenx/react';
 import { Bot } from 'lucide-react';
 import type { BotConfig } from '../types';
 

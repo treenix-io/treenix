@@ -13,12 +13,12 @@ import {
 } from '@dnd-kit/core';
 import { arrayMove, horizontalListSortingStrategy, SortableContext, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Badge } from '@treenity/react/components/ui/badge';
-import { Button } from '@treenity/react/components/ui/button';
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@treenity/react/components/ui/dialog';
-import { Input } from '@treenity/react/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@treenity/react/components/ui/select';
-import { trpc } from '@treenity/react';
+import { Badge } from '@treenx/react/components/ui/badge';
+import { Button } from '@treenx/react/components/ui/button';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@treenx/react/components/ui/dialog';
+import { Input } from '@treenx/react/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@treenx/react/components/ui/select';
+import { trpc } from '@treenx/react';
 import { ArrowRight, Plus, X } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { ACTION_TYPES, MENU_TYPES, type MenuButton, type MenuRow, type MenuType, type TString } from '../types';
@@ -181,7 +181,7 @@ function SortableButton({
       }}
       className={`shrink-0 relative ${showIndicator ? 'ml-2' : ''}`}
       onDragOver={e => {
-        if (e.dataTransfer.types.includes('application/treenity-path')) {
+        if (e.dataTransfer.types.includes('application/treenix-path')) {
           e.preventDefault();
           e.dataTransfer.dropEffect = 'link';
           setTreeDragOver(true);
@@ -189,7 +189,7 @@ function SortableButton({
       }}
       onDragLeave={() => setTreeDragOver(false)}
       onDrop={async e => {
-        const path = e.dataTransfer.getData('application/treenity-path');
+        const path = e.dataTransfer.getData('application/treenix-path');
         setTreeDragOver(false);
         if (!path) return;
         e.preventDefault();

@@ -1,6 +1,6 @@
 // Lazy loader: registers t3d.scene view but defers three.js import until render
 
-import { register, type NodeData } from '@treenity/core';
+import { register, type NodeData } from '@treenx/core';
 import { lazy, Suspense } from 'react';
 
 const SceneViewLazy = lazy(() =>

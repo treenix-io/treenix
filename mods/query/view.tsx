@@ -1,8 +1,8 @@
-import type { NodeData } from '@treenity/core';
-import { register } from '@treenity/core';
-import { Render, RenderContext, type View } from '@treenity/react';
-import { useChildren, useNavigate } from '@treenity/react/hooks';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@treenity/react/ui/table';
+import type { NodeData } from '@treenx/core';
+import { register } from '@treenx/core';
+import { Render, RenderContext, type View } from '@treenx/react';
+import { useChildren, useNavigate } from '@treenx/react/hooks';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@treenx/react/ui/table';
 import { List, Plus, Rows3, Table2, X } from 'lucide-react';
 import { useMemo, useState, type ReactNode } from 'react';
 import { useChildTypes, useFiltered } from './hooks';

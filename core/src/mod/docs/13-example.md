@@ -67,8 +67,8 @@ register('sensor', 'service', async (node: NodeData, ctx: ServiceCtx) => {
 ```tsx
 // src/mods/sensor/view.tsx
 import { register } from '#core';
-import type { View } from '@treenity/react/context';
-import { useChildren } from '@treenity/react/hooks';
+import type { View } from '@treenx/react/context';
+import { useChildren } from '@treenx/react/hooks';
 import { SensorConfig, SensorReading } from './types';
 
 // View<T> — типизированный компонент. value: T, ctx: ViewCtx

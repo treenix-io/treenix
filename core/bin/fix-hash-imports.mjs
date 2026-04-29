@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-// Post-build: rewrite #subpath imports → relative paths in dist/
-// Runs after tsc. Reads package.json "imports" field, walks dist/*.js,
-// replaces `from '#xxx'` with `from './relative/path.js'`.
+// Post-build:
+// - rewrite #subpath imports → relative paths in dist/
+// - add .js to relative ESM imports/exports in JS and declaration output
+// Runs after tsc. Reads package.json "imports" field, walks dist/.
 // Prevents dual-module issues in bundlers (Vite, webpack) that don't
 // fully support Node.js package.json "imports" field.
 
@@ -54,19 +55,31 @@ function tryFile(rel) {
 }
 
 const HASH_RE = /from\s+['"]#([^'"]+)['"]/g;
+const SPEC_RE = /(\bfrom\s+['"]|^\s*import\s+['"])(\.{1,2}\/[^'"]+)(['"])/gm;
 let files = 0, rewrites = 0;
+
+function normalizeRelativeSpecifier(specifier) {
+  if (specifier.endsWith('.ts') || specifier.endsWith('.tsx')) {
+    return specifier.replace(/\.tsx?$/, '.js');
+  }
+
+  const last = specifier.split('/').pop() ?? '';
+  if (last.includes('.')) return specifier;
+
+  return `${specifier}.js`;
+}
 
 function walk(dir) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const full = join(dir, entry.name);
     if (entry.isDirectory()) { walk(full); continue; }
-    if (!entry.name.endsWith('.js') && !entry.name.endsWith('.jsx')) continue;
+    if (!entry.name.endsWith('.js') && !entry.name.endsWith('.jsx') && !entry.name.endsWith('.d.ts')) continue;
 
     const src = readFileSync(full, 'utf-8');
-    if (!src.includes("'#") && !src.includes('"#')) continue;
+    if (!src.includes("'#") && !src.includes('"#') && !src.includes("from './") && !src.includes('from "./') && !src.includes("import './") && !src.includes('import "./')) continue;
 
     let changed = false;
-    const out = src.replace(HASH_RE, (match, specifier) => {
+    let out = src.replace(HASH_RE, (match, specifier) => {
       const resolved = resolveHash('#' + specifier);
       if (!resolved) { console.warn(`  WARN: unresolved #${specifier} in ${full}`); return match; }
       let rel = relative(dirname(full), resolved);
@@ -74,6 +87,14 @@ function walk(dir) {
       changed = true;
       rewrites++;
       return `from '${rel}'`;
+    });
+
+    out = out.replace(SPEC_RE, (match, prefix, specifier, suffix) => {
+      const next = normalizeRelativeSpecifier(specifier);
+      if (next === specifier) return match;
+      changed = true;
+      rewrites++;
+      return `${prefix}${next}${suffix}`;
     });
 
     if (changed) { writeFileSync(full, out); files++; }

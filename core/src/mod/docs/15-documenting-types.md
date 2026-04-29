@@ -34,7 +34,7 @@ Class JSDoc → extract-schemas.ts → src/schema/generated/*.json → registry(
 | `textarea` | Многострочное поле | Длинный текст, JSON, описания |
 | `uri` | URL + кликабельная ссылка | Внешние ссылки |
 | `email` | Текстовое поле | Email-адреса |
-| `path` | Поле пути | Treenity node paths (auto при refType) |
+| `path` | Поле пути | Treenix node paths (auto при refType) |
 | `tags` | Чипсы с add/remove | Массивы тегов |
 | `tstring` | Мультиязычный редактор | Переводы `{ ru: "...", en: "..." }` |
 | `timestamp` | Форматированная дата | Unix-метки времени |
@@ -131,9 +131,9 @@ register('brahman.bot', 'action:start', startHandler);
 Копируй как system instructions для AI, который создаёт или документирует типы:
 
 ```
-## Treenity Type Annotation Rules
+## Treenix Type Annotation Rules
 
-When creating or documenting a Treenity component class:
+When creating or documenting a Treenix component class:
 
 1. CLASS: one-line JSDoc `/** {Noun phrase} — {what it does} */`
 2. PROPERTIES: `/** @title {Label} @description {hint} @format {widget} */`

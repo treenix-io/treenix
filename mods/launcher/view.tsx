@@ -1,16 +1,16 @@
 // Launcher view — dashboard with drag-drop from tree + context switching
 
-import { isRef, type NodeData, register, resolveExact } from '@treenity/core';
-import { Render, RenderContext, type View } from '@treenity/react';
-import { useChildren, useNavigate, usePath } from '@treenity/react';
-import { cn } from '@treenity/react';
-import { Button } from '@treenity/react/ui/button';
+import { isRef, type NodeData, register, resolveExact } from '@treenx/core';
+import { Render, RenderContext, type View } from '@treenx/react';
+import { useChildren, useNavigate, usePath } from '@treenx/react';
+import { cn } from '@treenx/react';
+import { Button } from '@treenx/react/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '@treenity/react/ui/dropdown-menu';
+} from '@treenx/react/ui/dropdown-menu';
 import { GripVertical, Plus, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import GridLayout from 'react-grid-layout';
@@ -273,7 +273,7 @@ const LauncherView: View<NodeData> = ({ value }) => {
   const handleExternalDrop = useCallback(
     (_layout: unknown, _item: unknown, e: Event) => {
       const de = e as DragEvent;
-      const path = de.dataTransfer?.getData('application/treenity-path')
+      const path = de.dataTransfer?.getData('application/treenix-path')
         || de.dataTransfer?.getData('text/plain');
       if (!path || !path.startsWith('/')) return;
       launcher.addApp({ path });
@@ -284,7 +284,7 @@ const LauncherView: View<NodeData> = ({ value }) => {
 
   // Container-level drop for when grid is empty or drop misses grid items
   const handleContainerDragOver = useCallback((e: React.DragEvent) => {
-    if (e.dataTransfer.types.includes('application/treenity-path')) {
+    if (e.dataTransfer.types.includes('application/treenix-path')) {
       e.preventDefault();
       setDragOver(true);
     }
@@ -294,7 +294,7 @@ const LauncherView: View<NodeData> = ({ value }) => {
     (e: React.DragEvent) => {
       e.preventDefault();
       setDragOver(false);
-      const path = e.dataTransfer.getData('application/treenity-path')
+      const path = e.dataTransfer.getData('application/treenix-path')
         || e.dataTransfer.getData('text/plain');
       if (!path || !path.startsWith('/')) return;
       launcher.addApp({ path });
@@ -315,7 +315,7 @@ const LauncherView: View<NodeData> = ({ value }) => {
     >
       {/* Status bar */}
       <div className="flex items-center justify-between px-5 pb-2 pt-3">
-        <span className="text-sm font-semibold text-white/80">Treenity</span>
+        <span className="text-sm font-semibold text-white/80">Treenix</span>
         <Button
           size="sm"
           variant="ghost"

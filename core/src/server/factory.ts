@@ -1,4 +1,4 @@
-// treenity() — universal server factory
+// treenix() — universal server factory
 // Single entry point: loads infrastructure, mods, builds pipeline, wires logging.
 
 import '#contexts/text/index';
@@ -16,7 +16,7 @@ import { deploySeedPrefabs } from './prefab';
 import { createEnsure, type Ensure } from './seed';
 import { createHttpServer, createPipeline, type Pipeline } from './server';
 
-export type TreenityConfig = {
+export type TreenixConfig = {
   rootNode: NodeData;
   modsDir?: string | false;
   seed?: (tree: Tree, ensure: Ensure) => Promise<void>;
@@ -29,15 +29,15 @@ export type ListenOpts = {
   staticDir?: string;
 };
 
-export type TreenityInstance = Pipeline & {
+export type TreenixInstance = Pipeline & {
   stop(): Promise<void>;
 };
 
-export type TreenityServer = TreenityInstance & {
+export type TreenixServer = TreenixInstance & {
   listen(port?: number, opts?: ListenOpts): Promise<Server>;
 };
 
-export async function treenity(config: TreenityConfig): Promise<TreenityServer> {
+export async function treenix(config: TreenixConfig): Promise<TreenixServer> {
   const { rootNode } = config;
   const autostart = config.autostart ?? true;
 
@@ -114,10 +114,10 @@ export async function treenity(config: TreenityConfig): Promise<TreenityServer> 
               const comp = root[k] as Record<string, unknown> | undefined;
               return `  ${k}: ${comp?.$type ?? '?'}  ${comp?.root ?? comp?.uri ?? ''}`;
             }).join('\n');
-            console.log(`treenity ${host}:${port}  ${storage}\n${layerInfo}`);
+            console.log(`treenix ${host}:${port}  ${storage}\n${layerInfo}`);
           } else {
             const detail = mount?.root ?? mount?.uri ?? '';
-            console.log(`treenity ${host}:${port}  ${storage}${detail ? `  ${detail}` : ''}`);
+            console.log(`treenix ${host}:${port}  ${storage}${detail ? `  ${detail}` : ''}`);
           }
           resolve(server);
         });

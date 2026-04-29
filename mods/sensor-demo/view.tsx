@@ -1,7 +1,7 @@
 // Sensor feed — live view of last N readings, auto-updates via watchNew
 
-import { type NodeData, register } from '@treenity/core';
-import { useChildren } from '@treenity/react';
+import { type NodeData, register } from '@treenx/core';
+import { useChildren } from '@treenx/react';
 
 const MAX = 10;
 

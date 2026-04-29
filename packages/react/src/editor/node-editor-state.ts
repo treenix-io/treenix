@@ -1,4 +1,4 @@
-import type { NodeData } from '@treenity/core';
+import type { NodeData } from '@treenx/core';
 
 export function getNodeEditorJsonText(node: NodeData): string {
   return JSON.stringify(node, null, 2);

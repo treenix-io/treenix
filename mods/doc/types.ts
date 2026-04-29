@@ -1,6 +1,6 @@
-import { registerType } from '@treenity/core/comp';
+import { registerType } from '@treenx/core/comp';
 
-/** Rich document — Tiptap JSON with embedded Treenity components */
+/** Rich document — Tiptap JSON with embedded Treenix components */
 class DocPage {
   /** @title Title */
   title = 'Untitled';

@@ -1,4 +1,4 @@
-import { registerType } from '@treenity/core/comp';
+import { registerType } from '@treenx/core/comp';
 
 /** @title 3D Scene — root container for the Three.js viewport */
 export class T3dScene {}

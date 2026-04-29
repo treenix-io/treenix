@@ -8,14 +8,14 @@ import { AGENT_SESSION_TTL, hashAgentKey, timingSafeCompare } from './agent';
 import { buildClaims, createSession, resolveToken, withAcl } from './auth';
 
 // Import agent-port type registration (side-effect: registers t.agent.port)
-import '../mods/treenity/agent-port';
+import '../mods/treenix/agent-port';
 
 let tree: Tree;
 
 beforeEach(async () => {
   clearRegistry();
   // Re-import registers via dynamic import won't re-run, so import at top level
-  await import('../mods/treenity/agent-port');
+  await import('../mods/treenix/agent-port');
 
   tree = createMemoryTree();
   // Root with public read

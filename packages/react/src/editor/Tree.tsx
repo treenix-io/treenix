@@ -159,7 +159,7 @@ function TreeNode({
         draggable={false}
         onDragStart={(e) => {
           e.dataTransfer.setData('text/plain', path);
-          e.dataTransfer.setData('application/treenity-path', path);
+          e.dataTransfer.setData('application/treenix-path', path);
           e.dataTransfer.effectAllowed = 'all';
         }}
         onDragOver={(e) => {

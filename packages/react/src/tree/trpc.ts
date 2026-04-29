@@ -1,6 +1,6 @@
-import { createTrpcTransport } from '@treenity/core/client';
+import { createTrpcTransport } from '@treenx/core/client';
 
-const TOKEN_KEY = 'treenity_token';
+const TOKEN_KEY = 'treenix_token';
 
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);

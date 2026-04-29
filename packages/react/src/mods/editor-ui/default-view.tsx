@@ -1,8 +1,8 @@
 import './editor-ui.css';
 import { Render, RenderContext } from '#context';
 import { useChildren } from '#hooks';
-import { type ComponentData, type NodeData, register } from '@treenity/core';
-import type { PropertySchema } from '@treenity/core/schema/types';
+import { type ComponentData, type NodeData, register } from '@treenx/core';
+import type { PropertySchema } from '@treenx/core/schema/types';
 import { EmptyNodePlaceholder } from './empty-placeholder';
 import { renderField } from './form-field';
 import { getComponents, getPlainFields, getSchema } from './node-utils';

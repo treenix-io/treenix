@@ -1,11 +1,11 @@
-// Treenity Client SDK — e2e tests
+// Treenix Client SDK — e2e tests
 // Tests createTrpcTransport + createRepathTree + t.mount.tree.trpc
 
 import { registerType } from '#comp';
 import { createNode, R, register, S, W } from '#core';
 import { withMounts } from '#server/mount';
 import { setAllowPrivateUrls } from '#server/mount-adapters';
-import { createTreenityServer } from '#server/server';
+import { createTreenixServer } from '#server/server';
 import { createMemoryTree } from '#tree';
 import { createRepathTree } from '#tree/repath';
 import assert from 'node:assert/strict';
@@ -30,8 +30,8 @@ class Counter {
   increment() { this.count++; }
 }
 
-describe('Treenity Client SDK', () => {
-  let ts: ReturnType<typeof createTreenityServer>;
+describe('Treenix Client SDK', () => {
+  let ts: ReturnType<typeof createTreenixServer>;
   let url: string;
   const sockets = new Set<Socket>();
 
@@ -51,7 +51,7 @@ describe('Treenity Client SDK', () => {
       $acl: [{ g: 'public', p: R | W | S }],
     });
 
-    ts = createTreenityServer(bootstrap);
+    ts = createTreenixServer(bootstrap);
     ts.server.on('connection', (s: Socket) => {
       sockets.add(s);
       s.on('close', () => sockets.delete(s));

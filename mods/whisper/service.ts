@@ -1,7 +1,7 @@
 // Whisper service — autostart-compatible, registers HTTP route dynamically
 
-import { getComponent, register } from '@treenity/core';
-import { routeRegistry } from '@treenity/core/server/server';
+import { getComponent, register } from '@treenx/core';
+import { routeRegistry } from '@treenx/core/server/server';
 import { createWhisperHandler } from './route';
 import { WhisperConfig } from './types';
 

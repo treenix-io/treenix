@@ -24,7 +24,7 @@ const config: KnipConfig = {
       project: ['src/**/*.ts', 'src/**/*.tsx'],
       ignoreDependencies: [
         // cross-package peers resolved at runtime
-        '@treenity/react', 'dayjs', 'eventsource', 'reflect-metadata',
+        '@treenx/react', 'dayjs', 'eventsource', 'reflect-metadata',
       ],
     },
 
@@ -33,15 +33,15 @@ const config: KnipConfig = {
       entry: [
         'src/index.ts',
         'src/app/main.tsx',
-        'src/app/Treenity.tsx',
+        'src/app/Treenix.tsx',
         'src/mods/clients.ts',
         'src/mods/servers.ts',
-        'vite-plugin-treenity.ts',
+        'vite-plugin-treenix.ts',
       ],
       project: ['src/**/*.ts', 'src/**/*.tsx'],
       ignoreDependencies: [
         '@tailwindcss/vite',  // vite plugin, not a direct import
-        '@treenity/react',    // self-reference in package.json
+        '@treenx/react',    // self-reference in package.json
       ],
     },
 
@@ -60,7 +60,7 @@ const config: KnipConfig = {
     },
 
     'packages/agent-client': {},
-    'packages/create-treenity': {},
+    'packages/create-treenix': {},
     'packages/treenix': {},
     'packages/fuse': {},
   },

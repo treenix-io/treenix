@@ -4,13 +4,13 @@
 // Deterministic routing — no LLM tokens burned on orchestration.
 
 import { invokeClaude } from '#metatron/claude';
-import { type Class, type ComponentData, createNode, getComponent, type NodeData, register } from '@treenity/core';
-import { setComponent } from '@treenity/core/comp';
-import type { ServiceCtx } from '@treenity/core/contexts/service';
-import { OpError } from '@treenity/core/errors';
-import { createLogger } from '@treenity/core/log';
-import type { ActionCtx } from '@treenity/core/server/actions';
-import { debouncedWrite } from '@treenity/core/util/debounced-write';
+import { type Class, type ComponentData, createNode, getComponent, type NodeData, register } from '@treenx/core';
+import { setComponent } from '@treenx/core/comp';
+import type { ServiceCtx } from '@treenx/core/contexts/service';
+import { OpError } from '@treenx/core/errors';
+import { createLogger } from '@treenx/core/log';
+import type { ActionCtx } from '@treenx/core/server/actions';
+import { debouncedWrite } from '@treenx/core/util/debounced-write';
 import dayjs from 'dayjs';
 import { buildPermissionRules, createCanUseTool, reconcileOnStartup } from './guardian';
 import {
@@ -90,7 +90,7 @@ function buildWorkPrompt(role: string, task: NodeData, agent: NodeData, cursor: 
   const agentComp = getComponent(agent, AiAgent);
   const base = agentComp?.systemPrompt
     ? String(agentComp.systemPrompt)
-    : `You are a ${role} agent for the Treenity project.`;
+    : `You are a ${role} agent for the Treenix project.`;
 
   // Include org.post hat if agent lives on an org.post node
   const hat = agent.$type === 'org.post' && typeof agent.hat === 'string' && agent.hat
@@ -140,7 +140,7 @@ function buildPlanPrompt(role: string, task: NodeData, agent: NodeData, cursor: 
   const agentComp = getComponent(agent, AiAgent);
   const base = agentComp?.systemPrompt
     ? String(agentComp.systemPrompt)
-    : `You are a ${role} agent for the Treenity project.`;
+    : `You are a ${role} agent for the Treenix project.`;
 
   const hat = agent.$type === 'org.post' && typeof agent.hat === 'string' && agent.hat
     ? `\n## Hat\n${agent.hat}\n`

@@ -2,8 +2,8 @@
 // Self-contained: include card styling, click navigation, chevron
 
 import { useNavigate } from '#navigate';
-import type { NodeData } from '@treenity/core';
-import { register } from '@treenity/core';
+import type { NodeData } from '@treenx/core';
+import { register } from '@treenx/core';
 
 const TYPE_ICONS: Record<string, string> = {
   root: '/',

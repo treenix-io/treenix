@@ -12,11 +12,11 @@ import {
   type NodeData,
   register,
   resolve,
-} from '@treenity/core';
-import '@treenity/core/contexts/service';
-import { newComponent, setComponent } from '@treenity/core/comp';
-import { OpError } from '@treenity/core/errors';
-import { type ActionCtx, serverNodeHandle } from '@treenity/core/server/actions';
+} from '@treenx/core';
+import '@treenx/core/contexts/service';
+import { newComponent, setComponent } from '@treenx/core/comp';
+import { OpError } from '@treenx/core/errors';
+import { type ActionCtx, serverNodeHandle } from '@treenx/core/server/actions';
 import {
   type AgentEvent,
   type EventEntry,
