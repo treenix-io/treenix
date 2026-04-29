@@ -6,7 +6,7 @@ import { basename, join, resolve } from 'node:path';
 import { modCreate } from './mod-create';
 
 const STARTER_URL = process.env.TREENIX_STARTER_URL
-  ?? 'https://codeload.github.com/treenix-ai/starter/tar.gz/refs/heads/main';
+  ?? 'https://codeload.github.com/treenix-io/starter/tar.gz/refs/heads/main';
 
 async function downloadStarter(targetDir: string) {
   mkdirSync(targetDir, { recursive: true });

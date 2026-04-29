@@ -23,7 +23,7 @@ Context   = Map<type+context, handler>   // how it BEHAVES
 ## Quick Start
 
 ```bash
-npx create-treenix my-app
+npx -y create-treenix my-app
 cd my-app
 npm run dev
 ```

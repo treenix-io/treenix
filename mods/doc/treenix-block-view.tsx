@@ -1,6 +1,5 @@
 import { NodeViewWrapper } from '@tiptap/react';
-import { getContextsForType } from '@treenx/core';
-import { getRegistryVersion, subscribeRegistry } from '@treenx/core/core/registry';
+import { getContextsForType, getRegistryVersion, subscribeRegistry } from '@treenx/core';
 import { Render, RenderContext } from '@treenx/react';
 import { usePath } from '@treenx/react';
 import { useAutoSave } from '@treenx/react/tree/auto-save';

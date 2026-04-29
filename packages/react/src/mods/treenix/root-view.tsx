@@ -1,7 +1,7 @@
 import type { View } from '#context';
 import { Render } from '#context';
 import { usePath } from '#hooks';
-import { register } from '@treenx/core/core';
+import { register } from '@treenx/core';
 
 const RootView: View<{ $type: 'root' }> = () => {
   const { data: page, loading } = usePath('/home');

@@ -128,7 +128,7 @@ view(${cls}, ({ value }) => (
 
   Next:
     1. Edit types.ts
-    2. npm run schema
-    3. Restart server → visit /t/${name}/example
+    2. Restart the dev server
+    3. Visit /t/${name}/example
 `);
 }

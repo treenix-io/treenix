@@ -7,7 +7,7 @@
 ### Try it without committing
 
 ```bash
-npx create-treenix start
+npx -y create-treenix start
 ```
 
 Downloads the starter into a cached playground, installs deps once, starts the dev server. Re-run to jump back in; `--reset` wipes and re-downloads.
@@ -15,7 +15,7 @@ Downloads the starter into a cached playground, installs deps once, starts the d
 ### Scaffold a named project
 
 ```bash
-npx create-treenix my-app
+npx -y create-treenix my-app
 ```
 
 Downloads the starter into `./my-app`, installs deps, tells you how to run it. Add `-y` to skip prompts.
@@ -23,24 +23,24 @@ Downloads the starter into `./my-app`, installs deps, tells you how to run it. A
 ### Add a mod to an existing project
 
 ```bash
-npx create-treenix mod create my-mod
+npx -y create-treenix mod create my-mod
 ```
 
 Must be run inside a Treenix project (walks up to find `root.json`). Creates `types.ts`, `view.tsx`, `seed.ts`; registers the seed in `root.json`.
 
 ## What you get
 
-Whatever `github.com/treenix-ai/starter` contains at `main`. Currently:
+Whatever `github.com/treenix-io/starter` contains at `main`. Currently:
 
 - Vite 8 frontend on `:3210`, Treenix server on `:3211` (single process).
 - Admin UI (tree browser, node editor, context-aware views) auto-loaded from `@treenx/mods` and `@treenx/react`.
-- `root.json` with FS overlay (`data/base` + `data/work`).
+- `root.json` with FS overlay (`tree/seed` + `tree/work`).
 - `mods/example` and `mods/profile` — edit or delete.
 
 ```
 my-app/
-├── data/base/       seed tree (checked in)
-├── data/work/       runtime overlay (gitignored)
+├── tree/seed/       seed tree (checked in)
+├── tree/work/       runtime overlay (gitignored)
 ├── mods/            your mods
 ├── src/main.tsx     `import '@treenx/react/main'`
 ├── root.json        server config

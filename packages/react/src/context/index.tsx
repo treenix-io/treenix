@@ -97,7 +97,7 @@ export function useActions<T>(value: T): Actions<T> {
   }), [path]);
 }
 
-declare module '@treenx/core/core/context' {
+declare module '@treenx/core' {
   interface ContextHandlers<T> {
     // method syntax = bivariant: View<T, Extra> assignable without casts
     react(props: RenderProps<T>): ReturnType<FC>;

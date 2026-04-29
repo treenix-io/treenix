@@ -1,6 +1,6 @@
 {
   "name": "@treenx/core",
-  "version": "3.0.10",
+  "version": "3.0.11",
   "description": "Composable typed tree engine — three primitives, everything else composes. Nodes, components, contexts.",
   "type": "module",
   "publishConfig": {
@@ -8,10 +8,10 @@
   },
   "license": "FSL-1.1-MIT",
   "author": "Treenix <hello@treenix.ai> (https://treenix.ai)",
-  "homepage": "https://github.com/treenix-ai/treenix",
+  "homepage": "https://github.com/treenix-io/treenix",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/treenix-ai/treenix.git"
+    "url": "git+https://github.com/treenix-io/treenix.git"
   },
   "keywords": [
     "treenix",

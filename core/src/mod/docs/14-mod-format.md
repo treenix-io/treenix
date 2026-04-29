@@ -308,7 +308,7 @@ buf.clear();                         // сбросить всё
 ### Регистрация — типобезопасная
 
 ```tsx
-import { register } from '@treenx/core/core';
+import { register } from '@treenx/core';
 import type { View } from '@treenx/react/context';
 import { Render, RenderContext } from '@treenx/react/context';
 

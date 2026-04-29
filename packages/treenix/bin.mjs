@@ -19,7 +19,7 @@ if (cmd === 'init') {
 
   console.log(`\n  Creating ${name}...\n`);
   execSync(
-    `git clone --recurse-submodules --depth 1 https://github.com/treenix-ai/starter.git ${name}`,
+    `git clone --recurse-submodules --depth 1 https://github.com/treenix-io/starter.git ${name}`,
     { stdio: 'inherit' },
   );
 

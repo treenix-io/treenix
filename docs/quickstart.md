@@ -91,7 +91,7 @@ export { TodoList };
 ### seed.ts — Initial Data
 
 ```typescript
-import { type NodeData } from '@treenx/core/core';
+import type { NodeData } from '@treenx/core';
 import { registerPrefab } from '@treenx/core/mod';
 
 registerPrefab('todo', 'seed', [
@@ -133,7 +133,7 @@ This already works: typed data, validated actions, real-time updates, persistenc
 Create `view.tsx` for a proper UI:
 
 ```tsx
-import { register, type NodeData } from '@treenx/core/core';
+import { register, type NodeData } from '@treenx/core';
 import { usePath, useChildren } from '@treenx/react/hooks';
 import { useState } from 'react';
 import { TodoItem, TodoList } from './types';
