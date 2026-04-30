@@ -12,11 +12,11 @@ import { Input } from '#components/ui/input';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '#components/ui/resizable';
 import { TypePicker } from '#mods/editor-ui/type-picker';
 import type { NodeData } from '@treenx/core';
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as cache from '#tree/cache';
 import { tree } from '#tree/client';
-import { SSE_CONNECTED, SSE_DISCONNECTED, startEvents, stopEvents } from '#tree/events';
-import { addComponent, createNode } from '#hooks';
+import { SSE_CONNECTED, SSE_DISCONNECTED } from '#tree/events';
+import { addComponent } from '#hooks';
 import { checkBeforeNavigate, makeNavigateApi, NavigateProvider, pushHistory } from '#navigate';
 import { EditorSidebar } from './EditorSidebar';
 import { Inspector } from '#editor/Inspector';
@@ -40,17 +40,8 @@ export function Editor({ authed, onLogout }: EditorProps) {
     const rest = p.slice(2);
     return rest || '/';
   });
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const expandedRef = useRef(expanded);
-  expandedRef.current = expanded;
-  const selectedRef = useRef(selected);
-  selectedRef.current = selected;
-  const [loaded, setLoaded] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
-  const [creatingAt, setCreatingAt] = useState<string | null>(null);
   const [addingComponentAt, setAddingComponentAt] = useState<string | null>(null);
-  const [filter, setFilter] = useState('');
-  const [showHidden, setShowHidden] = useState(false);
   const [toastMsg, setToastMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const [sseDown, setSseDown] = useState(false);
   const sseDownTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -83,11 +74,6 @@ export function Editor({ authed, onLogout }: EditorProps) {
       if (sseDownTimer.current) clearTimeout(sseDownTimer.current);
     };
   }, []);
-
-  const hasRootNode = useSyncExternalStore(
-    useCallback((cb: () => void) => cache.subscribePath(root, cb), [root]),
-    useCallback(() => cache.has(root), [root]),
-  );
 
   // Sync selected path to /t/ URL
   const navFromPopstate = useRef(false);
@@ -142,91 +128,23 @@ export function Editor({ authed, onLogout }: EditorProps) {
     return () => window.removeEventListener('unhandledrejection', handler);
   }, [showToast]);
 
-  const loadChildren = useCallback(async (path: string) => {
-    const { items: children } = await tree.getChildren(path, { watch: true, watchNew: true });
-    cache.replaceChildren(path, children);
-    setLoaded((prev) => new Set(prev).add(path));
-  }, []);
-
-  useEffect(() => {
-    cache.clear();
-    setLoaded(new Set());
-    (async () => {
-      try {
-        const rootNode = (await trpc.get.query({ path: root, watch: true })) as NodeData | undefined;
-        if (rootNode) cache.put(rootNode);
-        await loadChildren(root);
-
-        const p = location.pathname;
-        const target = p.startsWith('/t') ? p.slice(2) || '/' : root;
-        const toExpand = new Set([root]);
-
-        if (target !== root && target.startsWith(root === '/' ? '/' : root + '/')) {
-          const relative = root === '/' ? target : target.slice(root.length);
-          const parts = relative.split('/').filter(Boolean);
-          let cur = root === '/' ? '' : root;
-          for (let i = 0; i < parts.length - 1; i++) {
-            cur += '/' + parts[i];
-            toExpand.add(cur);
-            await loadChildren(cur);
-          }
-          const parent = cur || root;
-          if (!toExpand.has(parent)) await loadChildren(parent);
-        }
-        setExpanded(toExpand);
-        setSelected(target);
-        if (target !== root) {
-          const node = (await trpc.get.query({ path: target, watch: true })) as
-            | NodeData
-            | undefined;
-          if (node) cache.put(node);
-        }
-      } catch (e) {
-        setError(e instanceof Error ? e.message : 'Failed to connect to server');
+  const selectPath = useCallback(
+    async (path: string | null) => {
+      setSelected(path);
+      if (path && !cache.has(path)) {
+        const node = (await trpc.get.query({ path, watch: true })) as NodeData | undefined;
+        if (node) cache.put(node);
       }
-    })();
-  }, [loadChildren, root]);
-
-  useEffect(() => {
-    startEvents({
-      loadChildren,
-      getExpanded: () => expandedRef.current,
-      getSelected: () => selectedRef.current,
-    });
-    return stopEvents;
-  }, [loadChildren]);
+    },
+    [],
+  );
 
   const handleSelect = useCallback(
     async (path: string) => {
       if (!checkBeforeNavigate()) return;
-      setSelected(path);
-      if (!cache.has(path)) {
-        const node = (await trpc.get.query({ path, watch: true })) as NodeData | undefined;
-        if (node) cache.put(node);
-      }
-      await loadChildren(path);
+      await selectPath(path);
     },
-    [loadChildren],
-  );
-
-  const handleExpand = useCallback(
-    async (path: string) => {
-      const wasExpanded = expanded.has(path);
-      setExpanded((prev) => {
-        const next = new Set(prev);
-        if (next.has(path)) next.delete(path);
-        else next.add(path);
-        return next;
-      });
-      if (!wasExpanded) {
-        await loadChildren(path);
-      } else {
-        const childPaths = cache.getChildren(path).map(n => n.$path).filter(p => p !== path);
-        trpc.unwatchChildren.mutate({ paths: [path] });
-        if (childPaths.length) trpc.unwatch.mutate({ paths: childPaths });
-      }
-    },
-    [expanded, loadChildren],
+    [selectPath],
   );
 
   const handleDelete = useCallback(
@@ -234,32 +152,13 @@ export function Editor({ authed, onLogout }: EditorProps) {
       await tree.remove(path);
       cache.remove(path);
       const parent = path === '/' ? null : path.slice(0, path.lastIndexOf('/')) || '/';
-      if (parent) await loadChildren(parent);
-      setSelected(parent);
-    },
-    [loadChildren],
-  );
-
-  const handleCreateChild = useCallback((parentPath: string) => {
-    setCreatingAt(parentPath);
-  }, []);
-
-  const handlePickType = useCallback(
-    async (name: string, type: string) => {
-      const parentPath = creatingAt!;
-      setCreatingAt(null);
-      const childPath = parentPath === '/' ? `/${name}` : `${parentPath}/${name}`;
-      await createNode(childPath, type);
-      await loadChildren(parentPath);
-      if (!expanded.has(parentPath)) {
-        setExpanded((prev) => new Set(prev).add(parentPath));
+      if (parent) {
+        const { items: children } = await tree.getChildren(parent, { watch: true, watchNew: true });
+        cache.replaceChildren(parent, children);
       }
-      setSelected(childPath);
-      const node = (await trpc.get.query({ path: childPath, watch: true })) as NodeData | undefined;
-      if (node) cache.put(node);
-      showToast(`Created ${name}`);
+      await selectPath(parent);
     },
-    [creatingAt, loadChildren, expanded, showToast],
+    [selectPath],
   );
 
   const handleAddComponent = useCallback((path: string) => {
@@ -276,29 +175,6 @@ export function Editor({ authed, onLogout }: EditorProps) {
     [addingComponentAt, showToast],
   );
 
-  const handleMove = useCallback(
-    async (fromPath: string, toPath: string) => {
-      const fromNode = cache.get(fromPath);
-      const toNode = cache.get(toPath);
-      if (!fromNode || !toNode) return;
-      const toParent = toPath === '/' ? '/' : toPath.slice(0, toPath.lastIndexOf('/')) || '/';
-      const fromName = fromPath.slice(fromPath.lastIndexOf('/') + 1);
-      const newPath = toParent === '/' ? `/${fromName}` : `${toParent}/${fromName}`;
-      if (newPath === fromPath) return;
-      await tree.remove(fromPath);
-      await tree.set({ ...fromNode, $path: newPath });
-      const oldParent =
-        fromPath === '/' ? '/' : fromPath.slice(0, fromPath.lastIndexOf('/')) || '/';
-      await loadChildren(oldParent);
-      await loadChildren(toParent);
-      setSelected(newPath);
-      showToast(`Moved to ${newPath}`);
-    },
-    [loadChildren, showToast],
-  );
-
-  const roots = hasRootNode ? [root, '/local'] : ['/local'];
-
   const [rootPromptOpen, setRootPromptOpen] = useState(false);
   const [rootPromptType, setRootPromptType] = useState('root');
 
@@ -309,18 +185,11 @@ export function Editor({ authed, onLogout }: EditorProps) {
       const rootNode = await tree.get('/');
       if (rootNode) cache.put(rootNode);
       setSelected('/');
-      setExpanded(new Set(['/']));
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to create root');
     }
   }, []);
-
-  const handleClearCache = () => {
-    cache.clear();
-    showToast('Cache cleared');
-    location.reload();
-  };
 
   const handleSetRoot = (path: string) => setRoot(path);
 
@@ -329,8 +198,8 @@ export function Editor({ authed, onLogout }: EditorProps) {
 
   const navigate = useCallback((path: string) => {
     if (!checkBeforeNavigate()) return;
-    handleSelect(path);
-  }, [handleSelect]);
+    selectPath(path);
+  }, [selectPath]);
 
   const navCtx = useMemo(() => makeNavigateApi(navigate, makeHref), [navigate, makeHref]);
 
@@ -357,26 +226,15 @@ export function Editor({ authed, onLogout }: EditorProps) {
         <ResizablePanelGroup orientation="horizontal" className="h-full">
           <EditorSidebar
             authed={authed}
-            roots={roots}
             root={root}
-            expanded={expanded}
-            loaded={loaded}
             selected={selected}
-            filter={filter}
-            showHidden={showHidden}
-            onFilterChange={setFilter}
-            onShowHiddenChange={setShowHidden}
-            onSelect={handleSelect}
-            onExpand={handleExpand}
-            onCreateChild={handleCreateChild}
-            onDelete={handleDelete}
-            onMove={handleMove}
+            onSelect={selectPath}
             onSetRoot={handleSetRoot}
             onRequestCreateRoot={() => {
               setRootPromptType('root');
               setRootPromptOpen(true);
             }}
-            onClearCache={handleClearCache}
+            toast={showToast}
             onLogout={onLogout}
           />
 
@@ -394,8 +252,6 @@ export function Editor({ authed, onLogout }: EditorProps) {
             />
           </ResizablePanel>
         </ResizablePanelGroup>
-
-        {creatingAt && <TypePicker onSelect={handlePickType} onCancel={() => setCreatingAt(null)} />}
 
         {addingComponentAt && (
           <TypePicker

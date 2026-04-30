@@ -10,36 +10,35 @@ import {
 import { Input } from '#components/ui/input';
 import { ResizablePanel } from '#components/ui/resizable';
 import { Tree } from '#editor/Tree';
+import { createNode } from '#hooks';
+import { TypePicker } from '#mods/editor-ui/type-picker';
+import { checkBeforeNavigate } from '#navigate';
 import * as cache from '#tree/cache';
+import { tree } from '#tree/client';
+import { startEvents, stopEvents } from '#tree/events';
+import { trpc } from '#tree/trpc';
+import type { NodeData } from '@treenx/core';
 import { ChevronDown, Eye, EyeOff, LogIn, LogOut, RotateCcw } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { flushSync } from 'react-dom';
-import type { PanelImperativeHandle } from 'react-resizable-panels';
+import type { PanelImperativeHandle, PanelSize } from 'react-resizable-panels';
 
 const SIDEBAR_EXPAND_MS = 200;
 const SIDEBAR_COLLAPSE_MS = 500;
+const SIDEBAR_COLLAPSED_WIDTH = 50;
+const SIDEBAR_MIN_WIDTH = 240;
+const SIDEBAR_RESIZE_COLLAPSE_WIDTH = (SIDEBAR_COLLAPSED_WIDTH + SIDEBAR_MIN_WIDTH) / 2;
 
 type SidebarPhase = 'expanded' | 'expanding' | 'collapsing' | 'collapsed';
 
 type EditorSidebarProps = {
   authed: string;
-  roots: string[];
   root: string;
-  expanded: Set<string>;
-  loaded: Set<string>;
   selected: string | null;
-  filter: string;
-  showHidden: boolean;
-  onFilterChange: (value: string) => void;
-  onShowHiddenChange: (value: boolean) => void;
-  onSelect: (path: string) => void;
-  onExpand: (path: string) => void;
-  onCreateChild: (parentPath: string) => void;
-  onDelete: (path: string) => void;
-  onMove: (fromPath: string, toPath: string) => void;
+  onSelect: (path: string) => void | Promise<void>;
   onSetRoot: (path: string) => void;
   onRequestCreateRoot: () => void;
-  onClearCache: () => void;
+  toast: (message: string, type?: 'success' | 'error') => void;
   onLogout: () => void;
 };
 
@@ -73,33 +72,91 @@ function MenuItemIcon({ children }: { children: ReactNode }) {
 
 export function EditorSidebar({
   authed,
-  roots,
   root,
-  expanded,
-  loaded,
   selected,
-  filter,
-  showHidden,
-  onFilterChange,
-  onShowHiddenChange,
   onSelect,
-  onExpand,
-  onCreateChild,
-  onDelete,
-  onMove,
   onSetRoot,
   onRequestCreateRoot,
-  onClearCache,
+  toast,
   onLogout,
 }: EditorSidebarProps) {
   const panelRef = useRef<PanelImperativeHandle | null>(null);
   const animationTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const searchRef = useRef<HTMLInputElement>(null);
   const [phase, setPhase] = useState<SidebarPhase>('expanded');
+  const [filter, setFilter] = useState('');
+  const [showHidden, setShowHidden] = useState(false);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [loaded, setLoaded] = useState<Set<string>>(new Set());
+  const [creatingAt, setCreatingAt] = useState<string | null>(null);
+  const expandedRef = useRef(expanded);
+  const selectedRef = useRef(selected);
+  const phaseRef = useRef(phase);
+
+  expandedRef.current = expanded;
+  selectedRef.current = selected;
+  phaseRef.current = phase;
+
+  const hasRootNode = useSyncExternalStore(
+    useCallback((cb: () => void) => cache.subscribePath(root, cb), [root]),
+    useCallback(() => cache.has(root), [root]),
+  );
+  const roots = hasRootNode ? [root, '/local'] : ['/local'];
+
+  const loadChildren = useCallback(async (path: string) => {
+    const { items: children } = await tree.getChildren(path, { watch: true, watchNew: true });
+    cache.replaceChildren(path, children);
+    setLoaded((prev) => new Set(prev).add(path));
+  }, []);
 
   useEffect(() => () => {
     if (animationTimer.current) clearTimeout(animationTimer.current);
   }, []);
+
+  useEffect(() => {
+    cache.clear();
+    setLoaded(new Set());
+    (async () => {
+      const rootNode = (await trpc.get.query({ path: root, watch: true })) as NodeData | undefined;
+      if (rootNode) cache.put(rootNode);
+      await loadChildren(root);
+
+      const p = location.pathname;
+      const target = p.startsWith('/t') ? p.slice(2) || '/' : root;
+      const toExpand = new Set([root]);
+
+      if (target !== root && target.startsWith(root === '/' ? '/' : `${root}/`)) {
+        const relative = root === '/' ? target : target.slice(root.length);
+        const parts = relative.split('/').filter(Boolean);
+        let cur = root === '/' ? '' : root;
+        for (let i = 0; i < parts.length - 1; i++) {
+          cur += `/${parts[i]}`;
+          toExpand.add(cur);
+          await loadChildren(cur);
+        }
+        const parent = cur || root;
+        if (!toExpand.has(parent)) await loadChildren(parent);
+      }
+
+      setExpanded(toExpand);
+      await onSelect(target);
+      if (target !== root && !cache.has(target)) {
+        const node = (await trpc.get.query({ path: target, watch: true })) as NodeData | undefined;
+        if (node) cache.put(node);
+      }
+    })().catch((e: unknown) => {
+      toast(e instanceof Error ? e.message : 'Failed to connect to server', 'error');
+    });
+  }, [loadChildren, onSelect, root, toast]);
+
+  useEffect(() => {
+    startEvents({
+      loadChildren,
+      getExpanded: () => expandedRef.current,
+      getSelected: () => selectedRef.current,
+    });
+    return stopEvents;
+  }, [loadChildren]);
 
   const toggleSidebar = useCallback(() => {
     if (animationTimer.current) clearTimeout(animationTimer.current);
@@ -122,6 +179,118 @@ export function EditorSidebar({
     }, SIDEBAR_COLLAPSE_MS);
   }, [phase]);
 
+  const handlePanelResize = useCallback((size: PanelSize) => {
+    const currentPhase = phaseRef.current;
+    if (currentPhase === 'expanding' || currentPhase === 'collapsing') return;
+
+    const isCollapsedSize =
+      panelRef.current?.isCollapsed() || size.inPixels <= SIDEBAR_RESIZE_COLLAPSE_WIDTH;
+
+    if (isCollapsedSize && currentPhase !== 'collapsed') {
+      setPhase('collapsed');
+      return;
+    }
+
+    if (!isCollapsedSize && currentPhase === 'collapsed') {
+      setPhase('expanded');
+    }
+  }, []);
+
+  const handleSelect = useCallback(
+    async (path: string) => {
+      if (!checkBeforeNavigate()) return;
+      await onSelect(path);
+      await loadChildren(path);
+    },
+    [loadChildren, onSelect],
+  );
+
+  const handleExpand = useCallback(
+    async (path: string) => {
+      const wasExpanded = expanded.has(path);
+      setExpanded((prev) => {
+        const next = new Set(prev);
+        if (next.has(path)) next.delete(path);
+        else next.add(path);
+        return next;
+      });
+      if (!wasExpanded) {
+        await loadChildren(path);
+      } else {
+        const childPaths = cache.getChildren(path).map((n) => n.$path).filter((p) => p !== path);
+        trpc.unwatchChildren.mutate({ paths: [path] });
+        if (childPaths.length) trpc.unwatch.mutate({ paths: childPaths });
+      }
+    },
+    [expanded, loadChildren],
+  );
+
+  const handleCreateChild = useCallback((parentPath: string) => {
+    setCreatingAt(parentPath);
+  }, []);
+
+  const handlePickType = useCallback(
+    async (name: string, type: string) => {
+      const parentPath = creatingAt;
+      if (!parentPath) return;
+      setCreatingAt(null);
+
+      const childPath = parentPath === '/' ? `/${name}` : `${parentPath}/${name}`;
+      await createNode(childPath, type);
+      await loadChildren(parentPath);
+      setExpanded((prev) => new Set(prev).add(parentPath));
+      await onSelect(childPath);
+
+      const node = (await trpc.get.query({ path: childPath, watch: true })) as NodeData | undefined;
+      if (node) cache.put(node);
+      toast(`Created ${name}`);
+    },
+    [creatingAt, loadChildren, onSelect, toast],
+  );
+
+  const handleDelete = useCallback(
+    async (path: string) => {
+      await tree.remove(path);
+      cache.remove(path);
+      const parent = path === '/' ? null : path.slice(0, path.lastIndexOf('/')) || '/';
+      if (parent) {
+        await loadChildren(parent);
+        await onSelect(parent);
+      } else {
+        await onSelect('/');
+      }
+    },
+    [loadChildren, onSelect],
+  );
+
+  const handleMove = useCallback(
+    async (fromPath: string, toPath: string) => {
+      const fromNode = cache.get(fromPath);
+      const toNode = cache.get(toPath);
+      if (!fromNode || !toNode) return;
+
+      const toParent = toPath === '/' ? '/' : toPath.slice(0, toPath.lastIndexOf('/')) || '/';
+      const fromName = fromPath.slice(fromPath.lastIndexOf('/') + 1);
+      const newPath = toParent === '/' ? `/${fromName}` : `${toParent}/${fromName}`;
+      if (newPath === fromPath) return;
+
+      await tree.remove(fromPath);
+      await tree.set({ ...fromNode, $path: newPath });
+      const oldParent = fromPath === '/' ? '/' : fromPath.slice(0, fromPath.lastIndexOf('/')) || '/';
+      await loadChildren(oldParent);
+      await loadChildren(toParent);
+      await onSelect(newPath);
+      toast(`Moved to ${newPath}`);
+    },
+    [loadChildren, onSelect, toast],
+  );
+
+  const handleClearCache = useCallback(() => {
+    cache.clear();
+    toast('Cache cleared');
+    location.reload();
+  }, [toast]);
+
   const collapsed = phase === 'collapsed';
   const compact = phase !== 'expanded';
   const buttonCompact = phase === 'collapsed' || phase === 'collapsing';
@@ -134,11 +303,12 @@ export function EditorSidebar({
       data-editor-sidebar-panel
       data-sidebar-animation={animationMode}
       panelRef={panelRef}
+      onResize={handlePanelResize}
       defaultSize="28%"
-      minSize="240px"
+      minSize={`${SIDEBAR_MIN_WIDTH}px`}
       maxSize="450px"
       collapsible
-      collapsedSize="50px"
+      collapsedSize={`${SIDEBAR_COLLAPSED_WIDTH}px`}
       className="flex flex-col border-r border-border"
     >
       <div className={`relative shrink-0 overflow-hidden border-b border-border ${compact ? 'h-[74px]' : 'h-[44px]'}`}>
@@ -169,7 +339,7 @@ export function EditorSidebar({
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuItem
-                onClick={() => onShowHiddenChange(!showHidden)}
+                onClick={() => setShowHidden(!showHidden)}
                 className={showHidden ? 'bg-accent text-accent-foreground font-medium' : ''}
               >
                 <MenuItemIcon>
@@ -177,7 +347,7 @@ export function EditorSidebar({
                 </MenuItemIcon>
                 <span className="truncate">Show hidden</span>
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={onClearCache}>
+              <DropdownMenuItem onClick={handleClearCache}>
                 <MenuItemIcon>
                   <RotateCcw className="size-3.5" />
                 </MenuItemIcon>
@@ -200,7 +370,7 @@ export function EditorSidebar({
                 &#8962; {root}
               </Button>
             )}
-            {roots.length === 0 && (
+            {!hasRootNode && (
               <Button variant="ghost" size="sm" className="h-5 text-[10px]" onClick={onRequestCreateRoot}>
                 Create root
               </Button>
@@ -224,7 +394,7 @@ export function EditorSidebar({
             ref={searchRef}
             placeholder="Search nodes..."
             value={filter}
-            onChange={(e) => onFilterChange(e.target.value)}
+            onChange={(e) => setFilter(e.target.value)}
             className="h-7 text-xs bg-muted/50 border-border"
           />
         </div>
@@ -240,11 +410,11 @@ export function EditorSidebar({
               selected={selected}
               filter={filter}
               showHidden={showHidden}
-              onSelect={onSelect}
-              onExpand={onExpand}
-              onCreateChild={onCreateChild}
-              onDelete={onDelete}
-              onMove={onMove}
+              onSelect={handleSelect}
+              onExpand={handleExpand}
+              onCreateChild={handleCreateChild}
+              onDelete={handleDelete}
+              onMove={handleMove}
             />
           </div>
 
@@ -255,6 +425,7 @@ export function EditorSidebar({
           </div>
         </>
       )}
+      {creatingAt && <TypePicker onSelect={handlePickType} onCancel={() => setCreatingAt(null)} />}
     </ResizablePanel>
   );
 }
