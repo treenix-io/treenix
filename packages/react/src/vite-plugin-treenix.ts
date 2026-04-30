@@ -118,7 +118,9 @@ const VIRTUAL_ID = 'virtual:mod-clients';
 const RESOLVED_ID = '\0' + VIRTUAL_ID;
 const SERVER_RE = /\/mods\/[^/]+\/server(\.ts)?$/;
 
-const CLIENT_CONVENTION = ['types.ts', 'view.tsx'];
+// react.tsx is the preferred name (filename = first-level context, see docs/concepts/context.md).
+// view.tsx kept as legacy alias during migration; both load if present.
+const CLIENT_CONVENTION = ['types.ts', 'react.tsx', 'view.tsx'];
 
 type ModEntry = { name: string; files: string[] };
 
