@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "properties": {
+    "wildcard": {
+      "type": "boolean",
+      "title": "When true, this route catches descendant URL paths (e.g. /sys/routes/t catches /t/anything)."
+    }
+  },
+  "$id": "t.route",
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}
