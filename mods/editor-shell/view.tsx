@@ -22,13 +22,14 @@ import { useAuthContext } from '@treenx/react/app/auth-context';
 import { useRouteParams } from '@treenx/react/context/route-params';
 import { ConnectionBanner } from '@treenx/react/app/ConnectionBanner';
 import { EditorSidebar } from '@treenx/react/app/EditorSidebar';
+import { LoginScreen } from '@treenx/react/app/Login';
 import { Inspector } from '@treenx/react/editor/Inspector';
 import { useModErrors } from '@treenx/react/hooks/use-mod-errors';
 import { TypePicker } from '@treenx/react/mods/editor-ui/type-picker';
 import { EditorShell } from './types';
 
 const EditorShellView = () => {
-  const { authed, logout } = useAuthContext();
+  const { authed, authChecked, setAuthed, logout } = useAuthContext();
   const { rest } = useRouteParams();
   const { search } = useLocation();
   const navigate = useNavigate();
@@ -102,7 +103,8 @@ const EditorShellView = () => {
     [selected],
   );
 
-  if (!authed) return null;
+  if (!authChecked) return null;
+  if (!authed) return <LoginScreen onLogin={setAuthed} />;
 
   return (
     <>
