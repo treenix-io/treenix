@@ -6,7 +6,7 @@ import { getComponent, type NodeData, register } from '@treenx/core';
 import type { ServiceCtx, ServiceHandle } from '@treenx/core/contexts/service';
 import { Autostart } from '@treenx/core/mods/autostart/service';
 import type { ActionCtx } from '@treenx/core/server/actions';
-import { Bot } from 'grammy';
+import { Bot, type Context } from 'grammy';
 import { type BrahmanCtx, executeAction, executePage, findActionComp, formatTString, resolveWait } from './helpers';
 import { BotConfig, BrahmanSession, BrahmanUser, PageConfig } from './types';
 
@@ -19,7 +19,8 @@ export function setBotFactory(f: ((token: string) => unknown) | undefined) { _bo
 
 register('brahman.bot', 'service', async (node: NodeData, svcCtx: ServiceCtx): Promise<ServiceHandle> => {
   const config = getComponent(node, BotConfig);
-  if (!config?.token) throw new Error('brahman.bot: token not configured');
+  if (!config) throw new Error('brahman.bot: BotConfig component not found');
+  if (!config.token) throw new Error('brahman.bot: token not configured');
 
   const bot = (_botFactory?.(config.token) ?? new Bot(config.token)) as Bot;
   const botPath = node.$path;
@@ -39,12 +40,12 @@ register('brahman.bot', 'service', async (node: NodeData, svcCtx: ServiceCtx): P
 
   const userQueues = new Map<number, Promise<void>>();
 
-  async function handleUpdate(gCtx: Parameters<Parameters<typeof bot.use>[0]>[0], next: () => Promise<void>) {
+  async function handleUpdate(gCtx: Context, next: () => Promise<void>) {
     const userId = gCtx.from?.id;
     if (!userId) return;
 
-    // Maintenance check
-    if (config.maintenance) {
+    // Maintenance check (optional chain — TS widens narrowed const across closure)
+    if (config?.maintenance) {
       await gCtx.reply(config.maintenance);
       return;
     }
