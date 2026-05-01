@@ -1,0 +1,43 @@
+{
+  "name": "@treenx/ssr",
+  "version": "0.1.0",
+  "description": "Server-side rendering for Treenix — tree-driven router, t.site / t.seo / t.route components, Tailwind v4 runtime JIT.",
+  "type": "module",
+  "private": true,
+  "license": "FSL-1.1-MIT",
+  "imports": {
+    "#*": {
+      "development": "./src/*.ts",
+      "default": "./dist/*.js"
+    }
+  },
+  "exports": {
+    ".": {
+      "development": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./*": {
+      "development": "./src/*.ts",
+      "types": "./dist/*.d.ts",
+      "default": "./dist/*.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "!src/**/*.test.ts",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "tsx --conditions development --test src/**/*.test.ts"
+  },
+  "peerDependencies": {
+    "@treenx/core": "^3.0.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.3"
+  }
+}

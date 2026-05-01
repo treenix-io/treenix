@@ -1,0 +1,52 @@
+{
+  "type": "object",
+  "properties": {
+    "state": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "published"
+      ],
+      "title": "Lifecycle: 'draft' = invisible to public, 'published' = served.",
+      "default": "draft"
+    },
+    "mode": {
+      "type": "string",
+      "enum": [
+        "static",
+        "hydrate",
+        "spa"
+      ],
+      "title": "Render mode: 'static' = HTML only, 'hydrate' = HTML + client JS, 'spa' = no SSR.",
+      "default": "spa"
+    },
+    "tailwindRuntime": {
+      "type": "boolean",
+      "title": "Include the Tailwind browser CDN for runtime classes added after hydration."
+    },
+    "cache": {
+      "type": "object",
+      "properties": {
+        "maxAge": {
+          "type": "number",
+          "title": "Cache-Control max-age in seconds."
+        },
+        "staleWhileRevalidate": {
+          "type": "number",
+          "title": "stale-while-revalidate in seconds."
+        },
+        "etag": {
+          "type": "boolean",
+          "title": "Emit weak ETag for cache validation."
+        }
+      },
+      "title": "HTTP cache hints."
+    }
+  },
+  "required": [
+    "state",
+    "mode"
+  ],
+  "$id": "t.site",
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}
