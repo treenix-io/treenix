@@ -1,200 +1,152 @@
 import './editor-ui.css';
-import { Render, RenderContext } from '#context';
-import { useChildren } from '#hooks';
-import { type ComponentData, type NodeData, register } from '@treenx/core';
-import type { PropertySchema } from '@treenx/core/schema/types';
-import { EmptyNodePlaceholder } from './empty-placeholder';
-import { renderField } from './form-field';
-import { getComponents, getPlainFields, getSchema } from './node-utils';
-
-const noop = () => {};
-
-/** Fallback for components without their own react handler */
-function ComponentFieldsView({ value }: { value: ComponentData }) {
-  const schema = getSchema(value.$type);
-  const data: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(value)) {
-    if (!k.startsWith('$')) data[k] = v;
-  }
-
-  if (schema && Object.keys(schema.properties).length > 0) {
-    const titleEntry = Object.entries(schema.properties).find(([k]) => TITLE_KEYS.has(k));
-    const descEntry = Object.entries(schema.properties).find(([k]) => DESC_KEYS.has(k));
-
-    return (
-      <>
-        {titleEntry && data[titleEntry[0]] && (
-          <div className="text-base font-medium text-[--text] mb-1">
-            {String(data[titleEntry[0]])}
-          </div>
-        )}
-        {descEntry && data[descEntry[0]] && (
-          <p className="text-sm text-[--text-2] mb-3 leading-relaxed whitespace-pre-wrap">
-            {String(data[descEntry[0]])}
-          </p>
-        )}
-        {Object.entries(schema.properties)
-          .filter(([k]) => k !== titleEntry?.[0] && k !== descEntry?.[0])
-          .map(([k, prop]) =>
-            renderField(k, { ...(prop as PropertySchema), readOnly: true }, data, noop),
-          )}
-      </>
-    );
-  }
-
-  const entries = Object.entries(data);
-  if (entries.length === 0) return null;
-
-  const titleKey = entries.find(([k]) => TITLE_KEYS.has(k));
-  const descKey = entries.find(([k]) => DESC_KEYS.has(k));
-  const meta = entries.filter(([k]) => k !== titleKey?.[0] && k !== descKey?.[0]);
-
-  return (
-    <>
-      {titleKey && titleKey[1] && (
-        <div className="text-base font-medium text-[--text] mb-1">{String(titleKey[1])}</div>
-      )}
-      {descKey && descKey[1] && (
-        <p className="text-sm text-[--text-2] mb-3 leading-relaxed whitespace-pre-wrap">
-          {String(descKey[1])}
-        </p>
-      )}
-      {meta.length > 0 && (
-        <div className="dv-meta">
-          {meta.map(([k, v]) => (
-            <div key={k} className="dv-meta-row">
-              <span className="dv-meta-label">{k}</span>
-              <FieldValue value={v} />
-            </div>
-          ))}
-        </div>
-      )}
-    </>
-  );
-}
-
-function FieldValue({ value }: { value: unknown }) {
-  if (value === undefined || value === null || value === '')
-    return <span className="text-[--text-3]">—</span>;
-  if (typeof value === 'boolean')
-    return (
-      <span className={value ? 'text-green-400' : 'text-[--text-3]'}>{value ? 'Yes' : 'No'}</span>
-    );
-  if (typeof value === 'number') return <span className="tabular-nums">{value}</span>;
-  if (typeof value === 'string') {
-    if (/^\d{4}-\d{2}-\d{2}/.test(value)) {
-      return <span className="tabular-nums text-[--text-2]">{value}</span>;
-    }
-    return <span>{value}</span>;
-  }
-  return <span className="font-mono text-xs text-[--text-2]">{JSON.stringify(value)}</span>;
-}
+import { Render, type View } from '#context';
+import { type ComponentData, isComponent, isRef, register, resolveExact } from '@treenx/core';
+import type { PropertySchema, TypeSchema } from '@treenx/core/schema/types';
+import { createContext, type ReactNode, useContext } from 'react';
+import { getSchema } from './node-utils';
 
 const TITLE_KEYS = new Set(['title', 'name', 'label']);
-const DESC_KEYS = new Set(['description', 'desc', 'summary', 'text', 'body', 'content']);
+const MAX_DEPTH = 8;
+const DepthCtx = createContext(0);
 
-/** Reusable plain-fields renderer: promotes title/desc, renders rest as key-value rows */
-export function PlainFieldsView({
-  plain,
-  typeName,
-}: {
-  plain: Record<string, unknown>;
-  typeName: string;
-}) {
-  const schema = getSchema(typeName);
-  const keys = Object.keys(plain);
-  if (keys.length === 0) return null;
+type PlainField = { name: string; prop?: PropertySchema; value: unknown };
+type SplitResult = {
+  title?: PlainField;
+  rest: PlainField[];
+  components: { name: string; value: ComponentData }[];
+};
 
-  const titleKey = keys.find((k) => TITLE_KEYS.has(k));
-  const descKey = keys.find((k) => DESC_KEYS.has(k));
-  const title = titleKey ? String(plain[titleKey] ?? '') : '';
-  const desc = descKey ? String(plain[descKey] ?? '') : '';
-  const metaKeys = keys.filter((k) => k !== titleKey && k !== descKey);
-
-  return (
-    <>
-      {title && <h2 className="text-lg font-semibold text-[--text] mb-1">{title}</h2>}
-      {desc && (
-        <p className="text-sm text-[--text-2] mb-4 leading-relaxed whitespace-pre-wrap">{desc}</p>
-      )}
-
-      {metaKeys.length > 0 && schema && Object.keys(schema.properties).length > 0 && (
-        <div className="py-0.5 pb-2.5">
-          {metaKeys.map((k) => {
-            const prop = schema.properties[k];
-            if (!prop)
-              return (
-                <div key={k} className="dv-meta-row">
-                  <span className="dv-meta-label">{k}</span>
-                  <FieldValue value={plain[k]} />
-                </div>
-              );
-            return renderField(
-              k,
-              { ...(prop as PropertySchema), readOnly: true },
-              plain,
-              noop,
-            );
-          })}
-        </div>
-      )}
-
-      {metaKeys.length > 0 && (!schema || Object.keys(schema.properties).length === 0) && (
-        <div className="dv-meta">
-          {metaKeys.map((k) => (
-            <div key={k} className="dv-meta-row">
-              <span className="dv-meta-label">{k}</span>
-              <FieldValue value={plain[k]} />
-            </div>
-          ))}
-        </div>
-      )}
-    </>
-  );
+export function inferType(v: unknown): string {
+  if (Array.isArray(v)) return 'array';
+  if (v == null) return 'string';
+  const t = typeof v;
+  if (t === 'string' || t === 'number' || t === 'boolean') return t;
+  return 'object';
 }
 
-function DefaultNodeView({ value }: { value: NodeData }) {
-  const { data: children } = useChildren(value.$path);
-  const plain = getPlainFields(value);
-  const components = getComponents(value);
-  const hasInfo = Object.keys(plain).length > 0 || components.length > 0;
+export function resolveDisplayType(prop: PropertySchema | undefined, value: unknown): string {
+  const tryResolve = (t?: string) => (t && resolveExact(t, 'react') ? t : null);
+  return tryResolve(prop?.format) ?? tryResolve(prop?.type) ?? inferType(value);
+}
 
+/** Classify every non-$ key into ref/component/plain, applying schema order first. */
+export function splitRecord(value: ComponentData, schema: TypeSchema | null): SplitResult {
+  const components: SplitResult['components'] = [];
+  const plain: PlainField[] = [];
+  const seen = new Set<string>();
+
+  const consider = (name: string, prop: PropertySchema | undefined, raw: unknown) => {
+    if (seen.has(name)) return;
+    seen.add(name);
+
+    if (isRef(raw)) {
+      plain.push({ name, prop, value: raw });
+      return;
+    }
+
+    if (isComponent(raw)) {
+      components.push({ name, value: raw });
+      return;
+    }
+
+    plain.push({ name, prop, value: raw });
+  };
+
+  if (schema?.properties) {
+    for (const [name, prop] of Object.entries(schema.properties)) {
+      if (name.startsWith('$')) continue;
+      if (!(name in value)) continue;
+      consider(name, prop, value[name]);
+    }
+  }
+
+  for (const [name, raw] of Object.entries(value)) {
+    if (name.startsWith('$')) continue;
+    consider(name, undefined, raw);
+  }
+
+  const title = plain.find((field) => TITLE_KEYS.has(field.name));
+  const rest = plain.filter((field) => field !== title);
+  return { title, rest, components };
+}
+
+function FieldRow({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="node-default-view">
-      <PlainFieldsView plain={plain} typeName={value.$type} />
-
-      {components.map(([name, comp]) => {
-        const ctype = (comp as any).$type;
-        return (
-          <div key={name} className="comp-view-card">
-            <div className="comp-view-header">
-              {name}
-              {name !== ctype && <span className="comp-type">{ctype}</span>}
-            </div>
-            <Render value={comp as ComponentData} />
-          </div>
-        );
-      })}
-
-      {children.length > 0 && (
-        <RenderContext name="react:list">
-          <div className="children-grid">
-            {children.map((child) => (
-              <Render key={child.$path} value={child} />
-            ))}
-          </div>
-        </RenderContext>
-      )}
-
-      {children.length === 0 && !hasInfo && <EmptyNodePlaceholder value={value} />}
+    <div className="dv-meta-row">
+      <span className="dv-meta-label">{label}</span>
+      {children}
     </div>
   );
 }
 
-/** Dispatch: node → DefaultNodeView, component → ComponentFieldsView */
-function DefaultView({ value }: { value: ComponentData }) {
-  if ('$path' in value) return <DefaultNodeView value={value as NodeData} />;
-  return <ComponentFieldsView value={value} />;
+function PlainFieldRender({ field }: { field: PlainField }) {
+  const { name, prop, value } = field;
+  const label = prop?.title ?? name;
+
+  if (isRef(value)) {
+    const refValue = { ...value, $type: value.$type ?? 'ref' };
+    return (
+      <FieldRow label={label}>
+        <Render value={refValue} />
+      </FieldRow>
+    );
+  }
+
+  const $type = resolveDisplayType(prop, value);
+  const fieldData: ComponentData = { $type, value, label };
+  if (prop?.description) fieldData.placeholder = prop.description;
+  if (prop?.enum) fieldData.enum = prop.enum;
+  if (prop?.enumNames) fieldData.enumNames = prop.enumNames;
+  if (prop?.items) fieldData.items = prop.items;
+
+  return (
+    <FieldRow label={label}>
+      <Render value={fieldData} />
+    </FieldRow>
+  );
 }
 
-register('default', 'react', DefaultView as any);
+function ComponentCard({ name, value }: { name: string; value: ComponentData }) {
+  const ctype = value.$type;
+  return (
+    <div className="comp-view-card">
+      <div className="comp-view-header">
+        {name}
+        {name !== ctype && <span className="comp-type">{ctype}</span>}
+      </div>
+      <Render value={value} />
+    </div>
+  );
+}
+
+export const TypedRecordView: View<ComponentData> = ({ value }) => {
+  const depth = useContext(DepthCtx);
+  if (depth > MAX_DEPTH) return <span className="text-[--text-3] text-xs">...</span>;
+
+  const schema = getSchema(value.$type);
+  const { title, rest, components } = splitRecord(value, schema);
+
+  return (
+    <DepthCtx.Provider value={depth + 1}>
+      <div className="node-default-view">
+        {title && title.value != null && title.value !== '' && (
+          <h2 className="text-lg font-semibold text-[--text] mb-1">{String(title.value)}</h2>
+        )}
+
+        {rest.length > 0 && (
+          <div className="dv-meta">
+            {rest.map((field) => (
+              <PlainFieldRender key={field.name} field={field} />
+            ))}
+          </div>
+        )}
+
+        {components.map(({ name, value: comp }) => (
+          <ComponentCard key={name} name={name} value={comp} />
+        ))}
+      </div>
+    </DepthCtx.Provider>
+  );
+};
+
+register('default', 'react', TypedRecordView);

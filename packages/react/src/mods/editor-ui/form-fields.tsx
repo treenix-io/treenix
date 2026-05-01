@@ -32,15 +32,26 @@ type FP = {
 
 // ── View handlers (react context) — readOnly display ──
 
+function EmptyValue() {
+  return <span className="text-[--text-3]">—</span>;
+}
+
+function isEmpty(v: unknown): boolean {
+  return v == null || v === '';
+}
+
 function StringView({ value }: FP) {
+  if (isEmpty(value.value)) return <EmptyValue />;
   return <span className="text-xs text-foreground/70">{String(value.value ?? '')}</span>;
 }
 
 function NumberView({ value }: FP) {
+  if (isEmpty(value.value)) return <EmptyValue />;
   return <span className="text-xs font-mono text-foreground/70">{String(value.value ?? 0)}</span>;
 }
 
 function BooleanView({ value }: FP) {
+  if (isEmpty(value.value)) return <EmptyValue />;
   return <span className="text-xs text-foreground/70">{value.value ? 'true' : 'false'}</span>;
 }
 
@@ -50,6 +61,7 @@ function ImageView({ value }: FP) {
 }
 
 function UriView({ value }: FP) {
+  if (isEmpty(value.value)) return <EmptyValue />;
   const url = String(value.value ?? '');
   return url ? (
     <a
@@ -60,10 +72,13 @@ function UriView({ value }: FP) {
     >
       {url}
     </a>
-  ) : null;
+  ) : (
+    <EmptyValue />
+  );
 }
 
 function TimestampView({ value }: FP) {
+  if (isEmpty(value.value)) return <EmptyValue />;
   const ts = Number(value.value ?? 0);
   const formatted = ts ? dayjs(ts > 1e12 ? ts : ts * 1000).format('YYYY-MM-DD HH:mm:ss') : '—';
   return <span className="text-xs font-mono text-foreground/70">{formatted}</span>;
@@ -336,6 +351,7 @@ function DateTimeForm({ value, onChange }: FP) {
 }
 
 function DateView({ value }: FP) {
+  if (isEmpty(value.value)) return <EmptyValue />;
   const v = String(value.value ?? '');
   return <span className="text-xs tabular-nums text-foreground/70">{v || '—'}</span>;
 }
