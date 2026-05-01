@@ -3,6 +3,8 @@
 Low-code RAD platform. Tree of typed components with context-aware rendering.
 Inspired by Unity3D component model, Plan9 filesystem, Unix pipes.
 
+HI!
+
 # RULES
 
 ## Code

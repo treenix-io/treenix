@@ -118,11 +118,14 @@ const VIRTUAL_ID = 'virtual:mod-clients';
 const RESOLVED_ID = '\0' + VIRTUAL_ID;
 const SERVER_RE = /\/mods\/[^/]+\/server(\.ts)?$/;
 
-const CLIENT_CONVENTION = ['types.ts', 'view.tsx'];
+// Default convention. react.tsx is the preferred name (filename = first-level context,
+// see docs/concepts/context.md). view.tsx kept as legacy alias during migration.
+// Override via plugin opts.clientFiles — e.g. RN build passes ['types.ts', 'rn.tsx'].
+const DEFAULT_CLIENT_FILES = ['types.ts', 'react.tsx', 'view.tsx'];
 
 type ModEntry = { name: string; files: string[] };
 
-function scanClients(dir: string, warnIfMissing = true): ModEntry[] {
+function scanClients(dir: string, clientFiles: string[], warnIfMissing = true): ModEntry[] {
   if (!existsSync(dir)) {
     if (warnIfMissing) console.warn(`[treenix] modsDir not found, skipped: ${dir}`);
     return [];
@@ -135,7 +138,7 @@ function scanClients(dir: string, warnIfMissing = true): ModEntry[] {
     if (existsSync(client)) {
       mods.push({ name: entry.name, files: [client] });
     } else {
-      const files = CLIENT_CONVENTION
+      const files = clientFiles
         .map(f => resolve(modDir, f))
         .filter(f => existsSync(f));
       if (files.length) mods.push({ name: entry.name, files });
@@ -173,11 +176,12 @@ function discoverPackageClients(): string[] {
 
 // ── Plugin ──
 
-export default function treenixPlugin(opts?: { modsDirs?: string[] }): Plugin {
+export default function treenixPlugin(opts?: { modsDirs?: string[]; clientFiles?: string[] }): Plugin {
   const engineRoot = resolve(import.meta.dirname, '../../..');
   // In npm installs engineRoot = node_modules/, which has no sibling mods/ —
   // engine mods scan is a monorepo-dev convenience only.
   const inNodeModules = import.meta.dirname.includes('/node_modules/');
+  const clientFiles = opts?.clientFiles ?? DEFAULT_CLIENT_FILES;
   let conditions: string[] = [];
 
   return {
@@ -243,10 +247,10 @@ export default function treenixPlugin(opts?: { modsDirs?: string[] }): Plugin {
       const pkgClients = discoverPackageClients();
 
       // 2. Engine mods (sibling to this plugin's package) — monorepo-dev only
-      const engineMods = inNodeModules ? [] : scanClients(resolve(engineRoot, 'mods'));
+      const engineMods = inNodeModules ? [] : scanClients(resolve(engineRoot, 'mods'), clientFiles);
 
       // 3. Extra mods dirs (passed explicitly from project vite config)
-      const extraMods = (opts?.modsDirs ?? []).flatMap(d => scanClients(resolve(d)));
+      const extraMods = (opts?.modsDirs ?? []).flatMap(d => scanClients(resolve(d), clientFiles));
 
       // Dedupe by mod name (realpath of first file)
       const seen = new Set<string>();

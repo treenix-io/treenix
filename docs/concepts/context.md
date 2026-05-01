@@ -35,6 +35,58 @@ resolve(TodoItem, 'react:kanban')
 
 Registering in `react` automatically covers any `react:*` sub-context unless a more specific handler exists.
 
+## Mod File Convention
+
+Context registration is explicit code. A mod file name only tells the discovery layer which entry files to import.
+
+Today, React views are conventionally loaded from `view.tsx`. The clearer context-named spelling is `react.tsx`; use it once the discovery layer in your runtime supports it, or import it from `client.ts`.
+
+| File | Context family | Status | Loaded by |
+|---|---|---|---|
+| `view.tsx` | `react` | current legacy name | Frontend Vite plugin |
+| `react.tsx` | `react` | preferred new name once supported | Frontend runtime |
+| `service.ts` | `service` | current | Server mod loader |
+| `types.ts` | `class`, `action:*` via `registerType()`; schema source for generation | current | Frontend and server |
+| `seed.ts` | prefabs / seed data | current | Server mod loader |
+| `mcp.ts` | `mcp` | indexed for docs; import explicitly for runtime use | Server entry files |
+| `text.ts` | `text` | explicit import today | Any runtime |
+| `mount.ts` | `mount` | explicit import today | Server entry files |
+| `solid.tsx`, `rn.tsx` | future renderer families | future | Runtime-specific loaders |
+
+Inside a context file, keep using ordinary `register(Type, context, handler)` calls:
+
+```typescript
+// mods/todo/react.tsx
+import { register } from '@treenx/core'
+import { TodoItem } from './types'
+import { TodoCard, TodoRow, TodoEdit } from './views'
+
+register(TodoItem, 'react',       TodoCard)
+register(TodoItem, 'react:table', TodoRow)
+register(TodoItem, 'react:edit',  TodoEdit)
+```
+
+Sub-contexts stay in the parent context file. Register `react:table` in `react.tsx` or legacy `view.tsx`; do not create separate `react-table.tsx` files. The normal fallback cascade still applies: `react:table` falls back to `react` when no exact handler exists.
+
+### Explicit Entry Files
+
+If a mod has `client.ts`, the frontend imports `client.ts` instead of the convention files. If a mod has `server.ts`, the server imports `server.ts` instead of `types.ts`, `seed.ts`, and `service.ts`.
+
+Use explicit entry files when a mod needs custom ordering or additional imports:
+
+```typescript
+// client.ts
+import './types'
+import './react'
+
+// server.ts
+import './types'
+import './service'
+import './seed'
+```
+
+Files without registry semantics are plain modules imported by these entry files: helpers, UI components, generated schemas, tests, and implementation details.
+
 ## Context Types
 
 | Context | Handler signature | Purpose |
