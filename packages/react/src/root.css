@@ -41,6 +41,7 @@
 
   /* Legacy aliases */
   --bg: var(--color-background);
+  /* translucent — for in-flow cards. Floats use --color-popover (solid). */
   --surface: var(--color-card);
   --surface-2: var(--color-secondary);
   --surface-3: rgba(255, 255, 255, 0.06);

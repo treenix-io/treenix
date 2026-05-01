@@ -187,8 +187,11 @@
 }
 
 /* Slash command menu */
+/* Use --color-popover (solid) — slash menus are portaled to document.body, so the
+   page background isn't behind them. --surface (rgba α 0.02) is for cards inside
+   the layout, not for floating popovers. */
 .slash-menu {
-  background: var(--surface);
+  background: var(--color-popover);
   border: 1px solid var(--border);
   border-radius: 6px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
@@ -333,8 +336,9 @@
 }
 
 /* Slash picker (ref / component / link) */
+/* Same reason as .slash-menu: portaled to document.body — needs solid popover bg. */
 .slash-picker {
-  background: var(--surface);
+  background: var(--color-popover);
   border: 1px solid var(--border);
   border-radius: 6px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
