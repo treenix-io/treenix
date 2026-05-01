@@ -50,9 +50,14 @@ export function resolve<C extends string>(type: TypeId, context: C, _notifyMiss 
   const exact = registry.get(n)?.get(context);
   if (exact) return exact.handler as ContextHandler<C>;
 
-  // Notify miss BEFORE default fallback — async loaders (UIX) start fetching,
-  // register when done, bump triggers re-render → next resolve finds exact match.
-  if (_notifyMiss) missResolvers.get(context)?.(n);
+  // Notify miss BEFORE default fallback. Async loaders (UIX) start fetching, register
+  // when done, bump() triggers re-render — next resolve() finds exact match. Sync
+  // resolvers register inline; we re-check exact below so they take effect in this call.
+  if (_notifyMiss) {
+    missResolvers.get(context)?.(n);
+    const reExact = registry.get(n)?.get(context);
+    if (reExact) return reExact.handler as ContextHandler<C>;
+  }
 
   const def = registry.get(DEFAULT_TYPE)?.get(context);
   if (def) return def.handler as ContextHandler<C>;
