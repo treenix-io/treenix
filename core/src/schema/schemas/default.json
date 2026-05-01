@@ -6,13 +6,6 @@
   "methods": {
     "$schema": {
       "arguments": []
-    },
-    "patch": {
-      "arguments": [
-        {
-          "name": "data"
-        }
-      ]
     }
   }
 }
