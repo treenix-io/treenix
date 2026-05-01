@@ -91,6 +91,17 @@ export function unregister(type: string, context: string): boolean {
   return true;
 }
 
+/** Atomic replace: unregister(type, ctx) if present, then register. Use this when a
+ *  caller must override an existing handler (HMR-style hot reload, inheritance
+ *  fallback override). Plain register() keeps its silent-dedup contract for
+ *  module-load idempotency. */
+export function replaceHandler<C extends string>(type: string, context: C, handler: ContextHandler<C>, meta?: Record<string, unknown>): void;
+export function replaceHandler<T, C extends string>(type: Class<T>, context: C, handler: ContextHandler<C, T>, meta?: Record<string, unknown>): void;
+export function replaceHandler(type: TypeId, context: string, handler: Handler, meta?: Record<string, unknown>): void {
+  unregister(normalizeType(type), context);
+  register(type as any, context, handler as any, meta);
+}
+
 // Snapshot — callers (e.g. clearRegistry) may unregister during iteration.
 export function mapRegistry<T>(fn: (type: string, context: string) => T | undefined): T[] {
   const entries: Array<[string, string]> = [];
