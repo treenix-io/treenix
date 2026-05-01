@@ -1,7 +1,7 @@
 import { assertSafePath, basename, dirname, isChildPath, join } from '#core/path';
 import { registerBuiltins } from '#mods/treenix/builtins';
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { afterEach, describe, it } from 'node:test';
 import {
   createNode,
   getComponent,
@@ -293,6 +293,36 @@ describe('assertSafePath (F03)', () => {
   it('rejects double slashes', () => {
     assert.throws(() => assertSafePath('//admin'), /double slash/);
     assert.throws(() => assertSafePath('/board//task'), /double slash/);
+  });
+});
+
+describe('Lazy resolver semantics (sync miss)', () => {
+  afterEach(() => {
+    // onResolveMiss is singleton-per-context; reset to noop so this describe block
+    // does not leak a 'schema' resolver into other test suites.
+    onResolveMiss('schema', () => {});
+  });
+
+  it('returns handler registered synchronously by miss resolver in same resolve() call', () => {
+    const snap = saveRegistrySnapshot();
+    try {
+      const TYPE = 'lazy.synctest.A';
+      let parseCount = 0;
+
+      onResolveMiss('schema', (type) => {
+        if (type !== TYPE) return;
+        parseCount++;
+        register(type, 'schema', () => ({ $id: type, type: 'object' as const, title: 'A', properties: {} }));
+      });
+
+      const handler = resolve(TYPE, 'schema');
+      assert.ok(handler, 'sync miss resolver registered handler — resolve must return it on first call, not null');
+      assert.equal(parseCount, 1, 'resolver must run exactly once');
+      const schema = (handler as any)();
+      assert.equal(schema.$id, TYPE);
+    } finally {
+      restoreRegistrySnapshot(snap);
+    }
   });
 });
 
