@@ -4,7 +4,7 @@ import { RoutedPage } from './RoutedPage';
 import { ViewPage } from './ViewPage';
 import { Editor } from './Editor';
 import { useAuth } from './use-auth';
-import { checkBeforeNavigate, makeNavigateApi, NavigateProvider, pushHistory, useLocation } from '#navigate';
+import { makeEditorHref, makeNavigateApi, NavigateProvider, navigateTo, useLocation } from '#navigate';
 import * as cache from '#tree/cache';
 
 type Mode = 'editor' | 'view' | 'routed';
@@ -25,7 +25,7 @@ function detectViewPath(pathname: string): string {
 cache.hydrate();
 
 /**
- * Top-level router.
+ * Top-level router. Owns the single NavigateProvider for all three modes.
  *
  * - `/`, `/foo/...`    → RoutedPage (public — anonymous visitors render via `public` role)
  * - `/v/<path>`         → ViewPage (direct node render, requires auth)
@@ -40,20 +40,22 @@ export function Router() {
   const mode = detectMode(pathname);
   const viewPath = detectViewPath(pathname);
 
-  // Push the next URL and let useLocation re-read via the synthetic popstate.
-  // Editor brings its own NavigateProvider; this serves routed/view.
+  // Per-mode href builders preserve mode-relevant query params (root for editor, ctx for view)
+  // so chained navigation inside a view stays in the same scope/context.
   const makeHref = useCallback((path: string) => {
-    if (mode === 'editor') return `/t${path === '/' ? '' : path}`;
-    if (mode === 'view') return `/v${path}`;
+    if (mode === 'editor') {
+      const root = new URLSearchParams(search).get('root') || '/';
+      return makeEditorHref(path === '/' ? '/' : path, root);
+    }
+    if (mode === 'view') {
+      const ctx = new URLSearchParams(search).get('ctx');
+      const base = `/v${path}`;
+      return ctx && ctx !== 'react' ? `${base}?ctx=${encodeURIComponent(ctx)}` : base;
+    }
     return path;
-  }, [mode]);
+  }, [mode, search]);
 
-  const navigate = useCallback((path: string) => {
-    if (!checkBeforeNavigate()) return;
-    pushHistory(makeHref(path));
-    window.dispatchEvent(new PopStateEvent('popstate'));
-  }, [makeHref]);
-
+  const navigate = useCallback((path: string) => navigateTo(makeHref(path)), [makeHref]);
   const navCtx = useMemo(() => makeNavigateApi(navigate, makeHref), [navigate, makeHref]);
 
   if (!authChecked) return null;
@@ -82,7 +84,7 @@ export function Router() {
   // mode === 'editor'
   const isAnon = authed.startsWith('anon:');
   return (
-    <>
+    <NavigateProvider value={navCtx}>
       <Editor authed={authed} onLogout={logout} />
       {showLoginModal && (
         <LoginModal
@@ -90,6 +92,6 @@ export function Router() {
           onClose={isAnon ? undefined : closeLoginModal}
         />
       )}
-    </>
+    </NavigateProvider>
   );
 }

@@ -17,6 +17,7 @@ import { type ComponentData, type GroupPerm, isRef, type NodeData, resolve } fro
 import type { TypeSchema } from '@treenx/core/schema/types';
 import { ChevronRight, Trash2 } from 'lucide-react';
 import { useRef, useState } from 'react';
+import { toast } from 'sonner';
 import { proxy, useSnapshot } from 'valtio';
 import { AclEditor } from './AclEditor';
 import { ComponentSection } from './ComponentSection';
@@ -60,11 +61,10 @@ export type NodeEditorProps = {
   onClose: () => void;
   onDelete?: () => void;
   currentUserId?: string;
-  toast: (msg: string) => void;
   onAddComponent: (path: string) => void;
 };
 
-export function NodeEditor({ node, save, open, onClose, onDelete, currentUserId, toast, onAddComponent }: NodeEditorProps) {
+export function NodeEditor({ node, save, open, onClose, onDelete, currentUserId, onAddComponent }: NodeEditorProps) {
   const { onChange, scope, flush, reset: resetSave, dirty, stale } = save;
 
   // Valtio only for system fields ($type, $acl) and UI state
@@ -129,9 +129,9 @@ export function NodeEditor({ node, save, open, onClose, onDelete, currentUserId,
       }
       await flush();
       resetProperties();
-      toast('Saved');
+      toast.success('Saved');
     } catch (error) {
-      toast(error instanceof Error ? error.message : 'Save failed');
+      toast.error(error instanceof Error ? error.message : 'Save failed');
     }
   }
 
@@ -141,9 +141,9 @@ export function NodeEditor({ node, save, open, onClose, onDelete, currentUserId,
       const toSave = parseNodeEditorJson(snap.jsonText);
       await set(toSave);
       st.jsonText = getNodeEditorJsonText(toSave);
-      toast('Saved');
+      toast.success('Saved');
     } catch (error) {
-      toast(error instanceof Error ? error.message : 'Save failed');
+      toast.error(error instanceof Error ? error.message : 'Save failed');
     }
   }
 
@@ -195,7 +195,6 @@ export function NodeEditor({ node, save, open, onClose, onDelete, currentUserId,
               name=""
               value={mainValue}
               onChange={onChange}
-              toast={toast}
               onActionComplete={resetProperties}
             />
 
@@ -210,7 +209,6 @@ export function NodeEditor({ node, save, open, onClose, onDelete, currentUserId,
                 collapsed={!!snap.collapsed[name]}
                 onToggle={() => { st.collapsed[name] = !st.collapsed[name]; }}
                 onRemove={() => handleRemoveComponent(name)}
-                toast={toast}
                 onActionComplete={resetProperties}
               />
             ))}

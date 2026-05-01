@@ -19,10 +19,9 @@ type Props = {
   onAddComponent: (path: string) => void;
   onSelect: (path: string) => void;
   onSetRoot?: (path: string) => void;
-  toast: (msg: string) => void;
 };
 
-export function Inspector({ path, currentUserId, onDelete, onAddComponent, onSelect, onSetRoot, toast }: Props) {
+export function Inspector({ path, currentUserId, onDelete, onAddComponent, onSelect, onSetRoot }: Props) {
   const { data: node } = usePath(path);
   const save = useAutoSave(path ?? '');
   const [propsOpen, setPropsOpen] = useState(false);
@@ -79,7 +78,6 @@ export function Inspector({ path, currentUserId, onDelete, onAddComponent, onSel
         onClose={() => setPropsOpen(false)}
         onDelete={() => onDelete(node.$path)}
         currentUserId={currentUserId}
-        toast={toast}
         onAddComponent={onAddComponent}
       />
     </div>

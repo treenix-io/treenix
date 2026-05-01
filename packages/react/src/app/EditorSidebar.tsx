@@ -1,3 +1,4 @@
+import { toast } from 'sonner';
 import { Button } from '#components/ui/button';
 import {
   DropdownMenu,
@@ -12,7 +13,7 @@ import { ResizablePanel } from '#components/ui/resizable';
 import { Tree } from '#editor/Tree';
 import { createNode } from '#hooks';
 import { TypePicker } from '#mods/editor-ui/type-picker';
-import { checkBeforeNavigate } from '#navigate';
+import type { NavigateFn } from '#navigate';
 import * as cache from '#tree/cache';
 import { tree } from '#tree/client';
 import { startEvents, stopEvents } from '#tree/events';
@@ -35,10 +36,9 @@ type EditorSidebarProps = {
   authed: string;
   root: string;
   selected: string | null;
-  onSelect: (path: string) => void | Promise<void>;
+  onSelect: NavigateFn;
   onSetRoot: (path: string) => void;
   onRequestCreateRoot: () => void;
-  toast: (message: string, type?: 'success' | 'error') => void;
   onLogout: () => void;
 };
 
@@ -77,7 +77,6 @@ export function EditorSidebar({
   onSelect,
   onSetRoot,
   onRequestCreateRoot,
-  toast,
   onLogout,
 }: EditorSidebarProps) {
   const panelRef = useRef<PanelImperativeHandle | null>(null);
@@ -92,10 +91,14 @@ export function EditorSidebar({
   const expandedRef = useRef(expanded);
   const selectedRef = useRef(selected);
   const phaseRef = useRef(phase);
+  // Mirror of `loaded` updated synchronously inside loadChildren so concurrent
+  // calls within one async sequence don't refetch the same path.
+  const loadedRef = useRef(loaded);
 
   expandedRef.current = expanded;
   selectedRef.current = selected;
   phaseRef.current = phase;
+  loadedRef.current = loaded;
 
   const hasRootNode = useSyncExternalStore(
     useCallback((cb: () => void) => cache.subscribePath(root, cb), [root]),
@@ -104,50 +107,66 @@ export function EditorSidebar({
   const roots = hasRootNode ? [root, '/local'] : ['/local'];
 
   const loadChildren = useCallback(async (path: string) => {
+    if (loadedRef.current.has(path)) return;
     const { items: children } = await tree.getChildren(path, { watch: true, watchNew: true });
     cache.replaceChildren(path, children);
-    setLoaded((prev) => new Set(prev).add(path));
+    const next = new Set(loadedRef.current).add(path);
+    loadedRef.current = next;
+    setLoaded(next);
   }, []);
+
+  // Loads ancestor children for `selected` within `root` and merges those ancestors
+  // into `expanded`. Idempotent via loadChildren's early-return.
+  const ensurePathVisible = useCallback(async (rootPath: string, target: string | null) => {
+    if (!target || target === rootPath) return;
+    const insideRoot = target.startsWith(rootPath === '/' ? '/' : `${rootPath}/`);
+    if (!insideRoot) return;
+    const rel = rootPath === '/' ? target : target.slice(rootPath.length);
+    const parts = rel.split('/').filter(Boolean);
+    const ancestors: string[] = [];
+    let cur = rootPath === '/' ? '' : rootPath;
+    for (let i = 0; i < parts.length - 1; i++) {
+      cur += `/${parts[i]}`;
+      ancestors.push(cur);
+    }
+    for (const a of ancestors) await loadChildren(a);
+    if (ancestors.length) {
+      setExpanded((prev) => {
+        const next = new Set(prev);
+        for (const a of ancestors) next.add(a);
+        return next;
+      });
+    }
+  }, [loadChildren]);
 
   useEffect(() => () => {
     if (animationTimer.current) clearTimeout(animationTimer.current);
   }, []);
 
+  // Bootstrap on root change: load root node, its children, and ancestors of the
+  // currently-selected node. Inspector owns the selected-leaf fetch via usePath.
   useEffect(() => {
     cache.clear();
+    loadedRef.current = new Set();
     setLoaded(new Set());
+    setExpanded(new Set([root]));
     (async () => {
       const rootNode = (await trpc.get.query({ path: root, watch: true })) as NodeData | undefined;
       if (rootNode) cache.put(rootNode);
       await loadChildren(root);
-
-      const p = location.pathname;
-      const target = p.startsWith('/t') ? p.slice(2) || '/' : root;
-      const toExpand = new Set([root]);
-
-      if (target !== root && target.startsWith(root === '/' ? '/' : `${root}/`)) {
-        const relative = root === '/' ? target : target.slice(root.length);
-        const parts = relative.split('/').filter(Boolean);
-        let cur = root === '/' ? '' : root;
-        for (let i = 0; i < parts.length - 1; i++) {
-          cur += `/${parts[i]}`;
-          toExpand.add(cur);
-          await loadChildren(cur);
-        }
-        const parent = cur || root;
-        if (!toExpand.has(parent)) await loadChildren(parent);
-      }
-
-      setExpanded(toExpand);
-      await onSelect(target);
-      if (target !== root && !cache.has(target)) {
-        const node = (await trpc.get.query({ path: target, watch: true })) as NodeData | undefined;
-        if (node) cache.put(node);
-      }
+      await ensurePathVisible(root, selectedRef.current);
     })().catch((e: unknown) => {
-      toast(e instanceof Error ? e.message : 'Failed to connect to server', 'error');
+      toast.error(e instanceof Error ? e.message : 'Failed to connect to server');
     });
-  }, [loadChildren, onSelect, root, toast]);
+  }, [root, loadChildren, ensurePathVisible]);
+
+  // Selected change (e.g. browser back/forward, deep link inside same root):
+  // merge ancestors of the new selection into `expanded` without disturbing user-expanded nodes.
+  useEffect(() => {
+    ensurePathVisible(root, selected).catch((e: unknown) => {
+      toast.error(e instanceof Error ? e.message : String(e));
+    });
+  }, [selected, root, ensurePathVisible]);
 
   useEffect(() => {
     startEvents({
@@ -198,8 +217,7 @@ export function EditorSidebar({
 
   const handleSelect = useCallback(
     async (path: string) => {
-      if (!checkBeforeNavigate()) return;
-      await onSelect(path);
+      if (!onSelect(path)) return;
       await loadChildren(path);
     },
     [loadChildren, onSelect],
@@ -243,9 +261,9 @@ export function EditorSidebar({
 
       const node = (await trpc.get.query({ path: childPath, watch: true })) as NodeData | undefined;
       if (node) cache.put(node);
-      toast(`Created ${name}`);
+      toast.success(`Created ${name}`);
     },
-    [creatingAt, loadChildren, onSelect, toast],
+    [creatingAt, loadChildren, onSelect],
   );
 
   const handleDelete = useCallback(
@@ -280,16 +298,16 @@ export function EditorSidebar({
       await loadChildren(oldParent);
       await loadChildren(toParent);
       await onSelect(newPath);
-      toast(`Moved to ${newPath}`);
+      toast.success(`Moved to ${newPath}`);
     },
-    [loadChildren, onSelect, toast],
+    [loadChildren, onSelect],
   );
 
   const handleClearCache = useCallback(() => {
     cache.clear();
-    toast('Cache cleared');
+    toast.success('Cache cleared');
     location.reload();
-  }, [toast]);
+  }, []);
 
   const collapsed = phase === 'collapsed';
   const compact = phase !== 'expanded';

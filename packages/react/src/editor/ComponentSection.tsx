@@ -31,7 +31,6 @@ export type ComponentSectionProps = {
   collapsed?: boolean;
   onToggle?: () => void;
   onRemove?: () => void;
-  toast: (msg: string) => void;
   onActionComplete?: () => void;
 };
 
@@ -43,7 +42,6 @@ export function ComponentSection({
   collapsed,
   onToggle,
   onRemove,
-  toast,
   onActionComplete,
 }: ComponentSectionProps) {
   const isMain = !name;
@@ -91,7 +89,6 @@ export function ComponentSection({
             componentName={name}
             compType={compType}
             compData={value}
-            toast={toast}
             onActionComplete={onActionComplete}
           />
         </ErrorBoundary>

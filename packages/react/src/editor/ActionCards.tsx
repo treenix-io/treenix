@@ -11,6 +11,7 @@ import * as cache from '#tree/cache';
 import { trpc } from '#tree/trpc';
 import type { ComponentData, NodeData } from '@treenx/core';
 import { useState } from 'react';
+import { toast } from 'sonner';
 
 function ResultView({ value }: { value: unknown }) {
   if (value === undefined || value === null) return null;
@@ -42,14 +43,12 @@ export function ActionCardList({
   path,
   componentName,
   compType,
-  toast,
   onActionComplete,
 }: {
   path: string;
   componentName: string;
   compType: string;
   compData: Record<string, unknown>;
-  toast: (msg: string) => void;
   onActionComplete?: () => void;
 }) {
   const schema = useSchema(compType);
@@ -76,7 +75,7 @@ export function ActionCardList({
         const raw = (paramsText[a] ?? '').trim();
         if (raw && raw !== '{}') {
           try { data = JSON.parse(raw); }
-          catch { toast('Invalid JSON params'); setRunning(null); return; }
+          catch { toast.error('Invalid JSON params'); setRunning(null); return; }
         }
       }
       const result = await execute(path, a, data, undefined, componentName);

@@ -1,28 +1,23 @@
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '#components/ui/alert-dialog';
+// Editor — tree inspector + per-node Inspector at /t/<path>?root=<root>.
+// URL is the single source of truth: `selected` and `root` are derived from useLocation.
+// Navigation goes through the unified NavigateProvider mounted in Router.
+
 import { Button } from '#components/ui/button';
-import { Input } from '#components/ui/input';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '#components/ui/resizable';
 import { TypePicker } from '#mods/editor-ui/type-picker';
 import type { NodeData } from '@treenx/core';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import * as cache from '#tree/cache';
 import { tree } from '#tree/client';
-import { SSE_CONNECTED, SSE_DISCONNECTED } from '#tree/events';
 import { addComponent } from '#hooks';
-import { checkBeforeNavigate, makeNavigateApi, NavigateProvider, pushHistory } from '#navigate';
+import { setEditorRoot, useLocation, useNavigate } from '#navigate';
 import { EditorSidebar } from './EditorSidebar';
 import { Inspector } from '#editor/Inspector';
-import { trpc } from '#tree/trpc';
-import { getModErrors } from '#tree/load-client';
 import { toast } from 'sonner';
+import { useSseStatus } from '#hooks/use-sse-status';
+import { useModErrors } from '#hooks/use-mod-errors';
+import { ConnectionBanner } from './ConnectionBanner';
+import { CreateRootDialog } from './CreateRootDialog';
 
 export interface EditorProps {
   authed: string;
@@ -30,76 +25,24 @@ export interface EditorProps {
 }
 
 export function Editor({ authed, onLogout }: EditorProps) {
-  const [root, setRoot] = useState<string>(() =>
-    new URLSearchParams(location.search).get('root') || '/',
+  const { pathname, search } = useLocation();
+  const selected = useMemo(
+    () => (pathname.startsWith('/t') ? (pathname.slice(2) || '/') : null),
+    [pathname],
   );
+  const root = useMemo(
+    () => new URLSearchParams(search).get('root') || '/',
+    [search],
+  );
+  const navigate = useNavigate();
 
-  const [selected, setSelected] = useState<string | null>(() => {
-    const p = location.pathname;
-    if (!p.startsWith('/t')) return null;
-    const rest = p.slice(2);
-    return rest || '/';
-  });
   const [error, setError] = useState<string | null>(null);
   const [addingComponentAt, setAddingComponentAt] = useState<string | null>(null);
-  const [toastMsg, setToastMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
-  const [sseDown, setSseDown] = useState(false);
-  const sseDownTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const [rootPromptOpen, setRootPromptOpen] = useState(false);
+  const sseDown = useSseStatus();
+  useModErrors();
 
-  // Notify about failed mods once
-  useEffect(() => {
-    const errors = getModErrors();
-    if (!errors.size) return;
-    for (const [name, msg] of errors) {
-      toast.warning(`Mod "${name}" skipped`, { description: msg, duration: 10_000 });
-    }
-  }, []);
-
-  // SSE connection indicator
-  useEffect(() => {
-    const onConnect = () => {
-      if (sseDownTimer.current) { clearTimeout(sseDownTimer.current); sseDownTimer.current = undefined; }
-      setSseDown(false);
-    };
-    const onDisconnect = () => {
-      if (!sseDownTimer.current) {
-        sseDownTimer.current = setTimeout(() => { sseDownTimer.current = undefined; setSseDown(true); }, 2000);
-      }
-    };
-    window.addEventListener(SSE_CONNECTED, onConnect);
-    window.addEventListener(SSE_DISCONNECTED, onDisconnect);
-    return () => {
-      window.removeEventListener(SSE_CONNECTED, onConnect);
-      window.removeEventListener(SSE_DISCONNECTED, onDisconnect);
-      if (sseDownTimer.current) clearTimeout(sseDownTimer.current);
-    };
-  }, []);
-
-  // Sync selected path to /t/ URL
-  const navFromPopstate = useRef(false);
-  useEffect(() => {
-    if (navFromPopstate.current) { navFromPopstate.current = false; return; }
-    const base = selected ? `/t${selected === '/' ? '' : selected}` : '/';
-    const search = root !== '/' ? `?root=${encodeURIComponent(root)}` : '';
-    const url = base + search;
-    if (location.pathname + location.search !== url) {
-      pushHistory(url);
-    }
-  }, [selected, root]);
-
-  // Editor-local popstate: keep selected/root in sync when user back/forwards within /t/*
-  useEffect(() => {
-    const onPop = () => {
-      const p = location.pathname;
-      if (!p.startsWith('/t')) return; // Router will handle mode switch
-      navFromPopstate.current = true;
-      setSelected(p.slice(2) || '/');
-      setRoot(new URLSearchParams(location.search).get('root') || '/');
-    };
-    window.addEventListener('popstate', onPop);
-    return () => window.removeEventListener('popstate', onPop);
-  }, []);
-
+  // Cmd+/ : open Add Component picker for the currently selected node
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       const meta = e.metaKey || e.ctrlKey;
@@ -114,38 +57,15 @@ export function Editor({ authed, onLogout }: EditorProps) {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [selected]);
 
-  const showToast = useCallback((msg: string, type: 'success' | 'error' = 'success') => {
-    setToastMsg({ text: msg, type });
-    setTimeout(() => setToastMsg(null), type === 'error' ? 5000 : 2000);
-  }, []);
-
+  // Surface uncaught promise rejections as toasts so users see fetch/tree errors.
   useEffect(() => {
     const handler = (e: PromiseRejectionEvent) => {
       const msg = e.reason?.message || String(e.reason);
-      showToast(msg, 'error');
+      toast.error(msg);
     };
     window.addEventListener('unhandledrejection', handler);
     return () => window.removeEventListener('unhandledrejection', handler);
-  }, [showToast]);
-
-  const selectPath = useCallback(
-    async (path: string | null) => {
-      setSelected(path);
-      if (path && !cache.has(path)) {
-        const node = (await trpc.get.query({ path, watch: true })) as NodeData | undefined;
-        if (node) cache.put(node);
-      }
-    },
-    [],
-  );
-
-  const handleSelect = useCallback(
-    async (path: string) => {
-      if (!checkBeforeNavigate()) return;
-      await selectPath(path);
-    },
-    [selectPath],
-  );
+  }, []);
 
   const handleDelete = useCallback(
     async (path: string) => {
@@ -156,9 +76,9 @@ export function Editor({ authed, onLogout }: EditorProps) {
         const { items: children } = await tree.getChildren(parent, { watch: true, watchNew: true });
         cache.replaceChildren(parent, children);
       }
-      await selectPath(parent);
+      navigate(parent ?? '/');
     },
-    [selectPath],
+    [navigate],
   );
 
   const handleAddComponent = useCallback((path: string) => {
@@ -167,16 +87,14 @@ export function Editor({ authed, onLogout }: EditorProps) {
 
   const handlePickComponent = useCallback(
     async (name: string, type: string) => {
-      const path = addingComponentAt!;
+      const path = addingComponentAt;
+      if (!path) return;
       setAddingComponentAt(null);
       await addComponent(path, name, type);
-      showToast(`Added ${name}`);
+      toast.success(`Added ${name}`);
     },
-    [addingComponentAt, showToast],
+    [addingComponentAt],
   );
-
-  const [rootPromptOpen, setRootPromptOpen] = useState(false);
-  const [rootPromptType, setRootPromptType] = useState('root');
 
   const handleCreateRoot = useCallback(async (type: string) => {
     if (!type) return;
@@ -184,24 +102,17 @@ export function Editor({ authed, onLogout }: EditorProps) {
       await tree.set({ $path: '/', $type: type } as NodeData);
       const rootNode = await tree.get('/');
       if (rootNode) cache.put(rootNode);
-      setSelected('/');
+      navigate('/');
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to create root');
     }
-  }, []);
+  }, [navigate]);
 
-  const handleSetRoot = (path: string) => setRoot(path);
-
-  // Editor owns in-subtree navigation — children call navigate(path), we select it.
-  const makeHref = useCallback((path: string) => `/t${path === '/' ? '' : path}`, []);
-
-  const navigate = useCallback((path: string) => {
-    if (!checkBeforeNavigate()) return;
-    selectPath(path);
-  }, [selectPath]);
-
-  const navCtx = useMemo(() => makeNavigateApi(navigate, makeHref), [navigate, makeHref]);
+  const handleSetRoot = useCallback(
+    (newRoot: string) => { setEditorRoot(newRoot, selected); },
+    [selected],
+  );
 
   if (error) {
     return (
@@ -216,25 +127,17 @@ export function Editor({ authed, onLogout }: EditorProps) {
   }
 
   return (
-    <NavigateProvider value={navCtx}>
-      {sseDown && (
-        <div className="fixed top-0 inset-x-0 z-50 bg-yellow-500 text-black text-center text-sm py-1">
-          Reconnecting to server…
-        </div>
-      )}
+    <>
+      <ConnectionBanner down={sseDown} />
       <div className="flex h-screen bg-background text-foreground overflow-hidden">
         <ResizablePanelGroup orientation="horizontal" className="h-full">
           <EditorSidebar
             authed={authed}
             root={root}
             selected={selected}
-            onSelect={selectPath}
+            onSelect={navigate}
             onSetRoot={handleSetRoot}
-            onRequestCreateRoot={() => {
-              setRootPromptType('root');
-              setRootPromptOpen(true);
-            }}
-            toast={showToast}
+            onRequestCreateRoot={() => setRootPromptOpen(true)}
             onLogout={onLogout}
           />
 
@@ -246,9 +149,8 @@ export function Editor({ authed, onLogout }: EditorProps) {
               currentUserId={authed}
               onDelete={handleDelete}
               onAddComponent={handleAddComponent}
-              onSelect={handleSelect}
+              onSelect={navigate}
               onSetRoot={handleSetRoot}
-              toast={showToast}
             />
           </ResizablePanel>
         </ResizablePanelGroup>
@@ -264,36 +166,12 @@ export function Editor({ authed, onLogout }: EditorProps) {
           />
         )}
 
-        <AlertDialog open={rootPromptOpen} onOpenChange={setRootPromptOpen}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Create root node</AlertDialogTitle>
-            </AlertDialogHeader>
-            <Input
-              value={rootPromptType}
-              onChange={(e) => setRootPromptType(e.target.value)}
-              placeholder="$type"
-              className="font-mono"
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  setRootPromptOpen(false);
-                  handleCreateRoot(rootPromptType);
-                }
-              }}
-            />
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction onClick={() => handleCreateRoot(rootPromptType)}>Create</AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-
-        {toastMsg && (
-          <div className={`fixed bottom-4 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-lg text-sm ${toastMsg.type === 'error' ? 'bg-destructive/20 text-destructive border border-destructive/30' : 'bg-primary/20 text-primary border border-primary/30'}`}>
-            {toastMsg.text}
-          </div>
-        )}
+        <CreateRootDialog
+          open={rootPromptOpen}
+          onOpenChange={setRootPromptOpen}
+          onCreate={handleCreateRoot}
+        />
       </div>
-    </NavigateProvider>
+    </>
   );
 }
