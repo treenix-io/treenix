@@ -352,5 +352,24 @@ describe('Lazy resolver semantics (sync miss)', () => {
     }
   });
 
+  it('miss resolver that does not register: resolve falls through to default/null', () => {
+    const snap = saveRegistrySnapshot();
+    try {
+      const TYPE = 'lazy.noop.C';
+      let invoked = 0;
+
+      onResolveMiss('schema', (type) => {
+        if (type !== TYPE) return;
+        invoked++;
+        // Deliberately do NOT register — simulate "not my prefix" early-return
+      });
+
+      const handler = resolve(TYPE, 'schema');
+      assert.equal(invoked, 1, 'resolver was invoked');
+      assert.equal(handler, null, 'no registration → resolve returns null');
+    } finally {
+      restoreRegistrySnapshot(snap);
+    }
+  });
 });
 
