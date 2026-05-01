@@ -44,7 +44,7 @@ register('text/markdown', 'decode', async (filePath: string, nodePath: string, o
   return node as NodeData;
 });
 
-register('doc.page', 'encode', async (node: NodeData, filePath: string) => {
+register('doc.page', 'encode', async (node: NodeData, filePath: string, outerPath?: string) => {
   const { title, content } = node as { title?: string; content?: TiptapNode };
   const fmComp = (node as Record<string, unknown>)['doc.frontmatter'] as
     | (DocFrontmatterData & { $type?: string })
@@ -58,7 +58,9 @@ register('doc.page', 'encode', async (node: NodeData, filePath: string) => {
   }
 
   if (title) md += `# ${title}\n\n`;
-  if (content) md += tiptapToMd(content);
+  // Pass outerPath as basePath so nodeLinks with a preserved sourceHref (`./types.md`)
+  // can verify their invariant and round-trip in the original relative form.
+  if (content) md += tiptapToMd(content, outerPath ?? node.$path);
 
   // Extensionless path → append .md
   const actualPath = filePath.endsWith('.md') ? filePath : filePath + '.md';

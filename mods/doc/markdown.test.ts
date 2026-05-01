@@ -297,3 +297,186 @@ describe('roundtrip md → tiptap → md', () => {
     assert.ok(result.includes('const x = 1;'));
   });
 });
+
+describe('nodeLink href preservation', () => {
+  // Regression: codec used to rewrite `./types.md` → `treenix:/abs/path` on roundtrip.
+  // Treenix scheme breaks plain markdown viewers (GitHub, VS Code preview); relative
+  // form is the authorial contract. We now store the original href on the mark and
+  // re-emit it as long as it still resolves to the same absolute path.
+  it('preserves relative href through full roundtrip', () => {
+    const original = 'See [Types](./concepts/types.md).';
+    const basePath = '/docs/public/index.md';
+    const tiptap = mdToTiptap(original, basePath);
+    const result = tiptapToMd(tiptap, basePath);
+    assert.ok(result.includes('[Types](./concepts/types.md)'), `expected relative href preserved, got: ${result}`);
+    assert.ok(!result.includes('treenix:'), 'treenix: scheme must not appear in encoded output');
+  });
+
+  it('drops legacy treenix: scheme and emits absolute path', () => {
+    // Old documents on disk may contain `[T](treenix:/a)`; we decode them but never
+    // round-trip the scheme back out — encoders write standard markdown only.
+    const tiptap = mdToTiptap('go [home](treenix:/foo)');
+    const result = tiptapToMd(tiptap);
+    assert.ok(result.includes('[home](/foo)'), `expected legacy scheme stripped, got: ${result}`);
+    assert.ok(!result.includes('treenix:'));
+  });
+
+  it('emits absolute path when no sourceHref is stored (programmatic links)', () => {
+    // Slash-menu / [[/path]] input rule produce nodeLinks without an authored href.
+    // Encode falls back to the absolute path — still valid markdown, no `treenix:`.
+    const tiptap: TiptapNode = {
+      type: 'doc',
+      content: [{
+        type: 'paragraph',
+        content: [{ type: 'text', text: 'See it', marks: [{ type: 'nodeLink', attrs: { path: '/notes/x' } }] }],
+      }],
+    };
+    const result = tiptapToMd(tiptap);
+    assert.ok(result.includes('[See it](/notes/x)'));
+    assert.ok(!result.includes('treenix:'));
+  });
+
+  it('falls back to absolute path when sourceHref no longer resolves to path (stale link)', () => {
+    // Simulates a retargeted link: stored path no longer matches what sourceHref
+    // would resolve to. We MUST NOT emit the stale href.
+    const tiptap: TiptapNode = {
+      type: 'doc',
+      content: [{
+        type: 'paragraph',
+        content: [{ type: 'text', text: 'X', marks: [{ type: 'nodeLink', attrs: { path: '/docs/new.md', sourceHref: './old.md' } }] }],
+      }],
+    };
+    const result = tiptapToMd(tiptap, '/docs/index.md');
+    assert.ok(result.includes('[X](/docs/new.md)'), `expected absolute fallback, got: ${result}`);
+    assert.ok(!result.includes('./old.md'));
+  });
+
+  it('preserves href with query and fragment', () => {
+    const original = 'see [t](./x.md?v=1#anchor)';
+    const basePath = '/docs/a.md';
+    const tiptap = mdToTiptap(original, basePath);
+    const result = tiptapToMd(tiptap, basePath);
+    assert.ok(result.includes('[t](./x.md?v=1#anchor)'), `expected query+fragment preserved, got: ${result}`);
+  });
+});
+
+describe('treenix fenced embed', () => {
+  // Regression: treenixBlock used to serialize as lossy `[Component: foo at /bar]` text
+  // that mdToTiptap could not parse back. Roundtrip destroyed the embed. The structured
+  // fenced format makes embeds first-class while staying valid markdown.
+  it('roundtrips a component embed with $ref/$type/$context/$props', () => {
+    const original = [
+      '```treenix',
+      '$type: chart.bar',
+      '$ref: /data/sales',
+      '$context: react:compact',
+      '$props:',
+      '  height: 200',
+      '  label: Sales',
+      '```',
+    ].join('\n');
+    const tiptap = mdToTiptap(original);
+    const block = tiptap.content?.[0];
+    assert.equal(block?.type, 'treenixBlock');
+    assert.equal(block?.attrs?.type, 'chart.bar');
+    assert.equal(block?.attrs?.ref, '/data/sales');
+    assert.equal(block?.attrs?.context, 'react:compact');
+    assert.deepEqual(block?.attrs?.props, { height: 200, label: 'Sales' });
+
+    const result = tiptapToMd(tiptap);
+    const re = mdToTiptap(result);
+    // Roundtrip must produce identical attrs — the embed survives byte-equivalent on the wire.
+    assert.deepEqual(re.content?.[0]?.attrs, block?.attrs);
+  });
+
+  it('roundtrips a query embed with $where filters', () => {
+    const original = [
+      '```treenix',
+      '$query: /todos',
+      '$type: todo.item',
+      '$where:',
+      '  done: false',
+      '  priority: high',
+      '```',
+    ].join('\n');
+    const tiptap = mdToTiptap(original);
+    const block = tiptap.content?.[0];
+    assert.equal(block?.type, 'queryBlock');
+    assert.equal(block?.attrs?.path, '/todos');
+    assert.equal(block?.attrs?.type, 'todo.item');
+    // $where keys/values land as { field, value: String(v) } — matches queryBlock attr shape.
+    assert.deepEqual(block?.attrs?.filters, [
+      { field: 'done', value: 'false' },
+      { field: 'priority', value: 'high' },
+    ]);
+
+    const result = tiptapToMd(tiptap);
+    const re = mdToTiptap(result);
+    assert.deepEqual(re.content?.[0]?.attrs?.filters, block?.attrs?.filters);
+    assert.equal(re.content?.[0]?.attrs?.path, '/todos');
+  });
+
+  it('falls back to plain codeBlock on malformed embed YAML — body verbatim', () => {
+    // Defensive contract: a broken embed must NEVER crash decode. We keep the body
+    // intact in a codeBlock so the user can fix it in their editor.
+    const original = '```treenix\nthis is: : : not yaml\n  random indent\n```';
+    const tiptap = mdToTiptap(original);
+    const block = tiptap.content?.[0];
+    assert.equal(block?.type, 'codeBlock', 'malformed embed must fall back to codeBlock');
+    assert.equal(block?.attrs?.language, 'treenix');
+    const text = block?.content?.[0]?.text ?? '';
+    assert.ok(text.includes('this is: : : not yaml'));
+  });
+
+  it('falls back to plain codeBlock when $query and $ref both present (conflict)', () => {
+    // Ambiguous embed — refuse silent coercion. Body is preserved verbatim so the
+    // author sees exactly what they wrote and can resolve the conflict.
+    const original = '```treenix\n$query: /todos\n$ref: /data/sales\n```';
+    const tiptap = mdToTiptap(original);
+    const block = tiptap.content?.[0];
+    assert.equal(block?.type, 'codeBlock');
+    assert.equal(block?.attrs?.language, 'treenix');
+  });
+
+  it('falls back to plain codeBlock when no embed-shaped fields are present', () => {
+    // Random YAML in a `treenix` fence is not an embed. Treat as a codeBlock so the
+    // user's content survives unchanged through a roundtrip.
+    const original = '```treenix\njust: a config\n```';
+    const tiptap = mdToTiptap(original);
+    const block = tiptap.content?.[0];
+    assert.equal(block?.type, 'codeBlock');
+  });
+
+  it('roundtrips a component embed with nested $props', () => {
+    // Mini-YAML supports recursive block mappings — nested objects in props survive
+    // a full encode/decode cycle.
+    const tiptap: TiptapNode = {
+      type: 'doc',
+      content: [{
+        type: 'treenixBlock',
+        attrs: {
+          type: 'chart.area',
+          ref: null,
+          context: 'react',
+          props: { style: { color: 'red', size: 12 }, height: 200 },
+        },
+      }],
+    };
+    const md = tiptapToMd(tiptap);
+    const re = mdToTiptap(md);
+    assert.deepEqual(re.content?.[0]?.attrs?.props, { style: { color: 'red', size: 12 }, height: 200 });
+  });
+
+  it('emits no $context line when context is the default react', () => {
+    // Defaults stay implicit — keeps the wire format compact and the diff minimal.
+    const tiptap: TiptapNode = {
+      type: 'doc',
+      content: [{
+        type: 'treenixBlock',
+        attrs: { type: 'x.y', ref: null, props: {}, context: 'react' },
+      }],
+    };
+    const md = tiptapToMd(tiptap);
+    assert.ok(!md.includes('$context'), `default context should be implicit, got: ${md}`);
+  });
+});

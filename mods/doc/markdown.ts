@@ -1,6 +1,8 @@
 // Markdown ↔ Tiptap JSON converters
 // Used by: text.ts (Tiptap→md), fs-codec decode/encode (.md files ↔ doc.page nodes)
 
+import { emitYaml, parseYaml, yamlScalar } from '@treenx/core/util/yaml';
+
 export type TiptapNode = {
   type: string;
   attrs?: Record<string, unknown>;
@@ -11,54 +13,69 @@ export type TiptapNode = {
 
 // ── Tiptap JSON → Markdown ──
 
-export function inlineToMd(node: TiptapNode): string {
+// emitLinkHref decides which href to write for a nodeLink mark. It prefers the original
+// markdown href if and only if it still resolves to the resolved path under basePath —
+// this preserves authorial intent (`./types.md`) but falls back to the absolute tree
+// path when the link has been retargeted or the page has moved.
+function emitLinkHref(attrs: Record<string, unknown>, basePath?: string): string {
+  const path = (attrs.path as string | null) ?? '';
+  const sourceHref = attrs.sourceHref as string | null;
+  if (sourceHref && basePath && resolveLinkPath(sourceHref, basePath) === path) {
+    return sourceHref;
+  }
+  return path;
+}
+
+export function inlineToMd(node: TiptapNode, basePath?: string): string {
   if (node.text) {
     let t = node.text;
     const nodeLink = node.marks?.find((m) => m.type === 'nodeLink');
     if (nodeLink) {
-      const path = (nodeLink as { type: string; attrs?: Record<string, unknown> }).attrs?.path ?? '';
-      t = `[${t}](treenix:${path})`;
+      const href = emitLinkHref((nodeLink.attrs ?? {}) as Record<string, unknown>, basePath);
+      t = `[${t}](${href})`;
     }
     if (node.marks?.some((m) => m.type === 'bold')) t = `**${t}**`;
     if (node.marks?.some((m) => m.type === 'italic')) t = `*${t}*`;
     if (node.marks?.some((m) => m.type === 'code')) t = `\`${t}\``;
     return t;
   }
-  return (node.content ?? []).map(inlineToMd).join('');
+  return (node.content ?? []).map((c) => inlineToMd(c, basePath)).join('');
 }
 
-export function tiptapToMd(node: TiptapNode): string {
+export function tiptapToMd(node: TiptapNode, basePath?: string): string {
   const children = node.content ?? [];
+  const block = (c: TiptapNode) => tiptapToMd(c, basePath);
+  const inline = (c: TiptapNode) => inlineToMd(c, basePath);
 
   switch (node.type) {
     case 'doc':
-      return children.map((c) => tiptapToMd(c)).join('\n\n');
+      return children.map(block).join('\n\n');
 
     case 'heading': {
       const level = (node.attrs?.level as number) ?? 1;
-      return '#'.repeat(level) + ' ' + children.map(inlineToMd).join('');
+      return '#'.repeat(level) + ' ' + children.map(inline).join('');
     }
 
     case 'paragraph':
-      return children.map(inlineToMd).join('');
+      return children.map(inline).join('');
 
     case 'bulletList':
-      return children.map((c) => tiptapToMd(c)).join('\n');
+      return children.map(block).join('\n');
 
     case 'orderedList':
-      return children.map((c, i) => `${i + 1}. ${tiptapToMd(c).replace(/^- /, '')}`).join('\n');
+      return children.map((c, i) => `${i + 1}. ${block(c).replace(/^- /, '')}`).join('\n');
 
     case 'taskList':
-      return children.map((c) => tiptapToMd(c)).join('\n');
+      return children.map(block).join('\n');
 
     case 'taskItem': {
       const checked = node.attrs?.checked ? 'x' : ' ';
-      const inner = children.map((c) => tiptapToMd(c)).join('\n');
+      const inner = children.map(block).join('\n');
       return `- [${checked}] ${inner}`;
     }
 
     case 'listItem': {
-      const inner = children.map((c) => tiptapToMd(c)).join('\n');
+      const inner = children.map(block).join('\n');
       return '- ' + inner;
     }
 
@@ -67,12 +84,11 @@ export function tiptapToMd(node: TiptapNode): string {
       if (!rows.length) return '';
       const mdRows = rows.map((row) => {
         const cells = (row.content ?? []).map((cell) => {
-          const text = (cell.content ?? []).map((c) => tiptapToMd(c)).join('').replace(/\|/g, '\\|');
+          const text = (cell.content ?? []).map(block).join('').replace(/\|/g, '\\|');
           return text.trim();
         });
         return '| ' + cells.join(' | ') + ' |';
       });
-      // Insert separator after header row
       const firstRow = rows[0];
       const colCount = (firstRow.content ?? []).length;
       const sep = '| ' + Array(colCount).fill('---').join(' | ') + ' |';
@@ -82,39 +98,126 @@ export function tiptapToMd(node: TiptapNode): string {
     case 'tableRow':
     case 'tableCell':
     case 'tableHeader':
-      return children.map((c) => tiptapToMd(c)).join('');
+      return children.map(block).join('');
 
     case 'codeBlock': {
       const lang = (node.attrs?.language as string) ?? '';
-      return '```' + lang + '\n' + children.map(inlineToMd).join('') + '\n```';
+      return '```' + lang + '\n' + children.map(inline).join('') + '\n```';
     }
 
     case 'blockquote':
-      return children.map((c) => '> ' + tiptapToMd(c)).join('\n');
+      return children.map((c) => '> ' + block(c)).join('\n');
 
     case 'horizontalRule':
       return '---';
 
-    case 'treenixBlock': {
-      const ref = node.attrs?.ref as string | null;
-      const type = node.attrs?.type as string | null;
-      if (ref) return `[Component: ${type ?? 'unknown'} at ${ref}]`;
-      return `[Component: ${type ?? 'unknown'} (inline)]`;
-    }
+    case 'treenixBlock':
+      return emitTreenixEmbed(node);
 
-    case 'queryBlock': {
-      const qPath = node.attrs?.path as string | null;
-      const qType = node.attrs?.type as string | null;
-      const qFilters = node.attrs?.filters as { field: string; value: string }[] | null;
-      const parts = [`[Query: ${qPath ?? '/'}`];
-      if (qType) parts.push(`type=${qType}`);
-      if (qFilters?.length) parts.push(qFilters.map(f => `${f.field}=${f.value}`).join(', '));
-      return parts.join(' ') + ']';
-    }
+    case 'queryBlock':
+      return emitQueryEmbed(node);
 
     default:
-      return children.map((c) => tiptapToMd(c)).join('');
+      return children.map(block).join('');
   }
+}
+
+// Treenix-flavored fenced code block: structured embed for component refs and queries.
+// Discriminator on decode: presence of `$query` selects queryBlock; otherwise `$ref`/`$type`
+// produce a treenixBlock. Conflicting or unknown shapes fall back to a plain codeBlock so
+// content is never silently dropped.
+
+function emitTreenixEmbed(node: TiptapNode): string {
+  const attrs = node.attrs ?? {};
+  const ref = attrs.ref as string | null;
+  const type = attrs.type as string | null;
+  const props = (attrs.props as Record<string, unknown>) ?? {};
+  const context = (attrs.context as string) ?? 'react';
+  const lines = ['```treenix'];
+  if (type) lines.push(`$type: ${yamlScalar(type)}`);
+  if (ref) lines.push(`$ref: ${yamlScalar(ref)}`);
+  if (context && context !== 'react') lines.push(`$context: ${yamlScalar(context)}`);
+  if (Object.keys(props).length) {
+    lines.push('$props:');
+    lines.push(emitYaml(props as Record<string, unknown>, 2) as string);
+  }
+  lines.push('```');
+  return lines.join('\n');
+}
+
+function emitQueryEmbed(node: TiptapNode): string {
+  const attrs = node.attrs ?? {};
+  const qPath = attrs.path as string | null;
+  const qType = attrs.type as string | null;
+  const filters = (attrs.filters as { field: string; value: string }[] | null) ?? [];
+  const context = (attrs.context as string) ?? 'react';
+  const lines = ['```treenix'];
+  if (qPath) lines.push(`$query: ${yamlScalar(qPath)}`);
+  if (qType) lines.push(`$type: ${yamlScalar(qType)}`);
+  if (context && context !== 'react') lines.push(`$context: ${yamlScalar(context)}`);
+  if (filters.length) {
+    lines.push('$where:');
+    for (const { field, value } of filters) {
+      lines.push(`  ${yamlScalar(field)}: ${yamlScalar(String(value))}`);
+    }
+  }
+  lines.push('```');
+  return lines.join('\n');
+}
+
+// Shape returned by the codeBlock branch when a ```treenix fence is encountered.
+// Returns null when the fence content is not a recognizable embed — caller falls back
+// to a plain codeBlock so the original body is preserved verbatim.
+function parseTreenixEmbed(body: string): TiptapNode | null {
+  let data: Record<string, unknown>;
+  try {
+    const parsed = parseYaml(body);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    data = parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+
+  const $query = data.$query;
+  const $ref = data.$ref;
+  const $type = data.$type;
+  const $context = data.$context;
+
+  // Conflict: both query and component-only fields → ambiguous, refuse
+  if (typeof $query === 'string' && typeof $ref === 'string') return null;
+
+  if (typeof $query === 'string') {
+    const where = (data.$where && typeof data.$where === 'object' && !Array.isArray(data.$where))
+      ? (data.$where as Record<string, unknown>)
+      : {};
+    const filters = Object.entries(where).map(([field, value]) => ({ field, value: String(value) }));
+    return {
+      type: 'queryBlock',
+      attrs: {
+        path: $query,
+        type: typeof $type === 'string' ? $type : null,
+        filters,
+        context: typeof $context === 'string' ? $context : 'react',
+      },
+    };
+  }
+
+  if (typeof $ref === 'string' || typeof $type === 'string') {
+    const props = (data.$props && typeof data.$props === 'object' && !Array.isArray(data.$props))
+      ? (data.$props as Record<string, unknown>)
+      : {};
+    return {
+      type: 'treenixBlock',
+      attrs: {
+        type: typeof $type === 'string' ? $type : null,
+        ref: typeof $ref === 'string' ? $ref : null,
+        props,
+        context: typeof $context === 'string' ? $context : 'react',
+      },
+    };
+  }
+
+  return null;
 }
 
 // ── Markdown → Tiptap JSON ──
@@ -186,7 +289,8 @@ export function mdToTiptap(markdown: string, basePath?: string): TiptapNode {
       continue;
     }
 
-    // Code block
+    // Code block (top-level backtick fences only — tilde fences and indented fences in
+    // list items are out of scope; mdToTiptap has always operated on this subset).
     if (line.trimStart().startsWith('```')) {
       const lang = line.trim().slice(3).trim();
       const codeLines: string[] = [];
@@ -196,10 +300,21 @@ export function mdToTiptap(markdown: string, basePath?: string): TiptapNode {
         i++;
       }
       i++; // skip closing ```
+      const body = codeLines.join('\n');
+      // Treenix-flavored embed: structured component/query reference. Falls back to
+      // a plain codeBlock (with body verbatim) when the content can't be parsed as a
+      // recognized embed shape — guarantees the user's text is never silently dropped.
+      if (lang === 'treenix') {
+        const embed = parseTreenixEmbed(body);
+        if (embed) {
+          blocks.push(embed);
+          continue;
+        }
+      }
       blocks.push({
         type: 'codeBlock',
         attrs: lang ? { language: lang } : {},
-        content: [{ type: 'text', text: codeLines.join('\n') }],
+        content: [{ type: 'text', text: body }],
       });
       continue;
     }
@@ -354,11 +469,14 @@ function parseInline(text: string, basePath?: string, parentMarks: Mark[] = []):
       const linkText = match[5];
       const href = match[6];
       const treePath = resolveLinkPath(href, basePath);
+      // Preserve the original markdown href so encode can roundtrip relative forms
+      // (`./types.md`, `foo.md?v=1#a`). Drop the legacy `treenix:` scheme on the way
+      // in so we never re-emit it — it isn't standard markdown and breaks plain MD
+      // viewers like GitHub/VS Code preview.
+      const sourceHref = href.startsWith('treenix:') ? null : href;
       const linkMarks: Mark[] = treePath
-        ? [...parentMarks, { type: 'nodeLink', attrs: { path: treePath } }]
+        ? [...parentMarks, { type: 'nodeLink', attrs: { path: treePath, sourceHref } }]
         : parentMarks;
-      // Recurse on link text in case it has its own marks (e.g. **[bold link](x)**
-      // arrives here as already-bold; literal `[*foo*](x)` resolves *foo* inside).
       nodes.push(...parseInline(linkText, basePath, linkMarks));
     }
 

@@ -20,7 +20,13 @@ export const NodeLink = Mark.create<NodeLinkOptions>({
 
   addAttributes() {
     return {
+      // Resolved absolute tree path — runtime navigation contract.
       path: { default: null },
+      // Original markdown href as authored on disk. Used to round-trip relative forms
+      // (`./types.md`, `foo.md?v=1#a`) through tiptapToMd. Only respected on encode if
+      // resolveLinkPath(sourceHref, basePath) still equals path — otherwise we fall back
+      // to the absolute path so a moved page or retargeted link can't emit a stale href.
+      sourceHref: { default: null },
     };
   },
 

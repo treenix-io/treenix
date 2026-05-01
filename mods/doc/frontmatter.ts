@@ -8,7 +8,7 @@
 // "Front matter" comes from book printing — material that appears before the main text
 // (title page, copyright, toc). SSGs adopted the term for header metadata.
 
-import { parseYaml, type YamlValue } from '@treenx/core/util/yaml';
+import { parseYaml, type YamlValue, yamlScalar } from '@treenx/core/util/yaml';
 
 const KNOWN_KEYS = ['title', 'description', 'tags', 'section', 'order'] as const;
 type KnownKey = typeof KNOWN_KEYS[number];
@@ -109,14 +109,6 @@ export function serializeFrontmatter(fm: DocFrontmatterData | null | undefined):
   }
   if (!lines.length) return '';
   return `---\n${lines.join('\n')}\n---\n\n`;
-}
-
-function yamlScalar(s: string): string {
-  // Quote if contains chars that would break parseScalar/findKeyColon
-  if (/^[\s]|[\s]$|[:#\[\]"']|^(true|false|null|~)$|^-?\d+(\.\d+)?$/i.test(s)) {
-    return `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
-  }
-  return s;
 }
 
 function yamlAny(v: unknown): string {

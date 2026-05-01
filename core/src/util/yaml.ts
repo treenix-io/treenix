@@ -161,6 +161,70 @@ function parseScalar(s: string): YamlValue {
   return s;
 }
 
+// ── Emitter ──
+//
+// Symmetric subset to the parser: scalars, primitive flow arrays, block mappings (recursive).
+// Does NOT emit: flow objects, arrays-of-mappings, anchors. The parser can't roundtrip those
+// either, so the emitter refuses them rather than producing silently lossy output.
+
+export function yamlScalar(s: string): string {
+  if (s === '') return '""';
+  // Quote if: leading/trailing whitespace, contains special chars that would break parseScalar
+  // or findKeyColon, looks like a reserved scalar (true/false/null), looks like a number,
+  // or starts with `-` (would be ambiguous with a list item in some contexts).
+  const needsQuote =
+    /^[\s]|[\s]$/.test(s) ||
+    /[:#\[\]{}"'`,&*!|>%@]/.test(s) ||
+    /^(true|false|null|~|True|False|TRUE|FALSE|Null|NULL|yes|no|on|off|Yes|No|On|Off|YES|NO|ON|OFF)$/.test(s) ||
+    /^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(s) ||
+    /^-/.test(s);
+  if (!needsQuote) return s;
+  const escaped = s
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\r')
+    .replace(/\t/g, '\\t');
+  return `"${escaped}"`;
+}
+
+// Keys have the same safety rules as scalars in this subset.
+export const yamlKey = yamlScalar;
+
+// Accepts `unknown` because callers pass user/runtime data (Tiptap attrs, frontmatter extras)
+// that the type system can't statically narrow to YamlValue. Unsupported shapes throw.
+export function emitYaml(value: unknown, indent: number = 0): string {
+  if (value === null || value === undefined) return 'null';
+  if (typeof value === 'boolean') return String(value);
+  if (typeof value === 'number') return String(value);
+  if (typeof value === 'string') return yamlScalar(value);
+  if (Array.isArray(value)) {
+    if (value.some((v) => v !== null && typeof v === 'object')) {
+      throw new Error('emitYaml: arrays of objects/nested arrays are not roundtrippable in this YAML subset');
+    }
+    return '[' + value.map((v) => emitYaml(v)).join(', ') + ']';
+  }
+  if (typeof value === 'object') return emitMapping(value as Record<string, unknown>, indent);
+  throw new Error(`emitYaml: unsupported value type ${typeof value}`);
+}
+
+function emitMapping(obj: Record<string, unknown>, indent: number): string {
+  const pad = ' '.repeat(indent);
+  const entries = Object.entries(obj);
+  if (!entries.length) return `${pad}{}`;
+  const lines: string[] = [];
+  for (const [k, v] of entries) {
+    const key = yamlKey(k);
+    if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
+      lines.push(`${pad}${key}:`);
+      lines.push(emitMapping(v as Record<string, unknown>, indent + 2));
+    } else {
+      lines.push(`${pad}${key}: ${emitYaml(v)}`);
+    }
+  }
+  return lines.join('\n');
+}
+
 function splitFlow(body: string): string[] {
   // Split top-level commas, respecting quotes.
   const out: string[] = [];

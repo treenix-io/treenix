@@ -35,9 +35,11 @@ function getMime(filename: string): string {
 
 // outerPath: nodePath as seen by clients (after mount-prefix). Decoders may need it
 // to resolve self-referential paths inside file content (e.g. relative markdown links).
+// Encoders receive the same outerPath so they can preserve those relative forms when
+// serializing back — without it, an absolute path is the only honest fallback.
 // nodePath: tree path as the rawfs sees it (without mount prefix).
 export type DecodeHandler = (filePath: string, nodePath: string, outerPath?: string) => Promise<NodeData>;
-export type EncodeHandler = (node: NodeData, filePath: string) => Promise<void>;
+export type EncodeHandler = (node: NodeData, filePath: string, outerPath?: string) => Promise<void>;
 
 declare module '#core/context' {
   interface ContextHandlers {
@@ -137,7 +139,7 @@ export async function createRawFsStore(rootDir: string, mountPath: string = ''):
       if (!encode) throw new Error(`No encode registered for type "${node.$type}"`);
 
       await mkdir(dirname(filePath), { recursive: true });
-      await encode(node, filePath);
+      await encode(node, filePath, toOuter(node.$path));
     },
 
     async remove(path) {
