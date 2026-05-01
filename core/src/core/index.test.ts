@@ -324,5 +324,33 @@ describe('Lazy resolver semantics (sync miss)', () => {
       restoreRegistrySnapshot(snap);
     }
   });
+
+  it('async miss resolver still uses bump+re-render path (returns null first call, handler after)', async () => {
+    const snap = saveRegistrySnapshot();
+    try {
+      const TYPE = 'lazy.async.B';
+      let resolved: (() => void) | null = null;
+      const work = new Promise<void>((res) => { resolved = res; });
+
+      onResolveMiss('schema', (type) => {
+        if (type !== TYPE) return;
+        // Simulate async fetch — register on next tick
+        Promise.resolve().then(() => {
+          register(type, 'schema', () => ({ $id: type, type: 'object' as const, title: 'B', properties: {} }));
+          resolved!();
+        });
+      });
+
+      const first = resolve(TYPE, 'schema');
+      assert.equal(first, null, 'async path: first resolve returns null while resolver runs in background');
+
+      await work;
+      const second = resolve(TYPE, 'schema');
+      assert.ok(second, 'async path: second resolve returns the handler registered in background');
+    } finally {
+      restoreRegistrySnapshot(snap);
+    }
+  });
+
 });
 
