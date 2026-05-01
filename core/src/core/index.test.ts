@@ -6,6 +6,7 @@ import {
   createNode,
   getComponent,
   getComponents,
+  getMeta,
   isComponent,
   isRef,
   mapRegistry,
@@ -14,6 +15,7 @@ import {
   removeComponent,
   onResolveMiss,
   render,
+  replaceHandler,
   resolve,
   unregister,
 } from './index';
@@ -373,3 +375,53 @@ describe('Lazy resolver semantics (sync miss)', () => {
   });
 });
 
+describe('replaceHandler', () => {
+  it('overrides an existing handler atomically', () => {
+    const snap = saveRegistrySnapshot();
+    try {
+      const TYPE = 'replace.test.D';
+      const first = () => 'first';
+      const second = () => 'second';
+
+      register(TYPE, 'schema', first as any);
+      assert.equal((resolve(TYPE, 'schema') as any)?.(), 'first');
+
+      // Plain register() must be a no-op (silent dedup)
+      register(TYPE, 'schema', second as any);
+      assert.equal((resolve(TYPE, 'schema') as any)?.(), 'first', 'plain register no-ops on duplicate');
+
+      // replaceHandler must override
+      replaceHandler(TYPE, 'schema', second as any);
+      assert.equal((resolve(TYPE, 'schema') as any)?.(), 'second', 'replaceHandler overrides');
+    } finally {
+      restoreRegistrySnapshot(snap);
+    }
+  });
+
+  it('registers cleanly when no prior entry exists', () => {
+    const snap = saveRegistrySnapshot();
+    try {
+      const TYPE = 'replace.fresh.E';
+      const handler = () => 'fresh';
+
+      replaceHandler(TYPE, 'schema', handler as any);
+      assert.equal((resolve(TYPE, 'schema') as any)?.(), 'fresh');
+    } finally {
+      restoreRegistrySnapshot(snap);
+    }
+  });
+
+  it('preserves meta when replacing', () => {
+    const snap = saveRegistrySnapshot();
+    try {
+      const TYPE = 'replace.meta.F';
+      const handler = () => 'with-meta';
+
+      replaceHandler(TYPE, 'schema', handler as any, { source: 'test' });
+      const meta = getMeta(TYPE, 'schema');
+      assert.deepEqual(meta, { source: 'test' });
+    } finally {
+      restoreRegistrySnapshot(snap);
+    }
+  });
+});
