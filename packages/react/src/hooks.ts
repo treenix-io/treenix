@@ -21,15 +21,11 @@ import * as cache from '#tree/cache';
 import { tree } from '#tree/client';
 import { trpc } from '#tree/trpc';
 import { ensureType } from '#schema-loader';
-import { EMPTY_PATH_SNAPSHOT, type PathHandle } from '#tree/tree-source';
+import { type ChildrenHandle, EMPTY_PATH_SNAPSHOT, type PathHandle } from '#tree/tree-source';
 import { useTreeSource } from '#tree/tree-source-context';
 
 const noopUnsub = () => {};
 export { useNavigate, useBeforeNavigate } from '#navigate';
-
-// Server default matches trpc.getChildren schema (engine/core/src/server/trpc.ts:125).
-// Consumers who want more per page must pass `limit` explicitly.
-const DEFAULT_PAGE_SIZE = 100;
 
 // ── Query<T> — industry-standard reactive fetch shape ──
 // Matches React Query / SWR / Apollo / RTK Query. Boring, familiar, trivially
@@ -52,28 +48,12 @@ export type ChildrenQuery = Query<NodeData[]> & {
 };
 
 export type ChildrenOpts = {
-  limit?: number;                  // page size; absent = DEFAULT_PAGE_SIZE
+  limit?: number;                  // page size; absent = source default (100)
   watch?: boolean;                 // subscribe to path updates
   watchNew?: boolean;              // subscribe to new children appearing
 };
 
-// ── Watch ref-counting ──
-// Multiple components may watch the same parent; ref-count to avoid premature unwatch.
-// Path-level watch ref-counting moved into ClientTreeSource.mountPath.
-
-const childrenWatchRefs = new Map<string, number>();
-
-function refWatch(map: Map<string, number>, path: string) {
-  map.set(path, (map.get(path) ?? 0) + 1);
-}
-
-/** Decrement ref count. Returns true when last consumer unwatched → caller should unwatch on server. */
-function unrefWatch(map: Map<string, number>, path: string): boolean {
-  const count = (map.get(path) ?? 0) - 1;
-  if (count <= 0) { map.delete(path); return true; }
-  map.set(path, count);
-  return false;
-}
+// Watch ref-counting + page-size tracking now live in ClientTreeSource.
 
 // ── usePath: reactive path read → Query<T> ──
 //
@@ -171,167 +151,46 @@ function debugPath(path: string, hook: string) {
 // ── useChildren: reactive children list → ChildrenQuery ──
 
 export function useChildren(parentPath: string, opts?: ChildrenOpts): ChildrenQuery {
-  const gen = useSyncExternalStore(cache.subscribeSSEGen, cache.getSSEGen);
+  const source = useTreeSource();
 
-  // Data subscription — children set is the primary reactive source
-  const data = useSyncExternalStore(
-    useCallback((cb: () => void) => cache.subscribeChildren(parentPath, cb), [parentPath]),
-    useCallback(() => cache.getChildren(parentPath), [parentPath]),
+  // Single bundled snapshot — data + phase + total + truncated + error.
+  // Source merges all five into one stable reference; one subscribe channel.
+  const snap = useSyncExternalStore(
+    useCallback((cb: () => void) => source.subscribeChildren(parentPath, cb), [source, parentPath]),
+    useCallback(() => source.getChildrenSnapshot(parentPath), [source, parentPath]),
   );
 
-  const error = useSyncExternalStore(
-    useCallback((cb: () => void) => cache.subscribeChildrenError(parentPath, cb), [parentPath]),
-    useCallback(() => cache.getChildrenError(parentPath), [parentPath]),
-  );
-
-  const phase = useSyncExternalStore(
-    useCallback((cb: () => void) => cache.subscribeChildren(parentPath, cb), [parentPath]),
-    useCallback(() => cache.getChildrenPhase(parentPath), [parentPath]),
-  );
-
-  const total = useSyncExternalStore(
-    useCallback((cb: () => void) => cache.subscribeChildren(parentPath, cb), [parentPath]),
-    useCallback(() => cache.getChildrenTotal(parentPath), [parentPath]),
-  );
-
-  const truncated = useSyncExternalStore(
-    useCallback((cb: () => void) => cache.subscribeChildren(parentPath, cb), [parentPath]),
-    useCallback(() => cache.getChildrenTruncated(parentPath), [parentPath]),
-  );
-
-  // Subscriber lifecycle — retain on mount, release on unmount. Drives
-  // childPageSize + loadedCount release when the last consumer for this
-  // parent unmounts.
-  useEffect(() => {
-    cache.retainChildSubscriber(parentPath);
-    return () => cache.releaseChildSubscriber(parentPath);
-  }, [parentPath]);
-
-  // Fetch effect — initial load OR reconnect OR opts change → REPLACE semantics.
+  // Lifecycle — mountChildren owns fetch + retain/release + watch ref-counting +
+  // page-size lock + SSE-reset re-fetch. dispose() reverses everything.
+  const handleRef = useRef<ChildrenHandle | null>(null);
   useEffect(() => {
     debugPath(parentPath, 'useChildren');
+    const h = source.mountChildren(parentPath, opts);
+    handleRef.current = h;
+    return () => { h.dispose(); handleRef.current = null; };
+  }, [source, parentPath, opts?.limit, opts?.watch, opts?.watchNew]);
 
-    // First-wins page size lock. Second caller with a different limit gets
-    // the locked value + a dev warn.
-    const effectiveLimit = cache.lockChildPageSize(
-      parentPath,
-      opts?.limit ?? DEFAULT_PAGE_SIZE,
-    );
-
-    // Decide phase: cold (no authoritative collection yet) vs warm
-    // (in-session cached → stale data + background refetch).
-    // CRITICAL: check `hasChildrenCollectionLoaded`, NOT `parentIndex.has`.
-    // The latter conflates "some child cached" with "children list fetched".
-    const hasAuthoritative = cache.hasChildrenCollectionLoaded(parentPath);
-    cache.setChildrenPhase(parentPath, hasAuthoritative ? 'refetch' : 'initial');
-
-    let cancelled = false;
-
-    trpc.getChildren
-      .query({
-        path: parentPath,
-        limit: effectiveLimit,
-        watch: opts?.watch,
-        watchNew: opts?.watchNew,
-      })
-      .then((result: any) => {
-        if (cancelled) return;
-        cache.replaceChildren(parentPath, result.items as NodeData[]);
-        cache.setChildrenTotal(parentPath, result.total);
-        cache.setChildrenTruncated(parentPath, !!result.truncated);
-        cache.setChildrenError(parentPath, null);
-        cache.setChildrenPhase(parentPath, 'ready');
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        cache.setChildrenError(parentPath, err instanceof Error ? err : new Error(String(err)));
-        cache.setChildrenPhase(parentPath, 'error');
-      });
-
-    return () => { cancelled = true; };
-  }, [parentPath, gen, opts?.limit, opts?.watch, opts?.watchNew]);
-
-  // Watch cleanup — unwatchChildren on unmount or path change (ref-counted)
-  useEffect(() => {
-    if (!(opts?.watch || opts?.watchNew)) return;
-    refWatch(childrenWatchRefs, parentPath);
-    return () => {
-      if (unrefWatch(childrenWatchRefs, parentPath)) {
-        trpc.unwatchChildren.mutate({ paths: [parentPath] }).catch(() => {});
-      }
-    };
-  }, [parentPath, opts?.watch, opts?.watchNew]);
+  const refetch = useCallback(() => { handleRef.current?.refetch(); }, []);
+  const loadMore = useCallback(() => { handleRef.current?.loadMore(); }, []);
 
   // Derived flags — each state derives from exactly one source.
-  const loading = phase === 'idle' || phase === 'initial';
-  const stale = phase === 'refetch';
-  const loadingMore = phase === 'append';
-  const hasMore = total !== null && data.length < total;
-
-  const loadMore = useCallback(() => {
-    if (!hasMore || loadingMore) return;
-    const pageSize = cache.getChildPageSize(parentPath) ?? DEFAULT_PAGE_SIZE;
-    const offset = cache.getLoadedCount(parentPath);
-    cache.setChildrenPhase(parentPath, 'append');
-    trpc.getChildren
-      .query({
-        path: parentPath,
-        limit: pageSize,
-        offset,
-      })
-      .then((result: any) => {
-        cache.appendChildren(parentPath, result.items as NodeData[]);
-        cache.setChildrenTotal(parentPath, result.total);
-        cache.setChildrenPhase(parentPath, 'ready');
-      })
-      .catch((err: unknown) => {
-        cache.setChildrenError(parentPath, err instanceof Error ? err : new Error(String(err)));
-        cache.setChildrenPhase(parentPath, 'error');
-      });
-  }, [parentPath, hasMore, loadingMore]);
-
-  const refetch = useCallback(() => {
-    // Reload the CURRENTLY LOADED WINDOW in one call — preserves scroll position.
-    // If user scrolled 60 items via loadMore, refetch issues `limit:60,offset:0`
-    // so all 60 rows get replaced.
-    const windowSize = cache.getLoadedCount(parentPath)
-      || cache.getChildPageSize(parentPath)
-      || DEFAULT_PAGE_SIZE;
-    cache.setChildrenPhase(parentPath, 'refetch');
-    trpc.getChildren
-      .query({
-        path: parentPath,
-        limit: windowSize,
-        offset: 0,
-        watch: opts?.watch,
-        watchNew: opts?.watchNew,
-      })
-      .then((result: any) => {
-        // replaceChildren clamps loadedCount to result.items.length
-        cache.replaceChildren(parentPath, result.items as NodeData[]);
-        cache.setChildrenTotal(parentPath, result.total);
-        cache.setChildrenTruncated(parentPath, !!result.truncated);
-        cache.setChildrenError(parentPath, null);
-        cache.setChildrenPhase(parentPath, 'ready');
-      })
-      .catch((err: unknown) => {
-        cache.setChildrenError(parentPath, err instanceof Error ? err : new Error(String(err)));
-        cache.setChildrenPhase(parentPath, 'error');
-      });
-  }, [parentPath, opts?.watch, opts?.watchNew]);
+  const loading = snap.phase === 'idle' || snap.phase === 'initial';
+  const stale = snap.phase === 'refetch';
+  const loadingMore = snap.phase === 'append';
+  const hasMore = snap.total !== null && snap.data.length < snap.total;
 
   return useMemo(() => ({
-    data,
-    total,
+    data: snap.data,
+    total: snap.total,
     hasMore,
     loading,
     loadingMore,
-    error,
+    error: snap.error,
     stale,
-    truncated,
+    truncated: snap.truncated,
     refetch,
     loadMore,
-  }), [data, total, hasMore, loading, loadingMore, error, stale, truncated, refetch, loadMore]);
+  }), [snap, hasMore, loading, loadingMore, stale, refetch, loadMore]);
 }
 
 // ── set: optimistic update + server persist ──
