@@ -3,6 +3,7 @@
 
 import { getComponent } from '@treenx/core';
 import { getCtx, registerType } from '@treenx/core/comp';
+import { OpError } from '@treenx/core/errors';
 import type { BrahmanCtx } from './helpers';
 
 // ── Shared types ──
@@ -280,18 +281,31 @@ export class TagAction {
       } catch { /* eval failed */ }
     }
 
-    const tags = bCtx.userTags;
-    if (shouldSet && !tags.includes(this.tag)) {
-      tags.push(this.tag);
-    } else if (!shouldSet) {
-      const idx = tags.indexOf(this.tag);
-      if (idx >= 0) tags.splice(idx, 1);
-    }
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const userNode = attempt === 0 ? bCtx.user : await tree.get(bCtx.user.$path);
+      if (!userNode) return;
 
-    const userComp = getComponent(bCtx.user, BrahmanUser);
-    if (userComp) {
+      const userComp = getComponent(userNode, BrahmanUser);
+      if (!userComp) return;
+
+      const tags = [...(userComp.tags ?? [])];
+      if (shouldSet && !tags.includes(this.tag)) {
+        tags.push(this.tag);
+      } else if (!shouldSet) {
+        const idx = tags.indexOf(this.tag);
+        if (idx >= 0) tags.splice(idx, 1);
+      }
+
       (userComp as any).tags = tags;
-      await tree.set(bCtx.user);
+      try {
+        await tree.set(userNode);
+        bCtx.user = userNode;
+        bCtx.userTags = tags;
+        return;
+      } catch (err) {
+        if (err instanceof OpError && err.code === 'CONFLICT' && attempt < 2) continue;
+        throw err;
+      }
     }
   }
 }

@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import { buildReplyMarkup, checkTags, formatTString, renderTemplate } from './helpers';
 import { setBotFactory } from './service';
-import { type MenuRow, type TString } from './types';
+import { type MenuRow, TagAction, type TString } from './types';
 
 // Force registration of brahman types + action handlers
 import './types';
@@ -857,5 +857,47 @@ describe('brahman.action.call', () => {
     );
 
     setBotFactory(undefined);
+  });
+});
+
+describe('brahman.action.tag', () => {
+  it('retries on stale user revision and merges tags', async () => {
+    const tree = createMemoryTree();
+    const userPath = `${BOT}/users/1600`;
+    await tree.set({
+      $path: userPath,
+      $type: 'brahman.user',
+      tid: 1600,
+      firstName: 'Race',
+      lastName: '',
+      username: 'race',
+      lang: 'en',
+      isAdmin: false,
+      blocked: false,
+      banned: false,
+      tags: [],
+    } as NodeData);
+
+    const staleUser = await tree.get(userPath) as NodeData;
+    await tree.set({ ...staleUser, tags: ['external'] } as NodeData);
+
+    const action = new TagAction();
+    action.tag = 'accepted';
+    action.value = 'true';
+
+    await action.run({
+      ctx: createFakeCtx({ userId: 1600 }),
+      tree,
+      session: {},
+      sessionNode: { $path: `${BOT}/sessions/1600`, $type: 'brahman.session' } as NodeData,
+      user: staleUser,
+      lang: 'en',
+      botPath: BOT,
+      userTags: [],
+      botLangs: ['en', 'ru'],
+    });
+
+    const fresh = await tree.get(userPath) as any;
+    assert.deepEqual(fresh.tags.sort(), ['accepted', 'external']);
   });
 });

@@ -23,4 +23,4 @@ const RootView: View<{ $type: 'root' }> = () => {
   );
 };
 
-register('root', 'react', RootView as never);
+register('root', 'react', RootView);

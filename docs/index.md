@@ -1,8 +1,8 @@
 ---
 title: Introduction
+description: "Build typed apps on a live tree of nodes, actions, views, and services"
 section: root
 order: 0
-description: Build typed apps on a live tree of nodes, actions, views, and services
 tags: [intro, overview]
 ---
 

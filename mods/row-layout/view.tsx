@@ -53,7 +53,7 @@ const RowColLayoutView: View<RowColLayout> = ({ value, onChange, ctx }) => {
     compMap.set(toLayoutRef(name), comp)
   }
 
-  const { data: children } = useChildren(node.$path)
+  const { data: children, loading: childrenLoading, error: childrenError } = useChildren(node.$path)
   const childMap = new Map<string, NodeData>()
   for (const child of children) {
     const ref = childToRef(child.$path, node.$path)
@@ -74,11 +74,17 @@ const RowColLayoutView: View<RowColLayout> = ({ value, onChange, ctx }) => {
   const storedHiddenJson = JSON.stringify(value.hidden ?? [])
   const cleanHiddenJson = JSON.stringify(cleanHidden)
 
+  // Children load is async. While loading or after error, child refs may be
+  // missing from childMap and silently reconciled OUT — which would persist
+  // rows: [] and lose seeded layout. Hold off the write until children settle.
+  const reconcileBlocked = childrenLoading || !!childrenError
+
   useEffect(() => {
+    if (reconcileBlocked) return
     if (storedRowsJson !== cleanRowsJson || storedHiddenJson !== cleanHiddenJson) {
       onChange?.({ rows: cleanRows, hidden: cleanHidden })
     }
-  }, [storedRowsJson, cleanRowsJson, storedHiddenJson, cleanHiddenJson])
+  }, [reconcileBlocked, storedRowsJson, cleanRowsJson, storedHiddenJson, cleanHiddenJson])
 
   const mentionedRefs = new Set(cleanRows.flatMap(r => r.items.map(i => i.ref)))
   const hiddenSet = new Set(cleanHidden)
@@ -104,7 +110,10 @@ const RowColLayoutView: View<RowColLayout> = ({ value, onChange, ctx }) => {
     }
 
     const child = childMap.get(ref)
-    if (!child) return <div className="text-[--text-3] text-sm italic">Missing child: {ref}</div>
+    if (!child) {
+      if (childrenLoading) return <div className="text-[--text-3] text-sm italic opacity-50">Loading {ref}…</div>
+      return <div className="text-[--text-3] text-sm italic">Missing child: {ref}</div>
+    }
 
     const itemConfig = effectiveRows.flatMap(r => r.items).find(i => i.ref === ref)
     const renderCtx = itemConfig?.context ?? value.context ?? 'react'

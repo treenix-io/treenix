@@ -37,7 +37,9 @@ register('brahman.bot', 'service', async (node: NodeData, svcCtx: ServiceCtx): P
 
   // ── Global middleware: pending callbacks → maintenance → session → auth ──
 
-  bot.use(async (gCtx, next) => {
+  const userQueues = new Map<number, Promise<void>>();
+
+  async function handleUpdate(gCtx: Parameters<Parameters<typeof bot.use>[0]>[0], next: () => Promise<void>) {
     const userId = gCtx.from?.id;
     if (!userId) return;
 
@@ -112,6 +114,19 @@ register('brahman.bot', 'service', async (node: NodeData, svcCtx: ServiceCtx): P
       callbacks: sessionData.callbacks ?? {},
     });
     await svcCtx.tree.set(sessionNode);
+  }
+
+  bot.use(async (gCtx, next) => {
+    const userId = gCtx.from?.id;
+    if (!userId) return;
+
+    const prev = userQueues.get(userId) ?? Promise.resolve();
+    const run = prev.catch(() => {}).then(() => handleUpdate(gCtx, next));
+    const queued = run.finally(() => {
+      if (userQueues.get(userId) === queued) userQueues.delete(userId);
+    });
+    userQueues.set(userId, queued);
+    await run;
   });
 
   // ── Dynamic page lookup (pages can be added/changed at runtime) ──

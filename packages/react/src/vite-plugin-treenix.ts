@@ -153,13 +153,14 @@ function discoverPackageClients(): string[] {
   let current = process.cwd();
 
   while (current !== dirname(current)) {
-    const nmDir = join(current, 'node_modules', '@treenix');
+    const nmDir = join(current, 'node_modules', '@treenx');
     if (existsSync(nmDir)) {
       for (const entry of readdirSync(nmDir, { withFileTypes: true })) {
         if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
         const pkgPath = join(nmDir, entry.name, 'package.json');
         if (!existsSync(pkgPath)) continue;
         const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+        // TODO: fix this, mods search should be more clever
         if (pkg.treenix?.clients) {
           const realDir = realpathSync(join(nmDir, entry.name));
           const clientsPath = resolve(realDir, pkg.treenix.clients);
