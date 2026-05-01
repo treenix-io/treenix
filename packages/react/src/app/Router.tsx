@@ -3,7 +3,7 @@ import { LoginScreen, LoginModal } from './Login';
 import { RoutedPage } from './RoutedPage';
 import { ViewPage } from './ViewPage';
 import { Editor } from './Editor';
-import { useAuth } from './use-auth';
+import { useAuthContext } from './auth-context';
 import { makeEditorHref, makeNavigateApi, NavigateProvider, navigateTo, useLocation } from '#navigate';
 import * as cache from '#tree/cache';
 
@@ -34,7 +34,7 @@ cache.hydrate();
  * Auth model: see useAuth — anonymous → claims=['public'], otherwise trpc.me userId.
  */
 export function Router() {
-  const { authed, authChecked, showLoginModal, setAuthed, closeLoginModal, logout } = useAuth();
+  const { authed, authChecked, showLoginModal, setAuthed, closeLoginModal, logout } = useAuthContext();
   const { pathname, search } = useLocation();
 
   const mode = detectMode(pathname);

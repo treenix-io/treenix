@@ -4,6 +4,7 @@ import { enablePatches } from 'immer';
 import { type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
+import { AuthProvider } from './auth-context';
 import '#tree/load-client';
 import { createClientTreeSource } from '#tree/client-tree-source';
 import { TreeSourceProvider } from '#tree/tree-source-context';
@@ -26,10 +27,12 @@ export function boot(el: HTMLElement | string = '#root') {
   createRoot(root as HTMLElement).render(
     <Strict>
       <TreeSourceProvider source={treeSource}>
-        <QueryClientProvider client={queryClient}>
-          <App />
-          <Toaster />
-        </QueryClientProvider>
+        <AuthProvider>
+          <QueryClientProvider client={queryClient}>
+            <App />
+            <Toaster />
+          </QueryClientProvider>
+        </AuthProvider>
       </TreeSourceProvider>
     </Strict>,
   );
