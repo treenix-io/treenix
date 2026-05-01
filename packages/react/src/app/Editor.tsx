@@ -2,10 +2,8 @@
 // URL is the single source of truth: `selected` and `root` are derived from useLocation.
 // Navigation goes through the unified NavigateProvider mounted in Router.
 
-import { Button } from '#components/ui/button';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '#components/ui/resizable';
 import { TypePicker } from '#mods/editor-ui/type-picker';
-import type { NodeData } from '@treenx/core';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import * as cache from '#tree/cache';
 import { tree } from '#tree/client';
@@ -14,10 +12,8 @@ import { setEditorRoot, useLocation, useNavigate } from '#navigate';
 import { EditorSidebar } from './EditorSidebar';
 import { Inspector } from '#editor/Inspector';
 import { toast } from 'sonner';
-import { useSseStatus } from '#hooks/use-sse-status';
 import { useModErrors } from '#hooks/use-mod-errors';
 import { ConnectionBanner } from './ConnectionBanner';
-import { CreateRootDialog } from './CreateRootDialog';
 
 export interface EditorProps {
   authed: string;
@@ -36,10 +32,7 @@ export function Editor({ authed, onLogout }: EditorProps) {
   );
   const navigate = useNavigate();
 
-  const [error, setError] = useState<string | null>(null);
   const [addingComponentAt, setAddingComponentAt] = useState<string | null>(null);
-  const [rootPromptOpen, setRootPromptOpen] = useState(false);
-  const sseDown = useSseStatus();
   useModErrors();
 
   // Cmd+/ : open Add Component picker for the currently selected node
@@ -96,39 +89,14 @@ export function Editor({ authed, onLogout }: EditorProps) {
     [addingComponentAt],
   );
 
-  const handleCreateRoot = useCallback(async (type: string) => {
-    if (!type) return;
-    try {
-      await tree.set({ $path: '/', $type: type } as NodeData);
-      const rootNode = await tree.get('/');
-      if (rootNode) cache.put(rootNode);
-      navigate('/');
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to create root');
-    }
-  }, [navigate]);
-
   const handleSetRoot = useCallback(
     (newRoot: string) => { setEditorRoot(newRoot, selected); },
     [selected],
   );
 
-  if (error) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-background">
-        <div className="flex flex-col items-center gap-3 text-center">
-          <span className="text-4xl">&#9888;</span>
-          <p className="text-sm text-red-400">{error}</p>
-          <Button variant="outline" size="sm" onClick={() => location.reload()}>Retry</Button>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <>
-      <ConnectionBanner down={sseDown} />
+      <ConnectionBanner />
       <div className="flex h-screen bg-background text-foreground overflow-hidden">
         <ResizablePanelGroup orientation="horizontal" className="h-full">
           <EditorSidebar
@@ -137,7 +105,6 @@ export function Editor({ authed, onLogout }: EditorProps) {
             selected={selected}
             onSelect={navigate}
             onSetRoot={handleSetRoot}
-            onRequestCreateRoot={() => setRootPromptOpen(true)}
             onLogout={onLogout}
           />
 
@@ -165,12 +132,6 @@ export function Editor({ authed, onLogout }: EditorProps) {
             onCancel={() => setAddingComponentAt(null)}
           />
         )}
-
-        <CreateRootDialog
-          open={rootPromptOpen}
-          onOpenChange={setRootPromptOpen}
-          onCreate={handleCreateRoot}
-        />
       </div>
     </>
   );

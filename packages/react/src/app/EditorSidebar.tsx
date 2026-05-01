@@ -38,7 +38,6 @@ type EditorSidebarProps = {
   selected: string | null;
   onSelect: NavigateFn;
   onSetRoot: (path: string) => void;
-  onRequestCreateRoot: () => void;
   onLogout: () => void;
 };
 
@@ -76,7 +75,6 @@ export function EditorSidebar({
   selected,
   onSelect,
   onSetRoot,
-  onRequestCreateRoot,
   onLogout,
 }: EditorSidebarProps) {
   const panelRef = useRef<PanelImperativeHandle | null>(null);
@@ -100,11 +98,7 @@ export function EditorSidebar({
   phaseRef.current = phase;
   loadedRef.current = loaded;
 
-  const hasRootNode = useSyncExternalStore(
-    useCallback((cb: () => void) => cache.subscribePath(root, cb), [root]),
-    useCallback(() => cache.has(root), [root]),
-  );
-  const roots = hasRootNode ? [root, '/local'] : ['/local'];
+  const roots = [root, '/local'];
 
   const loadChildren = useCallback(async (path: string) => {
     if (loadedRef.current.has(path)) return;
@@ -381,18 +375,11 @@ export function EditorSidebar({
           </DropdownMenu>
         </div>
 
-        {!compact && (
+        {!compact && root !== '/' && (
           <div className="absolute left-[148px] right-12 top-1/2 flex -translate-y-1/2 items-center gap-2 overflow-hidden">
-            {root !== '/' && (
-              <Button variant="ghost" size="sm" className="h-5 px-1.5 font-mono text-[10px] text-muted-foreground" onClick={() => onSetRoot('/')}>
-                &#8962; {root}
-              </Button>
-            )}
-            {!hasRootNode && (
-              <Button variant="ghost" size="sm" className="h-5 text-[10px]" onClick={onRequestCreateRoot}>
-                Create root
-              </Button>
-            )}
+            <Button variant="ghost" size="sm" className="h-5 px-1.5 font-mono text-[10px] text-muted-foreground" onClick={() => onSetRoot('/')}>
+              &#8962; {root}
+            </Button>
           </div>
         )}
 
