@@ -13,6 +13,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   useSyncExternalStore,
 } from 'react';
@@ -20,6 +21,10 @@ import * as cache from '#tree/cache';
 import { tree } from '#tree/client';
 import { trpc } from '#tree/trpc';
 import { ensureType } from '#schema-loader';
+import { EMPTY_PATH_SNAPSHOT, type PathHandle } from '#tree/tree-source';
+import { useTreeSource } from '#tree/tree-source-context';
+
+const noopUnsub = () => {};
 export { useNavigate, useBeforeNavigate } from '#navigate';
 
 // Server default matches trpc.getChildren schema (engine/core/src/server/trpc.ts:125).
@@ -53,9 +58,9 @@ export type ChildrenOpts = {
 };
 
 // ── Watch ref-counting ──
-// Multiple components may watch the same path; ref-count to avoid premature unwatch.
+// Multiple components may watch the same parent; ref-count to avoid premature unwatch.
+// Path-level watch ref-counting moved into ClientTreeSource.mountPath.
 
-const pathWatchRefs = new Map<string, number>();
 const childrenWatchRefs = new Map<string, number>();
 
 function refWatch(map: Map<string, number>, path: string) {
@@ -96,6 +101,7 @@ export function usePath<T extends object>(
   clsOrOpts?: Class<T> | PathOpts,
   key?: string,
 ): Query<unknown> {
+  const source = useTreeSource();
   const isTyped = typeof clsOrOpts === 'function';
   const cls = isTyped ? clsOrOpts as Class<T> : undefined;
   const opts = isTyped ? undefined : clsOrOpts as PathOpts | undefined;
@@ -106,76 +112,40 @@ export function usePath<T extends object>(
   );
   const path = isTyped ? pathOrUri : (parsed?.path ?? null);
 
-  // Re-fetch + re-register server watch on SSE reconnect (preserved=false)
-  const gen = useSyncExternalStore(cache.subscribeSSEGen, cache.getSSEGen);
-
-  const node = useSyncExternalStore(
-    useCallback((cb: () => void) => (path ? cache.subscribePath(path, cb) : () => {}), [path]),
-    useCallback(() => (path ? cache.get(path) : undefined), [path]),
+  // Reactive snapshot — bundles data + status + error in a single reference,
+  // stable until any of those three change. Source owns the merge.
+  const snap = useSyncExternalStore(
+    useCallback(
+      (cb: () => void) => path ? source.subscribePath(path, cb) : noopUnsub,
+      [source, path],
+    ),
+    useCallback(
+      () => path ? source.getPathSnapshot(path) : EMPTY_PATH_SNAPSHOT,
+      [source, path],
+    ),
   );
 
-  const status = useSyncExternalStore(
-    useCallback((cb: () => void) => (path ? cache.subscribePath(path, cb) : () => {}), [path]),
-    useCallback(() => (path ? cache.getPathStatus(path) : undefined), [path]),
-  );
-
-  const error = useSyncExternalStore(
-    useCallback((cb: () => void) => (path ? cache.subscribePathError(path, cb) : () => {}), [path]),
-    useCallback(() => (path ? cache.getPathError(path) : null), [path]),
-  );
-
-  // Fetch effect — always settles the status, even on null response.
+  // Lifecycle — mountPath owns fetch + watch ref-counting + SSE-reset re-fetch.
+  // dispose() reverses everything.
+  const handleRef = useRef<PathHandle | null>(null);
   useEffect(() => {
-    if (!path) return;
+    if (!path) { handleRef.current = null; return; }
     debugPath(path, 'usePath');
-    cache.setPathStatus(path, 'loading');
-    trpc.get.query({ path, watch: !opts?.once })
-      .then((n: unknown) => {
-        if (n) {
-          cache.put(n as NodeData);  // put() sets pathStatus='ready'
-        } else {
-          // Atomic evict + flip status + fire subs once — prevents stale data
-          // from coexisting with not_found status.
-          cache.markPathMissing(path);
-        }
-      })
-      .catch((err: unknown) => {
-        cache.setPathError(path, err instanceof Error ? err : new Error(String(err)));
-        cache.setPathStatus(path, 'error');
-      });
-  }, [path, opts?.once, gen]);
+    const h = source.mountPath(path, opts);
+    handleRef.current = h;
+    return () => { h.dispose(); handleRef.current = null; };
+  }, [source, path, opts?.once]);
 
-  // Watch cleanup — unwatch on unmount or path change (ref-counted)
-  useEffect(() => {
-    if (!path || opts?.once) return;
-    refWatch(pathWatchRefs, path);
-    return () => {
-      if (unrefWatch(pathWatchRefs, path)) {
-        trpc.unwatch.mutate({ paths: [path] }).catch(() => {});
-      }
-    };
-  }, [path, opts?.once]);
-
-  const refetch = useCallback(() => {
-    if (!path) return;
-    cache.setPathStatus(path, 'loading');
-    trpc.get.query({ path, watch: !opts?.once })
-      .then((n: unknown) => {
-        if (n) cache.put(n as NodeData);
-        else cache.markPathMissing(path);
-      })
-      .catch((err: unknown) => {
-        cache.setPathError(path, err instanceof Error ? err : new Error(String(err)));
-        cache.setPathStatus(path, 'error');
-      });
-  }, [path, opts?.once]);
+  const refetch = useCallback(() => { handleRef.current?.refetch(); }, []);
 
   // Derived flags — `loading` is status-driven, NOT presence-driven.
   // A null tRPC response settles to 'not_found' → loading flips to false
-  // with data:undefined, which is the key fix over the old model.
-  const loading = !path || status === undefined || status === 'loading';
+  // with data:undefined.
+  const loading = !path || snap.status === undefined || snap.status === 'loading';
   // Path mode: refetch re-enters 'loading' fully; no background revalidate layer.
   const stale = false;
+  const error = snap.error;
+  const node = snap.data;
 
   // Typed mode — façade proxy (method calls work regardless of data state)
   const proxy = useMemo(() => {
