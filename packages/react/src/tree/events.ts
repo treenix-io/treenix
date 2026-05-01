@@ -45,13 +45,14 @@ export function startEvents(config: EventsConfig) {
     onError(err: unknown) {
       console.error('[sse] subscription error (non-retryable):', err);
       window.dispatchEvent(new Event(SSE_DISCONNECTED));
-      // tRPC exhausted retries — schedule a single delayed re-subscribe
-      scheduleResubscribe();
+      // tRPC exhausted retries — back off briefly before re-subscribing
+      scheduleResubscribe(RESUBSCRIBE_BACKOFF_MS);
     },
     onStopped() {
-      // Server closed the stream — schedule re-subscribe
-      window.dispatchEvent(new Event(SSE_DISCONNECTED));
-      scheduleResubscribe();
+      // Server closed the stream cleanly — re-subscribe immediately, no banner.
+      // Banner only appears if the reconnect itself takes long enough for
+      // onConnectionStateChange('connecting') to outlast useSseStatus grace.
+      scheduleResubscribe(0);
     },
     onData(event) {
       if (event.type === 'reconnect') {
@@ -111,15 +112,16 @@ export function startEvents(config: EventsConfig) {
   unsub = () => sub.unsubscribe();
 }
 
-const RESUBSCRIBE_DELAY = 5_000;
+// Back off briefly after a non-retryable error so an unreachable server can't
+// turn into a tight reconnect loop. Clean closes (onStopped) pass 0 — instant.
+const RESUBSCRIBE_BACKOFF_MS = 1_000;
 
-function scheduleResubscribe() {
+function scheduleResubscribe(delayMs: number) {
   if (reconnectTimer || !lastConfig) return;
-  console.log(`[sse] will re-subscribe in ${RESUBSCRIBE_DELAY}ms`);
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
     if (lastConfig) startEvents(lastConfig);
-  }, RESUBSCRIBE_DELAY);
+  }, delayMs);
 }
 
 export function stopEvents() {
