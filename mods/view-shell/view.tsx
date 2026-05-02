@@ -21,11 +21,20 @@ const ViewShellView = () => {
   if (!authChecked) return null;
   if (!authed) return <LoginScreen onLogin={setAuthed} />;
 
-  if (loading || !node) {
+  // Show 404 ONLY when fetch settled with no node. Loading-with-cached-node
+  // (e.g. background refetch on SSE reconnect) keeps rendering the node.
+  if (!node && !loading) {
     return (
       <div className="flex flex-col items-center justify-center h-screen gap-4 text-[--text-3]">
         <div className="text-4xl">404</div>
         <p>Node not found: <span className="font-mono">{path}</span></p>
+      </div>
+    );
+  }
+  if (!node) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen gap-2 text-[--text-3]">
+        <div className="text-sm">Loading…</div>
       </div>
     );
   }
