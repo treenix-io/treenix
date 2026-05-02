@@ -1,6 +1,6 @@
 import { Router } from './Router';
 
-// Kept as thin alias for backwards compat — all logic lives in Router / Editor / RoutedPage / ViewPage.
+// Thin alias kept for back-compat. All logic lives in Router (resolver-driven).
 export function App() {
   return <Router />;
 }
