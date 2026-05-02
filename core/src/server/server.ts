@@ -24,14 +24,6 @@ const log = createLogger('http');
 
 export type RouteHandler = (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse, tree: Tree) => Promise<void>;
 
-/** Generic HTML response — returned by an htmlHandler when it wants to take over a request. */
-export type HtmlResponse = { status: number; headers: Record<string, string>; body: string };
-
-/** Single fallback handler invoked after routeRegistry + tRPC, before static serving.
- *  Returning null falls through to the SPA static branch — same behavior as today
- *  for routes that don't opt into SSR. */
-export type HtmlHandler = (req: import('node:http').IncomingMessage, url: URL) => Promise<HtmlResponse | null>;
-
 // Dynamic route registry — services register/unregister routes at runtime
 export const routeRegistry = new Map<string, RouteHandler>();
 
@@ -71,9 +63,6 @@ export function createPipeline(bootstrap: Tree): Pipeline {
 type HttpServerOpts = {
   allowedOrigins?: string[];
   staticDir?: string;
-  /** Optional SSR fallback. Runs after routeRegistry + tRPC, before serveStatic.
-   *  Returning null falls through to the existing static / SPA-fallback branch. */
-  htmlHandler?: HtmlHandler;
 };
 
 /** HTTP server on top of an existing pipeline */
@@ -155,25 +144,6 @@ export function createHttpServer(pipeline: Pipeline, opts?: HttpServerOpts): Ser
         onError: ({ error, path: p }) => log.error(`trpc ${p}: ${error.message}`),
       });
       return;
-    }
-
-    // SSR fallback — opt-in handler for HTML responses
-    if (opts?.htmlHandler) {
-      try {
-        const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
-        const html = await opts.htmlHandler(req, url);
-        if (html) {
-          res.writeHead(html.status, html.headers);
-          res.end(html.body);
-          return;
-        }
-      } catch (err) {
-        const e = err as Error;
-        log.error(`htmlHandler ${pathname}: ${e.message}\n${e.stack ?? ''}`);
-        res.writeHead(500, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' });
-        res.end('Internal Server Error');
-        return;
-      }
     }
 
     // Static files (frontend SPA)

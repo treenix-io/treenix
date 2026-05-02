@@ -21,7 +21,10 @@ import type { RouteIndex } from './route-index';
 import { ServerTreeSource } from './server-tree-source';
 import { buildHtmlShell } from './template';
 import { SsrDataUnresolved } from './errors';
-import { render as renderHtml } from '@treenx/react/ssr/entry-server';
+import { render as defaultRender, type RenderArgs } from '@treenx/react/ssr/entry-server';
+
+/** Render function signature — Vite middleware passes a hot-loaded copy via deps.render. */
+export type RenderFn = (args: RenderArgs) => string;
 
 export type SsrResponse = {
   status: number;
@@ -46,6 +49,9 @@ export type SsrHandlerDeps = {
   tailwindJit?: (html: string) => Promise<string> | string;
   /** Render-loop budget. */
   maxPasses?: number;
+  /** Override the React render fn — Vite middleware passes a fresh ssrLoadModule copy
+   *  so view edits HMR-reload. Defaults to the statically-imported render. */
+  render?: RenderFn;
 };
 
 const DEFAULT_PASSES = 5;
@@ -72,9 +78,10 @@ export async function ssrHandler(
   const targetNode: NodeData = routeNode;
 
   const maxPasses = deps.maxPasses ?? DEFAULT_PASSES;
+  const render = deps.render ?? defaultRender;
   let html = '';
   for (let pass = 0; pass < maxPasses; pass++) {
-    html = renderHtml({
+    html = render({
       source,
       node: targetNode,
       rest: match.rest,

@@ -23,14 +23,10 @@ export type TreenixConfig = {
   autostart?: boolean;
 };
 
-import type { HtmlHandler } from './server';
-
 export type ListenOpts = {
   host?: string;
   allowedOrigins?: string[];
   staticDir?: string;
-  /** Optional SSR fallback (see createHttpServer). */
-  htmlHandler?: HtmlHandler;
 };
 
 export type TreenixInstance = Pipeline & {
@@ -106,7 +102,6 @@ export async function treenix(config: TreenixConfig): Promise<TreenixServer> {
       const server = createHttpServer(pipeline, {
         allowedOrigins: opts?.allowedOrigins,
         staticDir: opts?.staticDir,
-        htmlHandler: opts?.htmlHandler,
       });
       return new Promise<Server>((resolve) => {
         server.listen(port, host, () => {

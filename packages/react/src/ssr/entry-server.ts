@@ -27,18 +27,9 @@ export type RenderArgs = {
 };
 
 export function render({ source, node, rest, mode, pathname = '' }: RenderArgs): string {
-  const tree = createElement(
-    TreeSourceProvider,
-    { source },
-    createElement(
-      RouteParamsContext.Provider,
-      { value: { rest, full: pathname } },
-      createElement(
-        RenderContext,
-        { name: 'site' },
-        createElement(Render, { value: node }),
-      ),
-    ),
-  );
+  const inner = createElement(Render, { value: node });
+  const ctx = createElement(RenderContext, { name: 'site', children: inner });
+  const params = createElement(RouteParamsContext.Provider, { value: { rest, full: pathname }, children: ctx });
+  const tree = createElement(TreeSourceProvider, { source, children: params });
   return mode === 'hydrate' ? renderToString(tree) : renderToStaticMarkup(tree);
 }
