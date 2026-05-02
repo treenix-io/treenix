@@ -1,2 +1,2 @@
-// @treenx/jsonld-types — public surface. Real exports added in later tasks.
-export {};
+export { loadSchemaOrgV29Pack, verifySnapshotChecksum } from './pack';
+export type { ClassOverride, FieldOverride, JsonLdSnapshot } from './translate';
