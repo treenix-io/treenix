@@ -320,7 +320,7 @@ export async function requestApproval(
 }
 
 /** Write a persistent rule to agent or global policy (with OCC retry) */
-async function rememberRule(store: Tree, tool: string, _input: string, allow: boolean, agentPath: string, scope: string) {
+export async function rememberRule(store: Tree, tool: string, _input: string, allow: boolean, agentPath: string, scope: string) {
   const targetPath = scope === 'agent' ? agentPath : GUARDIAN_PATH;
   const MAX_RETRIES = 3;
 
