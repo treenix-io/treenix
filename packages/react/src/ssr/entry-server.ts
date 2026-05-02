@@ -3,7 +3,11 @@
 // returns an HTML string. Render mode picks the React DOM API:
 //   'static'  → renderToStaticMarkup (no React markers, smaller output)
 //   'hydrate' → renderToString (markers needed for hydrateRoot)
+//
+// File is .ts (not .tsx) so cross-package importers that go through the `./*`
+// exports map don't need the .ts→.tsx array fallback to fire under tsx.
 
+import { createElement } from 'react';
 import { renderToStaticMarkup, renderToString } from 'react-dom/server';
 import type { NodeData } from '@treenx/core';
 import { TreeSourceProvider } from '#tree/tree-source-context';
@@ -23,14 +27,18 @@ export type RenderArgs = {
 };
 
 export function render({ source, node, rest, mode, pathname = '' }: RenderArgs): string {
-  const tree = (
-    <TreeSourceProvider source={source}>
-      <RouteParamsContext.Provider value={{ rest, full: pathname }}>
-        <RenderContext name="site">
-          <Render value={node} />
-        </RenderContext>
-      </RouteParamsContext.Provider>
-    </TreeSourceProvider>
+  const tree = createElement(
+    TreeSourceProvider,
+    { source },
+    createElement(
+      RouteParamsContext.Provider,
+      { value: { rest, full: pathname } },
+      createElement(
+        RenderContext,
+        { name: 'site' },
+        createElement(Render, { value: node }),
+      ),
+    ),
   );
   return mode === 'hydrate' ? renderToString(tree) : renderToStaticMarkup(tree);
 }
