@@ -1,0 +1,27 @@
+{
+  "name": "@treenx/jsonld-types",
+  "version": "0.1.0",
+  "description": "JSON-LD vocabulary type packs for Treenix — schema.org subset as native types via lazy resolver.",
+  "type": "module",
+  "private": true,
+  "license": "FSL-1.1-MIT",
+  "imports": {
+    "#*": {
+      "development": "./src/*.ts",
+      "default": "./dist/*.js"
+    }
+  },
+  "exports": {
+    ".": {
+      "development": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@treenx/core": "workspace:*"
+  },
+  "scripts": {
+    "test": "node --test --conditions development 'src/**/*.test.ts'"
+  }
+}
