@@ -1,97 +1,92 @@
+// Top-level router. Single resolver against /sys/routes drives every URL;
+// the legacy /t // /v // public mode switch is gone. Adding a new top-level
+// route now means seeding a node, not editing this file.
+//
+// Flow:
+//   pathname → useRouteResolve → /sys/routes/<key> NodeData → <Render value=node>
+//
+// The route node's registered React view ('react' context) handles the page,
+// reading useRouteParams().rest for the URL tail. NavigateProvider preserves
+// query params per route flavour (?root= for editor-shell, ?ctx= for view-shell).
+// Anything not matched falls through to RoutedPage (today's public catch-all,
+// to be replaced by /sys/routes/_index in Phase 6).
+
 import { useCallback, useMemo } from 'react';
-import { LoginScreen, LoginModal } from './Login';
+import { LoginModal } from './Login';
 import { RoutedPage } from './RoutedPage';
-import { ViewPage } from './ViewPage';
-import { Editor } from './Editor';
 import { useAuthContext } from './auth-context';
+import { Render, RenderContext } from '#context';
+import { RouteParamsContext } from '#context/route-params';
 import { makeEditorHref, makeNavigateApi, NavigateProvider, navigateTo, useLocation } from '#navigate';
 import * as cache from '#tree/cache';
+import { useRouteResolve } from '#tree/use-route-resolve';
 
-type Mode = 'editor' | 'view' | 'routed';
-
-function detectMode(pathname: string): Mode {
-  if (pathname.startsWith('/t')) return 'editor';
-  if (pathname.startsWith('/v/') || pathname === '/v') return 'view';
-  return 'routed';
-}
-
-function detectViewPath(pathname: string): string {
-  if (pathname.startsWith('/v')) return pathname.slice(2) || '/';
-  if (!pathname.startsWith('/t')) return pathname || '/';
-  return '/';
-}
-
-// Hydrate cache from IDB before first render — RoutedPage/ViewPage also rely on this.
+// Hydrate cache from IDB before first render — RoutedPage relies on this.
 cache.hydrate();
 
-/**
- * Top-level router. Owns the single NavigateProvider for all three modes.
- *
- * - `/`, `/foo/...`    → RoutedPage (public — anonymous visitors render via `public` role)
- * - `/v/<path>`         → ViewPage (direct node render, requires auth)
- * - `/t/<path>`         → Editor (tree inspector, requires auth)
- *
- * Auth model: see useAuth — anonymous → claims=['public'], otherwise trpc.me userId.
- */
+type NavMode = 'editor' | 'view' | 'public';
+
+function navModeFor(type: string | undefined): NavMode {
+  if (type === 't.editor.shell') return 'editor';
+  if (type === 't.view.shell') return 'view';
+  return 'public';
+}
+
 export function Router() {
-  const { authed, authChecked, showLoginModal, setAuthed, closeLoginModal, logout } = useAuthContext();
+  const { authed, authChecked, showLoginModal, setAuthed, closeLoginModal } = useAuthContext();
   const { pathname, search } = useLocation();
 
-  const mode = detectMode(pathname);
-  const viewPath = detectViewPath(pathname);
+  const { result, loading: routeLoading } = useRouteResolve(pathname);
 
-  // Per-mode href builders preserve mode-relevant query params (root for editor, ctx for view)
-  // so chained navigation inside a view stays in the same scope/context.
+  // Per-mode href builders preserve query params: ?root= for editor-shell
+  // and ?ctx= for view-shell. Other routes get clean URLs.
+  const navMode = navModeFor(result?.node.$type);
   const makeHref = useCallback((path: string) => {
-    if (mode === 'editor') {
+    if (navMode === 'editor') {
       const root = new URLSearchParams(search).get('root') || '/';
       return makeEditorHref(path === '/' ? '/' : path, root);
     }
-    if (mode === 'view') {
+    if (navMode === 'view') {
       const ctx = new URLSearchParams(search).get('ctx');
       const base = `/v${path}`;
       return ctx && ctx !== 'react' ? `${base}?ctx=${encodeURIComponent(ctx)}` : base;
     }
     return path;
-  }, [mode, search]);
+  }, [navMode, search]);
 
   const navigate = useCallback((path: string) => navigateTo(makeHref(path)), [makeHref]);
   const navCtx = useMemo(() => makeNavigateApi(navigate, makeHref), [navigate, makeHref]);
 
   if (!authChecked) return null;
+  // Don't flash the public fallback while route data is still loading.
+  if (routeLoading && !result) return null;
 
-  // Public routed pages render for anonymous visitors — no login gate.
-  if (mode === 'routed') {
+  // Resolved: render the route node via the registry. Auth (if needed) is
+  // gated by the route's view itself.
+  if (result) {
+    const isAnon = !!authed && authed.startsWith('anon:');
     return (
       <NavigateProvider value={navCtx}>
-        <RoutedPage path={viewPath} />
+        <RouteParamsContext.Provider value={{ rest: result.rest, full: pathname }}>
+          <RenderContext name="react">
+            <Render value={result.node} />
+          </RenderContext>
+        </RouteParamsContext.Provider>
+        {showLoginModal && (
+          <LoginModal
+            onLogin={(uid) => { setAuthed(uid); closeLoginModal(); }}
+            onClose={isAnon ? undefined : closeLoginModal}
+          />
+        )}
       </NavigateProvider>
     );
   }
 
-  // Protected modes require a real session.
-  if (!authed) return <LoginScreen onLogin={setAuthed} />;
-
-  if (mode === 'view') {
-    const ctx = new URLSearchParams(search).get('ctx') || 'react';
-    return (
-      <NavigateProvider value={navCtx}>
-        <ViewPage path={viewPath} ctx={ctx} />
-      </NavigateProvider>
-    );
-  }
-
-  // mode === 'editor'
-  const isAnon = authed.startsWith('anon:');
+  // Catch-all: today's public path renderer. Phase 6 replaces this with a
+  // /sys/routes/_index entry that the resolver matches.
   return (
     <NavigateProvider value={navCtx}>
-      <Editor authed={authed} onLogout={logout} />
-      {showLoginModal && (
-        <LoginModal
-          onLogin={(uid) => { setAuthed(uid); closeLoginModal(); }}
-          onClose={isAnon ? undefined : closeLoginModal}
-        />
-      )}
+      <RoutedPage path={pathname || '/'} />
     </NavigateProvider>
   );
 }
