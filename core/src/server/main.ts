@@ -35,7 +35,21 @@ const modsDir = process.env.MODS_DIR || undefined;
 const t = await treenix({ rootNode, modsDir });
 const port = Number(process.env.PORT) || 3211;
 const host = process.env.HOST || '127.0.0.1';
-const server = await t.listen(port, { host });
+
+// Optional SSR — wired only if @treenx/ssr is installed and SSR=1 (or default-on).
+let htmlHandler;
+if (process.env.SSR !== '0') {
+  try {
+    const ssr = await import('@treenx/ssr');
+    htmlHandler = await ssr.installSsr(t);
+    console.log('[ssr] enabled');
+  } catch (err) {
+    const code = (err as Record<string, unknown>).code;
+    if (code !== 'ERR_MODULE_NOT_FOUND') console.warn('[ssr] init failed:', (err as Error).message);
+  }
+}
+
+const server = await t.listen(port, { host, htmlHandler });
 
 process.on('unhandledRejection', (err) => console.error('[UNHANDLED]', err));
 
