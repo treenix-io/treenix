@@ -103,34 +103,44 @@ export function translateClass(
     }
   };
 
-  // Walk the subClassOf chain, collecting properties at each level
+  // Collect own properties, then walk subClassOf parents (BFS over the full graph)
   collectProps(`schema:${className}`);
-  const visited = new Set<string>([`schema:${className}`]);
-  let cursor: JsonLdNode | undefined = classNode;
-
-  while (cursor) {
-    const parents = arrayify(cursor['rdfs:subClassOf']).map(p => p['@id']);
-    let next: JsonLdNode | undefined;
+  const classId = `schema:${className}`;
+  const visited = new Set<string>([classId]);
+  const queue: JsonLdNode[] = [classNode];
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    const parents = arrayify(current['rdfs:subClassOf']).map(p => p['@id']);
     for (const parentId of parents) {
       if (visited.has(parentId)) continue;
       visited.add(parentId);
       const shortParent = parentId.replace(/^schema:/, '');
-      try {
-        const parentNode = findClass(snapshot, shortParent);
-        collectProps(parentId);
-        next = parentNode;
-        break;
-      } catch {
-        // parent class not in snapshot — skip
+      let parentNode: JsonLdNode | undefined;
+      try { parentNode = findClass(snapshot, shortParent); }
+      catch { continue; } // parent not in snapshot — skip
+      for (const propNode of findPropertiesForClass(snapshot, parentId)) {
+        const shortName = propNode['@id'].replace(/^schema:/, '');
+        if (!propsByName.has(shortName)) propsByName.set(shortName, propNode);
       }
+      queue.push(parentNode);
     }
-    cursor = next;
   }
 
   // Build properties — only fields declared in overrides (curation contract)
   const properties: Record<string, SlottedPropertySchema> = {};
   for (const [name, fieldOverride] of Object.entries(overrides.fields)) {
-    properties[name] = buildFieldSchema(fieldOverride, propsByName.get(name));
+    const propNode = propsByName.get(name);
+    if (!propNode && !fieldOverride.slotType) {
+      // Field declared in overrides has no JSON-LD property in snapshot.
+      // For slot fields slotType is the contract; for plain fields the snapshot is.
+      // Loud-fail catches typos (override.knosw vs schema:knows) and fixture drift.
+      throw new Error(
+        `translateClass(${className}): override field not found in snapshot — "${name}" ` +
+        `has no rdf:Property with schema:domainIncludes ${classId} or any ancestor. ` +
+        `Either fix the override field name or add slotType to declare it as a slot.`,
+      );
+    }
+    properties[name] = buildFieldSchema(fieldOverride, propNode);
   }
 
   const schema: TypeSchema & { $id: string } = {
