@@ -116,6 +116,8 @@ function matchPattern(id: string, map: FieldMap, pkgDir: string, conditions: str
 
 const VIRTUAL_ID = 'virtual:mod-clients';
 const RESOLVED_ID = '\0' + VIRTUAL_ID;
+const SITE_VIRTUAL_ID = 'virtual:mod-site-views';
+const SITE_RESOLVED_ID = '\0' + SITE_VIRTUAL_ID;
 const SERVER_RE = /\/mods\/[^/]+\/server(\.ts)?$/;
 
 // Default convention. react.tsx is the preferred name (filename = first-level context,
@@ -147,25 +149,59 @@ function scanClients(dir: string, clientFiles: string[], warnIfMissing = true): 
   return mods;
 }
 
-// Scan node_modules for @treenx/* packages with treenix.clients field
-function discoverPackageClients(): string[] {
-  const imports: string[] = [];
-  let current = process.cwd();
+// Scan for SSR-safe site-view modules. Convention: <mod>/view-site.ts (or .tsx).
+// Used by virtual:mod-site-views — entry-server imports this barrel so site
+// context has views registered before render() runs.
+function scanSiteViews(dir: string): ModEntry[] {
+  if (!existsSync(dir)) return [];
+  const mods: ModEntry[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const modDir = resolve(dir, entry.name);
+    const candidates = ['view-site.ts', 'view-site.tsx', 'site.ts', 'site.tsx']
+      .map(f => resolve(modDir, f))
+      .filter(f => existsSync(f));
+    if (candidates.length) {
+      // Also pull in types so registerType has fired before view-site registers handlers.
+      const types = resolve(modDir, 'types.ts');
+      const files = existsSync(types) ? [types, ...candidates] : candidates;
+      mods.push({ name: entry.name, files });
+    }
+  }
+  return mods;
+}
 
+// Read treenix.clients from a package.json at pkgDir, return absolute path or null
+function readClientsFromPkg(pkgDir: string): string | null {
+  const pkgPath = join(pkgDir, 'package.json');
+  if (!existsSync(pkgPath)) return null;
+  const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+  if (!pkg.treenix?.clients) return null;
+  const clientsPath = resolve(pkgDir, pkg.treenix.clients);
+  return existsSync(clientsPath) ? clientsPath : null;
+}
+
+// Discover @treenx/* clients: host package itself + all installed @treenx/* packages.
+// The host (where this plugin lives) isn't in node_modules — it's the running app —
+// so node_modules-only scan would miss its own treenix.clients barrel.
+function discoverPackageClients(hostPkgDir: string): string[] {
+  const imports: string[] = [];
+
+  // Host package's own clients (e.g. @treenx/react in monorepo dev)
+  const hostClients = readClientsFromPkg(hostPkgDir);
+  if (hostClients) imports.push(hostClients);
+
+  // Installed @treenx/* packages
+  let current = process.cwd();
   while (current !== dirname(current)) {
     const nmDir = join(current, 'node_modules', '@treenx');
     if (existsSync(nmDir)) {
       for (const entry of readdirSync(nmDir, { withFileTypes: true })) {
         if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
-        const pkgPath = join(nmDir, entry.name, 'package.json');
-        if (!existsSync(pkgPath)) continue;
-        const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
-        // TODO: fix this, mods search should be more clever
-        if (pkg.treenix?.clients) {
-          const realDir = realpathSync(join(nmDir, entry.name));
-          const clientsPath = resolve(realDir, pkg.treenix.clients);
-          if (existsSync(clientsPath)) imports.push(clientsPath);
-        }
+        const realDir = realpathSync(join(nmDir, entry.name));
+        if (realDir === hostPkgDir) continue; // already added as host
+        const clients = readClientsFromPkg(realDir);
+        if (clients) imports.push(clients);
       }
       break; // found node_modules, stop walking up
     }
@@ -179,6 +215,9 @@ function discoverPackageClients(): string[] {
 
 export default function treenixPlugin(opts?: { modsDirs?: string[]; clientFiles?: string[] }): Plugin {
   const engineRoot = resolve(import.meta.dirname, '../../..');
+  // Host package = the package this plugin lives in (e.g. @treenx/react).
+  // import.meta.dirname is .../packages/react/src → host pkg dir is one up.
+  const hostPkgDir = resolve(import.meta.dirname, '..');
   // In npm installs engineRoot = node_modules/, which has no sibling mods/ —
   // engine mods scan is a monorepo-dev convenience only.
   const inNodeModules = import.meta.dirname.includes('/node_modules/');
@@ -195,6 +234,7 @@ export default function treenixPlugin(opts?: { modsDirs?: string[]; clientFiles?
 
     resolveId(id, importer) {
       if (id === VIRTUAL_ID) return RESOLVED_ID;
+      if (id === SITE_VIRTUAL_ID) return SITE_RESOLVED_ID;
       if (!importer) return;
 
 
@@ -249,10 +289,26 @@ export default function treenixPlugin(opts?: { modsDirs?: string[]; clientFiles?
     },
 
     load(id) {
+      if (id === SITE_RESOLVED_ID) {
+        // SSR-only barrel — view-site.ts files are server-safe (no window/etc).
+        const engineSiteMods = inNodeModules ? [] : scanSiteViews(resolve(engineRoot, 'mods'));
+        const extraSiteMods = (opts?.modsDirs ?? []).flatMap(d => scanSiteViews(resolve(d)));
+        const seen = new Set<string>();
+        const all: ModEntry[] = [];
+        for (const m of [...engineSiteMods, ...extraSiteMods]) {
+          const real = realpathSync(m.files[0]);
+          if (!seen.has(real)) { seen.add(real); all.push(m); }
+        }
+        // Static imports (top-level await), so registry is populated before the
+        // importer runs render(). Failures here MUST surface — site views missing
+        // means SSR can't render that type at all.
+        const lines = all.flatMap(m => m.files.map(f => `import '${f}';`));
+        return lines.join('\n') + '\n';
+      }
       if (id !== RESOLVED_ID) return;
 
-      // 1. Auto-discover @treenx/* packages with treenix.clients
-      const pkgClients = discoverPackageClients();
+      // 1. Auto-discover @treenx/* packages with treenix.clients (host + node_modules)
+      const pkgClients = discoverPackageClients(hostPkgDir);
 
       // 2. Engine mods (sibling to this plugin's package) — monorepo-dev only
       const engineMods = inNodeModules ? [] : scanClients(resolve(engineRoot, 'mods'), clientFiles);

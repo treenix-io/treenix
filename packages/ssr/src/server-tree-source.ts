@@ -95,6 +95,18 @@ export class ServerTreeSource implements TreeSource {
     return { paths: [...this.pendingPaths], children: [...this.pendingChildren] };
   }
 
+  /** True iff any flushed path/children read failed with a FORBIDDEN error.
+   *  SSR is anonymous-only — auth-protected nodes mean we should hand the
+   *  request back to the SPA (which can drive the login flow). */
+  hasForbidden(): boolean {
+    const isForbidden = (e: Error | null) =>
+      !!e && (((e as { code?: string }).code === 'FORBIDDEN')
+        || ((e as { data?: { code?: string } }).data?.code === 'FORBIDDEN'));
+    for (const v of this.paths.values()) if (isForbidden(v.error)) return true;
+    for (const v of this.children.values()) if (isForbidden(v.error)) return true;
+    return false;
+  }
+
   /** Resolve every recorded pending entry concurrently and store results. */
   async flushPending(): Promise<void> {
     const paths = [...this.pendingPaths];

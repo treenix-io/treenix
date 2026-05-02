@@ -6,7 +6,15 @@ import type { Tree, Page } from '@treenx/core/tree';
 import { createElement } from 'react';
 import './types/index';
 import { RouteIndex } from './route-index';
-import { ssrHandler, type SsrRequest } from './handler';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { ssrHandler, type SsrRequest, type RenderFn } from './handler';
+
+// Tests inject this minimal render — entry-server itself can't be imported
+// here because it does `import 'virtual:mod-site-views'` (Vite-only).
+const testRender: RenderFn = ({ node }) =>
+  renderToStaticMarkup(createElement('main', { 'data-page': (node as any).heading }, (node as any).heading ?? 'untitled'));
+
+const deps = (routes: RouteIndex, tree: Tree) => ({ routes, tree, render: testRender });
 
 const emptyTree: Tree = {
   async get() { return undefined; },
@@ -40,13 +48,13 @@ function indexWith(node: NodeData): RouteIndex {
 
 describe('ssrHandler', () => {
   it('returns null for unknown route (caller falls through to SPA)', async () => {
-    const res = await ssrHandler(req('/missing'), { routes: new RouteIndex(), tree: emptyTree });
+    const res = await ssrHandler(req('/missing'), deps(new RouteIndex(), emptyTree));
     assert.equal(res, null);
   });
 
   it('returns null when route node has no t.site (no SSR opt-in)', async () => {
     const node: NodeData = { $path: '/sys/routes/about', $type: 'page' } as NodeData;
-    const res = await ssrHandler(req('/about'), { routes: indexWith(node), tree: emptyTree });
+    const res = await ssrHandler(req('/about'), deps(indexWith(node), emptyTree));
     assert.equal(res, null);
   });
 
@@ -55,7 +63,7 @@ describe('ssrHandler', () => {
       $path: '/sys/routes/about', $type: 'page',
       site: { $type: 't.site', state: 'published', mode: 'spa' },
     } as NodeData;
-    const res = await ssrHandler(req('/about'), { routes: indexWith(node), tree: emptyTree });
+    const res = await ssrHandler(req('/about'), deps(indexWith(node), emptyTree));
     assert.equal(res, null);
   });
 
@@ -64,7 +72,7 @@ describe('ssrHandler', () => {
       $path: '/sys/routes/about', $type: 'page',
       site: { $type: 't.site', state: 'draft', mode: 'static' },
     } as NodeData;
-    const res = await ssrHandler(req('/about'), { routes: indexWith(node), tree: emptyTree });
+    const res = await ssrHandler(req('/about'), deps(indexWith(node), emptyTree));
     assert.equal(res?.status, 404);
   });
 
@@ -77,7 +85,7 @@ describe('ssrHandler', () => {
     } as NodeData;
     const res = await ssrHandler(
       req('/about', { preview: true, admin: true }),
-      { routes: indexWith(node), tree: emptyTree },
+      deps(indexWith(node), emptyTree),
     );
     assert.equal(res?.status, 200);
     assert.equal(res?.headers['Cache-Control'], 'no-store');
@@ -92,7 +100,7 @@ describe('ssrHandler', () => {
       site: { $type: 't.site', state: 'published', mode: 'static' },
       seo: { $type: 't.seo', title: 'About Us' },
     } as NodeData;
-    const res = await ssrHandler(req('/about'), { routes: indexWith(node), tree: emptyTree });
+    const res = await ssrHandler(req('/about'), deps(indexWith(node), emptyTree));
     assert.equal(res?.status, 200);
     assert.ok(res?.body.startsWith('<!doctype html>'));
     assert.ok(res?.body.includes('<title>About Us</title>'));
@@ -108,7 +116,7 @@ describe('ssrHandler', () => {
       site: { $type: 't.site', state: 'published', mode: 'hydrate' },
       seo: { $type: 't.seo', title: 'X' },
     } as NodeData;
-    const res = await ssrHandler(req('/about'), { routes: indexWith(node), tree: emptyTree });
+    const res = await ssrHandler(req('/about'), deps(indexWith(node), emptyTree));
     assert.equal(res?.status, 200);
     assert.ok(res?.body.includes('data-treenix-mode="hydrate"'));
     assert.ok(res?.body.includes('id="treenix-initial"'));
@@ -124,7 +132,7 @@ describe('ssrHandler', () => {
       },
       seo: { $type: 't.seo', title: 'C' },
     } as NodeData;
-    const res = await ssrHandler(req('/about'), { routes: indexWith(node), tree: emptyTree });
+    const res = await ssrHandler(req('/about'), deps(indexWith(node), emptyTree));
     assert.equal(res?.headers['Cache-Control'], 'public, max-age=60, stale-while-revalidate=600');
   });
 });

@@ -21,7 +21,10 @@ import type { RouteIndex } from './route-index';
 import { ServerTreeSource } from './server-tree-source';
 import { buildHtmlShell } from './template';
 import { SsrDataUnresolved } from './errors';
-import { render as defaultRender, type RenderArgs } from '@treenx/react/ssr/entry-server';
+// Type-only import — keeps the entry-server module out of the import graph
+// at config-bundle time (it pulls virtual: barrels that Vite's config loader
+// can't resolve). Caller MUST pass deps.render with a freshly loaded copy.
+import type { RenderArgs } from '@treenx/react/ssr/entry-server';
 
 /** Render function signature — Vite middleware passes a hot-loaded copy via deps.render. */
 export type RenderFn = (args: RenderArgs) => string;
@@ -29,7 +32,17 @@ export type RenderFn = (args: RenderArgs) => string;
 export type SsrResponse = {
   status: number;
   headers: Record<string, string>;
+  /** Full standalone HTML doc (legacy / static-only fallback). */
   body: string;
+  /** Inner body content — the SSR markup that should land inside `<div id="root">`.
+   *  Vite-side hosts inject this into the SPA index.html so client `main.tsx`
+   *  can `hydrateRoot()` over the existing markup. */
+  bodyContent: string;
+  /** Pre-fetched tree data the client should pre-seed into ClientTreeSource
+   *  (so the first paint after hydration doesn't re-fetch). */
+  initialState: unknown;
+  /** SEO metadata extracted from the route node — caller injects into <head>. */
+  seo?: { title?: string; description?: string; canonical?: string; ogImage?: string };
 };
 
 export type SsrRequest = {
@@ -49,9 +62,10 @@ export type SsrHandlerDeps = {
   tailwindJit?: (html: string) => Promise<string> | string;
   /** Render-loop budget. */
   maxPasses?: number;
-  /** Override the React render fn — Vite middleware passes a fresh ssrLoadModule copy
-   *  so view edits HMR-reload. Defaults to the statically-imported render. */
-  render?: RenderFn;
+  /** React render fn. Vite middleware passes a fresh ssrLoadModule copy so view
+   *  edits HMR-reload. Required — entry-server is loaded by the caller (not
+   *  here) so the SSR module graph stays out of Vite's config bundle. */
+  render: RenderFn;
 };
 
 const DEFAULT_PASSES = 5;
@@ -78,7 +92,7 @@ export async function ssrHandler(
   const targetNode: NodeData = routeNode;
 
   const maxPasses = deps.maxPasses ?? DEFAULT_PASSES;
-  const render = deps.render ?? defaultRender;
+  const render = deps.render;
   let html = '';
   for (let pass = 0; pass < maxPasses; pass++) {
     html = render({
@@ -90,21 +104,27 @@ export async function ssrHandler(
     });
     if (source.pendingCount() === 0) break;
     await source.flushPending();
+    // SSR is anonymous — if any read needed auth, bail out so the SPA shell
+    // takes over and the user gets the login flow instead of an SSR'd 404.
+    if (source.hasForbidden()) return null;
   }
+  if (source.hasForbidden()) return null;
   if (source.pendingCount() > 0) {
     const { paths, children } = source.pending();
     throw new SsrDataUnresolved([...paths, ...children.map(c => `children:${c}`)]);
   }
 
   const css = deps.tailwindJit ? await deps.tailwindJit(html) : '';
-  const seo = getComponent(routeNode, Seo) ?? undefined;
+  const seoNode = getComponent(routeNode, Seo);
+  const initialState = source.serialize();
 
+  // Standalone fallback (used when caller has no SPA template to inject into).
   const body = buildHtmlShell({
     html,
     css,
-    seo,
+    seo: seoNode ?? undefined,
     mode: site.mode,
-    initialState: site.mode === 'hydrate' ? source.serialize() : undefined,
+    initialState: site.mode === 'hydrate' ? initialState : undefined,
     tailwindRuntime: !!site.tailwindRuntime,
     isPreview,
   });
@@ -120,5 +140,12 @@ export async function ssrHandler(
       (swr != null ? `, stale-while-revalidate=${swr}` : '');
   }
 
-  return { status: 200, headers, body };
+  const seo = seoNode ? {
+    title: seoNode.title,
+    description: seoNode.description,
+    canonical: seoNode.canonical,
+    ogImage: seoNode.image,
+  } : undefined;
+
+  return { status: 200, headers, body, bodyContent: html, initialState, seo };
 }

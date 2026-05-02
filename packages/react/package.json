@@ -76,8 +76,7 @@
     "build": "tsc -p tsconfig.build.json && fix-hash-imports --copy-assets",
     "prepack": "npm run build",
     "test": "tsx --conditions development --experimental-test-module-mocks --import ./test/register-dom.mjs --import ./test/register-css.mjs --test src/**/*.test.ts",
-    "dev": "vite",
-    "dev:ssr": "tsx --conditions development ../ssr/src/dev-server.ts"
+    "dev": "vite"
   },
   "peerDependencies": {
     "@treenx/core": "^3.0.0",
@@ -105,6 +104,7 @@
   "devDependencies": {
     "@tailwindcss/vite": "^4.2.4",
     "@testing-library/react": "^16.3.2",
+    "@treenx/ssr": "^0.1.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",

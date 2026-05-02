@@ -8,4 +8,5 @@ export { Route } from './types/route';
 export { ssrHandler, type SsrRequest, type SsrResponse, type RenderFn } from './handler';
 export { RouteIndex } from './route-index';
 export { ServerTreeSource } from './server-tree-source';
+export { viteSsrPlugin, type ViteSsrOpts } from './vite-ssr';
 export { MissingSiteViewError, SsrDataUnresolved } from './errors';

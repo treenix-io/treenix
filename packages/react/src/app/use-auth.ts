@@ -14,9 +14,14 @@ export type AuthState = {
   logout: () => void;
 };
 
+// SSR has no localStorage / no token — start as "anonymous, checked" so
+// Router renders content during SSR (matches what client will produce after
+// useEffect-based initAuth resolves to the same anonymous state).
+const IS_SSR = typeof window === 'undefined';
+
 export function useAuth(): AuthState {
   const [authed, setAuthed] = useState<string | null>(null);
-  const [authChecked, setAuthChecked] = useState(false);
+  const [authChecked, setAuthChecked] = useState(IS_SSR);
   const [showLoginModal, setShowLoginModal] = useState(false);
   const retryTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 

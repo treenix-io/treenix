@@ -125,13 +125,22 @@ export function setEditorRoot(root: string, selected: string | null): boolean {
 // ── useLocation — subscribe a component to window.location via popstate ──
 
 function subscribeLocation(callback: () => void) {
+  if (typeof window === 'undefined') return () => {};
   window.addEventListener('popstate', callback);
   return () => window.removeEventListener('popstate', callback);
 }
 
 const getLocationHref = () => location.href;
+// Server-side has no `location` — useSyncExternalStore needs a server snapshot
+// or it throws. The actual pathname comes from ServerLocationContext below.
+const getServerLocationHref = () => '';
+
+/** Set by entry-server so SSR reads the request URL where useLocation expects window.location. */
+export const ServerLocationContext = createContext<{ pathname: string; search: string; href: string } | null>(null);
 
 export function useLocation(): Location {
-  useSyncExternalStore(subscribeLocation, getLocationHref);
-  return location;
+  useSyncExternalStore(subscribeLocation, getLocationHref, getServerLocationHref);
+  if (typeof window !== 'undefined') return window.location;
+  const stub = useContext(ServerLocationContext);
+  return (stub ?? { pathname: '/', search: '', href: '' }) as Location;
 }

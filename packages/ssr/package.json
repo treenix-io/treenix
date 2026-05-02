@@ -17,6 +17,7 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./vite-ssr": "./src/vite-ssr.ts",
     "./*": {
       "development": "./src/*.ts",
       "types": "./dist/*.d.ts",

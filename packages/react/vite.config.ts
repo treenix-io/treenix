@@ -3,6 +3,7 @@ import { existsSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { defineConfig } from 'vite';
 import treenixPlugin from './src/vite-plugin-treenix';
+import { viteSsrPlugin } from '@treenx/ssr/vite-ssr';
 
 const repoRoot = resolve(import.meta.dirname, '../../..');
 const initCwd = process.env.INIT_CWD;
@@ -19,6 +20,7 @@ export default defineConfig({
     treenixPlugin({ modsDirs: [resolve(projectRoot, 'mods')] }),
     // tailwindcss(), // disabled — using CDN in index.html
     react({ babel: { plugins: ['babel-plugin-react-compiler'] } }),
+    viteSsrPlugin({ trpcUrl: `http://127.0.0.1:${apiPort}/trpc` }),
   ],
   publicDir: 'public',
   optimizeDeps: {

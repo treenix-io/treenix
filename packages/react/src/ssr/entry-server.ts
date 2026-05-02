@@ -1,35 +1,71 @@
-// SSR entry — invoked by @treenx/ssr's handler. Wraps a node render in the
-// minimal provider stack (TreeSource + RouteParams + RenderContext='site') and
-// returns an HTML string. Render mode picks the React DOM API:
-//   'static'  → renderToStaticMarkup (no React markers, smaller output)
-//   'hydrate' → renderToString (markers needed for hydrateRoot)
+// SSR entry — wraps the SAME provider stack `boot()` mounts on the client
+// (TreeSourceProvider + AuthProvider + Router) so client hydration sees the
+// exact React tree it would have rendered itself, no DOM mismatch.
 //
-// File is .ts (not .tsx) so cross-package importers that go through the `./*`
-// exports map don't need the .ts→.tsx array fallback to fire under tsx.
+// .ts (not .tsx) so cross-package importers don't need .ts→.tsx fallback
+// in the exports map.
 
-import { createElement } from 'react';
+import { createElement, Fragment } from 'react';
 import { renderToStaticMarkup, renderToString } from 'react-dom/server';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { NodeData } from '@treenx/core';
 import { TreeSourceProvider } from '#tree/tree-source-context';
 import type { TreeSource } from '#tree/tree-source';
-import { RouteParamsContext } from '#context/route-params';
-import { Render, RenderContext } from '#context';
+import { ServerLocationContext } from '#navigate';
+import { AuthProvider } from '#app/auth-context';
+import { Router } from '#app/Router';
+import { Toaster } from '#components/ui/sonner';
+// Side-effect: scan engine/mods for view-site.ts and register them in the
+// component registry. Vite's treenix plugin generates this barrel.
+import 'virtual:mod-site-views';
 
 export type RenderMode = 'static' | 'hydrate';
 
 export type RenderArgs = {
   source: TreeSource;
+  /** The route node — passed for parity with previous API; Router resolves it
+   *  again from `pathname` so the rendered tree matches the client's. */
   node: NodeData;
+  /** URL tail after the matched route prefix. Unused — Router computes it. */
   rest: string;
   mode: RenderMode;
-  /** Full URL pathname for context (e.g. "/about"). */
+  /** Full URL pathname (e.g. "/v/demo/landing"). Required — Router reads it
+   *  through ServerLocationContext to mirror what client useLocation() returns. */
   pathname?: string;
 };
 
-export function render({ source, node, rest, mode, pathname = '' }: RenderArgs): string {
-  const inner = createElement(Render, { value: node });
-  const ctx = createElement(RenderContext, { name: 'site', children: inner });
-  const params = createElement(RouteParamsContext.Provider, { value: { rest, full: pathname }, children: ctx });
-  const tree = createElement(TreeSourceProvider, { source, children: params });
+export function render({ source, mode, pathname = '/' }: RenderArgs): string {
+  const loc = { pathname, search: '', href: pathname };
+  // Mirror the exact provider stack from main.tsx boot() so hydration matches
+  // element-for-element. ServerLocationContext is the only addition — it's a
+  // pure React Context, no DOM, invisible to hydration's DOM diff.
+  const queryClient = new QueryClient();
+  const tree = createElement(
+    ServerLocationContext.Provider,
+    {
+      value: loc,
+      children: createElement(
+        TreeSourceProvider,
+        {
+          source,
+          children: createElement(
+            AuthProvider,
+            {
+              children: createElement(
+                QueryClientProvider,
+                {
+                  client: queryClient,
+                  children: createElement(Fragment, null,
+                    createElement(Router),
+                    createElement(Toaster),
+                  ),
+                },
+              ),
+            },
+          ),
+        },
+      ),
+    },
+  );
   return mode === 'hydrate' ? renderToString(tree) : renderToStaticMarkup(tree);
 }
