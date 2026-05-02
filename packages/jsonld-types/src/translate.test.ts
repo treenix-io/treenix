@@ -88,4 +88,56 @@ describe('translateClass', () => {
       assert.equal(json.includes('oneOf'), false, `${cls} schema must not contain oneOf`);
     }
   });
+
+  it('walks ALL rdfs:subClassOf parents (BFS, not just first)', () => {
+    // Manufacture a snapshot with multiple inheritance:
+    //   X subClassOf [A, B]; A has prop 'fromA'; B has prop 'fromB'
+    // The translator must collect properties from BOTH A and B.
+    const synth: JsonLdSnapshot = {
+      '@context': { rdfs: 'http://www.w3.org/2000/01/rdf-schema#', schema: 'https://schema.org/' },
+      '@graph': [
+        { '@id': 'schema:A', '@type': 'rdfs:Class', 'rdfs:label': 'A' },
+        { '@id': 'schema:B', '@type': 'rdfs:Class', 'rdfs:label': 'B' },
+        {
+          '@id': 'schema:X',
+          '@type': 'rdfs:Class',
+          'rdfs:label': 'X',
+          'rdfs:subClassOf': [{ '@id': 'schema:A' }, { '@id': 'schema:B' }],
+        },
+        { '@id': 'schema:fromA', '@type': 'rdf:Property', 'schema:domainIncludes': [{ '@id': 'schema:A' }], 'schema:rangeIncludes': [{ '@id': 'schema:Text' }] },
+        { '@id': 'schema:fromB', '@type': 'rdf:Property', 'schema:domainIncludes': [{ '@id': 'schema:B' }], 'schema:rangeIncludes': [{ '@id': 'schema:Text' }] },
+      ],
+    } as unknown as JsonLdSnapshot;
+
+    const schema = translateClass(synth, 'X', {
+      fields: {
+        fromA: { cardinality: 'scalar' },
+        fromB: { cardinality: 'scalar' },
+      },
+    });
+    assert.deepEqual(schema.properties?.fromA, { type: 'string' });
+    assert.deepEqual(schema.properties?.fromB, { type: 'string' });
+  });
+
+  it('throws when override field has no matching snapshot property and no slotType', () => {
+    assert.throws(
+      () => translateClass(SNAPSHOT, 'Person', {
+        fields: { knosw: { cardinality: 'scalar' } }, // typo: 'knosw' instead of 'knows'
+      }),
+      /not found in snapshot.*knosw/i,
+    );
+  });
+
+  it('does NOT throw when override field has slotType (slot is self-declared)', () => {
+    // A slot field can name a Treenix type that has no schema.org snapshot entry
+    const schema = translateClass(SNAPSHOT, 'Person', {
+      fields: {
+        myCustomLink: { cardinality: 'scalar', slotType: 'jsonld.schema-org.Person' },
+      },
+    });
+    assert.deepEqual(schema.properties?.myCustomLink, {
+      type: 'jsonld.refOrComponent',
+      slotType: 'jsonld.schema-org.Person',
+    });
+  });
 });
