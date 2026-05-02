@@ -598,6 +598,9 @@ export function clear() {
 // cached) starts phase as 'refetch' → placeholderData semantics. Cold restart:
 // always cold fetch.
 export async function hydrate(): Promise<void> {
+  // SSR / Node has no IndexedDB — silently no-op so server-side imports
+  // (e.g. Router on entry-server) don't crash at module load.
+  if (typeof indexedDB === 'undefined') return;
   try {
     const entries = await idb.loadAll();
     for (const { data, lastUpdated: ts, virtualParent } of entries) {

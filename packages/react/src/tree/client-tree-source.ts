@@ -5,9 +5,12 @@
 // implement the same interface without touching tRPC or SSE.
 
 import type { NodeData } from '@treenx/core';
-import * as cache from './cache';
-import { tree as clientTree } from './client';
-import { trpc } from './trpc';
+// Use the package-internal alias (#tree/...) — NOT relative './cache' — so
+// Vite deduplicates with hooks.ts's import. Two URLs for the same file
+// produce two ESM module instances, two cache singletons, broken reactivity.
+import * as cache from '#tree/cache';
+import { tree as clientTree } from '#tree/client';
+import { trpc } from '#tree/trpc';
 import {
   type ChildrenHandle,
   type ChildrenOpts,

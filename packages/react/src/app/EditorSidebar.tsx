@@ -139,8 +139,11 @@ export function EditorSidebar({
 
   // Bootstrap on root change: load root node, its children, and ancestors of the
   // currently-selected node. Inspector owns the selected-leaf fetch via usePath.
+  // Do NOT call cache.clear() here — it nukes shared state (e.g. /sys/routes
+  // that Router's useRouteResolve depends on), causing Router to re-render
+  // null and unmount the editor in a loop. The fetches below repopulate this
+  // sidebar's own state.
   useEffect(() => {
-    cache.clear();
     loadedRef.current = new Set();
     setLoaded(new Set());
     setExpanded(new Set([root]));

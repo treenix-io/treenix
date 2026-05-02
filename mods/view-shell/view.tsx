@@ -1,27 +1,21 @@
-// View shell — registered for t.view.shell. Renders the node at the URL tail
-// in a chosen RenderContext. /v/foo/bar → reads /foo/bar; ?ctx=react:compact
-// switches the rendering context. No mutations, no chrome — read-only.
+// View shell — registered for t.view.shell. Public read-only view of any node
+// at the URL tail. Works in both `react` (client) and `site` (SSR) contexts:
+// no auth gate (SSR is anonymous-only by design), no mutations, no chrome.
+// Editor / authenticated flows live behind /t/* (t.editor.shell), not here.
 
-import { Render, RenderContext, useLocation, usePath, useAutoSave, view } from '@treenx/react';
-import { useAuthContext } from '@treenx/react/app/auth-context';
-import { LoginScreen } from '@treenx/react/app/Login';
+import { Render, RenderContext, usePath, useAutoSave, view } from '@treenx/react';
 import { useRouteParams } from '@treenx/react/context/route-params';
+import { register } from '@treenx/core';
 import { ViewShell } from './types';
 
 const ViewShellView = () => {
-  const { authed, authChecked, setAuthed } = useAuthContext();
   const { rest } = useRouteParams();
-  const { search } = useLocation();
   const path = '/' + rest;
-  const ctx = new URLSearchParams(search).get('ctx') || 'react';
 
   const { data: node, loading } = usePath(path);
   const { onChange } = useAutoSave(path);
 
-  if (!authChecked) return null;
-  if (!authed) return <LoginScreen onLogin={setAuthed} />;
-
-  if (loading || !node) {
+  if (!node && !loading) {
     return (
       <div className="flex flex-col items-center justify-center h-screen gap-4 text-[--text-3]">
         <div className="text-4xl">404</div>
@@ -29,11 +23,18 @@ const ViewShellView = () => {
       </div>
     );
   }
+  if (!node) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen gap-2 text-[--text-3]">
+        <div className="text-sm">Loading…</div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-screen">
       <div className="flex-1 overflow-auto p-4 has-[.view-full]:p-0">
-        <RenderContext name={ctx}>
+        <RenderContext name="react">
           <Render value={node} onChange={onChange} />
         </RenderContext>
       </div>
@@ -42,3 +43,4 @@ const ViewShellView = () => {
 };
 
 view(ViewShell, ViewShellView);
+register(ViewShell, 'site', ViewShellView);

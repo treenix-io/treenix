@@ -411,8 +411,11 @@ describe('e2e: tRPC over HTTP', () => {
       });
       await ts.tree.set(createNode('/secret/data', 'doc'));
 
-      const node = await pub.get.query({ path: '/secret/data' });
-      assert.equal(node, undefined, 'Public should not see private node');
+      await assert.rejects(
+        pub.get.query({ path: '/secret/data' }),
+        (e: any) => e.data?.code === 'FORBIDDEN',
+        'Public should be told FORBIDDEN, not silent undefined',
+      );
     });
 
     it('unauthenticated cannot write to private paths', async () => {

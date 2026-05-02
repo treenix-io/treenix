@@ -1,0 +1,99 @@
+{
+  "@context": {
+    "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+    "schema": "https://schema.org/"
+  },
+  "@graph": [
+    {
+      "@id": "schema:Thing",
+      "@type": "rdfs:Class",
+      "rdfs:label": "Thing",
+      "rdfs:comment": "The most generic type of item."
+    },
+    {
+      "@id": "schema:Person",
+      "@type": "rdfs:Class",
+      "rdfs:subClassOf": { "@id": "schema:Thing" },
+      "rdfs:label": "Person"
+    },
+    {
+      "@id": "schema:Event",
+      "@type": "rdfs:Class",
+      "rdfs:subClassOf": { "@id": "schema:Thing" },
+      "rdfs:label": "Event"
+    },
+    {
+      "@id": "schema:CreativeWork",
+      "@type": "rdfs:Class",
+      "rdfs:subClassOf": { "@id": "schema:Thing" },
+      "rdfs:label": "CreativeWork"
+    },
+    {
+      "@id": "schema:Article",
+      "@type": "rdfs:Class",
+      "rdfs:subClassOf": { "@id": "schema:CreativeWork" },
+      "rdfs:label": "Article"
+    },
+    {
+      "@id": "schema:BlogPosting",
+      "@type": "rdfs:Class",
+      "rdfs:subClassOf": { "@id": "schema:Article" },
+      "rdfs:label": "BlogPosting"
+    },
+    {
+      "@id": "schema:PostalAddress",
+      "@type": "rdfs:Class",
+      "rdfs:subClassOf": { "@id": "schema:Thing" },
+      "rdfs:label": "PostalAddress"
+    },
+    {
+      "@id": "schema:name",
+      "@type": "rdf:Property",
+      "schema:domainIncludes": [{ "@id": "schema:Thing" }],
+      "schema:rangeIncludes": [{ "@id": "schema:Text" }]
+    },
+    {
+      "@id": "schema:email",
+      "@type": "rdf:Property",
+      "schema:domainIncludes": [{ "@id": "schema:Person" }],
+      "schema:rangeIncludes": [{ "@id": "schema:Text" }]
+    },
+    {
+      "@id": "schema:address",
+      "@type": "rdf:Property",
+      "schema:domainIncludes": [{ "@id": "schema:Person" }],
+      "schema:rangeIncludes": [{ "@id": "schema:PostalAddress" }, { "@id": "schema:Text" }]
+    },
+    {
+      "@id": "schema:knows",
+      "@type": "rdf:Property",
+      "schema:domainIncludes": [{ "@id": "schema:Person" }],
+      "schema:rangeIncludes": [{ "@id": "schema:Person" }]
+    },
+    {
+      "@id": "schema:startDate",
+      "@type": "rdf:Property",
+      "schema:domainIncludes": [{ "@id": "schema:Event" }],
+      "schema:rangeIncludes": [{ "@id": "schema:Date" }]
+    },
+    {
+      "@id": "schema:headline",
+      "@type": "rdf:Property",
+      "schema:domainIncludes": [{ "@id": "schema:CreativeWork" }],
+      "schema:rangeIncludes": [{ "@id": "schema:Text" }]
+    },
+    {
+      "@id": "schema:author",
+      "@type": "rdf:Property",
+      "schema:domainIncludes": [{ "@id": "schema:CreativeWork" }],
+      "schema:rangeIncludes": [{ "@id": "schema:Person" }]
+    },
+    {
+      "@id": "schema:streetAddress",
+      "@type": "rdf:Property",
+      "schema:domainIncludes": [{ "@id": "schema:PostalAddress" }],
+      "schema:rangeIncludes": [{ "@id": "schema:Text" }]
+    }
+  ]
+}

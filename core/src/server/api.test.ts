@@ -76,7 +76,9 @@ describe('tRPC API integration', () => {
 
     const router = createTreeRouter(tree, watcher, undefined, cdc);
     caller = router.createCaller({ session: null, token: null });
-    authedCaller = router.createCaller({ session: { userId: 'alice' } as Session, token: null });
+    // Include 'public' in alice's claims so she inherits root's public RWS.
+    // Without it, her getChildren on the public root throws FORBIDDEN.
+    authedCaller = router.createCaller({ session: { userId: 'alice', claims: ['public', 'authenticated', 'u:alice'] } as Session, token: null });
   });
 
   // ── CRUD ──
@@ -354,7 +356,10 @@ describe('tRPC API integration', () => {
     });
 
     it('public cannot read denied nodes', async () => {
-      assert.equal(await caller.get({ path: '/private/secret' }), undefined);
+      await assert.rejects(
+        () => caller.get({ path: '/private/secret' }),
+        (e: any) => e.code === 'FORBIDDEN',
+      );
     });
 
     it('public cannot write denied paths', async () => {
@@ -364,9 +369,11 @@ describe('tRPC API integration', () => {
       );
     });
 
-    it('getChildren filters forbidden', async () => {
-      const result = await caller.getChildren({ path: '/private' });
-      assert.equal(result.items.length, 0);
+    it('getChildren throws FORBIDDEN on unreadable parent', async () => {
+      await assert.rejects(
+        () => caller.getChildren({ path: '/private' }),
+        (e: any) => e.code === 'FORBIDDEN',
+      );
     });
 
     it('public cannot execute action on denied node', async () => {

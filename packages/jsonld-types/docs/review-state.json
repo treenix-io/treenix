@@ -1,0 +1,22 @@
+{
+  "round": 4,
+  "threadId": "019de510-79c3-7ac0-9381-c01612f60654",
+  "status": "completed",
+  "last_score": 9,
+  "last_verdict": "ALMOST (approve as scoped v1 after two API-surface corrections)",
+  "target_score": 9,
+  "target_hit": true,
+  "score_progression": [5, 8, 8, 9],
+  "remaining_nits": [
+    "addTypeValidator/TypeValidator not in root @treenx/core barrel — use subpath import or add export",
+    "definePrefab is a doc artifact; use existing registerPrefab(...) seed convention"
+  ],
+  "post_loop_refinement": {
+    "architecture": "lazy registration via onResolveMiss('schema', ...) — no batch register at pack-load",
+    "required_core_change": "registry.ts:55 re-check exact after sync miss resolver (~3 LoC) — generally useful, not JSON-LD-specific",
+    "new_ac": "AC21: validateNode enforces correct validation on first set for never-resolved pack type",
+    "revised_estimate": "~1,000 LoC pack + 9 LoC core (was 1,500 LoC + 6)"
+  },
+  "pending_experiments": [],
+  "timestamp": "2026-05-01T03:50:00"
+}

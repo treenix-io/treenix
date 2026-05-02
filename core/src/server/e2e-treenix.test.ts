@@ -123,10 +123,9 @@ describe('e2e: treenix default ACL', () => {
     rmSync(ctx.tmpDir, { recursive: true, force: true })
   })
 
-  it('anon get returns undefined (access denied)', async () => {
+  it('anon get throws FORBIDDEN (access denied)', async () => {
     const c = createClient(ctx.url)
-    const root = await c.get.query({ path: '/' })
-    assert.equal(root, undefined)
+    await assert.rejects(c.get.query({ path: '/' }), (e: any) => e.data?.code === 'FORBIDDEN')
   })
 
   it('anon set rejected', async () => {

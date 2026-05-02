@@ -1,0 +1,47 @@
+{
+  "type": "object",
+  "properties": {
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "alpha"
+            ]
+          },
+          "count": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "kind",
+          "count"
+        ]
+      },
+      "default": []
+    },
+    "mode": {
+      "type": "number",
+      "enum": [
+        0,
+        1,
+        2
+      ],
+      "enumNames": [
+        "Normal",
+        "Fast",
+        "Slow"
+      ],
+      "default": 1
+    }
+  },
+  "required": [
+    "entries",
+    "mode"
+  ],
+  "$id": "test.import-collision-alpha",
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}

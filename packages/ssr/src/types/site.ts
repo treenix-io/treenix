@@ -3,12 +3,14 @@
 
 import { registerType } from '@treenx/core/comp';
 
+export type SiteMode = 'static' | 'hydrate' | 'spa';
+
 /** Server-side rendering marker. Add to a route node to expose it as crawlable HTML. */
 export class Site {
   /** Lifecycle: 'draft' = invisible to public, 'published' = served. */
   state: 'draft' | 'published' = 'draft';
   /** Render mode: 'static' = HTML only, 'hydrate' = HTML + client JS, 'spa' = no SSR. */
-  mode: 'static' | 'hydrate' | 'spa' = 'spa';
+  mode: SiteMode = 'spa';
   /** Include the Tailwind browser CDN for runtime classes added after hydration. */
   tailwindRuntime?: boolean;
   /** HTTP cache hints. */

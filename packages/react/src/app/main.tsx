@@ -2,7 +2,7 @@ import 'reflect-metadata';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { enablePatches } from 'immer';
 import { type ReactNode } from 'react';
-import { createRoot } from 'react-dom/client';
+import { createRoot, hydrateRoot } from 'react-dom/client';
 import { App } from './App';
 import { AuthProvider } from './auth-context';
 import '#tree/load-client';
@@ -24,7 +24,7 @@ const Strict = ({ children }: { children: ReactNode }) => children;
 export function boot(el: HTMLElement | string = '#root') {
   const root = typeof el === 'string' ? document.querySelector(el) : el;
   if (!root) throw new Error(`Treenix boot: element "${el}" not found`);
-  createRoot(root as HTMLElement).render(
+  const tree = (
     <Strict>
       <TreeSourceProvider source={treeSource}>
         <AuthProvider>
@@ -34,8 +34,14 @@ export function boot(el: HTMLElement | string = '#root') {
           </QueryClientProvider>
         </AuthProvider>
       </TreeSourceProvider>
-    </Strict>,
+    </Strict>
   );
+  // SSR-rendered? Then hydrate; else create fresh.
+  if (root.firstElementChild) {
+    hydrateRoot(root as HTMLElement, tree);
+  } else {
+    createRoot(root as HTMLElement).render(tree);
+  }
 }
 
 // Auto-boot when loaded directly (not imported)

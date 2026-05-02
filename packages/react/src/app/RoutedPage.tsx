@@ -9,7 +9,10 @@ import { usePath } from '#hooks';
 import { trpc } from '#tree/trpc';
 
 export function RoutedPage({ path }: { path: string }) {
-  const routePath = path === '/' ? '/sys/routes/_index' : `/sys/routes${path}`;
+  // Strip trailing slash before composing the route path. Server rejects
+  // /sys/routes/t/ as "trailing slash"; the URL /t/ would otherwise produce it.
+  const cleanPath = path === '/' ? path : path.replace(/\/+$/, '');
+  const routePath = cleanPath === '/' ? '/sys/routes/_index' : `/sys/routes${cleanPath}`;
   const [targetPath, setTargetPath] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
 

@@ -367,7 +367,7 @@ describe('withAcl', () => {
 
   it("alice cannot read bob's page", async () => {
     const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);
-    assert.equal(await s.get('/users/bob/page'), undefined);
+    await assert.rejects(s.get('/users/bob/page'), (e: any) => e.code === 'FORBIDDEN');
   });
 
   it('filters getChildren', async () => {
@@ -397,7 +397,7 @@ describe('withAcl', () => {
   it('unauthenticated: public read only', async () => {
     const s = withAcl(tree, null, ['public']);
     assert.ok(await s.get('/types/block.hero'));
-    assert.equal(await s.get('/users/alice/page'), undefined);
+    await assert.rejects(s.get('/users/alice/page'), (e: any) => e.code === 'FORBIDDEN');
     await assert.rejects(() => s.set(createNode('/types/x', 'x')));
   });
 
@@ -446,8 +446,11 @@ describe('sessions', () => {
 
     // Authenticated non-admin: denied
     const userTree = withAcl(ss, 'alice', ['u:alice', 'authenticated']);
-    const node = await userTree.get(`/auth/sessions/${token}`);
-    assert.equal(node, undefined, 'non-admin should not read session node');
+    await assert.rejects(
+      userTree.get(`/auth/sessions/${token}`),
+      (e: any) => e.code === 'FORBIDDEN',
+      'non-admin should not read session node',
+    );
 
     // Admin: allowed
     const adminTree = withAcl(ss, 'admin', ['u:admin', 'admins', 'authenticated']);
@@ -472,6 +475,12 @@ describe('getChildren truncation', () => {
 
   it('sets truncated=true when ACL scan limit is hit', async () => {
     const base = createMemoryTree();
+    // Parent must be readable now that getChildren throws FORBIDDEN on
+    // unreadable parents — otherwise we'd never reach the truncation path.
+    await base.set({
+      ...createNode('/big', 'folder'),
+      $acl: [{ g: 'authenticated', p: R }],
+    });
 
     // Create a proxy tree that pretends getChildren returned MAX_ACL_SCAN items
     // by returning exactly 10_000 dummy nodes, triggering the truncation path

@@ -35,6 +35,7 @@ const modsDir = process.env.MODS_DIR || undefined;
 const t = await treenix({ rootNode, modsDir });
 const port = Number(process.env.PORT) || 3211;
 const host = process.env.HOST || '127.0.0.1';
+
 const server = await t.listen(port, { host });
 
 process.on('unhandledRejection', (err) => console.error('[UNHANDLED]', err));

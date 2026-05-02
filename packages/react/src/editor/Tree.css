@@ -9,7 +9,6 @@
 }
 
 .tree-node + .tree-node {
-  margin-top: 2px;
 }
 
 .tree-children {
@@ -22,10 +21,10 @@
   align-items: center;
   gap: 8px;
   width: 100%;
-  min-height: 28px;
-  padding-top: 2px;
-  padding-right: 8px;
-  padding-bottom: 2px;
+  min-height: 24px;
+  padding-top: 4px;
+  padding-right: 4px;
+  padding-bottom: 4px;
   cursor: pointer;
   color: var(--color-secondary-foreground);
   font-size: 14px;

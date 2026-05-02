@@ -17,6 +17,7 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./vite-ssr": "./src/vite-ssr.ts",
     "./*": {
       "development": "./src/*.ts",
       "types": "./dist/*.d.ts",
@@ -31,10 +32,11 @@
     "README.md"
   ],
   "scripts": {
-    "test": "tsx --conditions development --test src/**/*.test.ts"
+    "test": "TSX_TSCONFIG_PATH=../react/tsconfig.json tsx --conditions development --test 'src/**/*.test.ts'"
   },
   "peerDependencies": {
-    "@treenx/core": "^3.0.0"
+    "@treenx/core": "^3.0.0",
+    "@treenx/react": "^3.0.0"
   },
   "devDependencies": {
     "tsx": "^4.21.0",

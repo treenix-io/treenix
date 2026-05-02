@@ -103,6 +103,10 @@ export function usePath<T extends object>(
       () => path ? source.getPathSnapshot(path) : EMPTY_PATH_SNAPSHOT,
       [source, path],
     ),
+    useCallback(
+      () => path ? source.getPathSnapshot(path) : EMPTY_PATH_SNAPSHOT,
+      [source, path],
+    ),
   );
 
   // Lifecycle — mountPath owns fetch + watch ref-counting + SSE-reset re-fetch.
@@ -157,6 +161,7 @@ export function useChildren(parentPath: string, opts?: ChildrenOpts): ChildrenQu
   // Source merges all five into one stable reference; one subscribe channel.
   const snap = useSyncExternalStore(
     useCallback((cb: () => void) => source.subscribeChildren(parentPath, cb), [source, parentPath]),
+    useCallback(() => source.getChildrenSnapshot(parentPath), [source, parentPath]),
     useCallback(() => source.getChildrenSnapshot(parentPath), [source, parentPath]),
   );
 

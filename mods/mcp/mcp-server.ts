@@ -1,7 +1,7 @@
 // Treenix MCP Server — exposes tree store as MCP tools
 // StreamableHTTP transport, stateful sessions, token auth via Authorization: Bearer header
 
-import { requestApproval, resolveVerdict } from '#agent/guardian';
+import { rememberRule, requestApproval, resolveVerdict } from '#agent/guardian';
 import { AiPolicy } from '#agent/types';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -132,19 +132,75 @@ function subjectLabel(subject: string): string {
   return `all ${parts[0]} calls`;
 }
 
-/** Check guardian and block until human approves via ai.approval node */
-async function guardBlock(guard: McpGuardianResult, store: Tree, userId: string) {
+/** Check guardian and block until human approves.
+ * Two modes: inline elicitation (clients that support it — Claude Code, etc.)
+ * vs tree-based approval node (agents, headless, batch). Selection by client capability. */
+async function guardBlock(
+  guard: McpGuardianResult,
+  store: Tree,
+  userId: string,
+  mcp: McpServer,
+) {
   if (guard.allowed === true) return null;
   if (guard.allowed === false) return text(`🛑 Guardian: ${guard.reason}`);
 
   const tool = guard.subjects[0] ?? 'unknown';
-  const input = JSON.stringify(guard.args);
+  const label = subjectLabel(tool);
+  const argPreview = yaml(guard.args, 0, 200);
+
+  if (mcp.server.getClientCapabilities()?.elicitation) {
+    try {
+      const narrow = guard.subjects[0] ?? tool;
+      const broad = guard.subjects.at(-1) ?? tool;
+      const result = await mcp.server.elicitInput({
+        message: `Guardian approval required\n\n${label}\n\n${argPreview}`,
+        requestedSchema: {
+          type: 'object',
+          properties: {
+            remember: {
+              type: 'string',
+              title: 'Remember decision',
+              description: 'Persist the chosen action (accept→allow, decline→deny) into /guardian policy',
+              enum: ['once', 'this-path', 'this-tool'],
+              enumNames: [
+                'Just this once',
+                `Always for ${narrow.replace('mcp__treenix__', '')}`,
+                `Always for ${broad.replace('mcp__treenix__', '')}`,
+              ],
+              default: 'once',
+            },
+          },
+        },
+      });
+
+      if (result.action !== 'accept' && result.action !== 'decline') {
+        return text(`🛑 Guardian: ${result.action} by user`);
+      }
+
+      const remember = (result.content?.remember as string | undefined) ?? 'once';
+      const allow = result.action === 'accept';
+
+      if (remember !== 'once') {
+        const subject = remember === 'this-tool' ? broad : narrow;
+        try {
+          await rememberRule(store, subject, JSON.stringify(guard.args), allow, '', 'global');
+        } catch (err) {
+          console.error('[mcp-guardian] failed to persist rule:', err);
+        }
+      }
+
+      return allow ? null : text(`🛑 Guardian: declined by user`);
+    } catch (err) {
+      console.error('[mcp-guardian] elicitInput failed, falling back to tree approval:', err);
+    }
+  }
+
   const approved = await requestApproval(store, {
     agentPath: `/agents/mcp:${userId}`,
     role: 'mcp',
     tool,
-    input,
-    reason: `MCP escalation: ${tool.replace('mcp__treenix__', '')}`,
+    input: JSON.stringify(guard.args),
+    reason: `MCP escalation: ${label}`,
   });
   return approved ? null : text(`🛑 Guardian: denied by human`);
 }
@@ -161,13 +217,13 @@ export async function buildMcpServer(store: Tree, session: Session, claims?: str
   console.log(`[mcp-diag] userId=${session.userId}, claims=[${claims}], root.$acl=${JSON.stringify(root?.$acl)}`);
   const aclStore = withAcl(store, session.userId, claims);
 
+  const mcp = new McpServer({ name: 'treenix', version: '1.0.0' });
+
   /** Check guardian policy; block on escalation until human approves */
   async function guarded(tool: string, args: Record<string, unknown>) {
     const guard = await checkMcpGuardian(store, { tool, args });
-    return guardBlock(guard, store, session.userId);
+    return guardBlock(guard, store, session.userId, mcp);
   }
-
-  const mcp = new McpServer({ name: 'treenix', version: '1.0.0' });
 
   mcp.registerTool(
     'get_node',
