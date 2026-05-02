@@ -1,73 +1,187 @@
-# Treenix
+<p align="center">
+  <img src="docs/assets/readme-header.svg" alt="Treenix - Fullstack AI-ready Platform" width="100%" />
+</p>
 
-**Composable app engine.** What Unity did for games, Treenix does for AI-native apps.
+<p align="center">
+  <a href="https://www.npmjs.com/package/@treenx/core"><img alt="Treenix 3.0.12" src="https://img.shields.io/badge/Treenix-3.0.12-65B741?style=for-the-badge&labelColor=3b3b3b"></a>
+  <a href="https://nodejs.org"><img alt="Node.js 22 or newer" src="https://img.shields.io/badge/node-%3E%3D22-65B741?style=for-the-badge&logo=nodedotjs&logoColor=white&labelColor=3b3b3b"></a>
+  <a href="https://discord.gg/peX8CwHQPz"><img alt="Discord chat" src="https://img.shields.io/badge/chat-Discord-65B741?style=for-the-badge&logo=discord&logoColor=white&labelColor=3b3b3b"></a>
+</p>
 
-Tree of typed components with context-aware rendering. Inspired by Unity3D ECS, Plan9 filesystem, Unix pipes.
+<p align="center">
+  <strong>Fullstack AI-ready Platform.</strong><br />
+  ECS-style tree of typed components with context-aware rendering.
+</p>
 
-## Core Ideas
+Docs: [Introduction](treenix:/docs/docs/index.md) · [Composition](treenix:/docs/docs/concepts/composition.md) · [Components](treenix:/docs/docs/concepts/components.md) · [Quickstart & Setup](treenix:/docs/docs/getting-started/installation.md) · [Tutorial](treenix:/docs/docs/getting-started/tutorial.md) · [Thinking in Treenix](treenix:/docs/docs/getting-started/thinking-in-treenix.md) · [React Views](treenix:/docs/docs/guides/react-views.md) · [API](treenix:/docs/docs/api/overview.md)
 
-- **Everything is a node.** Files, users, configs, AI agents — all nodes in one tree.
-- **ECS composition.** Attach any component to any node. No inheritance, no migration hell.
-- **Context-aware rendering.** Same data, different views — React, Telegram, CLI, AI.
-- **MCP-native.** Every node is AI-addressable out of the box.
-- **Core < 500 lines.** Zero dependencies. Two npm packages.
+Write a class. Attach it to a node. Treenix turns it into stored data, editable forms, rendered views, server actions, MCP tools, access rules, realtime updates, and audit events.
+
+Treenix is for building applications as a shared tree of composable nodes. Humans use the app and admin interface. Agents use the same tree through typed actions. Your business logic stays in one place instead of being copied across schema, API, UI, permissions, and agent tools.
 
 ## Three Primitives
 
 ```typescript
-Component = { $type: string } & Data    // what it IS
-Node      = { $path, $type, ...components }  // where it LIVES
-Context   = Map<type+context, handler>   // how it BEHAVES
+Node      = { $path, $type, ...components }
+Component = { $type, ...data }
+Context   = (Type, context) => handler
 ```
 
-## Quick Start
+In ECS terms, a **Node** is the entity, a **Component** is a typed aspect attached to that entity, and **Contexts** provide the systems around it: React views, actions, services, validation, ACL, text rendering, and agent tools.
+
+Treenix borrows ECS composition without forcing everything into a global game loop. A service can behave like a scoped system over a subtree, a React context can render the same component as a card or editor, and an action can mutate the same node through the validated server pipeline.
+
+## Create an App
 
 ```bash
-npx -y create-treenix my-app
+npm create treenix my-app
 cd my-app
 npm run dev
 ```
 
-## Packages
+Open `http://localhost:3210`.
 
-| Package | Description |
-|---------|-------------|
-| `@treenx/core` | Engine: nodes, components, contexts, tree adapters, server, MCP |
-| `@treenx/react` | React binding: hooks, admin shell, Inspector |
-| `@treenx/agent-client` | Headless Node.js client for AI agents |
-| `@treenx/recall` | Standalone RAG: BM25 + vector hybrid search |
+## Core Idea
 
-## Mods
+One class defines a component's data and actions:
 
-Official modules included in this repo:
+```typescript
+// mods/todo/types.ts
+import { getCtx, registerType } from '@treenx/core/comp';
 
-| Mod | Description |
-|-----|-------------|
-| `board` | Kanban task board |
-| `brahman` | Telegram bot builder (visual flow) |
-| `cafe` | Contact form demo |
-| `doc` | Rich text document editor |
-| `launcher` | App launcher / dashboard |
-| `mindmap` | Interactive mind map |
-| `sim` | AI agent simulation |
-| `three` | 3D scene editor (Three.js) |
-| `todo` | Todo list |
-| `whisper` | Notification inbox |
+export class TodoItem {
+  title = '';
+  done = false;
+  priority: 'low' | 'normal' | 'high' = 'normal';
 
-## Architecture
+  toggle() {
+    this.done = !this.done;
+  }
 
-```
-Layer 0: Node + Component + Context + Ref (core)
-Layer 1: Storage adapters (Mongo/FS/Memory)
-Layer 2: React binding, Telegram binding
-Layer 3: Queries, children filtering
-Layer 4: Mounts, external API adapters
-Layer 5: tRPC/REST/MCP exposure
-Layer 6: LLM integration
+  remove() {
+    const { node, tree } = getCtx();
+    tree.remove(node.$path);
+  }
+}
+
+registerType('todo.item', TodoItem);
 ```
 
-Lower layers never know about upper layers. Core has zero dependencies.
+Register a React view for the same type:
+
+```tsx
+// mods/todo/view.tsx
+import { useActions, view } from '@treenx/react';
+import { TodoItem } from './types';
+
+view(TodoItem, ({ value }) => {
+  const { toggle, remove } = useActions(value);
+
+  return (
+    <div>
+      <button onClick={() => toggle()}>
+        {value.done ? 'Done' : 'Open'}
+      </button>
+      <span>{value.title}</span>
+      <button onClick={() => remove()}>Remove</button>
+    </div>
+  );
+});
+```
+
+The type and the view work on the same node. The view reads typed data from `value` and calls typed server actions through `useActions(value)`.
+
+## ECS Composition
+
+Model by attaching capabilities to nodes instead of building inheritance trees or join tables. A task can also be a discussion thread, an AI assignment, a calendar item, and a billing unit because those are separate components on the same addressable entity:
+
+```typescript
+{
+  $path: '/work/q2-launch',
+  $type: 'todo.task',
+
+  // Main component fields live at node level because $type === 'todo.task'.
+  title: 'Ship Q2 launch',
+  done: false,
+  priority: 'high',
+
+  // Additional components attach under named keys.
+  thread: {
+    $type: 'forum.thread',
+    messages: [],
+  },
+  ai: {
+    $type: 'metatron.assignment',
+    agent: '/agents/release-manager',
+  },
+  schedule: {
+    $type: 'calendar.entry',
+    dueDate: '2026-05-15',
+  },
+}
+```
+
+Each component has its own type, schema, actions, views, and permissions. The node gives them shared identity (`/work/q2-launch`), shared realtime updates, shared audit history, and shared tree placement.
+
+This is the main modeling rule:
+
+- If two pieces of data describe one thing and share lifecycle, put them on one
+
+  node as components.
+
+- If they can live or be deleted independently, make them separate nodes and
+
+  connect them with refs or child paths.
+
+- Add a capability by adding a component. Do not create a subclass just to say
+
+  "task with chat" or "order with AI".
+
+The node itself is its main component. `getComponent(node, TodoItem)` returns the node when `node.$type === 'todo.task'`; named keys are for additional components with their own `$type`.
+
+## Runtime Model
+
+Treenix keeps the same object moving through one pipeline:
+
+| Layer | What happens |
+| --- | --- |
+| Type | A class defines fields, validation metadata, and actions for a component. |
+| Component | Typed aspects attach to nodes by key and can render or react independently. |
+| Node | Data lives at a path in the tree, such as `/todos/ship-readme`, with one main component and any number of extras. |
+| Context | React views, text renderers, services, ACL, schema, and action handlers resolve by `(Type, context)`. |
+| Action | Class methods execute as server-side mutations from UI, services, workflows, or MCP clients. |
+| Security | ACL and validation run on reads, writes, subscriptions, and action calls. |
+| Realtime | Mutations stream patches to subscribed views and child queries. |
+| Audit | The runtime can record who changed what, when, and through which path. |
+
+## Modules
+
+Modules are Types + Views + Services packaged together. A module may define a workflow, a document editor, an MCP adapter, a board, or a domain-specific app.
+
+Current module areas:
+
+| Area | Examples |
+| --- | --- |
+| Ops | Flow, Board, Brahman, Jitsi |
+| Content | Mindmap, Blocks, Doc, Table |
+| AI | Tagger, Agent, Whisper, Memory |
+| Infra | Row-layout, Backup, MCP, Query |
+| Experimental | Org, Grove, Resim |
+
+## Next Steps
+
+- [Quickstart & Setup](treenix:/docs/docs/getting-started/installation.md) — create a project and run it locally.
+- [Tutorial](treenix:/docs/docs/getting-started/tutorial.md) — build a bookmark manager from a Type, actions, seed data, and views.
+- [Create a Mod](treenix:/docs/docs/guides/create-a-mod.md) — package Types, Views, and Services into a reusable module.
+- [React Views](treenix:/docs/docs/guides/react-views.md) — register typed views and render children through contexts.
+
+## Community
+
+- GitHub: treenix/treenix-io
+- Discord: discord.gg/peX8CwHQPz
+- Telegram: t.me/treenix_io
+- X: x.com/treenix
 
 ## License
 
-Licensed under FSL-1.1-MIT. Free to use for any purpose. Converts to MIT automatically after two years from each release date.
+MIT open source.

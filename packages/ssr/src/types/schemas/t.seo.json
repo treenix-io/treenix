@@ -1,0 +1,56 @@
+{
+  "type": "object",
+  "properties": {
+    "title": {
+      "type": "string",
+      "title": "Page title. Required — empty title produces blank crawler results.",
+      "default": ""
+    },
+    "description": {
+      "type": "string",
+      "title": "Meta description, ~160 chars max."
+    },
+    "image": {
+      "type": "string",
+      "title": "Absolute or root-relative URL. https? or /... only — validated at SSR boundary."
+    },
+    "imageAlt": {
+      "type": "string",
+      "title": "Alt text for og:image."
+    },
+    "canonical": {
+      "type": "string",
+      "title": "Canonical URL. Same protocol allow-list as `image`."
+    },
+    "robots": {
+      "type": "string",
+      "enum": [
+        "index,follow",
+        "noindex,follow",
+        "noindex,nofollow"
+      ],
+      "title": "Robots directive."
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "website",
+        "article"
+      ],
+      "title": "OpenGraph type."
+    },
+    "locale": {
+      "type": "string",
+      "title": "BCP-47 language tag, e.g. 'en', 'en-US'."
+    },
+    "jsonLd": {
+      "type": "object",
+      "title": "JSON-LD structured data, embedded as <script type=\"application/ld+json\">."
+    }
+  },
+  "required": [
+    "title"
+  ],
+  "$id": "t.seo",
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}

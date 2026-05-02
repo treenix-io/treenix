@@ -1,36 +1,45 @@
-// Editor — tree inspector + per-node Inspector at /t/<path>?root=<root>.
-// URL is the single source of truth: `selected` and `root` are derived from useLocation.
-// Navigation goes through the unified NavigateProvider mounted in Router.
+// Editor shell view — registered for t.editor.shell. Mounted by Router.tsx
+// (Phase 2 step 9) when /sys/routes/t resolves. URL tail (e.g. "/t/foo/bar"
+// → rest="foo/bar") becomes the selected node path; ?root= still selects
+// the sidebar root.
+//
+// Auth comes from <AuthProvider> at the SPA root, not props — the View
+// contract delivers only {value, onChange, ctx}.
 
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '#components/ui/resizable';
-import { TypePicker } from '#mods/editor-ui/type-picker';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import * as cache from '#tree/cache';
-import { tree } from '#tree/client';
-import { addComponent } from '#hooks';
-import { setEditorRoot, useLocation, useNavigate } from '#navigate';
-import { EditorSidebar } from './EditorSidebar';
-import { Inspector } from '#editor/Inspector';
 import { toast } from 'sonner';
-import { useModErrors } from '#hooks/use-mod-errors';
-import { ConnectionBanner } from './ConnectionBanner';
+import {
+  addComponent,
+  cache,
+  setEditorRoot,
+  tree,
+  useLocation,
+  useNavigate,
+  view,
+} from '@treenx/react';
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@treenx/react/ui/resizable';
+import { useAuthContext } from '@treenx/react/app/auth-context';
+import { useRouteParams } from '@treenx/react/context/route-params';
+import { ConnectionBanner } from '@treenx/react/app/ConnectionBanner';
+import { EditorSidebar } from '@treenx/react/app/EditorSidebar';
+import { LoginScreen } from '@treenx/react/app/Login';
+import { Inspector } from '@treenx/react/editor/Inspector';
+import { useModErrors } from '@treenx/react/hooks/use-mod-errors';
+import { TypePicker } from '@treenx/react/mods/editor-ui/type-picker';
+import { EditorShell } from './types';
 
-export interface EditorProps {
-  authed: string;
-  onLogout: () => void;
-}
+const EditorShellView = () => {
+  const { authed, authChecked, setAuthed, logout } = useAuthContext();
+  const { rest } = useRouteParams();
+  const { search } = useLocation();
+  const navigate = useNavigate();
 
-export function Editor({ authed, onLogout }: EditorProps) {
-  const { pathname, search } = useLocation();
-  const selected = useMemo(
-    () => (pathname.startsWith('/t') ? (pathname.slice(2) || '/') : null),
-    [pathname],
-  );
+  // URL tail → selected node path. rest='' (bare /t) → root '/'.
+  const selected = useMemo(() => '/' + rest, [rest]);
   const root = useMemo(
     () => new URLSearchParams(search).get('root') || '/',
     [search],
   );
-  const navigate = useNavigate();
 
   const [addingComponentAt, setAddingComponentAt] = useState<string | null>(null);
   useModErrors();
@@ -53,7 +62,7 @@ export function Editor({ authed, onLogout }: EditorProps) {
   // Surface uncaught promise rejections as toasts so users see fetch/tree errors.
   useEffect(() => {
     const handler = (e: PromiseRejectionEvent) => {
-      const msg = e.reason?.message || String(e.reason);
+      const msg = (e.reason as { message?: string } | null)?.message ?? String(e.reason);
       toast.error(msg);
     };
     window.addEventListener('unhandledrejection', handler);
@@ -94,6 +103,9 @@ export function Editor({ authed, onLogout }: EditorProps) {
     [selected],
   );
 
+  if (!authChecked) return null;
+  if (!authed) return <LoginScreen onLogin={setAuthed} />;
+
   return (
     <>
       <ConnectionBanner />
@@ -105,7 +117,7 @@ export function Editor({ authed, onLogout }: EditorProps) {
             selected={selected}
             onSelect={navigate}
             onSetRoot={handleSetRoot}
-            onLogout={onLogout}
+            onLogout={logout}
           />
 
           <ResizableHandle withHandle />
@@ -135,4 +147,6 @@ export function Editor({ authed, onLogout }: EditorProps) {
       </div>
     </>
   );
-}
+};
+
+view(EditorShell, EditorShellView);

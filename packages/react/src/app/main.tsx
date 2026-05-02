@@ -4,13 +4,17 @@ import { enablePatches } from 'immer';
 import { type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
+import { AuthProvider } from './auth-context';
 import '#tree/load-client';
+import { createClientTreeSource } from '#tree/client-tree-source';
+import { TreeSourceProvider } from '#tree/tree-source-context';
 import { Toaster } from '#components/ui/sonner';
 import '../root.css';
 
 enablePatches();
 
 const queryClient = new QueryClient();
+const treeSource = createClientTreeSource();
 
 // StrictMode off: FlowGram inversify container breaks on double-mount
 // https://github.com/bytedance/flowgram.ai/issues/402
@@ -22,10 +26,14 @@ export function boot(el: HTMLElement | string = '#root') {
   if (!root) throw new Error(`Treenix boot: element "${el}" not found`);
   createRoot(root as HTMLElement).render(
     <Strict>
-      <QueryClientProvider client={queryClient}>
-        <App />
-        <Toaster />
-      </QueryClientProvider>
+      <TreeSourceProvider source={treeSource}>
+        <AuthProvider>
+          <QueryClientProvider client={queryClient}>
+            <App />
+            <Toaster />
+          </QueryClientProvider>
+        </AuthProvider>
+      </TreeSourceProvider>
     </Strict>,
   );
 }
