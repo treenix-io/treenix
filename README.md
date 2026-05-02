@@ -13,7 +13,7 @@
   ECS-style tree of typed components with context-aware rendering.
 </p>
 
-Docs: [Introduction](treenix:/docs/docs/index.md) · [Composition](treenix:/docs/docs/concepts/composition.md) · [Components](treenix:/docs/docs/concepts/components.md) · [Quickstart & Setup](treenix:/docs/docs/getting-started/installation.md) · [Tutorial](treenix:/docs/docs/getting-started/tutorial.md) · [Thinking in Treenix](treenix:/docs/docs/getting-started/thinking-in-treenix.md) · [React Views](treenix:/docs/docs/guides/react-views.md) · [API](treenix:/docs/docs/api/overview.md)
+Docs: [Introduction](./docs/index.md) · [Composition](./docs/concepts/composition.md) · [Components](./docs/concepts/components.md) · [Quickstart & Setup](./docs/getting-started/installation.md) · [Tutorial](./docs/getting-started/tutorial.md) · [Thinking in Treenix](./docs/getting-started/thinking-in-treenix.md) · [React Views](./docs/guides/react-views.md) · [API](./docs/api/overview.md)
 
 Write a class. Attach it to a node. Treenix turns it into stored data, editable forms, rendered views, server actions, MCP tools, access rules, realtime updates, and audit events.
 
@@ -170,10 +170,10 @@ Current module areas:
 
 ## Next Steps
 
-- [Quickstart & Setup](treenix:/docs/docs/getting-started/installation.md) — create a project and run it locally.
-- [Tutorial](treenix:/docs/docs/getting-started/tutorial.md) — build a bookmark manager from a Type, actions, seed data, and views.
-- [Create a Mod](treenix:/docs/docs/guides/create-a-mod.md) — package Types, Views, and Services into a reusable module.
-- [React Views](treenix:/docs/docs/guides/react-views.md) — register typed views and render children through contexts.
+- [Quickstart & Setup](./docs/getting-started/installation.md) — create a project and run it locally.
+- [Tutorial](./docs/getting-started/tutorial.md) — build a bookmark manager from a Type, actions, seed data, and views.
+- [Create a Mod](./docs/guides/create-a-mod.md) — package Types, Views, and Services into a reusable module.
+- [React Views](./docs/guides/react-views.md) — register typed views and render children through contexts.
 
 ## Community
 
