@@ -84,7 +84,13 @@ export async function ssrHandler(
 
   const isPreview = req.query.get('preview') === '1' && req.isAdmin;
   if (site.state === 'draft' && !isPreview) {
-    return { status: 404, headers: { 'Content-Type': 'text/html; charset=utf-8' }, body: '' };
+    return {
+      status: 404,
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+      body: '',
+      bodyContent: '',
+      initialState: {},
+    };
   }
 
   const source = new ServerTreeSource(deps.tree);

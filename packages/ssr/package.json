@@ -32,7 +32,8 @@
     "README.md"
   ],
   "scripts": {
-    "test": "TSX_TSCONFIG_PATH=../react/tsconfig.json tsx --conditions development --test 'src/**/*.test.ts'"
+    "test": "TSX_TSCONFIG_PATH=../react/tsconfig.json tsx --conditions development --test 'src/**/*.test.ts'",
+    "start": "tsx src/front-server.ts"
   },
   "peerDependencies": {
     "@treenx/core": "^3.0.0",
