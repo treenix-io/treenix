@@ -34,8 +34,9 @@ export async function installSsr(
   }
 
   await rebuild();
+  console.log(`[ssr] indexed ${routes.size()} route(s)`);
 
-  return async (req, url) => {
+  return async (_req, url) => {
     if (!opts.cacheRoutes) await rebuild();
     return ssrHandler(
       { pathname: url.pathname, query: url.searchParams, isAdmin: false },

@@ -168,7 +168,8 @@ export function createHttpServer(pipeline: Pipeline, opts?: HttpServerOpts): Ser
           return;
         }
       } catch (err) {
-        log.error(`htmlHandler ${pathname}: ${(err as Error).message}`);
+        const e = err as Error;
+        log.error(`htmlHandler ${pathname}: ${e.message}\n${e.stack ?? ''}`);
         res.writeHead(500, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' });
         res.end('Internal Server Error');
         return;
