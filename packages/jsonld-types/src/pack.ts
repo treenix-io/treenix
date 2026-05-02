@@ -83,14 +83,10 @@ function missResolver(type: string): void {
   if (!type.startsWith(PREFIX)) return;
   const className = type.slice(PREFIX.length);
   const override = OVERRIDES[className];
-  if (!override) return;
-  let schema;
-  try {
-    schema = translateClass(loadSnapshotOnce(), className, override);
-  } catch (e) {
-    console.error(`[jsonld-types] failed to translate ${className}:`, e);
-    return;
-  }
+  if (!override) return; // not in v1 pack — leave as miss for other resolvers
+  // Translation errors throw loud. Pack bugs must not become silent
+  // skipped validation in validate.ts:133.
+  const schema = translateClass(loadSnapshotOnce(), className, override);
   register(type, 'schema', () => schema);
 }
 
@@ -98,5 +94,11 @@ export async function loadSchemaOrgV29Pack(_tree: Tree): Promise<void> {
   loadSnapshotOnce();
   // Both calls are last-writer-wins — safe and idempotent on repeated invocation.
   addTypeValidator('jsonld.refOrComponent', refOrComponentValidator);
+  // KNOWN v1 LIMITATION: onResolveMiss is singleton-per-context. This pack owns
+  // 'schema' miss resolution. A future second pack (e.g., GS1, FHIR, ActivityStreams)
+  // would clobber this resolver — last-writer-wins. Plan #3+ must add either:
+  //   (a) a centralized 'schema' dispatcher that fans out to per-prefix sub-resolvers, or
+  //   (b) a chained resolver API in core registry.
+  // For v1 with a single ontology pack, last-writer-wins is acceptable.
   onResolveMiss('schema', missResolver);
 }
