@@ -34,7 +34,8 @@
     "test": "tsx --conditions development --test 'src/**/*.test.ts'"
   },
   "peerDependencies": {
-    "@treenx/core": "^3.0.0"
+    "@treenx/core": "^3.0.0",
+    "@treenx/react": "^3.0.0"
   },
   "devDependencies": {
     "tsx": "^4.21.0",
