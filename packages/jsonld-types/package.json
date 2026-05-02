@@ -22,6 +22,6 @@
     "@treenx/core": "workspace:*"
   },
   "scripts": {
-    "test": "node --test --conditions development 'src/**/*.test.ts'"
+    "test": "tsx --conditions development --test src/**/*.test.ts"
   }
 }
