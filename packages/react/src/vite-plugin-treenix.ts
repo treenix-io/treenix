@@ -13,7 +13,7 @@ import type { Plugin } from 'vite';
 type SpecValue = string | string[] | Record<string, string | string[]>;
 type FieldMap = Record<string, SpecValue>;
 
-const pkgCache = new Map<string, { dir: string; imports?: FieldMap; exports?: FieldMap } | null>();
+const pkgCache = new Map<string, { dir: string; name?: string; imports?: FieldMap; exports?: FieldMap } | null>();
 
 function readPkg(startDir: string) {
   if (pkgCache.has(startDir)) return pkgCache.get(startDir)!;
@@ -24,7 +24,7 @@ function readPkg(startDir: string) {
     if (existsSync(pkgPath)) {
       const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
       if (pkg.imports || pkg.exports) {
-        const result = { dir: current, imports: pkg.imports as FieldMap, exports: pkg.exports as FieldMap };
+        const result = { dir: current, name: pkg.name as string | undefined, imports: pkg.imports as FieldMap, exports: pkg.exports as FieldMap };
         pkgCache.set(startDir, result);
         return result;
       }
@@ -198,13 +198,20 @@ export default function treenixPlugin(opts?: { modsDirs?: string[]; clientFiles?
       if (!importer) return;
 
 
-      // Block server.ts from frontend + resolve relative imports in @treenix packages
+      // Block server.ts from frontend + resolve relative imports in @treenx packages
       if (id.startsWith('.')) {
         const resolved = resolve(importer, '..', id).replace(/\\/g, '/');
 
-        // Relative imports within @treenix packages: resolve explicitly so module IDs
-        // match plugin-resolved @treenx/* paths (prevents ?v= hash mismatch → dual modules)
+        // Relative imports within @treenx packages: resolve explicitly so module IDs
+        // match plugin-resolved @treenx/* paths (prevents ?v= hash mismatch and the
+        // /src/* vs /@fs/.../packages/*/src/* dual-URL issue → dual module instances).
+        // Match BOTH installed packages (node_modules) and monorepo workspaces — the
+        // older guard was node_modules-only and missed dev-mode workspace symlinks.
         if (importer.includes('/node_modules/@treenx/')) {
+          return tryResolve([resolved]);
+        }
+        const importerPkg = readPkg(dirname(importer));
+        if (importerPkg?.name?.startsWith?.('@treenx/')) {
           return tryResolve([resolved]);
         }
 
