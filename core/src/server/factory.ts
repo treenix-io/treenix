@@ -13,7 +13,7 @@ import { loadSchemasFromDir } from '#schema/load';
 import { createMemoryTree, type Tree } from '#tree';
 import type { Server } from 'node:http';
 import { deploySeedPrefabs } from './prefab';
-import { createEnsure, type Ensure } from './seed';
+import { createEnsure, type Ensure } from './seed/index';
 import { createHttpServer, createPipeline, type Pipeline } from './server';
 
 export type TreenixConfig = {
