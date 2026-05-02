@@ -12,7 +12,7 @@ export type ValidationError = {
 
 // ── Type-dispatched validator tree ──
 
-type TypeValidator = (value: unknown, def: PropertySchema, path: string, errors: ValidationError[]) => void;
+export type TypeValidator = (value: unknown, def: PropertySchema, path: string, errors: ValidationError[]) => void;
 
 const typeValidators: Record<string, TypeValidator> = {
   string(value, def, path, errors) {
