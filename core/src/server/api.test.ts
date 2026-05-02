@@ -356,7 +356,10 @@ describe('tRPC API integration', () => {
     });
 
     it('public cannot read denied nodes', async () => {
-      assert.equal(await caller.get({ path: '/private/secret' }), undefined);
+      await assert.rejects(
+        () => caller.get({ path: '/private/secret' }),
+        (e: any) => e.code === 'FORBIDDEN',
+      );
     });
 
     it('public cannot write denied paths', async () => {

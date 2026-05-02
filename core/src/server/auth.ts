@@ -354,8 +354,11 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
   return {
     getPerm,
     async get(path, ctx) {
+      // Fail loud — same reasoning as getChildren below. Silent `undefined`
+      // for a forbidden path makes routers (and SSR) treat it as 404 instead
+      // of "auth required", which leads to wrong rendering decisions.
       const perm = await getPerm(path);
-      if (!(perm & R)) return undefined;
+      if (!(perm & R)) throw new OpError('FORBIDDEN', `Access denied: ${path}`);
       const node = await rawStore.get(path, ctx);
       if (!node) return undefined;
       const out = stripComponents(node, userId, claims);

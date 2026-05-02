@@ -268,7 +268,12 @@ async function resolveActionHandler(
   componentKey: string | undefined,
   action: string,
 ): Promise<ResolvedAction> {
-  const node = await tree.get(path);
+  // Mask FORBIDDEN as NOT_FOUND on execute — security: don't leak existence
+  // of paths the caller can't read. (tree.get throws FORBIDDEN on no read perm.)
+  const node = await tree.get(path).catch((e: any) => {
+    if (e?.code === 'FORBIDDEN') throw new OpError('NOT_FOUND', `Node not found: ${path}`);
+    throw e;
+  });
   if (!node) throw new OpError('NOT_FOUND', `Node not found: ${path}`);
 
   const [comp, fieldKey] = getComponentField(node, componentType ?? 't.any', componentKey) ?? [];
