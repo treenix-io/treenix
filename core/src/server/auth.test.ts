@@ -472,6 +472,12 @@ describe('getChildren truncation', () => {
 
   it('sets truncated=true when ACL scan limit is hit', async () => {
     const base = createMemoryTree();
+    // Parent must be readable now that getChildren throws FORBIDDEN on
+    // unreadable parents — otherwise we'd never reach the truncation path.
+    await base.set({
+      ...createNode('/big', 'folder'),
+      $acl: [{ g: 'authenticated', p: R }],
+    });
 
     // Create a proxy tree that pretends getChildren returned MAX_ACL_SCAN items
     // by returning exactly 10_000 dummy nodes, triggering the truncation path

@@ -367,6 +367,12 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
     },
 
     async getChildren(path, opts, ctx) {
+      // Fail loud, not silent — caller distinguishes "no permission" from
+      // "no readable children". Returning [] for a forbidden parent makes
+      // routers happily render NotFound instead of LoginScreen.
+      const parentPerm = await getPerm(path);
+      if (!(parentPerm & R)) throw new OpError('FORBIDDEN', `Access denied: ${path}`);
+
       const MAX_ACL_SCAN = 10_000;
       // Fetch up to limit from underlying — ACL filters first, then paginate
       const raw = await rawStore.getChildren(path, { depth: opts?.depth, limit: MAX_ACL_SCAN }, ctx);
