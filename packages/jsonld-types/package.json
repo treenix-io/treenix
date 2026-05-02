@@ -19,7 +19,7 @@
     }
   },
   "dependencies": {
-    "@treenx/core": "workspace:*"
+    "@treenx/core": "^3.0.0"
   },
   "scripts": {
     "test": "tsx --conditions development --test src/**/*.test.ts"

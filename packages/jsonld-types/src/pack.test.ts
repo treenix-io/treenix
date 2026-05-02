@@ -1,14 +1,8 @@
+import { getRegisteredTypes, mapRegistry, onResolveMiss, resolve, unregister } from '@treenx/core';
+import { createMemoryTree, type Tree } from '@treenx/core/tree';
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
-import {
-  getRegisteredTypes,
-  mapRegistry,
-  onResolveMiss,
-  resolve,
-  unregister,
-} from '@treenx/core';
-import { createMemoryTree, type Tree } from '@treenx/core/tree';
-import { loadSchemaOrgV29Pack, verifySnapshotChecksum } from './pack';
+import { loadSchemaOrgV29Pack } from './pack';
 
 function snapshotRegistry(): Array<[string, string]> {
   const out: Array<[string, string]> = [];
@@ -75,12 +69,10 @@ describe('loadSchemaOrgV29Pack', () => {
     assert.equal(after.length, before.length, 'registry size unchanged after second load');
   });
 
-  it('throws loud on snapshot SHA-256 mismatch (AC7)', () => {
-    assert.throws(
-      () => verifySnapshotChecksum('0000000000000000000000000000000000000000000000000000000000000000'),
-      /checksum mismatch/i,
-    );
-  });
+  // AC7 (sha256 mismatch fails loud) was removed when pack.ts switched to ESM JSON
+  // import — snapshot is now bundled at build time, runtime tampering is no longer
+  // a concern (the file is part of the package source). Snapshot drift detection
+  // moves to the future pack-update workflow.
 });
 
 describe('end-to-end: validateNode through pack resolver', () => {
