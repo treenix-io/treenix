@@ -15,13 +15,16 @@ export type AuthState = {
 };
 
 // SSR has no localStorage / no token — start as "anonymous, checked" so
-// Router renders content during SSR (matches what client will produce after
-// useEffect-based initAuth resolves to the same anonymous state).
+// Router renders content during SSR.
 const IS_SSR = typeof window === 'undefined';
+// Hydrated SSR pages must produce the same first client render before effects
+// run. Token/dev-login validation can still update auth state after hydration.
+const HAS_SSR_INITIAL_STATE =
+  typeof document !== 'undefined' && !!document.getElementById('treenix-initial');
 
 export function useAuth(): AuthState {
   const [authed, setAuthed] = useState<string | null>(null);
-  const [authChecked, setAuthChecked] = useState(IS_SSR);
+  const [authChecked, setAuthChecked] = useState(IS_SSR || HAS_SSR_INITIAL_STATE);
   const [showLoginModal, setShowLoginModal] = useState(false);
   const retryTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 

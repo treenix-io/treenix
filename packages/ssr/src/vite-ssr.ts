@@ -14,9 +14,9 @@ import { resolve } from 'node:path';
 import type { Plugin, ViteDevServer } from 'vite';
 import type { NodeData } from '@treenx/core';
 import type { Tree, ChildrenOpts, Page } from '@treenx/core/tree';
-import { RouteIndex } from './route-index';
-import { ssrHandler, type RenderFn } from './handler';
-import { escape, escapeAttr, escapeUrl, escapeJson } from './template';
+import { RouteIndex } from '#route-index';
+import { ssrHandler, type RenderFn } from '#handler';
+import { escape, escapeAttr, escapeUrl, escapeJson, extractBodyHeadHints } from '#template';
 
 export type ViteSsrOpts = {
   /** Backend tRPC URL. Default: http://127.0.0.1:${VITE_API_PORT|3211}/trpc */
@@ -44,6 +44,7 @@ export function viteSsrPlugin(opts: ViteSsrOpts = {}): Plugin {
 
   return {
     name: 'treenix-ssr',
+    enforce: 'pre',
     apply: 'serve',
     configureServer(vite: ViteDevServer) {
       const tree = createTrpcTree(trpcUrl);
@@ -107,7 +108,8 @@ function injectSsrIntoTemplate(
   result: { bodyContent: string; initialState: unknown; seo?: { title?: string; description?: string; canonical?: string; ogImage?: string } },
 ): string {
   // 1. Body: replace `<div id="root">` opening so its content becomes our SSR markup.
-  let html = template.replace(ROOT_OPEN, m => `${m}${result.bodyContent}`);
+  const rendered = extractBodyHeadHints(result.bodyContent);
+  let html = template.replace(ROOT_OPEN, m => `${m}${rendered.body}`);
 
   // 2. Head meta — title overrides any in template; description/canonical/og added.
   // <base href="/"> forces all relative URLs in index.html (favicons, /src/app/main.tsx)
@@ -117,6 +119,7 @@ function injectSsrIntoTemplate(
   if (result.seo?.description) headBits.push(`<meta name="description" content="${escapeAttr(result.seo.description)}" />`);
   if (result.seo?.canonical) headBits.push(`<link rel="canonical" href="${escapeUrl(result.seo.canonical)}" />`);
   if (result.seo?.ogImage) headBits.push(`<meta property="og:image" content="${escapeUrl(result.seo.ogImage)}" />`);
+  headBits.push(...rendered.headHints);
 
   // 3. Initial state — pre-seeded into client TreeSource on hydration.
   headBits.push(`<script type="application/json" id="treenix-initial">${escapeJson(result.initialState)}</script>`);

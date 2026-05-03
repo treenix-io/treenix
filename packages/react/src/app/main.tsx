@@ -6,12 +6,27 @@ import { createRoot, hydrateRoot } from 'react-dom/client';
 import { App } from './App';
 import { AuthProvider } from './auth-context';
 import '#tree/load-client';
+import { hydrateFromServerSnapshot } from '#tree/cache';
 import { createClientTreeSource } from '#tree/client-tree-source';
 import { TreeSourceProvider } from '#tree/tree-source-context';
 import { Toaster } from '#components/ui/sonner';
 import '../root.css';
 
 enablePatches();
+
+function readSsrInitialState(): unknown {
+  const el = document.getElementById('treenix-initial');
+  if (!el?.textContent) return undefined;
+  try {
+    return JSON.parse(el.textContent);
+  } catch {
+    return undefined;
+  }
+}
+
+if (typeof document !== 'undefined') {
+  hydrateFromServerSnapshot(readSsrInitialState());
+}
 
 const queryClient = new QueryClient();
 const treeSource = createClientTreeSource();

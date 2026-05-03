@@ -588,6 +588,47 @@ export function clear() {
   idb.clearAll().catch(() => {});
 }
 
+type ServerHydrationState = {
+  paths?: Record<string, NodeData | null>;
+  children?: Record<string, NodeData[]>;
+  childMeta?: Record<string, { total?: number; truncated?: boolean }>;
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  !!value && typeof value === 'object' && !Array.isArray(value);
+
+const isNodeData = (value: unknown): value is NodeData =>
+  isRecord(value) && typeof value.$path === 'string';
+
+/** Populate the client cache from the SSR snapshot before hydrateRoot().
+ *  This keeps the first client render aligned with the server DOM. */
+export function hydrateFromServerSnapshot(state: unknown): void {
+  if (!isRecord(state)) return;
+  const snapshot = state as ServerHydrationState;
+
+  if (isRecord(snapshot.paths)) {
+    for (const [path, node] of Object.entries(snapshot.paths)) {
+      if (node === null) {
+        markPathMissing(path);
+      } else if (isNodeData(node)) {
+        put(node);
+      }
+    }
+  }
+
+  if (isRecord(snapshot.children)) {
+    for (const [parent, items] of Object.entries(snapshot.children)) {
+      if (!Array.isArray(items)) continue;
+      const nodes = items.filter(isNodeData);
+      replaceChildren(parent, nodes);
+      const meta = snapshot.childMeta?.[parent];
+      setChildrenTotal(parent, typeof meta?.total === 'number' ? meta.total : nodes.length);
+      setChildrenTruncated(parent, !!meta?.truncated);
+      setChildrenPhase(parent, 'ready');
+    }
+  }
+}
+
 // Populate cache from IDB on startup — no IDB writes triggered.
 // Call before first render for instant stale paint.
 // NOTE: hydrate does NOT populate childrenLoaded — IDB entries are incidental

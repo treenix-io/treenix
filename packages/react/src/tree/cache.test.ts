@@ -120,6 +120,32 @@ describe('cache', () => {
     assert.strictEqual(cache.hasChildrenCollectionLoaded('/p'), true);
   });
 
+  it('hydrateFromServerSnapshot seeds paths and authoritative children', () => {
+    cache.hydrateFromServerSnapshot({
+      paths: {
+        '/page': { $path: '/page', $type: 'page', title: 'SSR' },
+        '/missing': null,
+      },
+      children: {
+        '/sys/routes': [
+          { $path: '/sys/routes/index', $type: 'route', route: '/' },
+        ],
+      },
+      childMeta: {
+        '/sys/routes': { total: 3, truncated: true },
+      },
+    });
+
+    assert.strictEqual(cache.get('/page')?.title, 'SSR');
+    assert.strictEqual(cache.getPathStatus('/page'), 'ready');
+    assert.strictEqual(cache.getPathStatus('/missing'), 'not_found');
+    assert.strictEqual(cache.getChildren('/sys/routes').length, 1);
+    assert.strictEqual(cache.hasChildrenCollectionLoaded('/sys/routes'), true);
+    assert.strictEqual(cache.getChildrenPhase('/sys/routes'), 'ready');
+    assert.strictEqual(cache.getChildrenTotal('/sys/routes'), 3);
+    assert.strictEqual(cache.getChildrenTruncated('/sys/routes'), true);
+  });
+
   it('appendChildren() merges without removing existing', () => {
     cache.replaceChildren('/p', [{ $path: '/p/a', $type: 'x' } as any]);
     cache.appendChildren('/p', [{ $path: '/p/b', $type: 'x' } as any]);

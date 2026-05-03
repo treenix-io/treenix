@@ -70,6 +70,17 @@ type ShellInput = {
 };
 
 const TAILWIND_CDN = 'https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4';
+const BODY_HEAD_HINT =
+  /<link\b(?=[^>]*\brel=(["']?)(?:preload|preconnect|dns-prefetch|modulepreload)\1)[^>]*>/gi;
+
+export function extractBodyHeadHints(html: string): { body: string; headHints: string[] } {
+  const headHints: string[] = [];
+  const body = html.replace(BODY_HEAD_HINT, (tag) => {
+    headHints.push(tag);
+    return '';
+  });
+  return { body, headHints };
+}
 
 export function buildHtmlShell({
   html,
@@ -81,6 +92,7 @@ export function buildHtmlShell({
   isPreview,
   hydrateScriptUrl,
 }: ShellInput): string {
+  const rendered = extractBodyHeadHints(html);
   const title = escape(seo?.title ?? '');
   const description = seo?.description ? `<meta name="description" content="${escapeAttr(seo.description)}" />` : '';
   const canonical = seo?.canonical ? `<link rel="canonical" href="${escapeUrl(seo.canonical)}" />` : '';
@@ -95,6 +107,7 @@ export function buildHtmlShell({
   const jsonLd = seo?.jsonLd ? `<script type="application/ld+json">${escapeJson(seo.jsonLd)}</script>` : '';
   const lang = seo?.locale ? escapeAttr(seo.locale) : 'en';
   const tailwindCdn = tailwindRuntime ? `<script src="${TAILWIND_CDN}"></script>` : '';
+  const headHints = rendered.headHints.join('\n');
   const initialJson = mode === 'hydrate' && initialState !== undefined
     ? `<script type="application/json" id="treenix-initial">${escapeJson(initialState)}</script>`
     : '';
@@ -121,10 +134,11 @@ ${ogType}
 ${jsonLd}
 <style id="tnx-tw-jit">${css}</style>
 ${tailwindCdn}
+${headHints}
 </head>
 <body>
 ${previewBanner}
-<div id="root" data-treenix-mode="${mode}">${html}</div>
+<div id="root" data-treenix-mode="${mode}">${rendered.body}</div>
 ${initialJson}
 ${hydrateScript}
 </body>

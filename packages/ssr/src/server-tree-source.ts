@@ -158,7 +158,11 @@ export class ServerTreeSource implements TreeSource {
   }
 
   /** Snapshot for hydration: what we ended up with. */
-  serialize(): { paths: Record<string, NodeData | null>; children: Record<string, NodeData[]> } {
+  serialize(): {
+    paths: Record<string, NodeData | null>;
+    children: Record<string, NodeData[]>;
+    childMeta: Record<string, { total: number | null; truncated: boolean | null }>;
+  } {
     const paths: Record<string, NodeData | null> = {};
     for (const [k, v] of this.paths) {
       if (v.status === 'ready' || v.status === 'not_found') {
@@ -166,10 +170,14 @@ export class ServerTreeSource implements TreeSource {
       }
     }
     const children: Record<string, NodeData[]> = {};
+    const childMeta: Record<string, { total: number | null; truncated: boolean | null }> = {};
     for (const [k, v] of this.children) {
-      if (v.phase === 'ready') children[k] = v.data;
+      if (v.phase === 'ready') {
+        children[k] = v.data;
+        childMeta[k] = { total: v.total, truncated: v.truncated };
+      }
     }
-    return { paths, children };
+    return { paths, children, childMeta };
   }
 }
 

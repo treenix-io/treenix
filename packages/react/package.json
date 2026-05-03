@@ -79,7 +79,7 @@
     "build:front": "npm run build:spa && npm run build:ssr",
     "prepack": "npm run build",
     "test": "tsx --conditions development --experimental-test-module-mocks --import ./test/register-dom.mjs --import ./test/register-css.mjs --test src/**/*.test.ts",
-    "dev": "NODE_OPTIONS='--import tsx --conditions=development' vite"
+    "dev": "NODE_OPTIONS=\"$NODE_OPTIONS --import tsx --conditions=development\" vite"
   },
   "peerDependencies": {
     "@treenx/core": "^3.0.0",

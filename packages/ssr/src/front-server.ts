@@ -24,7 +24,7 @@ import type { NodeData } from '@treenx/core';
 import type { Tree, ChildrenOpts, Page } from '@treenx/core/tree';
 import { RouteIndex } from './route-index.ts';
 import { ssrHandler, type RenderFn } from './handler.ts';
-import { escape, escapeAttr, escapeUrl, escapeJson } from './template.ts';
+import { escape, escapeAttr, escapeUrl, escapeJson, extractBodyHeadHints } from './template.ts';
 
 const port = Number(process.env.PORT ?? 3210);
 const apiUrl = process.env.API_URL ?? 'http://127.0.0.1:3211/trpc';
@@ -102,7 +102,8 @@ function injectSsrIntoTemplate(
   template: string,
   result: { bodyContent: string; initialState: unknown; seo?: { title?: string; description?: string; canonical?: string; ogImage?: string } },
 ): string {
-  let html = template.replace(ROOT_OPEN, m => `${m}${result.bodyContent}`);
+  const rendered = extractBodyHeadHints(result.bodyContent);
+  let html = template.replace(ROOT_OPEN, m => `${m}${rendered.body}`);
   // <base> MUST come before any <link>/<script> with a relative URL — per HTML
   // spec it only affects URLs that follow it. Inject right after <head> open.
   html = html.replace(HEAD_OPEN, m => `${m}\n<base href="/" />`);
@@ -111,6 +112,7 @@ function injectSsrIntoTemplate(
   if (result.seo?.description) headBits.push(`<meta name="description" content="${escapeAttr(result.seo.description)}" />`);
   if (result.seo?.canonical) headBits.push(`<link rel="canonical" href="${escapeUrl(result.seo.canonical)}" />`);
   if (result.seo?.ogImage) headBits.push(`<meta property="og:image" content="${escapeUrl(result.seo.ogImage)}" />`);
+  headBits.push(...rendered.headHints);
   headBits.push(`<script type="application/json" id="treenix-initial">${escapeJson(result.initialState)}</script>`);
   return html.replace(HEAD_CLOSE, headBits.join('\n') + '\n</head>');
 }
@@ -173,6 +175,8 @@ const server = http.createServer(async (req, res) => {
     }
 
     try {
+      debugger;
+      console.log('JOPA')
       await rebuildRoutes();
       const parsed = new URL(url, `http://${req.headers.host ?? 'localhost'}`);
       const ssr = await ssrHandler(

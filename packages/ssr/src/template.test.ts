@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildHtmlShell, escape, escapeAttr, escapeJson, escapeUrl } from './template';
+import { buildHtmlShell, escape, escapeAttr, escapeJson, escapeUrl, extractBodyHeadHints } from './template';
 
 describe('escape', () => {
   it('blocks script-injection in element text', () => {
@@ -127,6 +127,30 @@ describe('buildHtmlShell', () => {
       isPreview: false,
     });
     assert.ok(!html.includes('javascript:'));
+  });
+
+  it('moves React body head hints out of #root', () => {
+    const html = buildHtmlShell({
+      html: '<link rel="preload" as="image" href="/hero.png"/><div class="page">Hi</div>',
+      css: '',
+      seo: { $type: 't.seo', title: 'X' } as any,
+      mode: 'hydrate',
+      initialState: {},
+      tailwindRuntime: false,
+      isPreview: false,
+    });
+
+    assert.ok(html.includes('<head>'));
+    assert.ok(html.includes('<link rel="preload" as="image" href="/hero.png"/>'));
+    assert.ok(html.includes('<div id="root" data-treenix-mode="hydrate"><div class="page">Hi</div></div>'));
+  });
+});
+
+describe('extractBodyHeadHints', () => {
+  it('extracts preload links from rendered body fragments', () => {
+    const out = extractBodyHeadHints('<link rel="preload" href="/x" as="image"><main />');
+    assert.deepEqual(out.headHints, ['<link rel="preload" href="/x" as="image">']);
+    assert.equal(out.body, '<main />');
   });
 });
 
