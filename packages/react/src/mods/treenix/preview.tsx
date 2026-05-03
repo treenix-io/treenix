@@ -2,6 +2,7 @@
 
 import { Button } from '#components/ui/button';
 import { Render, RenderContext } from '#context';
+import { stampNode } from '#symbols';
 import { type ComponentData, getContextsForType, type NodeData } from '@treenx/core';
 import { useMemo, useState } from 'react';
 
@@ -76,11 +77,15 @@ export function TypePreview({ typeName, properties }: {
   const contexts = getContextsForType(typeName);
   const reactContexts = contexts.filter(c => c.startsWith('react'));
 
-  const initial = useMemo(() => ({
-    $path: `/preview/${typeName.replace(/\./g, '/')}`,
-    $type: typeName,
-    ...mockObject(properties),
-  } as NodeData), [typeName]);
+  const initial = useMemo(() => {
+    const n = {
+      $path: `/preview/${typeName.replace(/\./g, '/')}`,
+      $type: typeName,
+      ...mockObject(properties),
+    } as NodeData;
+    stampNode(n);
+    return n;
+  }, [typeName]);
 
   const [previewCtx, setPreviewCtx] = useState<string | null>(null);
   const [node, setNode] = useState<NodeData>(initial);
@@ -88,7 +93,11 @@ export function TypePreview({ typeName, properties }: {
   if (reactContexts.length === 0) return null;
 
   const handleFormChange = (partial: Record<string, unknown>) => {
-    setNode(prev => ({ ...prev, ...partial, $path: initial.$path, $type: initial.$type }) as NodeData);
+    setNode(prev => {
+      const next = { ...prev, ...partial, $path: initial.$path, $type: initial.$type } as NodeData;
+      stampNode(next);
+      return next;
+    });
   };
 
   return (
