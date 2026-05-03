@@ -8,6 +8,7 @@
 import { getComponent, getMeta, type NodeData, normalizeType, resolve } from '@treenx/core';
 import { type Class, getDefaults, type TypeProxy } from '@treenx/core/comp';
 import { deriveURI, parseURI } from '@treenx/core/uri';
+import { mergeIntoNode, type OnChange } from '#tree/on-change';
 import { pushOptimistic, rollback } from '#tree/rebase';
 import {
   useCallback,
@@ -414,4 +415,32 @@ export async function* watch<T = unknown>(uri: string): AsyncGenerator<T> {
   } finally {
     unsub();
   }
+}
+
+// ── useValue: useState with OnChange-shaped setter, resets when input identity changes ──
+//
+// Returns [value, onChange] matching our controlled-component contract
+// (top-level keys or dot-paths; undefined deletes — see OnChange).
+//
+//   const [v, onChange] = useValue(useMemo(() => stampComponent({ ... }, node), [node]));
+//
+// When the input identity changes, local state resets to the new input
+// (Adjusting-State-on-Props-Change pattern: in-render setState).
+export function useValue<T extends object>(
+  input: T,
+  onSink?: (partial: OnChange<T>) => void,
+): [T, (partial: OnChange<T>) => void] {
+  const [state, setState] = useState(input);
+  const [prev, setPrev] = useState(input);
+  if (prev !== input) {
+    setPrev(input);
+    setState(input);
+  }
+  const sinkRef = useRef(onSink);
+  sinkRef.current = onSink;
+  const onChange = useCallback((partial: OnChange<T>) => {
+    setState(p => mergeIntoNode(p as Record<string, unknown>, partial as Record<string, unknown>) as T);
+    sinkRef.current?.(partial);
+  }, []);
+  return [state, onChange];
 }

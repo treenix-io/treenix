@@ -14,5 +14,5 @@ export { tree } from '#tree/client';
 export { cn } from '#lib/utils';
 export { sanitizeHref } from '#lib/sanitize-href';
 export { minimd } from '#lib/minimd';
-export { stampNode } from '#symbols';
+export { stampNode, stampComponent } from '#symbols';
 export { useDraft, type DraftHandle } from './draft';

@@ -23,3 +23,12 @@ export function stampNode(node: NodeData): void {
     hide(v, $node, node);
   }
 }
+
+// Stamp a synthetic component value (constructed at render time, not from cache)
+// so views can resolve their owning node via $node / $key for useActions, viewCtx, etc.
+export function stampComponent<T extends object>(value: T, node: NodeData, key = ''): T {
+  if ((value as any)[$node] === node && (value as any)[$key] === key) return value;
+  hide(value, $key, key);
+  hide(value, $node, node);
+  return value;
+}
