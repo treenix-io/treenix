@@ -106,9 +106,9 @@ export class ClientTreeSource implements TreeSource {
       if (cancelled) return;
       cache.setPathStatus(path, 'loading');
       trpc.get.query({ path, watch: watching })
-        .then((n: unknown) => {
+        .then((n) => {
           if (cancelled) return;
-          if (n) cache.put(n as NodeData);
+          if (n) cache.put(n);
           else cache.markPathMissing(path);
         })
         .catch((err: unknown) => {

@@ -45,7 +45,7 @@ export function createNodeClient(client: TreenixClient) {
         }
       });
 
-      cached = node as NodeData | undefined;
+      cached = node;
       if (cached) notify();
       return { unsubscribe };
     },

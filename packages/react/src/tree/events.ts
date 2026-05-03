@@ -62,7 +62,7 @@ export function startEvents(config: EventsConfig) {
           const sel = getSelected();
           if (sel) {
             trpc.get.query({ path: sel, watch: true }).then(n => {
-              if (n) cache.put(n as NodeData);
+              if (n) cache.put(n);
             });
           }
         }
@@ -91,12 +91,12 @@ export function startEvents(config: EventsConfig) {
             } catch (e) {
               console.error('Failed to apply patches, fetching full node:', e);
               trpc.get.query({ path: event.path }).then((n) => {
-                if (n) cache.put(n as NodeData);
+                if (n) cache.put(n);
               });
             }
           } else {
             trpc.get.query({ path: event.path }).then((n) => {
-              if (n) cache.put(n as NodeData);
+              if (n) cache.put(n);
             });
           }
         }

@@ -27,7 +27,7 @@ const ctx = {
 function fetchChildren(path: string): void {
   trpc.getChildren
     .query({ path, watch: true, watchNew: true })
-    .then((r: any) => cache.replaceChildren(path, r.items as NodeData[]));
+    .then((r) => cache.replaceChildren(path, r.items));
 }
 
 /** Ensure source data is in cache by fetching from server */
@@ -40,8 +40,8 @@ function ensureInCache(path: string, collection: boolean): void {
   } else {
     if (fetchedNodes.has(path)) return;
     fetchedNodes.add(path);
-    trpc.get.query({ path }).then((n: any) => {
-      if (n) cache.put(n as NodeData);
+    trpc.get.query({ path }).then((n) => {
+      if (n) cache.put(n);
     });
   }
 }

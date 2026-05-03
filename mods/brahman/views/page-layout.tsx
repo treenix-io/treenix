@@ -165,7 +165,7 @@ export function PageLayoutView({ value }: { value: NodeData }) {
   const saveNode = useCallback((patch: Record<string, unknown>) => {
     if (!node) return;
     // Strip any leftover 'page' component that shouldn't exist
-    const { page: _drop, ...clean } = node as NodeData & { page?: unknown };
+    const { page: _drop, ...clean } = node;
     set({ ...clean, ...patch } as NodeData);
   }, [node]);
 
