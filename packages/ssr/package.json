@@ -31,9 +31,15 @@
     "LICENSE",
     "README.md"
   ],
+  "bin": {
+    "treenx-front": "./dist/front-server.js"
+  },
   "scripts": {
+    "build": "tsc -p tsconfig.build.json && fix-hash-imports",
+    "prepack": "npm run build",
     "test": "TSX_TSCONFIG_PATH=../react/tsconfig.json tsx --conditions development --test 'src/**/*.test.ts'",
-    "start": "tsx src/front-server.ts"
+    "start": "node dist/front-server.js",
+    "dev": "tsx --conditions=development src/front-server.ts"
   },
   "peerDependencies": {
     "@treenx/core": "^3.0.0",

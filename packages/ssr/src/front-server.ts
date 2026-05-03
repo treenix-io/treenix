@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 // Treenix front-server — production HTTP server for the SPA + SSR.
 //
 // Standalone Node process, sibling to the data-API backend. Replaces Vite in
@@ -12,14 +13,15 @@
 // Env:
 //   PORT            front-server bind port (default 3210)
 //   API_URL         backend tRPC base (default http://127.0.0.1:3211/trpc)
-//   CLIENT_DIR      built SPA assets (default packages/react/dist-spa)
-//   SSR_BUNDLE      prebuilt SSR entry-server (default packages/ssr/dist-ssr/entry-server.js)
+//   CLIENT_DIR      built SPA assets (default: @treenx/react/dist-spa via require.resolve)
+//   SSR_BUNDLE      prebuilt SSR entry-server (default: <pkg>/dist-ssr/entry-server.js)
 //   ROUTE_TTL_MS    how long the in-memory RouteIndex is reused before refetch (default 30000)
 
 import http from 'node:http';
 import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs';
-import { extname, join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { extname, join, resolve, dirname } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { createRequire } from 'node:module';
 import type { NodeData } from '@treenx/core';
 import type { Tree, ChildrenOpts, Page } from '@treenx/core/tree';
 import { RouteIndex } from './route-index.ts';
@@ -28,9 +30,17 @@ import { escape, escapeAttr, escapeUrl, escapeJson, extractBodyHeadHints } from 
 
 const port = Number(process.env.PORT ?? 3210);
 const apiUrl = process.env.API_URL ?? 'http://127.0.0.1:3211/trpc';
-const clientDir = resolve(process.env.CLIENT_DIR ?? 'engine/packages/react/dist-spa');
-const ssrBundle = resolve(process.env.SSR_BUNDLE ?? 'engine/packages/ssr/dist-ssr/entry-server.js');
 const routeTtlMs = Number(process.env.ROUTE_TTL_MS ?? 30_000);
+
+// Defaults resolve relative to THIS file (works for src/dev, dist/, and
+// node_modules installs — independent of CWD).
+const here = dirname(fileURLToPath(import.meta.url));
+const pkgRoot = resolve(here, '..');                              // src→pkg, dist→pkg
+const require_ = createRequire(import.meta.url);
+const reactPkgDir = dirname(require_.resolve('@treenx/react/package.json'));
+
+const clientDir = resolve(process.env.CLIENT_DIR ?? join(reactPkgDir, 'dist-spa'));
+const ssrBundle = resolve(process.env.SSR_BUNDLE ?? join(pkgRoot, 'dist-ssr/entry-server.js'));
 
 const indexHtmlPath = join(clientDir, 'index.html');
 if (!existsSync(indexHtmlPath)) {
