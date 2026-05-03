@@ -1,7 +1,7 @@
 import { Checkbox } from '#components/ui/checkbox';
 import { Input } from '#components/ui/input';
 import { useSchema } from '#schema-loader';
-import { type ComponentData, isRef, register, resolve } from '@treenx/core';
+import { type ComponentData, isComponent, isRef, register, resolve } from '@treenx/core';
 import type { PropertySchema } from '@treenx/core/schema/types';
 import type { View } from '#context';
 import { createElement } from 'react';
@@ -12,9 +12,13 @@ const DefaultEditForm: View<ComponentData> = ({ value, onChange }) => {
   const schema = useSchema(value.$type);
   if (schema === undefined) return null;
 
+  // value may be the node itself — skip $-system fields and nested components
+  // (they render as their own ComponentSection in NodeEditor).
   const data: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(value)) {
-    if (!k.startsWith('$')) data[k] = v;
+    if (k.startsWith('$')) continue;
+    if (isComponent(v)) continue;
+    data[k] = v;
   }
 
   const set = (field: string, val: unknown) => onChange?.({ [field]: val });

@@ -10,11 +10,9 @@ import { Tabs, TabsList, TabsTrigger } from '#components/ui/tabs';
 import { ConfirmPopover } from '#components/ConfirmPopover';
 import { JsonEditor } from '#mods/editor-ui/JsonEditor';
 import { removeComponent, set } from '#hooks';
-import { FieldLabel, RefEditor } from '#mods/editor-ui/FieldLabel';
-import { getComponents, getPlainFields } from '#mods/editor-ui/node-utils';
+import { getComponents } from '#mods/editor-ui/node-utils';
 import type { SaveHandle } from '#tree/auto-save';
-import { type ComponentData, type GroupPerm, isRef, type NodeData, resolve } from '@treenx/core';
-import type { TypeSchema } from '@treenx/core/schema/types';
+import { type ComponentData, type GroupPerm, type NodeData } from '@treenx/core';
 import { ChevronRight, Trash2 } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { toast } from 'sonner';
@@ -97,11 +95,6 @@ export function NodeEditor({ node, save, open, onClose, onDelete, currentUserId,
 
   const nodeName = node.$path === '/' ? '/' : node.$path.slice(node.$path.lastIndexOf('/') + 1);
   const components = getComponents(node);
-  const plainFields = getPlainFields(node);
-  const schemaHandler = resolve(node.$type, 'schema');
-  const schema = schemaHandler ? (schemaHandler() as TypeSchema) : null;
-  const mainCompCls = resolve(node.$type, 'class') as (new () => Record<string, unknown>) | null;
-  const mainCompDefaults = mainCompCls ? new mainCompCls() : null;
 
   // Reset only the properties tab state (system field edits + auto-save buffer)
   function resetProperties() {
@@ -151,10 +144,6 @@ export function NodeEditor({ node, save, open, onClose, onDelete, currentUserId,
     await removeComponent(node.$path, name);
   }
 
-  // Main component value: node's own fields (cache has optimistic updates from auto-save)
-  const mainValue = { $type: node.$type, ...plainFields } as ComponentData;
-  const hasPlainFields = Object.keys(plainFields).length > 0;
-
   return (
     <div className={`edit-panel${open ? ' open' : ''}`}>
       <div className="edit-panel-header">
@@ -189,11 +178,13 @@ export function NodeEditor({ node, save, open, onClose, onDelete, currentUserId,
               onChange={(o, r) => { st.aclEdit = { owner: o, rules: r }; }}
             />
 
-            {/* Main type section — auto-save onChange */}
+            {/* Main type section — node IS the main component (getComponent returns
+                node when types match). Cache stamps $node on the node itself, so
+                useActions / viewCtx work without synthesis. */}
             <ComponentSection
               node={node}
               name=""
-              value={mainValue}
+              value={node}
               onChange={onChange}
               onActionComplete={resetProperties}
             />
@@ -212,32 +203,6 @@ export function NodeEditor({ node, save, open, onClose, onDelete, currentUserId,
                 onActionComplete={resetProperties}
               />
             ))}
-
-            {/* Untyped plain data fallback */}
-            {!schema && !mainCompDefaults && hasPlainFields && (
-              <div className="border-t border-border mt-2 pt-0.5 first:border-t-0 first:mt-0 first:pt-0">
-                <div className="flex items-center justify-between py-2 pb-1.5 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Data</div>
-                <div className="py-0.5 pb-2.5">
-                  {Object.entries(plainFields).map(([k, v]) => {
-                    const onCh = (next: unknown) => onChange({ [k]: next });
-                    return (
-                      <div key={k} className={`field${typeof v === 'object' && v !== null ? ' stack' : ''}`}>
-                        <FieldLabel label={k} value={v} onChange={onCh} />
-                        {typeof v === 'object' && isRef(v) ? (
-                          <RefEditor value={v as { $ref: string; $map?: string }} onChange={onCh} />
-                        ) : (
-                          <Input
-                            className="h-7 text-xs"
-                            value={typeof v === 'string' ? v : JSON.stringify(v)}
-                            onChange={(e) => onChange({ [k]: e.target.value })}
-                          />
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
           </>
         ) : (
           <JsonEditor
