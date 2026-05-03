@@ -1,8 +1,8 @@
 ---
-title: Quickstart & Setup
+title: "Quickstart & Setup"
+description: "Create a project, run the dev server, and make the first change"
 section: getting-started
 order: 1
-description: Create a project, run the dev server, and make the first change
 tags: [getting-started, beginner]
 ---
 
@@ -30,13 +30,13 @@ cd my-app
 npm run dev
 ```
 
-Open [http://localhost:3210](http://localhost:3210).
+Open http://localhost:3210.
 
 The Vite dev server serves the frontend on `3210`. The Treenix server runs on `3211` behind the same dev process, and Vite proxies `/trpc` and `/api` to it.
 
 ## Verify the Demo
 
-Open [http://localhost:3210/t/example/counter](http://localhost:3210/t/example/counter).
+Open http://localhost:3210/t/example/counter.
 
 You should see the Inspector for the seeded counter node. Click **increment**.
 
