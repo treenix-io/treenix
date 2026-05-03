@@ -6,7 +6,7 @@ import { createRoot, hydrateRoot } from 'react-dom/client';
 import { App } from './App';
 import { AuthProvider } from './auth-context';
 import '#tree/load-client';
-import { hydrateFromServerSnapshot } from '#tree/cache';
+import { hydrateFromServerSnapshot, type ServerHydrationState } from '#tree/cache';
 import { createClientTreeSource } from '#tree/client-tree-source';
 import { TreeSourceProvider } from '#tree/tree-source-context';
 import { Toaster } from '#components/ui/sonner';
@@ -14,14 +14,10 @@ import '../root.css';
 
 enablePatches();
 
-function readSsrInitialState(): unknown {
+function readSsrInitialState(): ServerHydrationState | undefined {
   const el = document.getElementById('treenix-initial');
   if (!el?.textContent) return undefined;
-  try {
-    return JSON.parse(el.textContent);
-  } catch {
-    return undefined;
-  }
+  return JSON.parse(el.textContent) as ServerHydrationState;
 }
 
 if (typeof document !== 'undefined') {

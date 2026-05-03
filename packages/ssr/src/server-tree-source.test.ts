@@ -2,6 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import type { NodeData } from '@treenx/core';
 import type { Tree, Page, ChildrenOpts } from '@treenx/core/tree';
+import { $node } from '@treenx/react/symbols';
 import { ServerTreeSource } from './server-tree-source';
 
 function fakeTree(seed: NodeData[]): Tree {
@@ -101,8 +102,41 @@ describe('ServerTreeSource', () => {
     src.getChildrenSnapshot('/p');
     await src.flushPending();
     const out = src.serialize();
-    assert.equal(out.paths['/a']?.$type, 'x');
-    assert.equal(out.children['/p']?.length, 1);
+    assert.equal(out.paths.length, 1);
+    assert.equal(out.paths[0]?.$path, '/a');
+    assert.equal(out.paths[0]?.$type, 'x');
+    assert.equal(out.children['/p']?.items.length, 1);
+    assert.equal(out.children['/p']?.total, 1);
+  });
+
+  it('serialize emits notFound for missing paths', async () => {
+    const src = new ServerTreeSource(fakeTree([]));
+    src.getPathSnapshot('/missing');
+    await src.flushPending();
+    const out = src.serialize();
+    assert.deepEqual(out.notFound, ['/missing']);
+    assert.equal(out.paths.length, 0);
+  });
+
+  it('flushed paths are stamped with $node so useActions/viewCtx work in SSR', async () => {
+    const src = new ServerTreeSource(fakeTree([{ $path: '/a', $type: 'x' }]));
+    src.getPathSnapshot('/a');
+    await src.flushPending();
+    const data = src.getPathSnapshot('/a').data;
+    assert.ok(data, 'expected ready snapshot');
+    assert.equal((data as any)[$node], data);
+  });
+
+  it('flushed children are stamped with $node', async () => {
+    const src = new ServerTreeSource(fakeTree([
+      { $path: '/p', $type: 'dir' },
+      { $path: '/p/a', $type: 'x' },
+    ]));
+    src.getChildrenSnapshot('/p');
+    await src.flushPending();
+    const items = src.getChildrenSnapshot('/p').data;
+    assert.equal(items.length, 1);
+    assert.equal((items[0] as any)[$node], items[0]);
   });
 
   it('multi-pass: leaf added during pass-2 takes pass-3 to resolve', async () => {

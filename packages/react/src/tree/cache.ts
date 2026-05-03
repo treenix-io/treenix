@@ -9,6 +9,7 @@
 // separate from `parentIndex` (incidental node cache).
 
 import type { NodeData } from '@treenx/core';
+import type { Page } from '@treenx/core/tree';
 import * as idb from './idb';
 import { stampNode } from '#symbols';
 
@@ -588,42 +589,31 @@ export function clear() {
   idb.clearAll().catch(() => {});
 }
 
-type ServerHydrationState = {
-  paths?: Record<string, NodeData | null>;
-  children?: Record<string, NodeData[]>;
-  childMeta?: Record<string, { total?: number; truncated?: boolean }>;
+export type ServerHydrationState = {
+  paths?: NodeData[];
+  notFound?: string[];
+  children?: Record<string, Page<NodeData>>;
 };
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  !!value && typeof value === 'object' && !Array.isArray(value);
-
-const isNodeData = (value: unknown): value is NodeData =>
-  isRecord(value) && typeof value.$path === 'string';
-
 /** Populate the client cache from the SSR snapshot before hydrateRoot().
- *  This keeps the first client render aligned with the server DOM. */
-export function hydrateFromServerSnapshot(state: unknown): void {
-  if (!isRecord(state)) return;
-  const snapshot = state as ServerHydrationState;
+ *  This keeps the first client render aligned with the server DOM.
+ *  Trust the snapshot — server controls this shape. */
+export function hydrateFromServerSnapshot(snapshot: ServerHydrationState | undefined): void {
+  if (!snapshot) return;
 
-  if (isRecord(snapshot.paths)) {
-    for (const [path, node] of Object.entries(snapshot.paths)) {
-      if (node === null) {
-        markPathMissing(path);
-      } else if (isNodeData(node)) {
-        put(node);
-      }
-    }
+  if (snapshot.paths) {
+    for (const node of snapshot.paths) put(node);
   }
 
-  if (isRecord(snapshot.children)) {
-    for (const [parent, items] of Object.entries(snapshot.children)) {
-      if (!Array.isArray(items)) continue;
-      const nodes = items.filter(isNodeData);
-      replaceChildren(parent, nodes);
-      const meta = snapshot.childMeta?.[parent];
-      setChildrenTotal(parent, typeof meta?.total === 'number' ? meta.total : nodes.length);
-      setChildrenTruncated(parent, !!meta?.truncated);
+  if (snapshot.notFound) {
+    for (const path of snapshot.notFound) markPathMissing(path);
+  }
+
+  if (snapshot.children) {
+    for (const [parent, page] of Object.entries(snapshot.children)) {
+      replaceChildren(parent, page.items);
+      setChildrenTotal(parent, page.total);
+      setChildrenTruncated(parent, !!page.truncated);
       setChildrenPhase(parent, 'ready');
     }
   }

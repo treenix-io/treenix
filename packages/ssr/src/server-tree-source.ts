@@ -11,7 +11,8 @@
 // nonzero after the budget, throws SsrDataUnresolved.
 
 import type { NodeData } from '@treenx/core';
-import type { Tree } from '@treenx/core/tree';
+import type { Page, Tree } from '@treenx/core/tree';
+import { stampNode } from '@treenx/react/symbols';
 import {
   EMPTY_PATH_SNAPSHOT,
   EMPTY_CHILDREN_SNAPSHOT,
@@ -122,6 +123,7 @@ export class ServerTreeSource implements TreeSource {
   private async loadPath(path: string): Promise<void> {
     try {
       const data = await this.tree.get(path, this.ctx);
+      if (data) stampNode(data);
       this.paths.set(path, Object.freeze({
         data,
         status: data ? 'ready' : 'not_found',
@@ -139,6 +141,7 @@ export class ServerTreeSource implements TreeSource {
   private async loadChildren(path: string): Promise<void> {
     try {
       const page = await this.tree.getChildren(path, undefined, this.ctx);
+      for (const item of page.items) stampNode(item);
       this.children.set(path, Object.freeze({
         data: page.items,
         phase: 'ready',
@@ -157,27 +160,32 @@ export class ServerTreeSource implements TreeSource {
     }
   }
 
-  /** Snapshot for hydration: what we ended up with. */
+  /** Snapshot for hydration: what we ended up with.
+   *  paths — array of resolved nodes, each carries its own $path (no redundant map keys).
+   *  notFound — paths that resolved to missing.
+   *  children — Page per parent path. */
   serialize(): {
-    paths: Record<string, NodeData | null>;
-    children: Record<string, NodeData[]>;
-    childMeta: Record<string, { total: number | null; truncated: boolean | null }>;
+    paths: NodeData[];
+    notFound: string[];
+    children: Record<string, Page<NodeData>>;
   } {
-    const paths: Record<string, NodeData | null> = {};
+    const paths: NodeData[] = [];
+    const notFound: string[] = [];
     for (const [k, v] of this.paths) {
-      if (v.status === 'ready' || v.status === 'not_found') {
-        paths[k] = v.data ?? null;
-      }
+      if (v.status === 'ready' && v.data) paths.push(v.data);
+      else if (v.status === 'not_found') notFound.push(k);
     }
-    const children: Record<string, NodeData[]> = {};
-    const childMeta: Record<string, { total: number | null; truncated: boolean | null }> = {};
+    const children: Record<string, Page<NodeData>> = {};
     for (const [k, v] of this.children) {
       if (v.phase === 'ready') {
-        children[k] = v.data;
-        childMeta[k] = { total: v.total, truncated: v.truncated };
+        children[k] = {
+          items: v.data,
+          total: v.total ?? v.data.length,
+          truncated: v.truncated ?? false,
+        };
       }
     }
-    return { paths, children, childMeta };
+    return { paths, notFound, children };
   }
 }
 

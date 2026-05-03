@@ -122,17 +122,14 @@ describe('cache', () => {
 
   it('hydrateFromServerSnapshot seeds paths and authoritative children', () => {
     cache.hydrateFromServerSnapshot({
-      paths: {
-        '/page': { $path: '/page', $type: 'page', title: 'SSR' },
-        '/missing': null,
-      },
+      paths: [{ $path: '/page', $type: 'page', title: 'SSR' }],
+      notFound: ['/missing'],
       children: {
-        '/sys/routes': [
-          { $path: '/sys/routes/index', $type: 'route', route: '/' },
-        ],
-      },
-      childMeta: {
-        '/sys/routes': { total: 3, truncated: true },
+        '/sys/routes': {
+          items: [{ $path: '/sys/routes/index', $type: 'route', route: '/' }],
+          total: 3,
+          truncated: true,
+        },
       },
     });
 
