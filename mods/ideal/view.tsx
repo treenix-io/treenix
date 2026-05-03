@@ -1,4 +1,5 @@
-import { Render, RenderContext, useActions, useChildren, view } from '@treenx/react';
+import { useActions, useChildren, view } from '@treenx/react';
+import { RenderChildren } from '@treenx/react/mods/editor-ui/list-items';
 import { Idea, IdeasBoard } from './types';
 
 // ── Board view — renders children in list context ──
@@ -13,13 +14,7 @@ view(IdeasBoard, ({ value, ctx }) => {
         Auto-approve at {value.autoApproveThreshold}+ votes
       </p>
 
-      <RenderContext name="react:list">
-        <div className="divide-y divide-border rounded-md border border-border">
-          {children.map(child => (
-            <Render key={child.$path} value={child} />
-          ))}
-        </div>
-      </RenderContext>
+      <RenderChildren items={children} ctx="list" />
     </div>
   );
 });
@@ -52,9 +47,9 @@ view(Idea, ({ value }) => {
 // ── Idea — compact list row ──
 
 view.list(Idea, ({ value }) => (
-  <div className="flex items-center gap-2 px-3 py-2">
+  <>
     <span className="text-xs font-mono px-1.5 py-0.5 rounded bg-muted">{value.votes}</span>
     <span className="flex-1">{value.title}</span>
     <span className="text-xs text-muted-foreground">{value.status}</span>
-  </div>
+  </>
 ));

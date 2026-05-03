@@ -8,10 +8,10 @@ import {
   Render,
   RenderContext,
   useChildren,
-  useNavigate,
   usePath,
   type View,
 } from '@treenx/react';
+import { RenderChildren, RenderItem } from '@treenx/react/mods/editor-ui/list-items';
 import { useMemo, useState } from 'react';
 import { type AgentStatus, AiAgent, AiApproval, AiApprovals, AiPlan, AiPool, AiThread } from './types';
 
@@ -121,14 +121,11 @@ const PoolView: View<AiPool> = ({ value, ctx }) => {
         <h3 className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
           Agents ({agentNodes.length})
         </h3>
-        <RenderContext name="react:list">
-          {agentNodes.map((agent) => (
-            <Render key={agent.$path} value={agent} />
-          ))}
-        </RenderContext>
-        {agentNodes.length === 0 && (
-          <p className="text-sm text-zinc-600 italic">No agents registered</p>
-        )}
+        <RenderChildren
+          items={agentNodes}
+          ctx="list"
+          empty={<p className="text-sm text-zinc-600 italic">No agents registered</p>}
+        />
       </div>
 
       {/* Current runs */}
@@ -149,19 +146,11 @@ const PoolView: View<AiPool> = ({ value, ctx }) => {
 // ── AgentRow (compact card — react:list context) ──
 
 const AgentRow: View<AiAgent> = ({ value, ctx }) => {
-  const nav = useNavigate();
   const status = value.status || 'offline';
   const s = statusStyle(status);
 
   return (
-    <button
-      onClick={() => nav(ctx!.node.$path)}
-      className={cn(
-        'flex items-center gap-3 px-3.5 py-2.5 rounded-lg border transition-all duration-150',
-        'border-zinc-800/60 hover:border-zinc-700 hover:bg-zinc-800/30',
-        'text-left w-full group',
-      )}
-    >
+    <>
       <StatusDot status={status} />
 
       <div className="flex-1 min-w-0">
@@ -187,9 +176,7 @@ const AgentRow: View<AiAgent> = ({ value, ctx }) => {
         )}
         {value.lastRunAt > 0 && <span>{timeAgo(value.lastRunAt)}</span>}
       </div>
-
-      <span className="text-zinc-700 group-hover:text-zinc-500 transition-colors">›</span>
-    </button>
+    </>
   );
 };
 
@@ -251,11 +238,7 @@ const AgentView: View<AiAgent> = ({ value, ctx }) => {
           <h3 className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
             Runs ({sortedRuns.length})
           </h3>
-          <RenderContext name="react:list">
-            {sortedRuns.map(run => (
-              <Render key={run.$path} value={run} />
-            ))}
-          </RenderContext>
+          <RenderChildren items={sortedRuns} ctx="list" />
         </div>
       )}
 
@@ -475,21 +458,12 @@ const PlanView: View<AiPlan> = ({ value, ctx }) => {
 
 // ── ApprovalRow (compact — react:list context) ──
 
-const ApprovalRow: View<AiApproval> = ({ value, ctx }) => {
-  const nav = useNavigate();
+const ApprovalRow: View<AiApproval> = ({ value }) => {
   const status = value.status || 'pending';
   const s = APPROVAL_STATUS[status] ?? APPROVAL_STATUS.pending;
 
   return (
-    <button
-      onClick={() => nav(ctx!.node.$path)}
-      className={cn(
-        'flex items-center gap-3 px-3 py-2 rounded-lg border transition-colors',
-        'text-left w-full group',
-        s.border, s.bg,
-        'hover:brightness-125',
-      )}
-    >
+    <>
       <span className={cn('text-[10px] font-mono px-1.5 py-0.5 rounded shrink-0', s.bg, s.text)}>
         {status}
       </span>
@@ -507,9 +481,7 @@ const ApprovalRow: View<AiApproval> = ({ value, ctx }) => {
       {value.createdAt > 0 && (
         <span className="text-[10px] text-zinc-600 shrink-0">{timeAgo(value.createdAt)}</span>
       )}
-
-      <span className="text-zinc-700 group-hover:text-zinc-500 transition-colors">›</span>
-    </button>
+    </>
   );
 };
 
@@ -542,9 +514,7 @@ const AgentLayout: View<AiAgent> = ({ value, ctx }) => {
           Agent
         </button>
         {collapsed ? (
-          <RenderContext name="react:list">
-            <Render value={node} />
-          </RenderContext>
+          <RenderItem value={node} ctx="list" />
         ) : (
           <div className="max-h-[40vh] overflow-y-auto">
             <RenderContext name="react">

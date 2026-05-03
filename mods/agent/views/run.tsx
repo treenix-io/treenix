@@ -2,7 +2,7 @@
 
 import { getComponent, register } from '@treenx/core';
 import { type View } from '@treenx/react';
-import { execute, useNavigate } from '@treenx/react';
+import { execute } from '@treenx/react';
 import { cn } from '@treenx/react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
@@ -201,19 +201,13 @@ const RunView: View<AiRun> = ({ value, ctx }) => {
 // ── Run row (compact — react:list) ──
 
 const RunRow: View<AiRun> = ({ value, ctx }) => {
-  const nav = useNavigate();
   const node = ctx!.node;
   const runStatus = getComponent(node, AiRunStatus);
   const costComp = getComponent(node, AiCost);
   const status = runStatus?.status ?? 'pending';
 
   return (
-    <button
-      onClick={() => nav(ctx!.path)}
-      className={cn(
-        'flex items-center gap-2.5 px-3.5 py-2 rounded-lg border transition-colors text-left w-full',
-        'border-zinc-800/60 hover:border-zinc-700 hover:bg-zinc-800/30',
-      )}>
+    <>
       <StatusDot status={status} />
       <span className={cn(
         'text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800/60 text-zinc-500',
@@ -229,7 +223,7 @@ const RunRow: View<AiRun> = ({ value, ctx }) => {
       {runStatus?.startedAt ? (
         <span className="text-[10px] text-zinc-600 shrink-0">{formatTime(runStatus.startedAt)}</span>
       ) : null}
-    </button>
+    </>
   );
 };
 

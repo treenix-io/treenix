@@ -42,3 +42,61 @@ const CounterView: View<Counter> = ({ ctx }) => {
 **НИКОГДА:**
 - `value.increment()` — value is plain data at runtime, no methods → TypeError
 - `ctx.execute('increment')` — untyped string, no autocomplete
+
+### View Contexts — содержимое vs chrome
+
+Контексты `react:list`, `react:card`, `react:icon` — это **содержимое** ноды для соответствующего слота (строка списка, карточка, иконка). Сам слот (border, padding, hover, click-to-navigate, фиксированная ширина, layout сетки) — ответственность **наблюдателя**, который рендерит коллекцию.
+
+```tsx
+// Item view = ТОЛЬКО content (фрагмент или div c flex-col)
+view.list(MyType, ({ value }) => (
+  <>
+    <Icon />
+    <span>{value.title}</span>
+  </>
+));
+
+view.card(MyType, ({ value }) => (
+  <>
+    <header>{value.title}</header>
+    <p>{value.summary}</p>
+  </>
+));
+```
+
+**Наблюдатель** оборачивает каждый элемент через `<RenderChildren items ctx />` из `@treenx/react/mods/editor-ui/list-items`:
+
+```tsx
+import { RenderChildren } from '@treenx/react/mods/editor-ui/list-items';
+
+<RenderChildren items={children} ctx="list" />   // или 'card' | 'icon' | 'react'
+<RenderChildren items={[]} ctx="card" empty={<EmptyState/>} />
+```
+
+Для одиночного элемента — `<RenderItem value ctx />`.
+
+**НИКОГДА в item views:**
+- ❌ `<button onClick={navigate}>...</button>` — клик/навигация у наблюдателя
+- ❌ `border`, `rounded-md`, `bg-card`, `px-3 py-2`, `hover:bg-accent/50` — chrome у наблюдателя
+- ❌ `w-[200px]` — ширина у наблюдателя
+- ❌ chevron `›`, decorative trailing affordances — у наблюдателя
+
+**Дефолты:** `default`, `dir`, `ref` уже зарегистрированы для `react:list`/`react:card`/`react:icon` как content-only fallback. Регистрируй свой только если нужен специфический контент.
+
+**Регистрация content-only items:**
+- `view.list(Type, Item)`
+- `view.card(Type, Item)` — пока через `view(Type, 'card', Item)` или `register(Type, 'react:card', Item)`
+- `register(Type, 'react:icon', Item)`
+
+**Что должно делать наблюдатель чтобы переключать вид:**
+```tsx
+const [ctx, setCtx] = useState<ChildCtx>('list');
+return (
+  <>
+    <Switcher value={ctx} onChange={setCtx} />
+    <RenderChildren items={children} ctx={ctx} />
+  </>
+);
+```
+
+См. [editor-ui/dir-view.tsx](mods/editor-ui/dir-view.tsx) — эталонный наблюдатель с переключателем.

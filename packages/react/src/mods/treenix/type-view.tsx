@@ -84,7 +84,7 @@ function TypeListItem({ value }: { value: NodeData }) {
   const hasClass = !!value.class;
 
   return (
-    <div className="flex-1 py-1">
+    <div className="flex min-w-0 flex-1 flex-col">
       <div className="flex items-center gap-2">
         <span className="font-semibold text-sm">{name}</span>
         {hasClass && (

@@ -15,7 +15,7 @@ function RefNodeView({ value, onSelect }: { value: NodeData; onSelect?: (p: stri
   return <RefDisplay target={ref} onSelect={onSelect} />;
 }
 
-// ── List item (compact, inside child-card grid) ──
+// ── List item content (chrome provided by observer's RenderChildren) ──
 
 function RefListItem({ value }: { value: NodeData }) {
   const ref = (value as any).$ref as string | undefined;
@@ -23,10 +23,12 @@ function RefListItem({ value }: { value: NodeData }) {
 
   return (
     <>
-      <span className="child-icon">&#128279;</span>
-      <div className="child-info">
-        <span className="child-name">{name}</span>
-        <span className="child-type">{ref ?? 'ref'}</span>
+      <span className="flex h-6 w-6 items-center justify-center rounded bg-secondary text-[12px]">
+        &#128279;
+      </span>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate text-[13px] font-medium text-foreground">{name}</span>
+        <span className="truncate text-[11px] text-muted-foreground">{ref ?? 'ref'}</span>
       </div>
     </>
   );

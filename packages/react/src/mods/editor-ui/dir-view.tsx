@@ -1,6 +1,7 @@
-import { Render, RenderContext } from '#context';
 import { useChildren } from '#hooks';
-import { type NodeData } from '@treenx/core';
+import { register, type NodeData } from '@treenx/core';
+import { useState } from 'react';
+import { RenderChildren, type ChildCtx } from './list-items';
 
 const STATUS_PILL: Record<string, string> = {
   draft: 'border-yellow-300/25 bg-yellow-300/10 text-yellow-300',
@@ -8,8 +9,16 @@ const STATUS_PILL: Record<string, string> = {
   archived: 'border-zinc-400/20 bg-zinc-400/10 text-zinc-400',
 };
 
+const CTX_OPTIONS: { id: ChildCtx; label: string }[] = [
+  { id: 'list', label: 'List' },
+  { id: 'card', label: 'Card' },
+  { id: 'icon', label: 'Icon' },
+  { id: 'react', label: 'Full' },
+];
+
 function FolderView({ value }: { value: NodeData }) {
   const { data: children } = useChildren(value.$path);
+  const [childCtx, setChildCtx] = useState<ChildCtx>('list');
   const meta = value.metadata as
     | { $type: string; title?: string; description?: string }
     | undefined;
@@ -18,6 +27,23 @@ function FolderView({ value }: { value: NodeData }) {
 
   return (
     <div className="node-default-view">
+      {children.length > 0 && (
+        <div className="mb-3 flex gap-3 text-[12px]">
+          {CTX_OPTIONS.map((o) => (
+            <button
+              key={o.id}
+              onClick={() => setChildCtx(o.id)}
+              className={
+                childCtx === o.id
+                  ? 'text-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
+              }
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      )}
       {(meta || status || counter) && (
         <div className="mb-3 rounded-lg border border-border bg-card p-4">
           {meta?.title && <div className="text-[18px] font-semibold text-foreground">{meta.title}</div>}
@@ -44,15 +70,7 @@ function FolderView({ value }: { value: NodeData }) {
           )}
         </div>
       )}
-      {children.length > 0 && (
-        <RenderContext name="react:list">
-          <div className="children-grid">
-            {children.map((child) => (
-              <Render key={child.$path} value={child} />
-            ))}
-          </div>
-        </RenderContext>
-      )}
+      <RenderChildren items={children} ctx={childCtx} />
       {children.length === 0 && !meta && !status && !counter && (
         <div className="node-empty">Empty folder</div>
       )}
@@ -60,4 +78,4 @@ function FolderView({ value }: { value: NodeData }) {
   );
 }
 
-// register('dir', 'react', FolderView as any);
+register('dir', 'react', FolderView);

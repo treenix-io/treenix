@@ -614,12 +614,12 @@ export function SelectLanguageEditor({ value }: { value: NodeData }) {
 
 export function ActionListItem({ value }: { value: NodeData }) {
   return (
-    <div className="flex items-center gap-2 py-1 flex-1">
+    <>
       {actionIcon(value.$type)}
       <span className="text-xs font-medium text-muted-foreground">
         {value.$type.split('.').at(-1)}
       </span>
       <span className="text-sm truncate">{actionSummary(value)}</span>
-    </div>
+    </>
   );
 }

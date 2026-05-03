@@ -2,8 +2,8 @@
 
 import type { NodeData } from '@treenx/core';
 import { Badge } from '@treenx/react/components/ui/badge';
-import { Render, RenderContext } from '@treenx/react';
 import { useChildren } from '@treenx/react';
+import { RenderChildren } from '@treenx/react/mods/editor-ui/list-items';
 import { Bot } from 'lucide-react';
 import type { BotConfig } from '../types';
 
@@ -58,19 +58,15 @@ export function BotView({ value }: { value: NodeData }) {
           Pages ({pages.length})
         </div>
 
-        <RenderContext name="react:list">
-          <div className="children-grid">
-            {pages.map(page => (
-              <Render key={page.$path} value={page} />
-            ))}
-          </div>
-        </RenderContext>
-
-        {pages.length === 0 && (
-          <div className="text-sm text-muted-foreground text-center py-6 border border-dashed border-border rounded-md">
-            No pages yet.
-          </div>
-        )}
+        <RenderChildren
+          items={pages}
+          ctx="list"
+          empty={
+            <div className="text-sm text-muted-foreground text-center py-6 border border-dashed border-border rounded-md">
+              No pages yet.
+            </div>
+          }
+        />
       </div>
     </div>
   );

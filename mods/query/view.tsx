@@ -1,7 +1,8 @@
 import type { NodeData } from '@treenx/core';
 import { register } from '@treenx/core';
-import { Render, RenderContext, type View } from '@treenx/react';
+import { type View } from '@treenx/react';
 import { useChildren, useNavigate } from '@treenx/react/hooks';
+import { RenderChildren } from '@treenx/react/mods/editor-ui/list-items';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@treenx/react/ui/table';
 import { List, Plus, Rows3, Table2, X } from 'lucide-react';
 import { useMemo, useState, type ReactNode } from 'react';
@@ -47,13 +48,9 @@ function groupItems(items: NodeData[], groupBy: string) {
 
 function ListView({ items }: { items: NodeData[] }) {
   return (
-    <RenderContext name="react:list">
-      <div className="flex flex-col gap-1.5 p-3">
-        {items.map(child => (
-          <Render key={child.$path} value={child} />
-        ))}
-      </div>
-    </RenderContext>
+    <div className="p-3">
+      <RenderChildren items={items} ctx="list" />
+    </div>
   );
 }
 
@@ -128,13 +125,9 @@ function KanbanView({ items, groupBy }: { items: NodeData[]; groupBy: string }) 
             <span className="text-xs font-semibold text-foreground">{group}</span>
             <span className="ml-2 text-[10px] text-muted-foreground">{nodes.length}</span>
           </div>
-          <RenderContext name="react:list">
-            <div className="flex flex-col gap-1.5 p-2">
-              {nodes.map(child => (
-                <Render key={child.$path} value={child} />
-              ))}
-            </div>
-          </RenderContext>
+          <div className="p-2">
+            <RenderChildren items={nodes} ctx="list" />
+          </div>
         </div>
       ))}
     </div>
