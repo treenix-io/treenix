@@ -28,7 +28,7 @@ const ChecklistView: View<TChecklist> = ({ value }) => {
   const actions = useActions(value);
   const [draft, setDraft] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
-  const items = Array.isArray(value.items) ? value.items.filter(Boolean) : [];
+  const items = value.items;
   const doneCount = items.filter(i => i.done).length;
 
   return (
@@ -88,7 +88,7 @@ const ChecklistView: View<TChecklist> = ({ value }) => {
   );
 };
 
-register(TChecklist, 'react', ChecklistView);
+register(TChecklist, 'react:edit', ChecklistView);
 
 // ── Tags ──
 
@@ -165,7 +165,7 @@ const TagsView: View<TTags> = ({ value }) => {
   );
 };
 
-register(TTags, 'react', TagsView);
+register(TTags, 'react:edit', TagsView);
 
 // ── Estimate ──
 
@@ -227,7 +227,7 @@ const EstimateView: View<TEstimate> = ({ value }) => {
   );
 };
 
-register(TEstimate, 'react', EstimateView);
+register(TEstimate, 'react:edit', EstimateView);
 
 // ── Links ──
 
@@ -291,7 +291,7 @@ const LinksView: View<TLinks> = ({ value }) => {
   );
 };
 
-register(TLinks, 'react', LinksView);
+register(TLinks, 'react:edit', LinksView);
 
 // ── Comments ──
 
@@ -339,7 +339,7 @@ const CommentsView: View<TComments> = ({ value }) => {
   );
 };
 
-register(TComments, 'react', CommentsView);
+register(TComments, 'react:edit', CommentsView);
 
 // ── Time Track ──
 
@@ -400,7 +400,139 @@ const TimeTrackView: View<TTimeTrack> = ({ value }) => {
   );
 };
 
-register(TTimeTrack, 'react', TimeTrackView);
+register(TTimeTrack, 'react:edit', TimeTrackView);
+
+// ── Read-only views (default `react` context) — compact, no controls ──
+
+const ChecklistRead: View<TChecklist> = ({ value }) => {
+  const items = value.items;
+  if (!items.length) return null;
+  const doneCount = items.filter(i => i.done).length;
+
+  return (
+    <div className="rounded-md bg-white/[0.02] px-2 py-1.5">
+      {/*<div className="mb-1 flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">*/}
+        {/*<span>☑</span>*/}
+        {/*<span>Checklist</span>*/}
+      {/*</div>*/}
+      <div className="h-1 rounded-full bg-white/5">
+        <div
+          className="h-1 rounded-full bg-emerald-500"
+          style={{ width: `${(doneCount / items.length) * 100}%` }}
+        />
+      </div>
+      <ul className="mt-1 space-y-0.5">
+        {items.slice(0, 4).map(item => (
+          <li key={item.id} className="flex items-center gap-1.5 text-xs">
+            <span className={cn(
+              'inline-block h-3 w-3 shrink-0 rounded-sm border text-[8px] leading-3 text-center',
+              item.done ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-zinc-600',
+            )}>
+              {item.done ? '✓' : ''}
+            </span>
+            <span className={cn('truncate', item.done && 'text-muted-foreground line-through')}>{item.text}</span>
+          </li>
+        ))}
+        {items.length > 4 && (
+          <li className="text-[10px] text-muted-foreground">+{items.length - 4} more</li>
+        )}
+      </ul>
+    </div>
+  );
+};
+
+register(TChecklist, 'react', ChecklistRead);
+
+const TagsRead: View<TTags> = ({ value }) => {
+  const items = Array.isArray(value?.items) ? value.items : [];
+  if (!items.length) return null;
+
+  return (
+    <div className="flex flex-wrap gap-1">
+      {items.map(tag => (
+        <span key={tag} className={cn('inline-block rounded-full px-2 py-0.5 text-[10px] font-medium', tagColor(tag))}>
+          {tag}
+        </span>
+      ))}
+    </div>
+  );
+};
+
+register(TTags, 'react', TagsRead);
+
+const EstimateRead: View<TEstimate> = ({ value }) => {
+  const v = typeof value?.value === 'number' ? value.value : 0;
+  const unit = typeof value?.unit === 'string' ? value.unit : 'hours';
+  if (v <= 0) return null;
+
+  return (
+    <span className="inline-flex items-center gap-1 rounded bg-white/5 px-1.5 py-0.5 text-[11px] text-muted-foreground">
+      <span>⏱</span>
+      <span className="font-medium text-foreground">{v}{UNIT_LABELS[unit] || unit}</span>
+    </span>
+  );
+};
+
+register(TEstimate, 'react', EstimateRead);
+
+const LinksRead: View<TLinks> = ({ value }) => {
+  const items = Array.isArray(value?.items) ? value.items : [];
+  if (!items.length) return null;
+
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {items.map(link => (
+        <a
+          key={link.id}
+          href={link.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={e => e.stopPropagation()}
+          className="inline-flex items-center gap-1 rounded bg-white/5 px-1.5 py-0.5 text-[11px] text-blue-400 hover:underline"
+        >
+          <span>🔗</span>
+          <span className="max-w-32 truncate">{link.label || link.url}</span>
+        </a>
+      ))}
+    </div>
+  );
+};
+
+register(TLinks, 'react', LinksRead);
+
+const CommentsRead: View<TComments> = ({ value }) => {
+  const items = Array.isArray(value?.items) ? value.items : [];
+  if (!items.length) return null;
+
+  return (
+    <span className="inline-flex items-center gap-1 rounded bg-white/5 px-1.5 py-0.5 text-[11px] text-muted-foreground">
+      <span>💬</span>
+      <span>{items.length}</span>
+    </span>
+  );
+};
+
+register(TComments, 'react', CommentsRead);
+
+const TimeTrackRead: View<TTimeTrack> = ({ value }) => {
+  const entries = Array.isArray(value?.entries) ? value.entries : [];
+  const running = !!value?.running;
+  if (!entries.length && !running) return null;
+
+  const total = entries.reduce((sum, e) => sum + ((e.end || Date.now()) - e.start), 0);
+
+  return (
+    <span className={cn(
+      'inline-flex items-center gap-1 rounded bg-white/5 px-1.5 py-0.5 font-mono text-[11px]',
+      running && 'text-emerald-400',
+    )}>
+      <span>⏲</span>
+      <span>{formatDuration(total)}</span>
+    </span>
+  );
+};
+
+register(TTimeTrack, 'react', TimeTrackRead);
 
 // ── AttachMenu — universal "add component" popover ──
 
