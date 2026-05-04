@@ -184,4 +184,4 @@ Current module areas:
 
 ## License
 
-MIT open source.
+[FSL-1.1-MIT](../LICENSE) — Fair Source. Read, use, modify, and redistribute for non-competing purposes. Each version becomes MIT two years after release.
