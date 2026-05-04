@@ -76,8 +76,19 @@ body > div:has([data-radix-popover-content-wrapper]),
 
 /* Full-height views fill the viewport, manage their own scroll */
 [data-slot="scroll-area-viewport"]:has(.view-full) {
-  overflow-x: auto !important;
+  overflow-x: hidden !important;
   overflow-y: hidden !important;
+}
+/* Radix ScrollArea wraps content in `display: table` (sizes to max-content),
+   which lets any wide descendant (marquee, w-max, whitespace-nowrap text,
+   absolutely-positioned overflows, SVGs without viewBox, etc.) blow the
+   inspector panel out horizontally. Force the wrapper to fit the panel;
+   views must manage their own horizontal scroll inside their own container. */
+.editor [data-slot="scroll-area-viewport"] > div {
+  display: block !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
 }
 
 /* Let wrapper div stretch for view-full */
