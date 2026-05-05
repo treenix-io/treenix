@@ -23,6 +23,12 @@ import { CSS } from '@dnd-kit/utilities';
 import type { NodeData } from '@treenx/core';
 import { getDefaults } from '@treenx/core/comp';
 import { Button } from '@treenx/react/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@treenx/react/components/ui/dropdown-menu';
 import { Input } from '@treenx/react/components/ui/input';
 import { Render } from '@treenx/react';
 import { set, useChildren, useNavigate, usePath } from '@treenx/react';
@@ -35,31 +41,46 @@ import { actionIcon, actionSummary } from './action-cards';
 // ── Action palette dropdown ──
 
 function ActionPalette({ onSelect }: { onSelect: (type: string) => void }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const [filter, setFilter] = useState('');
+  const q = filter.trim().toLowerCase();
+  const items = q
+    ? ACTION_TYPES.filter(at => at.label.toLowerCase().includes(q) || at.type.toLowerCase().includes(q))
+    : ACTION_TYPES;
 
   return (
-    <div className="relative" ref={ref}>
-      <Button variant="outline" size="sm" onClick={() => setOpen(!open)}>
-        <Plus className="h-4 w-4 mr-1" /> Add action
-      </Button>
-
-      {open && (
-        <div className="absolute left-0 top-full mt-1 z-50 w-56 bg-popover border border-border rounded-md shadow-md py-1">
-          {ACTION_TYPES.map(at => (
-            <button
+    <DropdownMenu onOpenChange={(open) => { if (!open) setFilter(''); }}>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="sm">
+          <Plus className="h-4 w-4 mr-1" /> Add action
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-56 p-0">
+        <div className="p-1.5 border-b border-border">
+          <Input
+            autoFocus
+            value={filter}
+            onChange={e => setFilter(e.target.value)}
+            onKeyDown={e => e.stopPropagation()}
+            placeholder="Filter..."
+            className="h-7 text-sm"
+          />
+        </div>
+        <div className="py-1 max-h-180 overflow-y-auto">
+          {items.length === 0 ? (
+            <div className="px-3 py-2 text-sm text-muted-foreground">No matches</div>
+          ) : items.map(at => (
+            <DropdownMenuItem
               key={at.type}
-              type="button"
-              className="w-full text-left px-3 py-2 text-sm hover:bg-accent flex items-center gap-2"
-              onClick={() => { onSelect(at.type); setOpen(false); }}
+              onSelect={() => onSelect(at.type)}
+              className="flex items-center gap-2"
             >
               {actionIcon(at.type)}
               {at.label}
-            </button>
+            </DropdownMenuItem>
           ))}
         </div>
-      )}
-    </div>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
