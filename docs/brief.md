@@ -1,3 +1,7 @@
+---
+date: 2026-05-05
+---
+
 # Treenix Brief
 
 ---
@@ -40,4 +44,4 @@ Welcome to Treenix.
 
 ---
 
-*Treenix Team*
+*Treenix Team 2026-05-05*
