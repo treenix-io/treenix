@@ -17,6 +17,7 @@ import { getModPrefabs, getPrefab, getRegisteredMods } from '#mod/prefab';
 import { Prefab } from '#mods/treenix/prefab-type';
 import { paginate, type Tree } from '#tree';
 import { getModInfo } from './mod-catalog';
+import { buildTypeNode } from './types-mount';
 
 // Mark mount components as disabled on prefab catalog nodes —
 // they're data for inspection, not live mount points
@@ -85,17 +86,12 @@ export function createModsStore(_backingStore: Tree, modsPath = '/sys/mods'): Tr
       // /sys/mods/{mod}/types
       if (p.sub === 'types' && !p.name) return createNode(path, 'dir');
 
-      // /sys/mods/{mod}/types/{typeName}
+      // /sys/mods/{mod}/types/{typeName} — same shape as /sys/types/{name}
       if (p.sub === 'types' && p.name) {
         const info = getModInfo(p.mod);
         const entry = info?.types.find(t => t.name === p.name);
         if (!entry) return undefined;
-        return createNode(path, 'type', {
-          name: entry.name,
-          ...(entry.title ? { title: entry.title } : {}),
-          properties: entry.properties,
-          actions: entry.actions,
-        });
+        return buildTypeNode(entry.name, path) ?? createNode(path, 'type');
       }
 
       // /sys/mods/{mod}/prefabs
@@ -133,16 +129,12 @@ export function createModsStore(_backingStore: Tree, modsPath = '/sys/mods'): Tr
           if (info.prefabs.length > 0) items.push(createNode(`${path}/prefabs`, 'dir'));
         }
       } else if (p.sub === 'types' && !p.name) {
-        // List types for mod
+        // List types for mod — same shape as /sys/types
         const info = getModInfo(p.mod);
         if (info) {
           for (const t of info.types) {
-            items.push(createNode(`${path}/${t.name}`, 'type', {
-              name: t.name,
-              ...(t.title ? { title: t.title } : {}),
-              properties: t.properties,
-              actions: t.actions,
-            }));
+            const childPath = `${path}/${t.name}`;
+            items.push(buildTypeNode(t.name, childPath) ?? createNode(childPath, 'type'));
           }
         }
       } else if (p.sub === 'prefabs' && !p.name) {

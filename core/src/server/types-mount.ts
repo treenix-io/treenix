@@ -4,6 +4,31 @@
 import { type ComponentData, createNode, getContextsForType, getRegisteredTypes, type NodeData, resolve } from '#core';
 import { paginate, type Tree } from '#tree';
 
+/**
+ * Build a `type` NodeData for a registered type by collecting its registry contexts.
+ * The `schema` context is materialized into a `schema` named component;
+ * other contexts (react, twa, ...) are marked as presence-only components.
+ * Returns undefined when nothing is registered for the type.
+ *
+ * Reused by mods-mount so that `/sys/mods/{mod}/types/{name}` and
+ * `/sys/types/{name}` produce structurally identical nodes.
+ */
+export function buildTypeNode(typeName: string, path: string): NodeData | undefined {
+  const contexts = getContextsForType(typeName);
+  if (contexts.length === 0) return undefined;
+  const components: Record<string, ComponentData> = {};
+  for (const ctx of contexts) {
+    if (ctx === 'schema') {
+      const handler = resolve(typeName, ctx)!;
+      const schema = handler() as Record<string, unknown>;
+      components[ctx] = { $type: ctx, ...schema } as ComponentData;
+    } else {
+      components[ctx] = { $type: ctx } as ComponentData;
+    }
+  }
+  return createNode(path, 'type', undefined, components);
+}
+
 export function createTypesStore(backingStore: Tree, typesPath = '/sys/types'): Tree {
   // block.hero → /types/block/hero
   const toPath = (type: string) => `${typesPath}/${type.replace(/\./g, '/')}`;
@@ -15,22 +40,7 @@ export function createTypesStore(backingStore: Tree, typesPath = '/sys/types'): 
     return getContextsForType(typeName).length > 0;
   }
 
-  function typeNode(typeName: string): NodeData | undefined {
-    const contexts = getContextsForType(typeName);
-    if (contexts.length === 0) return undefined;
-    const components: Record<string, ComponentData> = {};
-    for (const ctx of contexts) {
-      // "schema" returns data object; other contexts (twa, react) are renderers — just mark presence
-      if (ctx === 'schema') {
-        const handler = resolve(typeName, ctx)!;
-        const schema = handler() as Record<string, unknown>;
-        components[ctx] = { $type: ctx, ...schema } as ComponentData;
-      } else {
-        components[ctx] = { $type: ctx } as ComponentData;
-      }
-    }
-    return createNode(toPath(typeName), 'type', undefined, components);
-  }
+  const typeNode = (typeName: string) => buildTypeNode(typeName, toPath(typeName));
 
   // Merge registry node with backing tree node — registry wins for code-defined
   // components, backing tree adds dynamic components (view, actions from AI agent)

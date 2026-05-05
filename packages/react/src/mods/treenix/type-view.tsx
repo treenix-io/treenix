@@ -5,8 +5,16 @@ import { TypePreview } from './preview';
 
 // ── Helpers ──
 
-function typeName(path: string) {
-  return path.replace(/^\/sys\/types\//, '').replace(/\//g, '.');
+// Type nodes can live under different mount paths (/sys/types/... or
+// /sys/mods/{mod}/types/...). Trust the schema's $id when present —
+// it's the canonical type name. Fall back to deriving from the path.
+function typeName(value: NodeData): string {
+  const schema = value.schema as { $id?: string } | undefined;
+  if (schema?.$id) return schema.$id;
+  return value.$path
+    .replace(/^\/sys\/mods\/[^/]+\/types\//, '')
+    .replace(/^\/sys\/types\//, '')
+    .replace(/\//g, '.');
 }
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
@@ -16,7 +24,7 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 // ── react (full view with live preview) ──
 
 function TypeNodeView({ value }: { value: NodeData }) {
-  const name = typeName(value.$path);
+  const name = typeName(value);
   const schema = value.schema as Record<string, unknown> | undefined;
   const title = schema?.title ? String(schema.title) : null;
   const props = (schema?.properties ?? {}) as Record<string, Record<string, unknown>>;
@@ -75,7 +83,7 @@ function TypeNodeView({ value }: { value: NodeData }) {
 // ── react:list (compact) ──
 
 function TypeListItem({ value }: { value: NodeData }) {
-  const name = typeName(value.$path);
+  const name = typeName(value);
   const schema = value.schema as Record<string, unknown> | undefined;
   const title = schema?.title ? String(schema.title) : null;
   const description = schema?.description ? String(schema.description) : null;

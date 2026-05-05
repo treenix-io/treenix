@@ -2,19 +2,21 @@
 // Any type without a specific react:form handler falls here via resolve('default', 'react:form')
 
 import { type RenderProps } from '#context';
+import { useSchema } from '#schema-loader';
 import { register, resolve } from '@treenx/core';
 import { createElement } from 'react';
 
 function DefaultSchemaForm({ value, onChange }: RenderProps) {
-  const schemaHandler = resolve(value.$type, 'schema');
-  if (!schemaHandler) {
+  // useSchema lazy-fetches /sys/types/{type} and registers the schema.
+  // undefined = loading, null = type has no schema.
+  const schema = useSchema(value.$type);
+  if (schema === undefined) {
+    return <div className="text-xs text-muted-foreground italic">Loading schema…</div>;
+  }
+  if (schema === null) {
     return <div className="text-xs text-muted-foreground italic">No schema for {value.$type}</div>;
   }
 
-  const schema = schemaHandler() as {
-    title?: string;
-    properties?: Record<string, Record<string, unknown>>;
-  };
   const properties = schema.properties ?? {};
 
   if (Object.keys(properties).length === 0) {
@@ -46,7 +48,7 @@ function DefaultSchemaForm({ value, onChange }: RenderProps) {
         const fieldData: Record<string, unknown> = {
           $type: resolvedType,
           value: (value as any)[name],
-          label: String(fieldSchema.label ?? fieldSchema.title ?? name),
+          label: String(fieldSchema.title ?? name),
           placeholder: fieldSchema.description ? String(fieldSchema.description) : undefined,
         };
         if (fieldSchema.items) fieldData.items = fieldSchema.items;

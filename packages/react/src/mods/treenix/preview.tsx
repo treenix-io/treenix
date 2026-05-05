@@ -120,7 +120,7 @@ export function TypePreview({ typeName, properties }: {
         <div className="flex flex-col gap-3">
           <div className="border border-border rounded-lg p-3 bg-background/50">
             <RenderContext name={previewCtx}>
-              <Render value={node} />
+              <Render value={node} onChange={handleFormChange} />
             </RenderContext>
           </div>
 
