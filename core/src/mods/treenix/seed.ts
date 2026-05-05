@@ -3,14 +3,18 @@ import { registerPrefab } from '@treenx/core/mod';
 
 // Universal infra — works with any storage backend (FS, memory, Mongo)
 registerPrefab('core', 'seed', [
-  { $path: 'sys', $type: 'treenix.system' },
+  { $path: 'sys', $type: 'treenix.system',
+    $acl: [
+      { g: 'admins', p: R | W | A | S },
+      { g: 'authenticated', p: R },
+      { g: 'public', p: R },
+    ],
+  },
   { $path: 'sys/types', $type: 'mount-point',
     mount: { $type: 't.mount.types' },
-    $acl: [{ g: 'public', p: R }],
   },
   { $path: 'sys/mods', $type: 'mount-point',
     mount: { $type: 't.mount.mods' },
-    $acl: [{ g: 'public', p: R }],
   },
   { $path: 'sys/mcp', $type: 'mcp.server', port: 0 },
   { $path: 'sys/autostart', $type: 'autostart' },

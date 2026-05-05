@@ -994,6 +994,44 @@ describe('withAcl.patch — C1 ACL enforcement', () => {
   });
 });
 
+// F6: /sys ACL must block non-admin writes via inheritance, even when root.json is permissive.
+describe('F6 — /sys admin-only writes via ACL inheritance', () => {
+  it('non-admin authenticated cannot write under /sys, even with permissive root', async () => {
+    const t = createMemoryTree();
+    // Permissive root — simulates an operator's root.json
+    await t.set({ ...createNode('/', 'root'), $acl: [
+      { g: 'admins', p: R | W | A },
+      { g: 'authenticated', p: R | W },
+      { g: 'public', p: R },
+    ]});
+    // /sys with restrictive ACL (mirrors the core seed prefab)
+    await t.set({ ...createNode('/sys', 'treenix.system'), $acl: [
+      { g: 'admins', p: R | W | A | S },
+      { g: 'authenticated', p: R },
+      { g: 'public', p: R },
+    ]});
+
+    const alice = withAcl(t, 'alice', ['u:alice', 'authenticated']);
+    await assert.rejects(
+      () => alice.set(createNode('/sys/autostart/evil', 'foo')),
+      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+    );
+  });
+
+  it('admin can write under /sys', async () => {
+    const t = createMemoryTree();
+    await t.set({ ...createNode('/', 'root'), $acl: [{ g: 'admins', p: R | W | A }]});
+    await t.set({ ...createNode('/sys', 'treenix.system'), $acl: [
+      { g: 'admins', p: R | W | A | S },
+      { g: 'authenticated', p: R },
+    ]});
+
+    const adm = withAcl(t, 'root', ['u:root', 'authenticated', 'admins']);
+    await adm.set(createNode('/sys/autostart/legit', 'foo'));
+    assert.ok(await adm.get('/sys/autostart/legit'));
+  });
+});
+
 // F1: devLogin must require BOTH NODE_ENV=development AND VITE_DEV_LOGIN.
 // Single-env-var typo in production must NOT create an admin session.
 describe('devLogin — env gate', () => {
