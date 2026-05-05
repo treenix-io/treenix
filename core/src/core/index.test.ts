@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
 import {
   assertSafeKey,
+  assertValidType,
   createNode,
   getComponent,
   getComponents,
@@ -466,5 +467,29 @@ describe('safeJsonParse', () => {
   it('preserves nested non-pollution data', () => {
     const obj = safeJsonParse('{"a": {"b": [1, 2, 3]}}');
     assert.deepEqual(obj, { a: { b: [1, 2, 3] } });
+  });
+});
+
+describe('assertValidType', () => {
+  it('accepts treenix conventions', () => {
+    for (const t of ['dir', 'mount-point', 't.mount.fs', 'craftistry.block.hero', 'application/json', 'json+ld']) {
+      assert.doesNotThrow(() => assertValidType(t));
+    }
+  });
+
+  it('rejects non-string, empty, oversize', () => {
+    assert.throws(() => assertValidType(undefined), /Invalid \$type/);
+    assert.throws(() => assertValidType(null), /Invalid \$type/);
+    assert.throws(() => assertValidType(123), /Invalid \$type/);
+    assert.throws(() => assertValidType(''), /Invalid \$type/);
+    assert.throws(() => assertValidType('a'.repeat(201)), /Invalid \$type/);
+  });
+
+  it('rejects control chars, leading non-letter, traversal markers', () => {
+    assert.throws(() => assertValidType('foo\0bar'), /Invalid \$type/);
+    assert.throws(() => assertValidType('foo\nbar'), /Invalid \$type/);
+    assert.throws(() => assertValidType('..'), /Invalid \$type/);
+    assert.throws(() => assertValidType('123foo'), /Invalid \$type/);
+    assert.throws(() => assertValidType('-foo'), /Invalid \$type/);
   });
 });

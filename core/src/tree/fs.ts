@@ -4,7 +4,7 @@
 // Auto-promotes leaf→dir when children appear, demotes dir→leaf when last child removed.
 
 import type { NodeData } from '#core';
-import { safeJsonParse } from '#core';
+import { assertValidType, safeJsonParse } from '#core';
 import { dirname as treeDirname, isInsideRoot } from '#core/path';
 import { OpError } from '#errors';
 import { mkdir, readdir, readFile, realpath, rmdir, unlink, writeFile } from 'node:fs/promises';
@@ -52,6 +52,7 @@ export async function createFsTree(rootDir: string): Promise<Tree> {
   // On-disk body has no $path — file location is authoritative.
   async function parseNode(file: string, path: string): Promise<NodeData> {
     const obj = safeJsonParse(await readFile(file, 'utf-8'));
+    assertValidType(obj.$type);
     obj.$path = path;
     return obj;
   }
