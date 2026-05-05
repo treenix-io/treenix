@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <strong>Fullstack AI-ready Platform.</strong><br />
+  <strong>Fullstack Platform.</strong><br />
   ECS-style tree of typed components with context-aware rendering.
 </p>
 
