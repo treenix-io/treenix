@@ -68,7 +68,11 @@ export async function logoutUser(store: Tree, token: string) {
 }
 
 export async function devLogin(store: Tree) {
-  if (!process.env.VITE_DEV_LOGIN) throw new OpError('FORBIDDEN', 'Dev-only');
+  // Require BOTH signals — single env-var typo in prod must not grant admin.
+  // Boot-time assertion in main.ts also crashes if VITE_DEV_LOGIN is set in non-dev.
+  if (process.env.NODE_ENV !== 'development' || !process.env.VITE_DEV_LOGIN) {
+    throw new OpError('FORBIDDEN', 'Dev-only');
+  }
   const userId = 'dev';
   const userPath = `/auth/users/${userId}`;
   if (!await store.get(userPath)) {

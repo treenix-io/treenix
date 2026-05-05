@@ -14,7 +14,24 @@ import {
   stripComponents,
   withAcl,
 } from './auth';
+import { devLogin } from './auth-ops';
 import { OpError } from '#errors';
+
+const withEnv = async (env: Record<string, string | undefined>, fn: () => Promise<void>) => {
+  const prev: Record<string, string | undefined> = {};
+  for (const k of Object.keys(env)) prev[k] = process.env[k];
+  for (const [k, v] of Object.entries(env)) {
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
+  }
+  try { await fn(); }
+  finally {
+    for (const [k, v] of Object.entries(prev)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+};
 
 let tree: Tree;
 
@@ -974,5 +991,36 @@ describe('withAcl.patch — C1 ACL enforcement', () => {
     const after = (await inner.get('/order')) as any;
     assert.ok(Array.isArray(after.$refs) && after.$refs.length === 1);
     assert.equal(after.$refs[0].t, '/customers/bob');
+  });
+});
+
+// F1: devLogin must require BOTH NODE_ENV=development AND VITE_DEV_LOGIN.
+// Single-env-var typo in production must NOT create an admin session.
+describe('devLogin — env gate', () => {
+  it('throws FORBIDDEN when NODE_ENV is not development, even with VITE_DEV_LOGIN set', async () => {
+    await withEnv({ NODE_ENV: 'production', VITE_DEV_LOGIN: '1' }, async () => {
+      await assert.rejects(
+        () => devLogin(tree),
+        (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+      );
+    });
+  });
+
+  it('throws FORBIDDEN when VITE_DEV_LOGIN is unset, even in development', async () => {
+    await withEnv({ NODE_ENV: 'development', VITE_DEV_LOGIN: undefined }, async () => {
+      await assert.rejects(
+        () => devLogin(tree),
+        (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+      );
+    });
+  });
+
+  it('succeeds with both NODE_ENV=development AND VITE_DEV_LOGIN set', async () => {
+    await withEnv({ NODE_ENV: 'development', VITE_DEV_LOGIN: '1' }, async () => {
+      const result = await devLogin(tree);
+      assert.equal(result.userId, 'dev');
+      assert.equal(typeof result.token, 'string');
+      assert.equal(result.token.length, 64);
+    });
   });
 });
