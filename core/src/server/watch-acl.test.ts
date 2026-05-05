@@ -2,6 +2,7 @@
 // - filterPatches: component-level patch filtering
 // - filteredPush behavior: claims caching, set/patch/remove event handling
 // - remove event ACL: parent-based permission check for deleted nodes
+// - F10: set event uses stored node $owner/$acl, not writer-supplied payload
 
 import { createNode, isComponent, R, W, register } from '#core';
 import { componentPerm, resolvePermission } from './auth';
@@ -10,6 +11,8 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { Operation } from 'fast-json-patch';
 import type { NodeData } from '#core';
+import { createFilteredPush } from './watch-filter';
+import type { NodeEvent } from './sub';
 
 // ── filterPatches (extracted logic, tested directly) ──
 
@@ -165,5 +168,71 @@ describe('remove event ACL — parent-based permission', () => {
     // bob is authenticated but parent denies authenticated — remove must NOT be delivered
     const perm = await resolvePermission(tree, '/secret', 'bob', ['u:bob', 'authenticated']);
     assert.equal(perm, 0, 'unauthorized user blocked by parent ACL');
+  });
+});
+
+// F10: ACL decisions for set events must use stored node, not writer-supplied event payload.
+// A path bypassing withAcl could craft an event with poisoned $owner; watch-filter must ignore it.
+describe('F10 — set event uses stored node for ACL, not event payload', () => {
+  it('poisoned $owner in event.node does not grant owner-level component visibility', async () => {
+    const tree = createMemoryTree();
+
+    // Stored: real owner is admin, /x readable by authenticated, secret readable by owner only.
+    const stored: NodeData = {
+      $path: '/x',
+      $type: 't',
+      $owner: 'admin',
+      $acl: [{ g: 'authenticated', p: R }],
+      secret: { $type: 'sec', apiKey: 'sk-real', $acl: [{ g: 'owner', p: R }, { g: 'authenticated', p: 0 }] },
+    };
+    await tree.set(stored);
+
+    const events: NodeEvent[] = [];
+    const filtered = createFilteredPush(tree, 'bob', ['u:bob', 'authenticated'], (e) => { events.push(e); });
+
+    // Crafted event with poisoned $owner='bob' — pretends bob is owner.
+    const poisoned: NodeEvent = {
+      type: 'set',
+      path: '/x',
+      node: {
+        $type: 't',
+        $owner: 'bob',
+        $acl: [{ g: 'authenticated', p: R }],
+        secret: { $type: 'sec', apiKey: 'sk-real', $acl: [{ g: 'owner', p: R }, { g: 'authenticated', p: 0 }] },
+      },
+    };
+    filtered(poisoned);
+
+    // filterEvent is async — wait for microtasks to drain
+    await new Promise(r => setImmediate(r));
+
+    assert.equal(events.length, 1, 'event delivered to bob (R on /x via authenticated)');
+    const evt = events[0];
+    if (evt.type !== 'set') throw new Error(`expected set event, got ${evt.type}`);
+    assert.equal(evt.node.secret, undefined, 'secret stripped — bob is not real owner of stored node');
+  });
+
+  it('drops set event when stored node is gone (race with remove)', async () => {
+    const tree = createMemoryTree();
+
+    const node: NodeData = {
+      $path: '/x', $type: 't',
+      $acl: [{ g: 'authenticated', p: R }],
+    };
+    await tree.set(node);
+
+    const events: NodeEvent[] = [];
+    const filtered = createFilteredPush(tree, 'bob', ['u:bob', 'authenticated'], (e) => { events.push(e); });
+
+    // Remove the node, then deliver a stale set event
+    await tree.remove('/x');
+
+    const stale: NodeEvent = {
+      type: 'set', path: '/x', node: { $type: 't', $acl: [{ g: 'authenticated', p: R }] },
+    };
+    filtered(stale);
+    await new Promise(r => setImmediate(r));
+
+    assert.equal(events.length, 0, 'stale set event dropped — stored node gone');
   });
 });

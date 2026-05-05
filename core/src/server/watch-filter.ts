@@ -89,8 +89,10 @@ async function filterEvent(
   if (!(perm & R)) return;
 
   if (event.type === 'set' && event.node) {
-    const fullNode = { $path: event.path, ...event.node } as NodeData;
-    const stripped = stripComponents(fullNode, userId, claims);
+    // ACL must come from stored node, not event payload — writer-supplied $owner/$acl in body would otherwise grant view.
+    const stored = await store.get(event.path);
+    if (!stored) return;
+    const stripped = stripComponents(stored, userId, claims);
     const { $path, ...body } = stripped;
     push({ ...event, node: body });
   } else if (event.type === 'patch' && event.patches.length > 0) {
