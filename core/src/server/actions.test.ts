@@ -313,21 +313,22 @@ describe('defineComponent', () => {
     assert.equal(result, 'pong');
   });
 
-  it('deepAssign blocks __proto__, constructor, prototype keys (F17)', async () => {
+  it('deepAssign throws on __proto__/constructor/prototype keys (F17)', async () => {
     registerBuiltinActions();
     register('mytype', 'schema', mytypeSchema);
     const tree = createMemoryTree();
     await tree.set(createNode('/n', 'mytype', { title: 'ok' }));
 
-    await executeAction(tree, '/n', undefined, undefined, 'patch', {
-      __proto__: { polluted: true },
-      constructor: { polluted: true },
-      prototype: { polluted: true },
-      title: 'patched',
-    });
+    await assert.rejects(
+      () => executeAction(tree, '/n', undefined, undefined, 'patch', {
+        constructor: { polluted: true },
+        title: 'patched',
+      }),
+      /prototype key/,
+    );
 
     const result = (await tree.get('/n'))!;
-    assert.equal(result.title, 'patched');
+    assert.equal(result.title, 'ok', 'patch must be atomic — no partial apply');
     assert.equal(({} as any).polluted, undefined, 'Object.prototype must not be polluted');
   });
 

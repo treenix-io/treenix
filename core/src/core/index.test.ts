@@ -3,12 +3,14 @@ import { registerBuiltins } from '#mods/treenix/builtins';
 import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
 import {
+  assertSafeKey,
   createNode,
   getComponent,
   getComponents,
   getMeta,
   isComponent,
   isRef,
+  isSafeKey,
   mapRegistry,
   ref,
   register,
@@ -17,6 +19,7 @@ import {
   render,
   replaceHandler,
   resolve,
+  safeJsonParse,
   unregister,
 } from './index';
 
@@ -423,5 +426,45 @@ describe('replaceHandler', () => {
     } finally {
       restoreRegistrySnapshot(snap);
     }
+  });
+});
+
+// F7: prototype-pollution defense — assertSafeKey/isSafeKey/safeJsonParse + createNode
+describe('isSafeKey / assertSafeKey', () => {
+  it('rejects __proto__, constructor, prototype', () => {
+    for (const k of ['__proto__', 'constructor', 'prototype']) {
+      assert.equal(isSafeKey(k), false);
+      assert.throws(() => assertSafeKey(k), /Forbidden prototype key/);
+    }
+  });
+
+  it('accepts ordinary names and $-prefixed names', () => {
+    for (const k of ['foo', 'a.b', '$path', '$type', '__bar__', 'protoype']) {
+      assert.equal(isSafeKey(k), true);
+      assert.doesNotThrow(() => assertSafeKey(k));
+    }
+  });
+
+  it('createNode rejects __proto__/constructor own properties (raw JSON.parse attack)', () => {
+    const polluted = JSON.parse('{"__proto__":{"p":1}}');
+    assert.equal(Object.keys(polluted).includes('__proto__'), true);
+    assert.throws(() => createNode('/x', 'foo', polluted), /prototype key/);
+    const polComp = JSON.parse('{"constructor":{"$type":"x"}}');
+    assert.throws(() => createNode('/x', 'foo', {}, polComp), /prototype key/);
+  });
+});
+
+describe('safeJsonParse', () => {
+  it('strips __proto__/constructor/prototype on parse', () => {
+    const obj = safeJsonParse('{"foo": 1, "__proto__": {"p": 2}, "constructor": "x"}');
+    assert.equal(obj.foo, 1);
+    assert.equal(obj.__proto__, Object.prototype);  // own __proto__ stripped → falls through to chain
+    assert.equal((obj as any).constructor, Object);
+    assert.equal(({} as any).p, undefined);          // global prototype not polluted
+  });
+
+  it('preserves nested non-pollution data', () => {
+    const obj = safeJsonParse('{"a": {"b": [1, 2, 3]}}');
+    assert.deepEqual(obj, { a: { b: [1, 2, 3] } });
   });
 });

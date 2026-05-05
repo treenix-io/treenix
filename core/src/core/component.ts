@@ -66,8 +66,11 @@ export function isRef(value: unknown): value is Ref {
 
 // ── Node ──
 
+import { assertSafeKey } from './json';
+
 export function assertNonSystemName(name: string) {
   if (name.startsWith('$')) throw new Error(`Component name cannot start with $: ${name}`);
+  assertSafeKey(name);
 }
 
 export function makeNode<T, C = Record<string, ComponentData<any>>>(

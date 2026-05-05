@@ -2,7 +2,7 @@
 // Compact [op, path, value?] tuples with dot-notation paths.
 // Maps 1:1 to RFC 6902 JSON Patch.
 
-import type { NodeData } from '#core';
+import { assertSafeKey, type NodeData } from '#core';
 import { OpError } from '#errors';
 
 // ── Types ──
@@ -28,16 +28,14 @@ export class PatchTestError extends Error {
 
 // ── Path safety (prototype pollution guard) ──
 
-const DANGEROUS_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
-
 export function assertSafePatchPath(path: string): void {
   if (typeof path !== 'string' || path.length === 0 || path.includes('\0')) {
     throw new OpError('FORBIDDEN', `Invalid patch path: ${JSON.stringify(path)}`);
   }
   for (const part of path.split('.')) {
-    if (part === '' || DANGEROUS_KEYS.has(part)) {
-      throw new OpError('FORBIDDEN', `Forbidden patch segment: ${JSON.stringify(part)} in ${path}`);
-    }
+    if (part === '') throw new OpError('FORBIDDEN', `Empty patch segment in ${path}`);
+    try { assertSafeKey(part); }
+    catch { throw new OpError('FORBIDDEN', `Forbidden patch segment: ${JSON.stringify(part)} in ${path}`); }
   }
 }
 

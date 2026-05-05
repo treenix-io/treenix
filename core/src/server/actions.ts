@@ -6,7 +6,7 @@ import { chain, type Chain } from '#chain';
 import { Class, type TypeProxy } from '#comp';
 import { type ExecuteFn, makeTypedProxy, type StreamFn } from '#comp/handle';
 import { collectDeps as _collectDeps, type ResolvedDeps } from '#comp/needs';
-import { type ComponentData, getComponentField, isComponent, type NodeData, register, resolve } from '#core';
+import { assertSafeKey, type ComponentData, getComponentField, isComponent, type NodeData, register, resolve, safeJsonParse } from '#core';
 import { validateValue, type ValidationError } from '#comp/validate';
 import { type TypeSchema } from '#schema/types';
 import { type PatchOp, type Tree } from '#tree';
@@ -183,7 +183,7 @@ async function loadDynamicAction(
       // Host function: ctx_tree_set(nodeJson) → void
       const setFn = vm.newFunction('ctx_tree_set', (nodeJsonHandle) => {
         const nj = vm.getString(nodeJsonHandle);
-        try { treeWrites.push({ node: JSON.parse(nj) }); } catch {}
+        try { treeWrites.push({ node: safeJsonParse(nj) }); } catch {}
         return vm.undefined;
       });
       vm.setProp(vm.global, 'ctx_tree_set', setFn);
@@ -460,7 +460,8 @@ export async function applyTemplate(
 
 function deepAssign(target: any, source: Record<string, unknown>) {
   for (const [k, v] of Object.entries(source)) {
-    if (k.startsWith('$') || k === '__proto__' || k === 'constructor' || k === 'prototype') continue;
+    if (k.startsWith('$')) continue;
+    assertSafeKey(k);
     if (v && typeof v === 'object' && !Array.isArray(v)
       && target[k] && typeof target[k] === 'object' && !Array.isArray(target[k])) {
       deepAssign(target[k], v as Record<string, unknown>);
