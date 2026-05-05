@@ -86,6 +86,8 @@ export async function startBot(tree: Tree, botPath: string, middlewares: TgMiddl
     const action = sep === -1 ? raw : raw.slice(0, sep);
     const params = sep === -1 ? '' : raw.slice(sep + 1);
 
+    if (!/^[a-z0-9_-]+$/i.test(action)) return ctx.answerCallbackQuery('Invalid action');
+
     const targetNode = await tree.get(`${commandsPath}/${action}`);
     if (!targetNode) return ctx.answerCallbackQuery('Unknown action');
     const handler = resolve(targetNode.$type, 'telegram');
