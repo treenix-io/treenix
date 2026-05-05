@@ -1,5 +1,6 @@
 // Treenix Module Loader — dependency sort, load, seed
 
+import { isInsideRoot } from '#core/path';
 import { createLogger } from '#log';
 import { loadSchemasFromDir } from '#schema/load';
 import type { Tree } from '#tree';
@@ -9,6 +10,15 @@ import { setCurrentMod } from './tracking';
 import type { LoadedMod, ModManifest, TreenixMod } from './types';
 
 const log = createLogger('mod');
+
+export function confine(packagePath: string, candidate: string): string {
+  const root = resolve(packagePath);
+  const full = resolve(packagePath, candidate);
+  if (!isInsideRoot(root, full)) {
+    throw new Error(`Manifest path escapes package root: ${candidate} → ${full}`);
+  }
+  return full;
+}
 
 // ── Dependency sorting (Kahn's algorithm) ──
 
@@ -123,7 +133,7 @@ export async function loadMods(
       let mod: TreenixMod | undefined;
 
       if (entryPath && manifest.packagePath) {
-        const fullPath = join(manifest.packagePath, entryPath);
+        const fullPath = confine(manifest.packagePath, entryPath);
         setCurrentMod(manifest.name);
         const exported = await import(fullPath);
         setCurrentMod(null);
@@ -141,7 +151,7 @@ export async function loadMods(
         if (mod?.seed) {
           await withTimeout(mod.seed(tree), `${manifest.name}.seed`, timeout);
         } else if (manifest.seed && manifest.packagePath) {
-          const seedMod = await import(join(manifest.packagePath, manifest.seed));
+          const seedMod = await import(confine(manifest.packagePath, manifest.seed));
           await withTimeout(seedMod.default(tree), `${manifest.name}.seed`, timeout);
         }
       }

@@ -3,7 +3,7 @@ import { beforeEach, describe, it } from 'node:test';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { clearModRegistry, getLoadedMods, getMod, isModLoaded, loadLocalMods, loadMods, sortByDependencies } from './loader';
+import { clearModRegistry, confine, getLoadedMods, getMod, isModLoaded, loadLocalMods, loadMods, sortByDependencies } from './loader';
 import type { ModManifest } from './types';
 
 function m(name: string, deps?: string[]): ModManifest {
@@ -293,5 +293,24 @@ describe('loadLocalMods', () => {
     assert.deepEqual(result.loaded, []);
 
     rmSync(tmpDir, { recursive: true });
+  });
+});
+
+describe('confine — F11 manifest path containment', () => {
+  it('returns resolved path when candidate stays inside packagePath', () => {
+    assert.equal(confine('/pkg/foo', 'server.js'), resolve('/pkg/foo', 'server.js'));
+    assert.equal(confine('/pkg/foo', './sub/server.js'), resolve('/pkg/foo', 'sub/server.js'));
+  });
+
+  it('throws when candidate escapes via ..', () => {
+    assert.throws(() => confine('/pkg/foo', '../../etc/passwd.js'), /escapes package root/);
+  });
+
+  it('throws when candidate is absolute', () => {
+    assert.throws(() => confine('/pkg/foo', '/etc/passwd.js'), /escapes package root/);
+  });
+
+  it('allows packagePath itself (empty candidate)', () => {
+    assert.equal(confine('/pkg/foo', ''), resolve('/pkg/foo'));
   });
 });
