@@ -300,6 +300,20 @@ describe('assertSafePath (F03)', () => {
     assert.throws(() => assertSafePath('//admin'), /double slash/);
     assert.throws(() => assertSafePath('/board//task'), /double slash/);
   });
+
+  it('rejects backslash', () => {
+    assert.throws(() => assertSafePath('/board\\admin'), /backslash/);
+    assert.throws(() => assertSafePath('\\board'), /must start with/);
+  });
+
+  it('rejects percent-escaped sequences', () => {
+    // %2e%2e/ → ../ if decoded later by some downstream
+    assert.throws(() => assertSafePath('/board/%2e%2e/admin'), /percent/);
+    // %2f → / could collapse segments
+    assert.throws(() => assertSafePath('/board%2fadmin'), /percent/);
+    // any percent-escape rejected — paths are stored literally, no encoding
+    assert.throws(() => assertSafePath('/board/%20task'), /percent/);
+  });
 });
 
 describe('Lazy resolver semantics (sync miss)', () => {

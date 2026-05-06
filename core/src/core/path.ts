@@ -34,10 +34,13 @@ export function isInsideRoot(root: string, target: string): boolean {
   return target === root || target.startsWith(root + '/');
 }
 
-/** Validate a tree path — rejects traversal, dot segments, trailing slash, double-slash, null bytes */
+/** Validate a tree path — rejects traversal, dot segments, trailing slash, double-slash, null bytes,
+ *  backslash, percent-escaped sequences (paths are stored literally — no encoding layer). */
 export function assertSafePath(path: string): void {
   if (!path.startsWith('/')) throw new Error(`Invalid path: must start with /: ${JSON.stringify(path)}`);
   if (path.includes('\0')) throw new Error(`Invalid path: null byte`);
+  if (path.includes('\\')) throw new Error(`Invalid path: backslash at ${JSON.stringify(path)}`);
+  if (/%[0-9a-f]{2}/i.test(path)) throw new Error(`Invalid path: percent-escape at ${JSON.stringify(path)}`);
   if (path.includes('//')) throw new Error(`Invalid path: double slash at ${JSON.stringify(path)}`);
   if (path !== '/' && path.endsWith('/')) throw new Error(`Invalid path: trailing slash at ${JSON.stringify(path)}`);
   const segments = path.split('/');
