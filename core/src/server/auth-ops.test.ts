@@ -55,6 +55,33 @@ describe('F5 — IP bucket rate-limit', () => {
     }
   });
 
+  // Codex round 3 #2 regression: TOCTOU on first-user admin election.
+  // Concurrent registers on a fresh store must produce exactly ONE admin.
+  it('register: serializes concurrent first-user calls (no double-admin)', async () => {
+    const tree = createMemoryTree();
+
+    // Fire 5 concurrent registers — without serialization multiple would observe
+    // items.length === 0 and grant themselves admins.
+    const userIds = Array.from({ length: 5 }, () => `u${randomBytes(4).toString('hex')}`);
+    const results = await Promise.allSettled(
+      userIds.map((u) => registerUser(tree, u, 'pw', null)),
+    );
+
+    let admins = 0;
+    for (const r of results) {
+      if (r.status === 'fulfilled' && r.value.pending === false) admins++;
+    }
+    assert.equal(admins, 1, 'exactly one register call should produce an active (admin) user');
+
+    // Verify in tree: exactly one user has groups.list including 'admins'.
+    const { items } = await tree.getChildren('/auth/users');
+    const adminCount = items.filter((u: any) => {
+      const g = u['groups'];
+      return g && Array.isArray(g.list) && g.list.includes('admins');
+    }).length;
+    assert.equal(adminCount, 1, 'tree state must show exactly one admin');
+  });
+
   it('login: trips IP bucket when attacker rotates target userId from one IP', async () => {
     const tree = createMemoryTree();
     const ip = uniqueIp();

@@ -13,37 +13,49 @@ function assertUserId(userId: string): void {
   if (/[/\\\0]/.test(userId)) throw new OpError('BAD_REQUEST', 'Invalid userId');
 }
 
-export async function registerUser(store: Tree, userId: string, password: string, clientIp: string | null = null) {
-  // IP bucket caps total registrations from one origin even when attacker rotates userId.
-  if (clientIp) checkRate(`register:ip:${clientIp}`, 5);
-  checkRate(`register:user:${userId}`, 3);
-  assertUserId(userId);
+// In-process serialize chain — closes the first-user admin-election TOCTOU window.
+// Two concurrent registers on a fresh store would both observe items.length === 0 and both gain admin.
+// Single-process tenant model: in-memory chain is enough; multi-process needs a tree-level lock or seed-time bootstrap.
+let registerChain: Promise<unknown> = Promise.resolve();
+function serializeRegister<T>(fn: () => Promise<T>): Promise<T> {
+  const next = registerChain.then(fn, fn);
+  registerChain = next.catch(() => {});
+  return next;
+}
 
-  const userPath = `/auth/users/${userId}`;
-  const existing = await store.get(userPath);
-  if (existing) throw new OpError('CONFLICT', 'User already exists');
+export function registerUser(store: Tree, userId: string, password: string, clientIp: string | null = null) {
+  return serializeRegister(async () => {
+    // IP bucket caps total registrations from one origin even when attacker rotates userId.
+    if (clientIp) checkRate(`register:ip:${clientIp}`, 5);
+    checkRate(`register:user:${userId}`, 3);
+    assertUserId(userId);
 
-  const { items } = await store.getChildren('/auth/users', { limit: 1 });
-  const isFirstUser = items.length === 0;
+    const userPath = `/auth/users/${userId}`;
+    const existing = await store.get(userPath);
+    if (existing) throw new OpError('CONFLICT', 'User already exists');
 
-  const hash = await hashPassword(password);
-  const node = createNode(userPath, 'user', {
-    status: isFirstUser ? 'active' : 'pending',
-  }, {
-    credentials: { $type: 'credentials', hash },
-    groups: { $type: 'groups', list: isFirstUser ? ['admins'] : [] },
+    const { items } = await store.getChildren('/auth/users', { limit: 1 });
+    const isFirstUser = items.length === 0;
+
+    const hash = await hashPassword(password);
+    const node = createNode(userPath, 'user', {
+      status: isFirstUser ? 'active' : 'pending',
+    }, {
+      credentials: { $type: 'credentials', hash },
+      groups: { $type: 'groups', list: isFirstUser ? ['admins'] : [] },
+    });
+    node.$owner = userId;
+    node.$acl = [
+      { g: 'owner', p: R | W },
+      { g: 'authenticated', p: 0 },
+    ];
+
+    await store.set(node);
+
+    if (!isFirstUser) return { token: null, userId, pending: true };
+    const token = await createSession(store, userId);
+    return { token, userId, pending: false };
   });
-  node.$owner = userId;
-  node.$acl = [
-    { g: 'owner', p: R | W },
-    { g: 'authenticated', p: 0 },
-  ];
-
-  await store.set(node);
-
-  if (!isFirstUser) return { token: null, userId, pending: true };
-  const token = await createSession(store, userId);
-  return { token, userId, pending: false };
 }
 
 export async function loginUser(store: Tree, userId: string, password: string, clientIp: string | null = null) {
