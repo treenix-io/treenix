@@ -100,3 +100,31 @@ describe('F5 — IP bucket rate-limit', () => {
     );
   });
 });
+
+describe('R4-AUTH-8 — assertUserId path-traversal hardening', () => {
+  const reject = (userId: string) => async () => {
+    const tree = createMemoryTree();
+    await assert.rejects(
+      registerUser(tree, userId, 'pw', uniqueIp()),
+      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+    );
+  };
+
+  it('rejects ".." (parent traversal)',  reject('..'));
+  it('rejects "."   (current dir)',      reject('.'));
+  it('rejects "..." (dot-only multi)',   reject('...'));
+  it('rejects empty string',              reject(''));
+  it('rejects userId with slash',         reject('a/b'));
+  it('rejects userId with backslash',     reject('a\\b'));
+  it('rejects userId with NUL',           reject('a\0b'));
+  it('rejects userId with colon',         reject('agent:x'));
+  it('rejects userId with space',         reject('a b'));
+  it('rejects userId with quote',         reject('a"b'));
+  it('rejects oversize userId (>64)',     reject('x'.repeat(65)));
+
+  it('accepts alphanumeric with allowed punctuation (._-)', async () => {
+    const tree = createMemoryTree();
+    // First user gets admin — single registration sufficient for the assertion.
+    await registerUser(tree, 'good.user_name-1', 'pw', uniqueIp());
+  });
+});

@@ -19,7 +19,7 @@ import {
 } from './actions';
 import { buildClaims, type Session, withAcl } from './auth';
 import type { StreamTokenStore } from './stream-token';
-import { agentConnect, devLogin, loginUser, logoutUser, registerUser } from './auth-ops';
+import { agentConnect, agentInitPair, devLogin, loginUser, logoutUser, registerUser } from './auth-ops';
 import { OpError } from '#errors';
 import { checkRate } from './rate-limit';
 import { deployPrefab as deployPrefabOp } from './prefab';
@@ -216,12 +216,14 @@ export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: 
           params: input.params,
         })),
 
+    // R4-AUTH-4: cap password length to prevent scrypt CPU DoS via multi-MB inputs.
+    // 256 chars is well above any realistic password-manager output.
     register: base
-      .input(z.object({ userId: z.string().min(1), password: z.string().min(1) }))
+      .input(z.object({ userId: z.string().min(1).max(64), password: z.string().min(1).max(256) }))
       .mutation(({ input, ctx }) => registerUser(baseStore, input.userId, input.password, ctx.clientIp)),
 
     login: base
-      .input(z.object({ userId: z.string().min(1), password: z.string().min(1) }))
+      .input(z.object({ userId: z.string().min(1).max(64), password: z.string().min(1).max(256) }))
       .mutation(({ input, ctx }) => loginUser(baseStore, input.userId, input.password, ctx.clientIp)),
 
     me: authed.query(({ ctx }) => {
@@ -247,8 +249,14 @@ export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: 
     }),
 
     agentConnect: base
-      .input(z.object({ path: safePath, key: z.string().min(1) }))
+      .input(z.object({ path: safePath, key: z.string().min(1).max(256) }))
       .mutation(({ input, ctx }) => agentConnect(baseStore, input.path, input.key, ctx.clientIp)),
+
+    // R4-AUTH-1: operator-side init for agent pairing. Requires auth + W on the port path
+    // (enforced by ctx.tree's withAcl wrap). Closes the unauth idle→pending self-claim.
+    agentInitPair: authed
+      .input(z.object({ path: safePath, key: z.string().min(1).max(256) }))
+      .mutation(({ input, ctx }) => agentInitPair(ctx.tree, input.path, input.key)),
 
     unwatch: authed.input(z.object({ paths: z.array(z.string()) })).mutation(({ input, ctx }) => {
       if (ctx.session) watcher.unwatch(ctx.session.userId, input.paths);
