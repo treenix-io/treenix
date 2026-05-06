@@ -303,6 +303,19 @@ describe('buildClaims', () => {
     assert.ok(claims.includes('u:alice'));
     assert.ok(claims.includes('authenticated'));
   });
+
+  // Privilege-escalation gate: a component planted at key 'groups' but with a different $type
+  // (which bypasses the registered groups type-acl on write) must NOT contribute claims.
+  it('ignores groups key with mismatched $type (poisoning attempt)', async () => {
+    await tree.set({
+      ...createNode('/auth/users/mallory', 'user'),
+      $owner: 'mallory',
+      groups: { $type: 'x', list: ['admins'] },
+    });
+    const claims = await buildClaims(tree, 'mallory');
+    assert.ok(!claims.includes('admins'), 'must not gain admins via fake $type');
+    assert.ok(claims.includes('u:mallory'));
+  });
 });
 
 describe('granular sticky deny', () => {

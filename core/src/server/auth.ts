@@ -5,6 +5,7 @@
 import {
   A,
   type ComponentData,
+  getComponent,
   type GroupPerm,
   isComponent,
   type NodeData,
@@ -281,9 +282,10 @@ export async function buildClaims(tree: Tree, userId: string): Promise<string[]>
   const claims = [`u:${userId}`, group];
   const userNode = await tree.get(`/auth/users/${userId}`);
   if (userNode) {
-    const gv = userNode['groups'];
-    const groups = isComponent(gv) ? gv : undefined;
-    if (Array.isArray(groups?.['list'])) claims.push(...groups['list']);
+    // Strict: component MUST be at key 'groups' with $type='groups'. A poisoned key with
+    // alternate $type would otherwise leak admin-claim via group list. Privilege escalation gate.
+    const groups = getComponent<{ list: string[] }>(userNode, 'groups', 'groups');
+    if (Array.isArray(groups?.list)) claims.push(...groups.list);
   }
   return claims;
 }
