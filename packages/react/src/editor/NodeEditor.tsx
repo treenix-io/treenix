@@ -19,7 +19,7 @@ import { toast } from 'sonner';
 import { proxy, useSnapshot } from 'valtio';
 import { AclEditor } from './AclEditor';
 import { ComponentSection } from './ComponentSection';
-import { getNodeEditorJsonText, parseNodeEditorJson } from './node-editor-state';
+import { getNodeEditorJsonText, saveNodeEditorJson } from './node-editor-state';
 
 function NodeCard({ path, type, onChangeType }: {
   path: string;
@@ -131,9 +131,7 @@ export function NodeEditor({ node, save, open, onClose, onDelete, currentUserId,
   // Save JSON tab: full-node replacement via set()
   async function handleSaveJson() {
     try {
-      const toSave = parseNodeEditorJson(snap.jsonText);
-      await set(toSave);
-      st.jsonText = getNodeEditorJsonText(toSave);
+      st.jsonText = await saveNodeEditorJson(snap.jsonText, set);
       toast.success('Saved');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Save failed');

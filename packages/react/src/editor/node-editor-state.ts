@@ -30,3 +30,15 @@ export function parseNodeEditorJson(text: string): NodeData {
 
   return node as NodeData;
 }
+
+// After save, returned $rev is bumped by the server. We must re-derive the editor
+// text from the fresh node, otherwise a second save reuses the stale OCC token
+// and the server rejects with CONFLICT (Expected $rev N+1, got N).
+export async function saveNodeEditorJson(
+  jsonText: string,
+  setFn: (node: NodeData) => Promise<NodeData>,
+): Promise<string> {
+  const parsed = parseNodeEditorJson(jsonText);
+  const fresh = await setFn(parsed);
+  return getNodeEditorJsonText(fresh);
+}

@@ -200,14 +200,19 @@ export function useChildren(parentPath: string, opts?: ChildrenOpts): ChildrenQu
 }
 
 // ── set: optimistic update + server persist ──
+// Returns the fresh node from server (with bumped $rev) so callers that hold
+// a local copy of the saved node — e.g. JSON editor — can reflect the new
+// $rev. Without this, a second save reuses the stale OCC token and trips
+// CONFLICT (Expected $rev N+1, got N).
 
-export async function set(next: NodeData) {
+export async function set(next: NodeData): Promise<NodeData> {
   const prev = cache.get(next.$path);
   cache.put(next);
   try {
     await tree.set(next);
     const fresh = await tree.get(next.$path);
     if (fresh) cache.put(fresh);
+    return fresh ?? next;
   } catch (err) {
     // F15: rollback optimistic cache on server reject (validation, ACL, OCC)
     if (prev) cache.put(prev); else cache.remove(next.$path);

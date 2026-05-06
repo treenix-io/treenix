@@ -25,7 +25,7 @@ export function useComputed(path: string): Record<string, unknown> {
 }
 
 /** Node with computed bindings merged — raw + computed overlay */
-export function useResolvedNode(path: string): [NodeData | undefined, (next: NodeData) => Promise<void>] {
+export function useResolvedNode(path: string): [NodeData | undefined, (next: NodeData) => Promise<NodeData>] {
   const { data: node } = usePath(path);
   const computed = useComputed(path);
 
