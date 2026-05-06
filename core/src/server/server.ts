@@ -10,9 +10,11 @@ import { nodeHTTPRequestHandler } from '@trpc/server/adapters/node-http';
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { extname, join, resolve } from 'node:path';
+import { TRPCError } from '@trpc/server';
 import { resolveToken } from './auth';
 import { withMounts } from './mount';
 import { withRefIndex } from './refs';
+import { createStreamTokenStore, type StreamTokenStore } from './stream-token';
 import { type CdcRegistry, withSubscriptions } from './sub';
 import { createTreeRouter, type TreeRouter, type TrpcContext } from './trpc';
 import { withMigration } from './migrate';
@@ -33,6 +35,7 @@ export type Pipeline = {
   mountable: Tree;
   watcher: WatchManager;
   router: TreeRouter;
+  streamTokens: StreamTokenStore;
   createContext: (token: string | null) => Promise<TrpcContext>;
 };
 
@@ -50,14 +53,15 @@ export function createPipeline(bootstrap: Tree): Pipeline {
   });
   const { tree, cdc } = withSubscriptions(cached, (e) => watcher.notify(e));
   cdcRef = cdc;
-  const router = createTreeRouter(tree, watcher, undefined, cdc);
+  const streamTokens = createStreamTokenStore();
+  const router = createTreeRouter(tree, watcher, undefined, cdc, streamTokens);
 
   const createContext = async (token: string | null): Promise<TrpcContext> => {
     const session = token ? await resolveToken(mountable, token) : null;
     return { session, token, clientIp: null };
   };
 
-  return { tree, cdc, mountable, watcher, router, createContext };
+  return { tree, cdc, mountable, watcher, router, streamTokens, createContext };
 }
 
 type HttpServerOpts = {
@@ -67,7 +71,7 @@ type HttpServerOpts = {
 
 /** HTTP server on top of an existing pipeline */
 export function createHttpServer(pipeline: Pipeline, opts?: HttpServerOpts): Server {
-  const { tree, mountable, router } = pipeline;
+  const { tree, mountable, router, streamTokens } = pipeline;
   const allowedOrigins = opts?.allowedOrigins
     ?? (process.env.ALLOWED_ORIGINS ?? 'http://localhost:3000').split(',');
   const staticDir = opts?.staticDir
@@ -119,20 +123,25 @@ export function createHttpServer(pipeline: Pipeline, opts?: HttpServerOpts): Ser
       return;
     }
 
-    // Shared context factory — reads token from Authorization header or SSE connectionParams
+    // Trust X-Forwarded-For only behind a known proxy — without TRUST_PROXY, attacker spoofs IP via header.
+    const trustProxy = process.env.TRUST_PROXY === 'true';
+    const xff = trustProxy ? req.headers['x-forwarded-for'] : undefined;
+    const clientIp = (Array.isArray(xff) ? xff[0] : xff)?.split(',')[0].trim()
+      || req.socket.remoteAddress
+      || null;
+
+    // SSE handshake (connectionParams present) accepts ONLY short-lived stream tokens.
+    // Regular HTTP keeps long-lived bearer in Authorization header.
     const createContext = async (opts?: ConnParams): Promise<TrpcContext> => {
+      if (opts?.info?.connectionParams) {
+        const streamToken = opts.info.connectionParams.token;
+        const session = streamToken ? streamTokens.resolve(streamToken) : null;
+        if (!session) throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Stream token required for subscriptions' });
+        return { session, token: null, clientIp };
+      }
       const auth = req.headers.authorization;
-      const token =
-        (typeof auth === 'string' && auth.startsWith('Bearer ') ? auth.slice(7) : null) ??
-        opts?.info?.connectionParams?.token ??
-        null;
+      const token = (typeof auth === 'string' && auth.startsWith('Bearer ') ? auth.slice(7) : null);
       const session = token ? await resolveToken(mountable, token) : null;
-      // Trust X-Forwarded-For only behind a known proxy — without TRUST_PROXY, attacker spoofs IP via header.
-      const trustProxy = process.env.TRUST_PROXY === 'true';
-      const xff = trustProxy ? req.headers['x-forwarded-for'] : undefined;
-      const clientIp = (Array.isArray(xff) ? xff[0] : xff)?.split(',')[0].trim()
-        || req.socket.remoteAddress
-        || null;
       return { session, token, clientIp };
     };
 

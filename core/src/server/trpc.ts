@@ -19,8 +19,10 @@ import {
   setComponent as setComponentOp,
 } from './actions';
 import { buildClaims, type Session, withAcl } from './auth';
+import type { StreamTokenStore } from './stream-token';
 import { agentConnect, devLogin, loginUser, logoutUser, registerUser } from './auth-ops';
 import { OpError } from '#errors';
+import { checkRate } from './rate-limit';
 import { deployPrefab as deployPrefabOp } from './prefab';
 import { type CdcRegistry, type NodeEvent } from './sub';
 import { extractPaths } from './volatile';
@@ -53,7 +55,7 @@ export type TreeRouterOpts = {
 
 const DEFAULT_CLAIMS_TTL_MS = 30_000;
 
-export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: TreeRouterOpts, cdc?: CdcRegistry) {
+export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: TreeRouterOpts, cdc?: CdcRegistry, streamTokens?: StreamTokenStore) {
   const claimsTtlMs = opts?.claimsTtlMs ?? DEFAULT_CLAIMS_TTL_MS;
   const t = initTRPC.context<TrpcContext>().create();
 
@@ -234,7 +236,15 @@ export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: 
 
     logout: authed.mutation(async ({ ctx }) => {
       if (!ctx.session || !ctx.token) return { ok: false };
+      streamTokens?.purgeForUser(ctx.session.userId);
       return logoutUser(baseStore, ctx.token);
+    }),
+
+    mintStreamToken: authed.mutation(({ ctx }) => {
+      if (!ctx.session) throw new OpError('UNAUTHORIZED', 'Authentication required');
+      if (!streamTokens) throw new OpError('NOT_FOUND', 'Stream tokens not configured');
+      checkRate(`mint:${ctx.session.userId}`, 60);
+      return streamTokens.mint(ctx.session);
     }),
 
     agentConnect: base

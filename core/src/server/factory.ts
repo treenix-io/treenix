@@ -94,6 +94,7 @@ export async function treenix(config: TreenixConfig): Promise<TreenixServer> {
     mountable: pipeline.mountable,
     watcher: pipeline.watcher,
     router: pipeline.router,
+    streamTokens: pipeline.streamTokens,
     createContext: pipeline.createContext,
     stop,
 
