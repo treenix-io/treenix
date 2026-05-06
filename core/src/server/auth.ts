@@ -28,7 +28,10 @@ declare module '#core/context' {
 
 // ── Types ──
 
-export type Session = { userId: string; claims?: string[] };
+// Session is open-ended: mods may patch session-node with their own metadata
+// (e.g. taskPath, runPath for workload sessions). resolveToken returns all
+// non-$ fields verbatim so consumers see what was written.
+export type Session = { userId: string; claims?: string[]; [key: string]: unknown };
 
 // Session nodes are stored as regular nodes with extra fields
 type SessionNode = NodeData & { userId: string; createdAt: number; expiresAt: number; claims?: string[] };
@@ -71,7 +74,15 @@ export async function resolveToken(tree: Tree, token: string): Promise<Session |
     await tree.remove(`/auth/sessions/${token}`);
     return null;
   }
-  return { userId: node.userId, ...(node.claims && { claims: node.claims }) };
+  // Spread all non-$ fields — mods write custom metadata (taskPath, runPath, …)
+  // and consumers read them via session.<field>. createdAt/expiresAt come along
+  // as plain fields; harmless and lets observers see TTL state.
+  const session: Session = { userId: node.userId };
+  for (const [k, v] of Object.entries(node)) {
+    if (k.startsWith('$') || k === 'userId') continue;
+    session[k] = v;
+  }
+  return session;
 }
 
 export async function revokeSession(tree: Tree, token: string): Promise<boolean> {

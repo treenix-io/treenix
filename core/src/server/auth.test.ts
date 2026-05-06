@@ -498,6 +498,28 @@ describe('sessions', () => {
     assert.equal(await resolveToken(ss, token), null);
     assert.equal(await revokeSession(ss, token), false);
   });
+
+  it('resolveToken returns custom metadata fields written to session node', async () => {
+    const token = await createSession(ss, 'alice');
+    // Mod patches session-node with arbitrary fields (taskPath, runPath, etc.)
+    await ss.patch(`/auth/sessions/${token}`, [
+      ['a', 'taskPath', '/board/tasks/123'],
+      ['a', 'runPath', '/agents/landing-bot/runs/r-7f2a'],
+    ]);
+    const session = await resolveToken(ss, token) as Record<string, unknown> | null;
+    assert.equal(session?.userId, 'alice');
+    assert.equal(session?.taskPath, '/board/tasks/123');
+    assert.equal(session?.runPath, '/agents/landing-bot/runs/r-7f2a');
+  });
+
+  it('resolveToken does not expose $-prefixed system fields', async () => {
+    const token = await createSession(ss, 'alice');
+    const session = await resolveToken(ss, token) as Record<string, unknown> | null;
+    assert.ok(session);
+    for (const key of Object.keys(session!)) {
+      assert.ok(!key.startsWith('$'), `system field leaked: ${key}`);
+    }
+  });
 });
 
 describe('getChildren truncation', () => {
