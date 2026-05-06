@@ -5,7 +5,7 @@ import { createMemoryTree } from '#tree';
 import { withCache } from '#tree/cache';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
-import { applyTemplate, collectSiblings, createNodeHandle, executeAction, registerBuiltinActions, setComponent } from './actions';
+import { applyTemplate, collectSiblings, createNodeHandle, executeAction, executeStream, registerBuiltinActions, setComponent } from './actions';
 
 // ── Component classes ──
 
@@ -534,6 +534,33 @@ describe('defineComponent', () => {
     await executeAction(tree, '/v3', 'metadata', 'metadata', 'rename', { title: 'new' });
     const result = (await tree.get('/v3'))!;
     assert.equal((result['metadata'] as any).title, 'new');
+  });
+
+  // Codex round 3 #5 regression: streamAction in trpc.ts previously bypassed validateActionArgs.
+  // Refactored to delegate to executeStream — verify executeStream applies the same schema gate.
+  it('executeStream rejects invalid args via validateActionArgs', async () => {
+    class StreamerForTest {
+      async *count(data: { n: number }) {
+        for (let i = 1; i <= data.n; i++) yield { i };
+      }
+    }
+    registerType('test.streamer', StreamerForTest);
+    register('test.streamer', 'schema', () => ({
+      $id: 'test.streamer', title: 'StreamerForTest', type: 'object' as const, properties: {},
+      methods: {
+        count: { arguments: [{ name: 'data', type: 'object', properties: { n: { type: 'number' } }, required: ['n'] }], streaming: true },
+      },
+    }));
+
+    const tree = createMemoryTree();
+    await tree.set(createNode('/sx', 'page', {}, { str: { $type: 'test.streamer' } }));
+
+    await assert.rejects(
+      (async () => {
+        for await (const _ of executeStream(tree, '/sx', undefined, 'str', 'count', { n: 'not-a-number' })) { /* drain */ }
+      })(),
+      (err: any) => err.code === 'BAD_REQUEST',
+    );
   });
 });
 

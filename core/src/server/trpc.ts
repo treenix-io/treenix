@@ -2,7 +2,7 @@
 // Thin transport wrapper over shared ops (actions.ts).
 // Responsibilities: input validation (Zod), error mapping (OpError → TRPCError), watch wiring.
 
-import { getComponentField, isRef, type NodeData, resolve, S } from '#core';
+import { isRef, type NodeData, S } from '#core';
 import { assertSafePath } from '#core/path';
 import { createTreeP } from '#protocol/treep';
 import type { Tree } from '#tree';
@@ -12,10 +12,9 @@ import { observable } from '@trpc/server/observable';
 import type {} from '@trpc/server/unstable-core-do-not-import';
 import { z } from 'zod';
 import {
-  type ActionCtx,
   applyTemplate as applyTemplateOp,
   executeAction,
-  serverNodeHandle,
+  executeStream,
   setComponent as setComponentOp,
 } from './actions';
 import { buildClaims, type Session, withAcl } from './auth';
@@ -272,46 +271,15 @@ export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: 
         return observable<unknown>((emit) => {
           const ac = new AbortController();
           (async () => {
-            const node = await ctx.tree.get(input.path);
-            if (!node) {
-              emit.error(new OpError('NOT_FOUND', `Node not found: ${input.path}`));
-              return;
-            }
-
-            // Resolve handler: key → type lookup, type scan, node type, component scan
-            let handler: any;
-            let comp: { $type: string; [k: string]: unknown } | undefined;
-
-            const [found] = getComponentField(node, input.type ?? 't.any', input.key) ?? [];
-            if (input.key && !found) {
-              emit.error(new OpError('NOT_FOUND', `Component "${input.key}" not found`));
-              return;
-            }
-            if (input.type && !found) {
-              emit.error(new OpError('NOT_FOUND', `Component "${input.type}" not found`));
-              return;
-            }
-            comp = found as typeof comp;
-            handler = resolve((comp ?? node).$type, `action:${input.action}`);
-
-            if (!handler) {
-              emit.error(new OpError('BAD_REQUEST', `No action "${input.action}" for type "${node.$type}"`));
-              return;
-            }
-            const actx: ActionCtx = { node, comp, tree: ctx.tree, signal: ac.signal, nc: serverNodeHandle(ctx.tree), userId: ctx.session?.userId ?? null, claims: ctx.claims };
-            const result = handler(actx, input.data);
-            if (
-              result &&
-              typeof result === 'object' &&
-              Symbol.asyncIterator in (result as object)
-            ) {
-              for await (const item of result as AsyncIterable<unknown>) {
-                if (ac.signal.aborted) break;
-                emit.next(item);
-              }
-            } else {
-              const resolved = await result;
-              emit.next(resolved);
+            // Delegate to executeStream — shares resolveActionHandler + validateActionArgs with executeAction.
+            // Manual handler loop here previously bypassed schema validation (allowed arbitrary `data` shape).
+            const gen = executeStream(
+              ctx.tree, input.path, input.type, input.key, input.action, input.data, ac.signal,
+              { userId: ctx.session?.userId ?? null, claims: ctx.claims },
+            );
+            for await (const item of gen) {
+              if (ac.signal.aborted) break;
+              emit.next(item);
             }
             emit.complete();
           })().catch((err) => {
