@@ -4,32 +4,17 @@
 // - remove event ACL: parent-based permission check for deleted nodes
 // - F10: set event uses stored node $owner/$acl, not writer-supplied payload
 
-import { createNode, isComponent, R, W, register } from '#core';
-import { componentPerm, resolvePermission } from './auth';
+import { createNode, R, W, register } from '#core';
+import { resolvePermission } from './auth';
 import { createMemoryTree } from '#tree';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { Operation } from 'fast-json-patch';
 import type { NodeData } from '#core';
-import { createFilteredPush } from './watch-filter';
+import { createFilteredPush, filterPatches } from './watch-filter';
 import type { NodeEvent } from './sub';
 
-// ── filterPatches (extracted logic, tested directly) ──
-
-function filterPatches(
-  patches: Operation[],
-  node: NodeData,
-  userId: string | null,
-  claims: string[],
-): Operation[] {
-  return patches.filter(op => {
-    const seg = op.path.split('/')[1];
-    if (!seg || seg.startsWith('$')) return true;
-    const val = node[seg];
-    if (!isComponent(val)) return true;
-    return !!(componentPerm(val, userId, claims, node.$owner) & R);
-  });
-}
+// ── filterPatches (real implementation, tested directly) ──
 
 describe('filterPatches — component-level ACL on patch events', () => {
   // Node with a public component and a restricted component
@@ -50,16 +35,52 @@ describe('filterPatches — component-level ACL on patch events', () => {
     const patches: Operation[] = [
       { op: 'replace', path: '/title', value: 'Updated' },
     ];
-    const filtered = filterPatches(patches, node, 'bob', ['authenticated', 'u:bob']);
+    const filtered = filterPatches(patches, node, 'bob', ['authenticated', 'u:bob'], false);
     assert.equal(filtered.length, 1);
     assert.equal(filtered[0].path, '/title');
   });
 
-  it('passes ops targeting system fields ($rev, $acl)', () => {
+  it('passes $rev (public version bump) regardless of A', () => {
     const patches: Operation[] = [
       { op: 'replace', path: '/$rev', value: 5 },
     ];
-    const filtered = filterPatches(patches, node, 'bob', ['authenticated', 'u:bob']);
+    const filtered = filterPatches(patches, node, 'bob', ['authenticated', 'u:bob'], false);
+    assert.equal(filtered.length, 1);
+  });
+
+  it('drops $acl/$owner patches for non-admin (R but not A)', () => {
+    const patches: Operation[] = [
+      { op: 'replace', path: '/$acl', value: [] },
+      { op: 'replace', path: '/$owner', value: 'mallory' },
+      { op: 'replace', path: '/$secret', value: 'leak' },
+    ];
+    const filtered = filterPatches(patches, node, 'bob', ['authenticated', 'u:bob'], false);
+    assert.equal(filtered.length, 0, '$acl/$owner/$secret leak ACL state to non-admin viewers');
+  });
+
+  it('passes $acl/$owner patches for admin (has A)', () => {
+    const patches: Operation[] = [
+      { op: 'replace', path: '/$acl', value: [] },
+      { op: 'replace', path: '/$owner', value: 'newuser' },
+    ];
+    const filtered = filterPatches(patches, node, 'admin-user', ['admin', 'authenticated'], true);
+    assert.equal(filtered.length, 2);
+  });
+
+  it('drops patch for component absent in stored — fail closed (could be removed restricted comp)', () => {
+    const patches: Operation[] = [
+      { op: 'remove', path: '/missingComp' },
+    ];
+    // missingComp not in stored node — without an oldNode snapshot, treat as restricted unless caller has A.
+    const filtered = filterPatches(patches, node, 'bob', ['authenticated', 'u:bob'], false);
+    assert.equal(filtered.length, 0);
+  });
+
+  it('passes patch for absent component when caller has A', () => {
+    const patches: Operation[] = [
+      { op: 'remove', path: '/missingComp' },
+    ];
+    const filtered = filterPatches(patches, node, 'admin-user', ['admin', 'authenticated'], true);
     assert.equal(filtered.length, 1);
   });
 
@@ -67,7 +88,7 @@ describe('filterPatches — component-level ACL on patch events', () => {
     const patches: Operation[] = [
       { op: 'replace', path: '/publicComp/data', value: 'new' },
     ];
-    const filtered = filterPatches(patches, node, 'bob', ['authenticated', 'u:bob']);
+    const filtered = filterPatches(patches, node, 'bob', ['authenticated', 'u:bob'], false);
     assert.equal(filtered.length, 1);
   });
 
@@ -76,7 +97,7 @@ describe('filterPatches — component-level ACL on patch events', () => {
       { op: 'replace', path: '/secretComp/apiKey', value: 'sk-new' },
     ];
     // bob is authenticated but secretComp denies authenticated (p=0), only admin gets R
-    const filtered = filterPatches(patches, node, 'bob', ['authenticated', 'u:bob']);
+    const filtered = filterPatches(patches, node, 'bob', ['authenticated', 'u:bob'], false);
     assert.equal(filtered.length, 0);
   });
 
@@ -84,7 +105,7 @@ describe('filterPatches — component-level ACL on patch events', () => {
     const patches: Operation[] = [
       { op: 'replace', path: '/secretComp/apiKey', value: 'sk-new' },
     ];
-    const filtered = filterPatches(patches, node, 'admin-user', ['authenticated', 'admin', 'u:admin-user']);
+    const filtered = filterPatches(patches, node, 'admin-user', ['authenticated', 'admin', 'u:admin-user'], true);
     assert.equal(filtered.length, 1);
   });
 
@@ -94,7 +115,7 @@ describe('filterPatches — component-level ACL on patch events', () => {
       { op: 'replace', path: '/publicComp/data', value: 'new' },
       { op: 'replace', path: '/secretComp/apiKey', value: 'sk-leaked' },
     ];
-    const filtered = filterPatches(patches, node, 'bob', ['authenticated', 'u:bob']);
+    const filtered = filterPatches(patches, node, 'bob', ['authenticated', 'u:bob'], false);
     assert.equal(filtered.length, 2);
     assert.ok(filtered.every(p => !p.path.startsWith('/secretComp')));
   });
@@ -104,18 +125,17 @@ describe('filterPatches — component-level ACL on patch events', () => {
       { op: 'replace', path: '/secretComp/apiKey', value: 'sk-new' },
       { op: 'add', path: '/secretComp/secret2', value: 'hidden' },
     ];
-    const filtered = filterPatches(patches, node, 'bob', ['authenticated', 'u:bob']);
+    const filtered = filterPatches(patches, node, 'bob', ['authenticated', 'u:bob'], false);
     assert.equal(filtered.length, 0);
     // Caller should skip emit entirely when filtered.length === 0
   });
 
-  it('handles root-level patch path ("/")', () => {
+  it('drops root-level patch path ("/") — replaces whole node, must not bypass ACL', () => {
     const patches: Operation[] = [
       { op: 'replace', path: '/', value: {} },
     ];
-    // seg = '' after split('/')[1] → !seg guard → passes through
-    const filtered = filterPatches(patches, node, 'bob', ['authenticated', 'u:bob']);
-    assert.equal(filtered.length, 1);
+    const filtered = filterPatches(patches, node, 'bob', ['authenticated', 'u:bob'], false);
+    assert.equal(filtered.length, 0);
   });
 });
 

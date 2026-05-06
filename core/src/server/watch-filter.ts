@@ -2,7 +2,7 @@
 // Sits between WatchManager and any transport (tRPC, HTTP, WS).
 // Ensures users only receive events they're authorized to see.
 
-import { isComponent, type NodeData, R } from '#core';
+import { A, isComponent, type NodeData, R } from '#core';
 import type { Tree } from '#tree';
 import type { Operation } from 'fast-json-patch';
 import { buildClaims, componentPerm, resolvePermission, stripComponents } from './auth';
@@ -19,17 +19,27 @@ const DEFAULT_CLAIMS_TTL_MS = 30_000;
 /**
  * Filter RFC 6902 patch operations, removing ops that target restricted components.
  * Patch paths are like "/componentKey/field" — first segment is the node key.
+ * `node` is the post-write stored node; `hasNodeA` is the caller's A bit on that node.
  */
 export function filterPatches(
   patches: Operation[],
   node: NodeData,
   userId: string | null,
   claims: string[],
+  hasNodeA: boolean,
 ): Operation[] {
   return patches.filter(op => {
     const seg = op.path.split('/')[1];
-    if (!seg || seg.startsWith('$')) return true;
+    if (!seg) return false; // root-level op — drop
+    if (seg.startsWith('$')) {
+      // Exact /$rev replace is a public version bump; anything deeper or any other $-prefixed
+      // path ($acl/$owner/$refs/$secret/etc., or /$rev/nested) requires A.
+      return op.path === '/$rev' || hasNodeA;
+    }
     const val = node[seg];
+    // Component absent in stored — either removed or never existed. Without an oldNode snapshot
+    // we cannot tell if it was restricted; fail closed unless caller has A.
+    if (val === undefined) return hasNodeA;
     if (!isComponent(val)) return true;
     return !!(componentPerm(val, userId, claims, node.$owner) & R);
   });
@@ -96,9 +106,11 @@ async function filterEvent(
     const { $path, ...body } = stripped;
     push({ ...event, node: body });
   } else if (event.type === 'patch' && event.patches.length > 0) {
+    // Fail closed if stored node disappeared mid-emit — never push raw writer-supplied patches without filtering.
     const node = await store.get(event.path);
-    if (!node) { push(event); return; }
-    const filtered = filterPatches(event.patches, node, userId, claims);
+    if (!node) return;
+    const hasNodeA = !!(perm & A);
+    const filtered = filterPatches(event.patches, node, userId, claims, hasNodeA);
     if (filtered.length === 0) return;
     push(filtered.length === event.patches.length ? event : { ...event, patches: filtered });
   } else {
