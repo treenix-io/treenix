@@ -482,8 +482,9 @@ export async function applyTemplate(
       try { await tree.set(orig); } catch (e) { rollbackErrs.push(e); }
     }
     if (rollbackErrs.length) {
+      const rbMsgs = rollbackErrs.map(e => (e as Error)?.message ?? String(e)).join('; ');
       throw new OpError('CONFLICT',
-        `applyTemplate rollback failed (${rollbackErrs.length} error(s)) after primary error: ${(err as Error)?.message ?? String(err)}`);
+        `applyTemplate rollback failed (${rollbackErrs.length} error(s) [${rbMsgs}]) after primary error: ${(err as Error)?.message ?? String(err)}`);
     }
     throw err;
   }
