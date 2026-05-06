@@ -17,15 +17,18 @@ export type TrpcTransportOpts = {
 export function createTrpcTransport(opts: TrpcTransportOpts): TreenixClient & { trpc: ReturnType<typeof createTRPCClient<TreeRouter>> } {
   const getToken = opts.getToken ?? (() => opts.token ?? null);
 
-  const trpc = createTRPCClient<TreeRouter>({
+  // Forward declaration — closure captures the binding, called only at subscribe time when trpc is defined.
+  let trpc!: ReturnType<typeof createTRPCClient<TreeRouter>>;
+  trpc = createTRPCClient<TreeRouter>({
     links: [
       splitLink({
         condition: (op) => op.type === 'subscription',
         true: httpSubscriptionLink({
           url: `${opts.url}/trpc/`,
-          connectionParams: () => {
-            const t = getToken();
-            return t ? { token: t } : {};
+          // Mint a short-lived stream token via authed mutation; called on every (re)connect.
+          connectionParams: async () => {
+            const { token } = await trpc.mintStreamToken.mutate();
+            return { token };
           },
         }),
         false: httpBatchLink({

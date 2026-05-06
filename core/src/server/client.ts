@@ -46,17 +46,23 @@ function createIsolatedEventSource() {
 
 export function createClient(url: string, token?: string | null): TRPCClient<TreeRouter> {
   const headers = token ? { Authorization: `Bearer ${token}` } : {};
-  return createTRPCClient<TreeRouter>({
+  let trpc!: TRPCClient<TreeRouter>;
+  trpc = createTRPCClient<TreeRouter>({
     links: [
       splitLink({
         condition: (op) => op.type === 'subscription',
         true: httpSubscriptionLink({
           url,
           EventSource: createIsolatedEventSource() as any,
-          connectionParams: () => (token ? { token } : {}),
+          // Mint short-lived stream token; called on every (re)connect.
+          connectionParams: async () => {
+            const { token: streamToken } = await trpc.mintStreamToken.mutate();
+            return { token: streamToken };
+          },
         }),
         false: httpBatchLink({ url, maxURLLength: 2048, headers: () => headers }),
       }),
     ],
   });
+  return trpc;
 }
