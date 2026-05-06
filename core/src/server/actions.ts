@@ -56,6 +56,8 @@ export type ActionCtx = {
   deps?: ResolvedDeps;
   /** User who triggered this action (null for system/anonymous) */
   userId?: string | null;
+  /** Caller's claims (e.g. 'admins', 'authenticated'). Empty/undefined for system. */
+  claims?: string[];
 };
 
 // ── Client proxy ──
@@ -305,7 +307,7 @@ export async function executeAction<T = unknown>(
   componentKey: string | undefined,
   action: string,
   data?: unknown,
-  opts?: { userId?: string | null },
+  opts?: { userId?: string | null; claims?: string[] },
 ): Promise<T> {
   return lockAction(path, async () => {
   const { node, handler, type, deps, fieldKey } = await resolveActionHandler(
@@ -343,7 +345,7 @@ export async function executeAction<T = unknown>(
   }
 
   const nc = serverNodeHandle(tree);
-  const actx: ActionCtx = { node: draft, comp: draftComp, deps, tree, signal: AbortSignal.timeout(ACTION_TIMEOUT), nc, userId: opts?.userId };
+  const actx: ActionCtx = { node: draft, comp: draftComp, deps, tree, signal: AbortSignal.timeout(ACTION_TIMEOUT), nc, userId: opts?.userId, claims: opts?.claims };
   const result = await handler(actx, data ?? {});
 
   let patches: Patch[] = [];
@@ -375,7 +377,7 @@ export async function* executeStream(
   action: string,
   data?: unknown,
   signal?: AbortSignal,
-  opts?: { userId?: string | null },
+  opts?: { userId?: string | null; claims?: string[] },
 ): AsyncGenerator<unknown> {
   const { node, handler, type, comp, deps } = await resolveActionHandler(
     tree, path, componentType, componentKey, action,
@@ -385,7 +387,7 @@ export async function* executeStream(
 
   // comp is already node[fieldKey] from resolution — no Immer draft needed for generators
   const nc = serverNodeHandle(tree);
-  const actx: ActionCtx = { node, comp, deps, tree, signal: signal ?? AbortSignal.timeout(STREAM_TIMEOUT), nc, userId: opts?.userId };
+  const actx: ActionCtx = { node, comp, deps, tree, signal: signal ?? AbortSignal.timeout(STREAM_TIMEOUT), nc, userId: opts?.userId, claims: opts?.claims };
   const result = handler(actx, data ?? {});
   if (!result || typeof (result as any)[Symbol.asyncIterator] !== 'function')
     throw new OpError('BAD_REQUEST', `Action "${action}" is not a generator`);

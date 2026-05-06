@@ -76,8 +76,8 @@ export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: 
     const claims = ctx.session?.claims ?? (userId ? await buildClaims(baseStore, userId) : ['public']);
     const tree = withAcl(baseStore, userId, claims);
     const tp = createTreeP(tree, (path, key, action, data) =>
-      executeAction(tree, path, undefined, key, action, data, { userId }));
-    return next({ ctx: { ...ctx, tree, tp } });
+      executeAction(tree, path, undefined, key, action, data, { userId, claims }));
+    return next({ ctx: { ...ctx, tree, tp, claims } });
   });
 
   return t.router({
@@ -288,7 +288,7 @@ export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: 
               emit.error(new OpError('BAD_REQUEST', `No action "${input.action}" for type "${node.$type}"`));
               return;
             }
-            const actx: ActionCtx = { node, comp, tree: ctx.tree, signal: ac.signal, nc: serverNodeHandle(ctx.tree), userId: ctx.session?.userId ?? null };
+            const actx: ActionCtx = { node, comp, tree: ctx.tree, signal: ac.signal, nc: serverNodeHandle(ctx.tree), userId: ctx.session?.userId ?? null, claims: ctx.claims };
             const result = handler(actx, input.data);
             if (
               result &&
