@@ -437,6 +437,40 @@ describe('e2e: tRPC over HTTP', () => {
       );
     });
 
+    // F9 (codex H1 regression): subscription without connectionParams must NOT fall through to long-lived bearer auth.
+    // Discriminator is op.type==='subscription', not connectionParams presence.
+    it('rejects subscription without connectionParams (bearer-only handshake)', async () => {
+      const pub = createClient(url);
+      const reg = await pub.register.mutate({ userId: 'sse-noparams', password: 'pass' });
+
+      const { createTRPCClient, httpBatchLink, httpSubscriptionLink, splitLink } = await import('@trpc/client');
+      const { EventSource: BaseEventSource } = await import('eventsource');
+      const noParamsClient = createTRPCClient<TreeRouter>({
+        links: [
+          splitLink({
+            condition: (op) => op.type === 'subscription',
+            true: httpSubscriptionLink({
+              url,
+              EventSource: BaseEventSource as unknown as typeof globalThis.EventSource,
+              // connectionParams intentionally omitted — pre-H1 this fell through to bearer auth.
+            }),
+            false: httpBatchLink({ url, headers: () => ({ Authorization: `Bearer ${reg.token}` }) }),
+          }),
+        ],
+      });
+
+      await assert.rejects(
+        new Promise((resolve, reject) => {
+          const sub = noParamsClient.events.subscribe(undefined, {
+            onData: () => {},
+            onError: (e: unknown) => { sub.unsubscribe(); reject(e); },
+            onComplete: () => resolve(undefined),
+          });
+        }),
+        (e: unknown) => /UNAUTHORIZED|Stream token/i.test(String((e as { message?: string })?.message ?? e)),
+      );
+    });
+
     // F9: a freshly-minted stream token works for the SSE handshake.
     it('accepts a freshly-minted stream token', async () => {
       const pub = createClient(url);
