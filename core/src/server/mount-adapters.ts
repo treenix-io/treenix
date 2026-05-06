@@ -125,13 +125,25 @@ const PRIVATE_HOST_RE = /^(?:localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\
 let _allowPrivateUrls = false;
 export function setAllowPrivateUrls(v: boolean) { _allowPrivateUrls = v; }
 
+// R4-MOUNT-2: scrub userinfo (and querystring) from URLs before they appear in error messages or logs.
+// Operators commonly paste credentials as `https://user:TOKEN@host/`; without scrubbing, the token
+// reaches downstream callers via tRPC error propagation.
+export function safeUrlForLog(raw: string): string {
+  try {
+    const u = new URL(raw);
+    return `${u.protocol}//${u.host}${u.pathname}`;
+  } catch {
+    return '<invalid-url>';
+  }
+}
+
 register(MountTreeTrpc, 'mount', async (mount, ctx) => {
   if (!mount.url) throw new Error('t.mount.trpc: url required');
   try {
     const host = new URL(mount.url).host;
     if (!_allowPrivateUrls && PRIVATE_HOST_RE.test(host)) throw new Error(`t.mount.trpc: private/internal URL denied: ${host}`);
   } catch (e) {
-    if (e instanceof TypeError) throw new Error(`t.mount.trpc: invalid URL: ${mount.url}`);
+    if (e instanceof TypeError) throw new Error(`t.mount.trpc: invalid URL: ${safeUrlForLog(mount.url)}`);
     throw e;
   }
   const { tree } = createTrpcTransport({ url: mount.url, token: mount.token || undefined });
