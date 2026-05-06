@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Page metadata for SSR. Title required; everything else optional.",
   "properties": {
     "title": {
       "type": "string",

@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Human decision record for an agent tool call that requires approval.",
   "properties": {
     "agentPath": {
       "type": "string",

@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Send file — deliver photo/document/video/audio to chat",
   "properties": {
     "fileId": {
       "type": "string",

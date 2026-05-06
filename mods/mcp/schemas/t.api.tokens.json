@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Server-side registry for creating and revoking machine credentials.",
   "properties": {},
   "methods": {
     "create": {

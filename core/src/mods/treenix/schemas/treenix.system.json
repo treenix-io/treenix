@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "description": "System actions — type discovery, view compilation, prefab deployment",
   "properties": {},
   "methods": {
     "catalog": {

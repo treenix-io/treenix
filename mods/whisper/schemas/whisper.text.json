@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Transcription result — recognized text content",
   "properties": {
     "content": {
       "type": "string",

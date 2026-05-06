@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "User conversation state — session data, history, pending callbacks",
   "properties": {
     "tid": {
       "type": "number",

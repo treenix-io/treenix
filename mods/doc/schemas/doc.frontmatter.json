@@ -1,5 +1,7 @@
 {
   "type": "object",
+  "title": "YAML frontmatter from a markdown file. Known keys are typed; arbitrary keys",
+  "description": "preserved in `extra` so we round-trip third-party SSG conventions losslessly.",
   "properties": {
     "title": {
       "type": "string",

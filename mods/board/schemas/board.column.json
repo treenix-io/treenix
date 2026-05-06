@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Kanban column — label + color + sort order. Query mount provides filtered tasks.",
   "properties": {
     "label": {
       "type": "string",

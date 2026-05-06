@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Reusable prompt template for quick task creation",
   "properties": {
     "name": {
       "type": "string",

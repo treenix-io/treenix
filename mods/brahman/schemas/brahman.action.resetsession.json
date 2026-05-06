@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Reset session — clear all user session data",
   "properties": {},
   "methods": {
     "run": {

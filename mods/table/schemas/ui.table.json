@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Table view — paginates children, auto-columns from schema, per-column filters",
   "properties": {
     "displayType": {
       "type": "string",

@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Home screen with icon grid + widgets. Layout via react-grid-layout.",
   "properties": {
     "columns": {
       "type": "number",

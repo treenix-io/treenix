@@ -34,7 +34,10 @@ enum Direction {
   West = 'W',
 }
 
-/** A complex widget for testing schema extraction */
+/**
+ * A complex widget for testing schema extraction.
+ * Covers class, property, and method metadata used by the catalog.
+ */
 class SchemaTestWidget {
   // Primitives (inferred from initializer)
   title = '';
@@ -195,3 +198,10 @@ class SchemaTestWidget {
 }
 
 registerType('test.schema-widget', SchemaTestWidget);
+
+/** Exported class fixture for JSDoc extraction. */
+export class ExportedSchemaTestWidget {
+  name = '';
+}
+
+registerType('test.exported-schema-widget', ExportedSchemaTestWidget);

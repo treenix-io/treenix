@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "3D Light — light source",
   "properties": {
     "kind": {
       "type": "string",

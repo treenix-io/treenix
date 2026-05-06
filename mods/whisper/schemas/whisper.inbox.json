@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Bridge: auto-send whisper transcriptions to a task inbox",
   "properties": {
     "source": {
       "type": "string",

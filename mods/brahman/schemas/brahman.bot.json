@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Telegram bot instance — token, proxy, language, maintenance",
   "properties": {
     "token": {
       "type": "string",

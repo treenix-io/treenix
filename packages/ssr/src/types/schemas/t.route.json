@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Routing hint. Attach to a /sys/routes/* node.",
   "properties": {
     "wildcard": {
       "type": "boolean",

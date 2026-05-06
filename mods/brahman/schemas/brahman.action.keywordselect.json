@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Keyword matcher — select response based on text keywords",
   "properties": {
     "textFrom": {
       "type": "string",

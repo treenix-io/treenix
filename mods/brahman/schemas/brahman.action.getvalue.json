@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Read session value — extract data from user session",
   "properties": {
     "path": {
       "type": "string",

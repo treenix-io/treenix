@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Set user tag — assign key-value metadata to user",
   "properties": {
     "tag": {
       "type": "string",

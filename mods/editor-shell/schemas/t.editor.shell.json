@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Admin shell route node.",
   "properties": {},
   "$id": "t.editor.shell",
   "$schema": "http://json-schema.org/draft-07/schema#"

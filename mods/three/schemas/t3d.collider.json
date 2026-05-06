@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "3D Collider — collision shape",
   "properties": {
     "shape": {
       "type": "string",

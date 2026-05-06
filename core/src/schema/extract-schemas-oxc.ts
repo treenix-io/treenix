@@ -23,14 +23,17 @@ type Comment = { type: string; value: string; start: number; end: number };
 // ── JSDoc ──
 
 // Parse JSDoc comment body into a tag map.
-// Line-oriented: first non-tag line becomes the implicit title (matches prior
-// behavior for multi-line doc blocks). Within a line we also parse multiple
-// inline tags: `@title Foo @format bar` yields both title and format.
+// Line-oriented: first non-tag line becomes the implicit title. Later prose
+// becomes description unless an explicit @description tag is present. Within a
+// line we also parse multiple inline tags: `@title Foo @format bar` yields both
+// title and format.
 // Tag boundary = start-of-line or whitespace followed by `@word`, so that
 // `user@example.com` inside a tag value is NOT treated as a new tag.
 function parseJSDoc(raw: string): Record<string, string> {
   const result: Record<string, string> = {};
   if (!raw) return result;
+  const plainDescriptionParts: string[] = [];
+  let hasExplicitDescription = false;
 
   const lines = raw
     .replace(/^\s*\*\s?/gm, '')
@@ -50,18 +53,31 @@ function parseJSDoc(raw: string): Record<string, string> {
 
     if (hits.length === 0) {
       if (!result.title) result.title = line;
+      else plainDescriptionParts.push(line);
       continue;
     }
 
     // Text before the first tag on this line → implicit title (first wins).
     const head = line.slice(0, hits[0].idx).trim();
-    if (head && !result.title) result.title = head;
+    if (head) {
+      if (!result.title) result.title = head;
+      else plainDescriptionParts.push(head);
+    }
 
     for (let i = 0; i < hits.length; i++) {
       const { name, valueStart } = hits[i];
       const end = i + 1 < hits.length ? hits[i + 1].idx : line.length;
-      result[name] = line.slice(valueStart, end).trim();
+      const value = line.slice(valueStart, end).trim();
+      if (name === 'description') hasExplicitDescription = true;
+      result[name] = value;
     }
+  }
+
+  if (!hasExplicitDescription && plainDescriptionParts.length) {
+    result.description = plainDescriptionParts.join(' ');
+  }
+  if (result.description === result.title) {
+    delete result.description;
   }
 
   return result;
@@ -74,7 +90,20 @@ function buildJSDocMap(comments: Comment[], source: string): Map<number, Record<
     let pos = c.end;
     while (pos < source.length && /\s/.test(source[pos])) pos++;
     const doc = parseJSDoc(c.value);
-    if (Object.keys(doc).length) map.set(pos, doc);
+    if (!Object.keys(doc).length) continue;
+    map.set(pos, doc);
+
+    // `export class Foo` often reports the ClassDeclaration start at `class`,
+    // while the JSDoc naturally points at `export`. Map both positions.
+    let classPos = pos;
+    while (true) {
+      while (classPos < source.length && /\s/.test(source[classPos])) classPos++;
+      const keyword = /^(export|default|declare|abstract)\b/.exec(source.slice(classPos));
+      if (!keyword) break;
+      classPos += keyword[0].length;
+    }
+    while (classPos < source.length && /\s/.test(source[classPos])) classPos++;
+    if (source.startsWith('class', classPos)) map.set(classPos, doc);
   }
   return map;
 }
@@ -575,10 +604,37 @@ function findExternalActions(ast: N, fileName: string): Map<string, ExternalActi
 
 // ── Schema generation ──
 
+function buildClassTypesByFile(entries: ComponentEntry[]): Map<string, Map<string, string>> {
+  const byFile = new Map<string, Map<string, string>>();
+  for (const entry of entries) {
+    let fileTypes = byFile.get(entry.fileName);
+    if (!fileTypes) {
+      fileTypes = new Map();
+      byFile.set(entry.fileName, fileTypes);
+    }
+    fileTypes.set(entry.className, entry.typeName);
+  }
+  return byFile;
+}
+
+function resolveRegisteredClassType(
+  className: string,
+  currentFile: string,
+  classTypesByFile: Map<string, Map<string, string>>,
+  importsByFile: Map<string, Map<string, ImportEntry>>,
+): string | undefined {
+  const localType = classTypesByFile.get(currentFile)?.get(className);
+  if (localType) return localType;
+
+  const imp = importsByFile.get(currentFile)?.get(className);
+  if (!imp) return undefined;
+  return classTypesByFile.get(imp.sourceFile)?.get(imp.importedName);
+}
+
 function generateClassSchema(
   classNode: N,
   jsDocMap: Map<number, Record<string, string>>,
-  classToType: Map<string, string>,
+  classTypesByFile: Map<string, Map<string, string>>,
   currentFile: string,
   aliasesByFile: Map<string, Map<string, N>>,
   enumsByFile: Map<string, Map<string, N>>,
@@ -601,17 +657,17 @@ function generateClassSchema(
       const doc = jsDocMap.get(member.start);
       if (doc?.hidden !== undefined) continue;
       const ta = member.typeAnnotation?.typeAnnotation;
+      const refType =
+        ta?.type === 'TSTypeReference' && ta.typeName?.name
+          ? resolveRegisteredClassType(ta.typeName.name, currentFile, classTypesByFile, importsByFile)
+          : undefined;
 
-      // Registered component class → refType
-      if (
-        ta?.type === 'TSTypeReference' &&
-        ta.typeName?.name &&
-        classToType.has(ta.typeName.name)
-      ) {
+      // Registered component class → path ref to that registered type.
+      if (refType) {
         properties[name] = {
           type: 'string',
           format: 'path',
-          refType: classToType.get(ta.typeName.name),
+          refType,
         };
       } else {
         properties[name] = ta ? typeToSchema(ta, ctx) : typeFromInit(member.value);
@@ -761,19 +817,7 @@ export async function generateSchemas(dirs: string[]): Promise<void> {
     }
   }
 
-  // classToType is kept global because class references (e.g. `linked?: OtherWidget`) are
-  // commonly cross-file via ES imports. Detect name collisions and warn — if two classes
-  // share a name but register different type names, refType resolution is ambiguous.
-  const classToType = new Map<string, string>();
-  for (const e of allEntries) {
-    const prev = classToType.get(e.className);
-    if (prev && prev !== e.typeName) {
-      console.warn(
-        `[schema/oxc] class name collision: "${e.className}" registered as both "${prev}" and "${e.typeName}" — refType lookups may be ambiguous`,
-      );
-    }
-    classToType.set(e.className, e.typeName);
-  }
+  const classTypesByFile = buildClassTypesByFile(allEntries);
 
   const generated = new Set<string>();
   let updated = 0;
@@ -787,7 +831,7 @@ export async function generateSchemas(dirs: string[]): Promise<void> {
     const schema = generateClassSchema(
       classInfo.node,
       classInfo.jsDocMap,
-      classToType,
+      classTypesByFile,
       entry.fileName,
       aliasesByFile,
       enumsByFile,

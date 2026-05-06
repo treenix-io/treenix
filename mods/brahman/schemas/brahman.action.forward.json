@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Forward message — relay message to another chat",
   "properties": {
     "msgIdFrom": {
       "type": "string",

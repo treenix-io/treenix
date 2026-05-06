@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Approval inbox — field-level ref points to the approvals dir",
   "properties": {
     "source": {
       "type": "object",

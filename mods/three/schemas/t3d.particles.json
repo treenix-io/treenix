@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "3D Particles — particle emitter",
   "properties": {
     "count": {
       "type": "number",

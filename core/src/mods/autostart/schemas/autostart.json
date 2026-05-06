@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Service lifecycle manager — start/stop services via ref children",
   "properties": {},
   "methods": {
     "start": {

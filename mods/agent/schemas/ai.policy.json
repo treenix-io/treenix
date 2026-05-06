@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Persistent tool policy — lives on agent (per-agent) or /guardian (global)",
   "properties": {
     "allow": {
       "type": "array",

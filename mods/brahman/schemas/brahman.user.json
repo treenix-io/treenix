@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Bot user profile — Telegram identity, language, tags, ban status",
   "properties": {
     "tid": {
       "type": "number",

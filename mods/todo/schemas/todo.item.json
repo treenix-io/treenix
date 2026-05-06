@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Single checklist item with a title and completion flag.",
   "properties": {
     "title": {
       "type": "string",

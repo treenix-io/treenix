@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Concurrency pool — lives on /agents node",
   "properties": {
     "maxConcurrent": {
       "type": "number",

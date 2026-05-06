@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Remove message — delete bot message from chat",
   "properties": {},
   "methods": {
     "run": {

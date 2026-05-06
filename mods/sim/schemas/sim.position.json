@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Agent 2D map position and interaction radius",
   "properties": {
     "x": {
       "type": "number",

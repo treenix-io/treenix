@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Current simulation round — phase and event log",
   "properties": {
     "current": {
       "type": "number",

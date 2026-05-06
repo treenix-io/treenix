@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Broadcast message — send action to users matching tag filter",
   "properties": {
     "userTags": {
       "type": "array",

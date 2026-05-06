@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Audio file metadata — filename, size, MIME type",
   "properties": {
     "filename": {
       "type": "string",

@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Transcription metadata — model, language, duration, segments",
   "properties": {
     "model": {
       "type": "string",

@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Language selector — let user choose interface language",
   "properties": {
     "text": {
       "type": "object",

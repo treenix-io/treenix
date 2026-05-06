@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "3D Script — client-side update loop",
   "properties": {
     "code": {
       "type": "string",

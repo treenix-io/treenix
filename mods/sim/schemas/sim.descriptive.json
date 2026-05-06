@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Agent identity — name, icon, description",
   "properties": {
     "name": {
       "type": "string",

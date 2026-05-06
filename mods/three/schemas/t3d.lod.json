@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "3D LOD — level of detail",
   "properties": {
     "d0": {
       "type": "number",

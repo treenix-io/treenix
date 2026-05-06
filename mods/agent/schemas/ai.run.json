@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "One Claude invocation — lives at /agents/{name}/runs/{id}",
   "properties": {
     "taskRef": {
       "type": "string",

@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Task card — status-driven workflow with assignment and priority",
   "properties": {
     "title": {
       "type": "string",

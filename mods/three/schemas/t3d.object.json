@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "3D Object — spatial entity in the scene graph",
   "properties": {
     "px": {
       "type": "number",

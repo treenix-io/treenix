@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Speech-to-text config — Whisper model, language, audio path",
   "properties": {
     "model": {
       "type": "string",

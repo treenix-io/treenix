@@ -1,5 +1,7 @@
 {
   "type": "object",
+  "title": "AI Agent — autonomous worker node at /agents/{name}",
+  "description": "LLM config (model, systemPrompt) lives directly on agent. Chat session in ai.chat component. Work creates ai.run nodes under runs/.",
   "properties": {
     "role": {
       "type": "string",
@@ -27,6 +29,7 @@
         4
       ],
       "title": "Trust level (metadata only — not enforced by guardian yet).",
+      "description": "0=sandbox 1=observer 2=worker 3=operator 4=admin",
       "default": 2
     },
     "model": {

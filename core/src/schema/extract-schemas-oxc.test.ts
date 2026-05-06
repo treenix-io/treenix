@@ -6,33 +6,50 @@ import { generateSchemas } from '#schema/extract-schemas-oxc';
 
 const SCHEMAS_DIR = path.resolve(import.meta.dirname, 'schemas');
 const SCHEMA_FILE = path.join(SCHEMAS_DIR, 'test.schema-widget.json');
+const EXPORTED_SCHEMA_FILE = path.join(SCHEMAS_DIR, 'test.exported-schema-widget.json');
 const IMPORT_FIXTURES_DIR = path.resolve(import.meta.dirname, '_import-fixtures');
 const IMPORT_SCHEMAS_DIR = path.join(IMPORT_FIXTURES_DIR, 'schemas');
 
 describe('extract-schemas-oxc', () => {
   let schema: any;
+  let exportedSchema: any;
   let alphaSchema: any;
   let betaSchema: any;
+  let refSourceSchema: any;
+  let warnings: string[];
 
   before(async () => {
     // Clean previous test artifacts
     await fs.rm(SCHEMA_FILE, { force: true });
+    await fs.rm(EXPORTED_SCHEMA_FILE, { force: true });
     await fs.rm(IMPORT_SCHEMAS_DIR, { recursive: true, force: true });
 
     // Generate from fixture
-    await generateSchemas([import.meta.dirname]);
+    warnings = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => warnings.push(args.map(String).join(' '));
+    try {
+      await generateSchemas([import.meta.dirname]);
+    } finally {
+      console.warn = originalWarn;
+    }
 
     schema = JSON.parse(await fs.readFile(SCHEMA_FILE, 'utf-8'));
+    exportedSchema = JSON.parse(await fs.readFile(EXPORTED_SCHEMA_FILE, 'utf-8'));
     alphaSchema = JSON.parse(
       await fs.readFile(path.join(IMPORT_SCHEMAS_DIR, 'test.import-collision-alpha.json'), 'utf-8'),
     );
     betaSchema = JSON.parse(
       await fs.readFile(path.join(IMPORT_SCHEMAS_DIR, 'test.import-collision-beta.json'), 'utf-8'),
     );
+    refSourceSchema = JSON.parse(
+      await fs.readFile(path.join(IMPORT_SCHEMAS_DIR, 'test.ref-source.json'), 'utf-8'),
+    );
   });
 
   after(async () => {
     await fs.rm(SCHEMA_FILE, { force: true });
+    await fs.rm(EXPORTED_SCHEMA_FILE, { force: true });
     await fs.rm(IMPORT_SCHEMAS_DIR, { recursive: true, force: true });
   });
 
@@ -42,7 +59,19 @@ describe('extract-schemas-oxc', () => {
   });
 
   it('extracts class-level JSDoc as title', () => {
-    assert.equal(schema.title, 'A complex widget for testing schema extraction');
+    assert.equal(schema.title, 'A complex widget for testing schema extraction.');
+  });
+
+  it('extracts class-level JSDoc continuation as description', () => {
+    assert.equal(
+      schema.description,
+      'Covers class, property, and method metadata used by the catalog.',
+    );
+  });
+
+  it('extracts JSDoc from exported classes', () => {
+    assert.equal(exportedSchema.title, 'Exported class fixture for JSDoc extraction.');
+    assert.equal(exportedSchema.description, undefined);
   });
 
   // ── Primitives (inferred from initializer) ──
@@ -325,6 +354,7 @@ describe('extract-schemas-oxc', () => {
     const m = schema.methods.increment;
     assert.deepEqual(m.arguments, []);
     assert.equal(m.title, 'Widget action — increment the counter.');
+    assert.equal(m.description, 'Adds one vote to the current count.');
   });
 
   it('@pre/@post on methods', () => {
@@ -417,6 +447,26 @@ describe('extract-schemas-oxc', () => {
       enumNames: ['Normal', 'Fast', 'Slow'],
       default: 1,
     });
+  });
+
+  it('resolves same-named registered class refs by import source', () => {
+    assert.deepEqual(refSourceSchema.properties.alpha, {
+      type: 'string',
+      format: 'path',
+      refType: 'test.ref-target-alpha',
+    });
+    assert.deepEqual(refSourceSchema.properties.beta, {
+      type: 'string',
+      format: 'path',
+      refType: 'test.ref-target-beta',
+    });
+  });
+
+  it('does not warn when same-named classes are registered in different files', () => {
+    assert.deepEqual(
+      warnings.filter((line) => line.includes('class name collision')),
+      [],
+    );
   });
 
   // ── Incremental: second run is no-op ──

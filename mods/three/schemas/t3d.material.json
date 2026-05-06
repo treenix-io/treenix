@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "3D Material — surface appearance",
   "properties": {
     "kind": {
       "type": "string",

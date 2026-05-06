@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Parse parameters — split and name input parts",
   "properties": {
     "base64": {
       "type": "boolean",

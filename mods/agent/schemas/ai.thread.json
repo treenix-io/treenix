@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Discussion thread on a task — lightweight multi-agent chat",
   "properties": {
     "messages": {
       "type": "array",

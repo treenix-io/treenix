@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Bot conversation page — command trigger and ordered action sequence",
   "properties": {
     "command": {
       "type": "string",

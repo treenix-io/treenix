@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Interactive chat session — compose with ai.thread for messages",
   "properties": {
     "streaming": {
       "type": "boolean",

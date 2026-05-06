@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "3D Audio — positional sound",
   "properties": {
     "src": {
       "type": "string",

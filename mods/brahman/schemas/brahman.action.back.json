@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Go back — return to previous page in history",
   "properties": {},
   "methods": {
     "run": {

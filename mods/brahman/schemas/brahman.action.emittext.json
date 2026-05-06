@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Emit synthetic text — inject text for re-processing",
   "properties": {
     "from": {
       "type": "string",

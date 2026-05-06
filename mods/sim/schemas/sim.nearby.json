@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Proximity cache — nearby agents within radius",
   "properties": {
     "agents": {
       "type": "array",

@@ -401,7 +401,7 @@ export async function buildMcpServer(store: Tree, session: Session, claims?: str
   mcp.registerTool(
     'catalog',
     {
-      description: 'List all registered types with title, properties, and action names. Use this first to discover what types exist.',
+      description: 'List all registered types with compact descriptions plus property/action docs. Use this first to discover what types exist.',
       inputSchema: {},
     },
     async () => text(yaml(catalog.list())),

@@ -6,6 +6,7 @@ import { getCtx, registerType } from '@treenx/core/comp';
 import { createSession, revokeSession } from '@treenx/core/server/auth';
 import { ApiTokenManager } from './types';
 
+/** Server-side registry for creating and revoking machine credentials. */
 class ApiTokenServer extends ApiTokenManager {
 
   /** @mutation Create API token for an agent */

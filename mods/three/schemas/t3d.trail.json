@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "3D Trail — trail renderer behind moving objects",
   "properties": {
     "width": {
       "type": "number",

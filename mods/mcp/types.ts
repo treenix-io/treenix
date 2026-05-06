@@ -1,5 +1,6 @@
 import { registerType } from '@treenx/core/comp';
 
+/** Local MCP server binding used by agent clients and external tools. */
 export class McpConfig {
   port = 3212;
   /** @title Bind host */
@@ -7,6 +8,7 @@ export class McpConfig {
 }
 registerType('mcp.server', McpConfig);
 
+/** API token manager for creating and revoking machine access credentials. */
 export class ApiTokenManager {
   /** @mutation Create API token for an agent */
   create(_data: { name: string }) {

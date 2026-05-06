@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Server-side rendering marker. Add to a route node to expose it as crawlable HTML.",
   "properties": {
     "state": {
       "type": "string",

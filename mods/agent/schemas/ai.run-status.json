@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Generic lifecycle status — reusable for any process",
   "properties": {
     "status": {
       "type": "string",

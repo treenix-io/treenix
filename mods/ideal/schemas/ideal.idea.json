@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "A single idea with voting",
   "properties": {
     "title": {
       "type": "string",

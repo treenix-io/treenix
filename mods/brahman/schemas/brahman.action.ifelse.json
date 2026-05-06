@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Conditional branch — evaluate JS expression, run if/else action",
   "properties": {
     "condition": {
       "type": "string",

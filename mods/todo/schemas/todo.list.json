@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Container that creates todo.item children from add action calls.",
   "properties": {
     "title": {
       "type": "string",

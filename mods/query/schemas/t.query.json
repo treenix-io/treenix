@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Tree-backed virtual view configuration for filtering and grouping child nodes.",
   "properties": {
     "source": {
       "type": "string",

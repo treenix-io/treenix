@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Latest price snapshot — current price and timestamp",
   "properties": {
     "price": {
       "type": "number",

@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Simulation world config — dimensions, round timing",
   "properties": {
     "width": {
       "type": "number",

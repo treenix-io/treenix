@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Navigate to page — redirect conversation flow",
   "properties": {
     "targetPage": {
       "type": "string",

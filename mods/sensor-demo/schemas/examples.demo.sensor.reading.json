@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "description": "A single sensor reading data point",
   "properties": {
     "ts": {
       "type": "number",

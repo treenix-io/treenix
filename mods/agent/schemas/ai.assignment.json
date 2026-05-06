@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "AI workflow on a board.task — routing + discussion cursor",
   "properties": {
     "origin": {
       "type": "string",

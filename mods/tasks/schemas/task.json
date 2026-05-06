@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Agent task — question/answer workflow with status tracking",
   "properties": {
     "status": {
       "type": "string",

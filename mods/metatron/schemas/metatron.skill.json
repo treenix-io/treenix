@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Modular prompt fragment — learned skill or injected capability",
   "properties": {
     "name": {
       "type": "string",

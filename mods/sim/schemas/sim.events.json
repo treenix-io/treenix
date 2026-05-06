@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Agent event inbox — received events per round",
   "properties": {
     "entries": {
       "type": "array",

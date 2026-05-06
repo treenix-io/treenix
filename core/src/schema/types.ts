@@ -37,6 +37,7 @@ export type MethodSchema = {
 
 export type TypeSchema = {
   title?: string;
+  description?: string;
   type: 'object';
   properties: Record<string, PropertySchema>;
   required?: string[];

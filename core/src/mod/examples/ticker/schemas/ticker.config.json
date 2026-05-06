@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Price feed config — trading symbol and polling interval",
   "properties": {
     "symbol": {
       "type": "string",

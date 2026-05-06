@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "description": "Mind map visualization — radial tree of Treenix nodes",
   "properties": {
     "root": {
       "type": "string",

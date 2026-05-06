@@ -1,5 +1,7 @@
 {
   "type": "object",
+  "title": "AI execution plan — lives as named component on board.task node.",
+  "description": "Agent writes plan first, human reviews + approves before execution.",
   "properties": {
     "text": {
       "type": "string",

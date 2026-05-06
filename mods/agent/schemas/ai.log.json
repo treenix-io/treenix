@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Structured activity log — attachable to any node (run, chat, etc.)",
   "properties": {
     "entries": {
       "type": "array",

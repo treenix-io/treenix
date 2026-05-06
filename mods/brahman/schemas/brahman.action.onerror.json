@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Error handler — catch specific errors and run fallback action",
   "properties": {
     "error": {
       "type": "string",

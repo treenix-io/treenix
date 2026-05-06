@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "description": "Server log buffer — query, grep, filter by level",
   "properties": {},
   "methods": {
     "query": {

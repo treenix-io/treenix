@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Meeting checklist — action items from transcription",
   "properties": {
     "checked": {
       "type": "array",

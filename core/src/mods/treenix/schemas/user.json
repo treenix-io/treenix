@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Account lifecycle state for auth and access decisions.",
   "properties": {
     "status": {
       "type": "string",

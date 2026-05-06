@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Cost tracking — attachable to any billable operation",
   "properties": {
     "inputTokens": {
       "type": "number",

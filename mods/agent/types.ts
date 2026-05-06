@@ -235,6 +235,7 @@ export class AiPlan {
 
 registerType('ai.plan', AiPlan);
 
+/** Human decision record for an agent tool call that requires approval. */
 export class AiApproval {
   agentPath = '';
   agentRole = '';

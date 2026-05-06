@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Local MCP server binding used by agent clients and external tools.",
   "properties": {
     "port": {
       "type": "number",

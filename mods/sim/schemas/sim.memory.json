@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Agent memory — accumulated observations",
   "properties": {
     "entries": {
       "type": "array",

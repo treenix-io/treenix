@@ -1,5 +1,6 @@
 import { getCtx, registerType } from '@treenx/core/comp';
 
+/** Single checklist item with a title and completion flag. */
 class TodoItem {
   title = '';
   done = false;
@@ -10,6 +11,7 @@ class TodoItem {
   }
 }
 
+/** Container that creates todo.item children from add action calls. */
 class TodoList {
   title = 'My Todos';
 

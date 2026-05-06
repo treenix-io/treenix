@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Send message — text with optional menu and link previews",
   "properties": {
     "text": {
       "type": "object",

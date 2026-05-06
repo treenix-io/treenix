@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Ask question — prompt for text/photo input, save answer",
   "properties": {
     "text": {
       "type": "object",

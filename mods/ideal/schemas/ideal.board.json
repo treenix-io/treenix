@@ -1,5 +1,6 @@
 {
   "type": "object",
+  "title": "Board of ideas — container that auto-approves popular ones",
   "properties": {
     "autoApproveThreshold": {
       "type": "number",
