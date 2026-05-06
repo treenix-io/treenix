@@ -9,7 +9,7 @@ import { withCache } from '#tree/cache';
 import { nodeHTTPRequestHandler } from '@trpc/server/adapters/node-http';
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
-import { extname, join, resolve } from 'node:path';
+import { extname, join, resolve, sep } from 'node:path';
 import { TRPCError } from '@trpc/server';
 import { resolveToken } from './auth';
 import { withMounts } from './mount';
@@ -88,7 +88,8 @@ export function createHttpServer(pipeline: Pipeline, opts?: HttpServerOpts): Ser
     if (!staticDir) return false;
 
     const file = resolve(join(staticDir, pathname === '/' ? 'index.html' : pathname));
-    if (!file.startsWith(staticDir)) return false; // path traversal blocked
+    // Boundary-aware containment check — startsWith alone allows sibling escape ("/srv/static" ⊃ "/srv/static-evil").
+    if (file !== staticDir && !file.startsWith(staticDir + sep)) return false;
 
     if (!existsSync(file) || !statSync(file).isFile()) {
       // SPA fallback: non-file paths → index.html
@@ -107,7 +108,7 @@ export function createHttpServer(pipeline: Pipeline, opts?: HttpServerOpts): Ser
     return true;
   }
 
-  type ConnParams = { info?: { connectionParams?: Record<string, string | undefined> | null } };
+  type ConnParams = { info?: { type?: string; connectionParams?: Record<string, string | undefined> | null } };
 
   return createServer(async (req, res) => {
     const origin = req.headers.origin;
@@ -130,11 +131,12 @@ export function createHttpServer(pipeline: Pipeline, opts?: HttpServerOpts): Ser
       || req.socket.remoteAddress
       || null;
 
-    // SSE handshake (connectionParams present) accepts ONLY short-lived stream tokens.
+    // ALL subscriptions require a short-lived stream token. Discriminate by op type, NOT connectionParams presence —
+    // a subscription request without connectionParams must NOT fall through to long-lived bearer auth.
     // Regular HTTP keeps long-lived bearer in Authorization header.
     const createContext = async (opts?: ConnParams): Promise<TrpcContext> => {
-      if (opts?.info?.connectionParams) {
-        const streamToken = opts.info.connectionParams.token;
+      if (opts?.info?.type === 'subscription') {
+        const streamToken = opts.info.connectionParams?.token;
         const session = streamToken ? streamTokens.resolve(streamToken) : null;
         if (!session) throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Stream token required for subscriptions' });
         return { session, token: null, clientIp };
