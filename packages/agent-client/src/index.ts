@@ -49,7 +49,22 @@ export function createAgentClient(opts: AgentOpts) {
   /** Single connect attempt. Returns status — caller decides what to do. */
   async function connect(): Promise<ConnectResult> {
     const anon = createTrpcTransport({ url });
-    const res = await anon.trpc.agentConnect.mutate({ path, key });
+    let res;
+    try {
+      res = await anon.trpc.agentConnect.mutate({ path, key });
+    } catch (e: any) {
+      // R4-AUTH-1: server now rejects unauth idle→pending self-claims. Operator must call
+      // `agentInitPair` (authed) once to seed the expected key on the port. Surface this
+      // clearly so the agent operator knows what to do.
+      const msg = String(e?.message ?? e);
+      if (msg.includes('Port not initialized')) {
+        throw new Error(
+          `[agent] port ${path} is idle. Operator must run agentInitPair(path, key) ` +
+          `from an authenticated admin session before this agent can connect. Original error: ${msg}`,
+        );
+      }
+      throw e;
+    }
 
     if (res.status === 'pending') {
       return { status: 'pending' };
