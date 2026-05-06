@@ -11,11 +11,26 @@ export type QueryConfig = {
   match: Record<string, unknown>;
 };
 
+// sift operators that compile/eval code → server-side RCE if exposed to user-influenced queries.
+// Mount config (`t.mount.query.match`) is user-writable wherever a user has W on the mount node;
+// without type-ACL on t.mount.* (deferred F4), $where is a 1-line path to RCE.
+const SIFT_FORBIDDEN = new Set(['$where', '$function', '$accumulator', '$expr']);
+
+export function assertSafeSiftQuery(q: unknown): void {
+  if (Array.isArray(q)) { for (const item of q) assertSafeSiftQuery(item); return; }
+  if (!q || typeof q !== 'object' || q.constructor !== Object) return;
+  for (const [k, v] of Object.entries(q)) {
+    if (SIFT_FORBIDDEN.has(k)) throw new Error(`Forbidden sift operator: ${k}`);
+    assertSafeSiftQuery(v);
+  }
+}
+
 export function mapSiftQuery(q: unknown): unknown {
   if (Array.isArray(q)) return q.map(mapSiftQuery);
   if (q && typeof q === 'object' && q.constructor === Object) {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(q)) {
+      if (SIFT_FORBIDDEN.has(k)) throw new Error(`Forbidden sift operator: ${k}`);
       let newKey = k;
       if (k === '$type') newKey = '_type';
       else if (k === '$path') newKey = '_path';
@@ -49,6 +64,7 @@ export function createQueryTree(config: QueryConfig, parentStore: Tree): Tree {
 
     async getChildren(_path, opts, ctx) {
       // Pass ctx properly to ensure auth/context flows through the query mount
+      if (opts?.query) assertSafeSiftQuery(opts.query);
       const mappedQuery = mapSiftQuery(config.match) as Record<string, unknown>;
       const mergedQuery = opts?.query ? { $and: [opts.query, mappedQuery] } : mappedQuery;
       const res = await parentStore.getChildren(config.source, { ...opts, depth: 1, query: mergedQuery }, ctx);

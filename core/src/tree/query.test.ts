@@ -2,7 +2,7 @@ import { createNode, type NodeData } from '#core';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { createMemoryTree } from './index';
-import { createQueryTree, matchesFilter } from './query';
+import { assertSafeSiftQuery, createQueryTree, matchesFilter } from './query';
 
 describe('matchesFilter', () => {
   it('matches dot-path values', () => {
@@ -88,6 +88,46 @@ describe('QueryStore', () => {
     const parent = createMemoryTree();
     const qs = createQueryTree({ source: '/items', match: {} }, parent);
     await assert.rejects(() => qs.remove('/items/a'), /read-only/);
+  });
+
+  it('rejects $where in mount match — RCE blocker (R4-TREE-3)', async () => {
+    const parent = createMemoryTree();
+    await parent.set({ $path: '/items/a', $type: 'item' } as NodeData);
+    const qs = createQueryTree({ source: '/items', match: { $where: 'function(){return true}' } }, parent);
+    await assert.rejects(() => qs.getChildren('/x'), /Forbidden sift operator: \$where/);
+  });
+
+  it('rejects $where nested under $and — RCE blocker (R4-TREE-3)', async () => {
+    const parent = createMemoryTree();
+    await parent.set({ $path: '/items/a', $type: 'item' } as NodeData);
+    const qs = createQueryTree({
+      source: '/items',
+      match: { $and: [{ name: 'x' }, { $where: 'function(){return true}' }] },
+    }, parent);
+    await assert.rejects(() => qs.getChildren('/x'), /Forbidden sift operator: \$where/);
+  });
+
+  it('rejects $where in caller-supplied opts.query — defense-in-depth (R4-TREE-3)', async () => {
+    const parent = createMemoryTree();
+    await parent.set({ $path: '/items/a', $type: 'item' } as NodeData);
+    const qs = createQueryTree({ source: '/items', match: {} }, parent);
+    await assert.rejects(
+      () => qs.getChildren('/x', { query: { $where: 'function(){return true}' } }),
+      /Forbidden sift operator: \$where/,
+    );
+  });
+
+  it('rejects $function, $accumulator, $expr — defense-in-depth (R4-TREE-3)', () => {
+    assert.throws(() => assertSafeSiftQuery({ $function: { body: 'x' } }), /\$function/);
+    assert.throws(() => assertSafeSiftQuery({ $accumulator: {} }), /\$accumulator/);
+    assert.throws(() => assertSafeSiftQuery({ $expr: {} }), /\$expr/);
+  });
+
+  it('allows safe operators ($eq, $gt, $in, $and)', () => {
+    assert.doesNotThrow(() => assertSafeSiftQuery({ name: { $eq: 'x' } }));
+    assert.doesNotThrow(() => assertSafeSiftQuery({ count: { $gt: 5, $lt: 100 } }));
+    assert.doesNotThrow(() => assertSafeSiftQuery({ tag: { $in: ['a', 'b'] } }));
+    assert.doesNotThrow(() => assertSafeSiftQuery({ $and: [{ a: 1 }, { b: 2 }] }));
   });
 
   it('excludes non-matching nodes like mount configs', async () => {
