@@ -11,6 +11,7 @@ import './mount-adapters';
 import { afterEach, before, beforeEach, describe, it } from 'node:test';
 import { createClient } from './client';
 import { createTreenixServer, type TreenixServer } from './server';
+import { _resetRateLimits } from './rate-limit';
 import { type NodeEvent } from './sub';
 
 // ── Test components ──
@@ -162,6 +163,7 @@ describe('e2e: tRPC over HTTP', () => {
   });
 
   beforeEach(async () => {
+    _resetRateLimits();
     const bootstrap = createMemoryTree();
     await bootstrap.set({
       ...createNode('/', 'root'),

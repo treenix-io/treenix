@@ -23,3 +23,6 @@ setInterval(() => {
   const now = Date.now();
   for (const [k, v] of buckets) if (now > v.resetAt) buckets.delete(k);
 }, 5 * 60_000).unref();
+
+// Test-only: full bucket clear. Module-level Map persists across tests in one process.
+export function _resetRateLimits() { buckets.clear(); }

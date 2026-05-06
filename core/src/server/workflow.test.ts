@@ -67,7 +67,7 @@ describe('Workflow & Spatial Gravity', () => {
     // Create tRPC router
     const watcher = createWatchManager();
     const router = createTreeRouter(trpcStore as any, watcher);
-    const caller = router.createCaller({ session: null, token: null });
+    const caller = router.createCaller({ session: null, token: null, clientIp: null });
 
     // Execute the action (should emit patches in console and update DB)
     await caller.execute({

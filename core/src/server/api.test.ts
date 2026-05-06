@@ -75,10 +75,10 @@ describe('tRPC API integration', () => {
     rawStore = tree;
 
     const router = createTreeRouter(tree, watcher, undefined, cdc);
-    caller = router.createCaller({ session: null, token: null });
+    caller = router.createCaller({ session: null, token: null, clientIp: null });
     // Include 'public' in alice's claims so she inherits root's public RWS.
     // Without it, her getChildren on the public root throws FORBIDDEN.
-    authedCaller = router.createCaller({ session: { userId: 'alice', claims: ['public', 'authenticated', 'u:alice'] } as Session, token: null });
+    authedCaller = router.createCaller({ session: { userId: 'alice', claims: ['public', 'authenticated', 'u:alice'] } as Session, token: null, clientIp: null });
   });
 
   // ── CRUD ──

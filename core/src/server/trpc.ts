@@ -27,7 +27,7 @@ import { extractPaths } from './volatile';
 import { type WatchManager } from './watch';
 import { createFilteredPush } from './watch-filter';
 
-export type TrpcContext = { session: Session | null; token: string | null };
+export type TrpcContext = { session: Session | null; token: string | null; clientIp: string | null };
 
 /** Zod schema that validates tree paths — rejects traversal, null bytes, double slashes */
 const safePath = z.string().superRefine((p, ctx) => {
@@ -217,11 +217,11 @@ export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: 
 
     register: base
       .input(z.object({ userId: z.string().min(1), password: z.string().min(1) }))
-      .mutation(({ input }) => registerUser(baseStore, input.userId, input.password)),
+      .mutation(({ input, ctx }) => registerUser(baseStore, input.userId, input.password, ctx.clientIp)),
 
     login: base
       .input(z.object({ userId: z.string().min(1), password: z.string().min(1) }))
-      .mutation(({ input }) => loginUser(baseStore, input.userId, input.password)),
+      .mutation(({ input, ctx }) => loginUser(baseStore, input.userId, input.password, ctx.clientIp)),
 
     me: authed.query(({ ctx }) => {
       if (!ctx.session) return null;
@@ -239,7 +239,7 @@ export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: 
 
     agentConnect: base
       .input(z.object({ path: safePath, key: z.string().min(1) }))
-      .mutation(({ input }) => agentConnect(baseStore, input.path, input.key)),
+      .mutation(({ input, ctx }) => agentConnect(baseStore, input.path, input.key, ctx.clientIp)),
 
     unwatch: authed.input(z.object({ paths: z.array(z.string()) })).mutation(({ input, ctx }) => {
       if (ctx.session) watcher.unwatch(ctx.session.userId, input.paths);

@@ -54,7 +54,7 @@ export function createPipeline(bootstrap: Tree): Pipeline {
 
   const createContext = async (token: string | null): Promise<TrpcContext> => {
     const session = token ? await resolveToken(mountable, token) : null;
-    return { session, token };
+    return { session, token, clientIp: null };
   };
 
   return { tree, cdc, mountable, watcher, router, createContext };
@@ -127,7 +127,13 @@ export function createHttpServer(pipeline: Pipeline, opts?: HttpServerOpts): Ser
         opts?.info?.connectionParams?.token ??
         null;
       const session = token ? await resolveToken(mountable, token) : null;
-      return { session, token };
+      // Trust X-Forwarded-For only behind a known proxy — without TRUST_PROXY, attacker spoofs IP via header.
+      const trustProxy = process.env.TRUST_PROXY === 'true';
+      const xff = trustProxy ? req.headers['x-forwarded-for'] : undefined;
+      const clientIp = (Array.isArray(xff) ? xff[0] : xff)?.split(',')[0].trim()
+        || req.socket.remoteAddress
+        || null;
+      return { session, token, clientIp };
     };
 
     const pathname = (req.url ?? '/').split('?')[0];

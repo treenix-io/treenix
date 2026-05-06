@@ -13,8 +13,10 @@ function assertUserId(userId: string): void {
   if (/[/\\\0]/.test(userId)) throw new OpError('BAD_REQUEST', 'Invalid userId');
 }
 
-export async function registerUser(store: Tree, userId: string, password: string) {
-  checkRate(`register:${userId}`);
+export async function registerUser(store: Tree, userId: string, password: string, clientIp: string | null = null) {
+  // IP bucket caps total registrations from one origin even when attacker rotates userId.
+  if (clientIp) checkRate(`register:ip:${clientIp}`, 5);
+  checkRate(`register:user:${userId}`, 3);
   assertUserId(userId);
 
   const userPath = `/auth/users/${userId}`;
@@ -44,8 +46,9 @@ export async function registerUser(store: Tree, userId: string, password: string
   return { token, userId, pending: false };
 }
 
-export async function loginUser(store: Tree, userId: string, password: string) {
-  checkRate(`login:${userId}`);
+export async function loginUser(store: Tree, userId: string, password: string, clientIp: string | null = null) {
+  if (clientIp) checkRate(`login:ip:${clientIp}`, 10);
+  checkRate(`login:user:${userId}`, 5);
   assertUserId(userId);
 
   const userPath = `/auth/users/${userId}`;
@@ -86,8 +89,9 @@ export async function devLogin(store: Tree) {
   return { token, userId };
 }
 
-export async function agentConnect(store: Tree, path: string, key: string) {
-  checkRate(`agent:${path}`);
+export async function agentConnect(store: Tree, path: string, key: string, clientIp: string | null = null) {
+  if (clientIp) checkRate(`agent:ip:${clientIp}`, 20);
+  checkRate(`agent:path:${path}`, 10);
   const node = await store.get(path);
   if (!node) throw new OpError('NOT_FOUND', 'Agent port not found');
   if (node.$type !== 't.agent.port') throw new OpError('BAD_REQUEST', 'Not an agent port');
