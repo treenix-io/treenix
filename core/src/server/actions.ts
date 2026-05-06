@@ -127,6 +127,10 @@ async function loadDynamicAction(
 
   const typePath = `/sys/types/${type.replace(/\./g, '/')}`;
   const typeNode = await tree.get(typePath);
+  // Strict: only nodes with $type === 'type' are valid type definitions. Without this an attacker
+  // who can write any node at /sys/types/* — even one with arbitrary $type — could plant
+  // executable `actions` and a poisoned `schema` (the latter disables validateActionArgs globally).
+  if (!typeNode || typeNode.$type !== 'type') return null;
   const actionCode = (typeNode as any)?.actions?.[action];
   if (!actionCode || typeof actionCode !== 'string') return null;
 

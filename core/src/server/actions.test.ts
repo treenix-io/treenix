@@ -339,7 +339,7 @@ describe('defineComponent', () => {
     // Create a type node with dynamic action
     await tree.set({
       $path: '/sys/types/test/demo',
-      $type: 'dir',
+      $type: 'type',
       actions: {
         greet: 'var node = ctx.tree.get(ctx.node.$path); node.greeting = "hello " + (data.name || "world"); ctx.tree.set(node); return { ok: true };',
       },
@@ -364,7 +364,7 @@ describe('defineComponent', () => {
 
     await tree.set({
       $path: '/sys/types/test/evil',
-      $type: 'dir',
+      $type: 'type',
       actions: {
         pwn: 'return typeof process !== "undefined" ? "FAIL" : "safe";',
       },
@@ -383,7 +383,7 @@ describe('defineComponent', () => {
 
     await tree.set({
       $path: '/sys/types/test/escape',
-      $type: 'dir',
+      $type: 'type',
       actions: {
         steal: 'ctx.tree.set({ $path: "/auth/sessions/evil", $type: "session", hacked: true }); return "tried";',
       },
@@ -406,7 +406,7 @@ describe('defineComponent', () => {
 
     await tree.set({
       $path: '/sys/types/test/snoop',
-      $type: 'dir',
+      $type: 'type',
       actions: {
         check: 'var n = ctx.node; return { hasAcl: "$acl" in n, hasOwner: "$owner" in n, hasRefs: "$refs" in n };',
       },
@@ -433,7 +433,7 @@ describe('defineComponent', () => {
 
     await tree.set({
       $path: '/sys/types/test/writer',
-      $type: 'dir',
+      $type: 'type',
       actions: {
         writeChild: 'ctx.tree.set({ $path: ctx.node.$path + "/child1", $type: "test.writer", created: true }); return "ok";',
       },
@@ -450,13 +450,35 @@ describe('defineComponent', () => {
     assert.equal((child as any).created, true);
   });
 
+  // Strict $type guard: a node parked at /sys/types/* with non-canonical $type carrying
+  // attacker-supplied `actions`/`schema` must NOT be loaded. Defense-in-depth — F6 limits write
+  // to /sys to admins, but the type-vs-non-type invariant prevents schema poisoning + RCE.
+  it('refuses to load dynamic action when type node $type !== "type"', async () => {
+    registerBuiltinActions();
+    const tree = createMemoryTree();
+
+    await tree.set({
+      $path: '/sys/types/test/poisoned',
+      $type: 'dir', // not a type node — guard must refuse
+      actions: { evil: 'return "pwned";' },
+      schema: { methods: { evil: { arguments: [] } } },
+    } as NodeData);
+    await tree.set(createNode('/p1', 'test.poisoned', {}));
+
+    await assert.rejects(
+      executeAction(tree, '/p1', undefined, undefined, 'evil', {}),
+      (e: any) => e.code === 'BAD_REQUEST',
+      'poisoned type node must not contribute action handler',
+    );
+  });
+
   it('dynamic action not cached — source changes take effect', async () => {
     registerBuiltinActions();
     const tree = createMemoryTree();
 
     await tree.set({
       $path: '/sys/types/test/mutable',
-      $type: 'dir',
+      $type: 'type',
       actions: { calc: 'return 1;' },
       schema: { methods: { calc: { arguments: [] } } },
     } as NodeData);
