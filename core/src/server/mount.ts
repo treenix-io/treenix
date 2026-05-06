@@ -2,62 +2,61 @@
 // Mount = component on node. Adapter resolved via context system.
 // Core untouched. Tree interface preserved.
 
-import { isComponent, isRef, type NodeData, resolve, resolveExact } from '#core';
+import { isComponent, isRef, type NodeData, resolve } from '#core';
 import { type Tree } from '#tree';
+import { createBoundedCache } from '#util/bounded-cache';
 
 // ── Mountable Tree ──
 
-type ResolveResult = { tree: Tree; mountPath: string | null; parentStore: Tree };
-
 export function withMounts(rootStore: Tree): Tree {
-  const cache = new Map<string, Tree>();
   const MAX_MOUNT_CACHE = 1000;
+  const cache = createBoundedCache<string, { tree: Tree; refTarget?: string }>(MAX_MOUNT_CACHE);
 
   /** Invalidate cache for path and all descendants (nested mounts under it) */
   function invalidateMount(path: string): void {
-    for (const key of cache.keys()) {
+    if (cache.size === 0) return;
+    cache.deleteWhere((entry, key) => {
       // key may have ?uid= suffix — extract the path part
       const keyPath = key.split('?')[0];
-      if (keyPath === path || keyPath.startsWith(path + '/')) cache.delete(key);
-    }
+      return (
+        isSameOrDescendant(keyPath, path)
+        || (!!entry.refTarget && isSameOrDescendant(entry.refTarget, path))
+      );
+    });
+  }
+
+  function isSameOrDescendant(candidate: string, path: string): boolean {
+    if (path === '/') return true;
+    return candidate === path || candidate.startsWith(path + '/');
   }
 
   const self: Tree = {
     async get(path, ctx) {
-      const { tree, mountPath, parentStore } = await resolveStore(path, ctx);
-      // Mount node config lives in parent tree
-      if (mountPath === path) return parentStore.get(path, ctx);
+      const tree = await resolveNodeStore(path, ctx);
       return tree.get(path, ctx);
     },
 
     async getChildren(path, opts, ctx) {
-      const { tree } = await resolveStore(path, ctx);
+      const tree = await resolveContentStore(path, ctx);
       return tree.getChildren(path, opts, ctx);
     },
 
     async set(node, ctx) {
-      const { tree, mountPath, parentStore } = await resolveStore(node.$path, ctx);
-      if (mountPath === node.$path) {
-        invalidateMount(node.$path);
-        await parentStore.set(node, ctx);
-      } else await tree.set(node, ctx);
+      const tree = await resolveNodeStore(node.$path, ctx);
+      invalidateMount(node.$path);
+      await tree.set(node, ctx);
     },
 
     async remove(path, ctx) {
-      const { tree, mountPath, parentStore } = await resolveStore(path, ctx);
-      if (mountPath === path) {
-        invalidateMount(path);
-        return parentStore.remove(path, ctx);
-      }
+      const tree = await resolveNodeStore(path, ctx);
+      invalidateMount(path);
       return tree.remove(path, ctx);
     },
 
     async patch(path, ops, ctx) {
-      const { tree, mountPath, parentStore } = await resolveStore(path, ctx);
-      if (mountPath === path) {
-        invalidateMount(path);
-        await parentStore.patch(path, ops, ctx);
-      } else await tree.patch(path, ops, ctx);
+      const tree = await resolveNodeStore(path, ctx);
+      invalidateMount(path);
+      await tree.patch(path, ops, ctx);
     },
   };
 
@@ -68,7 +67,22 @@ export function withMounts(rootStore: Tree): Tree {
     if (mount.disabled) return false;
     // Refs need resolution — treat as mount-point optimistically
     if (isRef(mount)) return true;
-    return !!resolve(mount.$type, 'mount');
+    const adapter = resolve(mount.$type, 'mount');
+    if (!adapter) throw new Error(`No adapter for type "${mount.$type}"`);
+    return true;
+  }
+
+  function mountRefTarget(node: NodeData): string | undefined {
+    const mount = node['mount'];
+    return isRef(mount) ? mount.$ref : undefined;
+  }
+
+  function mountCacheKey(path: string, ctx?: any): string {
+    return ctx?.userId ? `${path}?uid=${ctx.userId}` : path;
+  }
+
+  function cacheMount(path: string, node: NodeData, tree: Tree, ctx?: any): void {
+    cache.set(mountCacheKey(path, ctx), { tree, refTarget: mountRefTarget(node) });
   }
 
   async function resolveMount(node: NodeData, currentStore: Tree, ctx?: any): Promise<Tree> {
@@ -88,47 +102,50 @@ export function withMounts(rootStore: Tree): Tree {
   }
 
 
-  async function resolveStore(path: string, ctx?: any): Promise<ResolveResult> {
-    // Walk: /, /seg1, /seg1/seg2, ... — each may be a mount point
-    // Nested mounts: check each level in the current best tree
+  function strictAncestorPaths(path: string): string[] {
+    if (path === '/') return [];
     const segments = path.split('/').filter(Boolean);
     const checks = ['/'];
-    for (let i = 0; i < segments.length; i++) checks.push('/' + segments.slice(0, i + 1).join('/'));
+    for (let i = 0; i < segments.length - 1; i++) checks.push('/' + segments.slice(0, i + 1).join('/'));
+    return checks;
+  }
 
-    let bestStore = rootStore;
-    let bestMountPath: string | null = null;
-    let parentStore = rootStore;
+  async function resolveNodeStore(path: string, ctx?: any): Promise<Tree> {
+    // Walk strict ancestors only. The target node itself belongs to the tree
+    // that contains its config, even when the target is a mount point.
+    const checks = strictAncestorPaths(path);
+    let nodeStore = rootStore;
 
     for (const check of checks) {
-      // We need to look for parameterized mounts in the current best tree's config nodes if check isn't exactly matching.
-      // But first, let's keep the existing logic for direct matches
-      const cacheKey = ctx?.userId ? `${check}?uid=${ctx.userId}` : check;
+      const cacheKey = mountCacheKey(check, ctx);
       const cached = cache.get(cacheKey);
       if (cached) {
-        parentStore = bestStore;
-        bestStore = cached;
-        bestMountPath = check;
+        nodeStore = cached.tree;
         continue;
       }
 
-      const node = await bestStore.get(check, ctx);
+      const node = await nodeStore.get(check, ctx);
       // TODO: parametrized mounts (:param paths) — need explicit registry, not runtime scan
       if (!node || !isMountPoint(node)) continue;
 
-      const configNode = node;
-
-      const tree = await resolveMount(configNode, bestStore, ctx);
-      // Evict oldest entry if cache is full
-      if (cache.size >= MAX_MOUNT_CACHE) {
-        const first = cache.keys().next().value;
-        if (first) cache.delete(first);
-      }
-      cache.set(cacheKey, tree);
-      parentStore = bestStore;
-      bestStore = tree;
-      bestMountPath = check;
+      const tree = await resolveMount(node, nodeStore, ctx);
+      cacheMount(check, node, tree, ctx);
+      nodeStore = tree;
     }
-    return { tree: bestStore, mountPath: bestMountPath, parentStore };
+
+    return nodeStore;
+  }
+
+  async function resolveContentStore(path: string, ctx?: any): Promise<Tree> {
+    const nodeStore = await resolveNodeStore(path, ctx);
+    const cached = cache.get(mountCacheKey(path, ctx));
+    if (cached) return cached.tree;
+
+    const node = await nodeStore.get(path, ctx);
+    if (!node || !isMountPoint(node)) return nodeStore;
+    const tree = await resolveMount(node, nodeStore, ctx);
+    cacheMount(path, node, tree, ctx);
+    return tree;
   }
 
   return self;

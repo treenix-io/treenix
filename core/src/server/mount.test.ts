@@ -112,6 +112,27 @@ describe('Mounts', () => {
     assert.equal(callCount, 1);
   });
 
+  it('caches resolved stores for getChildren on the mount path', async () => {
+    let callCount = 0;
+    clearRegistry();
+    register('test.mount.countingChildren', 'mount', () => {
+      callCount++;
+      return usersStore;
+    });
+    await rootStore.set(
+      createNode('/users', 'collection', {}, {
+        mount: { $type: 'test.mount.countingChildren' },
+      }),
+    );
+    await usersStore.set(createNode('/users/alice', 'user'));
+
+    const ms = withMounts(rootStore);
+    await ms.getChildren('/users');
+    await ms.getChildren('/users');
+
+    assert.equal(callCount, 1);
+  });
+
   // TODO: ref-mount where ref-target $type IS the adapter — needs rethink after MountAdapter<T> refactor
   it('resolves mount via $ref to config node', async () => {
     register('test.ref.store', 'mount', () => usersStore);
@@ -321,6 +342,152 @@ describe('Mounts', () => {
     const ms = withMounts(rootStore);
     const item = await ms.get('/normal/item');
     assert.equal(item?.$path, '/normal/item');
+  });
+
+  it('keeps broken mount config editable without starting adapter', async () => {
+    register('test.mount.needsRoot', 'mount', (mount: { root?: string }) => {
+      if (!mount.root) throw new Error('test.mount.needsRoot: root required');
+      return usersStore;
+    });
+    await rootStore.set(
+      createNode('/broken', 'mount-point', {}, {
+        mount: { $type: 'test.mount.needsRoot' },
+      }),
+    );
+
+    const ms = withMounts(rootStore);
+    const config = await ms.get('/broken');
+    assert.equal(config?.$path, '/broken');
+    assert.equal((config?.mount as { root?: string }).root, undefined);
+
+    await ms.patch('/broken', [['r', 'mount.root', 'ok']]);
+    await ms.set(createNode('/broken/item', 'thing'));
+
+    const item = await usersStore.get('/broken/item');
+    assert.equal(item?.$type, 't.thing');
+  });
+
+  it('keeps broken t.mount.fs config editable when root is empty', async () => {
+    register('t.mount.fs', 'mount', (mount: { root?: string }) => {
+      if (!mount.root) throw new Error('t.mount.fs: root required');
+      return usersStore;
+    });
+    await rootStore.set(
+      createNode('/fs', 'mount-point', {}, {
+        mount: { $type: 't.mount.fs', root: '' },
+      }),
+    );
+
+    const ms = withMounts(rootStore);
+    assert.equal(((await ms.get('/fs'))?.mount as { root?: string }).root, '');
+    await assert.rejects(() => ms.getChildren('/fs'), /t\.mount\.fs: root required/);
+
+    await ms.patch('/fs', [['r', 'mount.root', 'ok']]);
+    await ms.set(createNode('/fs/item', 'thing'));
+
+    assert.equal((await usersStore.get('/fs/item'))?.$type, 't.thing');
+  });
+
+  it('throws loudly when writing inside a broken mount', async () => {
+    register('test.mount.needsRoot', 'mount', (mount: { root?: string }) => {
+      if (!mount.root) throw new Error('test.mount.needsRoot: root required');
+      return usersStore;
+    });
+    await rootStore.set(
+      createNode('/broken', 'mount-point', {}, {
+        mount: { $type: 'test.mount.needsRoot' },
+      }),
+    );
+
+    const ms = withMounts(rootStore);
+    await assert.rejects(
+      () => ms.set(createNode('/broken/item', 'thing')),
+      /root required/,
+    );
+  });
+
+  it('resolves mounted root for getChildren on the mount path', async () => {
+    await rootStore.set(
+      createNode('/mounted', 'mount-point', {}, {
+        mount: { $type: 'test.mount.memory' },
+      }),
+    );
+    await usersStore.set(createNode('/mounted/item', 'thing'));
+
+    const ms = withMounts(rootStore);
+    const children = await ms.getChildren('/mounted');
+
+    assert.deepEqual(children.items.map(n => n.$path), ['/mounted/item']);
+  });
+
+  it('root mount invalidation clears nested mount cache entries', async () => {
+    const rootA = createMemoryTree();
+    const rootB = createMemoryTree();
+    const nestedA = createMemoryTree();
+
+    register('test.mount.rootSwitch', 'mount', (mount: { id: string }) => {
+      return mount.id === 'a' ? rootA : rootB;
+    });
+    register('test.mount.nestedA', 'mount', () => nestedA);
+
+    await rootStore.set(
+      createNode('/', 'root', {}, {
+        mount: { $type: 'test.mount.rootSwitch', id: 'a' },
+      }),
+    );
+    await rootA.set(
+      createNode('/special', 'mount-point', {}, {
+        mount: { $type: 'test.mount.nestedA' },
+      }),
+    );
+    await nestedA.set(createNode('/special/item', 'old'));
+    await rootB.set(createNode('/special/item', 'new'));
+
+    const ms = withMounts(rootStore);
+    assert.equal((await ms.get('/special/item'))?.$type, 't.old');
+
+    await ms.patch('/', [['r', 'mount.id', 'b']]);
+
+    assert.equal((await ms.get('/special/item'))?.$type, 't.new');
+  });
+
+  it('invalidates $ref mount cache when ref target changes', async () => {
+    const storeA = createMemoryTree();
+    const storeB = createMemoryTree();
+    register('test.mount.a', 'mount', () => storeA);
+    register('test.mount.b', 'mount', () => storeB);
+
+    await rootStore.set(
+      createNode('/configs/users', 'mount-point', {}, {
+        mount: { $type: 'test.mount.a' },
+      }),
+    );
+    await rootStore.set(
+      createNode('/users', 'collection', {}, {
+        mount: ref('/configs/users'),
+      }),
+    );
+    await storeA.set(createNode('/users/item', 'old'));
+    await storeB.set(createNode('/users/item', 'new'));
+
+    const ms = withMounts(rootStore);
+    assert.equal((await ms.get('/users/item'))?.$type, 't.old');
+
+    await ms.patch('/configs/users', [['r', 'mount', { $type: 'test.mount.b' }]]);
+
+    assert.equal((await ms.get('/users/item'))?.$type, 't.new');
+  });
+
+  it('throws on mount component with unknown adapter type', async () => {
+    await rootStore.set(
+      createNode('/bad', 'mount-point', {}, {
+        mount: { $type: 'test.mount.missing' },
+      }),
+    );
+
+    const ms = withMounts(rootStore);
+    await assert.rejects(() => ms.get('/bad/item'), /No adapter for type "test.mount.missing"/);
+    await assert.rejects(() => ms.getChildren('/bad'), /No adapter for type "test.mount.missing"/);
   });
 });
 

@@ -215,9 +215,8 @@ export function EditorSidebar({
   const handleSelect = useCallback(
     async (path: string) => {
       if (!onSelect(path)) return;
-      await loadChildren(path);
     },
-    [loadChildren, onSelect],
+    [onSelect],
   );
 
   const handleExpand = useCallback(
