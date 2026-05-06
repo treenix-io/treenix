@@ -1,5 +1,6 @@
 import { registerType } from '#comp';
 import { createNode, isComponent, type NodeData, normalizeType, register, resolve } from '#core';
+import { OpError } from '#errors';
 import { clearRegistry } from '#core/index.test';
 import { createMemoryTree } from '#tree';
 import { withCache } from '#tree/cache';
@@ -564,6 +565,48 @@ describe('defineComponent', () => {
   });
 });
 
+describe('ActionCtx.actor propagation', () => {
+  beforeEach(() => clearRegistry());
+
+  it('actor from opts is visible to handler', async () => {
+    let captured: unknown = null;
+    register('marker', 'schema', () => ({
+      $id: 'marker', title: 'M', type: 'object' as const, properties: {},
+      methods: { noop: { arguments: [] } },
+    }));
+    register('marker', 'action:noop', (ctx: import('./actions').ActionCtx) => { captured = ctx.actor; });
+
+    const tree = createMemoryTree();
+    await tree.set({ $path: '/x', $type: 'marker' });
+
+    await executeAction(tree, '/x', undefined, undefined, 'noop', undefined, {
+      actor: { id: 'agent-workload:r-1', taskPath: '/board/tasks/1', runPath: '/agents/x/runs/r-1' },
+    });
+
+    assert.deepEqual(captured, {
+      id: 'agent-workload:r-1',
+      taskPath: '/board/tasks/1',
+      runPath: '/agents/x/runs/r-1',
+    });
+  });
+
+  it('actor is undefined when opts.actor not passed', async () => {
+    let captured: unknown = 'sentinel';
+    register('marker', 'schema', () => ({
+      $id: 'marker', title: 'M', type: 'object' as const, properties: {},
+      methods: { noop: { arguments: [] } },
+    }));
+    register('marker', 'action:noop', (ctx: import('./actions').ActionCtx) => { captured = ctx.actor; });
+
+    const tree = createMemoryTree();
+    await tree.set({ $path: '/x', $type: 'marker' });
+
+    await executeAction(tree, '/x', undefined, undefined, 'noop');
+
+    assert.equal(captured, undefined);
+  });
+});
+
 describe('applyTemplate', () => {
   it('rolls back written children when a write fails mid-apply', async () => {
     const tree = createMemoryTree();
@@ -640,6 +683,40 @@ describe('applyTemplate', () => {
     // Old child still exists (delete failed, but no data loss)
     const oldChild = await tree.get('/target/old1');
     assert.ok(oldChild, 'old child preserved when delete fails — no data loss');
+  });
+
+  it('R4-MOUNT-1: rollback failure surfaces aggregate error (no silent swallow)', async () => {
+    const tree = createMemoryTree();
+    await tree.set({ $path: '/tmpl', $type: 'template' } as NodeData);
+    await tree.set({ $path: '/tmpl/a', $type: 'block', label: 'A' } as NodeData);
+    await tree.set({ $path: '/tmpl/b', $type: 'block', label: 'B' } as NodeData);
+    await tree.set({ $path: '/target', $type: 'page' } as NodeData);
+    await tree.set({ $path: '/target/old1', $type: 'block', label: 'OLD1' } as NodeData);
+
+    const realSet = tree.set.bind(tree);
+    let setCount = 0;
+    const failingTree = {
+      ...tree,
+      // Phase 1: 1st write succeeds, 2nd throws (triggers rollback);
+      // Phase rollback: 3rd write (snapshot restore) ALSO throws → must surface, not swallow.
+      set: async (node: NodeData) => {
+        setCount++;
+        if (setCount === 2) throw new Error('phase1 failure');
+        if (setCount === 3) throw new Error('rollback restore failure');
+        return realSet(node);
+      },
+      // Rollback removes also throw — both errors must be aggregated.
+      remove: async (_path: string) => { throw new Error('rollback remove failure'); },
+    };
+
+    await assert.rejects(
+      () => applyTemplate(failingTree as any, '/tmpl', '/target'),
+      (e) => {
+        // OpError CONFLICT carrying both the primary error and rollback failure context.
+        if (!(e instanceof OpError) || e.code !== 'CONFLICT') return false;
+        return e.message.includes('rollback failed') && e.message.includes('phase1 failure');
+      },
+    );
   });
 });
 

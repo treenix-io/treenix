@@ -45,6 +45,19 @@ function immerToPatchOps(patches: Patch[]): PatchOp[] {
 
 export type NodeHandle = ReturnType<typeof serverNodeHandle>;
 
+/** Actor identity + caller-context for audit trails.
+ *  - `id` is a stable principal id ('user:kriz', 'agent-workload:r-7f2a', 'system:autostart').
+ *  - taskPath/runPath/action/requestId are open metadata: entry points (MCP/tRPC) populate
+ *    them from session metadata so audit subscribers can record "who, on which task,
+ *    in which run, doing which action, as part of which request". */
+export type ActorContext = {
+  id: string;
+  taskPath?: string;
+  runPath?: string;
+  action?: string;
+  requestId?: string;
+};
+
 /** @opaque Runtime-injected, not part of public schema */
 export type ActionCtx = {
   node: NodeData;
@@ -58,6 +71,8 @@ export type ActionCtx = {
   userId?: string | null;
   /** Caller's claims (e.g. 'admins', 'authenticated'). Empty/undefined for system. */
   claims?: string[];
+  /** Actor metadata (audit trail). See ActorContext. */
+  actor?: ActorContext;
 };
 
 // ── Client proxy ──
@@ -92,9 +107,20 @@ export { registerActionNeeds, getActionNeeds } from '#comp/needs';
 // All ops throw OpError for domain errors (NOT_FOUND, BAD_REQUEST, CONFLICT).
 enablePatches();
 
-// Action timeout: env-configurable, default 5 min (was 30s)
-const ACTION_TIMEOUT = Number(process.env.ACTION_TIMEOUT) || 300_000;
+// Action timeout: env-configurable, default 10s.
+const ACTION_TIMEOUT = Number(process.env.ACTION_TIMEOUT) || 10_000;
 const STREAM_TIMEOUT = Number(process.env.STREAM_TIMEOUT) || 600_000;
+
+function withActionTimeout<T>(label: string, signal: AbortSignal, promise: Promise<T>): Promise<T> {
+  if (signal.aborted) return Promise.reject(new Error(`${label} timed out after ${ACTION_TIMEOUT}ms`));
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(new Error(`${label} timed out after ${ACTION_TIMEOUT}ms`));
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(resolve, reject).finally(() => {
+      signal.removeEventListener('abort', onAbort);
+    });
+  });
+}
 
 // ── Shared resolution: find handler + component for any action call ──
 // Resolution order:
@@ -311,7 +337,7 @@ export async function executeAction<T = unknown>(
   componentKey: string | undefined,
   action: string,
   data?: unknown,
-  opts?: { userId?: string | null; claims?: string[] },
+  opts?: { userId?: string | null; claims?: string[]; actor?: ActorContext },
 ): Promise<T> {
   return lockAction(path, async () => {
   const { node, handler, type, deps, fieldKey } = await resolveActionHandler(
@@ -349,8 +375,9 @@ export async function executeAction<T = unknown>(
   }
 
   const nc = serverNodeHandle(tree);
-  const actx: ActionCtx = { node: draft, comp: draftComp, deps, tree, signal: AbortSignal.timeout(ACTION_TIMEOUT), nc, userId: opts?.userId, claims: opts?.claims };
-  const result = await handler(actx, data ?? {});
+  const signal = AbortSignal.timeout(ACTION_TIMEOUT);
+  const actx: ActionCtx = { node: draft, comp: draftComp, deps, tree, signal, nc, userId: opts?.userId, claims: opts?.claims, actor: opts?.actor };
+  const result = await withActionTimeout(`${type}.${action}`, signal, Promise.resolve(handler(actx, data ?? {})));
 
   let patches: Patch[] = [];
   const nextNode = finishDraft(draft, (p) => { patches = p });
@@ -381,7 +408,7 @@ export async function* executeStream(
   action: string,
   data?: unknown,
   signal?: AbortSignal,
-  opts?: { userId?: string | null; claims?: string[] },
+  opts?: { userId?: string | null; claims?: string[]; actor?: ActorContext },
 ): AsyncGenerator<unknown> {
   const { node, handler, type, comp, deps } = await resolveActionHandler(
     tree, path, componentType, componentKey, action,
@@ -391,7 +418,7 @@ export async function* executeStream(
 
   // comp is already node[fieldKey] from resolution — no Immer draft needed for generators
   const nc = serverNodeHandle(tree);
-  const actx: ActionCtx = { node, comp, deps, tree, signal: signal ?? AbortSignal.timeout(STREAM_TIMEOUT), nc, userId: opts?.userId, claims: opts?.claims };
+  const actx: ActionCtx = { node, comp, deps, tree, signal: signal ?? AbortSignal.timeout(STREAM_TIMEOUT), nc, userId: opts?.userId, claims: opts?.claims, actor: opts?.actor };
   const result = handler(actx, data ?? {});
   if (!result || typeof (result as any)[Symbol.asyncIterator] !== 'function')
     throw new OpError('BAD_REQUEST', `Action "${action}" is not a generator`);
@@ -443,9 +470,21 @@ export async function applyTemplate(
       written.push(bpath);
     }
   } catch (err) {
-    // Rollback: remove partially written new children, restore originals
-    for (const wp of written) await tree.remove(wp).catch(() => {});
-    for (const orig of snapshot) await tree.set(orig).catch(() => {});
+    // R4-MOUNT-1: rollback failures must propagate. Silent .catch swallows violate the
+    // "fail loud" rule — partial-rollback corruption with no caller-visible signal is the
+    // worst possible outcome. Collect rollback failures and throw an aggregate alongside the
+    // original cause so operators see both.
+    const rollbackErrs: unknown[] = [];
+    for (const wp of written) {
+      try { await tree.remove(wp); } catch (e) { rollbackErrs.push(e); }
+    }
+    for (const orig of snapshot) {
+      try { await tree.set(orig); } catch (e) { rollbackErrs.push(e); }
+    }
+    if (rollbackErrs.length) {
+      throw new OpError('CONFLICT',
+        `applyTemplate rollback failed (${rollbackErrs.length} error(s)) after primary error: ${(err as Error)?.message ?? String(err)}`);
+    }
     throw err;
   }
 
