@@ -44,7 +44,9 @@ export function createRepathTree(inner: Tree, localBase: string, remoteBase: str
   }
 
   function remapPage(page: Page<NodeData>): Page<NodeData> {
-    return { ...page, items: page.items.filter(n => n.$path).map(remapNode) };
+    // R4-TREE-1: do NOT silently drop malformed nodes — inner tree is trusted code; a node
+    // with no $path is a bug, not user data. remapNode already throws when $path is missing.
+    return { ...page, items: page.items.map(remapNode) };
   }
 
   return {
