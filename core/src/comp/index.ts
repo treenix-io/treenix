@@ -139,13 +139,19 @@ export function registerActions<T>(type: TypeId, cls: Class<T>, opts?: CompOptio
   for (const name of Object.getOwnPropertyNames(proto)) {
     if (name === 'constructor') continue;
     if (typeof proto[name] === 'function') {
-      register(t, `action:${name}`, (ctx: any, data: unknown) => {
+      const context = `action:${name}`;
+      const meta: Record<string, unknown> = { ...opts?.ports?.[name] };
+      if (opts?.noOptimistic?.includes(name)) meta.noOptimistic = true;
+      if (proto[name] instanceof AsyncGenFn) meta.stream = true;
+      if (opts?.override) unregister(t, context);
+
+      register(t, context, (ctx: any, data: unknown) => {
         const target = ctx.comp ?? ctx.node;
         if (_als) return _als.run(ctx, () => proto[name].call(target, data, ctx.deps));
         _ctx = ctx;
         try { return proto[name].call(target, data, ctx.deps); }
         finally { _ctx = null; }
-      }, opts?.ports?.[name]);
+      }, Object.keys(meta).length ? meta : undefined);
     }
   }
 }

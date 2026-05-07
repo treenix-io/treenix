@@ -1,22 +1,21 @@
-// Editor shell view — registered for t.editor.shell. Mounted by Router.tsx
-// (Phase 2 step 9) when /sys/routes/t resolves. URL tail (e.g. "/t/foo/bar"
-// → rest="foo/bar") becomes the selected node path; ?root= still selects
-// the sidebar root.
-//
-// Auth comes from <AuthProvider> at the SPA root, not props — the View
-// contract delivers only {value, onChange, ctx}.
+// Editor shell view — registered for t.editor.shell. Rendered by Router when
+// /sys/routes/t resolves. The route node's `route` component (prefix/index)
+// drives target path resolution; ?root= selects the sidebar root and is
+// preserved across navigations via useRouteShell's preserveQuery.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import {
   addComponent,
   cache,
+  NavigateProvider,
   setEditorRoot,
   tree,
   useLocation,
-  useNavigate,
+  type View,
   view,
 } from '@treenx/react';
+import { useRouteShell } from '@treenx/react/router/use-route-shell';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@treenx/react/ui/resizable';
 import { useAuthContext } from '@treenx/react/app/auth-context';
 import { EMPTY, RouteParamsContext, useRouteParams } from '@treenx/react/context/route-params';
@@ -28,14 +27,11 @@ import { useModErrors } from '@treenx/react/hooks/use-mod-errors';
 import { TypePicker } from '@treenx/react/mods/editor-ui/type-picker';
 import { EditorShell } from './types';
 
-const EditorShellView = () => {
+const EditorShellView: View<EditorShell> = ({ ctx }) => {
   const { authed, authChecked, setAuthed, logout } = useAuthContext();
-  const { rest } = useRouteParams();
   const { search } = useLocation();
-  const navigate = useNavigate();
 
-  // URL tail → selected node path. rest='' (bare /t) → root '/'.
-  const selected = useMemo(() => '/' + rest, [rest]);
+  const { target: selected, nav } = useRouteShell(ctx!.node, { preserveQuery: { root: '/' } });
   const root = useMemo(
     () => new URLSearchParams(search).get('root') || '/',
     [search],
@@ -78,9 +74,9 @@ const EditorShellView = () => {
         const { items: children } = await tree.getChildren(parent, { watch: true, watchNew: true });
         cache.replaceChildren(parent, children);
       }
-      navigate(parent ?? '/');
+      nav(parent ?? '/');
     },
-    [navigate],
+    [nav],
   );
 
   const handleAddComponent = useCallback((path: string) => {
@@ -108,6 +104,7 @@ const EditorShellView = () => {
 
   return (
     <RouteParamsContext value={EMPTY}>
+    <NavigateProvider value={nav}>
       <ConnectionBanner />
       <div className="flex h-screen bg-background text-foreground overflow-hidden">
         <ResizablePanelGroup orientation="horizontal" className="h-full">
@@ -115,7 +112,7 @@ const EditorShellView = () => {
             authed={authed}
             root={root}
             selected={selected}
-            onSelect={navigate}
+            onSelect={nav}
             onSetRoot={handleSetRoot}
             onLogout={logout}
           />
@@ -128,7 +125,7 @@ const EditorShellView = () => {
               currentUserId={authed}
               onDelete={handleDelete}
               onAddComponent={handleAddComponent}
-              onSelect={navigate}
+              onSelect={nav}
               onSetRoot={handleSetRoot}
             />
           </ResizablePanel>
@@ -145,6 +142,7 @@ const EditorShellView = () => {
           />
         )}
       </div>
+    </NavigateProvider>
     </RouteParamsContext>
   );
 };

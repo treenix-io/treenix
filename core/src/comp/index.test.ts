@@ -1,7 +1,7 @@
 // Tests for setComponent, newComponent, getCtx
 // Key behavior: when node.$type matches component $type, node itself IS the component.
 
-import { getCtx, newComponent, registerType, setComponent } from '#comp';
+import { getCtx, newComponent, registerActions, registerType, setComponent } from '#comp';
 import { createNode, getComponent, getMeta, type NodeData, register, resolve } from '#core';
 import { clearRegistry } from '#core/index.test';
 import { executeAction } from '#server/actions';
@@ -242,6 +242,45 @@ describe('registerType noOptimistic', () => {
 
     const listMeta = getMeta('test.tokens', 'action:list');
     assert.equal(listMeta?.noOptimistic, undefined);
+  });
+});
+
+// ── registerActions: server overrides + meta ──
+
+describe('registerActions override', () => {
+  it('replaces action handlers and carries noOptimistic meta', async () => {
+    clearRegistry();
+
+    class SharedActions {
+      value() { return 1; }
+      mutate() { return 'shared'; }
+    }
+    registerType('test.actions', SharedActions);
+    register('test.actions', 'schema', () => ({
+      $id: 'test.actions',
+      type: 'object' as const,
+      properties: {},
+      methods: {
+        value: { arguments: [] },
+        mutate: { arguments: [] },
+      },
+    }));
+
+    class ServerActions {
+      value() { return 2; }
+      mutate() { return 'server'; }
+    }
+    registerActions('test.actions', ServerActions, {
+      override: true,
+      noOptimistic: ['mutate'],
+    });
+
+    const tree = createMemoryTree();
+    await tree.set(createNode('/actions', 'test.actions'));
+
+    assert.equal(await executeAction(tree, '/actions', undefined, undefined, 'value'), 2);
+    assert.equal(await executeAction(tree, '/actions', undefined, undefined, 'mutate'), 'server');
+    assert.equal(getMeta('test.actions', 'action:mutate')?.noOptimistic, true);
   });
 });
 

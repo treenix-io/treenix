@@ -9,8 +9,14 @@ import { createSession, DUMMY_HASH, hashPassword, revokeSession, verifyPassword 
 import { OpError } from '#errors';
 import { checkRate } from './rate-limit';
 
+// userId becomes a path segment under /auth/users/. Original check (slash/backslash/NUL) missed
+// `..` and dot-only names → on FS-backed stores `path.join` normalizes them and writes outside
+// /auth/users/. Tighten to allowlist + length cap; reject dot-only names.
 function assertUserId(userId: string): void {
-  if (/[/\\\0]/.test(userId)) throw new OpError('BAD_REQUEST', 'Invalid userId');
+  if (typeof userId !== 'string' || userId.length === 0 || userId.length > 64
+      || !/^[A-Za-z0-9._-]+$/.test(userId)
+      || /^\.+$/.test(userId))
+    throw new OpError('BAD_REQUEST', 'Invalid userId');
 }
 
 // In-process serialize chain — closes the first-user admin-election TOCTOU window.
@@ -70,8 +76,11 @@ export async function loginUser(store: Tree, userId: string, password: string, c
   const hash = typeof creds?.['hash'] === 'string' ? creds['hash'] : undefined;
   // Always run scrypt to prevent timing-based user enumeration
   const ok = await verifyPassword(password, hash ?? DUMMY_HASH);
-  if (!user || !hash || !ok) throw new OpError('UNAUTHORIZED', 'Invalid credentials');
-  if (user.status !== 'active') throw new OpError('FORBIDDEN', 'Account not activated');
+  // R4-AUTH-6: collapse pending-status differential into UNAUTHORIZED. Distinct FORBIDDEN
+  // for pending users let credential-stuffing oracles confirm a valid (userId, password) pair
+  // before the account was even activated. Same response shape as wrong-credentials.
+  if (!user || !hash || !ok || user.status !== 'active')
+    throw new OpError('UNAUTHORIZED', 'Invalid credentials');
 
   const token = await createSession(store, userId);
   return { token, userId };
@@ -101,6 +110,22 @@ export async function devLogin(store: Tree) {
   return { token, userId };
 }
 
+// Initialize an agent port pairing — operator-side, AUTHED. Sets pendingKey on an idle port.
+// Splits the original idle→pending self-claim out of the unauth `agentConnect` so an unauthenticated
+// remote attacker cannot plant their own key on a port and have an admin later approve it.
+// The caller's tree is the auth-wrapped tree → W on the port path is enforced by withAcl.set.
+export async function agentInitPair(authedTree: Tree, path: string, key: string) {
+  const node = await authedTree.get(path);
+  if (!node) throw new OpError('NOT_FOUND', 'Agent port not found');
+  if (node.$type !== 't.agent.port') throw new OpError('BAD_REQUEST', 'Not an agent port');
+  const status = (node as Record<string, unknown>).status as string ?? 'idle';
+  if (status !== 'idle') throw new OpError('CONFLICT', `Port already in status: ${status}`);
+  const keyHash = hashAgentKey(key);
+  // withAcl.set on authedTree enforces W permission on the port path.
+  await authedTree.set({ ...node, status: 'pending', pendingKey: keyHash });
+  return { status: 'pending' as const };
+}
+
 export async function agentConnect(store: Tree, path: string, key: string, clientIp: string | null = null) {
   if (clientIp) checkRate(`agent:ip:${clientIp}`, 20);
   checkRate(`agent:path:${path}`, 10);
@@ -113,10 +138,10 @@ export async function agentConnect(store: Tree, path: string, key: string, clien
 
   if (status === 'revoked') throw new OpError('FORBIDDEN', 'Agent access revoked');
 
-  if (status === 'idle') {
-    await store.set({ ...node, status: 'pending', pendingKey: keyHash });
-    return { status: 'pending' as const };
-  }
+  // R4-AUTH-1: idle → pending self-claim removed. Operator must call agentInitPair (authed)
+  // first; agentConnect only validates against an existing pendingKey/approvedKey.
+  if (status === 'idle')
+    throw new OpError('BAD_REQUEST', 'Port not initialized — operator must call agentInitPair first');
 
   if (status === 'pending') {
     if (!timingSafeCompare(keyHash, (node as Record<string, unknown>).pendingKey as string))

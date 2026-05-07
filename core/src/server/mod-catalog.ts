@@ -3,7 +3,7 @@
 
 import { getLoadedMods } from '#mod/loader';
 import { getModPrefabs, getRegisteredMods } from '#mod/prefab';
-import { getTypesForMod, inferModFromType } from '#mod/tracking';
+import { getTypesForMod } from '#mod/tracking';
 import type { ModState } from '#mod/types';
 import type { CatalogEntry } from '#schema/catalog';
 import { TypeCatalog } from '#schema/catalog';
@@ -32,21 +32,12 @@ export function getAllMods(): ModInfo[] {
 }
 
 function buildModInfo(name: string, state: ModState, error?: Error): ModInfo {
-  // Tracked types first
-  const tracked = getTypesForMod(name);
-  const trackedSet = new Set(tracked);
-
-  // Convention fallback: catalog types whose inferred mod matches
-  const allTypes = catalog.list();
-  const conventionTypes = allTypes.filter(
-    e => !trackedSet.has(e.name) && inferModFromType(e.name) === name,
-  );
-
-  const types = [
-    ...allTypes.filter(e => trackedSet.has(e.name)),
-    ...conventionTypes,
-  ];
-
+  // R4-BOOT-5: tracked-types only — drop convention fallback. Inferring mod-of-type from
+  // string prefix lets a type registered outside any setCurrentMod() window appear under
+  // an unrelated mod (e.g. `auth.takeover` shows up under mod `auth`). Authoritative
+  // attribution comes from typeToMod populated during loader's setCurrentMod windows.
+  const trackedSet = new Set(getTypesForMod(name));
+  const types = catalog.list().filter(e => trackedSet.has(e.name));
   const prefabs = getModPrefabs(name).map(([n]) => n);
 
   return {

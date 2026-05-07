@@ -5,14 +5,13 @@ import { rememberRule, requestApproval, resolveVerdict } from '#agent/guardian';
 import { AiPolicy } from '#agent/types';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { createNode, getComponent } from '@treenx/core';
+import { getComponent, getMeta, resolve } from '@treenx/core';
 import { matchesAny } from '@treenx/core/glob';
-import { verifyViewSource } from '@treenx/core/mods/uix/verify';
-import { TypeCatalog } from '@treenx/core/schema/catalog';
+import type { CatalogActionDoc, CatalogEntry, CatalogPropertyDoc } from '@treenx/core/schema/catalog';
+import type { MethodSchema, PropertySchema, TypeSchema } from '@treenx/core/schema/types';
 import { executeAction } from '@treenx/core/server/actions';
 import { buildClaims, resolveToken, type Session, withAcl } from '@treenx/core/server/auth';
-import { deployPrefab } from '@treenx/core/server/prefab';
-import type { Tree } from '@treenx/core/tree';
+import { resolveRef, type Tree } from '@treenx/core/tree';
 import { randomUUID } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
 import { z } from 'zod/v3';
@@ -81,8 +80,8 @@ export async function checkMcpGuardian(store: Tree, req: GuardianRequest): Promi
   }
 }
 
-/** Compact YAML-like serializer — readable for LLMs, much less noisy than JSON */
-function yaml(val: unknown, depth = 0, maxStr = 300): string {
+/** Compact YAML serializer — readable for LLMs, much less noisy than JSON */
+export function yaml(val: unknown, depth = 0, maxStr = 300): string {
   const pad = '  '.repeat(depth);
   if (val == null) return 'null';
   if (typeof val === 'boolean' || typeof val === 'number') return String(val);
@@ -99,10 +98,13 @@ function yaml(val: unknown, depth = 0, maxStr = 300): string {
     return val.map(item => {
       if (typeof item !== 'object' || item == null) return `${pad}- ${yaml(item, 0, maxStr)}`;
       const inner = yaml(item, depth + 1, maxStr);
-      const lines = inner.split('\n');
+      const childPad = '  '.repeat(depth + 1);
+      const lines = inner.split('\n').map(line =>
+        line.startsWith(childPad) ? line.slice(childPad.length) : line,
+      );
       return lines.length === 1
-        ? `${pad}- ${lines[0].trimStart()}`
-        : `${pad}- ${lines[0].trimStart()}\n${lines.slice(1).map(l => `${pad}  ${l.trimStart()}`).join('\n')}`;
+        ? `${pad}- ${lines[0]}`
+        : `${pad}- ${lines[0]}\n${lines.slice(1).map(l => `${pad}  ${l}`).join('\n')}`;
     }).join('\n');
   }
   if (typeof val === 'object') {
@@ -111,13 +113,72 @@ function yaml(val: unknown, depth = 0, maxStr = 300): string {
     return entries.map(([k, v]) => {
       if (v != null && typeof v === 'object') {
         const inner = yaml(v, depth + 1, maxStr);
-        if (!inner.includes('\n') && inner.length < 60) return `${pad}${k}: ${inner.trimStart()}`;
+        if (Array.isArray(v) && !inner.includes('\n')) return `${pad}${k}: ${inner}`;
         return `${pad}${k}:\n${inner}`;
       }
       return `${pad}${k}: ${yaml(v, 0, maxStr)}`;
     }).join('\n');
   }
   return String(val);
+}
+
+function oneLine(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+function formatList(label: string, values: string[], lines: string[]) {
+  if (!values.length) return;
+  const inline = values.join(', ');
+  if (inline.length <= 100) {
+    lines.push(`  ${label}: ${inline}`);
+    return;
+  }
+  lines.push(`  ${label}:`);
+  for (const value of values) lines.push(`    - ${value}`);
+}
+
+function formatFieldNote(name: string, doc: CatalogPropertyDoc): string {
+  const hints: string[] = [];
+  if (doc.format) hints.push(doc.format);
+  if (doc.refType) hints.push(`ref ${doc.refType}`);
+
+  const human = oneLine([doc.title, doc.description].filter(Boolean).join(' — '));
+  const detail = [hints.join(', '), human].filter(Boolean).join(' — ');
+  return detail ? `    - ${name}: ${detail}` : `    - ${name}`;
+}
+
+function formatAction(name: string, doc?: CatalogActionDoc): string {
+  if (!doc) return `    - ${name}`;
+
+  const args = doc.arguments?.length ? `(${doc.arguments.join(', ')})` : '';
+  const label = oneLine([doc.title, doc.description].filter(Boolean).join(' — '));
+  const streaming = doc.streaming ? ' [stream]' : '';
+  return `    - ${name}${args}${streaming}${label ? ` — ${label}` : ''}`;
+}
+
+function formatCatalogEntry(entry: CatalogEntry): string {
+  const lines = [`- ${entry.name}${entry.title ? ` — ${oneLine(entry.title)}` : ''}`];
+  if (entry.description) lines.push(`  ${oneLine(entry.description)}`);
+
+  formatList('fields', entry.properties, lines);
+
+  const fieldNotes = Object.entries(entry.propertyDocs ?? {});
+  if (fieldNotes.length) {
+    lines.push('  field notes:');
+    for (const [name, doc] of fieldNotes) lines.push(formatFieldNote(name, doc));
+  }
+
+  const actionDocs = entry.actionDocs ?? {};
+  if (entry.actions.length) {
+    lines.push('  actions:');
+    for (const name of entry.actions) lines.push(formatAction(name, actionDocs[name]));
+  }
+
+  return lines.join('\n');
+}
+
+export function formatCatalog(entries: CatalogEntry[]): string {
+  return entries.map(formatCatalogEntry).join('\n\n');
 }
 
 const text = (s: string) => ({ content: [{ type: 'text' as const, text: s }] });
@@ -148,11 +209,13 @@ async function guardBlock(
   const label = subjectLabel(tool);
   const argPreview = yaml(guard.args, 0, 200);
 
-  if (mcp.server.getClientCapabilities()?.elicitation) {
+  const caps = mcp.server.getClientCapabilities();
+  if (caps?.elicitation?.form) {
     try {
       const narrow = guard.subjects[0] ?? tool;
       const broad = guard.subjects.at(-1) ?? tool;
       const result = await mcp.server.elicitInput({
+        mode: 'form',
         message: `Guardian approval required\n\n${label}\n\n${argPreview}`,
         requestedSchema: {
           type: 'object',
@@ -191,8 +254,13 @@ async function guardBlock(
 
       return allow ? null : text(`🛑 Guardian: declined by user`);
     } catch (err) {
-      console.error('[mcp-guardian] elicitInput failed, falling back to tree approval:', err);
+      console.error('[mcp-guardian] elicitInput failed:', err);
+      return text(`🛑 Guardian: approval prompt failed: ${(err as Error).message}`);
     }
+  }
+
+  if (process.env.MCP_GUARDIAN_TREE_APPROVAL !== '1') {
+    return text('🛑 Guardian: this MCP client did not advertise form elicitation support; approval cannot be requested inline.');
   }
 
   const approved = await requestApproval(store, {
@@ -205,17 +273,162 @@ async function guardBlock(
   return approved ? null : text(`🛑 Guardian: denied by human`);
 }
 
-const catalog = new TypeCatalog();
+type McpServerBuildOpts = {
+  target?: string;
+};
 
-function dataKeys(node: Record<string, unknown>) {
-  return Object.keys(node).filter(k => !k.startsWith('$'));
+// R5-NEW-1: bound recursive Zod-from-JSON-Schema expansion. A pathological mod schema
+// (deeply-nested anyOf, huge enum, or recursive properties) would otherwise burn CPU/stack
+// at MCP build time. Caps mirror R4-MOUNT-4's assertSafeSchema constraints.
+const ZOD_DEPTH_MAX = 16;
+const ZOD_UNION_MAX = 100;
+const ZOD_PROPS_MAX = 200;
+
+function zodForProperty(prop: PropertySchema = {}, depth = 0): z.ZodTypeAny {
+  if (depth > ZOD_DEPTH_MAX)
+    throw new Error(`MCP schema too deep (>${ZOD_DEPTH_MAX} levels) — pathological schema rejected`);
+
+  let schema: z.ZodTypeAny;
+  if (prop.anyOf?.length) {
+    if (prop.anyOf.length > ZOD_UNION_MAX)
+      throw new Error(`MCP schema anyOf too large (>${ZOD_UNION_MAX} variants)`);
+    const variants = prop.anyOf.map(p => zodForProperty(p, depth + 1));
+    schema = variants.length === 1
+      ? variants[0]
+      : z.union(variants as [z.ZodTypeAny, z.ZodTypeAny, ...z.ZodTypeAny[]]);
+  } else if (prop.enum?.length) {
+    if (prop.enum.length > ZOD_UNION_MAX)
+      throw new Error(`MCP schema enum too large (>${ZOD_UNION_MAX} entries)`);
+    const literals: z.ZodTypeAny[] = prop.enum.map(v => z.literal(v));
+    schema = literals.length === 1
+      ? literals[0]
+      : z.union(literals as [z.ZodTypeAny, z.ZodTypeAny, ...z.ZodTypeAny[]]);
+  } else {
+    switch (prop.type) {
+      case 'string':
+        schema = z.string();
+        break;
+      case 'number':
+      case 'integer':
+        schema = z.number();
+        break;
+      case 'boolean':
+        schema = z.boolean();
+        break;
+      case 'array':
+        schema = z.array(zodForProperty(prop.items, depth + 1));
+        break;
+      case 'object':
+        schema = z.object(shapeForProperties(prop.properties ?? {}, prop.required ?? [], depth + 1)).passthrough();
+        break;
+      default:
+        schema = z.unknown();
+        break;
+    }
+  }
+  if (prop.description) schema = schema.describe(prop.description);
+  return schema;
 }
 
-export async function buildMcpServer(store: Tree, session: Session, claims?: string[]) {
+function shapeForProperties(
+  properties: Record<string, PropertySchema>,
+  required: readonly string[] = [],
+  depth = 0,
+): z.ZodRawShape {
+  const propEntries = Object.entries(properties);
+  if (propEntries.length > ZOD_PROPS_MAX)
+    throw new Error(`MCP schema has too many properties (>${ZOD_PROPS_MAX})`);
+  const req = new Set(required);
+  const shape: z.ZodRawShape = {};
+  for (const [name, prop] of propEntries) {
+    const schema = zodForProperty(prop, depth);
+    shape[name] = req.has(name) ? schema : schema.optional();
+  }
+  return shape;
+}
+
+function methodInputSchema(method: MethodSchema): z.AnyZodObject {
+  const args = method.arguments ?? [];
+  if (args.length === 1 && args[0].type === 'object') {
+    return z.object(shapeForProperties(args[0].properties ?? {}, args[0].required ?? [])).passthrough();
+  }
+  const shape: z.ZodRawShape = {};
+  for (const arg of args) shape[arg.name] = zodForProperty(arg);
+  return z.object(shape).passthrough();
+}
+
+function methodPayload(method: MethodSchema, args: Record<string, unknown>): unknown {
+  const actionArgs = method.arguments ?? [];
+  if (actionArgs.length === 0) return {};
+  if (actionArgs.length === 1) {
+    const arg = actionArgs[0];
+    return arg.type === 'object' ? args : args[arg.name];
+  }
+  return args;
+}
+
+function actionIsGuarded(type: string, action: string, method: MethodSchema): boolean {
+  const meta = getMeta(type, `action:${action}`);
+  if (meta?.noOptimistic === true) return true;
+  if (typeof (method as Record<string, unknown>).mutation === 'string') return true;
+  return false;
+}
+
+function delegatesToAction(method: MethodSchema): boolean {
+  const arg = method.arguments?.[0];
+  return arg?.type === 'object' && !!arg.properties?.path && !!arg.properties?.action;
+}
+
+async function callIsGuarded(tree: Tree, type: string, action: string, method: MethodSchema, args: Record<string, unknown>): Promise<boolean> {
+  if (!delegatesToAction(method)) return actionIsGuarded(type, action, method);
+
+  const targetPath = typeof args.path === 'string' ? args.path : '';
+  const targetAction = typeof args.action === 'string' ? args.action : '';
+  if (!targetPath || !targetAction) return true;
+
+  const explicitType = typeof args.type === 'string' ? args.type : '';
+  const targetType = explicitType || (await tree.get(targetPath))?.$type || '';
+  const targetMethod = targetType
+    ? (resolve(targetType, 'schema') as (() => TypeSchema) | null)?.()?.methods?.[targetAction]
+    : undefined;
+  if (!targetMethod) return true;
+  return actionIsGuarded(targetType, targetAction, targetMethod);
+}
+
+function delegatedActionCall(method: MethodSchema, args: Record<string, unknown>) {
+  if (!delegatesToAction(method)) return null;
+  const path = typeof args.path === 'string' ? args.path : '';
+  const action = typeof args.action === 'string' ? args.action : '';
+  if (!path || !action) return null;
+  return {
+    path,
+    action,
+    type: typeof args.type === 'string' ? args.type : undefined,
+    key: typeof args.key === 'string' ? args.key : undefined,
+    data: args.data,
+  };
+}
+
+function actionDescription(action: string, method: MethodSchema): string {
+  return [method.title, method.description, (method as Record<string, unknown>).mutation]
+    .filter((v): v is string => typeof v === 'string' && !!v)
+    .map(oneLine)
+    .join(' — ') || `Execute ${action}`;
+}
+
+async function resolveTargetNode(tree: Tree, targetPath: string) {
+  const raw = await tree.get(targetPath);
+  if (!raw) throw new Error(`MCP target node not found: ${targetPath}`);
+  return resolveRef(tree, raw);
+}
+
+export async function buildMcpServer(store: Tree, session: Session, claims?: string[], opts: McpServerBuildOpts = {}) {
   claims ??= session.claims ?? await buildClaims(store, session.userId);
-  const root = await store.get('/');
-  console.log(`[mcp-diag] userId=${session.userId}, claims=[${claims}], root.$acl=${JSON.stringify(root?.$acl)}`);
   const aclStore = withAcl(store, session.userId, claims);
+  const targetPath = opts.target ?? '/sys/mcp/tools';
+  const targetNode = await resolveTargetNode(aclStore, targetPath);
+  const schema = (resolve(targetNode.$type, 'schema') as (() => TypeSchema) | null)?.();
+  if (!schema?.methods) throw new Error(`MCP target type has no methods: ${targetNode.$type}`);
 
   const mcp = new McpServer({ name: 'treenix', version: '1.0.0' });
 
@@ -225,208 +438,45 @@ export async function buildMcpServer(store: Tree, session: Session, claims?: str
     return guardBlock(guard, store, session.userId, mcp);
   }
 
-  mcp.registerTool(
-    'get_node',
-    {
-      description: 'Read a node by path. Returns full untruncated values.',
-      inputSchema: { path: z.string() },
-    },
-    async ({ path }) => {
-      const node = await aclStore.get(path);
-      return text(node ? yaml(node, 0, Infinity) : `not found: ${path}`);
-    },
-  );
-
-  mcp.registerTool(
-    'list_children',
-    {
-      description: 'List children of a node. Long string values may be truncated — use get_node for full data.',
-      inputSchema: {
-        path: z.string(),
-        depth: z.number().optional(),
-        detail: z.boolean().optional().describe('Show first-level fields and component types'),
-        full: z.boolean().optional().describe('Return complete YAML of each node'),
+  for (const [action, method] of Object.entries(schema.methods)) {
+    mcp.registerTool(
+      action,
+      {
+        description: actionDescription(action, method),
+        inputSchema: methodInputSchema(method),
       },
-    },
-    async ({ path, depth, detail, full }) => {
-      const ctx = { queryContextPath: path, userId: session.userId };
-      const result = await aclStore.getChildren(path, { depth }, ctx);
-      const { items, total, truncated } = result;
-      const truncNote = truncated ? '\n⚠️ Results truncated — ACL scan limit reached. Use query mounts for large collections.' : '';
-
-      if (full) return text(yaml({ total, truncated, items }));
-
-      if (detail) {
-        const lines = items.map(n => {
-          const name = n.$path.split('/').at(-1);
-          const keys = dataKeys(n);
-          const header = n.$type === 'dir' ? `${name}/` : `${name}: ${n.$type}  [${keys.length}]`;
-          const fields = keys.map(k => {
-            const v = (n as Record<string, unknown>)[k];
-            if (v && typeof v === 'object' && '$type' in (v as object))
-              return `  ${k}: ${(v as Record<string, unknown>).$type}`;
-            if (Array.isArray(v)) return `  ${k}: [${v.length}]`;
-            const s = String(v);
-            return `  ${k}: ${s.length > 60 ? s.slice(0, 60) + '…' : s}`;
-          });
-          return header + (fields.length ? '\n' + fields.join('\n') : '');
-        });
-        return text(lines.join('\n') + `\n(${total} total)` + truncNote);
-      }
-
-      const lines = items.map(n => {
-        const name = n.$path.split('/').at(-1);
-        if (n.$type === 'dir') return `${name}/`;
-        return `${name}  ${n.$type}  [${dataKeys(n).length}]`;
-      });
-      return text(lines.join('\n') + (total > items.length ? `\n(${total} total)` : '') + truncNote);
-    },
-  );
-
-  mcp.registerTool(
-    'set_node',
-    {
-      description: 'Create or update a node. May require Guardian approval.',
-      inputSchema: {
-        path: z.string(),
-        type: z.string(),
-        components: z.record(z.unknown()).optional(),
-        acl: z.array(z.object({ g: z.string(), p: z.number() })).optional(),
-        owner: z.string().optional(),
-      },
-    },
-    async ({ path, type, components, acl, owner }) => {
-      const blocked = await guarded('set_node', { path, type, components, acl, owner });
-      if (blocked) return blocked;
-      const existing = await aclStore.get(path);
-      const node = existing ?? createNode(path, type);
-      if (!existing) node.$type = type;
-      if (components) {
-        for (const [k, v] of Object.entries(components)) {
-          if (k === '__proto__' || k === 'constructor' || k === 'prototype') continue;
-          const comp = v as Record<string, unknown> | null;
-          if (comp && typeof comp === 'object' && comp.$type === type) {
-            for (const [fk, fv] of Object.entries(comp)) {
-              if (fk !== '$type') node[fk] = fv;
-            }
-            continue;
-          }
-          node[k] = v;
+      async (args) => {
+        const callArgs = args as Record<string, unknown>;
+        if (await callIsGuarded(aclStore, targetNode.$type, action, method, callArgs)) {
+          const blocked = await guarded(action, { target: targetNode.$path, ...callArgs });
+          if (blocked) return blocked;
         }
-      }
-      if (acl) node.$acl = acl;
-      if (owner) node.$owner = owner;
-      await aclStore.set(node);
-      return text(yaml(node));
-    },
-  );
-
-  mcp.registerTool(
-    'execute',
-    {
-      description: 'Execute an action on a node or component. Actions are methods registered on types. May require Guardian approval.',
-      inputSchema: {
-        path: z.string(),
-        action: z.string(),
-        type: z.string().optional(),
-        key: z.string().optional(),
-        data: z.record(z.unknown()).optional(),
+        const delegated = delegatedActionCall(method, callArgs);
+        if (delegated) {
+          const result = await executeAction(
+            aclStore,
+            delegated.path,
+            delegated.type,
+            delegated.key,
+            delegated.action,
+            delegated.data,
+            { userId: session.userId, claims },
+          );
+          return text(typeof result === 'string' ? result : yaml(result ?? { ok: true }));
+        }
+        const result = await executeAction(
+          aclStore,
+          targetNode.$path,
+          targetNode.$type,
+          undefined,
+          action,
+          methodPayload(method, callArgs),
+          { userId: session.userId, claims },
+        );
+        return text(typeof result === 'string' ? result : yaml(result ?? { ok: true }));
       },
-    },
-    async ({ path, action, type, key, data }) => {
-      const blocked = await guarded('execute', { path, action, type, key, data });
-      if (blocked) return blocked;
-      const result = await executeAction(aclStore, path, type, key, action, data);
-      return text(yaml(result ?? { ok: true }));
-    },
-  );
-
-  mcp.registerTool(
-    'deploy_prefab',
-    {
-      description: 'Deploy a module prefab (node tree template) to a target path. Idempotent: skips existing nodes. Browse available prefabs via list_children /sys/mods.',
-      inputSchema: {
-        source: z.string().describe('Prefab path: /sys/mods/{mod}/prefabs/{name}'),
-        target: z.string().describe('Target path where nodes will be created'),
-        allowAbsolute: z.boolean().optional().describe('Allow prefab to write outside target (e.g. /sys/autostart refs). Default: false'),
-      },
-    },
-    async ({ source, target, allowAbsolute }) => {
-      const blocked = await guarded('deploy_prefab', { source, target, allowAbsolute });
-      if (blocked) return blocked;
-      const result = await deployPrefab(aclStore, source, target, { allowAbsolute });
-      return text(yaml(result));
-    },
-  );
-
-  mcp.registerTool(
-    'compile_view',
-    {
-      description: 'Verify that a UIX view source compiles correctly. Pass path to check an existing type node, or source to verify before writing.',
-      inputSchema: {
-        path: z.string().optional().describe('Path to type node (e.g. /sys/types/cosmos/system) — reads view.source'),
-        source: z.string().optional().describe('Raw JSX/TSX source to verify directly'),
-      },
-    },
-    async ({ path, source }) => {
-      let code = source;
-      if (!code) {
-        if (!path) return text('error: provide path or source');
-        const node = await aclStore.get(path);
-        if (!node) return text(`not found: ${path}`);
-        code = (node as any)?.view?.source;
-        if (!code || typeof code !== 'string') return text(`no view.source on ${path}`);
-      }
-      const result = verifyViewSource(code);
-      return text(yaml(result));
-    },
-  );
-
-  mcp.registerTool(
-    'remove_node',
-    {
-      description: 'Remove a node by path. May be denied by Guardian.',
-      inputSchema: { path: z.string() },
-    },
-    async ({ path }) => {
-      const blocked = await guarded('remove_node', { path });
-      if (blocked) return blocked;
-      const ok = await aclStore.remove(path);
-      return text(ok ? `removed: ${path}` : `not found: ${path}`);
-    },
-  );
-
-  // ── Discovery tools — powered by TypeCatalog ──
-
-  mcp.registerTool(
-    'catalog',
-    {
-      description: 'List all registered types with compact descriptions plus property/action docs. Use this first to discover what types exist.',
-      inputSchema: {},
-    },
-    async () => text(yaml(catalog.list())),
-  );
-
-  mcp.registerTool(
-    'describe_type',
-    {
-      description: 'Get full schema of a type: properties, actions with argument types, and cross-references to other types. Use after catalog to understand a specific type deeply.',
-      inputSchema: { type: z.string().describe('Type name, e.g. "cafe.contact" or "board.task"') },
-    },
-    async ({ type: typeName }) => {
-      const desc = catalog.describe(typeName);
-      return text(desc ? yaml(desc) : `type not found: ${typeName}`);
-    },
-  );
-
-  mcp.registerTool(
-    'search_types',
-    {
-      description: 'Search types by keyword across names, titles, property names, and action names. Use to find types relevant to a task.',
-      inputSchema: { query: z.string().describe('Search keyword, e.g. "order", "mail", "contact"') },
-    },
-    async ({ query }) => text(yaml(catalog.search(query))),
-  );
+    );
+  }
 
   return mcp;
 }
@@ -627,32 +677,88 @@ export function setCorsHeaders(
 }
 
 function send401(
+  req: import('node:http').IncomingMessage,
   res: import('node:http').ServerResponse,
   body: { error: string; message?: string },
+  opts: McpHandlerOptions = {},
 ): void {
-  res.setHeader('WWW-Authenticate', 'Bearer realm="mcp"');
+  const metadataUrl = absoluteResourceUrl(req, protectedResourceMetadataPath(opts.routePath ?? '/mcp'));
+  res.setHeader('WWW-Authenticate', `Bearer realm="mcp", resource_metadata="${metadataUrl}"`);
   res.writeHead(401, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(body));
 }
 
 type SessionEntry = { transport: StreamableHTTPServerTransport; mcp: McpServer; auth: SessionAuth };
 
-/** Create MCP HTTP server. Returns server handle for lifecycle management. */
-export function createMcpHttpServer(store: Tree, port: number, host = '127.0.0.1'): Server {
-  const sessions = new Map<string, SessionEntry>();
+export type McpHandlerOptions = {
+  routePath?: string;
+  target?: string;
+  authorizationServer?: string;
+};
 
-  const handler = async (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => {
+const PROTECTED_RESOURCE_METADATA_ROOT = '/.well-known/oauth-protected-resource';
+
+export function protectedResourceMetadataPath(routePath: string): string {
+  const route = routePath.startsWith('/') ? routePath : `/${routePath}`;
+  return route === '/' ? PROTECTED_RESOURCE_METADATA_ROOT : `${PROTECTED_RESOURCE_METADATA_ROOT}${route}`;
+}
+
+function requestOrigin(req: import('node:http').IncomingMessage): string {
+  const host = req.headers.host;
+  if (!host) return 'http://localhost';
+  const forwardedProto = req.headers['x-forwarded-proto'];
+  const proto = process.env.TRUST_PROXY === 'true' && typeof forwardedProto === 'string'
+    ? forwardedProto.split(',')[0].trim()
+    : 'http';
+  return `${proto || 'http'}://${host}`;
+}
+
+function absoluteResourceUrl(req: import('node:http').IncomingMessage, url: string): string {
+  if (/^https?:\/\//i.test(url)) return url;
+  return `${requestOrigin(req)}${url.startsWith('/') ? url : `/${url}`}`;
+}
+
+export function protectedResourceMetadata(
+  req: import('node:http').IncomingMessage,
+  opts: McpHandlerOptions = {},
+) {
+  const routePath = opts.routePath ?? '/mcp';
+  const authorizationServer = opts.authorizationServer || requestOrigin(req);
+  return {
+    resource: absoluteResourceUrl(req, routePath),
+    resource_name: 'Treenix MCP',
+    bearer_methods_supported: ['header'],
+    scopes_supported: ['treenix'],
+    authorization_servers: [absoluteResourceUrl(req, authorizationServer)],
+  };
+}
+
+export function createMcpResourceMetadataHandler(opts: McpHandlerOptions = {}) {
+  return async (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => {
     setCorsHeaders(req, res);
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
       res.end();
       return;
     }
+    if (req.method !== 'GET') {
+      res.writeHead(405, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'method_not_allowed' }));
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(protectedResourceMetadata(req, opts)));
+  };
+}
 
-    const url = (req.url ?? '/').split('?')[0];
-    if (url !== '/mcp') {
-      res.writeHead(404, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'not_found' }));
+export function createMcpRouteHandler(store: Tree, host = '127.0.0.1', opts: McpHandlerOptions = {}) {
+  const sessions = new Map<string, SessionEntry>();
+
+  return async (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => {
+    setCorsHeaders(req, res);
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204);
+      res.end();
       return;
     }
 
@@ -678,7 +784,7 @@ export function createMcpHttpServer(store: Tree, port: number, host = '127.0.0.1
           sessions.delete(sessionId);
           try { entry.transport.close(); } catch { /* ignore */ }
         }
-        send401(res, reval.body);
+        send401(req, res, reval.body, opts);
         return;
       }
       await entry.transport.handleRequest(req, res);
@@ -687,14 +793,14 @@ export function createMcpHttpServer(store: Tree, port: number, host = '127.0.0.1
 
     const auth = await resolveMcpAuth(store, token, host, peerAddr, proxy);
     if (!auth.ok) {
-      send401(res, auth.body);
+      send401(req, res, auth.body, opts);
       return;
     }
 
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
     });
-    const mcp = await buildMcpServer(store, auth.session, auth.claims);
+    const mcp = await buildMcpServer(store, auth.session, auth.claims, { target: opts.target });
     await mcp.connect(transport);
 
     transport.onclose = () => {
@@ -707,8 +813,28 @@ export function createMcpHttpServer(store: Tree, port: number, host = '127.0.0.1
     const sid = transport.sessionId;
     if (sid) sessions.set(sid, { transport, mcp, auth: auth.auth });
   };
+}
 
-  const server = createServer(handler);
+/** Create MCP HTTP server. Returns server handle for tests and standalone usage. */
+export function createMcpHttpServer(store: Tree, port: number, host = '127.0.0.1', opts: McpHandlerOptions = {}): Server {
+  const routePath = opts.routePath ?? '/mcp';
+  const handler = createMcpRouteHandler(store, host, { ...opts, routePath });
+  const metadataHandler = createMcpResourceMetadataHandler({ ...opts, routePath });
+  const metadataPath = protectedResourceMetadataPath(routePath);
+
+  const server = createServer(async (req, res) => {
+    const url = (req.url ?? '/').split('?')[0];
+    if (url === metadataPath) {
+      await metadataHandler(req, res);
+      return;
+    }
+    if (url !== routePath) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'not_found' }));
+      return;
+    }
+    await handler(req, res);
+  });
   server.listen(port, host, () => console.log(`treenix mcp http://${host}:${port}/mcp`));
   return server;
 }

@@ -5,6 +5,7 @@ import { getComponent } from '@treenx/core';
 import { getCtx, registerType } from '@treenx/core/comp';
 import { OpError } from '@treenx/core/errors';
 import type { BrahmanCtx } from './helpers';
+import { evalBool, evalExpr } from './sandbox';
 
 // ── Shared types ──
 
@@ -214,13 +215,12 @@ export class IfElseAction {
     const { tree } = bCtx;
     const session = bCtx.session;
 
-    let result = false;
-    try {
-      const condition = format(this.condition, bCtx);
-      const evalFn = new Function('session', 'data', 'user', `return !!(${condition})`);
-      const userData = getComponent(bCtx.user, BrahmanUser);
-      result = evalFn(session, session, userData);
-    } catch { /* eval failed → false */ }
+    // R5-BRAHMAN-1: QuickJS sandbox — no host globals, bounded memory + time.
+    // `format(condition)` interpolates session vars BEFORE eval; sandbox prevents
+    // a crafted user message that lands in `session.x` from gaining host JS execution.
+    const condition = format(this.condition, bCtx);
+    const userData = getComponent(bCtx.user, BrahmanUser);
+    const result = await evalBool(condition, { session, data: session, user: userData });
 
     const target = result ? this.actionIf : this.actionElse;
     if (target) {
@@ -275,10 +275,9 @@ export class TagAction {
     if (!this.tag) return;
     let shouldSet = true;
     if (this.value && this.value !== 'true') {
-      try {
-        const formatted = format(this.value, bCtx);
-        shouldSet = !!new Function('session', 'data', `return !!(${formatted})`)(session, session);
-      } catch { /* eval failed */ }
+      // R5-BRAHMAN-1: QuickJS sandbox.
+      const formatted = format(this.value, bCtx);
+      shouldSet = await evalBool(formatted, { session, data: session });
     }
 
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -382,11 +381,11 @@ export class SetValueAction {
     const session = bCtx.session;
 
     if (this.saveTo) {
+      // R5-BRAHMAN-1: QuickJS sandbox.
       try {
         const formatted = format(this.value, bCtx);
-        const evalFn = new Function('session', 'data', 'user', `return (${formatted})`);
         const userData = getComponent(bCtx.user, BrahmanUser);
-        session[this.saveTo] = evalFn(session, session, userData);
+        session[this.saveTo] = await evalExpr(formatted, { session, data: session, user: userData });
       } catch {
         session[this.saveTo] = this.value;
       }

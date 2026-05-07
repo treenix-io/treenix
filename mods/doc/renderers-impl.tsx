@@ -95,6 +95,11 @@ export function DocPageView({ value, onChange }: BlockProps) {
     const path = getNodeLinkPath(event.target);
     if (!path) return;
 
+    // Outside the active route's prefix: makeHref returns null → leave the
+    // browser default (which is no-op since we render <a> without href). Don't
+    // preventDefault, don't run unsaved-changes guard.
+    if (makeHref(path) === null) return;
+
     event.preventDefault();
     event.stopPropagation();
 

@@ -1,7 +1,7 @@
 // Ref node/component view — shows target path, resolve button, inline preview
 
 import { Button } from '#components/ui/button';
-import { Render } from '#context';
+import { Render, RenderContext } from '#context';
 import { usePath } from '#hooks';
 import { type NodeData, register } from '@treenx/core';
 import { useState } from 'react';
@@ -88,7 +88,23 @@ function RefDisplay({ target, onSelect }: { target: string; onSelect?: (p: strin
   );
 }
 
+// ── Route-context view: when a /sys/routes/* node is a ref, follow it and
+//    render the target as the page content (in plain `react` context). ──
+
+function RefRouteView({ value }: { value: NodeData }) {
+  const ref = (value as { $ref?: string }).$ref;
+  const { data: target } = usePath(ref ?? '');
+  if (!ref) return null;
+  if (!target) return null;
+  return (
+    <RenderContext name="react">
+      <Render value={target} />
+    </RenderContext>
+  );
+}
+
 // ── Registration ──
 
 register('ref', 'react', RefNodeView as any);
 register('ref', 'react:list', RefListItem as any);
+register('ref', 'react:route', RefRouteView as any);

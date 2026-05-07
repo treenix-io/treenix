@@ -2,8 +2,9 @@
 // Registered as a class so actions appear in catalog and are callable via execute tool.
 // Node at /sys has $type: treenix.system — all system actions route there.
 
-import { getCtx, registerType } from '@treenx/core/comp';
-import { verifyViewSource } from '@treenx/core/mods/uix/verify';
+import { getComponent } from '@treenx/core';
+import { getCtx, registerType, setComponent } from '@treenx/core/comp';
+import { UixSource, verifyViewSource } from '@treenx/core/mods/uix/uix-source';
 import { TypeCatalog } from '@treenx/core/schema/catalog';
 import { applyTemplate } from '@treenx/core/server/actions';
 import { deployPrefab } from '@treenx/core/server/prefab';
@@ -39,8 +40,9 @@ export class SystemActions {
       if (!targetPath) throw new Error('source or path required');
       const node = await tree.get(targetPath);
       if (!node) throw new Error(`not found: ${targetPath}`);
-      code = (node as any)?.view?.source;
-      if (!code) throw new Error(`no view.source on ${targetPath}`);
+      const view = getComponent(node, UixSource, 'view');
+      if (!view?.source) throw new Error(`no uix.source on ${targetPath}`);
+      code = view.source;
     }
 
     const check = verifyViewSource(code);
@@ -49,7 +51,7 @@ export class SystemActions {
     if (data.source && targetPath) {
       const node = await tree.get(targetPath);
       if (node) {
-        (node as any).view = { ...((node as any).view ?? {}), source: data.source };
+        setComponent(node, UixSource, { source: data.source }, 'view');
         await tree.set(node);
         return { ok: true, saved: targetPath };
       }

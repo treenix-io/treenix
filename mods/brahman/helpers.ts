@@ -254,6 +254,16 @@ export function buildLangKeyboard(langs: string[]) {
 // ── Page execution ──
 
 export async function executePage(pagePath: string, bCtx: BrahmanCtx): Promise<void> {
+  // R5-BRAHMAN-3: Telegram callback `data: 'page:/auth/users/admin'` would otherwise
+  // make the bot fetch and walk arbitrary subtrees. Restrict to the bot's own pages dir.
+  // Session/history paths (set by the bot itself) also flow here, so the same gate
+  // protects against history-poisoning.
+  const pagesRoot = `${bCtx.botPath}/pages`;
+  if (typeof pagePath !== 'string'
+      || (pagePath !== pagesRoot && !pagePath.startsWith(pagesRoot + '/'))) {
+    console.warn(`[brahman:${bCtx.botPath}] executePage rejected out-of-tree path: ${String(pagePath)}`);
+    return;
+  }
   const pageNode = await bCtx.tree.get(pagePath);
   if (!pageNode) return;
 

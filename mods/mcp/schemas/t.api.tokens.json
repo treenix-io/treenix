@@ -1,13 +1,13 @@
 {
   "type": "object",
-  "title": "Server-side registry for creating and revoking machine credentials.",
+  "title": "API token manager for creating and revoking machine access credentials.",
   "properties": {},
   "methods": {
     "create": {
-      "mutation": "Create API token for an agent",
+      "kind": "write",
       "arguments": [
         {
-          "name": "data",
+          "name": "_data",
           "type": "object",
           "properties": {
             "name": {
@@ -21,10 +21,10 @@
       ]
     },
     "revoke": {
-      "mutation": "Revoke an API token by name",
+      "kind": "write",
       "arguments": [
         {
-          "name": "data",
+          "name": "_data",
           "type": "object",
           "properties": {
             "name": {

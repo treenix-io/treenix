@@ -35,6 +35,25 @@ function validateActionArgs(type: string, action: string, data: unknown): void {
   }
 }
 
+// R4-MOUNT-4: shallow walk over a stored type's `schema` field to reject patterns that
+// would DoS the validator. Caps cover the worst-case offenders: catastrophic-backtracking
+// regex (length + nested-quantifier shape), oversized enums, deeply-nested anyOf/allOf.
+const SCHEMA_PATTERN_MAX = 256;
+const SCHEMA_DEPTH_MAX = 16;
+function assertSafeSchema(schema: unknown, ctx: string, depth = 0): void {
+  if (!schema || typeof schema !== 'object') return;
+  if (depth > SCHEMA_DEPTH_MAX) throw new OpError('BAD_REQUEST', `${ctx}: schema too deep (max ${SCHEMA_DEPTH_MAX})`);
+  if (Array.isArray(schema)) { for (const v of schema) assertSafeSchema(v, ctx, depth + 1); return; }
+  for (const [k, v] of Object.entries(schema as Record<string, unknown>)) {
+    if (k === 'pattern' && typeof v === 'string') {
+      if (v.length > SCHEMA_PATTERN_MAX) throw new OpError('BAD_REQUEST', `${ctx}: schema.pattern too long (>${SCHEMA_PATTERN_MAX})`);
+      // Reject the classic catastrophic-backtracking shape: nested quantifiers like (a+)+ / (a*)*.
+      if (/\([^)]*[+*][^)]*\)[+*]/.test(v)) throw new OpError('BAD_REQUEST', `${ctx}: schema.pattern has nested quantifiers (ReDoS risk)`);
+    }
+    assertSafeSchema(v, ctx, depth + 1);
+  }
+}
+
 function immerToPatchOps(patches: Patch[]): PatchOp[] {
   return patches.map(p => {
     const path = p.path.join('.');
@@ -164,6 +183,10 @@ async function loadDynamicAction(
   if (!resolve(type, 'schema')) {
     const nodeSchema = (typeNode as Record<string, unknown>).schema;
     if (!nodeSchema || typeof nodeSchema !== 'object') return null;
+    // R4-MOUNT-4: cap regex `pattern` complexity. F6 made /sys/types admin-only-write,
+    // but admin typo / malicious mod can plant `pattern: '(a+)+$'` (catastrophic backtracking)
+    // and DoS the single-process tenant on every action invocation.
+    assertSafeSchema(nodeSchema as Record<string, unknown>, type);
     const s = { $id: type, ...(nodeSchema as Record<string, unknown>) };
     register(type, 'schema', () => s as unknown as TypeSchema);
   }
@@ -482,8 +505,9 @@ export async function applyTemplate(
       try { await tree.set(orig); } catch (e) { rollbackErrs.push(e); }
     }
     if (rollbackErrs.length) {
+      const rbMsgs = rollbackErrs.map(e => (e as Error)?.message ?? String(e)).join('; ');
       throw new OpError('CONFLICT',
-        `applyTemplate rollback failed (${rollbackErrs.length} error(s)) after primary error: ${(err as Error)?.message ?? String(err)}`);
+        `applyTemplate rollback failed (${rollbackErrs.length} error(s) [${rbMsgs}]) after primary error: ${(err as Error)?.message ?? String(err)}`);
     }
     throw err;
   }

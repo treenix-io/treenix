@@ -5,6 +5,7 @@ import { createMemoryTree, type Tree } from '#tree';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 import { AGENT_SESSION_TTL, hashAgentKey, timingSafeCompare } from './agent';
+import { agentConnect, agentInitPair } from './auth-ops';
 import { buildClaims, createSession, resolveToken, withAcl } from './auth';
 
 // Import agent-port type registration (side-effect: registers t.agent.port)
@@ -47,6 +48,16 @@ describe('timingSafeCompare', () => {
 
   it('returns false for different lengths', () => {
     assert.equal(timingSafeCompare('aa', 'bbbb'), false);
+  });
+
+  it('R5-AGENT-1: returns false for undefined / non-string / empty inputs', () => {
+    const h = hashAgentKey('secret');
+    assert.equal(timingSafeCompare(undefined, h), false);
+    assert.equal(timingSafeCompare(h, undefined), false);
+    assert.equal(timingSafeCompare(null, null), false);
+    assert.equal(timingSafeCompare(42, h), false);
+    assert.equal(timingSafeCompare('', ''), false);
+    assert.equal(timingSafeCompare(h, ''), false);
   });
 });
 
@@ -278,6 +289,53 @@ describe('agent TOFU flow', () => {
     assert.equal((revoked as any).status, 'revoked');
     assert.equal((revoked as any).approvedKey, undefined);
     assert.ok(!revoked!.$acl?.some(e => e.g === `u:${agentUserId}`));
+  });
+
+  it('R4-AUTH-1: agentConnect REJECTS idle ports — no unauth self-claim', async () => {
+    // Port is freshly created (status=idle from beforeEach). Unauthenticated agentConnect
+    // must NOT plant pendingKey from caller input — that was the unauth bearer-acquisition vector.
+    await assert.rejects(
+      agentConnect(tree, PORT_PATH, AGENT_KEY, '1.2.3.4'),
+      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+    );
+    // Port state untouched.
+    const after = await tree.get(PORT_PATH);
+    assert.equal((after as any).status, 'idle');
+    assert.equal((after as any).pendingKey, undefined);
+  });
+
+  it('R4-AUTH-1: agentInitPair on authed tree sets pending — operator path', async () => {
+    // Operator authenticated as admin (uses raw memory tree as the authed tree for this unit-level test).
+    await agentInitPair(tree, PORT_PATH, AGENT_KEY);
+    const after = await tree.get(PORT_PATH);
+    assert.equal((after as any).status, 'pending');
+    assert.equal((after as any).pendingKey, hashAgentKey(AGENT_KEY));
+  });
+
+  it('R4-AUTH-1: agentInitPair refuses non-idle ports', async () => {
+    // Port already in pending — operator must not be able to overwrite an existing key.
+    await tree.set({
+      ...(await tree.get(PORT_PATH))!,
+      status: 'pending',
+      pendingKey: hashAgentKey('original-key'),
+    });
+    await assert.rejects(
+      agentInitPair(tree, PORT_PATH, 'attacker-replacement-key'),
+      (e: unknown) => e instanceof OpError && e.code === 'CONFLICT',
+    );
+  });
+
+  it('R4-AUTH-1: end-to-end — operator inits, agent connects, key compared', async () => {
+    // Operator initialises pairing (authed)
+    await agentInitPair(tree, PORT_PATH, AGENT_KEY);
+    // Unauthed agent connects with the SAME key — passes
+    const r = await agentConnect(tree, PORT_PATH, AGENT_KEY, '1.2.3.4');
+    assert.equal(r.status, 'pending');
+    // Wrong key — rejected
+    await assert.rejects(
+      agentConnect(tree, PORT_PATH, 'wrong-key', '1.2.3.4'),
+      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+    );
   });
 
   it('reset returns to idle', async () => {

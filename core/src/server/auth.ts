@@ -16,7 +16,20 @@ import {
 } from '#core';
 import { OpError } from '#errors';
 import { assertSafePatchPath, paginate, type Tree } from '#tree';
-import { randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
+
+// R4-AUTH-5: hash session token before persisting. The plaintext bearer never lands
+// in the store path or on disk — a DB dump / FS snapshot / accidental backup of
+// `/auth/sessions/*` reveals only hashes, not impersonable tokens. Mirrors the
+// `hashAgentKey` pattern already used for agent keys.
+function sessionHash(token: string): string {
+  return createHash('sha256').update(token).digest('hex');
+}
+/** Storage path for a session token. Exported for tests / admin tooling that need to look up
+ *  a session by its plaintext token (the path itself stores only the hash). */
+export function sessionPath(token: string): string {
+  return `/auth/sessions/${sessionHash(token)}`;
+}
 
 export type AclHandler = () => GroupPerm[];
 
@@ -48,7 +61,7 @@ export async function createSession(
   const token = randomBytes(32).toString('hex');
   const now = Date.now();
   const sessionNode: SessionNode = {
-    $path: `/auth/sessions/${token}`, $type: 'session',
+    $path: sessionPath(token), $type: 'session',
     $acl: [{ g: 'admins', p: R | W | A | S }],
     userId, createdAt: now, expiresAt: now + (opts?.ttlMs ?? SESSION_TTL_MS),
     ...(opts?.claims && { claims: opts.claims }),
@@ -63,15 +76,15 @@ export async function resolveToken(tree: Tree, token: string): Promise<Session |
   if (process.env.NODE_ENV === 'development' && token === process.env.VITE_DEV_TOKEN) {
     return { userId: 'dev', claims: ['u:dev', 'authenticated', 'agents'] };
   }
-  const node = await tree.get(`/auth/sessions/${token}`) as SessionNode | undefined;
+  const node = await tree.get(sessionPath(token)) as SessionNode | undefined;
   if (!node) return null;
   if (!node.userId || !node.expiresAt) {
     console.error(`[auth] corrupt session: ${token.slice(0, 8)}... (missing ${!node.userId ? 'userId' : 'expiresAt'})`);
-    await tree.remove(`/auth/sessions/${token}`);
+    await tree.remove(sessionPath(token));
     return null;
   }
   if (Date.now() > node.expiresAt) {
-    await tree.remove(`/auth/sessions/${token}`);
+    await tree.remove(sessionPath(token));
     return null;
   }
   // Spread all non-$ fields — mods write custom metadata (taskPath, runPath, …)
@@ -86,7 +99,7 @@ export async function resolveToken(tree: Tree, token: string): Promise<Session |
 }
 
 export async function revokeSession(tree: Tree, token: string): Promise<boolean> {
-  return tree.remove(`/auth/sessions/${token}`);
+  return tree.remove(sessionPath(token));
 }
 
 // ── Password hashing ──

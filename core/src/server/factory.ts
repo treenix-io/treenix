@@ -21,6 +21,13 @@ export type TreenixConfig = {
   modsDir?: string | false;
   seed?: (tree: Tree, ensure: Ensure) => Promise<void>;
   autostart?: boolean;
+  /** Optional outer wrapper applied to the assembled pipeline tree.
+   *  Mods compose extra concerns (e.g. audit) without modifying core pipeline. */
+  wrapTree?: (tree: Tree) => Tree;
+  /** Optional health probe — when present, server gates all non-/health requests.
+   *  /health endpoint always responds with the current state (200 healthy, 503 not).
+   *  Leave undefined to disable health gating entirely. */
+  healthCheck?: () => { healthy: boolean; reason: string };
 };
 
 export type ListenOpts = {
@@ -59,6 +66,10 @@ export async function treenix(config: TreenixConfig): Promise<TreenixServer> {
 
   // 3. Build pipeline
   const pipeline = createPipeline(bootstrap);
+  // Outer wrap (audit / etc): mod gets last word over the user-facing tree.
+  // Pre-pipeline (mountable, bootstrap) stays untouched — system writes (seed,
+  // log, autostart) bypass wrapTree by design.
+  if (config.wrapTree) pipeline.tree = config.wrapTree(pipeline.tree);
   const { tree, cdc, mountable } = pipeline;
 
   // 4. Seed — always run, deployNodes is idempotent per-node (skips existing)
@@ -103,6 +114,7 @@ export async function treenix(config: TreenixConfig): Promise<TreenixServer> {
       const server = createHttpServer(pipeline, {
         allowedOrigins: opts?.allowedOrigins,
         staticDir: opts?.staticDir,
+        healthCheck: config.healthCheck,
       });
       return new Promise<Server>((resolve) => {
         server.listen(port, host, () => {

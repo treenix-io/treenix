@@ -33,10 +33,13 @@ export type RenderArgs = {
   /** Full URL pathname (e.g. "/v/demo/landing"). Required — Router reads it
    *  through ServerLocationContext to mirror what client useLocation() returns. */
   pathname?: string;
+  /** URL search string with leading '?' (e.g. "?ctx=site"). Read by views via
+   *  useLocation().search — view-shell uses it to pick render context. */
+  search?: string;
 };
 
-export function render({ source, mode, pathname = '/' }: RenderArgs): string {
-  const loc = { pathname, search: '', href: pathname };
+export function render({ source, mode, pathname = '/', search = '' }: RenderArgs): string {
+  const loc = { pathname, search, href: pathname + search };
   // Mirror the exact provider stack from main.tsx boot() so hydration matches
   // element-for-element. ServerLocationContext is the only addition — it's a
   // pure React Context, no DOM, invisible to hydration's DOM diff.

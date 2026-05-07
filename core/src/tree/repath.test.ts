@@ -83,4 +83,24 @@ describe('createRepathTree', () => {
     assert.ok(node);
     assert.equal(node.$path, '/item');
   });
+
+  it('R4-TREE-1: rejects path containing ..', async () => {
+    const inner = createMemoryTree();
+    const mounted = createRepathTree(inner, '/mnt', '/data');
+    await assert.rejects(() => mounted.get('/mnt/../etc'), /traversal|Invalid path/);
+  });
+
+  it('R4-TREE-1: rejects path outside localBase prefix', async () => {
+    const inner = createMemoryTree();
+    const mounted = createRepathTree(inner, '/mnt', '/data');
+    await assert.rejects(() => mounted.get('/other/x'), /not under localBase/);
+  });
+
+  it('R4-TREE-1: accepts exact localBase address (mount root)', async () => {
+    const inner = createMemoryTree();
+    await inner.set(createNode('/data', 'dir'));
+    const mounted = createRepathTree(inner, '/mnt', '/data');
+    const node = await mounted.get('/mnt');
+    assert.ok(node);
+  });
 });

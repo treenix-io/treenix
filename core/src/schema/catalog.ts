@@ -18,6 +18,8 @@ export type CatalogActionDoc = {
   description?: string;
   streaming?: boolean;
   arguments?: string[];
+  kind?: 'read' | 'write';
+  io?: boolean;
 };
 
 export type CatalogEntry = {
@@ -55,6 +57,9 @@ function summarizeProperty(
   prop: PropertySchema,
   required: Set<string>,
 ): CatalogPropertyDoc | null {
+  const hasHumanSignal = !!(prop.title || prop.description || prop.format || prop.refType);
+  if (!hasHumanSignal) return null;
+
   const doc: CatalogPropertyDoc = {};
   const type = inferType(prop);
 
@@ -74,6 +79,8 @@ function summarizeAction(method: MethodSchema): CatalogActionDoc | null {
   if (method.title) doc.title = method.title;
   if (method.description) doc.description = method.description;
   if (method.streaming) doc.streaming = true;
+  if (method.kind) doc.kind = method.kind;
+  if (method.io) doc.io = true;
   if (method.arguments?.length) {
     doc.arguments = method.arguments.map((arg) => {
       const type = inferType(arg);

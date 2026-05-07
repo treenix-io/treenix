@@ -11,6 +11,7 @@ import {
   resolvePermission,
   resolveToken,
   revokeSession,
+  sessionPath,
   stripComponents,
   withAcl,
 } from './auth';
@@ -461,7 +462,7 @@ describe('sessions', () => {
 
   it('session nodes have admin-only $acl', async () => {
     const token = await createSession(ss, 'alice');
-    const node = await ss.get(`/auth/sessions/${token}`);
+    const node = await ss.get(sessionPath(token));
     assert.ok(node?.$acl, 'session node must have $acl');
     assert.equal(node!.$acl!.length, 1);
     assert.equal(node!.$acl![0].g, 'admins');
@@ -477,14 +478,14 @@ describe('sessions', () => {
     // Authenticated non-admin: denied
     const userTree = withAcl(ss, 'alice', ['u:alice', 'authenticated']);
     await assert.rejects(
-      userTree.get(`/auth/sessions/${token}`),
+      userTree.get(sessionPath(token)),
       (e: any) => e.code === 'FORBIDDEN',
       'non-admin should not read session node',
     );
 
     // Admin: allowed
     const adminTree = withAcl(ss, 'admin', ['u:admin', 'admins', 'authenticated']);
-    const adminNode = await adminTree.get(`/auth/sessions/${token}`);
+    const adminNode = await adminTree.get(sessionPath(token));
     assert.ok(adminNode, 'admin should read session node');
   });
 
@@ -499,10 +500,24 @@ describe('sessions', () => {
     assert.equal(await revokeSession(ss, token), false);
   });
 
+  it('R4-AUTH-5: session path is the hash, not the plaintext token', async () => {
+    const token = await createSession(ss, 'alice');
+    // Plaintext-token path must NOT be a stored node — that would mean a DB dump leaks bearers.
+    const rawPathNode = await ss.get(`/auth/sessions/${token}`);
+    assert.equal(rawPathNode, undefined,
+      'session must NOT be stored under the plaintext token path — leaks bearer on storage exposure');
+
+    // Hashed path resolves; resolveToken still finds the session via the plaintext token.
+    const hashedNode = await ss.get(sessionPath(token));
+    assert.ok(hashedNode, 'session must exist under sha256(token) path');
+    const session = await resolveToken(ss, token);
+    assert.equal(session?.userId, 'alice');
+  });
+
   it('resolveToken returns custom metadata fields written to session node', async () => {
     const token = await createSession(ss, 'alice');
     // Mod patches session-node with arbitrary fields (taskPath, runPath, etc.)
-    await ss.patch(`/auth/sessions/${token}`, [
+    await ss.patch(sessionPath(token), [
       ['a', 'taskPath', '/board/tasks/123'],
       ['a', 'runPath', '/agents/landing-bot/runs/r-7f2a'],
     ]);

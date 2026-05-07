@@ -71,7 +71,13 @@ export function createFilteredPush(
   };
 
   return (event: NodeEvent) => {
-    filterEvent(store, event, userId, getClaims, push).catch(() => {});
+    // R4-WATCH-1: filter still fails closed (event silently dropped) for confidentiality —
+    // a thrown filter must NEVER push a possibly-leaky event. But the swallow violates
+    // "fail loud": log so policy/storage bugs surface in operations.
+    filterEvent(store, event, userId, getClaims, push).catch(err => {
+      const path = (event as { path?: string }).path ?? '<no-path>';
+      console.error('[watch-filter] dropped %s event for user=%s path=%s: %s', event.type, userId, path, (err as Error)?.message ?? err);
+    });
   };
 }
 

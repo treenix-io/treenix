@@ -9,7 +9,7 @@
 // remove(path) on tree mutations. Wiring to a watcher is a Phase 5 concern.
 
 import type { NodeData } from '@treenx/core';
-import { resolveRoute, type ResolveResult } from '@treenx/react/tree/route-resolve';
+import { resolveRoute, type ResolveResult } from '@treenx/react/router/route-resolve';
 
 export class RouteIndex {
   private byPath = new Map<string, NodeData>();

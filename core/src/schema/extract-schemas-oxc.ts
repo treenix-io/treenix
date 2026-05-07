@@ -22,15 +22,41 @@ type Comment = { type: string; value: string; start: number; end: number };
 
 // ── JSDoc ──
 
+class JSDocError extends Error {
+  override readonly name = 'JSDocError';
+}
+
+// Whitelist of allowed JSDoc tags. Unknown tags throw to catch typos.
+// Module-specific tags can use the `@x-foo` escape (Phase 1.2).
+const KNOWN_TAGS = new Set([
+  // identity / docs
+  'title', 'description', 'deprecated', 'internal', 'example', 'see',
+  // schema annotations
+  'format', 'refType', 'hidden', 'opaque', 'dangerous',
+  // method kind (Phase 1) — `@mutation`/`@query` are graceful-migration aliases
+  'read', 'write', 'io', 'mutation', 'query',
+  // dataflow contract
+  'pre', 'post',
+  // standard JSDoc — silently ignored
+  'param', 'returns', 'throws', 'default',
+]);
+
+
 // Parse JSDoc comment body into a tag map.
-// Line-oriented: first non-tag line becomes the implicit title. Later prose
-// becomes description unless an explicit @description tag is present. Within a
-// line we also parse multiple inline tags: `@title Foo @format bar` yields both
-// title and format.
-// Tag boundary = start-of-line or whitespace followed by `@word`, so that
-// `user@example.com` inside a tag value is NOT treated as a new tag.
-function parseJSDoc(raw: string): Record<string, string> {
-  const result: Record<string, string> = {};
+// Line-oriented:
+//   - If a line's first non-whitespace char is NOT `@` → prose. Embedded
+//     `@word` (e.g. `(see @treenx/core)` or `test @treenx`) is text, not a tag.
+//     First prose line becomes implicit title; rest joins description.
+//   - If a line starts with `@` → tag-line. Multiple tags allowed:
+//     `@title Foo @format bar`, or `@read @io` (combined kind+modifier).
+// Tag name: letter-led, allows digits/underscore/hyphen for `@x-foo` escape.
+export type ParsedJSDoc = Record<string, string> & {
+  kind?: 'read' | 'write';
+  io?: boolean;
+};
+
+export function parseJSDoc(raw: string): ParsedJSDoc {
+  const result: Record<string, any> = {};
   if (!raw) return result;
   const plainDescriptionParts: string[] = [];
   let hasExplicitDescription = false;
@@ -42,26 +68,20 @@ function parseJSDoc(raw: string): Record<string, string> {
     .filter(Boolean);
 
   for (const line of lines) {
-    // Find all `@tag` positions on this line; boundary = start or whitespace.
-    const tagRe = /(?:^|\s)@(\w+)/g;
-    const hits: Array<{ idx: number; name: string; valueStart: number }> = [];
-    let m: RegExpExecArray | null;
-    while ((m = tagRe.exec(line))) {
-      const at = m.index + m[0].indexOf('@');
-      hits.push({ idx: at, name: m[1], valueStart: at + 1 + m[1].length });
-    }
-
-    if (hits.length === 0) {
+    // Prose-line: first non-WS char is not `@`. Embedded `@word` is text.
+    if (!line.startsWith('@')) {
       if (!result.title) result.title = line;
       else plainDescriptionParts.push(line);
       continue;
     }
 
-    // Text before the first tag on this line → implicit title (first wins).
-    const head = line.slice(0, hits[0].idx).trim();
-    if (head) {
-      if (!result.title) result.title = head;
-      else plainDescriptionParts.push(head);
+    // Tag-line: parse all `@tag` instances on this line.
+    const tagRe = /(?:^|\s)@([a-zA-Z][\w-]*)/g;
+    const hits: Array<{ idx: number; name: string; valueStart: number }> = [];
+    let m: RegExpExecArray | null;
+    while ((m = tagRe.exec(line))) {
+      const at = m.index + m[0].indexOf('@');
+      hits.push({ idx: at, name: m[1], valueStart: at + 1 + m[1].length });
     }
 
     for (let i = 0; i < hits.length; i++) {
@@ -80,7 +100,35 @@ function parseJSDoc(raw: string): Record<string, string> {
     delete result.description;
   }
 
-  return result;
+  for (const name of Object.keys(result)) {
+    if (!KNOWN_TAGS.has(name) && !name.startsWith('x-')) {
+      throw new JSDocError(`Unknown JSDoc tag: @${name}`);
+    }
+  }
+
+  // Kind tags: @read/@write canonical; @query/@mutation graceful-migration aliases.
+  const kindTags: { tag: string; value: 'read' | 'write' }[] = [];
+  if ('read' in result) kindTags.push({ tag: 'read', value: 'read' });
+  if ('query' in result) kindTags.push({ tag: 'query', value: 'read' });
+  if ('write' in result) kindTags.push({ tag: 'write', value: 'write' });
+  if ('mutation' in result) kindTags.push({ tag: 'mutation', value: 'write' });
+
+  if (kindTags.length) {
+    const distinct = new Set(kindTags.map((k) => k.value));
+    if (distinct.size > 1) {
+      throw new JSDocError(
+        `Conflicting kind tags: ${kindTags.map((k) => '@' + k.tag).join(' ')}`,
+      );
+    }
+    for (const k of kindTags) delete result[k.tag];
+    result.kind = kindTags[0].value;
+  }
+
+  if ('io' in result) {
+    result.io = true;
+  }
+
+  return result as ParsedJSDoc;
 }
 
 function buildJSDocMap(comments: Comment[], source: string): Map<number, Record<string, string>> {
@@ -651,11 +699,59 @@ function generateClassSchema(
   const required: string[] = [];
   const methods: Record<string, MethodSchema> = {};
 
+  const buildMethodFromFn = (name: string, fn: N, startPos: number): MethodSchema | null => {
+    if (name.startsWith('_')) return null;
+    if (jsDocMap.get(startPos)?.hidden !== undefined) return null;
+    const params = fn.params ?? [];
+    const args: MethodArgSchema[] = [];
+    for (const param of params) {
+      const p = param.type === 'AssignmentPattern' ? param.left : param;
+      args.push({
+        name: p.name ?? 'arg',
+        ...typeToSchema(p.typeAnnotation?.typeAnnotation, ctx),
+      });
+    }
+    const isGenerator = !!fn.generator;
+    const returnTa = fn.returnType?.typeAnnotation;
+    let yieldsSchema: PropertySchema | undefined;
+    if (isGenerator && returnTa?.type === 'TSTypeReference') {
+      const genName = returnTa.typeName?.name;
+      if (genName === 'AsyncGenerator' || genName === 'Generator') {
+        const yieldType = (returnTa.typeArguments?.params ?? returnTa.typeParameters?.params)?.[0];
+        if (yieldType) yieldsSchema = typeToSchema(yieldType, ctx);
+      }
+    }
+    const ret = isGenerator ? {} : typeToSchema(returnTa, ctx);
+    const methodDoc: Record<string, unknown> = { ...(jsDocMap.get(startPos) ?? {}) };
+    if (typeof methodDoc.pre === 'string')
+      methodDoc.pre = (methodDoc.pre as string).split(/\s+/).filter(Boolean);
+    if (typeof methodDoc.post === 'string')
+      methodDoc.post = (methodDoc.post as string).split(/\s+/).filter(Boolean);
+    return {
+      ...methodDoc,
+      ...(isGenerator ? { streaming: true } : {}),
+      arguments: args,
+      ...(isGenerator && yieldsSchema && Object.keys(yieldsSchema).length
+        ? { yields: yieldsSchema }
+        : {}),
+      ...(!isGenerator && Object.keys(ret).length && ret.type !== undefined ? { return: ret } : {}),
+    } as MethodSchema;
+  };
+
   for (const member of classNode.body?.body ?? []) {
     if (member.type === 'PropertyDefinition' && member.key?.name && !member.static) {
       const name = member.key.name;
       const doc = jsDocMap.get(member.start);
       if (doc?.hidden !== undefined) continue;
+
+      // Arrow-field method: `ship = (msg) => 42` — treated as method, not property.
+      const initType = member.value?.type;
+      if (initType === 'ArrowFunctionExpression' || initType === 'FunctionExpression') {
+        const m = buildMethodFromFn(name, member.value, member.start);
+        if (m) methods[name] = m;
+        continue;
+      }
+
       const ta = member.typeAnnotation?.typeAnnotation;
       const refType =
         ta?.type === 'TSTypeReference' && ta.typeName?.name
@@ -675,10 +771,14 @@ function generateClassSchema(
 
       Object.assign(properties[name], jsDocMap.get(member.start) ?? {});
 
+      // `default` and `required` are independent.
+      // `default` is the initial value forms (and other writers) seed when the user
+      // hasn't entered anything — it does NOT make the field optional. `required`
+      // is the validation rule "this key must be present in the payload"; only
+      // `?:` or `| undefined` in the TS type makes a field non-required.
       const def = evalInit(member.value, ctx);
       if (def !== undefined) properties[name].default = def;
 
-      // `?` or `| undefined` in union → optional
       const hasUndef =
         ta?.type === 'TSUnionType' &&
         (ta.types as N[]).some((t: N) => t.type === 'TSUndefinedKeyword');

@@ -14,7 +14,10 @@ import { createContext, useContext, useEffect, useSyncExternalStore } from 'reac
 // false when navigation was blocked by checkBeforeNavigate().
 
 export type NavigateFn = (path: string) => boolean;
-export type MakeHrefFn = (path: string) => string;
+// makeHref returns null when the path is outside the active route's prefix —
+// shells (useRouteShell) signal "no valid URL for this tree path" so links can
+// render as <a> without href and navigate() becomes a no-op.
+export type MakeHrefFn = (path: string) => string | null;
 export type NavigateApi = NavigateFn & { navigate: NavigateFn; makeHref: MakeHrefFn };
 
 const NavigateCtxImpl = createContext<NavigateApi | null>(null);

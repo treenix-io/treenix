@@ -9,18 +9,56 @@ import '#agent/guardian';
 import { AiPolicy } from '#agent/types';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { createNode, getComponent, R, S, W } from '@treenx/core';
+import { createNode, getComponent, R, resolve, S, W } from '@treenx/core';
+import { loadTestSchemas } from '@treenx/core/schema/load';
 import { createMemoryTree, type Tree } from '@treenx/core/tree';
-import { buildClaims, createSession, withAcl } from '@treenx/core/server/auth';
+import { buildClaims, createSession, sessionPath, withAcl } from '@treenx/core/server/auth';
 import assert from 'node:assert/strict';
 import { afterEach, before, beforeEach, describe, it } from 'node:test';
+import './server';
 
-import { buildMcpServer, buildSubjects, checkMcpGuardian, extractToken, type GuardianRequest } from './mcp-server';
+import {
+  buildMcpServer,
+  buildSubjects,
+  checkMcpGuardian,
+  extractToken,
+  formatCatalog,
+  protectedResourceMetadata,
+  protectedResourceMetadataPath,
+  yaml,
+  type GuardianRequest,
+} from './mcp-server';
+
+loadTestSchemas(import.meta.url);
 
 // ── Helpers ──
 
+async function ensureMcpTarget(store: Tree, userId?: string) {
+  const existing = await store.get('/sys/mcp/tools');
+  if (!existing) {
+    await store.set({
+      ...createNode('/sys/mcp/tools', 'mcp.treenix'),
+      $acl: [
+        { g: 'public', p: R },
+        { g: 'authenticated', p: R },
+        { g: 'admins', p: R },
+        ...(userId ? [{ g: `u:${userId}`, p: R }] : []),
+      ],
+    });
+    return;
+  }
+  if (userId) {
+    existing.$acl = [
+      ...(existing.$acl ?? []),
+      { g: `u:${userId}`, p: R },
+    ];
+    await store.set(existing);
+  }
+}
+
 /** Create in-process MCP client connected to buildMcpServer */
 async function createTestClient(store: Tree, userId: string, claims?: string[]) {
+  await ensureMcpTarget(store, userId);
   const session = { userId } as { userId: string };
   const mcp = await buildMcpServer(store, session, claims);
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -67,7 +105,157 @@ describe('extractToken', () => {
   });
 });
 
+describe('MCP auth discovery metadata', () => {
+  it('uses the route-specific OAuth protected resource metadata path', () => {
+    assert.equal(
+      protectedResourceMetadataPath('/mcp'),
+      '/.well-known/oauth-protected-resource/mcp',
+    );
+    assert.equal(
+      protectedResourceMetadataPath('/agent/mcp'),
+      '/.well-known/oauth-protected-resource/agent/mcp',
+    );
+  });
+
+  it('builds protected resource metadata with configured authorization server', () => {
+    const req = { headers: { host: 'example.com' } } as any;
+    assert.deepEqual(protectedResourceMetadata(req, {
+      routePath: '/mcp',
+      authorizationServer: 'https://auth.example.com',
+    }), {
+      resource: 'http://example.com/mcp',
+      resource_name: 'Treenix MCP',
+      bearer_methods_supported: ['header'],
+      scopes_supported: ['treenix'],
+      authorization_servers: ['https://auth.example.com'],
+    });
+  });
+
+  it('defaults authorization server to the resource origin', () => {
+    const req = { headers: { host: 'example.com' } } as any;
+    const metadata = protectedResourceMetadata(req, { routePath: '/mcp' });
+    assert.deepEqual(metadata.authorization_servers, ['http://example.com']);
+  });
+});
+
 // ── 2. buildSubjects — subject construction from GuardianRequest ──
+
+describe('MCP text formatting', () => {
+  it('preserves nested YAML indentation', () => {
+    assert.equal(
+      yaml([{
+        name: 'whisper.audio',
+        propertyDocs: { mime: { type: 'string', required: true } },
+        required: ['filename', 'size', 'mime'],
+      }]),
+      [
+        '- name: whisper.audio',
+        '  propertyDocs:',
+        '    mime:',
+        '      type: string',
+        '      required: true',
+        '  required: [filename, size, mime]',
+      ].join('\n'),
+    );
+  });
+
+  it('formats catalog entries for LLM discovery without type-only field noise', () => {
+    const out = formatCatalog([
+      {
+        name: 'whisper.config',
+        title: 'Speech-to-text config — Whisper model, language, audio path',
+        properties: ['model', 'language', 'audioDir', 'url'],
+        actions: [],
+      },
+      {
+        name: 'whisper.inbox',
+        title: 'Bridge: auto-send whisper transcriptions to a task inbox',
+        properties: ['source', 'target'],
+        actions: [],
+        propertyDocs: {
+          source: {
+            type: 'string',
+            format: 'path',
+            description: 'Whisper channel to watch, e.g. /whisper/kriz',
+            required: true,
+          },
+        },
+      },
+    ]);
+
+    assert.ok(out.includes('fields: model, language, audioDir, url'));
+    assert.ok(out.includes('field notes:\n    - source: path — Whisper channel to watch'));
+    assert.ok(!out.includes('type: string'));
+    assert.ok(!out.includes('required: true'));
+  });
+});
+
+describe('mcp generic target schema', () => {
+  it('loads tool descriptions from the shared mcp.treenix schema', () => {
+    const schema = (resolve('mcp.treenix', 'schema') as () => any)();
+    assert.equal(schema.methods.get_node.description, 'Read a node by path. Returns full untruncated values.');
+    assert.equal(schema.methods.get_node.arguments[0].properties.path.description, 'Node path to read.');
+    assert.equal(schema.methods.list_children.arguments[0].properties.detail.description, 'Include first-level fields and component types.');
+  });
+
+  it('exposes target node methods as MCP tools', async () => {
+    const store = createMemoryTree();
+    await store.set({ ...createNode('/', 'root'), $acl: [{ g: 'public', p: R | S }] });
+    const { client } = await createTestClient(store, 'anon', ['u:anon', 'public']);
+    const listed = await client.listTools();
+    const names = listed.tools.map(t => t.name);
+    assert.ok(names.includes('get_node'));
+    assert.ok(names.includes('list_children'));
+    assert.ok(names.includes('catalog'));
+  });
+});
+
+describe('mcp guardian elicitation', () => {
+  it('does not guard delegated read-only execute calls by the wrapper action', async () => {
+    const store = createMemoryTree();
+    await store.set({ ...createNode('/', 'root'), $acl: [{ g: 'public', p: R | W | S }] });
+    await store.set(createNode('/guardian', 'ai.policy', {
+      allow: [],
+      deny: [],
+      escalate: ['mcp__treenix__execute'],
+    }));
+
+    const { client } = await createTestClient(store, 'anon', ['u:anon', 'public']);
+    const result = await client.callTool({
+      name: 'execute',
+      arguments: {
+        path: '/sys/mcp/tools',
+        action: 'describe_type',
+        data: { type: 'mcp.server' },
+      },
+    });
+    assert.match(textContent(result), /name: mcp.server/);
+  });
+
+  it('does not fall back to blocking tree approval when client lacks form elicitation', async () => {
+    const saved = process.env.MCP_GUARDIAN_TREE_APPROVAL;
+    delete process.env.MCP_GUARDIAN_TREE_APPROVAL;
+    try {
+      const store = createMemoryTree();
+      await store.set({ ...createNode('/', 'root'), $acl: [{ g: 'public', p: R | W | S }] });
+      await store.set(createNode('/guardian', 'ai.policy', {
+        allow: [],
+        deny: [],
+        escalate: ['mcp__treenix__set_node'],
+      }));
+
+      const { client } = await createTestClient(store, 'anon', ['u:anon', 'public']);
+      const result = await client.callTool({
+        name: 'set_node',
+        arguments: { path: '/x', type: 'dir' },
+      });
+      assert.match(textContent(result), /did not advertise form elicitation support/);
+    } finally {
+      if (saved === undefined) delete process.env.MCP_GUARDIAN_TREE_APPROVAL;
+      else process.env.MCP_GUARDIAN_TREE_APPROVAL = saved;
+    }
+  });
+});
 
 describe('buildSubjects', () => {
   it('tool-only: no action, no path', () => {
@@ -572,26 +760,29 @@ describe('path traversal prevention', () => {
     await store.set(createNode('/admin/secrets', 't.default'));
   });
 
-  it('get_node with ../etc/passwd returns not found', async () => {
+  it('R5-MCP-3: get_node with ../etc/passwd is REJECTED (not silently normalized)', async () => {
     const { client } = await createTestClient(store, 'test-user', ['u:test-user', 'public']);
     const result = await client.callTool({ name: 'get_node', arguments: { path: '../etc/passwd' } });
-    assert.ok(textContent(result).includes('not found'));
+    const text = textContent(result);
+    // Must NOT silently traverse — rejected at the MCP boundary by assertSafePath.
+    assert.ok(!text.includes('secrets'), 'must not expose any node via traversal');
+    assert.ok(/Invalid path|traversal|error/i.test(text), `expected loud rejection, got: ${text.slice(0, 200)}`);
   });
 
   it('get_node with //admin does not traverse to /admin', async () => {
     const { client } = await createTestClient(store, 'test-user', ['u:test-user', 'public']);
-    // //admin is a different path from /admin in tree
     const result = await client.callTool({ name: 'get_node', arguments: { path: '//admin' } });
     const text = textContent(result);
-    // Should either not find it or find it as literal //admin path
-    // It must NOT accidentally resolve to /admin/secrets
+    // Either rejected loud (R5-MCP-3) or treated as literal //admin — must NOT resolve to /admin/secrets.
     assert.ok(!text.includes('secrets'), 'must not expose /admin/secrets through //admin');
   });
 
-  it('get_node with path containing null bytes is safe', async () => {
+  it('R5-MCP-3: get_node with path containing null bytes is REJECTED', async () => {
     const { client } = await createTestClient(store, 'test-user', ['u:test-user', 'public']);
     const result = await client.callTool({ name: 'get_node', arguments: { path: '/test\x00/admin' } });
-    assert.ok(textContent(result).includes('not found'));
+    const text = textContent(result);
+    assert.ok(!text.includes('secrets'), 'must not expose admin data via NUL byte');
+    assert.ok(/Invalid path|null|error/i.test(text), `expected loud rejection, got: ${text.slice(0, 200)}`);
   });
 });
 
@@ -871,7 +1062,7 @@ describe('revalidateSessionAuth', { concurrency: 1 }, () => {
     const token = await createSession(store, 'alice');
     const cached: SessionAuth = { kind: 'token', userId: 'alice', token, claims: ['u:alice', 'authenticated'] };
     // revoke
-    await store.remove(`/auth/sessions/${token}`);
+    await store.remove(sessionPath(token));
     const r = await revalidateSessionAuth(store, cached, token, '127.0.0.1', '127.0.0.1');
     assert.ok(!r.ok);
     if (!r.ok) assert.equal(r.body.error, 'token_invalid');
@@ -988,6 +1179,7 @@ describe('mcp http server integration', { concurrency: 1 }, () => {
   });
 
   async function listen(store: Tree): Promise<{ port: number; close: () => void }> {
+    await ensureMcpTarget(store);
     const server = createMcpHttpServer(store, 0);   // ephemeral port
     await new Promise<void>(r => server.once('listening', () => r()));
     const port = (server.address() as AddressInfo).port;
@@ -1014,7 +1206,9 @@ describe('mcp http server integration', { concurrency: 1 }, () => {
         body: initBody(),
       });
       assert.equal(res.status, 401);
-      assert.match(res.headers.get('www-authenticate') ?? '', /^Bearer/);
+      const challenge = res.headers.get('www-authenticate') ?? '';
+      assert.match(challenge, /^Bearer/);
+      assert.match(challenge, /resource_metadata="http:\/\/127\.0\.0\.1:\d+\/\.well-known\/oauth-protected-resource\/mcp"/);
       const body = await res.json();
       assert.equal(body.error, 'token_required');
     } finally { srv.close(); }
@@ -1281,7 +1475,7 @@ describe('revalidateSessionAuth claims drift (C5 round 2 + 3)', { concurrency: 1
 
     // Recreate session with new claims via createSession to mirror handler-side update
     const driftedClaims = ['u:alice', 'authenticated'];
-    await store.remove(`/auth/sessions/${token}`);
+    await store.remove(sessionPath(token));
     // Re-issue new token with new claims (we pretend the auth layer re-issues)
     const token2 = await createSession(store, 'alice', { claims: driftedClaims });
     // Cached pre-drift: token would be old token, but here we'll test: matching
