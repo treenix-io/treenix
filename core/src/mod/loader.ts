@@ -171,7 +171,10 @@ export async function loadMods(
         if (mod?.seed) {
           await withTimeout(mod.seed(tree), `${manifest.name}.seed`, timeout);
         } else if (manifest.seed && manifest.packagePath) {
-          const seedMod = await import(confine(manifest.packagePath, manifest.seed));
+          // R4-BOOT-2: seed import must use realpath-confine, not lexical confine — `import`
+          // follows symlinks; a `manifest.seed = "seed.js"` symlink to `../../etc/payload.js`
+          // passes lexical confine but loads foreign code.
+          const seedMod = await import(await confineReal(manifest.packagePath, manifest.seed));
           await withTimeout(seedMod.default(tree), `${manifest.name}.seed`, timeout);
         }
       }
