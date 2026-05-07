@@ -195,6 +195,15 @@ class SchemaTestWidget {
 
   /** @description Internal method, hidden from schema */
   _cleanup() {}
+
+  /** @read */
+  shipArrow = (msg: string) => 42;
+
+  /** @write */
+  bumpArrow = () => 1;
+
+  /** @read @io */
+  fetchExternal = () => 'remote';
 }
 
 registerType('test.schema-widget', SchemaTestWidget);

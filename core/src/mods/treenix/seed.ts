@@ -16,7 +16,8 @@ registerPrefab('core', 'seed', [
   { $path: 'sys/mods', $type: 'mount-point',
     mount: { $type: 't.mount.mods' },
   },
-  { $path: 'sys/mcp', $type: 'mcp.server', port: 0 },
+  { $path: 'sys/mcp', $type: 'mcp.server', url: '/mcp', target: '/sys/mcp/tools' },
+  { $path: 'sys/mcp/tools', $type: 'mcp.treenix' },
   { $path: 'sys/autostart', $type: 'autostart' },
   { $path: 'proc', $type: 'mount-point',
     mount: { $type: 't.mount.memory' },
@@ -25,12 +26,7 @@ registerPrefab('core', 'seed', [
   { $path: 'sys/autostart/mcp', $type: 'ref', $ref: '/sys/mcp' },
   { $path: 'sys/routes', $type: 'dir' },
   { $path: 'sys/llm', $type: 't.llm' },
-] as NodeData[], (nodes) => {
-  const mcpPort = Number(process.env.MCP_PORT) || 3212;
-  return nodes.map(n =>
-    n.$path === 'sys/mcp' ? { ...n, port: mcpPort } : n,
-  );
-}, { tier: 'core' });
+] as NodeData[], undefined, { tier: 'core' });
 
 // Auth infra — users, sessions, API tokens
 registerPrefab('auth', 'seed', [

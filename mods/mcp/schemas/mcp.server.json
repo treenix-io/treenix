@@ -4,17 +4,38 @@
   "properties": {
     "port": {
       "type": "number",
-      "default": 3212
+      "title": "Legacy standalone port",
+      "default": 0
     },
     "host": {
       "type": "string",
       "title": "Bind host",
       "default": "127.0.0.1"
+    },
+    "url": {
+      "type": "string",
+      "title": "HTTP route",
+      "default": "/mcp"
+    },
+    "target": {
+      "type": "string",
+      "title": "Tool node",
+      "format": "path",
+      "refType": "mcp.treenix",
+      "default": "/sys/mcp/tools"
+    },
+    "authorizationServer": {
+      "type": "string",
+      "title": "OAuth authorization server issuer",
+      "default": ""
     }
   },
   "required": [
     "port",
-    "host"
+    "host",
+    "url",
+    "target",
+    "authorizationServer"
   ],
   "$id": "mcp.server",
   "$schema": "http://json-schema.org/draft-07/schema#"

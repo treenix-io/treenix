@@ -1,0 +1,248 @@
+{
+  "type": "object",
+  "title": "Treenix tree and type-catalog tools exposed through the generic MCP adapter.",
+  "properties": {},
+  "methods": {
+    "get_node": {
+      "description": "Read a node by path. Returns full untruncated values.",
+      "arguments": [
+        {
+          "name": "_data",
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Node path to read."
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      ]
+    },
+    "list_children": {
+      "description": "List children of a node. Long string values may be truncated; use get_node for full data.",
+      "arguments": [
+        {
+          "name": "_data",
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Parent node path."
+            },
+            "depth": {
+              "type": "number",
+              "description": "Recursive depth for child traversal."
+            },
+            "detail": {
+              "type": "boolean",
+              "description": "Include first-level fields and component types."
+            },
+            "full": {
+              "type": "boolean",
+              "description": "Return complete YAML for each child node."
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      ]
+    },
+    "set_node": {
+      "description": "Create or update a node. May require Guardian approval.",
+      "arguments": [
+        {
+          "name": "_data",
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Node path to create or update."
+            },
+            "type": {
+              "type": "string",
+              "description": "Primary node type."
+            },
+            "components": {
+              "type": "object",
+              "description": "Fields and named components to merge into the node."
+            },
+            "acl": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "g": {
+                    "type": "string",
+                    "description": "Group or subject id."
+                  },
+                  "p": {
+                    "type": "number",
+                    "description": "Permission bitmask."
+                  }
+                },
+                "required": [
+                  "g",
+                  "p"
+                ]
+              },
+              "description": "Access-control entries for the node."
+            },
+            "owner": {
+              "type": "string",
+              "description": "Owner user id for owner ACL rules."
+            }
+          },
+          "required": [
+            "path",
+            "type"
+          ]
+        }
+      ]
+    },
+    "execute": {
+      "description": "Execute an action on a node or component. Actions are methods registered on types. May require Guardian approval.",
+      "arguments": [
+        {
+          "name": "_data",
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Node path that owns the action target."
+            },
+            "action": {
+              "type": "string",
+              "description": "Registered action method name."
+            },
+            "type": {
+              "type": "string",
+              "description": "Component type override when executing a component action."
+            },
+            "key": {
+              "type": "string",
+              "description": "Named component key when the node stores multiple components of a type."
+            },
+            "data": {
+              "type": "object",
+              "description": "Action input payload."
+            }
+          },
+          "required": [
+            "path",
+            "action"
+          ]
+        }
+      ]
+    },
+    "deploy_prefab": {
+      "description": "Deploy a module prefab to a target path. Idempotent: skips existing nodes.",
+      "arguments": [
+        {
+          "name": "_data",
+          "type": "object",
+          "properties": {
+            "source": {
+              "type": "string",
+              "description": "Prefab source path or module-prefab id."
+            },
+            "target": {
+              "type": "string",
+              "description": "Destination path where prefab nodes are deployed."
+            },
+            "allowAbsolute": {
+              "type": "boolean",
+              "description": "Allow absolute source paths."
+            }
+          },
+          "required": [
+            "source",
+            "target"
+          ]
+        }
+      ]
+    },
+    "compile_view": {
+      "description": "Verify that a UIX view source compiles correctly.",
+      "arguments": [
+        {
+          "name": "_data",
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "View node path to compile when source is omitted."
+            },
+            "source": {
+              "type": "string",
+              "description": "Raw UIX source to compile directly."
+            }
+          }
+        }
+      ]
+    },
+    "remove_node": {
+      "description": "Remove a node by path. May be denied by Guardian.",
+      "arguments": [
+        {
+          "name": "_data",
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Node path to remove."
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      ]
+    },
+    "catalog": {
+      "description": "List all registered types with compact descriptions plus property/action docs.",
+      "arguments": []
+    },
+    "describe_type": {
+      "description": "Get full schema of a type: properties, actions, and cross-references.",
+      "arguments": [
+        {
+          "name": "_data",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "description": "Type id to describe."
+            }
+          },
+          "required": [
+            "type"
+          ]
+        }
+      ]
+    },
+    "search_types": {
+      "description": "Search types by keyword across names, titles, property names, and action names.",
+      "arguments": [
+        {
+          "name": "_data",
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "Search query text."
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
+      ]
+    }
+  },
+  "$id": "mcp.treenix",
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}

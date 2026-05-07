@@ -398,6 +398,22 @@ describe('extract-schemas-oxc', () => {
     assert.ok(!('_cleanup' in schema.methods));
   });
 
+  // ── Arrow-field methods (PropertyDefinition with arrow initializer) ──
+
+  it('arrow-field with @read extracts kind="read" into methods', () => {
+    assert.equal(schema.methods.shipArrow.kind, 'read');
+    assert.ok(!('shipArrow' in schema.properties), 'arrow-field method should not appear in properties');
+  });
+
+  it('arrow-field with @write extracts kind="write"', () => {
+    assert.equal(schema.methods.bumpArrow.kind, 'write');
+  });
+
+  it('arrow-field with @read @io extracts kind="read" io=true', () => {
+    assert.equal(schema.methods.fetchExternal.kind, 'read');
+    assert.equal(schema.methods.fetchExternal.io, true);
+  });
+
   // ── Required fields ──
 
   it('non-optional fields are in required', () => {
