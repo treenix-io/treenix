@@ -99,6 +99,8 @@ export async function ssrHandler(
 
   const maxPasses = deps.maxPasses ?? DEFAULT_PASSES;
   const render = deps.render;
+  const queryStr = req.query.toString();
+  const search = queryStr ? `?${queryStr}` : '';
   let html = '';
   for (let pass = 0; pass < maxPasses; pass++) {
     html = render({
@@ -107,6 +109,7 @@ export async function ssrHandler(
       rest: match.rest,
       mode: site.mode === 'hydrate' ? 'hydrate' : 'static',
       pathname: req.pathname,
+      search,
     });
     if (source.pendingCount() === 0) break;
     await source.flushPending();

@@ -125,4 +125,13 @@ describe('resolveTarget', () => {
   it('rest non-empty + prefix → prefix/rest', () => {
     assert.equal(resolveTarget({ prefix: '/docs' }, 'foo'), '/docs/foo');
   });
+  it('normalises trailing slash on prefix', () => {
+    assert.equal(resolveTarget({ prefix: '/docs/', index: 'index' }, ''), '/docs/index');
+  });
+  it('prefix "/" treated as no prefix', () => {
+    assert.equal(resolveTarget({ prefix: '/' }, 'foo'), '/foo');
+  });
+  it('prefix missing leading slash is normalised', () => {
+    assert.equal(resolveTarget({ prefix: 'docs' }, 'foo'), '/docs/foo');
+  });
 });

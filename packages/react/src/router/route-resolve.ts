@@ -58,13 +58,22 @@ export function resolveRoute(pathname: string, routeNodes: readonly NodeData[]):
   return { node: best.node, rest };
 }
 
+/** Normalize a tree path prefix: ensure leading '/', strip trailing '/'.
+ *  Empty input or '/' → '' (no prefix). Accepts user-authored values like
+ *  '/docs/', 'docs', or '/'. */
+export function normalizePrefix(prefix: string | undefined): string {
+  if (!prefix || prefix === '/') return '';
+  const withLead = prefix.startsWith('/') ? prefix : '/' + prefix;
+  return withLead.replace(/\/+$/, '');
+}
+
 /** Compute target tree path for a route given its rest URL tail.
  *  - rest non-empty: prefix + '/' + rest (or '/' + rest when no prefix).
  *  - rest empty + index: prefix + '/' + index.
  *  - otherwise: prefix or '/'. */
 export function resolveTarget(route: Route | undefined, rest: string): string {
-  const prefix = route?.prefix || '';
+  const prefix = normalizePrefix(route?.prefix);
   if (rest) return prefix ? `${prefix}/${rest}` : `/${rest}`;
-  if (route?.index) return `${prefix}/${route.index}`;
+  if (route?.index) return prefix ? `${prefix}/${route.index}` : `/${route.index}`;
   return prefix || '/';
 }

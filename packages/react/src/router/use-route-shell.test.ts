@@ -72,4 +72,26 @@ describe('buildHref — root route (no prefix, no preserveQuery)', () => {
   it('empty key on _index route → /', () => {
     assert.equal(buildHref('/', undefined, '', '', undefined), '/');
   });
+
+  it('empty key + descendant → /<rel> (no leading double slash)', () => {
+    // Regression: empty key with non-empty rel must not produce "//foo".
+    assert.equal(buildHref('/foo', undefined, '', '', undefined), '/foo');
+  });
+});
+
+describe('buildHref — prefix normalization', () => {
+  it('trailing slash on prefix is stripped', () => {
+    const route: Route = { prefix: '/docs/', index: 'index' };
+    assert.equal(buildHref('/docs/foo', route, 'd', ''), '/d/foo');
+  });
+
+  it('prefix "/" is treated as no prefix', () => {
+    const route: Route = { prefix: '/' };
+    assert.equal(buildHref('/foo', route, 'k', ''), '/k/foo');
+  });
+
+  it('missing leading slash on prefix is added', () => {
+    const route: Route = { prefix: 'docs', index: 'index' };
+    assert.equal(buildHref('/docs/foo', route, 'd', ''), '/d/foo');
+  });
 });

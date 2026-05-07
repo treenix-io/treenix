@@ -14,7 +14,7 @@ import {
 } from '#navigate';
 import { useRouteParams } from '#context/route-params';
 import { Route } from './route';
-import { resolveTarget, urlKey } from './route-resolve';
+import { normalizePrefix, resolveTarget, urlKey } from './route-resolve';
 
 export type RouteShellOpts = {
   /** Query keys this shell preserves across navigations. Map key → default value
@@ -31,7 +31,7 @@ export function buildHref(
   search: string,
   preserve?: Record<string, string>,
 ): string | null {
-  const prefix = route?.prefix || '';
+  const prefix = normalizePrefix(route?.prefix);
   let rel: string;
   if (prefix) {
     if (path !== prefix && !path.startsWith(prefix + '/')) return null;
@@ -41,7 +41,10 @@ export function buildHref(
   }
   if (rel && rel === route?.index) rel = '';
 
-  const base = rel ? `/${key}/${rel}` : (key ? `/${key}` : '/');
+  // key='' is the _index route — never prepend an empty segment (would yield "//foo").
+  const base = rel
+    ? (key ? `/${key}/${rel}` : `/${rel}`)
+    : (key ? `/${key}` : '/');
 
   if (!preserve) return base;
   const params = new URLSearchParams(search);

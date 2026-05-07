@@ -43,7 +43,7 @@ export function Router() {
     return (
       <NavigateProvider value={defaultNav}>
         <RouteParamsContext.Provider value={{ rest: result.rest, full: pathname }}>
-          <RenderContext name="react">
+          <RenderContext name="react:route">
             <Render value={result.node} />
           </RenderContext>
         </RouteParamsContext.Provider>
