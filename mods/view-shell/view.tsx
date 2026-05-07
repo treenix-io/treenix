@@ -4,7 +4,7 @@
 // Editor / authenticated flows live behind /t/* (t.editor.shell), not here.
 
 import { Render, RenderContext, usePath, useAutoSave, view } from '@treenx/react';
-import { useRouteParams } from '@treenx/react/context/route-params';
+import { EMPTY, RouteParamsContext, useRouteParams } from '@treenx/react/context/route-params';
 import { register } from '@treenx/core';
 import { ViewShell } from './types';
 
@@ -32,13 +32,15 @@ const ViewShellView = () => {
   }
 
   return (
-    <div className="flex flex-col h-screen">
-      <div className="flex-1 overflow-auto p-4 has-[.view-full]:p-0">
-        <RenderContext name="react">
-          <Render value={node} onChange={onChange} />
-        </RenderContext>
+    <RouteParamsContext value={EMPTY}>
+      <div className="flex flex-col h-screen">
+        <div className="flex-1 overflow-auto p-4 has-[.view-full]:p-0">
+          <RenderContext name="react">
+            <Render value={node} onChange={onChange} />
+          </RenderContext>
+        </div>
       </div>
-    </div>
+    </RouteParamsContext>
   );
 };
 
