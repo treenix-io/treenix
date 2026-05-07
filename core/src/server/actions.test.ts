@@ -720,6 +720,44 @@ describe('applyTemplate', () => {
   });
 });
 
+describe('R4-MOUNT-4 — dynamic type schema meta-validation', () => {
+  // Dynamic types live at /sys/types/{ns}/{name}; the type id has a dot ("test.foo").
+  // executeAction on an INSTANCE of that type triggers loadDynamicAction → assertSafeSchema.
+  async function setup(typeId: string, schema: unknown) {
+    const tree = createMemoryTree();
+    const subPath = '/sys/types/' + typeId.replace(/\./g, '/');
+    await tree.set({ $path: subPath, $type: 'type', schema, actions: { go: 'return data;' } } as NodeData);
+    await tree.set({ $path: '/data/x', $type: typeId } as NodeData);
+    return tree;
+  }
+
+  it('rejects nested-quantifier regex patterns (ReDoS shape)', async () => {
+    const tree = await setup('test.redos', { properties: { x: { pattern: '(a+)+$' } } });
+    await assert.rejects(
+      executeAction(tree, '/data/x', 'test.redos', undefined, 'go', { x: 'aaaa' }),
+      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST' && /nested quantifiers/i.test(e.message),
+    );
+  });
+
+  it('rejects oversize regex pattern', async () => {
+    const tree = await setup('test.long', { properties: { x: { pattern: 'a'.repeat(300) } } });
+    await assert.rejects(
+      executeAction(tree, '/data/x', 'test.long', undefined, 'go', { x: 'a' }),
+      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST' && /pattern too long/i.test(e.message),
+    );
+  });
+
+  it('rejects schema deeper than depth cap', async () => {
+    let nested: Record<string, unknown> = { type: 'string' };
+    for (let i = 0; i < 30; i++) nested = { properties: { x: nested } };
+    const tree = await setup('test.deep', nested);
+    await assert.rejects(
+      executeAction(tree, '/data/x', 'test.deep', undefined, 'go', {}),
+      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST' && /too deep/i.test(e.message),
+    );
+  });
+});
+
 describe('setComponent', () => {
   it('does not corrupt cache when tree.set fails', async () => {
     const mem = createMemoryTree();
