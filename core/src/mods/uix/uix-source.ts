@@ -1,7 +1,15 @@
-// UIX View Verification — server-safe compile check (no React dependency)
-// Used by MCP to let LLMs verify that created views compile correctly
+// UIX source component + server-safe compile verification (no React dependency).
+// Used by MCP to let LLMs attach JSX to nodes and verify that it compiles.
 
+import { registerType } from '#comp';
 import { compileJSX } from './jsx-parser';
+
+/** Inline JSX/TSX source attached to a node as a `view` component. */
+export class UixSource {
+  /** @description JSX/TSX source code. */
+  source = '';
+}
+registerType('uix.source', UixSource);
 
 // Mirrors prepareCode from compile.ts but kept here to avoid React imports
 function prepareCode(code: string): { body: string; exportName: string | null } {

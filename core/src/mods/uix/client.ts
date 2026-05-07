@@ -1,11 +1,12 @@
 // UIX mod — dynamic JSX component engine
 // Auto-discovered via import.meta.glob('../mods/*/client.ts')
 
-import { onResolveMiss, register, unregister } from '#core';
+import { getComponent, onResolveMiss, register, unregister } from '#core';
 import { createInflight } from '#tree/inflight';
 import { cache, tree, UixNoView } from '@treenx/react';
 import React from 'react';
 import { compileComponent, invalidateCache } from './compile';
+import { UixSource } from './uix-source';
 
 export { compileComponent, invalidateCache };
 
@@ -62,8 +63,8 @@ function watchTypeNode(type: string, typePath: string) {
 
   const unsub = cache.subscribePath(typePath, () => {
     const node = cache.get(typePath);
-    const source = (node as any)?.view?.source;
-    if (!source || typeof source !== 'string') return;
+    const source = node ? getComponent(node, UixSource, 'view')?.source : undefined;
+    if (!source) return;
 
     // View appeared — swap fallback for real compiled view
     unsub();
@@ -93,9 +94,9 @@ onResolveMiss('react', (type) => {
 
   dedup(type, async () => {
     const typeNode = await tree.get(typePath);
-    const source = (typeNode as any)?.view?.source;
+    const source = typeNode ? getComponent(typeNode, UixSource, 'view')?.source : undefined;
 
-    if (!source || typeof source !== 'string') {
+    if (!source) {
       register(type, 'react', UixNoView);
       // Watch for future view creation (e.g. AI agent saves view.source later)
       watchTypeNode(type, typePath);

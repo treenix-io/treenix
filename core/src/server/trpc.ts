@@ -130,7 +130,7 @@ export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: 
           limit: input.limit,
           offset: input.offset,
           depth: input.depth,
-        }, { ...ctx, queryContextPath: input.path });
+        }, ctx);
 
         if (ctx.session) {
           if (input.watch) {

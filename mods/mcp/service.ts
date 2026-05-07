@@ -1,8 +1,10 @@
-// MCP autostart service — attaches MCP transport to the main HTTP server.
+// MCP autostart service — attaches MCP transport to the main HTTP server,
+// and optionally spawns a standalone localhost-only listener when `port > 0`.
 
 import { getComponent, register } from '@treenx/core';
 import { routeRegistry } from '@treenx/core/server/server';
 import {
+  createMcpHttpServer,
   createMcpResourceMetadataHandler,
   createMcpRouteHandler,
   protectedResourceMetadataPath,
@@ -24,10 +26,16 @@ register('mcp.server', 'service', async (node, ctx) => {
   routeRegistry.set(metadataPath, metadataHandler);
   console.log(`[mcp] route ${routePath} -> ${target}; auth metadata ${metadataPath}`);
 
+  // Optional standalone listener: kernel-bound to `host` (loopback by default).
+  // Use this for local MCP clients that can't reach the cloud route.
+  const localPort = config?.port ?? 0;
+  const local = localPort > 0 ? createMcpHttpServer(ctx.tree, localPort, host, routeOpts) : null;
+
   return {
     stop: async () => {
       if (routeRegistry.get(routePath) === handler) routeRegistry.delete(routePath);
       if (routeRegistry.get(metadataPath) === metadataHandler) routeRegistry.delete(metadataPath);
+      if (local) await new Promise<void>(resolve => local.close(() => resolve()));
       console.log(`[mcp] unregistered ${routePath}`);
     },
   };

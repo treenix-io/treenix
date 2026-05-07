@@ -771,10 +771,14 @@ function generateClassSchema(
 
       Object.assign(properties[name], jsDocMap.get(member.start) ?? {});
 
+      // `default` and `required` are independent.
+      // `default` is the initial value forms (and other writers) seed when the user
+      // hasn't entered anything — it does NOT make the field optional. `required`
+      // is the validation rule "this key must be present in the payload"; only
+      // `?:` or `| undefined` in the TS type makes a field non-required.
       const def = evalInit(member.value, ctx);
       if (def !== undefined) properties[name].default = def;
 
-      // `?` or `| undefined` in union → optional
       const hasUndef =
         ta?.type === 'TSUnionType' &&
         (ta.types as N[]).some((t: N) => t.type === 'TSUndefinedKeyword');
