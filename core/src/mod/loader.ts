@@ -4,7 +4,7 @@ import { isInsideRoot } from '#core/path';
 import { createLogger } from '#log';
 import { loadSchemasFromDir } from '#schema/load';
 import type { Tree } from '#tree';
-import { readdir, stat } from 'node:fs/promises';
+import { readdir, realpath, stat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { setCurrentMod } from './tracking';
 import type { LoadedMod, ModManifest, TreenixMod } from './types';
@@ -18,6 +18,21 @@ export function confine(packagePath: string, candidate: string): string {
     throw new Error(`Manifest path escapes package root: ${candidate} → ${full}`);
   }
   return full;
+}
+
+// R4-BOOT-2: realpath-aware containment. Lexical confine() doesn't follow symlinks, but
+// `import` does — a malicious package can ship `seed.js` as a symlink to `../../etc/payload.js`,
+// pass lexical confine, then load the foreign code. Resolve real paths and re-assert before
+// returning the importable path. Only used by the load entry points where `import` runs.
+async function confineReal(packagePath: string, candidate: string): Promise<string> {
+  const lexical = confine(packagePath, candidate);
+  // realpath throws ENOENT for missing files — let that propagate as a real error.
+  const realRoot = await realpath(resolve(packagePath));
+  const realFull = await realpath(lexical);
+  if (!isInsideRoot(realRoot, realFull)) {
+    throw new Error(`Symlink escapes package root: ${candidate} → ${realFull} (root ${realRoot})`);
+  }
+  return realFull;
 }
 
 // ── Dependency sorting (Kahn's algorithm) ──
@@ -133,7 +148,7 @@ export async function loadMods(
       let mod: TreenixMod | undefined;
 
       if (entryPath && manifest.packagePath) {
-        const fullPath = confine(manifest.packagePath, entryPath);
+        const fullPath = await confineReal(manifest.packagePath, entryPath);
         // R4-BOOT-4: must reset currentMod even if import throws — otherwise the next mod's
         // register() calls attribute their types to the failed mod's name.
         setCurrentMod(manifest.name);
@@ -247,9 +262,14 @@ export async function loadLocalMods(modsDir: string, target: LoadTarget): Promis
     try {
       // R4-BOOT-4: reset currentMod even on import-throw — prevents cross-attribution
       // of the next mod's register() calls to this failed mod.
+      // R4-BOOT-2: realpath-confine each file inside modDir — symlinked entry files inside
+      // a real mod dir would otherwise import code outside the mod root.
       setCurrentMod(entry.name);
       try {
-        for (const f of filesToImport) await import(f);
+        for (const f of filesToImport) {
+          const real = await confineReal(modDir, f);
+          await import(real);
+        }
       } finally {
         setCurrentMod(null);
       }
@@ -276,11 +296,19 @@ export async function loadAllMods(target: LoadTarget, ...extraDirs: string[]): P
 
   const dirs = [internalDir, engineDir];
 
-  // CWD/mods/ if different from engine mods
-  const projectDir = resolve('mods');
-  if (resolve(projectDir) !== resolve(engineDir)) dirs.push(projectDir);
-
-  dirs.push(...extraDirs);
+  // R4-BOOT-1: only auto-scan cwd/mods AND honour caller-supplied extraDirs (e.g. MODS_DIR)
+  // when NOT running in production, OR when the operator explicitly opts in via
+  // TRENIX_TRUST_MODS_DIR=1. Otherwise an attacker who can write to those paths (shared dev box,
+  // tampered deploy artifact, CI runner pulling untrusted PR diffs) gains arbitrary RCE at boot.
+  const trustExtraDirs = process.env.NODE_ENV !== 'production' || process.env.TRENIX_TRUST_MODS_DIR === '1';
+  if (trustExtraDirs) {
+    // CWD/mods/ if different from engine mods
+    const projectDir = resolve('mods');
+    if (resolve(projectDir) !== resolve(engineDir)) dirs.push(projectDir);
+    dirs.push(...extraDirs);
+  } else if (extraDirs.length) {
+    console.warn('[mod-loader] ignoring %d extra mod dir(s) in production — set TRENIX_TRUST_MODS_DIR=1 to opt in', extraDirs.length);
+  }
 
   const seen = new Set<string>();
   const result: LoadResult = { loaded: [], failed: [] };
