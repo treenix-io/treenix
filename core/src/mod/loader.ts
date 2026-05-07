@@ -134,10 +134,15 @@ export async function loadMods(
 
       if (entryPath && manifest.packagePath) {
         const fullPath = confine(manifest.packagePath, entryPath);
+        // R4-BOOT-4: must reset currentMod even if import throws — otherwise the next mod's
+        // register() calls attribute their types to the failed mod's name.
         setCurrentMod(manifest.name);
-        const exported = await import(fullPath);
-        setCurrentMod(null);
-        mod = exported.default as TreenixMod;
+        try {
+          const exported = await import(fullPath);
+          mod = exported.default as TreenixMod;
+        } finally {
+          setCurrentMod(null);
+        }
       }
 
       const t0 = performance.now();
@@ -240,9 +245,14 @@ export async function loadLocalMods(modsDir: string, target: LoadTarget): Promis
     loaded.set(entry.name, modEntry);
 
     try {
+      // R4-BOOT-4: reset currentMod even on import-throw — prevents cross-attribution
+      // of the next mod's register() calls to this failed mod.
       setCurrentMod(entry.name);
-      for (const f of filesToImport) await import(f);
-      setCurrentMod(null);
+      try {
+        for (const f of filesToImport) await import(f);
+      } finally {
+        setCurrentMod(null);
+      }
       modEntry.state = 'loaded';
       modEntry.loadedAt = Date.now();
       result.loaded.push(entry.name);
