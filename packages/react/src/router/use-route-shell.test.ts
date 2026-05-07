@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildHref } from './use-route-shell';
-import { Route } from './route';
+import type { Route } from './route-resolve';
 
 describe('buildHref — editor route (no prefix, preserveQuery: { root: "/" })', () => {
   const opts = { root: '/' };

@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { before, describe, it } from 'node:test';
-import './route';
+import './types';
 
 const SCHEMAS = join(dirname(fileURLToPath(import.meta.url)), 'schemas');
 
@@ -16,7 +16,7 @@ function getSchema(type: string): TypeSchema {
   return handler();
 }
 
-describe('@treenx/react — t.route schema', () => {
+describe('router mod — t.route schema', () => {
   before(() => { loadSchemasFromDir(SCHEMAS); });
 
   it('accepts wildcard true', () => {

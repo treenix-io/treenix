@@ -2,7 +2,6 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import type { NodeData } from '@treenx/core';
 import { normalizeUrl, resolveRoute, resolveTarget, urlKey } from './route-resolve';
-import './route'; // side-effect: register t.route
 
 const node = (path: string, wildcard?: boolean): NodeData => ({
   $path: path,

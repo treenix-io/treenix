@@ -8,13 +8,13 @@
 
 import { useCallback, useMemo } from 'react';
 import { type NodeData } from '@treenx/core';
-import { getComponent } from '@treenx/core';
 import {
   type NavigateApi, makeNavigateApi, navigateTo, useLocation,
 } from '#navigate';
 import { useRouteParams } from '#context/route-params';
-import { Route } from './route';
-import { normalizePrefix, resolveTarget, urlKey } from './route-resolve';
+import {
+  getRoute, normalizePrefix, resolveTarget, type Route, urlKey,
+} from './route-resolve';
 
 export type RouteShellOpts = {
   /** Query keys this shell preserves across navigations. Map key → default value
@@ -64,7 +64,7 @@ export function useRouteShell(
   const { rest } = useRouteParams();
   const { search } = useLocation();
 
-  const route = getComponent(routeNode, Route);
+  const route = getRoute(routeNode);
   const key = urlKey(routeNode.$path) || '';
 
   const target = useMemo(() => resolveTarget(route, rest), [route, rest]);

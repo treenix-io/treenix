@@ -6,10 +6,22 @@
 //
 // No React, no async, no I/O. Given the children of /sys/routes and a URL
 // pathname, returns the matching route node + the URL tail that follows it.
+//
+// Route shape is read structurally — the t.route class itself lives in
+// engine/mods/router (loaded as a directory mod) to keep its server-side
+// registration in a place the mod loader auto-scans. Importing from
+// @treenx/mods here would invert the package dependency direction (mods
+// peer-deps on react), so we mirror the field shape locally instead.
 
 import type { NodeData } from '@treenx/core';
-import { getComponent } from '@treenx/core';
-import { Route } from './route';
+
+/** Structural shape of the t.route component. The runtime class + schema
+ *  live in engine/mods/router/types.ts — registered there by the mod loader. */
+export type Route = {
+  wildcard?: boolean;
+  prefix?: string;
+  index?: string;
+};
 
 export type ResolveResult = { node: NodeData; rest: string } | null;
 
@@ -26,8 +38,13 @@ export function urlKey(routePath: string | undefined): string | null {
   return tail === '_index' ? '' : tail;
 }
 
+/** Read the t.route component off a node by its conventional `route` key. */
+export function getRoute(node: NodeData): Route | undefined {
+  return (node as { route?: Route }).route;
+}
+
 function isWildcard(node: NodeData): boolean {
-  return !!getComponent(node, Route)?.wildcard;
+  return !!getRoute(node)?.wildcard;
 }
 
 /** Resolve a URL pathname against a flat list of /sys/routes/* nodes.
