@@ -760,26 +760,29 @@ describe('path traversal prevention', () => {
     await store.set(createNode('/admin/secrets', 't.default'));
   });
 
-  it('get_node with ../etc/passwd returns not found', async () => {
+  it('R5-MCP-3: get_node with ../etc/passwd is REJECTED (not silently normalized)', async () => {
     const { client } = await createTestClient(store, 'test-user', ['u:test-user', 'public']);
     const result = await client.callTool({ name: 'get_node', arguments: { path: '../etc/passwd' } });
-    assert.ok(textContent(result).includes('not found'));
+    const text = textContent(result);
+    // Must NOT silently traverse — rejected at the MCP boundary by assertSafePath.
+    assert.ok(!text.includes('secrets'), 'must not expose any node via traversal');
+    assert.ok(/Invalid path|traversal|error/i.test(text), `expected loud rejection, got: ${text.slice(0, 200)}`);
   });
 
   it('get_node with //admin does not traverse to /admin', async () => {
     const { client } = await createTestClient(store, 'test-user', ['u:test-user', 'public']);
-    // //admin is a different path from /admin in tree
     const result = await client.callTool({ name: 'get_node', arguments: { path: '//admin' } });
     const text = textContent(result);
-    // Should either not find it or find it as literal //admin path
-    // It must NOT accidentally resolve to /admin/secrets
+    // Either rejected loud (R5-MCP-3) or treated as literal //admin — must NOT resolve to /admin/secrets.
     assert.ok(!text.includes('secrets'), 'must not expose /admin/secrets through //admin');
   });
 
-  it('get_node with path containing null bytes is safe', async () => {
+  it('R5-MCP-3: get_node with path containing null bytes is REJECTED', async () => {
     const { client } = await createTestClient(store, 'test-user', ['u:test-user', 'public']);
     const result = await client.callTool({ name: 'get_node', arguments: { path: '/test\x00/admin' } });
-    assert.ok(textContent(result).includes('not found'));
+    const text = textContent(result);
+    assert.ok(!text.includes('secrets'), 'must not expose admin data via NUL byte');
+    assert.ok(/Invalid path|null|error/i.test(text), `expected loud rejection, got: ${text.slice(0, 200)}`);
   });
 });
 

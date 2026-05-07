@@ -1,8 +1,9 @@
 // Treenix MCP tool node — legacy tree/discovery tools as ordinary node actions.
 
-import { createNode } from '@treenx/core';
+import { createNode, getComponent } from '@treenx/core';
 import { getCtx, registerActions } from '@treenx/core/comp';
-import { verifyViewSource } from '@treenx/core/mods/uix/verify';
+import { UixSource, verifyViewSource } from '@treenx/core/mods/uix/uix-source';
+import { assertSafePath } from '@treenx/core/core/path';
 import { TypeCatalog } from '@treenx/core/schema/catalog';
 import { executeAction } from '@treenx/core/server/actions';
 import { deployPrefab } from '@treenx/core/server/prefab';
@@ -19,12 +20,18 @@ function dataKeys(node: Record<string, unknown>) {
 class TreenixMcpToolsServer extends TreenixMcpTools {
   /** Read a node by path. Returns full untruncated values. */
   async get_node(data: { path: string }) {
+    assertSafePath(data.path); // R5-MCP-3
     const { tree } = getCtx();
     let node;
     try {
       node = await tree.get(data.path);
     } catch (err) {
-      if ((err as { code?: string }).code === 'FORBIDDEN') return `not found: ${data.path}`;
+      // ACL deny is masked as not-found to avoid leaking existence to unauthorized callers,
+      // but log it so ops can see real authorization failures.
+      if ((err as { code?: string }).code === 'FORBIDDEN') {
+        console.error(`[mcp] get_node FORBIDDEN at ${data.path}:`, err);
+        return `not found: ${data.path}`;
+      }
       throw err;
     }
     return node ? yaml(node, 0, Infinity) : `not found: ${data.path}`;
@@ -32,9 +39,9 @@ class TreenixMcpToolsServer extends TreenixMcpTools {
 
   /** List children of a node. Long string values may be truncated; use get_node for full data. */
   async list_children(data: { path: string; depth?: number; detail?: boolean; full?: boolean }) {
-    const { tree, node } = getCtx();
-    const ctx = { queryContextPath: data.path, userId: node.$owner ?? null };
-    const result = await tree.getChildren(data.path, { depth: data.depth }, ctx);
+    assertSafePath(data.path); // R5-MCP-3
+    const { tree } = getCtx();
+    const result = await tree.getChildren(data.path, { depth: data.depth });
     const { items, total, truncated } = result;
     const truncNote = truncated ? '\n⚠️ Results truncated — ACL scan limit reached. Use query mounts for large collections.' : '';
 
@@ -74,6 +81,7 @@ class TreenixMcpToolsServer extends TreenixMcpTools {
     acl?: Array<{ g: string; p: number }>;
     owner?: string;
   }) {
+    assertSafePath(data.path); // R5-MCP-3
     const { tree } = getCtx();
     const existing = await tree.get(data.path);
     const node = existing ?? createNode(data.path, data.type);
@@ -99,6 +107,7 @@ class TreenixMcpToolsServer extends TreenixMcpTools {
 
   /** Execute an action on a node or component. Actions are methods registered on types. May require Guardian approval. */
   async execute(data: { path: string; action: string; type?: string; key?: string; data?: Record<string, unknown> }) {
+    assertSafePath(data.path); // R5-MCP-3
     const { tree, userId, claims } = getCtx();
     const result = await executeAction(tree, data.path, data.type, data.key, data.action, data.data, {
       userId: userId as string | null | undefined,
@@ -109,26 +118,31 @@ class TreenixMcpToolsServer extends TreenixMcpTools {
 
   /** Deploy a module prefab to a target path. Idempotent: skips existing nodes. */
   async deploy_prefab(data: { source: string; target: string; allowAbsolute?: boolean }) {
+    assertSafePath(data.source); // R5-MCP-3
+    assertSafePath(data.target);
     const { tree } = getCtx();
     return yaml(await deployPrefab(tree, data.source, data.target, { allowAbsolute: data.allowAbsolute }));
   }
 
   /** Verify that a UIX view source compiles correctly. */
   async compile_view(data: { path?: string; source?: string }) {
+    if (data.path) assertSafePath(data.path); // R5-MCP-3
     const { tree } = getCtx();
     let code = data.source;
     if (!code) {
       if (!data.path) return 'error: provide path or source';
       const node = await tree.get(data.path);
       if (!node) return `not found: ${data.path}`;
-      code = (node as any)?.view?.source;
-      if (!code || typeof code !== 'string') return `no view.source on ${data.path}`;
+      const view = getComponent(node, UixSource, 'view');
+      if (!view?.source) return `no uix.source on ${data.path}`;
+      code = view.source;
     }
     return yaml(verifyViewSource(code));
   }
 
   /** Remove a node by path. May be denied by Guardian. */
   async remove_node(data: { path: string }) {
+    assertSafePath(data.path); // R5-MCP-3
     const { tree } = getCtx();
     const ok = await tree.remove(data.path);
     return ok ? `removed: ${data.path}` : `not found: ${data.path}`;
