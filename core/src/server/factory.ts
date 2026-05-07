@@ -21,6 +21,9 @@ export type TreenixConfig = {
   modsDir?: string | false;
   seed?: (tree: Tree, ensure: Ensure) => Promise<void>;
   autostart?: boolean;
+  /** Optional outer wrapper applied to the assembled pipeline tree.
+   *  Mods compose extra concerns (e.g. audit) without modifying core pipeline. */
+  wrapTree?: (tree: Tree) => Tree;
 };
 
 export type ListenOpts = {
@@ -59,6 +62,10 @@ export async function treenix(config: TreenixConfig): Promise<TreenixServer> {
 
   // 3. Build pipeline
   const pipeline = createPipeline(bootstrap);
+  // Outer wrap (audit / etc): mod gets last word over the user-facing tree.
+  // Pre-pipeline (mountable, bootstrap) stays untouched — system writes (seed,
+  // log, autostart) bypass wrapTree by design.
+  if (config.wrapTree) pipeline.tree = config.wrapTree(pipeline.tree);
   const { tree, cdc, mountable } = pipeline;
 
   // 4. Seed — always run, deployNodes is idempotent per-node (skips existing)
