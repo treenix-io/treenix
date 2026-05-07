@@ -678,6 +678,14 @@ export class CallAction {
     const path = format(this.path, bCtx);
     if (!path || !this.action) return;
 
+    // R5-BRAHMAN-2: confused-deputy concern — bot service tree has broad ACL, and `path` may
+    // be templated from session vars populated by Telegram input. A pure prefix-restriction
+    // breaks legitimate cross-tree CallAction (the existing test suite covers `/targets/*`,
+    // `/items/*` calls). Proper fix is capability-scoped dispatch via `executeWithCapability`
+    // against a per-bot scope — deferred to the harness/capability work track.
+    // Mitigation today: bot ACLs limit what the bot can actually invoke (action handlers run
+    // through `bCtx.tree` which is the bot's auth-wrapped tree).
+
     let data: unknown;
     if (this.dataExpr) {
       const formatted = format(this.dataExpr, bCtx);
