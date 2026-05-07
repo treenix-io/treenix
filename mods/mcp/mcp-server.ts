@@ -8,7 +8,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { getComponent, getMeta, resolve } from '@treenx/core';
 import { matchesAny } from '@treenx/core/glob';
 import type { CatalogActionDoc, CatalogEntry, CatalogPropertyDoc } from '@treenx/core/schema/catalog';
-import type { MethodArgSchema, MethodSchema, PropertySchema, TypeSchema } from '@treenx/core/schema/types';
+import type { MethodSchema, PropertySchema, TypeSchema } from '@treenx/core/schema/types';
 import { executeAction } from '@treenx/core/server/actions';
 import { buildClaims, resolveToken, type Session, withAcl } from '@treenx/core/server/auth';
 import { resolveRef, type Tree } from '@treenx/core/tree';
@@ -142,7 +142,7 @@ function formatFieldNote(name: string, doc: CatalogPropertyDoc): string {
   if (doc.format) hints.push(doc.format);
   if (doc.refType) hints.push(`ref ${doc.refType}`);
 
-  const human = [doc.title, doc.description].filter(Boolean).map(oneLine).join(' — ');
+  const human = oneLine([doc.title, doc.description].filter(Boolean).join(' — '));
   const detail = [hints.join(', '), human].filter(Boolean).join(' — ');
   return detail ? `    - ${name}: ${detail}` : `    - ${name}`;
 }
@@ -151,7 +151,7 @@ function formatAction(name: string, doc?: CatalogActionDoc): string {
   if (!doc) return `    - ${name}`;
 
   const args = doc.arguments?.length ? `(${doc.arguments.join(', ')})` : '';
-  const label = [doc.title, doc.description].filter(Boolean).map(oneLine).join(' — ');
+  const label = oneLine([doc.title, doc.description].filter(Boolean).join(' — '));
   const streaming = doc.streaming ? ' [stream]' : '';
   return `    - ${name}${args}${streaming}${label ? ` — ${label}` : ''}`;
 }
@@ -277,15 +277,29 @@ type McpServerBuildOpts = {
   target?: string;
 };
 
-function zodForProperty(prop: PropertySchema = {}): z.ZodTypeAny {
+// R5-NEW-1: bound recursive Zod-from-JSON-Schema expansion. A pathological mod schema
+// (deeply-nested anyOf, huge enum, or recursive properties) would otherwise burn CPU/stack
+// at MCP build time. Caps mirror R4-MOUNT-4's assertSafeSchema constraints.
+const ZOD_DEPTH_MAX = 16;
+const ZOD_UNION_MAX = 100;
+const ZOD_PROPS_MAX = 200;
+
+function zodForProperty(prop: PropertySchema = {}, depth = 0): z.ZodTypeAny {
+  if (depth > ZOD_DEPTH_MAX)
+    throw new Error(`MCP schema too deep (>${ZOD_DEPTH_MAX} levels) — pathological schema rejected`);
+
   let schema: z.ZodTypeAny;
   if (prop.anyOf?.length) {
-    const variants = prop.anyOf.map(p => zodForProperty(p));
+    if (prop.anyOf.length > ZOD_UNION_MAX)
+      throw new Error(`MCP schema anyOf too large (>${ZOD_UNION_MAX} variants)`);
+    const variants = prop.anyOf.map(p => zodForProperty(p, depth + 1));
     schema = variants.length === 1
       ? variants[0]
       : z.union(variants as [z.ZodTypeAny, z.ZodTypeAny, ...z.ZodTypeAny[]]);
   } else if (prop.enum?.length) {
-    const literals = prop.enum.map(v => z.literal(v));
+    if (prop.enum.length > ZOD_UNION_MAX)
+      throw new Error(`MCP schema enum too large (>${ZOD_UNION_MAX} entries)`);
+    const literals: z.ZodTypeAny[] = prop.enum.map(v => z.literal(v));
     schema = literals.length === 1
       ? literals[0]
       : z.union(literals as [z.ZodTypeAny, z.ZodTypeAny, ...z.ZodTypeAny[]]);
@@ -302,10 +316,10 @@ function zodForProperty(prop: PropertySchema = {}): z.ZodTypeAny {
         schema = z.boolean();
         break;
       case 'array':
-        schema = z.array(zodForProperty(prop.items));
+        schema = z.array(zodForProperty(prop.items, depth + 1));
         break;
       case 'object':
-        schema = z.object(shapeForProperties(prop.properties ?? {}, prop.required ?? [])).passthrough();
+        schema = z.object(shapeForProperties(prop.properties ?? {}, prop.required ?? [], depth + 1)).passthrough();
         break;
       default:
         schema = z.unknown();
@@ -319,11 +333,15 @@ function zodForProperty(prop: PropertySchema = {}): z.ZodTypeAny {
 function shapeForProperties(
   properties: Record<string, PropertySchema>,
   required: readonly string[] = [],
+  depth = 0,
 ): z.ZodRawShape {
+  const propEntries = Object.entries(properties);
+  if (propEntries.length > ZOD_PROPS_MAX)
+    throw new Error(`MCP schema has too many properties (>${ZOD_PROPS_MAX})`);
   const req = new Set(required);
   const shape: z.ZodRawShape = {};
-  for (const [name, prop] of Object.entries(properties)) {
-    const schema = zodForProperty(prop);
+  for (const [name, prop] of propEntries) {
+    const schema = zodForProperty(prop, depth);
     shape[name] = req.has(name) ? schema : schema.optional();
   }
   return shape;
@@ -406,8 +424,6 @@ async function resolveTargetNode(tree: Tree, targetPath: string) {
 
 export async function buildMcpServer(store: Tree, session: Session, claims?: string[], opts: McpServerBuildOpts = {}) {
   claims ??= session.claims ?? await buildClaims(store, session.userId);
-  const root = await store.get('/');
-  console.log(`[mcp-diag] userId=${session.userId}, claims=[${claims}], root.$acl=${JSON.stringify(root?.$acl)}`);
   const aclStore = withAcl(store, session.userId, claims);
   const targetPath = opts.target ?? '/sys/mcp/tools';
   const targetNode = await resolveTargetNode(aclStore, targetPath);
