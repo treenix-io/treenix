@@ -7,6 +7,7 @@ import { matchesAny } from '@treenx/core/glob';
 import { OpError } from '@treenx/core/errors';
 import type { NodeData } from '@treenx/core';
 import type { Tree, Page, PatchOp } from '@treenx/core/tree';
+import { executeAction, type ActorContext } from '@treenx/core/server/actions';
 
 /** Capability bundle declared by mod author via defineAgentScope.
  *  Glob patterns: '/foo/*' single-level, '/foo/**' deep, exact '/foo' literal. */
@@ -60,4 +61,30 @@ export function withCapability(tree: Tree, cap: Capability): Tree {
       return tree.patch(path, ops, ctx);
     },
   };
+}
+
+/** Action invocation under a capability — for workload identities only.
+ *  Three checks before delegating to executeAction:
+ *    1. action ∈ cap.allowedExec
+ *    2. target path ∈ cap.writePaths (mutating actions land somewhere)
+ *    3. ctx.tree handed to action handler is wrapped → confused-deputy guard:
+ *       even an allowed action cannot write outside writePaths internally.
+ *  Use this from MCP/tRPC entry instead of raw executeAction for any non-admin caller. */
+export async function executeWithCapability<T = unknown>(
+  tree: Tree,
+  cap: Capability,
+  input: { path: string; action: string; type?: string; key?: string; data?: unknown },
+  actor: ActorContext,
+): Promise<T> {
+  if (!matchesAny(cap.allowedExec, input.action)) {
+    throw new OpError('FORBIDDEN', `Capability: action "${input.action}" not allowed`);
+  }
+  if (!matchesAny(cap.writePaths, input.path)) {
+    throw new OpError('FORBIDDEN', `Capability: write not allowed on ${input.path}`);
+  }
+  // Wrap tree so internal ctx.tree.set/remove/patch inside the action handler
+  // pass through capability filtering — closes confused-deputy hole where a
+  // whitelisted action could write outside its declared scope.
+  const wrapped = withCapability(tree, cap);
+  return executeAction<T>(wrapped, input.path, input.type, input.key, input.action, input.data, { actor });
 }
