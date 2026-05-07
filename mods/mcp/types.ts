@@ -15,11 +15,16 @@ export class McpConfig {
 }
 registerType('mcp.server', McpConfig);
 
+// R5-MCP-2: callers may scope token privileges via `groups`. Default is empty (least privilege).
+// Allow only known groups; admins must be passed explicitly.
+export const API_TOKEN_GROUPS = ['agents', 'authenticated', 'admins'] as const;
+export type ApiTokenGroup = typeof API_TOKEN_GROUPS[number];
+
 /** API token manager for creating and revoking machine access credentials. */
 export class ApiTokenManager {
-  /** @write Create API token for an agent */
-  create(_data: { name: string }) {
-    console.log('API CREATE')
+  /** @write Create API token for an agent. Token returned ONCE — server stores only sha256(token). */
+  create(_data: { name: string; groups?: ApiTokenGroup[] }) {
+    return { token: '', userId: '' };
   }
   /** @write Revoke an API token by name */
   revoke(_data: { name: string }) {}
