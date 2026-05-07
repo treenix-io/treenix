@@ -33,7 +33,9 @@ const ViewShellView: View<ViewShell> = ({ ctx }) => {
     return (
       <div className="flex flex-col items-center justify-center h-screen gap-4 text-[--text-3]">
         <div className="text-4xl">404</div>
-        <p>Node not found: <span className="font-mono">{target}</span></p>
+        <p>
+          Node not found: <span className="font-mono">{target}</span>
+        </p>
       </div>
     );
   }
@@ -47,18 +49,15 @@ const ViewShellView: View<ViewShell> = ({ ctx }) => {
 
   return (
     <RouteParamsContext value={EMPTY}>
-    <NavigateProvider value={nav}>
-      <div className="flex flex-col h-screen">
-        <div className="flex-1 overflow-auto p-4 has-[.view-full]:p-0">
-          <RenderContext name="react">
-      <div className="flex flex-col h-screen">
-        <div className="flex-1 overflow-auto p-4 has-[.view-full]:p-0">
-          <RenderContext name={renderCtx}>
-            <Render value={node} onChange={onChange} />
-          </RenderContext>
+      <NavigateProvider value={nav}>
+        <div className="flex flex-col h-screen">
+          <div className="flex-1 overflow-auto p-4 has-[.view-full]:p-0">
+            <RenderContext name={renderCtx}>
+              <Render value={node} onChange={onChange} />
+            </RenderContext>
+          </div>
         </div>
-      </div>
-    </NavigateProvider>
+      </NavigateProvider>
     </RouteParamsContext>
   );
 };
