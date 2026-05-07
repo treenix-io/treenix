@@ -6,7 +6,8 @@
 import { InputRule, Mark, mergeAttributes } from '@tiptap/core';
 
 export type NodeLinkOptions = {
-  makeHref: ((path: string) => string) | null;
+  // null return = path falls outside active route's prefix → render <a> without href
+  makeHref: ((path: string) => string | null) | null;
 };
 
 export const NodeLink = Mark.create<NodeLinkOptions>({

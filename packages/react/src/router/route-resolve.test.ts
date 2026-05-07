@@ -1,7 +1,8 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import type { NodeData } from '@treenx/core';
-import { normalizeUrl, resolveRoute } from './route-resolve';
+import { normalizeUrl, resolveRoute, resolveTarget, urlKey } from './route-resolve';
+import './route'; // side-effect: register t.route
 
 const node = (path: string, wildcard?: boolean): NodeData => ({
   $path: path,
@@ -17,6 +18,20 @@ describe('normalizeUrl', () => {
     assert.equal(normalizeUrl(''), '');
     assert.equal(normalizeUrl(null), '');
     assert.equal(normalizeUrl(undefined), '');
+  });
+});
+
+describe('urlKey', () => {
+  it('extracts route key from /sys/routes/<key>', () => {
+    assert.equal(urlKey('/sys/routes/t'), 't');
+    assert.equal(urlKey('/sys/routes/blog/post'), 'blog/post');
+  });
+  it('treats _index as empty key (root match)', () => {
+    assert.equal(urlKey('/sys/routes/_index'), '');
+  });
+  it('returns null for non-route paths or undefined', () => {
+    assert.equal(urlKey('/foo/bar'), null);
+    assert.equal(urlKey(undefined), null);
   });
 });
 
@@ -72,7 +87,6 @@ describe('resolveRoute', () => {
   });
 
   it('non-wildcard sibling does not match descendants', () => {
-    // "about" is exact-only; "/about/x" should NOT match it
     const r = resolveRoute('/about/x', routes);
     assert.equal(r, null);
   });
@@ -80,7 +94,7 @@ describe('resolveRoute', () => {
   it('root wildcard catches everything when present', () => {
     const withRootWildcard = [
       node('/sys/routes/about'),
-      node('/sys/routes/_index', true),  // wildcard at root
+      node('/sys/routes/_index', true),
     ];
     const r = resolveRoute('/anything/here', withRootWildcard);
     assert.ok(r);
@@ -92,5 +106,23 @@ describe('resolveRoute', () => {
     const r = resolveRoute('/about/', routes);
     assert.ok(r);
     assert.equal(r.node.$path, '/sys/routes/about');
+  });
+});
+
+describe('resolveTarget', () => {
+  it('rest empty + no prefix → /', () => {
+    assert.equal(resolveTarget(undefined, ''), '/');
+  });
+  it('rest non-empty + no prefix → /<rest>', () => {
+    assert.equal(resolveTarget(undefined, 'foo/bar'), '/foo/bar');
+  });
+  it('rest empty + prefix only → prefix', () => {
+    assert.equal(resolveTarget({ prefix: '/docs' }, ''), '/docs');
+  });
+  it('rest empty + prefix + index → prefix/index', () => {
+    assert.equal(resolveTarget({ prefix: '/docs', index: 'index' }, ''), '/docs/index');
+  });
+  it('rest non-empty + prefix → prefix/rest', () => {
+    assert.equal(resolveTarget({ prefix: '/docs' }, 'foo'), '/docs/foo');
   });
 });

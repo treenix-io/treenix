@@ -8,6 +8,8 @@
 // pathname, returns the matching route node + the URL tail that follows it.
 
 import type { NodeData } from '@treenx/core';
+import { getComponent } from '@treenx/core';
+import { Route } from './route';
 
 export type ResolveResult = { node: NodeData; rest: string } | null;
 
@@ -18,18 +20,14 @@ export function normalizeUrl(pathname: string | null | undefined): string {
 }
 
 /** /sys/routes/<key> → <key>; /sys/routes/_index → "" (root match). */
-function urlKey(routePath: string | undefined): string | null {
+export function urlKey(routePath: string | undefined): string | null {
   if (!routePath || !routePath.startsWith('/sys/routes/')) return null;
   const tail = routePath.slice('/sys/routes/'.length);
   return tail === '_index' ? '' : tail;
 }
 
-/** Read the `wildcard` bit off the node's `route` component without
- *  pulling in the full t.route TS type from @treenx/ssr (would invert the
- *  package dependency direction). */
 function isWildcard(node: NodeData): boolean {
-  const route = (node as Record<string, unknown>).route;
-  return !!(route && typeof route === 'object' && (route as { wildcard?: boolean }).wildcard);
+  return !!getComponent(node, Route)?.wildcard;
 }
 
 /** Resolve a URL pathname against a flat list of /sys/routes/* nodes.
@@ -58,4 +56,15 @@ export function resolveRoute(pathname: string, routeNodes: readonly NodeData[]):
 
   const rest = best.key === '' ? norm : norm.slice(best.key.length).replace(/^\//, '');
   return { node: best.node, rest };
+}
+
+/** Compute target tree path for a route given its rest URL tail.
+ *  - rest non-empty: prefix + '/' + rest (or '/' + rest when no prefix).
+ *  - rest empty + index: prefix + '/' + index.
+ *  - otherwise: prefix or '/'. */
+export function resolveTarget(route: Route | undefined, rest: string): string {
+  const prefix = route?.prefix || '';
+  if (rest) return prefix ? `${prefix}/${rest}` : `/${rest}`;
+  if (route?.index) return `${prefix}/${route.index}`;
+  return prefix || '/';
 }

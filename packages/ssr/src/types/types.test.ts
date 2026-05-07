@@ -16,7 +16,7 @@ function getSchema(type: string): TypeSchema {
   return handler();
 }
 
-describe('@treenx/ssr — t.site / t.seo / t.route schemas', () => {
+describe('@treenx/ssr — t.site / t.seo schemas', () => {
   before(() => { loadSchemasFromDir(SCHEMAS); });
 
   describe('t.site', () => {
@@ -80,29 +80,4 @@ describe('@treenx/ssr — t.site / t.seo / t.route schemas', () => {
     });
   });
 
-  describe('t.route', () => {
-    it('accepts wildcard true', () => {
-      const errs = validateComponent(
-        { $type: 't.route', wildcard: true },
-        getSchema('t.route'), 'route',
-      );
-      assert.deepEqual(errs, []);
-    });
-
-    it('accepts empty (no fields required)', () => {
-      const errs = validateComponent(
-        { $type: 't.route' },
-        getSchema('t.route'), 'route',
-      );
-      assert.deepEqual(errs, []);
-    });
-
-    it('rejects non-boolean wildcard', () => {
-      const errs = validateComponent(
-        { $type: 't.route', wildcard: 1 as unknown as boolean },
-        getSchema('t.route'), 'route',
-      );
-      assert.ok(errs.some(e => e.path.endsWith('.wildcard')));
-    });
-  });
 });

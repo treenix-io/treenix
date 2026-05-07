@@ -5,6 +5,14 @@
     "wildcard": {
       "type": "boolean",
       "title": "When true, this route catches descendant URL paths (e.g. /sys/routes/t catches /t/anything)."
+    },
+    "prefix": {
+      "type": "string",
+      "title": "Tree path prefix this route mounts. Empty/absent → URL maps 1:1 to tree path."
+    },
+    "index": {
+      "type": "string",
+      "title": "Default child name when URL rest is empty (e.g. 'index')."
     }
   },
   "$id": "t.route",
