@@ -20,6 +20,30 @@ export type Capability = {
   allowedExec: string[];
 };
 
+/** Named-component placed on an agent-port node — declares per-mode capability.
+ *  `plan` is the read-only-ish baseline used until the human approves the plan;
+ *  `work` is the broader capability granted after approvePlan. */
+export type AgentScope = {
+  $type: 'agent.scope';
+  plan: Capability;
+  work: Capability;
+};
+
+type ScopeSpec = { read: string[]; write: string[]; exec: string[] };
+
+/** Mod-author DX: declare scope using short read/write/exec keys.
+ *  Returned object is the named-component value to attach on an agent-port node:
+ *      { $path: '/agents/refund-bot', $type: 't.agent.port',
+ *        scope: defineAgentScope({ plan: {...}, work: {...} }) } */
+export function defineAgentScope(spec: { plan: ScopeSpec; work: ScopeSpec }): AgentScope {
+  const toCap = (s: ScopeSpec): Capability => ({
+    readPaths: s.read,
+    writePaths: s.write,
+    allowedExec: s.exec,
+  });
+  return { $type: 'agent.scope', plan: toCap(spec.plan), work: toCap(spec.work) };
+}
+
 function denyOutOfScope(op: 'read' | 'write', path: string): never {
   throw new OpError('FORBIDDEN', `Capability: ${op} not allowed on ${path}`);
 }
