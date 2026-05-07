@@ -5,10 +5,13 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '#components/ui/dropdown-menu';
 import { Input } from '#components/ui/input';
+import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip';
 import { isRef } from '@treenx/core';
 import { useState } from 'react';
 
@@ -24,8 +27,9 @@ function getFieldMode(v: unknown): FieldMode {
 const MODE_LABELS: Record<FieldMode, string> = { value: 'val', ref: '$ref', map: '$map' };
 
 /** Interactive field label — click for mode menu, drop target for tree nodes */
-export function FieldLabel({ label, value, onChange }: {
+export function FieldLabel({ label, tooltip, value, onChange }: {
   label: string;
+  tooltip?: string;
   value: unknown;
   onChange?: (next: unknown) => void;
 }) {
@@ -44,15 +48,30 @@ export function FieldLabel({ label, value, onChange }: {
     }
   }
 
+  const tooltipText = tooltip || label;
+  const labelSpan = (
+    <span className="block overflow-hidden text-ellipsis">{label}</span>
+  );
+  const tooltipContent = tooltipText ? (
+    <TooltipContent side="left" className="max-w-xs whitespace-pre-line">
+      {tooltipText}
+    </TooltipContent>
+  ) : null;
+
   if (!onChange) {
-    return (
-      <label className="block overflow-hidden text-ellipsis" title={label}>
-        {label}
-      </label>
+    return tooltipContent ? (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <label className="block overflow-hidden">{labelSpan}</label>
+        </TooltipTrigger>
+        {tooltipContent}
+      </Tooltip>
+    ) : (
+      <label className="block overflow-hidden">{labelSpan}</label>
     );
   }
 
-  return (
+  const interactiveLabel = (
     <label
       className={dragOver ? 'text-primary cursor-pointer' : 'cursor-pointer'}
       onDragOver={(e) => {
@@ -73,17 +92,15 @@ export function FieldLabel({ label, value, onChange }: {
       }}
     >
       <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <span className="block overflow-hidden text-ellipsis" title={label}>
-            {label}
-          </span>
-        </DropdownMenuTrigger>
+        <DropdownMenuTrigger asChild>{labelSpan}</DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="min-w-[100px]">
-          {(['value', 'ref', 'map'] as FieldMode[]).map((m) => (
-            <DropdownMenuItem key={m} onClick={() => switchMode(m)}>
-              {mode === m ? '\u25CF ' : '\u00A0\u00A0'}{MODE_LABELS[m]}
-            </DropdownMenuItem>
-          ))}
+          <DropdownMenuRadioGroup value={mode} onValueChange={(v) => switchMode(v as FieldMode)}>
+            {(['value', 'ref', 'map'] as FieldMode[]).map((m) => (
+              <DropdownMenuRadioItem key={m} value={m}>
+                {MODE_LABELS[m]}
+              </DropdownMenuRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={() => navigator.clipboard.writeText(JSON.stringify(value))}>
             Copy
@@ -94,6 +111,15 @@ export function FieldLabel({ label, value, onChange }: {
         </DropdownMenuContent>
       </DropdownMenu>
     </label>
+  );
+
+  return tooltipContent ? (
+    <Tooltip>
+      <TooltipTrigger asChild>{interactiveLabel}</TooltipTrigger>
+      {tooltipContent}
+    </Tooltip>
+  ) : (
+    interactiveLabel
   );
 }
 

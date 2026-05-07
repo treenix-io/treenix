@@ -21,7 +21,7 @@
 .field > :not(label) {
   min-width: 0;
 }
-.field:not(.stack) > :not(label) {
+.field:not(.stack) > :not(label):not([data-slot="switch"]) {
   flex: 1 1 0;
   width: auto;
 }
@@ -43,11 +43,12 @@
 .field.stack {
   flex-direction: column;
   align-items: stretch;
+  gap: 2px;
 }
 .field:has(textarea) label,
 .field.stack label {
   min-width: unset;
-  margin-bottom: 3px;
+  margin-bottom: 0;
 }
 
 /* Component data view — shows field values in default view */

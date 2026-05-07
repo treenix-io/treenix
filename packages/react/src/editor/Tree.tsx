@@ -167,25 +167,27 @@ function TreeNode({
           e.preventDefault();
           onSelect(path);
         }}
-        draggable={false}
+        draggable
         onDragStart={(e) => {
           e.dataTransfer.setData('text/plain', path);
           e.dataTransfer.setData('application/treenix-path', path);
           e.dataTransfer.effectAllowed = 'all';
         }}
-        onDragOver={(e) => {
-          e.preventDefault();
-          const rect = rowRef.current!.getBoundingClientRect();
-          const y = e.clientY - rect.top;
-          setDragOver(y < rect.height / 2 ? 'above' : 'below');
-        }}
-        onDragLeave={() => setDragOver(null)}
-        onDrop={(e) => {
-          e.preventDefault();
-          setDragOver(null);
-          const from = e.dataTransfer.getData('text/plain');
-          if (from && from !== path && onMove) onMove(from, path);
-        }}
+        // Intra-tree move temporarily disabled — drag still works as a source
+        // (e.g. dropping onto FieldLabel / PathForm). Restore by uncommenting.
+        // onDragOver={(e) => {
+        //   e.preventDefault();
+        //   const rect = rowRef.current!.getBoundingClientRect();
+        //   const y = e.clientY - rect.top;
+        //   setDragOver(y < rect.height / 2 ? 'above' : 'below');
+        // }}
+        // onDragLeave={() => setDragOver(null)}
+        // onDrop={(e) => {
+        //   e.preventDefault();
+        //   setDragOver(null);
+        //   const from = e.dataTransfer.getData('text/plain');
+        //   if (from && from !== path && onMove) onMove(from, path);
+        // }}
       >
         {canExpand ? (
           <span

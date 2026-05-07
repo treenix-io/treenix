@@ -4,7 +4,6 @@
 
 import { Button } from '#components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#components/ui/collapsible';
-import { Input } from '#components/ui/input';
 import { ScrollArea } from '#components/ui/scroll-area';
 import { Tabs, TabsList, TabsTrigger } from '#components/ui/tabs';
 import { ConfirmPopover } from '#components/ConfirmPopover';
@@ -21,31 +20,42 @@ import { AclEditor } from './AclEditor';
 import { ComponentSection } from './ComponentSection';
 import { getNodeEditorJsonText, saveNodeEditorJson } from './node-editor-state';
 
-function NodeCard({ path, type, onChangeType }: {
-  path: string;
-  type: string;
-  onChangeType: (t: string) => void;
-}) {
+// Skip $acl/$owner — AclEditor renders them.
+const NODE_CARD_SKIP = new Set(['$acl', '$owner']);
+
+function formatSystemValue(v: unknown): string {
+  if (v == null) return '';
+  if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') return String(v);
+  return JSON.stringify(v);
+}
+
+function NodeCard({ node }: { node: NodeData }) {
+  const entries = Object.entries(node).filter(
+    ([k]) => k.startsWith('$') && !NODE_CARD_SKIP.has(k),
+  );
   return (
     <Collapsible className="border-t border-border mt-2 pt-0.5 first:border-t-0 first:mt-0 first:pt-0">
-      <CollapsibleTrigger className="flex w-full items-center justify-between py-2 pb-1.5 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider cursor-pointer select-none">
+      <CollapsibleTrigger className="group flex w-full items-center justify-between py-2 pb-1.5 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider cursor-pointer select-none">
         <span>Node</span>
         <span className="flex items-center gap-2 normal-case tracking-normal font-normal text-[11px] font-mono text-foreground/50">
-          {path}
-          <span className="text-primary">{type}</span>
+          <span className="group-data-[state=open]:hidden truncate">{node.$path}</span>
+          <span className="text-primary group-data-[state=open]:hidden">{node.$type}</span>
           <ChevronRight className="h-3 w-3 transition-transform duration-200 group-data-[state=open]:rotate-90" />
         </span>
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="py-0.5 pb-2.5">
-          <div className="field">
-            <label>$path</label>
-            <Input className="h-7 text-xs" value={path} readOnly />
-          </div>
-          <div className="field">
-            <label>$type</label>
-            <Input className="h-7 text-xs" value={type} onChange={(e) => onChangeType(e.target.value)} />
-          </div>
+          {entries.map(([k, v]) => {
+            const text = formatSystemValue(v);
+            return (
+              <div key={k} className="field">
+                <label>{k}</label>
+                <span className="text-xs font-mono text-muted-foreground truncate" title={text}>
+                  {text}
+                </span>
+              </div>
+            );
+          })}
         </div>
       </CollapsibleContent>
     </Collapsible>
@@ -65,9 +75,8 @@ export type NodeEditorProps = {
 export function NodeEditor({ node, save, open, onClose, onDelete, currentUserId, onAddComponent }: NodeEditorProps) {
   const { onChange, scope, flush, reset: resetSave, dirty, stale } = save;
 
-  // Valtio only for system fields ($type, $acl) and UI state
+  // Valtio only for system fields ($acl) and UI state
   const [st] = useState(() => proxy({
-    typeEdit: null as string | null,
     aclEdit: null as { owner: string; rules: GroupPerm[] } | null,
     tab: 'properties' as 'properties' | 'json',
     jsonText: '',
@@ -79,7 +88,6 @@ export function NodeEditor({ node, save, open, onClose, onDelete, currentUserId,
   const prevPathRef = useRef<string | null>(null);
   if (node.$path !== prevPathRef.current) {
     prevPathRef.current = node.$path;
-    st.typeEdit = null;
     st.aclEdit = null;
     st.tab = 'properties';
     st.jsonText = '';
@@ -87,18 +95,16 @@ export function NodeEditor({ node, save, open, onClose, onDelete, currentUserId,
 
   // Derived from node + system edits
   const formattedNodeJson = getNodeEditorJsonText(node);
-  const nodeType = snap.typeEdit ?? node.$type;
   const aclOwner = snap.aclEdit?.owner ?? (node.$owner as string) ?? '';
   const aclRules = snap.aclEdit?.rules ?? (node.$acl as GroupPerm[]) ?? [];
   const jsonDirty = snap.jsonText !== '' && snap.jsonText !== formattedNodeJson;
-  const hasPendingSystemEdits = snap.typeEdit != null || snap.aclEdit != null;
+  const hasPendingSystemEdits = snap.aclEdit != null;
 
   const nodeName = node.$path === '/' ? '/' : node.$path.slice(node.$path.lastIndexOf('/') + 1);
   const components = getComponents(node);
 
   // Reset only the properties tab state (system field edits + auto-save buffer)
   function resetProperties() {
-    st.typeEdit = null;
     st.aclEdit = null;
     resetSave();
   }
@@ -108,12 +114,11 @@ export function NodeEditor({ node, save, open, onClose, onDelete, currentUserId,
     st.jsonText = formattedNodeJson;
   }
 
-  // Save properties tab: $type/$acl via set(), then flush auto-save buffer
+  // Save properties tab: $acl via set(), then flush auto-save buffer
   async function handleSaveProperties() {
     try {
       if (hasPendingSystemEdits) {
         const toSave = { ...node };
-        if (snap.typeEdit) toSave.$type = snap.typeEdit;
         if (snap.aclEdit) {
           toSave.$owner = aclOwner;
           toSave.$acl = [...aclRules] as GroupPerm[];
@@ -131,7 +136,7 @@ export function NodeEditor({ node, save, open, onClose, onDelete, currentUserId,
   // Save JSON tab: full-node replacement via set()
   async function handleSaveJson() {
     try {
-      st.jsonText = await saveNodeEditorJson(snap.jsonText, set);
+      st.jsonText = await saveNodeEditorJson(snap.jsonText, set, node);
       toast.success('Saved');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Save failed');
@@ -156,8 +161,8 @@ export function NodeEditor({ node, save, open, onClose, onDelete, currentUserId,
         if (v === 'json' && !st.jsonText) {
           st.jsonText = formattedNodeJson;
         }
-      }} className="px-3 pt-2 shrink-0">
-        <TabsList className="h-8 bg-secondary">
+      }} className="shrink-0">
+        <TabsList variant="line" className="h-8">
           <TabsTrigger value="properties" className="text-xs">Properties</TabsTrigger>
           <TabsTrigger value="json" className="text-xs">JSON</TabsTrigger>
         </TabsList>
@@ -167,7 +172,7 @@ export function NodeEditor({ node, save, open, onClose, onDelete, currentUserId,
         <div className="p-3.5">
         {snap.tab === 'properties' ? (
           <>
-            <NodeCard path={node.$path} type={nodeType} onChangeType={(v) => { st.typeEdit = v; }} />
+            <NodeCard node={node} />
             <AclEditor
               path={node.$path}
               owner={aclOwner}

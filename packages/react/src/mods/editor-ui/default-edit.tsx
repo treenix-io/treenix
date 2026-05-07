@@ -105,9 +105,9 @@ const DefaultEditForm: View<ComponentData> = ({ value, onChange }) => {
 
   // Empty
   return (
-    <pre className="text-[11px] font-mono text-foreground/60 bg-muted/30 rounded p-2 whitespace-pre-wrap">
-      {JSON.stringify(data, null, 2)}
-    </pre>
+    <div className="text-[11px] italic text-muted-foreground py-1.5">
+      no fields
+    </div>
   );
 };
 

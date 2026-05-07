@@ -31,14 +31,14 @@ export function parseNodeEditorJson(text: string): NodeData {
   return node as NodeData;
 }
 
-// After save, returned $rev is bumped by the server. We must re-derive the editor
-// text from the fresh node, otherwise a second save reuses the stale OCC token
-// and the server rejects with CONFLICT (Expected $rev N+1, got N).
+// $rev synced from `latest` (live React state) — JSON textarea doesn't auto-refresh.
 export async function saveNodeEditorJson(
   jsonText: string,
   setFn: (node: NodeData) => Promise<NodeData>,
+  latest?: NodeData,
 ): Promise<string> {
   const parsed = parseNodeEditorJson(jsonText);
+  if (latest?.$rev !== undefined) (parsed as Record<string, unknown>).$rev = latest.$rev;
   const fresh = await setFn(parsed);
   return getNodeEditorJsonText(fresh);
 }

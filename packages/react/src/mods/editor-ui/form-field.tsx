@@ -12,7 +12,8 @@ export function renderField(
   data: Record<string, unknown>,
   set: (field: string, value: unknown) => void,
 ) {
-  const label = prop.title ?? name;
+  const label = name;
+  const tooltip = [prop.title, prop.description].filter(Boolean).join(' — ') || undefined;
   const placeholder = prop.description;
 
   // anyOf fields (e.g. string | number unions) — show JSON fallback widget
@@ -21,6 +22,7 @@ export function renderField(
       <div key={name} className="field stack">
         <FieldLabel
           label={label}
+          tooltip={tooltip}
           value={data[name]}
           onChange={prop.readOnly ? undefined : (next: unknown) => set(name, next)}
         />
@@ -55,7 +57,7 @@ export function renderField(
     const onFieldChange = prop.readOnly ? undefined : (next: unknown) => set(name, next);
     return (
       <div key={name} className="field">
-        <FieldLabel label={label} value={rawValue} onChange={onFieldChange} />
+        <FieldLabel label={label} tooltip={tooltip} value={rawValue} onChange={onFieldChange} />
         {onFieldChange && (
           <RefEditor value={rawValue as { $ref: string; $map?: string }} onChange={onFieldChange} />
         )}
@@ -88,6 +90,7 @@ export function renderField(
     $type: resolvedType,
     value: rawValue,
     label,
+    tooltip,
     placeholder,
   };
   if (prop.items) fieldData.items = prop.items;
@@ -102,13 +105,12 @@ export function renderField(
 
   return (
     <div key={name} className={isComplex ? 'field stack' : 'field'}>
-      {(prop.type !== 'boolean' || prop.readOnly) && (
-        <FieldLabel
-          label={label}
-          value={rawValue}
-          onChange={prop.readOnly ? undefined : (next: unknown) => set(name, next)}
-        />
-      )}
+      <FieldLabel
+        label={label}
+        tooltip={tooltip}
+        value={rawValue}
+        onChange={prop.readOnly ? undefined : (next: unknown) => set(name, next)}
+      />
       {createElement(handler as any, {
         value: fieldData,
         onChange: onFieldChange,

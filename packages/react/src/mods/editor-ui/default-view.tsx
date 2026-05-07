@@ -1,4 +1,5 @@
 import './editor-ui.css';
+import { HoverTooltip } from '#components/ui/tooltip';
 import { Render, type View } from '#context';
 import { type ComponentData, isComponent, isRef, register, resolveExact } from '@treenx/core';
 import type { PropertySchema, TypeSchema } from '@treenx/core/schema/types';
@@ -70,10 +71,12 @@ export function splitRecord(value: ComponentData, schema: TypeSchema | null): Sp
   return { title, rest, components };
 }
 
-function FieldRow({ label, children }: { label: string; children: ReactNode }) {
+function FieldRow({ label, tooltip, children }: { label: string; tooltip?: string; children: ReactNode }) {
   return (
     <div className="dv-meta-row">
-      <span className="dv-meta-label">{label}</span>
+      <HoverTooltip text={tooltip || label}>
+        <span className="dv-meta-label">{label}</span>
+      </HoverTooltip>
       {children}
     </div>
   );
@@ -81,12 +84,13 @@ function FieldRow({ label, children }: { label: string; children: ReactNode }) {
 
 function PlainFieldRender({ field }: { field: PlainField }) {
   const { name, prop, value } = field;
-  const label = prop?.title ?? name;
+  const label = name;
+  const tooltip = [prop?.title, prop?.description].filter(Boolean).join(' — ') || undefined;
 
   if (isRef(value)) {
     const refValue = { ...value, $type: value.$type ?? 'ref' };
     return (
-      <FieldRow label={label}>
+      <FieldRow label={label} tooltip={tooltip}>
         <Render value={refValue} />
       </FieldRow>
     );
@@ -94,13 +98,14 @@ function PlainFieldRender({ field }: { field: PlainField }) {
 
   const $type = resolveDisplayType(prop, value);
   const fieldData: ComponentData = { $type, value, label };
+  if (tooltip) fieldData.tooltip = tooltip;
   if (prop?.description) fieldData.placeholder = prop.description;
   if (prop?.enum) fieldData.enum = prop.enum;
   if (prop?.enumNames) fieldData.enumNames = prop.enumNames;
   if (prop?.items) fieldData.items = prop.items;
 
   return (
-    <FieldRow label={label}>
+    <FieldRow label={label} tooltip={tooltip}>
       <Render value={fieldData} />
     </FieldRow>
   );

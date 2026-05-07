@@ -53,11 +53,7 @@ export function ComponentSection({
         className="flex items-center justify-between py-2 pb-1.5 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider cursor-pointer select-none"
         onClick={onToggle}
       >
-        {isMain ? (
-          <span>{compType}</span>
-        ) : (
-          <span className="font-mono text-[12px]">{name}</span>
-        )}
+        <span>{isMain ? compType : name}</span>
         {!isMain && (
           <span className="flex items-center gap-2">
             <span className="text-[11px] text-muted-foreground/50 font-mono">{compType}</span>

@@ -10,6 +10,7 @@ import { hydrateFromServerSnapshot, type ServerHydrationState } from '#tree/cach
 import { createClientTreeSource } from '#tree/client-tree-source';
 import { TreeSourceProvider } from '#tree/tree-source-context';
 import { Toaster } from '#components/ui/sonner';
+import { TooltipProvider } from '#components/ui/tooltip';
 import '../root.css';
 
 enablePatches();
@@ -40,8 +41,10 @@ export function boot(el: HTMLElement | string = '#root') {
       <TreeSourceProvider source={treeSource}>
         <AuthProvider>
           <QueryClientProvider client={queryClient}>
-            <App />
-            <Toaster />
+            <TooltipProvider delayDuration={300}>
+              <App />
+              <Toaster />
+            </TooltipProvider>
           </QueryClientProvider>
         </AuthProvider>
       </TreeSourceProvider>

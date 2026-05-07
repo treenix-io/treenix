@@ -21,6 +21,7 @@ type FP = {
     $type: string;
     value: unknown;
     label?: string;
+    tooltip?: string;
     placeholder?: string;
     enum?: (string | number)[];
     enumNames?: string[];
@@ -149,10 +150,10 @@ function EnumSelect({
       value={String(value.value ?? '')}
       onValueChange={(v) => onChange?.({ ...value, value: toValue(v) })}
     >
-      <SelectTrigger className="h-7 text-xs font-mono">
+      <SelectTrigger size="xs" className="font-mono">
         <SelectValue placeholder="—" />
       </SelectTrigger>
-      <SelectContent>
+      <SelectContent size="xs">
         {options.map((v, i) => {
           const label = names?.[i];
           return (
@@ -189,7 +190,7 @@ function StringForm({ value, onChange }: FP) {
 function TextForm({ value, onChange }: FP) {
   return (
     <Textarea
-      className="text-xs"
+      className="text-xs md:text-xs"
       value={String(value.value ?? '')}
       placeholder={value.placeholder}
       onChange={(e) => onChange?.({ ...value, value: e.target.value })}
@@ -225,18 +226,10 @@ function IntegerForm({ value, onChange }: FP) {
 
 function BooleanForm({ value, onChange }: FP) {
   return (
-    <label className="flex items-center gap-2 cursor-pointer">
-      <Switch
-        checked={!!value.value}
-        onCheckedChange={(checked) => onChange?.({ ...value, value: checked })}
-      />
-      <span
-        className="text-xs text-muted-foreground overflow-hidden text-ellipsis"
-        title={value.label}
-      >
-        {value.label}
-      </span>
-    </label>
+    <Switch
+      checked={!!value.value}
+      onCheckedChange={(checked) => onChange?.({ ...value, value: checked })}
+    />
   );
 }
 
@@ -572,10 +565,10 @@ function SelectForm({ value, onChange }: FP) {
       value={String(value.value ?? '')}
       onValueChange={(v) => onChange?.({ ...value, value: v })}
     >
-      <SelectTrigger className="h-7 text-xs font-mono">
+      <SelectTrigger size="xs" className="font-mono">
         <SelectValue placeholder="—" />
       </SelectTrigger>
-      <SelectContent>
+      <SelectContent size="xs">
         {opts.map((v) => (
           <SelectItem key={String(v)} value={String(v)}>
             {String(v)}
@@ -1036,7 +1029,7 @@ function EmbeddedFields({
           };
           return (
             <div key={field} className="field">
-              {resolvedType !== 'boolean' && <label>{p.title ?? field}</label>}
+              <label title={p.title ?? p.description}>{field}</label>
               {createElement(handler as any, {
                 value: fieldData,
                 onChange: p.readOnly

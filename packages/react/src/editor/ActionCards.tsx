@@ -1,15 +1,15 @@
 // ActionCards — action pill buttons with expandable params, run, and results
 
 import { Button } from '#components/ui/button';
-import { Checkbox } from '#components/ui/checkbox';
-import { Input } from '#components/ui/input';
 import { Render } from '#context';
 import { execute } from '#hooks';
+import { renderField } from '#mods/editor-ui/form-field';
 import { getActions, getActionSchema } from '#mods/editor-ui/node-utils';
 import { useSchema } from '#schema-loader';
 import * as cache from '#tree/cache';
 import { trpc } from '#tree/trpc';
 import type { ComponentData, NodeData } from '@treenx/core';
+import type { PropertySchema } from '@treenx/core/schema/types';
 import { useState } from 'react';
 import { toast } from 'sonner';
 
@@ -128,34 +128,19 @@ export function ActionCardList({
         return (
           <div className="mt-2 p-2 px-2.5 border border-border rounded-md bg-card">
             {hasParams && (
-              <div className="flex flex-col gap-1.5 mb-2">
-                {Object.entries(actionSchema!.properties).map(([field, prop]) => {
-                  const p = prop as { type: string; title?: string; format?: string };
-                  const val = (schemaData[a] ?? {})[field];
-                  const setField = (v: unknown) =>
-                    setSchemaData((prev) => ({
-                      ...prev,
-                      [a]: { ...(prev[a] ?? {}), [field]: v },
-                    }));
-                  return (
-                    <div key={field} className="flex flex-col gap-0.5">
-                      <label>{p.title ?? field}</label>
-                      {p.type === 'number' || p.format === 'number' ? (
-                        <Input type="number" className="h-7 text-xs" value={String(val ?? 0)}
-                          onChange={(e) => setField(Number(e.target.value))} />
-                      ) : p.type === 'boolean' ? (
-                        <label className="flex items-center gap-1.5 cursor-pointer">
-                          <Checkbox checked={!!val}
-                            onChange={(e) => setField((e.target as HTMLInputElement).checked)} />
-                          <span className="text-[11px]">{val ? 'true' : 'false'}</span>
-                        </label>
-                      ) : (
-                        <Input className="h-7 text-xs" value={String(val ?? '')}
-                          onChange={(e) => setField(e.target.value)} />
-                      )}
-                    </div>
-                  );
-                })}
+              <div className="mb-2">
+                {Object.entries(actionSchema!.properties).map(([field, prop]) =>
+                  renderField(
+                    field,
+                    prop as PropertySchema,
+                    schemaData[a] ?? {},
+                    (k, v) =>
+                      setSchemaData((prev) => ({
+                        ...prev,
+                        [a]: { ...(prev[a] ?? {}), [k]: v },
+                      })),
+                  ),
+                )}
               </div>
             )}
 

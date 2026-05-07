@@ -194,10 +194,45 @@ export function AclEditor({ path, owner, rules, currentUserId, onChange }: Props
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="py-0.5 pb-2.5 space-y-3">
+          {chain.length > 0 && (
+            <div className="space-y-1">
+              <span className="text-[11px] text-muted-foreground/60 uppercase tracking-wide">Inherited</span>
+              <div className="space-y-0.5 pl-2 border-l border-border/40">
+                {chain.map((entry) => (
+                  <div
+                    key={entry.path}
+                    className="flex items-center gap-2 text-[11px] min-w-0 font-mono"
+                  >
+                    <span className="truncate shrink min-w-0 text-muted-foreground">{entry.path}</span>
+                    {entry.owner && (
+                      <span className="text-foreground/50 text-[10px] shrink-0">owner={entry.owner}</span>
+                    )}
+                    {entry.acl && entry.acl.length > 0 && (
+                      <span className="flex items-center gap-1 flex-wrap shrink-0 ml-auto">
+                        {entry.acl.map((r, i) => (
+                          <span
+                            key={i}
+                            className="inline-flex items-center gap-0.5 rounded bg-secondary px-1.5 py-0.5"
+                          >
+                            <span className="text-muted-foreground">{r.g}</span>
+                            <span className={r.p === 0 ? 'text-destructive' : 'text-primary'}>
+                              {permStr(r.p)}
+                            </span>
+                          </span>
+                        ))}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="field">
             <label className="text-xs text-muted-foreground">$owner</label>
-            <Input value={owner} onChange={(e) => onChange(e.target.value, rules)} />
+            <Input className="h-7 text-xs" value={owner} onChange={(e) => onChange(e.target.value, rules)} />
           </div>
+
           {rules.length > 0 && (
             <AclTable
               rules={rules}
@@ -208,48 +243,16 @@ export function AclEditor({ path, owner, rules, currentUserId, onChange }: Props
           )}
           <div className="flex gap-2">
             <Input
+              className="h-7 text-xs"
               placeholder="Group name"
               value={newGroup}
               onChange={(e) => setNewGroup(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && addRule()}
             />
-            <Button variant="outline" size="sm" onClick={addRule}>
+            <Button variant="outline" size="sm" className="h-7 text-xs" onClick={addRule}>
               Add
             </Button>
           </div>
-
-          {chain.length > 0 && (
-            <div className="space-y-1.5 pt-1 border-t border-border/40">
-              <span className="text-[11px] text-muted-foreground/60 uppercase tracking-wide">Inherited</span>
-              <div className="space-y-1.5 pl-2 border-l border-border/40">
-                {chain.map((entry) => (
-                  <div key={entry.path} className="text-xs min-w-0">
-                    <div className="flex items-baseline gap-1.5 min-w-0 font-mono text-muted-foreground">
-                      <span className="truncate shrink-0 max-w-[55%]">{entry.path}</span>
-                      {entry.owner && (
-                        <span className="truncate text-foreground/50 text-[10px]">owner={entry.owner}</span>
-                      )}
-                    </div>
-                    {entry.acl && entry.acl.length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-0.5">
-                        {entry.acl.map((r, i) => (
-                          <span
-                            key={i}
-                            className="inline-flex items-center gap-0.5 rounded bg-secondary px-1.5 py-0.5 text-[11px]"
-                          >
-                            <span className="text-muted-foreground">{r.g}</span>
-                            <span className={r.p === 0 ? 'text-destructive' : 'text-primary'}>
-                              {permStr(r.p)}
-                            </span>
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
       </CollapsibleContent>
     </Collapsible>
@@ -274,7 +277,7 @@ function AclTable({
       {rules.map((rule, i) => (
         <div
           key={i}
-          className="flex items-center gap-2 px-2 py-1.5 rounded bg-background border border-border/60"
+          className="flex items-center gap-2 px-1 py-0.5"
         >
           <span className="flex-1 text-[12px] font-mono text-foreground/70 truncate">
             {rule.g}
