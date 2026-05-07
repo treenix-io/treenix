@@ -10,8 +10,12 @@ export function hashAgentKey(key: string): string {
   return createHash('sha256').update(key).digest('hex');
 }
 
-/** Constant-time comparison of two hex hashes */
-export function timingSafeCompare(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
+/** Constant-time comparison of two hex hashes.
+ *  R5-AGENT-1: callers feed stored fields cast as `string` (e.g. `node.pendingKey as string`).
+ *  Reject non-string / empty inputs explicitly so a corrupted port node throws a clean false
+ *  instead of an unguarded `.length` / Buffer.from on undefined. Fail-closed invariant. */
+export function timingSafeCompare(a: unknown, b: unknown): boolean {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  if (a.length === 0 || a.length !== b.length) return false;
   return timingSafeEqual(Buffer.from(a, 'hex'), Buffer.from(b, 'hex'));
 }

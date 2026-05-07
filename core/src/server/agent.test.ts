@@ -49,6 +49,16 @@ describe('timingSafeCompare', () => {
   it('returns false for different lengths', () => {
     assert.equal(timingSafeCompare('aa', 'bbbb'), false);
   });
+
+  it('R5-AGENT-1: returns false for undefined / non-string / empty inputs', () => {
+    const h = hashAgentKey('secret');
+    assert.equal(timingSafeCompare(undefined, h), false);
+    assert.equal(timingSafeCompare(h, undefined), false);
+    assert.equal(timingSafeCompare(null, null), false);
+    assert.equal(timingSafeCompare(42, h), false);
+    assert.equal(timingSafeCompare('', ''), false);
+    assert.equal(timingSafeCompare(h, ''), false);
+  });
 });
 
 describe('agent session', () => {
