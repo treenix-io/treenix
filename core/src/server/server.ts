@@ -67,6 +67,8 @@ export function createPipeline(bootstrap: Tree): Pipeline {
 type HttpServerOpts = {
   allowedOrigins?: string[];
   staticDir?: string;
+  /** When set: /health responds with the result; non-/health requests get 503 if unhealthy. */
+  healthCheck?: () => { healthy: boolean; reason: string };
 };
 
 /** HTTP server on top of an existing pipeline */
@@ -122,6 +124,23 @@ export function createHttpServer(pipeline: Pipeline, opts?: HttpServerOpts): Ser
       res.writeHead(204);
       res.end();
       return;
+    }
+
+    // Health gate (audit append failure → server unhealthy → 503 on everything).
+    // /health endpoint always responds with state for liveness probes.
+    if (opts?.healthCheck) {
+      const path = (req.url ?? '/').split('?')[0];
+      const state = opts.healthCheck();
+      if (path === '/health') {
+        res.writeHead(state.healthy ? 200 : 503, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(state));
+        return;
+      }
+      if (!state.healthy) {
+        res.writeHead(503, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'unhealthy', reason: state.reason }));
+        return;
+      }
     }
 
     // R4-AUTH-3: take the RIGHTMOST X-Forwarded-For entry — the IP observed by the trusted

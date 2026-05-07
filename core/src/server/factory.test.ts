@@ -75,3 +75,66 @@ describe('treenix({ wrapTree })', () => {
     await app.stop();
   });
 });
+
+describe('treenix({ healthCheck })', () => {
+  async function bootWith(unhealthy: boolean) {
+    const app = await treenix({
+      modsDir: false,
+      autostart: false,
+      seed: async () => {},
+      rootNode: rootNode(tmp),
+      healthCheck: () => ({ healthy: !unhealthy, reason: unhealthy ? 'audit down' : '' }),
+    });
+    const server = await app.listen(0);
+    const port = (server.address() as { port: number }).port;
+    return { app, server, port };
+  }
+
+  async function fetchPath(port: number, path: string) {
+    const res = await fetch(`http://127.0.0.1:${port}${path}`);
+    const body = await res.text();
+    return { status: res.status, body };
+  }
+
+  it('healthy: /health returns 200 + body', async () => {
+    const { app, server, port } = await bootWith(false);
+    const { status, body } = await fetchPath(port, '/health');
+    assert.equal(status, 200);
+    assert.deepEqual(JSON.parse(body), { healthy: true, reason: '' });
+    await app.stop();
+    server.close();
+  });
+
+  it('unhealthy: /health returns 503 + reason', async () => {
+    const { app, server, port } = await bootWith(true);
+    const { status, body } = await fetchPath(port, '/health');
+    assert.equal(status, 503);
+    assert.deepEqual(JSON.parse(body), { healthy: false, reason: 'audit down' });
+    await app.stop();
+    server.close();
+  });
+
+  it('unhealthy: non-/health endpoints return 503', async () => {
+    const { app, server, port } = await bootWith(true);
+    const { status } = await fetchPath(port, '/trpc/anything');
+    assert.equal(status, 503);
+    await app.stop();
+    server.close();
+  });
+
+  it('healthCheck=undefined: server stays available', async () => {
+    const app = await treenix({
+      modsDir: false,
+      autostart: false,
+      seed: async () => {},
+      rootNode: rootNode(tmp),
+    });
+    const server = await app.listen(0);
+    const port = (server.address() as { port: number }).port;
+    // /health is reserved — without healthCheck it falls through to tRPC; expect non-503.
+    const { status } = await fetchPath(port, '/anything');
+    assert.notEqual(status, 503);
+    await app.stop();
+    server.close();
+  });
+});

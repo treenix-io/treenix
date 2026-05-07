@@ -24,6 +24,10 @@ export type TreenixConfig = {
   /** Optional outer wrapper applied to the assembled pipeline tree.
    *  Mods compose extra concerns (e.g. audit) without modifying core pipeline. */
   wrapTree?: (tree: Tree) => Tree;
+  /** Optional health probe — when present, server gates all non-/health requests.
+   *  /health endpoint always responds with the current state (200 healthy, 503 not).
+   *  Leave undefined to disable health gating entirely. */
+  healthCheck?: () => { healthy: boolean; reason: string };
 };
 
 export type ListenOpts = {
@@ -110,6 +114,7 @@ export async function treenix(config: TreenixConfig): Promise<TreenixServer> {
       const server = createHttpServer(pipeline, {
         allowedOrigins: opts?.allowedOrigins,
         staticDir: opts?.staticDir,
+        healthCheck: config.healthCheck,
       });
       return new Promise<Server>((resolve) => {
         server.listen(port, host, () => {
