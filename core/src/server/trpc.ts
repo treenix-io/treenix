@@ -2,7 +2,7 @@
 // Thin transport wrapper over shared ops (actions.ts).
 // Responsibilities: input validation (Zod), error mapping (OpError → TRPCError), watch wiring.
 
-import { isRef, type NodeData, S } from '#core';
+import { isRef, type NodeData, R, S } from '#core';
 import { assertSafePath } from '#core/path';
 import { createTreeP } from '#protocol/treep';
 import type { Tree } from '#tree';
@@ -188,8 +188,19 @@ export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: 
         const frag = input.key ? `${input.key}.${input.action}` : input.action;
         const result = await ctx.tp.set(`${input.path}#${frag}()`, input.data);
         if (input.watch && ctx.session) {
-          const paths = extractPaths(result);
-          if (paths.length) watcher.watch(ctx.session.userId, paths);
+          // R4-MOUNT-5: action result is handler-controlled (incl. dynamic actions running in
+          // QuickJS). Paths fed into watcher.watch must be (a) shape-validated (assertSafePath),
+          // (b) cap-limited so a handler cannot register 10k watches per call, (c) filtered to
+          // paths the caller actually has R on — silent-drop forbidden ones, mirroring filter-on-emit.
+          const MAX_WATCH_FROM_RESULT = 100;
+          const candidates = extractPaths(result).slice(0, MAX_WATCH_FROM_RESULT);
+          const allowed: string[] = [];
+          for (const p of candidates) {
+            try { assertSafePath(p); } catch { continue; }
+            const perm = await ctx.tree.getPerm(p);
+            if (perm & R) allowed.push(p);
+          }
+          if (allowed.length) watcher.watch(ctx.session.userId, allowed);
         }
         return result;
       }),
