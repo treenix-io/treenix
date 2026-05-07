@@ -12,7 +12,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createNode, getComponent, R, resolve, S, W } from '@treenx/core';
 import { loadTestSchemas } from '@treenx/core/schema/load';
 import { createMemoryTree, type Tree } from '@treenx/core/tree';
-import { buildClaims, createSession, withAcl } from '@treenx/core/server/auth';
+import { buildClaims, createSession, sessionPath, withAcl } from '@treenx/core/server/auth';
 import assert from 'node:assert/strict';
 import { afterEach, before, beforeEach, describe, it } from 'node:test';
 import './server';
@@ -1059,7 +1059,7 @@ describe('revalidateSessionAuth', { concurrency: 1 }, () => {
     const token = await createSession(store, 'alice');
     const cached: SessionAuth = { kind: 'token', userId: 'alice', token, claims: ['u:alice', 'authenticated'] };
     // revoke
-    await store.remove(`/auth/sessions/${token}`);
+    await store.remove(sessionPath(token));
     const r = await revalidateSessionAuth(store, cached, token, '127.0.0.1', '127.0.0.1');
     assert.ok(!r.ok);
     if (!r.ok) assert.equal(r.body.error, 'token_invalid');
@@ -1472,7 +1472,7 @@ describe('revalidateSessionAuth claims drift (C5 round 2 + 3)', { concurrency: 1
 
     // Recreate session with new claims via createSession to mirror handler-side update
     const driftedClaims = ['u:alice', 'authenticated'];
-    await store.remove(`/auth/sessions/${token}`);
+    await store.remove(sessionPath(token));
     // Re-issue new token with new claims (we pretend the auth layer re-issues)
     const token2 = await createSession(store, 'alice', { claims: driftedClaims });
     // Cached pre-drift: token would be old token, but here we'll test: matching
