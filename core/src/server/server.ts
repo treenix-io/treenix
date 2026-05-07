@@ -124,12 +124,16 @@ export function createHttpServer(pipeline: Pipeline, opts?: HttpServerOpts): Ser
       return;
     }
 
-    // Trust X-Forwarded-For only behind a known proxy — without TRUST_PROXY, attacker spoofs IP via header.
+    // R4-AUTH-3: take the RIGHTMOST X-Forwarded-For entry — the IP observed by the trusted
+    // proxy itself. Leftmost is client-supplied (proxies append, never validate) and trivially
+    // spoofed; using leftmost defeated F5's IP rate-limit. Single-hop trust assumption:
+    // operators with deeper proxy topology should set clientIp at the edge proxy and forward
+    // via a different header — TRUST_PROXY=true here means exactly one trusted hop.
     const trustProxy = process.env.TRUST_PROXY === 'true';
     const xff = trustProxy ? req.headers['x-forwarded-for'] : undefined;
-    const clientIp = (Array.isArray(xff) ? xff[0] : xff)?.split(',')[0].trim()
-      || req.socket.remoteAddress
-      || null;
+    const xffStr = Array.isArray(xff) ? xff.join(',') : xff;
+    const xffParts = xffStr ? xffStr.split(',').map(s => s.trim()).filter(Boolean) : [];
+    const clientIp = xffParts[xffParts.length - 1] || req.socket.remoteAddress || null;
 
     // ALL subscriptions require a short-lived stream token. Discriminate by op type, NOT connectionParams presence —
     // a subscription request without connectionParams must NOT fall through to long-lived bearer auth.
