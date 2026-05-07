@@ -6,6 +6,7 @@
 // Render context comes from ?ctx=<name> (default 'react') and is preserved
 // across navigations via useRouteShell's preserveQuery.
 
+import { EMPTY, RouteParamsContext, useRouteParams } from '@treenx/react/context/route-params';
 import {
   NavigateProvider,
   Render,
@@ -45,7 +46,11 @@ const ViewShellView: View<ViewShell> = ({ ctx }) => {
   }
 
   return (
+    <RouteParamsContext value={EMPTY}>
     <NavigateProvider value={nav}>
+      <div className="flex flex-col h-screen">
+        <div className="flex-1 overflow-auto p-4 has-[.view-full]:p-0">
+          <RenderContext name="react">
       <div className="flex flex-col h-screen">
         <div className="flex-1 overflow-auto p-4 has-[.view-full]:p-0">
           <RenderContext name={renderCtx}>
@@ -54,6 +59,7 @@ const ViewShellView: View<ViewShell> = ({ ctx }) => {
         </div>
       </div>
     </NavigateProvider>
+    </RouteParamsContext>
   );
 };
 

@@ -18,6 +18,7 @@ import {
 import { useRouteShell } from '@treenx/react/router/use-route-shell';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@treenx/react/ui/resizable';
 import { useAuthContext } from '@treenx/react/app/auth-context';
+import { EMPTY, RouteParamsContext, useRouteParams } from '@treenx/react/context/route-params';
 import { ConnectionBanner } from '@treenx/react/app/ConnectionBanner';
 import { EditorSidebar } from '@treenx/react/app/EditorSidebar';
 import { LoginScreen } from '@treenx/react/app/Login';
@@ -102,6 +103,7 @@ const EditorShellView: View<EditorShell> = ({ ctx }) => {
   if (!authed) return <LoginScreen onLogin={setAuthed} />;
 
   return (
+    <RouteParamsContext value={EMPTY}>
     <NavigateProvider value={nav}>
       <ConnectionBanner />
       <div className="flex h-screen bg-background text-foreground overflow-hidden">
@@ -141,6 +143,7 @@ const EditorShellView: View<EditorShell> = ({ ctx }) => {
         )}
       </div>
     </NavigateProvider>
+    </RouteParamsContext>
   );
 };
 

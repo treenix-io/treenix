@@ -14,7 +14,7 @@ export type RouteParams = {
   full: string;
 };
 
-const EMPTY: RouteParams = Object.freeze({ rest: '', full: '' });
+export const EMPTY: RouteParams = Object.freeze({ rest: '', full: '' });
 
 export const RouteParamsContext = createContext<RouteParams>(EMPTY);
 
