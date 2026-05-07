@@ -5,6 +5,7 @@
 // remoteBase: root of the remote tree to use (e.g. '/', or '/data' for a subtree)
 
 import type { NodeData } from '#core';
+import { assertSafePath } from '#core/path';
 import type { Page, Tree } from './index';
 
 export function createRepathTree(inner: Tree, localBase: string, remoteBase: string = '/'): Tree {
@@ -12,7 +13,22 @@ export function createRepathTree(inner: Tree, localBase: string, remoteBase: str
   const lb = localBase === '/' ? '' : localBase;
   const rb = remoteBase === '/' ? '' : remoteBase;
 
+  // R4-TREE-1: enforce that callers actually address the mount. Without this:
+  //   1. `localPath.slice(lb.length)` returns garbage when localPath is shorter than lb;
+  //   2. `..` segments propagate to the inner tree (defense-in-depth on top of the inner's own
+  //      `assertSafePath`, e.g. mimefs.ts catches FS-level traversal but the LOGICAL path still
+  //      pollutes cache/sub state with `..`);
+  //   3. precedence on `rb + rest || '/'` is `(rb + rest) || '/'` — when rest is '' (path equals
+  //      localBase exactly), result is `rb` directly, so `get(localBase)` reads the remote root.
+  //      That last case is intentional ("read the mount root"), but lint paths first.
+  function assertInBase(localPath: string): void {
+    assertSafePath(localPath);
+    if (lb && localPath !== lb && !localPath.startsWith(lb + '/'))
+      throw new Error(`repath: path ${localPath} not under localBase ${lb || '/'}`);
+  }
+
   function toRemote(localPath: string): string {
+    assertInBase(localPath);
     const rest = localPath.slice(lb.length);
     return rb + rest || '/';
   }
