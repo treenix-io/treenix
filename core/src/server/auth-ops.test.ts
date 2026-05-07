@@ -128,3 +128,28 @@ describe('R4-AUTH-8 — assertUserId path-traversal hardening', () => {
     await registerUser(tree, 'good.user_name-1', 'pw', uniqueIp());
   });
 });
+
+describe('R4-AUTH-6 — pending-status credential oracle closed', () => {
+  it('login on pending account returns UNAUTHORIZED, not FORBIDDEN', async () => {
+    const tree = createMemoryTree();
+    // First user becomes admin/active automatically. Register a second to get a pending user.
+    await registerUser(tree, 'admin1', 'adminpw', uniqueIp());
+    await registerUser(tree, 'bob', 'bobpw', uniqueIp());
+
+    // Bob's status is pending. Correct password → must NOT leak that.
+    await assert.rejects(
+      loginUser(tree, 'bob', 'bobpw', uniqueIp()),
+      (e: unknown) => e instanceof OpError
+        && e.code === 'UNAUTHORIZED'
+        && e.message === 'Invalid credentials',
+    );
+
+    // Wrong password must produce identical shape — same code, same message.
+    await assert.rejects(
+      loginUser(tree, 'bob', 'wrongpw', uniqueIp()),
+      (e: unknown) => e instanceof OpError
+        && e.code === 'UNAUTHORIZED'
+        && e.message === 'Invalid credentials',
+    );
+  });
+});

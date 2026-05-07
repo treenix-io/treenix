@@ -76,8 +76,11 @@ export async function loginUser(store: Tree, userId: string, password: string, c
   const hash = typeof creds?.['hash'] === 'string' ? creds['hash'] : undefined;
   // Always run scrypt to prevent timing-based user enumeration
   const ok = await verifyPassword(password, hash ?? DUMMY_HASH);
-  if (!user || !hash || !ok) throw new OpError('UNAUTHORIZED', 'Invalid credentials');
-  if (user.status !== 'active') throw new OpError('FORBIDDEN', 'Account not activated');
+  // R4-AUTH-6: collapse pending-status differential into UNAUTHORIZED. Distinct FORBIDDEN
+  // for pending users let credential-stuffing oracles confirm a valid (userId, password) pair
+  // before the account was even activated. Same response shape as wrong-credentials.
+  if (!user || !hash || !ok || user.status !== 'active')
+    throw new OpError('UNAUTHORIZED', 'Invalid credentials');
 
   const token = await createSession(store, userId);
   return { token, userId };
