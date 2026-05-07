@@ -130,6 +130,27 @@ describe('QueryStore', () => {
     assert.doesNotThrow(() => assertSafeSiftQuery({ $and: [{ a: 1 }, { b: 2 }] }));
   });
 
+  it('R5-MCP-4: rejects $regex with nested quantifiers (ReDoS shape)', () => {
+    assert.throws(() => assertSafeSiftQuery({ name: { $regex: '(a+)+$' } }), /nested quantifiers/);
+    assert.throws(() => assertSafeSiftQuery({ name: { $regex: '(a*)*' } }), /nested quantifiers/);
+    assert.throws(() => assertSafeSiftQuery({ name: { $regex: '(?:.*)+' } }), /nested quantifiers/);
+  });
+
+  it('R5-MCP-4: rejects $regex pattern longer than 256 chars', () => {
+    const long = 'a'.repeat(300);
+    assert.throws(() => assertSafeSiftQuery({ name: { $regex: long } }), /too long/);
+  });
+
+  it('R5-MCP-4: rejects RegExp literal with nested quantifiers', () => {
+    assert.throws(() => assertSafeSiftQuery({ name: /(a+)+$/ }), /nested quantifiers/);
+  });
+
+  it('R5-MCP-4: allows safe $regex patterns', () => {
+    assert.doesNotThrow(() => assertSafeSiftQuery({ name: { $regex: '^prefix' } }));
+    assert.doesNotThrow(() => assertSafeSiftQuery({ name: { $regex: 'simple.*case$' } }));
+    assert.doesNotThrow(() => assertSafeSiftQuery({ name: /^prefix/ }));
+  });
+
   it('excludes non-matching nodes like mount configs', async () => {
     const parent = createMemoryTree();
     await parent.set({ $path: '/orders/a', $type: 'order', status: { $type: 's', value: 'new' } } as NodeData);

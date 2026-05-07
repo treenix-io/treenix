@@ -16,21 +16,39 @@ export type QueryConfig = {
 // without type-ACL on t.mount.* (deferred F4), $where is a 1-line path to RCE.
 const SIFT_FORBIDDEN = new Set(['$where', '$function', '$accumulator', '$expr']);
 
+// R5-MCP-4: $regex is intentionally supported (legitimate query feature), but unbounded user
+// regex against long stored values DoSes the event loop. Cap pattern length and reject the
+// classic catastrophic-backtracking shape (matches R4-MOUNT-4 schema validator).
+const SIFT_REGEX_MAX = 256;
+const NESTED_QUANTIFIER_RE = /\([^)]*[+*][^)]*\)[+*]/;
+
+function assertSafeRegexPattern(pattern: unknown): void {
+  if (typeof pattern !== 'string') return; // sift will reject non-string at runtime
+  if (pattern.length > SIFT_REGEX_MAX)
+    throw new Error(`sift $regex too long (>${SIFT_REGEX_MAX})`);
+  if (NESTED_QUANTIFIER_RE.test(pattern))
+    throw new Error('sift $regex has nested quantifiers (ReDoS risk)');
+}
+
 export function assertSafeSiftQuery(q: unknown): void {
   if (Array.isArray(q)) { for (const item of q) assertSafeSiftQuery(item); return; }
+  if (q instanceof RegExp) { assertSafeRegexPattern(q.source); return; }
   if (!q || typeof q !== 'object' || q.constructor !== Object) return;
   for (const [k, v] of Object.entries(q)) {
     if (SIFT_FORBIDDEN.has(k)) throw new Error(`Forbidden sift operator: ${k}`);
+    if (k === '$regex') assertSafeRegexPattern(v);
     assertSafeSiftQuery(v);
   }
 }
 
 export function mapSiftQuery(q: unknown): unknown {
   if (Array.isArray(q)) return q.map(mapSiftQuery);
+  if (q instanceof RegExp) { assertSafeRegexPattern(q.source); return q; }
   if (q && typeof q === 'object' && q.constructor === Object) {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(q)) {
       if (SIFT_FORBIDDEN.has(k)) throw new Error(`Forbidden sift operator: ${k}`);
+      if (k === '$regex') assertSafeRegexPattern(v);
       let newKey = k;
       if (k === '$type') newKey = '_type';
       else if (k === '$path') newKey = '_path';
