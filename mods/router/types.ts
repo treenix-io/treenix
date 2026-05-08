@@ -14,6 +14,8 @@ export class Route {
   prefix?: string;
   /** Default child name when URL rest is empty (e.g. 'index'). */
   index?: string;
+  /** When true, route renders for unauthenticated users (no global login modal). */
+  public?: boolean;
 }
 
 registerType('t.route', Route);

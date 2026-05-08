@@ -21,6 +21,7 @@ export type Route = {
   wildcard?: boolean;
   prefix?: string;
   index?: string;
+  public?: boolean;
 };
 
 export type ResolveResult = { node: NodeData; rest: string } | null;

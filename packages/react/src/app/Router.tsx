@@ -25,7 +25,7 @@ export function Router() {
   const { authed, authChecked, showLoginModal, setAuthed, closeLoginModal } = useAuthContext();
   const { pathname } = useLocation();
 
-  const { result, loading: routeLoading } = useRouteResolve(pathname);
+  const { result, loading: routeLoading, isPublic } = useRouteResolve(pathname);
 
   // Default identity nav for catch-all / login modal. Shell views override
   // this via inner <NavigateProvider> with route-aware makeHref.
@@ -38,8 +38,26 @@ export function Router() {
   // Don't flash the public fallback while route data is still loading.
   if (routeLoading && !result) return null;
 
+  // Global auth gate: unauth user sees only the login modal — unless the
+  // matched route opts in via t.route.public, then it renders for anon.
+  if (!authed && !isPublic) {
+    return (
+      <NavigateProvider value={defaultNav}>
+        <LoginModal onLogin={(uid) => { setAuthed(uid); closeLoginModal(); }} />
+      </NavigateProvider>
+    );
+  }
+
+  const isAnon = !!authed && authed.startsWith('anon:');
+  const modalCloseable = !!authed && !isAnon;
+  const modal = showLoginModal && (
+    <LoginModal
+      onLogin={(uid) => { setAuthed(uid); closeLoginModal(); }}
+      onClose={modalCloseable ? closeLoginModal : undefined}
+    />
+  );
+
   if (result) {
-    const isAnon = !!authed && authed.startsWith('anon:');
     return (
       <NavigateProvider value={defaultNav}>
         <RouteParamsContext.Provider value={{ rest: result.rest, full: pathname }}>
@@ -47,12 +65,7 @@ export function Router() {
             <Render value={result.node} />
           </RenderContext>
         </RouteParamsContext.Provider>
-        {showLoginModal && (
-          <LoginModal
-            onLogin={(uid) => { setAuthed(uid); closeLoginModal(); }}
-            onClose={isAnon ? undefined : closeLoginModal}
-          />
-        )}
+        {modal}
       </NavigateProvider>
     );
   }
@@ -60,6 +73,7 @@ export function Router() {
   return (
     <NavigateProvider value={defaultNav}>
       <RoutedPage path={pathname || '/'} />
+      {modal}
     </NavigateProvider>
   );
 }

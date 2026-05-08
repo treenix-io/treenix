@@ -13,6 +13,10 @@
     "index": {
       "type": "string",
       "title": "Default child name when URL rest is empty (e.g. 'index')."
+    },
+    "public": {
+      "type": "boolean",
+      "title": "When true, route renders for unauthenticated users (no global login modal)."
     }
   },
   "$id": "t.route",

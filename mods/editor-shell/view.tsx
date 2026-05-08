@@ -21,14 +21,13 @@ import { useAuthContext } from '@treenx/react/app/auth-context';
 import { EMPTY, RouteParamsContext, useRouteParams } from '@treenx/react/context/route-params';
 import { ConnectionBanner } from '@treenx/react/app/ConnectionBanner';
 import { EditorSidebar } from '@treenx/react/app/EditorSidebar';
-import { LoginScreen } from '@treenx/react/app/Login';
 import { Inspector } from '@treenx/react/editor/Inspector';
 import { useModErrors } from '@treenx/react/hooks/use-mod-errors';
 import { TypePicker } from '@treenx/react/mods/editor-ui/type-picker';
 import { EditorShell } from './types';
 
 const EditorShellView: View<EditorShell> = ({ ctx }) => {
-  const { authed, authChecked, setAuthed, logout } = useAuthContext();
+  const { authed, logout } = useAuthContext();
   const { search } = useLocation();
 
   const { target: selected, nav } = useRouteShell(ctx!.node, { preserveQuery: { root: '/' } });
@@ -99,9 +98,6 @@ const EditorShellView: View<EditorShell> = ({ ctx }) => {
     [selected],
   );
 
-  if (!authChecked) return null;
-  if (!authed) return <LoginScreen onLogin={setAuthed} />;
-
   return (
     <RouteParamsContext value={EMPTY}>
     <NavigateProvider value={nav}>
@@ -109,7 +105,7 @@ const EditorShellView: View<EditorShell> = ({ ctx }) => {
       <div className="flex h-screen bg-background text-foreground overflow-hidden">
         <ResizablePanelGroup orientation="horizontal" className="h-full">
           <EditorSidebar
-            authed={authed}
+            authed={authed!}
             root={root}
             selected={selected}
             onSelect={nav}
@@ -122,7 +118,7 @@ const EditorShellView: View<EditorShell> = ({ ctx }) => {
           <ResizablePanel defaultSize={72} minSize={40}>
             <Inspector
               path={selected}
-              currentUserId={authed}
+              currentUserId={authed!}
               onDelete={handleDelete}
               onAddComponent={handleAddComponent}
               onSelect={nav}

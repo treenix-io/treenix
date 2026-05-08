@@ -9,17 +9,20 @@
 
 import { useMemo } from 'react';
 import { useChildren } from '#hooks';
-import { resolveRoute, type ResolveResult } from './route-resolve';
+import { getRoute, resolveRoute, type ResolveResult } from './route-resolve';
 
 export type RouteResolveQuery = {
   /** Match result, or null when no route matched (or while loading + empty). */
   result: ResolveResult;
   /** Initial fetch in flight — distinguish "loading" from "not found". */
   loading: boolean;
+  /** Matched route opts in for unauthenticated rendering (t.route.public). */
+  isPublic: boolean;
 };
 
 export function useRouteResolve(pathname: string): RouteResolveQuery {
   const { data, loading } = useChildren('/sys/routes', { watch: true, watchNew: true });
   const result = useMemo(() => resolveRoute(pathname, data), [pathname, data]);
-  return { result, loading };
+  const isPublic = !!result && getRoute(result.node)?.public === true;
+  return { result, loading, isPublic };
 }
