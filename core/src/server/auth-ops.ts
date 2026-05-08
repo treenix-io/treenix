@@ -12,9 +12,11 @@ import { checkRate } from './rate-limit';
 // userId becomes a path segment under /auth/users/. Original check (slash/backslash/NUL) missed
 // `..` and dot-only names → on FS-backed stores `path.join` normalizes them and writes outside
 // /auth/users/. Tighten to allowlist + length cap; reject dot-only names.
+// Allowlist includes `@` and `+` for email-format userIds (foo+tag@bar.com); neither is a path
+// separator nor enables traversal.
 function assertUserId(userId: string): void {
   if (typeof userId !== 'string' || userId.length === 0 || userId.length > 64
-      || !/^[A-Za-z0-9._-]+$/.test(userId)
+      || !/^[A-Za-z0-9._@+-]+$/.test(userId)
       || /^\.+$/.test(userId))
     throw new OpError('BAD_REQUEST', 'Invalid userId');
 }

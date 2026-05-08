@@ -127,6 +127,14 @@ describe('R4-AUTH-8 — assertUserId path-traversal hardening', () => {
     // First user gets admin — single registration sufficient for the assertion.
     await registerUser(tree, 'good.user_name-1', 'pw', uniqueIp());
   });
+
+  it('accepts email-format userId (@ and +)', async () => {
+    const tree = createMemoryTree();
+    await registerUser(tree, 'foo+tag@bar.com', 'pw', uniqueIp());
+    const r = await loginUser(tree, 'foo+tag@bar.com', 'pw', uniqueIp());
+    assert.equal(r.userId, 'foo+tag@bar.com');
+    assert.ok(r.token);
+  });
 });
 
 describe('R4-AUTH-6 — pending-status credential oracle closed', () => {

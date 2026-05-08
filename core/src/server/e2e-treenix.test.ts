@@ -95,7 +95,7 @@ async function boot(
     s.on('close', () => sockets.delete(s))
   })
   const port = (server.address() as { port: number }).port
-  return { app, server, url: `http://127.0.0.1:${port}/`, tmpDir: dir, sockets }
+  return { app, server, url: `http://127.0.0.1:${port}/trpc/`, tmpDir: dir, sockets }
 }
 
 async function shutdown(ctx: Ctx) {

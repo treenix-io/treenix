@@ -177,7 +177,7 @@ describe('e2e: tRPC over HTTP', () => {
       socket.on('close', () => sockets.delete(socket));
     });
     const port = await listen(ts.server);
-    url = `http://127.0.0.1:${port}/`;
+    url = `http://127.0.0.1:${port}/trpc/`;
   });
 
   afterEach(async () => {
