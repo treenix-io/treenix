@@ -44,8 +44,17 @@ function createIsolatedEventSource() {
   };
 }
 
-export function createClient(url: string, token?: string | null): TRPCClient<TreeRouter> {
-  const headers = token ? { Authorization: `Bearer ${token}` } : {};
+/** Token may be a string, null, or a getter — getter is re-evaluated per request so the
+ *  client picks up new sessions after login without being recreated. Returning null/undefined
+ *  from the getter sends no Authorization header (anonymous). */
+export type TokenSource = string | null | undefined | (() => string | null | undefined);
+
+function readToken(src: TokenSource): string | null {
+  const v = typeof src === 'function' ? src() : src;
+  return typeof v === 'string' && v.length > 0 ? v : null;
+}
+
+export function createClient(url: string, token?: TokenSource): TRPCClient<TreeRouter> {
   let trpc!: TRPCClient<TreeRouter>;
   trpc = createTRPCClient<TreeRouter>({
     links: [
@@ -55,12 +64,23 @@ export function createClient(url: string, token?: string | null): TRPCClient<Tre
           url,
           EventSource: createIsolatedEventSource() as any,
           // Mint short-lived stream token; called on every (re)connect.
+          // Skip the mint when no session token is present — avoids spamming the server
+          // with UNAUTHORIZED on logged-out clients (see server.ts onError).
           connectionParams: async () => {
+            if (!readToken(token)) throw new Error('No session — login before subscribing');
             const { token: streamToken } = await trpc.mintStreamToken.mutate();
             return { token: streamToken };
           },
         }),
-        false: httpBatchLink({ url, maxURLLength: 2048, headers: () => headers }),
+        false: httpBatchLink({
+          url, maxURLLength: 2048,
+          // Re-evaluated per request so a refreshed token after login is picked up
+          // without recreating the client.
+          headers: () => {
+            const t = readToken(token);
+            return t ? { Authorization: `Bearer ${t}` } : {};
+          },
+        }),
       }),
     ],
   });

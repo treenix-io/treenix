@@ -181,7 +181,11 @@ export function createHttpServer(pipeline: Pipeline, opts?: HttpServerOpts): Ser
       const path = pathname.replace(/^\/trpc/, '').replace(/^\//, '');
       await nodeHTTPRequestHandler({
         req, res, router, path, createContext,
-        onError: ({ error, path: p }) => log.error(`trpc ${p}: ${error.message}`),
+        onError: ({ error, path: p }) => {
+          // UNAUTHORIZED is the expected response when a logged-out client probes — don't spam error log.
+          if (error.code === 'UNAUTHORIZED') log.warn(`trpc ${p}: ${error.message}`);
+          else log.error(`trpc ${p}: ${error.message}`);
+        },
       });
       return;
     }
@@ -189,12 +193,8 @@ export function createHttpServer(pipeline: Pipeline, opts?: HttpServerOpts): Ser
     // Static files (frontend SPA)
     if (serveStatic(pathname, res)) return;
 
-    // Fallback: try tRPC for legacy non-prefixed calls
-    const path = pathname.replace(/^\//, '');
-    await nodeHTTPRequestHandler({
-      req, res, router, path, createContext,
-      onError: ({ error, path: p }) => log.error(`trpc ${p}: ${error.message}`),
-    });
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'not_found' }));
   });
 }
 
