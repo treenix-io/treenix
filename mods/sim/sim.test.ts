@@ -216,7 +216,7 @@ describe('mock tools', () => {
 
     const w = await tree.get('/w');
     const round = getComponent(w!, 'sim.round') as any;
-    const speakEvents = round.log.filter((e: any) => e.action === 'speak');
+    const speakEvents = round.log.filter((e: any) => typeof e.action === 'string' && e.action.startsWith('speak'));
     assert.ok(speakEvents.length > 0, 'should have at least one speak event');
     for (const e of speakEvents) {
       assert.ok(Array.isArray(e.heardBy), 'speak event should have heardBy');
