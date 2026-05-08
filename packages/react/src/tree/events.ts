@@ -5,7 +5,7 @@ import type { NodeData } from '@treenx/core';
 import { applyPatch, type Operation } from 'fast-json-patch';
 import * as cache from './cache';
 import { applyServerPatch, applyServerSet } from './rebase';
-import { trpc } from './trpc';
+import { getToken, trpc } from './trpc';
 
 type LoadChildren = (path: string) => Promise<void>;
 
@@ -24,9 +24,42 @@ let unsub: (() => void) | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let lastConfig: EventsConfig | null = null;
 
+// Wait until a session token appears, then call `cb` once. Listens to localStorage 'storage'
+// events (cross-tab) AND polls every 500ms (same-tab — login fires no storage event in the
+// originating window). De-noops itself once it fires.
+let tokenWaitTimer: ReturnType<typeof setInterval> | null = null;
+let tokenWaitListener: ((e: StorageEvent) => void) | null = null;
+function waitForToken(cb: () => void) {
+  if (tokenWaitTimer || tokenWaitListener) return; // already waiting
+  const fire = () => {
+    if (!getToken()) return;
+    if (tokenWaitTimer) { clearInterval(tokenWaitTimer); tokenWaitTimer = null; }
+    if (tokenWaitListener && typeof window !== 'undefined') {
+      window.removeEventListener('storage', tokenWaitListener);
+      tokenWaitListener = null;
+    }
+    cb();
+  };
+  tokenWaitTimer = setInterval(fire, 500);
+  if (typeof window !== 'undefined') {
+    tokenWaitListener = (e: StorageEvent) => { if (e.key === 'treenix_token') fire(); };
+    window.addEventListener('storage', tokenWaitListener);
+  }
+}
+
 export function startEvents(config: EventsConfig) {
   stopEvents();
   lastConfig = config;
+
+  // Defer SSE subscribe until a session token exists. Without this guard, calling
+  // startEvents on an unauthenticated SPA triggers a tight loop:
+  //   subscribe → connectionParams throws (no token) → onStopped → scheduleResubscribe(0) → repeat.
+  // Once a token lands (login), call startEvents again from the caller's auth-state effect,
+  // OR rely on the storage listener below to wake the subscription.
+  if (!getToken()) {
+    waitForToken(() => { if (lastConfig) startEvents(lastConfig); });
+    return;
+  }
 
   const { loadChildren, getExpanded, getSelected } = config;
 
@@ -120,6 +153,11 @@ function scheduleResubscribe(delayMs: number) {
   if (reconnectTimer || !lastConfig) return;
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
+    // If token disappeared (logout), don't loop — wait until token returns.
+    if (!getToken()) {
+      if (lastConfig) waitForToken(() => { if (lastConfig) startEvents(lastConfig); });
+      return;
+    }
     if (lastConfig) startEvents(lastConfig);
   }, delayMs);
 }
@@ -127,4 +165,9 @@ function scheduleResubscribe(delayMs: number) {
 export function stopEvents() {
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
   if (unsub) { unsub(); unsub = null; }
+  if (tokenWaitTimer) { clearInterval(tokenWaitTimer); tokenWaitTimer = null; }
+  if (tokenWaitListener && typeof window !== 'undefined') {
+    window.removeEventListener('storage', tokenWaitListener);
+    tokenWaitListener = null;
+  }
 }
