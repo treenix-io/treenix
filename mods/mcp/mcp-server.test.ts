@@ -131,10 +131,10 @@ describe('MCP auth discovery metadata', () => {
     });
   });
 
-  it('defaults authorization server to the resource origin', () => {
+  it('omits authorization_servers when no AS is configured (Bearer-only mode)', () => {
     const req = { headers: { host: 'example.com' } } as any;
     const metadata = protectedResourceMetadata(req, { routePath: '/mcp' });
-    assert.deepEqual(metadata.authorization_servers, ['http://example.com']);
+    assert.equal('authorization_servers' in metadata, false);
   });
 });
 

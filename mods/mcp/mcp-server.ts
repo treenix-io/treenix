@@ -723,14 +723,18 @@ export function protectedResourceMetadata(
   opts: McpHandlerOptions = {},
 ) {
   const routePath = opts.routePath ?? '/mcp';
-  const authorizationServer = opts.authorizationServer || requestOrigin(req);
-  return {
+  // No AS configured → omit authorization_servers so clients use static Bearer
+  // instead of probing OAuth discovery endpoints we don't serve.
+  const meta: Record<string, unknown> = {
     resource: absoluteResourceUrl(req, routePath),
     resource_name: 'Treenix MCP',
     bearer_methods_supported: ['header'],
     scopes_supported: ['treenix'],
-    authorization_servers: [absoluteResourceUrl(req, authorizationServer)],
   };
+  if (opts.authorizationServer) {
+    meta.authorization_servers = [absoluteResourceUrl(req, opts.authorizationServer)];
+  }
+  return meta;
 }
 
 export function createMcpResourceMetadataHandler(opts: McpHandlerOptions = {}) {
