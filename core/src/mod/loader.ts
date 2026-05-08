@@ -299,18 +299,18 @@ export async function loadAllMods(target: LoadTarget, ...extraDirs: string[]): P
 
   const dirs = [internalDir, engineDir];
 
-  // R4-BOOT-1: only auto-scan cwd/mods AND honour caller-supplied extraDirs (e.g. MODS_DIR)
-  // when NOT running in production, OR when the operator explicitly opts in via
-  // TRENIX_TRUST_MODS_DIR=1. Otherwise an attacker who can write to those paths (shared dev box,
-  // tampered deploy artifact, CI runner pulling untrusted PR diffs) gains arbitrary RCE at boot.
-  const trustExtraDirs = process.env.NODE_ENV !== 'production' || process.env.TRENIX_TRUST_MODS_DIR === '1';
+  // R4-BOOT-1: cwd/mods and caller-supplied extraDirs (e.g. MODS_DIR) load by default.
+  // Opt out via TREENIX_UNTRUSTED_MODS_DIR=1 in environments where those paths are attacker-writable
+  // (shared CI runner pulling untrusted PR diffs, multi-tenant box with untrusted writers) — there
+  // a malicious mod at boot = arbitrary RCE.
+  const trustExtraDirs = process.env.TREENIX_UNTRUSTED_MODS_DIR !== '1';
   if (trustExtraDirs) {
     // CWD/mods/ if different from engine mods
     const projectDir = resolve('mods');
     if (resolve(projectDir) !== resolve(engineDir)) dirs.push(projectDir);
     dirs.push(...extraDirs);
   } else if (extraDirs.length) {
-    console.warn('[mod-loader] ignoring %d extra mod dir(s) in production — set TRENIX_TRUST_MODS_DIR=1 to opt in', extraDirs.length);
+    console.warn('[mod-loader] ignoring %d extra mod dir(s) — TREENIX_UNTRUSTED_MODS_DIR=1 is set', extraDirs.length);
   }
 
   const seen = new Set<string>();
