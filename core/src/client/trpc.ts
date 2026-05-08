@@ -26,7 +26,11 @@ export function createTrpcTransport(opts: TrpcTransportOpts): TreenixClient & { 
         true: httpSubscriptionLink({
           url: `${opts.url}/trpc/`,
           // Mint a short-lived stream token via authed mutation; called on every (re)connect.
+          // Skip the mint when no session token is present — calling mintStreamToken without
+          // Authorization returns UNAUTHORIZED and the subscription would loop on it. Throw
+          // a clean error so the link surfaces "no session" instead of spamming the server.
           connectionParams: async () => {
+            if (!getToken()) throw new Error('No session — login before subscribing');
             const { token } = await trpc.mintStreamToken.mutate();
             return { token };
           },
@@ -50,6 +54,10 @@ export function createTrpcTransport(opts: TrpcTransportOpts): TreenixClient & { 
 
   function ensureSSE() {
     if (eventSub) return;
+    // Defer subscription until a session token exists — avoids triggering connectionParams
+    // (which would call mintStreamToken without Authorization and fail). When a later
+    // watchPath call fires after login, this kicks in.
+    if (!getToken()) return;
     eventSub = trpc.events.subscribe(undefined as void, {
       onData: (event: any) => {
         if ('path' in event) pathCbs.get(event.path)?.forEach(cb => cb(event));
