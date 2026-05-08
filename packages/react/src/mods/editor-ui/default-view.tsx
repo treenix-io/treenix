@@ -61,8 +61,14 @@ export function splitRecord(value: ComponentData, schema: TypeSchema | null): Sp
     }
   }
 
+  // Schema-strict for plain fields: hide undeclared keys (stale legacy data).
+  // Always pass through components ($type) and refs — they are ECS aspects, not type fields.
+  // No schema → fall back to permissive rendering so unknown types stay visible.
+  const strict = !!schema?.properties;
   for (const [name, raw] of Object.entries(value)) {
     if (name.startsWith('$')) continue;
+    if (seen.has(name)) continue;
+    if (strict && !isComponent(raw) && !isRef(raw)) continue;
     consider(name, undefined, raw);
   }
 
