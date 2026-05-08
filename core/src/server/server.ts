@@ -10,11 +10,9 @@ import { nodeHTTPRequestHandler } from '@trpc/server/adapters/node-http';
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { extname, join, resolve, sep } from 'node:path';
-import { TRPCError } from '@trpc/server';
-import { resolveToken } from './auth';
+import { parseSessionCookie, resolveToken } from './auth';
 import { withMounts } from './mount';
 import { withRefIndex } from './refs';
-import { createStreamTokenStore, type StreamTokenStore } from './stream-token';
 import { type CdcRegistry, withSubscriptions } from './sub';
 import { createTreeRouter, type TreeRouter, type TrpcContext } from './trpc';
 import { withMigration } from './migrate';
@@ -35,7 +33,6 @@ export type Pipeline = {
   mountable: Tree;
   watcher: WatchManager;
   router: TreeRouter;
-  streamTokens: StreamTokenStore;
   createContext: (token: string | null) => Promise<TrpcContext>;
 };
 
@@ -53,15 +50,14 @@ export function createPipeline(bootstrap: Tree): Pipeline {
   });
   const { tree, cdc } = withSubscriptions(cached, (e) => watcher.notify(e));
   cdcRef = cdc;
-  const streamTokens = createStreamTokenStore();
-  const router = createTreeRouter(tree, watcher, undefined, cdc, streamTokens);
+  const router = createTreeRouter(tree, watcher, undefined, cdc);
 
   const createContext = async (token: string | null): Promise<TrpcContext> => {
     const session = token ? await resolveToken(mountable, token) : null;
     return { session, token, clientIp: null };
   };
 
-  return { tree, cdc, mountable, watcher, router, streamTokens, createContext };
+  return { tree, cdc, mountable, watcher, router, createContext };
 }
 
 type HttpServerOpts = {
@@ -73,7 +69,7 @@ type HttpServerOpts = {
 
 /** HTTP server on top of an existing pipeline */
 export function createHttpServer(pipeline: Pipeline, opts?: HttpServerOpts): Server {
-  const { tree, mountable, router, streamTokens } = pipeline;
+  const { tree, mountable, router } = pipeline;
   const allowedOrigins = opts?.allowedOrigins
     ?? (process.env.ALLOWED_ORIGINS ?? 'http://localhost:3000').split(',');
   const staticDir = opts?.staticDir
@@ -110,13 +106,13 @@ export function createHttpServer(pipeline: Pipeline, opts?: HttpServerOpts): Ser
     return true;
   }
 
-  type ConnParams = { info?: { type?: string; connectionParams?: Record<string, string | undefined> | null } };
-
   return createServer(async (req, res) => {
     const origin = req.headers.origin;
     if (origin && allowedOrigins.includes(origin)) {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Vary', 'Origin');
+      // Required for browsers to send the session cookie on cross-origin requests.
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
     }
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
@@ -154,20 +150,20 @@ export function createHttpServer(pipeline: Pipeline, opts?: HttpServerOpts): Ser
     const xffParts = xffStr ? xffStr.split(',').map(s => s.trim()).filter(Boolean) : [];
     const clientIp = xffParts[xffParts.length - 1] || req.socket.remoteAddress || null;
 
-    // ALL subscriptions require a short-lived stream token. Discriminate by op type, NOT connectionParams presence —
-    // a subscription request without connectionParams must NOT fall through to long-lived bearer auth.
-    // Regular HTTP keeps long-lived bearer in Authorization header.
-    const createContext = async (opts?: ConnParams): Promise<TrpcContext> => {
-      if (opts?.info?.type === 'subscription') {
-        const streamToken = opts.info.connectionParams?.token;
-        const session = streamToken ? streamTokens.resolve(streamToken) : null;
-        if (!session) throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Stream token required for subscriptions' });
-        return { session, token: null, clientIp };
-      }
+    // Auth: cookie (browsers, including SSE EventSource) OR Authorization Bearer header
+    // (agents, MCP, tests). Cookies are HttpOnly + Secure + SameSite=Strict — set by
+    // login/register/devLogin via ctx.setHeader (see trpc.ts). The stream-token machinery
+    // that R1's F9 introduced is gone; cookies natively cover SSE.
+    const createContext = async (): Promise<TrpcContext> => {
       const auth = req.headers.authorization;
-      const token = (typeof auth === 'string' && auth.startsWith('Bearer ') ? auth.slice(7) : null);
+      const bearer = (typeof auth === 'string' && auth.startsWith('Bearer ') ? auth.slice(7) : null);
+      const cookieToken = parseSessionCookie(req.headers.cookie);
+      const token = bearer || cookieToken;
       const session = token ? await resolveToken(mountable, token) : null;
-      return { session, token, clientIp };
+      return {
+        session, token, clientIp,
+        setHeader: (name, value) => res.setHeader(name, value),
+      };
     };
 
     const pathname = (req.url ?? '/').split('?')[0];

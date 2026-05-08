@@ -1,5 +1,12 @@
 // tRPC transport for Treenix Client.
 // HTTP batch for queries/mutations, SSE for subscriptions.
+//
+// Auth model (post-cookie migration):
+//   • Browsers: rely on the HttpOnly session cookie set by login/register/devLogin.
+//     EventSource sends cookies natively → SSE just works.
+//   • Agents / MCP / tests: pass `token` or `getToken` — sent as `Authorization: Bearer ...`.
+//     SSE EventSource cannot set headers, so node clients that need subscriptions go
+//     through the cookie path too (custom fetch with a cookie jar) — see core/src/server/client.ts.
 
 import type { NodeData } from '#core';
 import type { PatchOp } from '#tree';
@@ -9,6 +16,7 @@ import type { TreenixClient, WatchSub } from './index';
 
 export type TrpcTransportOpts = {
   url: string;
+  /** Optional bearer source (agent/MCP/tests). Browsers use the HttpOnly session cookie automatically. */
   getToken?: () => string | null;
   token?: string;
   fetch?: (input: any, init?: any) => Promise<Response>;
@@ -17,7 +25,11 @@ export type TrpcTransportOpts = {
 export function createTrpcTransport(opts: TrpcTransportOpts): TreenixClient & { trpc: ReturnType<typeof createTRPCClient<TreeRouter>> } {
   const getToken = opts.getToken ?? (() => opts.token ?? null);
 
-  // Forward declaration — closure captures the binding, called only at subscribe time when trpc is defined.
+  // Browser fetch: include credentials so cookies flow on cross-origin (CORS) requests too.
+  // Custom fetch from caller (e.g. node tests with a cookie jar) overrides.
+  const defaultFetch = (input: any, init?: any) => fetch(input, { ...init, credentials: 'include' });
+  const fetchImpl = opts.fetch ?? defaultFetch;
+
   let trpc!: ReturnType<typeof createTRPCClient<TreeRouter>>;
   trpc = createTRPCClient<TreeRouter>({
     links: [
@@ -25,15 +37,8 @@ export function createTrpcTransport(opts: TrpcTransportOpts): TreenixClient & { 
         condition: (op) => op.type === 'subscription',
         true: httpSubscriptionLink({
           url: `${opts.url}/trpc/`,
-          // Mint a short-lived stream token via authed mutation; called on every (re)connect.
-          // Skip the mint when no session token is present — calling mintStreamToken without
-          // Authorization returns UNAUTHORIZED and the subscription would loop on it. Throw
-          // a clean error so the link surfaces "no session" instead of spamming the server.
-          connectionParams: async () => {
-            if (!getToken()) throw new Error('No session — login before subscribing');
-            const { token } = await trpc.mintStreamToken.mutate();
-            return { token };
-          },
+          // No connectionParams — auth comes from the cookie (browser) or a custom EventSource
+          // wired by the caller. Server reads cookie OR Authorization header in createContext.
         }),
         false: httpBatchLink({
           url: `${opts.url}/trpc/`,
@@ -42,7 +47,7 @@ export function createTrpcTransport(opts: TrpcTransportOpts): TreenixClient & { 
             const t = getToken();
             return t ? { Authorization: `Bearer ${t}` } : {};
           },
-          ...(opts.fetch && { fetch: opts.fetch }),
+          fetch: fetchImpl,
         }),
       }),
     ],
@@ -54,10 +59,6 @@ export function createTrpcTransport(opts: TrpcTransportOpts): TreenixClient & { 
 
   function ensureSSE() {
     if (eventSub) return;
-    // Defer subscription until a session token exists — avoids triggering connectionParams
-    // (which would call mintStreamToken without Authorization and fail). When a later
-    // watchPath call fires after login, this kicks in.
-    if (!getToken()) return;
     eventSub = trpc.events.subscribe(undefined as void, {
       onData: (event: any) => {
         if ('path' in event) pathCbs.get(event.path)?.forEach(cb => cb(event));

@@ -17,8 +17,7 @@ import {
   executeStream,
   setComponent as setComponentOp,
 } from './actions';
-import { buildClaims, type Session, withAcl } from './auth';
-import type { StreamTokenStore } from './stream-token';
+import { buildClaims, buildClearSessionCookie, buildSessionCookie, type Session, withAcl } from './auth';
 import { agentConnect, agentInitPair, devLogin, loginUser, logoutUser, registerUser } from './auth-ops';
 import { OpError } from '#errors';
 import { checkRate } from './rate-limit';
@@ -28,7 +27,13 @@ import { extractPaths } from './volatile';
 import { type WatchManager } from './watch';
 import { createFilteredPush } from './watch-filter';
 
-export type TrpcContext = { session: Session | null; token: string | null; clientIp: string | null };
+export type TrpcContext = {
+  session: Session | null;
+  token: string | null;
+  clientIp: string | null;
+  /** Set a response header — used by login/register/logout to set the session cookie. */
+  setHeader?: (name: string, value: string) => void;
+};
 
 /** Zod schema that validates tree paths — rejects traversal, null bytes, double slashes */
 const safePath = z.string().superRefine((p, ctx) => {
@@ -54,7 +59,7 @@ export type TreeRouterOpts = {
 
 const DEFAULT_CLAIMS_TTL_MS = 30_000;
 
-export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: TreeRouterOpts, cdc?: CdcRegistry, streamTokens?: StreamTokenStore) {
+export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: TreeRouterOpts, cdc?: CdcRegistry) {
   const claimsTtlMs = opts?.claimsTtlMs ?? DEFAULT_CLAIMS_TTL_MS;
   const t = initTRPC.context<TrpcContext>().create();
 
@@ -231,11 +236,20 @@ export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: 
     // 256 chars is well above any realistic password-manager output.
     register: base
       .input(z.object({ userId: z.string().min(1).max(64), password: z.string().min(1).max(256) }))
-      .mutation(({ input, ctx }) => registerUser(baseStore, input.userId, input.password, ctx.clientIp)),
+      .mutation(async ({ input, ctx }) => {
+        const r = await registerUser(baseStore, input.userId, input.password, ctx.clientIp);
+        // First user registers active+token; pending users have no token. Set cookie when issued.
+        if (r.token) ctx.setHeader?.('Set-Cookie', buildSessionCookie(r.token));
+        return r;
+      }),
 
     login: base
       .input(z.object({ userId: z.string().min(1).max(64), password: z.string().min(1).max(256) }))
-      .mutation(({ input, ctx }) => loginUser(baseStore, input.userId, input.password, ctx.clientIp)),
+      .mutation(async ({ input, ctx }) => {
+        const r = await loginUser(baseStore, input.userId, input.password, ctx.clientIp);
+        ctx.setHeader?.('Set-Cookie', buildSessionCookie(r.token));
+        return r;
+      }),
 
     me: authed.query(({ ctx }) => {
       if (!ctx.session) return null;
@@ -247,16 +261,9 @@ export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: 
       .query(async ({ input, ctx }) => ctx.tree.getPerm(input.path)),
 
     logout: authed.mutation(async ({ ctx }) => {
+      ctx.setHeader?.('Set-Cookie', buildClearSessionCookie());
       if (!ctx.session || !ctx.token) return { ok: false };
-      streamTokens?.purgeForUser(ctx.session.userId);
       return logoutUser(baseStore, ctx.token);
-    }),
-
-    mintStreamToken: authed.mutation(({ ctx }) => {
-      if (!ctx.session) throw new OpError('UNAUTHORIZED', 'Authentication required');
-      if (!streamTokens) throw new OpError('NOT_FOUND', 'Stream tokens not configured');
-      checkRate(`mint:${ctx.session.userId}`, 60);
-      return streamTokens.mint(ctx.session);
     }),
 
     agentConnect: base
@@ -282,7 +289,11 @@ export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: 
         }
       }),
 
-    devLogin: base.mutation(() => devLogin(baseStore)),
+    devLogin: base.mutation(async ({ ctx }) => {
+      const r = await devLogin(baseStore);
+      ctx.setHeader?.('Set-Cookie', buildSessionCookie(r.token));
+      return r;
+    }),
 
     streamAction: authed
       .input(z.object({ path: safePath, type: z.string().optional(), key: z.string().optional(), action: z.string(), data: z.unknown().optional() }))

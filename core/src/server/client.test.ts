@@ -65,44 +65,24 @@ describe('createClient TokenSource', () => {
     assert.equal(me, null);
   });
 
-  it('token-as-getter is re-evaluated per request — login refresh works without recreating client', async () => {
-    let currentToken: string | null = null;
-    const client = createClient(url, () => currentToken);
+  it('cookie auth — login persists session across same client without bearer', async () => {
+    // No bearer source. After login, server sets HttpOnly cookie which the cookie jar
+    // captures and replays on subsequent requests — same as a browser.
+    const client = createClient(url);
 
     // Pre-login: anonymous
     assert.equal(await client.me.query(), null);
 
-    // Register + login through the SAME client instance
+    // Register + login through the SAME client instance — cookie set on login, jar persists.
     await client.register.mutate({ userId: 'bob', password: 'pw' });
-    const { token } = await client.login.mutate({ userId: 'bob', password: 'pw' });
-    assert.ok(token);
+    const r = await client.login.mutate({ userId: 'bob', password: 'pw' });
+    assert.ok(r.token, 'login still returns the token (for non-cookie callers)');
 
-    // Now plug the token in. No client recreation.
-    currentToken = token;
     const me = await client.me.query();
     assert.equal(me?.userId, 'bob');
 
-    // Logout: drop token, next call goes anon again.
-    currentToken = null;
+    // logout clears the cookie via Set-Cookie: Max-Age=0 → next call is anon.
+    await client.logout.mutate();
     assert.equal(await client.me.query(), null);
-  });
-
-  it('subscription with no token throws "No session" without calling mintStreamToken', async () => {
-    const client = createClient(url, null);
-
-    // Subscribe should reject quickly; we capture error via onError callback.
-    const result = await new Promise<{ ok: boolean; error?: string }>((resolve) => {
-      const sub = client.events.subscribe(undefined, {
-        onData: () => {},
-        onComplete: () => resolve({ ok: true }),
-        onError: (err) => resolve({ ok: false, error: String((err as Error)?.message ?? err) }),
-      });
-      // Safety net — don't hang the test.
-      setTimeout(() => { sub.unsubscribe(); resolve({ ok: false, error: 'timeout' }); }, 1500);
-    });
-
-    // Subscription rejects (no flood of mintStreamToken requests). Error message text varies
-    // between transports (SSE swallows the throw message), so we only assert the no-success contract.
-    assert.equal(result.ok, false, 'subscription must NOT succeed without a session');
   });
 });
