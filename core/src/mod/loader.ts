@@ -2,7 +2,7 @@
 
 import { isInsideRoot } from '#core/path';
 import { createLogger } from '#log';
-import { loadSchemasFromDir } from '#schema/load';
+import { loadSchemasRecursive } from '#schema/load';
 import type { Tree } from '#tree';
 import { readdir, realpath, stat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
@@ -188,10 +188,10 @@ export async function loadMods(
       entry.loadDurationMs = elapsed;
       result.loaded.push(manifest.name);
 
-      // Load per-mod schemas
+      // Load per-mod schemas — walks the mod tree for any `schemas/` dir.
       if (manifest.packagePath) {
         const entryPath = target === 'server' ? manifest.server : manifest.client;
-        if (entryPath) loadSchemasFromDir(join(manifest.packagePath, dirname(entryPath), 'schemas'));
+        if (entryPath) loadSchemasRecursive(join(manifest.packagePath, dirname(entryPath)));
       }
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
@@ -279,7 +279,7 @@ export async function loadLocalMods(modsDir: string, target: LoadTarget): Promis
       modEntry.state = 'loaded';
       modEntry.loadedAt = Date.now();
       result.loaded.push(entry.name);
-      loadSchemasFromDir(join(modDir, 'schemas'));
+      loadSchemasRecursive(modDir);
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
       modEntry.state = 'failed';

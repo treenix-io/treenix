@@ -21,6 +21,23 @@ export function loadSchemasFromDir(dir: string): number {
   return count;
 }
 
+const SCHEMA_RECURSE_SKIP = new Set(['node_modules', 'dist', 'build', '.git']);
+
+/** Walk `root` recursively; for every directory named `schemas`, call loadSchemasFromDir.
+ * Skips node_modules, dist, build, hidden dirs. */
+export function loadSchemasRecursive(root: string): number {
+  if (!fs.existsSync(root)) return 0;
+  let total = 0;
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    if (entry.name.startsWith('.') || SCHEMA_RECURSE_SKIP.has(entry.name)) continue;
+    const sub = path.join(root, entry.name);
+    if (entry.name === 'schemas') total += loadSchemasFromDir(sub);
+    else total += loadSchemasRecursive(sub);
+  }
+  return total;
+}
+
 /** Load `./schemas/*.json` relative to caller's module — for tests that bypass mod loader.
  * Usage: `loadTestSchemas(import.meta.url)` */
 export function loadTestSchemas(metaUrl: string): number {
