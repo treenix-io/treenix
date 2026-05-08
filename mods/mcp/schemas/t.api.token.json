@@ -1,0 +1,41 @@
+{
+  "type": "object",
+  "title": "Single API token. Plaintext token is NEVER stored — sessionRef points to /auth/sessions/<sha256(token)>. Groups live on the user.",
+  "properties": {
+    "name": {
+      "type": "string",
+      "title": "Token name",
+      "default": ""
+    },
+    "userId": {
+      "type": "string",
+      "title": "Authenticates as this user id",
+      "default": ""
+    },
+    "sessionRef": {
+      "type": "string",
+      "title": "Session node path",
+      "format": "path",
+      "default": ""
+    },
+    "preview": {
+      "type": "string",
+      "title": "Token fingerprint (first6…last8) for visual identification",
+      "default": ""
+    },
+    "createdAt": {
+      "type": "number",
+      "title": "Created at (epoch ms)",
+      "default": 0
+    }
+  },
+  "required": [
+    "name",
+    "userId",
+    "sessionRef",
+    "preview",
+    "createdAt"
+  ],
+  "$id": "t.api.token",
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}

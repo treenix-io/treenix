@@ -4,29 +4,34 @@
 import { createNode } from '@treenx/core';
 import { getCtx, registerActions } from '@treenx/core/comp';
 import { createSession, sessionPath } from '@treenx/core/server/auth';
-import { API_TOKEN_GROUPS, ApiTokenGroup, ApiTokenManager } from './types';
+import { ApiTokenManager } from './types';
 
 /** Server-side registry for creating and revoking machine credentials. */
 class ApiTokenServer extends ApiTokenManager {
 
   /** @mutation Create API token for an agent. Returns the raw token ONCE — server stores only the hash. */
-  async create(data: { name: string; groups?: ApiTokenGroup[] }) {
+  async create(data: { name: string; groups?: string[] }) {
     if (!data?.name) throw new Error('name required');
     if (!/^[a-z0-9-]+$/.test(data.name)) throw new Error('name must be lowercase alphanumeric with dashes');
 
-    // R5-MCP-2: validate explicit groups against allowlist; default is least-privilege (no groups).
-    // Previous behaviour silently granted 'admins' on every token.
-    const groups: string[] = (data.groups ?? []).filter(g => API_TOKEN_GROUPS.includes(g));
+    // No allowlist: admin trust. Caller decides which groups to grant.
+    const groups: string[] = data.groups ?? [];
 
     const { tree, node } = getCtx();
     const userId = `api:${data.name}`;
     const path = node.$path;
 
     const userPath = `/auth/users/${userId}`;
-    if (!await tree.get(userPath)) {
+    const existing = await tree.get(userPath);
+    if (!existing) {
       await tree.set(createNode(userPath, 'user', { status: 'active' }, {
         groups: { $type: 'groups', list: groups },
       }));
+    } else {
+      // Refresh groups on re-issue so admins can elevate/restrict an existing api user.
+      await tree.patch(userPath, [
+        ['r', 'groups', { $type: 'groups', list: groups }],
+      ]);
     }
 
     const token = await createSession(tree, userId, {
@@ -40,8 +45,8 @@ class ApiTokenServer extends ApiTokenManager {
       $type: 't.api.token',
       name: data.name,
       userId,
-      groups,
       sessionRef: sessionPath(token),
+      preview: `${token.slice(0, 6)}…${token.slice(-8)}`,
       createdAt: Date.now(),
     });
 

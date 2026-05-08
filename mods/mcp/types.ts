@@ -15,18 +15,28 @@ export class McpConfig {
 }
 registerType('mcp.server', McpConfig);
 
-// R5-MCP-2: callers may scope token privileges via `groups`. Default is empty (least privilege).
-// Allow only known groups; admins must be passed explicitly.
-export const API_TOKEN_GROUPS = ['agents', 'authenticated', 'admins'] as const;
-export type ApiTokenGroup = typeof API_TOKEN_GROUPS[number];
-
 /** API token manager for creating and revoking machine access credentials. */
 export class ApiTokenManager {
-  /** @write Create API token for an agent. Token returned ONCE — server stores only sha256(token). */
-  create(_data: { name: string; groups?: ApiTokenGroup[] }) {
+  /** @write Create API token for an agent. Token returned ONCE — server stores only sha256(token). Groups go on the user (no allowlist — admin trust). */
+  create(_data: { name: string; groups?: string[] }) {
     return { token: '', userId: '' };
   }
   /** @write Revoke an API token by name */
   revoke(_data: { name: string }) {}
 }
 registerType('t.api.tokens', ApiTokenManager, { noOptimistic: ['create', 'revoke'] });
+
+/** Single API token. Plaintext token is NEVER stored — sessionRef points to /auth/sessions/<sha256(token)>. Groups live on the user. */
+export class ApiToken {
+  /** @title Token name */
+  name = '';
+  /** @title Authenticates as this user id */
+  userId = '';
+  /** @title Session node path @format path */
+  sessionRef = '';
+  /** @title Token fingerprint (first6…last8) for visual identification */
+  preview = '';
+  /** @title Created at (epoch ms) */
+  createdAt = 0;
+}
+registerType('t.api.token', ApiToken);
