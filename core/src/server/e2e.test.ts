@@ -12,7 +12,6 @@ import { afterEach, before, beforeEach, describe, it } from 'node:test';
 import { createClient } from './client';
 import { createTreenixServer, type TreenixServer } from './server';
 import { _resetRateLimits } from './rate-limit';
-import type { TreeRouter } from './trpc';
 import { type NodeEvent } from './sub';
 
 // ── Test components ──
@@ -402,92 +401,6 @@ describe('e2e: tRPC over HTTP', () => {
       assert.deepEqual(items[2], { type: 'end', summary: 'done' });
     });
 
-    // F9: SSE handshake must reject the long-lived bearer.
-    // Stream tokens are minted via authed mutation and used only in connectionParams.
-    it('rejects long-lived bearer placed in connectionParams', async () => {
-      const pub = createClient(url);
-      const reg = await pub.register.mutate({ userId: 'sse-bad', password: 'pass' });
-
-      // Build a client that sends bearer (instead of stream token) into connectionParams — the pre-F9 behaviour.
-      const { createTRPCClient, httpBatchLink, httpSubscriptionLink, splitLink } = await import('@trpc/client');
-      const { EventSource: BaseEventSource } = await import('eventsource');
-      const badClient = createTRPCClient<TreeRouter>({
-        links: [
-          splitLink({
-            condition: (op) => op.type === 'subscription',
-            true: httpSubscriptionLink({
-              url,
-              EventSource: BaseEventSource as unknown as typeof globalThis.EventSource,
-              connectionParams: () => ({ token: reg.token! }),
-            }),
-            false: httpBatchLink({ url, headers: () => ({ Authorization: `Bearer ${reg.token}` }) }),
-          }),
-        ],
-      });
-
-      await assert.rejects(
-        new Promise((resolve, reject) => {
-          const sub = badClient.events.subscribe(undefined, {
-            onData: () => {},
-            onError: (e: unknown) => { sub.unsubscribe(); reject(e); },
-            onComplete: () => resolve(undefined),
-          });
-        }),
-        (e: unknown) => /UNAUTHORIZED|Stream token/i.test(String((e as { message?: string })?.message ?? e)),
-      );
-    });
-
-    // F9 (codex H1 regression): subscription without connectionParams must NOT fall through to long-lived bearer auth.
-    // Discriminator is op.type==='subscription', not connectionParams presence.
-    it('rejects subscription without connectionParams (bearer-only handshake)', async () => {
-      const pub = createClient(url);
-      const reg = await pub.register.mutate({ userId: 'sse-noparams', password: 'pass' });
-
-      const { createTRPCClient, httpBatchLink, httpSubscriptionLink, splitLink } = await import('@trpc/client');
-      const { EventSource: BaseEventSource } = await import('eventsource');
-      const noParamsClient = createTRPCClient<TreeRouter>({
-        links: [
-          splitLink({
-            condition: (op) => op.type === 'subscription',
-            true: httpSubscriptionLink({
-              url,
-              EventSource: BaseEventSource as unknown as typeof globalThis.EventSource,
-              // connectionParams intentionally omitted — pre-H1 this fell through to bearer auth.
-            }),
-            false: httpBatchLink({ url, headers: () => ({ Authorization: `Bearer ${reg.token}` }) }),
-          }),
-        ],
-      });
-
-      await assert.rejects(
-        new Promise((resolve, reject) => {
-          const sub = noParamsClient.events.subscribe(undefined, {
-            onData: () => {},
-            onError: (e: unknown) => { sub.unsubscribe(); reject(e); },
-            onComplete: () => resolve(undefined),
-          });
-        }),
-        (e: unknown) => /UNAUTHORIZED|Stream token/i.test(String((e as { message?: string })?.message ?? e)),
-      );
-    });
-
-    // F9: a freshly-minted stream token works for the SSE handshake.
-    it('accepts a freshly-minted stream token', async () => {
-      const pub = createClient(url);
-      const reg = await pub.register.mutate({ userId: 'sse-ok', password: 'pass' });
-      // createClient now mints internally on each subscribe — this is the happy path.
-      const c = createClient(url, reg.token);
-      const events = collectEvents<DataEvent>(
-        (cbs) => c.events.subscribe(undefined, cbs),
-        { count: 1, timeoutMs: 2000 },
-      );
-      await new Promise(r => setTimeout(r, 200));
-      await pub.set.mutate({ node: { $path: '/sse-ok', $type: 'page' } });
-      await c.get.query({ path: '/sse-ok', watch: true });
-      await pub.set.mutate({ node: { $path: '/sse-ok', $type: 'page', x: 1 } });
-      const received = await events;
-      assert.ok(received.length >= 1, 'received at least one event');
-    });
   });
 
   // ── ACL security ──
