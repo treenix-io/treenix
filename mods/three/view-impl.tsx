@@ -6,7 +6,7 @@ import { Canvas, useFrame } from '@react-three/fiber';
 import { getComponent, type NodeData } from '@treenx/core';
 import { useResolvedNode } from '@treenx/react/bind/hook';
 import { cache } from '@treenx/react';
-import { useCurrentNode } from '@treenx/react';
+import { type View, useCurrentNode } from '@treenx/react';
 import { execute, useChildren, usePath } from '@treenx/react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
@@ -18,6 +18,7 @@ import {
   T3dMesh,
   T3dObject,
   T3dParticles,
+  T3dScene,
   T3dScript,
   T3dText,
   T3dTrail,
@@ -436,9 +437,8 @@ function SceneRoot({ path }: { path: string }) {
 
 // --- Top-level view (registered lazily from ./view.tsx) ---
 
-export function SceneView({ value }: { value: NodeData }) {
-  const node = useCurrentNode();
-  const path = node?.$path ?? value.$path;
+export const SceneView: View<T3dScene> = ({ ctx }) => {
+  const path = ctx!.path;
 
   return (
     <div className="w-full h-[600px] rounded-lg overflow-hidden bg-black/90">

@@ -1,12 +1,13 @@
 // Sensor feed — live view of last N readings, auto-updates via watchNew
 
-import { type NodeData, register } from '@treenx/core';
-import { useChildren } from '@treenx/react';
+import { register } from '@treenx/core';
+import { type View, useChildren } from '@treenx/react';
+import { SensorDemo } from './types';
 
 const MAX = 10;
 
-function SensorFeed({ value }: { value: NodeData }) {
-  const { data: children } = useChildren(value.$path, { watch: true, watchNew: true });
+const SensorFeed: View<SensorDemo> = ({ ctx }) => {
+  const { data: children } = useChildren(ctx!.path, { watch: true, watchNew: true });
   const last = children.slice(-MAX).reverse();
 
   return (
@@ -61,4 +62,4 @@ function SensorFeed({ value }: { value: NodeData }) {
   );
 }
 
-register('examples.demo.sensor', 'react', SensorFeed as any);
+register(SensorDemo, 'react', SensorFeed);

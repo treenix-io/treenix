@@ -26,12 +26,12 @@ import { Checkbox } from '@treenx/react/components/ui/checkbox';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@treenx/react/components/ui/dialog';
 import { Input } from '@treenx/react/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@treenx/react/components/ui/select';
-import { set, useChildren, usePath } from '@treenx/react';
+import { set, type View, useChildren, usePath } from '@treenx/react';
 import { sanitizeHref } from '@treenx/react';
 import { trpc } from '@treenx/react';
 import { Camera, File, GripVertical, Mic, MoreHorizontal, Plus, Trash2, Video } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ACTION_TYPES, MENU_TYPES, type MenuButton, type MenuRow, type MenuType, type TString } from '../types';
+import { ACTION_TYPES, MENU_TYPES, type MenuButton, type MenuRow, type MenuType, type PageConfig, type TString } from '../types';
 import { actionIcon, actionSummary } from './action-cards';
 import { TStringLineInput, tstringPreview } from './tstring-input';
 
@@ -660,11 +660,11 @@ function ChatActionPalette({ onSelect }: { onSelect: (type: string) => void }) {
 
 // ── Main component ──
 
-export function PageChatEditor({ value }: { value: NodeData }) {
-  const actionsPath = value.$path + '/_actions';
+export const PageChatEditor: View<PageConfig> = ({ value, ctx }) => {
+  const actionsPath = ctx!.path + '/_actions';
   const { data: children } = useChildren(actionsPath, { watch: true, watchNew: true });
 
-  const positions: string[] = (value.positions as string[]) ?? [];
+  const positions = value.positions;
   const tracked = new Set(positions);
   const sorted = [
     ...positions.map(p => children.find(c => c.$path === p)).filter((c): c is NodeData => !!c),

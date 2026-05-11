@@ -7,7 +7,7 @@ import { Checkbox } from '@treenx/react/components/ui/checkbox';
 import { Input } from '@treenx/react/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@treenx/react/components/ui/select';
 import { Textarea } from '@treenx/react/components/ui/textarea';
-import { set, usePath } from '@treenx/react';
+import { set, type View, usePath } from '@treenx/react';
 import { trpc } from '@treenx/react';
 import {
   AlertTriangle,
@@ -43,6 +43,7 @@ import type {
   KeywordSelectAction,
   MessageAction,
   OnErrorAction,
+  PageNavAction,
   ParamsAction,
   QuestionAction,
   SelectLanguageAction,
@@ -183,8 +184,8 @@ function useActionComp(path: string) {
 
 // ── Full editors (react context) ──
 
-export function MessageEditor({ value }: { value: NodeData }) {
-  const { comp, update, langs } = useActionComp(value.$path);
+export const MessageEditor: View<MessageAction> = ({ value, ctx }) => {
+  const { comp, update, langs } = useActionComp(ctx!.path);
   if (!comp) return null;
   const msg = comp as unknown as MessageAction;
 
@@ -212,8 +213,8 @@ export function MessageEditor({ value }: { value: NodeData }) {
   );
 }
 
-export function QuestionEditor({ value }: { value: NodeData }) {
-  const { comp, update, langs } = useActionComp(value.$path);
+export const QuestionEditor: View<QuestionAction> = ({ value, ctx }) => {
+  const { comp, update, langs } = useActionComp(ctx!.path);
   if (!comp) return null;
   const q = comp as unknown as QuestionAction;
 
@@ -243,8 +244,8 @@ export function QuestionEditor({ value }: { value: NodeData }) {
   );
 }
 
-export function IfElseEditor({ value }: { value: NodeData }) {
-  const { comp, update } = useActionComp(value.$path);
+export const IfElseEditor: View<IfElseAction> = ({ value, ctx }) => {
+  const { comp, update } = useActionComp(ctx!.path);
   if (!comp) return null;
   const ie = comp as unknown as IfElseAction;
 
@@ -273,8 +274,8 @@ export function IfElseEditor({ value }: { value: NodeData }) {
   );
 }
 
-export function PageNavEditor({ value }: { value: NodeData }) {
-  const { comp, update } = useActionComp(value.$path);
+export const PageNavEditor: View<PageNavAction> = ({ value, ctx }) => {
+  const { comp, update } = useActionComp(ctx!.path);
   const [dragOver, setDragOver] = useState(false);
   if (!comp) return null;
 
@@ -317,8 +318,8 @@ export function BackEditor() {
   );
 }
 
-export function TagEditor({ value }: { value: NodeData }) {
-  const { comp, update } = useActionComp(value.$path);
+export const TagEditor: View<TagAction> = ({ value, ctx }) => {
+  const { comp, update } = useActionComp(ctx!.path);
   if (!comp) return null;
   const t = comp as unknown as TagAction;
 
@@ -335,8 +336,8 @@ export function TagEditor({ value }: { value: NodeData }) {
   );
 }
 
-export function BroadcastEditor({ value }: { value: NodeData }) {
-  const { comp, update } = useActionComp(value.$path);
+export const BroadcastEditor: View<BroadcastAction> = ({ value, ctx }) => {
+  const { comp, update } = useActionComp(ctx!.path);
   if (!comp) return null;
   const b = comp as unknown as BroadcastAction;
 
@@ -354,8 +355,8 @@ export function BroadcastEditor({ value }: { value: NodeData }) {
   );
 }
 
-export function GetValueEditor({ value }: { value: NodeData }) {
-  const { comp, update } = useActionComp(value.$path);
+export const GetValueEditor: View<GetValueAction> = ({ value, ctx }) => {
+  const { comp, update } = useActionComp(ctx!.path);
   if (!comp) return null;
   const g = comp as unknown as GetValueAction;
 
@@ -373,8 +374,8 @@ export function GetValueEditor({ value }: { value: NodeData }) {
   );
 }
 
-export function SetValueEditor({ value }: { value: NodeData }) {
-  const { comp, update } = useActionComp(value.$path);
+export const SetValueEditor: View<SetValueAction> = ({ value, ctx }) => {
+  const { comp, update } = useActionComp(ctx!.path);
   if (!comp) return null;
   const s = comp as unknown as SetValueAction;
 
@@ -392,8 +393,8 @@ export function SetValueEditor({ value }: { value: NodeData }) {
   );
 }
 
-export function ParamsEditor({ value }: { value: NodeData }) {
-  const { comp, update } = useActionComp(value.$path);
+export const ParamsEditor: View<ParamsAction> = ({ value, ctx }) => {
+  const { comp, update } = useActionComp(ctx!.path);
   if (!comp) return null;
   const p = comp as unknown as ParamsAction;
 
@@ -414,8 +415,8 @@ export function ParamsEditor({ value }: { value: NodeData }) {
   );
 }
 
-export function FileEditor({ value }: { value: NodeData }) {
-  const { comp, update } = useActionComp(value.$path);
+export const FileEditor: View<FileAction> = ({ value, ctx }) => {
+  const { comp, update } = useActionComp(ctx!.path);
   if (!comp) return null;
   const f = comp as unknown as FileAction;
 
@@ -446,8 +447,8 @@ export function FileEditor({ value }: { value: NodeData }) {
 
 // ── New action editors ──
 
-export function EvalEditor({ value }: { value: NodeData }) {
-  const { comp, update } = useActionComp(value.$path);
+export const EvalEditor: View<EvalAction> = ({ value, ctx }) => {
+  const { comp, update } = useActionComp(ctx!.path);
   if (!comp) return null;
   const ev = comp as unknown as EvalAction;
 
@@ -473,8 +474,8 @@ export function RemoveEditor() {
   );
 }
 
-export function EmitTextEditor({ value }: { value: NodeData }) {
-  const { comp, update } = useActionComp(value.$path);
+export const EmitTextEditor: View<EmitTextAction> = ({ value, ctx }) => {
+  const { comp, update } = useActionComp(ctx!.path);
   if (!comp) return null;
   const et = comp as unknown as EmitTextAction;
 
@@ -488,8 +489,8 @@ export function EmitTextEditor({ value }: { value: NodeData }) {
   );
 }
 
-export function ForwardEditor({ value }: { value: NodeData }) {
-  const { comp, update } = useActionComp(value.$path);
+export const ForwardEditor: View<ForwardAction> = ({ value, ctx }) => {
+  const { comp, update } = useActionComp(ctx!.path);
   if (!comp) return null;
   const fw = comp as unknown as ForwardAction;
 
@@ -523,8 +524,8 @@ export function ResetHistoryEditor() {
   );
 }
 
-export function OnErrorEditor({ value }: { value: NodeData }) {
-  const { comp, update } = useActionComp(value.$path);
+export const OnErrorEditor: View<OnErrorAction> = ({ value, ctx }) => {
+  const { comp, update } = useActionComp(ctx!.path);
   if (!comp) return null;
   const oe = comp as unknown as OnErrorAction;
 
@@ -542,8 +543,8 @@ export function OnErrorEditor({ value }: { value: NodeData }) {
   );
 }
 
-export function KeywordSelectEditor({ value }: { value: NodeData }) {
-  const { comp, update } = useActionComp(value.$path);
+export const KeywordSelectEditor: View<KeywordSelectAction> = ({ value, ctx }) => {
+  const { comp, update } = useActionComp(ctx!.path);
   if (!comp) return null;
   const ks = comp as unknown as KeywordSelectAction;
 
@@ -596,8 +597,8 @@ export function KeywordSelectEditor({ value }: { value: NodeData }) {
   );
 }
 
-export function SelectLanguageEditor({ value }: { value: NodeData }) {
-  const { comp, update, langs } = useActionComp(value.$path);
+export const SelectLanguageEditor: View<SelectLanguageAction> = ({ value, ctx }) => {
+  const { comp, update, langs } = useActionComp(ctx!.path);
   if (!comp) return null;
   const sl = comp as unknown as SelectLanguageAction;
 
@@ -612,14 +613,12 @@ export function SelectLanguageEditor({ value }: { value: NodeData }) {
 
 // ── Compact list items (react:list context) ──
 
-export function ActionListItem({ value }: { value: NodeData }) {
-  return (
-    <>
-      {actionIcon(value.$type)}
-      <span className="text-xs font-medium text-muted-foreground">
-        {value.$type.split('.').at(-1)}
-      </span>
-      <span className="text-sm truncate">{actionSummary(value)}</span>
-    </>
-  );
-}
+export const ActionListItem: View = ({ value, ctx }) => (
+  <>
+    {actionIcon(value.$type)}
+    <span className="text-xs font-medium text-muted-foreground">
+      {value.$type.split('.').at(-1)}
+    </span>
+    <span className="text-sm truncate">{actionSummary(ctx!.node)}</span>
+  </>
+);

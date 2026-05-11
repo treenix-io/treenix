@@ -165,15 +165,15 @@ function SortableAction({
 
 // ── Page layout view (registered as 'brahman.page' react handler) ──
 
-export function PageLayoutView({ value }: { value: NodeData }) {
+export const PageLayoutView: View<PageConfig> = ({ value, ctx }) => {
   const navigate = useNavigate();
-  const actionsPath = value.$path + '/_actions';
+  const node = ctx!.node;
+  const actionsPath = ctx!.path + '/_actions';
   const { data: children } = useChildren(actionsPath, { watch: true, watchNew: true });
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
-  // Read command & positions from value top-level
-  const command = (value.command as string) ?? '';
-  const positions: string[] = (value.positions as string[]) ?? [];
+  const command = value.command;
+  const positions = value.positions;
 
   // Debounced save: update local state immediately, persist after 400ms idle
   const [localCommand, setLocalCommand] = useState(command);
@@ -183,7 +183,6 @@ export function PageLayoutView({ value }: { value: NodeData }) {
   useEffect(() => { setLocalCommand(command); }, [command]);
 
   const saveNode = useCallback((patch: Record<string, unknown>) => {
-    if (!node) return;
     // Strip any leftover 'page' component that shouldn't exist
     const { page: _drop, ...clean } = node;
     set({ ...clean, ...patch } as NodeData);

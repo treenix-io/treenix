@@ -1,1 +1,1 @@
-import './view';
+import './react';

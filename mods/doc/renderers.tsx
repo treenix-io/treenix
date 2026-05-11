@@ -1,6 +1,8 @@
 // Lazy loader: registers doc.page view but defers tiptap import until render
 
-import { register, type NodeData } from '@treenx/core';
+import { register } from '@treenx/core';
+import { type View } from '@treenx/react';
+import { DocPage } from './types';
 import { lazy, Suspense } from 'react';
 
 const DocPageViewLazy = lazy(() =>
@@ -49,10 +51,9 @@ function pathName(p: string): string {
   return p.slice(p.lastIndexOf('/') + 1) || '/';
 }
 
-function DocPageCard({ value }: { value: NodeData }) {
-  const data = value as { title?: unknown; content?: unknown };
-  const title = (typeof data.title === 'string' && data.title.trim()) || pathName(value.$path);
-  const snippet = extractSnippet(data.content);
+const DocPageCard: View<DocPage> = ({ value, ctx }) => {
+  const title = value.title?.trim() || pathName(ctx!.path);
+  const snippet = extractSnippet(value.content);
 
   return (
     <>

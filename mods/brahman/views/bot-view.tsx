@@ -1,8 +1,7 @@
 // Bot view — read-only display of bot config + pages list
 
-import type { NodeData } from '@treenx/core';
+import { type View, useChildren } from '@treenx/react';
 import { Badge } from '@treenx/react/components/ui/badge';
-import { useChildren } from '@treenx/react';
 import { RenderChildren } from '@treenx/react/mods/editor-ui/list-items';
 import { Bot } from 'lucide-react';
 import type { BotConfig } from '../types';
@@ -16,9 +15,9 @@ function Field({ label, value }: { label: string; value: string }) {
   );
 }
 
-export function BotView({ value }: { value: NodeData }) {
-  const bot = value as NodeData & BotConfig;
-  const { data: pages } = useChildren(`${value.$path}/pages`, { watch: true, watchNew: true });
+export const BotView: View<BotConfig> = ({ value, ctx }) => {
+  const bot = value;
+  const { data: pages } = useChildren(`${ctx!.path}/pages`, { watch: true, watchNew: true });
   const isActive = !bot.maintenance;
 
   return (
