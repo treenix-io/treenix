@@ -310,8 +310,9 @@ export default function treenixPlugin(opts?: { modsDirs?: string[]; clientFiles?
       // 1. Auto-discover @treenx/* packages with treenix.clients (host + node_modules)
       const pkgClients = discoverPackageClients(hostPkgDir);
 
-      // 2. Engine mods (sibling to this plugin's package) — monorepo-dev only
-      const engineMods = inNodeModules ? [] : scanClients(resolve(engineRoot, 'mods'), clientFiles);
+      // 2. Engine mods (sibling to this plugin's package) — monorepo-dev only.
+      // Engine is an optional submodule; silent skip when its mods dir is absent.
+      const engineMods = inNodeModules ? [] : scanClients(resolve(engineRoot, 'mods'), clientFiles, false);
 
       // 3. Extra mods dirs (passed explicitly from project vite config)
       const extraMods = (opts?.modsDirs ?? []).flatMap(d => scanClients(resolve(d), clientFiles));
