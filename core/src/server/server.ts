@@ -14,7 +14,7 @@ import { parseSessionCookie, resolveToken } from './auth';
 import { withMounts } from './mount';
 import { withRefIndex } from './refs';
 import { type CdcRegistry, withSubscriptions } from './sub';
-import { createTreeRouter, type TreeRouter, type TrpcContext } from './trpc';
+import { createTreeRouter, type TreeRouter, type TreeRouterOpts, type TrpcContext } from './trpc';
 import { withMigration } from './migrate';
 import { withValidation } from './validate';
 import { withVolatile } from './volatile';
@@ -37,7 +37,7 @@ export type Pipeline = {
 };
 
 /** Pure tree composition — no HTTP, no side effects */
-export function createPipeline(bootstrap: Tree): Pipeline {
+export function createPipeline(bootstrap: Tree, opts?: TreeRouterOpts): Pipeline {
   const migrated = withMigration(bootstrap);
   const mountable = withMounts(migrated);
   const volatile = withVolatile(mountable);
@@ -50,7 +50,7 @@ export function createPipeline(bootstrap: Tree): Pipeline {
   });
   const { tree, cdc } = withSubscriptions(cached, (e) => watcher.notify(e));
   cdcRef = cdc;
-  const router = createTreeRouter(tree, watcher, undefined, cdc);
+  const router = createTreeRouter(tree, watcher, opts, cdc);
 
   const createContext = async (token: string | null): Promise<TrpcContext> => {
     const session = token ? await resolveToken(mountable, token) : null;

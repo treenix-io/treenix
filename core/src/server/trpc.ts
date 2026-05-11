@@ -52,9 +52,21 @@ const patchOps = z.array(z.union([
   z.tuple([z.literal('d'), z.string()]).readonly(),
 ]));
 
+/** Higher-level dispatcher: tree + session + action input → result.
+ *  Mods (e.g. harness/audit) inject this to add capability narrowing or other
+ *  pre-execute logic. Without an executor, sessions go through plain executeAction. */
+export type SessionExecutor = (
+  tree: Tree,
+  session: Session,
+  input: { path: string; type?: string; key?: string; action: string; data?: unknown },
+) => Promise<unknown>;
+
 export type TreeRouterOpts = {
   /** TTL for cached claims in SSE connections (ms). Default 30s. 0 = no cache. */
   claimsTtlMs?: number;
+  /** Optional dispatcher for workload-bound sessions (those with `session.scopeRef`).
+   *  When undefined, all sessions go through plain executeAction — zero overhead. */
+  executor?: SessionExecutor;
 };
 
 const DEFAULT_CLAIMS_TTL_MS = 30_000;
@@ -81,8 +93,20 @@ export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: 
     const userId = ctx.session?.userId ?? null;
     const claims = ctx.session?.claims ?? (userId ? await buildClaims(baseStore, userId) : ['public']);
     const tree = withAcl(baseStore, userId, claims);
-    const tp = createTreeP(tree, (path, key, action, data) =>
-      executeAction(tree, path, undefined, key, action, data, { userId, claims }));
+    // Workload sessions (scopeRef set) require a configured executor; otherwise
+    // fail-closed — silent fallback would let a workload escape narrowing.
+    const session = ctx.session;
+    const isWorkload = !!session?.scopeRef;
+    if (isWorkload && !opts?.executor) {
+      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR',
+        message: 'workload session present but no executor configured' });
+    }
+    const dispatch = isWorkload
+      ? (path: string, key: string | undefined, action: string, data?: unknown) =>
+          opts!.executor!(tree, session!, { path, type: undefined, key, action, data })
+      : (path: string, key: string | undefined, action: string, data?: unknown) =>
+          executeAction(tree, path, undefined, key, action, data, { userId, claims });
+    const tp = createTreeP(tree, dispatch);
     return next({ ctx: { ...ctx, tree, tp, claims } });
   });
 

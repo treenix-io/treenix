@@ -38,23 +38,26 @@ const rootPath = resolve(process.argv[2] || 'root.json');
 console.log(`[boot] root: ${rootPath}`);
 const rootNode = JSON.parse(await readFile(rootPath, 'utf-8')) as NodeData;
 
-// Audit wiring — gated on `'audit'` ∈ rootNode.seeds. Single source of truth: if
-// the seed prefab is going to deploy /sys/audit/event, also wire the wrapper +
-// health-check that depend on that mount. Soft dep on @treenx/mods/audit
+// Harness/audit wiring — gated on `'audit'` ∈ rootNode.seeds. Single source of truth:
+// if the seed prefab deploys /sys/audit/event, also wire (a) the audit wrapper,
+// (b) health-check, (c) workload session executor. Soft dep on @treenx/mods/*
 // (engine/core has no static dep on mods to avoid workspace cycle).
 let wrapTree: ((tree: import('#tree').Tree) => import('#tree').Tree) | undefined;
 let healthCheck: (() => { healthy: boolean; reason: string }) | undefined;
+let executor: import('./trpc').SessionExecutor | undefined;
 const seeds = (rootNode as Record<string, unknown>).seeds;
 if (Array.isArray(seeds) && seeds.includes('audit')) {
   const { withAudit } = await import('@treenx/mods/audit/with-audit');
   const { isHealthy, unhealthyReason } = await import('@treenx/mods/audit/health');
+  const { executeForSession } = await import('@treenx/mods/harness/session');
   wrapTree = withAudit;
   healthCheck = () => ({ healthy: isHealthy(), reason: unhealthyReason() });
-  console.log('[boot] audit: enabled (seeds includes "audit")');
+  executor = executeForSession;
+  console.log('[boot] audit + harness: enabled (seeds includes "audit")');
 }
 
 const modsDir = process.env.MODS_DIR || undefined;
-const t = await treenix({ rootNode, modsDir, wrapTree, healthCheck });
+const t = await treenix({ rootNode, modsDir, wrapTree, healthCheck, executor });
 const port = Number(process.env.PORT) || 3211;
 const host = process.env.HOST || '127.0.0.1';
 

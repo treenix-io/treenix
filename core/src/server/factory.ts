@@ -15,6 +15,7 @@ import type { Server } from 'node:http';
 import { deploySeedPrefabs } from './prefab';
 import { createEnsure, type Ensure } from './seed/index';
 import { createHttpServer, createPipeline, type Pipeline } from './server';
+import type { SessionExecutor } from './trpc';
 
 export type TreenixConfig = {
   rootNode: NodeData;
@@ -28,6 +29,10 @@ export type TreenixConfig = {
    *  /health endpoint always responds with the current state (200 healthy, 503 not).
    *  Leave undefined to disable health gating entirely. */
   healthCheck?: () => { healthy: boolean; reason: string };
+  /** Optional dispatcher for workload-bound sessions. Without it, sessions with
+   *  `scopeRef` cannot be served — server fails the request with INTERNAL_SERVER_ERROR.
+   *  Composition root (e.g. main.ts) wires this from the harness mod. */
+  executor?: SessionExecutor;
 };
 
 export type ListenOpts = {
@@ -65,7 +70,7 @@ export async function treenix(config: TreenixConfig): Promise<TreenixServer> {
   await bootstrap.set(rootNode);
 
   // 3. Build pipeline
-  const pipeline = createPipeline(bootstrap);
+  const pipeline = createPipeline(bootstrap, { executor: config.executor });
   // Outer wrap (audit / etc): mod gets last word over the user-facing tree.
   // Pre-pipeline (mountable, bootstrap) stays untouched — system writes (seed,
   // log, autostart) bypass wrapTree by design.
