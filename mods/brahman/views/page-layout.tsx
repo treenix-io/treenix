@@ -31,7 +31,7 @@ import {
 } from '@treenx/react/components/ui/dropdown-menu';
 import { Input } from '@treenx/react/components/ui/input';
 import { Render } from '@treenx/react';
-import { set, useChildren, useNavigate, usePath } from '@treenx/react';
+import { set, useChildren, useNavigate } from '@treenx/react';
 import { trpc } from '@treenx/react';
 import { ChevronDown, ChevronRight, GripVertical, Plus, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -167,14 +167,13 @@ function SortableAction({
 
 export function PageLayoutView({ value }: { value: NodeData }) {
   const navigate = useNavigate();
-  const { data: node } = usePath(value.$path);
   const actionsPath = value.$path + '/_actions';
   const { data: children } = useChildren(actionsPath, { watch: true, watchNew: true });
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
-  // Read command & positions from node top-level (getComponent returns node itself)
-  const command = (node?.command as string) ?? '';
-  const positions: string[] = (node?.positions as string[]) ?? [];
+  // Read command & positions from value top-level
+  const command = (value.command as string) ?? '';
+  const positions: string[] = (value.positions as string[]) ?? [];
 
   // Debounced save: update local state immediately, persist after 400ms idle
   const [localCommand, setLocalCommand] = useState(command);

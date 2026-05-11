@@ -1,9 +1,8 @@
 // Launcher widgets — react:widget context for compact live views on the home screen
 
 import { type NodeData, register } from '@treenx/core';
-import type { RenderProps } from '@treenx/react';
-import { useChildren, usePath } from '@treenx/react';
-import { cn } from '@treenx/react';
+import type { RenderProps, View } from '@treenx/react';
+import { cn, Render, useChildren } from '@treenx/react';
 import type { FC } from 'react';
 import { TodoItem } from '../todo/types';
 
@@ -72,7 +71,7 @@ function TodoListItems({ path }: { path: string }) {
 
       <div className="flex flex-1 flex-col gap-0.5 overflow-hidden">
         {items.slice(0, 5).map(item => (
-          <TodoItemCompact key={item.$path} value={item} />
+          <Render key={item.$path} value={item} />
         ))}
         {items.length > 5 && (
           <span className="text-[10px] text-white/40">+{items.length - 5} more</span>
@@ -82,30 +81,29 @@ function TodoListItems({ path }: { path: string }) {
   );
 }
 
-function TodoItemCompact({ value }: { value: NodeData }) {
-  const { data: item } = usePath(value.$path, TodoItem);
-
+const TodoItemCompact: View<TodoItem> = ({ value }) => {
   return (
     <div className="flex items-center gap-1.5">
       <span className={cn(
         'flex h-3 w-3 shrink-0 items-center justify-center rounded-sm border text-[8px]',
-        item.done
+        value.done
           ? 'border-green-400/50 bg-green-500/30 text-green-300'
           : 'border-white/20',
       )}>
-        {item.done ? '✓' : ''}
+        {value.done ? '✓' : ''}
       </span>
       <span className={cn(
         'truncate text-[11px]',
-        item.done ? 'text-white/30 line-through' : 'text-white/80',
+        value.done ? 'text-white/30 line-through' : 'text-white/80',
       )}>
-        {item.title}
+        {value.title}
       </span>
     </div>
   );
-}
+};
 
 register('todo.list', 'react:widget', TodoWidget as any);
+register(TodoItem, 'react:widget', TodoItemCompact);
 
 // ── examples.demo.sensor widget — last value + mini bars ──
 

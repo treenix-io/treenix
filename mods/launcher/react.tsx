@@ -1,7 +1,7 @@
 // Launcher view — dashboard with drag-drop from tree + context switching
 
 import { isRef, type NodeData, register, resolveExact } from '@treenx/core';
-import { Render, RenderContext, type View } from '@treenx/react';
+import { Render, RenderContext, type View, useActions } from '@treenx/react';
 import { useChildren, useNavigate, usePath } from '@treenx/react';
 import { cn } from '@treenx/react';
 import { Button } from '@treenx/react/ui/button';
@@ -184,9 +184,9 @@ function DropZone({ visible }: { visible: boolean }) {
 
 // ── Main Launcher View ──
 
-const LauncherView: View<NodeData> = ({ value }) => {
-  const { data: launcher } = usePath(value.$path, Launcher);
-  const { data: children } = useChildren(value.$path, { watch: true, watchNew: true });
+const LauncherView: View<Launcher> = ({ value, ctx }) => {
+  const actions = useActions(value);
+  const { data: children } = useChildren(ctx!.path, { watch: true, watchNew: true });
 
   const [editing, setEditing] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -207,9 +207,9 @@ const LauncherView: View<NodeData> = ({ value }) => {
   }, []);
 
   // Parse layout
-  const columns = typeof launcher?.columns === 'number' ? launcher.columns : 4;
-  const wallpaper = typeof launcher?.wallpaper === 'string' ? launcher.wallpaper : '';
-  const layoutStr = typeof launcher?.layout === 'string' ? launcher.layout : '[]';
+  const columns = typeof value.columns === 'number' ? value.columns : 4;
+  const wallpaper = typeof value.wallpaper === 'string' ? value.wallpaper : '';
+  const layoutStr = typeof value.layout === 'string' ? value.layout : '[]';
 
   let layoutItems: LauncherLayoutItem[];
   try {
@@ -252,20 +252,20 @@ const LauncherView: View<NodeData> = ({ value }) => {
         i, x, y, w, h,
         ...(ctxMap.get(i) ? { ctx: ctxMap.get(i) } : {}),
       }));
-      launcher.updateLayout({ layout: JSON.stringify(clean) });
+      actions.updateLayout({ layout: JSON.stringify(clean) });
     },
     [launcher, layoutItems],
   );
 
   const handleRemove = (id: string) => {
-    launcher.removeApp({ id });
+    actions.removeApp({ id });
   };
 
   const handleContextChange = (id: string, ctx: string) => {
     const updated = layoutItems.map((l) =>
       l.i === id ? { ...l, ctx: ctx === 'auto' ? undefined : ctx } : l,
     );
-    launcher.updateLayout({ layout: JSON.stringify(updated) });
+    actions.updateLayout({ layout: JSON.stringify(updated) });
   };
 
   // ── External drop from tree sidebar ──
@@ -276,7 +276,7 @@ const LauncherView: View<NodeData> = ({ value }) => {
       const path = de.dataTransfer?.getData('application/treenix-path')
         || de.dataTransfer?.getData('text/plain');
       if (!path || !path.startsWith('/')) return;
-      launcher.addApp({ path });
+      actions.addApp({ path });
       setDragOver(false);
     },
     [value.$path],
@@ -297,7 +297,7 @@ const LauncherView: View<NodeData> = ({ value }) => {
       const path = e.dataTransfer.getData('application/treenix-path')
         || e.dataTransfer.getData('text/plain');
       if (!path || !path.startsWith('/')) return;
-      launcher.addApp({ path });
+      actions.addApp({ path });
     },
     [launcher],
   );

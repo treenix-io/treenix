@@ -1,2 +1,2 @@
 import './types';
-import './view';
+import './react';

@@ -1,4 +1,4 @@
 import './icons';
 import './widgets';
-import './view';
+import './react';
 import './launcher.css';

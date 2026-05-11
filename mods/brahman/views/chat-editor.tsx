@@ -661,11 +661,10 @@ function ChatActionPalette({ onSelect }: { onSelect: (type: string) => void }) {
 // ── Main component ──
 
 export function PageChatEditor({ value }: { value: NodeData }) {
-  const { data: node } = usePath(value.$path);
   const actionsPath = value.$path + '/_actions';
   const { data: children } = useChildren(actionsPath, { watch: true, watchNew: true });
 
-  const positions: string[] = (node?.positions as string[]) ?? [];
+  const positions: string[] = (value.positions as string[]) ?? [];
   const tracked = new Set(positions);
   const sorted = [
     ...positions.map(p => children.find(c => c.$path === p)).filter((c): c is NodeData => !!c),

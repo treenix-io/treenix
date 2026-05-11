@@ -3,45 +3,63 @@ React admin SPA — node editor, tree browser, typed hooks, client cache.
 
 ### Файлы
 - App.tsx — root layout: Tree sidebar + NodeEditor main panel
-- hooks.ts — useNode, useChildren, useComponent, useAction, **useComp**, **useExecute**
+- hooks.ts — `usePath`, `useChildren`, `set`, `execute`, `watch`
+- context/index.tsx — `<Render>`, `View<T>`, `useActions`, `RenderProps`
 - cache.ts — in-memory node cache, subscribePath/subscribeChildren
 - trpc.ts — tRPC client setup
 - Inspector.tsx — generic component inspector (key-based, not typed)
 - AclEditor.tsx — ACL UI
 
 ### Конвенции
-- **useComp(path, Class, key?)** — typed reactive proxy: data live, methods → trpc.execute.mutate
-- **useExecute()** — stable callback for node-level/generic actions
-- No magic `action: 'string'` in views — use useComp methods instead
-- useNode/useChildren remain for raw node/children access
+- Внутри `View<T>` читай поля прямо с `value` (Render уже даёт реактивный snapshot)
+- Для actions — `useActions(value)` (typed Actions<T>, routes to `execute`)
+- `usePath` — только для путей, отличных от `value.$path` (foreign path / 3-arg key form)
+- `useChildren(path)` — reactive children list
+- No magic `action: 'string'` strings — use `useActions(value).method(data)` instead
 
-### Typed Actions in Views — Two Patterns
+### Views — Reading Fields and Calling Actions
 
-**Pattern 1: `useActions(value)`** — typed proxy from View props:
+Inside `View<T>`, **`value` is already the reactive typed snapshot**. Read fields directly. For actions, opt-in with `useActions(value)`.
+
 ```tsx
 const CounterView: View<Counter> = ({ value }) => {
-  const actions = useActions(value)     // Actions<Counter> — typed!
-  return <button onClick={() => actions.increment()}>+</button>
-}
+  const actions = useActions(value);             // typed Actions<Counter>
+  return (
+    <button onClick={() => actions.increment()}>
+      {value.count}                               // reactive read, re-renders on SSE
+    </button>
+  );
+};
 ```
-- `Actions<T>` extracts methods from T (the Class type) → fully typed autocomplete
-- Runtime: Proxy routes every call to `ctx.execute(methodName, data)`
-- Requires `$node` symbol on value (set automatically by the rendering pipeline)
 
-**Pattern 2: `usePath(path, Class)`** — typed proxy with data + actions:
+- `value.X` — reactive field read. The cache delivers a fresh `value` on every change; subscription happens in `<Render>`, not inside the view.
+- `useActions(value)` — `Actions<T>` proxy. Every method call routes to `execute(path, methodName, data)`.
+- For data-only views, don't import `useActions` at all.
+
+### Anti-pattern — НИКОГДА в `View<T>`
+
 ```tsx
-const CounterView: View<Counter> = ({ ctx }) => {
-  const counter = usePath(ctx!.path, Counter)  // TypeProxy<Counter>
-  counter.count        // typed data read
-  counter.increment()  // typed action call
-}
-```
-- `TypeProxy<T>` merges data fields + methods in one proxy
-- Data → `getComponent(node, cls)`, methods → `trpc.execute.mutate`
+// ❌ Redundant: `usePath(value.$path, Class)` inside a View duplicates the
+// subscription Render already made and double-resolves the same node.
+const Bad: View<Counter> = ({ value }) => {
+  const { data: c } = usePath(value.$path, Counter);
+  if (!c) return null;
+  return <span>{c.count}</span>;
+};
 
-**НИКОГДА:**
-- `value.increment()` — value is plain data at runtime, no methods → TypeError
-- `ctx.execute('increment')` — untyped string, no autocomplete
+// ✅ Canonical
+const Good: View<Counter> = ({ value }) => <span>{value.count}</span>;
+```
+
+- `value.increment()` — `value` has no methods at runtime → TypeError. Use `useActions(value).increment()`.
+- `ctx.execute('increment')` — untyped string, no autocomplete. Use `useActions(value).increment()`.
+
+### When `usePath` is still right
+
+For paths **other than the current view's** value:
+- `usePath(otherPath)` — read a different node by URI
+- `usePath(otherPath, Class)` — typed proxy for a different node
+- `usePath(value.$path, Class, 'key')` — read an additional component by key (3rd argument changes semantics: `getComponent(node, cls, key)`)
 
 ### View Contexts — содержимое vs chrome
 

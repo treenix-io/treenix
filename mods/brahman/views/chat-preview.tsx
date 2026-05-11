@@ -2,7 +2,7 @@
 // Registered as react:chat for brahman.page
 
 import type { NodeData } from '@treenx/core';
-import { useChildren, usePath } from '@treenx/react';
+import { useChildren } from '@treenx/react';
 import { Camera, File, Mic, Video } from 'lucide-react';
 import type { MenuRow, MenuType, TString } from '../types';
 import { actionIcon, actionSummary } from './action-cards';
@@ -218,11 +218,10 @@ function renderAction(node: NodeData, index: number, isFirstBubble: boolean): Re
 // ── Main component ──
 
 export function PageChatPreview({ value }: { value: NodeData }) {
-  const { data: node } = usePath(value.$path);
   const actionsPath = value.$path + '/_actions';
   const { data: children } = useChildren(actionsPath, { watch: true, watchNew: true });
 
-  const positions: string[] = (node?.positions as string[]) ?? [];
+  const positions: string[] = (value.positions as string[]) ?? [];
   const tracked = new Set(positions);
   const sorted = [
     ...positions.map(p => children.find(c => c.$path === p)).filter((c): c is NodeData => !!c),
