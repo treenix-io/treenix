@@ -402,19 +402,15 @@ const TimeTrackView: View<TTimeTrack> = ({ value }) => {
 
 register(TTimeTrack, 'react:edit', TimeTrackView);
 
-// ── Read-only views (default `react` context) — compact, no controls ──
+// ── Compact view (`react:compact`) — tiny preview, no controls ──
 
-const ChecklistRead: View<TChecklist> = ({ value }) => {
+const ChecklistCompact: View<TChecklist> = ({ value }) => {
   const items = value.items;
   if (!items.length) return null;
   const doneCount = items.filter(i => i.done).length;
 
   return (
     <div className="rounded-md bg-white/[0.02] px-2 py-1.5">
-      {/*<div className="mb-1 flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">*/}
-        {/*<span>☑</span>*/}
-        {/*<span>Checklist</span>*/}
-      {/*</div>*/}
       <div className="h-1 rounded-full bg-white/5">
         <div
           className="h-1 rounded-full bg-emerald-500"
@@ -441,7 +437,53 @@ const ChecklistRead: View<TChecklist> = ({ value }) => {
   );
 };
 
-register(TChecklist, 'react', ChecklistRead);
+register(TChecklist, 'react:compact', ChecklistCompact);
+
+// ── Full view (default `react` context) — all items, toggle, progress ──
+
+const ChecklistFull: View<TChecklist> = ({ value }) => {
+  const actions = useActions(value);
+  const items = value.items;
+  const doneCount = items.filter(i => i.done).length;
+
+  return (
+    <Section label={`Checklist${items.length ? ` (${doneCount}/${items.length})` : ''}`}>
+      {items.length > 0 && (
+        <div className="mb-2 h-1 rounded-full bg-white/5">
+          <div
+            className="h-1 rounded-full bg-emerald-500 transition-all"
+            style={{ width: `${(doneCount / items.length) * 100}%` }}
+          />
+        </div>
+      )}
+
+      {items.length === 0 ? (
+        <div className="text-xs text-muted-foreground">No items</div>
+      ) : (
+        <ul className="space-y-1">
+          {items.map(item => (
+            <li key={item.id} className="flex items-center gap-2 rounded px-1 py-0.5">
+              <button
+                className={cn(
+                  'flex h-4 w-4 shrink-0 items-center justify-center rounded border text-[10px]',
+                  item.done ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-zinc-600 hover:border-zinc-400',
+                )}
+                onClick={() => actions.toggle({ id: item.id })}
+              >
+                {item.done ? '✓' : ''}
+              </button>
+              <span className={cn('flex-1 text-sm', item.done && 'text-muted-foreground line-through')}>
+                {item.text}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Section>
+  );
+};
+
+register(TChecklist, 'react', ChecklistFull);
 
 const TagsRead: View<TTags> = ({ value }) => {
   const items = Array.isArray(value?.items) ? value.items : [];
