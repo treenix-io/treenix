@@ -85,3 +85,14 @@ registerType('sim.round', SimRound);
 registerType('sim.events', SimEvents);
 registerType('sim.ai', SimAi);
 registerType('sim.nearby', SimNearby);
+
+/** Simulation world entity — aggregates config, round, events. Actions registered separately. */
+export class SimWorld {}
+/** Agent entity — aggregates position, descriptive, memory, ai, nearby, events. */
+export class SimAgent {}
+/** Interactable item entity in the world. */
+export class SimItem {}
+
+registerType('sim.world', SimWorld);
+registerType('sim.agent', SimAgent);
+registerType('sim.item', SimItem);

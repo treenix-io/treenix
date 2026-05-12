@@ -1,7 +1,7 @@
 // Brahman — view registrations
 // Registers react + react:list handlers for all brahman types
 
-import { register } from '@treenx/core';
+import { Class, register } from '@treenx/core';
 import './types';
 import {
   BackAction, BotConfig, BroadcastAction, EmitTextAction, EvalAction,
@@ -77,4 +77,4 @@ const listTypes = [
   ResetSessionAction, ResetHistoryAction, OnErrorAction,
   KeywordSelectAction, SelectLanguageAction,
 ];
-for (const t of listTypes) register(t, 'react:list', ActionListItem);
+for (const t of listTypes) register(t as Class, 'react:list', ActionListItem);

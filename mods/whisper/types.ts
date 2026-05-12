@@ -35,6 +35,11 @@ export class WhisperChecklist {
   checked: string[] = [];
 }
 
+/** Whisper channel — container for audio transcriptions with an optional checklist */
+export class WhisperChannel {
+  checklist?: WhisperChecklist;
+}
+
 /** Bridge: auto-send whisper transcriptions to a task inbox */
 export class WhisperInbox {
   /** @format path @description Whisper channel to watch, e.g. /whisper/kriz */
@@ -48,4 +53,5 @@ registerType('whisper.audio', WhisperAudio);
 registerType('whisper.text', WhisperText);
 registerType('whisper.meta', WhisperMeta);
 registerType('whisper.checklist', WhisperChecklist);
+registerType('whisper.channel', WhisperChannel);
 registerType('whisper.inbox', WhisperInbox);

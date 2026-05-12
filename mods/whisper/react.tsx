@@ -1,9 +1,10 @@
 // Whisper channel view — checklist of transcribed audio notes
 
-import { type NodeData, register } from '@treenx/core';
+import { register } from '@treenx/core';
 import { set, type View, useChildren } from '@treenx/react';
+import { WhisperChannel } from './types';
 
-const ChannelView: View = ({ value, ctx }) => {
+const ChannelView: View<WhisperChannel> = ({ value, ctx }) => {
   const node = ctx!.node;
   const { data: children } = useChildren(ctx!.path, { watchNew: true });
   const checklist = value.checklist as { $type: string; checked?: string[] } | undefined;

@@ -672,13 +672,13 @@ export const PageChatEditor: View<PageConfig> = ({ value, ctx }) => {
   ];
 
   // ── Command editing ──
-  const command = (node?.command as string) ?? '';
+  const command = value.command;
   const [localCmd, setLocalCmd] = useState(command);
   const cmdTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => { setLocalCmd(command); }, [command]);
 
+  const node = ctx!.node;
   const saveNode = useCallback((patch: Record<string, unknown>) => {
-    if (!node) return;
     set({ ...node, ...patch } as NodeData);
   }, [node]);
 

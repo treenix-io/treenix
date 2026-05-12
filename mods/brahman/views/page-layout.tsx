@@ -30,9 +30,10 @@ import {
   DropdownMenuTrigger,
 } from '@treenx/react/components/ui/dropdown-menu';
 import { Input } from '@treenx/react/components/ui/input';
-import { Render } from '@treenx/react';
+import { Render, type View } from '@treenx/react';
 import { set, useChildren, useNavigate } from '@treenx/react';
 import { trpc } from '@treenx/react';
+import type { PageConfig } from '../types';
 import { ChevronDown, ChevronRight, GripVertical, Plus, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ACTION_TYPES } from '../types';

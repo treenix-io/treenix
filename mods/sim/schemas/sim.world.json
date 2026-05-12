@@ -1,8 +1,9 @@
 {
+  "type": "object",
+  "title": "Simulation world entity — aggregates config, round, events. Actions registered separately.",
+  "properties": {},
   "$id": "sim.world",
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "type": "object",
-  "properties": {},
   "methods": {
     "start": {
       "arguments": []

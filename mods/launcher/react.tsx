@@ -254,7 +254,7 @@ const LauncherView: View<Launcher> = ({ value, ctx }) => {
       }));
       actions.updateLayout({ layout: JSON.stringify(clean) });
     },
-    [launcher, layoutItems],
+    [actions, layoutItems],
   );
 
   const handleRemove = (id: string) => {
@@ -279,7 +279,7 @@ const LauncherView: View<Launcher> = ({ value, ctx }) => {
       actions.addApp({ path });
       setDragOver(false);
     },
-    [value.$path],
+    [actions],
   );
 
   // Container-level drop for when grid is empty or drop misses grid items
@@ -299,7 +299,7 @@ const LauncherView: View<Launcher> = ({ value, ctx }) => {
       if (!path || !path.startsWith('/')) return;
       actions.addApp({ path });
     },
-    [launcher],
+    [actions],
   );
 
   return (

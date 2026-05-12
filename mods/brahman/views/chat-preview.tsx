@@ -233,10 +233,10 @@ export const PageChatPreview: View<PageConfig> = ({ value, ctx }) => {
   return (
     <div className="bg-[#0e1621] rounded-xl p-4 space-y-2.5 min-h-[200px] max-w-md mx-auto">
       {/* Command header */}
-      {typeof node?.command === 'string' && node.command && (
+      {value.command && (
         <div className="flex justify-center mb-2">
           <span className="text-[11px] text-[#6c7883] bg-[#131c26] rounded-full px-3 py-1 font-mono">
-            {node.command}
+            {value.command}
           </span>
         </div>
       )}

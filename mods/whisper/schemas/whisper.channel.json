@@ -1,0 +1,13 @@
+{
+  "type": "object",
+  "title": "Whisper channel — container for audio transcriptions with an optional checklist",
+  "properties": {
+    "checklist": {
+      "type": "string",
+      "format": "path",
+      "refType": "whisper.checklist"
+    }
+  },
+  "$id": "whisper.channel",
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}

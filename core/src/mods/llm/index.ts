@@ -3,8 +3,13 @@
 // Type: t.llm — node at /llm, actions: schema, describe
 
 import { getContextsForType, getRegisteredTypes, register, resolve } from '#core';
+import { registerType } from '#comp';
 import { basename } from '#core/path';
 import { type ActionCtx } from '#server/actions';
+
+/** LLM bridge — exports type schemas and describes subtrees as text for prompts. */
+export class Llm {}
+registerType('t.llm', Llm);
 
 export type TypeInfo = {
   type: string;

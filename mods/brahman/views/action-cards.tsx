@@ -1,7 +1,7 @@
 // Action type views — full editors (react) + compact cards (react:list)
 // Each action type gets: icon helper, summary helper, full editor, list item
 
-import type { NodeData } from '@treenx/core';
+import type { ComponentData, NodeData } from '@treenx/core';
 import { Button } from '@treenx/react/components/ui/button';
 import { Checkbox } from '@treenx/react/components/ui/checkbox';
 import { Input } from '@treenx/react/components/ui/input';
@@ -613,7 +613,7 @@ export const SelectLanguageEditor: View<SelectLanguageAction> = ({ value, ctx })
 
 // ── Compact list items (react:list context) ──
 
-export const ActionListItem: View = ({ value, ctx }) => (
+export const ActionListItem: View<ComponentData> = ({ value, ctx }) => (
   <>
     {actionIcon(value.$type)}
     <span className="text-xs font-medium text-muted-foreground">
