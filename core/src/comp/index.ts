@@ -65,10 +65,13 @@ declare module '#core/context' {
 let _als: any = null;
 let _ctx: ExecCtx | null = null;
 
-// Top-level await: guarantees _als is ready before any action runs.
-// Browser: import fails → _als stays null → falls back to _ctx global.
-try { _als = new (await import('node:async_hooks')).AsyncLocalStorage(); }
-catch {}
+// Async IIFE: schedules AsyncLocalStorage init without top-level await
+// (Metro wraps modules in non-async functions, so top-level `await` breaks RN).
+// Race with first action is harmless — getCtx falls back to _ctx until _als settles.
+// Browser/RN: import fails → _als stays null → falls back to _ctx global.
+void (async () => {
+  try { _als = new (await import('node:async_hooks')).AsyncLocalStorage(); } catch {}
+})();
 
 setCtxProvider(() => _als?.getStore() ?? _ctx);
 
