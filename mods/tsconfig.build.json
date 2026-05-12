@@ -9,7 +9,8 @@
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
-    "jsx": "react-jsx"
+    "jsx": "react-jsx",
+    "customConditions": []
   },
   "include": ["**/*.ts", "**/*.tsx"],
   "exclude": ["dist", "**/*.test.ts"]
