@@ -1,13 +1,12 @@
 // withAudit — Tree wrapper that appends an audit.event for every set/remove/patch.
 // Synchronous in pipeline tick: if append fails, the original mutation also fails (loud).
 
-import { createMemoryTree, type Tree } from '@treenx/core/tree';
-import { OpError } from '@treenx/core/errors';
 import { R, W } from '@treenx/core';
+import { createMemoryTree, type Tree } from '@treenx/core/tree';
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
-import { withAudit } from './with-audit';
 import { isHealthy, resetHealthForTest } from './health';
+import { withAudit } from './with-audit';
 
 let inner: Tree;
 let audited: Tree;
@@ -101,7 +100,7 @@ describe('withAudit — loud failure', () => {
       ...inner,
       async set(node, ctx) {
         if (node.$path.startsWith('/sys/audit/event/')) {
-          throw new OpError('INTERNAL', 'audit backend down');
+          throw new Error('audit backend down');
         }
         return inner.set(node, ctx);
       },

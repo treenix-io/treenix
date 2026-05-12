@@ -27,4 +27,5 @@ screenshot-*.png
 /*.png
 
 core/src/schema/generated/
+core/src/schema/_import-fixtures/schemas
 *.tgz

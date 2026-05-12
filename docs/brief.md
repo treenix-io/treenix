@@ -36,7 +36,7 @@ In Treenix agent changes a live tree: it builds system from tested, strongly typ
 
 ## Principles
 
-- **Everything composes** system behavior can be changed by attaching components and views to existing type, rather than changing the type itself. Types compose into nodes; nodes compose into app. 
+- **Everything composes** system behavior can be changed by attaching components and views to existing type, rather than changing the type itself. Types compose into nodes; nodes compose into apps. 
 - **Observability and auditability** apply to everything in the system: data and actions are visible from the administrative interface, including the actions of both people and agents.
 - **Minimal core.** A small core with no dependencies. Layers can be replaced independently.
 

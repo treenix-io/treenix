@@ -8,7 +8,7 @@ tags: [getting-started, beginner]
 
 # Project Structure
 
-A new project from `create-treenix` is a normal Node/Vite app with a Treenix tree behind it.
+A new project from `create-treenix` is a Node/Vite app with a Treenix tree behind it.
 
 ```
 my-app/
@@ -25,17 +25,24 @@ my-app/
 └── package.json       Scripts and dependencies
 ```
 
+You compose your app in the tree/work directory, which could be put anywhere to db, or fs.
+
 ## `mods/`
 
-Mods are the application code you write. A small mod usually has:
+Mods are the pieces, we compose our applications from.  
+application code you write. A small mod usually has:
 
 ```
 mods/bookmarks/
   types.ts     Type classes and registerType()
-  seed.ts      Initial nodes with registerPrefab()
-  view.tsx     React views
-  service.ts   Background service, optional
-  schemas/     Generated JSON Schemas
+  react.tsx     React views
+```
+
+```
+  # additionals
+  seed.ts      Initial nodes and prefabs
+  service.ts   Background services, optional
+  schemas/     Auto-generated JSON Schemas
 ```
 
 The server loads convention files when it starts:
@@ -44,16 +51,17 @@ The server loads convention files when it starts:
 - `seed.ts`
 - `service.ts`
 
-The frontend loads convention files through the Vite plugin:
+The react frontend loads convention files through the Vite plugin:
 
 - `types.ts`
-- `view.tsx`
+- `react.tsx`
 
 If a mod has explicit `server.ts` or `client.ts` files, those entry files are loaded instead.
 
 ## `tree/seed/`
 
-Seed data that belongs in the repo. It is read by the filesystem mount and normally not modified at runtime.
+Seed data that belongs in the repo. It is read-only tree layer, containing system brahches.
+It is read by the filesystem mount and normally not modified at runtime.
 
 ```
 tree/seed/
@@ -62,11 +70,9 @@ tree/seed/
     $.json           /example node
 ```
 
-Use this layer for content or defaults you want reviewed in pull requests.
-
 ## `tree/work/`
 
-Runtime writes. In the default overlay, Treenix reads `tree/work/` first and falls back to `tree/seed/`.
+Runtime writes above the seed tree. In the default overlay, Treenix reads `tree/work/` first and falls back to `tree/seed/`.
 
 If you edit seed data and do not see the change, a runtime node in `tree/work/` may be shadowing it. Delete `tree/work/` only when you are intentionally resetting local runtime state.
 
@@ -84,7 +90,7 @@ Typical local shape:
 ```json
 {
   "$path": "/",
-  "$type": "metatron.config",
+  "$type": "treenix.root",
   "seeds": ["core", "example"],
   "mount": { "$type": "t.mount.overlay", "layers": ["base", "work"] },
   "base": { "$type": "t.mount.fs", "root": "tree/seed" },
@@ -104,7 +110,7 @@ import { registerType } from '@treenx/core/comp'
 import { usePath, view } from '@treenx/react'
 ```
 
-Avoid `require()` and private source aliases in application mods.
+Avoid private source aliases in application mods.
 
 ## Scripts
 

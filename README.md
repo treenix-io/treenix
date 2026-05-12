@@ -13,6 +13,8 @@
   ECS-style tree of typed components with context-aware rendering.
 </p>
 
+> **Early Beta.** Bugs are expected — please report them so we can fix and stabilize. Open an issue on GitHub or ping us on [Discord](https://discord.gg/peX8CwHQPz).
+
 Docs: [Introduction](./docs/index.md) · [Composition](./docs/concepts/composition.md) · [Components](./docs/concepts/components.md) · [Quickstart & Setup](./docs/getting-started/installation.md) · [Tutorial](./docs/getting-started/tutorial.md) · [Thinking in Treenix](./docs/getting-started/thinking-in-treenix.md) · [React Views](./docs/guides/react-views.md) · [API](./docs/api/overview.md)
 
 Write a class. Attach it to a node. Treenix turns it into stored data, editable forms, rendered views, server actions, MCP tools, access rules, realtime updates, and audit events.

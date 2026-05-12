@@ -61,7 +61,7 @@ export async function treenix(config: TreenixConfig): Promise<TreenixServer> {
 
   // Dev-only: register test.schema-widget (exercises every form field widget)
   if (process.env.NODE_ENV !== 'production') {
-    await import('#schema/schema-test-widget');
+    await import('#schema/_import-fixtures/schema-test-widget');
     loadSchemasFromDir(new URL('../schema/schemas', import.meta.url).pathname);
   }
 
