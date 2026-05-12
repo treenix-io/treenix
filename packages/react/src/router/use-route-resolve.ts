@@ -9,11 +9,14 @@
 
 import { useMemo } from 'react';
 import { useChildren } from '#hooks';
-import { getRoute, resolveRoute, type ResolveResult } from './route-resolve';
+import { getRoute, resolveRoute, resolveTarget, type ResolveResult } from './route-resolve';
 
 export type RouteResolveQuery = {
   /** Match result, or null when no route matched (or while loading + empty). */
   result: ResolveResult;
+  /** Resolved target tree path for the current URL — `prefix + rest` (or
+   *  `prefix + index` for empty rest). Null when no route matched. */
+  target: string | null;
   /** Initial fetch in flight — distinguish "loading" from "not found". */
   loading: boolean;
   /** Matched route opts in for unauthenticated rendering (t.route.public). */
@@ -23,6 +26,7 @@ export type RouteResolveQuery = {
 export function useRouteResolve(pathname: string): RouteResolveQuery {
   const { data, loading } = useChildren('/sys/routes', { watch: true, watchNew: true });
   const result = useMemo(() => resolveRoute(pathname, data), [pathname, data]);
+  const target = result ? resolveTarget(getRoute(result.node), result.rest) : null;
   const isPublic = !!result && getRoute(result.node)?.public === true;
-  return { result, loading, isPublic };
+  return { result, target, loading, isPublic };
 }

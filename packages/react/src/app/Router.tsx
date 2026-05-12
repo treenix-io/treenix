@@ -8,7 +8,9 @@
 // component (prefix/index) via useRouteShell and provides its own NavigateProvider
 // — Router only supplies a default identity nav for catch-all / login modal.
 
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
+import { getComponent } from '@treenx/core';
+import { Seo } from '@treenx/ssr/types/seo';
 import { LoginModal } from './Login';
 import { RoutedPage } from './RoutedPage';
 import { useAuthContext } from './auth-context';
@@ -25,7 +27,15 @@ export function Router() {
   const { authed, authChecked, showLoginModal, setAuthed, closeLoginModal } = useAuthContext();
   const { pathname } = useLocation();
 
-  const { result, loading: routeLoading, isPublic } = useRouteResolve(pathname);
+  const { result, target, loading: routeLoading, isPublic } = useRouteResolve(pathname);
+
+  const seoTitle = result?.node ? getComponent(result.node, Seo)?.title : undefined;
+
+  useEffect(() => {
+    if (seoTitle) { document.title = seoTitle; return; }
+    const trimmed = (target || pathname || '/').replace(/^\/+/, '');
+    document.title = trimmed ? `${trimmed} | Treenix` : 'Treenix';
+  }, [seoTitle, target, pathname]);
 
   // Default identity nav for catch-all / login modal. Shell views override
   // this via inner <NavigateProvider> with route-aware makeHref.
