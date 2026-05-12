@@ -1,7 +1,7 @@
 {
+  "$id": "t3d.scene",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "3D Scene — root container for the Three.js viewport",
-  "properties": {},
-  "$id": "t3d.scene",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  "properties": {}
 }

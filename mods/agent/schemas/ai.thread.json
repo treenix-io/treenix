@@ -1,4 +1,6 @@
 {
+  "$id": "ai.thread",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "Discussion thread on a task — lightweight multi-agent chat",
   "properties": {
@@ -59,7 +61,5 @@
         }
       ]
     }
-  },
-  "$id": "ai.thread",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  }
 }

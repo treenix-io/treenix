@@ -1,4 +1,6 @@
 {
+  "$id": "whisper.audio",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "Audio file metadata — filename, size, MIME type",
   "properties": {
@@ -19,7 +21,5 @@
     "filename",
     "size",
     "mime"
-  ],
-  "$id": "whisper.audio",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  ]
 }

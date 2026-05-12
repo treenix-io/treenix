@@ -1,4 +1,6 @@
 {
+  "$id": "mindmap.map",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "description": "Mind map visualization — radial tree of Treenix nodes",
   "properties": {
@@ -16,7 +18,5 @@
   "required": [
     "root",
     "maxChildren"
-  ],
-  "$id": "mindmap.map",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  ]
 }

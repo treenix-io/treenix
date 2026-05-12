@@ -1,4 +1,6 @@
 {
+  "$id": "brahman.action.page",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "Navigate to page — redirect conversation flow",
   "properties": {
@@ -60,7 +62,5 @@
         }
       ]
     }
-  },
-  "$id": "brahman.action.page",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  }
 }

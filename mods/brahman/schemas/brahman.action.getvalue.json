@@ -1,4 +1,6 @@
 {
+  "$id": "brahman.action.getvalue",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "Read session value — extract data from user session",
   "properties": {
@@ -66,7 +68,5 @@
         }
       ]
     }
-  },
-  "$id": "brahman.action.getvalue",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  }
 }

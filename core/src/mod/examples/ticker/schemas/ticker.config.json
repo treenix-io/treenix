@@ -1,4 +1,6 @@
 {
+  "$id": "ticker.config",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "Price feed config — trading symbol and polling interval",
   "properties": {
@@ -37,7 +39,5 @@
         }
       ]
     }
-  },
-  "$id": "ticker.config",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  }
 }

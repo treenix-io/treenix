@@ -1,4 +1,6 @@
 {
+  "$id": "t.site",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "Server-side rendering marker. Add to a route node to expose it as crawlable HTML.",
   "properties": {
@@ -47,7 +49,5 @@
   "required": [
     "state",
     "mode"
-  ],
-  "$id": "t.site",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  ]
 }

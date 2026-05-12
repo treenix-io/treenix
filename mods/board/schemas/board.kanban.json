@@ -1,7 +1,7 @@
 {
+  "$id": "board.kanban",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "Kanban board — container node, columns are children",
-  "properties": {},
-  "$id": "board.kanban",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  "properties": {}
 }

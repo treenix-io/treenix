@@ -1,4 +1,6 @@
 {
+  "$id": "brahman.action.selectlang",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "Language selector — let user choose interface language",
   "properties": {
@@ -60,7 +62,5 @@
         }
       ]
     }
-  },
-  "$id": "brahman.action.selectlang",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  }
 }

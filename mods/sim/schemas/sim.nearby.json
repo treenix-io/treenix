@@ -1,4 +1,6 @@
 {
+  "$id": "sim.nearby",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "Proximity cache — nearby agents within radius",
   "properties": {
@@ -12,7 +14,5 @@
   },
   "required": [
     "agents"
-  ],
-  "$id": "sim.nearby",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  ]
 }

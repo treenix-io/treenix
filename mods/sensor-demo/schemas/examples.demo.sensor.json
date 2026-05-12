@@ -1,4 +1,6 @@
 {
+  "$id": "examples.demo.sensor",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "description": "Fake sensor that generates readings around a base value",
   "properties": {
@@ -29,7 +31,5 @@
         }
       ]
     }
-  },
-  "$id": "examples.demo.sensor",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  }
 }

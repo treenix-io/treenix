@@ -1,4 +1,6 @@
 {
+  "$id": "t3d.audio",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "3D Audio — positional sound",
   "properties": {
@@ -52,7 +54,5 @@
     "refDistance",
     "maxDistance",
     "rolloffFactor"
-  ],
-  "$id": "t3d.audio",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  ]
 }

@@ -1,4 +1,6 @@
 {
+  "$id": "brahman.action.question",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "Ask question — prompt for text/photo input, save answer",
   "properties": {
@@ -83,7 +85,5 @@
         }
       ]
     }
-  },
-  "$id": "brahman.action.question",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  }
 }

@@ -1,4 +1,6 @@
 {
+  "$id": "t3d.particles",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "3D Particles — particle emitter",
   "properties": {
@@ -103,7 +105,5 @@
     "opacityOverLifetime",
     "emissive",
     "loop"
-  ],
-  "$id": "t3d.particles",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  ]
 }

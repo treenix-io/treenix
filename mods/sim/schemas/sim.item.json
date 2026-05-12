@@ -1,9 +1,9 @@
 {
+  "$id": "sim.item",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "Interactable item entity in the world.",
   "properties": {},
-  "$id": "sim.item",
-  "$schema": "http://json-schema.org/draft-07/schema#",
   "methods": {
     "examine": {
       "arguments": []

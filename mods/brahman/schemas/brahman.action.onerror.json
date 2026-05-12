@@ -1,4 +1,6 @@
 {
+  "$id": "brahman.action.onerror",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "Error handler — catch specific errors and run fallback action",
   "properties": {
@@ -67,7 +69,5 @@
         }
       ]
     }
-  },
-  "$id": "brahman.action.onerror",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  }
 }

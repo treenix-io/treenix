@@ -1,9 +1,9 @@
 {
+  "$id": "t.llm",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "LLM bridge — exports type schemas and describes subtrees as text for prompts.",
   "properties": {},
-  "$id": "t.llm",
-  "$schema": "http://json-schema.org/draft-07/schema#",
   "methods": {
     "schema": {
       "arguments": []

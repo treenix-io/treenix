@@ -1,4 +1,6 @@
 {
+  "$id": "t3d.text",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "3D Text — floating text in scene",
   "properties": {
@@ -80,7 +82,5 @@
     "billboard",
     "outlineWidth",
     "outlineColor"
-  ],
-  "$id": "t3d.text",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  ]
 }

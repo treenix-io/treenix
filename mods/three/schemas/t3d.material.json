@@ -1,4 +1,6 @@
 {
+  "$id": "t3d.material",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "3D Material — surface appearance",
   "properties": {
@@ -125,7 +127,5 @@
     "emissiveMap",
     "aoMap",
     "envMapIntensity"
-  ],
-  "$id": "t3d.material",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  ]
 }

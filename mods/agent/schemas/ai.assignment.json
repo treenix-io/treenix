@@ -1,4 +1,6 @@
 {
+  "$id": "ai.assignment",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "AI workflow on a board.task — routing + discussion cursor",
   "properties": {
@@ -25,7 +27,5 @@
     "origin",
     "nextRoles",
     "cursors"
-  ],
-  "$id": "ai.assignment",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  ]
 }

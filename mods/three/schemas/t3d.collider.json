@@ -1,4 +1,6 @@
 {
+  "$id": "t3d.collider",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "3D Collider — collision shape",
   "properties": {
@@ -78,7 +80,5 @@
     "offsetZ",
     "friction",
     "restitution"
-  ],
-  "$id": "t3d.collider",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  ]
 }

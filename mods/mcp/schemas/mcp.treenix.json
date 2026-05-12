@@ -1,4 +1,6 @@
 {
+  "$id": "mcp.treenix",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "Treenix tree and type-catalog tools exposed through the generic MCP adapter.",
   "properties": {},
@@ -242,7 +244,5 @@
         }
       ]
     }
-  },
-  "$id": "mcp.treenix",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  }
 }

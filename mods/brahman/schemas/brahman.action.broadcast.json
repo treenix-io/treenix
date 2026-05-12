@@ -1,4 +1,6 @@
 {
+  "$id": "brahman.action.broadcast",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "Broadcast message — send action to users matching tag filter",
   "properties": {
@@ -70,7 +72,5 @@
         }
       ]
     }
-  },
-  "$id": "brahman.action.broadcast",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  }
 }

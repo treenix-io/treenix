@@ -1,4 +1,6 @@
 {
+  "$id": "simple.tags",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "properties": {
     "items": {
@@ -49,7 +51,5 @@
         }
       ]
     }
-  },
-  "$id": "simple.tags",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  }
 }

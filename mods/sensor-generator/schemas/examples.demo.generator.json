@@ -1,9 +1,9 @@
 {
+  "$id": "examples.demo.generator",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "On-demand sensor reading generator — streams N readings via generator action.",
   "properties": {},
-  "$id": "examples.demo.generator",
-  "$schema": "http://json-schema.org/draft-07/schema#",
   "methods": {
     "scan": {
       "arguments": [

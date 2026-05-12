@@ -1,4 +1,6 @@
 {
+  "$id": "t.logs",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "description": "Server log buffer — query, grep, filter by level",
   "properties": {},
@@ -56,7 +58,5 @@
       "description": "Buffer stats: buffered count, total ever, max capacity",
       "arguments": []
     }
-  },
-  "$id": "t.logs",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  }
 }

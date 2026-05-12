@@ -1,4 +1,6 @@
 {
+  "$id": "t3d.camera",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "3D Camera",
   "properties": {
@@ -44,7 +46,5 @@
     "far",
     "orthoSize",
     "active"
-  ],
-  "$id": "t3d.camera",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  ]
 }

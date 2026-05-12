@@ -1,4 +1,6 @@
 {
+  "$id": "brahman.action.keywordselect",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "Keyword matcher — select response based on text keywords",
   "properties": {
@@ -85,7 +87,5 @@
         }
       ]
     }
-  },
-  "$id": "brahman.action.keywordselect",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  }
 }

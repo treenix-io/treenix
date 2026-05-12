@@ -1,4 +1,6 @@
 {
+  "$id": "brahman.action.message",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "Send message — text with optional menu and link previews",
   "properties": {
@@ -150,7 +152,5 @@
         }
       ]
     }
-  },
-  "$id": "brahman.action.message",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  }
 }

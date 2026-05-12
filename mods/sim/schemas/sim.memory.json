@@ -1,4 +1,6 @@
 {
+  "$id": "sim.memory",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "Agent memory — accumulated observations",
   "properties": {
@@ -12,7 +14,5 @@
   },
   "required": [
     "entries"
-  ],
-  "$id": "sim.memory",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  ]
 }

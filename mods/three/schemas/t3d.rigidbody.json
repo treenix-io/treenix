@@ -1,4 +1,6 @@
 {
+  "$id": "t3d.rigidbody",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "3D Rigidbody — physics body",
   "properties": {
@@ -75,7 +77,5 @@
     "freezeRx",
     "freezeRy",
     "freezeRz"
-  ],
-  "$id": "t3d.rigidbody",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  ]
 }

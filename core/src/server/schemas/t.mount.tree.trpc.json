@@ -1,4 +1,6 @@
 {
+  "$id": "t.mount.tree.trpc",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "properties": {
     "url": {
@@ -18,7 +20,5 @@
     "url",
     "path",
     "token"
-  ],
-  "$id": "t.mount.tree.trpc",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  ]
 }

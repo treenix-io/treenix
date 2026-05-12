@@ -1,4 +1,6 @@
 {
+  "$id": "sim.round",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "Current simulation round — phase and event log",
   "properties": {
@@ -56,7 +58,5 @@
     "current",
     "phase",
     "log"
-  ],
-  "$id": "sim.round",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  ]
 }

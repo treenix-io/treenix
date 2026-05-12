@@ -1,4 +1,6 @@
 {
+  "$id": "t.mod",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "Mod catalog entry",
   "properties": {
@@ -21,7 +23,5 @@
   "required": [
     "name",
     "state"
-  ],
-  "$id": "t.mod",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  ]
 }

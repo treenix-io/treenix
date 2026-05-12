@@ -1,4 +1,6 @@
 {
+  "$id": "ticker.price",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "Latest price snapshot — current price and timestamp",
   "properties": {
@@ -14,7 +16,5 @@
   "required": [
     "price",
     "ts"
-  ],
-  "$id": "ticker.price",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  ]
 }

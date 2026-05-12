@@ -1,4 +1,6 @@
 {
+  "$id": "ai.cost",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "Cost tracking — attachable to any billable operation",
   "properties": {
@@ -24,7 +26,5 @@
     "outputTokens",
     "costUsd",
     "model"
-  ],
-  "$id": "ai.cost",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  ]
 }

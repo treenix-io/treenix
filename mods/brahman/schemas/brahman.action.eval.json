@@ -1,4 +1,6 @@
 {
+  "$id": "brahman.action.eval",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "Execute JavaScript — run async code with context access",
   "properties": {
@@ -61,7 +63,5 @@
         }
       ]
     }
-  },
-  "$id": "brahman.action.eval",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  }
 }

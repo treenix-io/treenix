@@ -1,4 +1,6 @@
 {
+  "$id": "t.api.token",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "Single API token. Plaintext token is NEVER stored — sessionRef points to /auth/sessions/<sha256(token)>. Groups live on the user.",
   "properties": {
@@ -35,7 +37,5 @@
     "sessionRef",
     "preview",
     "createdAt"
-  ],
-  "$id": "t.api.token",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  ]
 }

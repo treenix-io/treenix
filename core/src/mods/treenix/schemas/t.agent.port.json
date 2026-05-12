@@ -1,4 +1,6 @@
 {
+  "$id": "t.agent.port",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "properties": {
     "label": {
@@ -45,7 +47,5 @@
       "title": "Reset to idle — allows re-pairing with a different agent",
       "arguments": []
     }
-  },
-  "$id": "t.agent.port",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  }
 }

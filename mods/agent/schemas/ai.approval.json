@@ -1,4 +1,6 @@
 {
+  "$id": "ai.approval",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "Human decision record for an agent tool call that requires approval.",
   "properties": {
@@ -95,7 +97,5 @@
         }
       ]
     }
-  },
-  "$id": "ai.approval",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  }
 }

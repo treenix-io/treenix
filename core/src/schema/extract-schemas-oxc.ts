@@ -928,7 +928,7 @@ export async function generateSchemas(dirs: string[]): Promise<void> {
     const classInfo = allClasses.get(entry.className + '\0' + entry.fileName);
     if (!classInfo) continue;
 
-    const schema = generateClassSchema(
+    const body = generateClassSchema(
       classInfo.node,
       classInfo.jsDocMap,
       classTypesByFile,
@@ -937,23 +937,27 @@ export async function generateSchemas(dirs: string[]): Promise<void> {
       enumsByFile,
       importsByFile,
     );
-    schema.$id = entry.typeName;
-    schema.$schema = 'http://json-schema.org/draft-07/schema#';
     generated.add(entry.typeName);
 
     // Merge external actions
     const external = allExternalActions.get(entry.typeName);
     if (external) {
-      const methods: Record<string, MethodSchema> = schema.methods ?? {};
+      const methods: Record<string, MethodSchema> = body.methods ?? {};
       for (const act of external) {
         if (!methods[act.name]) {
           const { name, fileName: _, ...rest } = act;
           methods[name] = { arguments: [], ...rest };
         }
       }
-      if (Object.keys(methods).length) schema.methods = methods;
+      if (Object.keys(methods).length) body.methods = methods;
       allExternalActions.delete(entry.typeName);
     }
+
+    const schema = {
+      $id: entry.typeName,
+      $schema: 'http://json-schema.org/draft-07/schema#',
+      ...body,
+    };
 
     // Write (skip if unchanged)
     const schemasDir = path.join(path.dirname(entry.fileName), 'schemas');

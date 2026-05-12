@@ -1,4 +1,6 @@
 {
+  "$id": "ai.pool",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "Concurrency pool — lives on /agents node",
   "properties": {
@@ -28,8 +30,6 @@
     "active",
     "queue"
   ],
-  "$id": "ai.pool",
-  "$schema": "http://json-schema.org/draft-07/schema#",
   "methods": {
     "scan": {
       "arguments": []

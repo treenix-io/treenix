@@ -1,4 +1,6 @@
 {
+  "$id": "ai.agent",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "AI Agent — autonomous worker node at /agents/{name}",
   "description": "LLM config (model, systemPrompt) lives directly on agent. Chat session in ai.chat component. Work creates ai.run nodes under runs/.",
@@ -133,7 +135,5 @@
         }
       ]
     }
-  },
-  "$id": "ai.agent",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  }
 }

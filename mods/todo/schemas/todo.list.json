@@ -1,4 +1,6 @@
 {
+  "$id": "todo.list",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "Container that creates todo.item children from add action calls.",
   "properties": {
@@ -28,7 +30,5 @@
         }
       ]
     }
-  },
-  "$id": "todo.list",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  }
 }

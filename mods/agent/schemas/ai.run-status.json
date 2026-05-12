@@ -1,4 +1,6 @@
 {
+  "$id": "ai.run-status",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "Generic lifecycle status — reusable for any process",
   "properties": {
@@ -31,7 +33,5 @@
     "startedAt",
     "finishedAt",
     "error"
-  ],
-  "$id": "ai.run-status",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  ]
 }

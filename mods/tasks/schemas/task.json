@@ -1,4 +1,6 @@
 {
+  "$id": "task",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "Agent task — question/answer workflow with status tracking",
   "properties": {
@@ -75,7 +77,5 @@
         }
       ]
     }
-  },
-  "$id": "task",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  }
 }

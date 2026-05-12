@@ -1,4 +1,6 @@
 {
+  "$id": "brahman.action.call",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "Call tree action — execute any Treenix action from bot flow",
   "properties": {
@@ -95,7 +97,5 @@
         }
       ]
     }
-  },
-  "$id": "brahman.action.call",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  }
 }

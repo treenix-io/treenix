@@ -1,4 +1,6 @@
 {
+  "$id": "sim.config",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "Simulation world config — dimensions, round timing",
   "properties": {
@@ -27,7 +29,5 @@
     "height",
     "roundDelay",
     "running"
-  ],
-  "$id": "sim.config",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  ]
 }

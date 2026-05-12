@@ -1,4 +1,6 @@
 {
+  "$id": "treenix.system",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "description": "System actions — type discovery, view compilation, prefab deployment",
   "properties": {},
@@ -112,7 +114,5 @@
         }
       ]
     }
-  },
-  "$id": "treenix.system",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  }
 }

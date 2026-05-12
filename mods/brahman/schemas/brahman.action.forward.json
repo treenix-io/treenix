@@ -1,4 +1,6 @@
 {
+  "$id": "brahman.action.forward",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "Forward message — relay message to another chat",
   "properties": {
@@ -67,7 +69,5 @@
         }
       ]
     }
-  },
-  "$id": "brahman.action.forward",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  }
 }

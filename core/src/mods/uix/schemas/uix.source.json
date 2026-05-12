@@ -1,4 +1,6 @@
 {
+  "$id": "uix.source",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "Inline JSX/TSX source attached to a node as a `view` component.",
   "properties": {
@@ -10,7 +12,5 @@
   },
   "required": [
     "source"
-  ],
-  "$id": "uix.source",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  ]
 }

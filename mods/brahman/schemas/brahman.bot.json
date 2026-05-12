@@ -1,4 +1,6 @@
 {
+  "$id": "brahman.bot",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "Telegram bot instance — token, proxy, language, maintenance",
   "properties": {
@@ -53,8 +55,6 @@
     "maintenance",
     "running"
   ],
-  "$id": "brahman.bot",
-  "$schema": "http://json-schema.org/draft-07/schema#",
   "methods": {
     "start": {
       "arguments": []

@@ -1,4 +1,6 @@
 {
+  "$id": "board.task",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "Task card — status-driven workflow with assignment and priority",
   "properties": {
@@ -132,7 +134,5 @@
       "description": "Reopen task — reset to backlog",
       "arguments": []
     }
-  },
-  "$id": "board.task",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  }
 }

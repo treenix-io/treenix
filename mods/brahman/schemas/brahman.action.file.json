@@ -1,4 +1,6 @@
 {
+  "$id": "brahman.action.file",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "Send file — deliver photo/document/video/audio to chat",
   "properties": {
@@ -66,7 +68,5 @@
         }
       ]
     }
-  },
-  "$id": "brahman.action.file",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  }
 }

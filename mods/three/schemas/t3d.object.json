@@ -1,4 +1,6 @@
 {
+  "$id": "t3d.object",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "3D Object — spatial entity in the scene graph",
   "properties": {
@@ -58,7 +60,5 @@
     "sx",
     "sy",
     "sz"
-  ],
-  "$id": "t3d.object",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  ]
 }

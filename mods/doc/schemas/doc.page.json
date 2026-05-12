@@ -1,4 +1,6 @@
 {
+  "$id": "doc.page",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "Rich document — Tiptap JSON with embedded Treenix components",
   "properties": {
@@ -29,7 +31,5 @@
   "required": [
     "title",
     "content"
-  ],
-  "$id": "doc.page",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  ]
 }

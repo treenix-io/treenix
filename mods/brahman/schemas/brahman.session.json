@@ -1,4 +1,6 @@
 {
+  "$id": "brahman.session",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "User conversation state — session data, history, pending callbacks",
   "properties": {
@@ -29,7 +31,5 @@
     "data",
     "history",
     "callbacks"
-  ],
-  "$id": "brahman.session",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  ]
 }

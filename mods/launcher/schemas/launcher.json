@@ -1,4 +1,6 @@
 {
+  "$id": "launcher",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "Home screen with icon grid + widgets. Layout via react-grid-layout.",
   "properties": {
@@ -80,7 +82,5 @@
         }
       ]
     }
-  },
-  "$id": "launcher",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  }
 }

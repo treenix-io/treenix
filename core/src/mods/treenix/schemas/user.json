@@ -1,4 +1,6 @@
 {
+  "$id": "user",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "Account lifecycle state for auth and access decisions.",
   "properties": {
@@ -15,7 +17,5 @@
   },
   "required": [
     "status"
-  ],
-  "$id": "user",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  ]
 }

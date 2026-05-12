@@ -1,4 +1,6 @@
 {
+  "$id": "whisper.config",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "Speech-to-text config — Whisper model, language, audio path",
   "properties": {
@@ -24,7 +26,5 @@
     "language",
     "audioDir",
     "url"
-  ],
-  "$id": "whisper.config",
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  ]
 }
