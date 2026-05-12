@@ -13,6 +13,7 @@ import { type PatchOp, type Tree } from '#tree';
 import { createDraft, enablePatches, finishDraft, type Patch } from 'immer';
 import { createPathLock } from '#util/path-lock';
 import { OpError } from '#errors';
+import { readonlyProxy, wrapReadOnlyTree } from './readonly-tree';
 
 function validateActionArgs(type: string, action: string, data: unknown): void {
   const schemaFn = resolve(type, 'schema');
@@ -385,37 +386,54 @@ export async function executeAction<T = unknown>(
 
   const postSnap = Object.fromEntries(postFields.map(f => [f, target[f]]));
 
-  const draft = createDraft(node);
-  // comp must be the draft version so Immer captures mutations via `this.*`
-  const dc = fieldKey ? draft[fieldKey] : undefined;
-  const draftComp = isComponent(dc) ? dc as ComponentData : undefined;
+  // Kind enforcement: default 'write' preserves existing semantics.
+  // 'read' skips Immer draft entirely and gives the handler a readonly proxy of
+  // node/comp + a read-only tree facade. Any assignment (`ctx.node.x = …`,
+  // `this.x = …`, `ctx.tree.set(…)`) throws KIND_VIOLATION immediately.
+  const kind: 'read' | 'write' = methodSchema?.kind ?? 'write';
 
-  // Remap sibling deps to draft so Immer captures mutations through deps too
-  for (const key of Object.keys(deps)) {
-    if (deps[key] === node[key]) {
-      deps[key] = draft[key] as ComponentData;
+  let draft: NodeData | null = null;
+  let nodeForCtx: NodeData;
+  let compForCtx: ComponentData | undefined;
+
+  if (kind === 'read') {
+    nodeForCtx = readonlyProxy(node);
+    const rc = fieldKey ? node[fieldKey] : undefined;
+    compForCtx = isComponent(rc) ? readonlyProxy(rc as ComponentData) : undefined;
+  } else {
+    draft = createDraft(node);
+    const dc = fieldKey ? draft[fieldKey] : undefined;
+    nodeForCtx = draft;
+    compForCtx = isComponent(dc) ? dc as ComponentData : undefined;
+    // Remap sibling deps to draft so Immer captures mutations through deps too
+    for (const key of Object.keys(deps)) {
+      if (deps[key] === node[key]) {
+        deps[key] = draft[key] as ComponentData;
+      }
     }
   }
 
-  const nc = serverNodeHandle(tree);
+  const treeForCtx = kind === 'read' ? wrapReadOnlyTree(tree) : tree;
+  const nc = serverNodeHandle(treeForCtx);
   const signal = AbortSignal.timeout(ACTION_TIMEOUT);
-  const actx: ActionCtx = { node: draft, comp: draftComp, deps, tree, signal, nc, userId: opts?.userId, claims: opts?.claims, actor: opts?.actor };
+  const actx: ActionCtx = { node: nodeForCtx, comp: compForCtx, deps, tree: treeForCtx, signal, nc, userId: opts?.userId, claims: opts?.claims, actor: opts?.actor };
   const result = await withActionTimeout(`${type}.${action}`, signal, Promise.resolve(handler(actx, data ?? {})));
 
   let patches: Patch[] = [];
-  const nextNode = finishDraft(draft, (p) => { patches = p });
-
-  const postTarget = fieldKey ? nextNode[fieldKey] as Record<string, unknown> : nextNode as Record<string, unknown>;
-  for (const f of postFields) {
-    if (postTarget[f] === postSnap[f]) {
-      console.warn(`[post] ${type}.${action}: field "${f}" unchanged`);
+  if (draft) {
+    const nextNode = finishDraft(draft, (p) => { patches = p });
+    const postTarget = fieldKey ? nextNode[fieldKey] as Record<string, unknown> : nextNode as Record<string, unknown>;
+    for (const f of postFields) {
+      if (postTarget[f] === postSnap[f]) {
+        console.warn(`[post] ${type}.${action}: field "${f}" unchanged`);
+      }
+    }
+    if (patches.length > 0) {
+      const ops = immerToPatchOps(patches);
+      await tree.patch(node.$path, ops);
     }
   }
 
-  if (patches.length > 0) {
-    const ops = immerToPatchOps(patches);
-    await tree.patch(node.$path, ops);
-  }
   return result as T;
   }); // lockAction
 }
