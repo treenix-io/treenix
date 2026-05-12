@@ -28,19 +28,18 @@ registerPrefab('core', 'seed', [
   { $path: 'sys/llm', $type: 't.llm' },
 ] as NodeData[], undefined, { tier: 'core' });
 
-// Auth infra — users, sessions, API tokens
+// Auth infra — users, sessions, API tokens.
+// No explicit mount — children inherit the root overlay (FS by default).
+// For Mongo deployments, override these mount-points at the app level.
 registerPrefab('auth', 'seed', [
   { $path: 'auth', $type: 'dir', $acl: [{ g: 'admins', p: R | W | A | S }, { g: 'public', p: 0 }] },
-  { $path: 'auth/users', $type: 'mount-point',
-    mount: { $type: 't.mount.mongo', db: 'treenix', collection: 'users' },
+  { $path: 'auth/users', $type: 'dir',
     $acl: [{ g: 'authenticated', p: R | S }, { g: 'public', p: 0 }],
   },
-  { $path: 'auth/sessions', $type: 'mount-point',
-    mount: { $type: 't.mount.mongo', db: 'treenix', collection: 'sessions' },
+  { $path: 'auth/sessions', $type: 'dir',
     $acl: [{ g: 'admins', p: R | W | A | S }, { g: 'authenticated', p: 0 }, { g: 'public', p: 0 }],
   },
   { $path: 'auth/api-tokens', $type: 't.api.tokens',
-    mount: { $type: 't.mount.mongo', db: 'treenix', collection: 'api-tokens' },
     $acl: [{ g: 'admins', p: R | W | A | S }, { g: 'authenticated', p: 0 }],
   },
 ] as NodeData[], undefined, { tier: 'core' });
