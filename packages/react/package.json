@@ -1,6 +1,6 @@
 {
   "name": "@treenx/react",
-  "version": "3.0.14",
+  "version": "3.0.17",
   "description": "React binding for Treenix — reactive hooks, admin UI, and context-based component rendering.",
   "type": "module",
   "publishConfig": {
@@ -106,6 +106,7 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.2.4",
+    "@testing-library/dom": "^10.0.0",
     "@testing-library/react": "^16.3.2",
     "@treenx/ssr": "^0.1.0",
     "@types/react": "^19.2.14",
