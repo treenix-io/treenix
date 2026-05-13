@@ -1,38 +1,38 @@
-# 01 — Три примитива
+# 01 — Three primitives
 
 ```
-Node      = { $path, $type, ...components }   // сущность в дереве
-Component = { $type, ...data }                 // именованный аспект ноды
-Context   = register(type, context, handler)   // поведение типа в контексте
+Node      = { $path, $type, ...components }   // entity in the tree
+Component = { $type, ...data }                 // named aspect of a node
+Context   = register(type, context, handler)   // type behavior in a context
 ```
 
-Нода — это `$path` + `$type` + произвольные компоненты. Компонент — именованное поле с `$type`. Контекст привязывает поведение (рендер, экшен, сервис) к типу.
+A node is `$path` + `$type` + arbitrary components. A component is a named field with `$type`. A context binds behavior (render, action, service) to a type.
 
-Системные поля: `$path`, `$type`, `$rev` (OCC), `$owner`, `$acl`.
+System fields: `$path`, `$type`, `$rev` (OCC), `$owner`, `$acl`.
 
-## Структура мода
+## Mod structure
 
 ```
 src/mods/my-mod/
-  types.ts      — registerType() — классы компонентов, данные + экшены
-  action.ts     — register(type, 'action:name', handler) — node-level экшены
-  schemas.ts    — register(type, 'schema', () => ({...})) — JSON Schema для UI
-  view.tsx      — register(type, 'react', Component) — React-рендеры
-  service.ts    — register(type, 'service', handler) — фоновый сервис
+  types.ts      — registerType() — component classes, data + actions
+  action.ts     — register(type, 'action:name', handler) — node-level actions
+  schemas.ts    — register(type, 'schema', () => ({...})) — JSON Schema for UI
+  view.tsx      — register(type, 'react', Component) — React renderers
+  service.ts    — register(type, 'service', handler) — background service
 ```
 
-Регистрация:
-- Сервер: добавь импорт в `src/mods/index.ts`
-- Фронтенд: добавь импорт в `src/mods/views.ts` + `registerViews()`
+Registration:
+- Server: add import to `src/mods/index.ts`
+- Frontend: add import to `src/mods/views.ts` + `registerViews()`
 
 ## Dev workflow
 
 ```bash
-npm run schema        # извлечь JSON Schema (auto на dev startup, вручную для CI)
+npm run schema        # extract JSON Schema (auto on dev startup, manual for CI)
 npm test              # tsx --test src/**/*.test.ts
-npm run dev:server    # tsx --watch src/server/index.ts (порт 3001)
-npm run dev:front     # vite (React-фронт)
+npm run dev:server    # tsx --watch src/server/index.ts (port 3001)
+npm run dev:front     # vite (React frontend)
 ```
 
-Seed-данные: `data/base/` (git-tracked), runtime-данные: `data/work/` (gitignored).
-Overlay: work поверх base — записи идут в work, чтение fallback на base.
+Seed data: `data/base/` (git-tracked), runtime data: `data/work/` (gitignored).
+Overlay: work on top of base — writes go to work, reads fall back to base.
