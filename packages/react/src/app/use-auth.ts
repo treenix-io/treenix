@@ -31,18 +31,6 @@ export function useAuth(): AuthState {
   const initAuth = useCallback(async () => {
     const token = getToken();
     if (!token) {
-      if (import.meta.env.VITE_DEV_LOGIN) {
-        try {
-          const { token: devToken, userId } = await trpc.devLogin.mutate();
-          setToken(devToken);
-          setAuthed(userId);
-          setAuthChecked(true);
-        } catch {
-          toast.error('Server unavailable, retrying…');
-          retryTimer.current = setTimeout(initAuth, 3000);
-        }
-        return;
-      }
       // No token, no dev login → anonymous. Server assigns 'public' claims on every request.
       setAuthed(null);
       setAuthChecked(true);

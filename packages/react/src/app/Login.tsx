@@ -35,6 +35,20 @@ function LoginForm({ onLogin }: { onLogin: (userId: string) => void }) {
     }
   }
 
+  async function handleDevLogin() {
+    setLoading(true);
+    setErr(null);
+    try {
+      const res = await trpc.devLogin.mutate();
+      setToken(res.token);
+      onLogin(res.userId);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Dev login failed');
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <form className="flex flex-col gap-4 w-80 p-8 rounded-lg border border-border bg-card" onSubmit={handleSubmit}>
       <div className="flex items-center justify-center gap-2 mb-2">
@@ -69,6 +83,12 @@ function LoginForm({ onLogin }: { onLogin: (userId: string) => void }) {
       <Button type="submit" disabled={loading || !userId.trim() || !password}>
         {loading ? '...' : mode === 'register' ? 'Create account' : 'Sign in'}
       </Button>
+
+      {import.meta.env.DEV && (
+        <Button type="button" variant="secondary" onClick={handleDevLogin} disabled={loading}>
+          Login as Dev
+        </Button>
+      )}
 
       <Button
         type="button"

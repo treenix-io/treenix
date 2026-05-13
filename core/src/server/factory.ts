@@ -12,6 +12,7 @@ import { loadAllMods } from '#mod';
 import { loadSchemasFromDir } from '#schema/load';
 import { createMemoryTree, type Tree } from '#tree';
 import type { Server } from 'node:http';
+import { applyDevDefaults } from './dev-defaults';
 import { deploySeedPrefabs } from './prefab';
 import { createEnsure, type Ensure } from './seed/index';
 import { createHttpServer, createPipeline, type Pipeline } from './server';
@@ -52,6 +53,11 @@ export type TreenixServer = TreenixInstance & {
 export async function treenix(config: TreenixConfig): Promise<TreenixServer> {
   const { rootNode } = config;
   const autostart = config.autostart ?? true;
+
+  // Dev-mode flags (VITE_DEV_LOGIN, MCP_DEV_ADMIN). No-op in production.
+  // Lives here so external consumers (starter, vite plugins) get them via the
+  // factory without duplicating bootstrap code in every entry point.
+  applyDevDefaults();
 
   // 1. Load mods
   if (config.modsDir !== false) {

@@ -32,7 +32,7 @@ export default defineConfig({
   },
   server: {
     port: 3210,
-    host: '0.0.0.0',
+    host: process.env.HOST || '127.0.0.1',
     allowedHosts: ['treenix.pro', 'frp.treenix.pro', 'dev.treenix.pro'],
     proxy: {
       '/trpc/': { target: `http://127.0.0.1:${apiPort}`, changeOrigin: true },

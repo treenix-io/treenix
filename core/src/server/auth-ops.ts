@@ -1,7 +1,7 @@
 // Auth operations — transport-agnostic.
 // Throws OpError, never TRPCError. Transport layer maps errors.
 
-import { createNode, isComponent, R, W } from '#core';
+import { makeNode, isComponent, R, W } from '#core';
 import type { Tree } from '#tree';
 import { randomBytes } from 'node:crypto';
 import { AGENT_SESSION_TTL, hashAgentKey, timingSafeCompare } from './agent';
@@ -46,7 +46,7 @@ export function registerUser(store: Tree, userId: string, password: string, clie
     const isFirstUser = items.length === 0;
 
     const hash = await hashPassword(password);
-    const node = createNode(userPath, 'user', {
+    const node = makeNode(userPath, 'user', {
       status: isFirstUser ? 'active' : 'pending',
     }, {
       credentials: { $type: 'credentials', hash },
@@ -102,7 +102,7 @@ export async function devLogin(store: Tree) {
   const userId = 'dev';
   const userPath = `/auth/users/${userId}`;
   if (!await store.get(userPath)) {
-    const node = createNode(userPath, 'user', {}, {
+    const node = makeNode(userPath, 'user', { status: 'active' }, {
       groups: { $type: 'groups', list: ['admins'] },
     });
     node.$owner = userId;

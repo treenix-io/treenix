@@ -3,6 +3,7 @@ import { type NodeData } from '#core';
 import { readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { treenix } from './factory';
+import { applyDevDefaults, devBannerLines } from './dev-defaults';
 
 // Lock CWD — no library may change it
 process.chdir = () => { throw new Error('process.chdir is forbidden'); };
@@ -13,6 +14,10 @@ if (process.env.VITE_DEV_LOGIN && process.env.NODE_ENV !== 'development') {
   console.error('[boot] FATAL: VITE_DEV_LOGIN is set but NODE_ENV is not "development". Refusing to start — this would expose the dev-login admin route in production.');
   process.exit(1);
 }
+
+// In NODE_ENV=development, auto-populate the dev flags so a fresh clone needs no env setup.
+// Explicit `MCP_DEV_ADMIN=0` / `VITE_DEV_LOGIN=0` still overrides.
+applyDevDefaults();
 
 // Auto-generate schemas (oxc-parser is a devDependency — available in dev via tsx)
 try {
@@ -62,6 +67,9 @@ const port = Number(process.env.PORT) || 3211;
 const host = process.env.HOST || '127.0.0.1';
 
 const server = await t.listen(port, { host });
+
+const banner = devBannerLines(port);
+if (banner) for (const line of banner) console.log(line);
 
 process.on('unhandledRejection', (err) => console.error('[UNHANDLED]', err));
 
