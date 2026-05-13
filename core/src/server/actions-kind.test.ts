@@ -33,6 +33,44 @@ describe('executeAction — kind enforcement', () => {
     );
   });
 
+  it('@read calling @write — nested handler NOT invoked (throws on entry, no side effects)', async () => {
+    let writeHandlerRan = false;
+
+    register('test.kind.rNoSide', 'schema', () => ({
+      $id: 'test.kind.rNoSide',
+      type: 'object',
+      properties: {},
+      methods: { readCallsWrite: { arguments: [], kind: 'read' as const } },
+    }));
+
+    register('test.kind.wNoSide', 'schema', () => ({
+      $id: 'test.kind.wNoSide',
+      type: 'object',
+      properties: {},
+      methods: { writeOp: { arguments: [], kind: 'write' as const } },
+    }));
+
+    register('test.kind.rNoSide', 'action:readCallsWrite', async (ctx: ActionCtx) => {
+      await executeAction(ctx.tree, '/wn', undefined, undefined, 'writeOp');
+    });
+
+    register('test.kind.wNoSide', 'action:writeOp', async (ctx: ActionCtx) => {
+      writeHandlerRan = true;
+      (ctx.node as any).touched = true;
+    });
+
+    const tree = createMemoryTree();
+    await tree.set({ $path: '/rn', $type: 'test.kind.rNoSide' });
+    await tree.set({ $path: '/wn', $type: 'test.kind.wNoSide' });
+
+    await assert.rejects(
+      () => executeAction(tree, '/rn', undefined, undefined, 'readCallsWrite'),
+      (err: any) => err?.code === 'KIND_VIOLATION',
+    );
+
+    assert.equal(writeHandlerRan, false, 'write handler must not run when caller is @read');
+  });
+
   it('@read action calling @write via ctx.nc().execute throws KIND_VIOLATION', async () => {
     register('test.kind.r', 'schema', () => ({
       $id: 'test.kind.r',

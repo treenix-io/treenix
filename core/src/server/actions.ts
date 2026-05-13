@@ -14,6 +14,7 @@ import { createDraft, enablePatches, finishDraft, type Patch } from 'immer';
 import { createPathLock } from '#util/path-lock';
 import { OpError } from '#errors';
 import { readonlyProxy, wrapReadOnlyTree } from './readonly-tree';
+import { assertCanCall, runWithFrame, type KindFrame } from './kind-stack';
 
 function validateActionArgs(type: string, action: string, data: unknown): void {
   const schemaFn = resolve(type, 'schema');
@@ -394,7 +395,14 @@ export async function executeAction<T = unknown>(
   // `this.x = …`, `ctx.tree.set(…)`) throws KIND_VIOLATION immediately.
   const actionMeta = getMeta(type, `action:${action}`);
   const metaKind = actionMeta?.kind as 'read' | 'write' | undefined;
+  const metaIo = actionMeta?.io as boolean | undefined;
   const kind: 'read' | 'write' = metaKind ?? methodSchema?.kind ?? 'write';
+  const io: boolean = metaIo ?? methodSchema?.io ?? false;
+
+  // Stack-based propagation check — throws BEFORE we touch the handler so
+  // nested invocations don't produce partial side effects.
+  assertCanCall({ kind, io });
+  const frame: KindFrame = { kind, io, path, action };
 
   let draft: NodeData | null = null;
   let nodeForCtx: NodeData;
@@ -421,7 +429,9 @@ export async function executeAction<T = unknown>(
   const nc = serverNodeHandle(treeForCtx);
   const signal = AbortSignal.timeout(ACTION_TIMEOUT);
   const actx: ActionCtx = { node: nodeForCtx, comp: compForCtx, deps, tree: treeForCtx, signal, nc, userId: opts?.userId, claims: opts?.claims, actor: opts?.actor };
-  const result = await withActionTimeout(`${type}.${action}`, signal, Promise.resolve(handler(actx, data ?? {})));
+  const result = await runWithFrame(frame, () =>
+    withActionTimeout(`${type}.${action}`, signal, Promise.resolve(handler(actx, data ?? {}))),
+  );
 
   let patches: Patch[] = [];
   if (draft) {
