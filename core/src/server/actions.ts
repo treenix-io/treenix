@@ -6,7 +6,7 @@ import { chain, type Chain } from '#chain';
 import { Class, type TypeProxy } from '#comp';
 import { type ExecuteFn, makeTypedProxy, type StreamFn } from '#comp/handle';
 import { collectDeps as _collectDeps, type ResolvedDeps } from '#comp/needs';
-import { assertSafeKey, type ComponentData, getComponentField, isComponent, type NodeData, register, resolve, safeJsonParse } from '#core';
+import { assertSafeKey, type ComponentData, getComponentField, getMeta, isComponent, type NodeData, register, resolve, safeJsonParse } from '#core';
 import { validateValue, type ValidationError } from '#comp/validate';
 import { type TypeSchema } from '#schema/types';
 import { type PatchOp, type Tree } from '#tree';
@@ -300,7 +300,8 @@ async function loadDynamicAction(
           delete (n as any).$acl;
           delete (n as any).$owner;
           delete (n as any).$refs;
-          await tree.set(n as NodeData);
+          // Route through ctx.tree (read-only facade applies when parent action's kind = 'read').
+          await ctx.tree.set(n as NodeData);
         }
       }
 
@@ -387,10 +388,13 @@ export async function executeAction<T = unknown>(
   const postSnap = Object.fromEntries(postFields.map(f => [f, target[f]]));
 
   // Kind enforcement: default 'write' preserves existing semantics.
+  // Lookup: registry-meta (programmatic register opts) → schema (JSDoc) → fallback 'write'.
   // 'read' skips Immer draft entirely and gives the handler a readonly proxy of
   // node/comp + a read-only tree facade. Any assignment (`ctx.node.x = …`,
   // `this.x = …`, `ctx.tree.set(…)`) throws KIND_VIOLATION immediately.
-  const kind: 'read' | 'write' = methodSchema?.kind ?? 'write';
+  const actionMeta = getMeta(type, `action:${action}`);
+  const metaKind = actionMeta?.kind as 'read' | 'write' | undefined;
+  const kind: 'read' | 'write' = metaKind ?? methodSchema?.kind ?? 'write';
 
   let draft: NodeData | null = null;
   let nodeForCtx: NodeData;

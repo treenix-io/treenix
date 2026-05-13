@@ -79,8 +79,11 @@ export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: 
   function mapErrors(result: { ok: boolean; error?: { cause?: unknown } }) {
     if (result.ok) return;
     const cause = result.error?.cause;
-    if (cause instanceof OpError)
-      throw new TRPCError({ code: cause.code, message: cause.message });
+    if (cause instanceof OpError) {
+      // Domain code → TRPCError code. Codes not in tRPC's enum map to FORBIDDEN.
+      const code = cause.code === 'KIND_VIOLATION' ? 'FORBIDDEN' : cause.code;
+      throw new TRPCError({ code, message: cause.message });
+    }
   }
 
   const base = t.procedure.use(async ({ next }) => {

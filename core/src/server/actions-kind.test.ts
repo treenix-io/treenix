@@ -94,6 +94,33 @@ describe('executeAction — kind enforcement', () => {
     assert.equal((after as any)?.count, 1);
   });
 
+  it('registry meta {kind:"read"} enforces read even without schema kind', async () => {
+    // Action registered programmatically with kind in meta, NO schema.kind.
+    register('test.kind.metareg', 'schema', () => ({
+      $id: 'test.kind.metareg',
+      type: 'object',
+      properties: {},
+      methods: { readish: { arguments: [] } }, // no kind in schema
+    }));
+
+    register(
+      'test.kind.metareg',
+      'action:readish',
+      async (ctx: ActionCtx) => {
+        await ctx.tree.set({ $path: '/blocked', $type: 'foo' });
+      },
+      { kind: 'read' }, // meta declares kind
+    );
+
+    const tree = createMemoryTree();
+    await tree.set({ $path: '/r', $type: 'test.kind.metareg' });
+
+    await assert.rejects(
+      () => executeAction(tree, '/r', undefined, undefined, 'readish'),
+      (err: any) => err?.code === 'KIND_VIOLATION',
+    );
+  });
+
   it('@read action: this.x = ... throws KIND_VIOLATION (via readonly proxy on node)', async () => {
     register('test.kind.this', 'schema', () => ({
       $id: 'test.kind.this',
