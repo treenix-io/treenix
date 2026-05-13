@@ -1,7 +1,7 @@
 // Treenix MCP Server — exposes tree store as MCP tools
 // StreamableHTTP transport, stateful sessions, token auth via Authorization: Bearer header
 
-import { rememberRule, requestApproval, resolveVerdict } from '#agent/guardian';
+import { requestApproval, resolveVerdict } from '#agent/guardian';
 import { AiPolicy } from '#agent/types';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -52,7 +52,13 @@ export function buildSubjects(req: GuardianRequest): string[] {
 export async function checkMcpGuardian(store: Tree, req: GuardianRequest): Promise<McpGuardianResult> {
   try {
     const guardianNode = await store.get('/guardian');
-    if (!guardianNode) return { allowed: false, reason: 'no Guardian configured at /guardian — all writes denied' };
+    if (!guardianNode) {
+      // No /guardian configured. With MCP_DEV_ADMIN=1 (dev MCP): developer fast path (allow).
+      // Without it: fail-closed (deny). MCP_DEV_ADMIN is auto-set in NODE_ENV=development
+      // and can be explicitly disabled by setting MCP_DEV_ADMIN=0.
+      if (process.env.MCP_DEV_ADMIN === '1') return { allowed: true };
+      return { allowed: false, reason: 'no Guardian configured at /guardian — all writes denied' };
+    }
 
     const policy = getComponent(guardianNode, AiPolicy);
     if (!policy || policy.$type !== 'ai.policy') return { allowed: false, reason: 'invalid Guardian policy type — writes denied' };
@@ -193,9 +199,17 @@ function subjectLabel(subject: string): string {
   return `all ${parts[0]} calls`;
 }
 
+// Threshold below which a decline/cancel is treated as auto-reject by a client
+// that advertised elicitation capability but doesn't actually surface UI to the
+// user (e.g. CC VSCode plugin sub-agent context — anthropics/claude-code#35353
+// for URL mode; same auto-decline pattern observed in form mode). No human can
+// respond faster than ~300ms; <200ms is safely synthetic.
+const ELICIT_AUTO_REJECT_MS = 200;
+
 /** Check guardian and block until human approves.
- * Two modes: inline elicitation (clients that support it — Claude Code, etc.)
- * vs tree-based approval node (agents, headless, batch). Selection by client capability. */
+ * Tries inline elicitation first; on synthetic auto-reject (or no elicit
+ * capability) falls back to tree-based approval node under /guardian/approvals
+ * that user clicks in the UI. */
 async function guardBlock(
   guard: McpGuardianResult,
   store: Tree,
@@ -209,57 +223,36 @@ async function guardBlock(
   const label = subjectLabel(tool);
   const argPreview = yaml(guard.args, 0, 200);
 
+  const treeApprovalEnabled = process.env.MCP_GUARDIAN_TREE_APPROVAL === '1';
   const caps = mcp.server.getClientCapabilities();
-  if (caps?.elicitation?.form) {
+  if (caps?.elicitation) {
     try {
-      const narrow = guard.subjects[0] ?? tool;
-      const broad = guard.subjects.at(-1) ?? tool;
+      const t0 = Date.now();
       const result = await mcp.server.elicitInput({
-        mode: 'form',
         message: `Guardian approval required\n\n${label}\n\n${argPreview}`,
         requestedSchema: {
           type: 'object',
-          properties: {
-            remember: {
-              type: 'string',
-              title: 'Remember decision',
-              description: 'Persist the chosen action (accept→allow, decline→deny) into /guardian policy',
-              enum: ['once', 'this-path', 'this-tool'],
-              enumNames: [
-                'Just this once',
-                `Always for ${narrow.replace('mcp__treenix__', '')}`,
-                `Always for ${broad.replace('mcp__treenix__', '')}`,
-              ],
-              default: 'once',
-            },
-          },
+          properties: {},
         },
       });
-
-      if (result.action !== 'accept' && result.action !== 'decline') {
-        return text(`🛑 Guardian: ${result.action} by user`);
-      }
-
-      const remember = (result.content?.remember as string | undefined) ?? 'once';
-      const allow = result.action === 'accept';
-
-      if (remember !== 'once') {
-        const subject = remember === 'this-tool' ? broad : narrow;
-        try {
-          await rememberRule(store, subject, JSON.stringify(guard.args), allow, '', 'global');
-        } catch (err) {
-          console.error('[mcp-guardian] failed to persist rule:', err);
+      const elapsedMs = Date.now() - t0;
+      const wasFastReject =
+        (result.action === 'decline' || result.action === 'cancel') && elapsedMs < ELICIT_AUTO_REJECT_MS;
+      if (!wasFastReject) {
+        if (result.action !== 'accept' && result.action !== 'decline') {
+          return text(`🛑 Guardian: ${result.action} by user`);
         }
+        const allow = result.action === 'accept';
+        return allow ? null : text(`🛑 Guardian: declined by user (${elapsedMs}ms)`);
       }
-
-      return allow ? null : text(`🛑 Guardian: declined by user`);
+      // Fast-reject: client lied about elicit support. Fall through to tree approval if enabled.
+      console.log(`[guardian] elicit auto-rejected by client in ${elapsedMs}ms`);
     } catch (err) {
       console.error('[mcp-guardian] elicitInput failed:', err);
-      return text(`🛑 Guardian: approval prompt failed: ${(err as Error).message}`);
     }
   }
 
-  if (process.env.MCP_GUARDIAN_TREE_APPROVAL !== '1') {
+  if (!treeApprovalEnabled) {
     return text('🛑 Guardian: this MCP client did not advertise form elicitation support; approval cannot be requested inline.');
   }
 
@@ -270,7 +263,8 @@ async function guardBlock(
     input: JSON.stringify(guard.args),
     reason: `MCP escalation: ${label}`,
   });
-  return approved ? null : text(`🛑 Guardian: denied by human`);
+  if (approved) return null;
+  return text(`🛑 Guardian: ${label}\n\nApproval pending — open /guardian/approvals in the UI and click approve.`);
 }
 
 type McpServerBuildOpts = {

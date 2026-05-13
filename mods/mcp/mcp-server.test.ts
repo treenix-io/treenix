@@ -382,6 +382,47 @@ describe('checkMcpGuardian', () => {
     store = createMemoryTree();
   });
 
+  // ── Dev-MCP bypass: only when no /guardian configured ──
+
+  it('MCP_DEV_ADMIN=1 + no /guardian → allow (developer fast path)', async () => {
+    const saved = process.env.MCP_DEV_ADMIN;
+    process.env.MCP_DEV_ADMIN = '1';
+    try {
+      const result = await checkMcpGuardian(store, req('set_node', { path: '/x', type: 'dir' }));
+      assert.equal(result.allowed, true);
+    } finally {
+      if (saved === undefined) delete process.env.MCP_DEV_ADMIN;
+      else process.env.MCP_DEV_ADMIN = saved;
+    }
+  });
+
+  it('MCP_DEV_ADMIN=1 + /guardian present → policy is enforced (no bypass)', async () => {
+    const saved = process.env.MCP_DEV_ADMIN;
+    process.env.MCP_DEV_ADMIN = '1';
+    try {
+      await setGuardian({ allow: [], deny: ['mcp__treenix__set_node'], escalate: [] });
+      const result = await checkMcpGuardian(store, req('set_node', { path: '/x' }));
+      assert.equal(result.allowed, false);
+      assert.ok(!result.allowed && result.reason.includes('denied'));
+    } finally {
+      if (saved === undefined) delete process.env.MCP_DEV_ADMIN;
+      else process.env.MCP_DEV_ADMIN = saved;
+    }
+  });
+
+  it('MCP_DEV_ADMIN unset + no /guardian → deny (fail-closed)', async () => {
+    const saved = process.env.MCP_DEV_ADMIN;
+    delete process.env.MCP_DEV_ADMIN;
+    try {
+      const result = await checkMcpGuardian(store, req('set_node', { path: '/x' }));
+      assert.equal(result.allowed, false);
+      assert.ok(!result.allowed && result.reason.includes('no Guardian'));
+    } finally {
+      if (saved === undefined) delete process.env.MCP_DEV_ADMIN;
+      else process.env.MCP_DEV_ADMIN = saved;
+    }
+  });
+
   // ── Basic policy ──
 
   it('denies when no guardian node exists', async () => {
