@@ -97,19 +97,19 @@ const TOKEN = new RegExp([
   '(\\b\\d+(?:\\.\\d+)?\\b)',                                  // 4: numbers
 ].join('|'), 'g');
 
-const TOKEN_CLS = ['text-zinc-600', 'text-emerald-400', 'text-violet-400', 'text-sky-400', 'text-amber-400'];
+const TOKEN_CLS = ['text-muted-foreground', 'text-emerald-400', 'text-violet-400', 'text-sky-400', 'text-amber-400'];
 
 function colorize(code: string): React.ReactNode[] {
   const nodes: React.ReactNode[] = [];
   let last = 0;
   let k = 0;
   for (const m of code.matchAll(TOKEN)) {
-    if (m.index! > last) nodes.push(<span key={k++} className="text-zinc-300">{code.slice(last, m.index!)}</span>);
+    if (m.index! > last) nodes.push(<span key={k++} className="text-foreground">{code.slice(last, m.index!)}</span>);
     const gi = m.slice(1).findIndex(g => g !== undefined);
-    nodes.push(<span key={k++} className={TOKEN_CLS[gi] || 'text-zinc-300'}>{m[0]}</span>);
+    nodes.push(<span key={k++} className={TOKEN_CLS[gi] || 'text-foreground'}>{m[0]}</span>);
     last = m.index! + m[0].length;
   }
-  if (last < code.length) nodes.push(<span key={k++} className="text-zinc-300">{code.slice(last)}</span>);
+  if (last < code.length) nodes.push(<span key={k++} className="text-foreground">{code.slice(last)}</span>);
   return nodes;
 }
 
@@ -119,7 +119,7 @@ function CodeResult({ text }: { text: string }) {
       const ln = line.match(/^(\s*\d+→)(.*)/);
       return (
         <div key={i}>
-          {ln ? <><span className="text-zinc-700 select-none">{ln[1]}</span>{colorize(ln[2])}</> : colorize(line)}
+          {ln ? <><span className="text-muted-foreground/60 select-none">{ln[1]}</span>{colorize(ln[2])}</> : colorize(line)}
         </div>
       );
     });
@@ -138,8 +138,8 @@ function isJson(s: string): boolean {
 // ── JSON tree viewer ──
 
 function JsonValue({ value, depth = 0 }: { value: unknown; depth?: number }) {
-  if (value === null) return <span className="text-zinc-600">null</span>;
-  if (value === undefined) return <span className="text-zinc-600">undefined</span>;
+  if (value === null) return <span className="text-muted-foreground">null</span>;
+  if (value === undefined) return <span className="text-muted-foreground">undefined</span>;
   if (typeof value === 'boolean') return <span className="text-amber-400">{String(value)}</span>;
   if (typeof value === 'number') return <span className="text-sky-400">{value}</span>;
   if (typeof value === 'string') {
@@ -150,13 +150,13 @@ function JsonValue({ value, depth = 0 }: { value: unknown; depth?: number }) {
   }
 
   if (Array.isArray(value)) {
-    if (value.length === 0) return <span className="text-zinc-500">[]</span>;
+    if (value.length === 0) return <span className="text-muted-foreground">[]</span>;
     return (
-      <CollapsibleJson label={`Array(${value.length})`} className="text-zinc-400" defaultOpen={depth < 2}>
-        <div className="pl-3 border-l border-zinc-800/60">
+      <CollapsibleJson label={`Array(${value.length})`} className="text-muted-foreground" defaultOpen={depth < 2}>
+        <div className="pl-3 border-l border-border/60">
           {value.map((item, i) => (
             <div key={i} className="flex gap-1">
-              <span className="text-zinc-600 shrink-0 select-none">{i}:</span>
+              <span className="text-muted-foreground shrink-0 select-none">{i}:</span>
               <JsonValue value={item} depth={depth + 1} />
             </div>
           ))}
@@ -167,10 +167,10 @@ function JsonValue({ value, depth = 0 }: { value: unknown; depth?: number }) {
 
   if (typeof value === 'object') {
     const entries = Object.entries(value);
-    if (entries.length === 0) return <span className="text-zinc-500">{'{}'}</span>;
+    if (entries.length === 0) return <span className="text-muted-foreground">{'{}'}</span>;
     return (
-      <CollapsibleJson label={`{${entries.length}}`} className="text-zinc-400" defaultOpen={depth < 2}>
-        <div className="pl-3 border-l border-zinc-800/60">
+      <CollapsibleJson label={`{${entries.length}}`} className="text-muted-foreground" defaultOpen={depth < 2}>
+        <div className="pl-3 border-l border-border/60">
           {entries.map(([k, v]) => (
             <div key={k} className="flex gap-1">
               <span className="text-violet-400/80 shrink-0">{k}:</span>
@@ -182,7 +182,7 @@ function JsonValue({ value, depth = 0 }: { value: unknown; depth?: number }) {
     );
   }
 
-  return <span className="text-zinc-400">{String(value)}</span>;
+  return <span className="text-muted-foreground">{String(value)}</span>;
 }
 
 function CollapsibleJson({ label, className, defaultOpen = false, children }: {
@@ -279,7 +279,7 @@ export function CollapsibleBlock({ label, labelClass, preview, children, wrap, f
         </svg>
         {label}
         {!isOpen && preview && (
-          <span className="text-zinc-600 font-mono text-[10px] truncate ml-1 flex-1">{preview}</span>
+          <span className="text-muted-foreground font-mono text-[10px] truncate ml-1 flex-1">{preview}</span>
         )}
       </button>
       {isOpen && (
@@ -321,14 +321,14 @@ export function LogRenderer({ text, className }: { text: string; className?: str
         {hasCollapsible && (
           <button
             onClick={() => setExpandAll(prev => !prev)}
-            className="text-[11px] text-zinc-600 hover:text-zinc-400 transition-colors font-mono px-1.5 py-0.5 rounded border border-zinc-800/60 hover:border-zinc-700"
+            className="text-[11px] text-muted-foreground hover:text-muted-foreground transition-colors font-mono px-1.5 py-0.5 rounded border border-border/60 hover:border-border"
           >
             {expandAll ? 'fold' : 'unfold'}
           </button>
         )}
         <button
           onClick={() => setWrap(!wrap)}
-          className="text-[11px] text-zinc-600 hover:text-zinc-400 transition-colors font-mono px-1.5 py-0.5 rounded border border-zinc-800/60 hover:border-zinc-700"
+          className="text-[11px] text-muted-foreground hover:text-muted-foreground transition-colors font-mono px-1.5 py-0.5 rounded border border-border/60 hover:border-border"
           title={wrap ? 'Unwrap lines' : 'Wrap lines'}
         >
           {wrap ? 'unwrap' : 'wrap'}
@@ -340,7 +340,7 @@ export function LogRenderer({ text, className }: { text: string; className?: str
         switch (block.type) {
           case 'text':
             return (
-              <Md key={i} text={block.content} className="text-zinc-300 text-sm" />
+              <Md key={i} text={block.content} className="text-foreground text-sm" />
             );
 
           case 'tool':
@@ -355,8 +355,8 @@ export function LogRenderer({ text, className }: { text: string; className?: str
                 preview={truncate(block.input)}
               >
                 {isJson(block.input)
-                  ? <JsonTree text={block.input} className="text-zinc-500" />
-                  : <pre className="text-zinc-500 font-mono text-[11px]">{block.input}</pre>
+                  ? <JsonTree text={block.input} className="text-muted-foreground" />
+                  : <pre className="text-muted-foreground font-mono text-[11px]">{block.input}</pre>
                 }
               </CollapsibleBlock>
             );
@@ -373,10 +373,10 @@ export function LogRenderer({ text, className }: { text: string; className?: str
                 preview={truncate(block.content)}
               >
                 {isJson(block.content)
-                  ? <JsonTree text={block.content} className="text-zinc-500" />
+                  ? <JsonTree text={block.content} className="text-muted-foreground" />
                   : /^\s*\d+→/.test(block.content)
                     ? <CodeResult text={block.content} />
-                    : <Md text={block.content} className="text-zinc-400 text-xs" />
+                    : <Md text={block.content} className="text-muted-foreground text-xs" />
                 }
               </CollapsibleBlock>
             );
@@ -392,7 +392,7 @@ export function LogRenderer({ text, className }: { text: string; className?: str
                 labelClass="bg-amber-500/5 hover:bg-amber-500/10 text-amber-400/60"
                 preview={truncate(block.content)}
               >
-                <Md text={block.content} className="text-zinc-500 italic text-xs" />
+                <Md text={block.content} className="text-muted-foreground italic text-xs" />
               </CollapsibleBlock>
             );
 

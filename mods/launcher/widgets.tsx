@@ -30,7 +30,7 @@ function KanbanWidgetInner({ path }: { path: string }) {
 function ColumnRow({ col }: { col: NodeData }) {
   const { data: tasks } = useChildren(col.$path, { watch: true, watchNew: true });
   const label = typeof col.label === 'string' ? col.label : col.$path.split('/').at(-1) || '?';
-  const color = typeof col.color === 'string' ? col.color : 'border-zinc-400';
+  const color = typeof col.color === 'string' ? col.color : 'border-border';
   // Extract bg color from border color class
   const dotColor = color.replace('border-', 'bg-');
 

@@ -54,7 +54,7 @@ const PRIORITY_COLOR: Record<string, string> = {
   urgent: 'bg-red-500',
   high: 'bg-orange-400',
   normal: 'bg-blue-400',
-  low: 'bg-zinc-400',
+  low: 'bg-muted',
 };
 
 const PRIORITIES: { value: string; label: string }[] = [
@@ -573,7 +573,7 @@ const KanbanColumn: View<BoardColumn, ColumnExtra> = ({
       <div
         className={cn(
           'mb-2 flex items-center gap-2 border-b-2 pb-1.5',
-          value.color || 'border-zinc-400',
+          value.color || 'border-border',
         )}
       >
         {editable && (
@@ -763,7 +763,7 @@ const KanbanView: View<BoardKanban, { editable?: boolean }> = ({ value, ctx, edi
     await withToast(async () => {
       await createNode(`${basePath}/${slug}`, 'board.column', {
         label: label.trim(),
-        color: 'border-zinc-400',
+        color: 'border-border',
         order: maxOrder + 1,
         mount: { $type: 't.mount.query', source: `${basePath}/data`, match: { status: slug } },
       });

@@ -48,7 +48,7 @@ const ChecklistView: View<TChecklist> = ({ value }) => {
             <button
               className={cn(
                 'flex h-4 w-4 shrink-0 items-center justify-center rounded border text-[10px]',
-                item.done ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-zinc-600',
+                item.done ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-border',
               )}
               onClick={() => actions.toggle({ id: item.id })}
             >
@@ -129,7 +129,7 @@ const TagsView: View<TTags> = ({ value }) => {
 
         {!adding && (
           <button
-            className="rounded-full border border-dashed border-zinc-600 px-2 py-0.5 text-xs text-muted-foreground hover:border-zinc-400 hover:text-foreground"
+            className="rounded-full border border-dashed border-border px-2 py-0.5 text-xs text-muted-foreground hover:border-border hover:text-foreground"
             onClick={() => setAdding(true)}
           >
             +
@@ -422,7 +422,7 @@ const ChecklistCompact: View<TChecklist> = ({ value }) => {
           <li key={item.id} className="flex items-center gap-1.5 text-xs">
             <span className={cn(
               'inline-block h-3 w-3 shrink-0 rounded-sm border text-[8px] leading-3 text-center',
-              item.done ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-zinc-600',
+              item.done ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-border',
             )}>
               {item.done ? '✓' : ''}
             </span>
@@ -466,7 +466,7 @@ const ChecklistFull: View<TChecklist> = ({ value }) => {
               <button
                 className={cn(
                   'flex h-4 w-4 shrink-0 items-center justify-center rounded border text-[10px]',
-                  item.done ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-zinc-600 hover:border-zinc-400',
+                  item.done ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-border hover:border-border',
                 )}
                 onClick={() => actions.toggle({ id: item.id })}
               >
@@ -698,7 +698,7 @@ export function AttachMenu({ node }: { node: NodeData }) {
       {available.length > 0 && (
         <div className="relative">
           <button
-            className="rounded-md border border-dashed border-zinc-600 px-2 py-0.5 text-xs text-muted-foreground hover:border-zinc-400 hover:text-foreground"
+            className="rounded-md border border-dashed border-border px-2 py-0.5 text-xs text-muted-foreground hover:border-border hover:text-foreground"
             onClick={() => setOpen(v => !v)}
           >
             + Component

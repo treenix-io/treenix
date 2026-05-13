@@ -92,7 +92,7 @@ const ChatView: View<AiChat> = ({ value }) => {
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-3">
         {messages.length === 0 && !streaming && (
-          <p className="text-sm text-zinc-600 italic py-8 text-center">No messages yet</p>
+          <p className="text-sm text-muted-foreground italic py-8 text-center">No messages yet</p>
         )}
 
         {messages.map((msg, i) => (
@@ -118,9 +118,9 @@ const ChatView: View<AiChat> = ({ value }) => {
               <span className="text-[10px] text-violet-400 font-bold">AI</span>
             </div>
             <div className="flex items-center gap-1 py-2">
-              <span className="w-1.5 h-1.5 rounded-full bg-zinc-500 animate-bounce" style={{ animationDelay: '0ms' }} />
-              <span className="w-1.5 h-1.5 rounded-full bg-zinc-500 animate-bounce" style={{ animationDelay: '150ms' }} />
-              <span className="w-1.5 h-1.5 rounded-full bg-zinc-500 animate-bounce" style={{ animationDelay: '300ms' }} />
+              <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: '0ms' }} />
+              <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: '150ms' }} />
+              <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: '300ms' }} />
             </div>
           </div>
         )}
@@ -129,7 +129,7 @@ const ChatView: View<AiChat> = ({ value }) => {
       </div>
 
       {/* Input bar */}
-      <div className="shrink-0 border-t border-zinc-800 px-4 py-4 pb-6 flex gap-2 items-end">
+      <div className="shrink-0 border-t border-border px-4 py-4 pb-6 flex gap-2 items-end">
         <textarea
           ref={textareaRef}
           value={input}
@@ -139,9 +139,9 @@ const ChatView: View<AiChat> = ({ value }) => {
           disabled={streaming}
           rows={1}
           className={cn(
-            'flex-1 resize-none rounded-lg border border-zinc-800 bg-zinc-900/50 px-3 py-2',
-            'text-sm text-zinc-200 placeholder:text-zinc-600',
-            'focus:outline-none focus:border-zinc-600',
+            'flex-1 resize-none rounded-lg border border-border bg-card/50 px-3 py-2',
+            'text-sm text-foreground placeholder:text-muted-foreground',
+            'focus:outline-none focus:border-border',
             'field-sizing-content min-h-[38px] max-h-48',
             streaming && 'opacity-50 cursor-not-allowed',
           )}
@@ -162,7 +162,7 @@ const ChatView: View<AiChat> = ({ value }) => {
               'shrink-0 px-3 py-2 rounded-lg text-xs font-medium border transition-colors',
               input.trim()
                 ? 'bg-violet-600/20 text-violet-400 border-violet-500/20 hover:bg-violet-600/30'
-                : 'bg-zinc-800/30 text-zinc-600 border-zinc-800 cursor-not-allowed',
+                : 'bg-card/30 text-muted-foreground border-border cursor-not-allowed',
             )}
           >
             Send
@@ -172,7 +172,7 @@ const ChatView: View<AiChat> = ({ value }) => {
         {messages.length > 0 && !streaming && (
           <button
             onClick={clear}
-            className="shrink-0 px-2 py-2 rounded-lg text-xs text-zinc-600 hover:text-zinc-400 transition-colors"
+            className="shrink-0 px-2 py-2 rounded-lg text-xs text-muted-foreground hover:text-muted-foreground transition-colors"
             title="Clear messages and start a new session"
           >
             New Chat
@@ -199,9 +199,9 @@ function MessageBubble({ msg }: { msg: ThreadMessage }) {
 
       <div className={cn('flex-1 min-w-0', isUser && 'text-right')}>
         {isUser ? (
-          <p className="text-sm text-zinc-300 leading-relaxed whitespace-pre-wrap">{msg.text}</p>
+          <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">{msg.text}</p>
         ) : (
-          <LogRenderer text={msg.text} className="text-sm text-zinc-300" />
+          <LogRenderer text={msg.text} className="text-sm text-foreground" />
         )}
       </div>
     </div>

@@ -112,7 +112,7 @@ const RunView: View<AiRun> = ({ value, ctx }) => {
         {isRunning ? <RunningPing /> : <StatusDot status={status} />}
         <StatusBadge status={status} />
         <span className={cn(
-          'text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400',
+          'text-[10px] font-mono px-1.5 py-0.5 rounded bg-card text-muted-foreground',
         )}>
           {value.mode}
         </span>
@@ -121,17 +121,17 @@ const RunView: View<AiRun> = ({ value, ctx }) => {
           {elapsed && (
             <span className={cn(
               'text-[10px] font-mono tabular-nums',
-              isRunning ? 'text-sky-400/70' : 'text-zinc-600',
+              isRunning ? 'text-sky-400/70' : 'text-muted-foreground',
             )}>
               {elapsed}
             </span>
           )}
           {costComp && costComp.costUsd > 0 && (
-            <span className="text-[10px] font-mono text-zinc-600">
+            <span className="text-[10px] font-mono text-muted-foreground">
               ${costComp.costUsd.toFixed(3)}
             </span>
           )}
-          <span className="text-[10px] text-zinc-600 font-mono tabular-nums">
+          <span className="text-[10px] text-muted-foreground font-mono tabular-nums">
             {runStatus?.startedAt ? formatTime(runStatus.startedAt) : ''}
           </span>
           {isRunning && <StopButton runPath={path} />}
@@ -140,25 +140,25 @@ const RunView: View<AiRun> = ({ value, ctx }) => {
 
       {/* Task ref */}
       {value.taskRef && (
-        <div className="text-[11px] text-zinc-500 font-mono">
+        <div className="text-[11px] text-muted-foreground font-mono">
           task: {value.taskRef}
         </div>
       )}
 
       {/* Prompt */}
-      <div className="bg-zinc-900/40 rounded-xl px-4 py-3 border border-zinc-800/40">
+      <div className="bg-card/40 rounded-xl px-4 py-3 border border-border/40">
         <CollapsibleBlock
-          label={<span className="text-zinc-400">Prompt</span>}
-          labelClass="text-zinc-400/80 hover:text-zinc-300"
+          label={<span className="text-muted-foreground">Prompt</span>}
+          labelClass="text-muted-foreground/80 hover:text-foreground"
           wrap={true}
           defaultOpen={false}
         >
-          <Md text={value.prompt} className="text-sm text-zinc-300" />
+          <Md text={value.prompt} className="text-sm text-foreground" />
         </CollapsibleBlock>
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-0.5 bg-zinc-900/40 rounded-lg p-0.5 w-fit">
+      <div className="flex gap-0.5 bg-card/40 rounded-lg p-0.5 w-fit">
         {(['log', 'result'] as const).map(t => (
           <button
             key={t}
@@ -166,8 +166,8 @@ const RunView: View<AiRun> = ({ value, ctx }) => {
             className={cn(
               'px-3.5 py-1 rounded-md text-xs font-medium transition-all duration-150',
               tab === t
-                ? 'bg-zinc-800 text-zinc-200 shadow-sm'
-                : 'text-zinc-500 hover:text-zinc-300',
+                ? 'bg-card text-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground',
             )}
           >
             {t === 'log' ? `log (${entries.length})` : t}
@@ -179,12 +179,12 @@ const RunView: View<AiRun> = ({ value, ctx }) => {
       <div className={cn(
         'rounded-xl px-3 py-2.5 max-h-[75vh] overflow-y-auto border transition-all duration-300',
         isRunning
-          ? 'bg-zinc-950 border-sky-500/15 shadow-lg shadow-sky-500/5'
-          : 'bg-zinc-950 border-zinc-800',
+          ? 'bg-card border-sky-500/15 shadow-lg shadow-sky-500/5'
+          : 'bg-card border-border',
       )}>
         {tab === 'log'
           ? <StructuredLogRenderer entries={entries} />
-          : <p className="text-sm text-zinc-300 whitespace-pre-wrap">{value.result || 'No result yet'}</p>
+          : <p className="text-sm text-foreground whitespace-pre-wrap">{value.result || 'No result yet'}</p>
         }
       </div>
 
@@ -210,18 +210,18 @@ const RunRow: View<AiRun> = ({ value, ctx }) => {
     <>
       <StatusDot status={status} />
       <span className={cn(
-        'text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800/60 text-zinc-500',
+        'text-[10px] font-mono px-1.5 py-0.5 rounded bg-card/60 text-muted-foreground',
       )}>
         {value.mode}
       </span>
-      <span className="text-sm text-zinc-300 truncate flex-1">
+      <span className="text-sm text-foreground truncate flex-1">
         {value.prompt.slice(0, 80) || '(no prompt)'}
       </span>
       {costComp && costComp.costUsd > 0 && (
-        <span className="text-[10px] font-mono text-zinc-600">${costComp.costUsd.toFixed(3)}</span>
+        <span className="text-[10px] font-mono text-muted-foreground">${costComp.costUsd.toFixed(3)}</span>
       )}
       {runStatus?.startedAt ? (
-        <span className="text-[10px] text-zinc-600 shrink-0">{formatTime(runStatus.startedAt)}</span>
+        <span className="text-[10px] text-muted-foreground shrink-0">{formatTime(runStatus.startedAt)}</span>
       ) : null}
     </>
   );

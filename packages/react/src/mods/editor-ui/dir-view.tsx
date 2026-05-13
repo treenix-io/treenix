@@ -6,7 +6,7 @@ import { RenderChildren, type ChildCtx } from './list-items';
 const STATUS_PILL: Record<string, string> = {
   draft: 'border-yellow-300/25 bg-yellow-300/10 text-yellow-300',
   published: 'border-primary/25 bg-primary/10 text-primary',
-  archived: 'border-zinc-400/20 bg-zinc-400/10 text-zinc-400',
+  archived: 'border-border/20 bg-muted/10 text-muted-foreground',
 };
 
 const CTX_OPTIONS: { id: ChildCtx; label: string }[] = [

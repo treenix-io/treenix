@@ -37,18 +37,18 @@ const ApiTokensView: View<ApiTokenManager> = ({ value, ctx }) => {
 
   return (
     <div className="space-y-4 p-4">
-      <h2 className="text-lg font-semibold text-zinc-100">API Tokens</h2>
+      <h2 className="text-lg font-semibold text-foreground">API Tokens</h2>
 
       <div className="flex gap-2">
         <input
-          className="flex-1 rounded bg-zinc-800 px-3 py-1.5 text-sm text-zinc-100 border border-zinc-700 focus:border-zinc-500 outline-none"
+          className="flex-1 rounded bg-card px-3 py-1.5 text-sm text-foreground border border-border focus:border-border outline-none"
           placeholder="token name (e.g. claude-code)"
           value={name}
           onChange={e => setName(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && handleCreate()}
         />
         <input
-          className="w-64 rounded bg-zinc-800 px-3 py-1.5 text-sm text-zinc-100 border border-zinc-700 focus:border-zinc-500 outline-none"
+          className="w-64 rounded bg-card px-3 py-1.5 text-sm text-foreground border border-border focus:border-border outline-none"
           placeholder="groups (comma-separated, e.g. admins)"
           value={groupsInput}
           onChange={e => setGroupsInput(e.target.value)}
@@ -87,7 +87,7 @@ const ApiTokensView: View<ApiTokenManager> = ({ value, ctx }) => {
       )}
 
       {children.length === 0 ? (
-        <p className="text-sm text-zinc-500">No tokens yet</p>
+        <p className="text-sm text-muted-foreground">No tokens yet</p>
       ) : (
         <div className="space-y-2">
           {children.map(child => {
@@ -101,20 +101,20 @@ const ApiTokensView: View<ApiTokenManager> = ({ value, ctx }) => {
               ? (groupsComp!.list as unknown[]).filter((g): g is string => typeof g === 'string')
               : [];
             return (
-              <div key={child.$path} className="flex items-center justify-between rounded bg-zinc-800/50 px-3 py-2 border border-zinc-700/50">
+              <div key={child.$path} className="flex items-center justify-between rounded bg-card/50 px-3 py-2 border border-border/50">
                 <div className="space-y-1 min-w-0 flex-1">
-                  <div className="flex items-center gap-2 text-sm font-medium text-zinc-200">
+                  <div className="flex items-center gap-2 text-sm font-medium text-foreground">
                     <span>{tokenName}</span>
                     {preview && (
-                      <code className="font-mono text-xs text-zinc-500">{preview}</code>
+                      <code className="font-mono text-xs text-muted-foreground">{preview}</code>
                     )}
                     {userGroups.map(g => (
-                      <span key={g} className="rounded bg-zinc-700/60 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-zinc-300">
+                      <span key={g} className="rounded bg-muted/60 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-foreground">
                         {g}
                       </span>
                     ))}
                   </div>
-                  <div className="text-xs text-zinc-500">
+                  <div className="text-xs text-muted-foreground">
                     {userId}{createdAt ? ` · ${new Date(createdAt).toLocaleDateString()}` : ''}
                   </div>
                 </div>

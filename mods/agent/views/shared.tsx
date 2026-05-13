@@ -8,7 +8,7 @@ export const STATUS: Record<string, { bg: string; text: string; dot: string }> =
   running:  { bg: 'bg-sky-500/15', text: 'text-sky-400', dot: 'bg-sky-400 animate-pulse' },
   done:     { bg: 'bg-emerald-500/15', text: 'text-emerald-400', dot: 'bg-emerald-400' },
   error:    { bg: 'bg-red-500/15', text: 'text-red-400', dot: 'bg-red-400' },
-  aborted:  { bg: 'bg-zinc-500/15', text: 'text-zinc-400', dot: 'bg-zinc-400' },
+  aborted:  { bg: 'bg-muted-foreground/15', text: 'text-muted-foreground', dot: 'bg-muted' },
 };
 
 export function formatTime(ts: number): string {

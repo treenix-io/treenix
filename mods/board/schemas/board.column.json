@@ -10,7 +10,7 @@
     },
     "color": {
       "type": "string",
-      "default": "border-zinc-400"
+      "default": "border-border"
     },
     "order": {
       "type": "number",

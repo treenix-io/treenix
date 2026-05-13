@@ -28,7 +28,7 @@ const AGENT_STATUS: Record<AgentStatus, StatusStyle> = {
   working: { bg: 'bg-sky-500/10', text: 'text-sky-400', dot: 'bg-sky-400 animate-pulse', label: 'working' },
   blocked: { bg: 'bg-amber-500/10', text: 'text-amber-400', dot: 'bg-amber-400', label: 'blocked' },
   error:   { bg: 'bg-red-500/10', text: 'text-red-400', dot: 'bg-red-400', label: 'error' },
-  offline: { bg: 'bg-zinc-700/20', text: 'text-zinc-500', dot: 'bg-zinc-600', label: 'offline' },
+  offline: { bg: 'bg-muted/20', text: 'text-muted-foreground', dot: 'bg-muted', label: 'offline' },
 };
 
 const APPROVAL_STATUS: Record<string, { bg: string; text: string; border: string }> = {
@@ -84,8 +84,8 @@ const PoolView: View<AiPool> = ({ value, ctx }) => {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-semibold text-zinc-100 tracking-tight">Agent Office</h2>
-          <p className="text-xs text-zinc-500 mt-0.5 font-mono">
+          <h2 className="text-lg font-semibold text-foreground tracking-tight">Agent Office</h2>
+          <p className="text-xs text-muted-foreground mt-0.5 font-mono">
             {activeCount}/{maxC} active · {queueCount} queued
           </p>
         </div>
@@ -97,7 +97,7 @@ const PoolView: View<AiPool> = ({ value, ctx }) => {
               key={i}
               className={cn(
                 'w-3 h-8 rounded-sm transition-colors duration-300',
-                i < activeCount ? 'bg-sky-500/60' : 'bg-zinc-800',
+                i < activeCount ? 'bg-sky-500/60' : 'bg-card',
               )}
             />
           ))}
@@ -118,13 +118,13 @@ const PoolView: View<AiPool> = ({ value, ctx }) => {
 
       {/* Agents grid */}
       <div className="flex flex-col gap-2">
-        <h3 className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
+        <h3 className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
           Agents ({agentNodes.length})
         </h3>
         <RenderChildren
           items={agentNodes}
           ctx="list"
-          empty={<p className="text-sm text-zinc-600 italic">No agents registered</p>}
+          empty={<p className="text-sm text-muted-foreground italic">No agents registered</p>}
         />
       </div>
 
@@ -155,7 +155,7 @@ const AgentRow: View<AiAgent> = ({ value, ctx }) => {
 
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-zinc-200 truncate">
+          <span className="text-sm font-medium text-foreground truncate">
             {ctx!.node.$path.split('/').at(-1)}
           </span>
           <span className={cn('text-[10px] font-mono px-1.5 py-0.5 rounded', s.bg, s.text)}>
@@ -164,13 +164,13 @@ const AgentRow: View<AiAgent> = ({ value, ctx }) => {
         </div>
 
         {status === 'working' && value.currentTask && (
-          <p className="text-[11px] text-zinc-500 truncate mt-0.5 font-mono">
+          <p className="text-[11px] text-muted-foreground truncate mt-0.5 font-mono">
             → {value.currentTask}
           </p>
         )}
       </div>
 
-      <div className="flex items-center gap-3 text-[11px] text-zinc-600">
+      <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
         {value.totalTokens > 0 && (
           <span className="font-mono">{(value.totalTokens / 100000).toFixed(2)}$</span>
         )}
@@ -201,7 +201,7 @@ const AgentView: View<AiAgent> = ({ value, ctx }) => {
     <div className="flex flex-col gap-5 p-5 max-w-2xl">
       <div className="flex items-center gap-3">
         <StatusDot status={status} />
-        <h2 className="text-lg font-semibold text-zinc-100">{path.split('/').at(-1)}</h2>
+        <h2 className="text-lg font-semibold text-foreground">{path.split('/').at(-1)}</h2>
         <span className={cn('text-xs font-mono px-2 py-0.5 rounded', s.bg, s.text)}>
           {s.label}
         </span>
@@ -217,8 +217,8 @@ const AgentView: View<AiAgent> = ({ value, ctx }) => {
 
       {value.systemPrompt && (
         <div className="flex flex-col gap-1.5">
-          <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">System Prompt</span>
-          <pre className="text-xs text-zinc-400 bg-zinc-900/50 border border-zinc-800 rounded-lg p-3 whitespace-pre-wrap leading-relaxed max-h-48 overflow-y-auto">
+          <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">System Prompt</span>
+          <pre className="text-xs text-muted-foreground bg-card/50 border border-border rounded-lg p-3 whitespace-pre-wrap leading-relaxed max-h-48 overflow-y-auto">
             {value.systemPrompt}
           </pre>
         </div>
@@ -235,7 +235,7 @@ const AgentView: View<AiAgent> = ({ value, ctx }) => {
       {/* Past runs */}
       {sortedRuns.length > 0 && (
         <div className="flex flex-col gap-2">
-          <h3 className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
+          <h3 className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
             Runs ({sortedRuns.length})
           </h3>
           <RenderChildren items={sortedRuns} ctx="list" />
@@ -259,9 +259,9 @@ const AgentView: View<AiAgent> = ({ value, ctx }) => {
 
 function InfoCell({ label, value, mono, span2 }: { label: string; value: string; mono?: boolean; span2?: boolean }) {
   return (
-    <div className={cn('bg-zinc-900/40 border border-zinc-800/50 rounded-lg px-3 py-2', span2 && 'col-span-2')}>
-      <span className="text-[10px] text-zinc-600 uppercase tracking-wider block">{label}</span>
-      <span className={cn('text-sm text-zinc-300 mt-0.5 block truncate', mono && 'font-mono text-xs')}>{value}</span>
+    <div className={cn('bg-card/40 border border-border/50 rounded-lg px-3 py-2', span2 && 'col-span-2')}>
+      <span className="text-[10px] text-muted-foreground uppercase tracking-wider block">{label}</span>
+      <span className={cn('text-sm text-foreground mt-0.5 block truncate', mono && 'font-mono text-xs')}>{value}</span>
     </div>
   );
 }
@@ -269,7 +269,7 @@ function InfoCell({ label, value, mono, span2 }: { label: string; value: string;
 function ActionBtn({ label, color, onClick }: { label: string; color: string; onClick: () => void }) {
   const colors: Record<string, string> = {
     emerald: 'bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600/30 border-emerald-500/20',
-    zinc: 'bg-zinc-700/30 text-zinc-400 hover:bg-zinc-700/50 border-zinc-600/20',
+    zinc: 'bg-muted/30 text-muted-foreground hover:bg-muted/50 border-border/20',
     red: 'bg-red-600/20 text-red-400 hover:bg-red-600/30 border-red-500/20',
   };
   return (
@@ -291,7 +291,7 @@ const ApprovalsView: View<AiApprovals> = ({ value, ctx }) => {
 
   return (
     <div className="flex flex-col gap-5 p-5 max-w-3xl">
-      <h2 className="text-lg font-semibold text-zinc-100 tracking-tight">Approvals</h2>
+      <h2 className="text-lg font-semibold text-foreground tracking-tight">Approvals</h2>
 
       {pending.length > 0 && (
         <div className="flex flex-col gap-2">
@@ -303,12 +303,12 @@ const ApprovalsView: View<AiApprovals> = ({ value, ctx }) => {
       )}
 
       {pending.length === 0 && (
-        <p className="text-sm text-zinc-600 italic">No pending approvals</p>
+        <p className="text-sm text-muted-foreground italic">No pending approvals</p>
       )}
 
       {resolved.length > 0 && (
         <div className="flex flex-col gap-2">
-          <h3 className="text-[11px] font-medium text-zinc-600 uppercase tracking-wider">
+          <h3 className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
             History ({resolved.length})
           </h3>
           {resolved.slice(0, 20).map(a => <Render key={a.$path} value={a} />)}
@@ -331,25 +331,25 @@ const ApprovalView: View<AiApproval> = ({ value, ctx }) => {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className={cn('text-xs font-medium', s.text)}>{status}</span>
-          <span className="text-[11px] text-zinc-500 font-mono">{value.agentRole}</span>
-          <span className="text-[11px] text-zinc-600">→</span>
-          <span className="text-[11px] text-zinc-400 font-mono">{value.tool}</span>
+          <span className="text-[11px] text-muted-foreground font-mono">{value.agentRole}</span>
+          <span className="text-[11px] text-muted-foreground">→</span>
+          <span className="text-[11px] text-muted-foreground font-mono">{value.tool}</span>
         </div>
-        <span className="text-[10px] text-zinc-600">{timeAgo(value.createdAt)}</span>
+        <span className="text-[10px] text-muted-foreground">{timeAgo(value.createdAt)}</span>
       </div>
 
       {value.input && (
-        <pre className="text-[11px] text-zinc-500 bg-black/20 rounded px-2 py-1 max-h-20 overflow-y-auto whitespace-pre-wrap">
+        <pre className="text-[11px] text-muted-foreground bg-black/20 rounded px-2 py-1 max-h-20 overflow-y-auto whitespace-pre-wrap">
           {value.input}
         </pre>
       )}
-      {value.reason && <p className="text-[11px] text-zinc-500 italic">{value.reason}</p>}
+      {value.reason && <p className="text-[11px] text-muted-foreground italic">{value.reason}</p>}
 
       {isPending && (
         <div className="flex items-center gap-2 pt-1 flex-wrap">
           <ActionBtn label="Approve" color="emerald" onClick={() => execute(path, 'approve')} />
           <ActionBtn label="Deny" color="red" onClick={() => execute(path, 'deny')} />
-          <span className="text-[10px] text-zinc-700 mx-1">|</span>
+          <span className="text-[10px] text-muted-foreground/60 mx-1">|</span>
           <ActionBtn label="Approve + remember (agent)" color="emerald" onClick={() => execute(path, 'approve', { remember: 'agent' })} />
           <ActionBtn label="Approve + remember (global)" color="emerald" onClick={() => execute(path, 'approve', { remember: 'global' })} />
         </div>
@@ -364,7 +364,7 @@ const ThreadView: View<AiThread> = ({ value }) => {
   const messages = value?.messages ?? [];
 
   if (!messages.length) {
-    return <p className="text-sm text-zinc-600 italic p-4">No messages yet</p>;
+    return <p className="text-sm text-muted-foreground italic p-4">No messages yet</p>;
   }
 
   return (
@@ -375,8 +375,8 @@ const ThreadView: View<AiThread> = ({ value }) => {
             {msg.role}
           </span>
           <div className="flex-1 min-w-0">
-            <p className="text-sm text-zinc-300 leading-relaxed whitespace-pre-wrap">{msg.text}</p>
-            <span className="text-[10px] text-zinc-700 opacity-0 group-hover:opacity-100 transition-opacity">
+            <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">{msg.text}</p>
+            <span className="text-[10px] text-muted-foreground/60 opacity-0 group-hover:opacity-100 transition-opacity">
               {msg.from} · {timeAgo(msg.ts)}
             </span>
           </div>
@@ -410,9 +410,9 @@ const PlanView: View<AiPlan> = ({ value, ctx }) => {
     return (
       <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3">
         <div className="mb-1 text-[11px] font-medium text-emerald-400 uppercase tracking-wider">Plan approved</div>
-        <div className="minimd max-h-40 overflow-y-auto text-sm text-zinc-300" dangerouslySetInnerHTML={{ __html: html }} />
+        <div className="minimd max-h-40 overflow-y-auto text-sm text-foreground" dangerouslySetInnerHTML={{ __html: html }} />
         {value.feedback && (
-          <div className="mt-2 border-t border-emerald-500/20 pt-2 text-xs text-zinc-500">
+          <div className="mt-2 border-t border-emerald-500/20 pt-2 text-xs text-muted-foreground">
             Feedback: {value.feedback}
           </div>
         )}
@@ -424,13 +424,13 @@ const PlanView: View<AiPlan> = ({ value, ctx }) => {
     <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
       <div className="mb-2 flex items-center justify-between">
         <span className="text-[11px] font-medium text-amber-400 uppercase tracking-wider">Plan awaiting approval</span>
-        <span className="text-[10px] text-zinc-600">
+        <span className="text-[10px] text-muted-foreground">
           {value.createdAt ? new Date(value.createdAt).toLocaleString() : ''}
         </span>
       </div>
 
       <div
-        className="minimd mb-3 max-h-60 overflow-y-auto rounded border border-zinc-800 bg-zinc-900/50 p-2 text-sm text-zinc-300"
+        className="minimd mb-3 max-h-60 overflow-y-auto rounded border border-border bg-card/50 p-2 text-sm text-foreground"
         dangerouslySetInnerHTML={{ __html: html }}
       />
 
@@ -444,13 +444,13 @@ const PlanView: View<AiPlan> = ({ value, ctx }) => {
         value={feedback}
         onChange={e => setFeedback(e.target.value)}
         placeholder="Feedback / comments (optional)..."
-        className="mb-2 w-full min-h-16 max-h-32 resize-none rounded border border-zinc-800 bg-zinc-900/50 p-2 text-sm text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-700"
+        className="mb-2 w-full min-h-16 max-h-32 resize-none rounded border border-border bg-card/50 p-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-border"
       />
 
       <div className="flex items-center gap-2">
         <ActionBtn label="Approve Plan" color="emerald" onClick={() => doAction('approvePlan')} />
         <ActionBtn label="Reject" color="red" onClick={() => doAction('rejectPlan')} />
-        {busy && <span className="text-[10px] text-zinc-600">sending...</span>}
+        {busy && <span className="text-[10px] text-muted-foreground">sending...</span>}
       </div>
     </div>
   );
@@ -468,18 +468,18 @@ const ApprovalRow: View<AiApproval> = ({ value }) => {
         {status}
       </span>
 
-      <span className="text-sm text-zinc-300 truncate">
+      <span className="text-sm text-foreground truncate">
         {value.agentRole || 'agent'}
       </span>
 
-      <span className="text-[11px] text-zinc-500 font-mono truncate">
+      <span className="text-[11px] text-muted-foreground font-mono truncate">
         → {value.tool || '?'}
       </span>
 
       <div className="flex-1" />
 
       {value.createdAt > 0 && (
-        <span className="text-[10px] text-zinc-600 shrink-0">{timeAgo(value.createdAt)}</span>
+        <span className="text-[10px] text-muted-foreground shrink-0">{timeAgo(value.createdAt)}</span>
       )}
     </>
   );
@@ -502,10 +502,10 @@ const AgentLayout: View<AiAgent> = ({ value, ctx }) => {
 
   return (
     <div className="view-full flex flex-col h-full overflow-hidden">
-      <div className="shrink-0 border-b border-zinc-800">
+      <div className="shrink-0 border-b border-border">
         <button
           onClick={() => setCollapsed(!collapsed)}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors w-full"
+          className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors w-full"
         >
           <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
             className={cn('shrink-0 transition-transform duration-150', !collapsed && 'rotate-90')}>

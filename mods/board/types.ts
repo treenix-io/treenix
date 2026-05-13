@@ -80,7 +80,7 @@ registerType('board.kanban', BoardKanban);
 /** Kanban column — label + color + sort order. Query mount provides filtered tasks. */
 export class BoardColumn {
   label = '';
-  color = 'border-zinc-400';
+  color = 'border-border';
   order = 0;
 }
 
