@@ -6,11 +6,13 @@ import { withMigration } from './migrate';
 
 const TEST_TYPE = 'test.migrated';
 const COMP_TYPE = 'test.comp.migrated';
+const UNREL_TYPE = 'test.unrelated-bump';
 
 describe('withMigration', () => {
   afterEach(() => {
     unregister(TEST_TYPE, 'migrate');
     try { unregister(COMP_TYPE, 'migrate'); } catch {}
+    try { unregister(UNREL_TYPE, 'migrate'); } catch {}
   });
 
   it('passes through nodes without migrations', async () => {
@@ -369,6 +371,50 @@ describe('withMigration', () => {
     assert.equal(got?.title, 'hello');
     assert.equal((got as any).meta.$type, 'test.meta');
     assert.equal(typeof (got as any).meta.created, 'number');
+  });
+
+  // ── Cache behavior ──
+
+  it('caches migration descriptor — factory called once across many same-type reads', async () => {
+    let factoryCalls = 0;
+    register(TEST_TYPE, 'migrate', () => {
+      factoryCalls++;
+      return { 1: (_n: any) => {} };
+    });
+
+    const inner = createMemoryTree();
+    const tree = withMigration(inner);
+    await inner.set(createNode('/a', TEST_TYPE));
+    await inner.set(createNode('/b', TEST_TYPE));
+    await inner.set(createNode('/c', TEST_TYPE));
+
+    await tree.get('/a');
+    await tree.get('/b');
+    await tree.get('/c');
+
+    assert.equal(factoryCalls, 1);
+  });
+
+  it('cache invalidates on registry version bump (register/unregister)', async () => {
+    let factoryCalls = 0;
+    register(TEST_TYPE, 'migrate', () => {
+      factoryCalls++;
+      return { 1: (_n: any) => {} };
+    });
+
+    const inner = createMemoryTree();
+    const tree = withMigration(inner);
+    await inner.set(createNode('/a', TEST_TYPE));
+    await inner.set(createNode('/b', TEST_TYPE));
+
+    await tree.get('/a');
+    assert.equal(factoryCalls, 1);
+
+    // Unrelated register — bumps registry version, clears cache
+    register(UNREL_TYPE, 'migrate', () => ({}));
+
+    await tree.get('/b');
+    assert.equal(factoryCalls, 2);
   });
 
   it('empty migrations object is a no-op', async () => {

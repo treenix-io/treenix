@@ -1,24 +1,54 @@
 // Per-type schema migration — normalizes nodes and components on read.
 // Migrations registered via: register(type, 'migrate', () => ({ 1: fn, 2: fn }))
 // Absent $v = version 0. Migration functions mutate the clone in-place.
-// WeakSet tracks already-checked objects — zero cost on hot path.
+//
+// Hot path:
+//  1. checked: WeakSet — same NodeData object seen twice → instant skip
+//  2. migrationInfo: per-type cache (Map) — second time we ask "has type X
+//     any migrations?" returns cached answer (including a cached "no") without
+//     touching the registry. Cache is keyed by registry version (`getRegistryVersion()`)
+//     so any `register/unregister/replaceHandler` call invalidates it in one
+//     integer compare.
 
-import { isComponent, type NodeData, resolveExact } from '#core';
+import { getRegistryVersion, isComponent, type NodeData, resolveExact } from '#core';
 import type { Tree } from '#tree';
 
 type Migrator = (data: Record<string, unknown>) => void;
 type Migrations = Record<number, Migrator>;
+type MigrationInfo = { steps: [number, Migrator][]; version: number };
 
 // Objects that passed through migrateNode and need no changes
 const checked = new WeakSet<NodeData>();
 
-function getMigrations(type: string): { migrations: Migrations; version: number } | null {
+// Per-type migration descriptor cache. `null` is cached too, so types with no
+// migrations registered cost a single Map.get on the hot read path.
+const migrationInfo = new Map<string, MigrationInfo | null>();
+let cachedRegistryVersion = -1;
+
+function getMigrations(type: string): MigrationInfo | null {
+  const v = getRegistryVersion();
+  if (v !== cachedRegistryVersion) {
+    migrationInfo.clear();
+    cachedRegistryVersion = v;
+  }
+  const cached = migrationInfo.get(type);
+  if (cached !== undefined) return cached;
+
+  const info = computeMigrationInfo(type);
+  migrationInfo.set(type, info);
+  return info;
+}
+
+function computeMigrationInfo(type: string): MigrationInfo | null {
   const handler = resolveExact(type, 'migrate');
   if (!handler) return null;
   const migrations = handler() as Migrations;
   const keys = Object.keys(migrations).map(Number).sort((a, b) => a - b);
   if (!keys.length) return null;
-  return { migrations, version: keys[keys.length - 1] };
+  return {
+    steps: keys.map(k => [k, migrations[k]]),
+    version: keys[keys.length - 1],
+  };
 }
 
 /** Apply pending migrations to a data object. Returns true if anything changed. */
@@ -29,8 +59,8 @@ function applyMigrations(data: Record<string, unknown>, type: string): boolean {
   const v = (data['$v'] as number) ?? 0;
   if (v >= m.version) return false;
 
-  for (const [ver, fn] of Object.entries(m.migrations).sort(([a], [b]) => +a - +b)) {
-    if (+ver > v) fn(data);
+  for (const [ver, fn] of m.steps) {
+    if (ver > v) fn(data);
   }
   data['$v'] = m.version;
   return true;
