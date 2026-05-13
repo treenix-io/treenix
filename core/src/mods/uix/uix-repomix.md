@@ -287,7 +287,7 @@ export type { RenderContextType };
             ],
             "properties": {
               "group": {
-                "title": "Группа",
+                "title": "Group",
                 "type": "string"
               },
               "format": {
@@ -349,7 +349,7 @@ export type { RenderContextType };
             ],
             "properties": {
               "group": {
-                "title": "Группа",
+                "title": "Group",
                 "type": "string"
               },
               "format": {

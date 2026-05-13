@@ -1,7 +1,7 @@
 ## server
-HTTP сервер + tRPC + auth + mount system + store pipeline
+HTTP server + tRPC + auth + mount system + store pipeline
 
-### Файлы
+### Files
 - index.ts — bootstrap: overlay(base,work) → mount → volatile → validate → subscriptions
 - trpc.ts — tRPC router, Immer drafts in execute, OCC→CONFLICT mapping
 - auth.ts — ACL, sessions, withAcl wrapper, buildClaims
@@ -16,7 +16,7 @@ HTTP сервер + tRPC + auth + mount system + store pipeline
 - seed/ — initial tree: core.ts + domain module seeds
 - mcp.ts — MCP server: get_node, list_children, set_node, remove_node, execute
 
-### Конвенции
+### Conventions
 - Tree pipeline: withMounts → volatile → validated → subscriptions
 - Mount = component on node, adapter via resolve($type, "mount")
 - ACL: GroupPerm[], p>0 allow, p=0 deny all sticky, p<0 deny bits sticky

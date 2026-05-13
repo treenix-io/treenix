@@ -1,6 +1,6 @@
 # autostart
 
-Init.d-паттерн. Обходит `/sys/autostart`, резолвит ref-детей, запускает service-контекст каждого. Отслеживает состояние в `/proc/`. Экспонирует `start`/`stop` actions.
+Init.d-style pattern. Walks `/sys/autostart`, resolves ref children, starts each one's service context. Tracks state under `/proc/`. Exposes `start` / `stop` actions.
 
 ## Types
-- `autostart` — start/stop actions
+- `autostart` — `start` / `stop` actions

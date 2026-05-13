@@ -1,7 +1,7 @@
 # uix
 
-Динамический компилятор JSX-views. Берёт raw JSX/TSX из type-нод, компилирует в React-компоненты в runtime через `jsx-parser`, регистрирует как `react`-контексты. AI-генерируемые views без билд-шага.
+Dynamic JSX-view compiler. Takes raw JSX/TSX from type nodes, compiles to React components at runtime via `jsx-parser`, registers them as `react`-context handlers. AI-generated views without a build step.
 
 ## Key
 - `compileComponent(type, rawJSX)` — compile + cache + register
-- `verifyViewSource` — server-safe compile check (используется MCP)
+- `verifyViewSource` — server-safe compile check (used by MCP)
