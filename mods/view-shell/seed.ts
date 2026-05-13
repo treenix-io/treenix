@@ -1,7 +1,6 @@
 // view-shell seed — registers /sys/routes/v with a wildcard route, so the
 // unified router catches /v/anything and renders this mod's view.
 
-import type { NodeData } from '@treenx/core';
 import { registerPrefab } from '@treenx/core/mod';
 
 registerPrefab('view-shell', 'seed', [
@@ -13,4 +12,4 @@ registerPrefab('view-shell', 'seed', [
     site: { $type: 't.site', state: 'published', mode: 'static' },
     seo: { $type: 't.seo', title: 'Treenix' },
   },
-] as NodeData[], undefined, { tier: 'core' });
+], undefined, { tier: 'core' });

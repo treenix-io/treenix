@@ -1,6 +1,5 @@
 // Launcher seed — demo home screen with app shortcuts
 
-import type { NodeData } from '@treenx/core';
 import { registerPrefab } from '@treenx/core/mod';
 
 const layout = JSON.stringify([
@@ -36,4 +35,4 @@ registerPrefab('launcher', 'seed', [
 
   // Widgets (larger)
   { $path: 'launcher/board-widget', $type: 'ref', $ref: '/board' },
-] as NodeData[]);
+]);

@@ -1,4 +1,3 @@
-import { type NodeData } from '@treenx/core';
 import { registerPrefab } from '@treenx/core/mod';
 
 registerPrefab('whisper', 'seed', [
@@ -12,4 +11,4 @@ registerPrefab('whisper', 'seed', [
   { $path: 'whisper/inbox', $type: 'whisper.inbox',
     source: '/whisper/default', target: '/agent' },
   { $path: '/sys/autostart/whisper-inbox', $type: 'ref', $ref: '/whisper/inbox' },
-] as NodeData[]);
+]);

@@ -1,4 +1,3 @@
-import { type NodeData } from '@treenx/core';
 import { registerPrefab } from '@treenx/core/mod';
 
 registerPrefab('three', 'seed', [
@@ -51,4 +50,4 @@ registerPrefab('three', 'seed', [
     px: 0, py: 1.5, pz: 0, rx: 0, ry: 0, rz: 0, sx: 1, sy: 1, sz: 1,
     mesh: { $type: 't3d.mesh', geometry: 'cone', width: 0.3, height: 0.6, color: '#10b981' },
   },
-] as NodeData[]);
+]);

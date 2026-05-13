@@ -1,4 +1,3 @@
-import { type NodeData } from '@treenx/core';
 import { registerPrefab } from '@treenx/core/mod';
 import { mdToTiptap } from './markdown';
 
@@ -6,7 +5,7 @@ import { mdToTiptap } from './markdown';
 // Setup accepts { root: string } to set the filesystem path
 registerPrefab('doc', 'library', [
   { $path: '.', $type: 'mount-point', mount: { $type: 't.mount.fs', root: '' } },
-] as NodeData[], (nodes, params) => {
+], (nodes, params) => {
   const p = params as { root?: string } | undefined;
   if (!p?.root) return nodes;
   return nodes.map(n => n.$path === '.' ? { ...n, mount: { ...(n.mount as Record<string, unknown>), root: p.root } } : n);
@@ -23,4 +22,4 @@ const welcomeContent = mdToTiptap(welcomeMd);
 
 registerPrefab('doc', 'demo', [
   { $path: 'welcome', $type: 'doc.page', title: 'Welcome to Docs', content: welcomeContent },
-] as NodeData[]);
+]);

@@ -2,7 +2,7 @@
 // Backed by a Mongo collection so events accumulate without TTL by default;
 // retention policy is set per-deployment, not at this layer.
 
-import { A, type NodeData, R, S, W } from '@treenx/core';
+import { A, R, S, W } from '@treenx/core';
 import { registerPrefab } from '@treenx/core/mod';
 
 registerPrefab('audit', 'seed', [
@@ -15,4 +15,4 @@ registerPrefab('audit', 'seed', [
     // (system context bypasses the agent ACL — see audit/with-audit.ts).
     $acl: [{ g: 'admins', p: R | W | A | S }, { g: 'authenticated', p: 0 }, { g: 'public', p: 0 }],
   },
-] as NodeData[], undefined, { tier: 'core' });
+], undefined, { tier: 'core' });

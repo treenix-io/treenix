@@ -97,13 +97,12 @@ registerType('${name}', ${cls});
 `);
 
   writeFileSync(join(modDir, 'seed.ts'),
-`import type { NodeData } from '@treenx/core';
-import { registerPrefab } from '@treenx/core/mod';
+`import { registerPrefab } from '@treenx/core/mod';
 
 registerPrefab('${name}', 'seed', [
   { $path: '${name}', $type: 'dir' },
   { $path: '${name}/example', $type: '${name}', title: 'Example' },
-] as NodeData[]);
+]);
 `);
 
   writeFileSync(join(modDir, 'view.tsx'),

@@ -1,4 +1,3 @@
-import { type NodeData } from '@treenx/core';
 import { registerPrefab } from '@treenx/core/mod';
 
 registerPrefab('sim', 'seed', [
@@ -52,4 +51,4 @@ Describe the dynamics you observe: who moved where, who spoke, who heard whom. B
   },
 
   { $path: '/sys/autostart/sim', $type: 'ref', $ref: '/sim/world' },
-] as NodeData[]);
+]);

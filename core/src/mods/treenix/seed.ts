@@ -1,4 +1,4 @@
-import { A, type NodeData, R, S, W } from '@treenx/core';
+import { A, R, S, W } from '@treenx/core';
 import { registerPrefab } from '@treenx/core/mod';
 
 // Universal infra — works with any storage backend (FS, memory, Mongo)
@@ -26,7 +26,7 @@ registerPrefab('core', 'seed', [
   { $path: 'sys/autostart/mcp', $type: 'ref', $ref: '/sys/mcp' },
   { $path: 'sys/routes', $type: 'dir' },
   { $path: 'sys/llm', $type: 't.llm' },
-] as NodeData[], undefined, { tier: 'core' });
+], undefined, { tier: 'core' });
 
 // Auth infra — users, sessions, API tokens.
 // No explicit mount — children inherit the root overlay (FS by default).
@@ -42,4 +42,4 @@ registerPrefab('auth', 'seed', [
   { $path: 'auth/api-tokens', $type: 't.api.tokens',
     $acl: [{ g: 'admins', p: R | W | A | S }, { g: 'authenticated', p: 0 }],
   },
-] as NodeData[], undefined, { tier: 'core' });
+], undefined, { tier: 'core' });

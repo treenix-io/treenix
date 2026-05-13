@@ -1,6 +1,5 @@
 // Board seed — kanban at /board, typed columns with query mounts
 
-import { type NodeData } from '@treenx/core';
 import { registerPrefab } from '@treenx/core/mod';
 
 registerPrefab('board', 'seed', [
@@ -18,4 +17,4 @@ registerPrefab('board', 'seed', [
     mount: { $type: 't.mount.query', source: '/board/data', match: { status: 'review' } } },
   { $path: 'board/done', $type: 'board.column', label: 'Done', color: 'border-green-400', order: 4,
     mount: { $type: 't.mount.query', source: '/board/data', match: { status: 'done' } } },
-] as NodeData[], undefined, { tier: 'core' });
+], undefined, { tier: 'core' });

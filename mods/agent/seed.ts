@@ -1,6 +1,5 @@
 // Agent Office seed — /agents pool + agents, /guardian policies
 
-import { type NodeData } from '@treenx/core';
 import { registerPrefab } from '@treenx/core/mod';
 
 registerPrefab('agent', 'seed', [
@@ -78,4 +77,4 @@ Be concise. Facts only.`,
 
   // Autostart — orchestrator starts on server boot
   { $path: '/sys/autostart/agents', $type: 'ref', $ref: '/agents' },
-] as NodeData[]);
+]);
