@@ -69,7 +69,7 @@ This happens on the server. The client just receives the normal stream — query
 You rarely call `subscribe` directly in React. `usePath` and `useChildren` wrap the subscription and give you reactive state:
 
 ```typescript
-import { usePath, useChildren } from '@treenx/react/hooks'
+import { usePath, useChildren } from '@treenx/react'
 import { OrderStatus } from './types'
 
 function OrderView({ path }: { path: string }) {

@@ -64,7 +64,7 @@ This is a deliberate design: `getComponent(node, Class)` checks `node.$type` fir
 
 ```typescript
 import { getComponent, removeComponent } from '@treenx/core'
-import { setComponent, newComponent } from '@treenx/core/comp'
+import { setComponent, newComponent } from '@treenx/core'
 
 // Read a component by type (string or class)
 const priority = getComponent(node, 'task.priority')

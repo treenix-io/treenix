@@ -13,7 +13,7 @@ Treenix is a TypeScript platform for apps whose data is addressable, typed, reac
 You define a Type as a class. Treenix uses it to validate stored data, render Inspector forms, expose actions, stream updates, and describe tools to MCP clients.
 
 ```typescript
-import { registerType } from '@treenx/core/comp'
+import { registerType } from '@treenx/core'
 
 export class TodoItem {
   title = ''

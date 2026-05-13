@@ -36,7 +36,7 @@ The command creates `mods/bookmarks/`. If your `root.json` uses a `seeds` array,
 Replace `mods/bookmarks/types.ts`:
 
 ```typescript
-import { registerType } from '@treenx/core/comp'
+import { registerType } from '@treenx/core'
 
 export class Bookmark {
   /** @title URL @format uri */
@@ -77,7 +77,6 @@ Fields become the schema. Prototype methods become actions. JSDoc feeds the Insp
 Replace `mods/bookmarks/seed.ts`:
 
 ```typescript
-import type { NodeData } from '@treenx/core'
 import { registerPrefab } from '@treenx/core/mod'
 
 registerPrefab('bookmarks', 'seed', [
@@ -96,14 +95,14 @@ registerPrefab('bookmarks', 'seed', [
     title: 'TypeScript Handbook',
     tags: ['dev', 'docs'],
   },
-] as NodeData[])
+])
 ```
 
 Seed prefabs named `seed` deploy on startup. If your `root.json` has a `seeds` array, make sure it includes `bookmarks`.
 
 ## 4. Add Views
 
-Replace `mods/bookmarks/view.tsx`:
+Replace `mods/bookmarks/react.tsx`:
 
 ```tsx
 import { useActions, useNavigate, view } from '@treenx/react'
@@ -157,7 +156,7 @@ view.list(Bookmark, ({ value, ctx }) => {
   return (
     <button
       className="flex w-full items-center justify-between gap-3 rounded px-3 py-2 text-left hover:bg-muted"
-      onClick={() => navigate(ctx.node.$path)}
+      onClick={() => navigate(ctx!.path)}
     >
       <span className={value.archived ? 'line-through text-muted-foreground' : ''}>
         {value.title || value.url}
@@ -197,7 +196,7 @@ Expected result:
 mods/bookmarks/
   types.ts   Type class with fields and actions
   seed.ts    Initial nodes under /bookmarks
-  view.tsx   Detail and list React views
+  react.tsx  Detail and list React views
   schemas/   Generated JSON Schema after startup
 ```
 

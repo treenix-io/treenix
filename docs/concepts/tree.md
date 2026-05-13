@@ -36,7 +36,7 @@ const { items, total } = await tree.getChildren('/tasks', {
 })
 
 // Write (create or update)
-await tree.set(createNode('/tasks/2', 'todo.task', { title: 'New task' }))
+await tree.set(makeNode('/tasks/2', 'todo.task', { title: 'New task' }))
 
 // Delete
 const existed = await tree.remove('/tasks/2')
@@ -138,7 +138,7 @@ Mounts delegate subtrees to different backends. Like Unix mount points:
 A mount is a node with a `mount` component:
 
 ```typescript
-await tree.set(createNode('/db/orders', 'mount-point', {}, {
+await tree.set(makeNode('/db/orders', 'mount-point', {}, {
   mount: {
     $type: 't.mount.mongo',
     uri: 'mongodb://localhost:27017',
@@ -167,7 +167,7 @@ Everything under `/db/orders/*` now reads from and writes to the MongoDB collect
 A query mount creates a virtual directory showing a filtered subset of another path:
 
 ```typescript
-await tree.set(createNode('/orders/incoming', 'mount-point', {}, {
+await tree.set(makeNode('/orders/incoming', 'mount-point', {}, {
   mount: {
     $type: 't.mount.query',
     source: '/orders/data',
@@ -213,7 +213,7 @@ Subscribe by exact path, or by prefix — every mutation streams as a JSON Patch
 In React, you rarely touch subscriptions directly. [`usePath`](../api/hooks.md#usepath) and [`useChildren`](../api/hooks.md#usechildren) wrap the subscription, keep a local cache fresh, and give you reactive state:
 
 ```typescript
-import { usePath, useChildren } from '@treenx/react/hooks'
+import { usePath, useChildren } from '@treenx/react'
 import { Task } from './types'
 
 // One node — re-renders when any field on /tasks/buy-milk changes

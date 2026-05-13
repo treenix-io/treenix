@@ -15,7 +15,7 @@ A mod is a self-contained package of types, actions, views, and services. This g
 ```
 mods/mymod/
   types.ts            type classes + registerType()
-  view.tsx            React views
+  react.tsx           React views (preferred filename; `view.tsx` is legacy)
   service.ts          background workers (optional)
   seed.ts             initial data (optional)
   schemas/            generated JSON Schemas
@@ -24,7 +24,7 @@ mods/mymod/
 
 ### Discovery
 
-Local mods are discovered by convention. On server startup Treenix imports `types.ts`, `seed.ts`, and `service.ts` if they exist. In the frontend, the Vite plugin imports `types.ts` and `view.tsx`.
+Local mods are discovered by convention. On server startup Treenix imports `types.ts`, `seed.ts`, and `service.ts` if they exist. In the frontend, the Vite plugin imports `types.ts` and then `react.tsx` (or legacy `view.tsx`).
 
 If a mod needs custom ordering, add explicit entry files:
 
@@ -36,7 +36,7 @@ import './seed'
 
 // client.ts
 import './types'
-import './view'
+import './react'
 ```
 
 When `server.ts` exists, the server imports it instead of the convention files. When `client.ts` exists, the frontend imports it instead of the convention files.
@@ -49,7 +49,7 @@ Define your data and behavior in a single class:
 
 ```typescript
 // types.ts
-import { getCtx, registerType } from '@treenx/core/comp'
+import { getCtx, registerType } from '@treenx/core'
 
 export class SensorConfig {
   /** @title Interval @description Seconds between readings */
@@ -85,22 +85,19 @@ Schemas auto-generate into `schemas/` on dev server startup.
 Register React views for each context you need:
 
 ```typescript
-// view.tsx
-import { register } from '@treenx/core'
-import type { View } from '@treenx/react/context'
-import { usePath, useChildren } from '@treenx/react/hooks'
-import { SensorConfig } from './types'
+// react.tsx
+import { useChildren, view, type View } from '@treenx/react'
+import { SensorConfig, SensorReading } from './types'
 
 const SensorView: View<SensorConfig> = ({ value, ctx }) => {
-  const { data: sensor } = usePath(ctx!.node.$path, SensorConfig)
-  const { data: readings } = useChildren(ctx!.node.$path, { limit: 20, watchNew: true })
+  const { data: readings } = useChildren(ctx!.path, { limit: 20, watchNew: true })
 
   return (
     <div className="p-4 space-y-4">
       <div className="flex justify-between items-center">
-        <h3 className="font-bold">Sensor: {ctx!.node.$path}</h3>
+        <h3 className="font-bold">Sensor: {ctx!.path}</h3>
         <span className="text-sm text-muted-foreground">
-          every {sensor.interval}s
+          every {value.interval}s
         </span>
       </div>
 
@@ -115,15 +112,18 @@ const SensorView: View<SensorConfig> = ({ value, ctx }) => {
   )
 }
 
-register(SensorConfig, 'react', SensorView)
+view(SensorConfig, SensorView)
 ```
 
 **Patterns:**
 - Always use `View<T>` — never `{ value: any }`
-- `usePath(path, Class)` gives you a reactive TypeProxy with typed methods
-- `useChildren` with `watchNew: true` auto-updates when new children appear
-- Render children through `<Render>` and `<RenderContext>`, not hardcoded components
-- Tailwind classes only — never inline styles
+- Read fields via `value.X` directly — `value` is already the reactive snapshot
+- `useChildren(ctx!.path, ...)` with `watchNew: true` auto-updates when new children appear
+- Call actions via `useActions(value).foo(data)` — never `ctx.execute('foo')`
+- Use `view(Type, Component)` from `@treenx/react`; never `usePath(value.$path, T)` inside `View<T>` — it duplicates the parent's subscription
+- Tailwind v4 classes only — never inline styles
+
+See the `treenix-view-builder` skill for the full view pattern set.
 
 ## Services
 
@@ -131,8 +131,7 @@ Background workers run as long as their node exists in the tree:
 
 ```typescript
 // service.ts
-import { createNode, getComponent } from '@treenx/core'
-import { register } from '@treenx/core'
+import { getComponent, makeNode, register } from '@treenx/core'
 import type { ServiceHandle } from '@treenx/core/contexts/service'
 import { SensorConfig } from './types'
 
@@ -141,7 +140,7 @@ register('sensor', 'service', async (node, ctx) => {
   const interval = (config?.interval ?? 5) * 1000
 
   const timer = setInterval(async () => {
-    await ctx.tree.set(createNode(
+    await ctx.tree.set(makeNode(
       `${node.$path}/${Date.now()}`,
       'sensor.reading',
       { value: Math.random() * 100, ts: Date.now() },
@@ -159,7 +158,7 @@ register('sensor', 'service', async (node, ctx) => {
 To start a service automatically when the server boots, add a ref to `/sys/autostart`:
 
 ```typescript
-await tree.set(createNode('/sys/autostart/my-sensor', 'ref', {
+await tree.set(makeNode('/sys/autostart/my-sensor', 'ref', {
   $ref: '/sensors/temp',
 }))
 ```
@@ -172,7 +171,6 @@ The server walks `/sys/autostart` at startup, resolves refs, and starts service 
 
 ```typescript
 // seed.ts
-import type { NodeData } from '@treenx/core'
 import { registerPrefab } from '@treenx/core/mod'
 
 registerPrefab('sensor-demo', 'seed', [
@@ -187,7 +185,7 @@ registerPrefab('sensor-demo', 'seed', [
     $type: 'ref',
     $ref: '/sensors/temp',
   },
-] as NodeData[])
+])
 ```
 
 If `root.json` has a `seeds` array, add the mod name there:
@@ -208,13 +206,12 @@ Use `node:test` and test against contracts, not implementation details:
 // mymod.test.ts
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { createNode, getComponent } from '@treenx/core'
-import { getDefaults } from '@treenx/core/comp'
+import { getComponent, getDefaults, makeNode } from '@treenx/core'
 import { SensorConfig } from './types'
 
 describe('SensorConfig', () => {
   it('creates node with provided data', () => {
-    const node = createNode('/s', SensorConfig, { interval: 30, source: 'api' })
+    const node = makeNode('/s', SensorConfig, { interval: 30, source: 'api' })
     const config = getComponent(node, SensorConfig)!
     assert.equal(config.interval, 30)
     assert.equal(config.source, 'api')
@@ -274,7 +271,7 @@ The `treenix` field enables automatic discovery. When someone installs your pack
 1. Define types in `types.ts` + `registerType()`
 2. Write tests → `npm test` → green
 3. Schemas auto-generate into `schemas/` on dev server startup
-4. Write views in `view.tsx` + `register(type, 'react', View)`
+4. Write views in `react.tsx` + `view(Type, Component)` from `@treenx/react`
 5. Check browser console → zero errors
 6. Add seed data if needed
 7. Commit (one logical change per commit)

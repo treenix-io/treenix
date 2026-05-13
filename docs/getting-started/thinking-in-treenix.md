@@ -58,7 +58,7 @@ That's the whole data model. Two [Types](../concepts/types.md), one node, a sing
 You define the two Types as classes, the same way you would anywhere else:
 
 ```typescript
-import { registerType } from '@treenx/core/comp'
+import { registerType } from '@treenx/core'
 
 export class AcmeTask {
   title = ''
@@ -91,8 +91,7 @@ Nothing ties them together at this level. No join table, no foreign key. They sh
 Now the interesting part. [Contexts](../concepts/context.md) let the same typed data appear in different surfaces — each decided at render time, no duplication:
 
 ```typescript
-import { register } from '@treenx/core'
-import { useActions } from '@treenx/react/context'
+import { useActions, view, type View } from '@treenx/react'
 import { AcmeTask, AcmeThread } from './types'
 
 // The task, as a board card.
@@ -106,7 +105,7 @@ const TaskCard: View<AcmeTask> = ({ value }) => {
     </article>
   )
 }
-register(AcmeTask, 'react', TaskCard)
+view(AcmeTask, TaskCard)
 
 // The thread, as a forum panel.
 const ThreadPanel: View<AcmeThread> = ({ value }) => {
@@ -120,7 +119,7 @@ const ThreadPanel: View<AcmeThread> = ({ value }) => {
     </div>
   )
 }
-register(AcmeThread, 'react', ThreadPanel)
+view(AcmeThread, ThreadPanel)
 ```
 
 Drop the node into a board view and `TaskCard` renders. Drop the `thread` [component](../concepts/composition.md#component) into a discussion panel and `ThreadPanel` renders. Both read from the same node, [broadcast](../concepts/reactivity.md) through the same live stream, live under the same [ACL](../concepts/security.md#acl).

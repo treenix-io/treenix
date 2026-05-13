@@ -11,7 +11,7 @@ tags: [core, beginner, types]
 Write a class. Get [storage](#storage), [views](./context.md#views), [forms](#forms), [RPC](#rpc), [schema](#schema), [reactivity](./reactivity.md), and an [MCP](./ai-mcp.md) tool per method.
 
 ```typescript
-import { registerType } from '@treenx/core/comp'
+import { registerType } from '@treenx/core'
 
 export class TodoItem {
   title = ''
@@ -134,7 +134,7 @@ const TodoCard: View<TodoItem> = ({ value }) => {
   )
 }
 
-register(TodoItem, 'react', TodoCard)
+view(TodoItem, TodoCard)
 ```
 
 The shape of every realtime app, without the usual wiring. See [Reactivity](./reactivity.md) for the full multi-client picture.
@@ -213,7 +213,7 @@ Use the class for typed Component access:
 
 ```typescript
 import { getComponent } from '@treenx/core'
-import { setComponent, newComponent } from '@treenx/core/comp'
+import { setComponent, newComponent } from '@treenx/core'
 import { TodoItem } from './types'
 
 // Typed read — returns the main component if node.$type matches

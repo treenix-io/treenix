@@ -29,7 +29,7 @@ Under the hood:
 Actions are methods on type classes. `registerType` discovers them automatically:
 
 ```typescript
-import { registerType } from '@treenx/core/comp'
+import { registerType } from '@treenx/core'
 
 export class OrderStatus {
   value: 'incoming' | 'kitchen' | 'ready' = 'incoming'
@@ -75,7 +75,7 @@ The argument type is extracted for JSON Schema generation — the Inspector show
 Use `usePath` with a type class to get a **TypeProxy** — reactive data + typed action methods:
 
 ```typescript
-import { usePath } from '@treenx/react/hooks'
+import { usePath } from '@treenx/react'
 import { OrderStatus } from './types'
 
 function OrderCard({ path }: { path: string }) {
@@ -144,7 +144,7 @@ export class Portfolio {
 Inside action methods, `getCtx()` provides the node, tree, and abort signal:
 
 ```typescript
-import { getCtx } from '@treenx/core/comp'
+import { getCtx } from '@treenx/core'
 
 type ExecCtx = {
   node: NodeData       // the full node (Immer draft in sync actions)

@@ -15,7 +15,7 @@ All examples assume typed [Types](../concepts/types.md) — `class TodoItem`, `c
 ## `usePath`
 
 ```typescript
-import { usePath } from '@treenx/react/hooks'
+import { usePath } from '@treenx/react'
 ```
 
 Reactive read of a single path. Two modes.
@@ -43,7 +43,7 @@ usePath<T extends object>(path: string, cls: Class<T>, key?: string): Query<Type
 Typed mode. `data` is a **TypeProxy** — field reads subscribe, method calls route through `execute()`. During initial load `loading` is `true` and field reads return `undefined`, but method calls always queue.
 
 ```typescript
-const { data: task, loading } = usePath(ctx!.node.$path, Task)
+const { data: task, loading } = usePath(ctx!.path, Task)
 if (loading) return <Spinner />
 
 return (
@@ -69,7 +69,7 @@ return (
 ## `useChildren`
 
 ```typescript
-import { useChildren } from '@treenx/react/hooks'
+import { useChildren } from '@treenx/react'
 
 useChildren(parentPath: string | null, opts?: ChildrenOpts): ChildrenQuery
 ```
@@ -115,7 +115,7 @@ return (
 ## `useActions`
 
 ```typescript
-import { useActions } from '@treenx/react/context'
+import { useActions } from '@treenx/react'
 
 useActions<T>(value: T): Actions<T>
 ```
@@ -140,7 +140,7 @@ See [Type → RPC](../concepts/types.md#rpc) for the client-server story.
 ## `execute`
 
 ```typescript
-import { execute } from '@treenx/react/hooks'
+import { execute } from '@treenx/react'
 
 execute(path: string, action: string, data?: unknown, type?: string, key?: string): Promise<unknown>
 ```
@@ -226,19 +226,20 @@ Quick reference. Each has JSDoc in source if you need more; this list is where t
 
 | Symbol | Import | One-line |
 |---|---|---|
-| `set(node)` | `@treenx/react/hooks` | Persist a node with optimistic update + server commit |
-| `watch(uri)` | `@treenx/react/hooks` | Async iterator over changes; for non-React code |
-| `useNavigate()` | `@treenx/react/hooks` | Router-style navigation inside the admin UI |
-| `useBeforeNavigate()` | `@treenx/react/hooks` | Warn on unsaved changes |
-| `useCurrentNode()` | `@treenx/react/context` | Nearest `NodeProvider` value |
-| `useTreeContext()` | `@treenx/react/context` | Current render context string (`react`, `react:list`, …) |
-| `Render`, `RenderContext` | `@treenx/react/context` | The render pipeline — see [Contexts](../concepts/context.md) |
-| `registerType(name, Class, opts?)` | `@treenx/core/comp` | Declare a Type — see [Type](../concepts/types.md) |
-| `createNode(path, type, data?)` | `@treenx/core` | Build a NodeData — never by hand |
-| `getComponent(node, Class|name)` | `@treenx/core` | Read a Component off a Node |
-| `setComponent(node, Class, data)` | `@treenx/core/comp` | Write a Component onto a Node |
-| `newComponent(Class, data?)` | `@treenx/core/comp` | Construct a Component standalone |
-| `getCtx()` | `@treenx/core/comp` | Inside an action — access `tree`, `node`, caller |
+| `view(Class, Component)` | `@treenx/react` | Register a React view for a Type — preferred over raw `register()` |
+| `set(node)` | `@treenx/react` | Persist a node with optimistic update + server commit |
+| `watch(uri)` | `@treenx/react` | Async iterator over changes; for non-React code |
+| `useNavigate()` | `@treenx/react` | Router-style navigation inside the admin UI |
+| `useBeforeNavigate()` | `@treenx/react` | Warn on unsaved changes |
+| `useCurrentNode()` | `@treenx/react` | Nearest `NodeProvider` value |
+| `useTreeContext()` | `@treenx/react` | Current render context string (`react`, `react:list`, …) |
+| `Render`, `RenderContext` | `@treenx/react` | The render pipeline — see [Contexts](../concepts/context.md) |
+| `registerType(name, Class, opts?)` | `@treenx/core` | Declare a Type — see [Type](../concepts/types.md) |
+| `makeNode(path, type, data?, components?)` | `@treenx/core` | Build a NodeData — never by hand. `createNode` is a deprecated alias. |
+| `getComponent(node, Class\|name)` | `@treenx/core` | Read a Component off a Node |
+| `setComponent(node, Class, data)` | `@treenx/core` | Write a Component onto a Node |
+| `newComponent(Class, data?)` | `@treenx/core` | Construct a Component standalone |
+| `getCtx()` | `@treenx/core` | Inside an action — access `tree`, `node`, caller |
 | `isRef(value)` | `@treenx/core` | Type guard for `{ $type: 'ref', $ref }` |
 | `dirname / basename / join / isChildPath` | `@treenx/core` | Path utilities |
 | `R, W, A, S` | `@treenx/core` | ACL permission bits |

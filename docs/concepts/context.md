@@ -123,7 +123,7 @@ register(TodoItem, 'react:mobile', MobileView)
 Views are chosen at render time by context — a string like `react:card` or `telegram:view`. Register a renderer per context and drop the node anywhere with `<Render value={value} ctx="react:card" />`.
 
 ```typescript
-import { Render, RenderContext } from '@treenx/react/context'
+import { Render, RenderContext } from '@treenx/react'
 
 // Render a component in the current context
 <Render value={component} onChange={handler} />
@@ -139,8 +139,8 @@ Never hardcode component imports in a View. Use `<Render>` so the registry picks
 ### Typed View signature
 
 ```typescript
-import type { View } from '@treenx/react/context'
-import { useActions } from '@treenx/react/context'
+import type { View } from '@treenx/react'
+import { useActions } from '@treenx/react'
 import { TodoItem } from './types'
 
 const TodoCard: View<TodoItem> = ({ value, ctx }) => {

@@ -15,10 +15,10 @@ Mounts let you delegate parts of the tree to different backends. Like Unix mount
 A mount point is a node with a `mount` component. Everything under its path is handled by the mounted backend:
 
 ```typescript
-import { createNode } from '@treenx/core'
+import { makeNode } from '@treenx/core'
 
 // Mount a MongoDB collection at /db/orders
-await tree.set(createNode('/db/orders', 'mount-point', {}, {
+await tree.set(makeNode('/db/orders', 'mount-point', {}, {
   mount: {
     $type: 't.mount.mongo',
     uri: 'mongodb://localhost:27017',
@@ -36,7 +36,7 @@ const order = await tree.get('/db/orders/123')
 ### Filesystem
 
 ```typescript
-createNode('/docs', 'mount-point', {}, {
+makeNode('/docs', 'mount-point', {}, {
   mount: { $type: 't.mount.fs', root: 'data/docs' },
 })
 ```
@@ -46,7 +46,7 @@ Maps a directory on disk to a tree path. Each node is a `$.json` file. The `fs-c
 ### Memory
 
 ```typescript
-createNode('/cache', 'mount-point', {}, {
+makeNode('/cache', 'mount-point', {}, {
   mount: { $type: 't.mount.memory' },
 })
 ```
@@ -56,7 +56,7 @@ Volatile in-memory storage. Data lost on restart. Useful for caches, session dat
 ### Overlay
 
 ```typescript
-createNode('/', 'metatron.config', {
+makeNode('/', 'metatron.config', {
   mount: { $type: 't.mount.overlay', layers: ['base', 'work'] },
   base: { $type: 't.mount.fs', root: 'tree/seed' },
   work: { $type: 't.mount.fs', root: 'tree/work' },
@@ -72,7 +72,7 @@ This is the default setup in `root.json` — seed data in `tree/seed/` is read-o
 Virtual folder showing a filtered subset of another path:
 
 ```typescript
-createNode('/orders/incoming', 'mount-point', {}, {
+makeNode('/orders/incoming', 'mount-point', {}, {
   mount: {
     $type: 't.mount.query',
     source: '/orders/data',
@@ -88,7 +88,7 @@ createNode('/orders/incoming', 'mount-point', {}, {
 Connect to another Treenix instance over tRPC:
 
 ```typescript
-createNode('/partner', 'mount-point', {}, {
+makeNode('/partner', 'mount-point', {}, {
   mount: {
     $type: 't.mount.tree.trpc',
     url: 'https://partner.example.com/trpc',
@@ -102,7 +102,7 @@ Everything under `/partner/*` is transparently proxied to the remote server. ACL
 ### Type Introspection
 
 ```typescript
-createNode('/sys/types', 'mount-point', {}, {
+makeNode('/sys/types', 'mount-point', {}, {
   mount: { $type: 't.mount.types' },
 })
 ```
@@ -135,7 +135,7 @@ register('my.adapter', 'mount', async (mount, ctx) => {
 Then create a mount point:
 
 ```typescript
-createNode('/external', 'mount-point', {}, {
+makeNode('/external', 'mount-point', {}, {
   mount: {
     $type: 'my.adapter',
     apiKey: '...',

@@ -54,16 +54,21 @@ See [Contexts → Views](../concepts/context.md#views).
 
 **Symptom.** View is registered but `<Render>` falls through to the Inspector.
 
-**Diagnosis.** String-based `register` is the legacy path. Current API takes the Class.
+**Diagnosis.** Low-level `register()` with a string `$type` is the legacy escape hatch. The canonical API is `view(Class, Component)` from `@treenx/react` — typed end-to-end and tells the registry which class to instantiate for the proxy.
 
 **Fix.**
 
 ```tsx
-// WRONG
+import { view } from '@treenx/react'
+
+// WRONG — string-keyed register
 register('todo.task', 'react', TaskView)
 
 // RIGHT
-register(Task, 'react', TaskView)
+view(Task, TaskView)
+// or, for non-default contexts:
+view.list(Task, TaskListItem)
+view(Task, 'kanban', TaskKanbanCard)
 ```
 
 See [Contexts](../concepts/context.md).
@@ -115,7 +120,7 @@ See [Type → Schema](../concepts/types.md#schema).
 **Fix.**
 
 ```tsx
-const { data: task, loading } = usePath(ctx!.node.$path, Task)
+const { data: task, loading } = usePath(ctx!.path, Task)
 if (loading) return <Spinner />
 return <div>{task.title}</div>
 ```

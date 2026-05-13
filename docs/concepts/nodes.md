@@ -74,20 +74,20 @@ Everything else is your data.
 
 ## Creating Nodes
 
-Use `createNode()` — never construct node objects by hand:
+Use `makeNode()` — never construct node objects by hand:
 
 ```typescript
-import { createNode } from '@treenx/core'
+import { makeNode } from '@treenx/core'
 
 // With a string type
-const task = createNode('/tasks/buy-milk', 'todo.task', {
+const task = makeNode('/tasks/buy-milk', 'todo.task', {
   title: 'Buy milk',
   done: false,
 })
 
 // With a class — get autocomplete and type checking
 import { Task } from './types'
-const task = createNode('/tasks/buy-milk', Task, {
+const task = makeNode('/tasks/buy-milk', Task, {
   title: 'Buy milk',  // ← IDE knows this field exists
   done: false,
 })
@@ -115,7 +115,7 @@ const { items, total } = await tree.getChildren('/tasks', {
 In React, use hooks for reactive reads:
 
 ```typescript
-import { usePath, useChildren } from '@treenx/react/hooks'
+import { usePath, useChildren } from '@treenx/react'
 
 // Reactive single node (re-renders on change)
 const { data: task } = usePath('/tasks/buy-milk')
@@ -129,7 +129,7 @@ const { data: tasks } = useChildren('/tasks', { watch: true, watchNew: true })
 A node can carry multiple **components** — named fields with their own `$type`. This is how you attach extra data without changing the node's type:
 
 ```typescript
-const task = createNode('/tasks/buy-milk', 'todo.task', {
+const task = makeNode('/tasks/buy-milk', 'todo.task', {
   title: 'Buy milk',
   done: false,
 }, {

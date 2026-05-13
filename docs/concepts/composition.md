@@ -126,15 +126,15 @@ Separator is always `.` — not `/`, not `@`, not `:`.
 ### Creating nodes
 
 ```typescript
-import { createNode } from '@treenx/core'
+import { makeNode } from '@treenx/core'
 
-const node = createNode('/acme/projects/2026', 'project', {
+const node = makeNode('/acme/projects/2026', 'project', {
   title: 'Q2 website',
   status: 'active',
 })
 ```
 
-Never build `{ $path, $type, ... }` by hand — `createNode` validates system field names and normalizes Types.
+Never build `{ $path, $type, ... }` by hand — `makeNode` validates system field names and normalizes Types.
 
 ## Forest {#forest}
 

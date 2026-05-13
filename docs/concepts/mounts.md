@@ -37,9 +37,9 @@ Each adapter implements the same five-method [Tree interface](./tree.md). The on
 ## How a mount resolves
 
 ```typescript
-import { createNode } from '@treenx/core'
+import { makeNode } from '@treenx/core'
 
-await tree.set(createNode('/db/orders', 'mount-point', {}, {
+await tree.set(makeNode('/db/orders', 'mount-point', {}, {
   mount: {
     $type: 't.mount.mongo',
     uri: 'mongodb://localhost:27017',
@@ -76,7 +76,7 @@ The default starter layout. Seed data lives below, runtime writes live above; th
 A query mount creates a virtual directory showing only nodes matching a filter. Nodes entering or leaving the filter automatically appear or disappear — no manual sync.
 
 ```typescript
-await tree.set(createNode('/orders/incoming', 'mount-point', {}, {
+await tree.set(makeNode('/orders/incoming', 'mount-point', {}, {
   mount: {
     $type: 't.mount.query',
     source: '/orders/data',
@@ -107,7 +107,7 @@ An adapter registers on the `mount` context. The handler receives the mount node
 
 ```typescript
 import { register } from '@treenx/core'
-import { registerType } from '@treenx/core/comp'
+import { registerType } from '@treenx/core'
 
 export class MountRedis {
   url = ''

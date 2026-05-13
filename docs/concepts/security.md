@@ -141,7 +141,7 @@ Never `return { allowed: true }` as a fallback. The default for any permission c
 Every mutation and action is checked against the JSON Schema generated from the [Type](./types.md#schema). Wrong shape → rejected before it touches storage. Same check for human clients, services, and [agents](./ai-mcp.md).
 
 ```typescript
-import { registerType } from '@treenx/core/comp'
+import { registerType } from '@treenx/core'
 
 export class Invoice {
   amount = 0         // number

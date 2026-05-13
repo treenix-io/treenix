@@ -34,6 +34,35 @@ Open http://localhost:3210.
 
 The Vite dev server serves the frontend on `3210`. The Treenix server runs on `3211` behind the same dev process, and Vite proxies `/trpc` and `/api` to it.
 
+## Dev Mode — passwordless login + MCP
+
+`NODE_ENV=development` (set automatically by `npm run dev`) flips two switches:
+
+- **`VITE_DEV_LOGIN=1`** — the browser at http://localhost:3210 signs you in as a local admin without a password. Useful for the first ten minutes; do not ship it.
+- **`MCP_DEV_ADMIN=1`** — the MCP endpoint at `http://localhost:3211/mcp` accepts unauthenticated calls from loopback.
+
+On boot you see a yellow banner:
+
+```
+⚠️  DEV MODE — UNAUTHORIZED ADMIN ACCESS ENABLED
+   MCP: http://localhost:3211/mcp
+   Loopback only. Do not expose this port externally.
+   Disable: NODE_ENV=production (or MCP_DEV_ADMIN=0 / VITE_DEV_LOGIN=0)
+```
+
+Production refuses to boot if `VITE_DEV_LOGIN` is set with `NODE_ENV !== development` — the dev-login route never reaches a non-development build.
+
+### Connect an MCP client
+
+Point any MCP-aware tool at `http://localhost:3211/mcp`. The endpoint speaks the standard streamable-HTTP MCP protocol; no token is required while `MCP_DEV_ADMIN=1`.
+
+```bash
+# Claude Code
+claude mcp add --transport http treenix-dev http://localhost:3211/mcp
+```
+
+Claude Desktop, Cursor, Codex, and other clients accept the same URL via their own MCP config file (usually a JSON entry with `"url": "http://localhost:3211/mcp"`). Once connected, every registered Type and method becomes a tool the agent can call; see [AI / MCP](../concepts/ai-mcp.md).
+
 ## Verify the Demo
 
 Open http://localhost:3210/t/example/counter.
@@ -53,9 +82,7 @@ If the node does not load, check the terminal running `npm run dev` first. Schem
 The demo node already has a Type. To render it yourself, register a React view from a mod's client entry:
 
 ```typescript
-import { register } from '@treenx/core'
-import type { View } from '@treenx/react/context'
-import { useActions } from '@treenx/react/context'
+import { useActions, view, type View } from '@treenx/react'
 import { ExampleCounter } from './types'
 
 const CounterView: View<ExampleCounter> = ({ value }) => {
@@ -68,7 +95,7 @@ const CounterView: View<ExampleCounter> = ({ value }) => {
   )
 }
 
-register(ExampleCounter, 'react', CounterView)
+view(ExampleCounter, CounterView)
 ```
 
 Client changes hot-reload. Server-side Type and seed changes require restarting `npm run dev`.

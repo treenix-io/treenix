@@ -15,7 +15,7 @@ A service is a long-running background process tied to a node. While actions are
 Register a handler for the `service` context:
 
 ```typescript
-import { createNode } from '@treenx/core'
+import { makeNode } from '@treenx/core'
 import { register } from '@treenx/core'
 import type { ServiceHandle } from '@treenx/core/contexts/service'
 
@@ -25,7 +25,7 @@ register('my-worker', 'service', async (node, ctx) => {
   // ctx.subscribe — subscribe to tree changes
 
   const timer = setInterval(async () => {
-    await ctx.tree.set(createNode(
+    await ctx.tree.set(makeNode(
       `${node.$path}/${Date.now()}`,
       'tick',
       { ts: Date.now() },
@@ -46,10 +46,10 @@ Services don't run automatically. To start a service when the server boots, add 
 
 ```typescript
 // 1. Create the service node
-await tree.set(createNode('/my-worker', 'my-worker'))
+await tree.set(makeNode('/my-worker', 'my-worker'))
 
 // 2. Create an autostart ref
-await tree.set(createNode('/sys/autostart/my-worker', 'ref', {
+await tree.set(makeNode('/sys/autostart/my-worker', 'ref', {
   $ref: '/my-worker',
 }))
 ```
@@ -60,8 +60,8 @@ In seed data:
 
 ```typescript
 registerPrefab('my-mod', 'seed', [
-  createNode('/my-worker', 'my-worker', { /* config */ }),
-  createNode('/sys/autostart/my-worker', 'ref', { $ref: '/my-worker' }),
+  makeNode('/my-worker', 'my-worker', { /* config */ }),
+  makeNode('/sys/autostart/my-worker', 'ref', { $ref: '/my-worker' }),
 ])
 ```
 

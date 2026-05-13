@@ -105,9 +105,8 @@ When you run `npx -y create-treenix mod create bookmarks -y`, the CLI adds `book
 Use package imports in mods:
 
 ```typescript
-import { createNode } from '@treenx/core'
-import { registerType } from '@treenx/core/comp'
-import { usePath, view } from '@treenx/react'
+import { makeNode, registerType } from '@treenx/core'
+import { usePath, useActions, view, type View } from '@treenx/react'
 ```
 
 Avoid private source aliases in application mods.

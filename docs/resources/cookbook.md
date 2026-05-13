@@ -15,9 +15,7 @@ Seven short recipes. Each is a complete, runnable snippet — drop it into a mod
 A View that renders a typed node and mutates it with `useActions`. Optimistic updates come for free — the click reflects instantly.
 
 ```typescript
-import { register } from '@treenx/core'
-import { useActions } from '@treenx/react/context'
-import type { View } from '@treenx/react/context'
+import { useActions, view, type View } from '@treenx/react'
 import { Counter } from './types'
 
 const CounterView: View<Counter> = ({ value }) => {
@@ -31,7 +29,7 @@ const CounterView: View<Counter> = ({ value }) => {
   )
 }
 
-register(Counter, 'react', CounterView)
+view(Counter, CounterView)
 ```
 
 `value.count` subscribes; `actions.increment()` applies locally, commits on the server, broadcasts to other clients. See [Type → Optimistic Update](../concepts/types.md#optimistic-update).
@@ -41,13 +39,13 @@ register(Counter, 'react', CounterView)
 Render many children without loading them all. Request a page, show "load more" when there is more.
 
 ```typescript
-import type { View } from '@treenx/react/context'
-import { useChildren } from '@treenx/react/hooks'
-import { Render } from '@treenx/react/context'
+import type { View } from '@treenx/react'
+import { useChildren } from '@treenx/react'
+import { Render } from '@treenx/react'
 
 const Inbox: View<any> = ({ ctx }) => {
   const { data: items, total, hasMore, loadMore, loadingMore } =
-    useChildren(ctx!.node.$path, { limit: 50, watch: true, watchNew: true })
+    useChildren(ctx!.path, { limit: 50, watch: true, watchNew: true })
 
   return (
     <div className="space-y-1">
@@ -88,9 +86,9 @@ Existing nodes are skipped; new ones are created. Local mods load `seed.ts` by c
 Make a subtree writable only by admins, readable by everyone.
 
 ```typescript
-import { createNode, R, W, A, S } from '@treenx/core'
+import { makeNode, R, W, A, S } from '@treenx/core'
 
-await tree.set(createNode('/finance/ledger', 'dir', {
+await tree.set(makeNode('/finance/ledger', 'dir', {
   $acl: [
     { g: 'admins', p: R | W | A | S },
     { g: 'finance', p: R | S },
@@ -106,9 +104,9 @@ await tree.set(createNode('/finance/ledger', 'dir', {
 Bring another instance's subtree into yours. Remote nodes look local; the other side's ACL applies at the boundary.
 
 ```typescript
-import { createNode } from '@treenx/core'
+import { makeNode } from '@treenx/core'
 
-await tree.set(createNode('/partner', 'mount-point', {}, {
+await tree.set(makeNode('/partner', 'mount-point', {}, {
   mount: {
     $type: 't.mount.tree.trpc',
     url: 'https://globex.io/trpc',
@@ -126,8 +124,7 @@ See [Composition → Forest](../concepts/composition.md#forest) and [Mounts](../
 Register the same Type for a different surface — e.g., a compact row for list views.
 
 ```typescript
-import { register } from '@treenx/core'
-import { useActions } from '@treenx/react/context'
+import { useActions, view, type View } from '@treenx/react'
 import { TodoItem } from './types'
 
 const TodoRow: View<TodoItem> = ({ value }) => {
@@ -146,7 +143,7 @@ const TodoRow: View<TodoItem> = ({ value }) => {
   )
 }
 
-register(TodoItem, 'react:list', TodoRow)
+view.list(TodoItem, TodoRow)
 ```
 
 Anywhere `<Render value={todo} />` runs inside `<RenderContext name="react:list">`, it gets `TodoRow`. If absent, the cascade falls back to the `react` view automatically. See [Contexts](../concepts/context.md).
@@ -156,7 +153,7 @@ Anywhere `<Render value={todo} />` runs inside `<RenderContext name="react:list"
 Mutate the tree from inside an action by using the `tree` handle from `getCtx()`.
 
 ```typescript
-import { getCtx, registerType } from '@treenx/core/comp'
+import { getCtx, registerType } from '@treenx/core'
 
 export class TodoList {
   title = 'Inbox'

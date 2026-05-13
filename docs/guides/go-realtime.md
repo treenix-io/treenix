@@ -15,16 +15,14 @@ tags: [guide, realtime, hooks]
 The two hooks you'll use most. Both subscribe and re-render automatically.
 
 ```typescript
-import { usePath, useChildren } from '@treenx/react/hooks'
+import { useChildren } from '@treenx/react'
 import { Order } from './types'
 
-const OrderView: View<Order> = ({ ctx }) => {
-  // One node, reactive — Query<TypeProxy<Order>>
-  const { data: order } = usePath(ctx!.node.$path, Order)
-
+const OrderView: View<Order> = ({ value, ctx }) => {
+  // `value` is already the reactive snapshot — read fields directly
   // Its children, paginated + reactive
   const { data: items, total, hasMore, loadMore, loadingMore } =
-    useChildren(ctx!.node.$path, {
+    useChildren(ctx!.path, {
       watch: true,       // re-render when existing children change
       watchNew: true,    // re-render when new children appear
       limit: 50,
@@ -32,7 +30,7 @@ const OrderView: View<Order> = ({ ctx }) => {
 
   return (
     <div>
-      <h3>{order.status}</h3>
+      <h3>{value.status}</h3>
       <p>{items.length} of {total} items</p>
       {hasMore && (
         <button onClick={loadMore} disabled={loadingMore}>
@@ -44,7 +42,7 @@ const OrderView: View<Order> = ({ ctx }) => {
 }
 ```
 
-`usePath(path, Class)` gives you a **TypeProxy** — reading fields subscribes them; calling methods routes through `execute`. `useChildren(path, opts)` returns a paged list with change tracking.
+Inside `View<T>` the `value` prop **is** the reactive snapshot — reading `value.X` subscribes automatically. `useChildren(path, opts)` returns a paged list with change tracking. For paths **outside** the current view (foreign nodes, refs, sub-components by key) reach for `usePath(path, Class)` — that returns a `Query<TypeProxy<T>>`.
 
 ## Optimistic UX — write through `useActions`
 
@@ -75,7 +73,7 @@ You didn't write any of this glue. See [Type → Optimistic Update](../concepts/
 Outside React (scripts, services, CLI), iterate changes as they come:
 
 ```typescript
-import { watch } from '@treenx/react/hooks'
+import { watch } from '@treenx/react'
 
 for await (const value of watch('/sensors/temp')) {
   console.log('Temperature:', value)
@@ -134,7 +132,7 @@ When you create a [query mount](../concepts/mounts.md), children change automati
 
 ```typescript
 // Virtual folder: orders where status.value === 'incoming'
-await tree.set(createNode('/orders/incoming', 'mount-point', {}, {
+await tree.set(makeNode('/orders/incoming', 'mount-point', {}, {
   mount: {
     $type: 't.mount.query',
     source: '/orders/data',
