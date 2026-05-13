@@ -24,7 +24,7 @@ import { OpError } from '#errors';
 import { withMounts } from './mount';
 import { MountMemory, MountOverlay, MountQuery, MountTypes } from './mount-adapters';
 import { type CdcRegistry, withSubscriptions } from './sub';
-import { createTypesStore } from './types-mount';
+import { createTypesTree } from './types-mount';
 import { withValidation } from './validate';
 import { extractPaths, isVolatile, withVolatile } from './volatile';
 
@@ -48,7 +48,7 @@ describe('Mount adapters', () => {
 
     // Register mount adapters using typed classes (same as mount-adapters.ts but without Mongo import side effects)
     register(MountMemory, 'mount', () => createMemoryTree());
-    register(MountTypes, 'mount', (_mount, ctx) => createTypesStore(ctx.parentStore));
+    register(MountTypes, 'mount', (_mount, ctx) => createTypesTree(ctx.parentStore));
     register(MountQuery, 'mount', (mount, ctx) => {
       if (!mount.source || !mount.match) throw new Error('t.mount.query: source and match required');
       return createQueryTree(mount, ctx.globalStore || ctx.parentStore);
@@ -778,7 +778,7 @@ describe('TypesStore', () => {
 
   it('get returns undefined for unregistered type', async () => {
     const backing = createMemoryTree();
-    const ts = createTypesStore(backing);
+    const ts = createTypesTree(backing);
     const result = await ts.get('/sys/types/nonexistent');
     assert.equal(result, undefined);
   });
@@ -786,7 +786,7 @@ describe('TypesStore', () => {
   it('remove throws on registry type', async () => {
     register('vendor.widget', 'schema', () => ({ title: 'vendor.widget', type: 'object' as const, properties: {} }));
     const backing = createMemoryTree();
-    const ts = createTypesStore(backing);
+    const ts = createTypesTree(backing);
 
     await assert.rejects(() => ts.remove('/sys/types/vendor/widget'));
   });
@@ -795,14 +795,14 @@ describe('TypesStore', () => {
     const backing = createMemoryTree();
     await backing.set(createNode('/sys/types/custom/thing', 'type'));
 
-    const ts = createTypesStore(backing);
+    const ts = createTypesTree(backing);
     const result = await ts.remove('/sys/types/custom/thing');
     assert.equal(result, true);
   });
 
   it('set goes to backing tree', async () => {
     const backing = createMemoryTree();
-    const ts = createTypesStore(backing);
+    const ts = createTypesTree(backing);
     await ts.set(createNode('/sys/types/dynamic/type', 'type'));
 
     const node = await backing.get('/sys/types/dynamic/type');

@@ -29,7 +29,7 @@ export function buildTypeNode(typeName: string, path: string): NodeData | undefi
   return createNode(path, 'type', undefined, components);
 }
 
-export function createTypesStore(backingStore: Tree, typesPath = '/sys/types'): Tree {
+export function createTypesTree(backingStore: Tree, typesPath = '/sys/types'): Tree {
   // block.hero → /types/block/hero
   const toPath = (type: string) => `${typesPath}/${type.replace(/\./g, '/')}`;
   // /types/block/hero → block.hero

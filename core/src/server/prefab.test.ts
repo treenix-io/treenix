@@ -10,7 +10,7 @@ import { createMemoryTree, type Tree } from '#tree';
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { executeAction } from './actions';
-import { createModsStore } from './mods-mount';
+import { createModsTree } from './mods-mount';
 import { deployByKey, deployPrefab, deploySeedPrefabs } from './prefab';
 
 describe('Prefab registry', () => {
@@ -67,14 +67,14 @@ describe('Mods mount', () => {
   afterEach(() => clearPrefabs());
 
   it('get /sys/mods returns dir', async () => {
-    const ms = createModsStore(backing);
+    const ms = createModsTree();
     const node = await ms.get('/sys/mods');
     assert.equal(node?.$type, 't.dir');
   });
 
   it('get /sys/mods/{mod} returns t.mod for registered mod', async () => {
     registerPrefab('orders', 'infra', [{ $path: 'data', $type: 'dir' } as NodeData]);
-    const ms = createModsStore(backing);
+    const ms = createModsTree();
     const node = await ms.get('/sys/mods/orders');
     assert.equal(node?.$type, 't.mod');
     assert.equal((node as any).name, 'orders');
@@ -82,7 +82,7 @@ describe('Mods mount', () => {
   });
 
   it('get returns undefined for unregistered mod', async () => {
-    const ms = createModsStore(backing);
+    const ms = createModsTree();
     const node = await ms.get('/sys/mods/nope');
     assert.equal(node, undefined);
   });
@@ -90,7 +90,7 @@ describe('Mods mount', () => {
   it('getChildren /sys/mods lists all mods', async () => {
     registerPrefab('orders', 'infra', [{ $path: '.', $type: 'dir' } as NodeData]);
     registerPrefab('sim', 'world', [{ $path: '.', $type: 'dir' } as NodeData]);
-    const ms = createModsStore(backing);
+    const ms = createModsTree();
     const { items } = await ms.getChildren('/sys/mods');
     assert.equal(items.length, 2);
     const paths = items.map(n => n.$path).sort();
@@ -99,7 +99,7 @@ describe('Mods mount', () => {
 
   it('getChildren /sys/mods/{mod} lists prefabs dir', async () => {
     registerPrefab('orders', 'infra', [{ $path: 'data', $type: 'dir' } as NodeData]);
-    const ms = createModsStore(backing);
+    const ms = createModsTree();
     const { items } = await ms.getChildren('/sys/mods/orders');
     assert.ok(items.some(n => n.$path === '/sys/mods/orders/prefabs'));
   });
@@ -107,7 +107,7 @@ describe('Mods mount', () => {
   it('getChildren /sys/mods/{mod}/prefabs lists prefab names', async () => {
     registerPrefab('orders', 'infra', [{ $path: 'data', $type: 'dir' } as NodeData]);
     registerPrefab('orders', 'demo', [{ $path: 'x', $type: 'dir' } as NodeData]);
-    const ms = createModsStore(backing);
+    const ms = createModsTree();
     const { items } = await ms.getChildren('/sys/mods/orders/prefabs');
     assert.equal(items.length, 2);
     const paths = items.map(n => n.$path).sort();
@@ -122,7 +122,7 @@ describe('Mods mount', () => {
       { $path: 'nested/deep', $type: 'dir' } as NodeData, // skipped — not direct
       { $path: '/sys/autostart/x', $type: 'ref' } as NodeData, // skipped — absolute
     ]);
-    const ms = createModsStore(backing);
+    const ms = createModsTree();
     const { items } = await ms.getChildren('/sys/mods/orders/prefabs/infra');
     assert.equal(items.length, 2); // data + kitchen
     assert.deepEqual(items.map(n => n.$path).sort(), [
@@ -132,7 +132,7 @@ describe('Mods mount', () => {
   });
 
   it('set throws (read-only)', async () => {
-    const ms = createModsStore(backing);
+    const ms = createModsTree();
     await assert.rejects(
       () => ms.set(createNode('/sys/mods/x', 'dir')),
       (e: Error) => e.message.includes('read-only'),
@@ -140,7 +140,7 @@ describe('Mods mount', () => {
   });
 
   it('remove throws (read-only)', async () => {
-    const ms = createModsStore(backing);
+    const ms = createModsTree();
     await assert.rejects(
       () => ms.remove('/sys/mods/x'),
       (e: Error) => e.message.includes('read-only'),

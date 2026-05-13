@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { withMounts } from './mount';
-import { createTypesStore } from './types-mount';
+import { createTypesTree } from './types-mount';
 
 describe('Mounts', () => {
   let rootStore: Tree;
@@ -576,7 +576,7 @@ describe('Types mount adapter', () => {
       title: 'Hero', type: 'object' as const,
       properties: { title: { type: 'string' } },
     }));
-    const ts = createTypesStore(backingStore, '/types');
+    const ts = createTypesTree(backingStore, '/types');
     const node = await ts.get('/types/test/block/hero');
     assert.equal(node?.$type, 't.type');
     assert.equal(node?.$path, '/types/test/block/hero');
@@ -587,7 +587,7 @@ describe('Types mount adapter', () => {
   it('getChildren /types returns vendor folders', async () => {
     register('test.block.hero', 'schema', () => ({ title: 'Hero', type: 'object' as const, properties: {} }));
     register('test.block.text', 'schema', () => ({ title: 'Text', type: 'object' as const, properties: {} }));
-    const ts = createTypesStore(backingStore, '/types');
+    const ts = createTypesTree(backingStore, '/types');
     const children = await ts.getChildren('/types');
     const testFolder = children.items.find(n => n.$path === '/types/test');
     assert.ok(testFolder, '/types/test folder should exist');
@@ -597,7 +597,7 @@ describe('Types mount adapter', () => {
   it('getChildren returns type nodes in category', async () => {
     register('test.block.hero', 'schema', () => ({ title: 'Hero', type: 'object' as const, properties: {} }));
     register('test.block.text', 'schema', () => ({ title: 'Text', type: 'object' as const, properties: {} }));
-    const ts = createTypesStore(backingStore, '/types');
+    const ts = createTypesTree(backingStore, '/types');
     const children = await ts.getChildren('/types/test/block');
     assert.equal(children.items.length, 2);
     const names = children.items.map((n) => n.$path).sort();
@@ -606,14 +606,14 @@ describe('Types mount adapter', () => {
 
   it('get category folder returns dir node', async () => {
     register('test.block.hero', 'schema', () => ({ title: 'Hero', type: 'object' as const, properties: {} }));
-    const ts = createTypesStore(backingStore, '/types');
+    const ts = createTypesTree(backingStore, '/types');
     const node = await ts.get('/types/test/block');
     assert.equal(node?.$type, 't.dir');
   });
 
   it('falls back to backing tree for dynamic types', async () => {
     await backingStore.set(createNode('/types/custom/card', 'type'));
-    const ts = createTypesStore(backingStore, '/types');
+    const ts = createTypesTree(backingStore, '/types');
     const node = await ts.get('/types/custom/card');
     assert.equal(node?.$type, 't.type');
   });
@@ -621,7 +621,7 @@ describe('Types mount adapter', () => {
   it('merges registry and stored types in getChildren', async () => {
     register('test.block.hero', 'schema', () => ({ title: 'Hero', type: 'object' as const, properties: {} }));
     await backingStore.set(createNode('/types/custom', 'dir'));
-    const ts = createTypesStore(backingStore, '/types');
+    const ts = createTypesTree(backingStore, '/types');
     const children = await ts.getChildren('/types');
     const paths = children.items.map(n => n.$path);
     assert.ok(paths.includes('/types/test'), '/types/test should exist');
@@ -633,7 +633,7 @@ describe('Types mount adapter', () => {
       title: 'Hero from registry', type: 'object' as const, properties: {},
     }));
     await backingStore.set(createNode('/types/test/block/hero', 'type'));
-    const ts = createTypesStore(backingStore, '/types');
+    const ts = createTypesTree(backingStore, '/types');
     const node = await ts.get('/types/test/block/hero');
     const schema = node?.schema as { title: string };
     assert.equal(schema.title, 'Hero from registry');
@@ -647,7 +647,7 @@ describe('Types mount adapter', () => {
     }));
     register('test.block.hero', 'react', () => 'react-component');
     register('test.block.hero', 'react:edit', () => 'react-component');
-    const ts = createTypesStore(backingStore, '/types');
+    const ts = createTypesTree(backingStore, '/types');
     const node = await ts.get('/types/test/block/hero');
     assert.equal(node?.$type, 't.type');
     const schema = node?.schema as { $type: string; title: string };
@@ -660,14 +660,14 @@ describe('Types mount adapter', () => {
   });
 
   it('set goes to backing tree', async () => {
-    const ts = createTypesStore(backingStore, '/types');
+    const ts = createTypesTree(backingStore, '/types');
     await ts.set(createNode('/types/custom/card', 'type'));
     const stored = await backingStore.get('/types/custom/card');
     assert.equal(stored?.$type, 't.type');
   });
 
   it('remove deletes dynamic type from backing tree', async () => {
-    const ts = createTypesStore(backingStore, '/types');
+    const ts = createTypesTree(backingStore, '/types');
     await ts.set(createNode('/types/custom/card', 'type'));
     const removed = await ts.remove('/types/custom/card');
     assert.equal(removed, true);
@@ -676,12 +676,12 @@ describe('Types mount adapter', () => {
 
   it('remove throws on registry type', async () => {
     register('test.block.hero', 'schema', () => ({ title: 'Hero', type: 'object' as const, properties: {} }));
-    const ts = createTypesStore(backingStore, '/types');
+    const ts = createTypesTree(backingStore, '/types');
     await assert.rejects(() => ts.remove('/types/test/block/hero'));
   });
 
   it('dynamic type visible via get after set', async () => {
-    const ts = createTypesStore(backingStore, '/types');
+    const ts = createTypesTree(backingStore, '/types');
     const card = createNode('/types/custom/card', 'type', {}, {
       schema: { $type: 'schema', title: 'Card', type: 'object', properties: {} },
     });
@@ -693,7 +693,7 @@ describe('Types mount adapter', () => {
   });
 
   it('dynamic type appears in getChildren', async () => {
-    const ts = createTypesStore(backingStore, '/types');
+    const ts = createTypesTree(backingStore, '/types');
     await ts.set(createNode('/types/custom/card', 'type'));
     await ts.set(createNode('/types/custom/list', 'type'));
     const children = await ts.getChildren('/types/custom');
@@ -705,7 +705,7 @@ describe('Types mount adapter', () => {
   it('getChildren merges dynamic and registry in same category', async () => {
     register('test.block.hero', 'schema', () => ({ title: 'Hero', type: 'object' as const, properties: {} }));
     await backingStore.set(createNode('/types/test/block/custom-block', 'type'));
-    const ts = createTypesStore(backingStore, '/types');
+    const ts = createTypesTree(backingStore, '/types');
     const children = await ts.getChildren('/types/test/block');
     assert.equal(children.items.length, 2);
     const paths = children.items.map((n) => n.$path).sort();

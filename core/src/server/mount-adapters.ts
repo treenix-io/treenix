@@ -4,29 +4,15 @@
 
 import { createTrpcTransport } from '#client';
 import { registerType } from '#comp';
-import { isComponent, type NodeData, register, resolve } from '#core';
+import { isComponent, register } from '#core';
 import { createMemoryTree, createOverlayTree, type Tree } from '#tree';
 import { createFsTree } from '#tree/fs';
-import { createRawFsStore } from '#tree/mimefs';
+import { createRawFsTree } from '#tree/mimefs';
 import { createQueryTree, type QueryConfig } from '#tree/query';
 import { createRepathTree } from '#tree/repath';
-import { createModsStore } from './mods-mount';
-import { createTypesStore } from './types-mount';
-
-export type MountCtx = {
-  node: NodeData;
-  path: string;
-  parentStore: Tree;
-  globalStore?: Tree;
-};
-
-export type MountAdapter<T = unknown> = (mount: T, ctx: MountCtx) => Tree | Promise<Tree>;
-
-declare module '#core/context' {
-  interface ContextHandlers<T> {
-    mount: MountAdapter<T>;
-  }
-}
+import { createModsTree } from './mods-mount';
+import { type MountCtx, resolveAdapter } from './mount';
+import { createTypesTree } from './types-mount';
 
 // ── Mount type classes ──
 
@@ -92,9 +78,9 @@ register(MountMongo, 'mount', async (mount, ctx) => {
   return mount.shared ? tree : createRepathTree(tree, ctx.path, '/');
 });
 
-register(MountTypes, 'mount', (_mount, ctx) => createTypesStore(ctx.parentStore));
+register(MountTypes, 'mount', (_mount, ctx) => createTypesTree(ctx.parentStore));
 
-register(MountMods, 'mount', (_mount, ctx) => createModsStore(ctx.parentStore));
+register(MountMods, 'mount', () => createModsTree());
 
 register(MountMemory, 'mount', () => createMemoryTree());
 
@@ -113,7 +99,7 @@ register(MountRawFs, 'mount', async (mount, ctx) => {
   if (!mount.root) throw new Error('t.mount.rawfs: root required');
   // Pass mount path so decoders can resolve self-referential paths in file content
   // (e.g. relative markdown links → absolute outer tree paths).
-  const tree = await createRawFsStore(mount.root, mount.shared ? '' : ctx.path);
+  const tree = await createRawFsTree(mount.root, mount.shared ? '' : ctx.path);
   return mount.shared ? tree : createRepathTree(tree, ctx.path, '/');
 });
 
@@ -156,10 +142,11 @@ register(MountOverlay, 'mount', async (mount, ctx) => {
   for (const name of mount.layers) {
     const comp = ctx.node[name];
     if (!isComponent(comp)) throw new Error(`t.mount.overlay: component "${name}" not found`);
-    const adapter = resolve(comp.$type, 'mount');
-    if (!adapter) throw new Error(`No mount adapter for "${comp.$type}"`);
-    const subCtx: MountCtx = { node: ctx.node, path: ctx.path, parentStore: stores[0] ?? ({} as Tree), globalStore: ctx.globalStore };
-    stores.push(await adapter(comp, subCtx));
+    // First layer sees the Overlay's own parent; subsequent layers see the
+    // previously-built layer as their parent. Previously this used `{} as Tree`
+    // for layer 0 — a lie that crashes any adapter touching parentStore.
+    const subCtx: MountCtx = { node: ctx.node, path: ctx.path, parentStore: stores[0] ?? ctx.parentStore, globalStore: ctx.globalStore };
+    stores.push(await resolveAdapter(comp, subCtx));
   }
   // First = lower (base), last = upper (writes go here)
   let result = stores[0];

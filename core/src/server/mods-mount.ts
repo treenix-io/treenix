@@ -11,7 +11,7 @@
 //   /sys/mods/{mod}/prefabs/{name}/      → t.prefab node (mod, name, deploy action)
 //   /sys/mods/{mod}/prefabs/{name}/{...} → prefab nodes
 
-import { createNode, type NodeData } from '#core';
+import { createNode, isComponent, type NodeData } from '#core';
 import { getLoadedMods } from '#mod/loader';
 import { getModPrefabs, getPrefab, getRegisteredMods } from '#mod/prefab';
 import { Prefab } from '#mods/treenix/prefab-type';
@@ -19,11 +19,13 @@ import { paginate, type Tree } from '#tree';
 import { getModInfo } from './mod-catalog';
 import { buildTypeNode } from './types-mount';
 
-// Mark mount components as disabled on prefab catalog nodes —
-// they're data for inspection, not live mount points
-function disableMount(node: NodeData): NodeData {
+// Prefab inner nodes appear under /sys/mods/{mod}/prefabs/... as catalog entries.
+// Most have no mount component (just data); some do (e.g. directories that mount
+// FS roots when deployed). For the catalog view we disable any present mount —
+// browsing the catalog must not trigger live mount resolution. Absent mount = pass through.
+function disableMountIfPresent(node: NodeData): NodeData {
   const mount = node['mount'];
-  if (!mount || typeof mount !== 'object' || !('$type' in mount)) return node;
+  if (!isComponent(mount)) return node;
   return { ...node, mount: { ...mount, disabled: true } };
 }
 
@@ -34,7 +36,7 @@ type ParsedPath = {
   rest?: string;    // prefab sub-path
 };
 
-export function createModsStore(_backingStore: Tree, modsPath = '/sys/mods'): Tree {
+export function createModsTree(modsPath = '/sys/mods'): Tree {
   // Union: loader registry + prefab registry (some mods have prefabs but aren't in loader, e.g. tests)
   function allModNames(): Set<string> {
     const names = new Set(getLoadedMods().map(m => m.name));
@@ -109,7 +111,7 @@ export function createModsStore(_backingStore: Tree, modsPath = '/sys/mods'): Tr
         const clean = np.startsWith('/') ? np.slice(1) : np;
         return clean === p.rest;
       });
-      return found ? disableMount({ ...found, $path: path }) : undefined;
+      return found ? disableMountIfPresent({ ...found, $path: path }) : undefined;
     },
 
     async getChildren(path, opts) {
@@ -149,7 +151,7 @@ export function createModsStore(_backingStore: Tree, modsPath = '/sys/mods'): Tr
           for (const node of prefab.nodes) {
             if (node.$path === '.' || node.$path.startsWith('/')) continue;
             if (node.$path.includes('/')) continue;
-            items.push(disableMount({ ...node, $path: `${path}/${node.$path}` }));
+            items.push(disableMountIfPresent({ ...node, $path: `${path}/${node.$path}` }));
           }
         }
       }
