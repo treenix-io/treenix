@@ -1,6 +1,6 @@
 {
   "name": "@treenx/react",
-  "version": "3.0.17",
+  "version": "3.0.18",
   "description": "React binding for Treenix — reactive hooks, admin UI, and context-based component rendering.",
   "type": "module",
   "publishConfig": {
