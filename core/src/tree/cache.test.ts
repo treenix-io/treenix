@@ -236,6 +236,30 @@ describe('withCache — getChildren populates cache', () => {
   });
 });
 
+describe('withCache — bounded', () => {
+  it('evicts oldest entries when capacity exceeded', async () => {
+    let gets = 0;
+    const mem = createMemoryTree();
+    for (let i = 0; i < 5; i++) await mem.set(makeNode(`/n${i}`));
+
+    const spied: typeof mem = {
+      ...mem,
+      async get(path, ctx) { gets++; return mem.get(path, ctx); },
+      async getChildren(p, o, c) { return mem.getChildren(p, o, c); },
+      async set(n, c) { return mem.set(n, c); },
+      async remove(p, c) { return mem.remove(p, c); },
+    };
+
+    const cached = withCache(spied, 3);
+    for (let i = 0; i < 5; i++) await cached.get(`/n${i}`); // fills + evicts /n0,/n1
+    gets = 0;
+
+    await cached.get('/n4');                                // hit
+    await cached.get('/n0');                                // evicted → re-fetch
+    assert.equal(gets, 1);
+  });
+});
+
 describe('withCache — tree structure', () => {
   it('caches deep paths independently', async () => {
     const mem = createMemoryTree();
