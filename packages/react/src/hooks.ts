@@ -27,6 +27,7 @@ import { useTreeSource } from '#tree/tree-source-context';
 
 const noopUnsub = () => {};
 export { useNavigate, useBeforeNavigate } from '#navigate';
+export { useTheme, type Theme, type UseThemeResult, type CustomThemeSpec } from '#hooks/use-theme';
 
 // ── Query<T> — industry-standard reactive fetch shape ──
 // Matches React Query / SWR / Apollo / RTK Query. Boring, familiar, trivially

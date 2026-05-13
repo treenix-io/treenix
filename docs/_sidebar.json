@@ -33,6 +33,7 @@
         ]},
         { "path": "concepts/actions", "title": "Actions" },
         { "path": "concepts/reactivity", "title": "Reactivity" },
+        { "path": "concepts/theming", "title": "Theming" },
         { "path": "concepts/mounts", "title": "Mounts" },
         { "path": "concepts/security", "title": "Security", "anchors": [
           { "id": "acl", "title": "ACL" },
