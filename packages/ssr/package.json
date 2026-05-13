@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "description": "Server-side rendering for Treenix — tree-driven router, t.site / t.seo / t.route components, Tailwind v4 runtime JIT.",
   "type": "module",
-  "private": true,
+  "publishConfig": {
+    "access": "public"
+  },
   "license": "FSL-1.1-MIT",
   "imports": {
     "#*": {
