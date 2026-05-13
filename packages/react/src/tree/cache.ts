@@ -13,9 +13,13 @@ import type { Page } from '@treenx/core/tree';
 import * as idb from './idb';
 import { stampNode } from '#symbols';
 
-/** Shallow-freeze in dev mode to catch accidental cache mutation at the source */
-const devFreeze: (node: NodeData) => void =
-  import.meta.env?.DEV ? (node) => Object.freeze(node) : () => {};
+/** Deep-freeze in dev mode to catch accidental cache mutation (incl. nested components) */
+function deepFreeze(v: any): void {
+  if (!v || typeof v !== 'object' || Object.isFrozen(v)) return;
+  Object.freeze(v);
+  for (const k of Object.keys(v)) deepFreeze(v[k]);
+}
+const devFreeze: (node: NodeData) => void = import.meta.env?.DEV ? deepFreeze : () => {};
 
 type Sub = () => void;
 
