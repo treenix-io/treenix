@@ -48,7 +48,7 @@ declare module '#core/context' {
   }
 }
 
-export async function createRawFsStore(rootDir: string, mountPath: string = ''): Promise<Tree> {
+export async function createRawFsTree(rootDir: string, mountPath: string = ''): Promise<Tree> {
   rootDir = await realpath(resolve(rootDir));
   // Normalize mount prefix: strip trailing slash, treat '/' or '' as no prefix.
   // Used only to build outerPath for decoders — not for filesystem resolution.

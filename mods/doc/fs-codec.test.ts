@@ -1,6 +1,6 @@
 import type { NodeData } from '@treenx/core';
 import type { Tree } from '@treenx/core/tree';
-import { createRawFsStore } from '@treenx/core/tree/mimefs';
+import { createRawFsTree } from '@treenx/core/tree/mimefs';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -16,7 +16,7 @@ describe('doc fs-codec', () => {
 
   beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), 'treenix-doc-codec-'));
-    tree = await createRawFsStore(dir);
+    tree = await createRawFsTree(dir);
   });
 
   afterEach(async () => {
@@ -149,7 +149,7 @@ describe('doc fs-codec — mounted rawfs link resolution', () => {
     await mkdtemp(subdir + '-'); // ensure unique sibling, then create the real one
     await writeFile(join(dir, 'index.md'), 'See [Types](./public/types.md).\n');
 
-    const tree = await createRawFsStore(dir, '/docs');
+    const tree = await createRawFsTree(dir, '/docs');
     const node = await tree.get('/index.md');
 
     const link = findNodeLink((node as Record<string, unknown>).content);
@@ -160,7 +160,7 @@ describe('doc fs-codec — mounted rawfs link resolution', () => {
   it('resolves ./nested/file.md against deeper outer path', async () => {
     await writeFile(join(dir, 'index.md'), '[Types](./concepts/types.md)\n');
 
-    const tree = await createRawFsStore(dir, '/docs/public');
+    const tree = await createRawFsTree(dir, '/docs/public');
     const node = await tree.get('/index.md');
 
     const link = findNodeLink((node as Record<string, unknown>).content);
@@ -174,7 +174,7 @@ describe('doc fs-codec — mounted rawfs link resolution', () => {
     await writeFile(join(dir, 'sibling.md'), '# Sibling\n');
     await writeFile(join(dir, 'index.md'), '[Up](../sibling.md)\n');
 
-    const tree = await createRawFsStore(dir, '/docs/public');
+    const tree = await createRawFsTree(dir, '/docs/public');
     const node = await tree.get('/index.md');
 
     const link = findNodeLink((node as Record<string, unknown>).content);
@@ -185,7 +185,7 @@ describe('doc fs-codec — mounted rawfs link resolution', () => {
   it('default (no mountPath) keeps inner path — backward compatible', async () => {
     await writeFile(join(dir, 'index.md'), '[Types](./types.md)\n');
 
-    const tree = await createRawFsStore(dir);
+    const tree = await createRawFsTree(dir);
     const node = await tree.get('/index.md');
 
     const link = findNodeLink((node as Record<string, unknown>).content);
@@ -196,7 +196,7 @@ describe('doc fs-codec — mounted rawfs link resolution', () => {
   it('mountPath with trailing slash is normalized', async () => {
     await writeFile(join(dir, 'index.md'), '[X](./x.md)\n');
 
-    const tree = await createRawFsStore(dir, '/docs/');
+    const tree = await createRawFsTree(dir, '/docs/');
     const node = await tree.get('/index.md');
 
     const link = findNodeLink((node as Record<string, unknown>).content);
@@ -220,7 +220,7 @@ describe('doc fs-codec — YAML frontmatter', () => {
     const raw = `---\ntitle: Introduction\ndescription: Overview\ntags: [intro, overview]\norder: 0\nsection: root\n---\n\n# Body Heading\n\nSome text.\n`;
     await writeFile(join(dir, 'index.md'), raw);
 
-    const tree = await createRawFsStore(dir);
+    const tree = await createRawFsTree(dir);
     const node = await tree.get('/index.md') as Record<string, unknown>;
 
     // Frontmatter title takes precedence over H1
@@ -246,7 +246,7 @@ describe('doc fs-codec — YAML frontmatter', () => {
     const raw = `---\ndescription: only desc\n---\n\n# H1 Title\n\nBody.\n`;
     await writeFile(join(dir, 'page.md'), raw);
 
-    const tree = await createRawFsStore(dir);
+    const tree = await createRawFsTree(dir);
     const node = await tree.get('/page.md') as Record<string, unknown>;
 
     assert.equal(node.title, 'H1 Title');
@@ -258,7 +258,7 @@ describe('doc fs-codec — YAML frontmatter', () => {
     const raw = `---\ntitle: T\nlayout: post\ndraft: true\n---\nbody`;
     await writeFile(join(dir, 'p.md'), raw);
 
-    const tree = await createRawFsStore(dir);
+    const tree = await createRawFsTree(dir);
     const node = await tree.get('/p.md') as Record<string, unknown>;
     const fm = node['doc.frontmatter'] as Record<string, unknown>;
     assert.deepEqual(fm.extra, { layout: 'post', draft: true });
@@ -267,7 +267,7 @@ describe('doc fs-codec — YAML frontmatter', () => {
   it('no frontmatter → no doc.frontmatter component', async () => {
     await writeFile(join(dir, 'plain.md'), '# Just a heading\n\ntext\n');
 
-    const tree = await createRawFsStore(dir);
+    const tree = await createRawFsTree(dir);
     const node = await tree.get('/plain.md') as Record<string, unknown>;
     assert.equal(node['doc.frontmatter'], undefined);
     assert.equal(node.title, 'Just a heading');
@@ -277,14 +277,14 @@ describe('doc fs-codec — YAML frontmatter', () => {
     const original = `---\ntitle: T\ndescription: D\ntags: [a, b]\norder: 3\n---\n\n# T\n\nBody.\n`;
     await writeFile(join(dir, 'r.md'), original);
 
-    const tree = await createRawFsStore(dir);
+    const tree = await createRawFsTree(dir);
     const node = await tree.get('/r.md');
 
     await tree.set(node!);
     const result = await readFile(join(dir, 'r.md'), 'utf-8');
 
     // Re-decode and verify identical frontmatter component
-    const reTree = await createRawFsStore(dir);
+    const reTree = await createRawFsTree(dir);
     const reNode = await reTree.get('/r.md') as Record<string, unknown>;
     const fm = reNode['doc.frontmatter'] as Record<string, unknown>;
     assert.equal(fm.title, 'T');

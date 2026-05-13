@@ -96,14 +96,19 @@ function deleteByPath(obj: any, path: string): void {
   const parts = path.split('.');
   let cur = obj;
   for (let i = 0; i < parts.length - 1; i++) {
-    if (cur[parts[i]] == null) return;
+    if (cur[parts[i]] == null) throw new OpError('NOT_FOUND', `delete: missing parent at "${parts.slice(0, i + 1).join('.')}" in ${path}`);
     cur = cur[parts[i]];
   }
   const key = parts[parts.length - 1];
   if (Array.isArray(cur)) {
     const idx = Number(key);
-    if (Number.isInteger(idx)) { cur.splice(idx, 1); return; }
+    if (Number.isInteger(idx)) {
+      if (idx < 0 || idx >= cur.length) throw new OpError('NOT_FOUND', `delete: array index ${idx} out of range (length ${cur.length}) in ${path}`);
+      cur.splice(idx, 1);
+      return;
+    }
   }
+  if (!(key in cur)) throw new OpError('NOT_FOUND', `delete: missing key "${key}" in ${path}`);
   delete cur[key];
 }
 

@@ -201,7 +201,7 @@ describe('prototype pollution guard (assertSafePatchPath)', () => {
   });
 
   it('allows legitimate nested paths and array .- suffix', () => {
-    const obj = { mesh: { width: 5 }, tags: ['a'] } as any;
+    const obj = { mesh: { width: 5, height: 10 }, tags: ['a'] } as any;
     assert.doesNotThrow(() => applyOps(obj, [
       ['r', 'mesh.width', 20],
       ['a', 'tags.-', 'b'],
@@ -209,6 +209,28 @@ describe('prototype pollution guard (assertSafePatchPath)', () => {
     ]));
     assert.equal(obj.mesh.width, 20);
     assert.deepEqual(obj.tags, ['a', 'b']);
+    assert.equal('height' in obj.mesh, false);
+  });
+
+  it('delete throws NOT_FOUND on missing key', () => {
+    assert.throws(
+      () => applyOps({ mesh: { width: 5 } } as any, [['d', 'mesh.height']]),
+      (e: any) => e instanceof OpError && e.code === 'NOT_FOUND',
+    );
+  });
+
+  it('delete throws NOT_FOUND on missing parent path', () => {
+    assert.throws(
+      () => applyOps({} as any, [['d', 'a.b.c']]),
+      (e: any) => e instanceof OpError && e.code === 'NOT_FOUND',
+    );
+  });
+
+  it('delete throws NOT_FOUND on array index out of range', () => {
+    assert.throws(
+      () => applyOps({ items: ['x'] } as any, [['d', 'items.5']]),
+      (e: any) => e instanceof OpError && e.code === 'NOT_FOUND',
+    );
   });
 });
 

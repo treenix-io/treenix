@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { registerJsonCodec } from './json-codec';
-import { createRawFsStore } from './mimefs';
+import { createRawFsTree } from './mimefs';
 
 describe('RawFsStore', () => {
   let dir: string;
@@ -20,7 +20,7 @@ describe('RawFsStore', () => {
 
   async function setup() {
     dir = await mkdtemp(join(tmpdir(), 'treenix-rawfs-test-'));
-    return createRawFsStore(dir);
+    return createRawFsTree(dir);
   }
 
   it('file → typed node', async () => {

@@ -3,6 +3,7 @@
 // Used by t.mount.query to create virtual folders (e.g., /orders/incoming shows orders where status.value === 'incoming').
 
 import { type NodeData, toStorageKeys } from '#core';
+import { OpError } from '#errors';
 import sift from 'sift';
 import { type Tree } from './index';
 
@@ -90,15 +91,15 @@ export function createQueryTree(config: QueryConfig, parentStore: Tree): Tree {
     },
 
     async set() {
-      throw new Error('Query mount is read-only: writes not supported');
+      throw new OpError('FORBIDDEN', 'Query mount is read-only: writes not supported');
     },
 
     async remove() {
-      throw new Error('Query mount is read-only: removes not supported');
+      throw new OpError('FORBIDDEN', 'Query mount is read-only: removes not supported');
     },
 
     async patch() {
-      throw new Error('Query mount is read-only: patches not supported');
+      throw new OpError('FORBIDDEN', 'Query mount is read-only: patches not supported');
     },
   };
 }
