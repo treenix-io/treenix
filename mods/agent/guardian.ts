@@ -284,6 +284,7 @@ export async function requestApproval(
     status: 'pending',
     reason: opts.reason,
     createdAt: Date.now(),
+    resolvedAt: 0,
   }));
 
   console.log(`[guardian] escalation: ${opts.role} wants ${opts.tool} → ${path}`);
