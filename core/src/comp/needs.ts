@@ -19,7 +19,13 @@ export type ResolvedDeps = Record<string, ComponentData | NodeData | NodeData[]>
 const needsMap = new Map<string, NeedSpec[]>();
 
 export function registerActionNeeds(type: string, action: string, patterns: string[]): void {
-  needsMap.set(`${type}@${action}`, patterns.map(parseNeedPattern));
+  const specs = patterns.map(parseNeedPattern);
+  const seen = new Set<string>();
+  for (const s of specs) {
+    if (seen.has(s.key)) throw new Error(`Duplicate need key "${s.key}" for ${type}@${action}`);
+    seen.add(s.key);
+  }
+  needsMap.set(`${type}@${action}`, specs);
 }
 
 export function getActionNeeds(type: string, action: string): NeedSpec[] {
@@ -61,8 +67,6 @@ export async function collectDeps(
   const async_: Promise<void>[] = [];
 
   for (const s of specs) {
-    if (deps[s.key] !== undefined) throw new Error(`Duplicate dep key "${s.key}"`);
-
     if (s.kind === 'sibling') {
       const v = node[s.name];
       if (!isComponent(v)) throw new Error(`Needed sibling "${s.name}" not found on ${node.$path}`);

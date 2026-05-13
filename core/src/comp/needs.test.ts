@@ -357,21 +357,12 @@ describe('collectDeps', () => {
     await assert.rejects(() => collectDeps(node, 'comp', 'run', tree));
   });
 
-  it('throws on duplicate dep keys', async () => {
+  it('throws at registration on duplicate dep keys', () => {
     class DupKeys {
       static needs = { run: ['payment', '/other/payment'] };
       run() {}
     }
-    registerType('t.dup', DupKeys);
-    registerType('t.payment', Payment);
-    const tree = createMemoryTree();
-    await tree.set(createNode('/other/payment', 'x'));
-    const node = createNode('/x', 'dir', {}, {
-      comp: { $type: 't.dup' },
-      payment: { $type: 't.payment', amount: 0, settled: false },
-    });
-
-    await assert.rejects(() => collectDeps(node, 'comp', 'run', tree));
+    assert.throws(() => registerType('t.dup', DupKeys), /Duplicate need key/);
   });
 });
 

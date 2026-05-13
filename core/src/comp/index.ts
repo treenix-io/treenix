@@ -76,7 +76,10 @@ let _ctx: ExecCtx | null = null;
 // Race with first action is harmless — getCtx falls back to _ctx until _als settles.
 // Browser/RN: import fails → _als stays null → falls back to _ctx global.
 void (async () => {
-  try { _als = new (await import('node:async_hooks')).AsyncLocalStorage(); } catch {}
+  try { _als = new (await import('node:async_hooks')).AsyncLocalStorage(); }
+  catch (e) {
+    if (typeof window === 'undefined' && typeof process !== 'undefined') console.warn('[comp] AsyncLocalStorage init failed:', e);
+  }
 })();
 
 setCtxProvider(() => _als?.getStore() ?? _ctx);

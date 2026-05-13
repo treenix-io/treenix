@@ -86,10 +86,24 @@ describe('applyOps', () => {
     assert.deepEqual(obj.checklist.items, ['do b', 'do c']);
   });
 
-  it('creates intermediate objects on set', () => {
+  it('add creates intermediate objects', () => {
     const obj = {} as any;
-    applyOps(obj, [['r', 'deep.nested.field', 'ok']]);
+    applyOps(obj, [['a', 'deep.nested.field', 'ok']]);
     assert.equal(obj.deep.nested.field, 'ok');
+  });
+
+  it('replace throws NOT_FOUND when parent missing', () => {
+    const obj = {} as any;
+    assert.throws(
+      () => applyOps(obj, [['r', 'missing.field', 'x']]),
+      (e: any) => e instanceof OpError && e.code === 'NOT_FOUND',
+    );
+  });
+
+  it('replace upserts leaf when parent exists', () => {
+    const obj = { parent: {} } as any;
+    applyOps(obj, [['r', 'parent.absent', 'x']]);
+    assert.equal(obj.parent.absent, 'x');
   });
 });
 

@@ -51,7 +51,8 @@ export function applyOps(target: Record<string, unknown>, ops: readonly PatchOp[
         break;
       }
       case 'r':
-        setByPath(target, op[1], op[2]);
+        // RFC 6902 replace: target location MUST exist.
+        setByPath(target, op[1], op[2], true);
         break;
       case 'a':
         if (op[1].endsWith('.-')) {
@@ -82,11 +83,15 @@ function getByPath(obj: any, path: string): unknown {
   return cur;
 }
 
-function setByPath(obj: any, path: string, value: unknown): void {
+function setByPath(obj: any, path: string, value: unknown, strict = false): void {
   const parts = path.split('.');
   let cur = obj;
   for (let i = 0; i < parts.length - 1; i++) {
-    if (cur[parts[i]] == null || typeof cur[parts[i]] !== 'object') cur[parts[i]] = {};
+    const next = cur[parts[i]];
+    if (next == null || typeof next !== 'object') {
+      if (strict) throw new OpError('NOT_FOUND', `replace: missing parent at "${parts.slice(0, i + 1).join('.')}" in ${path}`);
+      cur[parts[i]] = {};
+    }
     cur = cur[parts[i]];
   }
   cur[parts[parts.length - 1]] = value;
