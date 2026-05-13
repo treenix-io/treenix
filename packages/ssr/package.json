@@ -1,6 +1,6 @@
 {
   "name": "@treenx/ssr",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Server-side rendering for Treenix — tree-driven router, t.site / t.seo / t.route components, Tailwind v4 runtime JIT.",
   "type": "module",
   "publishConfig": {
