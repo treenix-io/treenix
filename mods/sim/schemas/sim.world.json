@@ -5,11 +5,12 @@
   "title": "Simulation world entity — aggregates config, round, events. Actions registered separately.",
   "properties": {},
   "methods": {
-    "start": {
-      "arguments": []
-    },
-    "stop": {
-      "arguments": []
+    "add-entity": {
+      "arguments": [
+        {
+          "name": "params"
+        }
+      ]
     },
     "set-config": {
       "arguments": [
@@ -18,12 +19,11 @@
         }
       ]
     },
-    "add-entity": {
-      "arguments": [
-        {
-          "name": "params"
-        }
-      ]
+    "start": {
+      "arguments": []
+    },
+    "stop": {
+      "arguments": []
     }
   }
 }

@@ -405,6 +405,13 @@ function evalInit(node: N | null | undefined, ctx: SchemaCtx = {}): unknown {
   return undefined;
 }
 
+// Sort object keys to keep JSON output stable across fs.readdir orders
+function sortKeys<T>(obj: Record<string, T>): Record<string, T> {
+  return Object.fromEntries(
+    Object.keys(obj).sort((a, b) => a.localeCompare(b)).map((k) => [k, obj[k]]),
+  );
+}
+
 // ── AST walking ──
 
 function walk(node: N, visitor: (n: N) => void) {
@@ -949,7 +956,7 @@ export async function generateSchemas(dirs: string[]): Promise<void> {
           methods[name] = { arguments: [], ...rest };
         }
       }
-      if (Object.keys(methods).length) body.methods = methods;
+      if (Object.keys(methods).length) body.methods = sortKeys(methods);
       allExternalActions.delete(entry.typeName);
     }
 
@@ -973,6 +980,7 @@ export async function generateSchemas(dirs: string[]): Promise<void> {
 
   // Orphan external actions
   for (const [typeName, actions] of allExternalActions) {
+    actions.sort((a, b) => a.fileName.localeCompare(b.fileName));
     const methods: Record<string, MethodSchema> = {};
     for (const act of actions) {
       const { name, fileName: _, ...rest } = act;
@@ -983,7 +991,7 @@ export async function generateSchemas(dirs: string[]): Promise<void> {
       $schema: 'http://json-schema.org/draft-07/schema#',
       type: 'object' as const,
       properties: {},
-      methods,
+      methods: sortKeys(methods),
     };
     const schemasDir = path.join(path.dirname(actions[0].fileName), 'schemas');
     const outFile = path.join(schemasDir, `${typeName}.json`);

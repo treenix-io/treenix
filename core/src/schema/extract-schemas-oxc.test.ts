@@ -4,11 +4,11 @@ import * as path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { generateSchemas } from '#schema/extract-schemas-oxc';
 
-const SCHEMAS_DIR = path.resolve(import.meta.dirname, 'schemas');
+const IMPORT_FIXTURES_DIR = path.resolve(import.meta.dirname, '_import-fixtures');
+const SCHEMAS_DIR = path.join(IMPORT_FIXTURES_DIR, 'schemas');
 const SCHEMA_FILE = path.join(SCHEMAS_DIR, 'test.schema-widget.json');
 const EXPORTED_SCHEMA_FILE = path.join(SCHEMAS_DIR, 'test.exported-schema-widget.json');
-const IMPORT_FIXTURES_DIR = path.resolve(import.meta.dirname, '_import-fixtures');
-const IMPORT_SCHEMAS_DIR = path.join(IMPORT_FIXTURES_DIR, 'schemas');
+const IMPORT_SCHEMAS_DIR = SCHEMAS_DIR;
 
 describe('extract-schemas-oxc', () => {
   let schema: any;

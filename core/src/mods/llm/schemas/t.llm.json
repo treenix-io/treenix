@@ -5,10 +5,10 @@
   "title": "LLM bridge — exports type schemas and describes subtrees as text for prompts.",
   "properties": {},
   "methods": {
-    "schema": {
+    "describe": {
       "arguments": []
     },
-    "describe": {
+    "schema": {
       "arguments": []
     }
   }
