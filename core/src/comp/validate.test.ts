@@ -164,9 +164,12 @@ describe('validateValue', () => {
       assert.equal(e[0].path, 'x[0][1]');
     });
 
-    it('skips null items in array', () => {
+    it('rejects null items in array against item type', () => {
       const def = { type: 'array', items: { type: 'number' } };
-      assert.equal(check([1, null, 3], def as any).length, 0);
+      const e = check([1, null, 3], def as any);
+      assert.equal(e.length, 1);
+      assert.equal(e[0].path, 'x[1]');
+      assert.match(e[0].message, /null/);
     });
 
     it('rejects non-object when properties expected', () => {

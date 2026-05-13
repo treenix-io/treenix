@@ -20,6 +20,14 @@ export type PropertySchema = {
   anyOf?: PropertySchema[]; // union types (e.g. string | number) — rendered as JSON fallback widget
   properties?: Record<string, PropertySchema>; // for nested object fields
   required?: string[]; // required fields within nested object
+  // JSON Schema validation keywords — consumed by comp/validate.ts
+  minLength?: number;
+  maxLength?: number;
+  pattern?: string;
+  minimum?: number;
+  maximum?: number;
+  minItems?: number;
+  maxItems?: number;
 };
 
 export type MethodArgSchema = { name: string } & PropertySchema;

@@ -10,10 +10,12 @@ export function loadSchemasFromDir(dir: string): number {
   if (!fs.existsSync(dir)) return 0;
   let count = 0;
   for (const file of fs.readdirSync(dir).filter(f => f.endsWith('.json'))) {
-    const raw = fs.readFileSync(path.join(dir, file), 'utf-8').trim();
-    if (!raw) { console.warn(`[schema] empty: ${file}`); continue; }
+    const full = path.join(dir, file);
+    const raw = fs.readFileSync(full, 'utf-8').trim();
+    if (!raw) throw new Error(`[schema] ${full}: file is empty — delete it or fill in the schema`);
     const schema = safeJsonParse(raw);
-    if (!schema.$id) { console.warn(`[schema] no $id: ${file}`); continue; }
+    if (!schema || typeof schema !== 'object') throw new Error(`[schema] ${full}: parsed value is not an object`);
+    if (!schema.$id) throw new Error(`[schema] ${full}: missing "$id" — required for registry lookup`);
     schema.$id = normalizeType(schema.$id);
     register(schema.$id, 'schema', () => schema);
     count++;

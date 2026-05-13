@@ -21,7 +21,13 @@ import { type TypeSchema } from '#schema/types';
 import { type Tree } from '#tree';
 
 export type { Class };
-export type TypeClass<T> = Class<T> & { $type: string };
+export type TypeClass<T> = Class<T> & {
+  $type: string;
+  /** Per-action needs declared as a static class field. registerType reads this and calls registerActionNeeds. */
+  needs?: Record<string, string[]>;
+  /** Bracket-access marker so `proxy[Counter]` resolves to "§<$type>" inside treeChain. */
+  [Symbol.toPrimitive]?: () => string;
+};
 
 // Strip methods from a type — only keep data fields (recursive)
 // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
@@ -100,12 +106,12 @@ export function registerType<T extends object>(type: string, cls: Class<T>, opts
   const compClass = cls as TypeClass<T>;
   compClass.$type = normalizeType(type);
   // Bracket access in treeChain: proxy[Counter] → Proxy.get(_, "§app.counter")
-  (cls as any)[Symbol.toPrimitive] = () => `§${compClass.$type}`;
+  compClass[Symbol.toPrimitive] = () => `§${compClass.$type}`;
   register(type, 'class', cls, opts);
   trackType(compClass.$type);
 
   // Per-action needs from static property on class
-  const staticNeeds = (cls as any).needs as Record<string, string[]> | undefined;
+  const staticNeeds = compClass.needs;
   if (staticNeeds) {
     for (const [action, patterns] of Object.entries(staticNeeds)) {
       registerActionNeeds(type, action, patterns);

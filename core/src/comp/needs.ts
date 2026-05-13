@@ -73,8 +73,9 @@ export async function collectDeps(
     // cross-node: resolve target path, then fetch
     let target: string;
     if (s.kind === 'field-ref') {
-      target = (cv as Record<string, unknown>)[s.field] as string;
-      if (typeof target !== 'string') throw new Error(`Field "${s.field}" on ${componentName} is not a path string`);
+      const raw = (cv as Record<string, unknown>)[s.field];
+      if (typeof raw !== 'string') throw new Error(`Field "${s.field}" on ${componentName} is not a path string`);
+      target = raw;
     } else {
       target = resolvePath(node.$path, s.path);
     }

@@ -17,24 +17,22 @@ export type TypeValidator = (value: unknown, def: PropertySchema, path: string, 
 const typeValidators: Record<string, TypeValidator> = {
   string(value, def, path, errors) {
     if (typeof value !== 'string') { errors.push({ path, message: `expected string, got ${typeof value}` }); return; }
-    const d = def as any;
-    if (typeof d.minLength === 'number' && value.length < d.minLength)
-      errors.push({ path, message: `min length ${d.minLength}, got ${value.length}` });
-    if (typeof d.maxLength === 'number' && value.length > d.maxLength)
-      errors.push({ path, message: `max length ${d.maxLength}, got ${value.length}` });
-    if (typeof d.pattern === 'string' && !new RegExp(d.pattern).test(value))
-      errors.push({ path, message: `must match /${d.pattern}/` });
+    if (typeof def.minLength === 'number' && value.length < def.minLength)
+      errors.push({ path, message: `min length ${def.minLength}, got ${value.length}` });
+    if (typeof def.maxLength === 'number' && value.length > def.maxLength)
+      errors.push({ path, message: `max length ${def.maxLength}, got ${value.length}` });
+    if (typeof def.pattern === 'string' && !new RegExp(def.pattern).test(value))
+      errors.push({ path, message: `must match /${def.pattern}/` });
     if (def.enum && !def.enum.includes(value))
       errors.push({ path, message: `must be one of: ${def.enum.join(', ')}` });
   },
 
   number(value, def, path, errors) {
     if (typeof value !== 'number') { errors.push({ path, message: `expected number, got ${typeof value}` }); return; }
-    const d = def as any;
-    if (typeof d.minimum === 'number' && value < d.minimum)
-      errors.push({ path, message: `minimum ${d.minimum}, got ${value}` });
-    if (typeof d.maximum === 'number' && value > d.maximum)
-      errors.push({ path, message: `maximum ${d.maximum}, got ${value}` });
+    if (typeof def.minimum === 'number' && value < def.minimum)
+      errors.push({ path, message: `minimum ${def.minimum}, got ${value}` });
+    if (typeof def.maximum === 'number' && value > def.maximum)
+      errors.push({ path, message: `maximum ${def.maximum}, got ${value}` });
   },
 
   boolean(value, _def, path, errors) {
@@ -43,27 +41,32 @@ const typeValidators: Record<string, TypeValidator> = {
 
   array(value, def, path, errors) {
     if (!Array.isArray(value)) { errors.push({ path, message: `expected array, got ${typeof value}` }); return; }
-    const d = def as any;
-    if (typeof d.minItems === 'number' && value.length < d.minItems)
-      errors.push({ path, message: `min items ${d.minItems}, got ${value.length}` });
-    if (typeof d.maxItems === 'number' && value.length > d.maxItems)
-      errors.push({ path, message: `max items ${d.maxItems}, got ${value.length}` });
+    if (typeof def.minItems === 'number' && value.length < def.minItems)
+      errors.push({ path, message: `min items ${def.minItems}, got ${value.length}` });
+    if (typeof def.maxItems === 'number' && value.length > def.maxItems)
+      errors.push({ path, message: `max items ${def.maxItems}, got ${value.length}` });
 
     if (!def.items) return;
     const items = def.items;
 
     for (let i = 0; i < value.length; i++) {
-      if (value[i] === undefined || value[i] === null) continue;
       const ip = `${path}[${i}]`;
 
+      // Fix K: null/undefined in array fails against item type — not silently skipped.
+      // (Was: continue on null. Hid malformed arrays like [null, null] passing object schema.)
+      if (value[i] === undefined || value[i] === null) {
+        errors.push({ path: ip, message: `expected ${items.type ?? 'value'}, got ${value[i] === null ? 'null' : 'undefined'}` });
+        continue;
+      }
+
       if (items.properties) {
-        if (typeof value[i] !== 'object' || value[i] === null) {
+        if (typeof value[i] !== 'object') {
           errors.push({ path: ip, message: `expected object, got ${typeof value[i]}` });
         } else {
-          validateObject(value[i] as Record<string, unknown>, items.properties as Record<string, PropertySchema>, ip, errors);
+          validateObject(value[i] as Record<string, unknown>, items.properties, ip, errors);
         }
       } else if (items.type) {
-        validateValue(value[i], items as PropertySchema, ip, errors);
+        validateValue(value[i], items, ip, errors);
       }
     }
   },
@@ -73,16 +76,15 @@ const typeValidators: Record<string, TypeValidator> = {
       errors.push({ path, message: `expected object, got ${Array.isArray(value) ? 'array' : typeof value}` });
       return;
     }
-    const d = def as PropertySchema & { properties?: Record<string, PropertySchema>; required?: string[] };
-    if (d.required) {
+    if (def.required) {
       const obj = value as Record<string, unknown>;
-      for (const key of d.required) {
+      for (const key of def.required) {
         if (obj[key] === undefined) {
           errors.push({ path: path ? `${path}.${key}` : key, message: `required field missing` });
         }
       }
     }
-    if (d.properties) validateObject(value as Record<string, unknown>, d.properties, path, errors);
+    if (def.properties) validateObject(value as Record<string, unknown>, def.properties, path, errors);
   },
 };
 
