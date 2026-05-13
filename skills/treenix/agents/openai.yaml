@@ -1,0 +1,10 @@
+interface:
+  display_name: "Treenix"
+  short_description: "Work with Treenix MCP trees and boards"
+  default_prompt: "Use $treenix to inspect Treenix tasks and work through the MCP tree."
+
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "treenix"
+      description: "Treenix MCP tree tools for catalog, schema, node, board, and action operations"
