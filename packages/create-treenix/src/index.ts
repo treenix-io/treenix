@@ -7,6 +7,8 @@ import { modCreate } from './mod-create';
 
 const STARTER_URL = process.env.TREENIX_STARTER_URL
   ?? 'https://codeload.github.com/treenix-io/starter/tar.gz/refs/heads/main';
+const DOCS_URL = process.env.TREENIX_DOCS_URL
+  ?? 'https://codeload.github.com/treenix-io/treenix/tar.gz/refs/heads/main';
 
 async function downloadStarter(targetDir: string) {
   mkdirSync(targetDir, { recursive: true });
@@ -35,6 +37,44 @@ async function downloadStarter(targetDir: string) {
   // resolves to the latest versions satisfying package.json semver ranges.
   const lock = join(targetDir, 'package-lock.json');
   if (existsSync(lock)) rmSync(lock);
+}
+
+/** Overlay docs/ from the main treenix repo (latest authoritative content)
+ *  on top of the starter's minimal docs snapshot. Best-effort: failure is
+ *  logged but doesn't abort scaffolding. */
+async function downloadDocs(targetDir: string) {
+  const tgz = join(targetDir, '_docs.tgz');
+  const tmpExtract = join(targetDir, '_docs_extract');
+
+  try {
+    if (DOCS_URL.startsWith('file://')) {
+      writeFileSync(tgz, readFileSync(DOCS_URL.slice('file://'.length)));
+    } else {
+      const res = await fetch(DOCS_URL);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      writeFileSync(tgz, Buffer.from(await res.arrayBuffer()));
+    }
+
+    mkdirSync(tmpExtract, { recursive: true });
+    // Extract only `<repo>-<sha>/docs/*` into tmpExtract/docs
+    execSync(
+      `tar xzf "${tgz}" --strip-components=1 -C "${tmpExtract}" "$(tar tzf "${tgz}" | head -1)docs"`,
+      { stdio: 'ignore', shell: '/bin/bash' },
+    );
+    // Move/overlay onto targetDir/docs
+    const src = join(tmpExtract, 'docs');
+    if (existsSync(src)) {
+      execSync(`mkdir -p "${join(targetDir, 'docs')}" && cp -R "${src}/." "${join(targetDir, 'docs')}/"`, {
+        stdio: 'ignore',
+        shell: '/bin/bash',
+      });
+    }
+  } catch (e) {
+    log.warn(`Could not fetch docs from main repo (${(e as Error).message}); keeping starter docs only`);
+  } finally {
+    rmSync(tgz, { force: true });
+    rmSync(tmpExtract, { recursive: true, force: true });
+  }
 }
 
 function rewritePackageName(targetDir: string, name: string) {
@@ -148,6 +188,7 @@ try {
   rmSync(targetDir, { recursive: true, force: true });
   process.exit(1);
 }
+await downloadDocs(targetDir);
 s?.stop('Project created.');
 
 const pm = detectPm();
