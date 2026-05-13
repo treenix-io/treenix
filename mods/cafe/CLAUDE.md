@@ -1,7 +1,7 @@
 # cafe
 
-Демо-мод кафе. Контактная форма с валидацией и URI action binding. Опциональная SMTP-рассылка.
+Cafe demo mod. Contact form with validation and URI action binding. Optional SMTP delivery.
 
 ## Types
-- `cafe.contact` — форма с `submit()` action
-- `cafe.mail` — SMTP-конфигурация
+- `cafe.contact` — form with `submit()` action
+- `cafe.mail` — SMTP configuration

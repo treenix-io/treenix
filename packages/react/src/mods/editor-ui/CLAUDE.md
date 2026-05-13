@@ -1,12 +1,12 @@
 # editor-ui
 
-View-слой админки. Fallback `react`-рендерер для всех нод/компонентов, специализированные views (layout, page, dir, user, list), schema-driven form fields для NodeEditor.
+Admin view layer. Fallback `react` renderer for all nodes/components, specialised views (layout, page, dir, user, list), schema-driven form fields for NodeEditor.
 
 ## Items vs Chrome convention
 
-`react:list`, `react:card`, `react:icon` views = **content only** (fragment / inner divs). Chrome (border, padding, click-to-nav, hover, layout) делает наблюдатель через `<RenderChildren items ctx />` из [list-items.tsx](list-items.tsx).
+`react:list`, `react:card`, `react:icon` views = **content only** (fragment / inner divs). Chrome (border, padding, click-to-nav, hover, layout) belongs to the observer via `<RenderChildren items ctx />` from [list-items.tsx](list-items.tsx).
 
-- Default fallback items: `default`, `dir`, `ref` — уже зарегистрированы для `react:list`/`react:card`/`react:icon`.
-- Single-item: `<RenderItem value ctx />`.
-- Реализуй переключатель контекста в наблюдателе если хочешь list/card/icon view (см. [dir-view.tsx](dir-view.tsx)).
-- Подробности и примеры — `packages/react/src/CLAUDE.md`.
+- Default fallback items: `default`, `dir`, `ref` — already registered for `react:list` / `react:card` / `react:icon`.
+- Single item: `<RenderItem value ctx />`.
+- Implement a context switcher in the observer if you need list/card/icon views (see [dir-view.tsx](dir-view.tsx)).
+- For details and examples — `packages/react/src/CLAUDE.md`.

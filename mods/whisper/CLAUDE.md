@@ -1,7 +1,7 @@
 ## mods/whisper
 Audio transcription via @huggingface/transformers (Whisper). HTTP POST → node in tree immediately, transcribe in background.
 
-### Файлы
+### Files
 - route.ts — createWhisperHandler(cfg): POST audio → create node with status '...', respond 200, transcribe async via ffmpeg+transformers.js, update node
 - types.ts — WhisperAudio, WhisperText, WhisperMeta, WhisperChecklist component classes
 - service.ts — service registration
@@ -9,7 +9,7 @@ Audio transcription via @huggingface/transformers (Whisper). HTTP POST → node 
 - client.ts — frontend API
 - view.tsx — React UI
 
-### Конвенции
+### Conventions
 - Pipeline: POST → ffmpeg → 16kHz mono WAV → Float32Array → Whisper pipeline
 - Node appears in tree immediately (status '...'), updated when transcription finishes
 - Models lazy-loaded and cached: `onnx-community/whisper-{model}` or full HF model id

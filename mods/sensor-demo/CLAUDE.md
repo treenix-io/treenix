@@ -1,3 +1,3 @@
 # sensor-demo
 
-Демо живых сенсоров. Сервис генерирует синусоидальные + шумные показания как дочерние ноды каждую секунду, хранит последние 10.
+Live sensors demo. A service generates sinusoidal + noisy readings as child nodes every second, retains the most recent 10.

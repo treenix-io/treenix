@@ -244,7 +244,7 @@ Conclusions:
 ## Post-loop refinement — Lazy registration via `onResolveMiss('schema', ...)`
 
 **Date:** 2026-05-01 (after Round 4 closure)
-**Trigger:** stakeholder rejected eager batch registration. "У нас есть хендлер на схему. Хендлер берет схему JSON-LD объекта и при запросе транслирует. Не лениво — нет, делаем лениво."
+**Trigger:** stakeholder rejected eager batch registration. "We have a schema resolver. It takes the JSON-LD schema for an object and translates on demand. Not lazy — no, make it lazy."
 
 ### Architectural change
 

@@ -1,7 +1,7 @@
 ## front
 React admin SPA — node editor, tree browser, typed hooks, client cache.
 
-### Файлы
+### Files
 - App.tsx — root layout: Tree sidebar + NodeEditor main panel
 - hooks.ts — `usePath`, `useChildren`, `set`, `execute`, `watch`
 - context/index.tsx — `<Render>`, `View<T>`, `useActions`, `RenderProps`
@@ -10,10 +10,10 @@ React admin SPA — node editor, tree browser, typed hooks, client cache.
 - Inspector.tsx — generic component inspector (key-based, not typed)
 - AclEditor.tsx — ACL UI
 
-### Конвенции
-- Внутри `View<T>` читай поля прямо с `value` (Render уже даёт реактивный snapshot)
-- Для actions — `useActions(value)` (typed Actions<T>, routes to `execute`)
-- `usePath` — только для путей, отличных от `value.$path` (foreign path / 3-arg key form)
+### Conventions
+- Inside `View<T>` read fields directly from `value` (Render already provides a reactive snapshot)
+- For actions — `useActions(value)` (typed Actions<T>, routes to `execute`)
+- `usePath` — only for paths other than `value.$path` (foreign path / 3-arg key form)
 - `useChildren(path)` — reactive children list
 - No magic `action: 'string'` strings — use `useActions(value).method(data)` instead
 
@@ -36,7 +36,7 @@ const CounterView: View<Counter> = ({ value }) => {
 - `useActions(value)` — `Actions<T>` proxy. Every method call routes to `execute(path, methodName, data)`.
 - For data-only views, don't import `useActions` at all.
 
-### Anti-pattern — НИКОГДА в `View<T>`
+### Anti-pattern — NEVER inside `View<T>`
 
 ```tsx
 // ❌ Redundant: `usePath(value.$path, Class)` inside a View duplicates the
@@ -61,12 +61,12 @@ For paths **other than the current view's** value:
 - `usePath(otherPath, Class)` — typed proxy for a different node
 - `usePath(value.$path, Class, 'key')` — read an additional component by key (3rd argument changes semantics: `getComponent(node, cls, key)`)
 
-### View Contexts — содержимое vs chrome
+### View Contexts — content vs chrome
 
-Контексты `react:list`, `react:card`, `react:icon` — это **содержимое** ноды для соответствующего слота (строка списка, карточка, иконка). Сам слот (border, padding, hover, click-to-navigate, фиксированная ширина, layout сетки) — ответственность **наблюдателя**, который рендерит коллекцию.
+The contexts `react:list`, `react:card`, `react:icon` are the **content** of a node for the matching slot (list row, card, icon). The slot itself (border, padding, hover, click-to-navigate, fixed width, grid layout) is the responsibility of the **observer** that renders the collection.
 
 ```tsx
-// Item view = ТОЛЬКО content (фрагмент или div c flex-col)
+// Item view = ONLY content (fragment, or a div with flex-col)
 view.list(MyType, ({ value }) => (
   <>
     <Icon />
@@ -82,31 +82,31 @@ view.card(MyType, ({ value }) => (
 ));
 ```
 
-**Наблюдатель** оборачивает каждый элемент через `<RenderChildren items ctx />` из `@treenx/react/mods/editor-ui/list-items`:
+The **observer** wraps each item via `<RenderChildren items ctx />` from `@treenx/react/mods/editor-ui/list-items`:
 
 ```tsx
 import { RenderChildren } from '@treenx/react/mods/editor-ui/list-items';
 
-<RenderChildren items={children} ctx="list" />   // или 'card' | 'icon' | 'react'
+<RenderChildren items={children} ctx="list" />   // or 'card' | 'icon' | 'react'
 <RenderChildren items={[]} ctx="card" empty={<EmptyState/>} />
 ```
 
-Для одиночного элемента — `<RenderItem value ctx />`.
+For a single item — `<RenderItem value ctx />`.
 
-**НИКОГДА в item views:**
-- ❌ `<button onClick={navigate}>...</button>` — клик/навигация у наблюдателя
-- ❌ `border`, `rounded-md`, `bg-card`, `px-3 py-2`, `hover:bg-accent/50` — chrome у наблюдателя
-- ❌ `w-[200px]` — ширина у наблюдателя
-- ❌ chevron `›`, decorative trailing affordances — у наблюдателя
+**NEVER in item views:**
+- ❌ `<button onClick={navigate}>...</button>` — click/navigation belongs to the observer
+- ❌ `border`, `rounded-md`, `bg-card`, `px-3 py-2`, `hover:bg-accent/50` — chrome belongs to the observer
+- ❌ `w-[200px]` — width belongs to the observer
+- ❌ chevron `›`, decorative trailing affordances — observer-owned
 
-**Дефолты:** `default`, `dir`, `ref` уже зарегистрированы для `react:list`/`react:card`/`react:icon` как content-only fallback. Регистрируй свой только если нужен специфический контент.
+**Defaults:** `default`, `dir`, `ref` are already registered for `react:list` / `react:card` / `react:icon` as content-only fallbacks. Register your own only when specific content is needed.
 
-**Регистрация content-only items:**
+**Registering content-only items:**
 - `view.list(Type, Item)`
-- `view.card(Type, Item)` — пока через `view(Type, 'card', Item)` или `register(Type, 'react:card', Item)`
+- `view.card(Type, Item)` — currently via `view(Type, 'card', Item)` or `register(Type, 'react:card', Item)`
 - `register(Type, 'react:icon', Item)`
 
-**Что должно делать наблюдатель чтобы переключать вид:**
+**What the observer should do to switch views:**
 ```tsx
 const [ctx, setCtx] = useState<ChildCtx>('list');
 return (
@@ -117,4 +117,4 @@ return (
 );
 ```
 
-См. [editor-ui/dir-view.tsx](mods/editor-ui/dir-view.tsx) — эталонный наблюдатель с переключателем.
+See [editor-ui/dir-view.tsx](mods/editor-ui/dir-view.tsx) — the reference observer with a switcher.

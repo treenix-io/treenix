@@ -1,3 +1,3 @@
 # sensor-generator
 
-Стриминговый генератор сенсоров по запросу. Generator action выдаёт N показаний по одному с задержкой — демо streaming action паттерна.
+On-demand streaming sensor generator. A generator action yields N readings one at a time with a delay — a streaming-action pattern demo.
