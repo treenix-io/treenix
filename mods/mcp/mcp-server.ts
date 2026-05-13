@@ -433,43 +433,36 @@ export async function buildMcpServer(store: Tree, session: Session, claims?: str
   }
 
   for (const [action, method] of Object.entries(schema.methods)) {
-    mcp.registerTool(
-      action,
-      {
-        description: actionDescription(action, method),
-        inputSchema: methodInputSchema(method),
-      },
-      async (args) => {
-        const callArgs = args as Record<string, unknown>;
-        if (await callIsGuarded(aclStore, targetNode.$type, action, method, callArgs)) {
-          const blocked = await guarded(action, { target: targetNode.$path, ...callArgs });
-          if (blocked) return blocked;
-        }
-        const delegated = delegatedActionCall(method, callArgs);
-        if (delegated) {
-          const result = await executeAction(
-            aclStore,
-            delegated.path,
-            delegated.type,
-            delegated.key,
-            delegated.action,
-            delegated.data,
-            { userId: session.userId, claims },
-          );
-          return text(typeof result === 'string' ? result : yaml(result ?? { ok: true }));
-        }
+    const handler = async (args: Record<string, unknown>) => {
+      if (await callIsGuarded(aclStore, targetNode.$type, action, method, args)) {
+        const blocked = await guarded(action, { target: targetNode.$path, ...args });
+        if (blocked) return blocked;
+      }
+      const delegated = delegatedActionCall(method, args);
+      if (delegated) {
         const result = await executeAction(
           aclStore,
-          targetNode.$path,
-          targetNode.$type,
-          undefined,
-          action,
-          methodPayload(method, callArgs),
+          delegated.path,
+          delegated.type,
+          delegated.key,
+          delegated.action,
+          delegated.data,
           { userId: session.userId, claims },
         );
         return text(typeof result === 'string' ? result : yaml(result ?? { ok: true }));
-      },
-    );
+      }
+      const result = await executeAction(
+        aclStore,
+        targetNode.$path,
+        targetNode.$type,
+        undefined,
+        action,
+        methodPayload(method, args),
+        { userId: session.userId, claims },
+      );
+      return text(typeof result === 'string' ? result : yaml(result ?? { ok: true }));
+    };
+    mcp.tool(action, actionDescription(action, method), methodInputSchema(method).shape, handler);
   }
 
   return mcp;
