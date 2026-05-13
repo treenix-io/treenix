@@ -20,7 +20,7 @@ export class TreenixMcpTools {
     full?: boolean;
   }) {}
 
-  /** @description Create or update a node. May require Guardian approval. */
+  /** @write @description Create or update a node. May require Guardian approval. */
   set_node(_data: {
     /** @description Node path to create or update. */
     path: string;
@@ -39,7 +39,7 @@ export class TreenixMcpTools {
     owner?: string;
   }) {}
 
-  /** @description Execute an action on a node or component. Actions are methods registered on types. May require Guardian approval. */
+  /** @write @description Execute an action on a node or component. Actions are methods registered on types. May require Guardian approval. */
   execute(_data: {
     /** @description Node path that owns the action target. */
     path: string;
@@ -53,7 +53,7 @@ export class TreenixMcpTools {
     data?: Record<string, unknown>;
   }) {}
 
-  /** @description Deploy a module prefab to a target path. Idempotent: skips existing nodes. */
+  /** @write @description Deploy a module prefab to a target path. Idempotent: skips existing nodes. */
   deploy_prefab(_data: {
     /** @description Prefab source path or module-prefab id. */
     source: string;
@@ -71,7 +71,7 @@ export class TreenixMcpTools {
     source?: string;
   }) {}
 
-  /** @description Remove a node by path. May be denied by Guardian. */
+  /** @write @description Remove a node by path. May be denied by Guardian. */
   remove_node(_data: {
     /** @description Node path to remove. */
     path: string;
@@ -92,6 +92,4 @@ export class TreenixMcpTools {
     query: string;
   }) {}
 }
-registerType('mcp.treenix', TreenixMcpTools, {
-  noOptimistic: ['set_node', 'execute', 'deploy_prefab', 'remove_node'],
-});
+registerType('mcp.treenix', TreenixMcpTools);

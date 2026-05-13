@@ -18,6 +18,7 @@ import { afterEach, before, beforeEach, describe, it } from 'node:test';
 import './server';
 
 import {
+  actionIsGuarded,
   buildMcpServer,
   buildSubjects,
   checkMcpGuardian,
@@ -28,6 +29,7 @@ import {
   yaml,
   type GuardianRequest,
 } from './mcp-server';
+import type { MethodSchema } from '@treenx/core/schema/types';
 
 loadTestSchemas(import.meta.url);
 
@@ -325,6 +327,38 @@ describe('buildSubjects', () => {
       'mcp__treenix__remove_node:/dangerous',
       'mcp__treenix__remove_node',
     ]);
+  });
+});
+
+// ── 2a. actionIsGuarded — decides whether a method needs guardian check ──
+// Regression guard: previously this read `meta.noOptimistic`, conflating a frontend
+// rendering hint with a security policy signal. Source of truth is method.kind / method.io.
+
+describe('actionIsGuarded', () => {
+  const m = (extra: Partial<MethodSchema> = {}): MethodSchema => ({ arguments: [], ...extra });
+
+  it('guards methods with kind=write', () => {
+    assert.equal(actionIsGuarded('x', 'set_node', m({ kind: 'write' })), true);
+  });
+
+  it('guards methods with io=true (external side effect)', () => {
+    assert.equal(actionIsGuarded('x', 'fetch', m({ io: true })), true);
+  });
+
+  it('does not guard kind=read', () => {
+    assert.equal(actionIsGuarded('x', 'get_node', m({ kind: 'read' })), false);
+  });
+
+  it('does not guard methods without kind or io (default to unguarded)', () => {
+    assert.equal(actionIsGuarded('x', 'catalog', m()), false);
+  });
+
+  it('ignores noOptimistic-like meta — only kind/io decide', () => {
+    // noOptimistic is a frontend hint; even if some method had it, actionIsGuarded must
+    // not treat it as a guard signal. The check looks only at the MethodSchema fields.
+    const method = m() as MethodSchema & { noOptimistic?: boolean };
+    method.noOptimistic = true;
+    assert.equal(actionIsGuarded('x', 'whatever', method), false);
   });
 });
 

@@ -165,7 +165,4 @@ class TreenixMcpToolsServer extends TreenixMcpTools {
   }
 }
 
-registerActions('mcp.treenix', TreenixMcpToolsServer, {
-  override: true,
-  noOptimistic: ['set_node', 'execute', 'deploy_prefab', 'remove_node'],
-});
+registerActions('mcp.treenix', TreenixMcpToolsServer, { override: true });

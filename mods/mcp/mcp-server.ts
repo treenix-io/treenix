@@ -5,7 +5,7 @@ import { rememberRule, requestApproval, resolveVerdict } from '#agent/guardian';
 import { AiPolicy } from '#agent/types';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { getComponent, getMeta, resolve } from '@treenx/core';
+import { getComponent, resolve } from '@treenx/core';
 import { matchesAny } from '@treenx/core/glob';
 import type { CatalogActionDoc, CatalogEntry, CatalogPropertyDoc } from '@treenx/core/schema/catalog';
 import type { MethodSchema, PropertySchema, TypeSchema } from '@treenx/core/schema/types';
@@ -367,11 +367,11 @@ function methodPayload(method: MethodSchema, args: Record<string, unknown>): unk
   return args;
 }
 
-function actionIsGuarded(type: string, action: string, method: MethodSchema): boolean {
-  const meta = getMeta(type, `action:${action}`);
-  if (meta?.noOptimistic === true) return true;
-  if (typeof (method as Record<string, unknown>).mutation === 'string') return true;
-  return false;
+// Guard signal is the method's declared kind/side-effect — not noOptimistic
+// (noOptimistic is a frontend rendering hint, semantically unrelated to policy).
+// Declare via JSDoc: @write / @mutation → kind:'write'; @io → io:true.
+export function actionIsGuarded(_type: string, _action: string, method: MethodSchema): boolean {
+  return method.kind === 'write' || method.io === true;
 }
 
 function delegatesToAction(method: MethodSchema): boolean {
@@ -577,7 +577,7 @@ export async function resolveMcpAuth(
     return { ok: true, session, claims, auth: { kind: 'token', userId: session.userId, token, claims } };
   }
   if (isDevAdminEnabled(configuredHost, peerAddr, hasProxy)) {
-    console.warn('[mcp] ⚠️  DEV MODE: NODE_ENV=development + MCP_DEV_ADMIN=1 + loopback host & peer (no proxy) — granting admin without token.');
+    console.warn('[mcp] ⚠ dev admin (no token)');
     const claims = ['u:mcp-dev', 'authenticated', 'admins'];
     return {
       ok: true,
