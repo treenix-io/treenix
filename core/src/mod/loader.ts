@@ -255,16 +255,19 @@ function basenameNoExt(p: string): string {
 // Project-local TS mods (outside node_modules) need TypeScript handling for two reasons:
 // (a) Node 22 has no native strip-types at all;
 // (b) Node 25 has it but doesn't resolve extensionless `import './foo'`.
-// We register tsx as a GLOBAL ESM loader hook once, then use plain `await import(real)` so
-// the whole import graph (the mod and its transitive deps) shares a single module map. The
-// earlier `tsImport(...)` approach used a scoped namespace, which forced `@treenx/core` to
-// be loaded twice — once for main, once for the tsImport scope — breaking type-registration
-// global state. The Vite 8 × tsx race for `.ts` files in node_modules doesn't fire here:
-// node_modules mods go through the package-specifier branch above, never as .ts.
-let _tsxRegistered: Promise<void> | null = null;
+// We use tsx's scoped `tsImport` rather than its global `register`: when this loader
+// runs INSIDE a Vite process, Vite has already installed Module.registerHooks (sync)
+// for .ts files. A later async `register()` from tsx is shadowed by Vite's hook — Vite
+// returns an empty stub for project-local server.ts (it's an SSR-disabled file), and
+// the mod silently fails to evaluate (no registerType, no actions). `tsImport` runs in
+// its own loader scope and bypasses Vite's hooks entirely. The "two @treenx/core
+// instances" warning the earlier comment described is resolved by the globalThis-backed
+// registry in core/registry.ts — both instances share one Map under Symbol.for keys.
+let _tsImport: ((specifier: string, parentURL: string) => Promise<unknown>) | null = null;
 async function ensureTsxRegistered(): Promise<void> {
-  _tsxRegistered ??= import('tsx/esm/api').then(({ register }) => { register(); });
-  return _tsxRegistered;
+  if (_tsImport) return;
+  const api = await import('tsx/esm/api');
+  _tsImport = api.tsImport;
 }
 
 
@@ -322,7 +325,7 @@ export async function loadLocalMods(modsDir: string, target: LoadTarget): Promis
             await import(`${pkgName}/${entry.name}/${basenameNoExt(real)}`);
           } else if (real.endsWith('.ts') || real.endsWith('.tsx')) {
             await ensureTsxRegistered();
-            await import(real);
+            await _tsImport!(real, import.meta.url);
           } else {
             await import(real);
           }

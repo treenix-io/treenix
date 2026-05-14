@@ -4,22 +4,37 @@ import { ContextHandler, Handler } from './context';
 type Entry = { handler: Handler; meta?: Record<string, unknown> };
 
 // Single source of truth: type → context → entry.
-const registry = new Map<string, Map<string, Entry>>();
+// Stored on globalThis under a well-known Symbol so multiple @treenx/core module
+// instances (e.g. dist loaded by plain Node + src loaded by tsx in the same process)
+// share one registry. Without this, registerType() in a project mod (src) lands in a
+// different Map than the trpc dispatcher (dist) — actions vanish at execute time.
+type RegistryShared = {
+  registry: Map<string, Map<string, Entry>>;
+  listeners: Set<() => void>;
+  missResolvers: Map<string, (type: string) => void>;
+  version: number;
+};
+const REGISTRY_KEY = Symbol.for('@treenx/core/registry');
+const _g = globalThis as unknown as Record<symbol, RegistryShared>;
+if (!_g[REGISTRY_KEY]) {
+  _g[REGISTRY_KEY] = { registry: new Map(), listeners: new Set(), missResolvers: new Map(), version: 0 };
+}
+const _shared = _g[REGISTRY_KEY];
+const registry = _shared.registry;
+const listeners = _shared.listeners;
 
 const DEFAULT_TYPE = normalizeType('default');
 
 // ── Registry subscription — lets React re-render when handlers change ──
-let version = 0;
-const listeners = new Set<() => void>();
 function bump() {
-  version++;
+  _shared.version++;
   listeners.forEach(cb => cb());
 }
 export function subscribeRegistry(cb: () => void) {
   listeners.add(cb);
   return () => { listeners.delete(cb); };
 }
-export function getRegistryVersion() { return version; }
+export function getRegistryVersion() { return _shared.version; }
 
 function validateContext(context: string): void {
   if (typeof context !== 'string') throw new Error('context must be a string');
@@ -133,7 +148,7 @@ export function getContextsForType(type: TypeId): string[] {
 
 // ── Resolve miss — per-context extension point for dynamic loaders ──
 // One resolver per context. UIX uses this for 'react' to lazy-load views from type nodes.
-const missResolvers = new Map<string, (type: string) => void>();
+const missResolvers = _shared.missResolvers;
 export function onResolveMiss(context: string, resolver: (type: string) => void) {
   validateContext(context);
   missResolvers.set(context, resolver);
