@@ -1,6 +1,6 @@
 {
   "name": "@treenx/mods",
-  "version": "3.0.14",
+  "version": "3.0.17",
   "description": "Official Treenix modules — board, sim, cafe, doc, mindmap, and more.",
   "type": "module",
   "publishConfig": {
