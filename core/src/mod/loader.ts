@@ -4,8 +4,9 @@ import { isInsideRoot } from '#core/path';
 import { createLogger } from '#log';
 import { loadSchemasRecursive } from '#schema/load';
 import type { Tree } from '#tree';
-import { readdir, realpath, stat } from 'node:fs/promises';
+import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { setCurrentMod } from './tracking';
 import type { LoadedMod, ModManifest, TreenixMod } from './types';
 
@@ -227,6 +228,32 @@ async function resolveFirst(dir: string, bases: string[], exts: string[]): Promi
   return null;
 }
 
+// Mods shipped as a published npm package live under node_modules/<pkg>/<mod>/<entry>.ts.
+// Importing the absolute .ts path bypasses the package's `exports` map and forces Node's
+// native strip-types path, which refuses .ts files inside node_modules
+// (ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING). The package, however, also ships compiled
+// .js at <pkg>/dist/<mod>/<entry>.js and `exports` maps `./<mod>/<entry>` to either the .ts
+// source (development condition) or the dist .js (default condition). Importing through
+// the package specifier respects exports, so plain `node` picks .js and tsx (or any
+// resolver running with --conditions development) picks .ts. Result: the bundled .js path
+// works out of the box, no tsx required for npm-published mods.
+async function packageNameAt(modsDir: string): Promise<string | null> {
+  try {
+    const pkg = JSON.parse(await readFile(join(modsDir, 'package.json'), 'utf-8')) as { name?: unknown };
+    return typeof pkg.name === 'string' ? pkg.name : null;
+  } catch {
+    return null;
+  }
+}
+
+function basenameNoExt(p: string): string {
+  const slash = p.lastIndexOf('/');
+  const name = slash >= 0 ? p.slice(slash + 1) : p;
+  const dot = name.lastIndexOf('.');
+  return dot > 0 ? name.slice(0, dot) : name;
+}
+
+
 export async function loadLocalMods(modsDir: string, target: LoadTarget): Promise<LoadResult> {
   const result: LoadResult = { loaded: [], failed: [] };
   const entryBase = target === 'server' ? 'server' : 'client';
@@ -239,6 +266,11 @@ export async function loadLocalMods(modsDir: string, target: LoadTarget): Promis
   } catch {
     return result;
   }
+
+  // Inside node_modules, prefer importing through the package specifier so the package's
+  // `exports` map picks the compiled .js by default (and the .ts source under `development`).
+  // Sidesteps Node 25's strip-types refusal for .ts files in node_modules.
+  const pkgName = modsDir.includes('/node_modules/') ? await packageNameAt(modsDir) : null;
 
   for (const entry of entries) {
     if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
@@ -271,7 +303,20 @@ export async function loadLocalMods(modsDir: string, target: LoadTarget): Promis
       try {
         for (const f of filesToImport) {
           const real = await confineReal(modDir, f);
-          await import(real);
+          if (pkgName) {
+            // pkgName/<mod>/<entry> → exports field decides .ts vs .js
+            await import(`${pkgName}/${entry.name}/${basenameNoExt(real)}`);
+          } else if (real.endsWith('.ts') || real.endsWith('.tsx')) {
+            // Project-local TS: tsx's `tsImport` does strip-types + extensionless-import resolution
+            // programmatically, without registering global ESM hooks (so no conflict with Vite's
+            // `Module.registerHooks`). Required because Node 22 has no native strip-types and Node 25's
+            // native strip-types doesn't resolve extensionless imports. `tsx` is an optional
+            // peerDependency — lazy import lets servers without project-local .ts mods skip it.
+            const { tsImport } = await import('tsx/esm/api');
+            await tsImport(real, { parentURL: pathToFileURL(real).href });
+          } else {
+            await import(real);
+          }
         }
       } finally {
         setCurrentMod(null);

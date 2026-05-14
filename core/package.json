@@ -1,6 +1,6 @@
 {
   "name": "@treenx/core",
-  "version": "3.0.15",
+  "version": "3.0.16",
   "description": "Composable typed tree engine — three primitives, everything else composes. Nodes, components, contexts.",
   "type": "module",
   "publishConfig": {
@@ -78,6 +78,14 @@
   },
   "optionalDependencies": {
     "@orama/orama": "^3.1.18"
+  },
+  "peerDependencies": {
+    "tsx": "^4.21.0"
+  },
+  "peerDependenciesMeta": {
+    "tsx": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "oxc-parser": "^0.128.0",
