@@ -36,7 +36,7 @@ const config: KnipConfig = {
         'src/app/Treenix.tsx',
         'src/mods/clients.ts',
         'src/mods/servers.ts',
-        'vite-plugin-treenix.ts',
+        'vite-plugin.ts',
       ],
       project: ['src/**/*.ts', 'src/**/*.tsx'],
       ignoreDependencies: [

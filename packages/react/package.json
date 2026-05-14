@@ -1,6 +1,6 @@
 {
   "name": "@treenx/react",
-  "version": "3.0.20",
+  "version": "3.0.21",
   "description": "React binding for Treenix — reactive hooks, admin UI, and context-based component rendering.",
   "type": "module",
   "publishConfig": {
@@ -66,7 +66,7 @@
   "files": [
     "dist",
     "src",
-    "vite-plugin-treenix.ts",
+    "vite-plugin.ts",
     "!src/**/*.test.ts",
     "!src/**/*.test.tsx",
     "LICENSE",

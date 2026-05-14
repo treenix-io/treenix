@@ -2,7 +2,7 @@ import react from '@vitejs/plugin-react';
 import { existsSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { defineConfig } from 'vite';
-import treenixPlugin from './src/vite-plugin-treenix';
+import treenixPlugin from './src/vite-plugin';
 import { viteSsrPlugin } from '@treenx/ssr/vite-ssr';
 
 const repoRoot = resolve(import.meta.dirname, '../../..');
