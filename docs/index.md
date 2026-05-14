@@ -44,6 +44,7 @@ Create a node with `$type: 'todo.item'`, and the method is now callable from the
 2. [Tutorial](./getting-started/tutorial.md) — build a bookmark manager.
 3. [Project Structure](./getting-started/project-structure.md) — learn what the starter created.
 4. [Thinking in Treenix](./getting-started/thinking-in-treenix.md) — learn the modelling style.
+5. [Setup MCP and Skills](./guides/setup-mcp-and-skills.md) — connect Codex or Claude to Treenix MCP and install Treenix skills.
 
 ## When Treenix Fits
 

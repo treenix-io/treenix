@@ -1,16 +1,27 @@
 import type { Editor, Range } from '@tiptap/core';
 import { createNode, getRegisteredTypes } from '@treenx/core';
 import { getDefaults } from '@treenx/core/comp';
-import { MiniTree } from '@treenx/react/mods/editor-ui/form-fields';
 import { set } from '@treenx/react/hooks';
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { MiniTree } from '@treenx/react/mods/editor-ui/form-fields';
+import {
+  type FormEvent,
+  forwardRef,
+  type ReactNode,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 
 export type SlashMenuItem = {
   title: string;
   group: string;
   command: (props: { editor: Editor; range: Range }) => void;
-  picker?: 'ref' | 'component' | 'link';
+  picker?: 'ref' | 'component' | 'nodeLink' | 'urlLink';
 };
+
+type PickerMode = NonNullable<SlashMenuItem['picker']>;
 
 type Props = {
   items: SlashMenuItem[];
@@ -30,9 +41,16 @@ function scrollToSelected(container: HTMLDivElement | null, index: number) {
   else if (eRect.bottom > cRect.bottom) container.scrollTop += eRect.bottom - cRect.bottom;
 }
 
+function normalizeLinkHref(value: string): string {
+  const href = value.trim();
+  if (!href) return '';
+  if (/^(?:[a-z][a-z0-9+.-]*:|#|\/|\.{1,2}\/)/i.test(href)) return href;
+  return `https://${href}`;
+}
+
 export const SlashMenu = forwardRef<unknown, Props>(({ items, command, editor, range, docPath }, ref) => {
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const [pickerMode, setPickerMode] = useState<'ref' | 'component' | 'link' | null>(null);
+  const [pickerMode, setPickerMode] = useState<PickerMode | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => setSelectedIndex(0), [items]);
@@ -93,6 +111,17 @@ export const SlashMenu = forwardRef<unknown, Props>(({ items, command, editor, r
     close();
   };
 
+  const insertUrlLink = ({ href, text }: { href: string; text: string }) => {
+    const url = normalizeLinkHref(href);
+    const label = text.trim() || url;
+    if (!url) return;
+
+    editor.chain().focus().deleteRange(range)
+      .insertContent({ type: 'text', text: label, marks: [{ type: 'link', attrs: { href: url } }] })
+      .run();
+    close();
+  };
+
   const createComponent = async (typeName: string) => {
     const dp = docPath || editor.storage.slashCommand?.docPath || '';
     if (!dp || !typeName) {
@@ -121,18 +150,26 @@ export const SlashMenu = forwardRef<unknown, Props>(({ items, command, editor, r
     return (
       <div className="slash-picker">
         <div className="slash-picker-header">Embed existing node</div>
-        <MiniTree onSelect={insertRef} />
+        <PickerScroll>
+          <MiniTree onSelect={insertRef} />
+        </PickerScroll>
       </div>
     );
   }
 
-  if (pickerMode === 'link') {
+  if (pickerMode === 'nodeLink') {
     return (
       <div className="slash-picker">
         <div className="slash-picker-header">Link to node</div>
-        <MiniTree onSelect={insertLink} />
+        <PickerScroll>
+          <MiniTree onSelect={insertLink} />
+        </PickerScroll>
       </div>
     );
+  }
+
+  if (pickerMode === 'urlLink') {
+    return <LinkPicker onSubmit={insertUrlLink} />;
   }
 
   if (pickerMode === 'component') {
@@ -164,6 +201,55 @@ export const SlashMenu = forwardRef<unknown, Props>(({ items, command, editor, r
 });
 
 SlashMenu.displayName = 'SlashMenu';
+
+function PickerScroll({ children }: { children: ReactNode }) {
+  return (
+    <div
+      className="slash-picker-scroll"
+      onWheelCapture={(e) => e.stopPropagation()}
+      onTouchMoveCapture={(e) => e.stopPropagation()}
+    >
+      {children}
+    </div>
+  );
+}
+
+function LinkPicker({ onSubmit }: { onSubmit: (value: { href: string; text: string }) => void }) {
+  const [href, setHref] = useState('');
+  const [text, setText] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    onSubmit({ href, text });
+  };
+
+  return (
+    <form className="slash-picker" onSubmit={submit}>
+      <div className="slash-picker-header">Link</div>
+      <div className="slash-picker-input-wrap">
+        <input
+          ref={inputRef}
+          value={href}
+          onChange={(e) => setHref(e.target.value)}
+          placeholder="URL"
+          className="slash-picker-input"
+        />
+        <input
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="Text"
+          className="slash-picker-input slash-picker-input-spaced"
+        />
+      </div>
+      <button type="submit" className="slash-menu-item selected" disabled={!href.trim()}>
+        <span className="slash-menu-title">Insert link</span>
+      </button>
+    </form>
+  );
+}
 
 /* ── Type picker for /component ── */
 

@@ -222,20 +222,26 @@ describe('mdToTiptap link parsing', () => {
     assert.equal(link!.marks![0].attrs?.path, '/foo');
   });
 
-  it('keeps external link as plain text', () => {
+  it('parses external link as regular link', () => {
     const doc = mdToTiptap('see [docs](https://example.com)');
     const para = doc.content?.[0];
     const hasNodeLink = para?.content?.some((n) => n.marks?.[0]?.type === 'nodeLink');
     assert.equal(hasNodeLink, false);
+    const linkNode = para?.content?.find((n) => n.marks?.some((m) => m.type === 'link'));
+    assert.ok(linkNode, 'expected a regular link');
+    assert.equal(linkNode!.marks!.find((m) => m.type === 'link')?.attrs?.href, 'https://example.com');
     const text = para?.content?.map((n) => n.text).join('') ?? '';
     assert.ok(text.includes('docs'));
   });
 
-  it('keeps relative link without basePath as plain text', () => {
+  it('parses relative link without basePath as regular link', () => {
     const doc = mdToTiptap('see [Types](./types.md)');
     const para = doc.content?.[0];
     const hasNodeLink = para?.content?.some((n) => n.marks?.[0]?.type === 'nodeLink');
     assert.equal(hasNodeLink, false);
+    const linkNode = para?.content?.find((n) => n.marks?.some((m) => m.type === 'link'));
+    assert.ok(linkNode, 'expected a regular link');
+    assert.equal(linkNode!.marks!.find((m) => m.type === 'link')?.attrs?.href, './types.md');
   });
 
   // Regression: bold/italic wrapping a link must still parse the link inside,
@@ -295,6 +301,13 @@ describe('roundtrip md → tiptap → md', () => {
     const result = tiptapToMd(tiptap);
     assert.ok(result.includes('```ts'));
     assert.ok(result.includes('const x = 1;'));
+  });
+
+  it('preserves external links', () => {
+    const original = 'See [docs](https://example.com/path?q=1).';
+    const tiptap = mdToTiptap(original);
+    const result = tiptapToMd(tiptap);
+    assert.ok(result.includes('[docs](https://example.com/path?q=1)'), `expected external href preserved, got: ${result}`);
   });
 });
 

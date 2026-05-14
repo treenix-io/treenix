@@ -58,6 +58,7 @@
         { "path": "guides/mounts-federation", "title": "Federate Trees" },
         { "path": "guides/go-realtime", "title": "Go Realtime" },
         { "path": "guides/services", "title": "Run Services" },
+        { "path": "guides/setup-mcp-and-skills", "title": "Setup MCP and Skills" },
         { "path": "guides/troubleshooting", "title": "Troubleshooting" }
       ]
     },

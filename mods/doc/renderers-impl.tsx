@@ -6,17 +6,17 @@ import TableHeader from '@tiptap/extension-table-header';
 import TableRow from '@tiptap/extension-table-row';
 import TaskItem from '@tiptap/extension-task-item';
 import TaskList from '@tiptap/extension-task-list';
-import { NodeLink } from './node-link';
-import { buildNodeLinkHref, getNodeLinkPath } from './node-link-click';
 import { Editor, EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
-import { checkBeforeNavigate, pushHistory } from '@treenx/react';
-import { Input } from '@treenx/react/ui/input';
+import { checkBeforeNavigate } from '@treenx/react';
 import { useNavigate } from '@treenx/react/hooks';
+import { Input } from '@treenx/react/ui/input';
 import { common, createLowlight } from 'lowlight';
 import { type MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef } from 'react';
 import { CodeCopyButtons } from './code-copy-buttons';
 import { sanitizeTiptap, type TiptapNode } from './markdown';
+import { NodeLink } from './node-link';
+import { getNodeLinkPath } from './node-link-click';
 import { SlashCommand } from './slash-command';
 import { Toolbar } from './toolbar';
 import { TreenixBlock } from './treenix-block';
@@ -24,7 +24,16 @@ import { TreenixBlock } from './treenix-block';
 const lowlight = createLowlight(common);
 
 const baseExtensions = [
-  StarterKit.configure({ codeBlock: false }),
+  StarterKit.configure({
+    codeBlock: false,
+    link: {
+      HTMLAttributes: {
+        target: '_blank',
+        rel: 'noopener noreferrer nofollow',
+        class: 'node-link',
+      },
+    },
+  }),
   CodeBlockLowlight.configure({ lowlight }),
   TaskList,
   TaskItem.configure({ nested: true }),
@@ -32,7 +41,6 @@ const baseExtensions = [
   TableRow,
   TableCell,
   TableHeader,
-  NodeLink,
   TreenixBlock,
   SlashCommand,
 ];
@@ -83,7 +91,14 @@ export function DocPageView({ value, onChange }: BlockProps) {
 
   // Sync docPath for slash commands (e.g. /component)
   useEffect(() => {
-    if (value.$path) editor.storage.slashCommand.docPath = value.$path;
+    if (!value.$path) return;
+
+    const storage = editor.storage as typeof editor.storage & {
+      slashCommand?: { docPath: string };
+    };
+
+    storage.slashCommand ??= { docPath: '' };
+    storage.slashCommand.docPath = value.$path;
   }, [editor, value.$path]);
 
   // Sync editable state

@@ -57,10 +57,16 @@ const defaultItems: SlashMenuItem[] = [
     picker: 'component',
   },
   {
+    title: 'Link',
+    group: 'Text',
+    command: () => {},
+    picker: 'urlLink',
+  },
+  {
     title: 'Node Link',
     group: 'Treenix',
     command: () => {},
-    picker: 'link',
+    picker: 'nodeLink',
   },
 ];
 

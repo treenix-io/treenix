@@ -223,6 +223,10 @@
   background: var(--surface-2);
   color: var(--text);
 }
+.slash-menu-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
 .slash-menu-title {
   font-size: 13px;
   font-weight: 500;
@@ -373,6 +377,15 @@
 }
 .slash-picker-input:focus {
   border-color: var(--accent-color);
+}
+.slash-picker-input-spaced {
+  margin-top: 6px;
+}
+.slash-picker-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .slash-picker-list {
   overflow-y: auto;

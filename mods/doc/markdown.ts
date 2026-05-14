@@ -33,6 +33,10 @@ export function inlineToMd(node: TiptapNode, basePath?: string): string {
     if (nodeLink) {
       const href = emitLinkHref((nodeLink.attrs ?? {}) as Record<string, unknown>, basePath);
       t = `[${t}](${href})`;
+    } else {
+      const link = node.marks?.find((m) => m.type === 'link');
+      const href = (link?.attrs?.href as string | null) ?? '';
+      if (href) t = `[${t}](${href})`;
     }
     if (node.marks?.some((m) => m.type === 'bold')) t = `**${t}**`;
     if (node.marks?.some((m) => m.type === 'italic')) t = `*${t}*`;
@@ -476,7 +480,7 @@ function parseInline(text: string, basePath?: string, parentMarks: Mark[] = []):
       const sourceHref = href.startsWith('treenix:') ? null : href;
       const linkMarks: Mark[] = treePath
         ? [...parentMarks, { type: 'nodeLink', attrs: { path: treePath, sourceHref } }]
-        : parentMarks;
+        : [...parentMarks, { type: 'link', attrs: { href } }];
       nodes.push(...parseInline(linkText, basePath, linkMarks));
     }
 

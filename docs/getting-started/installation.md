@@ -61,7 +61,7 @@ Point any MCP-aware tool at `http://localhost:3211/mcp`. The endpoint speaks the
 claude mcp add --transport http treenix-dev http://localhost:3211/mcp
 ```
 
-Claude Desktop, Cursor, Codex, and other clients accept the same URL via their own MCP config file (usually a JSON entry with `"url": "http://localhost:3211/mcp"`). Once connected, every registered Type and method becomes a tool the agent can call; see [AI / MCP](../concepts/ai-mcp.md).
+Claude Desktop, Cursor, Codex, and other clients accept the same URL via their own MCP config file (usually a JSON entry with `"url": "http://localhost:3211/mcp"`). For Codex/Claude setup and Treenix skills, see [Setup MCP and Skills](../guides/setup-mcp-and-skills.md). Once connected, every registered Type and method becomes a tool the agent can call; see [AI / MCP](../concepts/ai-mcp.md).
 
 ## Verify the Demo
 
