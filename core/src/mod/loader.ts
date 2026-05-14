@@ -6,7 +6,6 @@ import { loadSchemasRecursive } from '#schema/load';
 import type { Tree } from '#tree';
 import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { setCurrentMod } from './tracking';
 import type { LoadedMod, ModManifest, TreenixMod } from './types';
 
@@ -253,6 +252,21 @@ function basenameNoExt(p: string): string {
   return dot > 0 ? name.slice(0, dot) : name;
 }
 
+// Project-local TS mods (outside node_modules) need TypeScript handling for two reasons:
+// (a) Node 22 has no native strip-types at all;
+// (b) Node 25 has it but doesn't resolve extensionless `import './foo'`.
+// We register tsx as a GLOBAL ESM loader hook once, then use plain `await import(real)` so
+// the whole import graph (the mod and its transitive deps) shares a single module map. The
+// earlier `tsImport(...)` approach used a scoped namespace, which forced `@treenx/core` to
+// be loaded twice — once for main, once for the tsImport scope — breaking type-registration
+// global state. The Vite 8 × tsx race for `.ts` files in node_modules doesn't fire here:
+// node_modules mods go through the package-specifier branch above, never as .ts.
+let _tsxRegistered: Promise<void> | null = null;
+async function ensureTsxRegistered(): Promise<void> {
+  _tsxRegistered ??= import('tsx/esm/api').then(({ register }) => { register(); });
+  return _tsxRegistered;
+}
+
 
 export async function loadLocalMods(modsDir: string, target: LoadTarget): Promise<LoadResult> {
   const result: LoadResult = { loaded: [], failed: [] };
@@ -307,13 +321,8 @@ export async function loadLocalMods(modsDir: string, target: LoadTarget): Promis
             // pkgName/<mod>/<entry> → exports field decides .ts vs .js
             await import(`${pkgName}/${entry.name}/${basenameNoExt(real)}`);
           } else if (real.endsWith('.ts') || real.endsWith('.tsx')) {
-            // Project-local TS: tsx's `tsImport` does strip-types + extensionless-import resolution
-            // programmatically, without registering global ESM hooks (so no conflict with Vite's
-            // `Module.registerHooks`). Required because Node 22 has no native strip-types and Node 25's
-            // native strip-types doesn't resolve extensionless imports. `tsx` is an optional
-            // peerDependency — lazy import lets servers without project-local .ts mods skip it.
-            const { tsImport } = await import('tsx/esm/api');
-            await tsImport(real, { parentURL: pathToFileURL(real).href });
+            await ensureTsxRegistered();
+            await import(real);
           } else {
             await import(real);
           }

@@ -59,6 +59,29 @@ export async function treenix(config: TreenixConfig): Promise<TreenixServer> {
   // factory without duplicating bootstrap code in every entry point.
   applyDevDefaults();
 
+  // Dev-only: auto-generate schemas via oxc-parser from TS source. Without this step,
+  // MCP catalog / TypeCatalog.search (which queries `getRegisteredTypes('schema')`) only
+  // sees pre-shipped JSON schemas, hiding all project-local + workspace types from search.
+  // oxc-parser is a devDependency — try/catch lets production builds skip it gracefully.
+  if (process.env.NODE_ENV !== 'production') {
+    try {
+      const { generateSchemas } = await import('#schema/extract-schemas-oxc');
+      const coreDir = new URL('../..', import.meta.url).pathname;
+      const engineDir = new URL('../../..', import.meta.url).pathname;
+      const { join, resolve: resolvePath } = await import('node:path');
+      await generateSchemas([
+        join(coreDir, 'src'),
+        join(engineDir, 'mods'),
+        join(engineDir, 'packages'),
+        resolvePath('mods'),
+        ...(config.modsDir ? [config.modsDir] : []),
+      ]);
+    } catch (err) {
+      const code = (err as Record<string, unknown>).code;
+      if (code !== 'ERR_MODULE_NOT_FOUND') throw err;
+    }
+  }
+
   // 1. Load mods
   if (config.modsDir !== false) {
     const extraDirs = config.modsDir ? [config.modsDir] : [];

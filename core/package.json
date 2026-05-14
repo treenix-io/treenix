@@ -1,6 +1,6 @@
 {
   "name": "@treenx/core",
-  "version": "3.0.16",
+  "version": "3.0.17",
   "description": "Composable typed tree engine — three primitives, everything else composes. Nodes, components, contexts.",
   "type": "module",
   "publishConfig": {
@@ -72,6 +72,7 @@
     "fast-json-patch": "^3.1.1",
     "grammy": "^1.42.0",
     "immer": "^11.1.4",
+    "oxc-parser": "^0.128.0",
     "quickjs-emscripten": "^0.32.0",
     "sift": "^17.1.3",
     "zod": "^4.3.6"
@@ -88,7 +89,6 @@
     }
   },
   "devDependencies": {
-    "oxc-parser": "^0.128.0",
     "tsx": "^4.21.0",
     "typescript": "^6.0.3"
   }
