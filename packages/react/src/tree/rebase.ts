@@ -24,13 +24,23 @@ interface RebaseState {
 
 const state = new Map<string, RebaseState>();
 
-/** Replay all pending ops on confirmed and put result in cache */
+/** Replay all pending ops on confirmed and put result in cache.
+ *  Handlers may be async — sync try/catch only catches sync throws, so we also
+ *  attach .catch() to any returned promise to swallow async rejections.
+ *  Without this, one failing optimistic op (e.g. action calling server-only
+ *  tree.set on the client) becomes an "Uncaught (in promise)" and cascades
+ *  through every subsequent replay. Optimistic UX is best-effort; the server
+ *  result is authoritative. */
 function replayAndPut(path: string, rs: RebaseState) {
   const draft = structuredClone(rs.confirmed);
   for (const op of rs.pending) {
     try {
       const comp = getComponent(draft, op.cls, op.key);
-      if (comp) op.handler({ comp, node: draft }, op.data);
+      if (!comp) continue;
+      const result = op.handler({ comp, node: draft }, op.data) as unknown;
+      if (result && typeof (result as Promise<unknown>).then === 'function') {
+        (result as Promise<unknown>).catch(() => { /* failed replay — skip */ });
+      }
     } catch { /* failed replay — skip */ }
   }
   cache.put(draft);
