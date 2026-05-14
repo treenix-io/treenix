@@ -262,12 +262,11 @@ function basenameNoExt(p: string): string {
 // the mod silently fails to evaluate (no registerType, no actions). `tsImport` runs in
 // its own loader scope and bypasses Vite's hooks entirely. The "two @treenx/core
 // instances" warning the earlier comment described is resolved by the globalThis-backed
-// registry in core/registry.ts — both instances share one Map under Symbol.for keys.
-let _tsImport: ((specifier: string, parentURL: string) => Promise<unknown>) | null = null;
-async function ensureTsxRegistered(): Promise<void> {
-  if (_tsImport) return;
-  const api = await import('tsx/esm/api');
-  _tsImport = api.tsImport;
+// registry in core/registry.ts — both instances share one Map.
+let tsxImportPromise: Promise<typeof import('tsx/esm/api').tsImport> | null = null;
+function getTsxImport(): Promise<typeof import('tsx/esm/api').tsImport> {
+  tsxImportPromise ??= import('tsx/esm/api').then(m => m.tsImport);
+  return tsxImportPromise;
 }
 
 
@@ -324,8 +323,8 @@ export async function loadLocalMods(modsDir: string, target: LoadTarget): Promis
             // pkgName/<mod>/<entry> → exports field decides .ts vs .js
             await import(`${pkgName}/${entry.name}/${basenameNoExt(real)}`);
           } else if (real.endsWith('.ts') || real.endsWith('.tsx')) {
-            await ensureTsxRegistered();
-            await _tsImport!(real, import.meta.url);
+            const tsxImport = await getTsxImport();
+            await tsxImport(real, import.meta.url);
           } else {
             await import(real);
           }

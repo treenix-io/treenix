@@ -4,22 +4,29 @@ import { ContextHandler, Handler } from './context';
 type Entry = { handler: Handler; meta?: Record<string, unknown> };
 
 // Single source of truth: type → context → entry.
-// Stored on globalThis under a well-known Symbol so multiple @treenx/core module
-// instances (e.g. dist loaded by plain Node + src loaded by tsx in the same process)
-// share one registry. Without this, registerType() in a project mod (src) lands in a
-// different Map than the trpc dispatcher (dist) — actions vanish at execute time.
+// Stored on globalThis so multiple @treenx/core module instances (e.g. dist loaded
+// by plain Node + src loaded by tsx in the same process) share one registry.
+// Without this, registerType() in a project mod (src) lands in a different Map
+// than the trpc dispatcher (dist) — actions vanish at execute time.
 type RegistryShared = {
   registry: Map<string, Map<string, Entry>>;
   listeners: Set<() => void>;
   missResolvers: Map<string, (type: string) => void>;
   version: number;
 };
-const REGISTRY_KEY = Symbol.for('@treenx/core/registry');
-const _g = globalThis as unknown as Record<symbol, RegistryShared>;
-if (!_g[REGISTRY_KEY]) {
-  _g[REGISTRY_KEY] = { registry: new Map(), listeners: new Set(), missResolvers: new Map(), version: 0 };
+
+declare global {
+  // eslint-disable-next-line no-var
+  var __treenxCoreRegistry: RegistryShared | undefined;
 }
-const _shared = _g[REGISTRY_KEY];
+
+globalThis.__treenxCoreRegistry ??= {
+  registry: new Map(),
+  listeners: new Set(),
+  missResolvers: new Map(),
+  version: 0,
+};
+const _shared = globalThis.__treenxCoreRegistry;
 const registry = _shared.registry;
 const listeners = _shared.listeners;
 
