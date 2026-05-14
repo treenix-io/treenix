@@ -27,7 +27,7 @@ const ViewShellView: View<ViewShell> = ({ ctx }) => {
   const renderCtx = new URLSearchParams(search).get('ctx') || 'react';
 
   const { data: node, loading } = usePath(target);
-  const { onChange } = useAutoSave(target);
+  const { value, onChange } = useAutoSave(target);
 
   if (!node && !loading) {
     return (
@@ -39,7 +39,7 @@ const ViewShellView: View<ViewShell> = ({ ctx }) => {
       </div>
     );
   }
-  if (!node) {
+  if (!value) {
     return (
       <div className="flex flex-col items-center justify-center h-screen gap-2 text-[--text-3]">
         <div className="text-sm">Loading…</div>
@@ -53,7 +53,7 @@ const ViewShellView: View<ViewShell> = ({ ctx }) => {
         <div className="flex flex-col h-screen">
           <div className="flex-1 overflow-auto p-4 has-[.view-full]:p-0">
             <RenderContext name={renderCtx}>
-              <Render value={node} onChange={onChange} />
+              <Render value={value} onChange={onChange} />
             </RenderContext>
           </div>
         </div>

@@ -9,7 +9,6 @@ HI!
 
 ## Code
 - DRY: if logic exists somewhere in the codebase, find and reuse it.
-- KISS: simplest working solution. No premature abstractions, no over-engineering.
 - Prefer small focused files — large files are hard to edit and reason about.
 - Use blank lines to separate logical blocks within functions.
 - Always use ES `import`. Never use `require()`.

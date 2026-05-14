@@ -44,7 +44,7 @@ export function TreenixBlockView({ node, updateAttributes, deleteNode, editor, g
     if (ref && refNode) {
       return (
         <RenderContext name={ctx}>
-          <Render value={refNode} onChange={editable ? save.onChange : undefined} />
+          <Render value={save.value ?? refNode} onChange={editable ? save.onChange : undefined} />
         </RenderContext>
       );
     }

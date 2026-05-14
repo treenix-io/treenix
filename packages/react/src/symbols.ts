@@ -19,6 +19,7 @@ export function stampNode(node: NodeData): void {
 
   for (const [k, v] of Object.entries(node)) {
     if (k.startsWith('$') || !isComponent(v)) continue;
+    if ((v as any)[$node] !== undefined) continue; // shared frozen ref after merge
     hide(v, $key, k);
     hide(v, $node, node);
   }

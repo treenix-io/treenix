@@ -37,6 +37,29 @@ describe('stampNode', () => {
     // plain string — no symbols
     assert.equal((node as any).label[$key], undefined);
   });
+
+  // Regression: editor's auto-save merges into the cached node via shallow spread,
+  // sharing top-level component refs. The prior cache.put + devFreeze locked their
+  // $key/$node symbols non-configurable; re-stamping the merged node tried to
+  // Object.defineProperty on a frozen prop and threw "Cannot redefine property".
+  // Triggered by /docs/index.md (doc.page with doc.frontmatter) — bug since a85fd7e.
+  it('skips re-stamping a frozen shared component (auto-save merge after devFreeze)', () => {
+    const node = makeNode('/docs/index.md', 'doc.page', {
+      'doc.frontmatter': { $type: 'doc.frontmatter' },
+    });
+    const frontmatter = (node as any)['doc.frontmatter'];
+    Object.freeze(frontmatter);
+    Object.freeze(node);
+
+    const merged = { ...node, title: 'New' } as NodeData;
+    stampNode(merged);
+
+    assert.equal((merged as any)[$node], merged);
+    assert.equal((merged as any)[$key], '');
+    assert.equal((merged as any)['doc.frontmatter'], frontmatter);
+    assert.equal(frontmatter[$key], 'doc.frontmatter');
+    assert.equal(frontmatter[$node].$path, '/docs/index.md');
+  });
 });
 
 describe('viewCtx', () => {

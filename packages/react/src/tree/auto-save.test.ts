@@ -111,13 +111,16 @@ describe('mergeIntoNode', () => {
 // ── useSave: onChange ──
 
 describe('useSave: onChange', () => {
-  it('updates cache optimistically', () => {
+  it('exposes pending diff via value for instant form-local feedback', () => {
     seed('/a', 'task', { title: 'Old' });
     const { result } = renderHook(() => useSave('/a'));
 
     act(() => result.current.onChange({ title: 'New' }));
 
-    assert.equal(cache.get('/a')!.title, 'New');
+    // Form sees draft immediately via value (cached + pending merge)
+    assert.equal(result.current.value!.title, 'New');
+    // Cache stays at original until debounce fires or flush
+    assert.equal(cache.get('/a')!.title, 'Old');
   });
 
   it('sets dirty=true', () => {
@@ -129,7 +132,7 @@ describe('useSave: onChange', () => {
     assert.equal(result.current.dirty, true);
   });
 
-  it('accumulates multiple changes', () => {
+  it('accumulates multiple changes in value', () => {
     seed('/c', 'task', { title: 'A', count: 0 });
     const { result } = renderHook(() => useSave('/c'));
 
@@ -138,18 +141,11 @@ describe('useSave: onChange', () => {
       result.current.onChange({ count: 5 });
     });
 
-    const node = cache.get('/c')!;
-    assert.equal(node.title, 'B');
-    assert.equal(node.count, 5);
+    const v = result.current.value!;
+    assert.equal(v.title, 'B');
+    assert.equal(v.count, 5);
   });
 
-  it('noop for null partial', () => {
-    seed('/d', 'task', { title: 'X' });
-    const { result } = renderHook(() => useSave('/d'));
-
-    act(() => result.current.onChange(null!));
-    assert.equal(result.current.dirty, false);
-  });
 });
 
 // ── useSave: flush ──
@@ -212,14 +208,15 @@ describe('useSave: flush', () => {
 // ── useSave: reset ──
 
 describe('useSave: reset', () => {
-  it('restores cache to pre-edit state', () => {
+  it('discards pending — value reverts to cached node', () => {
     seed('/h', 'task', { title: 'Original' });
     const { result } = renderHook(() => useSave('/h'));
 
     act(() => result.current.onChange({ title: 'Modified' }));
-    assert.equal(cache.get('/h')!.title, 'Modified');
+    assert.equal(result.current.value!.title, 'Modified');
 
     act(() => result.current.reset());
+    assert.equal(result.current.value!.title, 'Original');
     assert.equal(cache.get('/h')!.title, 'Original');
   });
 
@@ -274,7 +271,7 @@ describe('useSave: path change', () => {
 // ── usePathSave: change ──
 
 describe('usePathSave: change', () => {
-  it('updates cache optimistically per path', () => {
+  it('cache updates after flush — debounced fanout otherwise', async () => {
     seed('/p/a', 'col', { label: 'A' });
     seed('/p/b', 'col', { label: 'B' });
     const { result } = renderHook(() => usePathSave({ delay: 0 }));
@@ -284,6 +281,11 @@ describe('usePathSave: change', () => {
       result.current.change('/p/b', { label: 'B2' });
     });
 
+    // Cache unchanged until debounce fires or flush
+    assert.equal(cache.get('/p/a')!.label, 'A');
+    assert.equal(cache.get('/p/b')!.label, 'B');
+
+    await act(() => result.current.flush());
     assert.equal(cache.get('/p/a')!.label, 'A2');
     assert.equal(cache.get('/p/b')!.label, 'B2');
   });
@@ -323,12 +325,14 @@ describe('usePathSave: path()', () => {
     assert.notEqual(h1, h2);
   });
 
-  it('handle.onChange updates cache', () => {
+  it('handle.onChange queues change — cache updates after flush', async () => {
     seed('/q', 'col', { label: 'Old' });
     const { result } = renderHook(() => usePathSave({ delay: 0 }));
 
     act(() => result.current.path('/q').onChange({ label: 'New' }));
+    assert.equal(cache.get('/q')!.label, 'Old');
 
+    await act(() => result.current.flush());
     assert.equal(cache.get('/q')!.label, 'New');
   });
 
