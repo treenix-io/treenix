@@ -255,18 +255,18 @@ function basenameNoExt(p: string): string {
 // Project-local TS mods (outside node_modules) need TypeScript handling for two reasons:
 // (a) Node 22 has no native strip-types at all;
 // (b) Node 25 has it but doesn't resolve extensionless `import './foo'`.
-// We use tsx's scoped `tsImport` rather than its global `register`: when this loader
-// runs INSIDE a Vite process, Vite has already installed Module.registerHooks (sync)
-// for .ts files. A later async `register()` from tsx is shadowed by Vite's hook — Vite
-// returns an empty stub for project-local server.ts (it's an SSR-disabled file), and
-// the mod silently fails to evaluate (no registerType, no actions). `tsImport` runs in
-// its own loader scope and bypasses Vite's hooks entirely. The "two @treenx/core
-// instances" warning the earlier comment described is resolved by the globalThis-backed
-// registry in core/registry.ts — both instances share one Map.
-let tsxImportPromise: Promise<typeof import('tsx/esm/api').tsImport> | null = null;
-function getTsxImport(): Promise<typeof import('tsx/esm/api').tsImport> {
-  tsxImportPromise ??= import('tsx/esm/api').then(m => m.tsImport);
-  return tsxImportPromise;
+// We register tsx as a GLOBAL ESM loader hook once, then use plain `await import(real)` so
+// the whole import graph (the mod and its transitive deps) shares a single module map —
+// crucial so all module-level state in @treenx/core (e.g. the prefab map in mod/prefab.ts)
+// has ONE instance across factory + all mods. tsx's scoped `tsImport` would put each mod
+// in its own loader scope, dual-instancing every module that registers prefabs/services.
+// The Vite 8 × tsx race that justified an earlier `tsImport` workaround no longer applies:
+// the server is now spawned as a child process (see @treenx/core/vite-plugin), outside
+// Vite's hooks entirely.
+let _tsxRegistered: Promise<void> | null = null;
+async function ensureTsxRegistered(): Promise<void> {
+  _tsxRegistered ??= import('tsx/esm/api').then(({ register }) => { register(); });
+  return _tsxRegistered;
 }
 
 
@@ -323,8 +323,8 @@ export async function loadLocalMods(modsDir: string, target: LoadTarget): Promis
             // pkgName/<mod>/<entry> → exports field decides .ts vs .js
             await import(`${pkgName}/${entry.name}/${basenameNoExt(real)}`);
           } else if (real.endsWith('.ts') || real.endsWith('.tsx')) {
-            const tsxImport = await getTsxImport();
-            await tsxImport(real, import.meta.url);
+            await ensureTsxRegistered();
+            await import(real);
           } else {
             await import(real);
           }
