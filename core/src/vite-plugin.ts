@@ -16,6 +16,7 @@
 
 import type { Plugin } from 'vite';
 import { spawn, type ChildProcess } from 'node:child_process';
+import { connect, type Socket } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 
@@ -24,15 +25,38 @@ export type TreenixServerOpts = {
   configPath?: string;
   /** Extra args appended after configPath (forwarded to main.ts). */
   args?: string[];
+  /** Port the backend listens on (default: 3211). Must match Vite proxy target. */
+  port?: number;
+  /** Max wait for backend port to open, in ms (default: 30000). */
+  readyTimeoutMs?: number;
 };
+
+// Poll TCP connect to port until it accepts a connection or timeout elapses.
+// Used to gate Vite's first request until the spawned backend is actually listening,
+// otherwise the browser races vite proxy → ECONNREFUSED on /trpc/events.
+async function waitForPort(port: number, host: string, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const ok = await new Promise<boolean>(resolve => {
+      const sock: Socket = connect(port, host);
+      sock.once('connect', () => { sock.end(); resolve(true); });
+      sock.once('error', () => { sock.destroy(); resolve(false); });
+    });
+    if (ok) return;
+    await new Promise(r => setTimeout(r, 100));
+  }
+  throw new Error(`treenixServer: backend did not open ${host}:${port} within ${timeoutMs}ms`);
+}
 
 export default function treenixServer(opts: TreenixServerOpts = {}): Plugin {
   const configPath = opts.configPath ?? 'root.json';
+  const port = opts.port ?? 3211;
+  const readyTimeoutMs = opts.readyTimeoutMs ?? 30_000;
   let child: ChildProcess | null = null;
 
   return {
     name: 'treenix-server',
-    configureServer() {
+    async configureServer() {
       // Resolve main.ts relative to this plugin file so it works from both
       // dist (node_modules/@treenx/core/dist/) and src (workspace dev mode).
       const here = dirname(fileURLToPath(import.meta.url));
@@ -49,6 +73,12 @@ export default function treenixServer(opts: TreenixServerOpts = {}): Plugin {
       process.once('exit', kill);
       process.once('SIGINT', kill);
       process.once('SIGTERM', kill);
+
+      // Block Vite startup until the backend port is open. Without this, the
+      // browser's first /trpc/events SSE call (and the initial getChildren
+      // batches) hit Vite before the proxy target accepts connections, surfacing
+      // as `ECONNREFUSED 127.0.0.1:3211` in the console.
+      await waitForPort(port, '127.0.0.1', readyTimeoutMs);
     },
   };
 }
