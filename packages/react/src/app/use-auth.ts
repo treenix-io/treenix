@@ -1,9 +1,9 @@
 // Auth state hook — bootstraps session from token, handles dev login,
-// surfaces a re-login modal when the server emits AUTH_EXPIRED_EVENT.
+// and drops stale auth when the server emits AUTH_EXPIRED_EVENT.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { AUTH_EXPIRED_EVENT, clearToken, getToken, setToken, trpc } from '#tree/trpc';
+import { AUTH_EXPIRED_EVENT, clearToken, getToken, trpc } from '#tree/trpc';
 
 export type AuthState = {
   authed: string | null;
@@ -45,6 +45,8 @@ export function useAuth(): AuthState {
       const isAuthError = e?.data?.code === 'UNAUTHORIZED' || e?.data?.httpStatus === 401;
       if (isAuthError) {
         clearToken();
+        setAuthed(null);
+        setShowLoginModal(false);
         setAuthChecked(true);
       } else {
         toast.error('Server unavailable, retrying…');
@@ -58,17 +60,17 @@ export function useAuth(): AuthState {
     return () => clearTimeout(retryTimer.current);
   }, [initAuth]);
 
-  // Session expired mid-use → drop token, prompt login.
+  // Session expired mid-use. Drop auth; Router decides whether this route needs login.
   useEffect(() => {
     const handler = () => {
-      if (showLoginModal) return;
       clearToken();
       setAuthed(null);
-      setShowLoginModal(true);
+      setAuthChecked(true);
+      setShowLoginModal(false);
     };
     window.addEventListener(AUTH_EXPIRED_EVENT, handler);
     return () => window.removeEventListener(AUTH_EXPIRED_EVENT, handler);
-  }, [showLoginModal]);
+  }, []);
 
   const logout = useCallback(() => {
     clearToken();

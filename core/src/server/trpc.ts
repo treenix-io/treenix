@@ -70,10 +70,17 @@ export type TreeRouterOpts = {
 };
 
 const DEFAULT_CLAIMS_TTL_MS = 30_000;
+export const SSE_PING_INTERVAL_MS = 15_000;
+export const SSE_RECONNECT_AFTER_INACTIVITY_MS = 60_000;
 
 export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: TreeRouterOpts, cdc?: CdcRegistry) {
   const claimsTtlMs = opts?.claimsTtlMs ?? DEFAULT_CLAIMS_TTL_MS;
-  const t = initTRPC.context<TrpcContext>().create();
+  const t = initTRPC.context<TrpcContext>().create({
+    sse: {
+      ping: { enabled: true, intervalMs: SSE_PING_INTERVAL_MS },
+      client: { reconnectAfterInactivityMs: SSE_RECONNECT_AFTER_INACTIVITY_MS },
+    },
+  });
 
   // Map domain errors → TRPCError. Base middleware for all procedures.
   function mapErrors(result: { ok: boolean; error?: { cause?: unknown } }) {
@@ -347,18 +354,33 @@ export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: 
       }),
 
     events: authed.subscription(({ ctx }) => {
+      if (ctx.token && !ctx.session) {
+        throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Session expired' });
+      }
+
       return observable<NodeEvent>((emit) => {
         const userId = ctx.session?.userId;
         if (!userId) return () => {};
+        const expiresAt = typeof ctx.session?.expiresAt === 'number' ? ctx.session.expiresAt : null;
         const claims = ctx.session?.claims ?? [];
         const connId = `${userId}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
 
         const sessionClaims = claims.length ? claims : null;
         const push = createFilteredPush(baseStore, userId, sessionClaims, (e) => emit.next(e), { claimsTtlMs });
 
+        let expiryTimer: ReturnType<typeof setTimeout> | null = null;
+        if (expiresAt) {
+          expiryTimer = setTimeout(() => {
+            emit.error(new TRPCError({ code: 'UNAUTHORIZED', message: 'Session expired' }));
+          }, Math.max(0, expiresAt - Date.now()));
+        }
+
         const preserved = watcher.connect(connId, userId, push);
         emit.next({ type: 'reconnect', preserved });
-        return () => watcher.disconnect(connId);
+        return () => {
+          if (expiryTimer) clearTimeout(expiryTimer);
+          watcher.disconnect(connId);
+        };
       });
     }),
   });

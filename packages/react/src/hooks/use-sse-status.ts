@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { SSE_CONNECTED, SSE_DISCONNECTED } from '#tree/events';
 
-const SSE_DOWN_GRACE_MS = 2000;
+const SSE_DOWN_GRACE_MS = 5_000;
 
 export function useSseStatus(): boolean {
   const [down, setDown] = useState(false);

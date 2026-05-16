@@ -5,7 +5,7 @@ import type { NodeData } from '@treenx/core';
 import { applyPatch, type Operation } from 'fast-json-patch';
 import * as cache from './cache';
 import { applyServerPatch, applyServerSet } from './rebase';
-import { getToken, trpc } from './trpc';
+import { AUTH_EXPIRED_EVENT, clearToken, getToken, trpc } from './trpc';
 
 type LoadChildren = (path: string) => Promise<void>;
 
@@ -23,6 +23,11 @@ export const SSE_DISCONNECTED = 'sse-disconnected';
 let unsub: (() => void) | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let lastConfig: EventsConfig | null = null;
+
+function isUnauthorized(err: unknown): boolean {
+  const data = (err as { data?: { code?: string; httpStatus?: number } }).data;
+  return data?.code === 'UNAUTHORIZED' || data?.httpStatus === 401;
+}
 
 // Wait until a session token appears, then call `cb` once. Listens to localStorage 'storage'
 // events (cross-tab) AND polls every 500ms (same-tab — login fires no storage event in the
@@ -51,11 +56,8 @@ export function startEvents(config: EventsConfig) {
   stopEvents();
   lastConfig = config;
 
-  // Defer SSE subscribe until a session token exists. Without this guard, calling
-  // startEvents on an unauthenticated SPA triggers a tight loop:
-  //   subscribe → connectionParams throws (no token) → onStopped → scheduleResubscribe(0) → repeat.
-  // Once a token lands (login), call startEvents again from the caller's auth-state effect,
-  // OR rely on the storage listener below to wake the subscription.
+  // Defer editor SSE until a session token exists. Once a token lands (login),
+  // the caller's auth-state effect or the storage listener below wakes it.
   if (!getToken()) {
     waitForToken(() => { if (lastConfig) startEvents(lastConfig); });
     return;
@@ -76,6 +78,11 @@ export function startEvents(config: EventsConfig) {
       }
     },
     onError(err: unknown) {
+      if (isUnauthorized(err)) {
+        clearToken();
+        window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
+        return;
+      }
       console.error('[sse] subscription error (non-retryable):', err);
       window.dispatchEvent(new Event(SSE_DISCONNECTED));
       // tRPC exhausted retries — back off briefly before re-subscribing

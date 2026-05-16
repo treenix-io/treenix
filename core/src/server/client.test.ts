@@ -85,4 +85,26 @@ describe('createClient TokenSource', () => {
     await client.logout.mutate();
     assert.equal(await client.me.query(), null);
   });
+
+  it('events with a stale token reject instead of staying empty', async () => {
+    const client = createClient(url, '0'.repeat(64));
+
+    const err = await new Promise<unknown>((resolve, reject) => {
+      let sub: { unsubscribe(): void };
+      sub = client.events.subscribe(undefined, {
+        onData() {
+          reject(new Error('stale token stream must not deliver data'));
+        },
+        onError(e) {
+          sub.unsubscribe();
+          resolve(e);
+        },
+        onComplete() {
+          reject(new Error('stale token stream completed without error'));
+        },
+      });
+    });
+
+    assert.equal((err as { data?: { code?: string } }).data?.code, 'UNAUTHORIZED');
+  });
 });
