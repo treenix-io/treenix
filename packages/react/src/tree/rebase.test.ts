@@ -41,6 +41,18 @@ const action = (type: string, name: string) => resolve(type, `action:${name}`, f
 
 afterEach(() => { cache.clear(); clear(); });
 
+async function captureWarnings(fn: (warnings: string[]) => void | Promise<void>): Promise<string[]> {
+  const warnings: string[] = [];
+  const originalWarn = console.warn;
+  console.warn = (...args: unknown[]) => warnings.push(args.map(String).join(' '));
+  try {
+    await fn(warnings);
+  } finally {
+    console.warn = originalWarn;
+  }
+  return warnings;
+}
+
 // ── Tests ──
 
 describe('rebase', () => {
@@ -175,22 +187,49 @@ describe('rebase', () => {
     assert.strictEqual(hasPending('/c'), true, 'second op still pending');
   });
 
-  it('failed replay op is skipped, others still applied', () => {
-    cache.put({ $path: '/c', $type: 'test.rebase.counter', count: 5 } as any);
+  it('failed replay op warns, is skipped, and others still applied', async () => {
+    await captureWarnings((warnings) => {
+      cache.put({ $path: '/c', $type: 'test.rebase.counter', count: 5 } as any);
 
-    const incFn = action('test.rebase.counter', 'increment');
-    const brokenFn = action('test.rebase.counter', 'broken');
+      const incFn = action('test.rebase.counter', 'increment');
+      const brokenFn = action('test.rebase.counter', 'broken');
 
-    pushOptimistic('/c', Counter, undefined, incFn, undefined);    // count=6
-    pushOptimistic('/c', Counter, undefined, brokenFn, undefined); // throws, skipped
-    pushOptimistic('/c', Counter, undefined, incFn, undefined);    // count=7
+      pushOptimistic('/c', Counter, undefined, incFn, undefined);    // count=6
+      pushOptimistic('/c', Counter, undefined, brokenFn, undefined); // throws, skipped
+      pushOptimistic('/c', Counter, undefined, incFn, undefined);    // count=7
 
-    assert.strictEqual((cache.get('/c') as any).count, 7);
+      assert.strictEqual((cache.get('/c') as any).count, 7);
 
-    // Server confirms first
-    applyServerPatch('/c', [{ op: 'replace', path: '/count', value: 6 }]);
-    // Remaining: broken (skipped) + increment → confirmed=6, replay: skip broken, +1 = 7
-    assert.strictEqual((cache.get('/c') as any).count, 7);
+      // Server confirms first
+      applyServerPatch('/c', [{ op: 'replace', path: '/count', value: 6 }]);
+      // Remaining: broken (skipped) + increment → confirmed=6, replay: skip broken, +1 = 7
+      assert.strictEqual((cache.get('/c') as any).count, 7);
+      assert.ok(
+        warnings.some(w => w.includes('[treenix] optimistic replay failed path=/c type=Counter')),
+        `expected replay warning, saw: ${warnings.join('\n')}`,
+      );
+    });
+  });
+
+  it('async failed replay op warns without an unhandled rejection', async () => {
+    await captureWarnings(async (warnings) => {
+      cache.put({ $path: '/c', $type: 'test.rebase.counter', count: 5 } as any);
+
+      pushOptimistic(
+        '/c',
+        Counter,
+        undefined,
+        () => Promise.reject(new Error('async fail')),
+        undefined,
+        { type: 'test.rebase.counter', action: 'asyncBroken' },
+      );
+      await Promise.resolve();
+
+      assert.ok(
+        warnings.some(w => w.includes('path=/c type=test.rebase.counter action=asyncBroken')),
+        `expected async replay warning, saw: ${warnings.join('\n')}`,
+      );
+    });
   });
 
   it('cleanup leaves no state in map', () => {

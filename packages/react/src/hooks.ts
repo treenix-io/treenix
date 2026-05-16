@@ -294,7 +294,7 @@ export const execute = (
     if (!meta?.noOptimistic) {
       const cls = resolve(compType, 'class');
       const actionFn = resolve(compType, `action:${action}`, false);
-      if (cls && actionFn) pushOptimistic(path, cls, key, actionFn, data);
+      if (cls && actionFn) pushOptimistic(path, cls, key, actionFn, data, { type: compType, action });
     }
   }
 

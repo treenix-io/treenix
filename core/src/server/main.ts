@@ -1,9 +1,9 @@
 import 'dotenv/config';
 import { type NodeData } from '#core';
 import { readFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { treenix } from './factory';
-import { applyDevDefaults, devBannerLines } from './dev-defaults';
+import { devBannerLines } from './dev-defaults';
 
 // Lock CWD — no library may change it
 process.chdir = () => { throw new Error('process.chdir is forbidden'); };
@@ -13,30 +13,6 @@ process.chdir = () => { throw new Error('process.chdir is forbidden'); };
 if (process.env.VITE_DEV_LOGIN && process.env.NODE_ENV !== 'development') {
   console.error('[boot] FATAL: VITE_DEV_LOGIN is set but NODE_ENV is not "development". Refusing to start — this would expose the dev-login admin route in production.');
   process.exit(1);
-}
-
-// In NODE_ENV=development, auto-populate the dev flags so a fresh clone needs no env setup.
-// Explicit `MCP_DEV_ADMIN=0` / `VITE_DEV_LOGIN=0` still overrides.
-applyDevDefaults();
-
-// Auto-generate schemas (oxc-parser is a devDependency — available in dev via tsx)
-try {
-  const { generateSchemas } = await import('#schema/extract-schemas-oxc');
-  const coreDir = new URL('../..', import.meta.url).pathname;
-  const engineDir = new URL('../../..', import.meta.url).pathname;
-  await generateSchemas([
-    join(coreDir, 'src'),
-    join(engineDir, 'mods'),
-    join(engineDir, 'packages'),
-    resolve('mods'),
-  ]);
-} catch (err) {
-  const code = (err as Record<string, unknown>).code;
-  if (code === 'ERR_MODULE_NOT_FOUND') {
-    console.log('[schema] skipped (production mode)');
-  } else {
-    throw err;
-  }
 }
 
 const rootPath = resolve(process.argv[2] || 'root.json');
