@@ -6,11 +6,13 @@ import { beforeEach, describe, it } from 'node:test';
 import {
   ancestorPaths,
   buildClaims,
+  buildSessionCookie,
   componentPerm,
   createSession,
   resolvePermission,
   resolveToken,
   revokeSession,
+  SESSION_TTL_MS,
   sessionPath,
   stripComponents,
   withAcl,
@@ -458,6 +460,20 @@ describe('sessions', () => {
     const token = await createSession(ss, 'alice');
     const session = await resolveToken(ss, token);
     assert.equal(session?.userId, 'alice');
+  });
+
+  it('default session and cookie last several days', async () => {
+    const token = await createSession(ss, 'alice');
+    const node = await ss.get(sessionPath(token));
+
+    assert.equal(typeof node?.createdAt, 'number');
+    assert.equal(typeof node?.expiresAt, 'number');
+    if (typeof node?.createdAt !== 'number' || typeof node.expiresAt !== 'number') {
+      throw new Error('session timestamps missing');
+    }
+
+    assert.equal(node.expiresAt - node.createdAt, SESSION_TTL_MS);
+    assert.match(buildSessionCookie(token), /Max-Age=604800(?:;|$)/);
   });
 
   it('session nodes have admin-only $acl', async () => {

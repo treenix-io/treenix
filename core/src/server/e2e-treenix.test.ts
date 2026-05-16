@@ -293,6 +293,8 @@ describe('e2e: treenix persistence', () => {
     const ctx1 = await boot(agentRuntimeSeed, tmpDir, { publicAccess: true })
     ctxs.push(ctx1)
     const c1 = createClient(ctx1.url)
+    await c1.register.mutate({ userId: 'persist-user', password: 'persist-pass' })
+    const { token } = await c1.login.mutate({ userId: 'persist-user', password: 'persist-pass' })
     await c1.set.mutate({ node: { $path: '/persist-check', $type: 'doc', survived: true } })
 
     const saved = await c1.get.query({ path: '/persist-check' })
@@ -314,6 +316,9 @@ describe('e2e: treenix persistence', () => {
     const persisted = await c2.get.query({ path: '/persist-check' })
     assert.ok(persisted, 'Custom data should persist across restart')
     assert.equal((persisted as Record<string, unknown>).survived, true)
+
+    const me = await createClient(ctx2.url, token).me.query()
+    assert.equal(me?.userId, 'persist-user')
 
     await shutdown(ctx2)
     ctxs.length = 0

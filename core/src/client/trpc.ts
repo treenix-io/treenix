@@ -3,7 +3,7 @@
 //
 // Auth model (post-cookie migration):
 //   • Browsers: rely on the HttpOnly session cookie set by login/register/devLogin.
-//     EventSource sends cookies natively → SSE just works.
+//     EventSource sends cookies natively; withCredentials covers cross-origin dev setups.
 //   • Agents / MCP / tests: pass `token` or `getToken` — sent as `Authorization: Bearer ...`.
 //     SSE EventSource cannot set headers, so node clients that need subscriptions go
 //     through the cookie path too (custom fetch with a cookie jar) — see core/src/server/client.ts.
@@ -37,8 +37,7 @@ export function createTrpcTransport(opts: TrpcTransportOpts): TreenixClient & { 
         condition: (op) => op.type === 'subscription',
         true: httpSubscriptionLink({
           url: `${opts.url}/trpc/`,
-          // No connectionParams — auth comes from the cookie (browser) or a custom EventSource
-          // wired by the caller. Server reads cookie OR Authorization header in createContext.
+          eventSourceOptions: { withCredentials: true },
         }),
         false: httpBatchLink({
           url: `${opts.url}/trpc/`,

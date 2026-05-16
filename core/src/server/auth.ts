@@ -38,7 +38,9 @@ export function sessionPath(token: string): string {
 // Bearer-in-Authorization-header continues to work in parallel for agents/MCP/tests.
 
 export const SESSION_COOKIE = 'treenix_session';
-const SESSION_COOKIE_MAX_AGE = 24 * 60 * 60; // seconds, matches SESSION_TTL_MS
+
+const SESSION_COOKIE_MAX_AGE = 7 * 24 * 60 * 60; // 7 days
+export const SESSION_TTL_MS = SESSION_COOKIE_MAX_AGE * 1000;
 
 export function buildSessionCookie(token: string): string {
   return `${SESSION_COOKIE}=${token}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${SESSION_COOKIE_MAX_AGE}`;
@@ -78,8 +80,6 @@ export type Session = { userId: string; claims?: string[]; [key: string]: unknow
 type SessionNode = NodeData & { userId: string; createdAt: number; expiresAt: number; claims?: string[] };
 
 // ── Sessions (tree-backed, /auth/sessions/{token}) ──
-
-const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 export async function createSession(
   tree: Tree,

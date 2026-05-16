@@ -152,8 +152,7 @@ export function createHttpServer(pipeline: Pipeline, opts?: HttpServerOpts): Ser
 
     // Auth: cookie (browsers, including SSE EventSource) OR Authorization Bearer header
     // (agents, MCP, tests). Cookies are HttpOnly + Secure + SameSite=Strict — set by
-    // login/register/devLogin via ctx.setHeader (see trpc.ts). The stream-token machinery
-    // that R1's F9 introduced is gone; cookies natively cover SSE.
+    // login/register/devLogin via ctx.setHeader (see trpc.ts). Cookies natively cover SSE.
     const createContext = async (): Promise<TrpcContext> => {
       const auth = req.headers.authorization;
       const bearer = (typeof auth === 'string' && auth.startsWith('Bearer ') ? auth.slice(7) : null);
