@@ -25,6 +25,7 @@ const { renderHook, act } = await import('@testing-library/react');
 const { mergeToOps, mergeIntoNode, useSave, usePathSave } = await import('./auto-save');
 const cache = await import('#tree/cache');
 const { makeNode } = await import('@treenx/core');
+const { $key, $node } = await import('#symbols');
 
 function seed(path: string, type: string, data?: Record<string, unknown>) {
   cache.put(makeNode(path, type, data));
@@ -121,6 +122,31 @@ describe('useSave: onChange', () => {
     assert.equal(result.current.value!.title, 'New');
     // Cache stays at original until debounce fires or flush
     assert.equal(cache.get('/a')!.title, 'Old');
+  });
+
+  it('preserves original node context on pending value for Render/useActions', () => {
+    const original = seed('/ctx', 'task', { title: 'Old' });
+    const { result } = renderHook(() => useSave('/ctx'));
+
+    act(() => result.current.onChange({ title: 'New' }));
+
+    assert.equal((result.current.value as any)[$node], original);
+    assert.notEqual(result.current.value, original);
+  });
+
+  it('preserves original node context on pending named components', () => {
+    const original = seed('/ctx-comp', 'task', {
+      meta: { $type: 'task.meta', title: 'Old' },
+    });
+    const { result } = renderHook(() => useSave('/ctx-comp'));
+
+    act(() => result.current.scope('meta')({ title: 'New' }));
+
+    const meta = (result.current.value as any).meta;
+    assert.equal(meta.title, 'New');
+    assert.equal(meta[$node], original);
+    assert.equal(meta[$key], 'meta');
+    assert.notEqual(meta, (original as any).meta);
   });
 
   it('sets dirty=true', () => {

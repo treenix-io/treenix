@@ -45,10 +45,12 @@ export function Inspector({ path, currentUserId, onDelete, onAddComponent, onSel
     );
   }
 
+  const draftNode = save.value ?? node;
+
   return (
     <div className="editor">
       <InspectorHeader
-        node={node}
+        node={draftNode}
         context={context}
         propsOpen={propsOpen}
         onContextChange={setContext}
@@ -63,7 +65,7 @@ export function Inspector({ path, currentUserId, onDelete, onAddComponent, onSel
           <ErrorBoundary key={node.$path}>
             <RenderContext name={context}>
               <div className="node-view">
-                <Render value={node} onChange={save.onChange} />
+                <Render value={draftNode} onChange={save.onChange} />
               </div>
             </RenderContext>
           </ErrorBoundary>
@@ -72,11 +74,11 @@ export function Inspector({ path, currentUserId, onDelete, onAddComponent, onSel
 
       {/* Slide-out edit panel */}
       <NodeEditor
-        node={node}
+        node={draftNode}
         save={save}
         open={propsOpen}
         onClose={() => setPropsOpen(false)}
-        onDelete={() => onDelete(node.$path)}
+        onDelete={() => onDelete(draftNode.$path)}
         currentUserId={currentUserId}
         onAddComponent={onAddComponent}
       />

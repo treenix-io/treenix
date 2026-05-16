@@ -1,5 +1,8 @@
 // OnChange: typed partial with dot-notation → MutationOp[]
-// Pure types + conversion utilities. No React dependency.
+// Types + conversion utilities. No React dependency.
+
+import { isComponent, type NodeData } from '@treenx/core';
+import { $key, $node, stampComponent } from '#symbols';
 
 export type MutationOp = ['r', string, unknown] | ['d', string];
 
@@ -74,7 +77,20 @@ export function mergeIntoNode<T extends Record<string, unknown>>(node: T, partia
       (merged as Record<string, unknown>)[k] = v;
     }
   }
+  preserveContext(node, merged);
   return merged as T;
+}
+
+function preserveContext(source: object, target: Record<string, unknown>) {
+  const owner = (source as any)[$node] as NodeData | undefined;
+  if (!owner) return;
+  stampComponent(target, owner, ((source as any)[$key] as string | undefined) ?? '');
+
+  for (const [k, v] of Object.entries(target)) {
+    if (k.startsWith('$') || !isComponent(v)) continue;
+    if ((v as any)[$node] !== undefined) continue;
+    stampComponent(v, owner, k);
+  }
 }
 
 function setByPath(obj: Record<string, unknown>, path: string, value: unknown) {
@@ -85,7 +101,9 @@ function setByPath(obj: Record<string, unknown>, path: string, value: unknown) {
     if (existing == null || typeof existing !== 'object') {
       cur[parts[i]] = {};
     } else {
-      cur[parts[i]] = { ...(existing as Record<string, unknown>) };
+      const next = { ...(existing as Record<string, unknown>) };
+      preserveContext(existing, next);
+      cur[parts[i]] = next;
     }
     cur = cur[parts[i]] as Record<string, unknown>;
   }
