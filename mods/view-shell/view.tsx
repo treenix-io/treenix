@@ -14,6 +14,7 @@ import {
   useAutoSave,
   useLocation,
   usePath,
+  useReactivePathEvents,
   type View,
   view,
 } from '@treenx/react';
@@ -21,13 +22,14 @@ import { register } from '@treenx/core';
 import { useRouteShell } from '@treenx/react/router/use-route-shell';
 import { ViewShell } from './types';
 
-const ViewShellView: View<ViewShell> = ({ ctx }) => {
+const ViewShellView: View<ViewShell> = ({ value, ctx }) => {
   const { target, nav } = useRouteShell(ctx!.node, { preserveQuery: { ctx: 'react' } });
   const { search } = useLocation();
   const renderCtx = new URLSearchParams(search).get('ctx') || 'react';
 
-  const { data: node, loading } = usePath(target);
-  const { value, onChange } = useAutoSave(target);
+  const { data: node, loading } = usePath(target, value.reactive ? undefined : { once: true });
+  const { value: draft, onChange } = useAutoSave(target);
+  if (value.reactive) useReactivePathEvents();
 
   if (!node && !loading) {
     return (
@@ -39,7 +41,7 @@ const ViewShellView: View<ViewShell> = ({ ctx }) => {
       </div>
     );
   }
-  if (!value) {
+  if (!draft) {
     return (
       <div className="flex flex-col items-center justify-center h-screen gap-2 text-[--text-3]">
         <div className="text-sm">Loading…</div>
@@ -53,7 +55,7 @@ const ViewShellView: View<ViewShell> = ({ ctx }) => {
         <div className="flex flex-col h-screen">
           <div className="flex-1 overflow-auto p-4 has-[.view-full]:p-0">
             <RenderContext name={renderCtx}>
-              <Render value={value} onChange={onChange} />
+              <Render value={draft} onChange={onChange} />
             </RenderContext>
           </div>
         </div>

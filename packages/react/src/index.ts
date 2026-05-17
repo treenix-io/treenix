@@ -16,3 +16,4 @@ export { sanitizeHref } from '#lib/sanitize-href';
 export { minimd } from '#lib/minimd';
 export { stampNode, stampComponent } from '#symbols';
 export { useDraft, type DraftHandle } from './draft';
+export { useReactivePathEvents } from '#hooks/use-reactive-path-events';

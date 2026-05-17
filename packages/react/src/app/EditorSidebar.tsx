@@ -16,7 +16,6 @@ import { TypePicker } from '#mods/editor-ui/type-picker';
 import type { NavigateFn } from '#navigate';
 import * as cache from '#tree/cache';
 import { tree } from '#tree/client';
-import { startEvents, stopEvents } from '#tree/events';
 import { trpc } from '#tree/trpc';
 import type { NodeData } from '@treenx/core';
 import { ChevronDown, Eye, EyeOff, LogIn, LogOut, RotateCcw } from 'lucide-react';
@@ -86,14 +85,12 @@ export function EditorSidebar({
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [loaded, setLoaded] = useState<Set<string>>(new Set());
   const [creatingAt, setCreatingAt] = useState<string | null>(null);
-  const expandedRef = useRef(expanded);
   const selectedRef = useRef(selected);
   const phaseRef = useRef(phase);
   // Mirror of `loaded` updated synchronously inside loadChildren so concurrent
   // calls within one async sequence don't refetch the same path.
   const loadedRef = useRef(loaded);
 
-  expandedRef.current = expanded;
   selectedRef.current = selected;
   phaseRef.current = phase;
   loadedRef.current = loaded;
@@ -164,15 +161,6 @@ export function EditorSidebar({
       toast.error(e instanceof Error ? e.message : String(e));
     });
   }, [selected, root, ensurePathVisible]);
-
-  useEffect(() => {
-    startEvents({
-      loadChildren,
-      getExpanded: () => expandedRef.current,
-      getSelected: () => selectedRef.current,
-    });
-    return stopEvents;
-  }, [loadChildren]);
 
   const toggleSidebar = useCallback(() => {
     if (animationTimer.current) clearTimeout(animationTimer.current);

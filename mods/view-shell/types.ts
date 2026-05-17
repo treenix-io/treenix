@@ -6,6 +6,9 @@
 import { registerType } from '@treenx/core/comp';
 
 /** Read-only viewer route node. */
-export class ViewShell {}
+export class ViewShell {
+  /** When true, keep the viewed target live via the client tree event stream. */
+  reactive?: boolean;
+}
 
 registerType('t.view.shell', ViewShell);

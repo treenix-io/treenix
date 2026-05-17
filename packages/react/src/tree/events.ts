@@ -2,17 +2,20 @@
 // Listens to trpc.events SSE and updates the cache.
 
 import type { NodeData } from '@treenx/core';
-import { applyPatch, type Operation } from 'fast-json-patch';
+import fjp from 'fast-json-patch';
+import type { Operation } from 'fast-json-patch';
 import * as cache from './cache';
 import { applyServerPatch, applyServerSet } from './rebase';
 import { AUTH_EXPIRED_EVENT, clearToken, getToken, trpc } from './trpc';
 
+const { applyPatch } = fjp;
+
 type LoadChildren = (path: string) => Promise<void>;
 
 interface EventsConfig {
-  loadChildren: LoadChildren;
-  getExpanded: () => Set<string>;
-  getSelected: () => string | null;
+  loadChildren?: LoadChildren;
+  getExpanded?: () => Set<string>;
+  getSelected?: () => string | null;
 }
 
 // ── SSE connection events (consumed by App.tsx) ──
@@ -52,11 +55,11 @@ function waitForToken(cb: () => void) {
   }
 }
 
-export function startEvents(config: EventsConfig) {
+export function startEvents(config: EventsConfig = {}) {
   stopEvents();
   lastConfig = config;
 
-  // Defer editor SSE until a session token exists. Once a token lands (login),
+  // Defer SSE until a session token exists. Once a token lands (login),
   // the caller's auth-state effect or the storage listener below wakes it.
   if (!getToken()) {
     waitForToken(() => { if (lastConfig) startEvents(lastConfig); });
@@ -98,8 +101,10 @@ export function startEvents(config: EventsConfig) {
       if (event.type === 'reconnect') {
         if (!event.preserved) {
           cache.signalReconnect();
-          for (const path of getExpanded()) loadChildren(path);
-          const sel = getSelected();
+          if (loadChildren) {
+            for (const path of getExpanded?.() ?? []) loadChildren(path);
+          }
+          const sel = getSelected?.();
           if (sel) {
             trpc.get.query({ path: sel, watch: true }).then(n => {
               if (n) cache.put(n);

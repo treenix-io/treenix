@@ -6,6 +6,7 @@ import { ErrorBoundary } from '#app/ErrorBoundary';
 import { ScrollArea } from '#components/ui/scroll-area';
 import { Render, RenderContext } from '#context';
 import { usePath } from '#hooks';
+import { useReactivePathEvents } from '#hooks/use-reactive-path-events';
 import { pickDefaultContext } from '#mods/editor-ui/node-utils';
 import { useAutoSave } from '#tree/auto-save';
 import { useState } from 'react';
@@ -22,6 +23,7 @@ type Props = {
 };
 
 export function Inspector({ path, currentUserId, onDelete, onAddComponent, onSelect, onSetRoot }: Props) {
+  useReactivePathEvents();
   const { data: node } = usePath(path);
   const save = useAutoSave(path ?? '');
   const [propsOpen, setPropsOpen] = useState(false);
