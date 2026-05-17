@@ -4,4 +4,5 @@ Dynamic JSX-view compiler. Takes raw JSX/TSX from type nodes, compiles to React 
 
 ## Key
 - `compileComponent(type, rawJSX)` — compile + cache + register
-- `verifyViewSource` — server-safe compile check (used by MCP)
+- `verifyViewSource` — server-safe compile check
+- `uix.mcp` — `compile_view` MCP object for checking/saving `uix.source`

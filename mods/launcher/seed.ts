@@ -10,7 +10,6 @@ const layout = JSON.stringify([
   { i: 'sys', x: 0, y: 1, w: 1, h: 1 },
   { i: 'whisper', x: 1, y: 1, w: 1, h: 1 },
   { i: 'sim', x: 2, y: 1, w: 1, h: 1 },
-  { i: 'llm', x: 3, y: 1, w: 1, h: 1 },
   { i: 'board-widget', x: 0, y: 2, w: 2, h: 2 },
 ]);
 
@@ -31,7 +30,6 @@ registerPrefab('launcher', 'seed', [
   { $path: 'launcher/sys', $type: 'ref', $ref: '/sys' },
   { $path: 'launcher/whisper', $type: 'ref', $ref: '/whisper' },
   { $path: 'launcher/sim', $type: 'ref', $ref: '/sim' },
-  { $path: 'launcher/llm', $type: 'ref', $ref: '/sys/llm' },
 
   // Widgets (larger)
   { $path: 'launcher/board-widget', $type: 'ref', $ref: '/board' },

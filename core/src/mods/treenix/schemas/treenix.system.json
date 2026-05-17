@@ -2,7 +2,7 @@
   "$id": "treenix.system",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
-  "description": "System actions — type discovery, view compilation, prefab deployment",
+  "description": "System actions — type discovery and prefab deployment",
   "properties": {},
   "methods": {
     "catalog": {
@@ -42,25 +42,6 @@
           "required": [
             "type"
           ]
-        }
-      ]
-    },
-    "compile_view": {
-      "description": "Compile JSX view source. With source: compile + save to type node. Without: check existing",
-      "arguments": [
-        {
-          "name": "data",
-          "type": "object",
-          "properties": {
-            "source": {
-              "type": "string",
-              "title": "JSX source code"
-            },
-            "path": {
-              "type": "string",
-              "title": "Type node path"
-            }
-          }
         }
       ]
     },

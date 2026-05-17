@@ -1,7 +1,7 @@
 // UIX Compile — integration test
 // Full pipeline: JSX/TSX source → compileComponent → real React → renderToString
 
-import { resolve } from '#core';
+import { resolve } from '@treenx/core';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 import React from 'react';

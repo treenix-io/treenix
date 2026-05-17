@@ -63,14 +63,6 @@ export class TreenixMcpTools {
     allowAbsolute?: boolean;
   }) {}
 
-  /** @description Verify that a UIX view source compiles correctly. */
-  compile_view(_data: {
-    /** @description View node path to compile when source is omitted. */
-    path?: string;
-    /** @description Raw UIX source to compile directly. */
-    source?: string;
-  }) {}
-
   /** @write @description Remove a node by path. May be denied by Guardian. */
   remove_node(_data: {
     /** @description Node path to remove. */

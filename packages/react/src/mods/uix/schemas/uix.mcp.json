@@ -1,0 +1,29 @@
+{
+  "$id": "uix.mcp",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "UIX MCP tools for dynamic React views.",
+  "properties": {},
+  "methods": {
+    "compile_view": {
+      "description": "Verify that a UIX view source compiles. With source and path, save it as the view component.",
+      "kind": "write",
+      "arguments": [
+        {
+          "name": "data",
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "View node path to compile when source is omitted, or save target when source is provided."
+            },
+            "source": {
+              "type": "string",
+              "description": "Raw UIX source to compile directly."
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -170,25 +170,6 @@
         }
       ]
     },
-    "compile_view": {
-      "description": "Verify that a UIX view source compiles correctly.",
-      "arguments": [
-        {
-          "name": "_data",
-          "type": "object",
-          "properties": {
-            "path": {
-              "type": "string",
-              "description": "View node path to compile when source is omitted."
-            },
-            "source": {
-              "type": "string",
-              "description": "Raw UIX source to compile directly."
-            }
-          }
-        }
-      ]
-    },
     "remove_node": {
       "description": "Remove a node by path. May be denied by Guardian.",
       "kind": "write",

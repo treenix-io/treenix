@@ -1,9 +1,9 @@
 // UIX Compile — JSX compilation + caching + registration pipeline
 // Turns raw JSX/TSX code string into a React component
 
-import { register } from '#core';
-import { Render, RenderContext, RenderField, viewCtx } from '@treenx/react';
-import { execute, useChildren, usePath } from '@treenx/react';
+import { register } from '@treenx/core';
+import { Render, RenderContext, RenderField, viewCtx } from '#context';
+import { execute, useChildren, usePath } from '#hooks';
 import React from 'react';
 import { compileJSX } from './jsx-parser';
 

@@ -594,7 +594,7 @@ describe('checkMcpGuardian', () => {
       allow: [
         'mcp__treenix__get_node', 'mcp__treenix__list_children',
         'mcp__treenix__catalog', 'mcp__treenix__describe_type',
-        'mcp__treenix__search_types', 'mcp__treenix__compile_view',
+        'mcp__treenix__search_types',
         'mcp__treenix__execute:$schema',
       ],
       deny: ['mcp__treenix__remove_node'],

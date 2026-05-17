@@ -5,7 +5,7 @@
 // useSyncExternalStore subscription was active, causing bump() to be missed.
 // Fix: Render also calls resolve() from useEffect (post-commit) as a safety net.
 
-import { getRegistryVersion, onResolveMiss, register, resolve, subscribeRegistry, unregister } from '#core';
+import { getRegistryVersion, onResolveMiss, register, resolve, subscribeRegistry, unregister } from '@treenx/core';
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import React from 'react';

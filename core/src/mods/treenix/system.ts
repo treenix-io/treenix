@@ -1,17 +1,15 @@
-// treenix.system — system actions: type discovery, view compilation, prefab deployment
+// treenix.system — system actions: type discovery and prefab deployment
 // Registered as a class so actions appear in catalog and are callable via execute tool.
 // Node at /sys has $type: treenix.system — all system actions route there.
 
-import { getComponent } from '@treenx/core';
-import { getCtx, registerType, setComponent } from '@treenx/core/comp';
-import { UixSource, verifyViewSource } from '@treenx/core/mods/uix/uix-source';
+import { getCtx, registerType } from '@treenx/core/comp';
 import { TypeCatalog } from '@treenx/core/schema/catalog';
 import { applyTemplate } from '@treenx/core/server/actions';
 import { deployPrefab } from '@treenx/core/server/prefab';
 
 const catalog = new TypeCatalog();
 
-/** @description System actions — type discovery, view compilation, prefab deployment */
+/** @description System actions — type discovery and prefab deployment */
 export class SystemActions {
   /** @description List all registered types with properties and actions */
   async catalog() {
@@ -28,35 +26,6 @@ export class SystemActions {
     const desc = catalog.describe(data.type);
     if (!desc) throw new Error(`type not found: ${data.type}`);
     return desc;
-  }
-
-  /** @description Compile JSX view source. With source: compile + save to type node. Without: check existing */
-  async compile_view(data: { /** JSX source code */ source?: string; /** Type node path */ path?: string }) {
-    const { tree } = getCtx();
-    const targetPath = data.path;
-
-    let code = data.source;
-    if (!code) {
-      if (!targetPath) throw new Error('source or path required');
-      const node = await tree.get(targetPath);
-      if (!node) throw new Error(`not found: ${targetPath}`);
-      const view = getComponent(node, UixSource, 'view');
-      if (!view?.source) throw new Error(`no uix.source on ${targetPath}`);
-      code = view.source;
-    }
-
-    const check = verifyViewSource(code);
-    if (!check.ok) return check;
-
-    if (data.source && targetPath) {
-      const node = await tree.get(targetPath);
-      if (node) {
-        setComponent(node, UixSource, { source: data.source }, 'view');
-        await tree.set(node);
-        return { ok: true, saved: targetPath };
-      }
-    }
-    return check;
   }
 
   /** @description Apply template: copy children from template path to target path */

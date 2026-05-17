@@ -52,7 +52,6 @@ const DEFAULT_TOOLS = [
   'mcp__treenix__remove_node',
   'mcp__treenix__execute',
   'mcp__treenix__deploy_prefab',
-  'mcp__treenix__compile_view',
   'mcp__treenix__catalog',
   'mcp__treenix__describe_type',
   'mcp__treenix__search_types',

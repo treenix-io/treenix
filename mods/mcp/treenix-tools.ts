@@ -1,8 +1,7 @@
 // Treenix MCP tool node — legacy tree/discovery tools as ordinary node actions.
 
-import { createNode, getComponent } from '@treenx/core';
+import { createNode } from '@treenx/core';
 import { getCtx, registerActions } from '@treenx/core/comp';
-import { UixSource, verifyViewSource } from '@treenx/core/mods/uix/uix-source';
 import { assertSafePath } from '@treenx/core/core/path';
 import { TypeCatalog } from '@treenx/core/schema/catalog';
 import { executeAction } from '@treenx/core/server/actions';
@@ -122,22 +121,6 @@ class TreenixMcpToolsServer extends TreenixMcpTools {
     assertSafePath(data.target);
     const { tree } = getCtx();
     return yaml(await deployPrefab(tree, data.source, data.target, { allowAbsolute: data.allowAbsolute }));
-  }
-
-  /** Verify that a UIX view source compiles correctly. */
-  async compile_view(data: { path?: string; source?: string }) {
-    if (data.path) assertSafePath(data.path); // R5-MCP-3
-    const { tree } = getCtx();
-    let code = data.source;
-    if (!code) {
-      if (!data.path) return 'error: provide path or source';
-      const node = await tree.get(data.path);
-      if (!node) return `not found: ${data.path}`;
-      const view = getComponent(node, UixSource, 'view');
-      if (!view?.source) return `no uix.source on ${data.path}`;
-      code = view.source;
-    }
-    return yaml(verifyViewSource(code));
   }
 
   /** Remove a node by path. May be denied by Guardian. */

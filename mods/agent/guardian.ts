@@ -483,7 +483,6 @@ const READ_ONLY_TOOLS = new Set([
   'mcp__treenix__get_node', 'mcp__treenix__list_children',
   'mcp__treenix__catalog', 'mcp__treenix__describe_type',
   'mcp__treenix__search_types',
-  'mcp__treenix__compile_view',
 ]);
 
 const READ_ONLY_BASH = new Set([

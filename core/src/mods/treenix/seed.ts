@@ -25,7 +25,6 @@ registerPrefab('core', 'seed', [
   },
   { $path: 'sys/autostart/mcp', $type: 'ref', $ref: '/sys/mcp' },
   { $path: 'sys/routes', $type: 'dir' },
-  { $path: 'sys/llm', $type: 't.llm' },
 ], undefined, { tier: 'core' });
 
 // Auth infra — users, sessions, API tokens.

@@ -140,27 +140,6 @@ const SimIcon: FC<RenderProps> = () => (
   </IconShell>
 );
 
-// ── LLM (Brain/AI) ──
-const LlmIcon: FC<RenderProps> = () => (
-  <IconShell g1="#a855f7" g2="#c026d3">
-    {/* Brain left half */}
-    <path d="M58 36 C48 36, 32 40, 32 56 C32 68, 40 78, 50 82 C52 82, 56 80, 58 76"
-      fill="none" stroke="white" strokeWidth="4" strokeLinecap="round" strokeOpacity="0.85" />
-    {/* Brain right half */}
-    <path d="M62 36 C72 36, 88 40, 88 56 C88 68, 80 78, 70 82 C68 82, 64 80, 62 76"
-      fill="none" stroke="white" strokeWidth="4" strokeLinecap="round" strokeOpacity="0.85" />
-    {/* Center line */}
-    <line x1="60" y1="34" x2="60" y2="84" stroke="white" strokeWidth="2" strokeOpacity="0.4" />
-    {/* Neural connection dots */}
-    <circle cx="44" cy="52" r="3" fillOpacity="0.7" />
-    <circle cx="76" cy="52" r="3" fillOpacity="0.7" />
-    <circle cx="48" cy="68" r="3" fillOpacity="0.5" />
-    <circle cx="72" cy="68" r="3" fillOpacity="0.5" />
-    {/* Sparkle top */}
-    <path d="M60 28 l0-4 M56 30 l-2-3 M64 30 l2-3" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeOpacity="0.6" />
-  </IconShell>
-);
-
 // ── Sensor (Thermometer + gauge) ──
 const SensorIcon: FC<RenderProps> = () => (
   <IconShell g1="#10b981" g2="#047857">
@@ -231,4 +210,3 @@ register('mount-point', 'react:icon', DocsIcon);
 register('treenix.system', 'react:icon', SystemIcon);
 register('whisper.service', 'react:icon', WhisperIcon);
 register('examples.demo.sensor', 'react:icon', SensorIcon);
-register('t.llm', 'react:icon', LlmIcon);

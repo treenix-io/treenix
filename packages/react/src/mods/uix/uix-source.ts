@@ -1,7 +1,7 @@
 // UIX source component + server-safe compile verification (no React dependency).
 // Used by MCP to let LLMs attach JSX to nodes and verify that it compiles.
 
-import { registerType } from '#comp';
+import { registerType } from '@treenx/core/comp';
 import { compileJSX } from './jsx-parser';
 
 /** Inline JSX/TSX source attached to a node as a `view` component. */
