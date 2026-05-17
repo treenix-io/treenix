@@ -7,12 +7,6 @@ let currentMod: string | null = null;
 // type → mod name
 const typeToMod = new Map<string, string>();
 
-// Aliases for types whose first segment ≠ mod dir name
-const MOD_ALIASES: Record<string, string> = {
-  order: 'orders',
-  pult: 'pult',
-};
-
 export function setCurrentMod(name: string | null): void {
   currentMod = name;
 }
@@ -35,13 +29,13 @@ export function getTypesForMod(modName: string): string[] {
   return types;
 }
 
-/** Infer mod name from type name: tracked → exact; else first segment + alias lookup */
+/** Infer mod name from type name: tracked → exact; else first segment. */
 export function inferModFromType(typeName: string): string {
   const tracked = typeToMod.get(typeName);
   if (tracked) return tracked;
 
   const first = typeName.split('.')[0];
-  return MOD_ALIASES[first] ?? first;
+  return first;
 }
 
 // For tests

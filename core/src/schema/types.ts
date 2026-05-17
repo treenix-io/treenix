@@ -41,7 +41,7 @@ export type MethodSchema = {
   return?: PropertySchema;
   pre?: string[]; // @pre fields — Design by Contract preconditions
   post?: string[]; // @post fields — Design by Contract postconditions
-  kind?: 'read' | 'write'; // @read | @write (or aliases @query | @mutation)
+  kind?: 'read' | 'write'; // @read | @write
   io?: boolean; // @io modifier — external side effect, cache-unsafe
 };
 

@@ -1,5 +1,5 @@
 import { registerType } from '#comp';
-import { collectDeps, collectSiblings, getActionNeeds, parseNeedPattern } from '#comp/needs';
+import { collectDeps, getActionNeeds, parseNeedPattern } from '#comp/needs';
 import { createNode, register } from '#core';
 import { clearRegistry } from '#core/index.test';
 import { executeAction } from '#server/actions';
@@ -363,28 +363,6 @@ describe('collectDeps', () => {
       run() {}
     }
     assert.throws(() => registerType('t.dup', DupKeys), /Duplicate need key/);
-  });
-});
-
-describe('collectSiblings backward compat', () => {
-  beforeEach(() => {
-    clearRegistry();
-
-  });
-
-  it('opts.needs still works via collectSiblings', () => {
-    class Meta { title = ''; rename() {} }
-    registerType('t.meta', Meta, { needs: ['status'] });
-    registerType('t.status', Status);
-
-    const node = createNode('/p', 'page', {}, {
-      meta: { $type: 't.meta', title: 'old' },
-      status: { $type: 't.status', value: 'draft' },
-    });
-
-    const siblings = collectSiblings(node, 'meta');
-    assert.equal(Object.keys(siblings).length, 1);
-    assert.equal((siblings.status as any).value, 'draft');
   });
 });
 

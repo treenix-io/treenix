@@ -33,8 +33,8 @@ const KNOWN_TAGS = new Set([
   'title', 'description', 'deprecated', 'internal', 'example', 'see',
   // schema annotations
   'format', 'refType', 'hidden', 'opaque', 'dangerous',
-  // method kind (Phase 1) — `@mutation`/`@query` are graceful-migration aliases
-  'read', 'write', 'io', 'mutation', 'query',
+  // method kind
+  'read', 'write', 'io',
   // dataflow contract
   'pre', 'post',
   // standard JSDoc — silently ignored
@@ -106,12 +106,10 @@ export function parseJSDoc(raw: string): ParsedJSDoc {
     }
   }
 
-  // Kind tags: @read/@write canonical; @query/@mutation graceful-migration aliases.
+  // Kind tags: @read/@write canonical.
   const kindTags: { tag: string; value: 'read' | 'write' }[] = [];
   if ('read' in result) kindTags.push({ tag: 'read', value: 'read' });
-  if ('query' in result) kindTags.push({ tag: 'query', value: 'read' });
   if ('write' in result) kindTags.push({ tag: 'write', value: 'write' });
-  if ('mutation' in result) kindTags.push({ tag: 'mutation', value: 'write' });
 
   if (kindTags.length) {
     const distinct = new Set(kindTags.map((k) => k.value));

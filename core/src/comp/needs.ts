@@ -97,22 +97,3 @@ export async function collectDeps(
   if (async_.length) await Promise.all(async_);
   return deps;
 }
-
-// ── Backward compat ──
-
-export function collectSiblings(node: NodeData, componentName: string): Record<string, ComponentData> {
-  const cv = getComponent(node, AnyType, componentName);
-  if (!cv) throw new Error(`Component "${componentName}" not found on ${node.$path}`);
-
-  const specs = getActionNeeds(cv.$type, '*');
-  if (!specs.length) return {};
-
-  const out: Record<string, ComponentData> = {};
-  for (const s of specs) {
-    if (s.kind !== 'sibling') continue;
-    const v = node[s.name];
-    if (!isComponent(v)) throw new Error(`Needed component "${s.name}" not found on ${node.$path}`);
-    out[s.key] = v;
-  }
-  return out;
-}

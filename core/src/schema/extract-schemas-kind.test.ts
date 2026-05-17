@@ -45,20 +45,19 @@ describe('parseJSDoc — kind tag whitelist', () => {
     );
   });
 
-  it('extracts @mutation as alias for kind="write" (graceful migration)', () => {
-    const result = parseJSDoc('* @mutation\n');
-    assert.equal(result.kind, 'write');
-  });
-
-  it('extracts @query as alias for kind="read" (graceful migration)', () => {
-    const result = parseJSDoc('* @query\n');
-    assert.equal(result.kind, 'read');
-  });
-
-  it('throws on @mutation @read conflict (alias mismatch)', () => {
+  it('rejects removed @mutation alias', () => {
     assert.throws(
-      () => parseJSDoc('* @mutation\n* @read\n'),
-      (err: unknown) => err instanceof Error && err.name === 'JSDocError',
+      () => parseJSDoc('* @mutation\n'),
+      (err: unknown) =>
+        err instanceof Error && err.name === 'JSDocError' && /mutation/.test(err.message),
+    );
+  });
+
+  it('rejects removed @query alias', () => {
+    assert.throws(
+      () => parseJSDoc('* @query\n'),
+      (err: unknown) =>
+        err instanceof Error && err.name === 'JSDocError' && /query/.test(err.message),
     );
   });
 });

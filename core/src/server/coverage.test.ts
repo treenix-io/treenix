@@ -3,7 +3,7 @@
 //  - mount-adapters (memory, query, overlay, types, fs validation)
 //  - sift queries via memory tree getChildren
 //  - sub.ts remove CDC path
-//  - actions.ts (executeAction, setComponent, applyTemplate)
+//  - actions.ts (executeAction, setComponent)
 //  - fs tree OCC
 //  - validate.ts edge cases
 //  - volatile extractPaths
@@ -19,7 +19,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
-import { applyTemplate, executeAction, executeStream, setComponent } from './actions';
+import { executeAction, executeStream, setComponent } from './actions';
 import { OpError } from '#errors';
 import { withMounts } from './mount';
 import { MountMemory, MountOverlay, MountQuery, MountTypes } from './mount-adapters';
@@ -375,7 +375,7 @@ describe('sub.ts: remove + CDC', () => {
   });
 });
 
-// ── actions.ts: executeAction, setComponent, applyTemplate ──
+// ── actions.ts: executeAction, setComponent ──
 
 describe('actions.ts operations', () => {
   beforeEach(() => {
@@ -556,36 +556,6 @@ describe('actions.ts operations', () => {
     );
   });
 
-  it('applyTemplate copies children to target', async () => {
-    const tree = createMemoryTree();
-    await tree.set(createNode('/templates/blog', 'template'));
-    await tree.set(createNode('/templates/blog/header', 'block', { text: 'Hello' }));
-    await tree.set(createNode('/templates/blog/body', 'block', { text: 'Content' }));
-
-    // Existing children at target get removed
-    await tree.set(createNode('/pages/p1', 'page'));
-    await tree.set(createNode('/pages/p1/old', 'block'));
-
-    const result = await applyTemplate(tree, '/templates/blog', '/pages/p1');
-    assert.equal(result.blocks, 2);
-    assert.equal(result.applied, '/templates/blog');
-
-    // Old child gone
-    assert.equal(await tree.get('/pages/p1/old'), undefined);
-
-    // New children present
-    const header = await tree.get('/pages/p1/header');
-    assert.ok(header);
-    assert.equal((header as any).text, 'Hello');
-  });
-
-  it('applyTemplate throws NOT_FOUND for missing template', async () => {
-    const tree = createMemoryTree();
-    await assert.rejects(
-      () => applyTemplate(tree, '/missing', '/target'),
-      (e: any) => { assert.equal(e.code, 'NOT_FOUND'); return true; },
-    );
-  });
 });
 
 // ── fs tree: OCC + remove edge cases ──

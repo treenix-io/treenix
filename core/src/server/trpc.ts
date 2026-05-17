@@ -12,7 +12,6 @@ import { observable } from '@trpc/server/observable';
 import type {} from '@trpc/server/unstable-core-do-not-import';
 import { z } from 'zod';
 import {
-  applyTemplate as applyTemplateOp,
   executeAction,
   executeStream,
   setComponent as setComponentOp,
@@ -243,15 +242,6 @@ export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: 
         }
         return result;
       }),
-
-    getTemplates: authed.query(
-      async ({ ctx }) => (await ctx.tree.getChildren('/templates')).items,
-    ),
-
-    // deprecated: use execute('/sys', 'apply_template', { templatePath, targetPath })
-    applyTemplate: authed
-      .input(z.object({ templatePath: safePath, targetPath: safePath }))
-      .mutation(({ input, ctx }) => applyTemplateOp(ctx.tree, input.templatePath, input.targetPath)),
 
     // R5-SRV-1: `params` removed from tRPC surface — only used by internal seed
     // bootstrap (deploySeedPrefabs → deployNodes), never reached over the wire.

@@ -262,45 +262,6 @@ describe('tRPC API integration', () => {
     });
   });
 
-  // ── applyTemplate ──
-
-  describe('applyTemplate', () => {
-    it('copies template blocks to target', async () => {
-      await caller.set({ node: { $path: '/templates', $type: 'folder' } });
-      await caller.set({ node: { $path: '/templates/blog', $type: 'template' } });
-      await caller.set({ node: { $path: '/templates/blog/header', $type: 'block', content: 'Hello' } });
-      await caller.set({ node: { $path: '/templates/blog/body', $type: 'block', content: 'World' } });
-      await caller.set({ node: { $path: '/target', $type: 'page' } });
-
-      const result = await caller.applyTemplate({ templatePath: '/templates/blog', targetPath: '/target' });
-      assert.equal(result.blocks, 2);
-
-      const children = await caller.getChildren({ path: '/target' });
-      assert.equal(children.items.length, 2);
-      const paths = children.items.map(n => n.$path).sort();
-      assert.deepEqual(paths, ['/target/body', '/target/header']);
-    });
-
-    it('replaces existing children', async () => {
-      await caller.set({ node: { $path: '/templates/t', $type: 'template' } });
-      await caller.set({ node: { $path: '/templates/t/new', $type: 'block' } });
-      await caller.set({ node: { $path: '/dest', $type: 'page' } });
-      await caller.set({ node: { $path: '/dest/old', $type: 'block' } });
-
-      await caller.applyTemplate({ templatePath: '/templates/t', targetPath: '/dest' });
-      const children = await caller.getChildren({ path: '/dest' });
-      assert.equal(children.items.length, 1);
-      assert.equal(children.items[0].$path, '/dest/new');
-    });
-
-    it('NOT_FOUND for missing template', async () => {
-      await assert.rejects(
-        () => caller.applyTemplate({ templatePath: '/nope', targetPath: '/x' }),
-        (e: any) => e.code === 'NOT_FOUND',
-      );
-    });
-  });
-
   // ── Auth ──
 
   describe('auth', () => {

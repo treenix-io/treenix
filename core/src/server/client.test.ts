@@ -4,13 +4,13 @@
 //   3. once token appears, subscription works end-to-end
 
 import { createNode, R, S, W } from '#core';
-import { createMemoryTree } from '#tree';
+import { createMemoryTree, type Tree } from '#tree';
 import assert from 'node:assert/strict';
 import type { Socket } from 'node:net';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { createClient } from './client';
 import { _resetRateLimits } from './rate-limit';
-import { createTreenixServer, type TreenixServer } from './server';
+import { createHttpServer, createPipeline, type Pipeline } from './server';
 
 function listen(server: import('node:http').Server): Promise<number> {
   return new Promise((resolve) => {
@@ -21,8 +21,15 @@ function listen(server: import('node:http').Server): Promise<number> {
   });
 }
 
+type TestServer = Pipeline & { server: import('node:http').Server };
+
+function createTestServer(bootstrap: Tree): TestServer {
+  const pipeline = createPipeline(bootstrap);
+  return { ...pipeline, server: createHttpServer(pipeline) };
+}
+
 describe('createClient TokenSource', () => {
-  let ts: TreenixServer;
+  let ts: TestServer;
   let url: string;
   const sockets = new Set<Socket>();
 
@@ -33,7 +40,7 @@ describe('createClient TokenSource', () => {
       ...createNode('/', 'root'),
       $acl: [{ g: 'public', p: R | W | S }, { g: 'authenticated', p: R | W | S }],
     });
-    ts = createTreenixServer(bootstrap);
+    ts = createTestServer(bootstrap);
     ts.server.on('connection', (socket: Socket) => {
       sockets.add(socket);
       socket.on('close', () => sockets.delete(socket));

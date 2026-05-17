@@ -5,8 +5,8 @@ import { registerType } from '#comp';
 import { createNode, R, register, S, W } from '#core';
 import { withMounts } from '#server/mount';
 import { setAllowPrivateUrls } from '#server/mount-adapters';
-import { createTreenixServer } from '#server/server';
-import { createMemoryTree } from '#tree';
+import { createHttpServer, createPipeline, type Pipeline } from '#server/server';
+import { createMemoryTree, type Tree } from '#tree';
 import { createRepathTree } from '#tree/repath';
 import assert from 'node:assert/strict';
 import type { Socket } from 'node:net';
@@ -23,6 +23,13 @@ function listen(server: import('node:http').Server): Promise<number> {
   });
 }
 
+type TestServer = Pipeline & { server: import('node:http').Server };
+
+function createTestServer(bootstrap: Tree): TestServer {
+  const pipeline = createPipeline(bootstrap);
+  return { ...pipeline, server: createHttpServer(pipeline) };
+}
+
 // ── Test type ──
 
 class Counter {
@@ -31,7 +38,7 @@ class Counter {
 }
 
 describe('Treenix Client SDK', () => {
-  let ts: ReturnType<typeof createTreenixServer>;
+  let ts: TestServer;
   let url: string;
   const sockets = new Set<Socket>();
 
@@ -51,7 +58,7 @@ describe('Treenix Client SDK', () => {
       $acl: [{ g: 'public', p: R | W | S }],
     });
 
-    ts = createTreenixServer(bootstrap);
+    ts = createTestServer(bootstrap);
     ts.server.on('connection', (s: Socket) => {
       sockets.add(s);
       s.on('close', () => sockets.delete(s));

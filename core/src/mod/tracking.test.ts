@@ -44,8 +44,8 @@ describe('mod/tracking', () => {
     assert.equal(inferModFromType('mabu.block.hero'), 'mabu');
   });
 
-  it('inferModFromType uses alias map', () => {
-    assert.equal(inferModFromType('order.status'), 'orders');
+  it('inferModFromType does not use hardcoded aliases', () => {
+    assert.equal(inferModFromType('order.status'), 'order');
   });
 
   it('clearTracking resets all state', () => {

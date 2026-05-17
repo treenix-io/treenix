@@ -6,7 +6,7 @@ import { createMemoryTree } from '#tree';
 import { withCache } from '#tree/cache';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
-import { applyTemplate, collectSiblings, createNodeHandle, executeAction, executeStream, registerBuiltinActions, setComponent } from './actions';
+import { createNodeHandle, executeAction, executeStream, registerBuiltinActions, setComponent } from './actions';
 
 // ── Component classes ──
 
@@ -120,8 +120,7 @@ describe('defineComponent', () => {
       const n = (await tree.get(path))!;
       const cv = n[component];
       if (!isComponent(cv)) throw new Error(`Component "${component}" not found`);
-      const siblings = collectSiblings(n, component);
-      resolve(cv.$type, `action:${action}`)!({ node: n, comp: cv, siblings, tree } as any, data);
+      resolve(cv.$type, `action:${action}`)!({ node: n, comp: cv, tree } as any, data);
       await tree.set(n);
     }
 
@@ -162,19 +161,6 @@ describe('defineComponent', () => {
     });
   });
 
-  it('defineComponent with needs option', () => {
-    registerType('metadata', Metadata, { needs: ['status'] });
-    registerType('status', Status);
-
-    const node = createNode('/p', 'page', {}, {
-      metadata: { $type: 'metadata', title: 'old', description: 'x' },
-      status: { $type: 'status', value: 'draft' },
-    });
-    const siblings = collectSiblings(node, 'metadata');
-    assert.equal(Object.keys(siblings).length, 1);
-    assert.equal((siblings.status as any).value, 'draft');
-  });
-
   it('action receives deps as second arg', () => {
     class Article {
       title = '';
@@ -194,7 +180,7 @@ describe('defineComponent', () => {
     });
 
     const comp = node['article'] as any;
-    const deps = collectSiblings(node, 'article');
+    const deps = { status: node['status'] as any };
     resolve(comp.$type, 'action:publishAndRename')!({ node, comp, deps } as any, {
       title: 'new',
     });
@@ -275,6 +261,7 @@ describe('defineComponent', () => {
 
     registerType('article', Article, { needs: ['status'] });
     registerType('status', Status);
+    register('article', 'schema', articleSchema);
 
     const tree = createMemoryTree();
     await tree.set(
@@ -284,13 +271,7 @@ describe('defineComponent', () => {
       }),
     );
 
-    const node = (await tree.get('/a'))!;
-    const comp = node['article'] as any;
-    const deps = collectSiblings(node, 'article');
-    resolve(comp.$type, 'action:publishAndRename')!({ node, comp, deps, tree } as any, {
-      title: 'new',
-    });
-    await tree.set(node);
+    await executeAction(tree, '/a', 'article', undefined, 'publishAndRename', { title: 'new' });
 
     const result = (await tree.get('/a'))!;
     assert.equal((result['article'] as any).title, 'new');
@@ -604,119 +585,6 @@ describe('ActionCtx.actor propagation', () => {
     await executeAction(tree, '/x', undefined, undefined, 'noop');
 
     assert.equal(captured, undefined);
-  });
-});
-
-describe('applyTemplate', () => {
-  it('rolls back written children when a write fails mid-apply', async () => {
-    const tree = createMemoryTree();
-
-    // Template with 3 blocks
-    await tree.set({ $path: '/tmpl', $type: 'template' } as NodeData);
-    await tree.set({ $path: '/tmpl/a', $type: 'block', label: 'A' } as NodeData);
-    await tree.set({ $path: '/tmpl/b', $type: 'block', label: 'B' } as NodeData);
-    await tree.set({ $path: '/tmpl/c', $type: 'block', label: 'C' } as NodeData);
-
-    // Target with existing children
-    await tree.set({ $path: '/target', $type: 'page' } as NodeData);
-    await tree.set({ $path: '/target/old1', $type: 'block', label: 'OLD1' } as NodeData);
-    await tree.set({ $path: '/target/old2', $type: 'block', label: 'OLD2' } as NodeData);
-
-    // Wrap tree.set to fail on the 3rd new write (block c)
-    const realSet = tree.set.bind(tree);
-    let setCount = 0;
-    const failingTree = {
-      ...tree,
-      set: async (node: NodeData) => {
-        setCount++;
-        // Writes 1-2 = blocks a, b succeed; write 3 = block c fails
-        if (setCount === 3) throw new Error('disk full');
-        return realSet(node);
-      },
-    };
-
-    await assert.rejects(
-      () => applyTemplate(failingTree as any, '/tmpl', '/target'),
-      { message: 'disk full' },
-    );
-
-    // Original children must still be present (restored from snapshot)
-    const old1 = await tree.get('/target/old1');
-    assert.ok(old1, 'original child old1 must survive rollback');
-    assert.equal((old1 as any).label, 'OLD1');
-
-    const old2 = await tree.get('/target/old2');
-    assert.ok(old2, 'original child old2 must survive rollback');
-  });
-
-  it('preserves data when delete phase fails (no data loss)', async () => {
-    const tree = createMemoryTree();
-
-    // Template with 1 block
-    await tree.set({ $path: '/tmpl', $type: 'template' } as NodeData);
-    await tree.set({ $path: '/tmpl/new1', $type: 'block', label: 'NEW' } as NodeData);
-
-    // Target with existing child (different name, so it should be deleted)
-    await tree.set({ $path: '/target', $type: 'page' } as NodeData);
-    await tree.set({ $path: '/target/old1', $type: 'block', label: 'OLD' } as NodeData);
-
-    // Wrap tree.remove to always fail
-    const failingTree = {
-      ...tree,
-      remove: async (_path: string) => { throw new Error('remove failed'); },
-    };
-
-    // applyTemplate should still succeed (delete failures don't abort)
-    // Actually the current code doesn't catch delete errors — but delete phase
-    // happens after all writes, so data is safe. Let's verify both children exist.
-    try {
-      await applyTemplate(failingTree as any, '/tmpl', '/target');
-    } catch {
-      // delete error may propagate — that's ok
-    }
-
-    // New child was written (phase 1 succeeded)
-    const newChild = await tree.get('/target/new1');
-    assert.ok(newChild, 'new child must exist after write phase');
-    assert.equal((newChild as any).label, 'NEW');
-
-    // Old child still exists (delete failed, but no data loss)
-    const oldChild = await tree.get('/target/old1');
-    assert.ok(oldChild, 'old child preserved when delete fails — no data loss');
-  });
-
-  it('R4-MOUNT-1: rollback failure surfaces aggregate error (no silent swallow)', async () => {
-    const tree = createMemoryTree();
-    await tree.set({ $path: '/tmpl', $type: 'template' } as NodeData);
-    await tree.set({ $path: '/tmpl/a', $type: 'block', label: 'A' } as NodeData);
-    await tree.set({ $path: '/tmpl/b', $type: 'block', label: 'B' } as NodeData);
-    await tree.set({ $path: '/target', $type: 'page' } as NodeData);
-    await tree.set({ $path: '/target/old1', $type: 'block', label: 'OLD1' } as NodeData);
-
-    const realSet = tree.set.bind(tree);
-    let setCount = 0;
-    const failingTree = {
-      ...tree,
-      // Phase 1: 1st write succeeds, 2nd throws (triggers rollback);
-      // Phase rollback: 3rd write (snapshot restore) ALSO throws → must surface, not swallow.
-      set: async (node: NodeData) => {
-        setCount++;
-        if (setCount === 2) throw new Error('phase1 failure');
-        if (setCount === 3) throw new Error('rollback restore failure');
-        return realSet(node);
-      },
-      // Rollback removes also throw — both errors must be aggregated.
-      remove: async (_path: string) => { throw new Error('rollback remove failure'); },
-    };
-
-    await assert.rejects(
-      () => applyTemplate(failingTree as any, '/tmpl', '/target'),
-      (e) => {
-        // OpError CONFLICT carrying both the primary error and rollback failure context.
-        if (!(e instanceof OpError) || e.code !== 'CONFLICT') return false;
-        return e.message.includes('rollback failed') && e.message.includes('phase1 failure');
-      },
-    );
   });
 });
 

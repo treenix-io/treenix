@@ -363,7 +363,7 @@ function methodPayload(method: MethodSchema, args: Record<string, unknown>): unk
 
 // Guard signal is the method's declared kind/side-effect — not noOptimistic
 // (noOptimistic is a frontend rendering hint, semantically unrelated to policy).
-// Declare via JSDoc: @write / @mutation → kind:'write'; @io → io:true.
+// Declare via JSDoc: @write → kind:'write'; @io → io:true.
 export function actionIsGuarded(_type: string, _action: string, method: MethodSchema): boolean {
   return method.kind === 'write' || method.io === true;
 }

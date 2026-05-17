@@ -10,7 +10,7 @@ import type { Socket } from 'node:net';
 import './mount-adapters';
 import { afterEach, before, beforeEach, describe, it } from 'node:test';
 import { createClient } from './client';
-import { createTreenixServer, type TreenixServer } from './server';
+import { createHttpServer, createPipeline, type Pipeline } from './server';
 import { _resetRateLimits } from './rate-limit';
 import { type NodeEvent } from './sub';
 
@@ -64,6 +64,13 @@ function listen(server: import('node:http').Server): Promise<number> {
   });
 }
 
+type TestServer = Pipeline & { server: import('node:http').Server };
+
+function createTestServer(bootstrap: ReturnType<typeof createMemoryTree>): TestServer {
+  const pipeline = createPipeline(bootstrap);
+  return { ...pipeline, server: createHttpServer(pipeline) };
+}
+
 // Collect subscription events with timeout.
 // Uses `any` for onData param to avoid mismatch between our NodeEvent and tRPC's inferred type.
 function collectEvents<T>(
@@ -106,7 +113,7 @@ function subscribeEvents<T = DataEvent>(
 
 /** Activate a pending user and return a login token (for 2nd+ registrations in tests) */
 async function activateAndLogin(
-  tree: TreenixServer['tree'],
+  tree: TestServer['tree'],
   pub: ReturnType<typeof createClient>,
   userId: string,
   password: string,
@@ -124,7 +131,7 @@ async function activateAndLogin(
 }
 
 describe('e2e: tRPC over HTTP', () => {
-  let ts: TreenixServer;
+  let ts: TestServer;
   let url: string;
   const sockets = new Set<Socket>();
 
@@ -170,7 +177,7 @@ describe('e2e: tRPC over HTTP', () => {
       $acl: [{ g: 'public', p: R | W | S }, { g: 'authenticated', p: R | W | S }],
     });
 
-    ts = createTreenixServer(bootstrap);
+    ts = createTestServer(bootstrap);
     ts.server.on('connection', (socket: Socket) => {
       sockets.add(socket);
       socket.on('close', () => sockets.delete(socket));

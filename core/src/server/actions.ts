@@ -120,7 +120,7 @@ export function serverNodeHandle(tree: Tree) {
   );
 }
 
-export { collectSiblings, collectDeps } from '#comp/needs';
+export { collectDeps } from '#comp/needs';
 export { registerActionNeeds, getActionNeeds } from '#comp/needs';
 
 // ── Server-side operations ──
@@ -257,8 +257,8 @@ async function loadDynamicAction(
       consoleObj.dispose();
       logFn.dispose();
 
-      // Wrapper: provides ctx.node, ctx.store (legacy alias), ctx.tree as sync bridge
-      // Dynamic action code uses `await ctx.store.get(path)` — in sandbox we strip await (sync)
+      // Wrapper: provides ctx.node and ctx.tree as a sync bridge.
+      // Dynamic action code may use `await ctx.tree.get(path)` — in sandbox we strip await (sync)
       // Sanitize: strip security-sensitive fields from snapshot
       const sanitized = { ...nodeSnapshot };
       delete (sanitized as any).$acl;
@@ -274,7 +274,6 @@ async function loadDynamicAction(
             set: function(n) { ctx_tree_set(JSON.stringify(n)); },
           },
         };
-        ctx.store = ctx.tree;
         (function() { ${actionCode.replace(/await\s+/g, '')} })();
       `;
 
@@ -496,63 +495,6 @@ export async function setComponent(
     throw new OpError('CONFLICT', `Stale revision: expected ${rev}, got ${node.$rev}`);
 
   await tree.set({ ...node, [name]: data });
-}
-
-// ── applyTemplate: copy template children to target path ──
-
-export async function applyTemplate(
-  tree: Tree,
-  templatePath: string,
-  targetPath: string,
-): Promise<{ applied: string; blocks: number }> {
-  const tmpl = await tree.get(templatePath);
-  if (!tmpl) throw new OpError('NOT_FOUND', `Template not found: ${templatePath}`);
-
-  const { items: blocks } = await tree.getChildren(templatePath);
-  const { items: existing } = await tree.getChildren(targetPath);
-
-  // Snapshot existing children for rollback
-  const snapshot = existing.map(c => structuredClone(c));
-
-  // Phase 1: Write new children first (crash here → old + partial new, no data loss)
-  const written: string[] = [];
-  try {
-    for (const block of blocks) {
-      const bname = block.$path.slice(block.$path.lastIndexOf('/') + 1);
-      const bpath = targetPath === '/' ? `/${bname}` : `${targetPath}/${bname}`;
-      const { $rev, ...rest } = block;
-      await tree.set({ ...rest, $path: bpath });
-      written.push(bpath);
-    }
-  } catch (err) {
-    // R4-MOUNT-1: rollback failures must propagate. Silent .catch swallows violate the
-    // "fail loud" rule — partial-rollback corruption with no caller-visible signal is the
-    // worst possible outcome. Collect rollback failures and throw an aggregate alongside the
-    // original cause so operators see both.
-    const rollbackErrs: unknown[] = [];
-    for (const wp of written) {
-      try { await tree.remove(wp); } catch (e) { rollbackErrs.push(e); }
-    }
-    for (const orig of snapshot) {
-      try { await tree.set(orig); } catch (e) { rollbackErrs.push(e); }
-    }
-    if (rollbackErrs.length) {
-      const rbMsgs = rollbackErrs.map(e => (e as Error)?.message ?? String(e)).join('; ');
-      throw new OpError('CONFLICT',
-        `applyTemplate rollback failed (${rollbackErrs.length} error(s) [${rbMsgs}]) after primary error: ${(err as Error)?.message ?? String(err)}`);
-    }
-    throw err;
-  }
-
-  // Phase 2: Delete old children not in new set (crash here → duplicates, no loss)
-  const newPaths = new Set(written);
-  for (const child of existing) {
-    if (!newPaths.has(child.$path)) {
-      await tree.remove(child.$path);
-    }
-  }
-
-  return { applied: tmpl.$path, blocks: blocks.length };
 }
 
 // ── Generic patch action — deep merge data into node (Immer draft) ──

@@ -14,14 +14,13 @@ import { createMemoryTree, type Tree } from '#tree';
 import type { Server } from 'node:http';
 import { applyDevDefaults } from './dev-defaults';
 import { deploySeedPrefabs } from './prefab';
-import { createEnsure, type Ensure } from './seed/index';
 import { createHttpServer, createPipeline, type Pipeline } from './server';
 import type { SessionExecutor } from './trpc';
 
 export type TreenixConfig = {
   rootNode: NodeData;
   modsDir?: string | false;
-  seed?: (tree: Tree, ensure: Ensure) => Promise<void>;
+  seed?: (tree: Tree) => Promise<void>;
   autostart?: boolean;
   /** Optional outer wrapper applied to the assembled pipeline tree.
    *  Mods compose extra concerns (e.g. audit) without modifying core pipeline. */
@@ -108,7 +107,7 @@ export async function treenix(config: TreenixConfig): Promise<TreenixServer> {
 
   // 4. Seed — always run, deployNodes is idempotent per-node (skips existing)
   if (config.seed) {
-    await config.seed(mountable, createEnsure(mountable));
+    await config.seed(mountable);
   } else {
     const seedFilter = (rootNode as Record<string, unknown>).seeds as string[] | undefined;
     console.log(`[seed] deploying prefabs, filter: ${JSON.stringify(seedFilter)}`);

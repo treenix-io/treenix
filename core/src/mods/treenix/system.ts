@@ -4,7 +4,6 @@
 
 import { getCtx, registerType } from '@treenx/core/comp';
 import { TypeCatalog } from '@treenx/core/schema/catalog';
-import { applyTemplate } from '@treenx/core/server/actions';
 import { deployPrefab } from '@treenx/core/server/prefab';
 
 const catalog = new TypeCatalog();
@@ -26,15 +25,6 @@ export class SystemActions {
     const desc = catalog.describe(data.type);
     if (!desc) throw new Error(`type not found: ${data.type}`);
     return desc;
-  }
-
-  /** @description Apply template: copy children from template path to target path */
-  async apply_template(data: {
-    /** Source template path, e.g. /templates/blog */ templatePath: string;
-    /** Target path where template children will be copied */ targetPath: string;
-  }) {
-    const { tree } = getCtx();
-    return applyTemplate(tree, data.templatePath, data.targetPath);
   }
 
   /** @description Deploy module prefab template to target path. Idempotent */
