@@ -31,6 +31,43 @@ export interface Tree {
   patch(path: string, ops: PatchOp[], ctx?: unknown): Promise<void>;
 }
 
+// ── TreeSource: server-internal traversal primitive ──
+// scanChildren is the pull-based alternative to getChildren. It yields one
+// ChildEntry per direct/descendant node within `opts.depth`. Used by the
+// read-runtime (executeList) to drive ACL projection + caller-query
+// filtering with cursor pagination. Never crosses the RPC boundary.
+
+export type ChildEntry = {
+  node: NodeData;
+  /** Opaque adapter-defined token encoding the entry's position in the
+   *  adapter's deterministic total order. Pass back as `opts.after` to
+   *  resume strictly after this entry. */
+  cursor: string;
+};
+
+export type ScanChildrenOpts = {
+  depth?: number;
+  /** Exclusive cursor. The next yield SHALL be strictly after this entry
+   *  in the adapter's total order. */
+  after?: string;
+  /** Soft hint; runtime decides when to stop. Adapters MAY batch
+   *  accordingly but MUST NOT truncate based on it alone. */
+  limitHint?: number;
+  /** Adapter-specific pushdown plan. Runtime passes whatever
+   *  `buildScanPlan(plan, actor)` produced for this adapter. Unknown
+   *  shape is ignored by adapters that don't pushdown. */
+  scanPlan?: unknown;
+  signal?: AbortSignal;
+};
+
+export interface TreeSource extends Tree {
+  scanChildren(
+    path: string,
+    opts?: ScanChildrenOpts,
+    ctx?: unknown,
+  ): AsyncIterable<ChildEntry>;
+}
+
 // ── In-memory implementation ──
 
 // ── Ref resolution ──
@@ -153,7 +190,7 @@ export function treeEnsure<T>(root: TreeNode<T>, path: string): TreeNode<T> {
   return node;
 }
 
-export function createMemoryTree(): Tree {
+export function createMemoryTree(): TreeSource {
   const root: TreeNode<NodeData> = { children: new Map() };
   const navigate = (path: string) => treeNavigate(root, path);
   const ensurePath = (path: string) => treeEnsure(root, path);
@@ -194,6 +231,29 @@ export function createMemoryTree(): Tree {
          result = result.filter(n => test(mapNodeForSift(n)));
       }
       return paginate(result, opts);
+    },
+
+    // ── scanChildren ──
+    // Adapter total order: $path ASC. Cursor = node.$path.
+    // After: cursor X means yield strictly entries with $path > X.
+    async *scanChildren(parent, opts, _ctx) {
+      const signal = opts?.signal;
+      if (signal?.aborted) throw signal.reason;
+
+      const node = navigate(parent);
+      if (!node) return;
+
+      const depth = opts?.depth ?? 1;
+      const after = opts?.after;
+      const entries = collectChildren(node, parent, depth)
+        .sort((a, b) => a.$path < b.$path ? -1 : a.$path > b.$path ? 1 : 0);
+
+      for (const data of entries) {
+        if (signal?.aborted) throw signal.reason;
+        const cursor = data.$path;
+        if (after !== undefined && cursor <= after) continue;
+        yield { node: structuredClone(data), cursor };
+      }
     },
 
     async set(node, _ctx) {

@@ -1,6 +1,7 @@
 import type { NodeData } from '#core';
 import { register } from '#core';
 import { clearRegistry } from '#core/index.test';
+import { OpError } from '#errors';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -131,6 +132,19 @@ describe('RawFsStore', () => {
 
       const paths = items.map(n => n.$path).sort();
       assert.deepEqual(paths, ['/real', '/real/visible.txt']);
+    } finally {
+      await rm(outsideDir, { recursive: true, force: true });
+    }
+  });
+
+  it('blocks traversal outside root with typed error', async () => {
+    const tree = await setup();
+    const outsideDir = await mkdtemp(join(tmpdir(), 'treenix-rawfs-outside-traversal-'));
+    try {
+      await assert.rejects(
+        () => tree.get(`/../${outsideDir.split('/').pop()}`),
+        (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+      );
     } finally {
       await rm(outsideDir, { recursive: true, force: true });
     }
@@ -336,5 +350,85 @@ describe('RawFsStore', () => {
     const node = await tree.get('/config.env');
     assert.deepEqual((node as any).env, { KEY: 'value', FOO: 'bar' });
 
+  });
+
+  describe('scanChildren', () => {
+    async function collect<T>(iter: AsyncIterable<T>): Promise<T[]> {
+      const out: T[] = [];
+      for await (const e of iter) out.push(e);
+      return out;
+    }
+
+    it('yields direct children with $path-asc cursor', async () => {
+      const tree = await setup();
+      await writeFile(join(dir, 'b.txt'), 'b');
+      await writeFile(join(dir, 'a.txt'), 'a');
+      await writeFile(join(dir, 'c.txt'), 'c');
+
+      const entries = await collect(tree.scanChildren('/'));
+      assert.deepEqual(entries.map(e => e.node.$path), ['/a.txt', '/b.txt', '/c.txt']);
+      assert.deepEqual(entries.map(e => e.cursor), ['/a.txt', '/b.txt', '/c.txt']);
+    });
+
+    it('depth=2 includes subdir entries', async () => {
+      const tree = await setup();
+      await mkdir(join(dir, 'sub'));
+      await writeFile(join(dir, 'sub', 'inner.txt'), 'x');
+      await writeFile(join(dir, 'top.txt'), 'y');
+
+      const paths = (await collect(tree.scanChildren('/', { depth: 2 }))).map(e => e.node.$path).sort();
+      assert.deepEqual(paths, ['/sub', '/sub/inner.txt', '/top.txt']);
+    });
+
+    it('after: cursor is exclusive', async () => {
+      const tree = await setup();
+      await writeFile(join(dir, 'a'), 'a');
+      await writeFile(join(dir, 'b'), 'b');
+      await writeFile(join(dir, 'c'), 'c');
+
+      const all = await collect(tree.scanChildren('/'));
+      const rest = await collect(tree.scanChildren('/', { after: all[0].cursor }));
+      assert.equal(rest.length, 2);
+      assert.ok(!rest.some(e => e.cursor === all[0].cursor));
+    });
+
+    it('page concat under stable data equals full scan', async () => {
+      const tree = await setup();
+      for (const n of ['a', 'b', 'c', 'd', 'e']) await writeFile(join(dir, n), n);
+
+      const all = await collect(tree.scanChildren('/'));
+      assert.equal(all.length, 5);
+
+      const page1: typeof all = [];
+      for await (const e of tree.scanChildren('/')) {
+        page1.push(e);
+        if (page1.length === 2) break;
+      }
+      const page2 = await collect(tree.scanChildren('/', { after: page1[1].cursor }));
+
+      assert.deepEqual(
+        [...page1, ...page2].map(e => e.node.$path),
+        all.map(e => e.node.$path),
+      );
+    });
+
+    it('AbortSignal rejects pending scan', async () => {
+      const tree = await setup();
+      await writeFile(join(dir, 'x'), 'x');
+      const ac = new AbortController();
+      ac.abort();
+      await assert.rejects(() => collect(tree.scanChildren('/', { signal: ac.signal })));
+    });
+
+    it('iterator return() runs cleanup', async () => {
+      const tree = await setup();
+      await writeFile(join(dir, 'a'), 'a');
+      await writeFile(join(dir, 'b'), 'b');
+      const it = tree.scanChildren('/')[Symbol.asyncIterator]();
+      const first = await it.next();
+      assert.equal(first.done, false);
+      const ret = await it.return!();
+      assert.equal(ret.done, true);
+    });
   });
 });

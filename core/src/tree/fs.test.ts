@@ -1,4 +1,5 @@
 import { createNode } from '#core';
+import { OpError } from '#errors';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -256,7 +257,7 @@ describe('FsStore', () => {
       // Trying to set a node under the symlinked path should fail
       await assert.rejects(
         () => tree.set({ $path: '/escape/secret', $type: 't.test' }),
-        /symlink|traversal/i,
+        (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
       );
     } finally {
       await rm(outsideDir, { recursive: true, force: true });
@@ -271,7 +272,7 @@ describe('FsStore', () => {
 
       await assert.rejects(
         () => tree.getChildren(`/../${basename(outsideDir)}`),
-        /traversal|escaped|root/i,
+        (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
       );
     } finally {
       await rm(outsideDir, { recursive: true, force: true });
@@ -287,7 +288,7 @@ describe('FsStore', () => {
 
       await assert.rejects(
         () => tree.getChildren('/escape'),
-        /symlink|escaped|root/i,
+        (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
       );
     } finally {
       await rm(outsideDir, { recursive: true, force: true });

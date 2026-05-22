@@ -4,11 +4,12 @@
 // "decode" context: file → node (read). "encode" context: node → file (write).
 
 import type { NodeData } from '#core';
+import { isInsideRoot } from '#core/path';
 import { resolve as ctxResolve } from '#core/registry';
+import { OpError } from '#errors';
 import { mkdir, readdir, realpath, rmdir, stat, unlink } from 'node:fs/promises';
 import { dirname, extname, join, resolve } from 'node:path';
-import { isInsideRoot } from '#core/path';
-import type { Tree } from './index';
+import type { TreeSource } from './index';
 import { paginate } from './index';
 import './json-codec'; // register JSON decode handler
 import { defaultPatch } from './patch';
@@ -50,7 +51,7 @@ declare module '#core/context' {
   }
 }
 
-export async function createRawFsTree(rootDir: string, mountPath: string = ''): Promise<Tree> {
+export async function createRawFsTree(rootDir: string, mountPath: string = ''): Promise<TreeSource> {
   rootDir = await realpath(resolve(rootDir));
   // Normalize mount prefix: strip trailing slash, treat '/' or '' as no prefix.
   // Used only to build outerPath for decoders — not for filesystem resolution.
@@ -65,12 +66,12 @@ export async function createRawFsTree(rootDir: string, mountPath: string = ''): 
 
   async function safeFilePath(path: string): Promise<string> {
     const full = resolve(join(rootDir, path));
-    if (!isInsideRoot(rootDir, full)) throw new Error(`Path traversal blocked`);
+    if (!isInsideRoot(rootDir, full)) throw new OpError('FORBIDDEN', 'Path traversal blocked');
 
     // Symlink containment: verify real path stays inside root
     try {
       const real = await realpath(full);
-      if (!isInsideRoot(rootDir, real)) throw new Error('Path escaped root via symlink');
+      if (!isInsideRoot(rootDir, real)) throw new OpError('FORBIDDEN', 'Path escaped root via symlink');
     } catch (e: any) {
       if (e.code !== 'ENOENT') throw e;
     }
@@ -97,7 +98,33 @@ export async function createRawFsTree(rootDir: string, mountPath: string = ''): 
     } as NodeData;
   }
 
-  const tree: Tree = {
+  async function collectDescendants(parent: string, depth: number): Promise<NodeData[]> {
+    const dir = await safeFilePath(parent);
+    const results: NodeData[] = [];
+
+    async function walk(dirPath: string, parentNodePath: string, currentDepth: number) {
+      if (currentDepth > depth) return;
+      let entries;
+      try { entries = await readdir(dirPath, { withFileTypes: true }); } catch { return; }
+
+      for (const e of entries) {
+        if (e.name.startsWith('.')) continue; // skip hidden files
+        if (e.isSymbolicLink()) continue;
+        const nodePath = parentNodePath === '/' ? `/${e.name}` : `${parentNodePath}/${e.name}`;
+        const filePath = await safeFilePath(nodePath);
+        results.push(await fileToNode(filePath, nodePath));
+
+        if (e.isDirectory() && currentDepth < depth) {
+          await walk(filePath, nodePath, currentDepth + 1);
+        }
+      }
+    }
+
+    await walk(dir, parent, 1);
+    return results;
+  }
+
+  const tree: TreeSource = {
     async get(path) {
       const file = await safeFilePath(path);
       try {
@@ -109,36 +136,33 @@ export async function createRawFsTree(rootDir: string, mountPath: string = ''): 
     },
 
     async getChildren(parent, opts) {
-      const dir = await safeFilePath(parent);
       const depth = opts?.depth ?? 1;
-
-      const results: NodeData[] = [];
-
-      async function walk(dirPath: string, parentNodePath: string, currentDepth: number) {
-        if (currentDepth > depth) return;
-        let entries;
-        try { entries = await readdir(dirPath, { withFileTypes: true }); } catch { return; }
-
-        for (const e of entries) {
-          if (e.name.startsWith('.')) continue; // skip hidden files
-          if (e.isSymbolicLink()) continue;
-          const nodePath = parentNodePath === '/' ? `/${e.name}` : `${parentNodePath}/${e.name}`;
-          const filePath = await safeFilePath(nodePath);
-          results.push(await fileToNode(filePath, nodePath));
-
-          if (e.isDirectory() && currentDepth < depth) {
-            await walk(filePath, nodePath, currentDepth + 1);
-          }
-        }
-      }
-
-      await walk(dir, parent, 1);
-      let filtered = results;
+      let filtered = await collectDescendants(parent, depth);
       if (opts?.query) {
         const test = sift(opts.query);
         filtered = filtered.filter(n => test(mapNodeForSift(n)));
       }
       return paginate(filtered, opts);
+    },
+
+    // ── scanChildren ──
+    // Adapter total order: $path ASC. Cursor = node.$path.
+    // mimefs paths preserve file extensions, so /p/a.json and /p/a are distinct.
+    async *scanChildren(parent, opts) {
+      const signal = opts?.signal;
+      if (signal?.aborted) throw signal.reason;
+
+      const depth = opts?.depth ?? 1;
+      const after = opts?.after;
+      const entries = (await collectDescendants(parent, depth))
+        .sort((a, b) => a.$path < b.$path ? -1 : a.$path > b.$path ? 1 : 0);
+
+      for (const data of entries) {
+        if (signal?.aborted) throw signal.reason;
+        const cursor = data.$path;
+        if (after !== undefined && cursor <= after) continue;
+        yield { node: data, cursor };
+      }
     },
 
     async set(node) {

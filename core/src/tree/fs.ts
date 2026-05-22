@@ -10,30 +10,30 @@ import { OpError } from '#errors';
 import { mkdir, readdir, readFile, realpath, rmdir, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import sift from 'sift';
-import type { Tree } from './index';
+import type { TreeSource } from './index';
 import { paginate } from './index';
 import { defaultPatch } from './patch';
 import { mapNodeForSift } from './query';
 
 async function securityCheck(root: string, file: string) {
-  if (!isInsideRoot(root, resolve(file))) throw new Error('Path traversal blocked');
+  if (!isInsideRoot(root, resolve(file))) throw new OpError('FORBIDDEN', 'Path traversal blocked');
   // Follow symlinks and verify real path is still inside root
   try {
     const real = await realpath(file);
-    if (!isInsideRoot(root, real)) throw new Error('Path escaped root via symlink');
+    if (!isInsideRoot(root, real)) throw new OpError('FORBIDDEN', 'Path escaped root via symlink');
   } catch (e: any) {
     if (e.code !== 'ENOENT') throw e;
     // File doesn't exist yet — check parent directory for symlink escapes
     try {
       const parentReal = await realpath(dirname(file));
-      if (!isInsideRoot(root, parentReal)) throw new Error('Path escaped root via symlink');
+      if (!isInsideRoot(root, parentReal)) throw new OpError('FORBIDDEN', 'Path escaped root via symlink');
     } catch (e2: any) {
       if (e2.code !== 'ENOENT') throw e2;
     }
   }
 }
 
-export async function createFsTree(rootDir: string): Promise<Tree> {
+export async function createFsTree(rootDir: string): Promise<TreeSource> {
   await mkdir(resolve(rootDir), { recursive: true });
   rootDir = await realpath(resolve(rootDir));
 
@@ -201,7 +201,7 @@ export async function createFsTree(rootDir: string): Promise<Tree> {
     return results;
   }
 
-  const tree: Tree = {
+  const tree: TreeSource = {
     async get(path) {
       return readNode(path);
     },
@@ -214,6 +214,28 @@ export async function createFsTree(rootDir: string): Promise<Tree> {
         filtered = filtered.filter(n => test(mapNodeForSift(n)));
       }
       return paginate(filtered, opts);
+    },
+
+    // ── scanChildren ──
+    // Adapter total order: $path ASC (lexicographic). Cursor = node.$path.
+    // collectChildren materializes the in-depth set; we sort + cursor-filter.
+    // AbortSignal honored between yields; in-flight readdir/readFile in
+    // collectChildren itself isn't cancellable in MVP — Stage 6 may stream.
+    async *scanChildren(parent, opts) {
+      const signal = opts?.signal;
+      if (signal?.aborted) throw signal.reason;
+
+      const depth = opts?.depth ?? 1;
+      const after = opts?.after;
+      const entries = (await collectChildren(parent, depth))
+        .sort((a, b) => a.$path < b.$path ? -1 : a.$path > b.$path ? 1 : 0);
+
+      for (const data of entries) {
+        if (signal?.aborted) throw signal.reason;
+        const cursor = data.$path;
+        if (after !== undefined && cursor <= after) continue;
+        yield { node: data, cursor };
+      }
     },
 
     async set(node) {
