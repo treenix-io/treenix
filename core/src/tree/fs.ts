@@ -10,10 +10,8 @@ import { OpError } from '#errors';
 import { mkdir, readdir, readFile, realpath, rmdir, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import sift from 'sift';
-import type { TreeSource } from './index';
-import { paginate } from './index';
+import { mapNodeForSift, paginate, type TreeSource } from './index';
 import { defaultPatch } from './patch';
-import { mapNodeForSift } from './query';
 
 async function securityCheck(root: string, file: string) {
   if (!isInsideRoot(root, resolve(file))) throw new OpError('FORBIDDEN', 'Path traversal blocked');

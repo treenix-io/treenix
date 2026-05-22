@@ -9,11 +9,9 @@ import { resolve as ctxResolve } from '#core/registry';
 import { OpError } from '#errors';
 import { mkdir, readdir, realpath, rmdir, stat, unlink } from 'node:fs/promises';
 import { dirname, extname, join, resolve } from 'node:path';
-import type { TreeSource } from './index';
-import { paginate } from './index';
+import { mapNodeForSift, paginate, type TreeSource } from './index';
 import './json-codec'; // register JSON decode handler
 import { defaultPatch } from './patch';
-import { mapNodeForSift } from './query';
 import sift from 'sift';
 
 const MIME: Record<string, string> = {

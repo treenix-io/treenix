@@ -11,9 +11,9 @@
 import { registerType } from '#comp';
 import { createNode, isComponent, type NodeData, register, resolve } from '#core';
 import { clearRegistry } from '#core/index.test';
-import { createMemoryTree, createOverlayTree, type Tree } from '#tree';
+import { createMemoryTree, createOverlayTree, mapNodeForSift, type Tree } from '#tree';
 import { createFsTree } from '#tree/fs';
-import { createQueryTree, mapNodeForSift, mapSiftQuery, matchesFilter } from '#tree/query';
+import { createQueryTree, mapSiftQuery, matchesFilter } from '#tree/query';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';

@@ -15,8 +15,8 @@ import {
   W,
 } from '#core';
 import { OpError } from '#errors';
-import { assertSafePatchPath, paginate, type Tree } from '#tree';
-import { createSiftTest, mapNodeForSift, withAclQueryTree } from '#tree/query';
+import { assertSafePatchPath, mapNodeForSift, paginate, type Tree } from '#tree';
+import { createSiftTest, withAclQueryTree } from '#tree/query';
 import { createHash, randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
 
 // R4-AUTH-5: hash session token before persisting. The plaintext bearer never lands

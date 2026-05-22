@@ -5,8 +5,8 @@
 import { type SubscribeOpts } from '#contexts/service/index';
 import { A, R, type NodeData } from '#core';
 import { buildClaims, resolvePermission, stripComponents } from '#security/auth';
-import { type PatchOp, toRfc6902, type Tree } from '#tree';
-import { createSiftTest, mapNodeForSift } from '#tree/query';
+import { mapNodeForSift, type PatchOp, toRfc6902, type Tree } from '#tree';
+import { createSiftTest } from '#tree/query';
 import type { Operation } from 'fast-json-patch';
 import fjp from 'fast-json-patch';
 

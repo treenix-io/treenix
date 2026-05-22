@@ -152,11 +152,16 @@ export function createOverlayTree(upper: Tree, lower: Tree): Tree {
   };
 }
 
-// ── In-memory implementation ──
+// ── Storage-key view of a node ──
+// $-prefixed system keys ($path, $type, $acl, ...) become _-prefixed for
+// storage matching (sift queries are pre-mapped by `mapSiftQuery`, so
+// nodes must match the same form). Pure Layer-1 helper, no query knowledge.
 
-function mapNodeForSift(node: NodeData): Record<string, unknown> {
+export function mapNodeForSift(node: NodeData): Record<string, unknown> {
   return toStorageKeys(node);
 }
+
+// ── In-memory implementation ──
 
 export type TreeNode<T> = {
   data?: T;

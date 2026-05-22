@@ -2,10 +2,10 @@
 // Virtual filtered view over a parent tree's children.
 // Used by t.mount.query to create virtual folders (e.g., /orders/incoming shows orders where status.value === 'incoming').
 
-import { type NodeData, toStorageKeys } from '#core';
+import { type NodeData } from '#core';
 import { OpError } from '#errors';
 import sift from 'sift';
-import { type Tree } from './index';
+import { mapNodeForSift, type Tree } from './index';
 
 export type QueryConfig = {
   source: string;
@@ -74,10 +74,6 @@ export function mapSiftQuery(q: unknown): unknown {
     return out;
   }
   return q;
-}
-
-export function mapNodeForSift(node: NodeData): Record<string, unknown> {
-  return toStorageKeys(node);
 }
 
 export function createSiftTest(match: Record<string, unknown>): (node: Record<string, unknown>) => boolean {
