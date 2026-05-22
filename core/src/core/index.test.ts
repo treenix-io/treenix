@@ -1,5 +1,5 @@
 import { assertSafePath, basename, dirname, isChildPath, join } from '#core/path';
-import { registerBuiltins } from '#mods/treenix/builtins';
+import { registerBuiltins } from '#core/builtins';
 import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
 import {

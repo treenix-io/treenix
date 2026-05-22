@@ -4,9 +4,9 @@ import { clearRegistry } from '#core/index.test';
 import { createMemoryTree, type Tree } from '#tree';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
-import { withMounts } from './mount';
+import { withMounts } from '#mount';
 import { createTreeRouter } from './trpc';
-import { createWatchManager } from './watch';
+import { createWatchManager } from '#sub/watch';
 
 class Order {
   status = 'new';
@@ -23,7 +23,7 @@ describe('Workflow & Spatial Gravity', () => {
   beforeEach(async () => {
     clearRegistry();
     // We register the query mount manually or import it
-    await import('./mount-adapters');
+    await import('#mount/adapters');
     registerType('order', Order);
     register('order', 'schema', () => ({
       $id: 'order',

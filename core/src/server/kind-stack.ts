@@ -37,7 +37,7 @@ export function assertCanCall(target: { kind: 'read' | 'write'; io: boolean }): 
   if (caller.kind === 'read' && target.kind === 'write') {
     throw new OpError(
       'KIND_VIOLATION',
-      `read action ${caller.action} cannot invoke write action ${target ? '' : ''}`.trim(),
+      `read action ${caller.action} cannot invoke write target (${target.kind}${target.io ? '+io' : ''})`,
     );
   }
   if (caller.kind === 'read' && target.io && !caller.io) {

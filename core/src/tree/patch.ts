@@ -71,6 +71,10 @@ export function applyOps(target: Record<string, unknown>, ops: readonly PatchOp[
   }
 }
 
+export function hasMutationOps(ops: readonly PatchOp[]): boolean {
+  return ops.some(op => op[0] !== 't');
+}
+
 // ── Path helpers (dot notation) ──
 
 function getByPath(obj: any, path: string): unknown {
@@ -159,6 +163,7 @@ export async function defaultPatch(
   if (!node) throw new OpError('NOT_FOUND', `Node not found: ${path}`);
   const copy = structuredClone(node);
   applyOps(copy, ops);
+  if (!hasMutationOps(ops)) return;
   await set(copy, ctx);
 }
 
@@ -174,5 +179,6 @@ export async function patchViaSet(
   if (!node) throw new OpError('NOT_FOUND', `Node not found: ${path}`);
   const copy = structuredClone(node);
   applyOps(copy, ops);
+  if (!hasMutationOps(ops)) return;
   await self.set(copy, ctx);
 }

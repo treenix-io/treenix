@@ -30,7 +30,7 @@ The intended Plan #3 architecture:
 
 - Snapshots live on FS in `mods/jsonld/snapshots/` (vendored subset committed; full vocab cached after first need; URL fetch as fallback).
 - `t.mount.jsonld` adapter exposes them via `/sys/types/jsonld/<vocab>/`, parses lazily on `tree.get`.
-- Server-side `types-mount.get()` triggers `resolve(type, 'schema')` so the pack's miss resolver fires; the resulting registered schema is synthesized into the type node.
+- Server-side `mount/types.get()` triggers `resolve(type, 'schema')` so the pack's miss resolver fires; the resulting registered schema is synthesized into the type node.
 - Client-side `onResolveMiss('schema', ...)` calls `tree.get('/sys/types/...')` over tRPC, extracts the schema component, registers locally. UIX-style fetch+register pattern, but for `'schema'` instead of `'react'`.
 
 Estimated effort to complete the full architecture (#3–#6): ~5–7 focused days. See plan files for TDD breakdown.

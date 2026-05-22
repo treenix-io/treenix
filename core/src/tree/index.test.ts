@@ -2,7 +2,7 @@ import { createNode } from '#core';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { OpError } from '#errors';
-import { createMemoryTree, createOverlayTree } from './index';
+import { createMemoryTree, createOverlayTree, PatchTestError } from './index';
 
 describe('MemoryStore', () => {
   it('set and get', async () => {
@@ -142,6 +142,56 @@ describe('MemoryStore', () => {
     const stored = await tree.get('/y') as any;
     assert.equal(stored.value, 1);
     assert.equal(stored.injected, undefined);
+  });
+
+  it('empty patch does not bump $rev', async () => {
+    const tree = createMemoryTree();
+    await tree.set(createNode('/n', 'doc', { value: 1 }));
+    const before = (await tree.get('/n'))!;
+
+    await tree.patch('/n', []);
+
+    const after = (await tree.get('/n'))!;
+    assert.equal(after.$rev, before.$rev);
+    assert.equal((after as any).value, 1);
+  });
+
+  it('test-only patch validates without bumping $rev', async () => {
+    const tree = createMemoryTree();
+    await tree.set(createNode('/n', 'doc', { value: 1 }));
+    const before = (await tree.get('/n'))!;
+
+    await tree.patch('/n', [['t', 'value', 1]]);
+
+    const after = (await tree.get('/n'))!;
+    assert.equal(after.$rev, before.$rev);
+  });
+
+  it('failed test-only patch does not bump $rev', async () => {
+    const tree = createMemoryTree();
+    await tree.set(createNode('/n', 'doc', { value: 1 }));
+    const before = (await tree.get('/n'))!;
+
+    await assert.rejects(
+      () => tree.patch('/n', [['t', 'value', 2]]),
+      (e: unknown) => e instanceof PatchTestError,
+    );
+
+    const after = (await tree.get('/n'))!;
+    assert.equal(after.$rev, before.$rev);
+    assert.equal((after as any).value, 1);
+  });
+
+  it('mixed test and replace bumps $rev once', async () => {
+    const tree = createMemoryTree();
+    await tree.set(createNode('/n', 'doc', { value: 1 }));
+    const before = (await tree.get('/n'))!;
+
+    await tree.patch('/n', [['t', 'value', 1], ['r', 'value', 2]]);
+
+    const after = (await tree.get('/n'))!;
+    assert.equal(after.$rev, before.$rev! + 1);
+    assert.equal((after as any).value, 2);
   });
 
 });

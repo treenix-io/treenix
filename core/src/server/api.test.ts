@@ -7,14 +7,15 @@ import { createNode, R, register, S, W } from '#core';
 import { createMemoryTree, type Tree } from '#tree';
 import assert from 'node:assert/strict';
 import { before, beforeEach, describe, it } from 'node:test';
-import { type Session } from './auth';
-import './mount-adapters';
-import { withMounts } from './mount';
-import { type NodeEvent, withSubscriptions } from './sub';
+import { type Session } from '#security/auth';
+import '#mount/adapters';
+import { withMounts } from '#mount';
+import { type NodeEvent, withSubscriptions } from '#sub';
 import { createTreeRouter } from './trpc';
-import { withValidation } from './validate';
-import { withVolatile } from './volatile';
-import { createWatchManager, type WatchManager } from './watch';
+import { withValidation } from '#tree/validation';
+import { withVolatile } from '#tree/volatile';
+import { createWatchManager, type WatchManager } from '#sub/watch';
+import { createFilteredPush } from '#sub/watch-filter';
 
 type DataEvent = Exclude<NodeEvent, { type: 'reconnect' }>;
 
@@ -394,6 +395,7 @@ describe('tRPC API integration', () => {
       const kitchen = await caller.getChildren({ path: '/orders/kitchen' });
       assert.equal(newOrders.items.length, 1);
       assert.equal(kitchen.items.length, 0);
+      assert.equal('queryMount' in newOrders, false);
     });
 
     it('action moves node between virtual folders', async () => {
@@ -418,6 +420,55 @@ describe('tRPC API integration', () => {
       assert.ok(ev);
       if ('addVps' in ev!) assert.ok(ev.addVps?.includes('/orders/kitchen'));
       if ('rmVps' in ev!) assert.ok(ev.rmVps?.includes('/orders/new'));
+    });
+
+    it('query mount does not match hidden component fields', async () => {
+      register('private.secret.api', 'acl', () => [{ g: 'admins', p: R }]);
+      await rawStore.set({ $path: '/oracle', $type: 'folder' });
+      await rawStore.set({ $path: '/oracle/data', $type: 'folder' });
+      await rawStore.set({
+        $path: '/oracle/data/a',
+        $type: 'page',
+        title: 'A',
+        secret: { $type: 'private.secret.api', value: 'alpha' },
+      } as any);
+      await rawStore.set({
+        $path: '/oracle/secret',
+        $type: 'folder',
+        mount: { $type: 't.mount.query', source: '/oracle/data', match: { 'secret.value': 'alpha' } },
+      } as any);
+
+      const result = await authedCaller.getChildren({ path: '/oracle/secret' });
+      assert.equal(result.items.length, 0);
+    });
+
+    it('CDC query membership does not route on hidden component fields', async () => {
+      register('private.secret.cdc', 'acl', () => [{ g: 'admins', p: R }]);
+      await rawStore.set({ $path: '/cdc-oracle', $type: 'folder' });
+      await rawStore.set({ $path: '/cdc-oracle/data', $type: 'folder' });
+      await rawStore.set({
+        $path: '/cdc-oracle/secret',
+        $type: 'folder',
+        mount: { $type: 't.mount.query', source: '/cdc-oracle/data', match: { 'secret.value': 'alpha' } },
+      } as any);
+
+      const pushed: NodeEvent[] = [];
+      watcher.connect(
+        'alice:cdc-oracle',
+        'alice',
+        createFilteredPush(rawStore, 'alice', ['public', 'authenticated', 'u:alice'], e => pushed.push(e)),
+      );
+      await authedCaller.getChildren({ path: '/cdc-oracle/secret', watchNew: true });
+
+      await rawStore.set({
+        $path: '/cdc-oracle/data/a',
+        $type: 'page',
+        title: 'A',
+        secret: { $type: 'private.secret.cdc', value: 'alpha' },
+      } as any);
+      await new Promise(resolve => setTimeout(resolve, 0));
+
+      assert.equal(pushed.length, 0);
     });
 
     it('multiple orders independently tracked', async () => {

@@ -1,5 +1,5 @@
-// @treenx/agent-client — TOFU agent connection SDK
-// Connect an external agent to a Treenix server with Trust On First Use handshake.
+// @treenx/agent-client — agent-port connection SDK.
+// Connect an external agent to a Treenix server after operator-initialized pairing.
 // All paths are relative to agent's subtree — agent writes "config", gets /agents/bot/config.
 
 import { createTrpcTransport, type TreenixClient } from '@treenx/core/client';

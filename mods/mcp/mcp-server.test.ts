@@ -12,7 +12,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createNode, getComponent, R, resolve, S, W } from '@treenx/core';
 import { loadTestSchemas } from '@treenx/core/schema/load';
 import { createMemoryTree, type Tree } from '@treenx/core/tree';
-import { buildClaims, createSession, sessionPath, withAcl } from '@treenx/core/server/auth';
+import { buildClaims, createSession, sessionPath, withAcl } from '@treenx/core/security/auth';
 import assert from 'node:assert/strict';
 import { afterEach, before, beforeEach, describe, it } from 'node:test';
 import './server';

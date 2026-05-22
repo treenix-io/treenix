@@ -21,12 +21,12 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { executeAction, executeStream, setComponent } from './actions';
 import { OpError } from '#errors';
-import { withMounts } from './mount';
-import { MountMemory, MountOverlay, MountQuery, MountTypes } from './mount-adapters';
-import { type CdcRegistry, withSubscriptions } from './sub';
-import { createTypesTree } from './types-mount';
-import { withValidation } from './validate';
-import { extractPaths, isVolatile, withVolatile } from './volatile';
+import { withMounts } from '#mount';
+import { MountMemory, MountOverlay, MountQuery, MountTypes } from '#mount/adapters';
+import { type CdcRegistry, withSubscriptions } from '#sub';
+import { createTypesTree } from '#mount/types';
+import { withValidation } from '#tree/validation';
+import { extractPaths, isVolatile, withVolatile } from '#tree/volatile';
 
 // ── Helpers ──
 

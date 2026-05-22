@@ -1,6 +1,6 @@
 import { createNode, register } from '#core';
 import { clearRegistry } from '#core/index.test';
-import { withSubscriptions } from '#server/sub';
+import { withSubscriptions } from '#sub';
 import { createMemoryTree, resolveRef } from '#tree';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';

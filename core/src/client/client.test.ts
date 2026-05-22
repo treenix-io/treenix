@@ -3,8 +3,8 @@
 
 import { registerType } from '#comp';
 import { createNode, R, register, S, W } from '#core';
-import { withMounts } from '#server/mount';
-import { setAllowPrivateUrls } from '#server/mount-adapters';
+import { withMounts } from '#mount';
+import { setAllowPrivateUrls } from '#mount/adapters';
 import { createHttpServer, createPipeline, type Pipeline } from '#server/server';
 import { createMemoryTree, type Tree } from '#tree';
 import { createRepathTree } from '#tree/repath';

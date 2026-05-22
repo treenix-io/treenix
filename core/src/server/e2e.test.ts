@@ -7,12 +7,12 @@ import { createNode, R, register, S, W } from '#core';
 import { createMemoryTree } from '#tree';
 import assert from 'node:assert/strict';
 import type { Socket } from 'node:net';
-import './mount-adapters';
+import '#mount/adapters';
 import { afterEach, before, beforeEach, describe, it } from 'node:test';
 import { createClient } from './client';
 import { createHttpServer, createPipeline, type Pipeline } from './server';
-import { _resetRateLimits } from './rate-limit';
-import { type NodeEvent } from './sub';
+import { _resetRateLimits } from '#security/rate-limit';
+import { type NodeEvent } from '#sub';
 
 // ── Test components ──
 

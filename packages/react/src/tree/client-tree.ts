@@ -3,7 +3,7 @@
 // Reads merge both — /local visible alongside server nodes.
 
 import type { NodeData } from '@treenx/core';
-import { withMounts } from '@treenx/core/server/mount';
+import { withMounts } from '@treenx/core/mount';
 import './fiber-tree'; // registers t.mount.react
 import { createFilterTree, createMemoryTree } from '@treenx/core/tree';
 import { withCache } from '@treenx/core/tree/cache';

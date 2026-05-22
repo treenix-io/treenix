@@ -6,6 +6,7 @@ import { type NodeData } from '#core';
 import { getPrefab, getSeedPrefabs, type PrefabEntry } from '#mod/prefab';
 import { type Tree } from '#tree';
 import { OpError } from '#errors';
+import { assertSafePath } from '#core/path';
 
 export type DeployOpts = {
   allowAbsolute?: boolean;
@@ -14,7 +15,7 @@ export type DeployOpts = {
 
 // /sys/mods/{mod}/prefabs/{name} → [mod, name]
 function parseSourcePath(source: string): [string, string] | null {
-  const m = source.match(/\/sys\/mods\/([^/]+)\/prefabs\/([^/]+)$/);
+  const m = source.match(/^\/sys\/mods\/([^/]+)\/prefabs\/([^/]+)$/);
   return m ? [m[1], m[2]] : null;
 }
 
@@ -24,6 +25,14 @@ function resolvePath(nodePath: string, target: string): string {
   return target === '/' ? `/${nodePath}` : `${target}/${nodePath}`;
 }
 
+function assertDeployPath(label: string, path: string): void {
+  try {
+    assertSafePath(path);
+  } catch (e) {
+    throw new OpError('BAD_REQUEST', `${label}: ${(e as Error).message}`);
+  }
+}
+
 /** Core deploy loop — shared by deployPrefab and deployByKey */
 async function deployNodes(
   tree: Tree,
@@ -31,6 +40,8 @@ async function deployNodes(
   target: string,
   opts?: DeployOpts,
 ): Promise<{ deployed: string[]; skipped: string[] }> {
+  assertDeployPath('Invalid prefab target', target);
+
   let nodes = prefab.nodes;
   if (prefab.setup) {
     nodes = await prefab.setup([...nodes], opts?.params);
@@ -47,6 +58,7 @@ async function deployNodes(
     }
 
     const resolvedPath = resolvePath(node.$path, target);
+    assertDeployPath('Invalid prefab node path', resolvedPath);
 
     // Idempotent: skip if exists
     if (await tree.get(resolvedPath)) {
@@ -69,6 +81,7 @@ export async function deployPrefab(
   target: string,
   opts?: DeployOpts,
 ): Promise<{ deployed: string[]; skipped: string[] }> {
+  assertDeployPath('Invalid prefab source', source);
   const parsed = parseSourcePath(source);
   if (!parsed) throw new OpError('BAD_REQUEST', `Invalid prefab path: ${source}`);
 

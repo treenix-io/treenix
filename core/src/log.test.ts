@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import { afterEach, beforeEach, describe, it } from 'node:test';
-import { createLogger, setDebug } from './log.js';
+import { createLogger, matchesLogGrep, queryLogs, setDebug } from './log.js';
 
 describe('createLogger', () => {
   const calls: { method: string; args: unknown[] }[] = []
@@ -66,5 +66,15 @@ describe('createLogger', () => {
     c.debug('no')
 
     assert.equal(calls.length, 2)
+  })
+
+  it('grep matching treats regex metacharacters literally', () => {
+    assert.equal(matchesLogGrep('literal [tag] and (a+)+$', '[tag]'), true)
+    assert.equal(matchesLogGrep('literal [tag] and (a+)+$', '(a+)+$'), true)
+    assert.equal(matchesLogGrep('literal [tag] and (a+)+$', 'missing.*'), false)
+  })
+
+  it('queryLogs does not compile grep as a regexp', () => {
+    assert.doesNotThrow(() => queryLogs({ grep: '[' }))
   })
 })

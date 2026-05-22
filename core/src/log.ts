@@ -129,14 +129,17 @@ export function queryLogs(opts: LogQuery = {}): LogEntry[] {
   }
 
   if (opts.grep) {
-    const re = new RegExp(opts.grep, 'i')
-    entries = entries.filter(e => re.test(e.msg))
+    entries = entries.filter(e => matchesLogGrep(e.msg, opts.grep!))
   }
 
   if (opts.tail) entries = entries.slice(-opts.tail)
   if (opts.head) entries = entries.slice(0, opts.head)
 
   return entries
+}
+
+export function matchesLogGrep(message: string, grep: string): boolean {
+  return message.toLocaleLowerCase().includes(grep.toLocaleLowerCase())
 }
 
 export function logStats() {

@@ -8,7 +8,7 @@
 **User intent:** instead of inventing local domain types (`cafe.shop`, `t.person`), import standard JSON-LD vocabularies as native Treenix types so that `{ $type: 'jsonld.schema-org.Person', name: 'Alice', email: '...' }` works out-of-the-box.
 
 **Architectural fit (verified in code):**
-- [types-mount.ts:7-11](engine/core/src/server/types-mount.ts#L7-L11) — `createTypesStore` already maps `block.hero ↔ /sys/types/block/hero` (dot↔slash convention). Backing tree merges with registry — types from a mount adapter become visible to MCP, validation, default views automatically.
+- [types.ts](engine/core/src/mount/types.ts) — `createTypesTree` already maps `block.hero ↔ /sys/types/block/hero` (dot↔slash convention). Backing tree merges with registry — types from a mount adapter become visible to MCP, validation, default views automatically.
 - [registry.ts:121](engine/core/src/core/registry.ts#L121) — `onResolveMiss` is already an extension point for dynamic type resolution (currently used by UIX for lazy view loading). Same hook serves rdfs:subClassOf inheritance fallback.
 - Default view redesign spec [docs/superpowers/specs/2026-05-01-default-view-redesign-design.md](docs/superpowers/specs/2026-05-01-default-view-redesign-design.md) is schema-driven via `splitRecord` — works for unknown schema-bearing types out-of-the-box.
 - Pre-existing backlog [docs/backlog/semantic-layer.md](docs/backlog/semantic-layer.md) already proposed the 3-mechanism semantic layer (projections, JSON-LD context, ontology mount). The user's question reframes mechanism #3 from "search auxiliary" to "primary type source".

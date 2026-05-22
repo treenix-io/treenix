@@ -6,7 +6,7 @@ import {
   SSE_PING_INTERVAL_MS,
   SSE_RECONNECT_AFTER_INACTIVITY_MS,
 } from './trpc';
-import { createWatchManager } from './watch';
+import { createWatchManager } from '#sub/watch';
 
 describe('createTreeRouter SSE config', () => {
   it('keeps idle SSE streams alive', () => {
@@ -17,5 +17,19 @@ describe('createTreeRouter SSE config', () => {
     assert.equal(sse?.ping?.intervalMs, SSE_PING_INTERVAL_MS);
     assert.equal(sse?.client?.reconnectAfterInactivityMs, SSE_RECONNECT_AFTER_INACTIVITY_MS);
     assert.ok(SSE_PING_INTERVAL_MS < SSE_RECONNECT_AFTER_INACTIVITY_MS);
+  });
+
+  it('validates unwatch paths with safePath', async () => {
+    const router = createTreeRouter(createMemoryTree(), createWatchManager());
+    const caller = router.createCaller({
+      session: { userId: 'u1', claims: ['authenticated'] },
+      token: 'token',
+      clientIp: null,
+    });
+
+    for (const path of ['/../x', '/x/', '/x//y', '/x\0y', '/x\\y', '/x%2fy']) {
+      await assert.rejects(() => caller.unwatch({ paths: [path] }));
+      await assert.rejects(() => caller.unwatchChildren({ paths: [path] }));
+    }
   });
 });

@@ -12,6 +12,8 @@ import type { Tree } from './index';
 import { paginate } from './index';
 import './json-codec'; // register JSON decode handler
 import { defaultPatch } from './patch';
+import { mapNodeForSift } from './query';
+import sift from 'sift';
 
 const MIME: Record<string, string> = {
   '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
@@ -119,8 +121,9 @@ export async function createRawFsTree(rootDir: string, mountPath: string = ''): 
 
         for (const e of entries) {
           if (e.name.startsWith('.')) continue; // skip hidden files
-          const filePath = join(dirPath, e.name);
+          if (e.isSymbolicLink()) continue;
           const nodePath = parentNodePath === '/' ? `/${e.name}` : `${parentNodePath}/${e.name}`;
+          const filePath = await safeFilePath(nodePath);
           results.push(await fileToNode(filePath, nodePath));
 
           if (e.isDirectory() && currentDepth < depth) {
@@ -130,7 +133,12 @@ export async function createRawFsTree(rootDir: string, mountPath: string = ''): 
       }
 
       await walk(dir, parent, 1);
-      return paginate(results, opts);
+      let filtered = results;
+      if (opts?.query) {
+        const test = sift(opts.query);
+        filtered = filtered.filter(n => test(mapNodeForSift(n)));
+      }
+      return paginate(filtered, opts);
     },
 
     async set(node) {

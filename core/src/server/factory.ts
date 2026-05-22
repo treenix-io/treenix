@@ -3,7 +3,7 @@
 
 import '#contexts/text/index';
 import '#schema/action';
-import './mount-adapters';
+import '#mount/adapters';
 
 import { type ServiceHandle, startServices } from '#contexts/service/index';
 import { type NodeData } from '#core';

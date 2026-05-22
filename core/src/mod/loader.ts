@@ -282,6 +282,7 @@ export async function loadLocalMods(modsDir: string, target: LoadTarget): Promis
   } catch {
     return result;
   }
+  entries.sort((a, b) => a.name.localeCompare(b.name));
 
   // Inside node_modules, prefer importing through the package specifier so the package's
   // `exports` map picks the compiled .js by default (and the .ts source under `development`).

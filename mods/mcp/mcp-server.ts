@@ -10,7 +10,7 @@ import { matchesAny } from '@treenx/core/glob';
 import type { CatalogActionDoc, CatalogEntry, CatalogPropertyDoc } from '@treenx/core/schema/catalog';
 import type { MethodSchema, PropertySchema, TypeSchema } from '@treenx/core/schema/types';
 import { executeAction } from '@treenx/core/server/actions';
-import { buildClaims, resolveToken, type Session, withAcl } from '@treenx/core/server/auth';
+import { buildClaims, resolveToken, type Session, withAcl } from '@treenx/core/security/auth';
 import { resolveRef, type Tree } from '@treenx/core/tree';
 import { randomUUID } from 'node:crypto';
 import { createServer, type Server } from 'node:http';

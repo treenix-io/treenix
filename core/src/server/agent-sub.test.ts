@@ -8,8 +8,8 @@ import { createMemoryTree } from '#tree';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 import { type ActionCtx, executeAction } from './actions';
-import { type NodeEvent, withSubscriptions } from './sub';
-import { createWatchManager } from './watch';
+import { type NodeEvent, withSubscriptions } from '#sub';
+import { createWatchManager } from '#sub/watch';
 
 describe('Agent task subscription', () => {
   beforeEach(() => clearRegistry());

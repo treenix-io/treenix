@@ -10,12 +10,12 @@ import { enablePatches } from 'immer';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 import { executeAction } from './actions';
-import { withMounts } from './mount';
-import { MountQuery } from './mount-adapters';
-import { type CdcRegistry, type NodeEvent, withSubscriptions } from './sub';
-import { withValidation } from './validate';
-import { withVolatile } from './volatile';
-import { createWatchManager, type WatchManager } from './watch';
+import { withMounts } from '#mount';
+import { MountQuery } from '#mount/adapters';
+import { type CdcRegistry, type NodeEvent, withSubscriptions } from '#sub';
+import { withValidation } from '#tree/validation';
+import { withVolatile } from '#tree/volatile';
+import { createWatchManager, type WatchManager } from '#sub/watch';
 
 enablePatches();
 

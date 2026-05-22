@@ -1,0 +1,19 @@
+{
+  "$id": "t.mount.fs",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "root": {
+      "type": "string",
+      "default": ""
+    },
+    "shared": {
+      "type": "boolean",
+      "default": false
+    }
+  },
+  "required": [
+    "root",
+    "shared"
+  ]
+}

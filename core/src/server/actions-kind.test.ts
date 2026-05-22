@@ -65,7 +65,7 @@ describe('executeAction — kind enforcement', () => {
 
     await assert.rejects(
       () => executeAction(tree, '/rn', undefined, undefined, 'readCallsWrite'),
-      (err: any) => err?.code === 'KIND_VIOLATION',
+      (err: any) => err?.code === 'KIND_VIOLATION' && /write target/.test(err.message),
     );
 
     assert.equal(writeHandlerRan, false, 'write handler must not run when caller is @read');

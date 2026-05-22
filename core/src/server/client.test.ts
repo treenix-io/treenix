@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import type { Socket } from 'node:net';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { createClient } from './client';
-import { _resetRateLimits } from './rate-limit';
+import { _resetRateLimits } from '#security/rate-limit';
 import { createHttpServer, createPipeline, type Pipeline } from './server';
 
 function listen(server: import('node:http').Server): Promise<number> {

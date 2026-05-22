@@ -46,11 +46,12 @@ const raw = await client.tree.get('config')
 ## How it works
 
 1. **Admin** creates an agent port node on the server (`$type: 't.agent.port'`)
-2. **Agent** calls `connect()` with its secret key
-3. **First connect** — key goes to "pending" (TOFU). Agent is not yet authorized
-4. **Admin** approves — key is locked, agent user is created with `agent` group
-5. **Agent** calls `connect()` again — gets a session token
-6. **Agent** reads/writes within its subtree using relative paths
+2. **Operator** initializes pairing from an authenticated session with `agentInitPair(path, key)`
+3. **Agent** calls `connect()` with the same secret key
+4. **Pending connect** waits for admin approval
+5. **Admin** approves — key is locked, agent user is created with `agent` group
+6. **Agent** calls `connect()` again — gets a session token
+7. **Agent** reads/writes within its subtree using relative paths
 
 ## Relative paths
 

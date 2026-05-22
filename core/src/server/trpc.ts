@@ -16,15 +16,16 @@ import {
   executeStream,
   setComponent as setComponentOp,
 } from './actions';
-import { buildClaims, buildClearSessionCookie, buildSessionCookie, type Session, withAcl } from './auth';
-import { agentConnect, agentInitPair, devLogin, loginUser, logoutUser, registerUser } from './auth-ops';
+import { agentConnect, agentInitPair } from '#agent-port/ops';
+import { buildClaims, buildClearSessionCookie, buildSessionCookie, type Session, withAcl } from '#security/auth';
+import { devLogin, loginUser, logoutUser, registerUser } from '#security/ops';
 import { OpError } from '#errors';
-import { checkRate } from './rate-limit';
+import { checkRate } from '#security/rate-limit';
 import { deployPrefab as deployPrefabOp } from './prefab';
-import { type CdcRegistry, type NodeEvent } from './sub';
-import { extractPaths } from './volatile';
-import { type WatchManager } from './watch';
-import { createFilteredPush } from './watch-filter';
+import { type CdcRegistry, type NodeEvent } from '#sub';
+import { extractPaths } from '#tree/volatile';
+import { type WatchManager } from '#sub/watch';
+import { createFilteredPush } from '#sub/watch-filter';
 
 export type TrpcContext = {
   session: Session | null;
@@ -180,12 +181,13 @@ export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: 
           if (input.watchNew) {
             if (result.queryMount) {
               const q = result.queryMount;
-              cdc?.watchQuery(input.path, q.source, q.match, ctx.session.userId);
+              cdc?.watchQuery(input.path, q.source, q.match, ctx.session.userId, ctx.session.claims ?? null);
             }
             watcher.watch(ctx.session.userId, [input.path], { children: true, autoWatch: input.watch });
           }
         }
-        return result;
+        const { queryMount, ...publicResult } = result;
+        return publicResult;
       }),
 
     set: authed
@@ -300,12 +302,12 @@ export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: 
       .input(z.object({ path: safePath, key: z.string().min(1).max(256) }))
       .mutation(({ input, ctx }) => agentInitPair(ctx.tree, input.path, input.key)),
 
-    unwatch: authed.input(z.object({ paths: z.array(z.string()) })).mutation(({ input, ctx }) => {
+    unwatch: authed.input(z.object({ paths: z.array(safePath) })).mutation(({ input, ctx }) => {
       if (ctx.session) watcher.unwatch(ctx.session.userId, input.paths);
-    }),
+      }),
 
     unwatchChildren: authed
-      .input(z.object({ paths: z.array(z.string()) }))
+      .input(z.object({ paths: z.array(safePath) }))
       .mutation(({ input, ctx }) => {
         if (ctx.session) {
           watcher.unwatch(ctx.session.userId, input.paths, { children: true });

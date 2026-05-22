@@ -1,9 +1,5 @@
-import './builtins';
-import './system';
-import './mod-type';
-import './prefab-type';
-import './user';
-import './groups';
-import './agent-port';
-import './logs';
-import './seed';
+// Compatibility shim for the old catch-all "treenix" internal mod.
+// New code should import the owner modules directly.
+import '../platform/server';
+import '../agent-port/server';
+import '../logs/server';

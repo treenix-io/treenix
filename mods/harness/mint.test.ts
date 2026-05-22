@@ -4,7 +4,7 @@
 // from tampering with its own scope.
 
 import { createMemoryTree, type Tree } from '@treenx/core/tree';
-import { resolveToken } from '@treenx/core/server/auth';
+import { resolveToken } from '@treenx/core/security/auth';
 import { OpError } from '@treenx/core/errors';
 import { R, W, A, S } from '@treenx/core';
 import assert from 'node:assert/strict';

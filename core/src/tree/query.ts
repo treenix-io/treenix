@@ -12,6 +12,19 @@ export type QueryConfig = {
   match: Record<string, unknown>;
 };
 
+export const ACL_QUERY_TREE: unique symbol = Symbol('treenix.aclQueryTree');
+
+type AclQueryCtx = { [ACL_QUERY_TREE]?: Tree };
+
+export function withAclQueryTree(ctx: unknown, tree: Tree): unknown {
+  if (ctx && typeof ctx === 'object') return { ...ctx, [ACL_QUERY_TREE]: tree };
+  return { [ACL_QUERY_TREE]: tree };
+}
+
+function aclQueryTree(ctx: unknown): Tree | undefined {
+  return (ctx as AclQueryCtx | undefined)?.[ACL_QUERY_TREE];
+}
+
 // sift operators that compile/eval code → server-side RCE if exposed to user-influenced queries.
 // Mount config (`t.mount.query.match`) is user-writable wherever a user has W on the mount node;
 // without type-ACL on t.mount.* (deferred F4), $where is a 1-line path to RCE.
@@ -86,7 +99,8 @@ export function createQueryTree(config: QueryConfig, parentStore: Tree): Tree {
       if (opts?.query) assertSafeSiftQuery(opts.query);
       const mappedQuery = mapSiftQuery(config.match) as Record<string, unknown>;
       const mergedQuery = opts?.query ? { $and: [opts.query, mappedQuery] } : mappedQuery;
-      const res = await parentStore.getChildren(config.source, { ...opts, depth: 1, query: mergedQuery }, ctx);
+      const sourceStore = aclQueryTree(ctx) ?? parentStore;
+      const res = await sourceStore.getChildren(config.source, { ...opts, depth: 1, query: mergedQuery }, ctx);
       return { ...res, queryMount: { source: config.source, match: config.match } };
     },
 

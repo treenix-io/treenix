@@ -207,6 +207,6 @@ register('board.task', 'react:icon', BoardIcon);
 register('todo.list', 'react:icon', TodoIcon);
 register('cafe.contact', 'react:icon', ContactIcon);
 register('mount-point', 'react:icon', DocsIcon);
-register('treenix.system', 'react:icon', SystemIcon);
+register('t.system', 'react:icon', SystemIcon);
 register('whisper.service', 'react:icon', WhisperIcon);
 register('examples.demo.sensor', 'react:icon', SensorIcon);

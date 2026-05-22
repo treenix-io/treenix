@@ -5,7 +5,7 @@
 import { isRef, type NodeData, type Ref, toStorageKeys } from '#core';
 import { OpError } from '#errors';
 import sift from 'sift';
-import { applyOps, defaultPatch, type PatchOp } from './patch';
+import { applyOps, defaultPatch, hasMutationOps, type PatchOp } from './patch';
 
 // ── Pagination ──
 
@@ -223,10 +223,11 @@ export function createMemoryTree(): Tree {
       if (!treeNode?.data) throw new OpError('NOT_FOUND', `Node not found: ${path}`);
       const copy = structuredClone(treeNode.data);
       applyOps(copy, ops);
+      if (!hasMutationOps(ops)) return;
       copy.$rev = (copy.$rev ?? 0) + 1;
       treeNode.data = copy;
     },
   };
 }
 
-export { type PatchOp, type Rfc6902Op, PatchTestError, applyOps, assertSafePatchPath, toRfc6902, fromRfc6902, defaultPatch, patchViaSet } from './patch';
+export { type PatchOp, type Rfc6902Op, PatchTestError, applyOps, assertSafePatchPath, toRfc6902, fromRfc6902, defaultPatch, hasMutationOps, patchViaSet } from './patch';

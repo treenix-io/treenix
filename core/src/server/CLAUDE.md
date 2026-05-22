@@ -1,26 +1,19 @@
 ## server
-HTTP server + tRPC + auth + mount system + store pipeline
+HTTP server + tRPC + store pipeline
 
 ### Files
-- index.ts — bootstrap: overlay(base,work) → mount → volatile → validate → subscriptions
+- server.ts — HTTP wrapper and tree pipeline composition
+- factory.ts — treenix() boot: load mods, build pipeline, deploy seeds, start services
 - trpc.ts — tRPC router, Immer drafts in execute, OCC→CONFLICT mapping
-- auth.ts — ACL, sessions, withAcl wrapper, buildClaims
-- mount.ts — withMounts walks path, resolves monts
-- mount-adapters.ts — t.mount.mongo/fs/memory/overlay/types/query (MountAdapter)
-- types-mount.ts — createTypesStore: /sys/types virtual tree from all registered types
-- validate.ts — Write-Barrier: schema validation before tree.set()
-- volatile.ts — in-memory overlay for volatile components
-- watch.ts — watchChildren, prefix watch, notify
-- sub.ts — withSubscriptions wrapper, NodeEvent emit
 - actions.ts — executeAction(tree,path,type?,key?,action,data?), createNodeHandle, serverNodeHandle; callAction deleted
+- prefab.ts — deploy registered prefab data into a tree
 - seed/ — initial tree: core.ts + domain module seeds
-- mcp.ts — MCP server: get_node, list_children, set_node, remove_node, execute
 
 ### Conventions
-- Tree pipeline: withMounts → volatile → validated → subscriptions
-- Mount = component on node, adapter via resolve($type, "mount")
+- Tree pipeline: migration → mounts → volatile → validation → ref index → cache → subscriptions
+- Mount code lives in `core/src/mount`; tree wrappers live in `core/src/tree`; auth/ACL lives in `core/src/security`; subscriptions live in `core/src/sub`.
 - ACL: GroupPerm[], p>0 allow, p=0 deny all sticky, p<0 deny bits sticky
-- Sealed registry: register() throws on duplicate (no overrides)
-- types-mount: getRegisteredTypes() — all types in /sys/types, not just schema-registered
+- Sealed registry: register() keeps the first handler unless explicitly replaced
+- mount/types: getRegisteredTypes() — all types in /sys/types, not just schema-registered
 - executeAction: type=$type for scan/verify, key=field name; no patches → skip persist
 - trpc execute: {path, type?, key?, action, data?, watch?} — NO component field (deleted)

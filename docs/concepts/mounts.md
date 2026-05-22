@@ -127,7 +127,7 @@ register(MountRedis, 'mount', async (mount, ctx) => {
 })
 ```
 
-The [Tree interface](./tree.md) is the whole contract — five methods. If your adapter implements them, it plugs in. Built-in adapters live in `engine/core/src/server/mount-adapters.ts` and make a good reference.
+The [Tree interface](./tree.md) is the whole contract — five methods. If your adapter implements them, it plugs in. Built-in adapters live in `engine/core/src/mount/adapters.ts` and make a good reference.
 
 ## Related
 

@@ -3,7 +3,7 @@
 
 import { createNode } from '@treenx/core';
 import { getCtx, registerActions } from '@treenx/core/comp';
-import { createSession, sessionPath } from '@treenx/core/server/auth';
+import { createSession, sessionPath } from '@treenx/core/security/auth';
 import { ApiTokenManager } from './types';
 
 /** Server-side registry for creating and revoking machine credentials. */

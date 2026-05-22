@@ -9,15 +9,15 @@ import { nodeHTTPRequestHandler } from '@trpc/server/adapters/node-http';
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { extname, join, resolve, sep } from 'node:path';
-import { parseSessionCookie, resolveToken } from './auth';
-import { withMounts } from './mount';
-import { withRefIndex } from './refs';
-import { type CdcRegistry, withSubscriptions } from './sub';
+import { parseSessionCookie, resolveToken } from '#security/auth';
+import { withMounts } from '#mount';
+import { withRefIndex } from '#tree/refs';
+import { type CdcRegistry, withSubscriptions } from '#sub';
 import { createTreeRouter, type TreeRouter, type TreeRouterOpts, type TrpcContext } from './trpc';
-import { withMigration } from './migrate';
-import { withValidation } from './validate';
-import { withVolatile } from './volatile';
-import { createWatchManager, type WatchManager } from './watch';
+import { withMigration } from '#tree/migration';
+import { withValidation } from '#tree/validation';
+import { withVolatile } from '#tree/volatile';
+import { createWatchManager, type WatchManager } from '#sub/watch';
 
 const log = createLogger('http');
 

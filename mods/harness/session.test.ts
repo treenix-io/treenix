@@ -3,12 +3,12 @@
 // Branching is on session.scopeRef presence — NEVER on userId-pattern.
 
 import { createMemoryTree, type Tree } from '@treenx/core/tree';
-import { withAcl } from '@treenx/core/server/auth';
+import { withAcl } from '@treenx/core/security/auth';
 import { OpError } from '@treenx/core/errors';
 import { register, R, W } from '@treenx/core';
 import { clearRegistry } from '@treenx/core/core/index.test';
 import type { ActionCtx } from '@treenx/core/server/actions';
-import type { Session } from '@treenx/core/server/auth';
+import type { Session } from '@treenx/core/security/auth';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 import { defineAgentScope } from './capability';

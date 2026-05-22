@@ -2,7 +2,7 @@ import { createNode } from '#core';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 import { createFsTree } from './fs';
 import { mapSiftQuery } from './query';
@@ -257,6 +257,37 @@ describe('FsStore', () => {
       await assert.rejects(
         () => tree.set({ $path: '/escape/secret', $type: 't.test' }),
         /symlink|traversal/i,
+      );
+    } finally {
+      await rm(outsideDir, { recursive: true, force: true });
+    }
+  });
+
+  it('blocks getChildren traversal outside root', async () => {
+    const tree = await setup();
+    const outsideDir = await mkdtemp(join(tmpdir(), 'treenix-fs-outside-'));
+    try {
+      await writeFile(join(outsideDir, 'secret.json'), '{"$type":"t.secret"}');
+
+      await assert.rejects(
+        () => tree.getChildren(`/../${basename(outsideDir)}`),
+        /traversal|escaped|root/i,
+      );
+    } finally {
+      await rm(outsideDir, { recursive: true, force: true });
+    }
+  });
+
+  it('blocks getChildren when requested parent is an escaping symlink', async () => {
+    const tree = await setup();
+    const outsideDir = await mkdtemp(join(tmpdir(), 'treenix-fs-parent-sym-'));
+    try {
+      await writeFile(join(outsideDir, 'secret.json'), '{"$type":"t.secret"}');
+      await symlink(outsideDir, join(dir, 'escape'));
+
+      await assert.rejects(
+        () => tree.getChildren('/escape'),
+        /symlink|escaped|root/i,
       );
     } finally {
       await rm(outsideDir, { recursive: true, force: true });

@@ -2,12 +2,13 @@ import type { NodeData } from '#core';
 import { register } from '#core';
 import { clearRegistry } from '#core/index.test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { registerJsonCodec } from './json-codec';
 import { createRawFsTree } from './mimefs';
+import { mapSiftQuery } from './query';
 
 describe('RawFsStore', () => {
   let dir: string;
@@ -62,6 +63,22 @@ describe('RawFsStore', () => {
     assert.equal(byPath['/sub'], 'dir');
   });
 
+  it('getChildren applies query filter before pagination', async () => {
+    const tree = await setup();
+    await writeFile(join(dir, 'a.txt'), 'text');
+    await writeFile(join(dir, 'b.txt'), 'text');
+    await writeFile(join(dir, 'data.json'), JSON.stringify({ $type: 'custom.data', status: 'open' }));
+
+    const page = await tree.getChildren('/', {
+      query: mapSiftQuery({ $type: 'text/plain' }) as Record<string, unknown>,
+      limit: 1,
+      offset: 1,
+    });
+
+    assert.equal(page.total, 2);
+    assert.deepEqual(page.items.map(n => n.$path), ['/b.txt']);
+  });
+
   it('getChildren respects depth', async () => {
     const tree = await setup();
     await mkdir(join(dir, 'a'));
@@ -83,6 +100,40 @@ describe('RawFsStore', () => {
     const { items } = await tree.getChildren('/');
     assert.equal(items.length, 1);
     assert.equal(items[0].$path, '/visible.txt');
+  });
+
+  it('skips symlinked files that point outside root', async () => {
+    const tree = await setup();
+    const outsideDir = await mkdtemp(join(tmpdir(), 'treenix-rawfs-outside-file-'));
+    try {
+      await writeFile(join(outsideDir, 'secret.txt'), 'secret');
+      await writeFile(join(dir, 'visible.txt'), 'visible');
+      await symlink(join(outsideDir, 'secret.txt'), join(dir, 'link.txt'));
+
+      const { items } = await tree.getChildren('/');
+
+      assert.deepEqual(items.map(n => n.$path), ['/visible.txt']);
+    } finally {
+      await rm(outsideDir, { recursive: true, force: true });
+    }
+  });
+
+  it('skips symlinked directories that point outside root', async () => {
+    const tree = await setup();
+    const outsideDir = await mkdtemp(join(tmpdir(), 'treenix-rawfs-outside-dir-'));
+    try {
+      await writeFile(join(outsideDir, 'secret.txt'), 'secret');
+      await mkdir(join(dir, 'real'));
+      await writeFile(join(dir, 'real', 'visible.txt'), 'visible');
+      await symlink(outsideDir, join(dir, 'linked'));
+
+      const { items } = await tree.getChildren('/', { depth: 2 });
+
+      const paths = items.map(n => n.$path).sort();
+      assert.deepEqual(paths, ['/real', '/real/visible.txt']);
+    } finally {
+      await rm(outsideDir, { recursive: true, force: true });
+    }
   });
 
   it('mime type detection', async () => {

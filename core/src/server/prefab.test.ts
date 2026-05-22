@@ -1,16 +1,16 @@
 import { createNode, type NodeData } from '#core';
 import { clearPrefabs, getModPrefabs, getPrefab, getRegisteredMods, getSeedPrefabs, registerPrefab } from '#mod/prefab';
-import '#mods/treenix/prefab-type';
+import '#mod/prefab-type';
 import { loadSchemasFromDir } from '#schema/load';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-loadSchemasFromDir(join(dirname(fileURLToPath(import.meta.url)), '../mods/treenix/schemas'));
+loadSchemasFromDir(join(dirname(fileURLToPath(import.meta.url)), '../mod/schemas'));
 import { createMemoryTree, type Tree } from '#tree';
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { executeAction } from './actions';
-import { createModsTree } from './mods-mount';
+import { createModsTree } from '#mount/mods';
 import { deployByKey, deployPrefab, deploySeedPrefabs } from './prefab';
 
 describe('Prefab registry', () => {
@@ -241,6 +241,46 @@ describe('deployPrefab', () => {
     );
   });
 
+  it('rejects prefixed source path that only ends like a prefab path', async () => {
+    registerPrefab('test', 'basic', [
+      { $path: 'x', $type: 'dir' } as NodeData,
+    ]);
+
+    await assert.rejects(
+      () => deployPrefab(tree, '/prefix/sys/mods/test/prefabs/basic', '/app'),
+      (e: Error) => e.message.includes('Invalid prefab path'),
+    );
+  });
+
+  it('rejects traversal in source path', async () => {
+    await assert.rejects(
+      () => deployPrefab(tree, '/sys/mods/../prefabs/x', '/app'),
+      (e: Error) => e.message.includes('Invalid prefab source'),
+    );
+  });
+
+  it('rejects traversal in target path', async () => {
+    registerPrefab('test', 'safe-target', [
+      { $path: 'x', $type: 'dir' } as NodeData,
+    ]);
+
+    await assert.rejects(
+      () => deployPrefab(tree, '/sys/mods/test/prefabs/safe-target', '/../outside'),
+      (e: Error) => e.message.includes('Invalid prefab target'),
+    );
+  });
+
+  it('rejects traversal in relative prefab node path', async () => {
+    registerPrefab('test', 'bad-node', [
+      { $path: '../outside', $type: 'dir' } as NodeData,
+    ]);
+
+    await assert.rejects(
+      () => deployPrefab(tree, '/sys/mods/test/prefabs/bad-node', '/app'),
+      (e: Error) => e.message.includes('Invalid prefab node path'),
+    );
+  });
+
   it('throws on missing prefab', async () => {
     await assert.rejects(
       () => deployPrefab(tree, '/sys/mods/nope/prefabs/nope', '/app'),
@@ -436,7 +476,7 @@ describe('t.prefab deploy action', () => {
       { $path: 'contact', $type: 'cafe.contact' } as NodeData,
     ]);
 
-    const { Prefab } = await import('#mods/treenix/prefab-type');
+    const { Prefab } = await import('#mod/prefab-type');
     await tree.set(createNode('/sys/mods/cafe/prefabs/seed', Prefab, { mod: 'cafe', name: 'seed' }));
 
     await executeAction(tree, '/sys/mods/cafe/prefabs/seed', 't.prefab', undefined, 'deploy', {
@@ -452,7 +492,7 @@ describe('t.prefab deploy action', () => {
       { $path: 'menu', $type: 'dir' } as NodeData,
     ]);
 
-    const { Prefab } = await import('#mods/treenix/prefab-type');
+    const { Prefab } = await import('#mod/prefab-type');
     await tree.set(createNode('/sys/mods/cafe/prefabs/seed', Prefab, { mod: 'cafe', name: 'seed' }));
 
     const r1 = await executeAction(tree, '/sys/mods/cafe/prefabs/seed', 't.prefab', undefined, 'deploy', {
