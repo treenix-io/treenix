@@ -95,6 +95,15 @@ export function withSubscriptions(
     delta[kind].push(vp);
   }
 
+  function routeDelta(routes: Map<string, MutableVpDelta>, userId: string): MutableVpDelta {
+    let delta = routes.get(userId);
+    if (!delta) {
+      delta = { addVps: [], rmVps: [], stayVps: [] };
+      routes.set(userId, delta);
+    }
+    return delta;
+  }
+
   async function claimsFor(q: QueryEntry, userId: string): Promise<string[]> {
     const user = q.users.get(userId)!;
     if (user.claims) return user.claims;
@@ -140,9 +149,22 @@ export function withSubscriptions(
       if (hasLegacyRawUser) {
         const wasIn = oldSift ? q.test(oldSift) : false;
         const isIn = newSift ? q.test(newSift) : false;
-        if (!wasIn && isIn) addVps.push(q.vp);
-        else if (wasIn && !isIn) rmVps.push(q.vp);
-        else if (wasIn && isIn) stayVps.push(q.vp);
+        let kind: keyof MutableVpDelta | null = null;
+        if (!wasIn && isIn) {
+          addVps.push(q.vp);
+          kind = 'addVps';
+        } else if (wasIn && !isIn) {
+          rmVps.push(q.vp);
+          kind = 'rmVps';
+        } else if (wasIn && isIn) {
+          stayVps.push(q.vp);
+          kind = 'stayVps';
+        }
+        if (kind) {
+          for (const [userId, user] of q.users) {
+            if (user.claims === undefined) addDelta(routeDelta(routes, userId), kind, q.vp);
+          }
+        }
       }
 
       for (const userId of q.users.keys()) {
@@ -155,11 +177,7 @@ export function withSubscriptions(
         const isIn = newVisible ? q.test(newVisible) : false;
         if (!wasIn && !isIn) continue;
 
-        let delta = routes.get(userId) as MutableVpDelta | undefined;
-        if (!delta) {
-          delta = { addVps: [], rmVps: [], stayVps: [] };
-          routes.set(userId, delta);
-        }
+        const delta = routeDelta(routes, userId);
         if (!wasIn && isIn) addDelta(delta, 'addVps', q.vp);
         else if (wasIn && !isIn) addDelta(delta, 'rmVps', q.vp);
         else if (wasIn && isIn) addDelta(delta, 'stayVps', q.vp);

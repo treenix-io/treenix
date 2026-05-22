@@ -1,8 +1,9 @@
-import { createNode } from '#core';
+import { A, createNode, R } from '#core';
 import { createMemoryTree } from '#tree';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { type NodeEvent, withSubscriptions } from './index';
+import { createWatchManager } from './watch';
 
 describe('Subscriptions', () => {
   it('emits on set (children)', async () => {
@@ -118,5 +119,44 @@ describe('Subscriptions', () => {
     assert.ok(event);
     if (event.type !== 'set') throw new Error('expected set event');
     assert.deepEqual(event.addVps, ['/views/status']);
+  });
+
+  it('routes query watches per user while preserving legacy raw watchers', async () => {
+    const watcher = createWatchManager();
+    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => watcher.notify(e));
+    const legacyEvents: NodeEvent[] = [];
+    const memberEvents: NodeEvent[] = [];
+    const anonEvents: NodeEvent[] = [];
+
+    watcher.connect('legacy-conn', 'legacy', e => legacyEvents.push(e));
+    watcher.connect('member-conn', 'member', e => memberEvents.push(e));
+    watcher.connect('anon-conn', 'anon', e => anonEvents.push(e));
+    watcher.watch('legacy', ['/views/open'], { children: true });
+    watcher.watch('member', ['/views/open'], { children: true });
+    watcher.watch('anon', ['/views/open'], { children: true });
+
+    await tree.set({ ...createNode('/', 'root'), $acl: [{ g: 'public', p: R | A }] });
+    await tree.set({ ...createNode('/items', 'dir'), $acl: [{ g: 'public', p: R }] });
+
+    cdc.watchQuery('/views/open', '/items', { status: 'open' }, 'legacy');
+    cdc.watchQuery('/views/open', '/items', { status: 'open' }, 'member', ['authenticated', 'public']);
+    cdc.watchQuery('/views/open', '/items', { status: 'open' }, 'anon', ['public']);
+
+    await tree.set({
+      ...createNode('/items/1', 'item'),
+      status: 'open',
+      $acl: [{ g: 'public', p: 0 }, { g: 'authenticated', p: R }],
+    });
+
+    assert.equal(legacyEvents.length, 1);
+    assert.equal(memberEvents.length, 1);
+    assert.equal(anonEvents.length, 0);
+    assert.equal(legacyEvents[0].type, 'set');
+    assert.equal(memberEvents[0].type, 'set');
+    if (legacyEvents[0].type !== 'set' || memberEvents[0].type !== 'set') {
+      throw new Error('expected set events');
+    }
+    assert.deepEqual(legacyEvents[0].addVps, ['/views/open']);
+    assert.deepEqual(memberEvents[0].addVps, ['/views/open']);
   });
 });
