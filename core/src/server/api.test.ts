@@ -375,6 +375,18 @@ describe('tRPC API integration', () => {
   // ── CDC Matrix ──
 
   describe('CDC Matrix', () => {
+    const aliceClaims = ['public', 'authenticated', 'u:alice'];
+
+    function connectAliceEvents(connId: string): DataEvent[] {
+      const pushed: DataEvent[] = [];
+      watcher.connect(
+        connId,
+        'alice',
+        createFilteredPush(rawStore, 'alice', aliceClaims, e => pushed.push(e as DataEvent)),
+      );
+      return pushed;
+    }
+
     // Use dot notation for sift: 'status.status' matches nested component field
     beforeEach(async () => {
       await caller.set({ node: { $path: '/orders', $type: 'folder' } });
@@ -396,6 +408,26 @@ describe('tRPC API integration', () => {
       assert.equal(newOrders.items.length, 1);
       assert.equal(kitchen.items.length, 0);
       assert.equal('queryMount' in newOrders, false);
+    });
+
+    it('query mount items keep canonical source paths', async () => {
+      const newOrders = await caller.getChildren({ path: '/orders/new' });
+
+      assert.equal(newOrders.items.length, 1);
+      assert.equal(newOrders.items[0].$path, '/orders/data/1');
+      assert.equal(newOrders.items[0].$path.startsWith('/orders/new/'), false);
+    });
+
+    it('executes actions using a source path discovered through query mount', async () => {
+      const newOrders = await caller.getChildren({ path: '/orders/new' });
+      const discoveredPath = newOrders.items[0].$path;
+
+      await caller.execute({ path: discoveredPath, key: 'status', action: 'cook' });
+
+      assert.equal((await caller.getChildren({ path: '/orders/new' })).items.length, 0);
+      const kitchen = await caller.getChildren({ path: '/orders/kitchen' });
+      assert.equal(kitchen.items.length, 1);
+      assert.equal(kitchen.items[0].$path, discoveredPath);
     });
 
     it('action moves node between virtual folders', async () => {
@@ -420,6 +452,46 @@ describe('tRPC API integration', () => {
       assert.ok(ev);
       if ('addVps' in ev!) assert.ok(ev.addVps?.includes('/orders/kitchen'));
       if ('rmVps' in ev!) assert.ok(ev.rmVps?.includes('/orders/new'));
+    });
+
+    it('query watcher receives membership transition with source event path and legacy VP fields', async () => {
+      const pushed = connectAliceEvents('alice:query-transition');
+      await authedCaller.getChildren({ path: '/orders/new', watchNew: true });
+      await authedCaller.getChildren({ path: '/orders/kitchen', watchNew: true });
+
+      await caller.execute({ path: '/orders/data/1', key: 'status', action: 'cook' });
+      await new Promise(resolve => setTimeout(resolve, 0));
+
+      const ev = pushed.find(e => e.path === '/orders/data/1');
+      assert.ok(ev);
+      assert.equal(ev.type, 'patch');
+      assert.equal(ev.path, '/orders/data/1');
+      assert.ok(ev.addVps?.includes('/orders/kitchen'));
+      assert.ok(ev.rmVps?.includes('/orders/new'));
+      assert.equal(ev.path.startsWith('/orders/new/'), false);
+      assert.equal(ev.path.startsWith('/orders/kitchen/'), false);
+    });
+
+    it('query watcher receives patch for item that stays in query mount', async () => {
+      const pushed = connectAliceEvents('alice:query-stay');
+      await authedCaller.getChildren({ path: '/orders/new', watchNew: true });
+
+      await caller.set({
+        node: {
+          $path: '/orders/data/1',
+          $type: 'page',
+          status: { $type: 'order.status', status: 'new' },
+          note: 'updated while staying in /orders/new',
+        },
+      });
+      await new Promise(resolve => setTimeout(resolve, 0));
+
+      const ev = pushed.find(e => e.path === '/orders/data/1');
+      assert.ok(ev);
+      assert.equal(ev.type, 'patch');
+      assert.equal(ev.path, '/orders/data/1');
+      assert.ok(ev.stayVps?.includes('/orders/new'));
+      assert.equal(ev.path.startsWith('/orders/new/'), false);
     });
 
     it('query mount does not match hidden component fields', async () => {
