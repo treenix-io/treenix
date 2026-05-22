@@ -155,6 +155,31 @@ export function withSubscriptions(
     return mapNodeForSift(visible);
   }
 
+  /** Compute invalidate-vp set for a mount/config write. Targets handles
+   *  whose vp IS the mutated path — the mount node is being rewritten, so
+   *  the plan's `viewWhere`/`source` may have shifted under the watcher.
+   *  Per MVP: targeted, not a global storm. */
+  function invalidateVpsForConfigChange(path: string): { vps: string[]; routes: Map<string, MutableVpDelta> } {
+    const vps: string[] = [];
+    const routes = new Map<string, MutableVpDelta>();
+    for (const q of activeQueries) {
+      if (q.vp !== path) continue;
+      vps.push(q.vp);
+      for (const userId of q.users.keys()) {
+        addDelta(routeDelta(routes, userId), 'invalidateVps', q.vp);
+      }
+    }
+    return { vps, routes };
+  }
+
+  /** True if the node carries a mount component that would steer this path
+   *  to a different sub-tree. Used to detect config writes. */
+  function hasMountComponent(node: NodeData | null | undefined): boolean {
+    if (!node) return false;
+    const m = node['mount'];
+    return !!m && typeof m === 'object' && (m as { $type?: string }).$type !== undefined;
+  }
+
   /** Compute invalidate-vp set for an ACL change at `path`. ACL inherits
    *  DOWN the tree, so an ACL change at P affects every descendant of P
    *  (incl. P itself). For a depth-1 query view rooted at `source`, the
@@ -317,6 +342,12 @@ export function withSubscriptions(
       if (isAclChange(oldNode ?? null, node)) {
         cdc = mergeInvalidate(cdc, await invalidateVpsForAclChange(node.$path));
       }
+      // Config write: either side carries a mount component. The mount node
+      // itself is being rewritten, so handles registered against this vp
+      // must re-fetch.
+      if (hasMountComponent(oldNode) || hasMountComponent(node)) {
+        cdc = mergeInvalidate(cdc, invalidateVpsForConfigChange(node.$path));
+      }
 
       const { $path, ...body } = node;
 
@@ -340,6 +371,10 @@ export function withSubscriptions(
       if (oldNode && (oldNode.$acl || oldNode.$owner) && cdc) {
         cdc = mergeInvalidate(cdc, await invalidateVpsForAclChange(path));
       }
+      // Removing a mount node: handles bound to this vp must re-fetch.
+      if (hasMountComponent(oldNode) && cdc) {
+        cdc = mergeInvalidate(cdc, invalidateVpsForConfigChange(path));
+      }
       const result = await tree.remove(path, ctx);
 
       if (result && oldNode) {
@@ -359,6 +394,16 @@ export function withSubscriptions(
       // diff shows a $acl change (covers full-node replace via patch).
       if (ops.some(isAclOp) || isAclChange(oldNode ?? null, newNode ?? null)) {
         cdc = mergeInvalidate(cdc, await invalidateVpsForAclChange(path));
+      }
+      // Config write detection on patch: either node had/has a mount, or
+      // an op touched the `mount` field directly (covers add/replace of
+      // the component on a previously-non-mount node).
+      const opsTouchedMount = ops.some(op => {
+        const p = op[1];
+        return p === 'mount' || p.startsWith('mount.');
+      });
+      if (opsTouchedMount || hasMountComponent(oldNode) || hasMountComponent(newNode)) {
+        cdc = mergeInvalidate(cdc, invalidateVpsForConfigChange(path));
       }
 
       // Emit only mutation ops (filter out test ops)

@@ -270,6 +270,72 @@ describe('ACL change invalidation (Stage 6)', () => {
     assert.deepEqual(ev.invalidateVps, ['/views/open']);
   });
 
+  it('mount config write at vp path → invalidate that vp', async () => {
+    const events: NodeEvent[] = [];
+    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => events.push(e));
+
+    await tree.set({
+      $path: '/views/orders',
+      $type: 'folder',
+      mount: { $type: 't.mount.query', source: '/orders', match: { status: 'new' } },
+    });
+    cdc.watchQuery('/views/orders', '/orders', { status: 'new' }, 'u1');
+    events.length = 0;
+
+    // Rewrite the mount component — match shifts from 'new' to 'pending'.
+    await tree.set({
+      $path: '/views/orders',
+      $type: 'folder',
+      mount: { $type: 't.mount.query', source: '/orders', match: { status: 'pending' } },
+    });
+
+    const ev = events.find(e =>
+      (e.type === 'set' || e.type === 'patch') && e.path === '/views/orders');
+    assert.ok(ev);
+    const invalidateVps = ev.type === 'set' ? ev.invalidateVps : (ev as any).invalidateVps;
+    assert.deepEqual(invalidateVps, ['/views/orders']);
+  });
+
+  it('patch op touching mount field emits invalidateVps for that vp', async () => {
+    const events: NodeEvent[] = [];
+    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => events.push(e));
+
+    await tree.set({
+      $path: '/views/orders',
+      $type: 'folder',
+      mount: { $type: 't.mount.query', source: '/orders', match: {} },
+    });
+    cdc.watchQuery('/views/orders', '/orders', {}, 'u1');
+    events.length = 0;
+
+    await tree.patch('/views/orders', [['r', 'mount.source', '/archived-orders']]);
+
+    const ev = events.find(e => e.type === 'patch' && e.path === '/views/orders');
+    assert.ok(ev);
+    if (ev.type !== 'patch') throw new Error('expected patch event');
+    assert.deepEqual(ev.invalidateVps, ['/views/orders']);
+  });
+
+  it('removing a mount node emits invalidateVps for that vp', async () => {
+    const events: NodeEvent[] = [];
+    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => events.push(e));
+
+    await tree.set({
+      $path: '/views/orders',
+      $type: 'folder',
+      mount: { $type: 't.mount.query', source: '/orders', match: {} },
+    });
+    cdc.watchQuery('/views/orders', '/orders', {}, 'u1');
+    events.length = 0;
+
+    await tree.remove('/views/orders');
+
+    const ev = events.find(e => e.type === 'remove' && e.path === '/views/orders');
+    assert.ok(ev);
+    if (ev.type !== 'remove') throw new Error('expected remove event');
+    assert.deepEqual(ev.invalidateVps, ['/views/orders']);
+  });
+
   it('routes invalidateVps to per-user CDC routes', async () => {
     const watcher = createWatchManager();
     const { tree, cdc } = withSubscriptions(createMemoryTree(), e => watcher.notify(e));
