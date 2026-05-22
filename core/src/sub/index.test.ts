@@ -160,3 +160,147 @@ describe('Subscriptions', () => {
     assert.deepEqual(memberEvents[0].addVps, ['/views/open']);
   });
 });
+
+describe('ACL change invalidation (Stage 6)', () => {
+  it('$acl change on the query source path → invalidateVps', async () => {
+    const events: NodeEvent[] = [];
+    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => events.push(e));
+
+    await tree.set(createNode('/items', 'dir'));
+    cdc.watchQuery('/views/open', '/items', { status: 'open' }, 'u1');
+    events.length = 0;
+
+    await tree.set({
+      ...createNode('/items', 'dir'),
+      $acl: [{ g: 'authenticated', p: R }],
+    });
+
+    const aclEvent = events.find(e =>
+      (e.type === 'set' || e.type === 'patch') && e.path === '/items');
+    assert.ok(aclEvent);
+    assert.deepEqual(
+      aclEvent.type === 'set' ? aclEvent.invalidateVps : (aclEvent as any).invalidateVps,
+      ['/views/open'],
+    );
+  });
+
+  it('$acl change on a direct child of the query source → invalidateVps', async () => {
+    const events: NodeEvent[] = [];
+    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => events.push(e));
+
+    await tree.set(createNode('/items', 'dir'));
+    cdc.watchQuery('/views/open', '/items', { status: 'open' }, 'u1');
+    events.length = 0;
+
+    await tree.set({ ...createNode('/items/1', 'item'), status: 'open', $acl: [{ g: 'authenticated', p: R }] });
+
+    const ev = events.find(e =>
+      (e.type === 'set' || e.type === 'patch') && e.path === '/items/1');
+    assert.ok(ev);
+    const invalidateVps = ev.type === 'set' ? ev.invalidateVps : (ev as any).invalidateVps;
+    assert.deepEqual(invalidateVps, ['/views/open']);
+  });
+
+  it('$acl change on an ancestor of the query source → invalidateVps', async () => {
+    const events: NodeEvent[] = [];
+    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => events.push(e));
+
+    await tree.set(createNode('/a', 'dir'));
+    await tree.set(createNode('/a/items', 'dir'));
+    cdc.watchQuery('/views/under-a', '/a/items', {}, 'u1');
+    events.length = 0;
+
+    await tree.set({ ...createNode('/a', 'dir'), $acl: [{ g: 'authenticated', p: R }] });
+
+    const ev = events.find(e =>
+      (e.type === 'set' || e.type === 'patch') && e.path === '/a');
+    assert.ok(ev);
+    const invalidateVps = ev.type === 'set' ? ev.invalidateVps : (ev as any).invalidateVps;
+    assert.deepEqual(invalidateVps, ['/views/under-a']);
+  });
+
+  it('data-only mutation does NOT produce invalidateVps', async () => {
+    const events: NodeEvent[] = [];
+    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => events.push(e));
+
+    await tree.set(createNode('/items', 'dir'));
+    cdc.watchQuery('/views/open', '/items', { status: 'open' }, 'u1');
+    events.length = 0;
+
+    await tree.set({ ...createNode('/items/1', 'item'), status: 'open' });
+
+    const ev = events.find(e =>
+      (e.type === 'set' || e.type === 'patch') && e.path === '/items/1');
+    assert.ok(ev);
+    assert.equal(
+      ev.type === 'set' ? ev.invalidateVps : (ev as any).invalidateVps,
+      undefined,
+    );
+  });
+
+  it('$owner change emits invalidateVps just like $acl change', async () => {
+    const events: NodeEvent[] = [];
+    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => events.push(e));
+
+    await tree.set(createNode('/items', 'dir'));
+    cdc.watchQuery('/views/open', '/items', {}, 'u1');
+    events.length = 0;
+
+    await tree.set({ ...createNode('/items', 'dir'), $owner: 'alice' });
+
+    const ev = events.find(e =>
+      (e.type === 'set' || e.type === 'patch') && e.path === '/items');
+    assert.ok(ev);
+    const invalidateVps = ev.type === 'set' ? ev.invalidateVps : (ev as any).invalidateVps;
+    assert.deepEqual(invalidateVps, ['/views/open']);
+  });
+
+  it('patch op touching $acl emits invalidateVps', async () => {
+    const events: NodeEvent[] = [];
+    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => events.push(e));
+
+    await tree.set(createNode('/items', 'dir'));
+    cdc.watchQuery('/views/open', '/items', {}, 'u1');
+
+    await tree.patch('/items', [['r', '$acl', [{ g: 'authenticated', p: R }]]]);
+
+    const ev = events.find(e => e.type === 'patch' && e.path === '/items');
+    assert.ok(ev);
+    if (ev.type !== 'patch') throw new Error('expected patch event');
+    assert.deepEqual(ev.invalidateVps, ['/views/open']);
+  });
+
+  it('routes invalidateVps to per-user CDC routes', async () => {
+    const watcher = createWatchManager();
+    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => watcher.notify(e));
+    const aliceEvents: NodeEvent[] = [];
+    const bobEvents: NodeEvent[] = [];
+
+    watcher.connect('alice-conn', 'alice', e => aliceEvents.push(e));
+    watcher.connect('bob-conn', 'bob', e => bobEvents.push(e));
+    watcher.watch('alice', ['/views/open'], { children: true });
+    watcher.watch('bob', ['/views/closed'], { children: true });
+
+    await tree.set({ ...createNode('/', 'root'), $acl: [{ g: 'public', p: R | A }] });
+    await tree.set({ ...createNode('/items', 'dir'), $acl: [{ g: 'public', p: R }] });
+
+    cdc.watchQuery('/views/open', '/items', { status: 'open' }, 'alice', ['public']);
+    cdc.watchQuery('/views/closed', '/items', { status: 'closed' }, 'bob', ['public']);
+
+    // ACL change on /items → both alice and bob should be invalidated
+    await tree.set({ ...createNode('/items', 'dir'), $acl: [{ g: 'authenticated', p: R }] });
+
+    const aliceEv = aliceEvents.find(e =>
+      (e.type === 'set' || e.type === 'patch') && e.path === '/items');
+    const bobEv = bobEvents.find(e =>
+      (e.type === 'set' || e.type === 'patch') && e.path === '/items');
+    assert.ok(aliceEv, 'alice receives invalidate event for /items ACL change');
+    assert.ok(bobEv, 'bob receives invalidate event for /items ACL change');
+    const aliceVps = aliceEv.type === 'set' ? aliceEv.invalidateVps : (aliceEv as any).invalidateVps;
+    const bobVps = bobEv.type === 'set' ? bobEv.invalidateVps : (bobEv as any).invalidateVps;
+    // Global event lists every invalidated vp; per-user filtering is the
+    // routing decision (who gets delivered), not field-level filtering.
+    assert.ok(aliceVps?.includes('/views/open'));
+    assert.ok(bobVps?.includes('/views/closed'));
+  });
+});

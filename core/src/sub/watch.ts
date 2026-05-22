@@ -109,6 +109,7 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
       ...(delta.addVps ?? []),
       ...(delta.rmVps ?? []),
       ...(delta.stayVps ?? []),
+      ...(delta.invalidateVps ?? []),
     ];
   }
 
@@ -256,6 +257,7 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
           ...('addVps' in event && event.addVps ? event.addVps : []),
           ...(event.rmVps || []),
           ...('stayVps' in event && event.stayVps ? event.stayVps : []),
+          ...('invalidateVps' in event && event.invalidateVps ? event.invalidateVps : []),
         ];
         for (const vp of vps) {
           const vpWatchers = prefixToUsers.get(vp);

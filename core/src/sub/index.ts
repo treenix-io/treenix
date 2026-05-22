@@ -15,12 +15,16 @@ const { compare } = fjp;
 // ── Event types ──
 
 export type NodeEvent =
-  | { type: 'set'; path: string; node: Omit<NodeData, '$path'>; addVps?: string[]; rmVps?: string[]; stayVps?: string[] }
-  | { type: 'patch'; path: string; patches: Operation[]; rev?: number; addVps?: string[]; rmVps?: string[]; stayVps?: string[] }
-  | { type: 'remove'; path: string; rmVps?: string[] }
+  | { type: 'set'; path: string; node: Omit<NodeData, '$path'>; addVps?: string[]; rmVps?: string[]; stayVps?: string[]; invalidateVps?: string[] }
+  | { type: 'patch'; path: string; patches: Operation[]; rev?: number; addVps?: string[]; rmVps?: string[]; stayVps?: string[]; invalidateVps?: string[] }
+  | { type: 'remove'; path: string; rmVps?: string[]; invalidateVps?: string[] }
   | { type: 'reconnect'; preserved: boolean };
 
-export type VpDelta = { addVps?: string[]; rmVps?: string[]; stayVps?: string[] };
+// invalidateVps: virtual paths whose visibility/membership may have shifted
+// due to an ACL or config change. Client should re-fetch the listing. The
+// runtime cannot exact-diff these — unlike addVps/rmVps which come from a
+// data mutation on a direct child of the query source.
+export type VpDelta = { addVps?: string[]; rmVps?: string[]; stayVps?: string[]; invalidateVps?: string[] };
 export const CDC_ROUTES: unique symbol = Symbol('treenix.cdcRoutes');
 export type RoutedNodeEvent = NodeEvent & { [CDC_ROUTES]?: Map<string, VpDelta> };
 
@@ -30,7 +34,33 @@ function cleanEvent<T extends NodeEvent>(event: T): T {
   if ('addVps' in e && e.addVps && e.addVps.length === 0) delete e.addVps;
   if ('rmVps' in e && e.rmVps && e.rmVps.length === 0) delete e.rmVps;
   if ('stayVps' in e && e.stayVps && e.stayVps.length === 0) delete e.stayVps;
+  if ('invalidateVps' in e && e.invalidateVps && e.invalidateVps.length === 0) delete e.invalidateVps;
   return e;
+}
+
+// ── ACL/config mutation detection ──
+// Stage-6 invalidation gate: ACL or config changes can shift query
+// membership in ways the exact-diff path can't reliably reconstruct
+// (e.g. $acl change makes a previously-hidden node visible to a watcher).
+// Detect here so callers can route an `invalidateVps` to affected queries.
+
+function isAclChange(oldNode: NodeData | null, newNode: NodeData | null): boolean {
+  // $acl array or $owner string differ → ACL change. Stable stringify since
+  // arrays may serialise different orderings of the same logical content.
+  const oldAcl = oldNode?.$acl;
+  const newAcl = newNode?.$acl;
+  const oldOwner = oldNode?.$owner;
+  const newOwner = newNode?.$owner;
+  if (oldOwner !== newOwner) return true;
+  if (!oldAcl && !newAcl) return false;
+  return JSON.stringify(oldAcl) !== JSON.stringify(newAcl);
+}
+
+function isAclOp(op: PatchOp): boolean {
+  // Any op touching $acl or $owner — including nested paths like $acl.0.p.
+  const path = op[1];
+  return path === '$acl' || path === '$owner'
+    || path.startsWith('$acl.') || path.startsWith('$owner.');
 }
 
 export type Listener = (event: NodeEvent) => void;
@@ -46,7 +76,7 @@ type QueryEntry = {
   users: Map<string, { claims: string[] | null | undefined; dynamicClaims?: string[]; dynamicAt?: number }>;
 };
 
-type MutableVpDelta = { addVps: string[]; rmVps: string[]; stayVps: string[] };
+type MutableVpDelta = { addVps: string[]; rmVps: string[]; stayVps: string[]; invalidateVps: string[] };
 
 export type CdcRegistry = {
   subscribe(path: string, listener: Listener, opts?: SubscribeOpts): () => void;
@@ -98,7 +128,7 @@ export function withSubscriptions(
   function routeDelta(routes: Map<string, MutableVpDelta>, userId: string): MutableVpDelta {
     let delta = routes.get(userId);
     if (!delta) {
-      delta = { addVps: [], rmVps: [], stayVps: [] };
+      delta = { addVps: [], rmVps: [], stayVps: [], invalidateVps: [] };
       routes.set(userId, delta);
     }
     return delta;
@@ -123,6 +153,51 @@ export function withSubscriptions(
       delete visible.$owner;
     }
     return mapNodeForSift(visible);
+  }
+
+  /** Compute invalidate-vp set for an ACL change at `path`. ACL inherits
+   *  DOWN the tree, so an ACL change at P affects every descendant of P
+   *  (incl. P itself). For a depth-1 query view rooted at `source`, the
+   *  set of affected paths is:
+   *    1. P is at-or-above source (source ∈ {P, descendants of P})
+   *    2. P is a direct child of source (P's ACL was the membership gate)
+   *  Per-user filter: legacy raw watchers (no claims) always get the
+   *  invalidate; modern watchers get it only when they have R on P —
+   *  otherwise the invalidate itself would leak existence. */
+  async function invalidateVpsForAclChange(path: string): Promise<{ vps: string[]; routes: Map<string, MutableVpDelta> }> {
+    const vps: string[] = [];
+    const routes = new Map<string, MutableVpDelta>();
+    if (activeQueries.length === 0) return { vps, routes };
+
+    function isAtOrAbove(p: string, candidate: string): boolean {
+      // candidate is `p` itself or a descendant — i.e., `p` is on the
+      // ancestor chain of candidate.
+      if (p === '/' || p === candidate) return true;
+      return candidate.startsWith(p + '/');
+    }
+    function isDirectChild(parent: string, candidate: string): boolean {
+      const prefix = parent === '/' ? '/' : parent + '/';
+      if (!candidate.startsWith(prefix)) return false;
+      const rest = candidate.slice(prefix.length);
+      return rest.length > 0 && !rest.includes('/');
+    }
+
+    for (const q of activeQueries) {
+      const affects = isAtOrAbove(path, q.source) || isDirectChild(q.source, path);
+      if (!affects) continue;
+      let anyUserAffected = false;
+      for (const [userId, user] of q.users) {
+        if (user.claims !== undefined) {
+          const claims = await claimsFor(q, userId);
+          const perm = await resolvePermission(tree, path, userId, claims);
+          if (!(perm & R)) continue;
+        }
+        addDelta(routeDelta(routes, userId), 'invalidateVps', q.vp);
+        anyUserAffected = true;
+      }
+      if (anyUserAffected) vps.push(q.vp);
+    }
+    return { vps, routes };
   }
 
   /** Evaluate CDC matrix for a direct child of a query source */
@@ -190,11 +265,36 @@ export function withSubscriptions(
       if (delta.addVps.length > 0) out.addVps = delta.addVps;
       if (delta.rmVps.length > 0) out.rmVps = delta.rmVps;
       if (delta.stayVps.length > 0) out.stayVps = delta.stayVps;
-      if (out.addVps || out.rmVps || out.stayVps) secureRoutes.set(userId, out);
+      if (delta.invalidateVps.length > 0) out.invalidateVps = delta.invalidateVps;
+      if (out.addVps || out.rmVps || out.stayVps || out.invalidateVps) secureRoutes.set(userId, out);
     }
     const result: VpDelta & { [CDC_ROUTES]?: Map<string, VpDelta> } = { addVps, rmVps, stayVps };
     if (secureRoutes.size > 0) result[CDC_ROUTES] = secureRoutes;
     return result;
+  }
+
+  /** Merge an ACL/config invalidation into the existing cdcEval routes.
+   *  Used by set/patch/remove when the mutation touched $acl/$owner — the
+   *  same affected query may also have data-diff entries from cdcEval, and
+   *  invalidate takes precedence on the client (re-fetch supersedes diff). */
+  function mergeInvalidate(
+    base: VpDelta & { [CDC_ROUTES]?: Map<string, VpDelta> },
+    invalidate: { vps: string[]; routes: Map<string, MutableVpDelta> },
+  ): VpDelta & { [CDC_ROUTES]?: Map<string, VpDelta> } {
+    if (invalidate.vps.length === 0) return base;
+    const merged: VpDelta & { [CDC_ROUTES]?: Map<string, VpDelta> } = { ...base };
+    merged.invalidateVps = [...(base.invalidateVps ?? []), ...invalidate.vps];
+    const existingRoutes = base[CDC_ROUTES] ?? new Map<string, VpDelta>();
+    const newRoutes = new Map(existingRoutes);
+    for (const [userId, delta] of invalidate.routes) {
+      const prev = newRoutes.get(userId) ?? {};
+      newRoutes.set(userId, {
+        ...prev,
+        invalidateVps: [...(prev.invalidateVps ?? []), ...delta.invalidateVps],
+      });
+    }
+    if (newRoutes.size > 0) merged[CDC_ROUTES] = newRoutes;
+    return merged;
   }
 
   const wrappedTree: Tree = {
@@ -213,7 +313,10 @@ export function withSubscriptions(
       const oldNode = await tree.get(node.$path, ctx);
 
       await tree.set(node, ctx);
-      const cdc = await cdcEval(node.$path, oldNode ?? null, node);
+      let cdc = await cdcEval(node.$path, oldNode ?? null, node);
+      if (isAclChange(oldNode ?? null, node)) {
+        cdc = mergeInvalidate(cdc, await invalidateVpsForAclChange(node.$path));
+      }
 
       const { $path, ...body } = node;
 
@@ -229,7 +332,14 @@ export function withSubscriptions(
 
     async remove(path, ctx) {
       const oldNode = await tree.get(path, ctx);
-      const cdc = oldNode ? await cdcEval(path, oldNode, null) : undefined;
+      let cdc = oldNode ? await cdcEval(path, oldNode, null) : undefined;
+      // Remove drops $acl entirely — treat as ACL change so subscribers
+      // re-fetch (the data-diff path already removes the node; invalidate
+      // covers the case where the removal also flips visibility of siblings
+      // whose ACL inheritance chain ran through this node).
+      if (oldNode && (oldNode.$acl || oldNode.$owner) && cdc) {
+        cdc = mergeInvalidate(cdc, await invalidateVpsForAclChange(path));
+      }
       const result = await tree.remove(path, ctx);
 
       if (result && oldNode) {
@@ -244,7 +354,12 @@ export function withSubscriptions(
       await tree.patch(path, ops, ctx);
 
       const newNode = await tree.get(path, ctx);
-      const cdc = await cdcEval(path, oldNode ?? null, newNode ?? null);
+      let cdc = await cdcEval(path, oldNode ?? null, newNode ?? null);
+      // Both directions: ops touched $acl/$owner directly OR the resulting
+      // diff shows a $acl change (covers full-node replace via patch).
+      if (ops.some(isAclOp) || isAclChange(oldNode ?? null, newNode ?? null)) {
+        cdc = mergeInvalidate(cdc, await invalidateVpsForAclChange(path));
+      }
 
       // Emit only mutation ops (filter out test ops)
       const mutations = ops.filter((o): o is Exclude<PatchOp, readonly ['t', ...any]> => o[0] !== 't');
