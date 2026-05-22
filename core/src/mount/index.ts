@@ -71,6 +71,18 @@ export function withMounts(rootStore: Tree): Tree {
       return tree.getChildren(path, opts, ctx);
     },
 
+    // scanChildren dispatch — same per-path resolution as getChildren, but
+    // streams. Mount sub-trees that don't expose scanChildren (legacy Tree-only
+    // adapters) fail loudly: the new read runtime explicitly forbids falling
+    // back to getChildren (would re-introduce the mixed-responsibilities path).
+    async *scanChildren(path, opts, ctx) {
+      const tree = await resolveContentTree(path, ctx);
+      if (!tree.scanChildren) {
+        throw new Error(`Mount-resolved tree at ${path} does not expose scanChildren`);
+      }
+      yield* tree.scanChildren(path, opts, ctx);
+    },
+
     async set(node, ctx) {
       const tree = await resolveNodeTree(node.$path, ctx);
       invalidateMount(node.$path);

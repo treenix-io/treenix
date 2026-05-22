@@ -15,8 +15,11 @@ import {
   W,
 } from '#core';
 import { OpError } from '#errors';
-import { assertSafePatchPath, mapNodeForSift, paginate, type Tree } from '#tree';
+import { asTreeSource, assertSafePatchPath, mapNodeForSift, paginate, type Page, type Tree } from '#tree';
 import { createSiftTest, withAclQueryTree } from '#tree/query';
+import { executeList } from '#tree/read-runtime';
+import { resolveReadPlan } from '#mount/resolve-plan';
+import { createProjector } from './projector';
 import { createHash, randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
 
 // R4-AUTH-5: hash session token before persisting. The plaintext bearer never lands
@@ -391,15 +394,58 @@ export type AclStore = Tree & {
   getPerm(path: string): Promise<number>;
 };
 
+// MVP read-runtime budgets. Public limit ceiling matches MVP rule 5.
+const PUBLIC_LIMIT_MAX = 200;
+const PUBLIC_LIMIT_DEFAULT = 100;
+
 export function withAcl(rawStore: Tree, userId: string | null, claims: string[]): AclStore {
   const cache = new Map<string, number>();
   // stateCache: accumulated ACL state per tree level — avoids re-walking shared ancestors
   // within a single request. nodeCache is handled by withCache in the tree pipeline.
   const stateCache = new Map<string, AclState>();
-  const ACL_SCAN_LIMIT = 1_000;
 
   async function getPerm(path: string): Promise<number> {
     return resolvePermission(rawStore, path, userId, claims, cache, undefined, stateCache);
+  }
+
+  // depth>1 fallback: when the caller needs descendants beyond the top
+  // level, executeList's depth-1 contract isn't enough yet (MVP rule 1).
+  // Use legacy scan+filter+strip until Stage-future deep scanning lands.
+  // Same scan-cap warning preserved so operators see the truncation.
+  const LEGACY_DEEP_SCAN_LIMIT = 1_000;
+  async function legacyDeepGetChildren(
+    path: string,
+    opts: import('#tree').ChildrenOpts | undefined,
+    ctx: unknown,
+  ): Promise<Page<NodeData>> {
+    // Wrap ctx so query-mount adapters reading via parentStore see the
+    // ACL-projected view, not the raw tree — closes the "match raw + strip
+    // after" inefficiency (and the timing side-channel that comes with it).
+    const rawCtx = withAclQueryTree(ctx, aclStore);
+    const raw = await rawStore.getChildren(path, { depth: opts?.depth, limit: LEGACY_DEEP_SCAN_LIMIT }, rawCtx);
+    const truncated = raw.items.length >= LEGACY_DEEP_SCAN_LIMIT;
+    if (truncated) {
+      console.warn(`[acl] getChildren(${path}, depth=${opts?.depth}): hit legacy deep scan limit ${LEGACY_DEEP_SCAN_LIMIT}`);
+    }
+    const filtered: NodeData[] = [];
+    for (const child of raw.items) {
+      const perm = await getPerm(child.$path);
+      if (!(perm & R)) continue;
+      const out = stripComponents(child, userId, claims);
+      if (!(perm & A)) {
+        delete out.$acl;
+        delete out.$owner;
+      }
+      filtered.push(out);
+    }
+    const queryTest = opts?.query ? createSiftTest(opts.query) : null;
+    const visible = queryTest
+      ? filtered.filter(n => queryTest(mapNodeForSift(n)))
+      : filtered;
+    const result = paginate(visible, opts);
+    if (truncated) result.truncated = true;
+    if (raw.queryMount) result.queryMount = raw.queryMount;
+    return result;
   }
 
   const aclStore: AclStore = {
@@ -427,34 +473,34 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
       const parentPerm = await getPerm(path);
       if (!(parentPerm & R)) throw new OpError('FORBIDDEN', `Access denied: ${path}`);
 
-      // Fetch up to limit from underlying, then apply ACL/strip before caller query.
-      // Applying caller query to raw nodes leaks hidden fields/components as an oracle.
-      const rawCtx = withAclQueryTree(ctx, aclStore);
-      const raw = await rawStore.getChildren(path, { depth: opts?.depth, limit: ACL_SCAN_LIMIT }, rawCtx);
-      const truncated = raw.items.length >= ACL_SCAN_LIMIT;
-      if (truncated) {
-        console.warn(`[acl] getChildren(${path}): hit scan limit ${ACL_SCAN_LIMIT}, results may be incomplete`);
-      }
-      const filtered: NodeData[] = [];
-      for (const child of raw.items) {
-        const perm = await getPerm(child.$path);
-        if (!(perm & R)) continue;
-        const out = stripComponents(child, userId, claims);
-        if (!(perm & A)) {
-          delete out.$acl;
-          delete out.$owner;
-        }
-        filtered.push(out);
-      }
-      const queryTest = opts?.query ? createSiftTest(opts.query) : null;
-      const visible = queryTest
-        ? filtered.filter(n => queryTest(mapNodeForSift(n)))
-        : filtered;
-      // Preserve queryMount for CDC Matrix (sub.ts active query registration)
-      const result = paginate(visible, opts);
-      if (truncated) result.truncated = true;
-      if (raw.queryMount) result.queryMount = raw.queryMount;
-      return result;
+      const depth = opts?.depth ?? 1;
+      // depth>1 fallback: executeList is depth-1 only in MVP. Use legacy
+      // scan+filter+strip path with no scan cap (kills ACL_SCAN_LIMIT for
+      // depth-1, which is the common case AND the only case that hit it).
+      if (depth > 1) return legacyDeepGetChildren(path, opts, ctx);
+
+      // depth=1: route through the new read runtime.
+      const source = asTreeSource(rawStore);
+      const { plan, legacyQueryMount } = await resolveReadPlan(rawStore, path, opts?.query, ctx);
+      const project = createProjector(rawStore, { userId, claims });
+
+      // Public API uses limit + offset + total; executeList uses limit + cursor.
+      // Bridge: scan up to LEGACY_DEEP_SCAN_LIMIT visible items to compute
+      // total (matches the pre-stage-3 contract). `truncated` surfaces when
+      // the scan hit its ceiling — same signal as the old ACL_SCAN_LIMIT
+      // warning, just structured into the page instead of console.warn.
+      const reqLimit = Math.min(opts?.limit ?? PUBLIC_LIMIT_DEFAULT, PUBLIC_LIMIT_MAX);
+      const offset = opts?.offset ?? 0;
+      const scanLimit = Math.max(LEGACY_DEEP_SCAN_LIMIT, offset + reqLimit);
+
+      const result = await executeList(source, plan, { limit: scanLimit }, project, ctx);
+      const items = result.items.slice(offset, offset + reqLimit);
+      const page: Page<NodeData> = { items, total: result.items.length };
+      if (result.nextCursor) page.truncated = true;
+      // queryMount metadata preserved for CDC matrix (sub.ts active query
+      // registration). Stage-6 watchQuery consumes the plan directly.
+      if (legacyQueryMount) page.queryMount = legacyQueryMount;
+      return page;
     },
 
     async set(node, ctx) {

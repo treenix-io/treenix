@@ -2,14 +2,18 @@
 // Server-internal safe list algorithm. Replaces ad-hoc ACL scan in
 // withAcl.getChildren and the virtual query-tree dispatch path.
 //
-// Flow per MVP:
+// Flow:
 //   for entry in source.scanChildren(plan.source):
-//     viewWhere(raw)? -> project(actor, raw) -> callerWhere(visible)? -> emit
+//     project(actor, raw) -> viewWhere(visible)? -> callerWhere(visible)? -> emit
 //   stop after limit+1; nextCursor = last-emitted cursor.
 //
-// viewWhere is trusted (from mount config); callerWhere is untrusted (from
-// public input) and runs against ALREADY-PROJECTED nodes so hidden fields
-// cannot be probed as oracles. depth=1 only — MVP scope.
+// Both viewWhere and callerWhere run AGAINST PROJECTED nodes. The MVP plan
+// describes a trust split (viewWhere is trusted, may reference hidden fields
+// for Mongo pushdown) but that requires type-ACL on `t.mount.*` (MVP item F4,
+// deferred). Until then, any user with W on a mount node can author viewWhere
+// — running it on raw would let them probe hidden fields via membership.
+// Both predicates filter visible data; Mongo pushdown of viewWhere is also
+// deferred until F4. depth=1 only — MVP scope.
 
 import type { NodeData } from '#core';
 import { OpError } from '#errors';
@@ -82,12 +86,14 @@ export async function executeList(
       );
     }
 
-    if (viewTest && !viewTest(mapNodeForSift(entry.node))) continue;
-
     const visible = await project(entry.node);
     if (!visible) continue;
 
-    if (callerTest && !callerTest(mapNodeForSift(visible))) continue;
+    // Both viewWhere and callerWhere run against the projected node so
+    // hidden fields can't be probed via membership (see file header).
+    const siftView = mapNodeForSift(visible);
+    if (viewTest && !viewTest(siftView)) continue;
+    if (callerTest && !callerTest(siftView)) continue;
 
     collected.push({ node: visible, cursor: entry.cursor });
     if (collected.length === limit + 1) break;

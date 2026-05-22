@@ -3,6 +3,7 @@
 
 import { type ComponentData, createNode, getContextsForType, getRegisteredTypes, type NodeData, resolve } from '#core';
 import { paginate, type Tree } from '#tree';
+import { scanFromCollected } from '#tree/fs-common';
 
 /**
  * Build a `type` NodeData for a registered type by collecting its registry contexts.
@@ -133,6 +134,14 @@ export function createTypesTree(backingStore: Tree, typesPath = '/sys/types'): T
         }
       }
       return paginate([...byPath.values()], opts);
+    },
+
+    // scanChildren — virtual catalog mount. Reuses getChildren (registry +
+    // backing merge is complex) and yields via the shared cursor helper.
+    // Bridge for read-runtime dispatch; not a streaming-native path.
+    async *scanChildren(parent, opts) {
+      const page = await this.getChildren!(parent, { depth: opts?.depth ?? 1 });
+      yield* scanFromCollected(page.items, opts);
     },
 
     async set(node) {

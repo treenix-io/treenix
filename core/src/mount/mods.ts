@@ -16,6 +16,7 @@ import { getLoadedMods } from '#mod/loader';
 import { getModPrefabs, getPrefab, getRegisteredMods } from '#mod/prefab';
 import { Prefab } from '#mod/prefab-type';
 import { paginate, type Tree } from '#tree';
+import { scanFromCollected } from '#tree/fs-common';
 import { getModInfo } from '#server/mod-catalog';
 import { buildTypeNode } from './types';
 
@@ -157,6 +158,13 @@ export function createModsTree(modsPath = '/sys/mods'): Tree {
       }
 
       return paginate(items, opts);
+    },
+
+    // scanChildren — virtual catalog mount. Wraps getChildren since the
+    // list shape is computed from in-memory mod registry, not streamed.
+    async *scanChildren(parent, opts) {
+      const page = await this.getChildren!(parent, { depth: opts?.depth ?? 1 });
+      yield* scanFromCollected(page.items, opts);
     },
 
     async set() {

@@ -649,7 +649,7 @@ describe('sessions', () => {
 describe('getChildren truncation', () => {
   beforeEach(() => clearRegistry());
 
-  it('sets truncated=true when ACL scan limit is hit', async () => {
+  it('sets truncated=true when scan hits the soft cap', async () => {
     const base = createMemoryTree();
     // Parent must be readable now that getChildren throws FORBIDDEN on
     // unreadable parents — otherwise we'd never reach the truncation path.
@@ -657,21 +657,13 @@ describe('getChildren truncation', () => {
       ...createNode('/big', 'folder'),
       $acl: [{ g: 'authenticated', p: R }],
     });
-
-    // Create a proxy tree that pretends getChildren returned at least the ACL scan
-    // limit, triggering the truncation path.
-    const items: import('#core').NodeData[] = [];
-    for (let i = 0; i < 1_000; i++) {
-      items.push(createNode(`/big/${i}`, 'doc'));
+    // Seed > scanLimit (1000) so executeList stops with nextCursor — same
+    // signal as the legacy ACL_SCAN_LIMIT warning, now structured.
+    for (let i = 0; i < 1_001; i++) {
+      await base.set(createNode(`/big/${String(i).padStart(4, '0')}`, 'doc'));
     }
-    const fakeTree: Tree = {
-      ...base,
-      async getChildren() {
-        return { items, total: items.length };
-      },
-    };
 
-    const s = withAcl(fakeTree, 'admin', ['u:admin', 'authenticated']);
+    const s = withAcl(base, 'admin', ['u:admin', 'authenticated']);
     const result = await s.getChildren('/big');
     assert.equal(result.truncated, true);
   });

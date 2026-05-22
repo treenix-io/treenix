@@ -60,6 +60,19 @@ export function createRepathTree(inner: Tree, localBase: string, remoteBase: str
       return remapPage(page);
     },
 
+    // scanChildren — remap each yielded node's $path back to local namespace.
+    // Cursor is opaque (inner uses inner $path); we pass it through unchanged
+    // so a follow-up call with `after` resumes correctly on the inner side.
+    // Only exposed when inner supports scanChildren — wire-facing trees
+    // (RPC transport) deliberately don't.
+    ...(inner.scanChildren ? {
+      async *scanChildren(path: string, opts?: Parameters<NonNullable<Tree['scanChildren']>>[1], ctx?: unknown) {
+        for await (const entry of inner.scanChildren!(toRemote(path), opts, ctx)) {
+          yield { node: remapNode(entry.node), cursor: entry.cursor };
+        }
+      },
+    } : {}),
+
     set: (node, ctx) =>
       inner.set({ ...node, $path: toRemote(node.$path) }, ctx),
 
