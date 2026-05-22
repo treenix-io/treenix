@@ -5,6 +5,7 @@
 import { isRef, type NodeData, type Ref, toStorageKeys } from '#core';
 import { OpError } from '#errors';
 import sift from 'sift';
+import { scanFromCollected } from './fs-common';
 import { applyOps, defaultPatch, hasMutationOps, type PatchOp } from './patch';
 
 // ── Pagination ──
@@ -238,27 +239,13 @@ export function createMemoryTree(): TreeSource {
       return paginate(result, opts);
     },
 
-    // ── scanChildren ──
-    // Adapter total order: $path ASC. Cursor = node.$path.
-    // After: cursor X means yield strictly entries with $path > X.
+    // Clone upfront so the in-memory store stays isolated from caller
+    // mutation; scanFromCollected owns sort/cursor/signal contract.
     async *scanChildren(parent, opts, _ctx) {
-      const signal = opts?.signal;
-      if (signal?.aborted) throw signal.reason;
-
       const node = navigate(parent);
       if (!node) return;
-
-      const depth = opts?.depth ?? 1;
-      const after = opts?.after;
-      const entries = collectChildren(node, parent, depth)
-        .sort((a, b) => a.$path < b.$path ? -1 : a.$path > b.$path ? 1 : 0);
-
-      for (const data of entries) {
-        if (signal?.aborted) throw signal.reason;
-        const cursor = data.$path;
-        if (after !== undefined && cursor <= after) continue;
-        yield { node: structuredClone(data), cursor };
-      }
+      const cloned = collectChildren(node, parent, opts?.depth ?? 1).map(d => structuredClone(d));
+      yield* scanFromCollected(cloned, opts);
     },
 
     async set(node, _ctx) {

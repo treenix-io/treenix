@@ -5,31 +5,14 @@
 
 import type { NodeData } from '#core';
 import { assertValidType, safeJsonParse } from '#core';
-import { dirname as treeDirname, isInsideRoot } from '#core/path';
+import { dirname as treeDirname } from '#core/path';
 import { OpError } from '#errors';
 import { mkdir, readdir, readFile, realpath, rmdir, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import sift from 'sift';
+import { assertPathSafe, scanFromCollected } from './fs-common';
 import { mapNodeForSift, paginate, type TreeSource } from './index';
 import { defaultPatch } from './patch';
-
-async function securityCheck(root: string, file: string) {
-  if (!isInsideRoot(root, resolve(file))) throw new OpError('FORBIDDEN', 'Path traversal blocked');
-  // Follow symlinks and verify real path is still inside root
-  try {
-    const real = await realpath(file);
-    if (!isInsideRoot(root, real)) throw new OpError('FORBIDDEN', 'Path escaped root via symlink');
-  } catch (e: any) {
-    if (e.code !== 'ENOENT') throw e;
-    // File doesn't exist yet — check parent directory for symlink escapes
-    try {
-      const parentReal = await realpath(dirname(file));
-      if (!isInsideRoot(root, parentReal)) throw new OpError('FORBIDDEN', 'Path escaped root via symlink');
-    } catch (e2: any) {
-      if (e2.code !== 'ENOENT') throw e2;
-    }
-  }
-}
 
 export async function createFsTree(rootDir: string): Promise<TreeSource> {
   await mkdir(resolve(rootDir), { recursive: true });
@@ -58,7 +41,7 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
   // Read node from whichever form exists: dir (path/$.json) or leaf (path.json)
   async function readNode(path: string): Promise<NodeData | undefined> {
     const dirFile = resolve(join(rootDir, path, '$.json'));
-    await securityCheck(rootDir, dirFile);
+    await assertPathSafe(rootDir, dirFile);
     try {
       return await parseNode(dirFile, path);
     } catch (e: any) {
@@ -68,7 +51,7 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
 
     if (path !== '/') {
       const leafFile = resolve(join(rootDir, path + '.json'));
-      await securityCheck(rootDir, leafFile);
+      await assertPathSafe(rootDir, leafFile);
       try {
         return await parseNode(leafFile, path);
       } catch (e: any) {
@@ -84,13 +67,13 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
   async function promoteIfNeeded(path: string): Promise<void> {
     if (path === '/') return;
     const leafFile = resolve(join(rootDir, path + '.json'));
-    await securityCheck(rootDir, leafFile);
+    await assertPathSafe(rootDir, leafFile);
     try {
       const data = await readFile(leafFile, 'utf-8');
       const dir = resolve(join(rootDir, path));
-      await securityCheck(rootDir, dir);
+      await assertPathSafe(rootDir, dir);
       const dirFile = join(dir, '$.json');
-      await securityCheck(rootDir, dirFile);
+      await assertPathSafe(rootDir, dirFile);
       await mkdir(dir, { recursive: true });
       await writeFile(dirFile, data, { mode: 0o600 });
       await unlink(leafFile);
@@ -110,7 +93,7 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
   // Check if a node's directory has children (entries beyond $.json)
   async function hasChildren(path: string): Promise<boolean> {
     const dir = resolve(join(rootDir, path));
-    await securityCheck(rootDir, dir);
+    await assertPathSafe(rootDir, dir);
     try {
       const entries = await readdir(dir);
       return entries.some(e => e !== '$.json');
@@ -125,7 +108,7 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
     // Remove the node's now-empty directory if it exists
     try {
       const nodeDir = resolve(join(rootDir, removedPath));
-      await securityCheck(rootDir, nodeDir);
+      await assertPathSafe(rootDir, nodeDir);
       const entries = await readdir(nodeDir);
       if (entries.length === 0) await rmdir(nodeDir);
     } catch (e: any) {
@@ -137,14 +120,14 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
     while (current && current !== '/') {
       const dir = resolve(join(rootDir, current));
       try {
-        await securityCheck(rootDir, dir);
+        await assertPathSafe(rootDir, dir);
         const entries = await readdir(dir);
         if (entries.length === 1 && entries[0] === '$.json') {
           // Only $.json remains — demote to leaf form
           const dirFile = join(dir, '$.json');
-          await securityCheck(rootDir, dirFile);
+          await assertPathSafe(rootDir, dirFile);
           const leafFile = resolve(join(rootDir, current + '.json'));
-          await securityCheck(rootDir, leafFile);
+          await assertPathSafe(rootDir, leafFile);
           const data = await readFile(dirFile, 'utf-8');
           await unlink(dirFile);
           await rmdir(dir);
@@ -166,7 +149,7 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
   async function collectChildren(parent: string, depth: number): Promise<NodeData[]> {
     const results: NodeData[] = [];
     const fsDir = resolve(join(rootDir, parent));
-    await securityCheck(rootDir, fsDir);
+    await assertPathSafe(rootDir, fsDir);
 
     async function walk(dir: string, currentDepth: number) {
       let entries;
@@ -179,7 +162,7 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
         if (e.name === '$.json') continue; // parent's own data, not a child
         if (e.isSymbolicLink()) continue; // skip symlinks — security hardening
         const full = resolve(join(dir, e.name));
-        await securityCheck(rootDir, full);
+        await assertPathSafe(rootDir, full);
 
         if (e.isDirectory()) {
           // Directory child — read its $.json if exists
@@ -214,26 +197,11 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
       return paginate(filtered, opts);
     },
 
-    // ── scanChildren ──
-    // Adapter total order: $path ASC (lexicographic). Cursor = node.$path.
-    // collectChildren materializes the in-depth set; we sort + cursor-filter.
-    // AbortSignal honored between yields; in-flight readdir/readFile in
-    // collectChildren itself isn't cancellable in MVP — Stage 6 may stream.
+    // In-flight readdir/readFile in collectChildren itself isn't cancellable
+    // in MVP — scanFromCollected gates the yield boundary. Stage 6 may stream.
     async *scanChildren(parent, opts) {
-      const signal = opts?.signal;
-      if (signal?.aborted) throw signal.reason;
-
-      const depth = opts?.depth ?? 1;
-      const after = opts?.after;
-      const entries = (await collectChildren(parent, depth))
-        .sort((a, b) => a.$path < b.$path ? -1 : a.$path > b.$path ? 1 : 0);
-
-      for (const data of entries) {
-        if (signal?.aborted) throw signal.reason;
-        const cursor = data.$path;
-        if (after !== undefined && cursor <= after) continue;
-        yield { node: data, cursor };
-      }
+      const collected = await collectChildren(parent, opts?.depth ?? 1);
+      yield* scanFromCollected(collected, opts);
     },
 
     async set(node) {
@@ -263,7 +231,7 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
         if (path === '/' || await hasChildren(path)) {
           // Dir form: has children
           const dirFile = resolve(join(rootDir, path, '$.json'));
-          await securityCheck(rootDir, dirFile);
+          await assertPathSafe(rootDir, dirFile);
           await mkdir(resolve(join(rootDir, path)), { recursive: true });
           await writeFile(dirFile, data, { mode: 0o600 });
           // Clean up stale leaf form
@@ -273,7 +241,7 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
         } else {
           // Leaf form: no children
           const leafFile = resolve(join(rootDir, path + '.json'));
-          await securityCheck(rootDir, leafFile);
+          await assertPathSafe(rootDir, leafFile);
           await mkdir(dirname(leafFile), { recursive: true });
           await writeFile(leafFile, data, { mode: 0o600 });
           // Clean up stale dir form + empty dir
@@ -286,7 +254,7 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
     async remove(path) {
       // Try dir form first
       const dirFile = resolve(join(rootDir, path, '$.json'));
-      await securityCheck(rootDir, dirFile);
+      await assertPathSafe(rootDir, dirFile);
       try {
         await unlink(dirFile);
         await cleanupAfterRemove(path);
@@ -298,7 +266,7 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
       // Try leaf form
       if (path !== '/') {
         const leafFile = resolve(join(rootDir, path + '.json'));
-        await securityCheck(rootDir, leafFile);
+        await assertPathSafe(rootDir, leafFile);
         try {
           await unlink(leafFile);
           await cleanupAfterRemove(path);

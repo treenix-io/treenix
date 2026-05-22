@@ -4,11 +4,10 @@
 // "decode" context: file → node (read). "encode" context: node → file (write).
 
 import type { NodeData } from '#core';
-import { isInsideRoot } from '#core/path';
 import { resolve as ctxResolve } from '#core/registry';
-import { OpError } from '#errors';
 import { mkdir, readdir, realpath, rmdir, stat, unlink } from 'node:fs/promises';
 import { dirname, extname, join, resolve } from 'node:path';
+import { assertPathSafe, scanFromCollected } from './fs-common';
 import { mapNodeForSift, paginate, type TreeSource } from './index';
 import './json-codec'; // register JSON decode handler
 import { defaultPatch } from './patch';
@@ -64,16 +63,7 @@ export async function createRawFsTree(rootDir: string, mountPath: string = ''): 
 
   async function safeFilePath(path: string): Promise<string> {
     const full = resolve(join(rootDir, path));
-    if (!isInsideRoot(rootDir, full)) throw new OpError('FORBIDDEN', 'Path traversal blocked');
-
-    // Symlink containment: verify real path stays inside root
-    try {
-      const real = await realpath(full);
-      if (!isInsideRoot(rootDir, real)) throw new OpError('FORBIDDEN', 'Path escaped root via symlink');
-    } catch (e: any) {
-      if (e.code !== 'ENOENT') throw e;
-    }
-
+    await assertPathSafe(rootDir, full);
     return full;
   }
 
@@ -143,24 +133,11 @@ export async function createRawFsTree(rootDir: string, mountPath: string = ''): 
       return paginate(filtered, opts);
     },
 
-    // ── scanChildren ──
-    // Adapter total order: $path ASC. Cursor = node.$path.
-    // mimefs paths preserve file extensions, so /p/a.json and /p/a are distinct.
+    // mimefs paths preserve file extensions; total-order semantics live in
+    // scanFromCollected (sort + after-exclusive + signal gating).
     async *scanChildren(parent, opts) {
-      const signal = opts?.signal;
-      if (signal?.aborted) throw signal.reason;
-
-      const depth = opts?.depth ?? 1;
-      const after = opts?.after;
-      const entries = (await collectDescendants(parent, depth))
-        .sort((a, b) => a.$path < b.$path ? -1 : a.$path > b.$path ? 1 : 0);
-
-      for (const data of entries) {
-        if (signal?.aborted) throw signal.reason;
-        const cursor = data.$path;
-        if (after !== undefined && cursor <= after) continue;
-        yield { node: data, cursor };
-      }
+      const collected = await collectDescendants(parent, opts?.depth ?? 1);
+      yield* scanFromCollected(collected, opts);
     },
 
     async set(node) {
