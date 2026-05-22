@@ -87,8 +87,10 @@ export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: 
     if (result.ok) return;
     const cause = result.error?.cause;
     if (cause instanceof OpError) {
-      // Domain code → TRPCError code. Codes not in tRPC's enum map to FORBIDDEN.
-      const code = cause.code === 'KIND_VIOLATION' ? 'FORBIDDEN' : cause.code;
+      // Domain code → TRPCError code. Codes not in tRPC's enum map onto closest peer.
+      const code = cause.code === 'KIND_VIOLATION' ? 'FORBIDDEN'
+        : cause.code === 'RESOURCE_EXHAUSTED' ? 'TOO_MANY_REQUESTS'
+        : cause.code;
       throw new TRPCError({ code, message: cause.message });
     }
   }
