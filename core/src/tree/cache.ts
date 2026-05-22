@@ -37,6 +37,19 @@ export function withCache(tree: Tree, max = DEFAULT_MAX): Tree {
       return result;
     },
 
+    // Scan-side cache warming: every yielded entry populates the lookup
+    // cache, so a follow-up get(node.$path) on the same path is free.
+    // Only exposed when the inner tree supports scanChildren — wire-facing
+    // (RPC) trees don't.
+    ...(tree.scanChildren ? {
+      async *scanChildren(parent: string, opts?: Parameters<NonNullable<Tree['scanChildren']>>[1], ctx?: unknown) {
+        for await (const entry of tree.scanChildren!(parent, opts, ctx)) {
+          cache.set(entry.node.$path, entry.node);
+          yield entry;
+        }
+      },
+    } : {}),
+
     async set(node, ctx) {
       await tree.set(node, ctx);
       // Write-populate: re-read to capture $rev bump, warm cache for subscribers

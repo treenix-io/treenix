@@ -200,6 +200,8 @@ export function withSubscriptions(
   const wrappedTree: Tree = {
     get: tree.get.bind(tree),
     getChildren: tree.getChildren.bind(tree),
+    // Forward only when inner exposes it; sub/ never enriches scans.
+    ...(tree.scanChildren ? { scanChildren: tree.scanChildren.bind(tree) } : {}),
 
     async set(node, ctx) {
       // Defense in depth: strip string $patches if injected

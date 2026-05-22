@@ -6,7 +6,7 @@ import { isRef, type NodeData, type Ref, toStorageKeys } from '#core';
 import { OpError } from '#errors';
 import sift from 'sift';
 import { scanFromCollected } from './fs-common';
-import { applyOps, defaultPatch, hasMutationOps, type PatchOp } from './patch';
+import { applyOps, hasMutationOps, type PatchOp } from './patch';
 
 // ── Pagination ──
 
@@ -30,6 +30,16 @@ export interface Tree {
   set(node: NodeData, ctx?: unknown): Promise<void>;
   remove(path: string, ctx?: unknown): Promise<boolean>;
   patch(path: string, ops: PatchOp[], ctx?: unknown): Promise<void>;
+  /** Server-internal traversal primitive. Optional on the public Tree
+   *  interface: the wire-facing tRPC remote tree cannot implement it
+   *  (no streaming over RPC), but every server-side adapter and wrapper
+   *  exposes it. `executeList` throws RESOURCE_EXHAUSTED-style at runtime
+   *  if a non-source Tree slips into a server read path. */
+  scanChildren?(
+    path: string,
+    opts?: ScanChildrenOpts,
+    ctx?: unknown,
+  ): AsyncIterable<ChildEntry>;
 }
 
 // ── TreeSource: server-internal traversal primitive ──
@@ -61,12 +71,20 @@ export type ScanChildrenOpts = {
   signal?: AbortSignal;
 };
 
-export interface TreeSource extends Tree {
-  scanChildren(
-    path: string,
-    opts?: ScanChildrenOpts,
-    ctx?: unknown,
-  ): AsyncIterable<ChildEntry>;
+/** Tree narrowed to require `scanChildren` — server-internal read runtime
+ *  uses this so callers express the dependency at the type level. Obtain
+ *  one via `asTreeSource(tree)` or via adapters that always implement it
+ *  (memory/fs/mimefs/combinators/pipeline wrappers). */
+export type TreeSource = Tree & Required<Pick<Tree, 'scanChildren'>>;
+
+/** Narrow a Tree to TreeSource. Throws if the tree doesn't expose
+ *  `scanChildren` — the executeList path is server-side only and would
+ *  silently break the no-fallback contract otherwise. */
+export function asTreeSource(tree: Tree): TreeSource {
+  if (!tree.scanChildren) {
+    throw new OpError('BAD_REQUEST', 'Tree does not expose scanChildren — not usable as a source for the read runtime');
+  }
+  return tree as TreeSource;
 }
 
 // ── In-memory implementation ──
@@ -107,6 +125,31 @@ export function createFilterTree(
       // Forward queryMount from lower tree (mount system → CDC Matrix)
       if (l.queryMount) result.queryMount = l.queryMount;
       return result;
+    },
+    // Streaming k-way merge by $path cursor. Lazy: only pulls one entry
+    // ahead from each side. Upper wins on path collision. Caller's `after`
+    // is honored by each side; merger never re-yields.
+    // Available only when BOTH sides expose scanChildren — Tree's scanChildren
+    // is optional (wire-facing trees lack it), and silently degrading would
+    // re-introduce the legacy-getChildren mixed-responsibilities path.
+    async *scanChildren(parent, opts, ctx) {
+      if (!upper.scanChildren || !lower.scanChildren) {
+        throw new OpError('BAD_REQUEST', 'createFilterTree: scanChildren requires both layers to expose it');
+      }
+      const uIter = upper.scanChildren(parent, opts, ctx)[Symbol.asyncIterator]();
+      const lIter = lower.scanChildren(parent, opts, ctx)[Symbol.asyncIterator]();
+      let u = await uIter.next();
+      let l = await lIter.next();
+      while (!u.done || !l.done) {
+        if (opts?.signal?.aborted) throw opts.signal.reason;
+        if (u.done) { yield l.value!; l = await lIter.next(); continue; }
+        if (l.done) { yield u.value!; u = await uIter.next(); continue; }
+        const up = u.value!.node.$path;
+        const lp = l.value!.node.$path;
+        if (up === lp) { yield u.value!; u = await uIter.next(); l = await lIter.next(); }
+        else if (up < lp) { yield u.value!; u = await uIter.next(); }
+        else { yield l.value!; l = await lIter.next(); }
+      }
     },
     async set(node, ctx) {
       if (toUpper(node)) await upper.set(node, ctx);
