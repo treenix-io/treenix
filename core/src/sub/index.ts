@@ -180,6 +180,35 @@ export function withSubscriptions(
     return !!m && typeof m === 'object' && (m as { $type?: string }).$type !== undefined;
   }
 
+  /** Extract a userId from `/auth/users/{userId}` paths. Returns null when
+   *  the path doesn't match (or has a deeper segment — only the user node
+   *  itself, not sub-paths, drives the claims rebuild). */
+  function userIdFromAuthPath(path: string): string | null {
+    const prefix = '/auth/users/';
+    if (!path.startsWith(prefix)) return null;
+    const rest = path.slice(prefix.length);
+    if (!rest || rest.includes('/')) return null;
+    return rest;
+  }
+
+  /** Compute invalidate-vp set for a user-claims change at `userId`. Every
+   *  active query that has this user gets the user's vps invalidated.
+   *  Also resets the cached dynamicClaims so the next read recomputes. */
+  function invalidateVpsForClaimsChange(userId: string): { vps: string[]; routes: Map<string, MutableVpDelta> } {
+    const vps: string[] = [];
+    const routes = new Map<string, MutableVpDelta>();
+    for (const q of activeQueries) {
+      const user = q.users.get(userId);
+      if (!user) continue;
+      // Force claimsFor to refresh on next access.
+      user.dynamicClaims = undefined;
+      user.dynamicAt = undefined;
+      vps.push(q.vp);
+      addDelta(routeDelta(routes, userId), 'invalidateVps', q.vp);
+    }
+    return { vps, routes };
+  }
+
   /** Compute invalidate-vp set for an ACL change at `path`. ACL inherits
    *  DOWN the tree, so an ACL change at P affects every descendant of P
    *  (incl. P itself). For a depth-1 query view rooted at `source`, the
@@ -348,6 +377,10 @@ export function withSubscriptions(
       if (hasMountComponent(oldNode) || hasMountComponent(node)) {
         cdc = mergeInvalidate(cdc, invalidateVpsForConfigChange(node.$path));
       }
+      const claimsUid = userIdFromAuthPath(node.$path);
+      if (claimsUid) {
+        cdc = mergeInvalidate(cdc, invalidateVpsForClaimsChange(claimsUid));
+      }
 
       const { $path, ...body } = node;
 
@@ -374,6 +407,10 @@ export function withSubscriptions(
       // Removing a mount node: handles bound to this vp must re-fetch.
       if (hasMountComponent(oldNode) && cdc) {
         cdc = mergeInvalidate(cdc, invalidateVpsForConfigChange(path));
+      }
+      const claimsUid = userIdFromAuthPath(path);
+      if (claimsUid && cdc) {
+        cdc = mergeInvalidate(cdc, invalidateVpsForClaimsChange(claimsUid));
       }
       const result = await tree.remove(path, ctx);
 
@@ -404,6 +441,10 @@ export function withSubscriptions(
       });
       if (opsTouchedMount || hasMountComponent(oldNode) || hasMountComponent(newNode)) {
         cdc = mergeInvalidate(cdc, invalidateVpsForConfigChange(path));
+      }
+      const claimsUid = userIdFromAuthPath(path);
+      if (claimsUid) {
+        cdc = mergeInvalidate(cdc, invalidateVpsForClaimsChange(claimsUid));
       }
 
       // Emit only mutation ops (filter out test ops)

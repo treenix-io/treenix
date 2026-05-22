@@ -336,6 +336,53 @@ describe('ACL change invalidation (Stage 6)', () => {
     assert.deepEqual(ev.invalidateVps, ['/views/orders']);
   });
 
+  it('write to /auth/users/{uid} invalidates all queries for that user', async () => {
+    const events: NodeEvent[] = [];
+    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => events.push(e));
+
+    await tree.set(createNode('/items', 'dir'));
+    await tree.set(createNode('/orders', 'dir'));
+    cdc.watchQuery('/views/open-items', '/items', {}, 'alice', ['public']);
+    cdc.watchQuery('/views/new-orders', '/orders', {}, 'alice', ['public']);
+    cdc.watchQuery('/views/open-items', '/items', {}, 'bob', ['public']);
+    events.length = 0;
+
+    // Alice's user node changes (e.g., admin tweaks her groups).
+    await tree.set({
+      $path: '/auth/users/alice',
+      $type: 'user',
+      groups: { $type: 'groups', list: ['admins'] },
+    });
+
+    const ev = events.find(e =>
+      (e.type === 'set' || e.type === 'patch') && e.path === '/auth/users/alice');
+    assert.ok(ev);
+    const invalidateVps = ev.type === 'set' ? ev.invalidateVps : (ev as any).invalidateVps;
+    // Both of alice's queries are listed. Bob's query is NOT affected.
+    assert.ok(invalidateVps?.includes('/views/open-items'));
+    assert.ok(invalidateVps?.includes('/views/new-orders'));
+  });
+
+  it('write to /auth/users/{uid}/sub-path does NOT invalidate (different node)', async () => {
+    const events: NodeEvent[] = [];
+    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => events.push(e));
+
+    await tree.set(createNode('/items', 'dir'));
+    cdc.watchQuery('/views/open', '/items', {}, 'alice', ['public']);
+    events.length = 0;
+
+    // Write under /auth/users/alice — not the user node itself.
+    await tree.set(createNode('/auth/users/alice/profile', 'profile'));
+
+    const ev = events.find(e =>
+      (e.type === 'set' || e.type === 'patch') && e.path === '/auth/users/alice/profile');
+    assert.ok(ev);
+    assert.equal(
+      ev.type === 'set' ? ev.invalidateVps : (ev as any).invalidateVps,
+      undefined,
+    );
+  });
+
   it('routes invalidateVps to per-user CDC routes', async () => {
     const watcher = createWatchManager();
     const { tree, cdc } = withSubscriptions(createMemoryTree(), e => watcher.notify(e));
