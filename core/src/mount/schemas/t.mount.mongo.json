@@ -28,8 +28,8 @@
     "dedupWindowMs": {
       "type": "number",
       "title": "Dedup TTL (ms) for self-write suppression in the external-watch loop.",
-      "description": "When the mongo change stream surfaces a write we just performed through the pipeline (withSubscriptions emitted it already), the dedup buffer recognizes the (path, $rev) pair and skips re-emission to clients. 5_000 ms covers typical replica-set lag (< 1s) with generous headroom. Set 0 to disable dedup (useful only when the mount is purely external and no in-pipeline writes flow through it). Effective TTL is [dedupWindowMs, 2 * dedupWindowMs] due to two-bucket rotation.",
-      "default": 5000
+      "description": "Default 0 = OFF (every external event forwarded, including echoes of in-pipeline writes — idempotent, just doubles event volume per write). Turn on (e.g. 5_000) ONLY when you accept the documented race window: the dedup heuristic uses (path, $rev) keys, which cannot distinguish a delayed change-stream echo of an OLD remove from a CURRENT external remove. Under a self-remove → self-recreate sequence within the window, a delayed remove echo can leave client state inconsistent with the storage. Operation-identity dedup (preimage `$rev` / writer token) would close this; not implemented yet. Effective TTL when enabled is [dedupWindowMs, 2 * dedupWindowMs] due to two-bucket rotation.",
+      "default": 0
     }
   },
   "required": [

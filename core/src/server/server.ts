@@ -4,7 +4,7 @@
 
 import { createLogger } from '#log';
 import type { Tree } from '#tree';
-import { withCache } from '#tree/cache';
+import { type CachedTree, withCache } from '#tree/cache';
 import { nodeHTTPRequestHandler } from '@trpc/server/adapters/node-http';
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
@@ -44,19 +44,28 @@ export function createPipeline(bootstrap: Tree, opts?: TreeRouterOpts): Pipeline
   // long after this fn returns, so the late binding is safe.
   let onSelfWriteRef: OnSelfWrite | null = null;
 
+  // Late-bound refs — see the comment on onSelfWriteRef. cachedRef gives
+  // runExternalWatch a hook to invalidate the outer cache for paths touched
+  // by external writes, so watch-filter and other consumers reading via
+  // baseStore see fresh data, not stale cached nodes.
+  let cachedRef: CachedTree | null = null;
+
   const startExternalWatch: ExternalWatchStarter = (tree, starterOpts) => {
     const ac = new AbortController();
-    if (!onSelfWriteRef) {
+    if (!onSelfWriteRef || !cachedRef) {
       // Mount resolved during pipeline construction — shouldn't happen
       // (mounts are lazy) but fail loud if it does so the bug surfaces.
       throw new Error(`startExternalWatch[${starterOpts.source}]: pipeline not yet wired (mount resolved too early)`);
     }
+    const cache = cachedRef;
     runExternalWatch(tree, {
       pathPrefix: starterOpts.pathPrefix,
       dedupWindowMs: starterOpts.dedupWindowMs,
       source: starterOpts.source,
       onSelfWrite: onSelfWriteRef,
       forwardEvent: (e) => watcher.notify(e),
+      invalidateCachePath: (p) => cache.invalidate(p),
+      invalidateCacheAll: () => cache.invalidateAll(),
       signal: ac.signal,
     });
     return () => ac.abort();
@@ -68,6 +77,7 @@ export function createPipeline(bootstrap: Tree, opts?: TreeRouterOpts): Pipeline
   const validated = withValidation(volatile);
   const refsIndexed = withRefIndex(validated);
   const cached = withCache(refsIndexed);
+  cachedRef = cached;
   let cdcRef: CdcRegistry;
   const watcher = createWatchManager({
     onUserRemoved: (userId) => cdcRef.unwatchAllQueries(userId),

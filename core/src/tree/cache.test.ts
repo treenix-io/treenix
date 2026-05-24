@@ -290,3 +290,181 @@ describe('withCache — tree structure', () => {
     assert.equal((b as any).tag, 'b');
   });
 });
+
+// Generation counter — closes the in-flight stale-read race: an external
+// invalidate that fires WHILE a get() is awaiting a slow inner read must
+// prevent the in-flight result from repopulating the cache with stale data.
+
+describe('withCache — invalidate generation guards in-flight reads', () => {
+  it('invalidate during in-flight get prevents stale repopulation', async () => {
+    // Inner tree with controllable get-resolution timing.
+    let resolveSlow: ((n: any) => void) | null = null;
+    const mem = createMemoryTree();
+    await mem.set(makeNode('/x', { v: 'old' }));
+
+    const slow: typeof mem = {
+      ...mem,
+      async get(path, ctx) {
+        if (path === '/x') {
+          return new Promise(r => { resolveSlow = r; });
+        }
+        return mem.get(path, ctx);
+      },
+    };
+
+    const cached = withCache(slow);
+
+    // Kick off a read that will resolve to the OLD node
+    const pending = cached.get('/x');
+    // External invalidate fires BEFORE the read resolves
+    cached.invalidate('/x');
+    // Now resolve the read with the stale (already-overwritten) value
+    resolveSlow!({ $path: '/x', $type: 'test', v: 'old' });
+    await pending;
+
+    // Subsequent get must NOT see the stale repopulation — it must miss
+    // and call inner.get again
+    let secondCallReceived = false;
+    const spied: typeof slow = {
+      ...slow,
+      async get(path, ctx) {
+        if (path === '/x') { secondCallReceived = true; return mem.get(path, ctx); }
+        return slow.get(path, ctx);
+      },
+    };
+    const cached2 = withCache(spied);
+    // Re-create the scenario on the spied instance: invalidate after read
+    let resolveSlow2: ((n: any) => void) | null = null;
+    const slowGet = spied.get;
+    spied.get = async (path, ctx) => {
+      if (path === '/x') return new Promise(r => { resolveSlow2 = r; });
+      return slowGet.call(spied, path, ctx);
+    };
+    const p2 = cached2.get('/x');
+    cached2.invalidate('/x');
+    resolveSlow2!({ $path: '/x', $type: 'test', v: 'old' });
+    await p2;
+
+    spied.get = async (path, ctx) => {
+      if (path === '/x') { secondCallReceived = true; return mem.get(path, ctx); }
+      return slowGet.call(spied, path, ctx);
+    };
+    await cached2.get('/x');
+    assert.ok(secondCallReceived, 'cache miss after invalidate → second inner.get called');
+  });
+
+  it('invalidateAll during in-flight get prevents stale repopulation', async () => {
+    let resolveSlow: ((n: any) => void) | null = null;
+    const mem = createMemoryTree();
+    await mem.set(makeNode('/y', { v: 'old' }));
+
+    const slow: typeof mem = {
+      ...mem,
+      async get(path, ctx) {
+        if (path === '/y') return new Promise(r => { resolveSlow = r; });
+        return mem.get(path, ctx);
+      },
+    };
+
+    let secondCall = 0;
+    const cached = withCache(slow);
+    const pending = cached.get('/y');
+    cached.invalidateAll();
+    resolveSlow!({ $path: '/y', $type: 'test', v: 'old' });
+    await pending;
+
+    // Re-wire inner.get to count calls + return fresh
+    slow.get = async (path, ctx) => {
+      if (path === '/y') { secondCall++; return mem.get(path, ctx); }
+      return mem.get(path, ctx);
+    };
+    await cached.get('/y');
+    assert.equal(secondCall, 1, 'invalidateAll bumped allGen → repopulation skipped');
+  });
+
+  it('post-invalidate caller does NOT join pre-invalidate in-flight (inflight key includes generation)', async () => {
+    // Race shape Codex flagged: caller A starts get('/x') while inner is
+    // slow. Invalidate fires. Caller B starts get('/x'). Without
+    // generation-keyed inflight, B would join A's promise and receive the
+    // STALE pre-invalidate value. With it, B starts a fresh inflight.
+    let resolveSlow: ((n: any) => void) | null = null;
+    let getCallCount = 0;
+    const mem = createMemoryTree();
+    await mem.set(makeNode('/x', { v: 'fresh' }));
+
+    const slow: typeof mem = {
+      ...mem,
+      async get(path, ctx) {
+        if (path === '/x') {
+          getCallCount++;
+          if (getCallCount === 1) return new Promise(r => { resolveSlow = r; });
+          return mem.get(path, ctx); // 2nd inner.get returns the fresh value
+        }
+        return mem.get(path, ctx);
+      },
+    };
+
+    const cached = withCache(slow);
+    const callerA = cached.get('/x');
+    cached.invalidate('/x');                         // bumps gen for /x
+    const callerB = cached.get('/x');                // must NOT join A's inflight
+    resolveSlow!({ $path: '/x', $type: 'test', v: 'stale' });
+
+    const [a, b] = await Promise.all([callerA, callerB]);
+    assert.equal((a as any).v, 'stale', 'A gets the stale resolved value (was in-flight before invalidate)');
+    assert.equal((b as any).v, 'fresh', 'B gets the fresh post-invalidate value (separate inflight)');
+    assert.equal(getCallCount, 2, 'inner.get called twice — generation key forced fresh inflight');
+  });
+
+  it('getChildren mid-flight invalidate: cache warming skipped, no stale entries', async () => {
+    // Race: getChildren('/p') starts, external invalidate fires for /p/x,
+    // getChildren resolves with old /p/x. Without the allGen guard, the
+    // warming loop would write the stale /p/x back into cache.
+    let resolveSlow: ((items: any) => void) | null = null;
+    const mem = createMemoryTree();
+    await mem.set(makeNode('/p'));
+    await mem.set(makeNode('/p/x', { v: 'old' }));
+
+    const slow: typeof mem = {
+      ...mem,
+      async getChildren(path) {
+        if (path === '/p') return new Promise(r => { resolveSlow = r; });
+        return { items: [], total: 0 };
+      },
+    };
+
+    const cached = withCache(slow);
+    const pending = cached.getChildren('/p');
+    cached.invalidate('/p/x'); // fires during in-flight getChildren
+    resolveSlow!({ items: [makeNode('/p/x', { v: 'stale' })], total: 1 });
+    await pending;
+
+    // Cache must NOT hold the stale /p/x entry — direct get should miss
+    // and re-read from underlying (which would return the fresh value)
+    let directGetCalled = 0;
+    slow.get = async (path, ctx) => {
+      if (path === '/p/x') directGetCalled++;
+      return mem.get(path, ctx);
+    };
+    await cached.get('/p/x');
+    assert.equal(directGetCalled, 1, 'getChildren did not poison cache with stale /p/x');
+  });
+
+  it('non-overlapping invalidate does NOT prevent legitimate cache fill', async () => {
+    // Ensure the generation guard doesn't accidentally block normal reads.
+    const mem = createMemoryTree();
+    await mem.set(makeNode('/a', { v: 1 }));
+
+    let calls = 0;
+    const spied: typeof mem = {
+      ...mem,
+      async get(path, ctx) { calls++; return mem.get(path, ctx); },
+    };
+    const cached = withCache(spied);
+
+    cached.invalidate('/unrelated'); // doesn't touch /a
+    await cached.get('/a');
+    await cached.get('/a'); // second should be cache hit
+    assert.equal(calls, 1, 'invalidate of unrelated path did not poison /a cache');
+  });
+});

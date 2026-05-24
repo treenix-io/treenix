@@ -90,14 +90,13 @@ To make manual mongo writes — migrations, other apps sharing the DB, ad-hoc `d
   "uri": "mongodb://localhost:27017/?replicaSet=rs0",
   "db": "treenix",
   "collection": "nodes",
-  "watch": true,
-  "dedupWindowMs": 5000
+  "watch": true
 }
 ```
 
 - **`watch: false` (default)** — adapter does NOT subscribe to change streams. Only in-pipeline writes (via `tree.set/patch/remove`) reach clients. Zero extra Mongo load.
-- **`watch: true`** — adapter calls `col.watch()` with `fullDocument: 'updateLookup'` and tries to enable `changeStreamPreAndPostImages` (best-effort `collMod`; needs admin perm). Out-of-band writes flow into the subscription bus, deduped against the in-pipeline writes Treenix already emitted.
-- **`dedupWindowMs: 5000`** — TTL window (ms) for self-write dedup. Default tuned for typical replica-set lag. See [Mounts → dedup window](../concepts/mounts.md#dedup-window--picking-a-value) for guidance.
+- **`watch: true`** — adapter calls `col.watch()` with `fullDocument: 'updateLookup'` and tries to enable `changeStreamPreAndPostImages` (best-effort `collMod`; needs admin perm). Out-of-band writes flow into the subscription bus and reach SSE clients. By default every event is forwarded, including change-stream echoes of writes Treenix itself performed (idempotent on the client side, ~2× event volume per write).
+- **`dedupWindowMs: 0` (default)** — set to a positive value (e.g. `5000`) to enable best-effort self-write dedup. **Comes with a documented race window**: under `remove → recreate` sequences a delayed change-stream echo of the old remove can transiently delete the recreated node on clients. See [Mounts → dedup window](../concepts/mounts.md#dedup-window--picking-a-value) for the full trade-off.
 
 **Requirements:**
 - Mongo deployed as a replica set (`--replSet`). Single-node `mongod` cannot expose change streams. A 1-node replica set is fine for development: `docker run -d -p 27017:27017 mongo:7 --replSet rs0` then `mongosh --eval 'rs.initiate()'`.

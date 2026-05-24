@@ -776,4 +776,77 @@ describe('FS mount repath (dedicated)', () => {
     assert.deepEqual(paths, ['/data/files/a', '/data/files/b']);
   });
 
+  // Lifecycle: external-watch consumers MUST be aborted whenever their
+  // mount cache entry leaves the cache — by explicit invalidation OR by
+  // FIFO eviction when cacheMax fills up. The bounded-cache onEvict path
+  // is what makes FIFO-safe; before that, FIFO drops silently leaked
+  // change-stream cursors + timers + onSelfWrite subscriptions.
+
+  describe('external-watch lifecycle', () => {
+    it('FIFO eviction aborts the external-watch consumer (no leak)', async () => {
+      const root = createMemoryTree();
+      await root.set(createNode('/m1', 'mount-point', {}, {
+        mount: { $type: 'test.mount.lifecycle' },
+      }));
+      await root.set(createNode('/m2', 'mount-point', {}, {
+        mount: { $type: 'test.mount.lifecycle' },
+      }));
+
+      const aborts: string[] = [];
+      register('test.mount.lifecycle', 'mount', (_m, ctx) => {
+        const fake: Tree = createMemoryTree();
+        if (ctx.startExternalWatch) {
+          ctx.startExternalWatch(fake, { pathPrefix: ctx.path, source: `at:${ctx.path}` });
+        }
+        return fake;
+      });
+
+      const ms = withMounts(root, {
+        cacheMax: 1,
+        startExternalWatch: (_tree, opts) => () => aborts.push(opts.source),
+      });
+
+      // getChildren on the mount path runs resolveContentTree which caches
+      // the resolved mount entry (and starts the external watch).
+      await ms.getChildren('/m1');
+      assert.equal(aborts.length, 0);
+
+      // Resolving /m2 forces FIFO eviction of /m1 — onEvict on bounded-cache
+      // fires the abort attached to /m1's entry.
+      await ms.getChildren('/m2');
+      assert.deepEqual(aborts, ['at:/m1']);
+    });
+
+    it('mount config rewrite invalidates cache → onEvict aborts external-watch', async () => {
+      const root = createMemoryTree();
+      await root.set(createNode('/m', 'mount-point', {}, {
+        mount: { $type: 'test.mount.invalidate' },
+      }));
+
+      const aborts: string[] = [];
+      register('test.mount.invalidate', 'mount', (_m, ctx) => {
+        const fake: Tree = createMemoryTree();
+        if (ctx.startExternalWatch) {
+          ctx.startExternalWatch(fake, { pathPrefix: ctx.path, source: 'inv' });
+        }
+        return fake;
+      });
+
+      const ms = withMounts(root, {
+        startExternalWatch: (_tree, opts) => () => aborts.push(opts.source),
+      });
+
+      // Cache the mount via getChildren.
+      await ms.getChildren('/m');
+      assert.equal(aborts.length, 0);
+
+      // Rewrite the mount node itself — the cache key '/m' is invalidated
+      // (write touches the mount path), onEvict fires the abort.
+      await ms.set(createNode('/m', 'mount-point', {}, {
+        mount: { $type: 'test.mount.invalidate' },
+      }));
+      assert.deepEqual(aborts, ['inv']);
+    });
+  });
+
 });

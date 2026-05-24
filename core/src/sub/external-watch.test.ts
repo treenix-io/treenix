@@ -253,7 +253,7 @@ describe('runExternalWatch — repath', () => {
 });
 
 describe('runExternalWatch — dedup', () => {
-  it('dedupWindowMs=0: no dedup, every event forwarded', async () => {
+  it('dedupWindowMs=0 (the safer default): no dedup, every event forwarded', async () => {
     const { tree, ctl } = makeMockTree();
     const sw = makeSelfWriteChannel();
     const ac = new AbortController();
@@ -274,6 +274,33 @@ describe('runExternalWatch — dedup', () => {
     await drain();
 
     assert.equal(out.length, 1, 'dedup off → event forwarded');
+    ac.abort();
+  });
+
+  it('dedupWindowMs default of 0 produces no buffer; even repeated self-write does not suppress', async () => {
+    // Regression: changing the MountMongo default to 0 means consumers that
+    // forget to set it inherit the correctness-first behavior. Any call to
+    // sw.fire() without dedup ON must NOT affect forward count.
+    const { tree, ctl } = makeMockTree();
+    const sw = makeSelfWriteChannel();
+    const ac = new AbortController();
+    const out: TreeEvent[] = [];
+
+    runExternalWatch(tree, {
+      pathPrefix: '/',
+      forwardEvent: (e) => out.push(e),
+      onSelfWrite: sw.onSelfWrite, // present but unused when dedupWindowMs omitted
+      signal: ac.signal,
+      source: 'omitted-dedup',
+    });
+
+    await drain();
+    sw.fire('/a', 1); sw.fire('/a', 2); sw.fire('/a', 3);
+    ctl.push({ type: 'set', path: '/a', node: { $type: 't', $rev: 1 } });
+    ctl.push({ type: 'set', path: '/a', node: { $type: 't', $rev: 2 } });
+    await drain();
+
+    assert.equal(out.length, 2, 'every external event forwarded when dedup unset');
     ac.abort();
   });
 
@@ -339,6 +366,40 @@ describe('runExternalWatch — dedup', () => {
     await drain();
 
     assert.equal(out.length, 1, 'set is not deduped by an unrelated remove');
+    ac.abort();
+  });
+
+  it('remove events are NEVER deduped (false-suppress would lose deletes)', async () => {
+    // Sequence: Treenix removes /x → external recreates /x → external removes /x
+    // again within the dedup window. If remove were path-deduped, step 3
+    // would be silently dropped and clients would still think /x exists.
+    const { tree, ctl } = makeMockTree();
+    const sw = makeSelfWriteChannel();
+    const ac = new AbortController();
+    const out: TreeEvent[] = [];
+
+    runExternalWatch(tree, {
+      pathPrefix: '/',
+      forwardEvent: (e) => out.push(e),
+      onSelfWrite: sw.onSelfWrite,
+      dedupWindowMs: 5_000,
+      signal: ac.signal,
+      source: 'remove-safety',
+    });
+
+    await drain();
+
+    // Self-remove of /x — marks nothing for remove (per design)
+    sw.fire('/x', undefined);
+    // External recreate + remove — both MUST be delivered
+    ctl.push({ type: 'set', path: '/x', node: { $type: 't', $rev: 1 } });
+    ctl.push({ type: 'remove', path: '/x' });
+    await drain();
+
+    const removes = out.filter(e => e.type === 'remove');
+    const sets = out.filter(e => e.type === 'set');
+    assert.equal(sets.length, 1, 'external set delivered');
+    assert.equal(removes.length, 1, 'external remove must NOT be suppressed by an earlier self-remove');
     ac.abort();
   });
 
@@ -449,6 +510,144 @@ describe('runExternalWatch — lifecycle', () => {
     await drain();
     assert.equal(ctl.callCount(), 0, 'tree.watch not called');
     assert.equal(sw.listenerCount(), 0, 'no subscription leaked');
+  });
+});
+
+describe('runExternalWatch — cache invalidation', () => {
+  it('invalidates outer cache for data events BEFORE forwarding', async () => {
+    const { tree, ctl } = makeMockTree();
+    const ac = new AbortController();
+    const invalidated: string[] = [];
+    const order: string[] = [];
+
+    runExternalWatch(tree, {
+      pathPrefix: '/mount',
+      forwardEvent: (e) => {
+        if (e.type !== 'reconnect') order.push(`forward:${e.path}`);
+      },
+      invalidateCachePath: (p) => {
+        invalidated.push(p);
+        order.push(`invalidate:${p}`);
+      },
+      signal: ac.signal,
+      source: 'cache-inv',
+    });
+
+    await drain();
+    ctl.push({ type: 'set', path: '/foo', node: { $type: 't' } });
+    await drain();
+
+    assert.deepEqual(invalidated, ['/mount/foo'], 'invalidated outer-namespace path');
+    // Strict ordering: invalidate runs BEFORE forward so any reader
+    // triggered by the event sees fresh data.
+    assert.deepEqual(order, ['invalidate:/mount/foo', 'forward:/mount/foo']);
+
+    ac.abort();
+  });
+
+  it('invalidates outer cache for remove events', async () => {
+    const { tree, ctl } = makeMockTree();
+    const ac = new AbortController();
+    const invalidated: string[] = [];
+
+    runExternalWatch(tree, {
+      pathPrefix: '/',
+      forwardEvent: () => {},
+      invalidateCachePath: (p) => invalidated.push(p),
+      signal: ac.signal,
+      source: 'remove-inv',
+    });
+
+    await drain();
+    ctl.push({ type: 'remove', path: '/x' });
+    await drain();
+
+    assert.deepEqual(invalidated, ['/x']);
+    ac.abort();
+  });
+
+  it('clears entire cache on reconnect{preserved:false}', async () => {
+    const { tree, ctl } = makeMockTree();
+    const ac = new AbortController();
+    let clearedAll = 0;
+    const pathInvalidations: string[] = [];
+
+    runExternalWatch(tree, {
+      pathPrefix: '/',
+      forwardEvent: () => {},
+      invalidateCachePath: (p) => pathInvalidations.push(p),
+      invalidateCacheAll: () => { clearedAll++; },
+      signal: ac.signal,
+      source: 'invalidate-all',
+    });
+
+    await drain();
+    ctl.push({ type: 'reconnect', preserved: false });
+    await drain();
+
+    assert.equal(clearedAll, 1, 'cache cleared wholesale');
+    assert.equal(pathInvalidations.length, 0, 'no path-level call for reconnect');
+    ac.abort();
+  });
+
+  it('caught stream error: clears cache BEFORE forwarding reconnect{preserved:false}', async () => {
+    const { tree, ctl } = makeMockTree();
+    const ac = new AbortController();
+    const out: TreeEvent[] = [];
+    let clearedAll = 0;
+    const order: string[] = [];
+
+    const origErr = console.error;
+    console.error = () => {};
+
+    try {
+      runExternalWatch(tree, {
+        pathPrefix: '/',
+        forwardEvent: (e) => {
+          out.push(e);
+          if (e.type === 'reconnect') order.push('forward:reconnect');
+        },
+        invalidateCacheAll: () => { clearedAll++; order.push('invalidateAll'); },
+        signal: ac.signal,
+        source: 'error-cache-clear',
+        initialRetryMs: 5,
+        maxRetryMs: 10,
+      });
+
+      await drain();
+      ctl.fail(new Error('stream blew up'));
+      await new Promise(r => setTimeout(r, 30));
+
+      assert.ok(clearedAll >= 1, 'cache cleared on stream error');
+      const firstReconnect = order.findIndex(s => s === 'forward:reconnect');
+      const firstInvalidate = order.findIndex(s => s === 'invalidateAll');
+      assert.ok(firstInvalidate >= 0 && firstInvalidate < firstReconnect,
+        'invalidateAll runs BEFORE the reconnect is forwarded');
+    } finally {
+      console.error = origErr;
+      ac.abort();
+    }
+  });
+
+  it('does NOT clear cache on reconnect{preserved:true}', async () => {
+    const { tree, ctl } = makeMockTree();
+    const ac = new AbortController();
+    let clearedAll = 0;
+
+    runExternalWatch(tree, {
+      pathPrefix: '/',
+      forwardEvent: () => {},
+      invalidateCacheAll: () => { clearedAll++; },
+      signal: ac.signal,
+      source: 'preserved',
+    });
+
+    await drain();
+    ctl.push({ type: 'reconnect', preserved: true });
+    await drain();
+
+    assert.equal(clearedAll, 0, 'preserved reconnect: cache untouched');
+    ac.abort();
   });
 });
 

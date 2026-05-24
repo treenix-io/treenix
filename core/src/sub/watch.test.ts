@@ -582,13 +582,32 @@ describe('WatchManager — edge cases', () => {
     assert.equal(events.length, 1, 'should not deliver twice');
   });
 
-  it('notify reconnect event is silently ignored', () => {
+  it('notify reconnect broadcasts to all connected users (refetch signal)', () => {
+    // Mid-session reconnect{preserved:false} from external sources (Mongo
+    // invalidate, change-stream error, delete-without-preimage) must reach
+    // every connected client so caches refetch. Per-scope routing isn't
+    // possible — the source can't tell which paths each user holds.
     const wm = createWatchManager();
-    const events: NodeEvent[] = [];
-    wm.connect('c1', 'u1', (e) => events.push(e));
-    wm.watch('u1', ['/a']);
-    // reconnect event has no path — must not crash or deliver
+    const ev1: NodeEvent[] = [];
+    const ev2: NodeEvent[] = [];
+    wm.connect('c1', 'u1', (e) => ev1.push(e));
+    wm.connect('c2', 'u2', (e) => ev2.push(e));
+    // No watches registered — still must receive the broadcast.
+    wm.notify({ type: 'reconnect', preserved: false });
+    assert.equal(ev1.length, 1);
+    assert.equal(ev1[0].type, 'reconnect');
+    if (ev1[0].type === 'reconnect') assert.equal(ev1[0].preserved, false);
+    assert.equal(ev2.length, 1);
+  });
+
+  it('notify reconnect reaches users with multiple connections (tabs)', () => {
+    const wm = createWatchManager();
+    const tab1: NodeEvent[] = [];
+    const tab2: NodeEvent[] = [];
+    wm.connect('c1', 'u1', (e) => tab1.push(e));
+    wm.connect('c2', 'u1', (e) => tab2.push(e));
     wm.notify({ type: 'reconnect', preserved: true });
-    assert.equal(events.length, 0);
+    assert.equal(tab1.length, 1);
+    assert.equal(tab2.length, 1);
   });
 });

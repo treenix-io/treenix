@@ -27,6 +27,16 @@ export type RunExternalWatchOpts = {
   pathPrefix: string;
   /** Where to forward the (repathed, deduped) event. Usually `watcher.notify`. */
   forwardEvent: (event: TreeEvent) => void;
+  /** Invalidate the outer cache for a path before forwarding the event.
+   *  External writes bypass `withCache.set`, so without this call any
+   *  consumer (e.g. watch-filter computing ACL via `baseStore.get`) would
+   *  read the stale cached node. Invoked for set/patch/remove on the
+   *  REPATHED (outer namespace) path. */
+  invalidateCachePath?: (outerPath: string) => void;
+  /** Clear the entire outer cache. Invoked on reconnect{preserved:false}
+   *  from the source (e.g. Mongo invalidate, stream error after retry).
+   *  Coarse but safe — clients refetch anyway. */
+  invalidateCacheAll?: () => void;
   /** Subscribe to self-write notifications from withSubscriptions. Required
    *  when `dedupWindowMs > 0`. The consumer subscribes on start and unsubs
    *  on abort. */
@@ -62,11 +72,16 @@ function eventRev(event: TreeEvent): number | undefined {
   return undefined;
 }
 
-function dedupKey(type: TreeEvent['type'], path: string, rev: number | undefined): string {
-  // Prefix by type so a recent self-remove of /x doesn't dedup an unrelated
-  // external set of /x. set/patch share keyspace (they're the same write
-  // observed in different shapes — same (path, rev) means same state).
-  if (type === 'remove') return `R:${path}`;
+function dedupKey(type: TreeEvent['type'], path: string, rev: number | undefined): string | null {
+  // Remove events are NEVER deduped — there's no stable identity to key on
+  // (no $rev). Path-only would falsely suppress this sequence:
+  //   1. Treenix removes /x
+  //   2. External writer creates /x
+  //   3. External writer removes /x
+  // The dedup buffer still holds `R:/x` from step 1, so step 3 would be
+  // suppressed and clients would believe /x still exists. Duplicate remove
+  // events are idempotent on the client side; false suppression is not.
+  if (type === 'remove') return null;
   return `S:${path}@${rev ?? '?'}`;
 }
 
@@ -87,7 +102,7 @@ export function runExternalWatch(tree: Tree, opts: RunExternalWatchOpts): void {
 
   const initialRetryMs = opts.initialRetryMs ?? DEFAULT_INITIAL_RETRY_MS;
   const maxRetryMs = opts.maxRetryMs ?? DEFAULT_MAX_RETRY_MS;
-  const { pathPrefix, forwardEvent, onSelfWrite, signal, source } = opts;
+  const { pathPrefix, forwardEvent, invalidateCachePath, invalidateCacheAll, onSelfWrite, signal, source } = opts;
 
   // ── Dedup buffer (two-bucket rotation) ──
   let bucketCurrent = new Set<string>();
@@ -107,14 +122,12 @@ export function runExternalWatch(tree: Tree, opts: RunExternalWatchOpts): void {
     if (typeof rotateTimer.unref === 'function') rotateTimer.unref();
 
     selfWriteUnsub = onSelfWrite!((path, rev) => {
-      // We don't know whether withSubscriptions emitted as set/patch/remove —
-      // for non-undefined rev mark the S: key; for undefined (remove) mark R:.
-      // Mongo only emits set/remove from change streams, so this covers both.
-      if (rev === undefined) {
-        bucketCurrent.add(dedupKey('remove', path, undefined));
-      } else {
-        bucketCurrent.add(dedupKey('set', path, rev));
-      }
+      // Only mark set/patch — removes are never deduped (see dedupKey()).
+      // withSubscriptions emits rev=undefined for remove events; we skip
+      // those here.
+      if (rev === undefined) return;
+      const key = dedupKey('set', path, rev);
+      if (key !== null) bucketCurrent.add(key);
     });
   }
 
@@ -148,7 +161,10 @@ export function runExternalWatch(tree: Tree, opts: RunExternalWatchOpts): void {
 
           // Control events pass through unchanged (reconnect from the
           // source — e.g. Mongo invalidate — already tells clients to refetch).
+          // Also clear the outer cache: state is wholesale stale, the next
+          // read MUST go through to the source.
           if (event.type === 'reconnect') {
+            if (!event.preserved && invalidateCacheAll) invalidateCacheAll();
             forwardEvent(event);
             continue;
           }
@@ -160,7 +176,13 @@ export function runExternalWatch(tree: Tree, opts: RunExternalWatchOpts): void {
           const externalPath = repath(pathPrefix, event.path);
           const rev = eventRev(event);
           const key = dedupKey(event.type, externalPath, rev);
-          if (dedupEnabled && isRecent(key)) continue;
+          // key === null → never dedup (remove events, see dedupKey rationale).
+          if (dedupEnabled && key !== null && isRecent(key)) continue;
+
+          // Invalidate cache BEFORE forwarding. ACL filters and other
+          // consumers read the store synchronously when handling the event;
+          // they MUST see fresh data, not the pre-write cached value.
+          if (invalidateCachePath) invalidateCachePath(externalPath);
 
           if (event.type === 'set') {
             forwardEvent({ type: 'set', path: externalPath, node: event.node });
@@ -180,16 +202,26 @@ export function runExternalWatch(tree: Tree, opts: RunExternalWatchOpts): void {
       if (signal.aborted) return;
 
       if (endedWithError) {
-        // Tell consumers state may be stale during the gap before retry.
+        // Server-side cache MUST be cleared first — any reader (e.g. the
+        // watch-filter computing ACL via baseStore.get) that races with this
+        // recovery path would otherwise see stale pre-error data. Then tell
+        // clients to refetch.
+        if (invalidateCacheAll) invalidateCacheAll();
         forwardEvent({ type: 'reconnect', preserved: false });
       }
 
       const delay = Math.min(maxRetryMs, initialRetryMs * 2 ** attempt);
       attempt++;
       await new Promise<void>((resolve) => {
-        const t = setTimeout(resolve, delay);
+        let onAbort: (() => void) | null = null;
+        const t = setTimeout(() => {
+          // Normal completion — detach abort listener so listeners don't
+          // accumulate over many retry cycles.
+          if (onAbort) signal.removeEventListener('abort', onAbort);
+          resolve();
+        }, delay);
         if (typeof t.unref === 'function') t.unref();
-        const onAbort = () => { clearTimeout(t); resolve(); };
+        onAbort = () => { clearTimeout(t); resolve(); };
         signal.addEventListener('abort', onAbort, { once: true });
       });
     }

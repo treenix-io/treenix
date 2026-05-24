@@ -157,9 +157,9 @@ register(MountRedis, 'mount', async (mount, ctx) => {
   if (tree.watch && mount.watch && ctx.startExternalWatch) {
     const pathPrefix = mount.shared ? '/' : ctx.path
     ctx.startExternalWatch(tree, {
-      pathPrefix,                                  // repath inner→outer namespace
-      dedupWindowMs: mount.dedupWindowMs ?? 5_000, // suppress self-write echoes
-      source: `redis@${ctx.path}`,                 // for log lines
+      pathPrefix,                              // repath inner→outer namespace
+      dedupWindowMs: mount.dedupWindowMs ?? 0, // default OFF — see warning below
+      source: `redis@${ctx.path}`,             // for log lines
     })
   }
 
@@ -171,9 +171,10 @@ What `ctx.startExternalWatch` does under the hood ([`engine/core/src/sub/externa
 
 1. **Subscribes** to `tree.watch({ kind: 'all' })` and drives a `for await` loop.
 2. **Repaths** every event from inner namespace (`/foo`) to outer namespace (`/mountRoot/foo`) before forwarding.
-3. **Dedups** writes that originated in-pipeline: `withSubscriptions` notifies via `onSelfWrite(path, rev)`; the consumer keeps a two-bucket TTL buffer keyed by `(type, path, rev)` and skips matches. Window is configurable per mount.
-4. **Retries** with exponential backoff (`initialRetryMs` → `maxRetryMs`, default 1 s → 30 s) when the stream errors. Emits `reconnect{preserved:false}` before each retry so clients refetch.
-5. **Lifecycle** — the abort fn returned is tracked by `withMounts` per mount cache key. On mount invalidation (config change), the consumer aborts, the change-stream cursor closes, the dedup timer clears.
+3. **Invalidates the outer server cache** for the repathed path BEFORE forwarding the event. Without this step, downstream consumers (e.g. the ACL watch-filter doing `baseStore.get(path)` to compute claims on the event) would read the stale pre-write cached node. For `reconnect{preserved:false}` the entire cache is cleared.
+4. **Dedups** writes that originated in-pipeline: `withSubscriptions` notifies via `onSelfWrite(path, rev)`; the consumer keeps a two-bucket TTL buffer keyed by `(type, path, rev)` and skips matches. Window is configurable per mount.
+5. **Retries** with exponential backoff (`initialRetryMs` → `maxRetryMs`, default 1 s → 30 s) when the stream errors. Emits `reconnect{preserved:false}` before each retry so clients refetch. `WatchManager.notify` broadcasts `reconnect` events to every connected user.
+6. **Lifecycle** — `withMounts` stores the abort fn on the mount cache entry. On any eviction (explicit invalidation via config change OR FIFO drop when `cacheMax` is reached), the bounded-cache `onEvict` callback fires the abort: change-stream cursor closes, dedup rotation timer clears, `onSelfWrite` subscription releases. Nothing leaks.
 
 ### Configuration fields convention
 
@@ -185,9 +186,11 @@ export class MountRedis {
   /** Enable tree.watch via Redis keyspace notifications. Default OFF —
    *  requires notify-keyspace-events config on the Redis server. */
   watch = false
-  /** Dedup TTL (ms) for self-write suppression. Default tuned for the
-   *  adapter's typical lag. Set 0 to disable dedup. */
-  dedupWindowMs = 5_000
+  /** Dedup TTL (ms) for self-write suppression. Default 0 = OFF (every
+   *  external event forwarded, including echoes of in-pipeline writes —
+   *  idempotent, ~2× event volume). Opt in (e.g. 5_000) when you accept the
+   *  documented race window. See "Known limitations" below. */
+  dedupWindowMs = 0
 }
 ```
 
@@ -195,16 +198,29 @@ When `watch: false`, the adapter does NOT call `ctx.startExternalWatch` (and ide
 
 ### Dedup window — picking a value
 
-- **Tight (~1 s)**: low-lag sources (in-process FS watcher, local socket). Smaller buffer.
-- **Default (~5 s)**: typical replica-set DB lag (Mongo, Postgres logical replication). Robust to normal jitter.
-- **Loose (~30 s)**: cross-region replication, flaky networks, eventually-consistent stores.
-- **Zero**: mount is purely external — no in-pipeline writes flow through it, so there's nothing to dedup. Saves the buffer entirely.
+**Default is `0` (OFF) — every external event is forwarded.** That includes change-stream echoes of writes Treenix itself performed (so each in-pipeline write triggers one immediate event from `withSubscriptions` and one ~lag-later echo from the external source). Idempotent on the client side; doubles event volume per write.
 
-Effective TTL is `[dedupWindowMs, 2 * dedupWindowMs)` because of two-bucket rotation. The cost of a miss (entry evicted too early) is a duplicate event delivered to clients — idempotent, not a correctness bug. So err on the longer side when in doubt.
+Turn on (`dedupWindowMs: N`) ONLY when you accept the documented race window:
+
+- The dedup buffer is keyed by `(type, path, $rev)`. Set/patch echoes are reliably suppressed; **remove echoes are never deduped** because remove events have no `$rev` for identity.
+- Under a `self-remove(/x) → self-recreate(/x)` sequence within the window, a delayed change-stream echo of the OLD remove arrives AFTER the recreate. The remove is forwarded (no dedup); the immediate set echo IS deduped. Client transiently sees `/x` deleted, but the next real read or invalidation restores correctness — visible glitch, no permanent corruption.
+- Operation-identity dedup (preimage `$rev`, writer token) would close this — not implemented yet. Until then, prefer `0` for correctness-first apps and only opt in when SSE event volume is a measured bottleneck.
+
+When enabled, effective TTL is `[dedupWindowMs, 2 * dedupWindowMs)` (two-bucket rotation). Typical values:
+
+- **~1 s**: low-lag sources (in-process FS watcher, local socket).
+- **~5 s**: typical replica-set DB lag (Mongo, Postgres logical replication).
+- **~30 s**: cross-region replication, flaky networks, eventually-consistent stores.
 
 ### Built-in example: `t.mount.mongo`
 
 See [`packages/mongo/src/index.ts`](../../engine/packages/mongo/src/index.ts) — `createMongoTree` exposes `watch?` when `opts.watch === true`, wires `col.watch()` change streams through `subscriptionToAsyncIterable`, handles Mongo-specific edge cases (pre-images for delete events, `invalidate`/`drop` → reconnect-and-close). The mount adapter for `t.mount.mongo` calls `ctx.startExternalWatch` exactly as shown above.
+
+### Known limitations
+
+- **CDC matrix bypass for external events.** Out-of-band writes invalidate the server cache and reach direct watchers via SSE, but they do NOT pass through `cdcEval`. Query mounts (`t.mount.query`) and other virtual-parent watchers will not see `addVps`/`rmVps`/`invalidateVps` for external writes — only direct path/children subscribers do. If you depend on query mounts reflecting external writes, the workaround today is to set `reconnect` semantics on clients (refetch on `reconnect{preserved:false}`) and rely on the runExternalWatch cache invalidation to make those refetches fresh.
+- **Composite mounts do not propagate startExternalWatch.** `MountOverlay`, `createRepathTree`, and other combinators do not forward `ctx.startExternalWatch` to inner trees. A Mongo adapter wrapped inside an overlay or repath does NOT get its change stream wired into the bus. The current opt-in shape (`mount.watch: true` on the leaf `t.mount.mongo`) works only for direct mounts. Combinator propagation is on the roadmap (design-doc follow-ups A/B/C).
+- **Self-write dedup race window.** When a write goes through `tree.set`, the dedup buffer marks `(path, $rev)` AFTER the storage write returns. A Mongo change-stream cursor can — in pathological timing — deliver the same event BEFORE the mark is installed, producing one duplicate event on clients. Idempotent on the client side; not a correctness bug, just a rare extra render.
 
 ## Related
 

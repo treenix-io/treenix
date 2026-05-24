@@ -211,7 +211,18 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
     },
 
     notify(event) {
-      if (event.type === 'reconnect') return;
+      if (event.type === 'reconnect') {
+        // Control event from an external source (e.g. Mongo invalidate,
+        // change-stream error, delete without pre-image) — broadcast to every
+        // connected user so their clients refetch. Per-scope routing is not
+        // possible here: the source can't tell which paths a user holds in
+        // cache, so we err toward "tell everyone, drop noise via dedup at
+        // the client layer".
+        for (const user of users.values()) {
+          for (const push of user.pushes.values()) push(event);
+        }
+        return;
+      }
       const notified = new Set<string>();
 
       // Exact match

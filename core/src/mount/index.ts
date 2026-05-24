@@ -62,29 +62,32 @@ export async function resolveAdapter(mount: ComponentData, mountCtx: MountCtx): 
 
 const DEFAULT_MOUNT_CACHE = 1000;
 
-export function withMounts(rootStore: Tree, opts?: WithMountsOpts): Tree {
-  const cache = createBoundedCache<string, { tree: Tree; refTarget?: string }>(opts?.cacheMax ?? DEFAULT_MOUNT_CACHE);
-  // Parallel map: per-mount-cache-key abort fn for any external-watch
-  // consumers the adapter started. On invalidate we call abort before
-  // dropping the cache entry, so change-stream cursors and timers don't leak.
-  const externalWatchAborts = new Map<string, () => void>();
+type MountCacheEntry = { tree: Tree; refTarget?: string; externalAbort?: () => void };
 
-  /** Invalidate cache for path and all descendants (nested mounts under it) */
+export function withMounts(rootStore: Tree, opts?: WithMountsOpts): Tree {
+  // onEvict aborts any external-watch consumer the adapter started for this
+  // mount entry — covers BOTH explicit invalidation AND FIFO eviction (which
+  // previously leaked change-stream cursors + dedup timers + onSelfWrite subs).
+  const cache = createBoundedCache<string, MountCacheEntry>(
+    opts?.cacheMax ?? DEFAULT_MOUNT_CACHE,
+    {
+      onEvict: (entry) => {
+        if (entry.externalAbort) entry.externalAbort();
+      },
+    },
+  );
+
+  /** Invalidate cache for path and all descendants (nested mounts under it).
+   *  bounded-cache onEvict fires per entry, releasing any external-watch
+   *  consumer the adapter started — no parallel bookkeeping needed. */
   function invalidateMount(path: string): void {
     if (cache.size === 0) return;
-    const toAbort: string[] = [];
     cache.deleteWhere((entry, key) => {
       // key may have ?uid= suffix — extract the path part
       const keyPath = key.split('?')[0];
-      const match = isSameOrDescendant(keyPath, path)
+      return isSameOrDescendant(keyPath, path)
         || (!!entry.refTarget && isSameOrDescendant(entry.refTarget, path));
-      if (match && externalWatchAborts.has(key)) toAbort.push(key);
-      return match;
     });
-    for (const key of toAbort) {
-      const abort = externalWatchAborts.get(key);
-      if (abort) { abort(); externalWatchAborts.delete(key); }
-    }
   }
 
   function isSameOrDescendant(candidate: string, path: string): boolean {
@@ -160,11 +163,21 @@ export function withMounts(rootStore: Tree, opts?: WithMountsOpts): Tree {
     return userId ? `${path}?uid=${userId}` : path;
   }
 
-  function cacheMount(path: string, node: NodeData, tree: Tree, ctx?: unknown): void {
-    cache.set(mountCacheKey(path, ctx), { tree, refTarget: mountRefTarget(node) });
+  function cacheMount(
+    path: string,
+    node: NodeData,
+    tree: Tree,
+    externalAbort: (() => void) | undefined,
+    ctx?: unknown,
+  ): void {
+    cache.set(mountCacheKey(path, ctx), { tree, refTarget: mountRefTarget(node), externalAbort });
   }
 
-  async function resolveMount(node: NodeData, currentStore: Tree, ctx?: unknown): Promise<Tree> {
+  async function resolveMount(
+    node: NodeData,
+    currentStore: Tree,
+    ctx?: unknown,
+  ): Promise<{ tree: Tree; externalAbort?: () => void }> {
     let mount = node['mount'];
     if (!isComponent(mount)) throw new Error(`Mount component missing on ${node.$path}`);
     let configNode: NodeData = node;
@@ -176,35 +189,31 @@ export function withMounts(rootStore: Tree, opts?: WithMountsOpts): Tree {
       if (!isComponent(mount)) throw new Error(`Mount component missing on ref target ${configNode.$path}`);
     }
 
-    // Wrap startExternalWatch so withMounts captures the abort fn keyed by
-    // the SAME cache key cacheMount uses below — invalidation can then close
-    // the corresponding external-watch consumer in lockstep with eviction.
+    // Capture the adapter's external-watch abort (if any) so cacheMount can
+    // stash it on the cache entry. bounded-cache.onEvict then aborts it
+    // automatically on invalidation, FIFO eviction, or replacement.
+    let externalAbort: (() => void) | undefined;
     let startExternalWatch: ExternalWatchStarter | undefined;
     if (opts?.startExternalWatch) {
       const wrapped = opts.startExternalWatch;
-      const mountPath = node.$path;
       startExternalWatch = (tree, starterOpts) => {
-        const key = mountCacheKey(mountPath, ctx);
-        // Re-resolve shouldn't normally race, but if it does, abort the
-        // previous consumer before installing the new one — never leak.
-        const prev = externalWatchAborts.get(key);
-        if (prev) prev();
+        // Re-resolve races (rare) — abort the previous consumer before
+        // installing the new one. Never leak.
+        if (externalAbort) externalAbort();
         const abort = wrapped(tree, starterOpts);
-        externalWatchAborts.set(key, abort);
-        return () => {
-          abort();
-          if (externalWatchAborts.get(key) === abort) externalWatchAborts.delete(key);
-        };
+        externalAbort = abort;
+        return abort;
       };
     }
 
-    return resolveAdapter(mount, {
+    const tree = await resolveAdapter(mount, {
       node: configNode,
       path: node.$path,
       parentStore: currentStore,
       globalStore: self,
       startExternalWatch,
     });
+    return { tree, externalAbort };
   }
 
 
@@ -234,8 +243,8 @@ export function withMounts(rootStore: Tree, opts?: WithMountsOpts): Tree {
       // TODO: parametrized mounts (:param paths) — need explicit registry, not runtime scan
       if (!node || !isMountPoint(node)) continue;
 
-      const tree = await resolveMount(node, nodeStore, ctx);
-      cacheMount(check, node, tree, ctx);
+      const { tree, externalAbort } = await resolveMount(node, nodeStore, ctx);
+      cacheMount(check, node, tree, externalAbort, ctx);
       nodeStore = tree;
     }
 
@@ -249,8 +258,8 @@ export function withMounts(rootStore: Tree, opts?: WithMountsOpts): Tree {
 
     const node = await nodeStore.get(path, ctx);
     if (!node || !isMountPoint(node)) return nodeStore;
-    const tree = await resolveMount(node, nodeStore, ctx);
-    cacheMount(path, node, tree, ctx);
+    const { tree, externalAbort } = await resolveMount(node, nodeStore, ctx);
+    cacheMount(path, node, tree, externalAbort, ctx);
     return tree;
   }
 
