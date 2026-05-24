@@ -62,6 +62,40 @@ describe('Mounts', () => {
     assert.equal(children.items.length, 2);
   });
 
+  // Regression (core-a4y): legacy adapter without native scanChildren must
+  // still drive executeList — withMounts.scanChildren falls back to a single
+  // getChildren page wrapped as an async generator. Was throwing
+  // "Mount-resolved tree at /users does not expose scanChildren".
+  it('scanChildren falls back to getChildren for adapters without scanChildren', async () => {
+    const legacy: Tree = {
+      async get(path) {
+        if (path === '/users/alice') return createNode('/users/alice', 'user');
+        if (path === '/users/bob') return createNode('/users/bob', 'user');
+        return undefined;
+      },
+      async getChildren() {
+        const items = [createNode('/users/alice', 'user'), createNode('/users/bob', 'user')];
+        return { items, total: items.length };
+      },
+      async set() {},
+      async remove() { return false; },
+      async patch() {},
+    };
+    register('test.mount.legacy', 'mount', () => legacy);
+    await rootStore.set(
+      createNode('/users', 'collection', {}, {
+        mount: { $type: 'test.mount.legacy' },
+      }),
+    );
+    const ms = withMounts(rootStore);
+    const collected: string[] = [];
+    for await (const entry of ms.scanChildren!('/users')) {
+      collected.push(entry.node.$path);
+      assert.equal(entry.cursor, entry.node.$path);
+    }
+    assert.deepEqual(collected, ['/users/alice', '/users/bob']);
+  });
+
   it('delegates set to mounted tree', async () => {
     await rootStore.set(
       createNode('/users', 'collection', {}, {

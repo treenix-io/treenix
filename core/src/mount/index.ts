@@ -110,15 +110,21 @@ export function withMounts(rootStore: Tree, opts?: WithMountsOpts): MountableTre
     },
 
     // scanChildren dispatch — same per-path resolution as getChildren, but
-    // streams. Mount sub-trees that don't expose scanChildren (legacy Tree-only
-    // adapters) fail loudly: the new read runtime explicitly forbids falling
-    // back to getChildren (would re-introduce the mixed-responsibilities path).
+    // streams. Legacy Tree-only adapters (no native scanChildren) fall back
+    // to a single getChildren page wrapped as an async generator. `after`
+    // cursor is not honored in fallback — migrate adapter to native
+    // scanChildren for cursor pagination.
     async *scanChildren(path, opts, ctx) {
       const tree = await resolveContentTree(path, ctx);
-      if (!tree.scanChildren) {
-        throw new Error(`Mount-resolved tree at ${path} does not expose scanChildren`);
+      if (tree.scanChildren) {
+        yield* tree.scanChildren(path, opts, ctx);
+        return;
       }
-      yield* tree.scanChildren(path, opts, ctx);
+      if (opts?.signal?.aborted) throw opts.signal.reason;
+      const page = await tree.getChildren(path, { depth: opts?.depth, limit: opts?.limitHint }, ctx);
+      for (const node of page.items) {
+        yield { node, cursor: node.$path };
+      }
     },
 
     async set(node, ctx) {
