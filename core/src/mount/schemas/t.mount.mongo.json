@@ -18,12 +18,19 @@
     "collection": {
       "type": "string",
       "default": "nodes"
+    },
+    "watch": {
+      "type": "boolean",
+      "title": "Enable `tree.watch` via Mongo change streams. OFF by default — change",
+      "description": "streams require a replica set (single-node `mongod` lacks them), and enabling pre-images via `collMod` needs admin permission. Turn on only when you need to observe out-of-band writes (manual mongo writes, other apps sharing the DB, migrations). When OFF, `tree.watch` is undefined on the wrapped adapter, and any caller invoking it gets a clean TypeError (\"watch is not a function\") instead of a silent stall.",
+      "default": false
     }
   },
   "required": [
     "shared",
     "uri",
     "db",
-    "collection"
+    "collection",
+    "watch"
   ]
 }

@@ -26,6 +26,14 @@ export class MountMongo {
   uri = '';
   db = 'treenix';
   collection = 'nodes';
+  /** Enable `tree.watch` via Mongo change streams. OFF by default — change
+   *  streams require a replica set (single-node `mongod` lacks them), and
+   *  enabling pre-images via `collMod` needs admin permission. Turn on only
+   *  when you need to observe out-of-band writes (manual mongo writes, other
+   *  apps sharing the DB, migrations). When OFF, `tree.watch` is undefined
+   *  on the wrapped adapter, and any caller invoking it gets a clean
+   *  TypeError ("watch is not a function") instead of a silent stall. */
+  watch = false;
 }
 registerType('t.mount.mongo', MountMongo);
 
@@ -74,7 +82,7 @@ register(MountMongo, 'mount', async (mount, ctx) => {
   const uri = mount.uri || process.env.MONGO_URI;
   if (!uri) throw new Error('t.mount.mongo: no uri and MONGO_URI not set');
   const { createMongoTree } = await import('@treenx/mongo');
-  const tree = await createMongoTree(uri, mount.db, mount.collection);
+  const tree = await createMongoTree(uri, mount.db, mount.collection, { watch: mount.watch });
   return mount.shared ? tree : createRepathTree(tree, ctx.path, '/');
 });
 

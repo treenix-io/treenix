@@ -46,10 +46,19 @@ function getSharedClient(uri: string): { client: MongoClient; ready: Promise<Mon
   return { client: entry.client, ready: entry.ready, release };
 }
 
+export type MongoTreeOpts = {
+  /** Enable `tree.watch` via Mongo change streams. OFF by default — change
+   *  streams require a replica set (single-node mongod lacks them) and
+   *  enabling pre-images via collMod needs admin permission. Turn on only
+   *  to observe out-of-band writes. */
+  watch?: boolean;
+};
+
 export async function createMongoTree(
   uri: string,
   dbName = 'treenix',
   collectionName = 'nodes',
+  opts: MongoTreeOpts = {},
 ): Promise<Tree & { close(): Promise<void> }> {
   const { client, ready, release } = getSharedClient(uri);
   await ready;
@@ -57,16 +66,20 @@ export async function createMongoTree(
   const col: Collection = db.collection(collectionName);
 
   await col.createIndex({ _path: 1 }, { unique: true });
-  // Best-effort: enable changeStreamPreAndPostImages so DELETE events can
-  // carry _path via `fullDocumentBeforeChange`. Without it, out-of-band
-  // deletes (Mongo writes that bypass Treenix) can't be mapped to a path
-  // and will surface as `reconnect{preserved:false}` instead. Fails harmlessly
-  // when the collection already has it set or when the caller lacks collMod.
-  try {
-    await db.command({ collMod: collectionName, changeStreamPreAndPostImages: { enabled: true } });
-  } catch (err) {
-    const msg = (err as { message?: string })?.message ?? String(err);
-    console.warn(`[mongo] could not enable changeStreamPreAndPostImages on ${dbName}.${collectionName}: ${msg}. tree.watch delete events without pre-images will emit reconnect instead.`);
+
+  const watchEnabled = opts.watch === true;
+  // Pre-image bootstrap only when watch is requested. Best-effort: lets
+  // DELETE events carry _path via `fullDocumentBeforeChange`. Without it,
+  // out-of-band deletes can't be mapped to a path and surface as
+  // `reconnect{preserved:false}`. Fails harmlessly when the collection
+  // already has it or when the caller lacks collMod permission.
+  if (watchEnabled) {
+    try {
+      await db.command({ collMod: collectionName, changeStreamPreAndPostImages: { enabled: true } });
+    } catch (err) {
+      const msg = (err as { message?: string })?.message ?? String(err);
+      console.warn(`[mongo] could not enable changeStreamPreAndPostImages on ${dbName}.${collectionName}: ${msg}. tree.watch delete events without pre-images will emit reconnect instead.`);
+    }
   }
 
   function buildPattern(parent: string, depth: number): RegExp {
@@ -136,13 +149,9 @@ export async function createMongoTree(
       return defaultPatch(tree.get, tree.set, path, ops, ctx);
     },
 
-    /** Observe out-of-band writes via Mongo change streams.
-     *
-     *  The wrapped Tree's own set/remove/patch ALSO flow through Mongo and
-     *  surface here. In typical pipelines `withSubscriptions(mongoTree)`
-     *  sits at the top emitting events for in-pipeline writes — this watch
-     *  is for writes that bypass Treenix entirely (manual mongo writes, other
-     *  apps sharing the DB, migrations).
+    /** Observe out-of-band writes via Mongo change streams. Only exposed
+     *  when the adapter is constructed with `{ watch: true }` — change
+     *  streams require a replica set, so it's an explicit opt-in.
      *
      *  Implementation notes:
      *  - Subscribes to a collection-level change stream with
@@ -159,9 +168,11 @@ export async function createMongoTree(
      *    simplest; future optimization: push a `$match` on `fullDocument._path`
      *    into the pipeline for path/children scopes.
      */
-    watch(scope: TreeWatchScope, opts?: TreeWatchOpts) {
-      return mongoWatch(col, scope, opts);
-    },
+    ...(watchEnabled ? {
+      watch(scope: TreeWatchScope, opts?: TreeWatchOpts) {
+        return mongoWatch(col, scope, opts);
+      },
+    } : {}),
 
     async close() {
       await release();
