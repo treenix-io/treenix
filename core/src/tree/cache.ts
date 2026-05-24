@@ -4,7 +4,7 @@
 
 import type { NodeData } from '#core';
 import { createBoundedCache } from '#util/bounded-cache';
-import { type Tree } from './index';
+import { type Tree, type TreeEvent, type TreeWatchOpts, type TreeWatchScope } from './index';
 import { createInflight } from './inflight';
 import { patchViaSet } from './patch';
 
@@ -66,6 +66,30 @@ export function withCache(tree: Tree, max = DEFAULT_MAX): Tree {
     async patch(path, ops, ctx) {
       return patchViaSet(wrapper, path, ops, ctx);
     },
+
+    // Cache invalidation via watch — for the federation-client case where
+    // withCache wraps a remote tree. Every data event evicts the path so the
+    // next get re-fetches; reconnect{preserved:false} clears the whole cache.
+    // The server-side topology `withSubscriptions(withCache(...))` doesn't
+    // exercise this — writes go through withCache.set which keeps the cache
+    // consistent without needing watch. Only forwarded when inner exposes
+    // watch — bare adapters (Mongo, etc.) stay opt-in.
+    ...(tree.watch ? {
+      watch(scope: TreeWatchScope, opts?: TreeWatchOpts, ctx?: unknown): AsyncIterable<TreeEvent> {
+        const inner = tree.watch!(scope, opts, ctx);
+        async function* wrapped(): AsyncIterable<TreeEvent> {
+          for await (const event of inner) {
+            if (event.type === 'reconnect') {
+              if (!event.preserved) cache.clear();
+            } else {
+              cache.delete(event.path);
+            }
+            yield event;
+          }
+        }
+        return wrapped();
+      },
+    } : {}),
   };
   return wrapper;
 }
