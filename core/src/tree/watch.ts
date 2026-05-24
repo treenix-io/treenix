@@ -39,6 +39,11 @@ const DEFAULT_BUFFER = 1024;
  *   without ever calling `register()`.
  * - Overflow (queue > buffer) replaces the pending queue with exactly one
  *   `overflowEvent`, then closes. No silent drops.
+ * - Graceful shutdown: register receives a second `endStream` callback.
+ *   Calling it stops accepting new events but lets the queue drain — the
+ *   iterator yields any pending events and THEN returns `done`. Used by
+ *   sources that get an "end-of-stream" signal (e.g. Mongo `invalidate`)
+ *   and want the consumer to terminate the for-await loop naturally.
  * - `buffer <= 0` throws `BAD_REQUEST` at iteration start.
  *
  * Generic `E` lets callers narrow the event type (e.g. NodeEvent in #sub).
@@ -46,7 +51,7 @@ const DEFAULT_BUFFER = 1024;
  * so the helper never reaches for `as any` to synthesize one.
  */
 export function subscriptionToAsyncIterable<E>(
-  register: (push: (e: E) => void) => () => void,
+  register: (push: (e: E) => void, endStream: () => void) => () => void,
   overflowEvent: E,
   opts?: TreeWatchOpts,
 ): AsyncIterable<E> {
@@ -61,6 +66,7 @@ export function subscriptionToAsyncIterable<E>(
 
       let registered = false;
       let closed = false;
+      let endRequested = false;
       let unregister: (() => void) | null = null;
       const queue: E[] = [];
       let waiter: ((v: IteratorResult<E>) => void) | null = null;
@@ -89,7 +95,7 @@ export function subscriptionToAsyncIterable<E>(
       }
 
       function push(e: E) {
-        if (closed) return;
+        if (closed || endRequested) return;
 
         if (queue.length >= buffer) {
           // Overflow — drop pending, replace with single overflowEvent, close
@@ -112,10 +118,23 @@ export function subscriptionToAsyncIterable<E>(
         queue.push(e);
       }
 
+      function endStream() {
+        if (endRequested || closed) return;
+        endRequested = true;
+        // If a consumer is waiting AND the queue is empty, close now.
+        // Otherwise the next .next() drains the queue and then closes.
+        if (queue.length === 0 && waiter) shutdown();
+      }
+
       const iterator: AsyncIterableIterator<E> = {
         async next(): Promise<IteratorResult<E>> {
           if (queue.length > 0) {
             return { value: queue.shift()!, done: false };
+          }
+          if (endRequested) {
+            // Queue drained after graceful endStream() — close now.
+            shutdown();
+            return { value: undefined, done: true };
           }
           if (closed) {
             return { value: undefined, done: true };
@@ -126,7 +145,7 @@ export function subscriptionToAsyncIterable<E>(
           }
           if (!registered) {
             registered = true;
-            unregister = register(push);
+            unregister = register(push, endStream);
             if (signal) {
               abortListener = () => shutdown();
               signal.addEventListener('abort', abortListener);

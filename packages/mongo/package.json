@@ -46,7 +46,8 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json && fix-hash-imports",
-    "prepack": "npm run build"
+    "prepack": "npm run build",
+    "test": "tsx --conditions development --test src/**/*.test.ts"
   },
   "peerDependencies": {
     "@treenx/core": "^3.0.0",

@@ -3,8 +3,20 @@
 
 import { type NodeData, toStorageKeys, fromStorageKeys } from '@treenx/core';
 import { OpError } from '@treenx/core/errors';
-import { type Collection, type Db, MongoClient } from 'mongodb';
-import { type Tree } from '@treenx/core/tree';
+import {
+  type ChangeStream,
+  type ChangeStreamDocument,
+  type Collection,
+  type Db,
+  MongoClient,
+} from 'mongodb';
+import {
+  type Tree,
+  type TreeEvent,
+  type TreeWatchOpts,
+  type TreeWatchScope,
+  subscriptionToAsyncIterable,
+} from '@treenx/core/tree';
 import { defaultPatch } from '@treenx/core/tree/patch';
 
 const toStorage = (node: NodeData) => toStorageKeys(node);
@@ -45,6 +57,17 @@ export async function createMongoTree(
   const col: Collection = db.collection(collectionName);
 
   await col.createIndex({ _path: 1 }, { unique: true });
+  // Best-effort: enable changeStreamPreAndPostImages so DELETE events can
+  // carry _path via `fullDocumentBeforeChange`. Without it, out-of-band
+  // deletes (Mongo writes that bypass Treenix) can't be mapped to a path
+  // and will surface as `reconnect{preserved:false}` instead. Fails harmlessly
+  // when the collection already has it set or when the caller lacks collMod.
+  try {
+    await db.command({ collMod: collectionName, changeStreamPreAndPostImages: { enabled: true } });
+  } catch (err) {
+    const msg = (err as { message?: string })?.message ?? String(err);
+    console.warn(`[mongo] could not enable changeStreamPreAndPostImages on ${dbName}.${collectionName}: ${msg}. tree.watch delete events without pre-images will emit reconnect instead.`);
+  }
 
   function buildPattern(parent: string, depth: number): RegExp {
     const esc = escapeRegex(parent);
@@ -113,12 +136,147 @@ export async function createMongoTree(
       return defaultPatch(tree.get, tree.set, path, ops, ctx);
     },
 
+    /** Observe out-of-band writes via Mongo change streams.
+     *
+     *  The wrapped Tree's own set/remove/patch ALSO flow through Mongo and
+     *  surface here. In typical pipelines `withSubscriptions(mongoTree)`
+     *  sits at the top emitting events for in-pipeline writes — this watch
+     *  is for writes that bypass Treenix entirely (manual mongo writes, other
+     *  apps sharing the DB, migrations).
+     *
+     *  Implementation notes:
+     *  - Subscribes to a collection-level change stream with
+     *    `fullDocument: 'updateLookup'` so insert/update/replace events carry
+     *    the post-image (becomes a `set` event). On `update` the wire payload
+     *    is a full set, not a derived patch — could be optimized later to map
+     *    `updateDescription` to PatchOp[].
+     *  - DELETE events need `fullDocumentBeforeChange` (Mongo 6.0+ collection
+     *    pre-images). Enabled best-effort at adapter init; if disabled, delete
+     *    events emit `reconnect{preserved:false}` so callers refetch.
+     *  - Stream errors / `invalidate` / `drop` emit `reconnect{preserved:false}`
+     *    and close the iterator. Helper takes care of overflow/abort lifecycle.
+     *  - Scope filtering is done after mapping — collection-level subscribe is
+     *    simplest; future optimization: push a `$match` on `fullDocument._path`
+     *    into the pipeline for path/children scopes.
+     */
+    watch(scope: TreeWatchScope, opts?: TreeWatchOpts) {
+      return mongoWatch(col, scope, opts);
+    },
+
     async close() {
       await release();
     },
   };
 
   return tree;
+}
+
+/** Direct-child check: matches /parent/x but not /parent (itself) or /parent/x/y. */
+function isDirectChild(parent: string, candidate: string): boolean {
+  const prefix = parent === '/' ? '/' : parent + '/';
+  if (!candidate.startsWith(prefix)) return false;
+  const rest = candidate.slice(prefix.length);
+  return rest.length > 0 && !rest.includes('/');
+}
+
+function matchesScope(event: TreeEvent, scope: TreeWatchScope): boolean {
+  if (event.type === 'reconnect') return true;
+  if (scope.kind === 'all') return true;
+  if (scope.kind === 'path') return event.path === scope.path;
+  return isDirectChild(scope.path, event.path);
+}
+
+type MongoPathDoc = Record<string, unknown> & { _path?: string };
+
+/** Map one Mongo change-stream document to a TreeEvent, or 'invalidate' when
+ *  the cursor signals it must restart (drop / rename / invalidate / delete
+ *  without preimage), or null to skip the event (unknown op, non-Treenix doc).
+ *  Kept pure — change-stream typing isolated from the watch loop. */
+export function mongoChangeToTreeEvent(change: ChangeStreamDocument): TreeEvent | 'invalidate' | null {
+  switch (change.operationType) {
+    case 'insert':
+    case 'replace':
+    case 'update': {
+      const lookup = (change as { fullDocument?: MongoPathDoc | null }).fullDocument;
+      if (!lookup || typeof lookup._path !== 'string') {
+        // updateLookup race or non-Treenix doc — skip, no path to attach
+        return null;
+      }
+      const node = fromStorage(lookup);
+      const { $path, ...body } = node;
+      return { type: 'set', path: $path, node: body };
+    }
+    case 'delete': {
+      const pre = (change as { fullDocumentBeforeChange?: MongoPathDoc | null }).fullDocumentBeforeChange;
+      if (!pre || typeof pre._path !== 'string') {
+        // Pre-images disabled or unavailable — cannot reconstruct path,
+        // ask caller to refetch the scope.
+        return 'invalidate';
+      }
+      return { type: 'remove', path: pre._path };
+    }
+    case 'invalidate':
+    case 'drop':
+    case 'dropDatabase':
+    case 'rename':
+      return 'invalidate';
+    default:
+      return null;
+  }
+}
+
+/** Subscribe to a Mongo collection change stream, mapped to TreeEvent.
+ *  Exported so other Mongo-backed adapters can reuse the wiring (and so the
+ *  unit suite can drive it with a mock Collection). For typical use, prefer
+ *  `tree.watch(scope, opts)` returned by `createMongoTree()`. */
+export function mongoWatch(
+  col: Collection,
+  scope: TreeWatchScope,
+  opts?: TreeWatchOpts,
+): AsyncIterable<TreeEvent> {
+  return subscriptionToAsyncIterable<TreeEvent>(
+    (push, endStream) => {
+      const stream: ChangeStream = col.watch([], {
+        fullDocument: 'updateLookup',
+        fullDocumentBeforeChange: 'whenAvailable',
+      });
+
+      let closed = false;
+
+      (async () => {
+        try {
+          for await (const change of stream) {
+            if (closed) break;
+            const out = mongoChangeToTreeEvent(change);
+            if (out === null) continue;
+            if (out === 'invalidate') {
+              // Push reconnect first, then signal graceful end — consumer
+              // sees the reconnect, then iterator returns done so any
+              // `for await` loop terminates cleanly.
+              push({ type: 'reconnect', preserved: false });
+              endStream();
+              return;
+            }
+            if (matchesScope(out, scope)) push(out);
+          }
+        } catch (err) {
+          if (closed) return;
+          console.error('[mongo-watch] change stream error:', err);
+          push({ type: 'reconnect', preserved: false });
+          endStream();
+        }
+      })();
+
+      return () => {
+        closed = true;
+        stream.close().catch((err: unknown) => {
+          console.error('[mongo-watch] failed to close change stream:', err);
+        });
+      };
+    },
+    { type: 'reconnect', preserved: false },
+    opts,
+  );
 }
 
 function escapeRegex(s: string): string {
