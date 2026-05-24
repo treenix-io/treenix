@@ -4,10 +4,7 @@
 
 import { getComponent, type NodeData } from '@treenx/core';
 import type { Class } from '@treenx/core/comp';
-import fjp from 'fast-json-patch';
-import type { Operation } from 'fast-json-patch';
-
-const { applyPatch } = fjp;
+import { applyOps, type PatchOp } from '@treenx/core/tree';
 import * as cache from './cache';
 
 interface PendingOp {
@@ -83,11 +80,11 @@ export function pushOptimistic<T extends object>(
 }
 
 /** Apply server patch to confirmed state. Returns true if rebase handled it. */
-export function applyServerPatch(path: string, patches: Operation[]): boolean {
+export function applyServerPatch(path: string, patches: PatchOp[]): boolean {
   const rs = state.get(path);
   if (!rs) return false;
 
-  applyPatch(rs.confirmed, patches);
+  applyOps(rs.confirmed, patches);
   rs.pending.shift();
 
   if (rs.pending.length === 0) {

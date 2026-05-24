@@ -20,6 +20,8 @@ export function withValidation(tree: Tree): Tree {
     async patch(path, ops, ctx) {
       return patchViaSet(wrapper, path, ops, ctx);
     },
+    // Pure passthrough — validation doesn't touch read/watch paths.
+    ...(tree.watch ? { watch: tree.watch.bind(tree) } : {}),
   };
   return wrapper;
 }

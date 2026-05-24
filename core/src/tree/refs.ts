@@ -46,6 +46,9 @@ export function withRefIndex(inner: Tree): Tree {
   return {
     ...inner,
 
+    // Pure passthrough — refs index doesn't transform watch.
+    ...(inner.watch ? { watch: inner.watch.bind(inner) } : {}),
+
     async set(node, ctx) {
       const refs = buildRefs(node);
       if (refs) node.$refs = refs;

@@ -66,9 +66,10 @@ describe('Subscriptions', () => {
     assert.equal(events.length, 1);
     assert.equal(events[0].type, 'patch');
     if (events[0].type === 'patch') {
-      const fooOp = events[0].patches.find(p => p.path === '/foo');
+      const fooOp = events[0].patches.find(p => p[1] === 'foo');
       assert.ok(fooOp);
-      assert.equal((fooOp as any).value, 'new');
+      assert.equal(fooOp[0], 'r');
+      assert.equal(fooOp[2], 'new');
     }
   });
 
@@ -86,10 +87,10 @@ describe('Subscriptions', () => {
     assert.equal(events.length, 1);
     assert.equal(events[0].type, 'patch');
     if (events[0].type === 'patch') {
-      const amountOp = events[0].patches.find(p => p.path === '/amount');
+      const amountOp = events[0].patches.find(p => p[1] === 'amount');
       assert.ok(amountOp);
       // Computed diff shows the REAL value (200), not the injected fake (0)
-      assert.equal((amountOp as any).value, 200);
+      assert.equal(amountOp[2], 200);
     }
   });
 

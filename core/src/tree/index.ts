@@ -7,6 +7,7 @@ import { OpError } from '#errors';
 import sift from 'sift';
 import { scanFromCollected } from './fs-common';
 import { applyOps, hasMutationOps, type PatchOp } from './patch';
+import type { TreeEvent, TreeWatchOpts, TreeWatchScope } from './watch';
 
 // ── Pagination ──
 
@@ -40,6 +41,18 @@ export interface Tree {
     opts?: ScanChildrenOpts,
     ctx?: unknown,
   ): AsyncIterable<ChildEntry>;
+  /** Observe changes through the same Tree the caller writes to. Optional:
+   *  storage adapters (Mongo today) MAY omit; outer wrappers like
+   *  withSubscriptions provide a runtime that emits on every write that
+   *  passes through them. Scope is a selector, not a promise that storage
+   *  has native path-level filtering — wrappers MAY subscribe more broadly
+   *  internally and filter before yielding. See `tree/watch.ts` for the
+   *  contract (lifecycle, back-pressure, reconnect semantics). */
+  watch?(
+    scope: TreeWatchScope,
+    opts?: TreeWatchOpts,
+    ctx?: unknown,
+  ): AsyncIterable<TreeEvent>;
 }
 
 // ── TreeSource: server-internal traversal primitive ──
@@ -326,3 +339,4 @@ export function createMemoryTree(): TreeSource {
 }
 
 export { type PatchOp, type Rfc6902Op, PatchTestError, applyOps, assertSafePatchPath, toRfc6902, fromRfc6902, defaultPatch, hasMutationOps, patchViaSet } from './patch';
+export { type TreeEvent, type TreeWatchScope, type TreeWatchOpts, subscriptionToAsyncIterable } from './watch';

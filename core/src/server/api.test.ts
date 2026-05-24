@@ -486,12 +486,16 @@ describe('tRPC API integration', () => {
       });
       await new Promise(resolve => setTimeout(resolve, 0));
 
+      // The watcher receiving the event proves routing worked. After the
+      // notifyVps rename (formerly stayVps), the "stays in vp" signal is
+      // server-internal and never reaches the wire — client computes
+      // membership locally from initial fetch + add/rm history.
       const ev = pushed.find(e => e.path === '/orders/data/1');
-      assert.ok(ev);
+      assert.ok(ev, 'VP watcher must receive event for in-vp mutation');
       assert.equal(ev.type, 'patch');
       assert.equal(ev.path, '/orders/data/1');
-      assert.ok(ev.stayVps?.includes('/orders/new'));
       assert.equal(ev.path.startsWith('/orders/new/'), false);
+      assert.ok(!('stayVps' in ev), 'stayVps is server-internal and must not appear on the wire');
     });
 
     it('query mount does not match hidden component fields', async () => {

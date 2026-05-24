@@ -3,8 +3,7 @@
 // Ensures users only receive events they're authorized to see.
 
 import { A, isComponent, type NodeData, R } from '#core';
-import type { Tree } from '#tree';
-import type { Operation } from 'fast-json-patch';
+import type { PatchOp, Tree } from '#tree';
 import { buildClaims, componentPerm, resolvePermission, stripComponents } from '#security/auth';
 import type { NodeEvent } from './index';
 
@@ -17,28 +16,34 @@ export type WatchFilterOpts = {
 const DEFAULT_CLAIMS_TTL_MS = 30_000;
 
 /**
- * Filter RFC 6902 patch operations, removing ops that target restricted components.
- * Patch paths are like "/componentKey/field" — first segment is the node key.
- * `node` is the post-write stored node; `hasNodeA` is the caller's A bit on that node.
+ * Filter compact PatchOps, removing ops that target restricted components.
+ * PatchOp shape: `[verb, dotPath, value?]` where `dotPath` is dot-separated
+ * (e.g. `componentKey.field`). First segment is the node key.
+ * `node` is the post-write stored node; `hasNodeA` is the caller's A bit on
+ * that node.
  */
 export function filterPatches(
-  patches: Operation[],
+  patches: PatchOp[],
   node: NodeData,
   userId: string | null,
   claims: string[],
   hasNodeA: boolean,
-): Operation[] {
+): PatchOp[] {
   return patches.filter(op => {
-    const seg = op.path.split('/')[1];
-    if (!seg) return false; // root-level op — drop
+    const path = op[1];
+    const dotIdx = path.indexOf('.');
+    const seg = dotIdx === -1 ? path : path.slice(0, dotIdx);
+    if (!seg) return false; // empty path — drop
     if (seg.startsWith('$')) {
-      // Exact /$rev replace is a public version bump; anything deeper or any other $-prefixed
-      // path ($acl/$owner/$refs/$secret/etc., or /$rev/nested) requires A.
-      return op.path === '/$rev' || hasNodeA;
+      // Exact $rev replace is a public version bump; anything deeper or any
+      // other $-prefixed path ($acl/$owner/$refs/$secret/etc., or $rev.nested)
+      // requires A.
+      return path === '$rev' || hasNodeA;
     }
     const val = node[seg];
-    // Component absent in stored — either removed or never existed. Without an oldNode snapshot
-    // we cannot tell if it was restricted; fail closed unless caller has A.
+    // Component absent in stored — either removed or never existed. Without an
+    // oldNode snapshot we cannot tell if it was restricted; fail closed unless
+    // caller has A.
     if (val === undefined) return hasNodeA;
     if (!isComponent(val)) return true;
     return !!(componentPerm(val, userId, claims, node.$owner) & R);

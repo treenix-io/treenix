@@ -433,7 +433,7 @@ describe('WatchManager — NodeEditor browse lifecycle', () => {
 
     // 2. Admin clicks into /orders/o1 — already exact-watched via autoWatch
     //    Update to o1 arrives (e.g. status change by kitchen)
-    wm.notify({ type: 'patch', path: '/orders/o1', patches: [{ op: 'replace', path: '/status', value: 'cooking' }] });
+    wm.notify({ type: 'patch', path: '/orders/o1', patches: [['r', 'status', 'cooking' ]] });
     assert.equal(events.length, 2);
 
     // 3. Admin navigates back to /orders — new order o2 still arrives
@@ -445,7 +445,7 @@ describe('WatchManager — NodeEditor browse lifecycle', () => {
     wm.watch('admin', ['/products'], { children: true });
 
     // o1 updates still arrive (exact watch from autoWatch persists)
-    wm.notify({ type: 'patch', path: '/orders/o1', patches: [{ op: 'replace', path: '/status', value: 'done' }] });
+    wm.notify({ type: 'patch', path: '/orders/o1', patches: [['r', 'status', 'done' ]] });
     assert.equal(events.length, 4);
 
     // New order o3 does NOT arrive (children watch removed)
@@ -468,19 +468,19 @@ describe('WatchManager — NodeEditor browse lifecycle', () => {
     wm.watch('admin', ['/tasks/t42']);
 
     // Both list and detail get the same event (deduped to 1)
-    wm.notify({ type: 'patch', path: '/tasks/t42', patches: [{ op: 'replace', path: '/done', value: true }] });
+    wm.notify({ type: 'patch', path: '/tasks/t42', patches: [['r', 'done', true ]] });
     assert.equal(events.length, 1);
 
     // Close detail panel — unwatch exact only
     wm.unwatch('admin', ['/tasks/t42']);
 
     // t42 still visible via children watch
-    wm.notify({ type: 'patch', path: '/tasks/t42', patches: [{ op: 'replace', path: '/assignee', value: 'bob' }] });
+    wm.notify({ type: 'patch', path: '/tasks/t42', patches: [['r', 'assignee', 'bob' ]] });
     assert.equal(events.length, 2);
 
     // Close list too
     wm.unwatch('admin', ['/tasks'], { children: true });
-    wm.notify({ type: 'patch', path: '/tasks/t42', patches: [{ op: 'replace', path: '/done', value: false }] });
+    wm.notify({ type: 'patch', path: '/tasks/t42', patches: [['r', 'done', false ]] });
     assert.equal(events.length, 2); // nothing
   });
 });

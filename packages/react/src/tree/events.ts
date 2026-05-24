@@ -2,13 +2,10 @@
 // Listens to trpc.events SSE and updates the cache.
 
 import type { NodeData } from '@treenx/core';
-import fjp from 'fast-json-patch';
-import type { Operation } from 'fast-json-patch';
+import { applyOps, type PatchOp } from '@treenx/core/tree';
 import * as cache from './cache';
 import { applyServerPatch, applyServerSet } from './rebase';
 import { AUTH_EXPIRED_EVENT, clearToken, getToken, trpc } from './trpc';
-
-const { applyPatch } = fjp;
 
 type LoadChildren = (path: string) => Promise<void>;
 
@@ -124,14 +121,17 @@ export function startEvents(config: EventsConfig = {}) {
       } else if (event.type === 'patch') {
         // Same rm→put→add ordering as 'set' above.
         if (event.rmVps) event.rmVps.forEach((vp: string) => cache.removeFromParent(event.path, vp));
-        if (event.patches && applyServerPatch(event.path, event.patches as Operation[])) {
+        // tRPC infers the wire type with `unknown[]` for tuples that contain
+        // `unknown` values — server emits real PatchOp tuples, narrow here.
+        const patches = event.patches as PatchOp[] | undefined;
+        if (patches && applyServerPatch(event.path, patches)) {
           // rebase handled it
         } else {
           const existing = cache.get(event.path);
-          if (existing && event.patches) {
+          if (existing && patches) {
             try {
               const patched = structuredClone(existing);
-              applyPatch(patched, event.patches as Operation[]);
+              applyOps(patched, patches);
               cache.put(patched);
             } catch (e) {
               console.error('Failed to apply patches, fetching full node:', e);

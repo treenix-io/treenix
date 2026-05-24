@@ -5,6 +5,12 @@
 
 import { CDC_ROUTES, type NodeEvent, type RoutedNodeEvent, type VpDelta } from './index';
 
+/** Server-internal — `notifyVps` is the L3 "stays-in-vp" fanout signal used
+ *  here for routing. It MUST NOT cross the wire (clients only see addVps,
+ *  rmVps, invalidateVps). The eventForUser stripping below enforces that. */
+type ServerVpDelta = VpDelta & { notifyVps?: string[] };
+type ServerEvent = NodeEvent & { notifyVps?: string[] };
+
 export type WatchPush = (event: NodeEvent) => void;
 
 export type WatchManagerOpts = {
@@ -82,33 +88,36 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
     opts?.onUserRemoved?.(userId);
   }
 
-  function pushToUser(uid: string, event: NodeEvent) {
+  function pushToUser(uid: string, event: ServerEvent) {
     const user = users.get(uid);
     if (!user) return;
     const safeEvent = eventForUser(event, uid);
     for (const push of user.pushes.values()) push(safeEvent);
   }
 
-  function eventForUser(event: NodeEvent, uid: string): NodeEvent {
-    const routes = (event as RoutedNodeEvent)[CDC_ROUTES];
-    if (!routes) return event;
+  function eventForUser(event: ServerEvent, uid: string): NodeEvent {
+    const routes = (event as RoutedNodeEvent)[CDC_ROUTES] as Map<string, ServerVpDelta> | undefined;
+    const out = { ...event } as ServerEvent & RoutedNodeEvent;
+    // notifyVps is server-internal; strip unconditionally before push.
+    delete out.notifyVps;
+    delete out[CDC_ROUTES];
+    if (!routes) return out;
     const delta = routes.get(uid);
-    const out = { ...event } as RoutedNodeEvent & Record<string, unknown>;
     delete out.addVps;
     delete out.rmVps;
-    delete out.stayVps;
-    delete out[CDC_ROUTES];
     if (delta?.addVps?.length) out.addVps = delta.addVps;
     if (delta?.rmVps?.length) out.rmVps = delta.rmVps;
-    if (delta?.stayVps?.length) out.stayVps = delta.stayVps;
+    // invalidateVps stays as a top-level broadcast (per-vp routing) — not
+    // overridden per-user; cdcEval emits per-user invalidate via routes for
+    // ACL/claims work but the wire-level union is what reaches the consumer.
     return out;
   }
 
-  function deltaVps(delta: VpDelta): string[] {
+  function deltaVps(delta: ServerVpDelta): string[] {
     return [
       ...(delta.addVps ?? []),
       ...(delta.rmVps ?? []),
-      ...(delta.stayVps ?? []),
+      ...(delta.notifyVps ?? []),
       ...(delta.invalidateVps ?? []),
     ];
   }
@@ -233,10 +242,11 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
           }
         }
 
-      // Virtual Parent Match (CDC Matrix events) — route on add/rm/stay union.
+      // Virtual Parent Match (CDC Matrix events) — route on add/rm/notify union.
       // When CDC_ROUTES exists, membership is user-specific and must not be
-      // broadcast through global addVps/rmVps/stayVps fields.
-      const routes = (event as RoutedNodeEvent)[CDC_ROUTES];
+      // broadcast through global addVps/rmVps/notifyVps fields.
+      const serverEvent = event as ServerEvent;
+      const routes = (event as RoutedNodeEvent)[CDC_ROUTES] as Map<string, ServerVpDelta> | undefined;
       if (routes) {
         for (const [uid, delta] of routes) {
           if (notified.has(uid)) continue;
@@ -245,7 +255,7 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
           const watchedVp = deltaVps(delta).find(vp => prefixToUsers.get(vp)?.has(uid));
           if (!watchedVp) continue;
           notified.add(uid);
-          pushToUser(uid, event);
+          pushToUser(uid, serverEvent);
           if (user.prefixes.get(watchedVp) && !user.paths.has(event.path) && userWatchCount(user) < maxPerUser && totalWatches < maxTotal) {
             user.paths.add(event.path);
             addTo(pathToUsers, event.path, uid);
@@ -256,7 +266,7 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
         const vps = [
           ...('addVps' in event && event.addVps ? event.addVps : []),
           ...(event.rmVps || []),
-          ...('stayVps' in event && event.stayVps ? event.stayVps : []),
+          ...(serverEvent.notifyVps ?? []),
           ...('invalidateVps' in event && event.invalidateVps ? event.invalidateVps : []),
         ];
         for (const vp of vps) {

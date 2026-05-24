@@ -93,7 +93,7 @@ describe('rebase e2e — deferred server responses', () => {
     // ── Server responds for ADD #1 ──
     // Server may enrich with timestamps, UUIDs etc.
     applyServerPatch('/todo', [
-      { op: 'add', path: '/checklist/items/0', value: { id: 1, text: 'Buy milk', done: false } },
+      ['a', 'checklist.items.0', { id: 1, text: 'Buy milk', done: false }],
     ]);
 
     // BUG SCENARIO: if rebase is broken, items will show only 1 (server state)
@@ -106,14 +106,14 @@ describe('rebase e2e — deferred server responses', () => {
 
     // ── Server responds for ADD #2 ──
     applyServerPatch('/todo', [
-      { op: 'add', path: '/checklist/items/1', value: { id: 2, text: 'Walk dog', done: false } },
+      ['a', 'checklist.items.1', { id: 2, text: 'Walk dog', done: false }],
     ]);
     assert.strictEqual(items().length, 3, 'after server #2: still 3 items (1 pending)');
     assert.strictEqual(hasPending('/todo'), true, '1 op still pending');
 
     // ── Server responds for ADD #3 ──
     applyServerPatch('/todo', [
-      { op: 'add', path: '/checklist/items/2', value: { id: 3, text: 'Code review', done: false } },
+      ['a', 'checklist.items.2', { id: 3, text: 'Code review', done: false }],
     ]);
     assert.strictEqual(items().length, 3, 'after server #3: 3 items confirmed');
     assert.strictEqual(hasPending('/todo'), false, 'all confirmed, cleaned up');
@@ -134,9 +134,7 @@ describe('rebase e2e — deferred server responses', () => {
 
     // Server for #1: adds createdAt, server-generated UUID
     applyServerPatch('/todo', [
-      { op: 'add', path: '/checklist/items/0', value: {
-        id: 1, text: 'A', done: false, createdAt: '2026-04-03T10:00:00Z',
-      }},
+      ['a', 'checklist.items.0', { id: 1, text: 'A', done: false, createdAt: '2026-04-03T10:00:00Z' }],
     ]);
 
     assert.strictEqual(items().length, 2, 'still 2 after server #1');
@@ -146,9 +144,7 @@ describe('rebase e2e — deferred server responses', () => {
 
     // Server for #2: also enriched
     applyServerPatch('/todo', [
-      { op: 'add', path: '/checklist/items/1', value: {
-        id: 2, text: 'B', done: false, createdAt: '2026-04-03T10:00:01Z',
-      }},
+      ['a', 'checklist.items.1', { id: 2, text: 'B', done: false, createdAt: '2026-04-03T10:00:01Z' }],
     ]);
     assert.strictEqual(items()[1].createdAt, '2026-04-03T10:00:01Z', 'server enrichment preserved');
     assert.strictEqual(hasPending('/todo'), false);
@@ -176,7 +172,7 @@ describe('rebase e2e — deferred server responses', () => {
 
     // Server confirms toggle
     applyServerPatch('/todo', [
-      { op: 'replace', path: '/checklist/items/0/done', value: true },
+      ['r', 'checklist.items.0.done', true ],
     ]);
     assert.strictEqual(items().length, 2, 'add still replayed after toggle confirmed');
     assert.strictEqual(items()[0].done, true, 'toggle confirmed');
@@ -185,7 +181,7 @@ describe('rebase e2e — deferred server responses', () => {
 
     // Server confirms add
     applyServerPatch('/todo', [
-      { op: 'add', path: '/checklist/items/1', value: { id: 2, text: 'New', done: false } },
+      ['a', 'checklist.items.1', { id: 2, text: 'New', done: false }],
     ]);
     assert.strictEqual(hasPending('/todo'), false);
   });
@@ -239,7 +235,7 @@ describe('rebase e2e — deferred server responses', () => {
     assert.strictEqual(count(), 3, '3 optimistic');
 
     // Server confirms first
-    applyServerPatch('/c', [{ op: 'replace', path: '/count', value: 1 }]);
+    applyServerPatch('/c', [['r', 'count', 1 ]]);
     assert.strictEqual(count(), 3, 'confirmed 1 + 2 replayed = 3');
 
     // Second call fails on server → rollback pops LAST pending (not middle!)
@@ -250,7 +246,7 @@ describe('rebase e2e — deferred server responses', () => {
     assert.strictEqual(hasPending('/c'), true);
 
     // Server confirms the remaining op
-    applyServerPatch('/c', [{ op: 'replace', path: '/count', value: 2 }]);
+    applyServerPatch('/c', [['r', 'count', 2 ]]);
     assert.strictEqual(count(), 2, 'all confirmed');
     assert.strictEqual(hasPending('/c'), false);
   });
@@ -268,7 +264,7 @@ describe('rebase e2e — deferred server responses', () => {
 
     // Server confirms one by one
     for (let i = 0; i < 5; i++) {
-      applyServerPatch('/c', [{ op: 'replace', path: '/count', value: 11 + i }]);
+      applyServerPatch('/c', [['r', 'count', 11 + i ]]);
       assert.strictEqual(count(), 15, `after server #${i + 1}: count stays 15`);
     }
 
@@ -288,7 +284,7 @@ describe('rebase e2e — deferred server responses', () => {
     assert.strictEqual((cache.get('/b') as any).count, 101);
 
     // Server confirms /b first (out of call order — different paths are independent)
-    applyServerPatch('/b', [{ op: 'replace', path: '/count', value: 101 }]);
+    applyServerPatch('/b', [['r', 'count', 101 ]]);
     assert.strictEqual((cache.get('/b') as any).count, 101);
     assert.strictEqual(hasPending('/b'), false);
 
@@ -297,11 +293,11 @@ describe('rebase e2e — deferred server responses', () => {
     assert.strictEqual((cache.get('/a') as any).count, 2);
 
     // Server confirms /a #1
-    applyServerPatch('/a', [{ op: 'replace', path: '/count', value: 1 }]);
+    applyServerPatch('/a', [['r', 'count', 1 ]]);
     assert.strictEqual((cache.get('/a') as any).count, 2, 'replay second inc');
 
     // Server confirms /a #2
-    applyServerPatch('/a', [{ op: 'replace', path: '/count', value: 2 }]);
+    applyServerPatch('/a', [['r', 'count', 2 ]]);
     assert.strictEqual((cache.get('/a') as any).count, 2);
     assert.strictEqual(hasPending('/a'), false);
   });
@@ -310,7 +306,7 @@ describe('rebase e2e — deferred server responses', () => {
     cache.put({ $path: '/c', $type: 'test.e2e.counter', count: 5 } as any);
 
     // Server sends a patch without any prior optimistic call
-    const handled = applyServerPatch('/c', [{ op: 'replace', path: '/count', value: 10 }]);
+    const handled = applyServerPatch('/c', [['r', 'count', 10 ]]);
     assert.strictEqual(handled, false, 'no rebase state → not handled');
 
     // Cache should NOT have been modified by applyServerPatch when it returns false
@@ -339,7 +335,7 @@ describe('rebase e2e — deferred server responses', () => {
 
     // Server confirms add
     applyServerPatch('/todo', [
-      { op: 'add', path: '/checklist/items/1', value: { id: 2, text: 'Temp', done: false } },
+      ['a', 'checklist.items.1', { id: 2, text: 'Temp', done: false }],
     ]);
     // Confirmed has 2 items, replay remove(id:2) → 1 item
     assert.strictEqual(items().length, 1, 'confirmed + replay remove = 1');
@@ -347,7 +343,7 @@ describe('rebase e2e — deferred server responses', () => {
 
     // Server confirms remove
     applyServerPatch('/todo', [
-      { op: 'remove', path: '/checklist/items/1' },
+      ['d', 'checklist.items.1'],
     ]);
     assert.strictEqual(items().length, 1);
     assert.strictEqual(hasPending('/todo'), false);
@@ -376,7 +372,7 @@ describe('rebase e2e — deferred server responses', () => {
 
     // Server responds for toggle #1 (delayed): done changed to false
     applyServerPatch('/todo', [
-      { op: 'replace', path: '/checklist/items/0/done', value: false },
+      ['r', 'checklist.items.0.done', false ],
     ]);
 
     // BUG SCENARIO: without rebase, server "false" overwrites optimistic "true"
@@ -386,7 +382,7 @@ describe('rebase e2e — deferred server responses', () => {
 
     // Server responds for toggle #2: done changed to true
     applyServerPatch('/todo', [
-      { op: 'replace', path: '/checklist/items/0/done', value: true },
+      ['r', 'checklist.items.0.done', true ],
     ]);
     assert.strictEqual(done(), true, 'confirmed: checked');
     assert.strictEqual(hasPending('/todo'), false);
@@ -412,17 +408,17 @@ describe('rebase e2e — deferred server responses', () => {
     assert.strictEqual(done(), true, 'toggle 3');
 
     // Server #1: done=true
-    applyServerPatch('/todo', [{ op: 'replace', path: '/checklist/items/0/done', value: true }]);
+    applyServerPatch('/todo', [['r', 'checklist.items.0.done', true ]]);
     // confirmed=true, replay toggle→false, toggle→true = true
     assert.strictEqual(done(), true, 'after server #1');
 
     // Server #2: done=false
-    applyServerPatch('/todo', [{ op: 'replace', path: '/checklist/items/0/done', value: false }]);
+    applyServerPatch('/todo', [['r', 'checklist.items.0.done', false ]]);
     // confirmed=false, replay toggle→true
     assert.strictEqual(done(), true, 'after server #2');
 
     // Server #3: done=true
-    applyServerPatch('/todo', [{ op: 'replace', path: '/checklist/items/0/done', value: true }]);
+    applyServerPatch('/todo', [['r', 'checklist.items.0.done', true ]]);
     assert.strictEqual(done(), true, 'after server #3');
     assert.strictEqual(hasPending('/todo'), false);
   });
@@ -439,13 +435,13 @@ describe('rebase e2e — deferred server responses', () => {
       simulateExecute('/c', 'increment', undefined);
       assert.strictEqual((cache.get('/c') as any).count, 1, 'works with frozen cache');
 
-      applyServerPatch('/c', [{ op: 'replace', path: '/count', value: 1 }]);
+      applyServerPatch('/c', [['r', 'count', 1 ]]);
       assert.strictEqual(hasPending('/c'), false);
     } else {
       // Not frozen (prod mode) — just verify basic flow
       simulateExecute('/c', 'increment', undefined);
       assert.strictEqual((cache.get('/c') as any).count, 1);
-      applyServerPatch('/c', [{ op: 'replace', path: '/count', value: 1 }]);
+      applyServerPatch('/c', [['r', 'count', 1 ]]);
       assert.strictEqual(hasPending('/c'), false);
     }
   });

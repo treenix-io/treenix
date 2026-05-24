@@ -64,7 +64,7 @@ describe('rebase', () => {
     assert.strictEqual((cache.get('/c') as any).count, 6, 'optimistic applied');
 
     // Server patch: count 5 → 6
-    applyServerPatch('/c', [{ op: 'replace', path: '/count', value: 6 }]);
+    applyServerPatch('/c', [['r', 'count', 6 ]]);
     assert.strictEqual((cache.get('/c') as any).count, 6, 'server confirmed');
     assert.strictEqual(hasPending('/c'), false, 'cleaned up');
   });
@@ -78,8 +78,8 @@ describe('rebase', () => {
 
     // Server sets count=6 AND adds updatedBy field
     applyServerPatch('/c', [
-      { op: 'replace', path: '/count', value: 6 },
-      { op: 'add', path: '/updatedBy', value: 'server' },
+      ['r', 'count', 6 ],
+      ['a', 'updatedBy', 'server' ],
     ]);
     const node = cache.get('/c') as any;
     assert.strictEqual(node.count, 6);
@@ -95,7 +95,7 @@ describe('rebase', () => {
     pushOptimistic('/n', Counter, 'stats', action('test.rebase.counter', 'increment'), undefined);
     assert.strictEqual((cache.get('/n') as any).stats.count, 4);
 
-    applyServerPatch('/n', [{ op: 'replace', path: '/stats/count', value: 4 }]);
+    applyServerPatch('/n', [['r', 'stats.count', 4 ]]);
     assert.strictEqual((cache.get('/n') as any).stats.count, 4);
     assert.strictEqual(hasPending('/n'), false);
   });
@@ -123,19 +123,19 @@ describe('rebase', () => {
     assert.strictEqual(items()[2].done, true);
 
     // Server confirms toggle 1
-    applyServerPatch('/t', [{ op: 'replace', path: '/items/0/done', value: true }]);
+    applyServerPatch('/t', [['r', 'items.0.done', true ]]);
     assert.strictEqual(items()[0].done, true, 'confirmed + replayed');
     assert.strictEqual(items()[1].done, true, 'still optimistic');
     assert.strictEqual(items()[2].done, true, 'still optimistic');
     assert.strictEqual(hasPending('/t'), true);
 
     // Server confirms toggle 2
-    applyServerPatch('/t', [{ op: 'replace', path: '/items/1/done', value: true }]);
+    applyServerPatch('/t', [['r', 'items.1.done', true ]]);
     assert.strictEqual(items()[1].done, true);
     assert.strictEqual(hasPending('/t'), true);
 
     // Server confirms toggle 3
-    applyServerPatch('/t', [{ op: 'replace', path: '/items/2/done', value: true }]);
+    applyServerPatch('/t', [['r', 'items.2.done', true ]]);
     assert.strictEqual(items()[2].done, true);
     assert.strictEqual(hasPending('/t'), false, 'all confirmed, cleaned up');
   });
@@ -167,7 +167,7 @@ describe('rebase', () => {
 
   it('applyServerPatch returns false when no rebase state', () => {
     cache.put({ $path: '/c', $type: 'test.rebase.counter', count: 5 } as any);
-    const handled = applyServerPatch('/c', [{ op: 'replace', path: '/count', value: 10 }]);
+    const handled = applyServerPatch('/c', [['r', 'count', 10 ]]);
     assert.strictEqual(handled, false);
   });
 
@@ -201,7 +201,7 @@ describe('rebase', () => {
       assert.strictEqual((cache.get('/c') as any).count, 7);
 
       // Server confirms first
-      applyServerPatch('/c', [{ op: 'replace', path: '/count', value: 6 }]);
+      applyServerPatch('/c', [['r', 'count', 6 ]]);
       // Remaining: broken (skipped) + increment → confirmed=6, replay: skip broken, +1 = 7
       assert.strictEqual((cache.get('/c') as any).count, 7);
       assert.ok(
@@ -238,7 +238,7 @@ describe('rebase', () => {
     pushOptimistic('/c', Counter, undefined, action('test.rebase.counter', 'increment'), undefined);
     assert.strictEqual(hasPending('/c'), true);
 
-    applyServerPatch('/c', [{ op: 'replace', path: '/count', value: 1 }]);
+    applyServerPatch('/c', [['r', 'count', 1 ]]);
     assert.strictEqual(hasPending('/c'), false, 'state map cleaned up');
   });
 });

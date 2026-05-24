@@ -734,9 +734,11 @@ describe('e2e: tRPC over HTTP', () => {
       const received = await events;
       const ev = received.find(e => e.path === '/items5/t1');
       assert.ok(ev, 'VP watcher must receive event for in-vp mutation');
-      assert.ok((ev as any).stayVps?.includes('/qm5/hot'), 'stayVps should contain /qm5/hot');
+      // After the notifyVps rename, "stays in vp" is server-internal — only
+      // the fact that the VP-only client received the event proves routing.
       assert.ok(!(ev as any).addVps, 'addVps should be absent (no membership delta)');
       assert.ok(!(ev as any).rmVps, 'rmVps should be absent (no membership delta)');
+      assert.ok(!('stayVps' in (ev as any)), 'stayVps must not be on the wire');
     });
   });
 

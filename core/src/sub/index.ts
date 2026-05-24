@@ -5,35 +5,80 @@
 import { type SubscribeOpts } from '#contexts/service/index';
 import { A, R, type NodeData } from '#core';
 import { buildClaims, resolvePermission, stripComponents } from '#security/auth';
-import { mapNodeForSift, type PatchOp, toRfc6902, type Tree } from '#tree';
+import {
+  mapNodeForSift,
+  type PatchOp,
+  subscriptionToAsyncIterable,
+  type Tree,
+  type TreeEvent,
+  type TreeWatchOpts,
+  type TreeWatchScope,
+} from '#tree';
 import { createSiftTest } from '#tree/query';
-import type { Operation } from 'fast-json-patch';
 import fjp from 'fast-json-patch';
 
 const { compare } = fjp;
 
+/** Diff two nodes via fast-json-patch and convert to compact PatchOp tuples.
+ *  fjp is the only consumer of `fast-json-patch` in #sub — its compare()
+ *  produces only add/replace/remove (no move/copy/test), so this mapper
+ *  exhaustively handles every op it can emit. */
+function diffNodes(oldNode: NodeData, newNode: NodeData): PatchOp[] {
+  const ops = compare(oldNode, newNode);
+  return ops.map((op): PatchOp => {
+    const path = op.path.slice(1).replace(/\//g, '.');
+    switch (op.op) {
+      case 'add':     return ['a', path, (op as { value: unknown }).value];
+      case 'replace': return ['r', path, (op as { value: unknown }).value];
+      case 'remove':  return ['d', path];
+      default:
+        throw new Error(`diffNodes: unexpected op from fast-json-patch.compare: ${op.op}`);
+    }
+  });
+}
+
 // ── Event types ──
+//
+// Layer split:
+//   - TreeEvent  (L1, in #tree) — the protocol event. No CDC/VP fields.
+//   - NodeEvent  (L3, here)     — TreeEvent extended with optional VPs.
+//
+// Public VPs are three: addVps / rmVps / invalidateVps. The "stays-in-vp"
+// notification used by WatchManager is server-internal as `notifyVps` and
+// MUST NOT cross the wire — strip in eventForUser before push.
 
-export type NodeEvent =
-  | { type: 'set'; path: string; node: Omit<NodeData, '$path'>; addVps?: string[]; rmVps?: string[]; stayVps?: string[]; invalidateVps?: string[] }
-  | { type: 'patch'; path: string; patches: Operation[]; rev?: number; addVps?: string[]; rmVps?: string[]; stayVps?: string[]; invalidateVps?: string[] }
-  | { type: 'remove'; path: string; rmVps?: string[]; invalidateVps?: string[] }
-  | { type: 'reconnect'; preserved: boolean };
+export type VpDelta = {
+  /** Query views the path NEWLY appears in. */
+  addVps?: string[];
+  /** Query views the path was REMOVED from. */
+  rmVps?: string[];
+  /** Query views with shifted ACL/config — caller MUST refetch the listing. */
+  invalidateVps?: string[];
+};
 
-// invalidateVps: virtual paths whose visibility/membership may have shifted
-// due to an ACL or config change. Client should re-fetch the listing. The
-// runtime cannot exact-diff these — unlike addVps/rmVps which come from a
-// data mutation on a direct child of the query source.
-export type VpDelta = { addVps?: string[]; rmVps?: string[]; stayVps?: string[]; invalidateVps?: string[] };
+export type NodeEvent = TreeEvent & Partial<VpDelta>;
+
+/** Server-internal VP shape — adds `notifyVps` for in-VP data-only mutations
+ *  that WatchManager uses to fan out to VP watchers. Never serialized. */
+type InternalVpDelta = VpDelta & { notifyVps?: string[] };
+type InternalNodeEvent = TreeEvent & Partial<InternalVpDelta>;
+
 export const CDC_ROUTES: unique symbol = Symbol('treenix.cdcRoutes');
-export type RoutedNodeEvent = NodeEvent & { [CDC_ROUTES]?: Map<string, VpDelta> };
+export type RoutedNodeEvent = InternalNodeEvent & { [CDC_ROUTES]?: Map<string, InternalVpDelta> };
 
-// Strip empty arrays and $path from node to keep wire format clean
-function cleanEvent<T extends NodeEvent>(event: T): T {
+/** Tree narrowed to require `watch` and produce richer NodeEvent (with VPs).
+ *  Returned by withSubscriptions so L3 callers consume VPs through the type. */
+export type SubscribedTree = Tree & {
+  watch(scope: TreeWatchScope, opts?: TreeWatchOpts, ctx?: unknown): AsyncIterable<NodeEvent>;
+};
+
+// Strip empty VP arrays. Internal-only `notifyVps` is left intact here —
+// WatchManager needs it for routing and strips it before pushing to clients.
+function cleanEvent<T extends InternalNodeEvent>(event: T): T {
   const e = { ...event };
   if ('addVps' in e && e.addVps && e.addVps.length === 0) delete e.addVps;
   if ('rmVps' in e && e.rmVps && e.rmVps.length === 0) delete e.rmVps;
-  if ('stayVps' in e && e.stayVps && e.stayVps.length === 0) delete e.stayVps;
+  if ('notifyVps' in e && e.notifyVps && e.notifyVps.length === 0) delete e.notifyVps;
   if ('invalidateVps' in e && e.invalidateVps && e.invalidateVps.length === 0) delete e.invalidateVps;
   return e;
 }
@@ -76,7 +121,7 @@ type QueryEntry = {
   users: Map<string, { claims: string[] | null | undefined; dynamicClaims?: string[]; dynamicAt?: number }>;
 };
 
-type MutableVpDelta = { addVps: string[]; rmVps: string[]; stayVps: string[]; invalidateVps: string[] };
+type MutableVpDelta = { addVps: string[]; rmVps: string[]; notifyVps: string[]; invalidateVps: string[] };
 
 export type CdcRegistry = {
   subscribe(path: string, listener: Listener, opts?: SubscribeOpts): () => void;
@@ -88,8 +133,8 @@ export type CdcRegistry = {
 
 export function withSubscriptions(
   tree: Tree,
-  onEvent?: (event: NodeEvent) => void,
-): { tree: Tree; cdc: CdcRegistry } {
+  onEvent?: (event: InternalNodeEvent) => void,
+): { tree: SubscribedTree; cdc: CdcRegistry } {
   const exactListeners = new Map<string, Set<Listener>>();
   const prefixListeners = new Map<string, Set<Listener>>();
   const activeQueries: QueryEntry[] = [];
@@ -104,7 +149,7 @@ export function withSubscriptions(
       .join(',')}}`;
   }
 
-  type DataEvent = Exclude<NodeEvent, { type: 'reconnect' }>;
+  type DataEvent = Exclude<InternalNodeEvent, { type: 'reconnect' }>;
 
   function emit(raw: DataEvent) {
     const event = cleanEvent(raw);
@@ -128,7 +173,7 @@ export function withSubscriptions(
   function routeDelta(routes: Map<string, MutableVpDelta>, userId: string): MutableVpDelta {
     let delta = routes.get(userId);
     if (!delta) {
-      delta = { addVps: [], rmVps: [], stayVps: [], invalidateVps: [] };
+      delta = { addVps: [], rmVps: [], notifyVps: [], invalidateVps: [] };
       routes.set(userId, delta);
     }
     return delta;
@@ -255,10 +300,10 @@ export function withSubscriptions(
   }
 
   /** Evaluate CDC matrix for a direct child of a query source */
-  async function cdcEval(path: string, oldNode: NodeData | null, newNode: NodeData | null): Promise<VpDelta & { [CDC_ROUTES]?: Map<string, VpDelta> }> {
+  async function cdcEval(path: string, oldNode: NodeData | null, newNode: NodeData | null): Promise<InternalVpDelta & { [CDC_ROUTES]?: Map<string, InternalVpDelta> }> {
     const addVps: string[] = [];
     const rmVps: string[] = [];
-    const stayVps: string[] = [];
+    const notifyVps: string[] = [];
     const oldSift = oldNode ? mapNodeForSift(oldNode) : null;
     const newSift = newNode ? mapNodeForSift(newNode) : null;
     const routes = new Map<string, MutableVpDelta>();
@@ -286,8 +331,8 @@ export function withSubscriptions(
           rmVps.push(q.vp);
           kind = 'rmVps';
         } else if (wasIn && isIn) {
-          stayVps.push(q.vp);
-          kind = 'stayVps';
+          notifyVps.push(q.vp);
+          kind = 'notifyVps';
         }
         if (kind) {
           for (const [userId, user] of q.users) {
@@ -309,20 +354,20 @@ export function withSubscriptions(
         const delta = routeDelta(routes, userId);
         if (!wasIn && isIn) addDelta(delta, 'addVps', q.vp);
         else if (wasIn && !isIn) addDelta(delta, 'rmVps', q.vp);
-        else if (wasIn && isIn) addDelta(delta, 'stayVps', q.vp);
+        else if (wasIn && isIn) addDelta(delta, 'notifyVps', q.vp);
       }
     }
 
-    const secureRoutes = new Map<string, VpDelta>();
+    const secureRoutes = new Map<string, InternalVpDelta>();
     for (const [userId, delta] of routes) {
-      const out: VpDelta = {};
+      const out: InternalVpDelta = {};
       if (delta.addVps.length > 0) out.addVps = delta.addVps;
       if (delta.rmVps.length > 0) out.rmVps = delta.rmVps;
-      if (delta.stayVps.length > 0) out.stayVps = delta.stayVps;
+      if (delta.notifyVps.length > 0) out.notifyVps = delta.notifyVps;
       if (delta.invalidateVps.length > 0) out.invalidateVps = delta.invalidateVps;
-      if (out.addVps || out.rmVps || out.stayVps || out.invalidateVps) secureRoutes.set(userId, out);
+      if (out.addVps || out.rmVps || out.notifyVps || out.invalidateVps) secureRoutes.set(userId, out);
     }
-    const result: VpDelta & { [CDC_ROUTES]?: Map<string, VpDelta> } = { addVps, rmVps, stayVps };
+    const result: InternalVpDelta & { [CDC_ROUTES]?: Map<string, InternalVpDelta> } = { addVps, rmVps, notifyVps };
     if (secureRoutes.size > 0) result[CDC_ROUTES] = secureRoutes;
     return result;
   }
@@ -332,13 +377,13 @@ export function withSubscriptions(
    *  same affected query may also have data-diff entries from cdcEval, and
    *  invalidate takes precedence on the client (re-fetch supersedes diff). */
   function mergeInvalidate(
-    base: VpDelta & { [CDC_ROUTES]?: Map<string, VpDelta> },
+    base: InternalVpDelta & { [CDC_ROUTES]?: Map<string, InternalVpDelta> },
     invalidate: { vps: string[]; routes: Map<string, MutableVpDelta> },
-  ): VpDelta & { [CDC_ROUTES]?: Map<string, VpDelta> } {
+  ): InternalVpDelta & { [CDC_ROUTES]?: Map<string, InternalVpDelta> } {
     if (invalidate.vps.length === 0) return base;
-    const merged: VpDelta & { [CDC_ROUTES]?: Map<string, VpDelta> } = { ...base };
+    const merged: InternalVpDelta & { [CDC_ROUTES]?: Map<string, InternalVpDelta> } = { ...base };
     merged.invalidateVps = [...(base.invalidateVps ?? []), ...invalidate.vps];
-    const existingRoutes = base[CDC_ROUTES] ?? new Map<string, VpDelta>();
+    const existingRoutes = base[CDC_ROUTES] ?? new Map<string, InternalVpDelta>();
     const newRoutes = new Map(existingRoutes);
     for (const [userId, delta] of invalidate.routes) {
       const prev = newRoutes.get(userId) ?? {};
@@ -351,11 +396,58 @@ export function withSubscriptions(
     return merged;
   }
 
-  const wrappedTree: Tree = {
+  /** Internal subscribe — shared between cdc.subscribe() and watch(). Returns
+   *  unregister. `children:true` uses prefixListeners (event.path === prefix
+   *  OR starts with prefix + '/'). */
+  function internalSubscribe(path: string, listener: Listener, opts?: { children?: boolean }): () => void {
+    const map = opts?.children ? prefixListeners : exactListeners;
+    if (!map.has(path)) map.set(path, new Set());
+    map.get(path)!.add(listener);
+    return () => {
+      const subs = map.get(path);
+      if (subs) {
+        subs.delete(listener);
+        if (subs.size === 0) map.delete(path);
+      }
+    };
+  }
+
+  function isDirectChild(parent: string, candidate: string): boolean {
+    const prefix = parent === '/' ? '/' : parent + '/';
+    if (!candidate.startsWith(prefix)) return false;
+    const rest = candidate.slice(prefix.length);
+    return rest.length > 0 && !rest.includes('/');
+  }
+
+  function watch(scope: TreeWatchScope, opts?: TreeWatchOpts, _ctx?: unknown): AsyncIterable<NodeEvent> {
+    const reconnectOverflow: NodeEvent = { type: 'reconnect', preserved: false };
+    return subscriptionToAsyncIterable<NodeEvent>(
+      (push) => {
+        if (scope.kind === 'path') {
+          return internalSubscribe(scope.path, (event) => push(event));
+        }
+        if (scope.kind === 'children') {
+          // prefixListeners fires on parent + every descendant; we yield
+          // only direct children, dropping the parent and grandchildren.
+          return internalSubscribe(scope.path, (event) => {
+            if (event.type === 'reconnect') { push(event); return; }
+            if (isDirectChild(scope.path, event.path)) push(event);
+          }, { children: true });
+        }
+        // 'all' — subscribe to root prefix; every path matches.
+        return internalSubscribe('/', (event) => push(event), { children: true });
+      },
+      reconnectOverflow,
+      opts,
+    );
+  }
+
+  const wrappedTree: SubscribedTree = {
     get: tree.get.bind(tree),
     getChildren: tree.getChildren.bind(tree),
     // Forward only when inner exposes it; sub/ never enriches scans.
     ...(tree.scanChildren ? { scanChildren: tree.scanChildren.bind(tree) } : {}),
+    watch,
 
     async set(node, ctx) {
       // Defense in depth: strip string $patches if injected
@@ -385,7 +477,7 @@ export function withSubscriptions(
       const { $path, ...body } = node;
 
       if (oldNode) {
-        const computed = compare(oldNode, node);
+        const computed = diffNodes(oldNode, node);
         emit(computed.length > 0
           ? { type: 'patch', path: $path, patches: computed, rev: node.$rev, ...cdc }
           : { type: 'set', path: $path, node: body, ...cdc });
@@ -447,26 +539,18 @@ export function withSubscriptions(
         cdc = mergeInvalidate(cdc, invalidateVpsForClaimsChange(claimsUid));
       }
 
-      // Emit only mutation ops (filter out test ops)
-      const mutations = ops.filter((o): o is Exclude<PatchOp, readonly ['t', ...any]> => o[0] !== 't');
+      // Emit only mutation ops (filter out test ops) — same PatchOp shape
+      // tree.patch consumes; no RFC 6902 conversion on the wire.
+      const mutations = ops.filter(o => o[0] !== 't');
       if (mutations.length > 0) {
-        emit({ type: 'patch', path, patches: toRfc6902(mutations) as Operation[], rev: newNode?.$rev, ...cdc });
+        emit({ type: 'patch', path, patches: mutations, rev: newNode?.$rev, ...cdc });
       }
     },
   };
 
   const cdc: CdcRegistry = {
     subscribe(path, listener, opts) {
-      const map = opts?.children ? prefixListeners : exactListeners;
-      if (!map.has(path)) map.set(path, new Set());
-      map.get(path)!.add(listener);
-      return () => {
-        const subs = map.get(path);
-        if (subs) {
-          subs.delete(listener);
-          if (subs.size === 0) map.delete(path);
-        }
-      };
+      return internalSubscribe(path, listener, opts);
     },
 
     watchQuery(vp, source, match, userId, claims) {
