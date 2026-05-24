@@ -106,8 +106,8 @@ export function asTreeSource(tree: Tree): TreeSource {
 
 export async function resolveRef(tree: Tree, node: NodeData): Promise<NodeData> {
   if (!isRef(node)) return node;
-  const target = await tree.get((node as unknown as Ref).$ref);
-  if (!target) throw new Error(`Ref not found: ${(node as unknown as Ref).$ref}`);
+  const target = await tree.get(node.$ref);
+  if (!target) throw new Error(`Ref not found: ${node.$ref}`);
   return target;
 }
 

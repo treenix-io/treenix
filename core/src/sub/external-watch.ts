@@ -1,52 +1,18 @@
-// Treenix External Watch — pumps an outside Tree's watch stream into the
-// subscription bus, with dedup of in-pipeline self-writes.
-//
-// Use case: a mount adapter exposes Tree.watch over an external source
-// (Mongo change streams, FS watch, REST webhook, ...). Writes that flow
-// through withSubscriptions already produce events for SSE; the same writes,
-// observed by the external source, would surface a SECOND time. This module
-// runs the consumer loop, repaths events into the outer (caller) namespace,
-// deduplicates self-writes, and forwards through to the subscription bus.
-//
-// Lifecycle: caller owns an AbortController. Cleanup runs on abort:
-//   - the underlying Tree.watch stream closes (signal propagation)
-//   - the onSelfWrite subscription unsubscribes
-//   - the bucket-rotation timer clears
-//
-// Errors / stream end: the loop forwards `reconnect{preserved:false}` to
-// the bus so SSE clients refetch, then reconnects with exponential backoff.
-// On natural stream end (e.g. Mongo invalidate), no extra reconnect is sent
-// — the source already produced one before closing.
+// External Watch — pump an outside Tree.watch stream into the subscription
+// bus. Repath, optional self-write dedup, retry/backoff, abort lifecycle.
 
 import type { Tree, TreeEvent } from '#tree';
 import type { OnSelfWrite } from './index';
 
 export type RunExternalWatchOpts = {
-  /** Prepended to every yielded event.path before forwarding. For an unrepathed
-   *  mount (mount.shared = true) pass '/' to no-op. */
   pathPrefix: string;
-  /** Where to forward the (repathed, deduped) event. Usually `watcher.notify`. */
   forwardEvent: (event: TreeEvent) => void;
-  /** Invalidate the outer cache for a path before forwarding the event.
-   *  External writes bypass `withCache.set`, so without this call any
-   *  consumer (e.g. watch-filter computing ACL via `baseStore.get`) would
-   *  read the stale cached node. Invoked for set/patch/remove on the
-   *  REPATHED (outer namespace) path. */
   invalidateCachePath?: (outerPath: string) => void;
-  /** Clear the entire outer cache. Invoked on reconnect{preserved:false}
-   *  from the source (e.g. Mongo invalidate, stream error after retry).
-   *  Coarse but safe — clients refetch anyway. */
   invalidateCacheAll?: () => void;
-  /** Subscribe to self-write notifications from withSubscriptions. Required
-   *  when `dedupWindowMs > 0`. The consumer subscribes on start and unsubs
-   *  on abort. */
   onSelfWrite?: OnSelfWrite;
-  /** TTL window (ms) for self-write dedup. 0 or undefined = no dedup. The
-   *  implementation rotates two buckets every `dedupWindowMs`, so entries
-   *  live for `[dedupWindowMs, 2 * dedupWindowMs)` before eviction. */
+  /** Self-write dedup TTL (ms). 0 = off. Effective window is
+   *  [dedupWindowMs, 2*dedupWindowMs) due to two-bucket rotation. */
   dedupWindowMs?: number;
-  /** Aborts the loop, closes the inner stream, clears rotation timer,
-   *  unsubscribes self-writes. */
   signal: AbortSignal;
   /** Initial retry delay (ms) for exponential backoff after a stream error.
    *  Doubles on each consecutive failure, capped at `maxRetryMs`. Default 1000. */
@@ -73,23 +39,12 @@ function eventRev(event: TreeEvent): number | undefined {
 }
 
 function dedupKey(type: TreeEvent['type'], path: string, rev: number | undefined): string | null {
-  // Remove events are NEVER deduped — there's no stable identity to key on
-  // (no $rev). Path-only would falsely suppress this sequence:
-  //   1. Treenix removes /x
-  //   2. External writer creates /x
-  //   3. External writer removes /x
-  // The dedup buffer still holds `R:/x` from step 1, so step 3 would be
-  // suppressed and clients would believe /x still exists. Duplicate remove
-  // events are idempotent on the client side; false suppression is not.
+  // Removes are NEVER deduped: no $rev to key on, and path-only would falsely
+  // suppress a real external delete that follows a self-remove + recreate.
   if (type === 'remove') return null;
   return `S:${path}@${rev ?? '?'}`;
 }
 
-/**
- * Start a consumer loop that pumps `tree.watch` into `forwardEvent`.
- * Fire-and-forget: caller owns `signal` for shutdown. Throws synchronously
- * if `tree.watch` is undefined or if dedup is requested without `onSelfWrite`.
- */
 export function runExternalWatch(tree: Tree, opts: RunExternalWatchOpts): void {
   if (!tree.watch) {
     throw new Error(`runExternalWatch[${opts.source}]: tree does not expose watch`);
@@ -122,10 +77,7 @@ export function runExternalWatch(tree: Tree, opts: RunExternalWatchOpts): void {
     if (typeof rotateTimer.unref === 'function') rotateTimer.unref();
 
     selfWriteUnsub = onSelfWrite!((path, rev) => {
-      // Only mark set/patch — removes are never deduped (see dedupKey()).
-      // withSubscriptions emits rev=undefined for remove events; we skip
-      // those here.
-      if (rev === undefined) return;
+      if (rev === undefined) return; // remove: not deduped
       const key = dedupKey('set', path, rev);
       if (key !== null) bucketCurrent.add(key);
     });
@@ -157,31 +109,24 @@ export function runExternalWatch(tree: Tree, opts: RunExternalWatchOpts): void {
         const stream = tree.watch!({ kind: 'all' }, { signal });
         for await (const event of stream) {
           if (signal.aborted) return;
-          attempt = 0; // any successful event resets the backoff
+          attempt = 0;
 
-          // Control events pass through unchanged (reconnect from the
-          // source — e.g. Mongo invalidate — already tells clients to refetch).
-          // Also clear the outer cache: state is wholesale stale, the next
-          // read MUST go through to the source.
           if (event.type === 'reconnect') {
             if (!event.preserved && invalidateCacheAll) invalidateCacheAll();
             forwardEvent(event);
             continue;
           }
 
-          // Dedup AFTER repath: onSelfWrite fires from withSubscriptions which
-          // sits OUTSIDE the repath wrapper, so its keys are in the outer
-          // (caller) namespace. The change stream produces inner-namespace
-          // paths. Repath first, then key match.
+          // Repath BEFORE dedup: onSelfWrite fires from withSubscriptions
+          // (outside the repath wrapper) in outer-namespace; the change
+          // stream is inner-namespace. Keys must match in one namespace.
           const externalPath = repath(pathPrefix, event.path);
           const rev = eventRev(event);
           const key = dedupKey(event.type, externalPath, rev);
-          // key === null → never dedup (remove events, see dedupKey rationale).
           if (dedupEnabled && key !== null && isRecent(key)) continue;
 
-          // Invalidate cache BEFORE forwarding. ACL filters and other
-          // consumers read the store synchronously when handling the event;
-          // they MUST see fresh data, not the pre-write cached value.
+          // Cache must be fresh BEFORE forward — watch-filter reads the
+          // store synchronously to compute ACL on the event.
           if (invalidateCachePath) invalidateCachePath(externalPath);
 
           if (event.type === 'set') {
@@ -192,8 +137,7 @@ export function runExternalWatch(tree: Tree, opts: RunExternalWatchOpts): void {
             forwardEvent({ type: 'remove', path: externalPath });
           }
         }
-        // Stream ended cleanly — source already emitted reconnect (if it
-        // wanted clients to refetch). Don't duplicate.
+        // Clean end: source already emitted reconnect if it needed one.
       } catch (err) {
         if (signal.aborted) return;
         endedWithError = true;
@@ -202,10 +146,8 @@ export function runExternalWatch(tree: Tree, opts: RunExternalWatchOpts): void {
       if (signal.aborted) return;
 
       if (endedWithError) {
-        // Server-side cache MUST be cleared first — any reader (e.g. the
-        // watch-filter computing ACL via baseStore.get) that races with this
-        // recovery path would otherwise see stale pre-error data. Then tell
-        // clients to refetch.
+        // Clear cache BEFORE reconnect: a concurrent watch-filter read
+        // would otherwise see stale pre-error data.
         if (invalidateCacheAll) invalidateCacheAll();
         forwardEvent({ type: 'reconnect', preserved: false });
       }
@@ -215,8 +157,8 @@ export function runExternalWatch(tree: Tree, opts: RunExternalWatchOpts): void {
       await new Promise<void>((resolve) => {
         let onAbort: (() => void) | null = null;
         const t = setTimeout(() => {
-          // Normal completion — detach abort listener so listeners don't
-          // accumulate over many retry cycles.
+          // Detach abort listener — without this, listeners accumulate
+          // over long-running retry cycles.
           if (onAbort) signal.removeEventListener('abort', onAbort);
           resolve();
         }, delay);

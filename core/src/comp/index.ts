@@ -211,5 +211,5 @@ export function getDefaults<T = any>(type: TypeId<T>): Partial<Raw<T>> {
     }
   }
 
-  return {} as R;
+  return {};
 }

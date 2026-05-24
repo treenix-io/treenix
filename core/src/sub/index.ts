@@ -64,6 +64,7 @@ type InternalVpDelta = VpDelta & { notifyVps?: string[] };
 type InternalNodeEvent = TreeEvent & Partial<InternalVpDelta>;
 
 export const CDC_ROUTES: unique symbol = Symbol('treenix.cdcRoutes');
+type RoutedVpDelta = InternalVpDelta & { [CDC_ROUTES]?: Map<string, InternalVpDelta> };
 export type RoutedNodeEvent = InternalNodeEvent & { [CDC_ROUTES]?: Map<string, InternalVpDelta> };
 
 /** Tree narrowed to require `watch` and produce richer NodeEvent (with VPs).
@@ -155,8 +156,6 @@ export function withSubscriptions(
       : event.type === 'set'
         ? (event.node as { $rev?: number }).$rev
         : undefined;
-    // Wrap each listener so one buggy consumer can't break the write path
-    // (or starve subsequent listeners). Failures are logged, not silent.
     for (const l of selfWriteListeners) {
       try { l(event.path, rev); }
       catch (err) { console.error('[withSubscriptions] selfWrite listener threw:', err); }
@@ -174,10 +173,6 @@ export function withSubscriptions(
 
   type DataEvent = Exclude<InternalNodeEvent, { type: 'reconnect' }>;
 
-  // Fan out an already-cleaned event to listeners + onEvent. Shared by emit
-  // (in-pipeline writes) and injectExternalEvent (out-of-band writes). The
-  // self-write notification is fired BY emit ONLY — external events must
-  // never poison the dedup buffer.
   function dispatch(event: InternalNodeEvent) {
     if (event.type !== 'reconnect') {
       const exact = exactListeners.get(event.path);
@@ -193,9 +188,8 @@ export function withSubscriptions(
 
   function emit(raw: DataEvent) {
     const event = cleanEvent(raw);
-    // Self-write notification fires synchronously BEFORE event delivery —
-    // so dedup buffers in external-watch consumers are populated before any
-    // out-of-band write surfaces the same (path, rev) back to us.
+    // notifySelfWrite MUST run before dispatch — external-watch dedup buffers
+    // populate from this callback and could otherwise race the change-stream echo.
     notifySelfWrite(event);
     dispatch(event);
   }
@@ -365,7 +359,7 @@ export function withSubscriptions(
   }
 
   /** Evaluate CDC matrix for a direct child of a query source */
-  async function cdcEval(path: string, oldNode: NodeData | null, newNode: NodeData | null): Promise<InternalVpDelta & { [CDC_ROUTES]?: Map<string, InternalVpDelta> }> {
+  async function cdcEval(path: string, oldNode: NodeData | null, newNode: NodeData | null): Promise<RoutedVpDelta> {
     const addVps: string[] = [];
     const rmVps: string[] = [];
     const notifyVps: string[] = [];
@@ -432,7 +426,7 @@ export function withSubscriptions(
       if (delta.invalidateVps.length > 0) out.invalidateVps = delta.invalidateVps;
       if (out.addVps || out.rmVps || out.notifyVps || out.invalidateVps) secureRoutes.set(userId, out);
     }
-    const result: InternalVpDelta & { [CDC_ROUTES]?: Map<string, InternalVpDelta> } = { addVps, rmVps, notifyVps };
+    const result: RoutedVpDelta = { addVps, rmVps, notifyVps };
     if (secureRoutes.size > 0) result[CDC_ROUTES] = secureRoutes;
     return result;
   }
@@ -442,16 +436,16 @@ export function withSubscriptions(
    *  same affected query may also have data-diff entries from cdcEval, and
    *  invalidate takes precedence on the client (re-fetch supersedes diff). */
   function mergeInvalidate(
-    base: InternalVpDelta & { [CDC_ROUTES]?: Map<string, InternalVpDelta> },
+    base: RoutedVpDelta,
     invalidate: { vps: string[]; routes: Map<string, MutableVpDelta> },
-  ): InternalVpDelta & { [CDC_ROUTES]?: Map<string, InternalVpDelta> } {
+  ): RoutedVpDelta {
     if (invalidate.vps.length === 0) return base;
-    const merged: InternalVpDelta & { [CDC_ROUTES]?: Map<string, InternalVpDelta> } = { ...base };
+    const merged: RoutedVpDelta = { ...base };
     merged.invalidateVps = [...(base.invalidateVps ?? []), ...invalidate.vps];
     const existingRoutes = base[CDC_ROUTES] ?? new Map<string, InternalVpDelta>();
     const newRoutes = new Map(existingRoutes);
     for (const [userId, delta] of invalidate.routes) {
-      const prev = newRoutes.get(userId) ?? {};
+      const prev: InternalVpDelta = newRoutes.get(userId) ?? {};
       newRoutes.set(userId, {
         ...prev,
         invalidateVps: [...(prev.invalidateVps ?? []), ...delta.invalidateVps],
@@ -671,7 +665,7 @@ export function withSubscriptions(
       return;
     }
     const inv = invalidateVpsForExternalPath(event.path);
-    const merged = mergeInvalidate({} as InternalVpDelta & { [CDC_ROUTES]?: Map<string, InternalVpDelta> }, inv);
+    const merged = mergeInvalidate({}, inv);
     dispatch(cleanEvent({ ...event, ...merged } as DataEvent));
   }
 

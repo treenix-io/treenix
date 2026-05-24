@@ -100,14 +100,8 @@ register(MountMongo, 'mount', async (mount, ctx) => {
   const tree = await createMongoTree(uri, mount.db, mount.collection, { watch: mount.watch });
   const wrapped = mount.shared ? tree : createRepathTree(tree, ctx.path, '/');
 
-  // Wire external-watch into the subscription bus when:
-  //   - mount declares watch (change stream enabled on the adapter)
-  //   - the adapter actually exposed tree.watch (mount.watch was honored)
-  //   - the host pipeline supplied startExternalWatch (createPipeline does)
-  // pathPrefix repaths change-stream events into the outer namespace:
-  //   shared mount → tree uses global paths → pathPrefix '/' (no-op)
-  //   non-shared    → tree's paths are mount-local → pathPrefix = ctx.path
   if (mount.watch && tree.watch && ctx.startExternalWatch) {
+    // shared = tree uses outer (global) paths; non-shared = mount-local.
     const pathPrefix = mount.shared ? '/' : ctx.path;
     ctx.startExternalWatch(tree, {
       pathPrefix,
@@ -183,13 +177,11 @@ register(MountOverlay, 'mount', async (mount, ctx) => {
   for (const name of mount.layers) {
     const comp = ctx.node[name];
     if (!isComponent(comp)) throw new Error(`t.mount.overlay: component "${name}" not found`);
-    // First layer sees the Overlay's own parent; subsequent layers see the
-    // previously-built layer as their parent. Previously this used `{} as Tree`
-    // for layer 0 — a lie that crashes any adapter touching parentStore.
+    // Each subsequent layer sees the previously-built one as its parent.
     const subCtx: MountCtx = { node: ctx.node, path: ctx.path, parentStore: stores[0] ?? ctx.parentStore, globalStore: ctx.globalStore };
     stores.push(await resolveAdapter(comp, subCtx));
   }
-  // First = lower (base), last = upper (writes go here)
+  // layers[0] is the base; later layers stack on top (last layer = writes).
   let result = stores[0];
   for (let i = 1; i < stores.length; i++) result = createOverlayTree(stores[i], result);
   return result;

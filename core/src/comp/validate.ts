@@ -116,15 +116,14 @@ export function validateComponent(comp: ComponentData, schema: TypeSchema, field
   const basePath = field || comp.$type;
 
   if (schema.required) {
-    const obj = comp as unknown as Record<string, unknown>;
     for (const key of schema.required) {
-      if (obj[key] === undefined) {
+      if (comp[key] === undefined) {
         errors.push({ path: basePath ? `${basePath}.${key}` : key, message: `required field missing` });
       }
     }
   }
 
-  validateObject(comp as unknown as Record<string, unknown>, schema.properties, basePath, errors);
+  validateObject(comp, schema.properties, basePath, errors);
   return errors;
 }
 

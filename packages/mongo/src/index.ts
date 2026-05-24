@@ -68,11 +68,8 @@ export async function createMongoTree(
   await col.createIndex({ _path: 1 }, { unique: true });
 
   const watchEnabled = opts.watch === true;
-  // Pre-image bootstrap only when watch is requested. Best-effort: lets
-  // DELETE events carry _path via `fullDocumentBeforeChange`. Without it,
-  // out-of-band deletes can't be mapped to a path and surface as
-  // `reconnect{preserved:false}`. Fails harmlessly when the collection
-  // already has it or when the caller lacks collMod permission.
+  // Enable pre-images so DELETE events can carry _path. Best-effort —
+  // fails if the caller lacks collMod or the collection already has it.
   if (watchEnabled) {
     try {
       await db.command({ collMod: collectionName, changeStreamPreAndPostImages: { enabled: true } });
@@ -149,25 +146,8 @@ export async function createMongoTree(
       return defaultPatch(tree.get, tree.set, path, ops, ctx);
     },
 
-    /** Observe out-of-band writes via Mongo change streams. Only exposed
-     *  when the adapter is constructed with `{ watch: true }` — change
-     *  streams require a replica set, so it's an explicit opt-in.
-     *
-     *  Implementation notes:
-     *  - Subscribes to a collection-level change stream with
-     *    `fullDocument: 'updateLookup'` so insert/update/replace events carry
-     *    the post-image (becomes a `set` event). On `update` the wire payload
-     *    is a full set, not a derived patch — could be optimized later to map
-     *    `updateDescription` to PatchOp[].
-     *  - DELETE events need `fullDocumentBeforeChange` (Mongo 6.0+ collection
-     *    pre-images). Enabled best-effort at adapter init; if disabled, delete
-     *    events emit `reconnect{preserved:false}` so callers refetch.
-     *  - Stream errors / `invalidate` / `drop` emit `reconnect{preserved:false}`
-     *    and close the iterator. Helper takes care of overflow/abort lifecycle.
-     *  - Scope filtering is done after mapping — collection-level subscribe is
-     *    simplest; future optimization: push a `$match` on `fullDocument._path`
-     *    into the pipeline for path/children scopes.
-     */
+    /** Observe out-of-band Mongo writes via change streams. Opt-in via
+     *  `{ watch: true }` — change streams require a replica set. */
     ...(watchEnabled ? {
       watch(scope: TreeWatchScope, opts?: TreeWatchOpts) {
         return mongoWatch(col, scope, opts);

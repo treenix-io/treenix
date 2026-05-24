@@ -3,7 +3,7 @@
 // admin approves, agent gets scoped access to its subtree.
 
 import { getCtx, registerType } from '#comp';
-import { R, S, W } from '#core';
+import { type GroupPerm, R, S, W } from '#core';
 import { loadSchemasFromDir } from '#schema/load';
 
 export class AgentPort {
@@ -31,21 +31,17 @@ export class AgentPort {
     if (!this.pendingKey) throw new Error('No pending key');
 
     const { tree, node } = getCtx();
-    const path = node.$path;
-    const agentUserId = `agent:${path}`;
+    const agentUserId = `agent:${node.$path}`;
+    const groupId = `u:${agentUserId}`;
 
     this.approvedKey = this.pendingKey;
     this.pendingKey = undefined;
     this.status = 'approved';
 
-    // ACL: grant agent R+W+S on its subtree (inherits to children)
-    const agentPerm = { g: `u:${agentUserId}`, p: R | W | S };
-    const acl = (node.$acl ?? []).filter((e: { g: string }) => e.g !== agentPerm.g);
-    acl.push(agentPerm);
-    (this as any).$acl = acl;
+    node.$acl = setGroupPerm(node.$acl, groupId, R | W | S);
 
-    // Create user node with 'agent' group. This write is outside the Immer draft,
-    // so the action must not resolve until the side effect is durable.
+    // Side-effect outside the Immer draft — must await so the user node
+    // exists before the action resolves.
     await tree.set({
       $path: `/auth/users/${agentUserId}`,
       $type: 'user',
@@ -58,15 +54,11 @@ export class AgentPort {
     if (this.status !== 'approved') throw new Error('Can only revoke approved agents');
 
     const { node } = getCtx();
-    const agentUserId = `agent:${node.$path}`;
-
     this.approvedKey = undefined;
     this.status = 'revoked';
     this.connected = false;
 
-    // Remove agent from ACL
-    const acl = (node.$acl ?? []).filter((e: { g: string }) => e.g !== `u:${agentUserId}`);
-    (this as any).$acl = acl;
+    node.$acl = setGroupPerm(node.$acl, `u:agent:${node.$path}`, null);
   }
 
   /** Reset to idle — allows re-pairing with a different agent */
@@ -82,12 +74,16 @@ export class AgentPort {
     this.connected = false;
     this.connectedAt = undefined;
 
-    // Remove agent from ACL
-    const acl = (node.$acl ?? []).filter((e: { g: string }) => e.g !== `u:${agentUserId}`);
-    (this as any).$acl = acl;
+    node.$acl = setGroupPerm(node.$acl, `u:${agentUserId}`, null);
 
     await tree.remove(`/auth/users/${agentUserId}`);
   }
+}
+
+/** Upsert a group's permission in an ACL list. `perm === null` deletes. */
+function setGroupPerm(acl: GroupPerm[] | undefined, g: string, perm: number | null): GroupPerm[] {
+  const filtered = (acl ?? []).filter(e => e.g !== g);
+  return perm === null ? filtered : [...filtered, { g, p: perm }];
 }
 
 registerType('t.agent.port', AgentPort);

@@ -47,11 +47,6 @@ declare module '#core/context' {
   }
 }
 
-/**
- * Resolve a mount component to its Tree by looking up the registered adapter.
- * Used both by the mount machinery (after node + ref resolution) and by composite
- * adapters like MountOverlay that need to resolve sub-components.
- */
 export async function resolveAdapter(mount: ComponentData, mountCtx: MountCtx): Promise<Tree> {
   const adapter = resolve(mount.$type, 'mount');
   if (!adapter) throw new Error(`No mount adapter for "${mount.$type}"`);
@@ -65,9 +60,9 @@ const DEFAULT_MOUNT_CACHE = 1000;
 type MountCacheEntry = { tree: Tree; refTarget?: string; externalAbort?: () => void };
 
 export function withMounts(rootStore: Tree, opts?: WithMountsOpts): Tree {
-  // onEvict aborts any external-watch consumer the adapter started for this
-  // mount entry — covers BOTH explicit invalidation AND FIFO eviction (which
-  // previously leaked change-stream cursors + dedup timers + onSelfWrite subs).
+  // onEvict aborts any external-watch consumer attached to the cache entry
+  // — covers both explicit invalidation AND FIFO eviction (otherwise leaks
+  // change-stream cursors, dedup timers, onSelfWrite subscriptions).
   const cache = createBoundedCache<string, MountCacheEntry>(
     opts?.cacheMax ?? DEFAULT_MOUNT_CACHE,
     {
@@ -154,10 +149,8 @@ export function withMounts(rootStore: Tree, opts?: WithMountsOpts): Tree {
     return isRef(mount) ? mount.$ref : undefined;
   }
 
-  // Mount cache is keyed by user identity — different users may see different
-  // mount configurations (per-user ACL drives different ref targets).
-  // Tree contract types ctx as `unknown`; we only read userId in mountCacheKey
-  // and narrow there. Other helpers pass ctx through opaquely.
+  // Per-user keying — different users may see different mount targets due
+  // to per-user ACL on the mount node's ref.
   function mountCacheKey(path: string, ctx?: unknown): string {
     const userId = (ctx as { userId?: string } | undefined)?.userId;
     return userId ? `${path}?uid=${userId}` : path;
@@ -189,17 +182,12 @@ export function withMounts(rootStore: Tree, opts?: WithMountsOpts): Tree {
       if (!isComponent(mount)) throw new Error(`Mount component missing on ref target ${configNode.$path}`);
     }
 
-    // Capture the adapter's external-watch abort (if any) so cacheMount can
-    // stash it on the cache entry. bounded-cache.onEvict then aborts it
-    // automatically on invalidation, FIFO eviction, or replacement.
     let externalAbort: (() => void) | undefined;
     let startExternalWatch: ExternalWatchStarter | undefined;
     if (opts?.startExternalWatch) {
       const wrapped = opts.startExternalWatch;
       startExternalWatch = (tree, starterOpts) => {
-        // Re-resolve races (rare) — abort the previous consumer before
-        // installing the new one. Never leak.
-        if (externalAbort) externalAbort();
+        if (externalAbort) externalAbort(); // re-resolve race: abort previous
         const abort = wrapped(tree, starterOpts);
         externalAbort = abort;
         return abort;

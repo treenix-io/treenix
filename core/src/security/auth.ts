@@ -83,6 +83,11 @@ export type Session = { userId: string; claims?: string[]; [key: string]: unknow
 // Session nodes are stored as regular nodes with extra fields
 type SessionNode = NodeData & { userId: string; createdAt: number; expiresAt: number; claims?: string[] };
 
+function isSessionNode(n: NodeData): n is SessionNode {
+  return typeof (n as { userId?: unknown }).userId === 'string'
+    && typeof (n as { expiresAt?: unknown }).expiresAt === 'number';
+}
+
 // ── Sessions (tree-backed, /auth/sessions/{token}) ──
 
 export async function createSession(
@@ -108,10 +113,10 @@ export async function resolveToken(tree: Tree, token: string): Promise<Session |
   if (process.env.NODE_ENV === 'development' && token === process.env.VITE_DEV_TOKEN) {
     return { userId: 'dev', claims: ['u:dev', 'authenticated', 'agents'] };
   }
-  const node = await tree.get(sessionPath(token)) as SessionNode | undefined;
+  const node = await tree.get(sessionPath(token));
   if (!node) return null;
-  if (!node.userId || !node.expiresAt) {
-    console.error(`[auth] corrupt session: ${token.slice(0, 8)}... (missing ${!node.userId ? 'userId' : 'expiresAt'})`);
+  if (!isSessionNode(node)) {
+    console.error(`[auth] corrupt session: ${token.slice(0, 8)}... (shape check failed)`);
     await tree.remove(sessionPath(token));
     return null;
   }
@@ -119,9 +124,8 @@ export async function resolveToken(tree: Tree, token: string): Promise<Session |
     await tree.remove(sessionPath(token));
     return null;
   }
-  // Spread all non-$ fields — mods write custom metadata (taskPath, runPath, …)
-  // and consumers read them via session.<field>. createdAt/expiresAt come along
-  // as plain fields; harmless and lets observers see TTL state.
+  // Mods write custom session metadata (taskPath, runPath, ...) as plain
+  // fields; consumers read them via `session.<field>`.
   const session: Session = { userId: node.userId };
   for (const [k, v] of Object.entries(node)) {
     if (k.startsWith('$') || k === 'userId') continue;

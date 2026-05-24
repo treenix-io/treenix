@@ -257,13 +257,12 @@ async function loadDynamicAction(
       consoleObj.dispose();
       logFn.dispose();
 
-      // Wrapper: provides ctx.node and ctx.tree as a sync bridge.
-      // Dynamic action code may use `await ctx.tree.get(path)` — in sandbox we strip await (sync)
-      // Sanitize: strip security-sensitive fields from snapshot
+      // Strip security-sensitive fields before exposing the snapshot to
+      // sandboxed action code (dynamic JS runs in QuickJS with sync bridge).
       const sanitized = { ...nodeSnapshot };
-      delete (sanitized as any).$acl;
-      delete (sanitized as any).$owner;
-      delete (sanitized as any).$refs;
+      delete sanitized.$acl;
+      delete sanitized.$owner;
+      delete sanitized.$refs;
       const sanitizedJson = JSON.stringify(sanitized);
 
       const wrapperCode = `
@@ -296,10 +295,10 @@ async function loadDynamicAction(
             console.warn(`[sandbox:${type}.${action}] blocked write to ${n.$path} (outside ${nodePath})`);
             continue;
           }
-          // Strip security-sensitive fields from sandbox writes
-          delete (n as any).$acl;
-          delete (n as any).$owner;
-          delete (n as any).$refs;
+          // Strip security-sensitive fields from sandbox writes.
+          delete n.$acl;
+          delete n.$owner;
+          delete n.$refs;
           // Route through ctx.tree (read-only facade applies when parent action's kind = 'read').
           await ctx.tree.set(n as NodeData);
         }
