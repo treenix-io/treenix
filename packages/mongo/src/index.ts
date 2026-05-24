@@ -11,8 +11,8 @@ import {
   MongoClient,
 } from 'mongodb';
 import {
-  type Tree,
   type TreeEvent,
+  type TreeSource,
   type TreeWatchOpts,
   type TreeWatchScope,
   subscriptionToAsyncIterable,
@@ -59,7 +59,7 @@ export async function createMongoTree(
   dbName = 'treenix',
   collectionName = 'nodes',
   opts: MongoTreeOpts = {},
-): Promise<Tree & { close(): Promise<void> }> {
+): Promise<TreeSource & { close(): Promise<void> }> {
   const { client, ready, release } = getSharedClient(uri);
   await ready;
   const db: Db = client.db(dbName);
@@ -101,7 +101,7 @@ export async function createMongoTree(
     return { items: docs.map((doc) => fromStorage(doc as Record<string, unknown>)), total };
   }
 
-  const tree: Tree & { close(): Promise<void> } = {
+  const tree: TreeSource & { close(): Promise<void> } = {
     async get(path, ctx) {
       const doc = await col.findOne({ _path: path });
       if (!doc) return undefined;
@@ -113,6 +113,34 @@ export async function createMongoTree(
       const pathQuery = { _path: buildPattern(parent, depth) };
       const filter = opts?.query ? { $and: [pathQuery, opts.query] } : pathQuery;
       return paginatedFind(filter, opts);
+    },
+
+    // Server-internal streaming for read-runtime (executeList). Honors `after`
+    // via $gt on the same _path index used by getChildren — no extra cost.
+    // `signal` closes the cursor; `limitHint` caps server-side fetch.
+    async *scanChildren(parent, opts) {
+      const depth = opts?.depth ?? 1;
+      const pattern = buildPattern(parent, depth);
+      const filter: Record<string, unknown> = opts?.after !== undefined
+        ? { $and: [{ _path: pattern }, { _path: { $gt: opts.after } }] }
+        : { _path: pattern };
+
+      if (opts?.signal?.aborted) throw opts.signal.reason;
+
+      const cursor = col.find(filter).sort({ _path: 1 });
+      if (opts?.limitHint) cursor.limit(opts.limitHint);
+
+      const onAbort = () => { cursor.close().catch(() => {}); };
+      opts?.signal?.addEventListener('abort', onAbort);
+
+      try {
+        for await (const doc of cursor) {
+          const node = fromStorage(doc as Record<string, unknown>);
+          yield { node, cursor: node.$path };
+        }
+      } finally {
+        opts?.signal?.removeEventListener('abort', onAbort);
+      }
     },
 
     async set(node, ctx) {
