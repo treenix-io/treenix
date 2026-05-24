@@ -1,8 +1,8 @@
 ---
 title: Self-Hosting Checklist
+description: "Env vars, secrets, backups, upgrade path"
 section: platform
 order: 4
-description: Env vars, secrets, backups, upgrade path
 tags: [platform, operations, production]
 ---
 
@@ -25,7 +25,7 @@ This page is a pragmatic list — what to set, what to back up, what to check be
 Set the ones your topology needs. See [CLI Reference → Environment variables](./cli.md) for the full list.
 
 | Variable | Required when | Notes |
-|---|---|---|
+| --- | --- | --- |
 | `MONGO_URI` | Using `t.mount.mongo` without an explicit `uri` in `root.json` | Connection string incl. auth |
 | `DOCS_ROOT` | You've overridden the docs mount target | Absolute path |
 | `CLAUDE_MEMORY_DIR` | MCP agent memory isn't at the default location | Writeable directory |
@@ -38,7 +38,7 @@ Secrets belong in the orchestrator's secret store (Docker secrets, Kubernetes Se
 Back up what your mount topology persists.
 
 | Mount | What to back up | How |
-|---|---|---|
+| --- | --- | --- |
 | `t.mount.fs` (below `tree/seed/`) | Git repo | Routine git |
 | `t.mount.fs` (`tree/work/`) | Directory | Periodic `tar` / `rsync` / object-store sync |
 | `t.mount.mongo` | Mongo database | `mongodump`, Atlas backup, or replica-set snapshots |
