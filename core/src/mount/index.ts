@@ -39,6 +39,13 @@ export type WithMountsOpts = {
   cacheMax?: number;
 };
 
+/** withMounts return type — exposes `invalidateMount` so external-watch
+ *  consumers can evict cached adapters when a mount config node is rewritten
+ *  out-of-band. In-pipeline writes invalidate automatically (set/remove/patch). */
+export type MountableTree = Tree & {
+  invalidateMount(path: string): void;
+};
+
 export type MountAdapter<T = unknown> = (mount: T, ctx: MountCtx) => Tree | Promise<Tree>;
 
 declare module '#core/context' {
@@ -59,7 +66,7 @@ const DEFAULT_MOUNT_CACHE = 1000;
 
 type MountCacheEntry = { tree: Tree; refTarget?: string; externalAbort?: () => void };
 
-export function withMounts(rootStore: Tree, opts?: WithMountsOpts): Tree {
+export function withMounts(rootStore: Tree, opts?: WithMountsOpts): MountableTree {
   // onEvict aborts any external-watch consumer attached to the cache entry
   // — covers both explicit invalidation AND FIFO eviction (otherwise leaks
   // change-stream cursors, dedup timers, onSelfWrite subscriptions).
@@ -90,7 +97,8 @@ export function withMounts(rootStore: Tree, opts?: WithMountsOpts): Tree {
     return candidate === path || candidate.startsWith(path + '/');
   }
 
-  const self: Tree = {
+  const self: MountableTree = {
+    invalidateMount,
     async get(path, ctx) {
       const tree = await resolveNodeTree(path, ctx);
       return tree.get(path, ctx);

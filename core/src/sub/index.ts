@@ -246,16 +246,12 @@ export function withSubscriptions(
   }
 
   /** Invalidate every active query whose source could be affected by an
-   *  external write at `path`. Used by external-watch consumers: out-of-band
-   *  writes can shift query-mount membership in ways cdcEval can't
-   *  reconstruct (no oldNode). Conservative refetch is safer than missing
-   *  updates.
-   *
-   *  Match cases:
-   *    1. path === q.source                — direct change of the source node
-   *    2. path is a direct child of source — cdcEval's normal vp membership rule
+   *  external write at `path`. Match cases:
+   *    1. path === q.source                — direct change of source node
+   *    2. path is a direct child of source — normal vp membership rule
    *    3. path is an ANCESTOR of source    — ACL/config change up the tree
-   *       can shift visibility/structure of the query target
+   *    4. path === q.vp                    — the query mount node itself
+   *       was rewritten (e.g. match changed); listing now stale
    *  Grand-descendants are skipped (can't affect direct-child queries). */
   function invalidateVpsForExternalPath(path: string): { vps: string[]; routes: Map<string, MutableVpDelta> } {
     const vps: string[] = [];
@@ -264,10 +260,9 @@ export function withSubscriptions(
       const prefix = q.source === '/' ? '/' : q.source + '/';
       const directChild = path.startsWith(prefix) && !path.slice(prefix.length).includes('/');
       const isSource = path === q.source;
-      // Ancestor: path === '/' covers everything; otherwise q.source must
-      // start with `${path}/`.
       const isAncestor = path === '/' || (q.source !== '/' && q.source.startsWith(path + '/'));
-      if (!directChild && !isSource && !isAncestor) continue;
+      const isVp = path === q.vp;
+      if (!directChild && !isSource && !isAncestor && !isVp) continue;
       vps.push(q.vp);
       for (const userId of q.users.keys()) {
         addDelta(routeDelta(routes, userId), 'invalidateVps', q.vp);

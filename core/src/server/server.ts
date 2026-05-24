@@ -15,7 +15,7 @@ import { withRefIndex } from '#tree/refs';
 import { type CdcRegistry, type OnSelfWrite, withSubscriptions } from '#sub';
 import type { TreeEvent } from '#tree';
 import { runExternalWatch } from '#sub/external-watch';
-import type { ExternalWatchStarter } from '#mount';
+import type { ExternalWatchStarter, MountableTree } from '#mount';
 import { createTreeRouter, type TreeRouter, type TreeRouterOpts, type TrpcContext } from './trpc';
 import { withMigration } from '#tree/migration';
 import { withValidation } from '#tree/validation';
@@ -52,24 +52,28 @@ export function createPipeline(bootstrap: Tree, opts?: TreeRouterOpts): Pipeline
   // external writes bypass cdcEval and query mounts miss them.
   let cachedRef: CachedTree | null = null;
   let injectExternalRef: ((e: TreeEvent) => void) | null = null;
+  let mountableRef: MountableTree | null = null;
 
   const startExternalWatch: ExternalWatchStarter = (tree, starterOpts) => {
     const ac = new AbortController();
-    if (!onSelfWriteRef || !cachedRef || !injectExternalRef) {
+    if (!onSelfWriteRef || !cachedRef || !injectExternalRef || !mountableRef) {
       // Mount resolved during pipeline construction — shouldn't happen
       // (mounts are lazy) but fail loud if it does so the bug surfaces.
       throw new Error(`startExternalWatch[${starterOpts.source}]: pipeline not yet wired (mount resolved too early)`);
     }
     const cache = cachedRef;
     const inject = injectExternalRef;
+    const mounts = mountableRef;
     runExternalWatch(tree, {
       pathPrefix: starterOpts.pathPrefix,
       dedupWindowMs: starterOpts.dedupWindowMs,
       source: starterOpts.source,
       onSelfWrite: onSelfWriteRef,
       forwardEvent: inject,
-      invalidateCachePath: (p) => cache.invalidate(p),
-      invalidateCacheAll: () => cache.invalidateAll(),
+      // Evict BOTH outer node cache AND mount-resolution cache. External
+      // writes can rewrite a mount config node — cached adapter must drop.
+      invalidateCachePath: (p) => { cache.invalidate(p); mounts.invalidateMount(p); },
+      invalidateCacheAll: () => { cache.invalidateAll(); mounts.invalidateMount('/'); },
       signal: ac.signal,
     });
     return () => ac.abort();
@@ -77,6 +81,7 @@ export function createPipeline(bootstrap: Tree, opts?: TreeRouterOpts): Pipeline
 
   const migrated = withMigration(bootstrap);
   const mountable = withMounts(migrated, { startExternalWatch });
+  mountableRef = mountable;
   const volatile = withVolatile(mountable);
   const validated = withValidation(volatile);
   const refsIndexed = withRefIndex(validated);

@@ -847,6 +847,60 @@ describe('FS mount repath (dedicated)', () => {
       }));
       assert.deepEqual(aborts, ['inv']);
     });
+
+    it('exposes invalidateMount publicly — external callers can evict adapter cache', async () => {
+      const root = createMemoryTree();
+      await root.set(createNode('/m', 'mount-point', {}, {
+        mount: { $type: 'test.mount.public-invalidate' },
+      }));
+
+      const aborts: string[] = [];
+      register('test.mount.public-invalidate', 'mount', (_m, ctx) => {
+        const fake: Tree = createMemoryTree();
+        if (ctx.startExternalWatch) {
+          ctx.startExternalWatch(fake, { pathPrefix: ctx.path, source: 'pub-inv' });
+        }
+        return fake;
+      });
+
+      const ms = withMounts(root, {
+        startExternalWatch: (_tree, opts) => () => aborts.push(opts.source),
+      });
+
+      await ms.getChildren('/m');
+      assert.equal(aborts.length, 0);
+
+      // External caller (createPipeline external-watch consumer) drops the
+      // mount cache without going through tree.set/remove/patch.
+      ms.invalidateMount('/m');
+      assert.deepEqual(aborts, ['pub-inv']);
+    });
+
+    it('invalidateMount("/") clears every cached mount', async () => {
+      const root = createMemoryTree();
+      await root.set(createNode('/a', 'mount-point', {}, { mount: { $type: 'test.mount.bulk' } }));
+      await root.set(createNode('/b', 'mount-point', {}, { mount: { $type: 'test.mount.bulk' } }));
+
+      const aborts: string[] = [];
+      register('test.mount.bulk', 'mount', (_m, ctx) => {
+        const fake: Tree = createMemoryTree();
+        if (ctx.startExternalWatch) {
+          ctx.startExternalWatch(fake, { pathPrefix: ctx.path, source: `bulk:${ctx.path}` });
+        }
+        return fake;
+      });
+
+      const ms = withMounts(root, {
+        startExternalWatch: (_tree, opts) => () => aborts.push(opts.source),
+      });
+
+      await ms.getChildren('/a');
+      await ms.getChildren('/b');
+      assert.equal(aborts.length, 0);
+
+      ms.invalidateMount('/');
+      assert.deepEqual(aborts.sort(), ['bulk:/a', 'bulk:/b']);
+    });
   });
 
 });

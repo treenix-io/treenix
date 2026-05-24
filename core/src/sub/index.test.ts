@@ -517,6 +517,31 @@ describe('withSubscriptions.onSelfWrite', () => {
     }
   });
 
+  it('injectExternalEvent fires invalidateVps when the path is the query VP itself', async () => {
+    // External write to the mount node itself (e.g. /views/open changing
+    // match: {status:'closed'}) must invalidate that vp — its listing is
+    // now driven by a different filter.
+    const events: NodeEvent[] = [];
+    const { tree, cdc, injectExternalEvent } = withSubscriptions(createMemoryTree(), e => events.push(e));
+
+    await tree.set(createNode('/items', 'dir'));
+    cdc.watchQuery('/views/open', '/items', { status: 'open' }, 'u1');
+    events.length = 0;
+
+    injectExternalEvent({
+      type: 'set',
+      path: '/views/open',
+      node: { $type: 'mount-point', mount: { $type: 't.mount.query', source: '/items', match: { status: 'closed' } } },
+    });
+
+    const ext = events.find(e => e.type === 'set' && e.path === '/views/open');
+    assert.ok(ext);
+    if (ext.type === 'set') {
+      assert.deepEqual(ext.invalidateVps, ['/views/open'],
+        'query whose VP path matches is invalidated');
+    }
+  });
+
   it('injectExternalEvent does NOT fire onSelfWrite (external events must not poison dedup)', async () => {
     const { tree, onSelfWrite, injectExternalEvent } = withSubscriptions(createMemoryTree());
     const selfWriteFires: string[] = [];
