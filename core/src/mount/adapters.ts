@@ -34,6 +34,15 @@ export class MountMongo {
    *  on the wrapped adapter, and any caller invoking it gets a clean
    *  TypeError ("watch is not a function") instead of a silent stall. */
   watch = false;
+  /** Dedup TTL (ms) for self-write suppression in the external-watch loop.
+   *  When the mongo change stream surfaces a write we just performed through
+   *  the pipeline (withSubscriptions emitted it already), the dedup buffer
+   *  recognizes the (path, $rev) pair and skips re-emission to clients.
+   *  5_000 ms covers typical replica-set lag (< 1s) with generous headroom.
+   *  Set 0 to disable dedup (useful only when the mount is purely external
+   *  and no in-pipeline writes flow through it). Effective TTL is
+   *  [dedupWindowMs, 2 * dedupWindowMs] due to two-bucket rotation. */
+  dedupWindowMs = 5_000;
 }
 registerType('t.mount.mongo', MountMongo);
 
@@ -83,7 +92,25 @@ register(MountMongo, 'mount', async (mount, ctx) => {
   if (!uri) throw new Error('t.mount.mongo: no uri and MONGO_URI not set');
   const { createMongoTree } = await import('@treenx/mongo');
   const tree = await createMongoTree(uri, mount.db, mount.collection, { watch: mount.watch });
-  return mount.shared ? tree : createRepathTree(tree, ctx.path, '/');
+  const wrapped = mount.shared ? tree : createRepathTree(tree, ctx.path, '/');
+
+  // Wire external-watch into the subscription bus when:
+  //   - mount declares watch (change stream enabled on the adapter)
+  //   - the adapter actually exposed tree.watch (mount.watch was honored)
+  //   - the host pipeline supplied startExternalWatch (createPipeline does)
+  // pathPrefix repaths change-stream events into the outer namespace:
+  //   shared mount → tree uses global paths → pathPrefix '/' (no-op)
+  //   non-shared    → tree's paths are mount-local → pathPrefix = ctx.path
+  if (mount.watch && tree.watch && ctx.startExternalWatch) {
+    const pathPrefix = mount.shared ? '/' : ctx.path;
+    ctx.startExternalWatch(tree, {
+      pathPrefix,
+      dedupWindowMs: mount.dedupWindowMs,
+      source: `mongo@${ctx.path}`,
+    });
+  }
+
+  return wrapped;
 });
 
 register(MountTypes, 'mount', (_mount, ctx) => createTypesTree(ctx.parentStore));

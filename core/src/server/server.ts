@@ -12,7 +12,9 @@ import { extname, join, resolve, sep } from 'node:path';
 import { parseSessionCookie, resolveToken } from '#security/auth';
 import { withMounts } from '#mount';
 import { withRefIndex } from '#tree/refs';
-import { type CdcRegistry, withSubscriptions } from '#sub';
+import { type CdcRegistry, type OnSelfWrite, withSubscriptions } from '#sub';
+import { runExternalWatch } from '#sub/external-watch';
+import type { ExternalWatchStarter } from '#mount';
 import { createTreeRouter, type TreeRouter, type TreeRouterOpts, type TrpcContext } from './trpc';
 import { withMigration } from '#tree/migration';
 import { withValidation } from '#tree/validation';
@@ -37,8 +39,31 @@ export type Pipeline = {
 
 /** Pure tree composition — no HTTP, no side effects */
 export function createPipeline(bootstrap: Tree, opts?: TreeRouterOpts): Pipeline {
+  // Forward-declare onSelfWrite so mount adapters can wire external watches
+  // before withSubscriptions exists. Mounts resolve lazily on first access,
+  // long after this fn returns, so the late binding is safe.
+  let onSelfWriteRef: OnSelfWrite | null = null;
+
+  const startExternalWatch: ExternalWatchStarter = (tree, starterOpts) => {
+    const ac = new AbortController();
+    if (!onSelfWriteRef) {
+      // Mount resolved during pipeline construction — shouldn't happen
+      // (mounts are lazy) but fail loud if it does so the bug surfaces.
+      throw new Error(`startExternalWatch[${starterOpts.source}]: pipeline not yet wired (mount resolved too early)`);
+    }
+    runExternalWatch(tree, {
+      pathPrefix: starterOpts.pathPrefix,
+      dedupWindowMs: starterOpts.dedupWindowMs,
+      source: starterOpts.source,
+      onSelfWrite: onSelfWriteRef,
+      forwardEvent: (e) => watcher.notify(e),
+      signal: ac.signal,
+    });
+    return () => ac.abort();
+  };
+
   const migrated = withMigration(bootstrap);
-  const mountable = withMounts(migrated);
+  const mountable = withMounts(migrated, { startExternalWatch });
   const volatile = withVolatile(mountable);
   const validated = withValidation(volatile);
   const refsIndexed = withRefIndex(validated);
@@ -47,8 +72,9 @@ export function createPipeline(bootstrap: Tree, opts?: TreeRouterOpts): Pipeline
   const watcher = createWatchManager({
     onUserRemoved: (userId) => cdcRef.unwatchAllQueries(userId),
   });
-  const { tree, cdc } = withSubscriptions(cached, (e) => watcher.notify(e));
+  const { tree, cdc, onSelfWrite } = withSubscriptions(cached, (e) => watcher.notify(e));
   cdcRef = cdc;
+  onSelfWriteRef = onSelfWrite;
   const router = createTreeRouter(tree, watcher, opts, cdc);
 
   const createContext = async (token: string | null): Promise<TrpcContext> => {

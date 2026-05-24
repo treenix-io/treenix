@@ -131,14 +131,37 @@ export type CdcRegistry = {
   getActiveQueryCount(): number;
 };
 
+/** Self-write notification — fired for every data event emitted by
+ *  withSubscriptions. Consumed by runExternalWatch dedup buffers so an
+ *  external watch source (Mongo change stream, etc.) can recognize and
+ *  skip events it observes as a side-effect of in-pipeline writes. */
+export type SelfWriteListener = (path: string, rev: number | undefined) => void;
+export type OnSelfWrite = (listener: SelfWriteListener) => () => void;
+
 export function withSubscriptions(
   tree: Tree,
   onEvent?: (event: InternalNodeEvent) => void,
-): { tree: SubscribedTree; cdc: CdcRegistry } {
+): { tree: SubscribedTree; cdc: CdcRegistry; onSelfWrite: OnSelfWrite } {
   const exactListeners = new Map<string, Set<Listener>>();
   const prefixListeners = new Map<string, Set<Listener>>();
+  const selfWriteListeners = new Set<SelfWriteListener>();
   const activeQueries: QueryEntry[] = [];
   const CLAIMS_TTL_MS = 30_000;
+
+  function notifySelfWrite(event: DataEvent) {
+    if (selfWriteListeners.size === 0) return;
+    const rev = event.type === 'patch'
+      ? event.rev
+      : event.type === 'set'
+        ? (event.node as { $rev?: number }).$rev
+        : undefined;
+    // Wrap each listener so one buggy consumer can't break the write path
+    // (or starve subsequent listeners). Failures are logged, not silent.
+    for (const l of selfWriteListeners) {
+      try { l(event.path, rev); }
+      catch (err) { console.error('[withSubscriptions] selfWrite listener threw:', err); }
+    }
+  }
 
   function stableJson(value: unknown): string {
     if (!value || typeof value !== 'object') return JSON.stringify(value);
@@ -153,6 +176,11 @@ export function withSubscriptions(
 
   function emit(raw: DataEvent) {
     const event = cleanEvent(raw);
+
+    // Self-write notification fires synchronously BEFORE event delivery —
+    // so dedup buffers in external-watch consumers are populated before any
+    // out-of-band write surfaces the same (path, rev) back to us.
+    notifySelfWrite(event);
 
     const exact = exactListeners.get(event.path);
     if (exact) for (const fn of exact) fn(event);
@@ -589,5 +617,10 @@ export function withSubscriptions(
     },
   };
 
-  return { tree: wrappedTree, cdc };
+  const onSelfWrite: OnSelfWrite = (listener) => {
+    selfWriteListeners.add(listener);
+    return () => { selfWriteListeners.delete(listener); };
+  };
+
+  return { tree: wrappedTree, cdc, onSelfWrite };
 }

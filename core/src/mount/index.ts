@@ -15,6 +15,28 @@ export type MountCtx = {
   path: string;
   parentStore: Tree;
   globalStore?: Tree;
+  /** Mount adapter callback: wire an external watch source (Mongo change
+   *  stream, FS watch, REST webhook) into the subscription bus. Available
+   *  only when the host pipeline supplied a `startExternalWatch` to
+   *  `withMounts`. The adapter is responsible for computing `pathPrefix`
+   *  (mount root for non-shared mounts, '/' for shared). Returns an abort
+   *  function — withMounts tracks it per mount cache key and calls it
+   *  on mount invalidation. */
+  startExternalWatch?: ExternalWatchStarter;
+};
+
+export type ExternalWatchStarter = (
+  tree: Tree,
+  opts: { pathPrefix: string; dedupWindowMs?: number; source: string },
+) => () => void;
+
+export type WithMountsOpts = {
+  startExternalWatch?: ExternalWatchStarter;
+  /** Max entries in the per-user mount resolution cache. FIFO eviction.
+   *  Default 1000 — generous for typical multi-tenant deployments where
+   *  the same handful of mount points are accessed by many users. Raise
+   *  if you observe high cache miss rate on a hot mount. */
+  cacheMax?: number;
 };
 
 export type MountAdapter<T = unknown> = (mount: T, ctx: MountCtx) => Tree | Promise<Tree>;
@@ -38,21 +60,31 @@ export async function resolveAdapter(mount: ComponentData, mountCtx: MountCtx): 
 
 // ── Mountable Tree ──
 
-export function withMounts(rootStore: Tree): Tree {
-  const MAX_MOUNT_CACHE = 1000;
-  const cache = createBoundedCache<string, { tree: Tree; refTarget?: string }>(MAX_MOUNT_CACHE);
+const DEFAULT_MOUNT_CACHE = 1000;
+
+export function withMounts(rootStore: Tree, opts?: WithMountsOpts): Tree {
+  const cache = createBoundedCache<string, { tree: Tree; refTarget?: string }>(opts?.cacheMax ?? DEFAULT_MOUNT_CACHE);
+  // Parallel map: per-mount-cache-key abort fn for any external-watch
+  // consumers the adapter started. On invalidate we call abort before
+  // dropping the cache entry, so change-stream cursors and timers don't leak.
+  const externalWatchAborts = new Map<string, () => void>();
 
   /** Invalidate cache for path and all descendants (nested mounts under it) */
   function invalidateMount(path: string): void {
     if (cache.size === 0) return;
+    const toAbort: string[] = [];
     cache.deleteWhere((entry, key) => {
       // key may have ?uid= suffix — extract the path part
       const keyPath = key.split('?')[0];
-      return (
-        isSameOrDescendant(keyPath, path)
-        || (!!entry.refTarget && isSameOrDescendant(entry.refTarget, path))
-      );
+      const match = isSameOrDescendant(keyPath, path)
+        || (!!entry.refTarget && isSameOrDescendant(entry.refTarget, path));
+      if (match && externalWatchAborts.has(key)) toAbort.push(key);
+      return match;
     });
+    for (const key of toAbort) {
+      const abort = externalWatchAborts.get(key);
+      if (abort) { abort(); externalWatchAborts.delete(key); }
+    }
   }
 
   function isSameOrDescendant(candidate: string, path: string): boolean {
@@ -143,7 +175,36 @@ export function withMounts(rootStore: Tree): Tree {
       mount = configNode['mount'];
       if (!isComponent(mount)) throw new Error(`Mount component missing on ref target ${configNode.$path}`);
     }
-    return resolveAdapter(mount, { node: configNode, path: node.$path, parentStore: currentStore, globalStore: self });
+
+    // Wrap startExternalWatch so withMounts captures the abort fn keyed by
+    // the SAME cache key cacheMount uses below — invalidation can then close
+    // the corresponding external-watch consumer in lockstep with eviction.
+    let startExternalWatch: ExternalWatchStarter | undefined;
+    if (opts?.startExternalWatch) {
+      const wrapped = opts.startExternalWatch;
+      const mountPath = node.$path;
+      startExternalWatch = (tree, starterOpts) => {
+        const key = mountCacheKey(mountPath, ctx);
+        // Re-resolve shouldn't normally race, but if it does, abort the
+        // previous consumer before installing the new one — never leak.
+        const prev = externalWatchAborts.get(key);
+        if (prev) prev();
+        const abort = wrapped(tree, starterOpts);
+        externalWatchAborts.set(key, abort);
+        return () => {
+          abort();
+          if (externalWatchAborts.get(key) === abort) externalWatchAborts.delete(key);
+        };
+      };
+    }
+
+    return resolveAdapter(mount, {
+      node: configNode,
+      path: node.$path,
+      parentStore: currentStore,
+      globalStore: self,
+      startExternalWatch,
+    });
   }
 
 

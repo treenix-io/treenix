@@ -80,6 +80,35 @@ const tree = await createMongoTree('mongodb://localhost', 'treenix', 'nodes')
 
 In storage, `$` system fields become `_` to avoid collision with Mongo operators (`$path` → `_path`, `$acl` → `_acl`). Conversion is transparent.
 
+### Watching external writes (change streams)
+
+To make manual mongo writes — migrations, other apps sharing the DB, ad-hoc `db.nodes.updateOne()` from a shell — reach SSE clients reactively, opt into change streams on the mount:
+
+```json
+{
+  "$type": "t.mount.mongo",
+  "uri": "mongodb://localhost:27017/?replicaSet=rs0",
+  "db": "treenix",
+  "collection": "nodes",
+  "watch": true,
+  "dedupWindowMs": 5000
+}
+```
+
+- **`watch: false` (default)** — adapter does NOT subscribe to change streams. Only in-pipeline writes (via `tree.set/patch/remove`) reach clients. Zero extra Mongo load.
+- **`watch: true`** — adapter calls `col.watch()` with `fullDocument: 'updateLookup'` and tries to enable `changeStreamPreAndPostImages` (best-effort `collMod`; needs admin perm). Out-of-band writes flow into the subscription bus, deduped against the in-pipeline writes Treenix already emitted.
+- **`dedupWindowMs: 5000`** — TTL window (ms) for self-write dedup. Default tuned for typical replica-set lag. See [Mounts → dedup window](../concepts/mounts.md#dedup-window--picking-a-value) for guidance.
+
+**Requirements:**
+- Mongo deployed as a replica set (`--replSet`). Single-node `mongod` cannot expose change streams. A 1-node replica set is fine for development: `docker run -d -p 27017:27017 mongo:7 --replSet rs0` then `mongosh --eval 'rs.initiate()'`.
+- Mongo 6.0+ for full delete-event support (pre-images carry the deleted document's path). Without pre-images, delete events surface as `reconnect{preserved:false}` and clients refetch — still correct, just heavier.
+
+**Limitations:**
+- `update` events arrive as full-document `set` (via `updateLookup`), not derived `patch`. Larger wire payload than in-pipeline patches. Future optimization: map `updateDescription` to `PatchOp[]`.
+- The `notify-keyspace-events`-style server-side filtering by path is not pushed down — runExternalWatch filters client-side after mapping. Fine for typical mount sizes; consider a `$match` pipeline if hot.
+
+See [Mounts → Observing external writes](../concepts/mounts.md#observing-external-writes--treewatch--change-streams) for the general mechanism and how to add the same to a custom adapter.
+
 ## Common topologies
 
 ### Overlay — seed below, runtime above

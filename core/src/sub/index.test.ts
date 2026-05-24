@@ -418,3 +418,96 @@ describe('ACL change invalidation (Stage 6)', () => {
     assert.ok(bobVps?.includes('/views/closed'));
   });
 });
+
+// ── onSelfWrite — channel for external-watch dedup ──
+
+describe('withSubscriptions.onSelfWrite', () => {
+  it('fires on set with (path, rev)', async () => {
+    const { tree, onSelfWrite } = withSubscriptions(createMemoryTree());
+    const calls: Array<[string, number | undefined]> = [];
+    onSelfWrite((p, r) => calls.push([p, r]));
+
+    await tree.set(createNode('/x', 'test'));
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0][0], '/x');
+    assert.equal(typeof calls[0][1], 'number');
+    assert.ok((calls[0][1] as number) > 0, 'rev is positive integer');
+  });
+
+  it('fires on patch with rev from event', async () => {
+    const tree0 = createMemoryTree();
+    const { tree, onSelfWrite } = withSubscriptions(tree0);
+    await tree.set({ ...createNode('/n', 'test'), n: 0 } as any);
+
+    const calls: Array<[string, number | undefined]> = [];
+    onSelfWrite((p, r) => calls.push([p, r]));
+
+    await tree.patch('/n', [['r', 'n', 5]]);
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0][0], '/n');
+    assert.ok(typeof calls[0][1] === 'number', 'patch fires with rev');
+  });
+
+  it('fires on remove with undefined rev', async () => {
+    const { tree, onSelfWrite } = withSubscriptions(createMemoryTree());
+    await tree.set(createNode('/x', 'test'));
+
+    const calls: Array<[string, number | undefined]> = [];
+    onSelfWrite((p, r) => calls.push([p, r]));
+
+    await tree.remove('/x');
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0][0], '/x');
+    assert.equal(calls[0][1], undefined);
+  });
+
+  it('multiple listeners — all fired', async () => {
+    const { tree, onSelfWrite } = withSubscriptions(createMemoryTree());
+    const a: string[] = [];
+    const b: string[] = [];
+    onSelfWrite((p) => a.push(p));
+    onSelfWrite((p) => b.push(p));
+
+    await tree.set(createNode('/x', 'test'));
+
+    assert.equal(a.length, 1);
+    assert.equal(b.length, 1);
+  });
+
+  it('unsubscribe stops further calls', async () => {
+    const { tree, onSelfWrite } = withSubscriptions(createMemoryTree());
+    const calls: string[] = [];
+    const unsub = onSelfWrite((p) => calls.push(p));
+
+    await tree.set(createNode('/x', 'test'));
+    assert.equal(calls.length, 1);
+
+    unsub();
+    await tree.set(createNode('/y', 'test'));
+    assert.equal(calls.length, 1, 'no further calls after unsub');
+  });
+
+  it('throwing listener does not break the write or other listeners', async () => {
+    const { tree, onSelfWrite } = withSubscriptions(createMemoryTree());
+
+    const originalError = console.error;
+    let errored = false;
+    console.error = () => { errored = true; };
+
+    const survivors: string[] = [];
+    onSelfWrite(() => { throw new Error('listener bug'); });
+    onSelfWrite((p) => survivors.push(p));
+
+    try {
+      await tree.set(createNode('/x', 'test'));
+    } finally {
+      console.error = originalError;
+    }
+
+    assert.equal(survivors.length, 1, 'second listener still fired');
+    assert.ok(errored, 'thrown error was logged, not swallowed silently');
+  });
+});

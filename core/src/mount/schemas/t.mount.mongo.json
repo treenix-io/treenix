@@ -24,6 +24,12 @@
       "title": "Enable `tree.watch` via Mongo change streams. OFF by default — change",
       "description": "streams require a replica set (single-node `mongod` lacks them), and enabling pre-images via `collMod` needs admin permission. Turn on only when you need to observe out-of-band writes (manual mongo writes, other apps sharing the DB, migrations). When OFF, `tree.watch` is undefined on the wrapped adapter, and any caller invoking it gets a clean TypeError (\"watch is not a function\") instead of a silent stall.",
       "default": false
+    },
+    "dedupWindowMs": {
+      "type": "number",
+      "title": "Dedup TTL (ms) for self-write suppression in the external-watch loop.",
+      "description": "When the mongo change stream surfaces a write we just performed through the pipeline (withSubscriptions emitted it already), the dedup buffer recognizes the (path, $rev) pair and skips re-emission to clients. 5_000 ms covers typical replica-set lag (< 1s) with generous headroom. Set 0 to disable dedup (useful only when the mount is purely external and no in-pipeline writes flow through it). Effective TTL is [dedupWindowMs, 2 * dedupWindowMs] due to two-bucket rotation.",
+      "default": 5000
     }
   },
   "required": [
@@ -31,6 +37,7 @@
     "uri",
     "db",
     "collection",
-    "watch"
+    "watch",
+    "dedupWindowMs"
   ]
 }

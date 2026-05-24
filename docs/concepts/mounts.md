@@ -129,6 +129,83 @@ register(MountRedis, 'mount', async (mount, ctx) => {
 
 The [Tree interface](./tree.md) is the whole contract — five methods. If your adapter implements them, it plugs in. Built-in adapters live in `engine/core/src/mount/adapters.ts` and make a good reference.
 
+## Observing external writes — `tree.watch` + change streams
+
+Tree exposes an **optional** `watch?(scope, opts?)` method. When an adapter implements it, [Reactivity](./reactivity.md) can observe **out-of-band writes** — writes that bypass the Treenix pipeline (manual mongo writes, other apps sharing the DB, migrations, file edits in a watched directory).
+
+Without `watch`, only writes that flow through `tree.set/patch/remove` reach SSE clients. With `watch`, the change source feeds the same subscription bus.
+
+### Tree.watch contract
+
+```typescript
+watch?(
+  scope: TreeWatchScope,        // { kind: 'all' } | { kind: 'path', path } | { kind: 'children', path }
+  opts?: TreeWatchOpts,         // { signal?, buffer? }
+): AsyncIterable<TreeEvent>     // { type: 'set' | 'patch' | 'remove' | 'reconnect', ... }
+```
+
+Lifecycle, back-pressure, and `reconnect{preserved:false}` semantics are pinned in [`engine/core/src/tree/watch.ts`](../../engine/core/src/tree/watch.ts). The `subscriptionToAsyncIterable` helper wraps any register/unregister callback into a contract-compliant AsyncIterable.
+
+### Wiring an external watch into the subscription bus
+
+The mount adapter receives `ctx.startExternalWatch` when the host pipeline supplies one (`createPipeline` does). Call it after creating the tree to forward external events into the subscription bus:
+
+```typescript
+register(MountRedis, 'mount', async (mount, ctx) => {
+  const tree = await createRedisTree(mount.url)   // tree.watch implemented via Redis keyspace notifications
+
+  if (tree.watch && mount.watch && ctx.startExternalWatch) {
+    const pathPrefix = mount.shared ? '/' : ctx.path
+    ctx.startExternalWatch(tree, {
+      pathPrefix,                                  // repath inner→outer namespace
+      dedupWindowMs: mount.dedupWindowMs ?? 5_000, // suppress self-write echoes
+      source: `redis@${ctx.path}`,                 // for log lines
+    })
+  }
+
+  return mount.shared ? tree : createRepathTree(tree, ctx.path, '/')
+})
+```
+
+What `ctx.startExternalWatch` does under the hood ([`engine/core/src/sub/external-watch.ts`](../../engine/core/src/sub/external-watch.ts)):
+
+1. **Subscribes** to `tree.watch({ kind: 'all' })` and drives a `for await` loop.
+2. **Repaths** every event from inner namespace (`/foo`) to outer namespace (`/mountRoot/foo`) before forwarding.
+3. **Dedups** writes that originated in-pipeline: `withSubscriptions` notifies via `onSelfWrite(path, rev)`; the consumer keeps a two-bucket TTL buffer keyed by `(type, path, rev)` and skips matches. Window is configurable per mount.
+4. **Retries** with exponential backoff (`initialRetryMs` → `maxRetryMs`, default 1 s → 30 s) when the stream errors. Emits `reconnect{preserved:false}` before each retry so clients refetch.
+5. **Lifecycle** — the abort fn returned is tracked by `withMounts` per mount cache key. On mount invalidation (config change), the consumer aborts, the change-stream cursor closes, the dedup timer clears.
+
+### Configuration fields convention
+
+Adapters that gate external-watch on caller intent (most should, since change streams add cost) expose two fields on their mount class:
+
+```typescript
+export class MountRedis {
+  url = ''
+  /** Enable tree.watch via Redis keyspace notifications. Default OFF —
+   *  requires notify-keyspace-events config on the Redis server. */
+  watch = false
+  /** Dedup TTL (ms) for self-write suppression. Default tuned for the
+   *  adapter's typical lag. Set 0 to disable dedup. */
+  dedupWindowMs = 5_000
+}
+```
+
+When `watch: false`, the adapter does NOT call `ctx.startExternalWatch` (and ideally does NOT expose `tree.watch` either). Callers get `tree.watch === undefined` — a `TypeError` at the call site if someone tries to consume it, never a silent stall.
+
+### Dedup window — picking a value
+
+- **Tight (~1 s)**: low-lag sources (in-process FS watcher, local socket). Smaller buffer.
+- **Default (~5 s)**: typical replica-set DB lag (Mongo, Postgres logical replication). Robust to normal jitter.
+- **Loose (~30 s)**: cross-region replication, flaky networks, eventually-consistent stores.
+- **Zero**: mount is purely external — no in-pipeline writes flow through it, so there's nothing to dedup. Saves the buffer entirely.
+
+Effective TTL is `[dedupWindowMs, 2 * dedupWindowMs)` because of two-bucket rotation. The cost of a miss (entry evicted too early) is a duplicate event delivered to clients — idempotent, not a correctness bug. So err on the longer side when in doubt.
+
+### Built-in example: `t.mount.mongo`
+
+See [`packages/mongo/src/index.ts`](../../engine/packages/mongo/src/index.ts) — `createMongoTree` exposes `watch?` when `opts.watch === true`, wires `col.watch()` change streams through `subscriptionToAsyncIterable`, handles Mongo-specific edge cases (pre-images for delete events, `invalidate`/`drop` → reconnect-and-close). The mount adapter for `t.mount.mongo` calls `ctx.startExternalWatch` exactly as shown above.
+
 ## Related
 
 - [The Tree](./tree.md) — the five-method interface every mount implements
