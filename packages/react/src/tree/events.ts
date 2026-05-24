@@ -118,6 +118,12 @@ export function startEvents(config: EventsConfig = {}) {
         if (event.rmVps) event.rmVps.forEach((vp: string) => cache.removeFromParent(event.path, vp));
         if (!applyServerSet(event.path, node)) cache.put(node);
         if (event.addVps) event.addVps.forEach((vp: string) => cache.addToParent(event.path, vp));
+        // invalidateVps — server tells us a query-mount listing under each vp
+        // may have shifted in ways the add/rm deltas didn't capture (out-of-band
+        // mongo write, ACL change). Refetch the children of each vp to reload.
+        if (event.invalidateVps && loadChildren) {
+          for (const vp of event.invalidateVps as string[]) loadChildren(vp);
+        }
       } else if (event.type === 'patch') {
         // Same rm→put→add ordering as 'set' above.
         if (event.rmVps) event.rmVps.forEach((vp: string) => cache.removeFromParent(event.path, vp));
@@ -146,10 +152,16 @@ export function startEvents(config: EventsConfig = {}) {
           }
         }
         if (event.addVps) event.addVps.forEach((vp: string) => cache.addToParent(event.path, vp));
+        if (event.invalidateVps && loadChildren) {
+          for (const vp of event.invalidateVps as string[]) loadChildren(vp);
+        }
       } else if (event.type === 'remove') {
         cache.remove(event.path);
         // Also clean up virtual parents (CDC queries)
         if (event.rmVps) event.rmVps.forEach((vp: string) => cache.removeFromParent(event.path, vp));
+        if (event.invalidateVps && loadChildren) {
+          for (const vp of event.invalidateVps as string[]) loadChildren(vp);
+        }
       }
     },
   });

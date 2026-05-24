@@ -28,77 +28,51 @@ export type CachedTree = Tree & {
 export function withCache(tree: Tree, max = DEFAULT_MAX): CachedTree {
   const cache = createBoundedCache<string, NodeData>(max);
   const dedup = createInflight<NodeData | undefined>();
-  // Per-path generation counter. Bumped on every invalidate / invalidateAll
-  // (the latter bumps a wildcard `*`). Any read started before the bump
-  // captures the pre-bump value and refuses to populate the cache when it
-  // completes — closes the in-flight stale-read race: read starts, external
-  // write invalidates, read resolves with the OLD node, would otherwise
-  // repopulate cache with stale data.
-  const gen = new Map<string, number>();
-  let allGen = 0;
-
-  function bump(path: string) {
-    gen.set(path, (gen.get(path) ?? 0) + 1);
-  }
-  function snapshot(path: string): { path: number; all: number } {
-    return { path: gen.get(path) ?? 0, all: allGen };
-  }
-  function stale(path: string, snap: { path: number; all: number }): boolean {
-    return (gen.get(path) ?? 0) !== snap.path || allGen !== snap.all;
-  }
+  // Single monotonic epoch — bumped on EVERY invalidate / invalidateAll.
+  // get() snapshots it at read start; the post-resolve check refuses to
+  // populate cache if it moved. Vs. a per-path Map, this is bounded by
+  // construction (one integer, no eviction race) and avoids the bug where
+  // a per-path entry gets FIFO-evicted before the in-flight read resolves.
+  // Cost: an unrelated invalidate(other-path) disqualifies any concurrent
+  // in-flight get's cache write. External invalidations are rare; the cost
+  // is "next read repopulates", not correctness.
+  let invalidateEpoch = 0;
 
   const wrapper: CachedTree = {
-    // path invalidate ALSO bumps allGen so concurrent collection reads
-    // (getChildren/scanChildren) don't repopulate the cache with entries
-    // captured before this invalidation. Coarser than per-path tracking,
-    // but the cost is a missed warming opportunity (next read repopulates)
-    // — never a correctness bug. Without this, a getChildren in-flight at
-    // invalidate time would write back the stale node for the invalidated
-    // path during its post-fetch warming loop.
-    invalidate(path) { cache.delete(path); bump(path); allGen++; },
-    invalidateAll() { cache.clear(); allGen++; },
+    invalidate(path) { cache.delete(path); invalidateEpoch++; },
+    invalidateAll() { cache.clear(); invalidateEpoch++; },
 
     async get(path, ctx) {
       const cached = cache.get(path);
       if (cached !== undefined) return cached;
-      const snap = snapshot(path);
-      // Include generation in the inflight dedup key — a caller arriving
-      // AFTER invalidate must NOT join a pre-invalidate in-flight read
-      // (which would return the stale value about to be discarded). The
-      // generation bump means the key differs, so a fresh inflight starts.
-      const inflightKey = `${path}@${snap.path}.${snap.all}`;
+      const startEpoch = invalidateEpoch;
+      // Inflight dedup key includes the epoch — a caller arriving AFTER
+      // invalidate gets a different key, so it does NOT join the
+      // pre-invalidate in-flight read (which would return a stale value).
+      const inflightKey = `${path}@${startEpoch}`;
       return dedup(inflightKey, async () => {
         const node = await tree.get(path, ctx);
-        // Belt-and-suspenders: if invalidate fires DURING this fetch, the
-        // result is stale → don't repopulate. (Inflight key already filters
-        // post-invalidate JOINERS; this catches the original starter.)
-        if (node && !stale(path, snap)) cache.set(node.$path, node);
+        // If any invalidate fires DURING this fetch, don't repopulate cache
+        // — the value we just read is potentially stale.
+        if (node && invalidateEpoch === startEpoch) cache.set(node.$path, node);
         return node;
       });
     },
 
     async getChildren(path, opts, ctx) {
-      // Snapshot allGen BEFORE the fetch — any invalidate/invalidateAll
-      // that fires during the in-flight read bumps allGen, and we skip
-      // warming entirely. Conservative: a single unrelated invalidate
-      // disqualifies the whole batch. Cost = next read repopulates;
-      // correctness wins over a missed warming opportunity.
-      const startAllGen = allGen;
+      const startEpoch = invalidateEpoch;
       const result = await tree.getChildren(path, opts, ctx);
-      if (allGen === startAllGen) {
+      if (invalidateEpoch === startEpoch) {
         for (const node of result.items) cache.set(node.$path, node);
       }
       return result;
     },
 
-    // Scan-side cache warming with the same guard. Entries are still
-    // yielded (caller sees data); only the cache population is skipped
-    // for entries observed AFTER an invalidation in this stream.
     ...(tree.scanChildren ? {
       async *scanChildren(parent: string, opts?: Parameters<NonNullable<Tree['scanChildren']>>[1], ctx?: unknown) {
-        const startAllGen = allGen;
+        const startEpoch = invalidateEpoch;
         for await (const entry of tree.scanChildren!(parent, opts, ctx)) {
-          if (allGen === startAllGen) cache.set(entry.node.$path, entry.node);
+          if (invalidateEpoch === startEpoch) cache.set(entry.node.$path, entry.node);
           yield entry;
         }
       },
@@ -133,10 +107,14 @@ export function withCache(tree: Tree, max = DEFAULT_MAX): CachedTree {
         const inner = tree.watch!(scope, opts, ctx);
         async function* wrapped(): AsyncIterable<TreeEvent> {
           for await (const event of inner) {
+            // Route through wrapper.invalidate{,All} so the generation +
+            // warming-epoch counters bump consistently. Raw cache.delete
+            // would silently skip those, leaving in-flight reads free to
+            // repopulate the just-cleared slot with stale data.
             if (event.type === 'reconnect') {
-              if (!event.preserved) cache.clear();
+              if (!event.preserved) wrapper.invalidateAll();
             } else {
-              cache.delete(event.path);
+              wrapper.invalidate(event.path);
             }
             yield event;
           }

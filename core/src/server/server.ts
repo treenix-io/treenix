@@ -13,6 +13,7 @@ import { parseSessionCookie, resolveToken } from '#security/auth';
 import { withMounts } from '#mount';
 import { withRefIndex } from '#tree/refs';
 import { type CdcRegistry, type OnSelfWrite, withSubscriptions } from '#sub';
+import type { TreeEvent } from '#tree';
 import { runExternalWatch } from '#sub/external-watch';
 import type { ExternalWatchStarter } from '#mount';
 import { createTreeRouter, type TreeRouter, type TreeRouterOpts, type TrpcContext } from './trpc';
@@ -45,25 +46,28 @@ export function createPipeline(bootstrap: Tree, opts?: TreeRouterOpts): Pipeline
   let onSelfWriteRef: OnSelfWrite | null = null;
 
   // Late-bound refs — see the comment on onSelfWriteRef. cachedRef gives
-  // runExternalWatch a hook to invalidate the outer cache for paths touched
-  // by external writes, so watch-filter and other consumers reading via
-  // baseStore see fresh data, not stale cached nodes.
+  // runExternalWatch a hook to invalidate the outer cache; injectExternalRef
+  // routes external events through withSubscriptions so CDC (query/VP
+  // invalidate) is computed and per-user routing applies. Without this,
+  // external writes bypass cdcEval and query mounts miss them.
   let cachedRef: CachedTree | null = null;
+  let injectExternalRef: ((e: TreeEvent) => void) | null = null;
 
   const startExternalWatch: ExternalWatchStarter = (tree, starterOpts) => {
     const ac = new AbortController();
-    if (!onSelfWriteRef || !cachedRef) {
+    if (!onSelfWriteRef || !cachedRef || !injectExternalRef) {
       // Mount resolved during pipeline construction — shouldn't happen
       // (mounts are lazy) but fail loud if it does so the bug surfaces.
       throw new Error(`startExternalWatch[${starterOpts.source}]: pipeline not yet wired (mount resolved too early)`);
     }
     const cache = cachedRef;
+    const inject = injectExternalRef;
     runExternalWatch(tree, {
       pathPrefix: starterOpts.pathPrefix,
       dedupWindowMs: starterOpts.dedupWindowMs,
       source: starterOpts.source,
       onSelfWrite: onSelfWriteRef,
-      forwardEvent: (e) => watcher.notify(e),
+      forwardEvent: inject,
       invalidateCachePath: (p) => cache.invalidate(p),
       invalidateCacheAll: () => cache.invalidateAll(),
       signal: ac.signal,
@@ -82,9 +86,10 @@ export function createPipeline(bootstrap: Tree, opts?: TreeRouterOpts): Pipeline
   const watcher = createWatchManager({
     onUserRemoved: (userId) => cdcRef.unwatchAllQueries(userId),
   });
-  const { tree, cdc, onSelfWrite } = withSubscriptions(cached, (e) => watcher.notify(e));
+  const { tree, cdc, onSelfWrite, injectExternalEvent } = withSubscriptions(cached, (e) => watcher.notify(e));
   cdcRef = cdc;
   onSelfWriteRef = onSelfWrite;
+  injectExternalRef = injectExternalEvent;
   const router = createTreeRouter(tree, watcher, opts, cdc);
 
   const createContext = async (token: string | null): Promise<TrpcContext> => {

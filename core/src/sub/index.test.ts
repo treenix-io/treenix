@@ -490,6 +490,58 @@ describe('withSubscriptions.onSelfWrite', () => {
     assert.equal(calls.length, 1, 'no further calls after unsub');
   });
 
+  it('injectExternalEvent fires invalidateVps for queries whose source contains the path', async () => {
+    // External (out-of-band) writes can't run through cdcEval (no oldNode
+    // snapshot). injectExternalEvent invalidates any active query that
+    // could have been affected, so query/VP watchers refetch instead of
+    // silently missing the change.
+    const events: NodeEvent[] = [];
+    const { tree, cdc, injectExternalEvent } = withSubscriptions(createMemoryTree(), e => events.push(e));
+
+    await tree.set(createNode('/items', 'dir'));
+    cdc.watchQuery('/views/open', '/items', { status: 'open' }, 'u1');
+    events.length = 0;
+
+    // Simulate an external Mongo write surfacing a direct child of /items
+    injectExternalEvent({
+      type: 'set',
+      path: '/items/external',
+      node: { $type: 't', status: 'open' },
+    });
+
+    const ext = events.find(e => e.type === 'set' && e.path === '/items/external');
+    assert.ok(ext, 'external event reaches direct watchers via dispatch');
+    if (ext.type === 'set') {
+      assert.deepEqual(ext.invalidateVps, ['/views/open'],
+        'query whose source contains /items/external is invalidated');
+    }
+  });
+
+  it('injectExternalEvent does NOT fire onSelfWrite (external events must not poison dedup)', async () => {
+    const { tree, onSelfWrite, injectExternalEvent } = withSubscriptions(createMemoryTree());
+    const selfWriteFires: string[] = [];
+    onSelfWrite((p) => selfWriteFires.push(p));
+
+    // Real self-write — fires
+    await tree.set(createNode('/a', 'test'));
+    assert.equal(selfWriteFires.length, 1);
+
+    // External event — must NOT fire
+    injectExternalEvent({ type: 'set', path: '/external', node: { $type: 't' } });
+    assert.equal(selfWriteFires.length, 1, 'external event did not fire onSelfWrite');
+  });
+
+  it('injectExternalEvent reconnect routes straight to onEvent (no CDC, no listeners)', async () => {
+    const events: NodeEvent[] = [];
+    const { injectExternalEvent } = withSubscriptions(createMemoryTree(), e => events.push(e));
+
+    injectExternalEvent({ type: 'reconnect', preserved: false });
+
+    assert.equal(events.length, 1);
+    assert.equal(events[0].type, 'reconnect');
+    if (events[0].type === 'reconnect') assert.equal(events[0].preserved, false);
+  });
+
   it('throwing listener does not break the write or other listeners', async () => {
     const { tree, onSelfWrite } = withSubscriptions(createMemoryTree());
 

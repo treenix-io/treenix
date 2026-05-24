@@ -141,7 +141,7 @@ export type OnSelfWrite = (listener: SelfWriteListener) => () => void;
 export function withSubscriptions(
   tree: Tree,
   onEvent?: (event: InternalNodeEvent) => void,
-): { tree: SubscribedTree; cdc: CdcRegistry; onSelfWrite: OnSelfWrite } {
+): { tree: SubscribedTree; cdc: CdcRegistry; onSelfWrite: OnSelfWrite; injectExternalEvent: (event: TreeEvent) => void } {
   const exactListeners = new Map<string, Set<Listener>>();
   const prefixListeners = new Map<string, Set<Listener>>();
   const selfWriteListeners = new Set<SelfWriteListener>();
@@ -174,24 +174,30 @@ export function withSubscriptions(
 
   type DataEvent = Exclude<InternalNodeEvent, { type: 'reconnect' }>;
 
+  // Fan out an already-cleaned event to listeners + onEvent. Shared by emit
+  // (in-pipeline writes) and injectExternalEvent (out-of-band writes). The
+  // self-write notification is fired BY emit ONLY — external events must
+  // never poison the dedup buffer.
+  function dispatch(event: InternalNodeEvent) {
+    if (event.type !== 'reconnect') {
+      const exact = exactListeners.get(event.path);
+      if (exact) for (const fn of exact) fn(event);
+      for (const [prefix, subs] of prefixListeners) {
+        if (event.path === prefix || event.path.startsWith(prefix === '/' ? '/' : prefix + '/')) {
+          for (const fn of subs) fn(event);
+        }
+      }
+    }
+    onEvent?.(event);
+  }
+
   function emit(raw: DataEvent) {
     const event = cleanEvent(raw);
-
     // Self-write notification fires synchronously BEFORE event delivery —
     // so dedup buffers in external-watch consumers are populated before any
     // out-of-band write surfaces the same (path, rev) back to us.
     notifySelfWrite(event);
-
-    const exact = exactListeners.get(event.path);
-    if (exact) for (const fn of exact) fn(event);
-
-    for (const [prefix, subs] of prefixListeners) {
-      if (event.path === prefix || event.path.startsWith(prefix === '/' ? '/' : prefix + '/')) {
-        for (const fn of subs) fn(event);
-      }
-    }
-
-    onEvent?.(event);
+    dispatch(event);
   }
 
   function addDelta(delta: MutableVpDelta, kind: keyof MutableVpDelta, vp: string) {
@@ -237,6 +243,37 @@ export function withSubscriptions(
     const routes = new Map<string, MutableVpDelta>();
     for (const q of activeQueries) {
       if (q.vp !== path) continue;
+      vps.push(q.vp);
+      for (const userId of q.users.keys()) {
+        addDelta(routeDelta(routes, userId), 'invalidateVps', q.vp);
+      }
+    }
+    return { vps, routes };
+  }
+
+  /** Invalidate every active query whose source could be affected by an
+   *  external write at `path`. Used by external-watch consumers: out-of-band
+   *  writes can shift query-mount membership in ways cdcEval can't
+   *  reconstruct (no oldNode). Conservative refetch is safer than missing
+   *  updates.
+   *
+   *  Match cases:
+   *    1. path === q.source                — direct change of the source node
+   *    2. path is a direct child of source — cdcEval's normal vp membership rule
+   *    3. path is an ANCESTOR of source    — ACL/config change up the tree
+   *       can shift visibility/structure of the query target
+   *  Grand-descendants are skipped (can't affect direct-child queries). */
+  function invalidateVpsForExternalPath(path: string): { vps: string[]; routes: Map<string, MutableVpDelta> } {
+    const vps: string[] = [];
+    const routes = new Map<string, MutableVpDelta>();
+    for (const q of activeQueries) {
+      const prefix = q.source === '/' ? '/' : q.source + '/';
+      const directChild = path.startsWith(prefix) && !path.slice(prefix.length).includes('/');
+      const isSource = path === q.source;
+      // Ancestor: path === '/' covers everything; otherwise q.source must
+      // start with `${path}/`.
+      const isAncestor = path === '/' || (q.source !== '/' && q.source.startsWith(path + '/'));
+      if (!directChild && !isSource && !isAncestor) continue;
       vps.push(q.vp);
       for (const userId of q.users.keys()) {
         addDelta(routeDelta(routes, userId), 'invalidateVps', q.vp);
@@ -622,5 +659,21 @@ export function withSubscriptions(
     return () => { selfWriteListeners.delete(listener); };
   };
 
-  return { tree: wrappedTree, cdc, onSelfWrite };
+  /** Ingest a TreeEvent from an external source (Mongo change stream etc.).
+   *  Routes through the same dispatch as in-pipeline writes, BUT skips
+   *  notifySelfWrite (the event isn't from us). Enriches data events with
+   *  `invalidateVps` for any active query whose source could contain the
+   *  path — query/VP watchers refetch instead of silently missing the
+   *  change. Reconnect events skip CDC and go straight to onEvent. */
+  function injectExternalEvent(event: TreeEvent) {
+    if (event.type === 'reconnect') {
+      dispatch(event as InternalNodeEvent);
+      return;
+    }
+    const inv = invalidateVpsForExternalPath(event.path);
+    const merged = mergeInvalidate({} as InternalVpDelta & { [CDC_ROUTES]?: Map<string, InternalVpDelta> }, inv);
+    dispatch(cleanEvent({ ...event, ...merged } as DataEvent));
+  }
+
+  return { tree: wrappedTree, cdc, onSelfWrite, injectExternalEvent };
 }
