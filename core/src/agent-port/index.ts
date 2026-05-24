@@ -38,7 +38,7 @@ export class AgentPort {
     this.pendingKey = undefined;
     this.status = 'approved';
 
-    node.$acl = setGroupPerm(node.$acl, groupId, R | W | S);
+    node.$acl = updatePerm(node.$acl, groupId, R | W | S);
 
     // Side-effect outside the Immer draft — must await so the user node
     // exists before the action resolves.
@@ -58,7 +58,7 @@ export class AgentPort {
     this.status = 'revoked';
     this.connected = false;
 
-    node.$acl = setGroupPerm(node.$acl, `u:agent:${node.$path}`, null);
+    node.$acl = updatePerm(node.$acl, `u:agent:${node.$path}`, null);
   }
 
   /** Reset to idle — allows re-pairing with a different agent */
@@ -74,16 +74,31 @@ export class AgentPort {
     this.connected = false;
     this.connectedAt = undefined;
 
-    node.$acl = setGroupPerm(node.$acl, `u:${agentUserId}`, null);
+    node.$acl = updatePerm(node.$acl, `u:${agentUserId}`, null);
 
     await tree.remove(`/auth/users/${agentUserId}`);
   }
 }
 
 /** Upsert a group's permission in an ACL list. `perm === null` deletes. */
-function setGroupPerm(acl: GroupPerm[] | undefined, g: string, perm: number | null): GroupPerm[] {
-  const filtered = (acl ?? []).filter(e => e.g !== g);
-  return perm === null ? filtered : [...filtered, { g, p: perm }];
+export function updatePerm(acl: GroupPerm[] | undefined, g: string, perm: number | null): GroupPerm[] | undefined {
+  if (!g) throw new Error('updatePerm: empty group id');
+  if (!acl) {
+    if (perm == null) return undefined;
+    else return [{ g, p: perm }];
+  } 
+
+  const foundIdx = acl.findIndex(e => e.g === g);
+  if (foundIdx >= 0)  {
+    if (perm == null) {
+      acl.splice(foundIdx, 1);
+      return acl.length ? acl : undefined
+    } else acl[foundIdx] = { g, p: perm };
+  } else if (perm !== null) {
+    acl.push({ g, p: perm });
+  }
+
+  return acl;
 }
 
 registerType('t.agent.port', AgentPort);
