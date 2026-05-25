@@ -113,7 +113,7 @@ const TagsView: View<TTags> = ({ value }) => {
   const actions = useActions(value);
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState('');
-  const items = Array.isArray(value.items) ? value.items : [];
+  const items = value.items;
 
   return (
     <Section label="Tags">
@@ -236,7 +236,7 @@ const LinksView: View<TLinks> = ({ value }) => {
   const [adding, setAdding] = useState(false);
   const [url, setUrl] = useState('');
   const [label, setLabel] = useState('');
-  const items = Array.isArray(value.items) ? value.items : [];
+  const items = value.items;
 
   return (
     <Section label="Links">
@@ -298,7 +298,7 @@ register(TLinks, 'react:edit', LinksView);
 const CommentsView: View<TComments> = ({ value }) => {
   const actions = useActions(value);
   const [draft, setDraft] = useState('');
-  const items = Array.isArray(value.items) ? value.items : [];
+  const items = value.items;
 
   return (
     <Section label={`Comments${items.length ? ` (${items.length})` : ''}`}>
@@ -353,8 +353,8 @@ function formatDuration(ms: number) {
 
 const TimeTrackView: View<TTimeTrack> = ({ value }) => {
   const actions = useActions(value);
-  const entries = Array.isArray(value.entries) ? value.entries : [];
-  const running = !!value.running;
+  const entries = value.entries;
+  const running = value.running;
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
@@ -486,7 +486,7 @@ const ChecklistFull: View<TChecklist> = ({ value }) => {
 register(TChecklist, 'react', ChecklistFull);
 
 const TagsRead: View<TTags> = ({ value }) => {
-  const items = Array.isArray(value?.items) ? value.items : [];
+  const items = value.items;
   if (!items.length) return null;
 
   return (
@@ -518,7 +518,7 @@ const EstimateRead: View<TEstimate> = ({ value }) => {
 register(TEstimate, 'react', EstimateRead);
 
 const LinksRead: View<TLinks> = ({ value }) => {
-  const items = Array.isArray(value?.items) ? value.items : [];
+  const items = value.items;
   if (!items.length) return null;
 
   return (
@@ -543,7 +543,7 @@ const LinksRead: View<TLinks> = ({ value }) => {
 register(TLinks, 'react', LinksRead);
 
 const CommentsRead: View<TComments> = ({ value }) => {
-  const items = Array.isArray(value?.items) ? value.items : [];
+  const items = value.items;
   if (!items.length) return null;
 
   return (
@@ -557,8 +557,8 @@ const CommentsRead: View<TComments> = ({ value }) => {
 register(TComments, 'react', CommentsRead);
 
 const TimeTrackRead: View<TTimeTrack> = ({ value }) => {
-  const entries = Array.isArray(value?.entries) ? value.entries : [];
-  const running = !!value?.running;
+  const entries = value.entries;
+  const running = value.running;
   if (!entries.length && !running) return null;
 
   const total = entries.reduce((sum, e) => sum + ((e.end || Date.now()) - e.start), 0);

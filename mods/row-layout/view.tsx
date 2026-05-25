@@ -62,16 +62,16 @@ const RowColLayoutView: View<RowColLayout> = ({ value, onChange, ctx }) => {
 
   const discoveredRefs = new Set([
     ...compMap.keys(),
-    ...(value.rows ?? []).flatMap(r => r.items.map(i => i.ref)).filter(ref => !isComponentRef(ref) && childMap.has(ref)),
+    ...value.rows.flatMap(r => r.items.map(i => i.ref)).filter(ref => !isComponentRef(ref) && childMap.has(ref)),
   ])
 
   const { rows: cleanRows, hidden: cleanHidden } = reconcile(
-    discoveredRefs, value.rows ?? [], value.hidden ?? [],
+    discoveredRefs, value.rows, value.hidden,
   )
 
-  const storedRowsJson = JSON.stringify(value.rows ?? [])
+  const storedRowsJson = JSON.stringify(value.rows)
   const cleanRowsJson = JSON.stringify(cleanRows)
-  const storedHiddenJson = JSON.stringify(value.hidden ?? [])
+  const storedHiddenJson = JSON.stringify(value.hidden)
   const cleanHiddenJson = JSON.stringify(cleanHidden)
 
   // Children load is async. While loading or after error, child refs may be
