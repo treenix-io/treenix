@@ -663,17 +663,27 @@ register('ai.pool', 'service', async (node: NodeData, ctx: ServiceCtx) => {
         let targetAgentPath: string | undefined;
 
         if (orgRun) {
-          // org.run routing: resolve postRef → post node → ai.agent → role
+          // org.run routing: resolve postRef → post node → ai.agent → role.
+          // get() returns undefined for not-found; ACL throws FORBIDDEN for
+          // unreadable posts. Both are expected — fall through to assignee.
+          // Anything else is a real error and must propagate.
+          let postNode: NodeData | undefined;
           try {
-            const postNode = await ctx.tree.get(orgRun.postRef);
-            if (postNode) {
-              const postAgent = getComponent(postNode, AiAgent);
-              if (postAgent) {
-                role = postAgent.role;
-                targetAgentPath = postNode.$path;
-              }
+            postNode = await ctx.tree.get(orgRun.postRef);
+          } catch (e) {
+            if (e instanceof OpError && e.code === 'FORBIDDEN') {
+              log.warn(`postRef ${orgRun.postRef} not readable by agent — falling through to assignee`);
+            } else {
+              throw e;
             }
-          } catch { /* post not found — fall through to assignee */ }
+          }
+          if (postNode) {
+            const postAgent = getComponent(postNode, AiAgent);
+            if (postAgent) {
+              role = postAgent.role;
+              targetAgentPath = postNode.$path;
+            }
+          }
         }
 
         if (!role && typeof task.assignee === 'string') {
