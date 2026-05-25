@@ -634,8 +634,9 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
       // MVP rule 7: a readable query mount over an unreadable source would
       // act as a capability view (child R-grants leak items the actor can't
       // otherwise list). Gate plan.source before scanning. Non-mount path:
-      // plan.source === path, parentPerm already guarded above — redundant
-      // but cheap (resolvePermission cache hit).
+      // plan.source === path, parentPerm above already guarded the same path
+      // (an extra resolvePermission walk; the assertion runs on a separate
+      // cache, so it pays a second ancestor traversal — accept the cost).
       const actor: Actor = { userId, claims };
       await assertSourceReadable(rawStore, actor, plan.source);
       const project = createProjector(rawStore, actor);
