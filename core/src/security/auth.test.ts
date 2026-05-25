@@ -1,4 +1,4 @@
-import { A, type ComponentData, createNode, R, register, S, W } from '#core';
+import { A, type ComponentData, createNode, type NodeData, R, register, S, W } from '#core';
 import { clearRegistry } from '#core/index.test';
 import { createMemoryTree, type Tree } from '#tree';
 import assert from 'node:assert/strict';
@@ -703,6 +703,32 @@ describe('getChildren truncation', () => {
     const result = await s.getChildren('/small');
     assert.equal(result.truncated, undefined);
     assert.equal(result.items.length, 2);
+  });
+
+  // e47f8e2 changed executeList to return {items, truncated:true} on budget
+  // exhaustion (was: throw RESOURCE_EXHAUSTED). Verify withAcl.getChildren
+  // propagates that flag — the consumer must see "incomplete", not partial
+  // success dressed as success. Default budget is 10_000 raw items; we seed
+  // > budget with a never-matching query so the scan exhausts before
+  // collecting limit+1.
+  it('propagates executeList truncated:true when callerWhere never matches and budget exhausts', async () => {
+    const base = createMemoryTree();
+    await base.set({
+      ...createNode('/huge', 'folder'),
+      $acl: [{ g: 'authenticated', p: R }],
+    });
+    // Default DEFAULT_BUDGET.maxRawScanned = 10_000. Seeding 10_001 children
+    // with an impossible callerWhere forces the executeList loop to scan
+    // every entry without collecting any, then trip the budget guard.
+    const N = 10_001;
+    for (let i = 0; i < N; i++) {
+      await base.set(createNode(`/huge/${String(i).padStart(5, '0')}`, 'doc'));
+    }
+
+    const s = withAcl(base, 'admin', ['u:admin', 'authenticated']);
+    const result = await s.getChildren('/huge', { query: { neverMatchField: 'impossible' } });
+    assert.equal(result.truncated, true, 'truncated must propagate from executeList');
+    assert.equal(result.items.length, 0, 'no items match the impossible predicate');
   });
 });
 
