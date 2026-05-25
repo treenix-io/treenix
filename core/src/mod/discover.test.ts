@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
-import { discoverMods } from './discover';
+import { discoverLocalMods, discoverMods } from './discover';
 
 let tmp: string;
 
@@ -129,5 +129,40 @@ describe('discoverMods', () => {
 
     const mods = await discoverMods(tmp);
     assert.equal(mods.length, 1);
+  });
+
+  // 176007f narrowed broad readdir catches to ENOENT-only. Everything else
+  // must propagate — otherwise we lose visibility on permission / IO errors.
+  it('throws when nodeModulesPath is a file, not a directory (non-ENOENT)', async () => {
+    const file = join(tmp, 'not-a-dir');
+    await writeFile(file, 'plain text, not a directory');
+    await assert.rejects(
+      () => discoverMods(file),
+      (e: NodeJS.ErrnoException) => e.code === 'ENOTDIR',
+    );
+  });
+});
+
+describe('discoverLocalMods', () => {
+  beforeEach(async () => {
+    tmp = await mkdtemp(join(tmpdir(), 'treenix-discover-local-'));
+  });
+
+  afterEach(async () => {
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  it('returns empty array for nonexistent directory (ENOENT)', async () => {
+    const mods = await discoverLocalMods(join(tmp, 'nowhere'));
+    assert.deepEqual(mods, []);
+  });
+
+  it('throws when modsDir is a file, not a directory (non-ENOENT)', async () => {
+    const file = join(tmp, 'not-a-dir');
+    await writeFile(file, 'plain text, not a directory');
+    await assert.rejects(
+      () => discoverLocalMods(file),
+      (e: NodeJS.ErrnoException) => e.code === 'ENOTDIR',
+    );
   });
 });
