@@ -49,6 +49,18 @@ describe('RawFsStore', () => {
     assert.equal(await tree.get('/nope'), undefined);
   });
 
+  // f9b8dbf narrowed walk's broad readdir catch to ENOENT-only. Calling
+  // getChildren on a path that exists as a FILE makes readdir throw ENOTDIR;
+  // that error must propagate instead of yielding an empty page.
+  it('getChildren on a file path throws ENOTDIR (non-ENOENT readdir)', async () => {
+    const tree = await setup();
+    await writeFile(join(dir, 'note.txt'), 'a file, not a directory');
+    await assert.rejects(
+      () => tree.getChildren('/note.txt'),
+      (e: NodeJS.ErrnoException) => e.code === 'ENOTDIR',
+    );
+  });
+
   it('getChildren lists typed entries', async () => {
     const tree = await setup();
     await writeFile(join(dir, 'a.txt'), 'text');
