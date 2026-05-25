@@ -28,8 +28,9 @@ import { type WatchManager } from '#sub/watch';
 import { createFilteredPush } from '#sub/watch-filter';
 
 export type TrpcContext = {
-  session: Session | null;
-  token: string | null;
+  /** Always present — outer handler issues anon session if no credential supplied. */
+  session: Session;
+  token: string;
   clientIp: string | null;
   /** Set a response header — used by login/register/logout to set the session cookie. */
   setHeader?: (name: string, value: string) => void;
@@ -101,29 +102,40 @@ export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: 
     return result;
   });
 
-  const authed = base.use(async ({ ctx, next }) => {
-    const userId = ctx.session?.userId ?? null;
-    const claims = ctx.session?.claims ?? (userId ? await buildClaims(baseStore, userId) : ['public']);
+  // withSession — anon OK. Session invariant guaranteed by outer HTTP handler;
+  // no fallback to ['public'] — that was the silent-downgrade hole (core-t9d).
+  const withSession = base.use(async ({ ctx, next }) => {
+    const { session } = ctx;
+    const { userId } = session;
+    const claims = session.claims ?? await buildClaims(baseStore, userId);
     const tree = withAcl(baseStore, userId, claims);
     // Workload sessions (scopeRef set) require a configured executor; otherwise
     // fail-closed — silent fallback would let a workload escape narrowing.
-    const session = ctx.session;
-    const isWorkload = !!session?.scopeRef;
+    const isWorkload = !!session.scopeRef;
     if (isWorkload && !opts?.executor) {
       throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR',
         message: 'workload session present but no executor configured' });
     }
     const dispatch = isWorkload
       ? (path: string, key: string | undefined, action: string, data?: unknown) =>
-          opts!.executor!(tree, session!, { path, type: undefined, key, action, data })
+          opts!.executor!(tree, session, { path, type: undefined, key, action, data })
       : (path: string, key: string | undefined, action: string, data?: unknown) =>
           executeAction(tree, path, undefined, key, action, data, { userId, claims });
     const tp = createTreeP(tree, dispatch);
     return next({ ctx: { ...ctx, tree, tp, claims } });
   });
 
+  // authed — withSession + login-required. Anon (publicly-issued) gets UNAUTHORIZED.
+  // Use for endpoints semantically only valid for logged-in users (deployPrefab, agentInitPair).
+  const authed = withSession.use(async ({ ctx, next }) => {
+    if (ctx.session.anonymous) {
+      throw new TRPCError({ code: 'UNAUTHORIZED', message: 'login required' });
+    }
+    return next();
+  });
+
   return t.router({
-    get: authed
+    get: withSession
       .input(z.object({ path: safePath, watch: z.boolean().optional() }))
       .query(async ({ input, ctx }) => {
         const node = await ctx.tree.get(input.path);
@@ -133,7 +145,7 @@ export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: 
       }),
 
     // Fetch node + resolve $ref targets. Returns [requested, ...resolved].
-    resolve: authed
+    resolve: withSession
       .input(z.object({ path: safePath, watch: z.boolean().optional() }))
       .query(async ({ input, ctx }) => {
         const node = await ctx.tree.get(input.path);
@@ -155,7 +167,7 @@ export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: 
         return result;
       }),
 
-    getChildren: authed
+    getChildren: withSession
       .input(
         z.object({
           path: safePath,
@@ -192,7 +204,7 @@ export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: 
         return publicResult;
       }),
 
-    set: authed
+    set: withSession
       .input(z.object({ node: z.record(z.string(), z.unknown()).refine(n => typeof n.$path === 'string', '$path required') }))
       .mutation(({ input, ctx }) => {
         assertSafePath(input.node.$path as string);
@@ -200,21 +212,21 @@ export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: 
         return ctx.tp.set(clean.$path as string, clean);
       }),
 
-    patch: authed
+    patch: withSession
       .input(z.object({ path: safePath, ops: patchOps }))
       .mutation(({ input, ctx }) => ctx.tp.set(input.path, input.ops)),
 
-    setComponent: authed
+    setComponent: withSession
       .input(
         z.object({ path: safePath, name: z.string(), data: z.record(z.string(), z.unknown()), rev: z.number().optional() }),
       )
       .mutation(({ input, ctx }) => setComponentOp(ctx.tree, input.path, input.name, input.data, input.rev)),
 
-    remove: authed
+    remove: withSession
       .input(z.object({ path: safePath }))
       .mutation(({ input, ctx }) => ctx.tp.remove(input.path)),
 
-    execute: authed
+    execute: withSession
       .input(
         z.object({
           path: safePath,
@@ -279,18 +291,21 @@ export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: 
         return r;
       }),
 
-    me: authed.query(({ ctx }) => {
-      if (!ctx.session) return null;
+    me: withSession.query(({ ctx }) => {
+      // Auth-state probe: anon is logged-out per use-auth.ts:40 (setAuthed(res?.userId ?? null)).
+      // Returning a userId for anon would make existing UI think anon is logged-in.
+      if (ctx.session.anonymous) return null;
       return { userId: ctx.session.userId };
     }),
 
-    getPerm: authed
+    getPerm: withSession
       .input(z.object({ path: safePath }))
       .query(async ({ input, ctx }) => ctx.tree.getPerm(input.path)),
 
-    logout: authed.mutation(async ({ ctx }) => {
+    logout: withSession.mutation(async ({ ctx }) => {
+      // Idempotent for anon (cookie cleared, no persisted node to revoke) and authed
+      // (cookie cleared, session node removed). logoutUser is a no-op for signed anon tokens.
       ctx.setHeader?.('Set-Cookie', buildClearSessionCookie());
-      if (!ctx.session || !ctx.token) return { ok: false };
       return logoutUser(baseStore, ctx.token);
     }),
 
@@ -304,17 +319,15 @@ export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: 
       .input(z.object({ path: safePath, key: z.string().min(1).max(256) }))
       .mutation(({ input, ctx }) => agentInitPair(ctx.tree, input.path, input.key)),
 
-    unwatch: authed.input(z.object({ paths: z.array(safePath) })).mutation(({ input, ctx }) => {
-      if (ctx.session) watcher.unwatch(ctx.session.userId, input.paths);
+    unwatch: withSession.input(z.object({ paths: z.array(safePath) })).mutation(({ input, ctx }) => {
+      watcher.unwatch(ctx.session.userId, input.paths);
       }),
 
-    unwatchChildren: authed
+    unwatchChildren: withSession
       .input(z.object({ paths: z.array(safePath) }))
       .mutation(({ input, ctx }) => {
-        if (ctx.session) {
-          watcher.unwatch(ctx.session.userId, input.paths, { children: true });
-          for (const p of input.paths) cdc?.unwatchQuery(p, ctx.session.userId);
-        }
+        watcher.unwatch(ctx.session.userId, input.paths, { children: true });
+        for (const p of input.paths) cdc?.unwatchQuery(p, ctx.session.userId);
       }),
 
     devLogin: base.mutation(async ({ ctx }) => {
@@ -323,7 +336,7 @@ export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: 
       return r;
     }),
 
-    streamAction: authed
+    streamAction: withSession
       .input(z.object({ path: safePath, type: z.string().optional(), key: z.string().optional(), action: z.string(), data: z.unknown().optional() }))
       .subscription(({ input, ctx }) => {
         return observable<unknown>((emit) => {
@@ -347,7 +360,7 @@ export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: 
         });
       }),
 
-    events: authed.subscription(({ ctx }) => {
+    events: withSession.subscription(({ ctx }) => {
       if (ctx.token && !ctx.session) {
         throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Session expired' });
       }

@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 import { withMounts } from '#mount';
 import { createTreeRouter } from './trpc';
+import { type Session } from '#security/auth';
 import { createWatchManager } from '#sub/watch';
 
 class Order {
@@ -67,7 +68,9 @@ describe('Workflow & Spatial Gravity', () => {
     // Create tRPC router
     const watcher = createWatchManager();
     const router = createTreeRouter(trpcStore as any, watcher);
-    const caller = router.createCaller({ session: null, token: null, clientIp: null });
+    // Anon session — mimics what HTTP outer handler issues for un-credentialed requests.
+    const anonSession: Session = { userId: 'anon:test', claims: ['public'], anonymous: true };
+    const caller = router.createCaller({ session: anonSession, token: 'anon.test', clientIp: null });
 
     // Execute the action (should emit patches in console and update DB)
     await caller.execute({
