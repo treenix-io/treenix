@@ -10,7 +10,8 @@ import { OpError } from '#errors';
 import { mkdir, readdir, readFile, realpath, rmdir, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import sift from 'sift';
-import { assertPathSafe, scanFromCollected } from './fs-common';
+import { scanFromCollected } from './fs-common';
+import { assertPathSafe } from './path-safety';
 import { mapNodeForSift, paginate, type TreeSource } from './index';
 import { defaultPatch } from './patch';
 
