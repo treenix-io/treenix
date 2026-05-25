@@ -3,6 +3,7 @@
 // Cascade: $volatile on instance > register(type, 'volatile') > false
 
 import { type NodeData, resolve as resolveHandler } from '#core';
+import { OpError } from '#errors';
 import { createFilterTree, createMemoryTree, type Tree } from '#tree';
 
 declare module '#core/context' {
@@ -17,13 +18,27 @@ export function isVolatile(node: NodeData): boolean {
   return handler ? !!handler() : false;
 }
 
+// Strict by contract: when result IS a list (`items` array), every item must
+// be a node-shape with string `$path`. The action-watch path in trpc consumes
+// this — silently dropping malformed items would mask handler bugs and let
+// a partial watch set look like the full one. Non-node results (scalar,
+// `{count}`, undefined) return `[]` explicitly — that's "nothing to watch",
+// not a malformed shape.
 export function extractPaths(result: unknown): string[] {
   if (!result || typeof result !== 'object') return [];
   const r = result as Record<string, unknown>;
-  if (Array.isArray(r.items))
-    return (r.items as Record<string, unknown>[])
-      .filter((n) => typeof n?.$path === 'string')
-      .map((n) => n.$path as string);
+  if (Array.isArray(r.items)) {
+    const items = r.items;
+    const paths: string[] = [];
+    for (let i = 0; i < items.length; i++) {
+      const n = items[i];
+      if (!n || typeof n !== 'object' || typeof (n as { $path?: unknown }).$path !== 'string') {
+        throw new OpError('BAD_REQUEST', `extractPaths: items[${i}] missing string $path`);
+      }
+      paths.push((n as { $path: string }).$path);
+    }
+    return paths;
+  }
   if (typeof r.$path === 'string') return [r.$path];
   return [];
 }

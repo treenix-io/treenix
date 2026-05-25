@@ -1,5 +1,6 @@
 import { register } from '#core';
 import { clearRegistry } from '#core/index.test';
+import { OpError } from '#errors';
 import { createMemoryTree } from '#tree';
 import { mapSiftQuery } from '#tree/query';
 import assert from 'node:assert/strict';
@@ -142,8 +143,27 @@ describe('extractPaths', () => {
     assert.deepEqual(extractPaths('hello'), []);
   });
 
-  it('filters items without $path', () => {
+  it('throws on item missing $path', () => {
     const result = { items: [{ $path: '/a', $type: 't' }, { name: 'no path' }], total: 2 };
-    assert.deepEqual(extractPaths(result), ['/a']);
+    assert.throws(
+      () => extractPaths(result),
+      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+    );
+  });
+
+  it('throws on item with non-string $path', () => {
+    const result = { items: [{ $path: 123, $type: 't' }], total: 1 };
+    assert.throws(
+      () => extractPaths(result),
+      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+    );
+  });
+
+  it('throws on null item inside items array', () => {
+    const result = { items: [{ $path: '/a', $type: 't' }, null], total: 2 };
+    assert.throws(
+      () => extractPaths(result),
+      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+    );
   });
 });

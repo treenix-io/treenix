@@ -689,9 +689,11 @@ describe('extractPaths', () => {
     assert.deepEqual(extractPaths(42), []);
   });
 
-  it('filters items without $path', () => {
-    const paths = extractPaths({ items: [{ $path: '/a' }, { name: 'no path' }, { $path: '/b' }] });
-    assert.deepEqual(paths, ['/a', '/b']);
+  it('throws on item missing $path', () => {
+    assert.throws(
+      () => extractPaths({ items: [{ $path: '/a' }, { name: 'no path' }, { $path: '/b' }] }),
+      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+    );
   });
 
   it('returns empty for object without $path or items', () => {
