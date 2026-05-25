@@ -6,6 +6,7 @@ import { createLogger } from '#log';
 import type { Tree } from '#tree';
 import { type CachedTree, withCache } from '#tree/cache';
 import { nodeHTTPRequestHandler } from '@trpc/server/adapters/node-http';
+import { TRPCError } from '@trpc/server';
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { extname, join, resolve, sep } from 'node:path';
@@ -214,7 +215,8 @@ export function createHttpServer(pipeline: Pipeline, opts?: HttpServerOpts): Ser
       return handler(req, res, tree);
     }
 
-    // tRPC routes — outer auth resolution + 401 on bad credentials, then dispatch.
+    // tRPC routes — outer auth resolution; bad credentials → TRPCError so tRPC
+    // emits a proper structured error envelope (SSE / query alike).
     if (pathname.startsWith('/trpc')) {
       // Auth: cookie (browsers, including SSE EventSource) OR Authorization Bearer header
       // (agents, MCP, tests). Cookies are HttpOnly + Secure + SameSite=Strict.
@@ -223,30 +225,31 @@ export function createHttpServer(pipeline: Pipeline, opts?: HttpServerOpts): Ser
       const cookieToken = parseSessionCookie(req.headers.cookie);
       const authResult = await resolveOrIssueSession(mountable, cookieToken, bearer);
 
-      if (authResult.kind === 'bad_bearer') {
-        res.writeHead(401, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'invalid bearer token' }));
-        return;
-      }
+      // Side effects on the response happen BEFORE tRPC handler runs:
+      // - expired_session: clear the bad cookie so the browser drops it
+      // - ok+issued: set the fresh anon cookie with year-long Max-Age
       if (authResult.kind === 'expired_session') {
-        // 🚨 NO silent downgrade to anon. Clear cookie, force re-auth.
-        // Owner regression rule: invalid/revoked user-session cookie MUST fail loud.
         res.setHeader('Set-Cookie', buildClearSessionCookie());
-        res.writeHead(401, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'session expired', action: 'login_required' }));
-        return;
-      }
-      if (authResult.issued) {
-        // Long Max-Age matches signed anon TTL (1y). User cookies set elsewhere keep 7d default.
+      } else if (authResult.kind === 'ok' && authResult.issued) {
         res.setHeader('Set-Cookie', buildSessionCookie(authResult.token, ANON_COOKIE_MAX_AGE));
       }
 
-      const createContext = async (): Promise<TrpcContext> => ({
-        session: authResult.session,
-        token: authResult.token,
-        clientIp,
-        setHeader: (name, value) => res.setHeader(name, value),
-      });
+      const createContext = async (): Promise<TrpcContext> => {
+        if (authResult.kind === 'bad_bearer') {
+          throw new TRPCError({ code: 'UNAUTHORIZED', message: 'invalid bearer token' });
+        }
+        if (authResult.kind === 'expired_session') {
+          // 🚨 NO silent downgrade to anon. Force re-auth at the client.
+          // Owner regression rule: invalid/revoked user-session cookie MUST fail loud.
+          throw new TRPCError({ code: 'UNAUTHORIZED', message: 'session expired' });
+        }
+        return {
+          session: authResult.session,
+          token: authResult.token,
+          clientIp,
+          setHeader: (name, value) => res.setHeader(name, value),
+        };
+      };
 
       const path = pathname.replace(/^\/trpc/, '').replace(/^\//, '');
       await nodeHTTPRequestHandler({
