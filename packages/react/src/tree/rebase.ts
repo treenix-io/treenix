@@ -80,11 +80,15 @@ export function pushOptimistic<T extends object>(
 }
 
 /** Apply server patch to confirmed state. Returns true if rebase handled it. */
-export function applyServerPatch(path: string, patches: PatchOp[]): boolean {
+export function applyServerPatch(path: string, patches: PatchOp[], rev?: number): boolean {
   const rs = state.get(path);
   if (!rs) return false;
 
   applyOps(rs.confirmed, patches);
+  // Patches don't carry $rev; without this, confirmed state stays at pre-patch rev
+  // and next optimistic op sends stale $rev → OptimisticConcurrencyError storm.
+  // Guard against wire-level garbage (NaN, null disguised as number).
+  if (typeof rev === 'number' && Number.isFinite(rev)) rs.confirmed.$rev = rev;
   rs.pending.shift();
 
   if (rs.pending.length === 0) {

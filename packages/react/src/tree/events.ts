@@ -130,7 +130,8 @@ export function startEvents(config: EventsConfig = {}) {
         // tRPC infers the wire type with `unknown[]` for tuples that contain
         // `unknown` values — server emits real PatchOp tuples, narrow here.
         const patches = event.patches as PatchOp[] | undefined;
-        if (patches && applyServerPatch(event.path, patches)) {
+        const rev = (event as { rev?: unknown }).rev;
+        if (patches && applyServerPatch(event.path, patches, typeof rev === 'number' ? rev : undefined)) {
           // rebase handled it
         } else {
           const existing = cache.get(event.path);
@@ -138,6 +139,9 @@ export function startEvents(config: EventsConfig = {}) {
             try {
               const patched = structuredClone(existing);
               applyOps(patched, patches);
+              // Non-rebase fallback: server's new $rev must land in cache too,
+              // otherwise next optimistic write sends pre-patch $rev → OCC storm.
+              if (typeof rev === 'number' && Number.isFinite(rev)) patched.$rev = rev;
               cache.put(patched);
             } catch (e) {
               console.error('Failed to apply patches, fetching full node:', e);

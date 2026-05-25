@@ -241,4 +241,25 @@ describe('rebase', () => {
     applyServerPatch('/c', [['r', 'count', 1 ]]);
     assert.strictEqual(hasPending('/c'), false, 'state map cleaned up');
   });
+
+  it('applyServerPatch updates confirmed $rev from event.rev (regression for OCC storm)', () => {
+    cache.put({ $path: '/c', $type: 'test.rebase.counter', $rev: 1, count: 0 } as any);
+
+    pushOptimistic('/c', Counter, undefined, action('test.rebase.counter', 'increment'), undefined);
+    // While pending, server confirms with new rev
+    applyServerPatch('/c', [['r', 'count', 1 ]], 2);
+
+    const node = cache.get('/c') as any;
+    assert.strictEqual(node.$rev, 2, 'confirmed $rev advanced to server rev (was stale → OCC storm before fix)');
+  });
+
+  it('applyServerPatch ignores non-finite rev (wire garbage)', () => {
+    cache.put({ $path: '/c', $type: 'test.rebase.counter', $rev: 5, count: 0 } as any);
+
+    pushOptimistic('/c', Counter, undefined, action('test.rebase.counter', 'increment'), undefined);
+    applyServerPatch('/c', [['r', 'count', 1 ]], Number.NaN);
+
+    const node = cache.get('/c') as any;
+    assert.strictEqual(node.$rev, 5, 'NaN rev did not corrupt cached $rev');
+  });
 });
