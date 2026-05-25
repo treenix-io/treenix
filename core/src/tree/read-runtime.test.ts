@@ -124,6 +124,30 @@ describe('executeList', () => {
     assert.equal(res.nextCursor, undefined);
   });
 
+  // Contract invariant: nextCursor and truncated are mutually exclusive.
+  // nextCursor implies "more pages exist within budget"; truncated implies
+  // "budget hit before completing the scan, no safe resumption". A consumer
+  // that saw both would have ambiguous semantics — assert it never happens.
+  it('contract invariant: never returns both nextCursor and truncated', async () => {
+    const source = await seed(['/x/a', '/x/b', '/x/c', '/x/d', '/x/e']);
+    const plan: ReadPlan = { source: '/x' };
+
+    // Normal pagination: nextCursor only.
+    const paginated = await executeList(source, plan, { limit: 2 }, identityProject);
+    assert.ok(paginated.nextCursor, 'pagination case sets nextCursor');
+    assert.equal(paginated.truncated, undefined, 'pagination case does not set truncated');
+
+    // Budget hit: truncated only.
+    const budgeted = await executeList(source, plan, { limit: 10, budget: { maxRawScanned: 2 } }, identityProject);
+    assert.equal(budgeted.truncated, true, 'budget case sets truncated');
+    assert.equal(budgeted.nextCursor, undefined, 'budget case does not set nextCursor');
+
+    // Full scan within budget: neither.
+    const complete = await executeList(source, plan, { limit: 10 }, identityProject);
+    assert.equal(complete.nextCursor, undefined, 'complete scan has no nextCursor');
+    assert.equal(complete.truncated, undefined, 'complete scan is not truncated');
+  });
+
   it('rejects unsafe callerWhere ($where)', async () => {
     const source = await seed(['/x/a']);
     const plan: ReadPlan = { source: '/x', callerWhere: { $where: 'true' } };

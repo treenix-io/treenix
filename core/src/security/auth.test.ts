@@ -1,6 +1,7 @@
 import { A, type ComponentData, createNode, type NodeData, R, register, S, W } from '#core';
 import { clearRegistry } from '#core/index.test';
 import { createMemoryTree, type Tree } from '#tree';
+import { DEFAULT_BUDGET } from '#tree/read-runtime';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 import {
@@ -717,10 +718,10 @@ describe('getChildren truncation', () => {
       ...createNode('/huge', 'folder'),
       $acl: [{ g: 'authenticated', p: R }],
     });
-    // Default DEFAULT_BUDGET.maxRawScanned = 10_000. Seeding 10_001 children
-    // with an impossible callerWhere forces the executeList loop to scan
-    // every entry without collecting any, then trip the budget guard.
-    const N = 10_001;
+    // Seed budget+1 so the executeList loop scans every entry without
+    // collecting any (impossible callerWhere), then trips the budget guard.
+    // Importing DEFAULT_BUDGET keeps this test in sync with the runtime constant.
+    const N = DEFAULT_BUDGET.maxRawScanned + 1;
     for (let i = 0; i < N; i++) {
       await base.set(createNode(`/huge/${String(i).padStart(5, '0')}`, 'doc'));
     }
