@@ -316,19 +316,31 @@ export function useCanWrite(path: string | null): boolean {
   const [perm, setPerm] = useState<number>(0);
 
   useEffect(() => {
+    // Reset to fail-closed BEFORE any async work. Without this, switching
+    // from a writable path to an in-flight one would briefly return the
+    // previous `true`, and switching to null/error would keep stale W.
+    setPerm(0);
     if (!path) return;
+
     const cached = permCache.get(path);
     if (cached && Date.now() - cached.ts < PERM_TTL) {
       setPerm(cached.perm);
       return;
     }
+
+    // Cancellation flag — a slow response for an OLD path must not overwrite
+    // the perm state after the effect has been re-scheduled for a NEW path.
+    let cancelled = false;
     trpc.getPerm.query({ path }).then((p) => {
+      if (cancelled) return;
       permCache.set(path, { perm: p, ts: Date.now() });
       setPerm(p);
     }).catch((e) => {
+      if (cancelled) return;
       console.warn('[useCanWrite] getPerm failed for', path, e);
       setPerm(0);
     });
+    return () => { cancelled = true; };
   }, [path]);
 
   return (perm & W) !== 0;
