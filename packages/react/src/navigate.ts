@@ -145,5 +145,6 @@ export function useLocation(): Location {
   useSyncExternalStore(subscribeLocation, getLocationHref, getServerLocationHref);
   if (typeof window !== 'undefined') return window.location;
   const stub = useContext(ServerLocationContext);
-  return (stub ?? { pathname: '/', search: '', href: '' }) as Location;
+  if (!stub) throw new Error('useLocation: SSR requires <ServerLocationContext.Provider> wrapping the tree');
+  return stub as Location;
 }

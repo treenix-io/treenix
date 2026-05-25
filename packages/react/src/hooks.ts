@@ -325,7 +325,10 @@ export function useCanWrite(path: string | null): boolean {
     trpc.getPerm.query({ path }).then((p) => {
       permCache.set(path, { perm: p, ts: Date.now() });
       setPerm(p);
-    }).catch(() => setPerm(0));
+    }).catch((e) => {
+      console.warn('[useCanWrite] getPerm failed for', path, e);
+      setPerm(0);
+    });
   }, [path]);
 
   return (perm & W) !== 0;
