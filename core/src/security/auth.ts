@@ -645,7 +645,9 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
       const result = await executeList(source, plan, { limit: scanLimit }, project, ctx);
       const items = result.items.slice(offset, offset + reqLimit);
       const page: Page<NodeData> = { items, total: result.items.length };
-      if (result.nextCursor) page.truncated = true;
+      // truncated: either more pages exist (nextCursor) or scan hit budget
+      // (result.truncated). Page.total reflects only what we managed to scan.
+      if (result.nextCursor || result.truncated) page.truncated = true;
       // queryMount metadata preserved for CDC matrix (sub.ts active query
       // registration). Stage-6 watchQuery consumes the plan directly.
       if (legacyQueryMount) page.queryMount = legacyQueryMount;

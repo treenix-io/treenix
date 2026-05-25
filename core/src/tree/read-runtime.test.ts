@@ -103,13 +103,25 @@ describe('executeList', () => {
     );
   });
 
-  it('budget exhaustion throws RESOURCE_EXHAUSTED', async () => {
+  it('budget exhaustion returns partial page with truncated:true and no nextCursor', async () => {
     const source = await seed(['/x/a', '/x/b', '/x/c', '/x/d', '/x/e']);
     const plan: ReadPlan = { source: '/x' };
-    await assert.rejects(
-      () => executeList(source, plan, { limit: 10, budget: { maxRawScanned: 2 } }, identityProject),
-      (e: unknown) => e instanceof OpError && e.code === 'RESOURCE_EXHAUSTED',
-    );
+    const res = await executeList(source, plan, { limit: 10, budget: { maxRawScanned: 2 } }, identityProject);
+    assert.deepEqual(res.items.map(n => n.$path), ['/x/a', '/x/b']);
+    assert.equal(res.truncated, true);
+    assert.equal(res.nextCursor, undefined);
+  });
+
+  it('budget exhaustion with zero matches still returns truncated:true', async () => {
+    const source = createMemoryTree();
+    await source.set({ $path: '/x/a', $type: 'item', kind: 'A' } as NodeData);
+    await source.set({ $path: '/x/b', $type: 'item', kind: 'A' } as NodeData);
+    await source.set({ $path: '/x/c', $type: 'item', kind: 'A' } as NodeData);
+    const plan: ReadPlan = { source: '/x', callerWhere: { kind: 'Z' } };
+    const res = await executeList(source, plan, { limit: 10, budget: { maxRawScanned: 2 } }, identityProject);
+    assert.deepEqual(res.items, []);
+    assert.equal(res.truncated, true);
+    assert.equal(res.nextCursor, undefined);
   });
 
   it('rejects unsafe callerWhere ($where)', async () => {

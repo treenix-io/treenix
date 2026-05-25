@@ -40,11 +40,18 @@ export type ExecuteListOpts = {
 
 export type ExecuteListResult = {
   items: NodeData[];
+  /** Set when more pages exist after a complete scan within budget. Mutually
+   *  exclusive with `truncated` — pagination implies the budget held. */
   nextCursor?: string;
+  /** Set when the scan hit `budget.maxRawScanned` before reaching the end of
+   *  the source. Returned items are a prefix of what would have been visible;
+   *  no nextCursor — clients cannot safely resume past a truncated page. */
+  truncated?: true;
 };
 
 /** Default operational guard. Not pagination — a runaway scan beyond this
- *  shape means the predicate is dropping nearly everything; surface it. */
+ *  shape means the predicate is dropping nearly everything. Surfaced via
+ *  truncated:true on the result, with no nextCursor. */
 export const DEFAULT_BUDGET = { maxRawScanned: 10_000 };
 
 export async function executeList(
@@ -80,10 +87,9 @@ export async function executeList(
   for await (const entry of scan) {
     rawScanned++;
     if (rawScanned > budget.maxRawScanned) {
-      throw new OpError(
-        'RESOURCE_EXHAUSTED',
-        `executeList: scan budget exhausted (${budget.maxRawScanned})`,
-      );
+      // Partial page — return what we have. No nextCursor: resuming after a
+      // budget-truncated scan would silently skip filtered-out raw entries.
+      return { items: collected.map(c => c.node), truncated: true };
     }
 
     const visible = await project(entry.node);
