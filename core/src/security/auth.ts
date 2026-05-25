@@ -20,7 +20,7 @@ import { createSiftTest, withAclQueryTree } from '#tree/query';
 import { executeList } from '#tree/read-runtime';
 import { resolveReadPlan } from '#mount/resolve-plan';
 import { createProjector } from './projector';
-import { createHash, randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
 
 // R4-AUTH-5: hash session token before persisting. The plaintext bearer never lands
 // in the store path or on disk — a DB dump / FS snapshot / accidental backup of
@@ -45,9 +45,12 @@ export const SESSION_COOKIE = 'treenix_session';
 
 const SESSION_COOKIE_MAX_AGE = 7 * 24 * 60 * 60; // 7 days
 export const SESSION_TTL_MS = SESSION_COOKIE_MAX_AGE * 1000;
+// Anon cookies live a year — server has no storage cost (signed stateless tokens) and
+// returning-visitor identity persistence is a feature (analytics/UX).
+export const ANON_COOKIE_MAX_AGE = 365 * 24 * 60 * 60;
 
-export function buildSessionCookie(token: string): string {
-  return `${SESSION_COOKIE}=${token}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${SESSION_COOKIE_MAX_AGE}`;
+export function buildSessionCookie(token: string, maxAgeSeconds: number = SESSION_COOKIE_MAX_AGE): string {
+  return `${SESSION_COOKIE}=${token}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${maxAgeSeconds}`;
 }
 export function buildClearSessionCookie(): string {
   return `${SESSION_COOKIE}=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0`;
@@ -78,7 +81,12 @@ declare module '#core/context' {
 // Session is open-ended: mods may patch session-node with their own metadata
 // (e.g. taskPath, runPath for workload sessions). resolveToken returns all
 // non-$ fields verbatim so consumers see what was written.
-export type Session = { userId: string; claims?: string[]; [key: string]: unknown };
+//
+// Anon sessions carry `anonymous: true` so middleware can split withSession
+// (anon OK) from authed (login-required). Detected by userId prefix `anon:`.
+export type AuthedSession = { userId: string; claims?: string[]; anonymous?: false; [key: string]: unknown };
+export type AnonSession = { userId: string; claims: ['public']; anonymous: true; [key: string]: unknown };
+export type Session = AuthedSession | AnonSession;
 
 // Session nodes are stored as regular nodes with extra fields
 type SessionNode = NodeData & { userId: string; createdAt: number; expiresAt: number; claims?: string[] };
@@ -108,6 +116,13 @@ export async function createSession(
 }
 
 export async function resolveToken(tree: Tree, token: string): Promise<Session | null> {
+  // Signed anon tokens: `anon.<base64url-payload>.<base64url-sig>`. Stateless — verify only.
+  if (token.startsWith(ANON_PREFIX)) {
+    const key = await getAnonKey(tree);
+    const v = verifyAnon(token, key);
+    if (!v) return null;
+    return { userId: `anon:${v.id}`, claims: ['public'], anonymous: true };
+  }
   if (!/^[0-9a-f]{64}$/.test(token)) return null;
 
   if (process.env.NODE_ENV === 'development' && token === process.env.VITE_DEV_TOKEN) {
@@ -136,6 +151,136 @@ export async function resolveToken(tree: Tree, token: string): Promise<Session |
 
 export async function revokeSession(tree: Tree, token: string): Promise<boolean> {
   return tree.remove(sessionPath(token));
+}
+
+// ── Anonymous sessions (signed, stateless) ──
+//
+// Anon token format: `anon.<base64url(payload)>.<base64url(hmac-sha256(payload, key))>`
+// Payload: { id, iat, exp }, id = 16-byte hex.
+// userId = `anon:<id>` — publishable, safe in $owner/audit/watch keys (NOT bearer token).
+// Server stores nothing — verify-only. Cross-restart/cross-node identity persistence via env-key.
+//
+// Closes core-t9d silent-downgrade hole: middleware no longer falls back to claims=['public']
+// without identity; anon is a real signed identity issued at the HTTP layer.
+
+const ANON_PREFIX = 'anon.';
+const ANON_TTL_MS = 365 * 24 * 60 * 60 * 1000; // 1 year — returning-visitor identity persistence
+const ANON_KEY_PATH = '/auth/secrets/anon-key';
+
+let anonKeyCache: Buffer | null = null;
+let anonKeyPromise: Promise<Buffer> | null = null; // race-serialize concurrent first-callers
+
+/** Exported for boot validation in factory.ts and tests. */
+export async function getAnonKey(tree: Tree): Promise<Buffer> {
+  if (anonKeyCache) return anonKeyCache;
+  if (anonKeyPromise) return anonKeyPromise;
+  anonKeyPromise = (async () => {
+    const envKey = process.env.TREENIX_ANON_KEY;
+    if (envKey) {
+      if (!/^[0-9a-f]{64}$/.test(envKey)) {
+        throw new Error('TREENIX_ANON_KEY must be 64 hex chars (32 bytes)');
+      }
+      anonKeyCache = Buffer.from(envKey, 'hex');
+      return anonKeyCache;
+    }
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('TREENIX_ANON_KEY required in production (no env fallback)');
+    }
+    // Dev fallback: persistent tree-backed key, lazy-created
+    const node = await tree.get(ANON_KEY_PATH);
+    if (node) {
+      // Node exists — require valid key. Don't silently re-mint over corrupt field.
+      const keyVal = node['key'];
+      if (typeof keyVal !== 'string') {
+        throw new Error(`malformed anon key at ${ANON_KEY_PATH} (key field missing or not string)`);
+      }
+      if (!/^[0-9a-f]{64}$/.test(keyVal)) {
+        throw new Error(`malformed anon key at ${ANON_KEY_PATH} (must be 64 hex chars)`);
+      }
+      anonKeyCache = Buffer.from(keyVal, 'hex');
+      return anonKeyCache;
+    }
+    const key = randomBytes(32);
+    await tree.set({
+      $path: ANON_KEY_PATH, $type: 'secret',
+      // Explicit deny on inheritance: admins read/write, authenticated and public denied.
+      // Without explicit zeros, authenticated users could inherit read from a parent
+      // and mint arbitrary anons by extracting the key.
+      $acl: [
+        { g: 'admins', p: R | W | A | S },
+        { g: 'authenticated', p: 0 },
+        { g: 'public', p: 0 },
+      ],
+      key: key.toString('hex'),
+    });
+    anonKeyCache = key;
+    return key;
+  })().catch((e) => { anonKeyPromise = null; throw e; });
+  return anonKeyPromise;
+}
+
+function signAnon(id: string, key: Buffer): string {
+  const now = Date.now();
+  const body = Buffer.from(JSON.stringify({ id, iat: now, exp: now + ANON_TTL_MS })).toString('base64url');
+  const sig = createHmac('sha256', key).update(body).digest('base64url');
+  return `${ANON_PREFIX}${body}.${sig}`;
+}
+
+function verifyAnon(token: string, key: Buffer): { id: string; exp: number } | null {
+  const parts = token.split('.');
+  if (parts.length !== 3 || parts[0] !== 'anon') return null;
+  const [, body, sig] = parts;
+  const expected = createHmac('sha256', key).update(body).digest('base64url');
+  const sigBuf = Buffer.from(sig);
+  const expBuf = Buffer.from(expected);
+  if (sigBuf.length !== expBuf.length) return null;
+  if (!timingSafeEqual(sigBuf, expBuf)) return null;
+  try {
+    const p = JSON.parse(Buffer.from(body, 'base64url').toString()) as { id?: unknown; exp?: unknown };
+    if (typeof p.id !== 'string' || !/^[0-9a-f]{32}$/.test(p.id)) return null;
+    if (typeof p.exp !== 'number' || !Number.isFinite(p.exp)) return null;
+    if (p.exp < Date.now()) return null;
+    return { id: p.id, exp: p.exp };
+  } catch { return null; }
+}
+
+export async function createAnonSession(tree: Tree): Promise<{ session: AnonSession; token: string }> {
+  const key = await getAnonKey(tree);
+  const id = randomBytes(16).toString('hex');
+  const token = signAnon(id, key);
+  return { session: { userId: `anon:${id}`, claims: ['public'], anonymous: true }, token };
+}
+
+/** Outer auth dispatcher. Distinguishes absent / bad-bearer / expired-session / ok.
+ *  Owner's strict rule (closes core-t9d): ANY invalid cookie → expired_session.
+ *  Never silently downgrades user-session to anon. */
+export async function resolveOrIssueSession(
+  tree: Tree,
+  cookieToken: string | null,
+  bearerToken: string | null,
+): Promise<
+  | { kind: 'ok'; session: Session; token: string; issued: boolean }
+  | { kind: 'bad_bearer' }
+  | { kind: 'expired_session' }
+> {
+  if (bearerToken) {
+    const s = await resolveToken(tree, bearerToken);
+    if (!s) return { kind: 'bad_bearer' };
+    return { kind: 'ok', session: s, token: bearerToken, issued: false };
+  }
+  if (cookieToken) {
+    const s = await resolveToken(tree, cookieToken);
+    if (s) return { kind: 'ok', session: s, token: cookieToken, issued: false };
+    return { kind: 'expired_session' };
+  }
+  const anon = await createAnonSession(tree);
+  return { kind: 'ok', session: anon.session, token: anon.token, issued: true };
+}
+
+/** Test-only: clear module-global anon key state between test cases. */
+export function _resetAnonKeyForTests(): void {
+  anonKeyCache = null;
+  anonKeyPromise = null;
 }
 
 // ── Password hashing ──
