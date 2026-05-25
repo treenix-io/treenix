@@ -250,7 +250,7 @@ export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: 
           const candidates = extractPaths(result).slice(0, MAX_WATCH_FROM_RESULT);
           const allowed: string[] = [];
           for (const p of candidates) {
-            try { assertSafePath(p); } catch { continue; }
+            assertSafePath(p); // handler bug if invalid shape — surface loud
             const perm = await ctx.tree.getPerm(p);
             if (perm & R) allowed.push(p);
           }
