@@ -9,7 +9,13 @@ import { nodeHTTPRequestHandler } from '@trpc/server/adapters/node-http';
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { extname, join, resolve, sep } from 'node:path';
-import { parseSessionCookie, resolveToken } from '#security/auth';
+import {
+  ANON_COOKIE_MAX_AGE,
+  buildClearSessionCookie,
+  buildSessionCookie,
+  parseSessionCookie,
+  resolveOrIssueSession,
+} from '#security/auth';
 import { withMounts } from '#mount';
 import { withRefIndex } from '#tree/refs';
 import { type CdcRegistry, type OnSelfWrite, withSubscriptions } from '#sub';
@@ -98,8 +104,11 @@ export function createPipeline(bootstrap: Tree, opts?: TreeRouterOpts): Pipeline
   const router = createTreeRouter(tree, watcher, opts, cdc);
 
   const createContext = async (token: string | null): Promise<TrpcContext> => {
-    const session = token ? await resolveToken(mountable, token) : null;
-    return { session, token, clientIp: null };
+    // Programmatic API: treat input as bearer (no cookie). Invalid → throw loud.
+    // Absent → issue anon (same model as HTTP path).
+    const result = await resolveOrIssueSession(mountable, null, token);
+    if (result.kind !== 'ok') throw new Error(`createContext: ${result.kind}`);
+    return { session: result.session, token: result.token, clientIp: null };
   };
 
   return { tree, cdc, mountable, watcher, router, createContext };
@@ -195,29 +204,50 @@ export function createHttpServer(pipeline: Pipeline, opts?: HttpServerOpts): Ser
     const xffParts = xffStr ? xffStr.split(',').map(s => s.trim()).filter(Boolean) : [];
     const clientIp = xffParts[xffParts.length - 1] || req.socket.remoteAddress || null;
 
-    // Auth: cookie (browsers, including SSE EventSource) OR Authorization Bearer header
-    // (agents, MCP, tests). Cookies are HttpOnly + Secure + SameSite=Strict — set by
-    // login/register/devLogin via ctx.setHeader (see trpc.ts). Cookies natively cover SSE.
-    const createContext = async (): Promise<TrpcContext> => {
-      const auth = req.headers.authorization;
-      const bearer = (typeof auth === 'string' && auth.startsWith('Bearer ') ? auth.slice(7) : null);
-      const cookieToken = parseSessionCookie(req.headers.cookie);
-      const token = bearer || cookieToken;
-      const session = token ? await resolveToken(mountable, token) : null;
-      return {
-        session, token, clientIp,
-        setHeader: (name, value) => res.setHeader(name, value),
-      };
-    };
-
     const pathname = (req.url ?? '/').split('?')[0];
+
+    // routeRegistry: direct dispatch, NOT auth-wrapped. RouteHandler has no session
+    // parameter (server.ts:27) — registered routes (MCP, etc.) do their own auth.
+    // Treenix session auth applies ONLY to /trpc.
     const handler = routeRegistry.get(pathname);
     if (handler) {
       return handler(req, res, tree);
     }
 
-    // tRPC routes
+    // tRPC routes — outer auth resolution + 401 on bad credentials, then dispatch.
     if (pathname.startsWith('/trpc')) {
+      // Auth: cookie (browsers, including SSE EventSource) OR Authorization Bearer header
+      // (agents, MCP, tests). Cookies are HttpOnly + Secure + SameSite=Strict.
+      const authHeader = req.headers.authorization;
+      const bearer = (typeof authHeader === 'string' && authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null);
+      const cookieToken = parseSessionCookie(req.headers.cookie);
+      const authResult = await resolveOrIssueSession(mountable, cookieToken, bearer);
+
+      if (authResult.kind === 'bad_bearer') {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'invalid bearer token' }));
+        return;
+      }
+      if (authResult.kind === 'expired_session') {
+        // 🚨 NO silent downgrade to anon. Clear cookie, force re-auth.
+        // Owner regression rule: invalid/revoked user-session cookie MUST fail loud.
+        res.setHeader('Set-Cookie', buildClearSessionCookie());
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'session expired', action: 'login_required' }));
+        return;
+      }
+      if (authResult.issued) {
+        // Long Max-Age matches signed anon TTL (1y). User cookies set elsewhere keep 7d default.
+        res.setHeader('Set-Cookie', buildSessionCookie(authResult.token, ANON_COOKIE_MAX_AGE));
+      }
+
+      const createContext = async (): Promise<TrpcContext> => ({
+        session: authResult.session,
+        token: authResult.token,
+        clientIp,
+        setHeader: (name, value) => res.setHeader(name, value),
+      });
+
       const path = pathname.replace(/^\/trpc/, '').replace(/^\//, '');
       await nodeHTTPRequestHandler({
         req, res, router, path, createContext,
@@ -230,7 +260,7 @@ export function createHttpServer(pipeline: Pipeline, opts?: HttpServerOpts): Ser
       return;
     }
 
-    // Static files (frontend SPA)
+    // Static files (frontend SPA) — no auth, no 401 blocking the login page.
     if (serveStatic(pathname, res)) return;
 
     res.writeHead(404, { 'Content-Type': 'application/json' });

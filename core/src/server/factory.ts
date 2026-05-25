@@ -9,6 +9,7 @@ import { type ServiceHandle, startServices } from '#contexts/service/index';
 import { type NodeData } from '#core';
 import { addOnLog, makeLogPath } from '#log';
 import { loadAllMods } from '#mod';
+import { getAnonKey } from '#security/auth';
 import { loadSchemasFromDir } from '#schema/load';
 import { createMemoryTree, type Tree } from '#tree';
 import type { Server } from 'node:http';
@@ -113,6 +114,11 @@ export async function treenix(config: TreenixConfig): Promise<TreenixServer> {
     console.log(`[seed] deploying prefabs, filter: ${JSON.stringify(seedFilter)}`);
     await deploySeedPrefabs(mountable, seedFilter);
   }
+
+  // 4b. Boot-time anon-key validation. Fails fast in prod if TREENIX_ANON_KEY
+  // missing/malformed; dev path lazy-creates persistent key in tree.
+  // Caching here avoids first-request stall and makes prod misconfiguration loud.
+  await getAnonKey(mountable);
 
   // 5. Wire log → tree
   addOnLog(entry => {
