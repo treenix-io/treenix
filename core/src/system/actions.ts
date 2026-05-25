@@ -2,7 +2,7 @@
 // Registered as a class so actions appear in catalog and are callable via execute tool.
 // Node at /sys has $type: t.system — all system actions route there.
 
-import { getCtx, registerActions, registerType } from '#comp';
+import { getCtx, registerType } from '#comp';
 import { TypeCatalog } from '#schema/catalog';
 import { loadSchemasFromDir } from '#schema/load';
 import { deployPrefab } from '#server/prefab';
@@ -40,5 +40,4 @@ export class SystemActions {
 }
 
 registerType('t.system', SystemActions);
-registerActions('treenix.system', SystemActions);
 loadSchemasFromDir(new URL('./schemas', import.meta.url).pathname);
