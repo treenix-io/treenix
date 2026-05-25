@@ -19,7 +19,7 @@ import { asTreeSource, assertSafePatchPath, mapNodeForSift, paginate, type Page,
 import { createSiftTest, withAclQueryTree } from '#tree/query';
 import { executeList } from '#tree/read-runtime';
 import { resolveReadPlan } from '#mount/resolve-plan';
-import { createProjector } from './projector';
+import { type Actor, assertSourceReadable, createProjector } from './projector';
 import { createHash, createHmac, randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
 
 // R4-AUTH-5: hash session token before persisting. The plaintext bearer never lands
@@ -631,7 +631,14 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
       // depth=1: route through the new read runtime.
       const source = asTreeSource(rawStore);
       const { plan, legacyQueryMount } = await resolveReadPlan(rawStore, path, opts?.query, ctx);
-      const project = createProjector(rawStore, { userId, claims });
+      // MVP rule 7: a readable query mount over an unreadable source would
+      // act as a capability view (child R-grants leak items the actor can't
+      // otherwise list). Gate plan.source before scanning. Non-mount path:
+      // plan.source === path, parentPerm already guarded above — redundant
+      // but cheap (resolvePermission cache hit).
+      const actor: Actor = { userId, claims };
+      await assertSourceReadable(rawStore, actor, plan.source);
+      const project = createProjector(rawStore, actor);
 
       // Public API uses limit + offset + total; executeList uses limit + cursor.
       // Bridge: scan up to LEGACY_DEEP_SCAN_LIMIT visible items to compute

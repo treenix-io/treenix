@@ -541,6 +541,31 @@ describe('withAcl', () => {
     assert.ok((await s.getPerm('/watchable')) & S);
     assert.ok(!((await s.getPerm('/no-watch')) & S));
   });
+
+  // MVP rule 7: a query mount whose virtual path is readable but whose
+  // source directory is not must NOT leak source-children even if those
+  // children individually grant R — that would be a capability view.
+  it('rejects query mount over unreadable source even when children grant R', async () => {
+    await tree.set({
+      ...createNode('/virtual', 'mount-point'),
+      $acl: [{ g: 'authenticated', p: R }],
+      mount: { $type: 't.mount.query', source: '/private', match: {} },
+    });
+    // /private: no R for authenticated → unreadable source
+    await tree.set({ ...createNode('/private', 'dir'), $acl: [] });
+    // child grants R directly — without the source-readability gate, the
+    // scan would project this child as visible.
+    await tree.set({
+      ...createNode('/private/leaked', 'doc'),
+      $acl: [{ g: 'authenticated', p: R }],
+    });
+
+    const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);
+    await assert.rejects(
+      () => s.getChildren('/virtual'),
+      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+    );
+  });
 });
 
 describe('sessions', () => {
