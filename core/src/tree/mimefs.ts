@@ -7,7 +7,8 @@ import type { NodeData } from '#core';
 import { resolve as ctxResolve } from '#core/registry';
 import { mkdir, readdir, realpath, rmdir, stat, unlink } from 'node:fs/promises';
 import { dirname, extname, join, resolve } from 'node:path';
-import { assertPathSafe, scanFromCollected } from './fs-common';
+import { scanFromCollected } from './fs-common';
+import { assertPathSafe } from './path-safety';
 import { mapNodeForSift, paginate, type TreeSource } from './index';
 import './json-codec'; // register JSON decode handler
 import { defaultPatch } from './patch';
@@ -93,7 +94,8 @@ export async function createRawFsTree(rootDir: string, mountPath: string = ''): 
     async function walk(dirPath: string, parentNodePath: string, currentDepth: number) {
       if (currentDepth > depth) return;
       let entries;
-      try { entries = await readdir(dirPath, { withFileTypes: true }); } catch { return; }
+      try { entries = await readdir(dirPath, { withFileTypes: true }); }
+      catch (e: any) { if (e?.code === 'ENOENT') return; throw e; }
 
       for (const e of entries) {
         if (e.name.startsWith('.')) continue; // skip hidden files
