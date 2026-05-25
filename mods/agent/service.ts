@@ -559,19 +559,15 @@ register('ai.pool', 'service', async (node: NodeData, ctx: ServiceCtx) => {
   /** Collect org.post nodes that have ai.agent components */
   async function getOrgAgents(): Promise<NodeData[]> {
     const orgPosts: NodeData[] = [];
-    try {
-      const orgNode = await ctx.tree.get('/org');
-      if (!orgNode) return orgPosts;
-      const { items: divisions } = await ctx.tree.getChildren('/org');
-      for (const div of divisions) {
-        if (div.$type !== 'org.division') continue;
-        const { items: posts } = await ctx.tree.getChildren(div.$path);
-        for (const post of posts) {
-          if (post.$type === 'org.post' && getComponent(post, AiAgent)) orgPosts.push(post);
-        }
+    const orgNode = await ctx.tree.get('/org');
+    if (!orgNode) return orgPosts;
+    const { items: divisions } = await ctx.tree.getChildren('/org');
+    for (const div of divisions) {
+      if (div.$type !== 'org.division') continue;
+      const { items: posts } = await ctx.tree.getChildren(div.$path);
+      for (const post of posts) {
+        if (post.$type === 'org.post' && getComponent(post, AiAgent)) orgPosts.push(post);
       }
-    } catch {
-      // org tree may not exist
     }
     return orgPosts;
   }
