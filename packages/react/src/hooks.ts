@@ -313,37 +313,39 @@ const permCache = new Map<string, { perm: number; ts: number }>();
 const PERM_TTL = 30_000; // 30s cache
 
 export function useCanWrite(path: string | null): boolean {
-  const [perm, setPerm] = useState<number>(0);
+  // Key the perm to its path. After a path change React re-renders with the
+  // NEW path but the OLD state until the effect commits — so we must derive
+  // the effective perm from `state.path === path`, falling closed otherwise.
+  // Without this gate the hook returns the previous `true` for one render.
+  const [state, setState] = useState<{ path: string | null; perm: number }>({ path: null, perm: 0 });
 
   useEffect(() => {
-    // Reset to fail-closed BEFORE any async work. Without this, switching
-    // from a writable path to an in-flight one would briefly return the
-    // previous `true`, and switching to null/error would keep stale W.
-    setPerm(0);
-    if (!path) return;
+    if (!path) { setState({ path: null, perm: 0 }); return; }
 
     const cached = permCache.get(path);
     if (cached && Date.now() - cached.ts < PERM_TTL) {
-      setPerm(cached.perm);
+      setState({ path, perm: cached.perm });
       return;
     }
+    // Set the key immediately so the next render fails closed for this path
+    // while the request is in flight (rather than carrying the prior path's perm).
+    setState({ path, perm: 0 });
 
-    // Cancellation flag — a slow response for an OLD path must not overwrite
-    // the perm state after the effect has been re-scheduled for a NEW path.
     let cancelled = false;
     trpc.getPerm.query({ path }).then((p) => {
       if (cancelled) return;
       permCache.set(path, { perm: p, ts: Date.now() });
-      setPerm(p);
+      setState({ path, perm: p });
     }).catch((e) => {
       if (cancelled) return;
       console.warn('[useCanWrite] getPerm failed for', path, e);
-      setPerm(0);
+      setState({ path, perm: 0 });
     });
     return () => { cancelled = true; };
   }, [path]);
 
-  return (perm & W) !== 0;
+  const effectivePerm = state.path === path ? state.perm : 0;
+  return (effectivePerm & W) !== 0;
 }
 
 // ── Internals ──
