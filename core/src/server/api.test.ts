@@ -75,7 +75,7 @@ describe('tRPC API integration', () => {
     });
     rawStore = tree;
 
-    const router = createTreeRouter(tree, watcher, undefined, cdc);
+    const router = createTreeRouter(tree, tree, watcher, undefined, cdc);
     // Unauthenticated caller: anon session (mimics what HTTP outer handler issues).
     const anonSession: Session = { userId: 'anon:test', claims: ['public'], anonymous: true };
     caller = router.createCaller({ session: anonSession, token: 'anon.test', clientIp: null });

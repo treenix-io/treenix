@@ -67,7 +67,7 @@ describe('Workflow & Spatial Gravity', () => {
 
     // Create tRPC router
     const watcher = createWatchManager();
-    const router = createTreeRouter(trpcStore as any, watcher);
+    const router = createTreeRouter(trpcStore as any, trpcStore as any, watcher);
     // Anon session — mimics what HTTP outer handler issues for un-credentialed requests.
     const anonSession: Session = { userId: 'anon:test', claims: ['public'], anonymous: true };
     const caller = router.createCaller({ session: anonSession, token: 'anon.test', clientIp: null });

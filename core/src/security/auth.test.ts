@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 import {
   ancestorPaths,
+  assertNotSystem,
   buildClaims,
   buildSessionCookie,
   componentPerm,
@@ -14,11 +15,12 @@ import {
   resolveToken,
   revokeSession,
   SESSION_TTL_MS,
+  SYSTEM_CLAIM,
   sessionPath,
   stripComponents,
   withAcl,
 } from './auth';
-import { devLogin } from './ops';
+import { devLogin, loginUser, registerUser } from './ops';
 import { OpError } from '#errors';
 
 const withEnv = async (env: Record<string, string | undefined>, fn: () => Promise<void>) => {
@@ -672,6 +674,109 @@ describe('sessions', () => {
   });
 });
 
+describe('system identity guards (F15)', () => {
+  it('SYSTEM_CLAIM is the reserved string "system"', () => {
+    assert.equal(SYSTEM_CLAIM, 'system');
+  });
+
+  it('assertNotSystem rejects userId "system"', () => {
+    assert.throws(() => assertNotSystem('system'), (e: any) => e instanceof OpError && e.code === 'FORBIDDEN');
+  });
+
+  it('assertNotSystem rejects claims containing "system"', () => {
+    assert.throws(
+      () => assertNotSystem('alice', ['authenticated', 'system']),
+      (e: any) => e instanceof OpError && e.code === 'FORBIDDEN',
+    );
+  });
+
+  it('assertNotSystem accepts ordinary users and claim lists', () => {
+    assert.doesNotThrow(() => assertNotSystem('alice'));
+    assert.doesNotThrow(() => assertNotSystem('alice', ['authenticated', 'u:alice']));
+  });
+
+  it('createSession refuses userId "system"', async () => {
+    const ss = createMemoryTree();
+    await assert.rejects(
+      createSession(ss, 'system'),
+      (e: any) => e instanceof OpError && e.code === 'FORBIDDEN',
+    );
+  });
+
+  it('createSession refuses opts.claims containing "system"', async () => {
+    const ss = createMemoryTree();
+    await assert.rejects(
+      createSession(ss, 'alice', { claims: ['authenticated', 'system'] }),
+      (e: any) => e instanceof OpError && e.code === 'FORBIDDEN',
+    );
+  });
+
+  it('buildClaims refuses userId "system"', async () => {
+    const ss = createMemoryTree();
+    await assert.rejects(
+      buildClaims(ss, 'system'),
+      (e: any) => e instanceof OpError && e.code === 'FORBIDDEN',
+    );
+  });
+
+  it('buildClaims strips "system" if it appears in user groups list', async () => {
+    const ss = createMemoryTree();
+    // A poisoned user record with "system" in its groups list must never escalate.
+    await ss.set({
+      $path: '/auth/users/alice', $type: 'user',
+      groups: { $type: 'groups', list: ['admins', 'system'] },
+    });
+    const claims = await buildClaims(ss, 'alice');
+    assert.ok(claims.includes('admins'), 'real groups preserved');
+    assert.ok(!claims.includes('system'), 'system claim must be filtered out');
+  });
+
+  it('resolveToken drops a forged session whose userId is "system"', async () => {
+    const ss = createMemoryTree();
+    const { randomBytes } = await import('node:crypto');
+    const token = randomBytes(32).toString('hex');
+    const now = Date.now();
+    // Directly write a session with the reserved userId — simulates a future ACL hole.
+    await ss.set({
+      $path: sessionPath(token), $type: 'session',
+      userId: 'system', createdAt: now, expiresAt: now + 60_000,
+    });
+    assert.equal(await resolveToken(ss, token), null);
+    // Defence-in-depth: the forged session is also removed on the way out.
+    assert.equal(await ss.get(sessionPath(token)), undefined);
+  });
+
+  it('resolveToken drops a forged session whose claims contain "system"', async () => {
+    const ss = createMemoryTree();
+    const { randomBytes } = await import('node:crypto');
+    const token = randomBytes(32).toString('hex');
+    const now = Date.now();
+    await ss.set({
+      $path: sessionPath(token), $type: 'session',
+      userId: 'alice', createdAt: now, expiresAt: now + 60_000,
+      claims: ['authenticated', 'system'],
+    });
+    assert.equal(await resolveToken(ss, token), null);
+    assert.equal(await ss.get(sessionPath(token)), undefined);
+  });
+
+  it('registerUser rejects userId "system"', async () => {
+    const ss = createMemoryTree();
+    await assert.rejects(
+      registerUser(ss, 'system', 'pw'),
+      (e: any) => e instanceof OpError && e.code === 'FORBIDDEN',
+    );
+  });
+
+  it('loginUser rejects userId "system"', async () => {
+    const ss = createMemoryTree();
+    await assert.rejects(
+      loginUser(ss, 'system', 'pw'),
+      (e: any) => e instanceof OpError && e.code === 'FORBIDDEN',
+    );
+  });
+});
+
 describe('getChildren truncation', () => {
   beforeEach(() => clearRegistry());
 
@@ -1075,6 +1180,74 @@ describe('withAcl.patch — C1 ACL enforcement', () => {
       () => s.patch('/n', [['a', 'newComp', { $type: 'restricted', data: 'x' }]]),
       (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
     );
+  });
+
+  it('set rejects replacing existing component with no W by non-component value', async () => {
+    register('secret', 'acl', () => [{ g: 'owner', p: R | W | A }]);
+    await tree.set({
+      ...createNode('/set-protected', 'doc'),
+      $owner: 'bob',
+      $acl: [{ g: 'authenticated', p: R | W }],
+      secret: { $type: 'secret', x: 'orig' },
+    });
+
+    const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);
+    const badNode: NodeData = {
+      ...createNode('/set-protected', 'doc'),
+      $owner: 'bob',
+      $acl: [{ g: 'authenticated', p: R | W }],
+      secret: null,
+    };
+    await assert.rejects(
+      () => s.set(badNode),
+      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+    );
+
+    const after = await tree.get('/set-protected') as NodeData;
+    assert.deepEqual(after.secret, { $type: 'secret', x: 'orig' });
+  });
+
+  it('set reattaches omitted existing component with no W', async () => {
+    register('secret', 'acl', () => [{ g: 'owner', p: R | W | A }]);
+    await tree.set({
+      ...createNode('/set-echo', 'doc'),
+      $owner: 'bob',
+      $acl: [{ g: 'authenticated', p: R | W }],
+      secret: { $type: 'secret', x: 'orig' },
+    });
+
+    const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);
+    await s.set({
+      ...createNode('/set-echo', 'doc'),
+      $owner: 'bob',
+      $acl: [{ g: 'authenticated', p: R | W }],
+      title: 'visible edit',
+    } as NodeData);
+
+    const after = await tree.get('/set-echo') as NodeData;
+    assert.equal(after.title, 'visible edit');
+    assert.deepEqual(after.secret, { $type: 'secret', x: 'orig' });
+  });
+
+  it('set rejects adding new component when incoming value has no W', async () => {
+    register('restricted', 'acl', () => [{ g: 'staff', p: R | W }]);
+    await tree.set({
+      ...createNode('/set-new-protected', 'doc'),
+      $acl: [{ g: 'authenticated', p: R | W }],
+    });
+
+    const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);
+    await assert.rejects(
+      () => s.set({
+        ...createNode('/set-new-protected', 'doc'),
+        $acl: [{ g: 'authenticated', p: R | W }],
+        newComp: { $type: 'restricted', data: 'x' },
+      } as NodeData),
+      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+    );
+
+    const after = await tree.get('/set-new-protected') as NodeData;
+    assert.equal(after.newComp, undefined);
   });
 
   // N15 (= old FX3): component check sees post-mutation $owner in same batch.

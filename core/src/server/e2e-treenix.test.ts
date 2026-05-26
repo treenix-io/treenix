@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, describe, it } from 'node:test'
 
-import { createNode, R, S, W } from '#core'
+import { A, createNode, R, S, W } from '#core'
 import type { Tree } from '#tree'
 import { createClient } from './client'
 import { treenix } from './factory'
@@ -67,15 +67,18 @@ function makeRootNode(dataDir: string, opts?: { publicAccess?: boolean }) {
     base: { $type: 't.mount.fs', root: dataDir + '/base' },
     work: { $type: 't.mount.fs', root: dataDir + '/work' },
   })
+  const systemGrant = { g: 'system', p: R | W | A | S }
   node.$acl = opts?.publicAccess
     ? [
         { g: 'public', p: R | W | S },
         { g: 'authenticated', p: R | W | S },
         { g: 'admins', p: R | W | S },
+        systemGrant,
       ]
     : [
         { g: 'authenticated', p: R | S },
         { g: 'admins', p: R | W | S },
+        systemGrant,
       ]
   return node
 }

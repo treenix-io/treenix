@@ -2,7 +2,7 @@
 // Tests createTrpcTransport + createRepathTree + t.mount.tree.trpc
 
 import { registerType } from '#comp';
-import { createNode, R, register, S, W } from '#core';
+import { A, createNode, R, register, S, W } from '#core';
 import { withMounts } from '#mount';
 import { setAllowPrivateUrls } from '#mount/adapters';
 import { createHttpServer, createPipeline, type Pipeline } from '#server/server';
@@ -55,7 +55,7 @@ describe('Treenix Client SDK', () => {
     const bootstrap = createMemoryTree();
     await bootstrap.set({
       ...createNode('/', 'root'),
-      $acl: [{ g: 'public', p: R | W | S }],
+      $acl: [{ g: 'public', p: R | W | S }, { g: 'system', p: R | W | A | S }],
     });
 
     ts = createTestServer(bootstrap);
@@ -161,7 +161,7 @@ describe('Treenix Client SDK', () => {
       const local = createMemoryTree();
       await local.set({
         ...createNode('/', 'root'),
-        $acl: [{ g: 'public', p: R | W | S }],
+        $acl: [{ g: 'public', p: R | W | S }, { g: 'system', p: R | W | A | S }],
       });
       await local.set({
         $path: '/remote',
@@ -186,7 +186,7 @@ describe('Treenix Client SDK', () => {
       const local = createMemoryTree();
       await local.set({
         ...createNode('/', 'root'),
-        $acl: [{ g: 'public', p: R | W | S }],
+        $acl: [{ g: 'public', p: R | W | S }, { g: 'system', p: R | W | A | S }],
       });
       await local.set({
         $path: '/fed',

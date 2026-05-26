@@ -3,7 +3,7 @@
 
 import { makeNode, isComponent, R, W } from '#core';
 import type { Tree } from '#tree';
-import { createSession, DUMMY_HASH, hashPassword, revokeSession, verifyPassword } from './auth';
+import { assertNotSystem, createSession, DUMMY_HASH, hashPassword, revokeSession, verifyPassword } from './auth';
 import { OpError } from '#errors';
 import { checkRate } from './rate-limit';
 
@@ -17,6 +17,7 @@ function assertUserId(userId: string): void {
       || !/^[A-Za-z0-9._@+-]+$/.test(userId)
       || /^\.+$/.test(userId))
     throw new OpError('BAD_REQUEST', 'Invalid userId');
+  assertNotSystem(userId);
 }
 
 // In-process serialize chain — closes the first-user admin-election TOCTOU window.

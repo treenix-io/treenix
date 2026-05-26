@@ -74,7 +74,7 @@ const DEFAULT_CLAIMS_TTL_MS = 30_000;
 export const SSE_PING_INTERVAL_MS = 15_000;
 export const SSE_RECONNECT_AFTER_INACTIVITY_MS = 60_000;
 
-export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: TreeRouterOpts, cdc?: CdcRegistry) {
+export function createTreeRouter(tree: Tree, systemTree: Tree, watcher: WatchManager, opts?: TreeRouterOpts, cdc?: CdcRegistry) {
   const claimsTtlMs = opts?.claimsTtlMs ?? DEFAULT_CLAIMS_TTL_MS;
   const t = initTRPC.context<TrpcContext>().create({
     sse: {
@@ -107,8 +107,8 @@ export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: 
   const withSession = base.use(async ({ ctx, next }) => {
     const { session } = ctx;
     const { userId } = session;
-    const claims = session.claims ?? await buildClaims(baseStore, userId);
-    const tree = withAcl(baseStore, userId, claims);
+    const claims = session.claims ?? await buildClaims(systemTree, userId);
+    const userTree = withAcl(tree, userId, claims);
     // Workload sessions (scopeRef set) require a configured executor; otherwise
     // fail-closed — silent fallback would let a workload escape narrowing.
     const isWorkload = !!session.scopeRef;
@@ -118,11 +118,11 @@ export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: 
     }
     const dispatch = isWorkload
       ? (path: string, key: string | undefined, action: string, data?: unknown) =>
-          opts!.executor!(tree, session, { path, type: undefined, key, action, data })
+          opts!.executor!(userTree, session, { path, type: undefined, key, action, data })
       : (path: string, key: string | undefined, action: string, data?: unknown) =>
-          executeAction(tree, path, undefined, key, action, data, { userId, claims });
-    const tp = createTreeP(tree, dispatch);
-    return next({ ctx: { ...ctx, tree, tp, claims } });
+          executeAction(userTree, path, undefined, key, action, data, { userId, claims });
+    const tp = createTreeP(userTree, dispatch);
+    return next({ ctx: { ...ctx, tree: userTree, tp, claims } });
   });
 
   // authed — withSession + login-required. Anon (publicly-issued) gets UNAUTHORIZED.
@@ -277,7 +277,7 @@ export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: 
     register: base
       .input(z.object({ userId: z.string().min(1).max(64), password: z.string().min(1).max(256) }))
       .mutation(async ({ input, ctx }) => {
-        const r = await registerUser(baseStore, input.userId, input.password, ctx.clientIp);
+        const r = await registerUser(systemTree, input.userId, input.password, ctx.clientIp);
         // First user registers active+token; pending users have no token. Set cookie when issued.
         if (r.token) ctx.setHeader?.('Set-Cookie', buildSessionCookie(r.token));
         return r;
@@ -286,7 +286,7 @@ export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: 
     login: base
       .input(z.object({ userId: z.string().min(1).max(64), password: z.string().min(1).max(256) }))
       .mutation(async ({ input, ctx }) => {
-        const r = await loginUser(baseStore, input.userId, input.password, ctx.clientIp);
+        const r = await loginUser(systemTree, input.userId, input.password, ctx.clientIp);
         ctx.setHeader?.('Set-Cookie', buildSessionCookie(r.token));
         return r;
       }),
@@ -306,12 +306,12 @@ export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: 
       // Idempotent for anon (cookie cleared, no persisted node to revoke) and authed
       // (cookie cleared, session node removed). logoutUser is a no-op for signed anon tokens.
       ctx.setHeader?.('Set-Cookie', buildClearSessionCookie());
-      return logoutUser(baseStore, ctx.token);
+      return logoutUser(systemTree, ctx.token);
     }),
 
     agentConnect: base
       .input(z.object({ path: safePath, key: z.string().min(1).max(256) }))
-      .mutation(({ input, ctx }) => agentConnect(baseStore, input.path, input.key, ctx.clientIp)),
+      .mutation(({ input, ctx }) => agentConnect(systemTree, input.path, input.key, ctx.clientIp)),
 
     // R4-AUTH-1: operator-side init for agent pairing. Requires auth + W on the port path
     // (enforced by ctx.tree's withAcl wrap). Closes the unauth idle→pending self-claim.
@@ -331,7 +331,7 @@ export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: 
       }),
 
     devLogin: base.mutation(async ({ ctx }) => {
-      const r = await devLogin(baseStore);
+      const r = await devLogin(systemTree);
       ctx.setHeader?.('Set-Cookie', buildSessionCookie(r.token));
       return r;
     }),
@@ -373,7 +373,7 @@ export function createTreeRouter(baseStore: Tree, watcher: WatchManager, opts?: 
         const connId = `${userId}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
 
         const sessionClaims = claims.length ? claims : null;
-        const push = createFilteredPush(baseStore, userId, sessionClaims, (e) => emit.next(e), { claimsTtlMs });
+        const push = createFilteredPush(systemTree, userId, sessionClaims, (e) => emit.next(e), { claimsTtlMs });
 
         let expiryTimer: ReturnType<typeof setTimeout> | null = null;
         if (expiresAt) {

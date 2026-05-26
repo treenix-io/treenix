@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
-import { createNode, R, S, W } from '#core';
+import { A, createNode, R, S, W } from '#core';
 import type { Tree } from '#tree';
 import { treenix } from './factory';
 
@@ -31,6 +31,7 @@ function rootNode(dir: string) {
   n.$acl = [
     { g: 'authenticated', p: R | W | S },
     { g: 'admins', p: R | W | S },
+    { g: 'system', p: R | W | A | S },
   ];
   return n;
 }

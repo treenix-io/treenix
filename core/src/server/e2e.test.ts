@@ -3,7 +3,7 @@
 // ACL security (no leaked data), and action return values.
 
 import { registerType } from '#comp';
-import { createNode, R, register, S, W } from '#core';
+import { A, createNode, R, register, S, W } from '#core';
 import { createMemoryTree } from '#tree';
 import assert from 'node:assert/strict';
 import type { Socket } from 'node:net';
@@ -174,7 +174,7 @@ describe('e2e: tRPC over HTTP', () => {
     const bootstrap = createMemoryTree();
     await bootstrap.set({
       ...createNode('/', 'root'),
-      $acl: [{ g: 'public', p: R | W | S }, { g: 'authenticated', p: R | W | S }],
+      $acl: [{ g: 'public', p: R | W | S }, { g: 'authenticated', p: R | W | S }, { g: 'system', p: R | W | A | S }],
     });
 
     ts = createTestServer(bootstrap);

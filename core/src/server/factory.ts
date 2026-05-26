@@ -101,30 +101,31 @@ export async function treenix(config: TreenixConfig): Promise<TreenixServer> {
   // 3. Build pipeline
   const pipeline = createPipeline(bootstrap, { executor: config.executor });
   // Outer wrap (audit / etc): mod gets last word over the user-facing tree.
-  // Pre-pipeline (mountable, bootstrap) stays untouched — system writes (seed,
-  // log, autostart) bypass wrapTree by design.
+  // Pre-pipeline (mountable, bootstrap) stays untouched — bootstrap writes (seed,
+  // log, autostart) go through pipeline.systemTree (= withAcl(mountable, 'system', ['system'])),
+  // ACL-gated but bypassing wrapTree to avoid an audit cycle on log writes.
   if (config.wrapTree) pipeline.tree = config.wrapTree(pipeline.tree);
-  const { tree, cdc, mountable } = pipeline;
+  const { tree, cdc, systemTree } = pipeline;
 
   // 4. Seed — always run, deployNodes is idempotent per-node (skips existing)
   if (config.seed) {
-    await config.seed(mountable);
+    await config.seed(systemTree);
   } else {
     const seedFilter = (rootNode as Record<string, unknown>).seeds as string[] | undefined;
     console.log(`[seed] deploying prefabs, filter: ${JSON.stringify(seedFilter)}`);
-    await deploySeedPrefabs(mountable, seedFilter);
+    await deploySeedPrefabs(systemTree, seedFilter);
   }
 
   // 4b. Boot-time anon-key validation. Fails fast in prod if TREENIX_ANON_KEY
   // missing/malformed; dev path lazy-creates persistent key in tree.
   // Caching here avoids first-request stall and makes prod misconfiguration loud.
-  await getAnonKey(mountable);
+  await getAnonKey(systemTree);
 
   // 5. Wire log → tree
   addOnLog(entry => {
     const p = makeLogPath()
     // process.stderr.write(`[log→tree] ${p} ${entry.level}: ${entry.msg.slice(0, 60)}\n`)
-    mountable.set({ $path: p, $type: 't.log', ...entry })
+    systemTree.set({ $path: p, $type: 't.log', ...entry })
       .catch(e => process.stderr.write(`[log write err] ${e.message}\n`))
   })
 
@@ -142,6 +143,7 @@ export async function treenix(config: TreenixConfig): Promise<TreenixServer> {
     tree: pipeline.tree,
     cdc: pipeline.cdc,
     mountable: pipeline.mountable,
+    systemTree: pipeline.systemTree,
     watcher: pipeline.watcher,
     router: pipeline.router,
     createContext: pipeline.createContext,

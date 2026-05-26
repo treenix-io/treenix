@@ -98,11 +98,22 @@ function isSessionNode(n: NodeData): n is SessionNode {
 
 // ── Sessions (tree-backed, /auth/sessions/{token}) ──
 
+/** Reserved claim/userId for bootstrap-only ACL bypass via root grant.
+ *  Must NEVER appear in a user-facing session or claim list — every API that
+ *  could mint a session, build claims, or accept a user-supplied id must reject it. */
+export const SYSTEM_CLAIM = 'system';
+
+export function assertNotSystem(userId: string, claims?: readonly string[]): void {
+  if (userId === SYSTEM_CLAIM) throw new OpError('FORBIDDEN', 'reserved userId');
+  if (claims && claims.includes(SYSTEM_CLAIM)) throw new OpError('FORBIDDEN', 'reserved claim');
+}
+
 export async function createSession(
   tree: Tree,
   userId: string,
   opts?: { ttlMs?: number; claims?: string[] },
 ): Promise<string> {
+  assertNotSystem(userId, opts?.claims);
   const token = randomBytes(32).toString('hex');
   const now = Date.now();
   const sessionNode: SessionNode = {
@@ -136,6 +147,15 @@ export async function resolveToken(tree: Tree, token: string): Promise<Session |
     return null;
   }
   if (Date.now() > node.expiresAt) {
+    await tree.remove(sessionPath(token));
+    return null;
+  }
+  // Defence-in-depth: a session node bearing the system identity is treated as
+  // forged. createSession blocks issuance, so the only path here is a malicious
+  // direct write through a future ACL hole. Drop the node and refuse the token.
+  const sessionClaims = Array.isArray(node.claims) ? node.claims as string[] : undefined;
+  if (node.userId === SYSTEM_CLAIM || sessionClaims?.includes(SYSTEM_CLAIM)) {
+    console.error(`[auth] forged system session removed: ${token.slice(0, 8)}...`);
     await tree.remove(sessionPath(token));
     return null;
   }
@@ -483,6 +503,7 @@ export function stripComponents(node: NodeData, userId: string | null, claims: s
 // ── Build claims ──
 
 export async function buildClaims(tree: Tree, userId: string): Promise<string[]> {
+  assertNotSystem(userId);
   const group = userId.startsWith('anon:') ? 'public' : 'authenticated';
   const claims = [`u:${userId}`, group];
   const userNode = await tree.get(`/auth/users/${userId}`);
@@ -490,7 +511,12 @@ export async function buildClaims(tree: Tree, userId: string): Promise<string[]>
     // Strict: component MUST be at key 'groups' with $type='groups'. A poisoned key with
     // alternate $type would otherwise leak admin-claim via group list. Privilege escalation gate.
     const groups = getComponent<{ list: string[] }>(userNode, 'groups', 'groups');
-    if (Array.isArray(groups?.list)) claims.push(...groups.list);
+    if (Array.isArray(groups?.list)) {
+      // Drop SYSTEM_CLAIM if it somehow lands in a user's groups list — last line
+      // of defence; the seed/admin tooling that writes /auth/users/*/groups must
+      // refuse to write 'system' there in the first place.
+      for (const g of groups.list) if (g !== SYSTEM_CLAIM) claims.push(g);
+    }
   }
   return claims;
 }
@@ -534,6 +560,11 @@ function assertComponentPerm(
   if (isComponent(existingVal) && !(componentPerm(existingVal, userId, claims, owner) & bit)) {
     throw new OpError('FORBIDDEN', `Access denied: component ${firstSeg}`);
   }
+}
+
+function sameValue(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  try { return JSON.stringify(a) === JSON.stringify(b); } catch { return false; }
 }
 
 // ── Tree wrapper ──
@@ -667,33 +698,38 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
       if (!(perm & W)) throw new OpError('FORBIDDEN', `Access denied: ${node.$path}`);
       const existing = await rawStore.get(node.$path, ctx);
       const safe = { ...node };
-      // Non-admin: preserve existing $acl/$owner
-      if (!(perm & A)) {
-        if (existing?.$acl) safe.$acl = existing.$acl;
-        else delete safe.$acl;
-        if (existing?.$owner) safe.$owner = existing.$owner;
-        else delete safe.$owner;
-      }
-      // Protect components: if user lacks W on a component, keep old value
+
+      const preserveField = (field: string) => {
+        const kept = existing?.[field];
+        if (field in safe && !sameValue(safe[field], kept)) {
+          throw new OpError('FORBIDDEN', `Access denied: ${field}`);
+        }
+        if (kept !== undefined) safe[field] = kept;
+        else delete safe[field];
+      };
+
+      if (!(perm & A)) { preserveField('$acl'); preserveField('$owner'); }
+
       const owner = safe.$owner ?? existing?.$owner;
+      const canWriteComponent = (val: ComponentData) => !!(componentPerm(val, userId, claims, owner) & W);
+
+      for (const [key, oldVal] of Object.entries(existing ?? {})) {
+        if (key.startsWith('$') || !isComponent(oldVal) || canWriteComponent(oldVal)) continue;
+        if (key in safe && !sameValue(safe[key], oldVal)) {
+          throw new OpError('FORBIDDEN', `Access denied: component ${key}`);
+        }
+        safe[key] = oldVal;
+      }
+
       for (const [key, val] of Object.entries(safe)) {
-        if (key.startsWith('$')) continue;
-        if (!isComponent(val)) continue;
-        if (!(componentPerm(val, userId, claims, owner) & W)) {
-          // User can't write this component — restore old value or remove
-          if (existing && key in existing) safe[key] = existing[key];
-          else delete safe[key];
+        if (key.startsWith('$') || !isComponent(val)) continue;
+        const oldVal = existing?.[key];
+        if (isComponent(oldVal) && !canWriteComponent(oldVal) && sameValue(val, oldVal)) continue;
+        if (!canWriteComponent(val)) {
+          throw new OpError('FORBIDDEN', `Access denied: component ${key}`);
         }
       }
-      // Also restore protected components the user may have omitted
-      if (existing) {
-        for (const [key, val] of Object.entries(existing)) {
-          if (key.startsWith('$')) continue;
-          if (!isComponent(val)) continue;
-          if (!(componentPerm(val, userId, claims, owner) & W) && !(key in safe))
-            safe[key] = val;
-        }
-      }
+
       return rawStore.set(safe, ctx);
     },
 

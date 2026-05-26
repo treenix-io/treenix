@@ -10,7 +10,8 @@ import { createWatchManager } from '#sub/watch';
 
 describe('createTreeRouter SSE config', () => {
   it('keeps idle SSE streams alive', () => {
-    const router = createTreeRouter(createMemoryTree(), createWatchManager());
+    const memTree = createMemoryTree();
+    const router = createTreeRouter(memTree, memTree, createWatchManager());
     const sse = router._def._config.sse;
 
     assert.equal(sse?.ping?.enabled, true);
@@ -20,7 +21,8 @@ describe('createTreeRouter SSE config', () => {
   });
 
   it('validates unwatch paths with safePath', async () => {
-    const router = createTreeRouter(createMemoryTree(), createWatchManager());
+    const memTree = createMemoryTree();
+    const router = createTreeRouter(memTree, memTree, createWatchManager());
     const caller = router.createCaller({
       session: { userId: 'u1', claims: ['authenticated'] },
       token: 'token',

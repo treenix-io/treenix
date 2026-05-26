@@ -16,6 +16,7 @@ import {
   buildSessionCookie,
   parseSessionCookie,
   resolveOrIssueSession,
+  withAcl,
 } from '#security/auth';
 import { withMounts } from '#mount';
 import { withRefIndex } from '#tree/refs';
@@ -40,6 +41,11 @@ export type Pipeline = {
   tree: Tree;
   cdc: CdcRegistry;
   mountable: Tree;
+  /** Mountable wrapped with the 'system' identity. All bootstrap-layer reads/writes
+   *  (seed, anon-key, log writer, session resolve) go through this — never raw mountable.
+   *  System grant on root ({g:'system', p:R|W|A|S}) makes inherited ACL checks pass
+   *  while keeping the auth pipeline visible to ACL handlers. */
+  systemTree: Tree;
   watcher: WatchManager;
   router: TreeRouter;
   createContext: (token: string | null) => Promise<TrpcContext>;
@@ -89,6 +95,10 @@ export function createPipeline(bootstrap: Tree, opts?: TreeRouterOpts): Pipeline
   const migrated = withMigration(bootstrap);
   const mountable = withMounts(migrated, { startExternalWatch });
   mountableRef = mountable;
+  // System identity at the pre-validation layer — used by factory bootstrap (seed,
+  // anon-key, log writer) and request-edge session resolution. Mirrors the current
+  // raw-mountable layer; switching here adds the ACL gate without changing semantics.
+  const systemTree = withAcl(mountable, 'system', ['system']);
   const volatile = withVolatile(mountable);
   const validated = withValidation(volatile);
   const refsIndexed = withRefIndex(validated);
@@ -102,17 +112,21 @@ export function createPipeline(bootstrap: Tree, opts?: TreeRouterOpts): Pipeline
   cdcRef = cdc;
   onSelfWriteRef = onSelfWrite;
   injectExternalRef = injectExternalEvent;
-  const router = createTreeRouter(tree, watcher, opts, cdc);
+  // Post-sub system tree for tRPC bootstrap ops (buildClaims, register/login/logout/
+  // agentConnect/devLogin, createFilteredPush). Per-user wraps still base on raw `tree`
+  // so the read runtime (executeList) sees scanChildren without going through an AclStore.
+  const systemTreeOps = withAcl(tree, 'system', ['system']);
+  const router = createTreeRouter(tree, systemTreeOps, watcher, opts, cdc);
 
   const createContext = async (token: string | null): Promise<TrpcContext> => {
     // Programmatic API: treat input as bearer (no cookie). Invalid → throw loud.
     // Absent → issue anon (same model as HTTP path).
-    const result = await resolveOrIssueSession(mountable, null, token);
+    const result = await resolveOrIssueSession(systemTree, null, token);
     if (result.kind !== 'ok') throw new Error(`createContext: ${result.kind}`);
     return { session: result.session, token: result.token, clientIp: null };
   };
 
-  return { tree, cdc, mountable, watcher, router, createContext };
+  return { tree, cdc, mountable, systemTree, watcher, router, createContext };
 }
 
 type HttpServerOpts = {
@@ -124,7 +138,7 @@ type HttpServerOpts = {
 
 /** HTTP server on top of an existing pipeline */
 export function createHttpServer(pipeline: Pipeline, opts?: HttpServerOpts): Server {
-  const { tree, mountable, router } = pipeline;
+  const { tree, systemTree, router } = pipeline;
   const allowedOrigins = opts?.allowedOrigins
     ?? (process.env.ALLOWED_ORIGINS ?? 'http://localhost:3000').split(',');
   const staticDir = opts?.staticDir
@@ -223,7 +237,7 @@ export function createHttpServer(pipeline: Pipeline, opts?: HttpServerOpts): Ser
       const authHeader = req.headers.authorization;
       const bearer = (typeof authHeader === 'string' && authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null);
       const cookieToken = parseSessionCookie(req.headers.cookie);
-      const authResult = await resolveOrIssueSession(mountable, cookieToken, bearer);
+      const authResult = await resolveOrIssueSession(systemTree, cookieToken, bearer);
 
       // Side effects on the response happen BEFORE tRPC handler runs:
       // - expired_session: clear the bad cookie so the browser drops it

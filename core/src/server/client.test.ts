@@ -3,7 +3,7 @@
 //   2. subscription rejects loudly without flooding mintStreamToken when token is null
 //   3. once token appears, subscription works end-to-end
 
-import { createNode, R, S, W } from '#core';
+import { A, createNode, R, S, W } from '#core';
 import { createMemoryTree, type Tree } from '#tree';
 import assert from 'node:assert/strict';
 import type { Socket } from 'node:net';
@@ -38,7 +38,7 @@ describe('createClient TokenSource', () => {
     const bootstrap = createMemoryTree();
     await bootstrap.set({
       ...createNode('/', 'root'),
-      $acl: [{ g: 'public', p: R | W | S }, { g: 'authenticated', p: R | W | S }],
+      $acl: [{ g: 'public', p: R | W | S }, { g: 'authenticated', p: R | W | S }, { g: 'system', p: R | W | A | S }],
     });
     ts = createTestServer(bootstrap);
     ts.server.on('connection', (socket: Socket) => {
