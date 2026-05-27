@@ -359,7 +359,7 @@ describe('defineComponent', () => {
     assert.equal(result, 'safe', 'process must not be accessible in sandbox');
   });
 
-  it('sandboxed dynamic action blocks writes outside own path', async () => {
+  it('sandboxed dynamic action rejects writes outside own path', async () => {
     registerBuiltinActions();
     const tree = createMemoryTree();
 
@@ -374,12 +374,53 @@ describe('defineComponent', () => {
 
     await tree.set(createNode('/esc1', 'test.escape', {}));
 
-    const result = await executeAction(tree, '/esc1', undefined, undefined, 'steal', {});
-    assert.equal(result, 'tried');
+    await assert.rejects(
+      () => executeAction(tree, '/esc1', undefined, undefined, 'steal', {}),
+      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+    );
 
-    // The write to /auth/sessions/evil should have been blocked
     const evil = await tree.get('/auth/sessions/evil');
     assert.equal(evil, undefined, 'write to foreign path must be blocked');
+  });
+
+  it('sandboxed dynamic action rejects malformed ctx.tree.set payloads', async () => {
+    registerBuiltinActions();
+    const tree = createMemoryTree();
+
+    await tree.set({
+      $path: '/sys/types/test/badwrite',
+      $type: 'type',
+      actions: {
+        bad: 'ctx.tree.set(null); return "ok";',
+      },
+      schema: { methods: { bad: { arguments: [] } } },
+    } as NodeData);
+    await tree.set(createNode('/badwrite1', 'test.badwrite', {}));
+
+    await assert.rejects(
+      () => executeAction(tree, '/badwrite1', undefined, undefined, 'bad', {}),
+      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+    );
+  });
+
+  it('sandboxed dynamic action rejects await until async bridge exists', async () => {
+    registerBuiltinActions();
+    const tree = createMemoryTree();
+
+    await tree.set({
+      $path: '/sys/types/test/async',
+      $type: 'type',
+      actions: {
+        wait: 'await ctx.tree.get(ctx.node.$path); return "ok";',
+      },
+      schema: { methods: { wait: { arguments: [] } } },
+    } as NodeData);
+    await tree.set(createNode('/async1', 'test.async', {}));
+
+    await assert.rejects(
+      () => executeAction(tree, '/async1', undefined, undefined, 'wait', {}),
+      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+    );
   });
 
   it('sandboxed dynamic action does not expose $acl/$owner in ctx.node', async () => {
@@ -501,6 +542,17 @@ describe('defineComponent', () => {
 
     await assert.rejects(
       () => executeAction(tree, '/v2', 'metadata', 'metadata', 'rename', {}),
+      (err: any) => err.code === 'BAD_REQUEST',
+    );
+  });
+
+  it('rejects action when schema method is missing', async () => {
+    register('noschema', 'action:run', () => {});
+    const tree = createMemoryTree();
+    await tree.set(createNode('/noschema1', 'noschema'));
+
+    await assert.rejects(
+      () => executeAction(tree, '/noschema1', undefined, undefined, 'run', {}),
       (err: any) => err.code === 'BAD_REQUEST',
     );
   });

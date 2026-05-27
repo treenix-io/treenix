@@ -162,13 +162,13 @@ function Results({ items, mode, groupBy }: { items: NodeData[]; mode: Mode; grou
 // ── Main view ──
 
 const QueryViewComponent: View<QueryView> = ({ value, onChange }) => {
-  const source = value.source || '/';
-  const typeFilter = value.typeFilter || '';
-  const filters = value.filters || [];
-  const groupBy = value.groupBy || '';
+  const source = value.source;
+  const typeFilter = value.typeFilter;
+  const filters = value.filters;
+  const groupBy = value.groupBy;
 
-  const [localMode, setLocalMode] = useState<Mode>(value.mode || 'list');
-  const mode = onChange ? (value.mode || 'list') : localMode;
+  const [localMode, setLocalMode] = useState<Mode>(value.mode);
+  const mode = onChange ? value.mode : localMode;
 
   const setMode = (m: Mode) => {
     if (onChange) onChange({ mode: m });
@@ -210,11 +210,11 @@ const inputCls = 'flex-1 bg-muted/30 rounded px-2 py-1 text-xs text-foreground b
 const selectCls = 'bg-muted/30 rounded px-2 py-1 text-xs text-foreground border border-border outline-none focus:border-emerald-500 min-w-0 cursor-pointer';
 
 const QueryEditView: View<QueryView> = ({ value, onChange }) => {
-  const source = value.source || '/';
-  const typeFilter = value.typeFilter || '';
-  const filters = value.filters || [];
-  const mode = value.mode || 'list';
-  const groupBy = value.groupBy || '';
+  const source = value.source;
+  const typeFilter = value.typeFilter;
+  const filters = value.filters;
+  const mode = value.mode;
+  const groupBy = value.groupBy;
 
   const { data: children } = useChildren(source, { limit: 50 });
   const fields = useMemo(() => collectFields(children), [children]);

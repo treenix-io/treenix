@@ -21,9 +21,7 @@ function validateActionArgs(type: string, action: string, data: unknown): void {
   const methodSchema = schemaFn?.()?.methods?.[action];
 
   if (!methodSchema) {
-    const msg = `[SECURITY] No schema for ${type}.${action} — action args not validated`;
-    if (process.env.NODE_ENV === 'development') { console.error(msg); return; }
-    throw new OpError('BAD_REQUEST', msg);
+    throw new OpError('BAD_REQUEST', `[SECURITY] No schema for ${type}.${action} — action args not validated`);
   }
 
   const argSchema = methodSchema.arguments?.[0];
@@ -195,6 +193,10 @@ async function loadDynamicAction(
 
   // Build a sandboxed action handler — compiled once, called per invocation
   const fn = async (ctx: ActionCtx, data: unknown): Promise<unknown> => {
+    if (/\bawait\b/.test(actionCode)) {
+      throw new OpError('BAD_REQUEST', `Dynamic action ${type}.${action} uses await, but async bridge is not implemented`);
+    }
+
     const QuickJS = await getQuickJS();
     const runtime = QuickJS.newRuntime();
     runtime.setMemoryLimit(DYNAMIC_ACTION_MEM);
@@ -220,8 +222,9 @@ async function loadDynamicAction(
       // Simple approach: wrap action code in async-like sequential execution
       // The sandbox code can call ctx.tree.get/set synchronously — we proxy through host fns
       let treeOpsResult: unknown = undefined;
-      const treeWrites: Array<{ node: Record<string, unknown> }> = [];
+      const treeWrites: Record<string, unknown>[] = [];
       const treeGets = new Map<string, Record<string, unknown> | undefined>();
+      let treeWriteError: string | null = null;
 
       // Pre-fetch the action node itself
       treeGets.set(ctx.node.$path, nodeSnapshot);
@@ -240,7 +243,16 @@ async function loadDynamicAction(
       // Host function: ctx_tree_set(nodeJson) → void
       const setFn = vm.newFunction('ctx_tree_set', (nodeJsonHandle) => {
         const nj = vm.getString(nodeJsonHandle);
-        try { treeWrites.push({ node: safeJsonParse(nj) }); } catch {}
+        try {
+          const parsed = safeJsonParse(nj);
+          if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+            treeWriteError = 'ctx.tree.set expected a node object';
+            return vm.undefined;
+          }
+          treeWrites.push(parsed as Record<string, unknown>);
+        } catch (err) {
+          treeWriteError = err instanceof Error ? err.message : String(err);
+        }
         return vm.undefined;
       });
       vm.setProp(vm.global, 'ctx_tree_set', setFn);
@@ -273,7 +285,7 @@ async function loadDynamicAction(
             set: function(n) { ctx_tree_set(JSON.stringify(n)); },
           },
         };
-        (function() { ${actionCode.replace(/await\s+/g, '')} })();
+        (function() { ${actionCode} })();
       `;
 
       const result = vm.evalCode(wrapperCode);
@@ -286,22 +298,25 @@ async function loadDynamicAction(
       treeOpsResult = vm.dump(result.value);
       result.value.dispose();
 
+      if (treeWriteError) {
+        throw new OpError('BAD_REQUEST', `Dynamic action ${type}.${action} invalid ctx.tree.set: ${treeWriteError}`);
+      }
+
       // Apply tree writes to real tree — scoped to own path or children only
       const nodePath = ctx.node.$path;
-      for (const w of treeWrites) {
-        const n = w.node;
-        if (n && typeof n === 'object' && typeof n.$path === 'string' && typeof n.$type === 'string') {
-          if (n.$path !== nodePath && !n.$path.startsWith(nodePath + '/')) {
-            console.warn(`[sandbox:${type}.${action}] blocked write to ${n.$path} (outside ${nodePath})`);
-            continue;
-          }
-          // Strip security-sensitive fields from sandbox writes.
-          delete n.$acl;
-          delete n.$owner;
-          delete n.$refs;
-          // Route through ctx.tree (read-only facade applies when parent action's kind = 'read').
-          await ctx.tree.set(n as NodeData);
+      for (const n of treeWrites) {
+        if (typeof n.$path !== 'string' || typeof n.$type !== 'string') {
+          throw new OpError('BAD_REQUEST', `Dynamic action ${type}.${action} invalid ctx.tree.set: node must include string $path and $type`);
         }
+        if (n.$path !== nodePath && !n.$path.startsWith(nodePath + '/')) {
+          throw new OpError('FORBIDDEN', `Dynamic action ${type}.${action} cannot write outside ${nodePath}: ${n.$path}`);
+        }
+        // Strip security-sensitive fields from sandbox writes.
+        delete n.$acl;
+        delete n.$owner;
+        delete n.$refs;
+        // Route through ctx.tree (read-only facade applies when parent action's kind = 'read').
+        await ctx.tree.set(n as NodeData);
       }
 
       return treeOpsResult;

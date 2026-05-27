@@ -189,13 +189,11 @@ export function newComponent<T>(cls: Class<T>, data: Partial<Raw<T>>): Component
 
 // Get default field values for a type: class instance fields → schema defaults → {}
 export function getDefaults<T = any>(type: TypeId<T>): Partial<Raw<T>> {
-  type R = Partial<Raw<T>>;
-
   // 1. Try registered class — new Class() gives field initializers
   const cls = resolve(type, 'class');
   if (cls) {
     const inst = new cls();
-    return Object.assign({}, inst) as R;
+    return Object.assign({}, inst) as Partial<Raw<T>>;
   }
 
   // 2. Fall back to JSON schema defaults
@@ -207,7 +205,7 @@ export function getDefaults<T = any>(type: TypeId<T>): Partial<Raw<T>> {
       for (const [k, prop] of Object.entries(schema.properties)) {
         if ('default' in prop) out[k] = prop.default;
       }
-      return out as R;
+      return out as Partial<Raw<T>>;
     }
   }
 
