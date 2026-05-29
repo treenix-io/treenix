@@ -238,28 +238,36 @@ export function EditorSidebar({
       setCreatingAt(null);
 
       const childPath = parentPath === '/' ? `/${name}` : `${parentPath}/${name}`;
-      await createNode(childPath, type);
-      await loadChildren(parentPath);
-      setExpanded((prev) => new Set(prev).add(parentPath));
-      await onSelect(childPath);
+      try {
+        await createNode(childPath, type);
+        await loadChildren(parentPath);
+        setExpanded((prev) => new Set(prev).add(parentPath));
+        await onSelect(childPath);
 
-      const node = (await trpc.get.query({ path: childPath, watch: true })) as NodeData | undefined;
-      if (node) cache.put(node);
-      toast.success(`Created ${name}`);
+        const node = (await trpc.get.query({ path: childPath, watch: true })) as NodeData | undefined;
+        if (node) cache.put(node);
+        toast.success(`Created ${name}`);
+      } catch (e: unknown) {
+        toast.error(e instanceof Error ? e.message : `Failed to create ${name}`);
+      }
     },
     [creatingAt, loadChildren, onSelect],
   );
 
   const handleDelete = useCallback(
     async (path: string) => {
-      await tree.remove(path);
-      cache.remove(path);
-      const parent = path === '/' ? null : path.slice(0, path.lastIndexOf('/')) || '/';
-      if (parent) {
-        await loadChildren(parent);
-        await onSelect(parent);
-      } else {
-        await onSelect('/');
+      try {
+        await tree.remove(path);
+        cache.remove(path);
+        const parent = path === '/' ? null : path.slice(0, path.lastIndexOf('/')) || '/';
+        if (parent) {
+          await loadChildren(parent);
+          await onSelect(parent);
+        } else {
+          await onSelect('/');
+        }
+      } catch (e: unknown) {
+        toast.error(e instanceof Error ? e.message : `Failed to delete ${path}`);
       }
     },
     [loadChildren, onSelect],
@@ -276,13 +284,17 @@ export function EditorSidebar({
       const newPath = toParent === '/' ? `/${fromName}` : `${toParent}/${fromName}`;
       if (newPath === fromPath) return;
 
-      await tree.remove(fromPath);
-      await tree.set({ ...fromNode, $path: newPath });
-      const oldParent = fromPath === '/' ? '/' : fromPath.slice(0, fromPath.lastIndexOf('/')) || '/';
-      await loadChildren(oldParent);
-      await loadChildren(toParent);
-      await onSelect(newPath);
-      toast.success(`Moved to ${newPath}`);
+      try {
+        await tree.remove(fromPath);
+        await tree.set({ ...fromNode, $path: newPath });
+        const oldParent = fromPath === '/' ? '/' : fromPath.slice(0, fromPath.lastIndexOf('/')) || '/';
+        await loadChildren(oldParent);
+        await loadChildren(toParent);
+        await onSelect(newPath);
+        toast.success(`Moved to ${newPath}`);
+      } catch (e: unknown) {
+        toast.error(e instanceof Error ? e.message : `Failed to move ${fromPath}`);
+      }
     },
     [loadChildren, onSelect],
   );
