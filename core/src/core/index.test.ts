@@ -332,6 +332,13 @@ describe('assertSafePath (F03)', () => {
     // any percent-escape rejected — paths are stored literally, no encoding
     assert.throws(() => assertSafePath('/board/%20task'), /percent/);
   });
+
+  it('rejects URI-reserved delimiters (? and #)', () => {
+    // '?' (query) and '#' (fragment / component-key) are URI delimiters — a raw node $path
+    // must never contain them (blocks mount cache-key collision + TreeP path mis-targeting).
+    assert.throws(() => assertSafePath('/data/x?uid=admin'), /reserved/);
+    assert.throws(() => assertSafePath('/data/x#secret'), /reserved/);
+  });
 });
 
 describe('Lazy resolver semantics (sync miss)', () => {
