@@ -27,6 +27,13 @@
     "ai-native"
   ],
   "imports": {
+    "#components/ui/*": {
+      "development": [
+        "./src/components/ui/*.tsx",
+        "./src/components/ui/*.ts"
+      ],
+      "default": "./dist/components/ui/*.js"
+    },
     "#*": {
       "development": [
         "./src/*.ts",
@@ -78,7 +85,7 @@
     "build:ssr": "NODE_OPTIONS='--import tsx --conditions=development' vite build --ssr src/ssr/entry-server.ts --outDir ../ssr/dist-ssr --emptyOutDir",
     "build:front": "npm run build:spa && npm run build:ssr",
     "prepack": "npm run build",
-    "test": "tsx --conditions development --experimental-test-module-mocks --import ./test/register-dom.mjs --import ./test/register-css.mjs --test src/**/*.test.ts",
+    "test": "tsx --conditions development --experimental-test-module-mocks --import ./test/register-dom.mjs --import ./test/register-css.mjs --test 'src/**/*.test.ts'",
     "dev": "NODE_OPTIONS=\"$NODE_OPTIONS --import tsx --conditions=development\" vite"
   },
   "peerDependencies": {

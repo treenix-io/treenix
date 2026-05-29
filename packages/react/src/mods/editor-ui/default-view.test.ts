@@ -6,6 +6,7 @@ import { register } from '@treenx/core';
 import type { ComponentData } from '@treenx/core';
 import type { TypeSchema } from '@treenx/core/schema/types';
 import { Render } from '#context';
+import { TooltipProvider } from '#components/ui/tooltip';
 import {
   inferType,
   resolveDisplayType,
@@ -16,7 +17,7 @@ import {
 afterEach(() => cleanup());
 
 describe('splitRecord', () => {
-  it('respects schema order and appends ad-hoc fields once', () => {
+  it('respects schema order and hides undeclared plain fields (schema-strict)', () => {
     const schema: TypeSchema = {
       type: 'object',
       properties: {
@@ -28,19 +29,21 @@ describe('splitRecord', () => {
 
     const result = splitRecord(value, schema);
 
+    // schema order (second before first); `extra` is undeclared → hidden under a schema
     assert.deepEqual(
       result.rest.map((field) => field.name),
-      ['second', 'first', 'extra'],
+      ['second', 'first'],
     );
     assert.equal(result.rest[0].prop?.title, 'Second');
   });
 
-  it('filters $-prefixed keys in schema and ad-hoc passes', () => {
+  it('filters $-prefixed keys; declared fields show, undeclared hidden', () => {
     const schema: TypeSchema = {
       type: 'object',
       properties: {
         $schema: { type: 'string' },
         title: { type: 'string' },
+        body: { type: 'string' },
       },
     };
     const value: ComponentData = {
@@ -49,11 +52,13 @@ describe('splitRecord', () => {
       $rev: 1,
       title: 'Visible',
       body: 'shown',
+      extra: 'adhoc',
     };
 
     const result = splitRecord(value, schema);
 
     assert.equal(result.title?.name, 'title');
+    // $-keys filtered ($schema/$rev), declared `body` shown, undeclared `extra` hidden
     assert.deepEqual(
       result.rest.map((field) => field.name),
       ['body'],
@@ -141,7 +146,9 @@ describe('TypedRecordView', () => {
       createElement('span', null, `${value.$type}:${value.$ref}`),
     );
 
-    render(createElement(Render, { value: { $type: 'demo.ref-holder', target: { $ref: '/x' } } }));
+    render(createElement(TooltipProvider, null,
+      createElement(Render, { value: { $type: 'demo.ref-holder', target: { $ref: '/x' } } }),
+    ));
 
     assert.equal(screen.getByText('ref:/x').textContent, 'ref:/x');
   });
