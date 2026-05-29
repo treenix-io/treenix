@@ -29,16 +29,9 @@ await mkdir(mountpoint, { recursive: true });
 const client = createTrpcTransport({ url, token });
 const mount = createFuseMount({ client, mountpoint, debug });
 
-await mount.mount();
-
-// Graceful shutdown
-for (const sig of ['SIGINT', 'SIGTERM'] as const) {
-  process.on(sig, async () => {
-    console.log(`\n[fuse] ${sig}, unmounting...`);
-    await mount.unmount();
-    process.exit(0);
-  });
-}
-
 console.log(`[fuse] tree @ ${url} → ${mountpoint}`);
 console.log('[fuse] Ctrl+C to unmount');
+
+// fuse_main (-f, foreground) installs its own SIGINT/SIGTERM handlers and blocks
+// this thread until unmount — a JS shutdown block here would be dead and redundant.
+mount.mount();
