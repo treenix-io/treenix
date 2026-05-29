@@ -24,7 +24,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import type { NodeData } from '@treenx/core';
 import type { Tree, ChildrenOpts, Page } from '@treenx/core/tree';
-import { RouteIndex } from './route-index.ts';
+import { RouteIndex, fetchRouteNodes } from './route-index.ts';
 import { ssrHandler, type RenderFn } from './handler.ts';
 import { escape, escapeAttr, escapeUrl, escapeJson, extractBodyHeadHints } from './template.ts';
 
@@ -61,8 +61,7 @@ let lastRouteRebuild = 0;
 async function rebuildRoutes() {
   if (Date.now() - lastRouteRebuild < routeTtlMs) return;
   try {
-    const page = await tree.getChildren('/sys/routes', { depth: -1 });
-    routes.hydrate(page.items as NodeData[]);
+    routes.hydrate(await fetchRouteNodes(tree));
     lastRouteRebuild = Date.now();
   } catch (err) {
     console.warn(`[front] route hydrate failed: ${(err as Error).message}`);
@@ -185,8 +184,6 @@ const server = http.createServer(async (req, res) => {
     }
 
     try {
-      debugger;
-      console.log('JOPA')
       await rebuildRoutes();
       const parsed = new URL(url, `http://${req.headers.host ?? 'localhost'}`);
       const ssr = await ssrHandler(

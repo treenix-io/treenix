@@ -9,7 +9,17 @@
 // remove(path) on tree mutations. Wiring to a watcher is a Phase 5 concern.
 
 import type { NodeData } from '@treenx/core';
+import type { Tree } from '@treenx/core/tree';
 import { resolveRoute, type ResolveResult } from '@treenx/react/router/route-resolve';
+
+/** Fetch every /sys/routes descendant for hydration.
+ *  Routes nest (e.g. /sys/routes/v/admin), so a deep scan is required.
+ *  `depth: Infinity` is core's deep convention (core/src/mount/types.ts);
+ *  `-1` is NOT interpreted as deep by any store and yields zero children. */
+export async function fetchRouteNodes(tree: Tree): Promise<NodeData[]> {
+  const page = await tree.getChildren('/sys/routes', { depth: Infinity });
+  return page.items as NodeData[];
+}
 
 export class RouteIndex {
   private byPath = new Map<string, NodeData>();

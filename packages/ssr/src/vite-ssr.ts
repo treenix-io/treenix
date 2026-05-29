@@ -14,7 +14,7 @@ import { resolve } from 'node:path';
 import type { Plugin, ViteDevServer } from 'vite';
 import type { NodeData } from '@treenx/core';
 import type { Tree, ChildrenOpts, Page } from '@treenx/core/tree';
-import { RouteIndex } from '#route-index';
+import { RouteIndex, fetchRouteNodes } from '#route-index';
 import { ssrHandler, type RenderFn } from '#handler';
 import { escape, escapeAttr, escapeUrl, escapeJson, extractBodyHeadHints } from '#template';
 
@@ -52,8 +52,7 @@ export function viteSsrPlugin(opts: ViteSsrOpts = {}): Plugin {
 
       async function rebuildRoutes() {
         try {
-          const page = await tree.getChildren('/sys/routes', { depth: -1 });
-          routes.hydrate(page.items as NodeData[]);
+          routes.hydrate(await fetchRouteNodes(tree));
         } catch (err) {
           vite.config.logger.warn(`[ssr] route hydrate failed: ${(err as Error).message}`);
         }
