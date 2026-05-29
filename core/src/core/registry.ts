@@ -84,9 +84,11 @@ export function resolve<C extends string>(type: TypeId, context: C, _notifyMiss 
   const def = registry.get(DEFAULT_TYPE)?.get(context);
   if (def) return def.handler as ContextHandler<C>;
 
-  // fallback: strip last segment ("react:compact" → "react")
+  // fallback: strip last segment ("react:compact" → "react"), propagating _notifyMiss so a
+  // base-context loader (e.g. UIX on 'react') fires for sub-context lookups — while a caller
+  // that passed notifyMiss=false (snapshot, UixNoView) still resolves WITHOUT firing loaders.
   const sep = context.lastIndexOf(':');
-  if (sep > 0) return resolve(type, context.slice(0, sep) as C, false);
+  if (sep > 0) return resolve(type, context.slice(0, sep) as C, _notifyMiss);
 
   return null;
 }

@@ -273,6 +273,24 @@ describe('Context + missResolver fallback', () => {
     unregister('exact.type', 'test-miss2');
     onResolveMiss('test-miss2', () => {});
   });
+
+  it('fires the base-context miss resolver when resolving a sub-context', () => {
+    clearRegistry();
+    const missed: string[] = [];
+    onResolveMiss('test-base', (type: string) => {
+      missed.push(type);
+      register(type, 'test-base', () => 'lazy-loaded');
+    });
+
+    // Sub-context lookup: the base 'test-base' loader must fire and its freshly
+    // registered handler must be returned via the strip-suffix fallback.
+    const handler = resolve('lazy.type', 'test-base:compact');
+    assert.deepEqual(missed, ['lazy.type'], 'base-context loader should fire for a sub-context miss');
+    assert.equal(handler?.({} as any), 'lazy-loaded');
+
+    unregister('lazy.type', 'test-base');
+    onResolveMiss('test-base', () => {});
+  });
 });
 
 describe('assertSafePath (F03)', () => {
