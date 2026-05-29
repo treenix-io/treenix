@@ -2,7 +2,7 @@
 // Synchronous in pipeline tick: if append fails, the original mutation also fails (loud).
 
 import { R, W } from '@treenx/core';
-import { createMemoryTree, type Tree } from '@treenx/core/tree';
+import { asTreeSource, createMemoryTree, type Tree } from '@treenx/core/tree';
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { isHealthy, resetHealthForTest } from './health';
@@ -111,5 +111,25 @@ describe('withAudit — loud failure', () => {
       (e: any) => e instanceof Error && /audit/i.test(e.message),
     );
     assert.equal(isHealthy(), false, 'health flag flipped on audit failure');
+  });
+});
+
+describe('withAudit — read/traversal/subscription pass-through', () => {
+  it('forwards scanChildren so the audited tree works as a read-runtime source', async () => {
+    await inner.set({ $path: '/data/a', $type: 'thing' });
+    await inner.set({ $path: '/data/b', $type: 'thing' });
+    // Regression: withAudit hand-listed its methods and dropped scanChildren,
+    // so asTreeSource threw "Tree does not expose scanChildren" for every
+    // service (MCP list_children, etc.) reading through the production audit wrap.
+    assert.ok(audited.scanChildren, 'audited tree must expose scanChildren');
+    const source = asTreeSource(audited);
+    const paths: string[] = [];
+    for await (const entry of source.scanChildren('/data')) paths.push(entry.node.$path);
+    assert.deepEqual(paths.sort(), ['/data/a', '/data/b']);
+  });
+
+  it('forwards watch when the inner tree exposes it', () => {
+    const withWatch: Tree = { ...inner, watch: () => (async function* () {})() };
+    assert.ok(withAudit(withWatch).watch, 'audited tree must forward watch');
   });
 });

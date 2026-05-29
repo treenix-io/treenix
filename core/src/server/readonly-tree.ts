@@ -16,9 +16,12 @@ function deny(action: string): never {
 }
 
 export function wrapReadOnlyTree(tree: Tree): Tree {
+  // Spread forwards the full read surface — get, getChildren, and the optional
+  // scanChildren/watch (both pure reads a handler may legitimately use); only
+  // mutations are denied. Hand-listing read methods would silently drop
+  // scanChildren and break the read runtime if this facade ever fed a source.
   return {
-    get: (path, ctx) => tree.get(path, ctx),
-    getChildren: (path, opts, ctx) => tree.getChildren(path, opts, ctx),
+    ...tree,
     set: () => deny('tree.set()'),
     patch: () => deny('tree.patch()'),
     remove: () => deny('tree.remove()'),

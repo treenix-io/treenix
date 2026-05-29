@@ -76,9 +76,12 @@ function getActor(ctx: unknown): ActorContext | undefined {
 /** Wrap a Tree so every mutation appends an audit.event. Reads pass through.
  *  Direct writes to /sys/audit/event/* are NOT re-audited (recursion guard). */
 export function withAudit(tree: Tree): Tree {
+  // Spread forwards every read/traversal method untouched — get, getChildren,
+  // and the OPTIONAL scanChildren/watch the read runtime depends on. Hand-listing
+  // methods here previously dropped scanChildren, so asTreeSource threw for every
+  // service reading through this wrap. Only the three mutating ops are overridden.
   return {
-    get: tree.get.bind(tree),
-    getChildren: tree.getChildren.bind(tree),
+    ...tree,
 
     async set(node, ctx) {
       if (isAuditWrite(node.$path)) return tree.set(node, ctx);
