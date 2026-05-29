@@ -79,7 +79,7 @@ const typeValidators: Record<string, TypeValidator> = {
     if (def.required) {
       const obj = value as Record<string, unknown>;
       for (const key of def.required) {
-        if (obj[key] === undefined) {
+        if (obj[key] === undefined || obj[key] === null) {
           errors.push({ path: path ? `${path}.${key}` : key, message: `required field missing` });
         }
       }
@@ -117,7 +117,7 @@ export function validateComponent(comp: ComponentData, schema: TypeSchema, field
 
   if (schema.required) {
     for (const key of schema.required) {
-      if (comp[key] === undefined) {
+      if (comp[key] === undefined || comp[key] === null) {
         errors.push({ path: basePath ? `${basePath}.${key}` : key, message: `required field missing` });
       }
     }

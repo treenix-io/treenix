@@ -242,6 +242,19 @@ describe('validateValue', () => {
       };
       assert.equal(check({ x: 5 }, def as any, 'obj').length, 0);
     });
+
+    it('rejects null on a nested required field (null = missing)', () => {
+      const def = {
+        type: 'object',
+        required: ['x'],
+        properties: {
+          x: { type: 'number', title: 'X' },
+        },
+      };
+      const e = check({ x: null }, def as any, 'obj');
+      assert.equal(e.length, 1);
+      assert.equal(e[0].path, 'obj.x');
+    });
   });
 
   // ── Edge cases ──
@@ -342,6 +355,33 @@ describe('validateComponent', () => {
       },
     };
     const comp: ComponentData = { $type: 'test' }; // name missing but not required
+    assert.equal(validateComponent(comp, schema, '').length, 0);
+  });
+
+  it('rejects null on a required field (null = missing)', () => {
+    const schema: TypeSchema = {
+      title: 'Test',
+      type: 'object',
+      properties: {
+        name: { type: 'string', title: 'Name' },
+      },
+      required: ['name'],
+    };
+    const comp: ComponentData = { $type: 'test', name: null };
+    const e = validateComponent(comp, schema, 'test');
+    assert.equal(e.length, 1);
+    assert.equal(e[0].path, 'test.name');
+  });
+
+  it('allows null on an optional field (null = absent)', () => {
+    const schema: TypeSchema = {
+      title: 'Test',
+      type: 'object',
+      properties: {
+        name: { type: 'string', title: 'Name' },
+      },
+    };
+    const comp: ComponentData = { $type: 'test', name: null };
     assert.equal(validateComponent(comp, schema, '').length, 0);
   });
 });
