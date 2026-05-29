@@ -393,6 +393,43 @@ describe('granular sticky deny', () => {
     );
     assert.equal(perm, 0); // all bits denied
   });
+
+  it('same-node allow then deny revokes the granted bit (order-independent)', async () => {
+    await tree.set({
+      ...createNode('/sad', 'doc'),
+      $acl: [
+        { g: 'editors', p: R | W },
+        { g: 'editors', p: -W },
+      ],
+    });
+    const perm = await resolvePermission(tree, '/sad', 'ed1', ['u:ed1', 'editors']);
+    assert.equal(perm, R); // deny applies even though the allow came first
+  });
+
+  it('ancestor allow, descendant deny — deny wins (sticky downward)', async () => {
+    await tree.set({
+      ...createNode('/anc', 'dir'),
+      $acl: [{ g: 'editors', p: R | W }],
+    });
+    await tree.set({
+      ...createNode('/anc/desc', 'doc'),
+      $acl: [{ g: 'editors', p: -W }],
+    });
+    const perm = await resolvePermission(tree, '/anc/desc', 'ed1', ['u:ed1', 'editors']);
+    assert.equal(perm, R); // descendant -W must revoke the ancestor's W grant
+  });
+
+  it('component ACL allow then deny revokes the granted bit', async () => {
+    const comp: ComponentData = {
+      $type: 'doc',
+      $acl: [
+        { g: 'editors', p: R | W },
+        { g: 'editors', p: -W },
+      ],
+    };
+    const perm = componentPerm(comp, 'ed1', ['u:ed1', 'editors'], undefined);
+    assert.equal(perm, R);
+  });
 });
 
 describe('withAcl', () => {

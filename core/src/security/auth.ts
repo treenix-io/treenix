@@ -361,6 +361,18 @@ function cloneAclState(s: AclState): AclState {
   };
 }
 
+// Most-permissive group wins, but each group's allows are first masked by its
+// sticky deny-bits — so a deny is order-independent (a descendant/later deny
+// revokes an earlier/ancestor allow).
+function maxAllowedPerm(groupPerms: Map<string, number>, deniedBits: Map<string, number>): number {
+  let best = 0;
+  for (const [g, v] of groupPerms) {
+    const masked = v & ~(deniedBits.get(g) || 0);
+    if (masked > best) best = masked;
+  }
+  return best;
+}
+
 // Walk ancestors, carry forward per-group.
 // p=0: deny all (sticky), p<0: deny bits (sticky), p>0: allow bits.
 // "owner" pseudo-group: matches if userId === $owner on node (or inherited).
@@ -436,10 +448,7 @@ export async function resolvePermission(
     stateCache?.set(p, cloneAclState(state));
   }
 
-  let effective = 0;
-  for (const v of state.groupPerms.values()) {
-    if (v > effective) effective = v;
-  }
+  const effective = maxAllowedPerm(state.groupPerms, state.deniedBits);
   cache?.set(path, effective);
   return effective;
 }
@@ -477,11 +486,7 @@ export function componentPerm(
         groupPerms.set(g, allowed);
       }
     }
-    let best = 0;
-    for (const p of groupPerms.values()) {
-      if (p > best) best = p;
-    }
-    effective &= best;
+    effective &= maxAllowedPerm(groupPerms, deniedBits);
   }
   return effective;
 }
