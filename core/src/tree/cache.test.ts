@@ -382,6 +382,34 @@ describe('withCache — invalidate generation guards in-flight reads', () => {
     assert.equal(secondCall, 1, 'invalidateAll bumped allGen → repopulation skipped');
   });
 
+  it('remove during in-flight get prevents stale repopulation (C5)', async () => {
+    let resolveSlow: ((n: any) => void) | null = null;
+    const mem = createMemoryTree();
+    await mem.set(makeNode('/z', { v: 'old' }));
+
+    const slow: typeof mem = {
+      ...mem,
+      async get(path, ctx) {
+        if (path === '/z') return new Promise(r => { resolveSlow = r; });
+        return mem.get(path, ctx);
+      },
+    };
+
+    let secondCall = 0;
+    const cached = withCache(slow);
+    const pending = cached.get('/z');
+    await cached.remove('/z');     // must bump the invalidate epoch
+    resolveSlow!({ $path: '/z', $type: 'test', v: 'old' });
+    await pending;
+
+    slow.get = async (path, ctx) => {
+      if (path === '/z') { secondCall++; return mem.get(path, ctx); }
+      return mem.get(path, ctx);
+    };
+    await cached.get('/z');
+    assert.equal(secondCall, 1, 'remove bumped epoch → in-flight repopulation skipped');
+  });
+
   it('post-invalidate caller does NOT join pre-invalidate in-flight (inflight key includes generation)', async () => {
     // Race shape Codex flagged: caller A starts get('/x') while inner is
     // slow. Invalidate fires. Caller B starts get('/x'). Without

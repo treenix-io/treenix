@@ -72,7 +72,7 @@ export function withCache(tree: Tree, max = DEFAULT_MAX): CachedTree {
 
     async remove(path, ctx) {
       const result = await tree.remove(path, ctx);
-      cache.delete(path);
+      wrapper.invalidate(path); // bump epoch — raw cache.delete lets an in-flight get repopulate
       return result;
     },
 
