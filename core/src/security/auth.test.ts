@@ -21,6 +21,7 @@ import {
   withAcl,
 } from './auth';
 import { devLogin, loginUser, registerUser } from './ops';
+import { GROUPS_ACL } from './groups';
 import { OpError } from '#errors';
 
 const withEnv = async (env: Record<string, string | undefined>, fn: () => Promise<void>) => {
@@ -321,6 +322,51 @@ describe('buildClaims', () => {
     const claims = await buildClaims(tree, 'mallory');
     assert.ok(!claims.includes('admins'), 'must not gain admins via fake $type');
     assert.ok(claims.includes('u:mallory'));
+  });
+
+  // Regression (F15): production calls buildClaims through withAcl(tree,'system',['system']),
+  // NOT a raw store. The user node ACL ({owner:R|W},{authenticated:0}) grants the 'system'
+  // identity nothing on that node — so the system reader must inherit R from the root grant,
+  // otherwise stripComponents drops `groups` and the user loses every group claim.
+});
+
+// F15 regression: buildClaims/register/devLogin read+write the user's `groups`
+// component through withAcl(tree,'system',['system']). The groups type-ACL must grant
+// 'system' like any other group — otherwise componentPerm strips/denies it and the
+// kernel can neither establish group claims nor provision users. (chicken-and-egg:
+// the groups read needs the very claim that reading groups would establish.)
+describe('system identity — groups component access (F15)', () => {
+  const seedAdmin = async (t: Tree) => {
+    register('groups', 'acl', () => GROUPS_ACL);
+    await t.set({ ...createNode('/', 'root'), $acl: [{ g: 'system', p: R | W | A | S }] });
+    await t.set({
+      ...createNode('/auth/users/admin', 'user'),
+      $owner: 'admin',
+      $acl: [{ g: 'owner', p: R | W }, { g: 'authenticated', p: 0 }],
+      groups: { $type: 'groups', list: ['admins'] },
+    });
+  };
+
+  it('buildClaims resolves groups through the system tree (read path)', async () => {
+    const prod = createMemoryTree();
+    await seedAdmin(prod);
+    const systemTree = withAcl(prod, 'system', ['system']);
+    const claims = await buildClaims(systemTree, 'admin');
+    assert.ok(claims.includes('admins'), `expected admins, got ${JSON.stringify(claims)}`);
+  });
+
+  it('system tree can write a user node carrying a groups component (write path)', async () => {
+    const prod = createMemoryTree();
+    register('groups', 'acl', () => GROUPS_ACL);
+    await prod.set({ ...createNode('/', 'root'), $acl: [{ g: 'system', p: R | W | A | S }] });
+    const systemTree = withAcl(prod, 'system', ['system']);
+    await systemTree.set({
+      ...createNode('/auth/users/bob', 'user'),
+      $owner: 'bob',
+      groups: { $type: 'groups', list: ['admins'] },
+    });
+    const claims = await buildClaims(systemTree, 'bob');
+    assert.ok(claims.includes('admins'), `expected admins after write, got ${JSON.stringify(claims)}`);
   });
 });
 
