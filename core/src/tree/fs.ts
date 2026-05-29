@@ -19,15 +19,13 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
   await mkdir(resolve(rootDir), { recursive: true });
   rootDir = await realpath(resolve(rootDir));
 
-  // Per-path write queue — serializes concurrent writes to the same file
-  const writeQueues = new Map<string, Promise<void>>();
-  function enqueue(path: string, fn: () => Promise<void>): Promise<void> {
-    const prev = writeQueues.get(path) ?? Promise.resolve();
-    const next = prev.then(fn, fn);
-    const cleanup = () => { if (writeQueues.get(path) === next) writeQueues.delete(path); };
-    next.then(cleanup, cleanup);
-    writeQueues.set(path, next);
-    return next;
+  // Serialize ALL mutations on one chain. promote/demote/leaf-cleanup mutate a node's
+  // parent and child paths, so per-path locking can't prevent set/set and set/remove races.
+  let writeChain: Promise<unknown> = Promise.resolve();
+  function locked<T>(fn: () => Promise<T>): Promise<T> {
+    const result = writeChain.then(fn, fn);
+    writeChain = result.then(() => {}, () => {});
+    return result;
   }
 
   // Parse a JSON file into NodeData, stamping $path from the logical tree path.
@@ -113,7 +111,7 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
       const entries = await readdir(nodeDir);
       if (entries.length === 0) await rmdir(nodeDir);
     } catch (e: any) {
-      if (e.code !== 'ENOENT') console.error(`[fs] cleanup error at ${removedPath}:`, e);
+      if (e.code !== 'ENOENT') throw e;
     }
 
     // Walk up and demote parents that lost their last child
@@ -124,22 +122,23 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
         await assertPathSafe(rootDir, dir);
         const entries = await readdir(dir);
         if (entries.length === 1 && entries[0] === '$.json') {
-          // Only $.json remains — demote to leaf form
+          // Only $.json remains — demote to leaf form. Write the leaf FIRST (same safe
+          // order as promoteIfNeeded) so a failing unlink/rmdir can't destroy node data.
           const dirFile = join(dir, '$.json');
           await assertPathSafe(rootDir, dirFile);
           const leafFile = resolve(join(rootDir, current + '.json'));
           await assertPathSafe(rootDir, leafFile);
           const data = await readFile(dirFile, 'utf-8');
+          await writeFile(leafFile, data, { mode: 0o600 });
           await unlink(dirFile);
           await rmdir(dir);
-          await writeFile(leafFile, data, { mode: 0o600 });
         } else if (entries.length === 0) {
           await rmdir(dir);
         } else {
           break; // still has children
         }
       } catch (e: any) {
-        if (e.code !== 'ENOENT') console.error(`[fs] demotion walk error at ${current}:`, e);
+        if (e.code !== 'ENOENT') throw e;
         break;
       }
       current = treeDirname(current);
@@ -206,7 +205,7 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
     },
 
     async set(node) {
-      return enqueue(node.$path, async () => {
+      return locked(async () => {
         const path = node.$path;
 
         await promoteAncestors(path);
@@ -253,31 +252,33 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
     },
 
     async remove(path) {
-      // Try dir form first
-      const dirFile = resolve(join(rootDir, path, '$.json'));
-      await assertPathSafe(rootDir, dirFile);
-      try {
-        await unlink(dirFile);
-        await cleanupAfterRemove(path);
-        return true;
-      } catch (e: any) {
-        if (e.code !== 'ENOENT') throw e;
-      }
-
-      // Try leaf form
-      if (path !== '/') {
-        const leafFile = resolve(join(rootDir, path + '.json'));
-        await assertPathSafe(rootDir, leafFile);
+      return locked(async () => {
+        // Try dir form first
+        const dirFile = resolve(join(rootDir, path, '$.json'));
+        await assertPathSafe(rootDir, dirFile);
         try {
-          await unlink(leafFile);
+          await unlink(dirFile);
           await cleanupAfterRemove(path);
           return true;
         } catch (e: any) {
           if (e.code !== 'ENOENT') throw e;
         }
-      }
 
-      return false;
+        // Try leaf form
+        if (path !== '/') {
+          const leafFile = resolve(join(rootDir, path + '.json'));
+          await assertPathSafe(rootDir, leafFile);
+          try {
+            await unlink(leafFile);
+            await cleanupAfterRemove(path);
+            return true;
+          } catch (e: any) {
+            if (e.code !== 'ENOENT') throw e;
+          }
+        }
+
+        return false;
+      });
     },
 
     async patch(path, ops, ctx) {

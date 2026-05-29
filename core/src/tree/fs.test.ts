@@ -24,6 +24,25 @@ describe('FsStore', () => {
     return stat(join(dir, path)).then(() => true, () => false);
   }
 
+  it('keeps on-disk form consistent under concurrent set/remove on related paths', async () => {
+    const tree = await setup();
+    for (let i = 0; i < 30; i++) {
+      const p = `/p${i}`;
+      await tree.set(createNode(p, 'dir'));
+      await tree.set(createNode(`${p}/c`, 'dir')); // promotes /p to dir form
+      await Promise.all([
+        tree.remove(`${p}/c`),
+        tree.set(createNode(`${p}/c2`, 'dir')),
+      ]);
+      const leaf = await exists(`p${i}.json`);
+      const dirData = await exists(`p${i}/$.json`);
+      const c2 = await exists(`p${i}/c2.json`);
+      assert.ok(!(leaf && dirData), `dual leaf+dir form at iter ${i}`);
+      if (c2) assert.ok(dirData && !leaf, `child present but /p not dir-form at iter ${i}`);
+      assert.ok(await tree.get(p), `${p} readable at iter ${i}`);
+    }
+  });
+
   it('set and get', async () => {
     const tree = await setup();
     const node = createNode('/users/alice', 'user');
