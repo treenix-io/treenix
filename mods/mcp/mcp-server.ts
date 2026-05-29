@@ -336,7 +336,12 @@ function shapeForProperties(
   const shape: z.ZodRawShape = {};
   for (const [name, prop] of propEntries) {
     const schema = zodForProperty(prop, depth);
-    shape[name] = req.has(name) ? schema : schema.optional();
+    // LLM clients send unset optionals as `null`, not by omitting them. `.optional()` rejects
+    // null (it only permits undefined), so the SDK would 400 the call — or, for loosely-typed
+    // params, the null slips through to a typed API (trpc getChildren depth:number) and fails
+    // there. `.nullish()` accepts both; the transform normalizes null → undefined so downstream
+    // only ever sees "absent". Missing keys still parse fine (outer optional short-circuits).
+    shape[name] = req.has(name) ? schema : schema.nullish().transform(v => v ?? undefined);
   }
   return shape;
 }

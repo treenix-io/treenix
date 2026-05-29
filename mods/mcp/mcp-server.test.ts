@@ -210,6 +210,21 @@ describe('mcp generic target schema', () => {
     assert.ok(names.includes('list_children'));
     assert.ok(names.includes('catalog'));
   });
+
+  it('accepts a null optional arg as absent instead of rejecting it', async () => {
+    const store = createMemoryTree();
+    await store.set({ ...createNode('/', 'root'), $acl: [{ g: 'public', p: R | S }] });
+    await store.set(createNode('/data', 'dir'));
+    await store.set(createNode('/data/a', 'dir'));
+
+    const { client } = await createTestClient(store, 'anon', ['u:anon', 'public']);
+    // LLM clients send unset optionals as null rather than omitting them; `.optional()`
+    // would reject the null (SDK 400) or leak it to a typed API (trpc getChildren depth:number).
+    const result = await client.callTool({ name: 'list_children', arguments: { path: '/data', depth: null } });
+
+    assert.ok(!result.isError, 'null depth must be treated as absent, not rejected');
+    assert.match(textContent(result), /a/);
+  });
 });
 
 describe('mcp guardian elicitation', () => {
