@@ -1,8 +1,10 @@
-import { describe, it } from 'node:test';
+import { cleanup, render } from '@testing-library/react';
+import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { createElement } from 'react';
 import { $key, $node, stampNode } from '#symbols';
-import { viewCtx } from '#context';
-import type { NodeData } from '@treenx/core';
+import { Render, RenderContext, viewCtx } from '#context';
+import { normalizeType, onResolveMiss, register, unregister, type NodeData } from '@treenx/core';
 
 function makeNode(path: string, type: string, components?: Record<string, { $type: string }>): NodeData {
   const node = { $path: path, $type: type, ...components } as NodeData;
@@ -103,5 +105,33 @@ describe('viewCtx', () => {
   it('returns null for value without $node symbol', () => {
     const plain = { $type: 'simple.checklist', items: [] };
     assert.equal(viewCtx(plain), null);
+  });
+});
+
+describe('Render — sub-context loader (C38)', () => {
+  afterEach(() => cleanup());
+
+  it('fires the base-context miss resolver when rendering at a sub-context', () => {
+    const T = 'uix.lazy.test';
+    let fired = false;
+    onResolveMiss('react', (type: string) => {
+      if (type === normalizeType(T)) {
+        fired = true;
+        register(T, 'react', () => createElement('span', null, 'loaded'));
+      }
+    });
+
+    // Rendering at a sub-context (react:zzztest) must reach the base 'react' loader.
+    render(
+      createElement(RenderContext, {
+        name: 'react:zzztest',
+        children: createElement(Render, { value: { $type: T } }),
+      }),
+    );
+
+    assert.ok(fired, 'sub-context render must trigger the base "react" loader');
+
+    unregister(T, 'react');
+    onResolveMiss('react', () => {});
   });
 });

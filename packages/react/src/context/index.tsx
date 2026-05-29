@@ -7,7 +7,6 @@ import { $key, $node } from '#symbols';
 import { type OnChange, scopeOnChange } from '#tree/on-change';
 import {
   type ComponentData,
-  hasMissResolver,
   type NodeData,
   resolve,
   resolveExact,
@@ -126,7 +125,7 @@ export function Render<E extends Record<string, unknown> = {}>({ value, onChange
   useEffect(() => {
     if (sync) return;
     setAsync(null);
-    if (hasMissResolver(ctx_)) resolve(type, ctx_);
+    resolve(type, ctx_);
 
     return subscribeRegistry(() => {
       const h = resolveExact(type, ctx_);
@@ -137,8 +136,7 @@ export function Render<E extends Record<string, unknown> = {}>({ value, onChange
   let Handler = sync ?? async_;
 
   if (!Handler) {
-    if (hasMissResolver(ctx_)) resolve(type, ctx_);
-    Handler = resolve(type, ctx_, false);
+    Handler = resolve(type, ctx_);
   }
 
   if (!Handler) {
