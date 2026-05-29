@@ -65,10 +65,13 @@ export function useReg(type: string | null | undefined, context: string) {
     const h = resolve(type, context);
     if (h) { setHandler(() => h); return; }
     setHandler(undefined);
+    let cancelled = false;
     ensureType(type).then(() => {
+      if (cancelled) return; // type changed mid-flight — don't clobber the current handler
       const h2 = resolve(type, context);
       setHandler(h2 ? () => h2 : null);
     });
+    return () => { cancelled = true; };
   }, [type, context]);
 
   return handler;
