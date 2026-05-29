@@ -41,15 +41,16 @@ export async function startService(path: string): Promise<void> {
   if (!_svcCtx) throw new Error('autostart: not initialized');
   if (handles.has(path)) return;
 
-  // Add ref child → tree reflects reality
+  // Start first; a failed start must not leave a ref claiming the service runs.
+  await _startService(path);
+
+  // Started → add ref child so tree reflects reality
   const name = path.split('/').filter(Boolean).join('-');
   const refPath = `${_autostartPath}/${name}`;
   const existing = await _svcCtx.tree.get(refPath);
   if (!existing) {
     await _svcCtx.tree.set({ $path: refPath, $type: 'ref', $ref: path } as NodeData);
   }
-
-  await _startService(path);
 }
 
 export async function stopService(path: string): Promise<void> {

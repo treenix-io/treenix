@@ -44,6 +44,20 @@ describe('autostart dynamic start/stop', () => {
     await handle.stop();
   });
 
+  it('failed start leaves no orphan ref (tree = truth)', async () => {
+    const { tree, handle } = await boot();
+
+    // node exists but its $type has no 'service' handler → _startService throws
+    await tree.set({ $path: '/srv/fail', $type: 'test.noservice' } as NodeData);
+    await assert.rejects(() => startService('/srv/fail'));
+
+    const { items } = await tree.getChildren('/sys/autostart');
+    const ref = items.find(n => (n as any).$ref === '/srv/fail');
+    assert.equal(ref, undefined, 'no ref written when start fails');
+
+    await handle.stop();
+  });
+
   it('stopService stops service and removes ref', async () => {
     const { tree, handle } = await boot();
 
