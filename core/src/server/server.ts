@@ -52,7 +52,7 @@ export type Pipeline = {
 };
 
 /** Pure tree composition — no HTTP, no side effects */
-export function createPipeline(bootstrap: Tree, opts?: TreeRouterOpts): Pipeline {
+export function createPipeline(bootstrap: Tree, opts?: TreeRouterOpts, wrapTree?: (t: Tree) => Tree): Pipeline {
   // Forward-declare onSelfWrite so mount adapters can wire external watches
   // before withSubscriptions exists. Mounts resolve lazily on first access,
   // long after this fn returns, so the late binding is safe.
@@ -108,13 +108,21 @@ export function createPipeline(bootstrap: Tree, opts?: TreeRouterOpts): Pipeline
   const watcher = createWatchManager({
     onUserRemoved: (userId) => cdcRef.unwatchAllQueries(userId),
   });
-  const { tree, cdc, onSelfWrite, injectExternalEvent } = withSubscriptions(cached, (e) => watcher.notify(e));
+  const { tree: subscribed, cdc, onSelfWrite, injectExternalEvent } = withSubscriptions(cached, (e) => watcher.notify(e));
   cdcRef = cdc;
   onSelfWriteRef = onSelfWrite;
   injectExternalRef = injectExternalEvent;
-  // Post-sub system tree for tRPC bootstrap ops (buildClaims, register/login/logout/
-  // agentConnect/devLogin, createFilteredPush). Per-user wraps still base on raw `tree`
-  // so the read runtime (executeList) sees scanChildren without going through an AclStore.
+  // Audit (or any outer wrap) sits INSIDE the pipeline — above subscriptions but
+  // BEFORE the router — so the tRPC router and every per-user withAcl wrap the
+  // audited tree. Applying it later (in factory, after the router) left tRPC writes
+  // un-audited (core-dpp). withAudit forwards scanChildren, so the audited tree is
+  // still a valid read-runtime source for depth-1 getChildren. Absent wrapTree this
+  // is a no-op — audit off = zero cost.
+  const tree = wrapTree ? wrapTree(subscribed) : subscribed;
+  // System-identity tree for request-time tRPC bootstrap ops (buildClaims,
+  // register/login/logout/agentConnect/devLogin, createFilteredPush) — audited like
+  // user writes since it wraps the same `tree`. Boot writes (seed/log/autostart) use
+  // `systemTree` above (mountable, below the wrap), so audit never storms at startup.
   const systemTreeOps = withAcl(tree, 'system', ['system']);
   const router = createTreeRouter(tree, systemTreeOps, watcher, opts, cdc);
 

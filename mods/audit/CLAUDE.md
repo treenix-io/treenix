@@ -44,7 +44,17 @@ Once flipped to unhealthy by an audit failure, stays until process restart.
 Server middleware should return 503 on all non-`/health` endpoints while
 unhealthy. `resetHealthForTest()` is for unit tests only.
 
-### Wiring (TODO — not yet done)
-- `engine/mods/audit/seed.ts` — declare `/sys/audit/event` mount-point
-- `engine/core/src/server/factory.ts` — `wrapTree?: (tree) => tree` extension
+### Wiring (done)
+- `engine/mods/audit/seed.ts` — `/sys/audit/event` mount-point (Mongo `audit_events`)
+- `engine/core/src/server/main.ts` — `wrapTree = withAudit` gated on `'audit' ∈ seeds`
+- `engine/core/src/server/factory.ts` — passes `config.wrapTree` into `createPipeline`
 - `engine/core/src/server/server.ts` — 503 middleware reading `isHealthy()`
+
+**Where the wrap goes is load-bearing.** `withAudit` is applied INSIDE
+`createPipeline`, above subscriptions but BEFORE the tRPC router is built, so the
+router and every per-user `withAcl` wrap the audited tree. Applying it later (after
+the router) leaves tRPC writes — the primary client path — un-audited (regression
+core-dpp). This requires `withAudit` to forward `scanChildren`/`watch` (it does, via
+`...tree` spread) so the audited tree stays a valid read-runtime source. Boot writes
+(seed/log/autostart) go through `pipeline.systemTree` (mountable, below the wrap) and
+are intentionally NOT audited — otherwise startup would storm the journal.

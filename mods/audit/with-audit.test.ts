@@ -2,6 +2,7 @@
 // Synchronous in pipeline tick: if append fails, the original mutation also fails (loud).
 
 import { R, W } from '@treenx/core';
+import { createPipeline } from '@treenx/core/server/server';
 import { asTreeSource, createMemoryTree, type Tree } from '@treenx/core/tree';
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
@@ -131,5 +132,39 @@ describe('withAudit — read/traversal/subscription pass-through', () => {
   it('forwards watch when the inner tree exposes it', () => {
     const withWatch: Tree = { ...inner, watch: () => (async function* () {})() };
     assert.ok(withAudit(withWatch).watch, 'audited tree must forward watch');
+  });
+});
+
+describe('audit pipeline wiring (core-dpp)', () => {
+  it('audits user writes through the router-facing pipeline.tree, not writes below the wrap', async () => {
+    const bootstrap = createMemoryTree();
+    await bootstrap.set({ $path: '/', $type: 'root' });
+    await bootstrap.set({ $path: '/sys', $type: 'dir' });
+    await bootstrap.set({ $path: '/sys/audit', $type: 'dir' });
+    await bootstrap.set({ $path: '/sys/audit/event', $type: 'dir' });
+    await bootstrap.set({ $path: '/data', $type: 'dir' });
+    const pipeline = createPipeline(bootstrap, {}, withAudit);
+
+    // The tRPC router and every per-user withAcl wrap pipeline.tree, so a user write
+    // through it MUST be audited. Bug (core-dpp): the router saw the un-audited tree
+    // because wrapTree was applied later, in factory, after the router was built.
+    await pipeline.tree.set({ $path: '/data/x', $type: 'thing', value: 1 });
+    const events = (await pipeline.tree.getChildren('/sys/audit/event')).items;
+    assert.equal(events.length, 1);
+    assert.equal(events[0].op, 'set');
+    assert.equal(events[0].path, '/data/x');
+
+    // Writes below the wrap (where boot seed/log/autostart go) are NOT audited.
+    await pipeline.mountable.set({ $path: '/data/y', $type: 'thing' });
+    assert.equal((await pipeline.tree.getChildren('/sys/audit/event')).items.length, 1);
+  });
+
+  it('is a no-op when wrapTree is absent (audit off = zero overhead)', async () => {
+    const bootstrap = createMemoryTree();
+    await bootstrap.set({ $path: '/data', $type: 'dir' });
+    const pipeline = createPipeline(bootstrap, {});
+    await pipeline.tree.set({ $path: '/data/x', $type: 'thing', value: 7 });
+    const node = await pipeline.tree.get('/data/x');
+    assert.equal(node?.value, 7);
   });
 });

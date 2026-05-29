@@ -98,13 +98,11 @@ export async function treenix(config: TreenixConfig): Promise<TreenixServer> {
   const bootstrap = createMemoryTree();
   await bootstrap.set(rootNode);
 
-  // 3. Build pipeline
-  const pipeline = createPipeline(bootstrap, { executor: config.executor });
-  // Outer wrap (audit / etc): mod gets last word over the user-facing tree.
-  // Pre-pipeline (mountable, bootstrap) stays untouched — bootstrap writes (seed,
-  // log, autostart) go through pipeline.systemTree (= withAcl(mountable, 'system', ['system'])),
-  // ACL-gated but bypassing wrapTree to avoid an audit cycle on log writes.
-  if (config.wrapTree) pipeline.tree = config.wrapTree(pipeline.tree);
+  // 3. Build pipeline. wrapTree (audit) is applied INSIDE createPipeline — above
+  // subscriptions but before the tRPC router — so per-user tRPC writes are audited
+  // (core-dpp). Boot writes (seed/log/autostart) go through pipeline.systemTree
+  // (= withAcl(mountable, ...), below the wrap), so audit never cycles on startup.
+  const pipeline = createPipeline(bootstrap, { executor: config.executor }, config.wrapTree);
   const { tree, cdc, systemTree } = pipeline;
 
   // 4. Seed — always run, deployNodes is idempotent per-node (skips existing)
