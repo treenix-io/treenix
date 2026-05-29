@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { parseYaml } from './yaml';
+import { emitYaml, parseYaml, type YamlValue } from './yaml';
 
 describe('parseYaml — scalars', () => {
   it('empty input → empty object', () => {
@@ -100,5 +100,36 @@ describe('parseYaml — error cases', () => {
 
   it('throws on inconsistent indent in mapping', () => {
     assert.throws(() => parseYaml('a: 1\n  b: 2'));
+  });
+});
+
+describe('parseYaml — arrays of mappings (C16)', () => {
+  it('parses inline "- key: value" items, with continuation lines', () => {
+    const r = parseYaml('authors:\n  - name: a\n    age: 1\n  - name: b');
+    assert.deepEqual(r, { authors: [{ name: 'a', age: 1 }, { name: 'b' }] });
+  });
+});
+
+describe('parseYaml — empty flow mapping (C39)', () => {
+  it('reads a bare empty mapping', () => {
+    assert.deepEqual(parseYaml('{}'), {});
+  });
+
+  it('reads a nested empty mapping', () => {
+    assert.deepEqual(parseYaml('props:\n  {}'), { props: {} });
+  });
+});
+
+describe('emit ↔ parse roundtrip', () => {
+  const rt = (v: YamlValue) => parseYaml(emitYaml(v));
+
+  it('roundtrips a multiline / tabbed string (C17)', () => {
+    const v = { description: 'line1\nline2\twith tab' };
+    assert.deepEqual(rt(v), v);
+  });
+
+  it('roundtrips an empty object, nested and top-level (C39)', () => {
+    assert.deepEqual(rt({}), {});
+    assert.deepEqual(rt({ props: {} }), { props: {} });
   });
 });

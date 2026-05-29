@@ -1,6 +1,6 @@
 // Mini YAML parser — covers the subset used by markdown frontmatter and config files.
 // Supports: scalars (null, bool, number, string), quoted strings, flow arrays [a, b],
-// block arrays (- item), top-level mappings, and one level of nested mapping by indent.
+// block arrays (- item and - key: value mappings), nested mappings by indent, empty {} / [].
 // Does NOT support: anchors/aliases, tags, multi-doc, folded/literal strings, complex keys.
 //
 // Goal: zero deps, ~100 lines, parses real-world frontmatter losslessly.
@@ -48,8 +48,13 @@ function parseBlock(ctx: Ctx, indent: number): YamlValue {
   const firstIndent = indentOf(first);
   if (firstIndent < indent) return {};
 
+  // Empty flow collections — what the emitter writes for {} and [].
+  const firstRest = first.slice(firstIndent);
+  if (firstRest === '{}') { ctx.i++; return {}; }
+  if (firstRest === '[]') { ctx.i++; return []; }
+
   // Block array: lines starting with "- "
-  if (first.slice(firstIndent).startsWith('- ') || first.slice(firstIndent) === '-') {
+  if (firstRest.startsWith('- ') || firstRest === '-') {
     return parseBlockArray(ctx, firstIndent);
   }
 
@@ -99,6 +104,16 @@ function parseBlockArray(ctx: Ctx, indent: number): YamlValue[] {
     const rest = line.slice(ind);
     if (!rest.startsWith('-')) break;
     const after = rest === '-' ? '' : rest.slice(2); // skip "- "
+
+    // Inline mapping item ("- key: value", continuation keys on more-indented lines):
+    // re-align the first key to its own indent so parseMapping consumes the whole item.
+    if (after.trim() && findKeyColon(after.trim()) >= 0) {
+      const childIndent = ind + 2;
+      ctx.lines[ctx.i] = ' '.repeat(childIndent) + after;
+      out.push(parseMapping(ctx, childIndent));
+      continue;
+    }
+
     ctx.i++;
     out.push(after.trim() ? parseScalar(after.trim()) : (peekNext(ctx)?.indent ?? -1) > indent ? parseBlock(ctx, indent + 2) : null);
   }
@@ -128,10 +143,16 @@ function findKeyColon(s: string): number {
   return -1;
 }
 
+const UNESCAPE: Record<string, string> = { n: '\n', r: '\r', t: '\t' };
+
 function unquote(s: string): string {
   if (s.length >= 2) {
     const a = s[0], b = s[s.length - 1];
-    if ((a === '"' && b === '"') || (a === "'" && b === "'")) {
+    if (a === '"' && b === '"') {
+      // Double-quoted: decode the escapes the emitter writes (\n \r \t \\ \").
+      return s.slice(1, -1).replace(/\\(.)/g, (_, c) => UNESCAPE[c] ?? c);
+    }
+    if (a === "'" && b === "'") {
       return s.slice(1, -1).replace(/\\(.)/g, '$1');
     }
   }
@@ -150,6 +171,8 @@ function parseScalar(s: string): YamlValue {
     if (!body) return [];
     return splitFlow(body).map(parseScalar);
   }
+  // Empty flow mapping (the only flow-object form this subset supports)
+  if (s === '{}') return {};
   // Null
   if (s === 'null' || s === '~' || s === 'Null' || s === 'NULL') return null;
   // Bool
@@ -163,9 +186,10 @@ function parseScalar(s: string): YamlValue {
 
 // ── Emitter ──
 //
-// Symmetric subset to the parser: scalars, primitive flow arrays, block mappings (recursive).
-// Does NOT emit: flow objects, arrays-of-mappings, anchors. The parser can't roundtrip those
-// either, so the emitter refuses them rather than producing silently lossy output.
+// Conservative emitter: scalars, primitive flow arrays, block mappings (recursive), {} / [].
+// Does NOT emit arrays-of-mappings or anchors — our own data never needs them, so it refuses
+// them loudly rather than emit silently-lossy output. (The parser is more liberal: it reads
+// "- key: value" lists and {} from hand-written frontmatter.)
 
 export function yamlScalar(s: string): string {
   if (s === '') return '""';
@@ -173,6 +197,7 @@ export function yamlScalar(s: string): string {
   // or findKeyColon, looks like a reserved scalar (true/false/null), looks like a number,
   // or starts with `-` (would be ambiguous with a list item in some contexts).
   const needsQuote =
+    /[\n\r\t]/.test(s) ||
     /^[\s]|[\s]$/.test(s) ||
     /[:#\[\]{}"'`,&*!|>%@]/.test(s) ||
     /^(true|false|null|~|True|False|TRUE|FALSE|Null|NULL|yes|no|on|off|Yes|No|On|Off|YES|NO|ON|OFF)$/.test(s) ||
