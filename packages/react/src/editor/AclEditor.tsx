@@ -3,8 +3,9 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#components
 import { Input } from '#components/ui/input';
 import { A, type GroupPerm, R, S, W } from '@treenx/core';
 import { ChevronRight, X } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import * as cache from '#tree/cache';
+import { tree } from '#tree/client';
 
 const BITS = [
   { bit: R, label: 'R' },
@@ -113,32 +114,41 @@ type Props = {
   onChange: (owner: string, rules: GroupPerm[]) => void;
 };
 
-function ancestorChain(path: string): { path: string; owner?: string; acl?: GroupPerm[] }[] {
-  const parts =
-    path === '/'
-      ? ['/']
-      : [
-          '/',
-          ...path
-            .split('/')
-            .filter(Boolean)
-            .reduce<string[]>((acc, seg) => {
-              acc.push((acc.length ? acc[acc.length - 1] : '') + '/' + seg);
-              return acc;
-            }, []),
-        ];
-  const chain: { path: string; owner?: string; acl?: GroupPerm[] }[] = [];
-  for (const p of parts) {
-    const node = cache.get(p);
-    if (node && (node.$acl || node.$owner))
-      chain.push({ path: p, owner: node.$owner, acl: node.$acl });
+type InheritedEntry = { path: string; owner?: string; acl?: GroupPerm[] };
+
+// Ancestor paths strictly ABOVE `path` (excludes the node itself; '/' has none).
+function ancestorPaths(path: string): string[] {
+  if (path === '/') return [];
+  const segs = path.split('/').filter(Boolean);
+  const paths = ['/'];
+  let cur = '';
+  for (let i = 0; i < segs.length - 1; i++) {
+    cur += '/' + segs[i];
+    paths.push(cur);
   }
-  return chain;
+  return paths;
 }
 
 export function AclEditor({ path, owner, rules, currentUserId, onChange }: Props) {
   const [newGroup, setNewGroup] = useState('');
-  const chain = useMemo(() => ancestorChain(path), [path]);
+  const [chain, setChain] = useState<InheritedEntry[]>([]);
+
+  // Fetch ancestors (not just whatever's cached) so the inherited chain is complete
+  // for deep nodes whose mid-ancestors were never loaded into the tree cache.
+  useEffect(() => {
+    let cancelled = false;
+    const paths = ancestorPaths(path);
+    Promise.all(paths.map((p) => tree.get(p).catch(() => undefined))).then((nodes) => {
+      if (cancelled) return;
+      const next: InheritedEntry[] = [];
+      paths.forEach((p, i) => {
+        const node = nodes[i];
+        if (node && (node.$acl || node.$owner)) next.push({ path: p, owner: node.$owner, acl: node.$acl });
+      });
+      setChain(next);
+    });
+    return () => { cancelled = true; };
+  }, [path]);
 
   const effective = currentUserId ? computeEffective(owner, rules, currentUserId, path) : null;
 
