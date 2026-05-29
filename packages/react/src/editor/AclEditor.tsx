@@ -197,22 +197,21 @@ export function AclEditor({ path, owner, rules, currentUserId, onChange }: Props
           {chain.length > 0 && (
             <div className="space-y-1">
               <span className="text-[11px] text-muted-foreground/60 uppercase tracking-wide">Inherited</span>
-              <div className="space-y-0.5 pl-2 border-l border-border/40">
+              <div className="space-y-1.5 pl-2 border-l border-border/40">
                 {chain.map((entry) => (
-                  <div
-                    key={entry.path}
-                    className="flex items-center gap-2 text-[11px] min-w-0 font-mono"
-                  >
-                    <span className="truncate shrink min-w-0 text-muted-foreground">{entry.path}</span>
-                    {entry.owner && (
-                      <span className="text-foreground/50 text-[10px] shrink-0">owner={entry.owner}</span>
-                    )}
+                  <div key={entry.path} className="text-[11px] font-mono">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="truncate text-muted-foreground">{entry.path}</span>
+                      {entry.owner && (
+                        <span className="text-foreground/50 text-[10px] shrink-0">owner={entry.owner}</span>
+                      )}
+                    </div>
                     {entry.acl && entry.acl.length > 0 && (
-                      <span className="flex items-center gap-1 flex-wrap shrink-0 ml-auto">
+                      <div className="mt-0.5 flex flex-wrap items-center gap-1">
                         {entry.acl.map((r, i) => (
                           <span
                             key={i}
-                            className="inline-flex items-center gap-0.5 rounded bg-secondary px-1.5 py-0.5"
+                            className="inline-flex items-center gap-1.5 rounded bg-secondary px-1.5 py-0.5"
                           >
                             <span className="text-muted-foreground">{r.g}</span>
                             <span className={r.p === 0 ? 'text-destructive' : 'text-primary'}>
@@ -220,7 +219,7 @@ export function AclEditor({ path, owner, rules, currentUserId, onChange }: Props
                             </span>
                           </span>
                         ))}
-                      </span>
+                      </div>
                     )}
                   </div>
                 ))}
