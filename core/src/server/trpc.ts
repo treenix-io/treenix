@@ -173,7 +173,7 @@ export function createTreeRouter(tree: Tree, systemTree: Tree, watcher: WatchMan
           path: safePath,
           limit: z.number().optional().default(100),
           offset: z.number().optional(),
-          depth: z.number().optional(),
+          depth: z.number().optional(), // levels to descend; -1 = all descendants (deep). Default 1.
           watch: z.boolean().optional(),
           watchNew: z.boolean().optional(),
         }),

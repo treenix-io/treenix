@@ -14,10 +14,10 @@ import { resolveRoute, type ResolveResult } from '@treenx/react/router/route-res
 
 /** Fetch every /sys/routes descendant for hydration.
  *  Routes nest (e.g. /sys/routes/v/admin), so a deep scan is required.
- *  `depth: Infinity` is core's deep convention (core/src/mount/types.ts);
- *  `-1` is NOT interpreted as deep by any store and yields zero children. */
+ *  `depth: -1` is the deep sentinel — every store treats negative depth as
+ *  "all descendants" (Infinity can't cross JSON, so -1 is the wire-safe value). */
 export async function fetchRouteNodes(tree: Tree): Promise<NodeData[]> {
-  const page = await tree.getChildren('/sys/routes', { depth: Infinity });
+  const page = await tree.getChildren('/sys/routes', { depth: -1 });
   return page.items as NodeData[];
 }
 

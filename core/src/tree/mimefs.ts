@@ -88,11 +88,12 @@ export async function createRawFsTree(rootDir: string, mountPath: string = ''): 
   }
 
   async function collectDescendants(parent: string, depth: number): Promise<NodeData[]> {
+    const deep = depth < 0; // -1 (any negative) = all descendants
     const dir = await safeFilePath(parent);
     const results: NodeData[] = [];
 
     async function walk(dirPath: string, parentNodePath: string, currentDepth: number) {
-      if (currentDepth > depth) return;
+      if (!deep && currentDepth > depth) return;
       let entries;
       try { entries = await readdir(dirPath, { withFileTypes: true }); }
       catch (e: any) { if (e?.code === 'ENOENT') return; throw e; }
@@ -104,7 +105,7 @@ export async function createRawFsTree(rootDir: string, mountPath: string = ''): 
         const filePath = await safeFilePath(nodePath);
         results.push(await fileToNode(filePath, nodePath));
 
-        if (e.isDirectory() && currentDepth < depth) {
+        if (e.isDirectory() && (deep || currentDepth < depth)) {
           await walk(filePath, nodePath, currentDepth + 1);
         }
       }

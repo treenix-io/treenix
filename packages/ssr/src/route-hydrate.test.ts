@@ -1,10 +1,10 @@
 // Regression: SSR route hydration must deep-scan /sys/routes.
 //
-// Bug (core-cnr.2 / C3): fetchRouteNodes used `depth: -1` intending "all
-// descendants", but no store treats -1 as deep — the memory tree returns []
-// and the mongo adapter builds a `{1,-1}` regex that matches nothing. The
-// RouteIndex stayed empty, so every HTML request silently fell back to the
-// client-only SPA. The deep convention in core is `depth: Infinity`.
+// Bug (core-cnr.2 / C3): rebuildRoutes used `depth: -1` intending "all
+// descendants", but at the time no store treated -1 as deep (memory → [],
+// mongo → a `{1,-1}` regex matching nothing), so RouteIndex stayed empty and
+// every HTML request silently fell back to the client-only SPA. `-1` is now
+// the deep sentinel honored by every store.
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';

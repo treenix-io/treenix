@@ -491,7 +491,7 @@ describe('withAcl', () => {
 
   it('filters getChildren', async () => {
     const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);
-    const children = await s.getChildren('/users', { depth: Infinity });
+    const children = await s.getChildren('/users', { depth: -1 });
     const paths = children.items.map((c) => c.$path);
     assert.ok(paths.includes('/users/alice'));
     assert.ok(!paths.includes('/users/bob'));

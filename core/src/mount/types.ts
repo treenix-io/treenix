@@ -73,7 +73,7 @@ export function createTypesTree(backingStore: Tree, typesPath = '/sys/types'): T
       const types = getRegisteredTypes();
       const byPath = new Map<string, NodeData>();
       // Backing tree — scan deep to discover category folders, synthesize intermediate dirs
-      const backingItems = (await backingStore.getChildren(path, { depth: Infinity })).items;
+      const backingItems = (await backingStore.getChildren(path, { depth: -1 })).items;
       for (const n of backingItems) {
         const rel = path === '/' ? n.$path.slice(1) : n.$path.slice(path.length + 1);
         const parts = rel.split('/');

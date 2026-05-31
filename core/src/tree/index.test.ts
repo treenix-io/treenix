@@ -50,14 +50,14 @@ describe('MemoryStore', () => {
     assert.deepEqual(items.map((n) => n.$path).sort(), ['/a/b', '/a/b/c', '/a/x']);
   });
 
-  it('getChildren with depth=Infinity returns all descendants', async () => {
+  it('getChildren with depth=-1 returns all descendants (deep)', async () => {
     const tree = createMemoryTree();
     await tree.set(createNode('/r', 'root'));
     await tree.set(createNode('/r/a', 'dir'));
     await tree.set(createNode('/r/a/b', 'dir'));
     await tree.set(createNode('/r/a/b/c', 'item'));
 
-    const result = await tree.getChildren('/r', { depth: Infinity });
+    const result = await tree.getChildren('/r', { depth: -1 });
     assert.equal(result.items.length, 3);
     assert.deepEqual(result.items.map((n) => n.$path).sort(), ['/r/a', '/r/a/b', '/r/a/b/c']);
   });

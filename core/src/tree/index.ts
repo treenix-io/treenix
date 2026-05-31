@@ -264,11 +264,12 @@ export function createMemoryTree(): TreeSource {
     currentDepth: number = 1,
   ): NodeData[] {
     const result: NodeData[] = [];
-    if (currentDepth > maxDepth) return result;
+    const deep = maxDepth < 0; // -1 (any negative) = all descendants, the wire-safe deep sentinel
+    if (!deep && currentDepth > maxDepth) return result;
 
     for (const [name, child] of node.children) {
       if (child.data) result.push(child.data);
-      if (currentDepth < maxDepth) {
+      if (deep || currentDepth < maxDepth) {
         const childPath = parentPath === '/' ? `/${name}` : `${parentPath}/${name}`;
         result.push(...collectChildren(child, childPath, maxDepth, currentDepth + 1));
       }

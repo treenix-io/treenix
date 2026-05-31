@@ -36,7 +36,8 @@ class TreenixMcpToolsServer extends TreenixMcpTools {
     return node ? yaml(node, 0, Infinity) : `not found: ${data.path}`;
   }
 
-  /** List children of a node. Long string values may be truncated; use get_node for full data. */
+  /** List children of a node. `depth` defaults to 1 (direct children); `-1` = all descendants (deep).
+   *  Long string values may be truncated; use get_node for full data. */
   async list_children(data: { path: string; depth?: number; detail?: boolean; full?: boolean }) {
     assertSafePath(data.path); // R5-MCP-3
     const { tree } = getCtx();

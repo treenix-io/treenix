@@ -148,6 +148,7 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
   // Collect children of a tree path up to given depth by walking only the relevant FS subtree
   async function collectChildren(parent: string, depth: number): Promise<NodeData[]> {
     const results: NodeData[] = [];
+    const deep = depth < 0; // -1 (any negative) = all descendants
     const fsDir = resolve(join(rootDir, parent));
     await assertPathSafe(rootDir, fsDir);
 
@@ -169,7 +170,7 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
           const childPath = full.slice(rootDir.length) || '/';
           const node = await readNode(childPath);
           if (node) results.push(node);
-          if (currentDepth < depth) await walk(full, currentDepth + 1);
+          if (deep || currentDepth < depth) await walk(full, currentDepth + 1);
         } else if (e.name.endsWith('.json')) {
           // Leaf child — name.json. Compute logical path from FS location and stamp $path.
           const childPath = full.slice(rootDir.length).replace(/\.json$/, '');

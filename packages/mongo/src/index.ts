@@ -79,16 +79,6 @@ export async function createMongoTree(
     }
   }
 
-  function buildPattern(parent: string, depth: number): RegExp {
-    const esc = escapeRegex(parent);
-    const seg = '[^/]+';
-    if (depth === 1) return parent === '/' ? /^\/[^/]+$/ : new RegExp(`^${esc}/${seg}$`);
-    if (depth === Infinity) return parent === '/' ? /^\/.*$/ : new RegExp(`^${esc}/.+`);
-    return parent === '/'
-      ? new RegExp(`^(/${seg}){1,${depth}}$`)
-      : new RegExp(`^${esc}(/${seg}){1,${depth}}$`);
-  }
-
   async function paginatedFind(
     filter: Record<string, unknown>,
     opts?: { limit?: number; offset?: number },
@@ -300,4 +290,15 @@ export function mongoWatch(
 
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** _path regex for a getChildren scan. depth 1 = direct children; depth N = N levels. */
+export function buildPattern(parent: string, depth: number): RegExp {
+  const esc = escapeRegex(parent);
+  const seg = '[^/]+';
+  if (depth < 0) return parent === '/' ? /^\/.*$/ : new RegExp(`^${esc}/.+`); // -1 = all descendants
+  if (depth === 1) return parent === '/' ? /^\/[^/]+$/ : new RegExp(`^${esc}/${seg}$`);
+  return parent === '/'
+    ? new RegExp(`^(/${seg}){1,${depth}}$`)
+    : new RegExp(`^${esc}(/${seg}){1,${depth}}$`);
 }

@@ -105,6 +105,16 @@ describe('RawFsStore', () => {
     assert.equal(d2.items.length, 2);
   });
 
+  it('getChildren depth=-1 returns all descendants (deep)', async () => {
+    const tree = await setup();
+    await mkdir(join(dir, 'a'));
+    await mkdir(join(dir, 'a', 'b'));
+    await writeFile(join(dir, 'a', 'b', 'c.md'), '# deep');
+
+    const all = await tree.getChildren('/', { depth: -1 });
+    assert.deepEqual(all.items.map(n => n.$path).sort(), ['/a', '/a/b', '/a/b/c.md']);
+  });
+
   it('skips hidden files', async () => {
     const tree = await setup();
     await writeFile(join(dir, '.hidden'), 'secret');

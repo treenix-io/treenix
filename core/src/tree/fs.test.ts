@@ -78,7 +78,7 @@ describe('FsStore', () => {
     assert.equal(d2.items.length, 2);
     assert.deepEqual(d2.items.map((n) => n.$path).sort(), ['/x/a', '/x/a/b']);
 
-    const all = await tree.getChildren('/x', { depth: Infinity });
+    const all = await tree.getChildren('/x', { depth: -1 });
     assert.equal(all.items.length, 3);
   });
 
