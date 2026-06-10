@@ -145,6 +145,16 @@ const RunView: View<AiRun> = ({ value, ctx }) => {
         </div>
       )}
 
+      {/* Branch ref — the run's workspace. Paths the agent mentions in its log
+          ('/x', '/.branch') live under <branchRef>/tree for a human reader. */}
+      {value.branchRef && (
+        <div className="text-[11px] font-mono flex items-center gap-3">
+          <span className="text-muted-foreground">branch:</span>
+          <a className="text-blue-400 hover:underline" href={`/t${value.branchRef}`}>{value.branchRef}</a>
+          <a className="text-muted-foreground hover:underline" href={`/t${value.branchRef}/tree`}>browse as agent</a>
+        </div>
+      )}
+
       {/* Prompt */}
       <div className="bg-card/40 rounded-xl px-4 py-3 border border-border/40">
         <CollapsibleBlock

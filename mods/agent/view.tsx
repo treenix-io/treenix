@@ -345,7 +345,18 @@ const ApprovalView: View<AiApproval> = ({ value, ctx }) => {
       )}
       {value.reason && <p className="text-[11px] text-muted-foreground italic">{value.reason}</p>}
 
-      {isPending && (
+      {value.branchRef ? (
+        // Merge review resolves ON THE BRANCH (its view has diff + Merge/Abandon);
+        // this card is a projection — the watcher settles it after the branch resolves.
+        <div className="flex items-center gap-3 pt-1">
+          <a className="text-[11px] text-blue-400 hover:underline" href={`/t${value.branchRef}`}>
+            Review diff & merge
+          </a>
+          <a className="text-[11px] text-muted-foreground hover:underline" href={`/t${value.branchRef}/tree`}>
+            Browse the tree as the agent sees it
+          </a>
+        </div>
+      ) : isPending && (
         <div className="flex items-center gap-2 pt-1 flex-wrap">
           <ActionBtn label="Approve" color="emerald" onClick={() => execute(path, 'approve')} />
           <ActionBtn label="Deny" color="red" onClick={() => execute(path, 'deny')} />

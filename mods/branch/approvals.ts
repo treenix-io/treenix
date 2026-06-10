@@ -10,15 +10,25 @@ export const APPROVALS_ROOT = '/guardian/approvals';
 
 export async function fileMergeApprovals(store: Tree, branchesRoot = '/branches'): Promise<number> {
   const { items: branches } = await store.getChildren(branchesRoot);
-  const inReview = branches.filter(b => b.$type === 't.branch' && b.status === 'review');
-  if (!inReview.length) return 0;
+  const byPath = new Map(branches.filter(b => b.$type === 't.branch').map(b => [b.$path, b]));
+  const inReview = [...byPath.values()].filter(b => b.status === 'review');
 
   const { items: approvals } = await store.getChildren(APPROVALS_ROOT);
-  const pendingFor = new Set(
-    approvals
-      .filter(a => a.$type === 'ai.approval' && a.status === 'pending' && typeof a.branchRef === 'string')
-      .map(a => a.branchRef as string),
+  const pendingBranchCards = approvals.filter(
+    a => a.$type === 'ai.approval' && a.status === 'pending' && typeof a.branchRef === 'string' && a.branchRef,
   );
+  const pendingFor = new Set(pendingBranchCards.map(a => a.branchRef as string));
+
+  // Symmetric projection: the branch resolved outside the card (human merged or
+  // abandoned from the branch view) → settle the inbox entry too.
+  for (const card of pendingBranchCards) {
+    const b = byPath.get(card.branchRef as string);
+    const settled = b?.status === 'merged' ? 'approved'
+      : (b?.status === 'abandoned' || !b) ? 'denied'
+      : null; // review → still pending; conflict → resolution still owed
+    if (!settled) continue;
+    await store.set({ ...card, status: settled, reason: b ? `branch ${b.status}` : 'branch removed', resolvedAt: Date.now() });
+  }
 
   let filed = 0;
   for (const b of inReview) {

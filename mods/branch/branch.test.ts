@@ -252,6 +252,25 @@ describe('branch mod: requestMerge + merge', () => {
     assert.equal(items[0].tool, 'branch.merge');
   });
 
+  it('watcher settles the card after the branch resolves: merged → approved, abandoned → denied', async () => {
+    const a = await setup();
+    await executeAction(a.tree, a.branchPath, undefined, undefined, 'requestMerge', undefined, ACTOR);
+    await fileMergeApprovals(a.tree);
+    await executeAction(a.tree, a.branchPath, undefined, undefined, 'merge', undefined, ACTOR);
+    await fileMergeApprovals(a.tree);
+    const merged = (await a.tree.getChildren('/guardian/approvals')).items;
+    assert.equal(merged.length, 1);
+    assert.equal(merged[0].status, 'approved');
+
+    const b = await setup();
+    await executeAction(b.tree, b.branchPath, undefined, undefined, 'requestMerge', undefined, ACTOR);
+    await fileMergeApprovals(b.tree);
+    await executeAction(b.tree, b.branchPath, undefined, undefined, 'abandon', undefined, ACTOR);
+    await fileMergeApprovals(b.tree);
+    const abandoned = (await b.tree.getChildren('/guardian/approvals')).items;
+    assert.equal(abandoned[0].status, 'denied');
+  });
+
   it('/.branch control window: read, list, act on the REAL branch from inside the view', async () => {
     const { root, tree, branchPath, view } = await setup();
     const self = `${view}/.branch`;
