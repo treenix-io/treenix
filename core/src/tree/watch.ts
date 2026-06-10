@@ -6,10 +6,15 @@ import type { NodeData } from '#core';
 import { OpError } from '#errors';
 import type { PatchOp } from './patch';
 
+// seq/by — wire protocol revision (core-gk8.1, twp-spec §5.1):
+//   seq — per-user monotonic cursor, stamped by WatchManager at delivery;
+//         a watermark (ACL filtering may skip values), NOT a contiguity counter.
+//   by  — opId of the client mutation that produced this event; lets the
+//         optimistic layer confirm exactly its own writes (core-cnr.6).
 export type TreeEvent =
-  | { type: 'set';       path: string; node: Omit<NodeData, '$path'> }
-  | { type: 'patch';     path: string; patches: PatchOp[]; rev?: number }
-  | { type: 'remove';    path: string }
+  | { type: 'set';       path: string; node: Omit<NodeData, '$path'>; seq?: number; by?: string }
+  | { type: 'patch';     path: string; patches: PatchOp[]; rev?: number; seq?: number; by?: string }
+  | { type: 'remove';    path: string; seq?: number; by?: string }
   | { type: 'reconnect'; preserved: boolean };
 
 export type TreeWatchScope =

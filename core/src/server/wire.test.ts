@@ -8,6 +8,7 @@ import { createNode, R, S, W } from '#core';
 import { OpError } from '#errors';
 import { createPortConn } from '#protocol/port';
 import type { Session } from '#security/auth';
+import { withSubscriptions } from '#sub';
 import { createWatchManager } from '#sub/watch';
 import { createMemoryTree, type Tree } from '#tree';
 import assert from 'node:assert/strict';
@@ -15,23 +16,30 @@ import { MessageChannel } from 'node:worker_threads';
 import { describe, it } from 'node:test';
 import { attachWireSession, createWireSession, type WireDeps } from './wire';
 
-async function harness(perm: number) {
-  const tree = createMemoryTree();
-  await tree.set({ ...createNode('/', 'root'), $acl: [{ g: 'public', p: perm }] });
-  await tree.set(createNode('/doc', 'dir', { title: 'doc' }));
+async function harness(perm: number, ringSize?: number) {
+  const memory = createMemoryTree();
+  await memory.set({ ...createNode('/', 'root'), $acl: [{ g: 'public', p: perm }] });
+  await memory.set(createNode('/doc', 'dir', { title: 'doc' }));
   // filterPatches fails closed for ops on fields absent from the stored node —
   // tests must patch EXISTING fields or the event is (correctly) dropped.
-  await tree.set(createNode('/barrier', 'dir', { n: 0 }));
+  await memory.set(createNode('/barrier', 'dir', { n: 0 }));
 
-  const watcher = createWatchManager();
-  const deps: WireDeps = { tree, systemTree: tree, watcher };
+  const watcher = createWatchManager(ringSize ? { ringSize } : undefined);
+  // Real pipeline shape: writes emit events → watcher routes → filtered push.
+  const { tree } = withSubscriptions(memory, (e) => watcher.notify(e));
+  const deps: WireDeps = { tree, systemTree: memory, watcher };
   const session: Session = { userId: 'wire-anon', anonymous: true, claims: ['public'] };
-
-  const { port1, port2 } = new MessageChannel();
   const wire = createWireSession(deps, session);
-  const detach = attachWireSession(wire, createPortConn(port1));
-  const client = createClient(createPortConn(port2));
-  return { tree: tree as Tree, watcher, client, detach };
+
+  function dial(since?: number) {
+    const { port1, port2 } = new MessageChannel();
+    const teardown = attachWireSession(wire, createPortConn(port1), since);
+    const client = createClient(createPortConn(port2));
+    return { client, teardown };
+  }
+
+  const first = dial();
+  return { tree: tree as Tree, watcher, wire, dial, client: first.client, teardown: first.teardown };
 }
 
 const isCode = (code: string) => (e: unknown) => e instanceof OpError && e.code === code;
@@ -104,5 +112,80 @@ describe('wire session over MessageChannel', () => {
     await client.tree.patch('/doc', [['r', 'title', 'patched']]);
     const doc = await tree.get('/doc');
     assert.equal(doc?.title, 'patched');
+  });
+
+  it('mutation opId echoes as by; seq stamps frames end-to-end (gk8.1)', async (t) => {
+    const { client } = await harness(R | W | S);
+    t.after(() => client.destroy());
+
+    const got: { ev?: string; by?: string; seq?: number }[] = [];
+    let patched!: () => void;
+    const done = new Promise<void>((r) => { patched = r; });
+    await client.watchPath('/doc', (e: { ev?: string; by?: string; seq?: number }) => {
+      got.push(e);
+      if (e.ev === 'patch') patched();
+    });
+
+    await client.peer.req.patch('/doc', [['r', 'title', 'x']], 'op-42');
+    await done;
+
+    const frame = got.find((f) => f.ev === 'patch');
+    assert.equal(frame?.by, 'op-42');
+    assert.equal(frame?.seq, 1);
+  });
+
+  it('resume: re-dial with since replays exactly the gap (gk8.1)', async (t) => {
+    const { tree, client, teardown, dial } = await harness(R | W | S, 8);
+
+    let firstEv!: () => void;
+    const first = new Promise<void>((r) => { firstEv = r; });
+    const seen: { seq?: number }[] = [];
+    await client.watchPath('/doc', (e: { seq?: number }) => { seen.push(e); firstEv(); });
+    await tree.patch('/doc', [['r', 'title', 'v1']]); // seq 1 — live
+    await first;
+    assert.equal(seen[0]?.seq, 1);
+
+    teardown();
+    client.destroy(); // watch-sets survive in grace; events below land in the ring
+    await tree.patch('/doc', [['r', 'title', 'v2']]); // seq 2
+    await tree.patch('/doc', [['r', 'title', 'v3']]); // seq 3
+
+    const b = dial(1);
+    t.after(() => b.client.destroy());
+    const replayed: { ev?: string; seq?: number }[] = [];
+    let caughtUp!: () => void;
+    const two = new Promise<void>((r) => { caughtUp = r; });
+    b.client.watch((e: { ev?: string; seq?: number }) => {
+      replayed.push(e);
+      if (replayed.length === 2) caughtUp();
+    });
+    await two;
+
+    assert.deepEqual(replayed.map((f) => f.seq), [2, 3]);
+    assert.ok(replayed.every((f) => f.ev === 'patch'));
+  });
+
+  it('stale cursor → reset frame, never a partial replay (gk8.1)', async (t) => {
+    const { tree, client, teardown, dial } = await harness(R | W | S, 1); // ring of 1
+    await client.watchPath('/doc', () => {});
+    teardown();
+    client.destroy();
+    await tree.patch('/doc', [['r', 'title', 'v1']]);
+    await tree.patch('/doc', [['r', 'title', 'v2']]);
+    await tree.patch('/doc', [['r', 'title', 'v3']]); // ring holds only seq 3
+
+    const b = dial(0); // cursor far behind the ring
+    t.after(() => b.client.destroy());
+    const frames: { ev?: string }[] = [];
+    let gotReset!: () => void;
+    const reset = new Promise<void>((r) => { gotReset = r; });
+    b.client.watch((e: { ev?: string }) => {
+      frames.push(e);
+      if (e.ev === 'reset') gotReset();
+    });
+    await reset;
+    await new Promise<void>((r) => setImmediate(r)); // drain anything queued behind it
+
+    assert.deepEqual(frames, [{ ev: 'reset', reason: 'resume' }]);
   });
 });

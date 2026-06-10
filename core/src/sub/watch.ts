@@ -18,13 +18,19 @@ export type WatchManagerOpts = {
   onUserRemoved?: (userId: string) => void;
   maxWatchesPerUser?: number;
   maxTotalWatches?: number;
+  /** Per-user replay ring capacity (core-gk8.1). Default 1024. */
+  ringSize?: number;
 };
 
 export type WatchOpts = { children?: boolean; autoWatch?: boolean };
 
 export type WatchManager = {
-  /** Attach push channel. Returns true if watches were preserved (reconnect within grace). */
-  connect(connId: string, userId: string, push: WatchPush): boolean;
+  /** Attach push channel. `since` = last seq this client processed; events
+   *  after it are replayed from the per-user ring through `push`.
+   *  Returns true ONLY when continuity holds (core-gk8.1): watch-sets alive
+   *  AND the gap is covered (replayed, or nothing was missed). False means
+   *  the client MUST full-refetch and re-register watches. */
+  connect(connId: string, userId: string, push: WatchPush, since?: number): boolean;
   disconnect(connId: string): void;
   watch(userId: string, paths: string[], opts?: WatchOpts): void;
   unwatch(userId: string, paths: string[], opts?: { children?: boolean }): void;
@@ -35,6 +41,7 @@ export type WatchManager = {
 const DEFAULT_GRACE_MS = 5_000;
 const MAX_WATCHES_PER_USER = 10_000;
 const MAX_TOTAL_WATCHES = 100_000;
+const DEFAULT_RING_SIZE = 1024;
 
 function addTo(map: Map<string, Set<string>>, key: string, uid: string) {
   let set = map.get(key);
@@ -56,12 +63,22 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
   const gracePeriodMs = opts?.gracePeriodMs ?? DEFAULT_GRACE_MS;
   const maxPerUser = opts?.maxWatchesPerUser ?? MAX_WATCHES_PER_USER;
   const maxTotal = opts?.maxTotalWatches ?? MAX_TOTAL_WATCHES;
+  const ringSize = opts?.ringSize ?? DEFAULT_RING_SIZE;
   const pathToUsers = new Map<string, Set<string>>();
   const prefixToUsers = new Map<string, Set<string>>();
-  const users = new Map<
-    string,
-    { pushes: Map<string, WatchPush>; paths: Set<string>; prefixes: Map<string, boolean> }
-  >();
+  // seq/ring/missedOffline — replay machinery (core-gk8.1). seq is per-user
+  // monotonic; the ring keeps the last `ringSize` routed events for resume.
+  // missedOffline marks events stamped while no connection was attached —
+  // a legacy reconnect (no `since`) can then be answered honestly.
+  type UserEntry = {
+    pushes: Map<string, WatchPush>;
+    paths: Set<string>;
+    prefixes: Map<string, boolean>;
+    seq: number;
+    ring: { seq: number; event: NodeEvent }[];
+    missedOffline: boolean;
+  };
+  const users = new Map<string, UserEntry>();
   const graceTimers = new Map<string, ReturnType<typeof setTimeout>>();
   let totalWatches = 0;
 
@@ -91,7 +108,10 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
   function pushToUser(uid: string, event: ServerEvent) {
     const user = users.get(uid);
     if (!user) return;
-    const safeEvent = eventForUser(event, uid);
+    const safeEvent = { ...eventForUser(event, uid), seq: ++user.seq };
+    user.ring.push({ seq: safeEvent.seq, event: safeEvent });
+    if (user.ring.length > ringSize) user.ring.shift();
+    if (user.pushes.size === 0) user.missedOffline = true;
     for (const push of user.pushes.values()) push(safeEvent);
   }
 
@@ -125,14 +145,14 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
   function ensureUser(userId: string) {
     let user = users.get(userId);
     if (!user) {
-      user = { pushes: new Map(), paths: new Set(), prefixes: new Map() };
+      user = { pushes: new Map(), paths: new Set(), prefixes: new Map(), seq: 0, ring: [], missedOffline: false };
       users.set(userId, user);
     }
     return user;
   }
 
   return {
-    connect(connId, userId, push) {
+    connect(connId, userId, push, since) {
       // Cancel grace timer — user reconnected in time
       const timer = graceTimers.get(userId);
       if (timer) {
@@ -140,10 +160,29 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
         graceTimers.delete(userId);
       }
 
-      const preserved = users.has(userId);
+      const watchSetsAlive = users.has(userId);
       const user = ensureUser(userId);
       user.pushes.set(connId, push);
-      return preserved;
+      if (!watchSetsAlive) return false;
+
+      // Continuity (core-gk8.1): preserved must mean "you missed nothing" —
+      // replayed from the ring, or provably no events during the gap. The old
+      // watch-sets-survived-grace answer silently dropped grace-window events.
+      let covered: boolean;
+      if (since === undefined) {
+        covered = !user.missedOffline;
+      } else if (since >= user.seq) {
+        covered = true;
+      } else if (user.ring.length > 0 && user.ring[0].seq <= since + 1) {
+        for (const entry of user.ring) {
+          if (entry.seq > since) push(entry.event);
+        }
+        covered = true;
+      } else {
+        covered = false; // ring no longer covers the gap — refetch loudly
+      }
+      user.missedOffline = false;
+      return covered;
     },
 
     disconnect(connId) {

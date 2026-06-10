@@ -86,6 +86,11 @@ function toError(err: ErrFrame['err']): Error {
   return err.code === 'INTERNAL' ? new Error(err.msg) : new OpError(err.code, err.msg);
 }
 
+/** Write ctx carrying the client mutation id — events echo it as `by` (gk8.1). */
+function writeCtx(opId: string | undefined): { opId: string } | undefined {
+  return opId ? { opId } : undefined;
+}
+
 export function createPeer(serve?: ServeFactory) {
   let nextId = 1;
   let conn: Conn | null = null;
@@ -175,20 +180,20 @@ export function createPeer(serve?: ServeFactory) {
           if (typeof frame.node.$type !== 'string') throw new OpError('BAD_REQUEST', 'node.$type required');
           // path field is authoritative; wire payload never carries $path/$patches (spec §6).
           const { $path: _wirePath, $patches: _patches, ...clean } = frame.node;
-          await s.tree.set({ ...clean, $type: frame.node.$type, $path: path });
+          await s.tree.set({ ...clean, $type: frame.node.$type, $path: path }, writeCtx(frame.opId));
           return ok(undefined);
         }
 
         case 'patch': {
           const path = vPath(frame.path);
           if (!Array.isArray(frame.ops)) throw new OpError('BAD_REQUEST', 'ops must be an array');
-          await s.tree.patch(path, frame.ops);
+          await s.tree.patch(path, frame.ops, writeCtx(frame.opId));
           return ok(undefined);
         }
 
         case 'rm': {
           const path = vPath(frame.path);
-          return ok(await s.tree.remove(path));
+          return ok(await s.tree.remove(path, writeCtx(frame.opId)));
         }
 
         case 'act': {
@@ -430,9 +435,9 @@ export function createPeer(serve?: ServeFactory) {
       get: (path: string, watch?: boolean) => call((id) => ({ id, op: 'get', path, watch })),
       resolve: (path: string, watch?: boolean) => call((id) => ({ id, op: 'resolve', path, watch })),
       ls: (path: string, o?: Omit<LsFrame, 'id' | 'op' | 'path'>) => call((id) => ({ id, op: 'ls', path, ...o })),
-      set: (path: string, node: Record<string, unknown>) => call((id) => ({ id, op: 'set', path, node })),
-      patch: (path: string, ops: PatchOp[]) => call((id) => ({ id, op: 'patch', path, ops })),
-      rm: (path: string) => call((id) => ({ id, op: 'rm', path })),
+      set: (path: string, node: Record<string, unknown>, opId?: string) => call((id) => ({ id, op: 'set', path, node, opId })),
+      patch: (path: string, ops: PatchOp[], opId?: string) => call((id) => ({ id, op: 'patch', path, ops, opId })),
+      rm: (path: string, opId?: string) => call((id) => ({ id, op: 'rm', path, opId })),
       act: (a: ActReq & { watch?: boolean }) => call((id) => ({ id, op: 'act', ...a })),
       actStream: (a: ActReq) => callStream((id) => ({ id, op: 'act', stream: true, ...a })),
       perm: (path: string) => call((id) => ({ id, op: 'perm', path })),

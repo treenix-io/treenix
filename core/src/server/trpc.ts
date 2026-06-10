@@ -169,17 +169,20 @@ export function createTreeRouter(tree: Tree, systemTree: Tree, watcher: WatchMan
         }, ctx))),
 
     set: withSession
-      .input(z.object({ node: z.record(z.string(), z.unknown()).refine(n => typeof n.$path === 'string', '$path required') }))
+      .input(z.object({
+        node: z.record(z.string(), z.unknown()).refine(n => typeof n.$path === 'string', '$path required'),
+        opId: z.string().min(1).max(128).optional(),
+      }))
       .mutation(({ input, ctx }) => {
         const path = input.node.$path;
         if (typeof path !== 'string') throw new OpError('BAD_REQUEST', '$path required');
-        return unwrap<void>(ctx.wire.handle({ id: 0, op: 'set', path, node: input.node }));
+        return unwrap<void>(ctx.wire.handle({ id: 0, op: 'set', path, node: input.node, opId: input.opId }));
       }),
 
     patch: withSession
-      .input(z.object({ path: safePath, ops: patchOps }))
+      .input(z.object({ path: safePath, ops: patchOps, opId: z.string().min(1).max(128).optional() }))
       .mutation(({ input, ctx }) =>
-        unwrap<void>(ctx.wire.handle({ id: 0, op: 'patch', path: input.path, ops: input.ops }))),
+        unwrap<void>(ctx.wire.handle({ id: 0, op: 'patch', path: input.path, ops: input.ops, opId: input.opId }))),
 
     setComponent: withSession
       .input(
@@ -191,9 +194,9 @@ export function createTreeRouter(tree: Tree, systemTree: Tree, watcher: WatchMan
       }),
 
     remove: withSession
-      .input(z.object({ path: safePath }))
+      .input(z.object({ path: safePath, opId: z.string().min(1).max(128).optional() }))
       .mutation(({ input, ctx }) =>
-        unwrap<boolean>(ctx.wire.handle({ id: 0, op: 'rm', path: input.path }))),
+        unwrap<boolean>(ctx.wire.handle({ id: 0, op: 'rm', path: input.path, opId: input.opId }))),
 
     execute: withSession
       .input(
@@ -323,7 +326,10 @@ export function createTreeRouter(tree: Tree, systemTree: Tree, watcher: WatchMan
         });
       }),
 
-    events: withSession.subscription(({ ctx }) => {
+    events: withSession
+      // since = last seq the client processed — ring replay on resubscribe (core-gk8.1)
+      .input(z.object({ since: z.number().int().nonnegative().optional() }).optional())
+      .subscription(({ input, ctx }) => {
       if (ctx.token && !ctx.session) {
         throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Session expired' });
       }
@@ -340,7 +346,7 @@ export function createTreeRouter(tree: Tree, systemTree: Tree, watcher: WatchMan
           }, Math.max(0, expiresAt - Date.now()));
         }
 
-        const { connId, preserved } = ctx.wire.connectEvents((e) => emit.next(e));
+        const { connId, preserved } = ctx.wire.connectEvents((e) => emit.next(e), input?.since);
         emit.next({ type: 'reconnect', preserved });
         return () => {
           if (expiryTimer) clearTimeout(expiryTimer);

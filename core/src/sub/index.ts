@@ -111,6 +111,14 @@ function isAclOp(op: PatchOp): boolean {
 
 export type Listener = (event: NodeEvent) => void;
 
+/** Extract the client mutation id from a write ctx (core-gk8.1). Writers opt
+ *  in by passing `{ opId }` as the Tree ctx; resulting events echo it as `by`. */
+function opIdOf(ctx: unknown): string | undefined {
+  if (typeof ctx !== 'object' || ctx === null) return undefined;
+  const v = (ctx as Record<string, unknown>).opId;
+  return typeof v === 'string' && v.length > 0 ? v : undefined;
+}
+
 // ── CDC Registry (instance-scoped) ──
 
 type QueryEntry = {
@@ -528,14 +536,15 @@ export function withSubscriptions(
       }
 
       const { $path, ...body } = node;
+      const by = opIdOf(ctx);
 
       if (oldNode) {
         const computed = diffNodes(oldNode, node);
         emit(computed.length > 0
-          ? { type: 'patch', path: $path, patches: computed, rev: node.$rev, ...cdc }
-          : { type: 'set', path: $path, node: body, ...cdc });
+          ? { type: 'patch', path: $path, patches: computed, rev: node.$rev, ...(by ? { by } : {}), ...cdc }
+          : { type: 'set', path: $path, node: body, ...(by ? { by } : {}), ...cdc });
       } else {
-        emit({ type: 'set', path: $path, node: body, ...cdc });
+        emit({ type: 'set', path: $path, node: body, ...(by ? { by } : {}), ...cdc });
       }
     },
 
@@ -560,7 +569,8 @@ export function withSubscriptions(
       const result = await tree.remove(path, ctx);
 
       if (result && oldNode) {
-        emit({ type: 'remove', path, ...cdc });
+        const by = opIdOf(ctx);
+        emit({ type: 'remove', path, ...(by ? { by } : {}), ...cdc });
       }
       return result;
     },
@@ -596,7 +606,8 @@ export function withSubscriptions(
       // tree.patch consumes; no RFC 6902 conversion on the wire.
       const mutations = ops.filter(o => o[0] !== 't');
       if (mutations.length > 0) {
-        emit({ type: 'patch', path, patches: mutations, rev: newNode?.$rev, ...cdc });
+        const by = opIdOf(ctx);
+        emit({ type: 'patch', path, patches: mutations, rev: newNode?.$rev, ...(by ? { by } : {}), ...cdc });
       }
     },
   };

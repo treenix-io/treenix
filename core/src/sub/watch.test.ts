@@ -611,3 +611,85 @@ describe('WatchManager — edge cases', () => {
     assert.equal(tab2.length, 1);
   });
 });
+
+describe('WatchManager — seq / ring / resume (core-gk8.1)', () => {
+  const setEvent = (path: string): NodeEvent => ({ type: 'set', path, node: { $type: 't' } });
+  const seqOf = (e: NodeEvent) => (e.type === 'reconnect' ? undefined : e.seq);
+
+  it('stamps per-user monotonic seq on delivered events', () => {
+    const wm = createWatchManager();
+    const e1: NodeEvent[] = [];
+    const e2: NodeEvent[] = [];
+    wm.connect('c1', 'u1', (e) => e1.push(e));
+    wm.watch('u1', ['/a']);
+    wm.notify(setEvent('/a'));
+    wm.notify(setEvent('/a'));
+    wm.connect('c2', 'u2', (e) => e2.push(e));
+    wm.watch('u2', ['/a']);
+    wm.notify(setEvent('/a'));
+    assert.deepEqual(e1.map(seqOf), [1, 2, 3]);
+    assert.deepEqual(e2.map(seqOf), [1]); // per-user stream, not global
+  });
+
+  it('connect(since) replays grace-window events — preserved means continuity', () => {
+    const wm = createWatchManager();
+    const a: NodeEvent[] = [];
+    wm.connect('c1', 'u1', (e) => a.push(e));
+    wm.watch('u1', ['/a']);
+    wm.notify(setEvent('/a')); // seq 1, delivered live
+    wm.disconnect('c1');
+    wm.notify(setEvent('/a')); // seq 2 — offline, ringed
+    wm.notify(setEvent('/a')); // seq 3 — offline, ringed
+
+    const b: NodeEvent[] = [];
+    const preserved = wm.connect('c2', 'u1', (e) => b.push(e), 1);
+    assert.equal(preserved, true);
+    assert.deepEqual(b.map(seqOf), [2, 3]); // exactly the gap, in order
+  });
+
+  it('ring overflow → preserved false, no partial replay', () => {
+    const wm = createWatchManager({ ringSize: 2 });
+    wm.connect('c1', 'u1', () => {});
+    wm.watch('u1', ['/a']);
+    wm.notify(setEvent('/a')); // seq 1
+    wm.disconnect('c1');
+    wm.notify(setEvent('/a')); // 2
+    wm.notify(setEvent('/a')); // 3
+    wm.notify(setEvent('/a')); // 4 — ring now [3,4], seq 2 evicted
+
+    const b: NodeEvent[] = [];
+    const preserved = wm.connect('c2', 'u1', (e) => b.push(e), 1);
+    assert.equal(preserved, false); // gap not covered — client must refetch
+    assert.deepEqual(b, []);        // never replay a hole silently
+  });
+
+  it('legacy reconnect (no since): false exactly when events were missed offline', () => {
+    const wm = createWatchManager();
+    wm.connect('c1', 'u1', () => {});
+    wm.watch('u1', ['/a']);
+    wm.disconnect('c1');
+    assert.equal(wm.connect('c2', 'u1', () => {}), true); // nothing missed
+
+    wm.disconnect('c2');
+    wm.notify(setEvent('/a')); // missed while offline
+    assert.equal(wm.connect('c3', 'u1', () => {}), false); // old preserved:true lie is gone
+  });
+
+  it('multi-tab: shared seq stream; resuming tab replays only to itself', () => {
+    const wm = createWatchManager();
+    const tab1: NodeEvent[] = [];
+    const tab2: NodeEvent[] = [];
+    wm.connect('c1', 'u1', (e) => tab1.push(e));
+    wm.connect('c2', 'u1', (e) => tab2.push(e));
+    wm.watch('u1', ['/a']);
+    wm.notify(setEvent('/a')); // seq 1 → both tabs
+    wm.disconnect('c2');
+    wm.notify(setEvent('/a')); // seq 2 → tab1 only (user online — not "missed")
+
+    const tab2b: NodeEvent[] = [];
+    const preserved = wm.connect('c2b', 'u1', (e) => tab2b.push(e), 1);
+    assert.equal(preserved, true);
+    assert.deepEqual(tab2b.map(seqOf), [2]); // replayed to the new tab
+    assert.deepEqual(tab1.map(seqOf), [1, 2]); // no duplicates to the live tab
+  });
+});

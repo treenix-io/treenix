@@ -44,31 +44,36 @@ export type WireSession = ReturnType<typeof createWireSession>;
 /** NodeEvent → TWP event frames. VP membership/config deltas collapse into
  *  one `dirty` per affected view path (gk8.12 refetch semantics — precise
  *  add/rm cache surgery stays a tRPC-binding capability until cdcEval dies);
- *  `reconnect` becomes `reset` only when continuity was lost. */
-export function toEventFrames(e: NodeEvent, nextSeq: () => number): EventFrame[] {
+ *  `reconnect` becomes `reset` only when continuity was lost.
+ *  seq/by come stamped from WatchManager delivery (core-gk8.1); dirty frames
+ *  are facets of the same event and share its seq — the cursor is a
+ *  watermark, clients track max(seen). */
+export function toEventFrames(e: NodeEvent): EventFrame[] {
   if (e.type === 'reconnect') {
     return e.preserved ? [] : [{ ev: 'reset', reason: 'resume' }];
   }
   // Frames must omit absent fields, not carry undefined: structured-clone
   // transports preserve undefined keys while JSON transports drop them —
   // explicit omission keeps the wire identical everywhere.
+  const meta = {
+    ...(e.seq === undefined ? {} : { seq: e.seq }),
+    ...(e.by === undefined ? {} : { by: e.by }),
+  };
   const frames: EventFrame[] = [];
-  if (e.type === 'set') frames.push({ seq: nextSeq(), ev: 'set', path: e.path, node: e.node });
+  if (e.type === 'set') frames.push({ ...meta, ev: 'set', path: e.path, node: e.node });
   else if (e.type === 'patch') {
     frames.push(e.rev === undefined
-      ? { seq: nextSeq(), ev: 'patch', path: e.path, ops: e.patches }
-      : { seq: nextSeq(), ev: 'patch', path: e.path, ops: e.patches, rev: e.rev });
-  } else frames.push({ seq: nextSeq(), ev: 'rm', path: e.path });
+      ? { ...meta, ev: 'patch', path: e.path, ops: e.patches }
+      : { ...meta, ev: 'patch', path: e.path, ops: e.patches, rev: e.rev });
+  } else frames.push({ ...meta, ev: 'rm', path: e.path });
 
   const dirty = new Set<string>([...(e.addVps ?? []), ...(e.rmVps ?? []), ...(e.invalidateVps ?? [])]);
-  for (const vp of dirty) frames.push({ seq: nextSeq(), ev: 'dirty', path: vp });
+  for (const vp of dirty) frames.push({ ...(e.seq === undefined ? {} : { seq: e.seq }), ev: 'dirty', path: vp });
   return frames;
 }
 
 export function createWireSession(deps: WireDeps, session: Session) {
   const { userId } = session;
-  let seq = 0;
-  const nextSeq = () => ++seq;
 
   // Claims + ACL tree are resolved per request — freshness parity with the
   // pre-TWP per-procedure middleware. Long-lived connections get the same
@@ -120,22 +125,23 @@ export function createWireSession(deps: WireDeps, session: Session) {
   const peer = createPeer(serve);
 
   /** Event lane: ACL-filtered push wired into the WatchManager.
-   *  Returns reconnect verdict — exactly the pre-TWP `events` subscription body. */
-  function connectEvents(push: (e: NodeEvent) => void): { connId: string; preserved: boolean } {
+   *  `since` = client's last processed seq — the ring replays the gap
+   *  through the SAME filter (claims drift re-applies, core-gk8.1). */
+  function connectEvents(push: (e: NodeEvent) => void, since?: number): { connId: string; preserved: boolean } {
     const sessionClaims = session.claims?.length ? session.claims : null;
     const claimsTtlMs = deps.opts?.claimsTtlMs ?? DEFAULT_CLAIMS_TTL_MS;
     const filtered = createFilteredPush(deps.systemTree, userId, sessionClaims, push, { claimsTtlMs });
     const connId = `${userId}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
-    const preserved = deps.watcher.connect(connId, userId, filtered);
+    const preserved = deps.watcher.connect(connId, userId, filtered, since);
     return { connId, preserved };
   }
 
   /** Event lane in TWP frames — native bindings (port/WS). The initial
    *  continuity verdict maps to a reset frame when watches were not preserved. */
-  function connectEventFrames(emit: (f: EventFrame) => void): { connId: string } {
+  function connectEventFrames(emit: (f: EventFrame) => void, since?: number): { connId: string } {
     const { connId, preserved } = connectEvents((e) => {
-      for (const f of toEventFrames(e, nextSeq)) emit(f);
-    });
+      for (const f of toEventFrames(e)) emit(f);
+    }, since);
     if (!preserved) emit({ ev: 'reset', reason: 'resume' });
     return { connId };
   }
@@ -159,9 +165,9 @@ export function createWireSession(deps: WireDeps, session: Session) {
  *    attachWireSession(createWireSession(deps, session), createPortConn(port))
  *  Auth is ambient: the host constructs the session (spec §5.3) — no hi frame.
  *  Returns a teardown that detaches the peer and releases the event connection. */
-export function attachWireSession(session: WireSession, conn: Conn): () => void {
+export function attachWireSession(session: WireSession, conn: Conn, since?: number): () => void {
   const detach = session.peer.attach(conn);
-  const { connId } = session.connectEventFrames((f) => session.peer.emit(f));
+  const { connId } = session.connectEventFrames((f) => session.peer.emit(f), since);
   return () => {
     session.disconnectEvents(connId);
     detach();

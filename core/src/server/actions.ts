@@ -373,7 +373,13 @@ async function resolveActionHandler(
 // Per-path lock prevents lost updates from concurrent mutations on the same node.
 const lockAction = createPathLock();
 
-export type ActionOpts = { userId?: string | null; claims?: string[]; actor?: ActorContext };
+export type ActionOpts = {
+  userId?: string | null;
+  claims?: string[];
+  actor?: ActorContext;
+  /** Client mutation id — idempotent replay (execute) + echoed as `by` on resulting events (core-gk8.1). */
+  opId?: string;
+};
 
 // Idempotency (Stripe model): a replayed opId returns the first execution's
 // settled outcome instead of re-applying. Agents retry on timeout by nature,
@@ -390,7 +396,7 @@ export function executeAction<T = unknown>(
   componentKey: string | undefined,
   action: string,
   data?: unknown,
-  opts?: ActionOpts & { opId?: string },
+  opts?: ActionOpts,
 ): Promise<T> {
   const opId = opts?.opId;
   if (!opId) return runAction<T>(tree, path, componentType, componentKey, action, data, opts);
@@ -499,7 +505,8 @@ async function runAction<T = unknown>(
       // the in-process lock (direct set, second pipeline, federation). core-gk8.3.
       if (node.$rev != null) ops.unshift(['t', '$rev', node.$rev]);
       try {
-        await tree.patch(node.$path, ops);
+        // opId ctx → events from this action's persist echo `by` (core-gk8.1)
+        await tree.patch(node.$path, ops, opts?.opId ? { opId: opts.opId } : undefined);
       } catch (e) {
         if (e instanceof PatchTestError) {
           throw new OpError('CONFLICT', `OptimisticConcurrencyError: ${type}.${action} on ${node.$path} — node changed during the action (expected $rev ${node.$rev})`);

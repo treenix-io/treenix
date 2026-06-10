@@ -1,9 +1,9 @@
 // TWP frames — docs/research/twp-spec.md §5. Vocabulary is identical in both
 // directions: a request is recognized by `op`, a response is matched by the
 // issuer against its own outstanding ids, events carry `ev`.
-// v1 deltas vs spec (deliberate): opId on set/patch/rm and hi/resume land with
-// core-gk8.1; act carries `stream` (caller picks) until responder-side handler
-// introspection is decided (spec §11).
+// v1 deltas vs spec (deliberate): hi-frame handshake lands with the first
+// reconnectable binding (core-nin.5); act carries `stream` (caller picks)
+// until responder-side handler introspection is decided (spec §11).
 
 import type { PatchOp } from '#tree/patch';
 import type { ErrorCode } from '#errors';
@@ -26,9 +26,12 @@ export type LsFrame      = {
   /** Folder membership interest (renamed from watchNew; dirty semantics per gk8.12). */
   watchList?: boolean;
 };
-export type SetFrame     = { id: number; op: 'set'; path: string; node: Record<string, unknown> };
-export type PatchFrame   = { id: number; op: 'patch'; path: string; ops: PatchOp[] };
-export type RmFrame      = { id: number; op: 'rm'; path: string };
+// opId on writes: echoed back as `by` on resulting events (core-gk8.1).
+// Dedup/idempotent retry for plain writes is NOT implemented yet — only act
+// dedups today; echo-only until the write-dedup decision lands.
+export type SetFrame     = { id: number; op: 'set'; path: string; node: Record<string, unknown>; opId?: string };
+export type PatchFrame   = { id: number; op: 'patch'; path: string; ops: PatchOp[]; opId?: string };
+export type RmFrame      = { id: number; op: 'rm'; path: string; opId?: string };
 export type ActFrame     = {
   id: number; op: 'act'; path: string; action: string;
   type?: string; key?: string; data?: unknown; opId?: string;
