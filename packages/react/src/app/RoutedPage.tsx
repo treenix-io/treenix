@@ -20,16 +20,36 @@ export function RoutedPage({ path }: { path: string }) {
   useEffect(() => {
     setTargetPath(null);
     setNotFound(false);
+    let cancelled = false;
+    let watched: string[] | null = null;
+    const release = (paths: string[]) =>
+      trpc.unwatch.mutate({ paths })
+        .catch((e: unknown) => console.error('[routed-page] unwatch failed:', paths, e));
 
     trpc.resolve.query({ path: routePath, watch: true }).then((nodes: unknown) => {
       const arr = nodes as NodeData[];
+      const paths = arr.length ? [routePath, ...(arr[1] ? [arr[1].$path] : [])] : null;
+      // Fast navigation: cleanup ran before resolve settled — the server watch
+      // was still registered, release it right here (core-m77/C46).
+      if (cancelled) { if (paths) release(paths); return; }
+      watched = paths;
       if (!arr.length) { setNotFound(true); return; }
 
       for (const n of arr) cache.put(n);
 
       const route = arr[0];
       setTargetPath(isRef(route) && arr[1] ? arr[1].$path : route.$path);
-    }).catch(() => setNotFound(true));
+    }).catch((e: unknown) => {
+      if (cancelled) return;
+      console.error('[routed-page] resolve failed:', routePath, e);
+      setNotFound(true);
+    });
+
+    return () => {
+      cancelled = true;
+      // core-m77/C46: resolve{watch:true} registered server watches — release on unmount/route change.
+      if (watched) release(watched);
+    };
   }, [routePath]);
 
   // Reactively subscribe to target node via cache

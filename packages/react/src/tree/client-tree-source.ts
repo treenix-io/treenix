@@ -129,7 +129,9 @@ export class ClientTreeSource implements TreeSource {
         cancelled = true;
         unsubReset();
         if (watching && unrefWatch(this.pathWatchRefs, path)) {
-          trpc.unwatch.mutate({ paths: [path] }).catch(() => {});
+          // core-m77: failure here means the server-side watch leaks — surface it.
+          trpc.unwatch.mutate({ paths: [path] })
+            .catch((e: unknown) => console.error('[tree-source] unwatch failed:', path, e));
         }
       },
     };
@@ -224,7 +226,9 @@ export class ClientTreeSource implements TreeSource {
         unsubReset();
         cache.releaseChildSubscriber(path);
         if (watching && unrefWatch(this.childrenWatchRefs, path)) {
-          trpc.unwatchChildren.mutate({ paths: [path] }).catch(() => {});
+          // core-m77: failure here means the server-side children watch leaks — surface it.
+          trpc.unwatchChildren.mutate({ paths: [path] })
+            .catch((e: unknown) => console.error('[tree-source] unwatchChildren failed:', path, e));
         }
       },
     };

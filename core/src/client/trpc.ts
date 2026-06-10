@@ -9,6 +9,7 @@
 //     through the cookie path too (custom fetch with a cookie jar) — see core/src/server/client.ts.
 
 import type { NodeData } from '#core';
+// kriz: not needed import
 import type { PatchOp } from '#tree';
 import type { TreeRouter } from '#server/trpc';
 import { createTRPCClient, httpBatchLink, httpSubscriptionLink, splitLink } from '@trpc/client';
@@ -58,8 +59,10 @@ export function createTrpcTransport(opts: TrpcTransportOpts): TreenixClient & { 
 
   function ensureSSE() {
     if (eventSub) return;
+    // kriz: why as void??? find such places and remove, meaningless
     eventSub = trpc.events.subscribe(undefined as void, {
       onData: (event: any) => {
+        // kriz: what if no path in event?
         if ('path' in event) pathCbs.get(event.path)?.forEach(cb => cb(event));
       },
     });
@@ -76,18 +79,30 @@ export function createTrpcTransport(opts: TrpcTransportOpts): TreenixClient & { 
     execute: (path, action, data, o) =>
       trpc.execute.mutate({ path, action, data, type: o?.type, key: o?.key }),
     watch: (onEvent) =>
-      trpc.events.subscribe(undefined as void, { onData: onEvent }),
+      // kriz: undefined as void???
+      trpc.events.subscribe(undefined, { onData: onEvent }),
 
+    // kriz: repeated in starter why? should reuse!
     watchPath: async (path, onEvent) => {
       const node = await trpc.get.query({ path, watch: true });
       ensureSSE();
+      // kriz: patchCbs.get, if !found -> add; equals, then found.add. dont (has + get)
       if (!pathCbs.has(path)) pathCbs.set(path, new Set());
       pathCbs.get(path)!.add(onEvent);
       return {
         node,
         unsubscribe() {
           const set = pathCbs.get(path);
-          if (set) { set.delete(onEvent); if (!set.size) pathCbs.delete(path); }
+          if (set) {
+            set.delete(onEvent);
+            if (!set.size) {
+              pathCbs.delete(path);
+              // core-m77: get{watch:true} registered a server-side watch — release it
+              // with the last local consumer, or it leaks for the session's lifetime.
+              trpc.unwatch.mutate({ paths: [path] })
+                .catch((e: unknown) => console.error('[trpc] unwatch failed:', path, e));
+            }
+          }
           if (!pathCbs.size && eventSub) { eventSub.unsubscribe(); eventSub = null; }
         },
       };
