@@ -84,6 +84,9 @@ async function runQuery(
     forkSession?: boolean;
     model?: string;
     mcpUrl?: string;
+    /** Per-run workload token (mintWorkloadToken) — binds the MCP session to a
+     *  scoped/branch-rooted identity. Falls back to the shared env token. */
+    mcpToken?: string;
     abortController?: AbortController;
     permissionRules?: PermissionRule[];
     canUseTool?: CanUseTool;
@@ -92,7 +95,7 @@ async function runQuery(
   },
 ): Promise<ClaudeResult> {
   const mcpUrl = opts.mcpUrl || process.env.TREENIX_MCP_URL || 'http://localhost:3212/mcp';
-  const mcpToken = process.env.TREENIX_MCP_TOKEN || 'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd';
+  const mcpToken = opts.mcpToken || process.env.TREENIX_MCP_TOKEN || 'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd';
   const startTime = Date.now();
 
   let sessionId: string | undefined;
@@ -233,6 +236,7 @@ export async function invokeClaude(
     forkSession?: boolean;
     model?: string;
     mcpUrl?: string;
+    mcpToken?: string;
     abortController?: AbortController;
     permissionRules?: PermissionRule[];
     canUseTool?: CanUseTool;

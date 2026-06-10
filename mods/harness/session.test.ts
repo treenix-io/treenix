@@ -56,7 +56,7 @@ describe('executeForSession — scoped (workload)', () => {
     const tree = await makeTree();
     await tree.set({ $path: '/agents', $type: 'dir' });
     await tree.set({ $path: '/agents/bot', $type: 't.agent.port',
-      scope: defineAgentScope({
+      '#scope': defineAgentScope({
         plan: { read: ['/work/*'], write: [], exec: [] },
         work: { read: ['/work/*'], write: ['/work/*'], exec: allowed },
       }),

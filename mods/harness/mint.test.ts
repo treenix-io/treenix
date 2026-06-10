@@ -6,7 +6,7 @@
 import { createMemoryTree, type Tree } from '@treenx/core/tree';
 import { resolveToken } from '@treenx/core/security/auth';
 import { OpError } from '@treenx/core/errors';
-import { R, W, A, S } from '@treenx/core';
+import { getComponentByName, R, W, A, S } from '@treenx/core';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 import { defineAgentScope } from './capability';
@@ -23,11 +23,12 @@ beforeEach(async () => {
   await tree.set({ $path: '/agents', $type: 'dir' });
   await tree.set({
     $path: '/agents/bot', $type: 't.agent.port',
-    scope: defineAgentScope({
+    '#scope': defineAgentScope({
       plan: { read: ['/work/*'], write: ['/agents/bot/runs/*'], exec: ['ai.plan.*'] },
       work: { read: ['/work/*'], write: ['/work/*'], exec: ['refund.requestReview'] },
     }),
   });
+  await tree.set({ $path: '/agents/scopeless', $type: 't.agent.port' });
 });
 
 describe('mintWorkloadToken', () => {
@@ -55,7 +56,7 @@ describe('mintWorkloadToken', () => {
     });
     const userNode = await tree.get('/auth/users/agent-workload:r-2');
     assert.ok(userNode, 'user node exists');
-    const groupsRaw = (userNode as Record<string, unknown>).groups as Record<string, unknown> | undefined;
+    const groupsRaw = getComponentByName(userNode!, 'groups') as Record<string, unknown> | undefined;
     assert.deepEqual(groupsRaw?.list, ['agent-workload'], 'no admin/authenticated leakage');
   });
 
@@ -90,5 +91,40 @@ describe('mintWorkloadToken', () => {
     });
     const session = await resolveToken(tree, token) as Record<string, unknown> | null;
     assert.equal(session?.userId, 'agent-workload:r-99');
+  });
+
+  it('branch is a valid boundary on its own: scope-less port mints a branch-rooted session', async () => {
+    const { token } = await mintWorkloadToken(tree, {
+      agentPath: '/agents/scopeless',
+      taskPath: '/board/tasks/1',
+      runPath: '/agents/scopeless/runs/r-7',
+      branch: '/branches/b-7',
+    });
+    const session = await resolveToken(tree, token) as Record<string, unknown> | null;
+    assert.equal(session?.branch, '/branches/b-7');
+    assert.equal(session?.scopeRef, undefined, 'no capability scope without a scope component');
+  });
+
+  it('scope-less port without a branch still fails loud', async () => {
+    await assert.rejects(
+      mintWorkloadToken(tree, {
+        agentPath: '/agents/scopeless',
+        taskPath: '/board/tasks/1',
+        runPath: '/agents/scopeless/runs/r-8',
+      }),
+      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+    );
+  });
+
+  it('scoped port with a branch carries both boundaries', async () => {
+    const { token } = await mintWorkloadToken(tree, {
+      agentPath: '/agents/bot',
+      taskPath: '/board/tasks/1',
+      runPath: '/agents/bot/runs/r-9',
+      branch: '/branches/b-9',
+    });
+    const session = await resolveToken(tree, token) as Record<string, unknown> | null;
+    assert.equal(session?.branch, '/branches/b-9');
+    assert.equal(session?.scopeRef, '/agents/bot');
   });
 });

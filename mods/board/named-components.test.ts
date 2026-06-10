@@ -9,14 +9,15 @@ describe('getNamedComponents', () => {
       $path: '/board/data/t-1',
       $type: 'board.task',
       title: 'Task',
-      chat: { $type: 'metatron.chat', title: 'Chat' },
-      plan: { $type: 'ai.plan', summary: 'Plan' },
+      '#chat': { $type: 'metatron.chat', title: 'Chat' },
+      '#plan': { $type: 'ai.plan', summary: 'Plan' },
       taskRef: '/agents/task-1',
     } as NodeData;
 
     const entries = getNamedComponents(node);
 
-    assert.deepEqual(entries.map(([key]) => key), ['chat', 'plan']);
+    // getComponents returns ACTUAL storage keys — consumers index node[key].
+    assert.deepEqual(entries.map(([key]) => key), ['#chat', '#plan']);
   });
 
   it('returns empty when node has no named component fields', () => {

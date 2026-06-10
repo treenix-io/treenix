@@ -2,6 +2,7 @@
 // Called by tRPC/MCP entry points so workload sessions naturally pick up
 // capability-narrowed execution without those layers knowing about workloads.
 
+import { getComponentByName } from '@treenx/core';
 import type { ActorContext } from '@treenx/core/server/actions';
 import { executeAction } from '@treenx/core/server/actions';
 import type { Session } from '@treenx/core/security/auth';
@@ -29,8 +30,8 @@ async function resolveScope(tree: Tree, session: Session): Promise<Capability | 
   const mode = session.scopeMode === 'work' ? 'work' : 'plan';
   const node = await tree.get(ref);
   if (!node) throw new OpError('FORBIDDEN', `session scopeRef invalid: ${ref}`);
-  const scopeRaw = node[key];
-  if (!scopeRaw || typeof scopeRaw !== 'object') {
+  const scopeRaw = getComponentByName(node, key);
+  if (!scopeRaw) {
     throw new OpError('FORBIDDEN', `session scope not found at ${ref}.${key}`);
   }
   const scope = scopeRaw as Partial<AgentScope>;

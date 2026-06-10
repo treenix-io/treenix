@@ -1,12 +1,13 @@
 // Agent Office tests — types (state machine) + guardian (policy registry)
 
 import { createNode, getComponent, resolve } from '@treenx/core';
+import { createMemoryTree } from '@treenx/core/tree';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import './types';
 import './guardian';
-import { buildPermissionRules, classifyBashCommand, createCanUseTool, splitBashParts } from './guardian';
+import { buildPermissionRules, classifyBashCommand, createCanUseTool, resolveVerdict, splitBashParts } from './guardian';
 import {
   AiAgent,
   AiAssignment,
@@ -838,7 +839,7 @@ describe('canUseTool: session approval cache', () => {
 
 describe('AiPlan', () => {
   it('approvePlan sets approved flag', () => {
-    const node = createNode('/board/data/t1', 'board.task', {
+    const node = createNode('/board/data/t1', 'board.task', undefined, {
       plan: { $type: 'ai.plan', text: 'Step 1: do X\nStep 2: do Y', approved: false, feedback: '', createdAt: Date.now() },
     });
     const plan = getComponent(node, AiPlan)!;
@@ -851,7 +852,7 @@ describe('AiPlan', () => {
   });
 
   it('approvePlan with feedback', () => {
-    const node = createNode('/board/data/t1', 'board.task', {
+    const node = createNode('/board/data/t1', 'board.task', undefined, {
       plan: { $type: 'ai.plan', text: 'Some plan', approved: false, feedback: '', createdAt: Date.now() },
     });
     const plan = getComponent(node, AiPlan)!;
@@ -862,7 +863,7 @@ describe('AiPlan', () => {
   });
 
   it('rejectPlan keeps text for re-planning and saves feedback', () => {
-    const node = createNode('/board/data/t1', 'board.task', {
+    const node = createNode('/board/data/t1', 'board.task', undefined, {
       plan: { $type: 'ai.plan', text: 'Bad plan', approved: false, feedback: '', createdAt: Date.now() },
     });
     const plan = getComponent(node, AiPlan)!;
@@ -874,7 +875,7 @@ describe('AiPlan', () => {
   });
 
   it('approvePlan throws on empty plan', () => {
-    const node = createNode('/board/data/t1', 'board.task', {
+    const node = createNode('/board/data/t1', 'board.task', undefined, {
       plan: { $type: 'ai.plan', text: '', approved: false, feedback: '', createdAt: 0 },
     });
     const plan = getComponent(node, AiPlan)!;
@@ -914,6 +915,7 @@ describe('AiRun', () => {
   it('creates with ECS components', () => {
     const node = createNode('/agents/qa/runs/r-1', 'ai.run', {
       prompt: 'Fix the bug', result: '', mode: 'work', taskRef: '/board/data/task-1',
+    }, {
       log: { $type: 'ai.log', entries: [] },
       'run-status': { $type: 'ai.run-status', status: 'pending', startedAt: 0, finishedAt: 0, error: '' },
       cost: { $type: 'ai.cost', inputTokens: 0, outputTokens: 0, costUsd: 0, model: 'claude-sonnet-4-20250514' },
@@ -938,6 +940,7 @@ describe('AiRun', () => {
     const node = createNode('/agents/qa/runs/r-1', 'ai.run', {
       prompt: 'Do stuff', result: '', mode: 'work', taskRef: '',
       queryKey: 'plan:/agents/qa',
+    }, {
       'run-status': { $type: 'ai.run-status', status: 'running', startedAt: Date.now(), finishedAt: 0, error: '' },
     });
 
@@ -992,5 +995,44 @@ describe('AiPolicy', () => {
     (handler as any)({ node, comp: getComponent(node, AiPolicy), store: {} }, { pattern: 'rm -rf' });
     assert.deepEqual(node.deny, []);
     assert.deepEqual(node.allow, ['mcp__treenix__*'], 'other lists untouched');
+  });
+});
+
+// ── canUseTool: branchRoot path translation (core-wm6.4) ──
+// Branch-rooted runs carry VIEW paths in tool args; the policy speaks REAL
+// paths. The guard judges the actual write target after translation.
+
+describe('canUseTool: branchRoot translation', () => {
+  async function policyTree(policy: { allow?: string[]; deny?: string[]; escalate?: string[] }) {
+    const tree = createMemoryTree();
+    await tree.set(createNode('/', 'root'));
+    const guardian = createNode('/guardian', 'ai.policy', {
+      allow: policy.allow ?? [], deny: policy.deny ?? [], escalate: policy.escalate ?? [],
+    });
+    await tree.set(guardian);
+    return tree;
+  }
+
+  it('view path is judged as its real branch target', async () => {
+    const tree = await policyTree({ allow: ['mcp__treenix__set_node:/branches/*'] });
+    const rooted = createCanUseTool('build', '/agents/build', tree, { branchRoot: '/branches/b-1' });
+    assert.equal((await rooted('mcp__treenix__set_node', { path: '/company/doc' })).behavior, 'allow');
+  });
+
+  it('/.branch maps to the real branch node for policy evaluation', async () => {
+    const tree = await policyTree({ allow: ['mcp__treenix__execute:*:/branches/*'] });
+    const rooted = createCanUseTool('build', '/agents/build', tree, { branchRoot: '/branches/b-1' });
+    assert.equal((await rooted('mcp__treenix__execute', { path: '/.branch', action: 'requestMerge' })).behavior, 'allow');
+  });
+
+  it('merge escalates over the branch allow on translated subjects', () => {
+    const policy = {
+      allow: ['mcp__treenix__execute:*:/branches/*'],
+      deny: [],
+      escalate: ['mcp__treenix__execute:merge:/branches/*'],
+    };
+    // Exactly the subject list a branch-rooted execute('/.branch','merge') produces.
+    const subjects = ['mcp__treenix__execute:merge:/branches/b-1', 'mcp__treenix__execute:merge', 'mcp__treenix__execute'];
+    assert.equal(resolveVerdict(policy, subjects), 'escalate');
   });
 });

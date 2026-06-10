@@ -3,7 +3,7 @@
 // workload itself cannot tamper with scopeMode/scopeRef. Mode starts as 'plan';
 // flipping to 'work' is a separate admin/system action invoked when AiPlan.approvePlan runs.
 
-import { createNode, R, W, A, S } from '@treenx/core';
+import { createNode, getComponentByName, R, W, A, S } from '@treenx/core';
 import { createSession, sessionPath } from '@treenx/core/security/auth';
 import { OpError } from '@treenx/core/errors';
 import type { Tree } from '@treenx/core/tree';
@@ -20,6 +20,10 @@ export type MintOpts = {
   ttlMs?: number;
   /** Named-component key on the agent-port node holding the AgentScope. */
   scopeKey?: string;
+  /** Branch the session is rooted into ('/' = <branch>/tree at the MCP layer).
+   *  A branch is a valid boundary on its own — with it, the agent-port scope
+   *  component becomes optional. */
+  branch?: string;
 };
 
 export type MintResult = {
@@ -39,9 +43,10 @@ export async function mintWorkloadToken(tree: Tree, opts: MintOpts): Promise<Min
 
   const port = await tree.get(opts.agentPath);
   if (!port) throw new OpError('NOT_FOUND', `agent-port not found: ${opts.agentPath}`);
-  const scope = (port as Record<string, unknown>)[scopeKey];
-  if (!scope || typeof scope !== 'object') {
-    throw new OpError('BAD_REQUEST', `agent-port has no ${scopeKey} component: ${opts.agentPath}`);
+  // A workload session must carry SOME boundary: a capability scope or a branch.
+  const scope = getComponentByName(port, scopeKey);
+  if (!scope && !opts.branch) {
+    throw new OpError('BAD_REQUEST', `agent-port has no ${scopeKey} component (and no branch given): ${opts.agentPath}`);
   }
 
   const runId = lastSegment(opts.runPath);
@@ -65,9 +70,8 @@ export async function mintWorkloadToken(tree: Tree, opts: MintOpts): Promise<Min
     ...sessionNode,
     taskPath: opts.taskPath,
     runPath: opts.runPath,
-    scopeRef: opts.agentPath,
-    scopeKey,
-    scopeMode: mode,
+    ...(scope ? { scopeRef: opts.agentPath, scopeKey, scopeMode: mode } : {}),
+    ...(opts.branch ? { branch: opts.branch } : {}),
     // Explicit admin-only ACL — fail-closed against later code that might widen sessions.
     $acl: [{ g: 'admins', p: R | W | A | S }],
   });

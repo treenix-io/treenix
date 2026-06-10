@@ -9,9 +9,11 @@ import { getComponent, resolve } from '@treenx/core';
 import { matchesAny } from '@treenx/core/glob';
 import type { CatalogActionDoc, CatalogEntry, CatalogPropertyDoc } from '@treenx/core/schema/catalog';
 import type { MethodSchema, PropertySchema, TypeSchema } from '@treenx/core/schema/types';
+import { OpError } from '@treenx/core/errors';
 import { executeAction } from '@treenx/core/server/actions';
 import { buildClaims, resolveToken, type Session, withAcl } from '@treenx/core/security/auth';
 import { resolveRef, type Tree } from '@treenx/core/tree';
+import { createRepathTree } from '@treenx/core/tree/repath';
 import { randomUUID } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
 import { z } from 'zod/v3';
@@ -421,51 +423,102 @@ async function resolveTargetNode(tree: Tree, targetPath: string) {
   return resolveRef(tree, raw);
 }
 
+/** Appended to FORBIDDEN mutation errors for non-branch-rooted agent sessions —
+ *  documentation delivered at the moment of failure, so an ad-hoc agent
+ *  self-corrects without a human. */
+export const BRANCH_HINT =
+  "The live tree is read-only for agents. Work in a branch: read /branches for the workflow — "
+  + "execute('/branches', 'create', { title }) → write under <branch>/tree/... → execute 'requestMerge'.";
+
+const MUTATING_TOOLS = new Set(['set_node', 'remove_node', 'execute', 'deploy_prefab']);
+
 export async function buildMcpServer(store: Tree, session: Session, claims?: string[], opts: McpServerBuildOpts = {}) {
   claims ??= session.claims ?? await buildClaims(store, session.userId);
   const aclStore = withAcl(store, session.userId, claims);
+
+  // Branch-rooted session (mintWorkloadToken --branch): '/' IS the branch view.
+  // Reads fall through to live inside the mount; writes land in the delta; the
+  // agent needs zero knowledge of branch paths. /.branch (control window) is
+  // re-targeted to the REAL branch node below — its delta is unreachable from
+  // view coordinates by design.
+  const branch = typeof (session as Record<string, unknown>).branch === 'string' && (session as Record<string, unknown>).branch
+    ? (session as Record<string, unknown>).branch as string
+    : '';
+  const tree = branch ? createRepathTree(aclStore, '/', `${branch}/tree`) : aclStore;
+
   const targetPath = opts.target ?? '/sys/mcp/tools';
-  const targetNode = await resolveTargetNode(aclStore, targetPath);
+  const targetNode = await resolveTargetNode(tree, targetPath);
   const schema = (resolve(targetNode.$type, 'schema') as (() => TypeSchema) | null)?.();
   if (!schema?.methods) throw new Error(`MCP target type has no methods: ${targetNode.$type}`);
 
   const mcp = new McpServer({ name: 'treenix', version: '1.0.0' });
 
+  // Guardian judges REAL effect: in a branch-rooted session view paths are
+  // translated before policy evaluation, so path-scoped rules (allow
+  // set_node:/branches/*, escalate execute:merge:/branches/*) see the actual
+  // write target instead of the view alias.
+  const realForPolicy = (p: unknown): unknown =>
+    branch && typeof p === 'string' && p.startsWith('/')
+      ? (p === '/.branch' ? branch : `${branch}/tree${p === '/' ? '' : p}`)
+      : p;
+  function policyArgs(args: Record<string, unknown>): Record<string, unknown> {
+    if (!branch) return args;
+    const out = { ...args };
+    if ('path' in out) out.path = realForPolicy(out.path);
+    if ('target' in out) out.target = realForPolicy(out.target);
+    if ('source' in out) out.source = realForPolicy(out.source);
+    return out;
+  }
+
   /** Check guardian policy; block on escalation until human approves */
   async function guarded(tool: string, args: Record<string, unknown>) {
-    const guard = await checkMcpGuardian(store, { tool, args });
+    const guard = await checkMcpGuardian(store, { tool, args: policyArgs(args) });
     return guardBlock(guard, store, session.userId, mcp);
   }
 
   for (const [action, method] of Object.entries(schema.methods)) {
     const handler = async (args: Record<string, unknown>) => {
-      if (await callIsGuarded(aclStore, targetNode.$type, action, method, args)) {
-        const blocked = await guarded(action, { target: targetNode.$path, ...args });
-        if (blocked) return blocked;
-      }
-      const delegated = delegatedActionCall(method, args);
-      if (delegated) {
+      try {
+        if (await callIsGuarded(tree, targetNode.$type, action, method, args)) {
+          const blocked = await guarded(action, { target: targetNode.$path, ...args });
+          if (blocked) return blocked;
+        }
+        const delegated = delegatedActionCall(method, args);
+        if (delegated) {
+          // Control plane escapes the overlay: /.branch actions run against the
+          // REAL branch node on the non-rooted store (diff/merge need the delta,
+          // which view coordinates cannot address).
+          const controlTarget = branch && delegated.path === '/.branch';
+          const result = await executeAction(
+            controlTarget ? aclStore : tree,
+            controlTarget ? branch : delegated.path,
+            delegated.type,
+            delegated.key,
+            delegated.action,
+            delegated.data,
+            { userId: session.userId, claims },
+          );
+          return text(typeof result === 'string' ? result : yaml(result ?? { ok: true }));
+        }
         const result = await executeAction(
-          aclStore,
-          delegated.path,
-          delegated.type,
-          delegated.key,
-          delegated.action,
-          delegated.data,
+          tree,
+          targetNode.$path,
+          targetNode.$type,
+          undefined,
+          action,
+          methodPayload(method, args),
           { userId: session.userId, claims },
         );
         return text(typeof result === 'string' ? result : yaml(result ?? { ok: true }));
+      } catch (err) {
+        // Teaching error: a live-write denial should point the agent at the
+        // branch workflow. Branch-rooted sessions never need it (their writes
+        // are already confined), so the hint fires only for plain sessions.
+        if (!branch && MUTATING_TOOLS.has(action) && err instanceof OpError && err.code === 'FORBIDDEN') {
+          throw new OpError('FORBIDDEN', `${err.message}\n\n${BRANCH_HINT}`);
+        }
+        throw err;
       }
-      const result = await executeAction(
-        aclStore,
-        targetNode.$path,
-        targetNode.$type,
-        undefined,
-        action,
-        methodPayload(method, args),
-        { userId: session.userId, claims },
-      );
-      return text(typeof result === 'string' ? result : yaml(result ?? { ok: true }));
     };
     mcp.tool(action, actionDescription(action, method), methodInputSchema(method).shape, handler);
   }

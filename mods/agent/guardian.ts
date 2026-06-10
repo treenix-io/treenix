@@ -496,7 +496,15 @@ export function createCanUseTool(
   role: string,
   agentPath: string,
   store?: Tree,
-  opts?: { readOnly?: boolean },
+  opts?: {
+    readOnly?: boolean;
+    /** Branch path the run is rooted into. Tool args carry VIEW paths ('/x'
+     *  means <branch>/tree/x, '/.branch' means the branch node) — translate
+     *  them to REAL paths before policy evaluation, so path-scoped rules
+     *  (allow set_node:/branches/*, escalate execute:merge:/branches/*)
+     *  judge the actual write target. */
+    branchRoot?: string;
+  },
 ) {
   const allow = (): PermissionResult => ({ behavior: 'allow' });
   const deny = (message: string): PermissionResult => ({ behavior: 'deny', message });
@@ -654,9 +662,16 @@ export function createCanUseTool(
 
     // Non-Bash tools — build ordered subjects (most specific → least)
     // Same format as MCP buildSubjects: tool:action:path, tool:action, tool:path, tool
+    const viewToReal = (p: string): string => {
+      const root = opts?.branchRoot;
+      if (!root || !p.startsWith('/')) return p;
+      if (p === '/.branch') return root;
+      return `${root}/tree${p === '/' ? '' : p}`;
+    };
     const action = typeof input.action === 'string' && input.action ? input.action : null;
-    const target = typeof input.path === 'string' && input.path ? input.path
+    const rawTarget = typeof input.path === 'string' && input.path ? input.path
       : typeof input.target === 'string' && input.target ? input.target : null;
+    const target = rawTarget ? viewToReal(rawTarget) : null;
     const subjects: string[] = [];
     if (action && target) subjects.push(`${toolName}:${action}:${target}`);
     if (action) subjects.push(`${toolName}:${action}`);
