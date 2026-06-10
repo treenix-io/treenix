@@ -134,7 +134,8 @@
       "arguments": []
     },
     "requestMerge": {
-      "description": "Flip to review and file an approval inbox item for a human",
+      "description": "Mark the branch ready for human review and merge.",
+      "title": "Status is the source of truth; the approval inbox entry is filed by the",
       "arguments": [
         {
           "name": "data",

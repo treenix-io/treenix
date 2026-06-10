@@ -1,4 +1,4 @@
-import { A, makeNode, R, register, S, W, type NodeData } from '@treenx/core';
+import { A, getComponentByName, makeNode, R, register, S, W, type NodeData } from '@treenx/core';
 import { registerType } from '@treenx/core/comp';
 import { OpError } from '@treenx/core/errors';
 import { withMounts } from '@treenx/core/mount';
@@ -8,6 +8,7 @@ import { createMemoryTree, type Tree } from '@treenx/core/tree';
 import { BRANCH_DELTA_TYPE, BRANCH_WHITEOUT_TYPE } from '@treenx/core/tree/branch';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { fileMergeApprovals } from './approvals';
 import type { DiffEntry } from './types';
 import './seed';
 import './types';
@@ -92,7 +93,7 @@ describe('branch mod: create + mounted view', () => {
 
     assert.equal((await tree.get(`${branchPath}/delta`))?.$type, 't.dir');
     const mountNode = await tree.get(`${branchPath}/tree`);
-    assert.equal((mountNode?.mount as { $type?: string } | undefined)?.$type, 't.mount.branch');
+    assert.equal(getComponentByName(mountNode!, 'mount')?.$type, 't.mount.branch');
   });
 
   it('create without session user and without explicit owner fails loud', async () => {
@@ -226,24 +227,57 @@ describe('branch mod: diff + abandon', () => {
 type MergeResult = { merged: number; applied: string[]; conflicts: { path: string; expectedRev: number | null; actualRev: number | null }[] };
 
 describe('branch mod: requestMerge + merge', () => {
-  it('requestMerge files an approval with branchRef and flips to review', async () => {
+  it('requestMerge flips status only; the approval is filed by the watcher', async () => {
     const { tree, branchPath } = await setup();
 
-    const { approval } = await executeAction<{ approval: string }>(
-      tree, branchPath, undefined, undefined, 'requestMerge', { note: 'please review' }, ACTOR,
-    );
+    await executeAction(tree, branchPath, undefined, undefined, 'requestMerge', { note: 'please review' }, ACTOR);
 
     assert.equal((await tree.get(branchPath))?.status, 'review');
-    const node = await tree.get(approval);
-    assert.equal(node?.$type, 'ai.approval');
-    assert.equal(node?.branchRef, branchPath);
-    assert.equal(node?.status, 'pending');
-    assert.equal(node?.tool, 'branch.merge');
+    const before = await tree.getChildren('/guardian/approvals');
+    assert.equal(before.items.length, 0, 'requestMerge itself writes no approval node');
 
     await assert.rejects(
       executeAction(tree, branchPath, undefined, undefined, 'requestMerge', undefined, ACTOR),
       isCode('CONFLICT'),
     );
+
+    // The orchestrator watcher projects status=review into the inbox — once.
+    assert.equal(await fileMergeApprovals(tree), 1);
+    assert.equal(await fileMergeApprovals(tree), 0);
+    const { items } = await tree.getChildren('/guardian/approvals');
+    assert.equal(items.length, 1);
+    assert.equal(items[0].$type, 'ai.approval');
+    assert.equal(items[0].branchRef, branchPath);
+    assert.equal(items[0].status, 'pending');
+    assert.equal(items[0].tool, 'branch.merge');
+  });
+
+  it('/.branch control window: read, list, act on the REAL branch from inside the view', async () => {
+    const { root, tree, branchPath, view } = await setup();
+    const self = `${view}/.branch`;
+
+    const ctl = await tree.get(self);
+    assert.equal(ctl?.$type, 't.branch');
+    assert.equal(ctl?.status, 'open');
+    assert.equal(ctl?.owner, OWNER);
+
+    const { items } = await tree.getChildren(view);
+    assert.ok(items.some(n => n.$path === self), '/.branch listed in the view root');
+
+    // diff through the window sees the branch's own delta
+    await tree.set(makeNode(`${view}/company/doc`, 'branchtest.doc', { title: 'wip', count: 3 }));
+    const { entries } = await executeAction<{ entries: DiffEntry[] }>(
+      tree, self, undefined, undefined, 'diff', undefined, ACTOR,
+    );
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].path, '/company/doc');
+
+    // requestMerge through the window flips the REAL node, not a delta copy
+    await executeAction(tree, self, undefined, undefined, 'requestMerge', undefined, ACTOR);
+    assert.equal((await root.get(branchPath))?.status, 'review');
+    assert.equal(await root.get(`${branchPath}/delta${branchPath}`), undefined, 'no delta copy of the branch node');
+
+    await assert.rejects(tree.remove(self), isCode('FORBIDDEN'));
   });
 
   it('clean merge applies create/set/remove, skips noop, journals revs via OCC', async () => {

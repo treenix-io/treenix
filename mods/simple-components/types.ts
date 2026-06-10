@@ -134,6 +134,18 @@ export class TTimeTrack {
 
 registerType('simple.time-track', TTimeTrack);
 
+// ── Description ──
+
+/** Plain-text description — universal self-documentation for any node.
+ *  Agent-facing surfaces (prompt composers, MCP reads) treat it as
+ *  instructions for working with the subtree it sits on. */
+export class TDescription {
+  /** @format textarea */
+  text = '';
+}
+
+registerType('t.description', TDescription);
+
 // ── Attachable component registry ──
 
 export interface AttachableComponent {
@@ -146,6 +158,7 @@ export interface AttachableComponent {
 }
 
 export const ATTACHABLE_COMPONENTS: AttachableComponent[] = [
+  { type: 't.description', key: 'description', label: 'Description', description: 'Free-text description / instructions for this node', icon: '📝', defaults: { text: '' } },
   { type: 'simple.checklist', key: 'checklist', label: 'Checklist', description: 'Todo items with progress tracking', icon: '☑', defaults: { items: [] } },
   { type: 'simple.tags', key: 'tags', label: 'Tags', description: 'Colored labels for categorization', icon: '🏷', defaults: { items: [] } },
   { type: 'simple.estimate', key: 'estimate', label: 'Estimate', description: 'Time or effort estimation', icon: '⏱', defaults: { value: 0, unit: 'hours' } },

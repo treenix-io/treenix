@@ -32,6 +32,16 @@ export type ConflictEntry = { path: string; expectedRev: number | null; actualRe
 
 const parentOf = (p: string) => p.slice(0, p.lastIndexOf('/')) || '/';
 
+// Actions invoked through the /.branch control window carry the WINDOW path as
+// node identity; delta/live live at the real branch path. (Branch-rooted
+// sessions cannot reach the delta at all — their /.branch executes are
+// re-targeted to the real path by the MCP layer before they get here.)
+const SELF_SUFFIX = '/tree/.branch';
+
+function realBranchPath(nodePath: string): string {
+  return nodePath.endsWith(SELF_SUFFIX) ? nodePath.slice(0, -SELF_SUFFIX.length) : nodePath;
+}
+
 // Thread the action's actor into tree writes so withAudit records the span
 // (one requestId per merge). Structural check + boundary cast — ExecCtx keys
 // are untyped (same decode pattern as audit's getActor).
@@ -97,7 +107,7 @@ export class Branches {
     await ctx.tree.set(branchNode);
     await ctx.tree.set(makeNode(`${path}/delta`, 'dir'));
     await ctx.tree.set(makeNode(`${path}/tree`, 'dir', undefined, {
-      mount: { $type: 't.mount.branch' },
+      '#mount': { $type: 't.mount.branch' },
     }));
     return { path };
   }
@@ -117,7 +127,7 @@ export class Branch {
   /** @description List the branch's changes against live (does not mutate) */
   async diff(): Promise<{ entries: DiffEntry[] }> {
     const ctx = getCtx();
-    return { entries: await collectDiff(ctx.tree, ctx.node.$path, this.base) };
+    return { entries: await collectDiff(ctx.tree, realBranchPath(ctx.node.$path), this.base) };
   }
 
   /** @description Close the branch without merging. Delta stays as the record. */
@@ -126,29 +136,18 @@ export class Branch {
     this.status = 'abandoned';
   }
 
-  /** @description Flip to review and file an approval inbox item for a human */
-  async requestMerge(data?: { note?: string }) {
+  /** @description Mark the branch ready for human review and merge.
+   *  Status is the source of truth; the approval inbox entry is filed by the
+   *  orchestrator watcher (fileMergeApprovals) as a REACTION to status=review —
+   *  a dual write from here would land in the branch's own delta when invoked
+   *  through a branch-rooted session (/.branch). */
+  requestMerge(data?: { note?: string }) {
     if (this.status !== 'open') {
       throw new OpError('CONFLICT', `cannot request merge in status "${this.status}"`);
     }
-    const ctx = getCtx();
-    const id = `m-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-    const path = `/guardian/approvals/${id}`;
-    // Approval node first — if this write fails, status stays 'open'.
-    await ctx.tree.set(makeNode(path, 'ai.approval', {
-      agentPath: ctx.node.$path,
-      agentRole: 'branch-owner',
-      tool: 'branch.merge',
-      input: data?.note ?? this.title,
-      inputTruncated: false,
-      status: 'pending' as const,
-      reason: 'merge review',
-      createdAt: Date.now(),
-      resolvedAt: 0,
-      branchRef: ctx.node.$path,
-    }), actorCtxOf(ctx));
+    if (data?.note) this.title = this.title ? `${this.title} — ${data.note}` : data.note;
     this.status = 'review';
-    return { approval: path };
+    return { status: 'review' as const };
   }
 
   /** @description Merge the branch into live. Run by an approver — agents hold
@@ -160,7 +159,7 @@ export class Branch {
       throw new OpError('CONFLICT', `cannot merge branch in status "${this.status}"`);
     }
     const ctx = getCtx();
-    const entries = await collectDiff(ctx.tree, ctx.node.$path, this.base);
+    const entries = await collectDiff(ctx.tree, realBranchPath(ctx.node.$path), this.base);
 
     const conflicts: ConflictEntry[] = [];
     for (const e of entries) {
@@ -270,6 +269,64 @@ function guardSubtree(inner: Tree, deniedRoot: string): Tree {
   };
 }
 
+// ── /.branch — the branch's own control window (Plan9 /proc/self) ──
+// Data plane (overlay) and control plane (branch lifecycle) are different
+// planes: a requestMerge routed through the overlay would change status only
+// inside the branch's own delta. The window proxies the reserved view path
+// <mount>/.branch to the REAL t.branch node, bypassing the overlay, so a
+// branch-rooted agent can read its status and run diff/requestMerge/abandon.
+export const BRANCH_SELF = '.branch';
+
+function withControlWindow(view: Tree, store: Tree, branchPath: string, mountPath: string): Tree {
+  const SELF = `${mountPath}/${BRANCH_SELF}`;
+
+  async function selfNode(c?: unknown): Promise<NodeData | undefined> {
+    const real = await store.get(branchPath, c);
+    return real ? { ...real, $path: SELF } : undefined;
+  }
+
+  return {
+    ...view,
+    async get(path, c) {
+      if (path === SELF) return selfNode(c);
+      return view.get(path, c);
+    },
+    async getChildren(path, opts, c) {
+      const page = await view.getChildren(path, opts, c);
+      if (path === mountPath) {
+        const self = await selfNode(c);
+        if (self) {
+          page.items = [self, ...page.items];
+          page.total += 1;
+        }
+      }
+      return page;
+    },
+    ...(view.scanChildren ? {
+      async *scanChildren(path: string, opts?: Parameters<NonNullable<Tree['scanChildren']>>[1], c?: unknown) {
+        // '.' (0x2e) sorts before alphanumerics — prepending keeps ASC order.
+        if (path === mountPath) {
+          const self = await selfNode(c);
+          if (self) yield { node: self, cursor: self.$path };
+        }
+        yield* view.scanChildren!(path, opts, c);
+      },
+    } : {}),
+    async set(node, c) {
+      if (node.$path === SELF) return store.set({ ...node, $path: branchPath }, c);
+      return view.set(node, c);
+    },
+    async patch(path, ops, c) {
+      if (path === SELF) return store.patch(branchPath, ops, c);
+      return view.patch(path, ops, c);
+    },
+    async remove(path, c) {
+      if (path === SELF) throw new OpError('FORBIDDEN', 'the branch control node cannot be removed from inside the view');
+      return view.remove(path, c);
+    },
+  };
+}
+
 register(MountBranch, 'mount', async (_mount, ctx: MountCtx) => {
   const branchPath = parentOf(ctx.path);
   const branchesRoot = parentOf(branchPath);
@@ -309,5 +366,5 @@ register(MountBranch, 'mount', async (_mount, ctx: MountCtx) => {
 
   const lower = createRepathTree(wrapReadOnlyTree(guardSubtree(projected, branchesRoot)), ctx.path, base);
   const upper = createRepathTree(store, ctx.path, `${branchPath}/delta`);
-  return createBranchTree(upper, lower);
+  return withControlWindow(createBranchTree(upper, lower), store, branchPath, ctx.path);
 });

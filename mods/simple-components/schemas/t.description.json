@@ -1,0 +1,17 @@
+{
+  "$id": "t.description",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Plain-text description — universal self-documentation for any node.",
+  "description": "Agent-facing surfaces (prompt composers, MCP reads) treat it as instructions for working with the subtree it sits on.",
+  "properties": {
+    "text": {
+      "type": "string",
+      "format": "textarea",
+      "default": ""
+    }
+  },
+  "required": [
+    "text"
+  ]
+}
