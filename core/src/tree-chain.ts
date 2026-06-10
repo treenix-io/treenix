@@ -1,6 +1,10 @@
 // treeChain — tree-aware Proxy chain
 // Navigate tree via dots, auto-follow refs, execute actions, typed components.
 // Layer L2: uses Tree (L1) + comp (L2). No server dependency.
+//
+// KEPT BY DESIGN (owner decision 2026-06-10): zero importers today, but this stays
+// as the intended server-side tree-scripting surface — do not delete as dead code.
+// Server-side only: resolves action handlers directly, without the session/ACL envelope.
 
 import { type Class, type Raw, type TypeClass } from '#comp';
 import { getComponent, getComponentByName, isRef, type NodeData, normalizeType, resolve } from '#core';
