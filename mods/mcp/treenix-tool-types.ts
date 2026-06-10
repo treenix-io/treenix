@@ -51,6 +51,8 @@ export class TreenixMcpTools {
     key?: string;
     /** @description Action input payload. */
     data?: Record<string, unknown>;
+    /** @description Idempotency key: retries with the same opId return the first execution's result instead of re-applying. Use one unique opId per logical operation when retrying on timeout. */
+    opId?: string;
   }) {}
 
   /** @write @description Deploy a module prefab to a target path. Idempotent: skips existing nodes. */

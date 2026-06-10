@@ -11,6 +11,7 @@ import { validateValue, type ValidationError } from '#comp/validate';
 import { type TypeSchema } from '#schema/types';
 import { type PatchOp, PatchTestError, type Tree } from '#tree';
 import { createDraft, enablePatches, finishDraft, type Patch } from 'immer';
+import { createBoundedCache } from '#util/bounded-cache';
 import { createPathLock } from '#util/path-lock';
 import { OpError } from '#errors';
 import { readonlyProxy, wrapReadOnlyTree } from './readonly-tree';
@@ -369,14 +370,43 @@ async function resolveActionHandler(
 // Per-path lock prevents lost updates from concurrent mutations on the same node.
 const lockAction = createPathLock();
 
-export async function executeAction<T = unknown>(
+export type ActionOpts = { userId?: string | null; claims?: string[]; actor?: ActorContext };
+
+// Idempotency (Stripe model): a replayed opId returns the first execution's
+// settled outcome instead of re-applying. Agents retry on timeout by nature,
+// and a timed-out action may still have committed — without this every retry
+// double-applies (core-gk8.2). Failed executions are cached too: the retry
+// observes the same error rather than applying a second time. opIds are
+// client-generated and must be unique per logical operation.
+const opResults = createBoundedCache<string, Promise<unknown>>(1000);
+
+export function executeAction<T = unknown>(
   tree: Tree,
   path: string,
   componentType: string | undefined,
   componentKey: string | undefined,
   action: string,
   data?: unknown,
-  opts?: { userId?: string | null; claims?: string[]; actor?: ActorContext },
+  opts?: ActionOpts & { opId?: string },
+): Promise<T> {
+  const opId = opts?.opId;
+  if (!opId) return runAction<T>(tree, path, componentType, componentKey, action, data, opts);
+
+  const prior = opResults.get(opId);
+  if (prior) return prior as Promise<T>;
+  const run = runAction<T>(tree, path, componentType, componentKey, action, data, opts);
+  opResults.set(opId, run);
+  return run;
+}
+
+async function runAction<T = unknown>(
+  tree: Tree,
+  path: string,
+  componentType: string | undefined,
+  componentKey: string | undefined,
+  action: string,
+  data?: unknown,
+  opts?: ActionOpts,
 ): Promise<T> {
   return lockAction(path, async () => {
   const { node, handler, type, deps, fieldKey } = await resolveActionHandler(
@@ -488,7 +518,7 @@ export async function* executeStream(
   action: string,
   data?: unknown,
   signal?: AbortSignal,
-  opts?: { userId?: string | null; claims?: string[]; actor?: ActorContext },
+  opts?: ActionOpts,
 ): AsyncGenerator<unknown> {
   const { node, handler, type, comp, deps } = await resolveActionHandler(
     tree, path, componentType, componentKey, action,

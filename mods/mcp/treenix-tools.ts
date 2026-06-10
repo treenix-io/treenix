@@ -106,12 +106,13 @@ class TreenixMcpToolsServer extends TreenixMcpTools {
   }
 
   /** Execute an action on a node or component. Actions are methods registered on types. May require Guardian approval. */
-  async execute(data: { path: string; action: string; type?: string; key?: string; data?: Record<string, unknown> }) {
+  async execute(data: { path: string; action: string; type?: string; key?: string; data?: Record<string, unknown>; opId?: string }) {
     assertSafePath(data.path); // R5-MCP-3
     const { tree, userId, claims } = getCtx();
     const result = await executeAction(tree, data.path, data.type, data.key, data.action, data.data, {
       userId: userId as string | null | undefined,
       claims: claims as string[] | undefined,
+      opId: data.opId,
     });
     return yaml(result ?? { ok: true });
   }

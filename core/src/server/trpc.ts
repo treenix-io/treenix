@@ -59,7 +59,7 @@ const patchOps = z.array(z.union([
 export type SessionExecutor = (
   tree: Tree,
   session: Session,
-  input: { path: string; type?: string; key?: string; action: string; data?: unknown },
+  input: { path: string; type?: string; key?: string; action: string; data?: unknown; opId?: string },
 ) => Promise<unknown>;
 
 export type TreeRouterOpts = {
@@ -117,10 +117,10 @@ export function createTreeRouter(tree: Tree, systemTree: Tree, watcher: WatchMan
         message: 'workload session present but no executor configured' });
     }
     const dispatch = isWorkload
-      ? (path: string, key: string | undefined, action: string, data?: unknown) =>
-          opts!.executor!(userTree, session, { path, type: undefined, key, action, data })
-      : (path: string, key: string | undefined, action: string, data?: unknown) =>
-          executeAction(userTree, path, undefined, key, action, data, { userId, claims });
+      ? (path: string, key: string | undefined, action: string, data?: unknown, opId?: string) =>
+          opts!.executor!(userTree, session, { path, type: undefined, key, action, data, opId })
+      : (path: string, key: string | undefined, action: string, data?: unknown, opId?: string) =>
+          executeAction(userTree, path, undefined, key, action, data, { userId, claims, opId });
     const tp = createTreeP(userTree, dispatch);
     return next({ ctx: { ...ctx, tree: userTree, tp, claims } });
   });
@@ -235,12 +235,13 @@ export function createTreeRouter(tree: Tree, systemTree: Tree, watcher: WatchMan
           action: z.string(),
           data: z.unknown().optional(),
           watch: z.boolean().optional(), // subscribe to paths returned in result
+          opId: z.string().min(1).max(128).optional(), // idempotency key — replays return the first result
         }),
       )
       .mutation(async ({ input, ctx }) => {
         // Build action URI: /path#[key.]action()
         const frag = input.key ? `${input.key}.${input.action}` : input.action;
-        const result = await ctx.tp.set(`${input.path}#${frag}()`, input.data);
+        const result = await ctx.tp.set(`${input.path}#${frag}()`, input.data, { opId: input.opId });
         if (input.watch && ctx.session) {
           // R4-MOUNT-5: action result is handler-controlled (incl. dynamic actions running in
           // QuickJS). Paths fed into watcher.watch must be (a) shape-validated (assertSafePath),

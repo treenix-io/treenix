@@ -10,12 +10,12 @@ import { parseURI, deriveURI } from '#uri'
 
 export type ActionExecutor = (
   path: string, key: string | undefined,
-  action: string, data?: unknown,
+  action: string, data?: unknown, opId?: string,
 ) => Promise<unknown>
 
 export interface TreeP {
   get(uri: string, opts?: { children?: boolean; limit?: number; offset?: number; depth?: number }): Promise<unknown>
-  set(uri: string, data?: unknown): Promise<unknown>
+  set(uri: string, data?: unknown, opts?: { opId?: string }): Promise<unknown>
   remove(uri: string): Promise<void>
 }
 
@@ -101,7 +101,7 @@ export function createTreeP(tree: Tree, execute?: ActionExecutor): TreeP {
       return hasFragment ? deriveURI(node, parsed) : node
     },
 
-    async set(uri, data) {
+    async set(uri, data, opts) {
       const parsed = safeParse(uri)
 
       if (isChildrenPath(parsed)) {
@@ -109,7 +109,7 @@ export function createTreeP(tree: Tree, execute?: ActionExecutor): TreeP {
       }
       if (parsed.action) {
         if (!execute) throw badRequest('Action dispatch not configured', `No executor for ${uri}`, parsed.path)
-        return execute(parsed.path, parsed.key, parsed.action, data)
+        return execute(parsed.path, parsed.key, parsed.action, data, opts?.opId)
       }
 
       // Field set → patch
