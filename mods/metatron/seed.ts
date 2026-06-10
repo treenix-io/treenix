@@ -14,7 +14,6 @@ Use your MCP tools: get_node, list_children, set_node, remove_node, execute, dep
 Be concise. Be proactive. Be smart.`,
     currentTask: '',
     currentRun: '',
-    trustLevel: 3,
     lastRunAt: 0,
     totalTokens: 0,
     chat: { $type: 'ai.chat', streaming: false, sessionId: '' },

@@ -21,19 +21,6 @@
       ],
       "default": "offline"
     },
-    "trustLevel": {
-      "type": "number",
-      "enum": [
-        0,
-        1,
-        2,
-        3,
-        4
-      ],
-      "title": "Trust level (metadata only — not enforced by guardian yet).",
-      "description": "0=sandbox 1=observer 2=worker 3=operator 4=admin",
-      "default": 2
-    },
     "model": {
       "type": "string",
       "default": "claude-opus-4-6"
@@ -66,7 +53,6 @@
   "required": [
     "role",
     "status",
-    "trustLevel",
     "model",
     "systemPrompt",
     "currentTask",

@@ -36,7 +36,6 @@ registerPrefab('agent', 'seed', [
   // MCP agent identity
   { $path: 'agents/mcp', $type: 'ai.agent',
     role: 'mcp', status: 'idle', currentTask: '', currentRun: '',
-    trustLevel: 1,
     lastRunAt: 0, totalTokens: 0,
     policy: {
       $type: 'ai.policy',
@@ -61,7 +60,6 @@ Your job: run tests, check for errors, verify code quality.
 Be concise. Facts only.`,
     currentTask: '',
     currentRun: '',
-    trustLevel: 2,
     lastRunAt: 0,
     totalTokens: 0,
     chat: { $type: 'ai.chat', streaming: false, sessionId: '' },

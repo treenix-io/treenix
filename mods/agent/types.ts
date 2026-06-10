@@ -115,9 +115,8 @@ export class AiAgent {
   /** Open-ended role string. Guardian policies keyed by role. */
   role = 'qa';
   status: AgentStatus = 'offline';
-  /** Trust level (metadata only — not enforced by guardian yet).
-   * 0=sandbox 1=observer 2=worker 3=operator 4=admin */
-  trustLevel: 0 | 1 | 2 | 3 | 4 = 2;
+  // trustLevel removed (core-p95): it was metadata the guardian never read —
+  // decorative security. Per-agent strictness lives in the AiPolicy cascade.
   model = 'claude-opus-4-6';
   /** @format textarea */
   systemPrompt = '';
