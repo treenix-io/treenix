@@ -5,9 +5,13 @@ Write-isolated futures over the live tree. Overlay mechanics live in
 lifecycle. Design: `core` repo `docs/engine/branches-plan.md`, epic core-wm6.
 
 ### Files
-- **types.ts** — `t.branches` (container, `create`), `t.branch` (`diff`, `abandon`;
-  merge/requestMerge come with core-wm6.3), `t.mount.branch` adapter
-- **seed.ts** — `/branches` root (admins + agents RWAS; per-branch nodes add `u:<owner>`)
+- **types.ts** — `t.branches` (container, `create`), `t.branch` (`diff`, `requestMerge`,
+  `merge`, `abandon`), `t.mount.branch` adapter, `/.branch` control window, `branchScope`
+- **approvals.ts** — `fileMergeApprovals(store)`: status=review → ai.approval inbox entry
+  (projection, filed by the orchestrator watcher; requestMerge only flips status)
+- **seed.ts** — `/branches` root + `#description` (t.description — THE agent onboarding
+  text; prompt composers inject it, ad-hoc agents read it via MCP; edit live, no deploy)
+- **view.tsx** — react diff view (red/green per entry, lifecycle buttons)
 - **schemas/** — generated, never hand-edit (`npm run schema`)
 
 ### Structure per branch
@@ -16,6 +20,16 @@ lifecycle. Design: `core` repo `docs/engine/branches-plan.md`, epic core-wm6.
 /branches/<id>/delta   wrapper nodes: t.branch.delta {baseRev, node} | t.branch.whiteout
 /branches/<id>/tree    mounted merged view — work happens here
 ```
+
+### Control plane vs data plane
+The overlay captures ALL writes — so branch lifecycle must escape it. `/.branch`
+(Plan9 /proc/self) proxies reads/writes to the REAL t.branch node; lifecycle
+actions through it use `realBranchPath()` to find delta/live. Branch-rooted MCP
+sessions (`session.branch` → '/' re-rooted to `<branch>/tree`) get `/.branch`
+executes re-targeted by the MCP layer to the real node on the non-rooted store —
+the delta is unreachable from view coordinates by design. Never expose the
+branch node as overlay DATA inside the view: nested tree addressing aliases
+delta paths, and control writes would sink into the branch's own delta.
 
 ### Load-bearing invariants
 - **Owner-projected lower**: the view reads live as `withAcl(store, owner)` —
