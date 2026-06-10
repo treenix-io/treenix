@@ -496,7 +496,10 @@ export async function buildMcpServer(store: Tree, session: Session, claims?: str
             delegated.key,
             delegated.action,
             delegated.data,
-            { userId: session.userId, claims },
+            {
+              userId: session.userId, claims,
+              actor: { id: session.userId, action: delegated.action, requestId: randomUUID() },
+            },
           );
           return text(typeof result === 'string' ? result : yaml(result ?? { ok: true }));
         }
@@ -507,7 +510,10 @@ export async function buildMcpServer(store: Tree, session: Session, claims?: str
           undefined,
           action,
           methodPayload(method, args),
-          { userId: session.userId, claims },
+          {
+            userId: session.userId, claims,
+            actor: { id: session.userId, action, requestId: randomUUID() },
+          },
         );
         return text(typeof result === 'string' ? result : yaml(result ?? { ok: true }));
       } catch (err) {

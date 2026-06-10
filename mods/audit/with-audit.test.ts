@@ -1,7 +1,9 @@
 // withAudit — Tree wrapper that appends an audit.event for every set/remove/patch.
 // Synchronous in pipeline tick: if append fails, the original mutation also fails (loud).
 
-import { R, W } from '@treenx/core';
+import { R, register, W } from '@treenx/core';
+import { registerType } from '@treenx/core/comp';
+import { executeAction } from '@treenx/core/server/actions';
 import { createPipeline } from '@treenx/core/server/server';
 import { asTreeSource, createMemoryTree, type Tree } from '@treenx/core/tree';
 import assert from 'node:assert/strict';
@@ -166,5 +168,28 @@ describe('audit pipeline wiring (core-dpp)', () => {
     await pipeline.tree.set({ $path: '/data/x', $type: 'thing', value: 7 });
     const node = await pipeline.tree.get('/data/x');
     assert.equal(node?.value, 7);
+  });
+
+  // core-gk8.5 (attribution slice): the action commit threads opts.actor into
+  // the write ctx, so the journal answers WHO — not just what.
+  it('action commits are attributed: event carries by/action/requestId from opts.actor', async () => {
+    registerType('audittest.counter', class { count = 0; bump() { this.count++; } });
+    register('audittest.counter', 'schema', () => ({
+      $id: 'audittest.counter',
+      type: 'object',
+      properties: { count: { type: 'integer' } },
+      methods: { bump: { arguments: [] } },
+    }));
+    await audited.set({ $path: '/data/c1', $type: 'audittest.counter', count: 0 });
+
+    const actor = { id: 'u-alice', action: 'bump', requestId: 'req-42' };
+    await executeAction(audited, '/data/c1', undefined, undefined, 'bump', undefined, { actor });
+
+    const events = await listAuditEvents(audited);
+    const patchEvent = events.find(e => e.op === 'patch' && e.path === '/data/c1');
+    assert.ok(patchEvent, 'action commit journaled');
+    assert.equal(patchEvent!.by, 'u-alice');
+    assert.equal(patchEvent!.action, 'bump');
+    assert.equal(patchEvent!.requestId, 'req-42');
   });
 });
