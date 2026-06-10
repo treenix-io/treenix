@@ -8,6 +8,7 @@ import { A, makeNode, type NodeData, R, register, S, W } from '@treenx/core';
 import { getCtx, registerType } from '@treenx/core/comp';
 import { OpError } from '@treenx/core/errors';
 import type { MountCtx } from '@treenx/core/mount';
+import type { ActorContext } from '@treenx/core/server/actions';
 import { buildClaims, withAcl } from '@treenx/core/security/auth';
 import { createProjector } from '@treenx/core/security/projector';
 import { wrapReadOnlyTree } from '@treenx/core/server/readonly-tree';
@@ -30,6 +31,15 @@ export type DiffEntry = {
 export type ConflictEntry = { path: string; expectedRev: number | null; actualRev: number | null };
 
 const parentOf = (p: string) => p.slice(0, p.lastIndexOf('/')) || '/';
+
+// Thread the action's actor into tree writes so withAudit records the span
+// (one requestId per merge). Structural check + boundary cast — ExecCtx keys
+// are untyped (same decode pattern as audit's getActor).
+function actorCtxOf(ctx: { [k: string]: unknown }): { actor: ActorContext } | undefined {
+  const a = ctx.actor;
+  if (a && typeof a === 'object' && 'id' in a) return { actor: a as ActorContext };
+  return undefined;
+}
 
 // Shared by diff/merge — action methods run on an Immer draft of node DATA
 // (class methods are not callable via `this` there).
@@ -136,7 +146,7 @@ export class Branch {
       createdAt: Date.now(),
       resolvedAt: 0,
       branchRef: ctx.node.$path,
-    }));
+    }), actorCtxOf(ctx));
     this.status = 'review';
     return { approval: path };
   }
@@ -172,18 +182,19 @@ export class Branch {
     // branches-plan.md) — that surfaces as CONFLICT mid-apply below.
     const applied: string[] = [];
     let current: DiffEntry | undefined;
+    const writeCtx = actorCtxOf(ctx); // one requestId across the whole span
     try {
       for (const e of entries) {
         if (e.op === 'noop') continue;
         current = e;
         if (e.op === 'remove') {
-          await ctx.tree.remove(e.path);
+          await ctx.tree.remove(e.path, writeCtx);
         } else {
           const future = e.node;
           if (!future) throw new OpError('CONFLICT', `merge: entry ${e.path} is missing its node`);
           const node: NodeData = { ...future, $path: e.path };
           if (e.baseRev !== null) node.$rev = e.baseRev;
-          await ctx.tree.set(node);
+          await ctx.tree.set(node, writeCtx);
         }
         applied.push(e.path);
       }
