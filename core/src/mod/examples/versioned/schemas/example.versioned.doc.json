@@ -1,0 +1,20 @@
+{
+  "$id": "example.versioned.doc",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Versioned document — demonstrates per-type schema migrations",
+  "properties": {
+    "body": {
+      "type": "string",
+      "default": ""
+    },
+    "words": {
+      "type": "number",
+      "default": 0
+    }
+  },
+  "required": [
+    "body",
+    "words"
+  ]
+}

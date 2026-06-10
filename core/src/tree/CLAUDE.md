@@ -9,7 +9,7 @@ Tree interface + adapters. Layer 1 — no deps except core types.
 - refs.ts — derived $refs index wrapper
 - volatile.ts — memory overlay routing for volatile nodes
 - validation.ts — schema validation wrapper
-- migration.ts — read/write migration wrapper
+- migration.ts — per-type $v migration wrapper; wraps the mounted tree (example mod: mod/examples/versioned)
 - repath.ts — path prefix remapping wrapper
 - query.ts — Query tree: virtual filtered view via sift (Mongo syntax). Used by t.mount.query
 - patch.ts — compact PatchOp tuples and RFC 6902 conversion

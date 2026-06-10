@@ -1,16 +1,33 @@
 // Per-type schema migration — normalizes nodes and components on read.
-// Migrations registered via: register(type, 'migrate', () => ({ 1: fn, 2: fn }))
-// Absent $v = version 0. Migration functions mutate the clone in-place.
+// THE mechanism mod developers use to evolve stored data shapes:
+//   register(type, 'migrate', () => ({ 1: fn, 2: fn }))
+// Absent $v = version 0. Each step mutates the clone in place; $v stamps to the
+// highest registered step after apply. Example mod: src/mod/examples/versioned.
+//
+// Position (R-gk8.29): wraps the MOUNTED tree in server.ts — above fs/mongo/
+// federation/query adapters — so every adapter's nodes migrate on read and one
+// layer covers all read verbs, current and future. The original wrapper sat
+// BELOW withMounts and only ever saw the bootstrap memory tree; the persistent
+// stores (the only data that outlives code versions) bypassed it entirely.
+// Reads write the migrated node back, so the corpus converges lazily; set()
+// stamps $v so fresh writes never re-enter the ladder.
+//
+// patch() stays delegated: re-implementing it here as get+set would break
+// mounts with native patch semantics (federation forwards ops remotely; the
+// remote migrates its own data). Every action flows through get() before
+// drafting, which converges the node first; a blind patch against a
+// never-read old-shape node applies to the stored shape — acceptable until
+// the one-commit-function unifies mutation surfaces (core-gk8.15).
 //
 // Hot path:
 //  1. checked: WeakSet — same NodeData object seen twice → instant skip
 //  2. migrationInfo: per-type cache (Map) — second time we ask "has type X
 //     any migrations?" returns cached answer (including a cached "no") without
-//     touching the registry. Cache is keyed by registry version (`getRegistryVersion()`)
-//     so any `register/unregister/replaceHandler` call invalidates it in one
-//     integer compare.
+//     touching the registry. Cache is keyed by registry version
+//     (`getRegistryVersion()`) so any register/unregister/replaceHandler call
+//     invalidates it in one integer compare.
 
-import { getRegistryVersion, isComponent, type NodeData, resolveExact } from '#core';
+import { getRegistryVersion, isCompKey, isComponent, type NodeData, resolveExact } from '#core';
 import type { Tree } from '#tree';
 
 type Migrator = (data: Record<string, unknown>) => void;
@@ -66,15 +83,14 @@ function applyMigrations(data: Record<string, unknown>, type: string): boolean {
   return true;
 }
 
-/** Check if node or any of its components need migration. */
+/** Check if node or any of its `#` components need migration. */
 function needsMigration(node: NodeData): boolean {
-  // Node-level
   const nm = getMigrations(node.$type);
   if (nm && ((node['$v'] as number) ?? 0) < nm.version) return true;
 
-  // Named components
+  // Strict namespace: only '#' keys are components; bare {$type} values are data.
   for (const key of Object.keys(node)) {
-    if (key.startsWith('$')) continue;
+    if (!isCompKey(key)) continue;
     const val = node[key];
     if (!isComponent(val)) continue;
     const cm = getMigrations(val.$type);
@@ -84,7 +100,7 @@ function needsMigration(node: NodeData): boolean {
   return false;
 }
 
-function migrateNode(node: NodeData): NodeData {
+export function migrateNode(node: NodeData): NodeData {
   if (checked.has(node)) return node;
 
   if (!needsMigration(node)) {
@@ -94,12 +110,10 @@ function migrateNode(node: NodeData): NodeData {
 
   const clone = structuredClone(node);
 
-  // Migrate node-level
   applyMigrations(clone as Record<string, unknown>, clone.$type);
 
-  // Migrate named components
   for (const key of Object.keys(clone)) {
-    if (key.startsWith('$')) continue;
+    if (!isCompKey(key)) continue;
     const val = clone[key];
     if (!isComponent(val)) continue;
     applyMigrations(val as Record<string, unknown>, val.$type);
@@ -113,7 +127,7 @@ function stampVersion(node: NodeData): void {
   if (m) node['$v'] = m.version;
 
   for (const key of Object.keys(node)) {
-    if (key.startsWith('$')) continue;
+    if (!isCompKey(key)) continue;
     const val = node[key];
     if (!isComponent(val)) continue;
     const cm = getMigrations(val.$type);
@@ -122,7 +136,7 @@ function stampVersion(node: NodeData): void {
 }
 
 export function withMigration(tree: Tree): Tree {
-  return {
+  const wrapped: Tree = {
     ...tree,
 
     async get(path, ctx) {
@@ -160,4 +174,24 @@ export function withMigration(tree: Tree): Tree {
       return tree.set(node, ctx);
     },
   };
+
+  // scanChildren is the read-runtime list path (ACL listings) — it MUST migrate
+  // too, or lists serve old shapes while get serves new ones. Override only when
+  // the inner tree exposes it; the spread already forwarded the original.
+  if (tree.scanChildren) {
+    wrapped.scanChildren = async function* (parent, opts) {
+      for await (const entry of tree.scanChildren!(parent, opts)) {
+        const migrated = migrateNode(entry.node);
+        if (migrated !== entry.node) {
+          await tree.set(migrated);
+          checked.add(migrated);
+          yield { ...entry, node: migrated };
+        } else {
+          yield entry;
+        }
+      }
+    };
+  }
+
+  return wrapped;
 }

@@ -11,6 +11,8 @@ export const R = 1,
 export type ComponentData<T = Record<string, unknown>> = T & {
   $type: string;
   $acl?: GroupPerm[];
+  /** Schema version stamped by migrations (tree/migration.ts). Absent = 0. */
+  $v?: number;
 };
 
 export type RefEntry = { t: string; f?: string; d?: ComponentData };
