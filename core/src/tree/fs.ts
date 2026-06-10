@@ -7,13 +7,37 @@ import type { NodeData } from '#core';
 import { assertValidType, safeJsonParse } from '#core';
 import { dirname as treeDirname } from '#core/path';
 import { OpError } from '#errors';
-import { mkdir, readdir, readFile, realpath, rmdir, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, open, readdir, readFile, realpath, rename, rmdir, unlink } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import sift from 'sift';
 import { scanFromCollected } from './fs-common';
 import { assertPathSafe } from './path-safety';
 import { mapNodeForSift, paginate, type TreeSource } from './index';
 import { defaultPatch } from './patch';
+
+// Atomic + durable node write: tmp file in the same dir → fsync → rename over target.
+// In-place writeFile tears on crash: a kill mid-write leaves truncated JSON at the
+// node's path and parseNode then throws forever with no repair path. rename(2) is
+// atomic on POSIX, so readers see either the old node or the new one, never a mix.
+// Orphaned tmp files from a crash are inert — readers only parse *.json / $.json.
+let tmpSeq = 0;
+export async function atomicWrite(file: string, data: string): Promise<void> {
+  const tmp = join(dirname(file), `.${process.pid}.${tmpSeq++}.tmp`);
+  const fh = await open(tmp, 'wx', 0o600);
+  try {
+    await fh.writeFile(data, 'utf-8');
+    await fh.sync();
+  } finally {
+    await fh.close();
+  }
+  try {
+    await rename(tmp, file);
+  } catch (e) {
+    // best-effort cleanup; a leftover tmp is inert (never parsed), original error wins
+    await unlink(tmp).catch(() => {});
+    throw e;
+  }
+}
 
 export async function createFsTree(rootDir: string): Promise<TreeSource> {
   await mkdir(resolve(rootDir), { recursive: true });
@@ -74,7 +98,7 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
       const dirFile = join(dir, '$.json');
       await assertPathSafe(rootDir, dirFile);
       await mkdir(dir, { recursive: true });
-      await writeFile(dirFile, data, { mode: 0o600 });
+      await atomicWrite(dirFile, data);
       await unlink(leafFile);
     } catch (e: any) {
       if (e.code !== 'ENOENT') throw e;
@@ -129,7 +153,7 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
           const leafFile = resolve(join(rootDir, current + '.json'));
           await assertPathSafe(rootDir, leafFile);
           const data = await readFile(dirFile, 'utf-8');
-          await writeFile(leafFile, data, { mode: 0o600 });
+          await atomicWrite(leafFile, data);
           await unlink(dirFile);
           await rmdir(dir);
         } else if (entries.length === 0) {
@@ -234,7 +258,7 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
           const dirFile = resolve(join(rootDir, path, '$.json'));
           await assertPathSafe(rootDir, dirFile);
           await mkdir(resolve(join(rootDir, path)), { recursive: true });
-          await writeFile(dirFile, data, { mode: 0o600 });
+          await atomicWrite(dirFile, data);
           // Clean up stale leaf form
           if (path !== '/') {
             try { await unlink(resolve(join(rootDir, path + '.json'))); } catch (e: any) { if (e.code !== 'ENOENT') throw e; }
@@ -244,7 +268,7 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
           const leafFile = resolve(join(rootDir, path + '.json'));
           await assertPathSafe(rootDir, leafFile);
           await mkdir(dirname(leafFile), { recursive: true });
-          await writeFile(leafFile, data, { mode: 0o600 });
+          await atomicWrite(leafFile, data);
           // Clean up stale dir form + empty dir
           try { await unlink(resolve(join(rootDir, path, '$.json'))); } catch (e: any) { if (e.code !== 'ENOENT') throw e; }
           try { await rmdir(resolve(join(rootDir, path))); } catch (e: any) { if (e.code !== 'ENOENT' && e.code !== 'ENOTEMPTY') throw e; }
