@@ -61,7 +61,7 @@ describe('ssrHandler', () => {
   it('returns null when t.site.mode = spa', async () => {
     const node = {
       $path: '/sys/routes/about', $type: 'page',
-      site: { $type: 't.site', state: 'published', mode: 'spa' },
+      '#site': { $type: 't.site', state: 'published', mode: 'spa' },
     } as NodeData;
     const res = await ssrHandler(req('/about'), deps(indexWith(node), emptyTree));
     assert.equal(res, null);
@@ -70,7 +70,7 @@ describe('ssrHandler', () => {
   it('404s draft pages for the public', async () => {
     const node = {
       $path: '/sys/routes/about', $type: 'page',
-      site: { $type: 't.site', state: 'draft', mode: 'static' },
+      '#site': { $type: 't.site', state: 'draft', mode: 'static' },
     } as NodeData;
     const res = await ssrHandler(req('/about'), deps(indexWith(node), emptyTree));
     assert.equal(res?.status, 404);
@@ -80,8 +80,8 @@ describe('ssrHandler', () => {
     const node = {
       $path: '/sys/routes/about', $type: 'test.handler.page',
       heading: 'About',
-      site: { $type: 't.site', state: 'draft', mode: 'static' },
-      seo: { $type: 't.seo', title: 'About — Draft' },
+      '#site': { $type: 't.site', state: 'draft', mode: 'static' },
+      '#seo': { $type: 't.seo', title: 'About — Draft' },
     } as NodeData;
     const res = await ssrHandler(
       req('/about', { preview: true, admin: true }),
@@ -97,8 +97,8 @@ describe('ssrHandler', () => {
     const node = {
       $path: '/sys/routes/about', $type: 'test.handler.page',
       heading: 'About',
-      site: { $type: 't.site', state: 'published', mode: 'static' },
-      seo: { $type: 't.seo', title: 'About Us' },
+      '#site': { $type: 't.site', state: 'published', mode: 'static' },
+      '#seo': { $type: 't.seo', title: 'About Us' },
     } as NodeData;
     const res = await ssrHandler(req('/about'), deps(indexWith(node), emptyTree));
     assert.equal(res?.status, 200);
@@ -113,8 +113,8 @@ describe('ssrHandler', () => {
     const node = {
       $path: '/sys/routes/about', $type: 'test.handler.page',
       heading: 'Hi',
-      site: { $type: 't.site', state: 'published', mode: 'hydrate' },
-      seo: { $type: 't.seo', title: 'X' },
+      '#site': { $type: 't.site', state: 'published', mode: 'hydrate' },
+      '#seo': { $type: 't.seo', title: 'X' },
     } as NodeData;
     const res = await ssrHandler(req('/about'), deps(indexWith(node), emptyTree));
     assert.equal(res?.status, 200);
@@ -126,11 +126,11 @@ describe('ssrHandler', () => {
     const node = {
       $path: '/sys/routes/about', $type: 'test.handler.page',
       heading: 'C',
-      site: {
+      '#site': {
         $type: 't.site', state: 'published', mode: 'static',
         cache: { maxAge: 60, staleWhileRevalidate: 600 },
       },
-      seo: { $type: 't.seo', title: 'C' },
+      '#seo': { $type: 't.seo', title: 'C' },
     } as NodeData;
     const res = await ssrHandler(req('/about'), deps(indexWith(node), emptyTree));
     assert.equal(res?.headers['Cache-Control'], 'public, max-age=60, stale-while-revalidate=600');
