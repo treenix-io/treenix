@@ -9,7 +9,7 @@
 //  - volatile extractPaths
 
 import { registerType } from '#comp';
-import { createNode, isComponent, type NodeData, register, resolve } from '#core';
+import { createNode, getComponentByName, type NodeData, register, resolve } from '#core';
 import { clearRegistry } from '#core/index.test';
 import { createMemoryTree, createOverlayTree, mapNodeForSift, type Tree } from '#tree';
 import { createFsTree } from '#tree/fs';
@@ -57,8 +57,8 @@ describe('Mount adapters', () => {
       if (!mount.layers?.length) throw new Error('t.mount.overlay: layers required');
       const stores: Tree[] = [];
       for (const name of mount.layers) {
-        const comp = ctx.node[name];
-        if (!isComponent(comp)) throw new Error(`t.mount.overlay: component "${name}" not found`);
+        const comp = getComponentByName(ctx.node, name);
+        if (!comp) throw new Error(`t.mount.overlay: component "${name}" not found`);
         const adapter = resolve(comp.$type, 'mount');
         if (!adapter) throw new Error(`No mount adapter for "${comp.$type}"`);
         const subCtx = { node: ctx.node, path: ctx.path, parentStore: stores[0] ?? ({} as Tree), globalStore: ctx.globalStore };
@@ -403,7 +403,7 @@ describe('actions.ts operations', () => {
     await executeAction(tree, '/c', 'counter', undefined, 'increment');
 
     const node = await tree.get('/c');
-    assert.equal((node!['counter'] as any).count, 1);
+    assert.equal((node!['#counter'] as any).count, 1);
     // $rev incremented
     assert.equal(node!.$rev, 2); // once from initial set, once from executeAction
   });
@@ -536,7 +536,7 @@ describe('actions.ts operations', () => {
     await setComponent(tree, '/s', 'meta', { $type: 'meta', title: 'new' });
 
     const node = await tree.get('/s');
-    assert.equal((node as any).meta.title, 'new');
+    assert.equal((node as any)['#meta'].title, 'new');
   });
 
   it('setComponent throws NOT_FOUND for missing node', async () => {
@@ -608,7 +608,7 @@ describe('Validation edge cases', () => {
     const tree = withValidation(createMemoryTree());
 
     await assert.rejects(
-      () => tree.set({ $path: '/v', $type: 'x', comp: { $type: 'typed', name: 123 } } as any),
+      () => tree.set({ $path: '/v', $type: 'x', '#comp': { $type: 'typed', name: 123 } } as any),
     );
   });
 
@@ -621,7 +621,7 @@ describe('Validation edge cases', () => {
     const tree = withValidation(createMemoryTree());
 
     await assert.rejects(
-      () => tree.set({ $path: '/v', $type: 'x', comp: { $type: 'numtype', count: 'not a number' } } as any),
+      () => tree.set({ $path: '/v', $type: 'x', '#comp': { $type: 'numtype', count: 'not a number' } } as any),
     );
   });
 
@@ -634,7 +634,7 @@ describe('Validation edge cases', () => {
     const tree = withValidation(createMemoryTree());
 
     await assert.rejects(
-      () => tree.set({ $path: '/v', $type: 'x', comp: { $type: 'booltype', flag: 42 } } as any),
+      () => tree.set({ $path: '/v', $type: 'x', '#comp': { $type: 'booltype', flag: 42 } } as any),
     );
   });
 
@@ -646,26 +646,26 @@ describe('Validation edge cases', () => {
 
     const tree = withValidation(createMemoryTree());
     // null and undefined should pass — optional by default
-    await tree.set({ $path: '/v', $type: 'x', comp: { $type: 'opttype', name: null } } as any);
-    await tree.set({ $path: '/v2', $type: 'x', comp: { $type: 'opttype' } } as any);
+    await tree.set({ $path: '/v', $type: 'x', '#comp': { $type: 'opttype', name: null } } as any);
+    await tree.set({ $path: '/v2', $type: 'x', '#comp': { $type: 'opttype' } } as any);
   });
 
   it('skips components without schema', async () => {
     const tree = withValidation(createMemoryTree());
-    await tree.set({ $path: '/v', $type: 'x', comp: { $type: 'untyped', anything: 'goes' } } as any);
+    await tree.set({ $path: '/v', $type: 'x', '#comp': { $type: 'untyped', anything: 'goes' } } as any);
     const node = await tree.get('/v');
     assert.ok(node, 'node should be stored');
-    assert.equal((node as any).comp.anything, 'goes');
+    assert.equal((node as any)['#comp'].anything, 'goes');
   });
 
   it('skips schemas without properties', async () => {
     register('emptyschema', 'schema', () => ({ title: 'emptyschema', type: 'object' as const, properties: {} }));
 
     const tree = withValidation(createMemoryTree());
-    await tree.set({ $path: '/v', $type: 'x', comp: { $type: 'emptyschema', x: 1 } } as any);
+    await tree.set({ $path: '/v', $type: 'x', '#comp': { $type: 'emptyschema', x: 1 } } as any);
     const node = await tree.get('/v');
     assert.ok(node, 'node should be stored');
-    assert.equal((node as any).comp.x, 1);
+    assert.equal((node as any)['#comp'].x, 1);
   });
 });
 

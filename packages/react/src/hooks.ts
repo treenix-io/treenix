@@ -5,7 +5,7 @@
 // execute:     action caller
 // watch:       universal async generator
 
-import { getComponent, getMeta, type NodeData, normalizeType, resolve } from '@treenx/core';
+import { compKey, getComponent, getComponentByName, getMeta, type NodeData, normalizeType, resolve } from '@treenx/core';
 import { type Class, getDefaults, type TypeProxy } from '@treenx/core/comp';
 import { deriveURI, parseURI } from '@treenx/core/uri';
 import { mergeIntoNode, type OnChange } from '#tree/on-change';
@@ -244,21 +244,23 @@ export async function addComponent(path: string, name: string, type: string) {
   // yet registered on the client.
   await ensureType(type);
   const comp = { $type: type, ...getDefaults(type) };
+  const key = compKey(name);
   const node = cache.get(path);
-  if (node) cache.put({ ...node, [name]: comp });
-  await trpc.patch.mutate({ path, ops: [['r', name, comp]] });
+  if (node) cache.put({ ...node, [key]: comp });
+  await trpc.patch.mutate({ path, ops: [['r', key, comp]] });
 }
 
 // ── removeComponent: detach a named component from a node (optimistic + patch) ──
 
 export async function removeComponent(path: string, name: string) {
+  const key = compKey(name);
   const node = cache.get(path);
   if (node) {
     const next = { ...node };
-    delete next[name];
+    delete next[key];
     cache.put(next);
   }
-  await trpc.patch.mutate({ path, ops: [['d', name]] });
+  await trpc.patch.mutate({ path, ops: [['d', key]] });
 }
 
 // ── removeNode: optimistic delete + server persist ──
@@ -289,7 +291,7 @@ export const execute = (
   // Optimistic: resolve class from cache + registry, predict locally
   const cached = cache.get(path);
   if (cached) {
-    const compType = type ?? (cached[key!] as { $type?: string })?.$type ?? cached.$type;
+    const compType = type ?? (key ? getComponentByName(cached, key)?.$type : undefined) ?? cached.$type;
     const meta = getMeta(compType, `action:${action}`);
     if (!meta?.noOptimistic) {
       const cls = resolve(compType, 'class');

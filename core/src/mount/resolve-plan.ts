@@ -6,7 +6,7 @@
 // non-mount paths the source IS the path; mountDeps stays empty since no
 // mount/config write can invalidate this read.
 
-import { isComponent } from '#core';
+import { getComponentByName, isComponent } from '#core';
 import type { Tree } from '#tree';
 import type { ReadPlan } from '#tree/read-runtime';
 
@@ -32,8 +32,9 @@ export async function resolveReadPlan(
   const node = await rawStore.get(path, ctx);
   mountDeps.add(path);
 
-  if (node && isComponent(node['mount']) && node['mount'].$type === 't.mount.query') {
-    const mount = node['mount'] as { $type: string; source: string; match: Record<string, unknown> };
+  const mountComp = node ? getComponentByName(node, 'mount') : undefined;
+  if (mountComp && mountComp.$type === 't.mount.query') {
+    const mount = mountComp as { $type: string; source: string; match: Record<string, unknown> };
     if (typeof mount.source !== 'string' || !mount.source) {
       throw new Error(`Query mount at ${path} missing source`);
     }

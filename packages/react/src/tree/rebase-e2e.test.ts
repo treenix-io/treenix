@@ -58,7 +58,7 @@ function simulateExecute(
   if (!cached) throw new Error(`no cache for ${path}`);
 
   const compType = key
-    ? (cached[key] as { $type?: string })?.$type ?? cached.$type
+    ? (cached[`#${key}`] as { $type?: string })?.$type ?? cached.$type
     : cached.$type;
 
   const cls = resolve(compType, 'class');
@@ -74,10 +74,10 @@ describe('rebase e2e — deferred server responses', () => {
     // Initial: empty checklist as named component
     cache.put({
       $path: '/todo', $type: 'dir',
-      checklist: { $type: 'test.e2e.checklist', items: [] },
+      '#checklist': { $type: 'test.e2e.checklist', items: [] },
     } as any);
 
-    const items = () => (cache.get('/todo') as any).checklist.items;
+    const items = () => (cache.get('/todo') as any)['#checklist'].items;
 
     // Client: 3 rapid adds (server hasn't responded yet)
     simulateExecute('/todo', 'add', { text: 'Buy milk' }, 'checklist');
@@ -93,7 +93,7 @@ describe('rebase e2e — deferred server responses', () => {
     // ── Server responds for ADD #1 ──
     // Server may enrich with timestamps, UUIDs etc.
     applyServerPatch('/todo', [
-      ['a', 'checklist.items.0', { id: 1, text: 'Buy milk', done: false }],
+      ['a', '#checklist.items.0', { id: 1, text: 'Buy milk', done: false }],
     ]);
 
     // BUG SCENARIO: if rebase is broken, items will show only 1 (server state)
@@ -106,14 +106,14 @@ describe('rebase e2e — deferred server responses', () => {
 
     // ── Server responds for ADD #2 ──
     applyServerPatch('/todo', [
-      ['a', 'checklist.items.1', { id: 2, text: 'Walk dog', done: false }],
+      ['a', '#checklist.items.1', { id: 2, text: 'Walk dog', done: false }],
     ]);
     assert.strictEqual(items().length, 3, 'after server #2: still 3 items (1 pending)');
     assert.strictEqual(hasPending('/todo'), true, '1 op still pending');
 
     // ── Server responds for ADD #3 ──
     applyServerPatch('/todo', [
-      ['a', 'checklist.items.2', { id: 3, text: 'Code review', done: false }],
+      ['a', '#checklist.items.2', { id: 3, text: 'Code review', done: false }],
     ]);
     assert.strictEqual(items().length, 3, 'after server #3: 3 items confirmed');
     assert.strictEqual(hasPending('/todo'), false, 'all confirmed, cleaned up');
@@ -122,10 +122,10 @@ describe('rebase e2e — deferred server responses', () => {
   it('server enriches data that client didnt have — enrichment survives replay', () => {
     cache.put({
       $path: '/todo', $type: 'dir',
-      checklist: { $type: 'test.e2e.checklist', items: [] },
+      '#checklist': { $type: 'test.e2e.checklist', items: [] },
     } as any);
 
-    const items = () => (cache.get('/todo') as any).checklist.items;
+    const items = () => (cache.get('/todo') as any)['#checklist'].items;
 
     // 2 rapid adds
     simulateExecute('/todo', 'add', { text: 'A' }, 'checklist');
@@ -134,7 +134,7 @@ describe('rebase e2e — deferred server responses', () => {
 
     // Server for #1: adds createdAt, server-generated UUID
     applyServerPatch('/todo', [
-      ['a', 'checklist.items.0', { id: 1, text: 'A', done: false, createdAt: '2026-04-03T10:00:00Z' }],
+      ['a', '#checklist.items.0', { id: 1, text: 'A', done: false, createdAt: '2026-04-03T10:00:00Z' }],
     ]);
 
     assert.strictEqual(items().length, 2, 'still 2 after server #1');
@@ -144,7 +144,7 @@ describe('rebase e2e — deferred server responses', () => {
 
     // Server for #2: also enriched
     applyServerPatch('/todo', [
-      ['a', 'checklist.items.1', { id: 2, text: 'B', done: false, createdAt: '2026-04-03T10:00:01Z' }],
+      ['a', '#checklist.items.1', { id: 2, text: 'B', done: false, createdAt: '2026-04-03T10:00:01Z' }],
     ]);
     assert.strictEqual(items()[1].createdAt, '2026-04-03T10:00:01Z', 'server enrichment preserved');
     assert.strictEqual(hasPending('/todo'), false);
@@ -153,13 +153,13 @@ describe('rebase e2e — deferred server responses', () => {
   it('rapid toggle + add interleaved — server order matches client order', () => {
     cache.put({
       $path: '/todo', $type: 'dir',
-      checklist: {
+      '#checklist': {
         $type: 'test.e2e.checklist',
         items: [{ id: 1, text: 'Existing', done: false }],
       },
     } as any);
 
-    const items = () => (cache.get('/todo') as any).checklist.items;
+    const items = () => (cache.get('/todo') as any)['#checklist'].items;
 
     // Toggle existing item
     simulateExecute('/todo', 'toggle', { id: 1 }, 'checklist');
@@ -172,7 +172,7 @@ describe('rebase e2e — deferred server responses', () => {
 
     // Server confirms toggle
     applyServerPatch('/todo', [
-      ['r', 'checklist.items.0.done', true ],
+      ['r', '#checklist.items.0.done', true ],
     ]);
     assert.strictEqual(items().length, 2, 'add still replayed after toggle confirmed');
     assert.strictEqual(items()[0].done, true, 'toggle confirmed');
@@ -181,7 +181,7 @@ describe('rebase e2e — deferred server responses', () => {
 
     // Server confirms add
     applyServerPatch('/todo', [
-      ['a', 'checklist.items.1', { id: 2, text: 'New', done: false }],
+      ['a', '#checklist.items.1', { id: 2, text: 'New', done: false }],
     ]);
     assert.strictEqual(hasPending('/todo'), false);
   });
@@ -189,10 +189,10 @@ describe('rebase e2e — deferred server responses', () => {
   it('server set (full node) after optimistic — remaining ops survive', () => {
     cache.put({
       $path: '/todo', $type: 'dir',
-      checklist: { $type: 'test.e2e.checklist', items: [] },
+      '#checklist': { $type: 'test.e2e.checklist', items: [] },
     } as any);
 
-    const items = () => (cache.get('/todo') as any).checklist.items;
+    const items = () => (cache.get('/todo') as any)['#checklist'].items;
 
     // 3 rapid adds
     simulateExecute('/todo', 'add', { text: 'A' }, 'checklist');
@@ -203,7 +203,7 @@ describe('rebase e2e — deferred server responses', () => {
     // Server sends FULL NODE (set event, not patch) for first add
     applyServerSet('/todo', {
       $path: '/todo', $type: 'dir',
-      checklist: {
+      '#checklist': {
         $type: 'test.e2e.checklist',
         items: [{ id: 1, text: 'A', done: false }],
         lastModified: '2026-04-03',
@@ -215,7 +215,7 @@ describe('rebase e2e — deferred server responses', () => {
     assert.strictEqual(items()[1].text, 'B', 'replayed');
     assert.strictEqual(items()[2].text, 'C', 'replayed');
     assert.strictEqual(
-      (cache.get('/todo') as any).checklist.lastModified,
+      (cache.get('/todo') as any)['#checklist'].lastModified,
       '2026-04-03',
       'server-added field preserved through replay',
     );
@@ -316,13 +316,13 @@ describe('rebase e2e — deferred server responses', () => {
   it('remove after add — replay produces correct final state', () => {
     cache.put({
       $path: '/todo', $type: 'dir',
-      checklist: {
+      '#checklist': {
         $type: 'test.e2e.checklist',
         items: [{ id: 1, text: 'Keep', done: false }],
       },
     } as any);
 
-    const items = () => (cache.get('/todo') as any).checklist.items;
+    const items = () => (cache.get('/todo') as any)['#checklist'].items;
 
     // Add then immediately remove the new item
     simulateExecute('/todo', 'add', { text: 'Temp' }, 'checklist');
@@ -335,7 +335,7 @@ describe('rebase e2e — deferred server responses', () => {
 
     // Server confirms add
     applyServerPatch('/todo', [
-      ['a', 'checklist.items.1', { id: 2, text: 'Temp', done: false }],
+      ['a', '#checklist.items.1', { id: 2, text: 'Temp', done: false }],
     ]);
     // Confirmed has 2 items, replay remove(id:2) → 1 item
     assert.strictEqual(items().length, 1, 'confirmed + replay remove = 1');
@@ -343,7 +343,7 @@ describe('rebase e2e — deferred server responses', () => {
 
     // Server confirms remove
     applyServerPatch('/todo', [
-      ['d', 'checklist.items.1'],
+      ['d', '#checklist.items.1'],
     ]);
     assert.strictEqual(items().length, 1);
     assert.strictEqual(hasPending('/todo'), false);
@@ -354,13 +354,13 @@ describe('rebase e2e — deferred server responses', () => {
     // Server has 1s delay on toggle. First server response must not kill the second toggle.
     cache.put({
       $path: '/todo', $type: 'dir',
-      checklist: {
+      '#checklist': {
         $type: 'test.e2e.checklist',
         items: [{ id: 1, text: 'Task', done: true }],
       },
     } as any);
 
-    const done = () => (cache.get('/todo') as any).checklist.items[0].done;
+    const done = () => (cache.get('/todo') as any)['#checklist'].items[0].done;
 
     // Toggle OFF (true → false)
     simulateExecute('/todo', 'toggle', { id: 1 }, 'checklist');
@@ -372,7 +372,7 @@ describe('rebase e2e — deferred server responses', () => {
 
     // Server responds for toggle #1 (delayed): done changed to false
     applyServerPatch('/todo', [
-      ['r', 'checklist.items.0.done', false ],
+      ['r', '#checklist.items.0.done', false ],
     ]);
 
     // BUG SCENARIO: without rebase, server "false" overwrites optimistic "true"
@@ -382,7 +382,7 @@ describe('rebase e2e — deferred server responses', () => {
 
     // Server responds for toggle #2: done changed to true
     applyServerPatch('/todo', [
-      ['r', 'checklist.items.0.done', true ],
+      ['r', '#checklist.items.0.done', true ],
     ]);
     assert.strictEqual(done(), true, 'confirmed: checked');
     assert.strictEqual(hasPending('/todo'), false);
@@ -391,13 +391,13 @@ describe('rebase e2e — deferred server responses', () => {
   it('triple toggle race — each server response replays remaining', () => {
     cache.put({
       $path: '/todo', $type: 'dir',
-      checklist: {
+      '#checklist': {
         $type: 'test.e2e.checklist',
         items: [{ id: 1, text: 'X', done: false }],
       },
     } as any);
 
-    const done = () => (cache.get('/todo') as any).checklist.items[0].done;
+    const done = () => (cache.get('/todo') as any)['#checklist'].items[0].done;
 
     // 3 rapid toggles: false→true→false→true
     simulateExecute('/todo', 'toggle', { id: 1 }, 'checklist');
@@ -408,17 +408,17 @@ describe('rebase e2e — deferred server responses', () => {
     assert.strictEqual(done(), true, 'toggle 3');
 
     // Server #1: done=true
-    applyServerPatch('/todo', [['r', 'checklist.items.0.done', true ]]);
+    applyServerPatch('/todo', [['r', '#checklist.items.0.done', true ]]);
     // confirmed=true, replay toggle→false, toggle→true = true
     assert.strictEqual(done(), true, 'after server #1');
 
     // Server #2: done=false
-    applyServerPatch('/todo', [['r', 'checklist.items.0.done', false ]]);
+    applyServerPatch('/todo', [['r', '#checklist.items.0.done', false ]]);
     // confirmed=false, replay toggle→true
     assert.strictEqual(done(), true, 'after server #2');
 
     // Server #3: done=true
-    applyServerPatch('/todo', [['r', 'checklist.items.0.done', true ]]);
+    applyServerPatch('/todo', [['r', '#checklist.items.0.done', true ]]);
     assert.strictEqual(done(), true, 'after server #3');
     assert.strictEqual(hasPending('/todo'), false);
   });

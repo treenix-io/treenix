@@ -11,7 +11,7 @@
 //   /sys/mods/{mod}/prefabs/{name}/      → t.prefab node (mod, name, deploy action)
 //   /sys/mods/{mod}/prefabs/{name}/{...} → prefab nodes
 
-import { createNode, isComponent, type NodeData } from '#core';
+import { AnyType, createNode, getComponentField, isComponent, type NodeData } from '#core';
 import { getLoadedMods } from '#mod/loader';
 import { getModPrefabs, getPrefab, getRegisteredMods } from '#mod/prefab';
 import { Prefab } from '#mod/prefab-type';
@@ -25,9 +25,13 @@ import { buildTypeNode } from './types';
 // FS roots when deployed). For the catalog view we disable any present mount —
 // browsing the catalog must not trigger live mount resolution. Absent mount = pass through.
 function disableMountIfPresent(node: NodeData): NodeData {
-  const mount = node['mount'];
-  if (!isComponent(mount)) return node;
-  return { ...node, mount: { ...mount, disabled: true } };
+  // Keyed rebuild: write the disabled copy back to the key the component
+  // actually lives under ('#mount' or legacy 'mount') — a bare-key write would
+  // be shadowed by an existing # twin.
+  const entry = getComponentField(node, AnyType, 'mount');
+  if (!entry) return node;
+  const [mount, key] = entry;
+  return { ...node, [key]: { ...mount, disabled: true } };
 }
 
 type ParsedPath = {

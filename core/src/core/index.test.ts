@@ -67,8 +67,8 @@ describe('Node', () => {
       info: { $type: 'task', status: 'open' },
       budget: { $type: 'money', amount: 100, currency: 'USD' },
     });
-    assert.equal(node.info.$type, 'task');
-    assert.equal(node.budget.amount, 100);
+    assert.equal(node['#info'].$type, 'task');
+    assert.equal(node['#budget'].amount, 100);
   });
 
   it('rejects $ prefix in component names', () => {
@@ -111,11 +111,12 @@ describe('Component access', () => {
   it('find all by type', () => {
     const moneys = getComponents(node, 'money');
     assert.equal(moneys.length, 2);
-    assert.deepEqual(moneys.map(([name]) => name).sort(), ['budget', 'estimate']);
+    // Accessors return STORAGE keys; display layers apply compName().
+    assert.deepEqual(moneys.map(([name]) => name).sort(), ['#budget', '#estimate']);
   });
 
   it('isComponent type guard', () => {
-    assert.ok(isComponent(node['budget']));
+    assert.ok(isComponent(node['#budget']));
     assert.ok(!isComponent((node as any)['missing']));
     assert.ok(!isComponent('string'));
     assert.ok(!isComponent(null));
@@ -123,7 +124,7 @@ describe('Component access', () => {
 
   it('set and remove', () => {
     const n = createNode('/x', 'x');
-    (n as any).tag = { $type: 'tag', value: 'urgent' };
+    (n as any)['#tag'] = { $type: 'tag', value: 'urgent' };
     assert.ok(getComponent(n, 'tag'));
     assert.equal(removeComponent(n, 'tag'), true);
     assert.equal(getComponent(n, 'tag'), undefined);

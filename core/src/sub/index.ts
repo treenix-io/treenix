@@ -3,7 +3,7 @@
 // No dependencies beyond Tree + core types.
 
 import { type SubscribeOpts } from '#contexts/service/index';
-import { A, R, type NodeData } from '#core';
+import { A, getComponentByName, R, type NodeData } from '#core';
 import { buildClaims, resolvePermission, stripComponents } from '#security/auth';
 import {
   mapNodeForSift,
@@ -275,8 +275,7 @@ export function withSubscriptions(
    *  to a different sub-tree. Used to detect config writes. */
   function hasMountComponent(node: NodeData | null | undefined): boolean {
     if (!node) return false;
-    const m = node['mount'];
-    return !!m && typeof m === 'object' && (m as { $type?: string }).$type !== undefined;
+    return getComponentByName(node, 'mount') !== undefined;
   }
 
   /** Extract a userId from `/auth/users/{userId}` paths. Returns null when
@@ -583,7 +582,7 @@ export function withSubscriptions(
       // the component on a previously-non-mount node).
       const opsTouchedMount = ops.some(op => {
         const p = op[1];
-        return p === 'mount' || p.startsWith('mount.');
+        return p === '#mount' || p.startsWith('#mount.');
       });
       if (opsTouchedMount || hasMountComponent(oldNode) || hasMountComponent(newNode)) {
         cdc = mergeInvalidate(cdc, invalidateVpsForConfigChange(path));

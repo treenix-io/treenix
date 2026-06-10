@@ -302,7 +302,7 @@ describe('buildClaims', () => {
     await tree.set({
       ...createNode('/auth/users/alice', 'user'),
       $owner: 'alice',
-      groups: { $type: 'groups', list: ['admins', 'editors'] },
+      '#groups': { $type: 'groups', list: ['admins', 'editors'] },
     });
     const claims = await buildClaims(tree, 'alice');
     assert.ok(claims.includes('admins'));
@@ -317,7 +317,7 @@ describe('buildClaims', () => {
     await tree.set({
       ...createNode('/auth/users/mallory', 'user'),
       $owner: 'mallory',
-      groups: { $type: 'x', list: ['admins'] },
+      '#groups': { $type: 'x', list: ['admins'] },
     });
     const claims = await buildClaims(tree, 'mallory');
     assert.ok(!claims.includes('admins'), 'must not gain admins via fake $type');
@@ -343,7 +343,7 @@ describe('system identity — groups component access (F15)', () => {
       ...createNode('/auth/users/admin', 'user'),
       $owner: 'admin',
       $acl: [{ g: 'owner', p: R | W }, { g: 'authenticated', p: 0 }],
-      groups: { $type: 'groups', list: ['admins'] },
+      '#groups': { $type: 'groups', list: ['admins'] },
     });
   };
 
@@ -363,7 +363,7 @@ describe('system identity — groups component access (F15)', () => {
     await systemTree.set({
       ...createNode('/auth/users/bob', 'user'),
       $owner: 'bob',
-      groups: { $type: 'groups', list: ['admins'] },
+      '#groups': { $type: 'groups', list: ['admins'] },
     });
     const claims = await buildClaims(systemTree, 'bob');
     assert.ok(claims.includes('admins'), `expected admins after write, got ${JSON.stringify(claims)}`);
@@ -635,7 +635,7 @@ describe('withAcl', () => {
     await tree.set({
       ...createNode('/virtual', 'mount-point'),
       $acl: [{ g: 'authenticated', p: R }],
-      mount: { $type: 't.mount.query', source: '/private', match: {} },
+      '#mount': { $type: 't.mount.query', source: '/private', match: {} },
     });
     // /private: no R for authenticated → unreadable source
     await tree.set({ ...createNode('/private', 'dir'), $acl: [] });
@@ -807,7 +807,7 @@ describe('system identity guards (F15)', () => {
     // A poisoned user record with "system" in its groups list must never escalate.
     await ss.set({
       $path: '/auth/users/alice', $type: 'user',
-      groups: { $type: 'groups', list: ['admins', 'system'] },
+      '#groups': { $type: 'groups', list: ['admins', 'system'] },
     });
     const claims = await buildClaims(ss, 'alice');
     assert.ok(claims.includes('admins'), 'real groups preserved');
@@ -926,7 +926,7 @@ describe('buildClaims — groups from user record', () => {
     await tree.set({
       ...createNode('/auth/users/carol', 'user'),
       $owner: 'carol',
-      groups: { $type: 'groups', list: ['editors', 'reviewers'] },
+      '#groups': { $type: 'groups', list: ['editors', 'reviewers'] },
     });
     const claims = await buildClaims(tree, 'carol');
     assert.ok(claims.includes('u:carol'), 'u:carol present');

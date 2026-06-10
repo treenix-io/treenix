@@ -1,7 +1,7 @@
 // Auth operations — transport-agnostic.
 // Throws OpError, never TRPCError. Transport layer maps errors.
 
-import { makeNode, isComponent, R, W } from '#core';
+import { getComponentByName, makeNode, R, W } from '#core';
 import type { Tree } from '#tree';
 import { assertNotSystem, createSession, DUMMY_HASH, hashPassword, revokeSession, verifyPassword } from './auth';
 import { OpError } from '#errors';
@@ -72,8 +72,7 @@ export async function loginUser(store: Tree, userId: string, password: string, c
 
   const userPath = `/auth/users/${userId}`;
   const user = await store.get(userPath);
-  const cv = user ? user['credentials'] : undefined;
-  const creds = isComponent(cv) ? cv : undefined;
+  const creds = user ? getComponentByName(user, 'credentials') : undefined;
   const hash = typeof creds?.['hash'] === 'string' ? creds['hash'] : undefined;
   // Always run scrypt to prevent timing-based user enumeration
   const ok = await verifyPassword(password, hash ?? DUMMY_HASH);

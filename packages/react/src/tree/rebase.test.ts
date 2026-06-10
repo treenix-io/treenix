@@ -89,14 +89,14 @@ describe('rebase', () => {
   it('named component key', () => {
     cache.put({
       $path: '/n', $type: 'dir',
-      stats: { $type: 'test.rebase.counter', count: 3 },
+      '#stats': { $type: 'test.rebase.counter', count: 3 },
     } as any);
 
     pushOptimistic('/n', Counter, 'stats', action('test.rebase.counter', 'increment'), undefined);
-    assert.strictEqual((cache.get('/n') as any).stats.count, 4);
+    assert.strictEqual((cache.get('/n') as any)['#stats'].count, 4);
 
-    applyServerPatch('/n', [['r', 'stats.count', 4 ]]);
-    assert.strictEqual((cache.get('/n') as any).stats.count, 4);
+    applyServerPatch('/n', [['r', '#stats.count', 4 ]]);
+    assert.strictEqual((cache.get('/n') as any)['#stats'].count, 4);
     assert.strictEqual(hasPending('/n'), false);
   });
 

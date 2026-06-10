@@ -403,8 +403,8 @@ describe('executeAction with deps', () => {
     await executeAction(tree, '/a', 't.article', undefined, 'publishAndRename', { title: 'new' });
 
     const result = (await tree.get('/a'))!;
-    assert.equal((result['article'] as any).title, 'new');
-    assert.equal((result['status'] as any).value, 'published');
+    assert.equal((result['#article'] as any).title, 'new');
+    assert.equal((result['#status'] as any).value, 'published');
   });
 
   it('different actions get different deps', async () => {
@@ -443,11 +443,11 @@ describe('executeAction with deps', () => {
 
     await executeAction(tree, '/p', 't.processor', undefined, 'quick', {});
     let result = (await tree.get('/p'))!;
-    assert.equal((result['processor'] as any).value, 'status=active');
+    assert.equal((result['#processor'] as any).value, 'status=active');
 
     await executeAction(tree, '/p', 't.processor', undefined, 'full', {});
     result = (await tree.get('/p'))!;
-    assert.equal((result['processor'] as any).value, 'status=active,amount=500');
+    assert.equal((result['#processor'] as any).value, 'status=active,amount=500');
   });
 
   it('cross-node @fieldRef in executeAction', async () => {
@@ -478,6 +478,6 @@ describe('executeAction with deps', () => {
     await executeAction(tree, '/order/1', 't.connector', undefined, 'fetch', {});
 
     const result = (await tree.get('/order/1'))!;
-    assert.equal((result['connector'] as any).result, '/config/wh');
+    assert.equal((result['#connector'] as any).result, '/config/wh');
   });
 });

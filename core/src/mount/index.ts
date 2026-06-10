@@ -2,7 +2,7 @@
 // Mount = component on node. Adapter resolved via context system.
 // Core untouched. Tree interface preserved.
 
-import { type ComponentData, isComponent, isRef, type NodeData, resolve } from '#core';
+import { type ComponentData, getComponentByName, isComponent, isRef, type NodeData, resolve } from '#core';
 import { type Tree } from '#tree';
 import { createBoundedCache } from '#util/bounded-cache';
 
@@ -148,8 +148,8 @@ export function withMounts(rootStore: Tree, opts?: WithMountsOpts): MountableTre
 
   /** Check if node's mount component resolves to a known adapter */
   function isMountPoint(node: NodeData): boolean {
-    const mount = node['mount'];
-    if (!isComponent(mount)) return false;
+    const mount = getComponentByName(node, 'mount');
+    if (!mount) return false;
     if (mount.disabled) return false;
     // Refs need resolution — treat as mount-point optimistically
     if (isRef(mount)) return true;
@@ -159,7 +159,7 @@ export function withMounts(rootStore: Tree, opts?: WithMountsOpts): MountableTre
   }
 
   function mountRefTarget(node: NodeData): string | undefined {
-    const mount = node['mount'];
+    const mount = getComponentByName(node, 'mount');
     return isRef(mount) ? mount.$ref : undefined;
   }
 
@@ -185,15 +185,15 @@ export function withMounts(rootStore: Tree, opts?: WithMountsOpts): MountableTre
     currentStore: Tree,
     ctx?: unknown,
   ): Promise<{ tree: Tree; externalAbort?: () => void }> {
-    let mount = node['mount'];
-    if (!isComponent(mount)) throw new Error(`Mount component missing on ${node.$path}`);
+    let mount = getComponentByName(node, 'mount');
+    if (!mount) throw new Error(`Mount component missing on ${node.$path}`);
     let configNode: NodeData = node;
     if (isRef(mount)) {
       const fetched = await currentStore.get(mount.$ref, ctx);
       if (!fetched) throw new Error(`Mount ref not found: ${mount.$ref}`);
       configNode = fetched;
-      mount = configNode['mount'];
-      if (!isComponent(mount)) throw new Error(`Mount component missing on ref target ${configNode.$path}`);
+      mount = getComponentByName(configNode, 'mount');
+      if (!mount) throw new Error(`Mount component missing on ref target ${configNode.$path}`);
     }
 
     let externalAbort: (() => void) | undefined;

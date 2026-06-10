@@ -1,4 +1,4 @@
-import { AnyType, type ComponentData, getComponent, isComponent, type NodeData } from '#core';
+import { AnyType, type ComponentData, getComponent, getComponentByName, type NodeData } from '#core';
 import { basename, dirname, join } from '#core/path';
 import { type Tree } from '#tree';
 
@@ -15,7 +15,7 @@ export type ResolvedDeps = Record<string, ComponentData | NodeData | NodeData[]>
 // ── Needs tree ──
 // Local map keyed by type@action. Populated by registerActionNeeds (called from registerType).
 // Separate from registry meta because needs are registered before actions exist in the registry.
-
+// kriz: should be in registry! it doesn't matter that actions not yet exists!
 const needsMap = new Map<string, NeedSpec[]>();
 
 export function registerActionNeeds(type: string, action: string, patterns: string[]): void {
@@ -68,8 +68,8 @@ export async function collectDeps(
 
   for (const s of specs) {
     if (s.kind === 'sibling') {
-      const v = node[s.name];
-      if (!isComponent(v)) throw new Error(`Needed sibling "${s.name}" not found on ${node.$path}`);
+      const v = getComponentByName(node, s.name);
+      if (!v) throw new Error(`Needed sibling "${s.name}" not found on ${node.$path}`);
       deps[s.key] = v;
       continue;
     }

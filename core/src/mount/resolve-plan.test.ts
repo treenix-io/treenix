@@ -28,7 +28,7 @@ describe('resolveReadPlan', () => {
     await tree.set({
       $path: '/orders/incoming',
       $type: 'folder',
-      mount: { $type: 't.mount.query', source: '/orders', match: { 'status.value': 'incoming' } },
+      '#mount': { $type: 't.mount.query', source: '/orders', match: { 'status.value': 'incoming' } },
     });
     const { plan, legacyQueryMount } = await resolveReadPlan(tree, '/orders/incoming', { kind: 'urgent' });
     assert.equal(plan.source, '/orders');
@@ -41,7 +41,7 @@ describe('resolveReadPlan', () => {
     await tree.set({
       $path: '/orders/incoming',
       $type: 'folder',
-      mount: { $type: 't.mount.query', source: '/orders', match: {} },
+      '#mount': { $type: 't.mount.query', source: '/orders', match: {} },
     });
     const { plan } = await resolveReadPlan(tree, '/orders/incoming');
     assert.equal('callerWhere' in plan, false);
@@ -51,7 +51,7 @@ describe('resolveReadPlan', () => {
     await tree.set({
       $path: '/all-orders',
       $type: 'folder',
-      mount: { $type: 't.mount.query', source: '/orders', match: {} },
+      '#mount': { $type: 't.mount.query', source: '/orders', match: {} },
     });
     const { plan } = await resolveReadPlan(tree, '/all-orders');
     assert.deepEqual(plan.viewWhere, {});
@@ -61,7 +61,7 @@ describe('resolveReadPlan', () => {
     await tree.set({
       $path: '/bad',
       $type: 'folder',
-      mount: { $type: 't.mount.query', source: '', match: {} },
+      '#mount': { $type: 't.mount.query', source: '', match: {} },
     });
     await assert.rejects(
       () => resolveReadPlan(tree, '/bad'),
@@ -73,7 +73,7 @@ describe('resolveReadPlan', () => {
     await tree.set({
       $path: '/fsmount',
       $type: 'folder',
-      mount: { $type: 't.mount.fs', root: '/tmp' },
+      '#mount': { $type: 't.mount.fs', root: '/tmp' },
     });
     const { plan, legacyQueryMount } = await resolveReadPlan(tree, '/fsmount');
     assert.deepEqual(plan, { source: '/fsmount' });

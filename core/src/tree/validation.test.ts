@@ -27,11 +27,11 @@ describe('withValidation (Write-Barrier)', () => {
     const vs = withValidation(tree);
     await vs.set({
       $path: '/a', $type: 'item',
-      metadata: { $type: 'metadata', title: 'Hello', count: 5, active: true },
+      '#metadata': { $type: 'metadata', title: 'Hello', count: 5, active: true },
     } as NodeData);
 
     const node = await vs.get('/a');
-    assert.equal((node?.metadata as any).title, 'Hello');
+    assert.equal((node?.['#metadata'] as any).title, 'Hello');
   });
 
   it('rejects wrong type: string expected, got number', async () => {
@@ -39,7 +39,7 @@ describe('withValidation (Write-Barrier)', () => {
     await assert.rejects(
       () => vs.set({
         $path: '/a', $type: 'item',
-        metadata: { $type: 'metadata', title: 42 },
+        '#metadata': { $type: 'metadata', title: 42 },
       } as NodeData),
     );
   });
@@ -49,7 +49,7 @@ describe('withValidation (Write-Barrier)', () => {
     await assert.rejects(
       () => vs.set({
         $path: '/a', $type: 'item',
-        metadata: { $type: 'metadata', count: 'not a number' },
+        '#metadata': { $type: 'metadata', count: 'not a number' },
       } as NodeData),
     );
   });
@@ -59,7 +59,7 @@ describe('withValidation (Write-Barrier)', () => {
     // Only title set, count and active missing — fine
     await vs.set({
       $path: '/a', $type: 'item',
-      metadata: { $type: 'metadata', title: 'Hello' },
+      '#metadata': { $type: 'metadata', title: 'Hello' },
     } as NodeData);
     assert.ok(await vs.get('/a'));
   });
@@ -68,7 +68,7 @@ describe('withValidation (Write-Barrier)', () => {
     const vs = withValidation(tree);
     await vs.set({
       $path: '/a', $type: 'item',
-      custom: { $type: 'no-schema-type', anything: 'goes' },
+      '#custom': { $type: 'no-schema-type', anything: 'goes' },
     } as NodeData);
     assert.ok(await vs.get('/a'));
   });
@@ -85,11 +85,11 @@ describe('withValidation (Write-Barrier)', () => {
     // Write a valid node
     await vs.set({
       $path: '/a', $type: 'item',
-      metadata: { $type: 'metadata', title: 'Hello', count: 5 },
+      '#metadata': { $type: 'metadata', title: 'Hello', count: 5 },
     } as NodeData);
     // Patch count to a string — violates schema (number expected)
     await assert.rejects(
-      () => vs.patch('/a', [['r', 'metadata.count', 'not-a-number']]),
+      () => vs.patch('/a', [['r', '#metadata.count', 'not-a-number']]),
       (e: Error) => e.name === 'OpError' && e.message.includes('Validation'),
     );
   });
@@ -98,19 +98,19 @@ describe('withValidation (Write-Barrier)', () => {
     const vs = withValidation(tree);
     await vs.set({
       $path: '/a', $type: 'item',
-      metadata: { $type: 'metadata', title: 'Hello', count: 5 },
+      '#metadata': { $type: 'metadata', title: 'Hello', count: 5 },
     } as NodeData);
     // Patch count to a valid number
-    await vs.patch('/a', [['r', 'metadata.count', 10]]);
+    await vs.patch('/a', [['r', '#metadata.count', 10]]);
     const node = await vs.get('/a');
-    assert.equal((node?.metadata as any).count, 10);
+    assert.equal((node?.['#metadata'] as any).count, 10);
   });
 
   it('patch never writes invalid data to underlying tree', async () => {
     const vs = withValidation(tree);
     await vs.set({
       $path: '/a', $type: 'item',
-      metadata: { $type: 'metadata', title: 'Hello', count: 5 },
+      '#metadata': { $type: 'metadata', title: 'Hello', count: 5 },
     } as NodeData);
 
     // Spy on inner tree to detect any writes
@@ -121,13 +121,13 @@ describe('withValidation (Write-Barrier)', () => {
 
     // Invalid patch — should throw without writing to inner tree
     await assert.rejects(
-      () => vs.patch('/a', [['r', 'metadata.count', 'not-a-number']]),
+      () => vs.patch('/a', [['r', '#metadata.count', 'not-a-number']]),
     );
     assert.equal(innerSetCalls, 0, 'no writes should reach inner tree on validation failure');
 
     // Verify the original data is intact
     const node = await tree.get('/a');
-    assert.equal((node?.metadata as any).count, 5);
+    assert.equal((node?.['#metadata'] as any).count, 5);
   });
 
   it('get/getChildren/remove pass through', async () => {

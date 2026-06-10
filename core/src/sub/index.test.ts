@@ -278,7 +278,7 @@ describe('ACL change invalidation (Stage 6)', () => {
     await tree.set({
       $path: '/views/orders',
       $type: 'folder',
-      mount: { $type: 't.mount.query', source: '/orders', match: { status: 'new' } },
+      '#mount': { $type: 't.mount.query', source: '/orders', match: { status: 'new' } },
     });
     cdc.watchQuery('/views/orders', '/orders', { status: 'new' }, 'u1');
     events.length = 0;
@@ -287,7 +287,7 @@ describe('ACL change invalidation (Stage 6)', () => {
     await tree.set({
       $path: '/views/orders',
       $type: 'folder',
-      mount: { $type: 't.mount.query', source: '/orders', match: { status: 'pending' } },
+      '#mount': { $type: 't.mount.query', source: '/orders', match: { status: 'pending' } },
     });
 
     const ev = events.find(e =>
@@ -304,12 +304,12 @@ describe('ACL change invalidation (Stage 6)', () => {
     await tree.set({
       $path: '/views/orders',
       $type: 'folder',
-      mount: { $type: 't.mount.query', source: '/orders', match: {} },
+      '#mount': { $type: 't.mount.query', source: '/orders', match: {} },
     });
     cdc.watchQuery('/views/orders', '/orders', {}, 'u1');
     events.length = 0;
 
-    await tree.patch('/views/orders', [['r', 'mount.source', '/archived-orders']]);
+    await tree.patch('/views/orders', [['r', '#mount.source', '/archived-orders']]);
 
     const ev = events.find(e => e.type === 'patch' && e.path === '/views/orders');
     assert.ok(ev);
@@ -324,7 +324,7 @@ describe('ACL change invalidation (Stage 6)', () => {
     await tree.set({
       $path: '/views/orders',
       $type: 'folder',
-      mount: { $type: 't.mount.query', source: '/orders', match: {} },
+      '#mount': { $type: 't.mount.query', source: '/orders', match: {} },
     });
     cdc.watchQuery('/views/orders', '/orders', {}, 'u1');
     events.length = 0;
@@ -352,7 +352,7 @@ describe('ACL change invalidation (Stage 6)', () => {
     await tree.set({
       $path: '/auth/users/alice',
       $type: 'user',
-      groups: { $type: 'groups', list: ['admins'] },
+      '#groups': { $type: 'groups', list: ['admins'] },
     });
 
     const ev = events.find(e =>
@@ -531,7 +531,7 @@ describe('withSubscriptions.onSelfWrite', () => {
     injectExternalEvent({
       type: 'set',
       path: '/views/open',
-      node: { $type: 'mount-point', mount: { $type: 't.mount.query', source: '/items', match: { status: 'closed' } } },
+      node: { $type: 'mount-point', '#mount': { $type: 't.mount.query', source: '/items', match: { status: 'closed' } } },
     });
 
     const ext = events.find(e => e.type === 'set' && e.path === '/views/open');

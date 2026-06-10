@@ -58,7 +58,7 @@ describe('AgentPort actions', () => {
 
     const user = await inner.get('/auth/users/agent:/agents/bot');
     assert.equal(user?.$type, 'user');
-    assert.deepEqual((user as any).groups.list, ['agent']);
+    assert.deepEqual((user as any)['#groups'].list, ['agent']);
   });
 
   it('reset waits until the agent user is removed', async () => {

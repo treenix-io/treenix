@@ -4,7 +4,7 @@ registerPrefab('sim', 'seed', [
   { $path: 'sim', $type: 'dir' },
 
   { $path: 'sim/world', $type: 'sim.world',
-    config: { $type: 'sim.config', width: 600, height: 400, roundDelay: 5000, running: false, model: 'claude-haiku-4-5-20251001' },
+    '#config': { $type: 'sim.config', width: 600, height: 400, roundDelay: 5000, running: false, model: 'claude-haiku-4-5-20251001' },
     round: { $type: 'sim.round', current: 0, phase: 'idle', log: [] },
   },
 

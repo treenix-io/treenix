@@ -7,8 +7,8 @@ export async function seedTicker(tree: Tree) {
   await tree.set({
     $path: '/demo/ticker',
     $type: 'ticker',
-    config: { $type: 'ticker.config', symbol: 'BTC', intervalSec: 5 },
-    mount: { $type: 't.mount.memory' },
+    '#config': { $type: 'ticker.config', symbol: 'BTC', intervalSec: 5 },
+    '#mount': { $type: 't.mount.memory' },
   } as NodeData);
 
   await tree.set({

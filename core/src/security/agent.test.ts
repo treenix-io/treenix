@@ -163,7 +163,7 @@ describe('agent TOFU flow', () => {
     // Create agent user
     await tree.set({
       ...createNode(`/auth/users/${agentUserId}`, 'user'),
-      groups: { $type: 'groups', list: ['agent'] },
+      '#groups': { $type: 'groups', list: ['agent'] },
     });
 
     // Verify
@@ -195,7 +195,7 @@ describe('agent TOFU flow', () => {
     });
     await tree.set({
       ...createNode(`/auth/users/${agentUserId}`, 'user'),
-      groups: { $type: 'groups', list: ['agent'] },
+      '#groups': { $type: 'groups', list: ['agent'] },
     });
 
     // Agent connects with correct key

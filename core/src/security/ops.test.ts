@@ -76,7 +76,7 @@ describe('F5 — IP bucket rate-limit', () => {
     // Verify in tree: exactly one user has groups.list including 'admins'.
     const { items } = await tree.getChildren('/auth/users');
     const adminCount = items.filter((u: any) => {
-      const g = u['groups'];
+      const g = u['#groups'];
       return g && Array.isArray(g.list) && g.list.includes('admins');
     }).length;
     assert.equal(adminCount, 1, 'tree state must show exactly one admin');

@@ -7,6 +7,7 @@ import {
   ComponentData,
   getComponent,
   getContextsForType,
+  compKey,
   NodeData,
   normalizeType,
   register,
@@ -23,6 +24,7 @@ import { type Tree } from '#tree';
 export type { Class };
 export type TypeClass<T> = Class<T> & {
   $type: string;
+  // kriz: why needs here and not on the registerType options? think should move there
   /** Per-action needs declared as a static class field. registerType reads this and calls registerActionNeeds. */
   needs?: Record<string, string[]>;
   /** Bracket-access marker so `proxy[Counter]` resolves to "§<$type>" inside treeChain. */
@@ -96,13 +98,16 @@ export function getCtx(): ExecCtx {
 
 // Port declaration: which component fields an action reads (pre) and writes (post).
 // Stored as registry meta on action:* contexts. Queried via comp/ports.ts and comp/planner.ts.
+// kriz: what is port, why is in core?
 export type PortDecl = { pre?: string[]; post?: string[] };
 type CompOptions = { needs?: string[]; ports?: Record<string, PortDecl>; override?: boolean; noOptimistic?: string[] };
+// kriz: alot of repetition of this
 const AsyncGenFn = Object.getPrototypeOf(async function* () { }).constructor;
 
 export function registerType<T extends object>(type: string, cls: Class<T>, opts?: CompOptions): TypeClass<T> {
   if (opts?.override) {
     const n = normalizeType(type);
+    // kriz: why unregister ALL contexts? and not only needed?
     for (const ctx of getContextsForType(n)) unregister(n, ctx);
   }
 
@@ -122,29 +127,34 @@ export function registerType<T extends object>(type: string, cls: Class<T>, opts
   }
 
   // opts.needs = global fallback ('*') for all actions
+  // kriz: should be full needs here, including * needs for all methods
   if (opts?.needs) registerActionNeeds(type, '*', opts.needs);
 
   const proto = cls.prototype;
   for (const name of Object.getOwnPropertyNames(proto)) {
     if (name === 'constructor') continue;
     if (typeof proto[name] === 'function') {
+      // kriz: what is ports for method? I think we misunderstood each other. let's discuss
       const meta: Record<string, unknown> = { ...opts?.ports?.[name] };
       if (opts?.noOptimistic?.includes(name)) meta.noOptimistic = true;
       if (proto[name] instanceof AsyncGenFn) meta.stream = true;
 
       register(type, `action:${name}`, (ctx: any, data: unknown) => {
+        // kriz: node should === comp if the node itself
         const target = ctx.comp ?? ctx.node;
         if (_als) return _als.run(ctx, () => proto[name].call(target, data, ctx.deps));
+
         _ctx = ctx;
         try { return proto[name].call(target, data, ctx.deps); }
         finally { _ctx = null; }
-      }, Object.keys(meta).length ? meta : undefined);
+      }, meta);
     }
   }
   return compClass;
 }
 
 // Register server-only actions from a class. _ prefixed = internal (hidden from clients).
+// kriz: omg, why code repetition??? this should be reused in registerType! and apply all the comments from there
 export function registerActions<T>(type: TypeId, cls: Class<T>, opts?: CompOptions): void {
   const t = normalizeType(type);
   const proto = cls.prototype;
@@ -169,25 +179,30 @@ export function registerActions<T>(type: TypeId, cls: Class<T>, opts?: CompOptio
 }
 
 // ── Type-safe component access ──
-
+// kriz: should full-rewrite component, not assign! add comments about this contract
+// kriz: component type could change, or anything could change. let's discuss, and find the way.
+// kriz: function like this should be like updateComponent, not set.
+// kriz: so, let's discuss this set of functions
 export function setComponent<T>(node: NodeData, cls: Class<T>, data: Partial<Raw<T>>, field?: string): void {
   const comp = getComponent(node, cls, field);
   if (comp) {
     Object.assign(comp as object, data);
   } else {
     const $type = normalizeType(cls);
-    const name = field ?? $type.split('.').at(-1)!;
-    if (node[name]) throw new Error(`Component ${name} already exists on ${node.$path}`);
-    node[name] = newComponent<T>(cls, data);
+    const key = compKey(field ?? $type.split('.').at(-1)!);
+    if (node[key]) throw new Error(`Component ${key} already exists on ${node.$path}`);
+    node[key] = newComponent<T>(cls, data);
   }
 }
-
+// kriz: this should be named makeComponent, like makeNode
 export function newComponent<T>(cls: Class<T>, data: Partial<Raw<T>>): ComponentData<T> {
   const $type = normalizeType(cls);
   return Object.assign({ $type }, data, { $type }) as ComponentData<T>;
 }
 
 // Get default field values for a type: class instance fields → schema defaults → {}
+// kriz: this should be somewhere near the schema.
+// kriz: isn't schema should be preferred?
 export function getDefaults<T = any>(type: TypeId<T>): Partial<Raw<T>> {
   // 1. Try registered class — new Class() gives field initializers
   const cls = resolve(type, 'class');
@@ -196,6 +211,7 @@ export function getDefaults<T = any>(type: TypeId<T>): Partial<Raw<T>> {
     return Object.assign({}, inst) as Partial<Raw<T>>;
   }
 
+  // kriz: how will we resolve non-primitive types here?
   // 2. Fall back to JSON schema defaults
   const schemaHandler = resolve(type, 'schema');
   if (schemaHandler) {

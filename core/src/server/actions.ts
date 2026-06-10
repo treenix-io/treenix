@@ -6,7 +6,7 @@ import { chain, type Chain } from '#chain';
 import { Class, type TypeProxy } from '#comp';
 import { type ExecuteFn, makeTypedProxy, type StreamFn } from '#comp/handle';
 import { collectDeps as _collectDeps, type ResolvedDeps } from '#comp/needs';
-import { assertSafeKey, type ComponentData, getComponentField, getMeta, isComponent, type NodeData, register, resolve, safeJsonParse } from '#core';
+import { assertSafeKey, COMP_PREFIX, type ComponentData, compKey, getComponentField, getMeta, isComponent, type NodeData, register, resolve, safeJsonParse } from '#core';
 import { validateValue, type ValidationError } from '#comp/validate';
 import { type TypeSchema } from '#schema/types';
 import { type PatchOp, PatchTestError, type Tree } from '#tree';
@@ -460,10 +460,13 @@ async function runAction<T = unknown>(
     const dc = fieldKey ? draft[fieldKey] : undefined;
     nodeForCtx = draft;
     compForCtx = isComponent(dc) ? dc as ComponentData : undefined;
-    // Remap sibling deps to draft so Immer captures mutations through deps too
+    // Remap sibling deps to draft so Immer captures mutations through deps too.
+    // Sibling deps live under their '#'-prefixed component key; cross-node deps
+    // (different node identity) never match and stay as fetched.
     for (const key of Object.keys(deps)) {
-      if (deps[key] === node[key]) {
-        deps[key] = draft[key] as ComponentData;
+      const storageKey = COMP_PREFIX + key;
+      if (deps[key] === node[storageKey]) {
+        deps[key] = draft[storageKey] as ComponentData;
       }
     }
   }
@@ -550,7 +553,7 @@ export async function setComponent(
   if (rev != null && node.$rev != null && rev !== node.$rev)
     throw new OpError('CONFLICT', `Stale revision: expected ${rev}, got ${node.$rev}`);
 
-  await tree.set({ ...node, [name]: data });
+  await tree.set({ ...node, [compKey(name)]: data });
 }
 
 // ── Generic patch action — deep merge data into node (Immer draft) ──

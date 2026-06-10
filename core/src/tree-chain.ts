@@ -3,7 +3,7 @@
 // Layer L2: uses Tree (L1) + comp (L2). No server dependency.
 
 import { type Class, type Raw, type TypeClass } from '#comp';
-import { getComponent, isComponent, isRef, type NodeData, normalizeType, resolve } from '#core';
+import { getComponent, getComponentByName, isRef, type NodeData, normalizeType, resolve } from '#core';
 import { OpError } from '#errors';
 import type { Tree } from '#tree';
 import type { Chain } from './chain';
@@ -44,8 +44,8 @@ async function exec(tree: Tree, path: string, spec: Spec | null, ops: Op[]): Pro
   // Apply $get — extract typed or named component
   if (spec) {
     if (spec.key) {
-      const ck = node[spec.key]
-      if (!isComponent(ck)) throw new Error(`Component "${spec.key}" not found on ${path}`)
+      const ck = getComponentByName(node, spec.key)
+      if (!ck) throw new Error(`Component "${spec.key}" not found on ${path}`)
       cur = ck
       curType = cur.$type
     } else if (spec.cls) {

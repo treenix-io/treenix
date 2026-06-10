@@ -172,7 +172,7 @@ describe('Mounts', () => {
     register('test.ref.store', 'mount', () => usersStore);
     await rootStore.set({
       ...createNode('/mnt/users', 'mount-point'),
-      mount: { $type: 'test.ref.store' },
+      '#mount': { $type: 'test.ref.store' },
     });
     await rootStore.set(
       createNode('/users', 'collection', {}, {
@@ -191,7 +191,7 @@ describe('Mounts', () => {
     register('test.ref.store', 'mount', () => usersStore);
     await rootStore.set({
       ...createNode('/mnt/users', 'mount-point'),
-      mount: { $type: 'test.ref.store' },
+      '#mount': { $type: 'test.ref.store' },
     });
     await rootStore.set(
       createNode('/users', 'collection', {}, {
@@ -349,7 +349,7 @@ describe('Mounts', () => {
     // The mount-point node itself should still be readable
     const node = await ms.get('/catalog');
     assert.equal(node?.$type, 't.dir');
-    assert.equal((node?.mount as Record<string, unknown>)?.disabled, true);
+    assert.equal((node?.['#mount'] as Record<string, unknown>)?.disabled, true);
   });
 
   it('enabled mount still works normally', async () => {
@@ -392,9 +392,9 @@ describe('Mounts', () => {
     const ms = withMounts(rootStore);
     const config = await ms.get('/broken');
     assert.equal(config?.$path, '/broken');
-    assert.equal((config?.mount as { root?: string }).root, undefined);
+    assert.equal((config?.['#mount'] as { root?: string }).root, undefined);
 
-    await ms.patch('/broken', [['r', 'mount.root', 'ok']]);
+    await ms.patch('/broken', [['r', '#mount.root', 'ok']]);
     await ms.set(createNode('/broken/item', 'thing'));
 
     const item = await usersStore.get('/broken/item');
@@ -413,10 +413,10 @@ describe('Mounts', () => {
     );
 
     const ms = withMounts(rootStore);
-    assert.equal(((await ms.get('/fs'))?.mount as { root?: string }).root, '');
+    assert.equal(((await ms.get('/fs'))?.['#mount'] as { root?: string }).root, '');
     await assert.rejects(() => ms.getChildren('/fs'), /t\.mount\.fs: root required/);
 
-    await ms.patch('/fs', [['r', 'mount.root', 'ok']]);
+    await ms.patch('/fs', [['r', '#mount.root', 'ok']]);
     await ms.set(createNode('/fs/item', 'thing'));
 
     assert.equal((await usersStore.get('/fs/item'))?.$type, 't.thing');
@@ -480,7 +480,7 @@ describe('Mounts', () => {
     const ms = withMounts(rootStore);
     assert.equal((await ms.get('/special/item'))?.$type, 't.old');
 
-    await ms.patch('/', [['r', 'mount.id', 'b']]);
+    await ms.patch('/', [['r', '#mount.id', 'b']]);
 
     assert.equal((await ms.get('/special/item'))?.$type, 't.new');
   });
@@ -507,7 +507,7 @@ describe('Mounts', () => {
     const ms = withMounts(rootStore);
     assert.equal((await ms.get('/users/item'))?.$type, 't.old');
 
-    await ms.patch('/configs/users', [['r', 'mount', { $type: 'test.mount.b' }]]);
+    await ms.patch('/configs/users', [['r', '#mount', { $type: 'test.mount.b' }]]);
 
     assert.equal((await ms.get('/users/item'))?.$type, 't.new');
   });
@@ -614,7 +614,7 @@ describe('Types mount adapter', () => {
     const node = await ts.get('/types/test/block/hero');
     assert.equal(node?.$type, 't.type');
     assert.equal(node?.$path, '/types/test/block/hero');
-    const schema = node?.schema as { title: string };
+    const schema = node?.['#schema'] as { title: string };
     assert.equal(schema.title, 'Hero');
   });
 
@@ -669,7 +669,7 @@ describe('Types mount adapter', () => {
     await backingStore.set(createNode('/types/test/block/hero', 'type'));
     const ts = createTypesTree(backingStore, '/types');
     const node = await ts.get('/types/test/block/hero');
-    const schema = node?.schema as { title: string };
+    const schema = node?.['#schema'] as { title: string };
     assert.equal(schema.title, 'Hero from registry');
   });
 
@@ -684,12 +684,12 @@ describe('Types mount adapter', () => {
     const ts = createTypesTree(backingStore, '/types');
     const node = await ts.get('/types/test/block/hero');
     assert.equal(node?.$type, 't.type');
-    const schema = node?.schema as { $type: string; title: string };
+    const schema = node?.['#schema'] as { $type: string; title: string };
     assert.equal(schema.$type, 'schema');
     assert.equal(schema.title, 'Hero');
-    const react = node?.react as { $type: string };
+    const react = node?.['#react'] as { $type: string };
     assert.equal(react.$type, 'react');
-    const reactEdit = node?.['react:edit'] as { $type: string };
+    const reactEdit = node?.['#react:edit'] as { $type: string };
     assert.equal(reactEdit.$type, 'react:edit');
   });
 
@@ -722,7 +722,7 @@ describe('Types mount adapter', () => {
     await ts.set(card);
     const node = await ts.get('/types/custom/card');
     assert.equal(node?.$type, 't.type');
-    const schema = node?.schema as { title: string };
+    const schema = node?.['#schema'] as { title: string };
     assert.equal(schema.title, 'Card');
   });
 

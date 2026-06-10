@@ -33,7 +33,7 @@ function makeOrder(status = 'incoming'): NodeData {
   return {
     $path: '/orders/1',
     $type: 'order',
-    status: { $type: 'order.status', value: status },
+    '#status': { $type: 'order.status', value: status },
   } as NodeData;
 }
 
@@ -66,14 +66,14 @@ describe('OptimisticBuffer', () => {
         node, 'order.status', 'advance', methodOf(OrderStatus, 'advance'), undefined,
       );
 
-      assert.equal((predicted.status as any).value, 'kitchen');
+      assert.equal((predicted['#status'] as any).value, 'kitchen');
       assert.ok(mutationId.startsWith('opt_'));
     });
 
     it('does not mutate original node', () => {
       const node = makeOrder('incoming');
       buf.apply(node, 'order.status', 'advance', methodOf(OrderStatus, 'advance'), undefined);
-      assert.equal((node.status as any).value, 'incoming');
+      assert.equal((node['#status'] as any).value, 'incoming');
     });
 
     it('passes data to method', () => {
@@ -111,7 +111,7 @@ describe('OptimisticBuffer', () => {
       const { node: result, rolledBack } = buf.confirm('/orders/1', serverNode);
 
       assert.equal(rolledBack, false);
-      assert.equal((result.status as any).value, 'kitchen');
+      assert.equal((result['#status'] as any).value, 'kitchen');
       assert.equal(buf.hasPending('/orders/1'), false);
     });
 
@@ -119,7 +119,7 @@ describe('OptimisticBuffer', () => {
       const serverNode = makeOrder('ready');
       const { node, rolledBack } = buf.confirm('/orders/1', serverNode);
       assert.equal(rolledBack, false);
-      assert.equal((node.status as any).value, 'ready');
+      assert.equal((node['#status'] as any).value, 'ready');
     });
   });
 
@@ -135,7 +135,7 @@ describe('OptimisticBuffer', () => {
       const { node: result, rolledBack } = buf.confirm('/orders/1', serverNode);
 
       assert.equal(rolledBack, true);
-      assert.equal((result.status as any).value, 'cancelled');
+      assert.equal((result['#status'] as any).value, 'cancelled');
       assert.equal(buf.hasPending('/orders/1'), false);
     });
 
@@ -147,13 +147,13 @@ describe('OptimisticBuffer', () => {
         { ...makeOrder('kitchen'), $path: '/orders/1' } as NodeData,
         'order.status', 'advance', methodOf(OrderStatus, 'advance'), undefined,
       );
-      assert.equal((predicted.status as any).value, 'ready');
+      assert.equal((predicted['#status'] as any).value, 'ready');
       assert.equal(buf.getPendingCount('/orders/1'), 2);
 
       // Server says cancelled — both pending are wrong
       const { node: result, rolledBack } = buf.confirm('/orders/1', makeOrder('cancelled'));
       assert.equal(rolledBack, true);
-      assert.equal((result.status as any).value, 'cancelled');
+      assert.equal((result['#status'] as any).value, 'cancelled');
       assert.equal(buf.getPendingCount('/orders/1'), 0);
     });
   });
@@ -219,7 +219,7 @@ describe('OptimisticBuffer', () => {
       buf.apply(node, 'order.status', 'advance', methodOf(OrderStatus, 'advance'), undefined);
 
       const baseline = buf.rollback('/orders/1');
-      assert.equal((baseline!.status as any).value, 'incoming');
+      assert.equal((baseline!['#status'] as any).value, 'incoming');
       assert.equal(buf.hasPending('/orders/1'), false);
     });
 
@@ -362,7 +362,7 @@ describe('OptimisticBuffer', () => {
       const node: NodeData = {
         $path: '/deep',
         $type: 'container',
-        meta: {
+        '#meta': {
           $type: 'order.status',
           value: 'incoming',
           nested: { deep: { array: [1, 2, 3] } },
@@ -374,11 +374,11 @@ describe('OptimisticBuffer', () => {
       );
 
       // Original untouched
-      assert.equal((node.meta as any).value, 'incoming');
+      assert.equal((node['#meta'] as any).value, 'incoming');
       // Predicted mutated
-      assert.equal((predicted.meta as any).value, 'kitchen');
+      assert.equal((predicted['#meta'] as any).value, 'kitchen');
       // Deep nested preserved
-      assert.deepEqual((predicted.meta as any).nested.deep.array, [1, 2, 3]);
+      assert.deepEqual((predicted['#meta'] as any).nested.deep.array, [1, 2, 3]);
     });
   });
 

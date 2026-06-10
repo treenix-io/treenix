@@ -128,10 +128,10 @@ describe('tRPC API integration', () => {
 
   describe('setComponent', () => {
     it('updates single component', async () => {
-      await caller.set({ node: { $path: '/n', $type: 'doc', meta: { $type: 'metadata', title: 'old', description: '' } } });
+      await caller.set({ node: { $path: '/n', $type: 'doc', '#meta': { $type: 'metadata', title: 'old', description: '' } } });
       await caller.setComponent({ path: '/n', name: 'meta', data: { $type: 'metadata', title: 'new', description: 'x' } });
       const node = await caller.get({ path: '/n' });
-      assert.equal((node as any).meta.title, 'new');
+      assert.equal((node as any)['#meta'].title, 'new');
     });
 
     it('NOT_FOUND for missing node', async () => {
@@ -206,10 +206,10 @@ describe('tRPC API integration', () => {
 
   describe('executeAction', () => {
     it('mutates node via Immer draft', async () => {
-      await caller.set({ node: { $path: '/o', $type: 'page', status: { $type: 'order.status', status: 'new' } } });
+      await caller.set({ node: { $path: '/o', $type: 'page', '#status': { $type: 'order.status', status: 'new' } } });
       await caller.execute({ path: '/o', key: 'status', action: 'cook' });
       const node = await caller.get({ path: '/o' });
-      assert.equal((node as any).status.status, 'kitchen');
+      assert.equal((node as any)['#status'].status, 'kitchen');
     });
 
     it('NOT_FOUND for missing node', async () => {
@@ -228,7 +228,7 @@ describe('tRPC API integration', () => {
     });
 
     it('BAD_REQUEST for missing action', async () => {
-      await caller.set({ node: { $path: '/o3', $type: 'page', status: { $type: 'order.status', status: 'new' } } });
+      await caller.set({ node: { $path: '/o3', $type: 'page', '#status': { $type: 'order.status', status: 'new' } } });
       await assert.rejects(
         () => caller.execute({ path: '/o3', key: 'status', action: 'nonexistent' }),
         (e: any) => e.code === 'BAD_REQUEST',
@@ -236,7 +236,7 @@ describe('tRPC API integration', () => {
     });
 
     it('generates Immer patches in events', async () => {
-      await caller.set({ node: { $path: '/pe', $type: 'page', meta: { $type: 'metadata', title: 'old', description: '' } } });
+      await caller.set({ node: { $path: '/pe', $type: 'page', '#meta': { $type: 'metadata', title: 'old', description: '' } } });
       events.length = 0;
       await caller.execute({ path: '/pe', key: 'meta', action: 'rename', data: { title: 'new' } });
 
@@ -367,7 +367,7 @@ describe('tRPC API integration', () => {
     });
 
     it('execute emits patch event', async () => {
-      await caller.set({ node: { $path: '/ev3', $type: 'page', meta: { $type: 'metadata', title: 'old', description: '' } } });
+      await caller.set({ node: { $path: '/ev3', $type: 'page', '#meta': { $type: 'metadata', title: 'old', description: '' } } });
       events.length = 0;
       await caller.execute({ path: '/ev3', key: 'meta', action: 'rename', data: { title: 'new' } });
       assert.ok(events.some(e => e.path === '/ev3' && e.type === 'patch'));
@@ -393,14 +393,14 @@ describe('tRPC API integration', () => {
     beforeEach(async () => {
       await caller.set({ node: { $path: '/orders', $type: 'folder' } });
       await caller.set({ node: { $path: '/orders/data', $type: 'folder' } });
-      await caller.set({ node: { $path: '/orders/data/1', $type: 'page', status: { $type: 'order.status', status: 'new' } } });
+      await caller.set({ node: { $path: '/orders/data/1', $type: 'page', '#status': { $type: 'order.status', status: 'new' } } });
       await caller.set({ node: {
         $path: '/orders/new', $type: 'folder',
-        mount: { $type: 't.mount.query', source: '/orders/data', match: { 'status.status': 'new' } },
+        '#mount': { $type: 't.mount.query', source: '/orders/data', match: { '#status.status': 'new' } },
       } });
       await caller.set({ node: {
         $path: '/orders/kitchen', $type: 'folder',
-        mount: { $type: 't.mount.query', source: '/orders/data', match: { 'status.status': 'kitchen' } },
+        '#mount': { $type: 't.mount.query', source: '/orders/data', match: { '#status.status': 'kitchen' } },
       } });
     });
 
@@ -482,7 +482,7 @@ describe('tRPC API integration', () => {
         node: {
           $path: '/orders/data/1',
           $type: 'page',
-          status: { $type: 'order.status', status: 'new' },
+          '#status': { $type: 'order.status', status: 'new' },
           note: 'updated while staying in /orders/new',
         },
       });
@@ -508,12 +508,12 @@ describe('tRPC API integration', () => {
         $path: '/oracle/data/a',
         $type: 'page',
         title: 'A',
-        secret: { $type: 'private.secret.api', value: 'alpha' },
+        '#secret': { $type: 'private.secret.api', value: 'alpha' },
       } as any);
       await rawStore.set({
         $path: '/oracle/secret',
         $type: 'folder',
-        mount: { $type: 't.mount.query', source: '/oracle/data', match: { 'secret.value': 'alpha' } },
+        '#mount': { $type: 't.mount.query', source: '/oracle/data', match: { '#secret.value': 'alpha' } },
       } as any);
 
       const result = await authedCaller.getChildren({ path: '/oracle/secret' });
@@ -527,7 +527,7 @@ describe('tRPC API integration', () => {
       await rawStore.set({
         $path: '/cdc-oracle/secret',
         $type: 'folder',
-        mount: { $type: 't.mount.query', source: '/cdc-oracle/data', match: { 'secret.value': 'alpha' } },
+        '#mount': { $type: 't.mount.query', source: '/cdc-oracle/data', match: { '#secret.value': 'alpha' } },
       } as any);
 
       const pushed: NodeEvent[] = [];
@@ -542,7 +542,7 @@ describe('tRPC API integration', () => {
         $path: '/cdc-oracle/data/a',
         $type: 'page',
         title: 'A',
-        secret: { $type: 'private.secret.cdc', value: 'alpha' },
+        '#secret': { $type: 'private.secret.cdc', value: 'alpha' },
       } as any);
       await new Promise(resolve => setTimeout(resolve, 0));
 
@@ -550,8 +550,8 @@ describe('tRPC API integration', () => {
     });
 
     it('multiple orders independently tracked', async () => {
-      await caller.set({ node: { $path: '/orders/data/2', $type: 'page', status: { $type: 'order.status', status: 'new' } } });
-      await caller.set({ node: { $path: '/orders/data/3', $type: 'page', status: { $type: 'order.status', status: 'new' } } });
+      await caller.set({ node: { $path: '/orders/data/2', $type: 'page', '#status': { $type: 'order.status', status: 'new' } } });
+      await caller.set({ node: { $path: '/orders/data/3', $type: 'page', '#status': { $type: 'order.status', status: 'new' } } });
 
       assert.equal((await caller.getChildren({ path: '/orders/new' })).items.length, 3);
 

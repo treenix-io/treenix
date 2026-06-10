@@ -70,13 +70,70 @@ import { assertSafeKey } from './json';
 
 export function assertNonSystemName(name: string) {
   if (name.startsWith('$')) throw new Error(`Component name cannot start with $: ${name}`);
+  if (name.startsWith(COMP_PREFIX)) throw new Error(`Component/field name cannot start with ${COMP_PREFIX}: ${name}`);
   assertSafeKey(name);
 }
 
+// ── Component namespace (# prefix) ──
+// Three disjoint key groups on a node: $x = system fields, bare = the main
+// component's own schema fields, #x = attached components (node['#run']).
+// Classification is purely the prefix — a bare value carrying $type is plain
+// data (e.g. a stored node snapshot), NOT a component. Legacy bare-component
+// storage is migrated offline in one pass (scripts/migrate-component-namespace);
+// there is no runtime compatibility mode. URLs and $refs already use the
+// single-# form (/path#run), so locators never change.
+// See docs/engine/core-simplification/component-namespace.md (core-gk8.21).
+
+export const COMP_PREFIX = '#';
+
+export function isCompKey(key: string): boolean {
+  return key.startsWith(COMP_PREFIX);
+}
+
+function bareName(nameOrKey: string): string {
+  const bare = isCompKey(nameOrKey) ? nameOrKey.slice(1) : nameOrKey;
+  if (!bare) throw new Error('Component name cannot be empty');
+  if (bare.includes('.')) throw new Error(`Component name cannot contain ".": ${nameOrKey}`);
+  assertNonSystemName(bare);
+  return bare;
+}
+
+/** 'run' → '#run'. Idempotent on storage keys: '#run' → '#run', never '##run'. */
+export function compKey(name: string): string {
+  return COMP_PREFIX + bareName(name);
+}
+
+/** '#run' → 'run'; 'run' → 'run'. For URLs / $refs locators — single-# form. */
+export function compName(key: string): string {
+  return bareName(key);
+}
+
+function assertWellFormedCompEntry(node: NodeData, key: string, value: unknown): asserts value is ComponentData {
+  // A #-key whose value carries no $type is neither a field nor a component —
+  // a malformed write slipped past the boundary. Throw, never skip.
+  if (!isComponent(value)) {
+    throw new Error(`Malformed component entry "${key}" on ${node.$path}: value has no $type`);
+  }
+}
+
+/** Component lookup by NAME: accepts 'run' or '#run', reads node['#run']. */
+export function getComponentByName(node: NodeData, name: string): ComponentData | undefined {
+  const bare = isCompKey(name) ? name.slice(1) : name;
+  const value = node[COMP_PREFIX + bare];
+  if (value === undefined) return undefined;
+  assertWellFormedCompEntry(node, COMP_PREFIX + bare, value);
+  return value;
+}
+
+/** Component-arg keys land in storage under their '#'-prefixed form.
+ *  A general string index signature passes through unprefixed so
+ *  Record<string, …> component bags stay assignable to NodeData. */
+type CompKeyed<C> = { [K in keyof C as K extends string ? (string extends K ? K : `#${K}`) : never]: C[K] };
+
 export function makeNode<T, C = Record<string, ComponentData<any>>>(
-  path: string, type: Class<T>, data?: Partial<T>, components?: C): NodeData<T & C>;
+  path: string, type: Class<T>, data?: Partial<T>, components?: C): NodeData<T & CompKeyed<C>>;
 export function makeNode<T = any, C = Record<string, ComponentData<any>>>(
-  path: string, type: string, data?: T, components?: C): NodeData<T & C>;
+  path: string, type: string, data?: T, components?: C): NodeData<T & CompKeyed<C>>;
 export function makeNode(
   path: string,
   type: TypeId,
@@ -84,10 +141,15 @@ export function makeNode(
   components?: any): NodeData {
 
   const node: NodeData = { $path: path, $type: normalizeType(type) } as NodeData;
-  if (components) Object.keys(components).forEach(assertNonSystemName);
   if (data) Object.keys(data).forEach(assertNonSystemName);
+  Object.assign(node, data);
 
-  Object.assign(node, components, data);
+  if (components) {
+    for (const [name, comp] of Object.entries(components)) {
+      if (!isComponent(comp)) throw new Error(`makeNode: component "${name}" has no $type`);
+      node[compKey(name)] = comp;
+    }
+  }
 
   return node;
 }
@@ -101,13 +163,18 @@ export function getComponentField<T = unknown>(
   field?: string,
 ): [ComponentData<T>, string] | undefined {
   if (field != null) {
-    const v = field === '' ? node : node[field];
-    if (isOfType<T>(v, type)) return [v, field];
+    if (field === '') return isOfType<T>(node, type) ? [node, ''] : undefined;
+    // Returns the ACTUAL storage key ('#run') — callers index node[fieldKey]
+    // downstream (Immer drafts, patch paths), so the key must match storage.
+    const key = COMP_PREFIX + (isCompKey(field) ? field.slice(1) : field);
+    const v = node[key];
+    if (isOfType<T>(v, type)) return [v, key];
     return;
   }
   if (isOfType<T>(node, type)) return [node, ''];
   for (const [k, v] of Object.entries(node)) {
-    if (k.startsWith('$')) continue;
+    if (!isCompKey(k)) continue; // bare keys are data, $ keys are system
+    assertWellFormedCompEntry(node, k, v);
     if (isOfType<T>(v, type)) return [v, k];
   }
 }
@@ -127,7 +194,8 @@ export function getComponents<T = unknown>(
   const result: [string, ComponentData<T>][] = [];
   if (isOfType<T>(node, type)) result.push(['', node]);
   for (const [k, v] of Object.entries(node)) {
-    if (k.startsWith('$')) continue;
+    if (!isCompKey(k)) continue; // bare keys are data, $ keys are system
+    assertWellFormedCompEntry(node, k, v);
     if (isOfType<T>(v, type)) result.push([k, v]);
   }
   return result;
@@ -152,8 +220,8 @@ export function fromStorageKeys(doc: Record<string, unknown>): Record<string, un
 }
 
 export function removeComponent(node: NodeData, name: string): boolean {
-  assertNonSystemName(name);
-  if (!isComponent(node[name])) return false;
-  delete node[name];
+  const key = compKey(name);
+  if (!isComponent(node[key])) return false;
+  delete node[key];
   return true;
 }

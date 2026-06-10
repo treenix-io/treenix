@@ -71,7 +71,7 @@ async function seed(): Promise<Tree> {
     $type: 'tch.profile',
     name: 'Alice',
     balance: 100,
-    wallet: { $type: 'tch.wallet', address: '0xabc', chain: 'eth' },
+    '#wallet': { $type: 'tch.wallet', address: '0xabc', chain: 'eth' },
   })
 
   return tree
@@ -678,7 +678,7 @@ describe('treeChain — multiple ops chain', () => {
       intervalMs: 1,
       maxRetries: 1,
       livePrices: { $type: 'ref', $ref: '/lp' },
-      nested: { $type: 'tch.wallet', address: '0x123', chain: 'polygon' },
+      '#nested': { $type: 'tch.wallet', address: '0x123', chain: 'polygon' },
     })
     await tree.set({ $path: '/lp', $type: 'tch.live-prices', feederUrl: 'ws://chain' })
 

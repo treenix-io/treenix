@@ -118,7 +118,7 @@ describe('defineComponent', () => {
 
     async function execute(path: string, component: string, action: string, data?: unknown) {
       const n = (await tree.get(path))!;
-      const cv = n[component];
+      const cv = n[`#${component}`];
       if (!isComponent(cv)) throw new Error(`Component "${component}" not found`);
       resolve(cv.$type, `action:${action}`)!({ node: n, comp: cv, tree } as any, data);
       await tree.set(n);
@@ -128,8 +128,8 @@ describe('defineComponent', () => {
     await execute('/p', 'status', 'publish');
 
     const result = (await tree.get('/p'))!;
-    assert.equal((result['metadata'] as any).title, 'new');
-    assert.equal((result['status'] as any).value, 'published');
+    assert.equal((result['#metadata'] as any).title, 'new');
+    assert.equal((result['#status'] as any).value, 'published');
   });
 
   it('node.get(Class).action() — typed client proxy', async () => {
@@ -179,14 +179,14 @@ describe('defineComponent', () => {
       status: { $type: 'status', value: 'draft' },
     });
 
-    const comp = node['article'] as any;
-    const deps = { status: node['status'] as any };
+    const comp = node['#article'] as any;
+    const deps = { status: node['#status'] as any };
     resolve(comp.$type, 'action:publishAndRename')!({ node, comp, deps } as any, {
       title: 'new',
     });
 
     assert.equal(comp.title, 'new');
-    assert.equal((node['status'] as any).value, 'published');
+    assert.equal((node['#status'] as any).value, 'published');
   });
 
   it('patch action: shallow fields', async () => {
@@ -274,8 +274,8 @@ describe('defineComponent', () => {
     await executeAction(tree, '/a', 'article', undefined, 'publishAndRename', { title: 'new' });
 
     const result = (await tree.get('/a'))!;
-    assert.equal((result['article'] as any).title, 'new');
-    assert.equal((result['status'] as any).value, 'published');
+    assert.equal((result['#article'] as any).title, 'new');
+    assert.equal((result['#status'] as any).value, 'published');
   });
 
   it('executeAction resolves dotless node.$type against normalized componentType', async () => {
@@ -567,7 +567,7 @@ describe('defineComponent', () => {
 
     await executeAction(tree, '/v3', 'metadata', 'metadata', 'rename', { title: 'new' });
     const result = (await tree.get('/v3'))!;
-    assert.equal((result['metadata'] as any).title, 'new');
+    assert.equal((result['#metadata'] as any).title, 'new');
   });
 
   // Codex round 3 #5 regression: streamAction in trpc.ts previously bypassed validateActionArgs.

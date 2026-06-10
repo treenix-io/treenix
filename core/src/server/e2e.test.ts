@@ -269,7 +269,7 @@ describe('e2e: tRPC over HTTP', () => {
 
     it('BAD_REQUEST for unknown action', async () => {
       const client = createClient(url);
-      await client.set.mutate({ node: { $path: '/n', $type: 'page', ret: { $type: 'returner' } } });
+      await client.set.mutate({ node: { $path: '/n', $type: 'page', '#ret': { $type: 'returner' } } });
       await assert.rejects(
         () => client.execute.mutate({ path: '/n', key: 'ret', action: 'nonexistent' }),
         (e: any) => e.data?.code === 'BAD_REQUEST',
@@ -278,7 +278,7 @@ describe('e2e: tRPC over HTTP', () => {
 
     it('CONFLICT on stale $rev', async () => {
       const client = createClient(url);
-      await client.set.mutate({ node: { $path: '/rev', $type: 'doc', x: { $type: 'returner' } } });
+      await client.set.mutate({ node: { $path: '/rev', $type: 'doc', '#x': { $type: 'returner' } } });
       await assert.rejects(
         () => client.setComponent.mutate({ path: '/rev', name: 'x', data: { $type: 'returner' }, rev: 99 }),
         (e: any) => e.data?.code === 'CONFLICT',
@@ -291,28 +291,28 @@ describe('e2e: tRPC over HTTP', () => {
   describe('action return values', () => {
     it('execute returns object', async () => {
       const client = createClient(url);
-      await client.set.mutate({ node: { $path: '/r', $type: 'page', ret: { $type: 'returner' } } });
+      await client.set.mutate({ node: { $path: '/r', $type: 'page', '#ret': { $type: 'returner' } } });
       const result = await client.execute.mutate({ path: '/r', key: 'ret', action: 'getObject' });
       assert.deepEqual(result, { x: 1, nested: { y: 'hello' } });
     });
 
     it('execute returns array', async () => {
       const client = createClient(url);
-      await client.set.mutate({ node: { $path: '/r2', $type: 'page', ret: { $type: 'returner' } } });
+      await client.set.mutate({ node: { $path: '/r2', $type: 'page', '#ret': { $type: 'returner' } } });
       const result = await client.execute.mutate({ path: '/r2', key: 'ret', action: 'getArray' });
       assert.deepEqual(result, [1, 'two', { three: 3 }]);
     });
 
     it('execute returns null', async () => {
       const client = createClient(url);
-      await client.set.mutate({ node: { $path: '/r3', $type: 'page', ret: { $type: 'returner' } } });
+      await client.set.mutate({ node: { $path: '/r3', $type: 'page', '#ret': { $type: 'returner' } } });
       const result = await client.execute.mutate({ path: '/r3', key: 'ret', action: 'getNull' });
       assert.equal(result, null);
     });
 
     it('execute returns number', async () => {
       const client = createClient(url);
-      await client.set.mutate({ node: { $path: '/r4', $type: 'page', ret: { $type: 'returner' } } });
+      await client.set.mutate({ node: { $path: '/r4', $type: 'page', '#ret': { $type: 'returner' } } });
       const result = await client.execute.mutate({ path: '/r4', key: 'ret', action: 'getNumber' });
       assert.equal(result, 42);
     });
@@ -326,7 +326,7 @@ describe('e2e: tRPC over HTTP', () => {
       const reg = await pub.register.mutate({ userId: 'watcher', password: 'pass' });
       const client = createClient(url, reg.token);
 
-      await pub.set.mutate({ node: { $path: '/w', $type: 'page', meta: { $type: 'order.status', status: 'new' } } });
+      await pub.set.mutate({ node: { $path: '/w', $type: 'page', '#meta': { $type: 'order.status', status: 'new' } } });
 
       // Start subscription first (triggers watcher.connect on server)
       const events = collectEvents<DataEvent>(
@@ -352,7 +352,7 @@ describe('e2e: tRPC over HTTP', () => {
       const reg = await pub.register.mutate({ userId: 'patcher', password: 'pass' });
       const client = createClient(url, reg.token);
 
-      await pub.set.mutate({ node: { $path: '/pe', $type: 'page', meta: { $type: 'order.status', status: 'new' } } });
+      await pub.set.mutate({ node: { $path: '/pe', $type: 'page', '#meta': { $type: 'order.status', status: 'new' } } });
 
       const events = collectEvents<DataEvent>(
         (cbs) => client.events.subscribe(undefined, cbs),
@@ -375,7 +375,7 @@ describe('e2e: tRPC over HTTP', () => {
       const reg = await pub.register.mutate({ userId: 'streamer', password: 'pass' });
       const client = createClient(url, reg.token);
 
-      await pub.set.mutate({ node: { $path: '/s', $type: 'page', str: { $type: 'streamer' } } });
+      await pub.set.mutate({ node: { $path: '/s', $type: 'page', '#str': { $type: 'streamer' } } });
 
       const items = await collectEvents<unknown>(
         (cbs) => client.streamAction.subscribe({ path: '/s', key: 'str', action: 'count', data: { n: 3 } }, cbs),
@@ -395,7 +395,7 @@ describe('e2e: tRPC over HTTP', () => {
       const reg = await pub.register.mutate({ userId: 'streamer2', password: 'pass' });
       const client = createClient(url, reg.token);
 
-      await pub.set.mutate({ node: { $path: '/s2', $type: 'page', str: { $type: 'streamer' } } });
+      await pub.set.mutate({ node: { $path: '/s2', $type: 'page', '#str': { $type: 'streamer' } } });
 
       const items = await collectEvents<unknown>(
         (cbs) => client.streamAction.subscribe({ path: '/s2', key: 'str', action: 'objects' }, cbs),
@@ -465,7 +465,7 @@ describe('e2e: tRPC over HTTP', () => {
       // Make alice an admin
       await ts.tree.set({
         ...createNode('/auth/groups/admins', 'group'),
-        members: { $type: 'members', list: ['alice-sec'] },
+        '#members': { $type: 'members', list: ['alice-sec'] },
       });
 
       // Create a private node only admins can see
@@ -523,15 +523,15 @@ describe('e2e: tRPC over HTTP', () => {
       await client.set.mutate({ node: { $path: '/orders/data', $type: 'folder' } });
       await client.set.mutate({ node: {
         $path: '/orders/data/1', $type: 'page',
-        status: { $type: 'order.status', status: 'new' },
+        '#status': { $type: 'order.status', status: 'new' },
       } });
       await client.set.mutate({ node: {
         $path: '/orders/new', $type: 'folder',
-        mount: { $type: 't.mount.query', source: '/orders/data', match: { 'status.status': 'new' } },
+        '#mount': { $type: 't.mount.query', source: '/orders/data', match: { '#status.status': 'new' } },
       } });
       await client.set.mutate({ node: {
         $path: '/orders/kitchen', $type: 'folder',
-        mount: { $type: 't.mount.query', source: '/orders/data', match: { 'status.status': 'kitchen' } },
+        '#mount': { $type: 't.mount.query', source: '/orders/data', match: { '#status.status': 'kitchen' } },
       } });
 
       let newOrders = await client.getChildren.query({ path: '/orders/new' });
@@ -556,7 +556,7 @@ describe('e2e: tRPC over HTTP', () => {
   ) {
     await client.set.mutate({ node: {
       $path: vpPath, $type: 'folder',
-      mount: { $type: 't.mount.query', source: sourcePath, match },
+      '#mount': { $type: 't.mount.query', source: sourcePath, match },
     } });
   }
 
@@ -572,13 +572,13 @@ describe('e2e: tRPC over HTTP', () => {
       await pub.set.mutate({ node: { $path: '/d1', $type: 'folder' } });
       await pub.set.mutate({ node: {
         $path: '/d1/o1', $type: 'page',
-        status: { $type: 'order.status', status: 'new' },
+        '#status': { $type: 'order.status', status: 'new' },
       } });
 
       // Query mounts
       await pub.set.mutate({ node: { $path: '/qm1', $type: 'folder' } });
-      await setupQueryMount(pub, '/qm1/new', '/d1', { 'status.status': 'new' });
-      await setupQueryMount(pub, '/qm1/kitchen', '/d1', { 'status.status': 'kitchen' });
+      await setupQueryMount(pub, '/qm1/new', '/d1', { '#status.status': 'new' });
+      await setupQueryMount(pub, '/qm1/kitchen', '/d1', { '#status.status': 'kitchen' });
 
       // Subscribe + register watches
       const events = collectEvents<DataEvent>(
@@ -608,7 +608,7 @@ describe('e2e: tRPC over HTTP', () => {
 
       await pub.set.mutate({ node: { $path: '/items2', $type: 'folder' } });
       await pub.set.mutate({ node: { $path: '/qm2', $type: 'folder' } });
-      await setupQueryMount(pub, '/qm2/hot', '/items2', { 'pri.level': 'high' });
+      await setupQueryMount(pub, '/qm2/hot', '/items2', { '#pri.level': 'high' });
 
       const events = collectEvents<DataEvent>(
         (cbs) => client.events.subscribe(undefined, cbs),
@@ -621,7 +621,7 @@ describe('e2e: tRPC over HTTP', () => {
       // Create matching node
       await pub.set.mutate({ node: {
         $path: '/items2/t1', $type: 'task',
-        pri: { $type: 'task.priority', level: 'high' },
+        '#pri': { $type: 'task.priority', level: 'high' },
       } });
 
       const received = await events;
@@ -639,10 +639,10 @@ describe('e2e: tRPC over HTTP', () => {
       await pub.set.mutate({ node: { $path: '/items3', $type: 'folder' } });
       await pub.set.mutate({ node: {
         $path: '/items3/t1', $type: 'task',
-        pri: { $type: 'task.priority', level: 'high' },
+        '#pri': { $type: 'task.priority', level: 'high' },
       } });
       await pub.set.mutate({ node: { $path: '/qm3', $type: 'folder' } });
-      await setupQueryMount(pub, '/qm3/hot', '/items3', { 'pri.level': 'high' });
+      await setupQueryMount(pub, '/qm3/hot', '/items3', { '#pri.level': 'high' });
 
       const events = collectEvents<DataEvent>(
         (cbs) => client.events.subscribe(undefined, cbs),
@@ -671,10 +671,10 @@ describe('e2e: tRPC over HTTP', () => {
       await pub.set.mutate({ node: { $path: '/items4', $type: 'folder' } });
       await pub.set.mutate({ node: {
         $path: '/items4/t1', $type: 'task',
-        pri: { $type: 'task.priority', level: 'low' },
+        '#pri': { $type: 'task.priority', level: 'low' },
       } });
       await pub.set.mutate({ node: { $path: '/qm4', $type: 'folder' } });
-      await setupQueryMount(pub, '/qm4/hot', '/items4', { 'pri.level': 'high' });
+      await setupQueryMount(pub, '/qm4/hot', '/items4', { '#pri.level': 'high' });
 
       const events = collectEvents<DataEvent>(
         (cbs) => client.events.subscribe(undefined, cbs),
@@ -687,7 +687,7 @@ describe('e2e: tRPC over HTTP', () => {
       // Update non-matching node (still low priority)
       await pub.set.mutate({ node: {
         $path: '/items4/t1', $type: 'task',
-        pri: { $type: 'task.priority', level: 'low' },
+        '#pri': { $type: 'task.priority', level: 'low' },
         extra: 'data',
       } });
 
@@ -707,11 +707,11 @@ describe('e2e: tRPC over HTTP', () => {
       await pub.set.mutate({ node: { $path: '/items5', $type: 'folder' } });
       await pub.set.mutate({ node: {
         $path: '/items5/t1', $type: 'task',
-        pri: { $type: 'task.priority', level: 'high' },
+        '#pri': { $type: 'task.priority', level: 'high' },
         assignee: 'alice',
       } });
       await pub.set.mutate({ node: { $path: '/qm5', $type: 'folder' } });
-      await setupQueryMount(pub, '/qm5/hot', '/items5', { 'pri.level': 'high' });
+      await setupQueryMount(pub, '/qm5/hot', '/items5', { '#pri.level': 'high' });
 
       const events = collectEvents<DataEvent>(
         (cbs) => client.events.subscribe(undefined, cbs),
@@ -727,7 +727,7 @@ describe('e2e: tRPC over HTTP', () => {
       // pri.level stays 'high' → membership in /qm5/hot unchanged → stayVps.
       await pub.set.mutate({ node: {
         $path: '/items5/t1', $type: 'task',
-        pri: { $type: 'task.priority', level: 'high' },
+        '#pri': { $type: 'task.priority', level: 'high' },
         assignee: 'bob',
       } });
 
@@ -751,19 +751,19 @@ describe('e2e: tRPC over HTTP', () => {
       await client.set.mutate({ node: { $path: '/src5', $type: 'folder' } });
       await client.set.mutate({ node: {
         $path: '/src5/a', $type: 'page',
-        status: { $type: 'order.status', status: 'new' },
+        '#status': { $type: 'order.status', status: 'new' },
       } });
       await client.set.mutate({ node: {
         $path: '/src5/b', $type: 'page',
-        status: { $type: 'order.status', status: 'kitchen' },
+        '#status': { $type: 'order.status', status: 'kitchen' },
       } });
       await client.set.mutate({ node: {
         $path: '/src5/c', $type: 'page',
-        status: { $type: 'order.status', status: 'new' },
+        '#status': { $type: 'order.status', status: 'new' },
       } });
 
       await client.set.mutate({ node: { $path: '/vm5', $type: 'folder' } });
-      await setupQueryMount(client, '/vm5/new', '/src5', { 'status.status': 'new' });
+      await setupQueryMount(client, '/vm5/new', '/src5', { '#status.status': 'new' });
 
       const result = await client.getChildren.query({ path: '/vm5/new' });
       assert.equal(result.items.length, 2, 'Only 2 of 3 match status=new');
@@ -771,7 +771,7 @@ describe('e2e: tRPC over HTTP', () => {
       // All items have real paths from /src5/
       for (const item of result.items) {
         assert.ok(item.$path.startsWith('/src5/'), `Real path expected, got ${item.$path}`);
-        assert.equal((item as any).status.status, 'new');
+        assert.equal((item as any)['#status'].status, 'new');
       }
     });
 
@@ -781,12 +781,12 @@ describe('e2e: tRPC over HTTP', () => {
       await client.set.mutate({ node: { $path: '/src6', $type: 'folder' } });
       await client.set.mutate({ node: {
         $path: '/src6/o1', $type: 'page',
-        status: { $type: 'order.status', status: 'new' },
+        '#status': { $type: 'order.status', status: 'new' },
       } });
 
       await client.set.mutate({ node: { $path: '/vm6', $type: 'folder' } });
-      await setupQueryMount(client, '/vm6/new', '/src6', { 'status.status': 'new' });
-      await setupQueryMount(client, '/vm6/kitchen', '/src6', { 'status.status': 'kitchen' });
+      await setupQueryMount(client, '/vm6/new', '/src6', { '#status.status': 'new' });
+      await setupQueryMount(client, '/vm6/kitchen', '/src6', { '#status.status': 'kitchen' });
 
       // Discover via query mount
       const newOrders = await client.getChildren.query({ path: '/vm6/new' });
@@ -810,11 +810,11 @@ describe('e2e: tRPC over HTTP', () => {
       await client.set.mutate({ node: { $path: '/src7', $type: 'folder' } });
       await client.set.mutate({ node: {
         $path: '/src7/n1', $type: 'returner',
-        status: { $type: 'order.status', status: 'new' },
+        '#status': { $type: 'order.status', status: 'new' },
       } });
 
       await client.set.mutate({ node: { $path: '/vm7', $type: 'folder' } });
-      await setupQueryMount(client, '/vm7/new', '/src7', { 'status.status': 'new' });
+      await setupQueryMount(client, '/vm7/new', '/src7', { '#status.status': 'new' });
 
       // Discover via mount
       const items = await client.getChildren.query({ path: '/vm7/new' });
@@ -839,13 +839,13 @@ describe('e2e: tRPC over HTTP', () => {
       await pub.set.mutate({ node: { $path: '/lc/data', $type: 'folder' } });
       await pub.set.mutate({ node: {
         $path: '/lc/data/o1', $type: 'page',
-        status: { $type: 'order.status', status: 'new' },
+        '#status': { $type: 'order.status', status: 'new' },
       } });
 
       // 3 query mounts
-      await setupQueryMount(pub, '/lc/new', '/lc/data', { 'status.status': 'new' });
-      await setupQueryMount(pub, '/lc/kitchen', '/lc/data', { 'status.status': 'kitchen' });
-      await setupQueryMount(pub, '/lc/delivered', '/lc/data', { 'status.status': 'delivered' });
+      await setupQueryMount(pub, '/lc/new', '/lc/data', { '#status.status': 'new' });
+      await setupQueryMount(pub, '/lc/kitchen', '/lc/data', { '#status.status': 'kitchen' });
+      await setupQueryMount(pub, '/lc/delivered', '/lc/data', { '#status.status': 'delivered' });
 
       // Subscribe
       const events = collectEvents<DataEvent>(
@@ -903,9 +903,9 @@ describe('e2e: tRPC over HTTP', () => {
       await pub.set.mutate({ node: { $path: '/multi', $type: 'folder' } });
       await pub.set.mutate({ node: { $path: '/qme', $type: 'folder' } });
       // VP1: matches high priority
-      await setupQueryMount(pub, '/qme/high', '/multi', { 'pri.level': 'high' });
+      await setupQueryMount(pub, '/qme/high', '/multi', { '#pri.level': 'high' });
       // VP2: matches any node with pri component (level exists)
-      await setupQueryMount(pub, '/qme/all', '/multi', { 'pri.level': { $exists: true } });
+      await setupQueryMount(pub, '/qme/all', '/multi', { '#pri.level': { $exists: true } });
 
       const { events, ready } = subscribeEvents(client, { count: 1, timeoutMs: 3000 });
       await ready;
@@ -916,7 +916,7 @@ describe('e2e: tRPC over HTTP', () => {
       // Create node matching both
       await pub.set.mutate({ node: {
         $path: '/multi/t1', $type: 'task',
-        pri: { $type: 'task.priority', level: 'high' },
+        '#pri': { $type: 'task.priority', level: 'high' },
       } });
 
       const received = await events;
@@ -934,7 +934,7 @@ describe('e2e: tRPC over HTTP', () => {
 
       await pub.set.mutate({ node: { $path: '/aw', $type: 'folder' } });
       await pub.set.mutate({ node: { $path: '/qmaw', $type: 'folder' } });
-      await setupQueryMount(pub, '/qmaw/hot', '/aw', { 'pri.level': 'high' });
+      await setupQueryMount(pub, '/qmaw/hot', '/aw', { '#pri.level': 'high' });
 
       const { events, ready } = subscribeEvents(client, { count: 2, timeoutMs: 4000 });
       await ready;
@@ -945,14 +945,14 @@ describe('e2e: tRPC over HTTP', () => {
       // Event 1: create matching node → addVps (autoWatch registers exact-path watch)
       await pub.set.mutate({ node: {
         $path: '/aw/t1', $type: 'task',
-        pri: { $type: 'task.priority', level: 'high' },
+        '#pri': { $type: 'task.priority', level: 'high' },
       } });
       await new Promise(r => setTimeout(r, 200));
 
       // Event 2: update same node (still matches) → exact-path watch delivers
       await pub.set.mutate({ node: {
         $path: '/aw/t1', $type: 'task',
-        pri: { $type: 'task.priority', level: 'high' },
+        '#pri': { $type: 'task.priority', level: 'high' },
         extra: 'updated',
       } });
 
@@ -976,7 +976,7 @@ describe('e2e: tRPC over HTTP', () => {
 
       await pub.set.mutate({ node: { $path: '/mu', $type: 'folder' } });
       await pub.set.mutate({ node: { $path: '/qmu', $type: 'folder' } });
-      await setupQueryMount(pub, '/qmu/hot', '/mu', { 'pri.level': 'high' });
+      await setupQueryMount(pub, '/qmu/hot', '/mu', { '#pri.level': 'high' });
 
       // Both users subscribe
       const sub1 = subscribeEvents(c1, { count: 1, timeoutMs: 5000 });
@@ -990,7 +990,7 @@ describe('e2e: tRPC over HTTP', () => {
       // Create matching node
       await pub.set.mutate({ node: {
         $path: '/mu/t1', $type: 'task',
-        pri: { $type: 'task.priority', level: 'high' },
+        '#pri': { $type: 'task.priority', level: 'high' },
       } });
 
       const [r1, r2] = await Promise.all([sub1.events, sub2.events]);

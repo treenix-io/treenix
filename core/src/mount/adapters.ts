@@ -4,7 +4,7 @@
 
 import { createTrpcTransport } from '#client';
 import { registerType } from '#comp';
-import { isComponent, register } from '#core';
+import { getComponentByName, isComponent, register } from '#core';
 import { createMemoryTree, createOverlayTree, type Tree } from '#tree';
 import { createFsTree } from '#tree/fs';
 import { createRawFsTree } from '#tree/mimefs';
@@ -175,8 +175,10 @@ register(MountOverlay, 'mount', async (mount, ctx) => {
   if (!mount.layers?.length) throw new Error('t.mount.overlay: layers required');
   const stores: Tree[] = [];
   for (const name of mount.layers) {
-    const comp = ctx.node[name];
-    if (!isComponent(comp)) throw new Error(`t.mount.overlay: component "${name}" not found`);
+    // Layer names are stored in data — resolve through the accessor so both
+    // '#'-prefixed and legacy storage forms work.
+    const comp = getComponentByName(ctx.node, name);
+    if (!comp) throw new Error(`t.mount.overlay: component "${name}" not found`);
     // Each subsequent layer sees the previously-built one as its parent.
     const subCtx: MountCtx = { node: ctx.node, path: ctx.path, parentStore: stores[0] ?? ctx.parentStore, globalStore: ctx.globalStore };
     stores.push(await resolveAdapter(comp, subCtx));

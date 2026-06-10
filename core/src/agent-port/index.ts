@@ -45,7 +45,7 @@ export class AgentPort {
     await tree.set({
       $path: `/auth/users/${agentUserId}`,
       $type: 'user',
-      groups: { $type: 'groups', list: ['agent'] },
+      '#groups': { $type: 'groups', list: ['agent'] },
     });
   }
 
