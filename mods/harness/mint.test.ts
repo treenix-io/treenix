@@ -6,7 +6,7 @@
 import { createMemoryTree, type Tree } from '@treenx/core/tree';
 import { resolveToken } from '@treenx/core/security/auth';
 import { OpError } from '@treenx/core/errors';
-import { getComponentByName, R, W, A, S } from '@treenx/core';
+import { createNode, getComponentByName, R, W, A, S } from '@treenx/core';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 import { defineAgentScope } from './capability';
@@ -21,13 +21,12 @@ beforeEach(async () => {
   await tree.set({ $path: '/auth/users', $type: 'dir' });
   await tree.set({ $path: '/auth/sessions', $type: 'dir' });
   await tree.set({ $path: '/agents', $type: 'dir' });
-  await tree.set({
-    $path: '/agents/bot', $type: 't.agent.port',
-    '#scope': defineAgentScope({
+  await tree.set(createNode('/agents/bot', 't.agent.port', undefined, {
+    scope: defineAgentScope({
       plan: { read: ['/work/*'], write: ['/agents/bot/runs/*'], exec: ['ai.plan.*'] },
       work: { read: ['/work/*'], write: ['/work/*'], exec: ['refund.requestReview'] },
     }),
-  });
+  }));
   await tree.set({ $path: '/agents/scopeless', $type: 't.agent.port' });
 });
 

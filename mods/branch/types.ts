@@ -107,7 +107,7 @@ export class Branches {
     await ctx.tree.set(branchNode);
     await ctx.tree.set(makeNode(`${path}/delta`, 'dir'));
     await ctx.tree.set(makeNode(`${path}/tree`, 'dir', undefined, {
-      '#mount': { $type: 't.mount.branch' },
+      mount: { $type: 't.mount.branch' },
     }));
     return { path };
   }

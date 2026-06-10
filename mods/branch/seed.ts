@@ -4,7 +4,7 @@
 // session to ITS branch (writePaths=['/branches/<id>/**']). Per-branch nodes
 // additionally grant `u:<owner>` full bits at create time.
 
-import { A, R, S, W } from '@treenx/core';
+import { A, makeNode, R, S, W } from '@treenx/core';
 import { registerPrefab } from '@treenx/core/mod';
 
 // The description is THE onboarding text for agents: prompt composers inject
@@ -21,14 +21,12 @@ Workflow:
 4. finish: execute 'requestMerge' with a note — flips the branch to review; a human reviews the diff and merges.
    Watch status and conflicts on the branch node.`;
 
-registerPrefab('branch', 'seed', [
-  {
-    $path: 'branches',
-    $type: 't.branches',
-    $acl: [
-      { g: 'admins', p: R | W | A | S },
-      { g: 'agents', p: R | W | A | S },
-    ],
-    '#description': { $type: 't.description', text: WORKFLOW },
-  },
-]);
+const branchesRoot = makeNode('branches', 't.branches', {}, {
+  description: { $type: 't.description', text: WORKFLOW },
+});
+branchesRoot.$acl = [
+  { g: 'admins', p: R | W | A | S },
+  { g: 'agents', p: R | W | A | S },
+];
+
+registerPrefab('branch', 'seed', [branchesRoot]);

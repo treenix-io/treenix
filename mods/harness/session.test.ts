@@ -5,7 +5,7 @@
 import { createMemoryTree, type Tree } from '@treenx/core/tree';
 import { withAcl } from '@treenx/core/security/auth';
 import { OpError } from '@treenx/core/errors';
-import { register, R, W } from '@treenx/core';
+import { createNode, register, R, W } from '@treenx/core';
 import { clearRegistry } from '@treenx/core/core/index.test';
 import type { ActionCtx } from '@treenx/core/server/actions';
 import type { Session } from '@treenx/core/security/auth';
@@ -55,12 +55,12 @@ describe('executeForSession — scoped (workload)', () => {
   async function setupScoped(allowed: string[]) {
     const tree = await makeTree();
     await tree.set({ $path: '/agents', $type: 'dir' });
-    await tree.set({ $path: '/agents/bot', $type: 't.agent.port',
-      '#scope': defineAgentScope({
+    await tree.set(createNode('/agents/bot', 't.agent.port', undefined, {
+      scope: defineAgentScope({
         plan: { read: ['/work/*'], write: [], exec: [] },
         work: { read: ['/work/*'], write: ['/work/*'], exec: allowed },
       }),
-    });
+    }));
     return tree;
   }
 

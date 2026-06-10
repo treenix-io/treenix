@@ -1341,9 +1341,10 @@ describe('mcp http server integration', { concurrency: 1 }, () => {
     await store.set(createNode('/admin-data/secret', 't.default'));
     // User exists but is NOT in admins group
     await store.set({
-      ...createNode('/auth/users/alice', 'user'),
+      ...createNode('/auth/users/alice', 'user', {}, {
+        groups: { $type: 'groups', list: [] },
+      }),
       $owner: 'alice',
-      '#groups': { $type: 'groups', list: [] },
     });
     // Token issued with explicit elevated claims (forged or stale grant)
     const token = await createSession(store, 'alice', { claims: ['u:alice', 'authenticated', 'admins'] });
@@ -1524,9 +1525,10 @@ describe('revalidateSessionAuth claims drift (C5 round 2 + 3)', { concurrency: 1
     const store = createMemoryTree();
     await store.set({ ...createNode('/', 'root'), $acl: [{ g: 'admins', p: R | W | S }] });
     await store.set({
-      ...createNode('/auth/users/alice', 'user'),
+      ...createNode('/auth/users/alice', 'user', {}, {
+        groups: { $type: 'groups', list: ['editors'] },
+      }),
       $owner: 'alice',
-      '#groups': { $type: 'groups', list: ['editors'] },
     });
     // Session created WITHOUT explicit claims → claims resolved dynamically via buildClaims
     const token = await createSession(store, 'alice');
@@ -1536,7 +1538,7 @@ describe('revalidateSessionAuth claims drift (C5 round 2 + 3)', { concurrency: 1
 
     // Demote alice — drop 'editors' group
     const userNode = (await store.get('/auth/users/alice'))!;
-    (userNode['#groups'] as { list: string[] }).list = [];
+    getComponent<{ list: string[] }>(userNode, 'groups', 'groups')!.list = [];
     await store.set(userNode);
 
     // Reconnect with same token: revalidate must detect group demotion
@@ -1550,9 +1552,10 @@ describe('revalidateSessionAuth claims drift (C5 round 2 + 3)', { concurrency: 1
     await store.set({ ...createNode('/', 'root'), $acl: [{ g: 'admins', p: R | W | S }] });
     // Create user with `editor` group claim, then session
     await store.set({
-      ...createNode('/auth/users/alice', 'user'),
+      ...createNode('/auth/users/alice', 'user', {}, {
+        groups: { $type: 'groups', list: ['editors'] },
+      }),
       $owner: 'alice',
-      '#groups': { $type: 'groups', list: ['editors'] },
     });
     const initialClaims = ['u:alice', 'authenticated', 'editors'];
     const token = await createSession(store, 'alice', { claims: initialClaims });
@@ -1560,7 +1563,7 @@ describe('revalidateSessionAuth claims drift (C5 round 2 + 3)', { concurrency: 1
 
     // Drift the user's groups: drop editors
     const userNode = (await store.get('/auth/users/alice'))!;
-    (userNode['#groups'] as { list: string[] }).list = [];
+    getComponent<{ list: string[] }>(userNode, 'groups', 'groups')!.list = [];
     await store.set(userNode);
 
     // Recreate session with new claims via createSession to mirror handler-side update
