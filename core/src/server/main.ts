@@ -1,4 +1,4 @@
-import 'dotenv/config';
+import './env';
 import { type NodeData } from '#core';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';

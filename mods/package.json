@@ -117,7 +117,8 @@
     "@anthropic-ai/claude-agent-sdk": "^0.2.0",
     "@treenx/core": "^3.0.0",
     "@treenx/react": "^3.0.0",
-    "grammy": "^1.39.0"
+    "grammy": "^1.39.0",
+    "quickjs-emscripten": "^0.32.0"
   },
   "peerDependenciesMeta": {
     "@anthropic-ai/claude-agent-sdk": {
@@ -128,12 +129,17 @@
     },
     "grammy": {
       "optional": true
+    },
+    "quickjs-emscripten": {
+      "optional": true
     }
   },
   "devDependencies": {
     "@types/d3-selection": "^3.0.11",
     "@types/d3-transition": "^3.0.9",
     "@types/d3-zoom": "^3.0.8",
+    "grammy": "^1.42.0",
+    "quickjs-emscripten": "^0.32.0",
     "tsx": "^4.21.0",
     "typescript": "^6.0.3"
   }

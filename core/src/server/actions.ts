@@ -161,8 +161,6 @@ type ResolvedAction = {
 // Code runs in QuickJS WASM sandbox — no host FS/network/process access (C01 fix).
 // Sandbox gets: ctx.node (snapshot), ctx.tree.get/set/remove, data, Date, console.log.
 
-import { getQuickJS, shouldInterruptAfterDeadline } from 'quickjs-emscripten';
-
 const DYNAMIC_ACTION_TIMEOUT = 5_000;
 const DYNAMIC_ACTION_MEM = 8 * 1024 * 1024;
 
@@ -198,6 +196,11 @@ async function loadDynamicAction(
       throw new OpError('BAD_REQUEST', `Dynamic action ${type}.${action} uses await, but async bridge is not implemented`);
     }
 
+    // Optional peer, resolved only when a stored dynamic action actually runs —
+    // keeps the WASM blob out of every @treenx/core consumer's install.
+    const { getQuickJS, shouldInterruptAfterDeadline } = await import('quickjs-emscripten').catch((e: Error) => {
+      throw new Error(`dynamic action ${type}.${action}: optional peer 'quickjs-emscripten' failed to load — ${e.message}`);
+    });
     const QuickJS = await getQuickJS();
     const runtime = QuickJS.newRuntime();
     runtime.setMemoryLimit(DYNAMIC_ACTION_MEM);
