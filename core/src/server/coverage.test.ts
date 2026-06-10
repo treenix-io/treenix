@@ -288,7 +288,7 @@ describe('sub.ts: remove + CDC', () => {
 
   });
 
-  it('remove emits rmVps when node was in query', async () => {
+  it('remove emits invalidateVps when node was in query', async () => {
     const mem = createMemoryTree();
     const events: any[] = [];
     const sub = withSubscriptions(mem, (e) => events.push(e));
@@ -303,16 +303,16 @@ describe('sub.ts: remove + CDC', () => {
 
     events.length = 0;
 
-    // Remove it — should emit rmVps
+    // Remove it — should emit invalidateVps
     await tree.remove('/items/a');
     assert.equal(events.length, 1);
     assert.equal(events[0].type, 'remove');
-    assert.deepEqual(events[0].rmVps, ['/active']);
+    assert.deepEqual(events[0].invalidateVps, ['/active']);
 
     cdc.unwatchAllQueries('user1');
   });
 
-  it('remove of non-matching node has empty rmVps', async () => {
+  it('remove of non-matching node has empty invalidateVps', async () => {
     const mem = createMemoryTree();
     const events: any[] = [];
     const sub = withSubscriptions(mem, (e) => events.push(e));
@@ -327,7 +327,7 @@ describe('sub.ts: remove + CDC', () => {
     await tree.remove('/items/b');
     assert.equal(events.length, 1);
     assert.equal(events[0].type, 'remove');
-    assert.equal(events[0].rmVps, undefined);
+    assert.equal(events[0].invalidateVps, undefined);
 
     cdc.unwatchAllQueries('user1');
   });

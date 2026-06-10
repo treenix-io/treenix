@@ -563,7 +563,7 @@ describe('e2e: tRPC over HTTP', () => {
   // ── CDC Matrix live events ──
 
   describe('CDC Matrix live events', () => {
-    it('action transition emits addVps/rmVps in live event', async () => {
+    it('action transition emits invalidateVps/invalidateVps in live event', async () => {
       const pub = createClient(url);
       const reg = await pub.register.mutate({ userId: 'cdc-live1', password: 'pass' });
       const client = createClient(url, reg.token);
@@ -597,11 +597,11 @@ describe('e2e: tRPC over HTTP', () => {
       assert.ok(received.length >= 1, `Expected >=1 events, got ${received.length}`);
       const ev = received.find(e => e.path === '/d1/o1')!;
       assert.ok(ev, 'Should receive event for /d1/o1');
-      assert.ok((ev as any).rmVps?.includes('/qm1/new'), 'rmVps should contain /qm1/new');
-      assert.ok((ev as any).addVps?.includes('/qm1/kitchen'), 'addVps should contain /qm1/kitchen');
+      assert.ok((ev as any).invalidateVps?.includes('/qm1/new'), 'invalidateVps should contain /qm1/new');
+      assert.ok((ev as any).invalidateVps?.includes('/qm1/kitchen'), 'invalidateVps should contain /qm1/kitchen');
     });
 
-    it('new node creation triggers addVps event', async () => {
+    it('new node creation triggers invalidateVps event', async () => {
       const pub = createClient(url);
       const reg = await pub.register.mutate({ userId: 'cdc-live2', password: 'pass' });
       const client = createClient(url, reg.token);
@@ -628,10 +628,10 @@ describe('e2e: tRPC over HTTP', () => {
       assert.ok(received.length >= 1, `Expected >=1 events, got ${received.length}`);
       const ev = received.find(e => e.path === '/items2/t1')!;
       assert.ok(ev, 'Should receive event for /items2/t1');
-      assert.ok((ev as any).addVps?.includes('/qm2/hot'), 'addVps should contain /qm2/hot');
+      assert.ok((ev as any).invalidateVps?.includes('/qm2/hot'), 'invalidateVps should contain /qm2/hot');
     });
 
-    it('node deletion triggers rmVps event', async () => {
+    it('node deletion triggers invalidateVps event', async () => {
       const pub = createClient(url);
       const reg = await pub.register.mutate({ userId: 'cdc-live3', password: 'pass' });
       const client = createClient(url, reg.token);
@@ -660,7 +660,7 @@ describe('e2e: tRPC over HTTP', () => {
       const ev = received.find(e => e.path === '/items3/t1')!;
       assert.ok(ev, 'Should receive remove event for /items3/t1');
       assert.equal(ev.type, 'remove');
-      assert.ok((ev as any).rmVps?.includes('/qm3/hot'), 'rmVps should contain /qm3/hot');
+      assert.ok((ev as any).invalidateVps?.includes('/qm3/hot'), 'invalidateVps should contain /qm3/hot');
     });
 
     it('non-matching mutation produces no VP event', async () => {
@@ -698,7 +698,7 @@ describe('e2e: tRPC over HTTP', () => {
 
     it('in-vp mutation (membership unchanged) notifies vp watcher', async () => {
       // Regression: when a field NOT in the query predicate changes, the node stays
-      // in the same virtual parent. Previously cdcEval emitted empty addVps/rmVps and
+      // in the same virtual parent. Previously cdcEval emitted empty invalidateVps/invalidateVps and
       // watch.ts routed nothing to vp watchers — the card went stale. Fix: stayVps.
       const pub = createClient(url);
       const reg = await pub.register.mutate({ userId: 'cdc-live5', password: 'pass' });
@@ -736,8 +736,8 @@ describe('e2e: tRPC over HTTP', () => {
       assert.ok(ev, 'VP watcher must receive event for in-vp mutation');
       // After the notifyVps rename, "stays in vp" is server-internal — only
       // the fact that the VP-only client received the event proves routing.
-      assert.ok(!(ev as any).addVps, 'addVps should be absent (no membership delta)');
-      assert.ok(!(ev as any).rmVps, 'rmVps should be absent (no membership delta)');
+      assert.ok(!(ev as any).invalidateVps, 'invalidateVps should be absent (no membership delta)');
+      assert.ok(!(ev as any).invalidateVps, 'invalidateVps should be absent (no membership delta)');
       assert.ok(!('stayVps' in (ev as any)), 'stayVps must not be on the wire');
     });
   });
@@ -873,14 +873,14 @@ describe('e2e: tRPC over HTTP', () => {
       // First event: new→kitchen
       const ev1 = received[0];
       assert.equal(ev1.path, '/lc/data/o1');
-      assert.ok((ev1 as any).rmVps?.includes('/lc/new'), 'ev1 rmVps should have /lc/new');
-      assert.ok((ev1 as any).addVps?.includes('/lc/kitchen'), 'ev1 addVps should have /lc/kitchen');
+      assert.ok((ev1 as any).invalidateVps?.includes('/lc/new'), 'ev1 invalidateVps should have /lc/new');
+      assert.ok((ev1 as any).invalidateVps?.includes('/lc/kitchen'), 'ev1 invalidateVps should have /lc/kitchen');
 
       // Second event: kitchen→delivered
       const ev2 = received[1];
       assert.equal(ev2.path, '/lc/data/o1');
-      assert.ok((ev2 as any).rmVps?.includes('/lc/kitchen'), 'ev2 rmVps should have /lc/kitchen');
-      assert.ok((ev2 as any).addVps?.includes('/lc/delivered'), 'ev2 addVps should have /lc/delivered');
+      assert.ok((ev2 as any).invalidateVps?.includes('/lc/kitchen'), 'ev2 invalidateVps should have /lc/kitchen');
+      assert.ok((ev2 as any).invalidateVps?.includes('/lc/delivered'), 'ev2 invalidateVps should have /lc/delivered');
 
       // Final state check
       const finalNew = await pub.getChildren.query({ path: '/lc/new' });
@@ -923,8 +923,8 @@ describe('e2e: tRPC over HTTP', () => {
       assert.ok(received.length >= 1);
       const ev = received.find(e => e.path === '/multi/t1')!;
       assert.ok(ev, 'Should receive event');
-      assert.ok((ev as any).addVps?.includes('/qme/high'), 'addVps should contain /qme/high');
-      assert.ok((ev as any).addVps?.includes('/qme/all'), 'addVps should contain /qme/all');
+      assert.ok((ev as any).invalidateVps?.includes('/qme/high'), 'invalidateVps should contain /qme/high');
+      assert.ok((ev as any).invalidateVps?.includes('/qme/all'), 'invalidateVps should contain /qme/all');
     });
 
     it('autoWatch: VP entry followed by exact-path update', async () => {
@@ -942,7 +942,7 @@ describe('e2e: tRPC over HTTP', () => {
       // watchNew + watch = autoWatch enabled
       await client.getChildren.query({ path: '/qmaw/hot', watchNew: true, watch: true });
 
-      // Event 1: create matching node → addVps (autoWatch registers exact-path watch)
+      // Event 1: create matching node → invalidateVps (autoWatch registers exact-path watch)
       await pub.set.mutate({ node: {
         $path: '/aw/t1', $type: 'task',
         '#pri': { $type: 'task.priority', level: 'high' },
@@ -960,7 +960,7 @@ describe('e2e: tRPC over HTTP', () => {
       assert.equal(received.length, 2, 'Should receive 2 events');
 
       // First: VP entry
-      assert.ok((received[0] as any).addVps?.includes('/qmaw/hot'), 'First event should have addVps');
+      assert.ok((received[0] as any).invalidateVps?.includes('/qmaw/hot'), 'First event should have invalidateVps');
 
       // Second: exact-path update (no VP change since still matches)
       assert.equal(received[1].path, '/aw/t1');
@@ -996,8 +996,8 @@ describe('e2e: tRPC over HTTP', () => {
       const [r1, r2] = await Promise.all([sub1.events, sub2.events]);
       assert.ok(r1.length >= 1, 'User 1 should receive event');
       assert.ok(r2.length >= 1, 'User 2 should receive event');
-      assert.ok((r1[0] as any).addVps?.includes('/qmu/hot'));
-      assert.ok((r2[0] as any).addVps?.includes('/qmu/hot'));
+      assert.ok((r1[0] as any).invalidateVps?.includes('/qmu/hot'));
+      assert.ok((r2[0] as any).invalidateVps?.includes('/qmu/hot'));
     });
   });
 

@@ -572,6 +572,17 @@ function sameValue(a: unknown, b: unknown): boolean {
   try { return JSON.stringify(a) === JSON.stringify(b); } catch { return false; }
 }
 
+/** Extract a userId from `/auth/users/{userId}` paths — only the user node
+ *  itself (no deeper segments) drives a claims rebuild. The auth layout
+ *  knowledge lives HERE; sub/ consumes it as an injected detector (gk8.12). */
+export function userIdFromAuthPath(path: string): string | null {
+  const prefix = '/auth/users/';
+  if (!path.startsWith(prefix)) return null;
+  const rest = path.slice(prefix.length);
+  if (!rest || rest.includes('/')) return null;
+  return rest;
+}
+
 // ── Tree wrapper ──
 
 export type AclStore = Tree & {

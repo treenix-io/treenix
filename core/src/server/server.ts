@@ -16,8 +16,10 @@ import {
   buildSessionCookie,
   parseSessionCookie,
   resolveOrIssueSession,
+  userIdFromAuthPath,
   withAcl,
 } from '#security/auth';
+import { getComponentByName } from '#core';
 import { withMounts } from '#mount';
 import { withRefIndex } from '#tree/refs';
 import { type CdcRegistry, type OnSelfWrite, withSubscriptions } from '#sub';
@@ -92,14 +94,17 @@ export function createPipeline(bootstrap: Tree, opts?: TreeRouterOpts, wrapTree?
     return () => ac.abort();
   };
 
-  const migrated = withMigration(bootstrap);
-  const mountable = withMounts(migrated, { startExternalWatch });
+  const mountable = withMounts(bootstrap, { startExternalWatch });
   mountableRef = mountable;
+  // Migration sits ABOVE mounts so fs/mongo/federation/query nodes all migrate on
+  // read (the wrapper used to sit below withMounts and persistent stores bypassed
+  // it entirely — R-gk8.29). Below validation: validators must see current shapes.
+  const migrated = withMigration(mountable);
   // System identity at the pre-validation layer — used by factory bootstrap (seed,
   // anon-key, log writer) and request-edge session resolution. Mirrors the current
   // raw-mountable layer; switching here adds the ACL gate without changing semantics.
-  const systemTree = withAcl(mountable, 'system', ['system']);
-  const volatile = withVolatile(mountable);
+  const systemTree = withAcl(migrated, 'system', ['system']);
+  const volatile = withVolatile(migrated);
   const validated = withValidation(volatile);
   const refsIndexed = withRefIndex(validated);
   const cached = withCache(refsIndexed);
@@ -108,7 +113,12 @@ export function createPipeline(bootstrap: Tree, opts?: TreeRouterOpts, wrapTree?
   const watcher = createWatchManager({
     onUserRemoved: (userId) => cdcRef.unwatchAllQueries(userId),
   });
-  const { tree: subscribed, cdc, onSelfWrite, injectExternalEvent } = withSubscriptions(cached, (e) => watcher.notify(e));
+  // gk8.12: sub/ stays ignorant of the auth layout and mount components —
+  // the layer-owned detectors are injected here.
+  const { tree: subscribed, cdc, onSelfWrite, injectExternalEvent } = withSubscriptions(cached, (e) => watcher.notify(e), {
+    claimsUserOf: userIdFromAuthPath,
+    isConfigNode: (node) => !!node && getComponentByName(node, 'mount') !== undefined,
+  });
   cdcRef = cdc;
   onSelfWriteRef = onSelfWrite;
   injectExternalRef = injectExternalEvent;

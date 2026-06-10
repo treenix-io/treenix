@@ -482,15 +482,15 @@ describe('Stress: query mounts + CDC', () => {
     // High priority — enters VP
     await tree.set(createNode('/entities/tickets/t2', 'ticket', { priority: 'high' }));
     assert.equal(events.length, 1);
-    assert.deepEqual((events[0] as any).addVps, ['/views/urgent']);
-    console.log('    high-priority → addVps ✓');
+    assert.deepEqual((events[0] as any).invalidateVps, ['/views/urgent']);
+    console.log('    high-priority → invalidateVps ✓');
 
     // Downgrade — leaves VP
     const t2 = (await tree.get('/entities/tickets/t2'))!;
     await tree.set({ ...t2, priority: 'low' } as NodeData);
     assert.equal(events.length, 2);
-    assert.deepEqual((events[1] as any).rmVps, ['/views/urgent']);
-    console.log('    downgrade → rmVps ✓');
+    assert.deepEqual((events[1] as any).invalidateVps, ['/views/urgent']);
+    console.log('    downgrade → invalidateVps ✓');
 
     cdc.unwatchAllQueries('user1');
   });
@@ -504,11 +504,9 @@ describe('Stress: query mounts + CDC', () => {
 
     cdc.watchQuery('/views/new', '/entities/orders', { status: 'new' }, 'watcher');
 
-    const adds: string[] = [];
-    const removes: string[] = [];
+    const dirty: string[] = [];
     watcher.connect('watcher', 'watcher', (e) => {
-      if ('addVps' in e && (e as any).addVps?.length) adds.push((e as any).path);
-      if ((e as any).rmVps?.length) removes.push((e as any).path);
+      if ('invalidateVps' in e && e.invalidateVps?.length) dirty.push((e as { path: string }).path);
     });
     watcher.watch('watcher', ['/views/new'], { children: true });
 
@@ -516,8 +514,9 @@ describe('Stress: query mounts + CDC', () => {
     for (let i = 0; i < 100; i++)
       await tree.set(createNode(`/entities/orders/o${i}`, 'order', { status: 'new' }));
 
-    assert.equal(adds.length, 100);
-    console.log(`    ${adds.length} addVps events ✓`);
+    assert.equal(dirty.length, 100);
+    console.log(`    ${dirty.length} invalidateVps events ✓`);
+    dirty.length = 0;
 
     console.log('    transitioning 50 to "done"...');
     for (let i = 0; i < 50; i++) {
@@ -525,8 +524,8 @@ describe('Stress: query mounts + CDC', () => {
       await tree.set({ ...order, status: 'done' } as NodeData);
     }
 
-    assert.equal(removes.length, 50);
-    console.log(`    ${removes.length} rmVps events ✓`);
+    assert.equal(dirty.length, 50);
+    console.log(`    ${dirty.length} invalidateVps events ✓`);
 
     const result = await tree.getChildren('/views/new');
     assert.equal(result.items.length, 50);
@@ -556,7 +555,7 @@ describe('Stress: query mounts + CDC', () => {
 
     await tree.set(createNode('/entities/items/x', 'item', { status: 'new', flagged: true }));
     assert.equal(events.length, 1, 'Single event despite matching two queries');
-    assert.deepEqual((events[0] as any).addVps?.sort(), ['/views/flagged', '/views/new']);
+    assert.deepEqual((events[0] as any).invalidateVps?.sort(), ['/views/flagged', '/views/new']);
     console.log('  ✓ single event with both VPs');
 
     cdc.unwatchAllQueries('u1');
@@ -870,7 +869,7 @@ describe('Stress: full watch pipeline', () => {
     w2.connect('observer', 'observer', (e) => {
       const path = 'path' in e ? e.path : '';
       if (path === '/data/tracked') exactEvents.push(e);
-      if ('addVps' in e && (e as any).addVps?.includes('/views/hot')) cdcEvents.push(e);
+      if ('invalidateVps' in e && (e as any).invalidateVps?.includes('/views/hot')) cdcEvents.push(e);
       if (path.startsWith('/data/') && path !== '/data/tracked') childEvents.push(e);
     });
 

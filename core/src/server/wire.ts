@@ -67,8 +67,9 @@ export function toEventFrames(e: NodeEvent): EventFrame[] {
       : { ...meta, ev: 'patch', path: e.path, ops: e.patches, rev: e.rev });
   } else frames.push({ ...meta, ev: 'rm', path: e.path });
 
-  const dirty = new Set<string>([...(e.addVps ?? []), ...(e.rmVps ?? []), ...(e.invalidateVps ?? [])]);
-  for (const vp of dirty) frames.push({ ...(e.seq === undefined ? {} : { seq: e.seq }), ev: 'dirty', path: vp });
+  for (const vp of e.invalidateVps ?? []) {
+    frames.push({ ...(e.seq === undefined ? {} : { seq: e.seq }), ev: 'dirty', path: vp });
+  }
   return frames;
 }
 
@@ -113,7 +114,7 @@ export function createWireSession(deps: WireDeps, session: Session) {
       },
       watchList: (path, page, itemWatch) => {
         if (page.queryMount) {
-          deps.cdc?.watchQuery(path, page.queryMount.source, page.queryMount.match, userId, session.claims ?? null);
+          deps.cdc?.watchQuery(path, page.queryMount.source, page.queryMount.match, userId);
         }
         deps.watcher.watch(userId, [path], { children: true, autoWatch: itemWatch });
       },

@@ -71,7 +71,7 @@ describe('wire session over MessageChannel', () => {
 
     watcher.notify({
       type: 'patch', path: '/doc', patches: [['r', 'title', 'doc2']],
-      addVps: ['/views/all'], invalidateVps: ['/views/inbox'],
+      invalidateVps: ['/views/all', '/views/inbox'],
     });
     await batch;
 

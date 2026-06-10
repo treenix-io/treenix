@@ -3,8 +3,7 @@
 // No dependencies beyond Tree + core types.
 
 import { type SubscribeOpts } from '#contexts/service/index';
-import { A, getComponentByName, R, type NodeData } from '#core';
-import { buildClaims, resolvePermission, stripComponents } from '#security/auth';
+import { type NodeData } from '#core';
 import {
   mapNodeForSift,
   type PatchOp,
@@ -41,31 +40,20 @@ function diffNodes(oldNode: NodeData, newNode: NodeData): PatchOp[] {
 //
 // Layer split:
 //   - TreeEvent  (L1, in #tree) — the protocol event. No CDC/VP fields.
-//   - NodeEvent  (L3, here)     — TreeEvent extended with optional VPs.
+//   - NodeEvent  (L3, here)     — TreeEvent extended with the dirty signal.
 //
-// Public VPs are three: addVps / rmVps / invalidateVps. The "stays-in-vp"
-// notification used by WatchManager is server-internal as `notifyVps` and
-// MUST NOT cross the wire — strip in eventForUser before push.
+// core-gk8.12: per-user VP prediction (addVps/rmVps/notifyVps + CDC_ROUTES)
+// is gone. One coarse signal remains — invalidateVps: "these query views may
+// have shifted, refetch through the canonical ACL read path". A wrong refetch
+// is impossible; a wrong predicted patch silently corrupts the client cache.
 
 export type VpDelta = {
-  /** Query views the path NEWLY appears in. */
-  addVps?: string[];
-  /** Query views the path was REMOVED from. */
-  rmVps?: string[];
-  /** Query views with shifted ACL/config — caller MUST refetch the listing. */
+  /** Query views whose membership/config/visibility may have shifted —
+   *  the caller MUST refetch the listing (coarse dirty, core-gk8.12). */
   invalidateVps?: string[];
 };
 
 export type NodeEvent = TreeEvent & Partial<VpDelta>;
-
-/** Server-internal VP shape — adds `notifyVps` for in-VP data-only mutations
- *  that WatchManager uses to fan out to VP watchers. Never serialized. */
-type InternalVpDelta = VpDelta & { notifyVps?: string[] };
-type InternalNodeEvent = TreeEvent & Partial<InternalVpDelta>;
-
-export const CDC_ROUTES: unique symbol = Symbol('treenix.cdcRoutes');
-type RoutedVpDelta = InternalVpDelta & { [CDC_ROUTES]?: Map<string, InternalVpDelta> };
-export type RoutedNodeEvent = InternalNodeEvent & { [CDC_ROUTES]?: Map<string, InternalVpDelta> };
 
 /** Tree narrowed to require `watch` and produce richer NodeEvent (with VPs).
  *  Returned by withSubscriptions so L3 callers consume VPs through the type. */
@@ -73,13 +61,9 @@ export type SubscribedTree = Tree & {
   watch(scope: TreeWatchScope, opts?: TreeWatchOpts, ctx?: unknown): AsyncIterable<NodeEvent>;
 };
 
-// Strip empty VP arrays. Internal-only `notifyVps` is left intact here —
-// WatchManager needs it for routing and strips it before pushing to clients.
-function cleanEvent<T extends InternalNodeEvent>(event: T): T {
+// Strip an empty dirty array — events carry invalidateVps only when real.
+function cleanEvent<T extends NodeEvent>(event: T): T {
   const e = { ...event };
-  if ('addVps' in e && e.addVps && e.addVps.length === 0) delete e.addVps;
-  if ('rmVps' in e && e.rmVps && e.rmVps.length === 0) delete e.rmVps;
-  if ('notifyVps' in e && e.notifyVps && e.notifyVps.length === 0) delete e.notifyVps;
   if ('invalidateVps' in e && e.invalidateVps && e.invalidateVps.length === 0) delete e.invalidateVps;
   return e;
 }
@@ -127,17 +111,28 @@ type QueryEntry = {
   matchKey: string;
   match: Record<string, unknown>;
   test: (node: Record<string, unknown>) => boolean;
-  users: Map<string, { claims: string[] | null | undefined; dynamicClaims?: string[]; dynamicAt?: number }>;
+  /** Subscribed userIds — drives claims-change targeting and lifecycle only.
+   *  No per-user claims here: visibility is decided once, on the read path. */
+  users: Set<string>;
 };
-
-type MutableVpDelta = { addVps: string[]; rmVps: string[]; notifyVps: string[]; invalidateVps: string[] };
 
 export type CdcRegistry = {
   subscribe(path: string, listener: Listener, opts?: SubscribeOpts): () => void;
-  watchQuery(vp: string, source: string, match: Record<string, unknown>, userId: string, claims?: string[] | null): void;
+  watchQuery(vp: string, source: string, match: Record<string, unknown>, userId: string): void;
   unwatchQuery(vp: string, userId: string): void;
   unwatchAllQueries(userId: string): void;
   getActiveQueryCount(): number;
+};
+
+/** Layer-injected detectors (core-gk8.12) — sub/ stays ignorant of the auth
+ *  layout and of mount components; the server layer wires the real ones.
+ *  Absent detector = that invalidation trigger is off (liveness, not access
+ *  control — reads stay ACL-filtered regardless). */
+export type SubscriptionOpts = {
+  /** Map a written path to the userId whose claims it defines (e.g. /auth/users/X). */
+  claimsUserOf?: (path: string) => string | null;
+  /** True when the node carries mount/config that steers reads on its vp. */
+  isConfigNode?: (node: NodeData | null | undefined) => boolean;
 };
 
 /** Self-write notification — fired for every data event emitted by
@@ -149,13 +144,15 @@ export type OnSelfWrite = (listener: SelfWriteListener) => () => void;
 
 export function withSubscriptions(
   tree: Tree,
-  onEvent?: (event: InternalNodeEvent) => void,
+  onEvent?: (event: NodeEvent) => void,
+  opts?: SubscriptionOpts,
 ): { tree: SubscribedTree; cdc: CdcRegistry; onSelfWrite: OnSelfWrite; injectExternalEvent: (event: TreeEvent) => void } {
   const exactListeners = new Map<string, Set<Listener>>();
   const prefixListeners = new Map<string, Set<Listener>>();
   const selfWriteListeners = new Set<SelfWriteListener>();
   const activeQueries: QueryEntry[] = [];
-  const CLAIMS_TTL_MS = 30_000;
+  const claimsUserOf = opts?.claimsUserOf ?? (() => null);
+  const isConfigNode = opts?.isConfigNode ?? (() => false);
 
   function notifySelfWrite(event: DataEvent) {
     if (selfWriteListeners.size === 0) return;
@@ -179,9 +176,9 @@ export function withSubscriptions(
       .join(',')}}`;
   }
 
-  type DataEvent = Exclude<InternalNodeEvent, { type: 'reconnect' }>;
+  type DataEvent = Exclude<NodeEvent, { type: 'reconnect' }>;
 
-  function dispatch(event: InternalNodeEvent) {
+  function dispatch(event: NodeEvent) {
     if (event.type !== 'reconnect') {
       const exact = exactListeners.get(event.path);
       if (exact) for (const fn of exact) fn(event);
@@ -202,55 +199,12 @@ export function withSubscriptions(
     dispatch(event);
   }
 
-  function addDelta(delta: MutableVpDelta, kind: keyof MutableVpDelta, vp: string) {
-    delta[kind].push(vp);
-  }
-
-  function routeDelta(routes: Map<string, MutableVpDelta>, userId: string): MutableVpDelta {
-    let delta = routes.get(userId);
-    if (!delta) {
-      delta = { addVps: [], rmVps: [], notifyVps: [], invalidateVps: [] };
-      routes.set(userId, delta);
-    }
-    return delta;
-  }
-
-  async function claimsFor(q: QueryEntry, userId: string): Promise<string[]> {
-    const user = q.users.get(userId)!;
-    if (user.claims) return user.claims;
-    if (!user.dynamicClaims || Date.now() - (user.dynamicAt ?? 0) > CLAIMS_TTL_MS) {
-      user.dynamicClaims = await buildClaims(tree, userId);
-      user.dynamicAt = Date.now();
-    }
-    return user.dynamicClaims;
-  }
-
-  async function visibleSiftNode(node: NodeData, userId: string, claims: string[]): Promise<Record<string, unknown> | null> {
-    const perm = await resolvePermission(tree, node.$path, userId, claims);
-    if (!(perm & R)) return null;
-    const visible = stripComponents(node, userId, claims);
-    if (!(perm & A)) {
-      delete visible.$acl;
-      delete visible.$owner;
-    }
-    return mapNodeForSift(visible);
-  }
-
   /** Compute invalidate-vp set for a mount/config write. Targets handles
    *  whose vp IS the mutated path — the mount node is being rewritten, so
    *  the plan's `viewWhere`/`source` may have shifted under the watcher.
    *  Per MVP: targeted, not a global storm. */
-  function invalidateVpsForConfigChange(path: string): { vps: string[]; routes: Map<string, MutableVpDelta> } {
-    const vps: string[] = [];
-    const routes = new Map<string, MutableVpDelta>();
-    for (const q of activeQueries) {
-      if (q.vp !== path) continue;
-      vps.push(q.vp);
-      for (const userId of q.users.keys()) {
-        addDelta(routeDelta(routes, userId), 'invalidateVps', q.vp);
-      }
-    }
-    return { vps, routes };
+  function vpsForConfigChange(path: string): string[] {
+    return activeQueries.filter(q => q.vp === path).map(q => q.vp);
   }
 
   /** Invalidate every active query whose source could be affected by an
@@ -261,200 +215,76 @@ export function withSubscriptions(
    *    4. path === q.vp                    — the query mount node itself
    *       was rewritten (e.g. match changed); listing now stale
    *  Grand-descendants are skipped (can't affect direct-child queries). */
-  function invalidateVpsForExternalPath(path: string): { vps: string[]; routes: Map<string, MutableVpDelta> } {
+  function vpsForExternalPath(path: string): string[] {
     const vps: string[] = [];
-    const routes = new Map<string, MutableVpDelta>();
     for (const q of activeQueries) {
       const prefix = q.source === '/' ? '/' : q.source + '/';
       const directChild = path.startsWith(prefix) && !path.slice(prefix.length).includes('/');
       const isSource = path === q.source;
       const isAncestor = path === '/' || (q.source !== '/' && q.source.startsWith(path + '/'));
       const isVp = path === q.vp;
-      if (!directChild && !isSource && !isAncestor && !isVp) continue;
-      vps.push(q.vp);
-      for (const userId of q.users.keys()) {
-        addDelta(routeDelta(routes, userId), 'invalidateVps', q.vp);
-      }
+      if (directChild || isSource || isAncestor || isVp) vps.push(q.vp);
     }
-    return { vps, routes };
+    return vps;
   }
 
-  /** True if the node carries a mount component that would steer this path
-   *  to a different sub-tree. Used to detect config writes. */
-  function hasMountComponent(node: NodeData | null | undefined): boolean {
-    if (!node) return false;
-    return getComponentByName(node, 'mount') !== undefined;
+  /** Claims change for `userId` → every query this user subscribes to goes
+   *  dirty. The invalidate is a broadcast field — co-watchers of the same vp
+   *  over-refetch; bounded and rare (claims changes), accepted (gk8.12). */
+  function vpsForClaimsChange(userId: string): string[] {
+    return activeQueries.filter(q => q.users.has(userId)).map(q => q.vp);
   }
 
-  /** Extract a userId from `/auth/users/{userId}` paths. Returns null when
-   *  the path doesn't match (or has a deeper segment — only the user node
-   *  itself, not sub-paths, drives the claims rebuild). */
-  function userIdFromAuthPath(path: string): string | null {
-    const prefix = '/auth/users/';
-    if (!path.startsWith(prefix)) return null;
-    const rest = path.slice(prefix.length);
-    if (!rest || rest.includes('/')) return null;
-    return rest;
-  }
-
-  /** Compute invalidate-vp set for a user-claims change at `userId`. Every
-   *  active query that has this user gets the user's vps invalidated.
-   *  Also resets the cached dynamicClaims so the next read recomputes. */
-  function invalidateVpsForClaimsChange(userId: string): { vps: string[]; routes: Map<string, MutableVpDelta> } {
-    const vps: string[] = [];
-    const routes = new Map<string, MutableVpDelta>();
-    for (const q of activeQueries) {
-      const user = q.users.get(userId);
-      if (!user) continue;
-      // Force claimsFor to refresh on next access.
-      user.dynamicClaims = undefined;
-      user.dynamicAt = undefined;
-      vps.push(q.vp);
-      addDelta(routeDelta(routes, userId), 'invalidateVps', q.vp);
-    }
-    return { vps, routes };
-  }
-
-  /** Compute invalidate-vp set for an ACL change at `path`. ACL inherits
-   *  DOWN the tree, so an ACL change at P affects every descendant of P
-   *  (incl. P itself). For a depth-1 query view rooted at `source`, the
-   *  set of affected paths is:
+  /** ACL change at `path` → dirty every query view it can affect. ACL
+   *  inherits DOWN the tree, so the affected set is:
    *    1. P is at-or-above source (source ∈ {P, descendants of P})
    *    2. P is a direct child of source (P's ACL was the membership gate)
-   *  Per-user filter: legacy raw watchers (no claims) always get the
-   *  invalidate; modern watchers get it only when they have R on P —
-   *  otherwise the invalidate itself would leak existence. */
-  async function invalidateVpsForAclChange(path: string): Promise<{ vps: string[]; routes: Map<string, MutableVpDelta> }> {
-    const vps: string[] = [];
-    const routes = new Map<string, MutableVpDelta>();
-    if (activeQueries.length === 0) return { vps, routes };
+   *  User-independent and sync (gk8.12): the old per-user R-filter was a
+   *  second ACL decision path on the write path. Deliberate over-invalidation
+   *  — the refetch re-derives truth through the canonical ACL read path, and
+   *  the dirty signal names only the vp the subscriber already watches. */
+  function vpsForAclChange(path: string): string[] {
+    if (activeQueries.length === 0) return [];
 
     function isAtOrAbove(p: string, candidate: string): boolean {
-      // candidate is `p` itself or a descendant — i.e., `p` is on the
-      // ancestor chain of candidate.
       if (p === '/' || p === candidate) return true;
       return candidate.startsWith(p + '/');
     }
-    function isDirectChild(parent: string, candidate: string): boolean {
+    function isDirectChildOf(parent: string, candidate: string): boolean {
       const prefix = parent === '/' ? '/' : parent + '/';
       if (!candidate.startsWith(prefix)) return false;
       const rest = candidate.slice(prefix.length);
       return rest.length > 0 && !rest.includes('/');
     }
 
-    for (const q of activeQueries) {
-      const affects = isAtOrAbove(path, q.source) || isDirectChild(q.source, path);
-      if (!affects) continue;
-      let anyUserAffected = false;
-      for (const [userId, user] of q.users) {
-        if (user.claims !== undefined) {
-          const claims = await claimsFor(q, userId);
-          const perm = await resolvePermission(tree, path, userId, claims);
-          if (!(perm & R)) continue;
-        }
-        addDelta(routeDelta(routes, userId), 'invalidateVps', q.vp);
-        anyUserAffected = true;
-      }
-      if (anyUserAffected) vps.push(q.vp);
-    }
-    return { vps, routes };
+    return activeQueries
+      .filter(q => isAtOrAbove(path, q.source) || isDirectChildOf(q.source, path))
+      .map(q => q.vp);
   }
 
-  /** Evaluate CDC matrix for a direct child of a query source */
-  async function cdcEval(path: string, oldNode: NodeData | null, newNode: NodeData | null): Promise<RoutedVpDelta> {
-    const addVps: string[] = [];
-    const rmVps: string[] = [];
-    const notifyVps: string[] = [];
+  /** Membership test for a direct child of a query source — ONCE per
+   *  mutation, against the RAW node, no per-user ACL (gk8.12). A flip in
+   *  either direction dirties the vp; in-folder updates of unchanged
+   *  membership ride the ordinary path event (items are exact-watched). */
+  function membershipVps(path: string, oldNode: NodeData | null, newNode: NodeData | null): string[] {
     const oldSift = oldNode ? mapNodeForSift(oldNode) : null;
     const newSift = newNode ? mapNodeForSift(newNode) : null;
-    const routes = new Map<string, MutableVpDelta>();
-
+    const vps: string[] = [];
     for (const q of activeQueries) {
       const prefix = q.source === '/' ? '/' : q.source + '/';
       if (!path.startsWith(prefix) || path.slice(prefix.length).includes('/')) continue;
-
-      let hasLegacyRawUser = false;
-      for (const user of q.users.values()) {
-        if (user.claims === undefined) {
-          hasLegacyRawUser = true;
-          break;
-        }
-      }
-
-      if (hasLegacyRawUser) {
-        const wasIn = oldSift ? q.test(oldSift) : false;
-        const isIn = newSift ? q.test(newSift) : false;
-        let kind: keyof MutableVpDelta | null = null;
-        if (!wasIn && isIn) {
-          addVps.push(q.vp);
-          kind = 'addVps';
-        } else if (wasIn && !isIn) {
-          rmVps.push(q.vp);
-          kind = 'rmVps';
-        } else if (wasIn && isIn) {
-          notifyVps.push(q.vp);
-          kind = 'notifyVps';
-        }
-        if (kind) {
-          for (const [userId, user] of q.users) {
-            if (user.claims === undefined) addDelta(routeDelta(routes, userId), kind, q.vp);
-          }
-        }
-      }
-
-      for (const userId of q.users.keys()) {
-        const user = q.users.get(userId)!;
-        if (user.claims === undefined) continue;
-        const claims = await claimsFor(q, userId);
-        const oldVisible = oldNode ? await visibleSiftNode(oldNode, userId, claims) : null;
-        const newVisible = newNode ? await visibleSiftNode(newNode, userId, claims) : null;
-        const wasIn = oldVisible ? q.test(oldVisible) : false;
-        const isIn = newVisible ? q.test(newVisible) : false;
-        if (!wasIn && !isIn) continue;
-
-        const delta = routeDelta(routes, userId);
-        if (!wasIn && isIn) addDelta(delta, 'addVps', q.vp);
-        else if (wasIn && !isIn) addDelta(delta, 'rmVps', q.vp);
-        else if (wasIn && isIn) addDelta(delta, 'notifyVps', q.vp);
-      }
+      const wasIn = oldSift ? q.test(oldSift) : false;
+      const isIn = newSift ? q.test(newSift) : false;
+      if (wasIn !== isIn) vps.push(q.vp);
     }
-
-    const secureRoutes = new Map<string, InternalVpDelta>();
-    for (const [userId, delta] of routes) {
-      const out: InternalVpDelta = {};
-      if (delta.addVps.length > 0) out.addVps = delta.addVps;
-      if (delta.rmVps.length > 0) out.rmVps = delta.rmVps;
-      if (delta.notifyVps.length > 0) out.notifyVps = delta.notifyVps;
-      if (delta.invalidateVps.length > 0) out.invalidateVps = delta.invalidateVps;
-      if (out.addVps || out.rmVps || out.notifyVps || out.invalidateVps) secureRoutes.set(userId, out);
-    }
-    const result: RoutedVpDelta = { addVps, rmVps, notifyVps };
-    if (secureRoutes.size > 0) result[CDC_ROUTES] = secureRoutes;
-    return result;
+    return vps;
   }
 
-  /** Merge an ACL/config invalidation into the existing cdcEval routes.
-   *  Used by set/patch/remove when the mutation touched $acl/$owner — the
-   *  same affected query may also have data-diff entries from cdcEval, and
-   *  invalidate takes precedence on the client (re-fetch supersedes diff). */
-  function mergeInvalidate(
-    base: RoutedVpDelta,
-    invalidate: { vps: string[]; routes: Map<string, MutableVpDelta> },
-  ): RoutedVpDelta {
-    if (invalidate.vps.length === 0) return base;
-    const merged: RoutedVpDelta = { ...base };
-    merged.invalidateVps = [...(base.invalidateVps ?? []), ...invalidate.vps];
-    const existingRoutes = base[CDC_ROUTES] ?? new Map<string, InternalVpDelta>();
-    const newRoutes = new Map(existingRoutes);
-    for (const [userId, delta] of invalidate.routes) {
-      const prev: InternalVpDelta = newRoutes.get(userId) ?? {};
-      newRoutes.set(userId, {
-        ...prev,
-        invalidateVps: [...(prev.invalidateVps ?? []), ...delta.invalidateVps],
-      });
-    }
-    if (newRoutes.size > 0) merged[CDC_ROUTES] = newRoutes;
-    return merged;
+  /** Union the dirty sources; undefined when nothing is dirty. */
+  function dirtyVps(...lists: string[][]): { invalidateVps: string[] } | undefined {
+    const set = new Set<string>();
+    for (const l of lists) for (const vp of l) set.add(vp);
+    return set.size ? { invalidateVps: [...set] } : undefined;
   }
 
   /** Internal subscribe — shared between cdc.subscribe() and watch(). Returns
@@ -520,20 +350,15 @@ export function withSubscriptions(
       const oldNode = await tree.get(node.$path, ctx);
 
       await tree.set(node, ctx);
-      let cdc = await cdcEval(node.$path, oldNode ?? null, node);
-      if (isAclChange(oldNode ?? null, node)) {
-        cdc = mergeInvalidate(cdc, await invalidateVpsForAclChange(node.$path));
-      }
-      // Config write: either side carries a mount component. The mount node
-      // itself is being rewritten, so handles registered against this vp
-      // must re-fetch.
-      if (hasMountComponent(oldNode) || hasMountComponent(node)) {
-        cdc = mergeInvalidate(cdc, invalidateVpsForConfigChange(node.$path));
-      }
-      const claimsUid = userIdFromAuthPath(node.$path);
-      if (claimsUid) {
-        cdc = mergeInvalidate(cdc, invalidateVpsForClaimsChange(claimsUid));
-      }
+      const claimsUid = claimsUserOf(node.$path);
+      const cdc = dirtyVps(
+        membershipVps(node.$path, oldNode ?? null, node),
+        isAclChange(oldNode ?? null, node) ? vpsForAclChange(node.$path) : [],
+        // Config write: either side carries a mount/config component — the vp
+        // node itself is being rewritten, handles on it must re-fetch.
+        isConfigNode(oldNode) || isConfigNode(node) ? vpsForConfigChange(node.$path) : [],
+        claimsUid ? vpsForClaimsChange(claimsUid) : [],
+      );
 
       const { $path, ...body } = node;
       const by = opIdOf(ctx);
@@ -550,22 +375,18 @@ export function withSubscriptions(
 
     async remove(path, ctx) {
       const oldNode = await tree.get(path, ctx);
-      let cdc = oldNode ? await cdcEval(path, oldNode, null) : undefined;
+      const claimsUid = claimsUserOf(path);
       // Remove drops $acl entirely — treat as ACL change so subscribers
-      // re-fetch (the data-diff path already removes the node; invalidate
-      // covers the case where the removal also flips visibility of siblings
-      // whose ACL inheritance chain ran through this node).
-      if (oldNode && (oldNode.$acl || oldNode.$owner) && cdc) {
-        cdc = mergeInvalidate(cdc, await invalidateVpsForAclChange(path));
-      }
-      // Removing a mount node: handles bound to this vp must re-fetch.
-      if (hasMountComponent(oldNode) && cdc) {
-        cdc = mergeInvalidate(cdc, invalidateVpsForConfigChange(path));
-      }
-      const claimsUid = userIdFromAuthPath(path);
-      if (claimsUid && cdc) {
-        cdc = mergeInvalidate(cdc, invalidateVpsForClaimsChange(claimsUid));
-      }
+      // re-fetch (visibility of siblings whose ACL inheritance chain ran
+      // through this node may flip).
+      const cdc = oldNode
+        ? dirtyVps(
+            membershipVps(path, oldNode, null),
+            (oldNode.$acl || oldNode.$owner) ? vpsForAclChange(path) : [],
+            isConfigNode(oldNode) ? vpsForConfigChange(path) : [],
+            claimsUid ? vpsForClaimsChange(claimsUid) : [],
+          )
+        : undefined;
       const result = await tree.remove(path, ctx);
 
       if (result && oldNode) {
@@ -581,26 +402,22 @@ export function withSubscriptions(
       await tree.patch(path, ops, ctx);
 
       const newNode = await tree.get(path, ctx);
-      let cdc = await cdcEval(path, oldNode ?? null, newNode ?? null);
-      // Both directions: ops touched $acl/$owner directly OR the resulting
-      // diff shows a $acl change (covers full-node replace via patch).
-      if (ops.some(isAclOp) || isAclChange(oldNode ?? null, newNode ?? null)) {
-        cdc = mergeInvalidate(cdc, await invalidateVpsForAclChange(path));
-      }
-      // Config write detection on patch: either node had/has a mount, or
-      // an op touched the `mount` field directly (covers add/replace of
-      // the component on a previously-non-mount node).
+      // Config write detection on patch: either node had/has config, or an op
+      // touched the `mount` field directly (covers add/replace of the
+      // component on a previously-non-config node).
       const opsTouchedMount = ops.some(op => {
         const p = op[1];
         return p === '#mount' || p.startsWith('#mount.');
       });
-      if (opsTouchedMount || hasMountComponent(oldNode) || hasMountComponent(newNode)) {
-        cdc = mergeInvalidate(cdc, invalidateVpsForConfigChange(path));
-      }
-      const claimsUid = userIdFromAuthPath(path);
-      if (claimsUid) {
-        cdc = mergeInvalidate(cdc, invalidateVpsForClaimsChange(claimsUid));
-      }
+      const claimsUid = claimsUserOf(path);
+      const cdc = dirtyVps(
+        membershipVps(path, oldNode ?? null, newNode ?? null),
+        // Both directions: ops touched $acl/$owner directly OR the resulting
+        // diff shows a $acl change (covers full-node replace via patch).
+        (ops.some(isAclOp) || isAclChange(oldNode ?? null, newNode ?? null)) ? vpsForAclChange(path) : [],
+        (opsTouchedMount || isConfigNode(oldNode) || isConfigNode(newNode)) ? vpsForConfigChange(path) : [],
+        claimsUid ? vpsForClaimsChange(claimsUid) : [],
+      );
 
       // Emit only mutation ops (filter out test ops) — same PatchOp shape
       // tree.patch consumes; no RFC 6902 conversion on the wire.
@@ -617,11 +434,11 @@ export function withSubscriptions(
       return internalSubscribe(path, listener, opts);
     },
 
-    watchQuery(vp, source, match, userId, claims) {
+    watchQuery(vp, source, match, userId) {
       const matchKey = stableJson(match);
       let entry = activeQueries.find(q => q.vp === vp);
       if (!entry) {
-        entry = { vp, source, match, matchKey, test: createSiftTest(match), users: new Map() };
+        entry = { vp, source, match, matchKey, test: createSiftTest(match), users: new Set() };
         activeQueries.push(entry);
       } else if (entry.source !== source || entry.matchKey !== matchKey) {
         // E03: vp reused with different source/match — update definition
@@ -630,7 +447,7 @@ export function withSubscriptions(
         entry.matchKey = matchKey;
         entry.test = createSiftTest(match);
       }
-      entry.users.set(userId, { claims });
+      entry.users.add(userId);
     },
 
     unwatchQuery(vp, userId) {
@@ -666,12 +483,11 @@ export function withSubscriptions(
    *  change. Reconnect events skip CDC and go straight to onEvent. */
   function injectExternalEvent(event: TreeEvent) {
     if (event.type === 'reconnect') {
-      dispatch(event as InternalNodeEvent);
+      dispatch(event);
       return;
     }
-    const inv = invalidateVpsForExternalPath(event.path);
-    const merged = mergeInvalidate({}, inv);
-    dispatch(cleanEvent({ ...event, ...merged } as DataEvent));
+    const inv = dirtyVps(vpsForExternalPath(event.path));
+    dispatch(cleanEvent({ ...event, ...inv } as DataEvent));
   }
 
   return { tree: wrappedTree, cdc, onSelfWrite, injectExternalEvent };

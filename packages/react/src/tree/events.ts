@@ -24,6 +24,18 @@ let unsub: (() => void) | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let lastConfig: EventsConfig | null = null;
 
+// Coalesce dirty refetches per vp (gk8.12): a burst of writes into one query
+// view triggers ONE listing refetch, not one per event.
+const DIRTY_COALESCE_MS = 75;
+const dirtyTimers = new Map<string, ReturnType<typeof setTimeout>>();
+function refetchDirtyVp(vp: string, loadChildren: LoadChildren) {
+  if (dirtyTimers.has(vp)) return;
+  dirtyTimers.set(vp, setTimeout(() => {
+    dirtyTimers.delete(vp);
+    void loadChildren(vp);
+  }, DIRTY_COALESCE_MS));
+}
+
 function isUnauthorized(err: unknown): boolean {
   const data = (err as { data?: { code?: string; httpStatus?: number } }).data;
   return data?.code === 'UNAUTHORIZED' || data?.httpStatus === 401;
@@ -113,20 +125,14 @@ export function startEvents(config: EventsConfig = {}) {
 
       if (event.type === 'set') {
         const node = { $path: event.path, ...event.node } as NodeData;
-        // Order: rmVps → put → addVps. Unlinking first prevents cache.put's
-        // reverse-index fan-out from firing a vp about to be removed.
-        if (event.rmVps) event.rmVps.forEach((vp: string) => cache.removeFromParent(event.path, vp));
         if (!applyServerSet(event.path, node)) cache.put(node);
-        if (event.addVps) event.addVps.forEach((vp: string) => cache.addToParent(event.path, vp));
-        // invalidateVps — server tells us a query-mount listing under each vp
-        // may have shifted in ways the add/rm deltas didn't capture (out-of-band
-        // mongo write, ACL change). Refetch the children of each vp to reload.
+        // invalidateVps — the coarse dirty signal (gk8.12): each named query
+        // view may have shifted; refetch its listing through the normal
+        // ACL-filtered read path. Precise add/rm deltas no longer exist.
         if (event.invalidateVps && loadChildren) {
-          for (const vp of event.invalidateVps as string[]) loadChildren(vp);
+          for (const vp of event.invalidateVps as string[]) refetchDirtyVp(vp, loadChildren);
         }
       } else if (event.type === 'patch') {
-        // Same rm→put→add ordering as 'set' above.
-        if (event.rmVps) event.rmVps.forEach((vp: string) => cache.removeFromParent(event.path, vp));
         // tRPC infers the wire type with `unknown[]` for tuples that contain
         // `unknown` values — server emits real PatchOp tuples, narrow here.
         const patches = event.patches as PatchOp[] | undefined;
@@ -155,16 +161,13 @@ export function startEvents(config: EventsConfig = {}) {
             });
           }
         }
-        if (event.addVps) event.addVps.forEach((vp: string) => cache.addToParent(event.path, vp));
         if (event.invalidateVps && loadChildren) {
-          for (const vp of event.invalidateVps as string[]) loadChildren(vp);
+          for (const vp of event.invalidateVps as string[]) refetchDirtyVp(vp, loadChildren);
         }
       } else if (event.type === 'remove') {
         cache.remove(event.path);
-        // Also clean up virtual parents (CDC queries)
-        if (event.rmVps) event.rmVps.forEach((vp: string) => cache.removeFromParent(event.path, vp));
         if (event.invalidateVps && loadChildren) {
-          for (const vp of event.invalidateVps as string[]) loadChildren(vp);
+          for (const vp of event.invalidateVps as string[]) refetchDirtyVp(vp, loadChildren);
         }
       }
     },
@@ -192,6 +195,8 @@ function scheduleResubscribe(delayMs: number) {
 
 export function stopEvents() {
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  for (const t of dirtyTimers.values()) clearTimeout(t);
+  dirtyTimers.clear();
   if (unsub) { unsub(); unsub = null; }
   if (tokenWaitTimer) { clearInterval(tokenWaitTimer); tokenWaitTimer = null; }
   if (tokenWaitListener && typeof window !== 'undefined') {

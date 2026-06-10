@@ -443,20 +443,23 @@ describe('tRPC API integration', () => {
       assert.equal(kitchen.items[0].$path, '/orders/data/1', 'Canonical path preserved');
     });
 
-    it('CDC emits addVps/rmVps', async () => {
+    it('CDC emits coarse invalidateVps on membership flips (gk8.12)', async () => {
       await authedCaller.getChildren({ path: '/orders/new', watchNew: true });
       await authedCaller.getChildren({ path: '/orders/kitchen', watchNew: true });
 
       events.length = 0;
       await caller.execute({ path: '/orders/data/1', key: 'status', action: 'cook' });
 
+      // cook flips membership new→kitchen — both views go dirty; the client
+      // refetches each through the ACL read path (no predicted add/rm).
       const ev = events.find(e => e.path === '/orders/data/1');
       assert.ok(ev);
-      if ('addVps' in ev!) assert.ok(ev.addVps?.includes('/orders/kitchen'));
-      if ('rmVps' in ev!) assert.ok(ev.rmVps?.includes('/orders/new'));
+      const vps = 'invalidateVps' in ev! ? ev.invalidateVps : undefined;
+      assert.ok(vps?.includes('/orders/kitchen'));
+      assert.ok(vps?.includes('/orders/new'));
     });
 
-    it('query watcher receives membership transition with source event path and legacy VP fields', async () => {
+    it('query watcher receives the membership flip as a dirty signal on the source event', async () => {
       const pushed = connectAliceEvents('alice:query-transition');
       await authedCaller.getChildren({ path: '/orders/new', watchNew: true });
       await authedCaller.getChildren({ path: '/orders/kitchen', watchNew: true });
@@ -468,15 +471,17 @@ describe('tRPC API integration', () => {
       assert.ok(ev);
       assert.equal(ev.type, 'patch');
       assert.equal(ev.path, '/orders/data/1');
-      assert.ok(ev.addVps?.includes('/orders/kitchen'));
-      assert.ok(ev.rmVps?.includes('/orders/new'));
+      assert.ok(ev.invalidateVps?.includes('/orders/kitchen'));
+      assert.ok(ev.invalidateVps?.includes('/orders/new'));
       assert.equal(ev.path.startsWith('/orders/new/'), false);
       assert.equal(ev.path.startsWith('/orders/kitchen/'), false);
     });
 
-    it('query watcher receives patch for item that stays in query mount', async () => {
+    it('in-folder update reaches item watchers as a plain patch — no dirty (gk8.12)', async () => {
       const pushed = connectAliceEvents('alice:query-stay');
-      await authedCaller.getChildren({ path: '/orders/new', watchNew: true });
+      // watch:true registers the listed ITEMS; membership stays — updates
+      // ride ordinary path events, the folder is never dirtied.
+      await authedCaller.getChildren({ path: '/orders/new', watch: true, watchNew: true });
 
       await caller.set({
         node: {
@@ -488,16 +493,12 @@ describe('tRPC API integration', () => {
       });
       await new Promise(resolve => setTimeout(resolve, 0));
 
-      // The watcher receiving the event proves routing worked. After the
-      // notifyVps rename (formerly stayVps), the "stays in vp" signal is
-      // server-internal and never reaches the wire — client computes
-      // membership locally from initial fetch + add/rm history.
       const ev = pushed.find(e => e.path === '/orders/data/1');
-      assert.ok(ev, 'VP watcher must receive event for in-vp mutation');
+      assert.ok(ev, 'item watcher must receive event for in-vp mutation');
       assert.equal(ev.type, 'patch');
       assert.equal(ev.path, '/orders/data/1');
       assert.equal(ev.path.startsWith('/orders/new/'), false);
-      assert.ok(!('stayVps' in ev), 'stayVps is server-internal and must not appear on the wire');
+      assert.ok(!('invalidateVps' in ev) || !ev.invalidateVps?.length, 'stay-in must not dirty the folder');
     });
 
     it('query mount does not match hidden component fields', async () => {
@@ -520,7 +521,12 @@ describe('tRPC API integration', () => {
       assert.equal(result.items.length, 0);
     });
 
-    it('CDC query membership does not route on hidden component fields', async () => {
+    it('hidden-field membership flip reaches vp watchers only as an opaque dirty (gk8.12)', async () => {
+      // Membership is sifted against the RAW node once per mutation — no
+      // per-user ACL on the write path. A watcher of the secret view gets a
+      // dirty signal (bounded metadata channel, see core-cnr.8); the DATA
+      // stays protected: the event is component-stripped and the refetch
+      // goes through the ACL read path (see the read-path oracle test above).
       register('private.secret.cdc', 'acl', () => [{ g: 'admins', p: R }]);
       await rawStore.set({ $path: '/cdc-oracle', $type: 'folder' });
       await rawStore.set({ $path: '/cdc-oracle/data', $type: 'folder' });
@@ -546,7 +552,12 @@ describe('tRPC API integration', () => {
       } as any);
       await new Promise(resolve => setTimeout(resolve, 0));
 
-      assert.equal(pushed.length, 0);
+      const ev = pushed.find(e => (e.type === 'set' || e.type === 'patch') && e.path === '/cdc-oracle/data/a');
+      assert.ok(ev, 'vp watcher receives the dirty-carrying event');
+      assert.ok(('invalidateVps' in ev ? ev.invalidateVps : undefined)?.includes('/cdc-oracle/secret'));
+      if (ev.type === 'set') {
+        assert.equal('#secret' in ev.node, false, 'restricted component must be stripped from the event');
+      }
     });
 
     it('multiple orders independently tracked', async () => {

@@ -3,13 +3,7 @@
 // Supports multiple connections per user (multi-tab).
 // Grace period: on last disconnect, watches survive briefly for SSE auto-reconnect.
 
-import { CDC_ROUTES, type NodeEvent, type RoutedNodeEvent, type VpDelta } from './index';
-
-/** Server-internal — `notifyVps` is the L3 "stays-in-vp" fanout signal used
- *  here for routing. It MUST NOT cross the wire (clients only see addVps,
- *  rmVps, invalidateVps). The eventForUser stripping below enforces that. */
-type ServerVpDelta = VpDelta & { notifyVps?: string[] };
-type ServerEvent = NodeEvent & { notifyVps?: string[] };
+import { type NodeEvent } from './index';
 
 export type WatchPush = (event: NodeEvent) => void;
 
@@ -105,41 +99,14 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
     opts?.onUserRemoved?.(userId);
   }
 
-  function pushToUser(uid: string, event: ServerEvent) {
+  function pushToUser(uid: string, event: NodeEvent) {
     const user = users.get(uid);
     if (!user) return;
-    const safeEvent = { ...eventForUser(event, uid), seq: ++user.seq };
+    const safeEvent = { ...event, seq: ++user.seq };
     user.ring.push({ seq: safeEvent.seq, event: safeEvent });
     if (user.ring.length > ringSize) user.ring.shift();
     if (user.pushes.size === 0) user.missedOffline = true;
     for (const push of user.pushes.values()) push(safeEvent);
-  }
-
-  function eventForUser(event: ServerEvent, uid: string): NodeEvent {
-    const routes = (event as RoutedNodeEvent)[CDC_ROUTES] as Map<string, ServerVpDelta> | undefined;
-    const out = { ...event } as ServerEvent & RoutedNodeEvent;
-    // notifyVps is server-internal; strip unconditionally before push.
-    delete out.notifyVps;
-    delete out[CDC_ROUTES];
-    if (!routes) return out;
-    const delta = routes.get(uid);
-    delete out.addVps;
-    delete out.rmVps;
-    if (delta?.addVps?.length) out.addVps = delta.addVps;
-    if (delta?.rmVps?.length) out.rmVps = delta.rmVps;
-    // invalidateVps stays as a top-level broadcast (per-vp routing) — not
-    // overridden per-user; cdcEval emits per-user invalidate via routes for
-    // ACL/claims work but the wire-level union is what reaches the consumer.
-    return out;
-  }
-
-  function deltaVps(delta: ServerVpDelta): string[] {
-    return [
-      ...(delta.addVps ?? []),
-      ...(delta.rmVps ?? []),
-      ...(delta.notifyVps ?? []),
-      ...(delta.invalidateVps ?? []),
-    ];
   }
 
   function ensureUser(userId: string) {
@@ -288,48 +255,23 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
           }
         }
 
-      // Virtual Parent Match (CDC Matrix events) — route on add/rm/notify union.
-      // When CDC_ROUTES exists, membership is user-specific and must not be
-      // broadcast through global addVps/rmVps/notifyVps fields.
-      const serverEvent = event as ServerEvent;
-      const routes = (event as RoutedNodeEvent)[CDC_ROUTES] as Map<string, ServerVpDelta> | undefined;
-      if (routes) {
-        for (const [uid, delta] of routes) {
+      // Virtual Parent match — the coarse dirty signal (gk8.12). The event
+      // carries invalidateVps; vp prefix-watchers receive it (and refetch),
+      // with the same autoWatch promotion as plain parents.
+      const vps = 'invalidateVps' in event && event.invalidateVps ? event.invalidateVps : [];
+      for (const vp of vps) {
+        const vpWatchers = prefixToUsers.get(vp);
+        if (!vpWatchers) continue;
+        for (const uid of vpWatchers) {
           if (notified.has(uid)) continue;
+          notified.add(uid);
           const user = users.get(uid);
           if (!user) continue;
-          const watchedVp = deltaVps(delta).find(vp => prefixToUsers.get(vp)?.has(uid));
-          if (!watchedVp) continue;
-          notified.add(uid);
-          pushToUser(uid, serverEvent);
-          if (user.prefixes.get(watchedVp) && !user.paths.has(event.path) && userWatchCount(user) < maxPerUser && totalWatches < maxTotal) {
+          pushToUser(uid, event);
+          if (user.prefixes.get(vp) && !user.paths.has(event.path) && userWatchCount(user) < maxPerUser && totalWatches < maxTotal) {
             user.paths.add(event.path);
             addTo(pathToUsers, event.path, uid);
             totalWatches++;
-          }
-        }
-      } else {
-        const vps = [
-          ...('addVps' in event && event.addVps ? event.addVps : []),
-          ...(event.rmVps || []),
-          ...(serverEvent.notifyVps ?? []),
-          ...('invalidateVps' in event && event.invalidateVps ? event.invalidateVps : []),
-        ];
-        for (const vp of vps) {
-          const vpWatchers = prefixToUsers.get(vp);
-          if (vpWatchers) {
-            for (const uid of vpWatchers) {
-              if (notified.has(uid)) continue;
-              notified.add(uid);
-              const user = users.get(uid);
-              if (!user) continue;
-              pushToUser(uid, event);
-              if (user.prefixes.get(vp) && !user.paths.has(event.path) && userWatchCount(user) < maxPerUser && totalWatches < maxTotal) {
-                user.paths.add(event.path);
-                addTo(pathToUsers, event.path, uid);
-                totalWatches++;
-              }
-            }
           }
         }
       }

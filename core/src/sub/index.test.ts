@@ -1,9 +1,16 @@
-import { A, createNode, R } from '#core';
+import { A, createNode, getComponentByName, R, type NodeData } from '#core';
+import { userIdFromAuthPath } from '#security/auth';
 import { createMemoryTree } from '#tree';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { type NodeEvent, withSubscriptions } from './index';
+import { type NodeEvent, type SubscriptionOpts, withSubscriptions } from './index';
 import { createWatchManager } from './watch';
+
+// Production detectors are layer-injected (gk8.12) — tests wire the real ones.
+const detectors: SubscriptionOpts = {
+  claimsUserOf: userIdFromAuthPath,
+  isConfigNode: (node: NodeData | null | undefined) => !!node && getComponentByName(node, 'mount') !== undefined,
+};
 
 describe('Subscriptions', () => {
   it('emits on set (children)', async () => {
@@ -119,10 +126,11 @@ describe('Subscriptions', () => {
     const event = events.find(e => e.type === 'set' && e.path === '/items/1');
     assert.ok(event);
     if (event.type !== 'set') throw new Error('expected set event');
-    assert.deepEqual(event.addVps, ['/views/status']);
+    // Membership flip against the UPDATED match → coarse dirty (gk8.12).
+    assert.deepEqual(event.invalidateVps, ['/views/status']);
   });
 
-  it('routes query watches per user while preserving legacy raw watchers', async () => {
+  it('coarse dirty reaches every vp watcher — visibility resolves on the read path (gk8.12)', async () => {
     const watcher = createWatchManager();
     const { tree, cdc } = withSubscriptions(createMemoryTree(), e => watcher.notify(e));
     const legacyEvents: NodeEvent[] = [];
@@ -140,8 +148,8 @@ describe('Subscriptions', () => {
     await tree.set({ ...createNode('/items', 'dir'), $acl: [{ g: 'public', p: R }] });
 
     cdc.watchQuery('/views/open', '/items', { status: 'open' }, 'legacy');
-    cdc.watchQuery('/views/open', '/items', { status: 'open' }, 'member', ['authenticated', 'public']);
-    cdc.watchQuery('/views/open', '/items', { status: 'open' }, 'anon', ['public']);
+    cdc.watchQuery('/views/open', '/items', { status: 'open' }, 'member');
+    cdc.watchQuery('/views/open', '/items', { status: 'open' }, 'anon');
 
     await tree.set({
       ...createNode('/items/1', 'item'),
@@ -149,16 +157,16 @@ describe('Subscriptions', () => {
       $acl: [{ g: 'public', p: 0 }, { g: 'authenticated', p: R }],
     });
 
+    // No per-user prediction on the write path: every vp watcher gets the
+    // dirty signal (anon included) and re-derives visibility via refetch.
     assert.equal(legacyEvents.length, 1);
     assert.equal(memberEvents.length, 1);
-    assert.equal(anonEvents.length, 0);
-    assert.equal(legacyEvents[0].type, 'set');
-    assert.equal(memberEvents[0].type, 'set');
-    if (legacyEvents[0].type !== 'set' || memberEvents[0].type !== 'set') {
-      throw new Error('expected set events');
+    assert.equal(anonEvents.length, 1);
+    for (const e of [legacyEvents[0], memberEvents[0], anonEvents[0]]) {
+      assert.equal(e.type, 'set');
+      if (e.type !== 'set') throw new Error('expected set event');
+      assert.ok(e.invalidateVps?.includes('/views/open'));
     }
-    assert.deepEqual(legacyEvents[0].addVps, ['/views/open']);
-    assert.deepEqual(memberEvents[0].addVps, ['/views/open']);
   });
 });
 
@@ -220,15 +228,17 @@ describe('ACL change invalidation (Stage 6)', () => {
     assert.deepEqual(invalidateVps, ['/views/under-a']);
   });
 
-  it('data-only mutation does NOT produce invalidateVps', async () => {
+  it('stay-in mutation does NOT dirty the folder (gk8.12)', async () => {
     const events: NodeEvent[] = [];
     const { tree, cdc } = withSubscriptions(createMemoryTree(), e => events.push(e));
 
     await tree.set(createNode('/items', 'dir'));
     cdc.watchQuery('/views/open', '/items', { status: 'open' }, 'u1');
+    await tree.set({ ...createNode('/items/1', 'item'), status: 'open' }); // enters → dirty (expected)
     events.length = 0;
 
-    await tree.set({ ...createNode('/items/1', 'item'), status: 'open' });
+    // Membership unchanged — the update rides the plain patch event only.
+    await tree.set({ ...createNode('/items/1', 'item'), status: 'open', note: 'touched' });
 
     const ev = events.find(e =>
       (e.type === 'set' || e.type === 'patch') && e.path === '/items/1');
@@ -273,7 +283,7 @@ describe('ACL change invalidation (Stage 6)', () => {
 
   it('mount config write at vp path → invalidate that vp', async () => {
     const events: NodeEvent[] = [];
-    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => events.push(e));
+    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => events.push(e), detectors);
 
     await tree.set({
       $path: '/views/orders',
@@ -319,7 +329,7 @@ describe('ACL change invalidation (Stage 6)', () => {
 
   it('removing a mount node emits invalidateVps for that vp', async () => {
     const events: NodeEvent[] = [];
-    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => events.push(e));
+    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => events.push(e), detectors);
 
     await tree.set({
       $path: '/views/orders',
@@ -339,13 +349,13 @@ describe('ACL change invalidation (Stage 6)', () => {
 
   it('write to /auth/users/{uid} invalidates all queries for that user', async () => {
     const events: NodeEvent[] = [];
-    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => events.push(e));
+    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => events.push(e), detectors);
 
     await tree.set(createNode('/items', 'dir'));
     await tree.set(createNode('/orders', 'dir'));
-    cdc.watchQuery('/views/open-items', '/items', {}, 'alice', ['public']);
-    cdc.watchQuery('/views/new-orders', '/orders', {}, 'alice', ['public']);
-    cdc.watchQuery('/views/open-items', '/items', {}, 'bob', ['public']);
+    cdc.watchQuery('/views/open-items', '/items', {}, 'alice');
+    cdc.watchQuery('/views/new-orders', '/orders', {}, 'alice');
+    cdc.watchQuery('/views/open-items', '/items', {}, 'bob');
     events.length = 0;
 
     // Alice's user node changes (e.g., admin tweaks her groups).
@@ -366,10 +376,10 @@ describe('ACL change invalidation (Stage 6)', () => {
 
   it('write to /auth/users/{uid}/sub-path does NOT invalidate (different node)', async () => {
     const events: NodeEvent[] = [];
-    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => events.push(e));
+    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => events.push(e), detectors);
 
     await tree.set(createNode('/items', 'dir'));
-    cdc.watchQuery('/views/open', '/items', {}, 'alice', ['public']);
+    cdc.watchQuery('/views/open', '/items', {}, 'alice');
     events.length = 0;
 
     // Write under /auth/users/alice — not the user node itself.
@@ -398,8 +408,8 @@ describe('ACL change invalidation (Stage 6)', () => {
     await tree.set({ ...createNode('/', 'root'), $acl: [{ g: 'public', p: R | A }] });
     await tree.set({ ...createNode('/items', 'dir'), $acl: [{ g: 'public', p: R }] });
 
-    cdc.watchQuery('/views/open', '/items', { status: 'open' }, 'alice', ['public']);
-    cdc.watchQuery('/views/closed', '/items', { status: 'closed' }, 'bob', ['public']);
+    cdc.watchQuery('/views/open', '/items', { status: 'open' }, 'alice');
+    cdc.watchQuery('/views/closed', '/items', { status: 'closed' }, 'bob');
 
     // ACL change on /items → both alice and bob should be invalidated
     await tree.set({ ...createNode('/items', 'dir'), $acl: [{ g: 'authenticated', p: R }] });
