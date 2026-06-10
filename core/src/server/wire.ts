@@ -4,7 +4,8 @@
 // Extracted from the tRPC withSession middleware + events subscription body.
 
 import { OpError } from '#errors';
-import { createPeer, type ActReq, type PeerServe, type ServeHooks } from '#protocol/peer';
+import type { EventFrame } from '#protocol/frames';
+import { createPeer, type ActReq, type Conn, type PeerServe, type ServeHooks } from '#protocol/peer';
 import { buildClaims, type Session, withAcl } from '#security/auth';
 import { type CdcRegistry, type NodeEvent } from '#sub';
 import { type WatchManager } from '#sub/watch';
@@ -40,8 +41,34 @@ export const DEFAULT_CLAIMS_TTL_MS = 30_000;
 
 export type WireSession = ReturnType<typeof createWireSession>;
 
+/** NodeEvent → TWP event frames. VP membership/config deltas collapse into
+ *  one `dirty` per affected view path (gk8.12 refetch semantics — precise
+ *  add/rm cache surgery stays a tRPC-binding capability until cdcEval dies);
+ *  `reconnect` becomes `reset` only when continuity was lost. */
+export function toEventFrames(e: NodeEvent, nextSeq: () => number): EventFrame[] {
+  if (e.type === 'reconnect') {
+    return e.preserved ? [] : [{ ev: 'reset', reason: 'resume' }];
+  }
+  // Frames must omit absent fields, not carry undefined: structured-clone
+  // transports preserve undefined keys while JSON transports drop them —
+  // explicit omission keeps the wire identical everywhere.
+  const frames: EventFrame[] = [];
+  if (e.type === 'set') frames.push({ seq: nextSeq(), ev: 'set', path: e.path, node: e.node });
+  else if (e.type === 'patch') {
+    frames.push(e.rev === undefined
+      ? { seq: nextSeq(), ev: 'patch', path: e.path, ops: e.patches }
+      : { seq: nextSeq(), ev: 'patch', path: e.path, ops: e.patches, rev: e.rev });
+  } else frames.push({ seq: nextSeq(), ev: 'rm', path: e.path });
+
+  const dirty = new Set<string>([...(e.addVps ?? []), ...(e.rmVps ?? []), ...(e.invalidateVps ?? [])]);
+  for (const vp of dirty) frames.push({ seq: nextSeq(), ev: 'dirty', path: vp });
+  return frames;
+}
+
 export function createWireSession(deps: WireDeps, session: Session) {
   const { userId } = session;
+  let seq = 0;
+  const nextSeq = () => ++seq;
 
   // Claims + ACL tree are resolved per request — freshness parity with the
   // pre-TWP per-procedure middleware. Long-lived connections get the same
@@ -103,6 +130,16 @@ export function createWireSession(deps: WireDeps, session: Session) {
     return { connId, preserved };
   }
 
+  /** Event lane in TWP frames — native bindings (port/WS). The initial
+   *  continuity verdict maps to a reset frame when watches were not preserved. */
+  function connectEventFrames(emit: (f: EventFrame) => void): { connId: string } {
+    const { connId, preserved } = connectEvents((e) => {
+      for (const f of toEventFrames(e, nextSeq)) emit(f);
+    });
+    if (!preserved) emit({ ev: 'reset', reason: 'resume' });
+    return { connId };
+  }
+
   return {
     session,
     /** Serve one frame (bindings call this; tRPC procedures delegate here). */
@@ -112,6 +149,21 @@ export function createWireSession(deps: WireDeps, session: Session) {
     /** Claims + ACL tree for binding-level legacy ops (deployPrefab, setComponent, agentInitPair). */
     scope,
     connectEvents,
+    connectEventFrames,
     disconnectEvents: (connId: string) => deps.watcher.disconnect(connId),
+  };
+}
+
+/** Bind a wire session to a transport Conn — request serving + event lane.
+ *  The postMessage host side is exactly this:
+ *    attachWireSession(createWireSession(deps, session), createPortConn(port))
+ *  Auth is ambient: the host constructs the session (spec §5.3) — no hi frame.
+ *  Returns a teardown that detaches the peer and releases the event connection. */
+export function attachWireSession(session: WireSession, conn: Conn): () => void {
+  const detach = session.peer.attach(conn);
+  const { connId } = session.connectEventFrames((f) => session.peer.emit(f));
+  return () => {
+    session.disconnectEvents(connId);
+    detach();
   };
 }

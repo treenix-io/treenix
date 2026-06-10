@@ -263,6 +263,10 @@ export function createPeer(serve?: ServeFactory) {
     const ac = new AbortController();
     inflight.set(frame.id, ac);
     try {
+      // Starvation hazard: a handler that loops on microtasks only (no IO/timer
+      // awaits between yields) can starve macrotask transports (postMessage,
+      // ws) so the cancel frame never lands. Handlers must hit the event loop;
+      // protocol-level chunk credits are deferred (twp-spec §11.4).
       for await (const item of s.executeStream(req, ac.signal)) {
         if (ac.signal.aborted) break;
         yield { id: frame.id, ch: item };

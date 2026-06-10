@@ -23,6 +23,7 @@ export function createClient(conn: Conn): WireClient {
   // watch is released exactly when the last local consumer unsubscribes.
   const pathCbs = new Map<string, Set<(e: EventFrame) => void>>();
   let offEvents: (() => void) | null = null;
+  let destroyed = false;
 
   function ensureEventRouting() {
     if (offEvents) return;
@@ -36,7 +37,10 @@ export function createClient(conn: Conn): WireClient {
     if (!set || !set.delete(cb)) return;
     if (set.size) return;
     pathCbs.delete(path);
-    peer.req.unsub({ paths: [path] }).catch((e) => console.error('[twp-client] unsub failed:', e));
+    // unsub racing destroy is benign — server releases all watches on disconnect.
+    peer.req.unsub({ paths: [path] }).catch((e) => {
+      if (!destroyed) console.error('[twp-client] unsub failed:', e);
+    });
     if (!pathCbs.size && offEvents) { offEvents(); offEvents = null; }
   }
 
@@ -76,6 +80,7 @@ export function createClient(conn: Conn): WireClient {
     peer,
 
     destroy() {
+      destroyed = true;
       pathCbs.clear();
       if (offEvents) { offEvents(); offEvents = null; }
       detach();
