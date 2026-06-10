@@ -2,7 +2,6 @@
 // Role determines prompt + tool policy. Uses metatron's invokeClaude for LLM.
 // Agent = node, tree = protocol.
 
-import { resolvePermission } from '#metatron/permissions';
 import { getComponent } from '@treenx/core';
 import { getCtx, registerType } from '@treenx/core/comp';
 
@@ -246,12 +245,17 @@ export class AiApproval {
   inputTruncated = false;
   /** Path of the t.branch this approval reviews ('' for plain tool approvals).
    *  Approval UIs render the branch diff through it; resolution = the human
-   *  runs `merge` on the branch, not resolvePermission. */
+   *  runs `merge` on the branch, not the approve action. */
   branchRef = '';
   status: 'pending' | 'approved' | 'denied' = 'pending';
   reason = '';
   createdAt = 0;
   resolvedAt = 0;
+  /** Deadline (ms epoch); past it the waiter/reconcile denies with reason 'timeout'/'expired'. */
+  expiresAt = 0;
+  /** Human's "remember this decision" choice — read by the guardian waiter, which
+   *  persists the rule. The node IS the resolution state (survives restarts). */
+  remember: '' | 'agent' | 'global' = '';
 
   /** @description Approve this tool usage */
   approve(data?: {
@@ -261,14 +265,7 @@ export class AiApproval {
     if (this.status !== 'pending') throw new Error('already resolved');
     this.status = 'approved';
     this.resolvedAt = Date.now();
-    const { node } = getCtx();
-    const id = node.$path.split('/').pop();
-    if (id) resolvePermission(id, true, {
-      tool: this.tool,
-      input: this.input,
-      agentPath: this.agentPath,
-      scope: data?.remember,
-    });
+    this.remember = data?.remember ?? '';
   }
 
   /** @description Deny this tool usage */
@@ -279,14 +276,7 @@ export class AiApproval {
     if (this.status !== 'pending') throw new Error('already resolved');
     this.status = 'denied';
     this.resolvedAt = Date.now();
-    const { node } = getCtx();
-    const id = node.$path.split('/').pop();
-    if (id) resolvePermission(id, false, {
-      tool: this.tool,
-      input: this.input,
-      agentPath: this.agentPath,
-      scope: data?.remember,
-    });
+    this.remember = data?.remember ?? '';
   }
 }
 

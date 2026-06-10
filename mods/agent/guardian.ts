@@ -1,8 +1,9 @@
 // Guardian — extensible tool policy for AI agents.
 // Cascade: agent ai.policy → global ai.policy (/guardian) → hardcoded fallback.
-// Escalation: creates ai.approval node → Promise resolution via pendingPermissions.
+// Escalation: creates ai.approval node; its status/remember fields ARE the
+// resolution state — waiters poll the node, so approvals survive restarts.
 
-import { pendingPermissions, type PermissionMeta, type PermissionRule } from '#metatron/permissions';
+import { type PermissionRule } from '#metatron/permissions';
 import type { PermissionResult } from '@anthropic-ai/claude-agent-sdk';
 import { createNode, getComponent, type NodeData } from '@treenx/core';
 import { setComponent } from '@treenx/core/comp';
@@ -264,60 +265,97 @@ export function splitBashParts(cmd: string): string[] {
   return parts.map(p => p.trim()).filter(Boolean);
 }
 
-// ── Escalation via tree nodes + Promise resolution ──
+// ── Escalation via tree nodes ──
+// The approval's entire fate lives in the ai.approval NODE — status, expiresAt,
+// remember — no in-memory resolver, so pending approvals survive restarts
+// (gk8.7): approve/deny actions only mutate the node; waiters POLL it; a
+// resumed agent re-requesting the same (agentPath, tool, input) re-attaches to
+// the still-pending node instead of duplicating it. Polling is a cache-backed
+// get at human-scale traffic and keeps guardian decoupled from the sub/ layer;
+// switch to a node watch when the transport-neutral watch API settles (gk8.25).
 
 const APPROVAL_TIMEOUT = 60 * 60 * 1000; // 1 hour
+const APPROVAL_POLL_MS = 2_000;
+
+/** Test seam: production callers use the defaults. */
+export type ApprovalWait = { timeoutMs?: number; pollMs?: number };
+
+function approvalDeadline(node: NodeData): number {
+  return typeof node.expiresAt === 'number' && node.expiresAt > 0
+    ? node.expiresAt
+    : (Number(node.createdAt) || 0) + APPROVAL_TIMEOUT;
+}
 
 export async function requestApproval(
   store: Tree,
   opts: { agentPath: string; role: string; tool: string; input: string; reason: string },
+  wait: ApprovalWait = {},
 ): Promise<boolean> {
-  const id = `a-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-  const path = `/guardian/approvals/${id}`;
+  const timeoutMs = wait.timeoutMs ?? APPROVAL_TIMEOUT;
+  const pollMs = wait.pollMs ?? APPROVAL_POLL_MS;
+  const input = opts.input.slice(0, 4000);
 
-  await store.set(createNode(path, 'ai.approval', {
-    agentPath: opts.agentPath,
-    agentRole: opts.role,
-    tool: opts.tool,
-    input: opts.input.slice(0, 4000),
-    inputTruncated: opts.input.length > 4000,
-    status: 'pending',
-    reason: opts.reason,
-    createdAt: Date.now(),
-    resolvedAt: 0,
-  }));
+  // Re-attach after a restart: the resumed agent retries its tool call and must
+  // latch onto the approval the human may already be looking at.
+  const { items } = await store.getChildren('/guardian/approvals');
+  const existing = items.find(n => n.$type === 'ai.approval' && n.status === 'pending'
+    && n.agentPath === opts.agentPath && n.tool === opts.tool && n.input === input);
 
-  console.log(`[guardian] escalation: ${opts.role} wants ${opts.tool} → ${path}`);
+  let path: string;
+  if (existing) {
+    path = existing.$path;
+    console.log(`[guardian] re-attached to pending escalation: ${path}`);
+  } else {
+    path = `/guardian/approvals/a-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    await store.set(createNode(path, 'ai.approval', {
+      agentPath: opts.agentPath,
+      agentRole: opts.role,
+      tool: opts.tool,
+      input,
+      inputTruncated: opts.input.length > 4000,
+      status: 'pending',
+      reason: opts.reason,
+      createdAt: Date.now(),
+      resolvedAt: 0,
+      expiresAt: Date.now() + timeoutMs,
+    }));
+    console.log(`[guardian] escalation: ${opts.role} wants ${opts.tool} → ${path}`);
+  }
 
-  return new Promise<boolean>((resolve) => {
-    const timer = setTimeout(async () => {
-      pendingPermissions.delete(id);
-      // Mark approval node as denied so it doesn't appear stale
-      try {
-        const node = await store.get(path);
-        if (node && node.status === 'pending') {
-          await store.set({ ...node, status: 'denied' as const, reason: 'timeout', resolvedAt: Date.now() });
-        }
-      } catch { /* best-effort cleanup */ }
-      console.log(`[guardian] escalation timed out: ${path}`);
-      resolve(false);
-    }, APPROVAL_TIMEOUT);
+  for (;;) {
+    const node = await store.get(path);
+    if (!node) {
+      console.error(`[guardian] approval node vanished mid-wait, denying: ${path}`);
+      return false;
+    }
 
-    pendingPermissions.set(id, async (allow: boolean, meta?: PermissionMeta) => {
-      clearTimeout(timer);
-
-      // "Remember" — persist rule to tree policy
-      if (meta?.scope && meta.tool) {
+    if (node.status === 'approved' || node.status === 'denied') {
+      const allow = node.status === 'approved';
+      const remember = node.remember;
+      if (remember === 'agent' || remember === 'global') {
         try {
-          await rememberRule(store, meta.tool, meta.input ?? '', allow, meta.agentPath ?? '', meta.scope);
+          await rememberRule(store, String(node.tool), String(node.input), allow, String(node.agentPath), remember);
         } catch (err) {
           console.error(`[guardian] failed to persist rule: ${err}`);
         }
       }
+      return allow;
+    }
 
-      resolve(allow);
-    });
-  });
+    if (Date.now() >= approvalDeadline(node)) {
+      try {
+        await store.set({ ...node, status: 'denied' as const, reason: 'timeout', resolvedAt: Date.now() });
+      } catch (err) {
+        // OCC conflict = a human resolved it concurrently — loop re-reads and honors that.
+        if (err instanceof OpError && err.code === 'CONFLICT') continue;
+        throw err;
+      }
+      console.log(`[guardian] escalation timed out: ${path}`);
+      return false;
+    }
+
+    await new Promise(r => setTimeout(r, pollMs));
+  }
 }
 
 /** Write a persistent rule to agent or global policy (with OCC retry) */
@@ -367,15 +405,16 @@ export type ResumableAgent = {
 export async function reconcileOnStartup(store: Tree): Promise<ResumableAgent[]> {
   const resumable: ResumableAgent[] = [];
 
-  // Expire orphaned approvals
-  try {
-    const { items } = await store.getChildren('/guardian/approvals');
-    for (const approval of items) {
-      if (approval.$type !== 'ai.approval' || approval.status !== 'pending') continue;
-      await store.set({ ...approval, status: 'denied' as const, reason: 'expired: server restart', resolvedAt: Date.now() });
-      console.log(`[guardian] expired orphaned approval: ${approval.$path}`);
-    }
-  } catch { /* no approvals dir */ }
+  // Expire only approvals past their deadline — fresh pendings SURVIVE restart
+  // (gk8.7): resumed agents re-attach via requestApproval, humans resolve via
+  // the node's approve/deny actions; nothing depends on in-process state.
+  const { items } = await store.getChildren('/guardian/approvals');
+  for (const approval of items) {
+    if (approval.$type !== 'ai.approval' || approval.status !== 'pending') continue;
+    if (Date.now() < approvalDeadline(approval)) continue;
+    await store.set({ ...approval, status: 'denied' as const, reason: 'expired', resolvedAt: Date.now() });
+    console.log(`[guardian] expired stale approval: ${approval.$path}`);
+  }
 
   // Reconcile agents — resume those with sessionId, reset the rest
   const resumablePaths: string[] = [];
@@ -504,6 +543,8 @@ export function createCanUseTool(
      *  (allow set_node:/branches/*, escalate execute:merge:/branches/*)
      *  judge the actual write target. */
     branchRoot?: string;
+    /** Test seam — poll/timeout overrides for requestApproval. */
+    approvalWait?: ApprovalWait;
   },
 ) {
   const allow = (): PermissionResult => ({ behavior: 'allow' });
@@ -623,7 +664,7 @@ export function createCanUseTool(
         const approved = await requestApproval(store, {
           agentPath, role, tool: escalatedSubject, input: cmd,
           reason: 'policy escalation',
-        });
+        }, opts?.approvalWait);
         sessionApproved.set(escalatedSubject, approved);
         return approved ? allow() : deny('denied by human');
       }
@@ -655,7 +696,7 @@ export function createCanUseTool(
       const approved = await requestApproval(store, {
         agentPath, role, tool: coarseKey, input: cmd,
         reason: strictest === 'unknown' ? 'unknown command' : 'requires approval',
-      });
+      }, opts?.approvalWait);
       sessionApproved.set(coarseKey, approved);
       return approved ? allow() : deny('denied by human');
     }
@@ -703,7 +744,7 @@ export function createCanUseTool(
         const approved = await requestApproval(store, {
           agentPath, role, tool: toolSubject, input: inputStr,
           reason: 'requires approval',
-        });
+        }, opts?.approvalWait);
         sessionApproved.set(toolSubject, approved);
         return approved ? allow() : deny('denied by human');
       }
@@ -719,7 +760,7 @@ export function createCanUseTool(
       const approved = await requestApproval(store, {
         agentPath, role, tool: toolSubject, input: inputStr,
         reason: 'unknown tool',
-      });
+      }, opts?.approvalWait);
       sessionApproved.set(toolSubject, approved);
       return approved ? allow() : deny('denied by human');
     }

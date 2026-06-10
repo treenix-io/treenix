@@ -1,6 +1,8 @@
-// Metatron permission system
-// 1. Pending permission resolvers — shared between approve action (types.ts) and query runner (claude.ts)
-// 2. Rule matching engine — evaluates tree-stored rules against tool calls
+// Metatron permission system — rule matching engine: evaluates tree-stored
+// rules against tool calls. Approval RESOLUTION lives in the ai.approval node
+// itself (mods/agent: status/remember fields, polled by the guardian waiter) —
+// the in-memory pendingPermissions resolver map is gone (gk8.7): it died on
+// every restart and took overnight approvals with it.
 // Separate module to avoid pulling @anthropic-ai/claude-agent-sdk into browser bundle.
 
 export type PermissionPolicy = 'allow' | 'ask-once' | 'ask-always' | 'deny';
@@ -10,24 +12,6 @@ export type PermissionRule = {
   pathPattern: string;  // optional input.path pattern
   policy: PermissionPolicy;
 };
-
-// ── Pending permission resolvers ──
-
-export type PermissionMeta = {
-  tool?: string;
-  input?: string;
-  agentPath?: string;
-  scope?: string;
-};
-
-export const pendingPermissions = new Map<string, (allow: boolean, meta?: PermissionMeta) => void>();
-
-export function resolvePermission(id: string, allow: boolean, meta?: PermissionMeta) {
-  const resolve = pendingPermissions.get(id);
-  if (!resolve) return;
-  pendingPermissions.delete(id);
-  resolve(allow, meta);
-}
 
 import { globMatch } from '@treenx/core/glob';
 

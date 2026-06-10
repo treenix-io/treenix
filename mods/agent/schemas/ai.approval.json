@@ -28,7 +28,7 @@
     "branchRef": {
       "type": "string",
       "title": "Path of the t.branch this approval reviews ('' for plain tool approvals).",
-      "description": "Approval UIs render the branch diff through it; resolution = the human runs `merge` on the branch, not resolvePermission.",
+      "description": "Approval UIs render the branch diff through it; resolution = the human runs `merge` on the branch, not the approve action.",
       "default": ""
     },
     "status": {
@@ -51,6 +51,22 @@
     "resolvedAt": {
       "type": "number",
       "default": 0
+    },
+    "expiresAt": {
+      "type": "number",
+      "title": "Deadline (ms epoch); past it the waiter/reconcile denies with reason 'timeout'/'expired'.",
+      "default": 0
+    },
+    "remember": {
+      "type": "string",
+      "enum": [
+        "",
+        "agent",
+        "global"
+      ],
+      "title": "Human's \"remember this decision\" choice — read by the guardian waiter, which",
+      "description": "persists the rule. The node IS the resolution state (survives restarts).",
+      "default": ""
     }
   },
   "required": [
@@ -63,7 +79,9 @@
     "status",
     "reason",
     "createdAt",
-    "resolvedAt"
+    "resolvedAt",
+    "expiresAt",
+    "remember"
   ],
   "methods": {
     "approve": {

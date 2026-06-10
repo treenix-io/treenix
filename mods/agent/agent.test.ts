@@ -7,7 +7,7 @@ import { describe, it } from 'node:test';
 
 import './types';
 import './guardian';
-import { buildPermissionRules, classifyBashCommand, createCanUseTool, resolveVerdict, splitBashParts } from './guardian';
+import { buildPermissionRules, classifyBashCommand, createCanUseTool, reconcileOnStartup, requestApproval, resolveVerdict, splitBashParts } from './guardian';
 import {
   AiAgent,
   AiAssignment,
@@ -446,6 +446,33 @@ describe('canUseTool pipe-aware', () => {
   });
 });
 
+// ── Approval-node test helpers (durable approvals, gk8.7) ──
+// Resolution = flipping the ai.approval NODE's status; the guardian waiter
+// polls the node, so tests drive the same path humans do.
+
+const WAIT = { approvalWait: { pollMs: 5, timeoutMs: 5_000 } };
+
+function makeApprovalStore(nodes: Record<string, any>) {
+  return {
+    nodes,
+    get: async (path: string) => nodes[path] ?? null,
+    set: async (node: any) => { nodes[node.$path] = { ...node }; },
+    getChildren: async (parent: string) => ({
+      items: Object.values(nodes).filter((n: any) => typeof n?.$path === 'string' && n.$path.startsWith(parent + '/')),
+    }),
+  } as any;
+}
+
+const approvalsIn = (store: any) =>
+  Object.values<any>(store.nodes).filter(n => n?.$type === 'ai.approval');
+
+function resolveApprovals(store: any, allow: boolean) {
+  for (const a of approvalsIn(store)) {
+    if (a.status !== 'pending') continue;
+    store.nodes[a.$path] = { ...a, status: allow ? 'approved' : 'denied', resolvedAt: Date.now() };
+  }
+}
+
 // ── Policy precedence: deny → allow → escalate (matches MCP guardian) ──
 
 describe('canUseTool: policy precedence', () => {
@@ -464,15 +491,11 @@ describe('canUseTool: policy precedence', () => {
     if (agentPolicy) {
       nodes['/agents/test'] = {
         $path: '/agents/test', $type: 'ai.agent',
-        policy: { $type: 'ai.policy', ...agentPolicy },
+        '#policy': { $type: 'ai.policy', ...agentPolicy },
       };
     }
 
-    return {
-      get: async (path: string) => nodes[path] ?? null,
-      set: async () => {},
-      getChildren: async () => ({ items: [] }),
-    } as any;
+    return makeApprovalStore(nodes);
   }
 
   // Flush microtask queue so async chains (store.get, store.set) settle
@@ -480,38 +503,23 @@ describe('canUseTool: policy precedence', () => {
     for (let i = 0; i < n; i++) await new Promise(r => setImmediate(r));
   }
 
-  async function resolveAllPending(allow: boolean) {
-    const { pendingPermissions } = await import('../metatron/permissions');
-    for (const [id, resolver] of pendingPermissions) {
-      resolver(allow);
-      pendingPermissions.delete(id);
-    }
-  }
-
-  it('specific escalate beats wildcard allow (specificity wins)', async (t) => {
+  it('specific escalate beats wildcard allow (specificity wins)', async () => {
     // Specific escalate (set_node) beats wildcard allow (*) — more specific pattern wins
-    t.mock.timers.enable({ apis: ['setTimeout'] });
-
     const store = mockStore(undefined, {
       allow: ['mcp__treenix__*'],
       deny: [],
       escalate: ['mcp__treenix__set_node'],
     });
 
-    let escalated = false;
-    store.set = async (node: any) => {
-      if (node?.$type === 'ai.approval') escalated = true;
-    };
-
-    const resultPromise = createCanUseTool('dev', '/agents/test', store)(
+    const resultPromise = createCanUseTool('dev', '/agents/test', store, WAIT)(
       'mcp__treenix__set_node', { path: '/foo' },
     );
 
     await flush();
-    assert.ok(escalated, 'specific escalate should beat wildcard allow');
+    assert.equal(approvalsIn(store).length, 1, 'specific escalate should beat wildcard allow');
 
-    await resolveAllPending(false);
-    await resultPromise;
+    resolveApprovals(store, false);
+    assert.equal((await resultPromise).behavior, 'deny');
   });
 
   it('specific allow beats wildcard escalate (execute:$schema)', async () => {
@@ -527,50 +535,36 @@ describe('canUseTool: policy precedence', () => {
     assert.equal(r.behavior, 'allow', 'specific allow should beat wildcard escalate');
   });
 
-  it('escalate applies when no allow matches', async (t) => {
-    t.mock.timers.enable({ apis: ['setTimeout'] });
-
+  it('escalate applies when no allow matches', async () => {
     const store = mockStore(undefined, {
       allow: ['mcp__treenix__get_node'],
       deny: [],
       escalate: ['mcp__treenix__set_node'],
     });
 
-    let escalated = false;
-    store.set = async (node: any) => {
-      if (node?.$type === 'ai.approval') escalated = true;
-    };
-
-    const resultPromise = createCanUseTool('dev', '/agents/test', store)(
+    const resultPromise = createCanUseTool('dev', '/agents/test', store, WAIT)(
       'mcp__treenix__set_node', { path: '/foo' },
     );
 
     await flush();
-    assert.ok(escalated, 'set_node should escalate when not in allow list');
+    assert.equal(approvalsIn(store).length, 1, 'set_node should escalate when not in allow list');
 
-    await resolveAllPending(false);
-    await resultPromise;
+    resolveApprovals(store, false);
+    assert.equal((await resultPromise).behavior, 'deny');
   });
 
-  it('git push escalates via classification (not policy)', async (t) => {
-    t.mock.timers.enable({ apis: ['setTimeout'] });
-
+  it('git push escalates via classification (not policy)', async () => {
     const store = mockStore();
 
-    let escalated = false;
-    store.set = async (node: any) => {
-      if (node?.$type === 'ai.approval') escalated = true;
-    };
-
-    const resultPromise = createCanUseTool('dev', '/agents/test', store)(
+    const resultPromise = createCanUseTool('dev', '/agents/test', store, WAIT)(
       'Bash', { command: 'git push origin main' },
     );
 
     await flush();
-    assert.ok(escalated, 'git push should escalate via BASH_ESCALATE classification');
+    assert.equal(approvalsIn(store).length, 1, 'git push should escalate via BASH_ESCALATE classification');
 
-    await resolveAllPending(false);
-    await resultPromise;
+    resolveApprovals(store, false);
+    assert.equal((await resultPromise).behavior, 'deny');
   });
 
   it('deny beats both allow and escalate', async () => {
@@ -648,30 +642,23 @@ describe('canUseTool: policy precedence', () => {
     assert.equal(r.behavior, 'allow', 'action-level allow should beat tool-level escalate');
   });
 
-  it('exact escalate beats wildcard allow at SAME subject level', async (t) => {
+  it('exact escalate beats wildcard allow at SAME subject level', async () => {
     // Both patterns match at the same subject (execute:run) — exact escalate wins
-    t.mock.timers.enable({ apis: ['setTimeout'] });
-
     const store = mockStore(undefined, {
       allow: ['mcp__treenix__execute:*'],
       deny: [],
       escalate: ['mcp__treenix__execute:run'],
     });
 
-    let escalated = false;
-    store.set = async (node: any) => {
-      if (node?.$type === 'ai.approval') escalated = true;
-    };
-
-    const resultPromise = createCanUseTool('dev', '/agents/test', store)(
+    const resultPromise = createCanUseTool('dev', '/agents/test', store, WAIT)(
       'mcp__treenix__execute', { action: 'run' },
     );
 
     await flush();
-    assert.ok(escalated, 'exact escalate should beat wildcard allow at same subject');
+    assert.equal(approvalsIn(store).length, 1, 'exact escalate should beat wildcard allow at same subject');
 
-    await resolveAllPending(false);
-    await resultPromise;
+    resolveApprovals(store, false);
+    assert.equal((await resultPromise).behavior, 'deny');
   });
 
   it('infix wildcard: deploy_prefab:*/agents/* beats deploy_prefab:*', async () => {
@@ -686,55 +673,41 @@ describe('canUseTool: policy precedence', () => {
     assert.equal(r.behavior, 'allow', 'infix wildcard allow should beat broader wildcard escalate');
   });
 
-  it('mixed bash: allowed + unallowed parts → falls to classifier (not blanket allow)', async (t) => {
-    t.mock.timers.enable({ apis: ['setTimeout'] });
-
+  it('mixed bash: allowed + unallowed parts → falls to classifier (not blanket allow)', async () => {
     const store = mockStore(undefined, {
       allow: ['Bash:cat /safe/*'],
       deny: [],
       escalate: [],
     });
 
-    let escalated = false;
-    store.set = async (node: any) => {
-      if (node?.$type === 'ai.approval') escalated = true;
-    };
-
     // cat /safe/x is allowed, but python script.py has no policy match → classifier → unknown → escalate
-    const resultPromise = createCanUseTool('dev', '/agents/test', store)(
+    const resultPromise = createCanUseTool('dev', '/agents/test', store, WAIT)(
       'Bash', { command: 'cat /safe/x && python script.py' },
     );
 
     await flush();
-    assert.ok(escalated, 'mixed bash: unmatched part should escalate, not be blanket-allowed');
+    assert.equal(approvalsIn(store).length, 1, 'mixed bash: unmatched part should escalate, not be blanket-allowed');
 
-    await resolveAllPending(false);
-    await resultPromise;
+    resolveApprovals(store, false);
+    assert.equal((await resultPromise).behavior, 'deny');
   });
 
-  it('mixed bash: allowed + escalated parts → escalate wins', async (t) => {
-    t.mock.timers.enable({ apis: ['setTimeout'] });
-
+  it('mixed bash: allowed + escalated parts → escalate wins', async () => {
     const store = mockStore(undefined, {
       allow: ['Bash:cat /safe/*'],
       deny: [],
       escalate: ['Bash:cat *'],
     });
 
-    let escalated = false;
-    store.set = async (node: any) => {
-      if (node?.$type === 'ai.approval') escalated = true;
-    };
-
-    const resultPromise = createCanUseTool('dev', '/agents/test', store)(
+    const resultPromise = createCanUseTool('dev', '/agents/test', store, WAIT)(
       'Bash', { command: 'cat /safe/x && cat /unsafe/x' },
     );
 
     await flush();
-    assert.ok(escalated, 'mixed bash: escalated part should escalate the whole command');
+    assert.equal(approvalsIn(store).length, 1, 'mixed bash: escalated part should escalate the whole command');
 
-    await resolveAllPending(false);
-    await resultPromise;
+    resolveApprovals(store, false);
+    assert.equal((await resultPromise).behavior, 'deny');
   });
 });
 
@@ -742,58 +715,39 @@ describe('canUseTool: policy precedence', () => {
 
 describe('canUseTool: session approval cache', () => {
   function mockStore() {
-    return {
-      get: async () => null,
-      set: async () => {},
-      getChildren: async () => ({ items: [] }),
-    } as any;
+    return makeApprovalStore({});
   }
 
   async function flush(n = 10) {
     for (let i = 0; i < n; i++) await new Promise(r => setImmediate(r));
   }
 
-  async function resolveAllPending(allow: boolean) {
-    const { pendingPermissions } = await import('../metatron/permissions');
-    for (const [id, resolver] of pendingPermissions) {
-      resolver(allow);
-      pendingPermissions.delete(id);
-    }
-  }
-
-  it('caches session approval for bash commands', async (t) => {
-    t.mock.timers.enable({ apis: ['setTimeout'] });
+  it('caches session approval for bash commands', async () => {
     const store = mockStore();
-    let approvalCount = 0;
-    store.set = async (node: any) => {
-      if (node?.$type === 'ai.approval') approvalCount++;
-    };
-
-    const canUse = createCanUseTool('dev', '/agents/test', store);
+    const canUse = createCanUseTool('dev', '/agents/test', store, WAIT);
 
     const p1 = canUse('Bash', { command: 'git commit -m "first"' });
     await flush();
-    assert.equal(approvalCount, 1);
+    assert.equal(approvalsIn(store).length, 1);
 
-    await resolveAllPending(true);
+    resolveApprovals(store, true);
     const r1 = await p1;
     assert.equal(r1.behavior, 'allow');
 
     // Second call with same command type — should use cache, no new approval
     const r2 = await canUse('Bash', { command: 'git commit -m "second"' });
     assert.equal(r2.behavior, 'allow');
-    assert.equal(approvalCount, 1, 'should not create a second approval');
+    assert.equal(approvalsIn(store).length, 1, 'should not create a second approval');
   });
 
-  it('caches session denial for bash commands', async (t) => {
-    t.mock.timers.enable({ apis: ['setTimeout'] });
+  it('caches session denial for bash commands', async () => {
     const store = mockStore();
-    const canUse = createCanUseTool('dev', '/agents/test', store);
+    const canUse = createCanUseTool('dev', '/agents/test', store, WAIT);
 
     const p1 = canUse('Bash', { command: 'git push origin main' });
     await flush();
 
-    await resolveAllPending(false);
+    resolveApprovals(store, false);
     const r1 = await p1;
     assert.equal(r1.behavior, 'deny');
 
@@ -803,27 +757,21 @@ describe('canUseTool: session approval cache', () => {
     assert.ok((r2 as any).message?.includes('session-denied'));
   });
 
-  it('caches session approval for non-bash tools', async (t) => {
-    t.mock.timers.enable({ apis: ['setTimeout'] });
+  it('caches session approval for non-bash tools', async () => {
     const store = mockStore();
-    let approvalCount = 0;
-    store.set = async (node: any) => {
-      if (node?.$type === 'ai.approval') approvalCount++;
-    };
-
-    const canUse = createCanUseTool('dev', '/agents/test', store);
+    const canUse = createCanUseTool('dev', '/agents/test', store, WAIT);
 
     const p1 = canUse('SomeCustomTool', { data: 'first' });
     await flush();
-    assert.equal(approvalCount, 1);
+    assert.equal(approvalsIn(store).length, 1);
 
-    await resolveAllPending(true);
+    resolveApprovals(store, true);
     await p1;
 
     // Second call — cached
     const r2 = await canUse('SomeCustomTool', { data: 'second' });
     assert.equal(r2.behavior, 'allow');
-    assert.equal(approvalCount, 1, 'should not create a second approval');
+    assert.equal(approvalsIn(store).length, 1, 'should not create a second approval');
   });
 
   it('auto commands never hit cache (always allowed)', async () => {
@@ -832,6 +780,86 @@ describe('canUseTool: session approval cache', () => {
     assert.equal((await canUse('Bash', { command: 'ls' })).behavior, 'allow');
     assert.equal((await canUse('Bash', { command: 'git status' })).behavior, 'allow');
     assert.equal((await canUse('Bash', { command: 'echo hello' })).behavior, 'allow');
+  });
+});
+
+// ── Durable approvals (gk8.7): the approval's fate lives in the node ──
+
+describe('approvals: durable via node state', () => {
+  async function flush(n = 10) {
+    for (let i = 0; i < n; i++) await new Promise(r => setImmediate(r));
+  }
+
+  it('re-attaches to a pending approval instead of duplicating (restart resume)', async () => {
+    const store = makeApprovalStore({
+      '/guardian/approvals/a-1': {
+        $path: '/guardian/approvals/a-1', $type: 'ai.approval',
+        agentPath: '/agents/test', tool: 'Bash:git push', input: 'git push',
+        status: 'pending', createdAt: Date.now(), expiresAt: Date.now() + 60_000,
+      },
+    });
+
+    const p = requestApproval(store, {
+      agentPath: '/agents/test', role: 'dev', tool: 'Bash:git push', input: 'git push', reason: 'retry after restart',
+    }, { pollMs: 5, timeoutMs: 5_000 });
+
+    await flush();
+    assert.equal(approvalsIn(store).length, 1, 'must re-attach, not duplicate');
+
+    resolveApprovals(store, true);
+    assert.equal(await p, true);
+  });
+
+  it('reconcile keeps fresh pendings and expires only stale ones', async () => {
+    const now = Date.now();
+    const store = makeApprovalStore({
+      '/guardian/approvals/fresh': {
+        $path: '/guardian/approvals/fresh', $type: 'ai.approval',
+        status: 'pending', createdAt: now, expiresAt: now + 60_000,
+      },
+      '/guardian/approvals/stale': {
+        $path: '/guardian/approvals/stale', $type: 'ai.approval',
+        status: 'pending', createdAt: now - 7_200_000, expiresAt: now - 3_600_000,
+      },
+    });
+
+    await reconcileOnStartup(store);
+
+    assert.equal(store.nodes['/guardian/approvals/fresh'].status, 'pending', 'fresh approval must survive restart');
+    assert.equal(store.nodes['/guardian/approvals/stale'].status, 'denied');
+    assert.equal(store.nodes['/guardian/approvals/stale'].reason, 'expired');
+  });
+
+  it('times out into denied when nobody resolves', async () => {
+    const store = makeApprovalStore({});
+
+    const ok = await requestApproval(store, {
+      agentPath: '/agents/test', role: 'dev', tool: 'ToolX', input: '{}', reason: 'r',
+    }, { pollMs: 5, timeoutMs: 40 });
+
+    assert.equal(ok, false);
+    const [a] = approvalsIn(store);
+    assert.equal(a.status, 'denied');
+    assert.equal(a.reason, 'timeout');
+  });
+
+  it('applies the remembered decision to the guardian policy', async () => {
+    const store = makeApprovalStore({
+      '/guardian': { $path: '/guardian', $type: 'ai.policy', allow: [], deny: [], escalate: ['ToolX'] },
+    });
+
+    const p = requestApproval(store, {
+      agentPath: '/agents/test', role: 'dev', tool: 'ToolX', input: '{}', reason: 'r',
+    }, { pollMs: 5, timeoutMs: 5_000 });
+
+    await flush();
+    for (const a of approvalsIn(store)) {
+      store.nodes[a.$path] = { ...a, status: 'approved', resolvedAt: Date.now(), remember: 'global' };
+    }
+
+    assert.equal(await p, true);
+    assert.ok(store.nodes['/guardian'].allow.includes('ToolX'), 'remember=global must persist the rule');
+    assert.ok(!store.nodes['/guardian'].escalate.includes('ToolX'), 'escalate entry must be consumed');
   });
 });
 
