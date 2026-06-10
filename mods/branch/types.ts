@@ -1,8 +1,8 @@
 // Branch mod — write-isolated futures over the live tree.
 // Overlay mechanics live in @treenx/core/tree/branch (Layer 1); this mod owns
 // the node types, the mount adapter and the lifecycle actions.
-// Lifecycle: create → work under /branches/<id>/tree → diff → abandon
-// (merge + requestMerge land in S3, core-wm6.3).
+// Lifecycle: create → work under /branches/<id>/tree → diff →
+// requestMerge (human reviews) → merge | abandon.
 
 import { A, makeNode, type NodeData, R, register, S, W } from '@treenx/core';
 import { getCtx, registerType } from '@treenx/core/comp';
@@ -14,6 +14,7 @@ import { wrapReadOnlyTree } from '@treenx/core/server/readonly-tree';
 import type { Tree } from '@treenx/core/tree';
 import { createBranchTree, isBranchDelta, isBranchWhiteout } from '@treenx/core/tree/branch';
 import { createRepathTree } from '@treenx/core/tree/repath';
+import { type AgentScope, defineAgentScope } from '#harness/capability';
 
 export type BranchStatus = 'open' | 'review' | 'merged' | 'conflict' | 'abandoned';
 
@@ -29,6 +30,34 @@ export type DiffEntry = {
 export type ConflictEntry = { path: string; expectedRev: number | null; actualRev: number | null };
 
 const parentOf = (p: string) => p.slice(0, p.lastIndexOf('/')) || '/';
+
+// Shared by diff/merge — action methods run on an Immer draft of node DATA
+// (class methods are not callable via `this` there).
+async function collectDiff(tree: Tree, branchPath: string, base: string): Promise<DiffEntry[]> {
+  const deltaRoot = `${branchPath}/delta`;
+  if (!tree.scanChildren) {
+    throw new OpError('BAD_REQUEST', 'branch.diff requires a tree with scanChildren');
+  }
+
+  const entries: DiffEntry[] = [];
+  for await (const { node: w } of tree.scanChildren(deltaRoot, { depth: -1 })) {
+    const rest = w.$path.slice(deltaRoot.length);
+    const livePath = base === '/' ? (rest || '/') : base + rest;
+    if (isBranchWhiteout(w)) {
+      entries.push({ path: livePath, op: w.baseRev === null ? 'noop' : 'remove', baseRev: w.baseRev });
+    } else if (isBranchDelta(w)) {
+      entries.push({
+        path: livePath,
+        op: w.baseRev === null ? 'create' : 'set',
+        baseRev: w.baseRev,
+        node: { ...w.node, $path: livePath },
+      });
+    } else {
+      throw new OpError('CONFLICT', `branch: foreign node in delta subtree at ${w.$path} ($type=${w.$type})`);
+    }
+  }
+  return entries;
+}
 
 /** Container at /branches — branches are created through it, never by hand. */
 export class Branches {
@@ -78,29 +107,7 @@ export class Branch {
   /** @description List the branch's changes against live (does not mutate) */
   async diff(): Promise<{ entries: DiffEntry[] }> {
     const ctx = getCtx();
-    const deltaRoot = `${ctx.node.$path}/delta`;
-    if (!ctx.tree.scanChildren) {
-      throw new OpError('BAD_REQUEST', 'branch.diff requires a tree with scanChildren');
-    }
-
-    const entries: DiffEntry[] = [];
-    for await (const { node: w } of ctx.tree.scanChildren(deltaRoot, { depth: -1 })) {
-      const rest = w.$path.slice(deltaRoot.length);
-      const livePath = this.base === '/' ? (rest || '/') : this.base + rest;
-      if (isBranchWhiteout(w)) {
-        entries.push({ path: livePath, op: w.baseRev === null ? 'noop' : 'remove', baseRev: w.baseRev });
-      } else if (isBranchDelta(w)) {
-        entries.push({
-          path: livePath,
-          op: w.baseRev === null ? 'create' : 'set',
-          baseRev: w.baseRev,
-          node: { ...w.node, $path: livePath },
-        });
-      } else {
-        throw new OpError('CONFLICT', `branch: foreign node in delta subtree at ${w.$path} ($type=${w.$type})`);
-      }
-    }
-    return { entries };
+    return { entries: await collectDiff(ctx.tree, ctx.node.$path, this.base) };
   }
 
   /** @description Close the branch without merging. Delta stays as the record. */
@@ -108,6 +115,108 @@ export class Branch {
     if (this.status === 'merged') throw new OpError('CONFLICT', 'cannot abandon a merged branch');
     this.status = 'abandoned';
   }
+
+  /** @description Flip to review and file an approval inbox item for a human */
+  async requestMerge(data?: { note?: string }) {
+    if (this.status !== 'open') {
+      throw new OpError('CONFLICT', `cannot request merge in status "${this.status}"`);
+    }
+    const ctx = getCtx();
+    const id = `m-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    const path = `/guardian/approvals/${id}`;
+    // Approval node first — if this write fails, status stays 'open'.
+    await ctx.tree.set(makeNode(path, 'ai.approval', {
+      agentPath: ctx.node.$path,
+      agentRole: 'branch-owner',
+      tool: 'branch.merge',
+      input: data?.note ?? this.title,
+      inputTruncated: false,
+      status: 'pending' as const,
+      reason: 'merge review',
+      createdAt: Date.now(),
+      resolvedAt: 0,
+      branchRef: ctx.node.$path,
+    }));
+    this.status = 'review';
+    return { approval: path };
+  }
+
+  /** @description Merge the branch into live. Run by an approver — agents hold
+   *  no live W, so the human invoking this IS the gate. Preflight checks every
+   *  entry against its captured baseRev; any mismatch reports conflicts and
+   *  applies NOTHING. */
+  async merge() {
+    if (this.status !== 'open' && this.status !== 'review') {
+      throw new OpError('CONFLICT', `cannot merge branch in status "${this.status}"`);
+    }
+    const ctx = getCtx();
+    const entries = await collectDiff(ctx.tree, ctx.node.$path, this.base);
+
+    const conflicts: ConflictEntry[] = [];
+    for (const e of entries) {
+      const live = await ctx.tree.get(e.path);
+      const actualRev = live?.$rev ?? null;
+      const ok = (e.op === 'create' || e.op === 'noop')
+        ? live === undefined
+        : actualRev === e.baseRev;
+      if (!ok) conflicts.push({ path: e.path, expectedRev: e.baseRev, actualRev });
+    }
+    if (conflicts.length) {
+      this.status = 'conflict';
+      this.conflicts = conflicts;
+      return { merged: 0, applied: [] as string[], conflicts };
+    }
+
+    // Apply with $rev = baseRev so storage OCC re-checks each set. A writer can
+    // still slip between preflight and apply (single-process window, see
+    // branches-plan.md) — that surfaces as CONFLICT mid-apply below.
+    const applied: string[] = [];
+    let current: DiffEntry | undefined;
+    try {
+      for (const e of entries) {
+        if (e.op === 'noop') continue;
+        current = e;
+        if (e.op === 'remove') {
+          await ctx.tree.remove(e.path);
+        } else {
+          const future = e.node;
+          if (!future) throw new OpError('CONFLICT', `merge: entry ${e.path} is missing its node`);
+          const node: NodeData = { ...future, $path: e.path };
+          if (e.baseRev !== null) node.$rev = e.baseRev;
+          await ctx.tree.set(node);
+        }
+        applied.push(e.path);
+      }
+    } catch (err) {
+      // OCC slip is the expected race — report it; applied entries stay live
+      // and journaled, re-merge re-preflights the remainder. Anything else is
+      // a real failure and rethrows.
+      if (err instanceof OpError && err.code === 'CONFLICT' && current) {
+        const live = await ctx.tree.get(current.path);
+        this.status = 'conflict';
+        this.conflicts = [{ path: current.path, expectedRev: current.baseRev, actualRev: live?.$rev ?? null }];
+        return { merged: applied.length, applied, conflicts: this.conflicts };
+      }
+      throw err;
+    }
+
+    this.status = 'merged';
+    this.mergedAt = Date.now();
+    this.conflicts = [];
+    return { merged: applied.length, applied, conflicts: [] as ConflictEntry[] };
+  }
+}
+
+/** Workload scope bound to a branch: plan = read-only live, work = full speed
+ *  inside the branch. allowedExec '*' is safe here — writePaths bind every
+ *  action target AND the handler's ctx.tree to the branch (confused-deputy
+ *  guard in executeWithCapability), so even `merge` invoked by the owner dies
+ *  on its first live write. */
+export function branchScope(branchPath: string): AgentScope {
+  return defineAgentScope({
+    plan: { read: ['*'], write: [], exec: [] },
+    work: { read: ['*'], write: [branchPath, `${branchPath}/*`], exec: ['*'] },
+  });
 }
 
 registerType('t.branches', Branches);

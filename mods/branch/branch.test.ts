@@ -222,3 +222,127 @@ describe('branch mod: diff + abandon', () => {
     assert.equal((await root.get(`${branchPath}/delta/company/doc`))?.$type, BRANCH_DELTA_TYPE);
   });
 });
+
+type MergeResult = { merged: number; applied: string[]; conflicts: { path: string; expectedRev: number | null; actualRev: number | null }[] };
+
+describe('branch mod: requestMerge + merge', () => {
+  it('requestMerge files an approval with branchRef and flips to review', async () => {
+    const { tree, branchPath } = await setup();
+
+    const { approval } = await executeAction<{ approval: string }>(
+      tree, branchPath, undefined, undefined, 'requestMerge', { note: 'please review' }, ACTOR,
+    );
+
+    assert.equal((await tree.get(branchPath))?.status, 'review');
+    const node = await tree.get(approval);
+    assert.equal(node?.$type, 'ai.approval');
+    assert.equal(node?.branchRef, branchPath);
+    assert.equal(node?.status, 'pending');
+    assert.equal(node?.tool, 'branch.merge');
+
+    await assert.rejects(
+      executeAction(tree, branchPath, undefined, undefined, 'requestMerge', undefined, ACTOR),
+      isCode('CONFLICT'),
+    );
+  });
+
+  it('clean merge applies create/set/remove, skips noop, journals revs via OCC', async () => {
+    const { root, tree, branchPath, view } = await setup();
+
+    await tree.set(makeNode(`${view}/company/doc`, 'branchtest.doc', { title: 'merged-title', count: 7 }));
+    await tree.remove(`${view}/company/other`);
+    await tree.set(makeNode(`${view}/fresh`, 'branchtest.doc', { title: 'born', count: 0 }));
+    await tree.set(makeNode(`${view}/tmp`, 'branchtest.doc', { title: 'gone', count: 0 }));
+    await tree.remove(`${view}/tmp`);
+
+    await executeAction(tree, branchPath, undefined, undefined, 'requestMerge', undefined, ACTOR);
+    const res = await executeAction<MergeResult>(
+      tree, branchPath, undefined, undefined, 'merge', undefined, ACTOR,
+    );
+
+    assert.equal(res.conflicts.length, 0);
+    assert.equal(res.merged, 3);
+    assert.deepEqual([...res.applied].sort(), ['/company/doc', '/company/other', '/fresh']);
+
+    const doc = await root.get('/company/doc');
+    assert.equal(doc?.title, 'merged-title');
+    assert.equal(doc?.$rev, 2); // OCC: set with $rev=1 bumped to 2
+    assert.equal(await root.get('/company/other'), undefined);
+    assert.equal((await root.get('/fresh'))?.title, 'born');
+    assert.equal(await root.get('/tmp'), undefined);
+
+    const branch = await tree.get(branchPath);
+    assert.equal(branch?.status, 'merged');
+    assert.ok(typeof branch?.mergedAt === 'number' && branch.mergedAt > 0);
+  });
+
+  it('preflight conflict: live drift reports all conflicts, applies NOTHING', async () => {
+    const { root, tree, branchPath, view } = await setup();
+
+    await tree.set(makeNode(`${view}/company/doc`, 'branchtest.doc', { title: 'branch-edit', count: 2 }));
+    await tree.set(makeNode(`${view}/fresh`, 'branchtest.doc', { title: 'branch-born', count: 0 }));
+
+    // Live drifts after the branch captured baseRevs.
+    const live = await root.get('/company/doc');
+    await root.set({ ...live!, title: 'live-raced' });
+    await root.set(makeNode('/fresh', 'branchtest.doc', { title: 'live-born-first', count: 0 }));
+
+    const res = await executeAction<MergeResult>(
+      tree, branchPath, undefined, undefined, 'merge', undefined, ACTOR,
+    );
+
+    assert.equal(res.merged, 0);
+    assert.deepEqual(res.applied, []);
+    assert.equal(res.conflicts.length, 2);
+    const byPath = new Map(res.conflicts.map(c => [c.path, c]));
+    assert.deepEqual(byPath.get('/company/doc'), { path: '/company/doc', expectedRev: 1, actualRev: 2 });
+    assert.deepEqual(byPath.get('/fresh'), { path: '/fresh', expectedRev: null, actualRev: 1 });
+
+    assert.equal((await root.get('/company/doc'))?.title, 'live-raced');
+    const branch = await tree.get(branchPath);
+    assert.equal(branch?.status, 'conflict');
+    assert.equal((branch?.conflicts as unknown[])?.length, 2);
+  });
+
+  it('mid-apply OCC slip: stops, records applied list, re-merge re-preflights', async () => {
+    const { root, tree, branchPath, view } = await setup();
+
+    await tree.set(makeNode(`${view}/company/doc`, 'branchtest.doc', { title: 'first', count: 1 }));
+    await tree.set(makeNode(`${view}/company/other`, 'branchtest.doc', { title: 'second', count: 2 }));
+
+    // Sabotage: while the first target is being applied, an out-of-band writer
+    // bumps the second target — its OCC re-check must then fail.
+    const sabotaged: Tree = {
+      ...tree,
+      async set(node, ctx) {
+        if (node.$path === '/company/doc') {
+          const other = await root.get('/company/other');
+          await root.set({ ...other!, title: 'raced' });
+        }
+        return tree.set(node, ctx);
+      },
+    };
+
+    const res = await executeAction<MergeResult>(
+      sabotaged, branchPath, undefined, undefined, 'merge', undefined, ACTOR,
+    );
+
+    assert.equal(res.merged, 1);
+    assert.deepEqual(res.applied, ['/company/doc']);
+    assert.equal(res.conflicts.length, 1);
+    assert.equal(res.conflicts[0].path, '/company/other');
+
+    assert.equal((await root.get('/company/doc'))?.title, 'first');
+    assert.equal((await root.get('/company/other'))?.title, 'raced');
+    assert.equal((await tree.get(branchPath))?.status, 'conflict');
+  });
+
+  it('merge is refused on merged/abandoned branches', async () => {
+    const { tree, branchPath } = await setup();
+    await executeAction(tree, branchPath, undefined, undefined, 'abandon', undefined, ACTOR);
+    await assert.rejects(
+      executeAction(tree, branchPath, undefined, undefined, 'merge', undefined, ACTOR),
+      isCode('CONFLICT'),
+    );
+  });
+});

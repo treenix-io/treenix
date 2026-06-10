@@ -132,6 +132,25 @@
     "abandon": {
       "description": "Close the branch without merging. Delta stays as the record.",
       "arguments": []
+    },
+    "requestMerge": {
+      "description": "Flip to review and file an approval inbox item for a human",
+      "arguments": [
+        {
+          "name": "data",
+          "type": "object",
+          "properties": {
+            "note": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "merge": {
+      "description": "Merge the branch into live. Run by an approver — agents hold",
+      "title": "no live W, so the human invoking this IS the gate. Preflight checks every",
+      "arguments": []
     }
   }
 }

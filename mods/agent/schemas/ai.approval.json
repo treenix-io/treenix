@@ -25,6 +25,12 @@
       "type": "boolean",
       "default": false
     },
+    "branchRef": {
+      "type": "string",
+      "title": "Path of the t.branch this approval reviews ('' for plain tool approvals).",
+      "description": "Approval UIs render the branch diff through it; resolution = the human runs `merge` on the branch, not resolvePermission.",
+      "default": ""
+    },
     "status": {
       "type": "string",
       "enum": [
@@ -53,6 +59,7 @@
     "tool",
     "input",
     "inputTruncated",
+    "branchRef",
     "status",
     "reason",
     "createdAt",

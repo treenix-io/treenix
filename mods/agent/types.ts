@@ -243,6 +243,10 @@ export class AiApproval {
   /** @format textarea */
   input = '';
   inputTruncated = false;
+  /** Path of the t.branch this approval reviews ('' for plain tool approvals).
+   *  Approval UIs render the branch diff through it; resolution = the human
+   *  runs `merge` on the branch, not resolvePermission. */
+  branchRef = '';
   status: 'pending' | 'approved' | 'denied' = 'pending';
   reason = '';
   createdAt = 0;
