@@ -4,6 +4,7 @@
 // Extracted from the tRPC withSession middleware + events subscription body.
 
 import { OpError } from '#errors';
+import { randomUUID } from 'node:crypto';
 import type { EventFrame } from '#protocol/frames';
 import { createPeer, type ActReq, type Conn, type PeerServe, type ServeHooks } from '#protocol/peer';
 import { buildClaims, type Session, withAcl } from '#security/auth';
@@ -98,13 +99,17 @@ export function createWireSession(deps: WireDeps, session: Session) {
     // `type` dropped on the promise path — parity with the pre-TWP dispatch
     // (both branches passed undefined); enabling component verification here
     // is a behavior change, decide separately. Stream path passes it (parity).
+    // Actor is born once, at the request edge — every layer below (commit,
+    // audit, cross-node writes) inherits it. Workload path: executor builds it.
+    const actorFor = (req: ActReq) => ({ id: userId, action: req.action, requestId: req.opId ?? randomUUID() });
+
     const execute = (req: ActReq) =>
       isWorkload
         ? deps.opts!.executor!(tree, session, { ...req, type: undefined })
-        : executeAction(tree, req.path, undefined, req.key, req.action, req.data, { userId, claims, opId: req.opId });
+        : executeAction(tree, req.path, undefined, req.key, req.action, req.data, { userId, claims, opId: req.opId, actor: actorFor(req) });
 
     const execStream = (req: ActReq, signal: AbortSignal) =>
-      executeStream(tree, req.path, req.type, req.key, req.action, req.data, signal, { userId, claims });
+      executeStream(tree, req.path, req.type, req.key, req.action, req.data, signal, { userId, claims, actor: actorFor(req) });
 
     const hooks: ServeHooks = {
       watch: (paths, o) => deps.watcher.watch(userId, paths, o),

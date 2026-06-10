@@ -505,8 +505,13 @@ async function runAction<T = unknown>(
       // the in-process lock (direct set, second pipeline, federation). core-gk8.3.
       if (node.$rev != null) ops.unshift(['t', '$rev', node.$rev]);
       try {
-        // opId ctx → events from this action's persist echo `by` (core-gk8.1)
-        await tree.patch(node.$path, ops, opts?.opId ? { opId: opts.opId } : undefined);
+        // opId → events from this action's persist echo `by` (core-gk8.1);
+        // actor → withAudit attributes the commit (who/task/run/requestId).
+        // Without this the journal records the mutation anonymously (core-gk8.5).
+        const writeCtx = opts && (opts.opId || opts.actor)
+          ? { ...(opts.opId ? { opId: opts.opId } : {}), ...(opts.actor ? { actor: opts.actor } : {}) }
+          : undefined;
+        await tree.patch(node.$path, ops, writeCtx);
       } catch (e) {
         if (e instanceof PatchTestError) {
           throw new OpError('CONFLICT', `OptimisticConcurrencyError: ${type}.${action} on ${node.$path} — node changed during the action (expected $rev ${node.$rev})`);
