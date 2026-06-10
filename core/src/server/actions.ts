@@ -9,7 +9,7 @@ import { collectDeps as _collectDeps, type ResolvedDeps } from '#comp/needs';
 import { assertSafeKey, type ComponentData, getComponentField, getMeta, isComponent, type NodeData, register, resolve, safeJsonParse } from '#core';
 import { validateValue, type ValidationError } from '#comp/validate';
 import { type TypeSchema } from '#schema/types';
-import { type PatchOp, type Tree } from '#tree';
+import { type PatchOp, PatchTestError, type Tree } from '#tree';
 import { createDraft, enablePatches, finishDraft, type Patch } from 'immer';
 import { createPathLock } from '#util/path-lock';
 import { OpError } from '#errors';
@@ -457,7 +457,19 @@ export async function executeAction<T = unknown>(
     }
     if (patches.length > 0) {
       const ops = immerToPatchOps(patches);
-      await tree.patch(node.$path, ops);
+      // OCC: the draft was taken at node.$rev — commit only if storage still holds it.
+      // Without the test op, patchViaSet re-reads fresh state and applies diffs computed
+      // against the stale snapshot: silent last-write-wins for any writer that bypasses
+      // the in-process lock (direct set, second pipeline, federation). core-gk8.3.
+      if (node.$rev != null) ops.unshift(['t', '$rev', node.$rev]);
+      try {
+        await tree.patch(node.$path, ops);
+      } catch (e) {
+        if (e instanceof PatchTestError) {
+          throw new OpError('CONFLICT', `OptimisticConcurrencyError: ${type}.${action} on ${node.$path} — node changed during the action (expected $rev ${node.$rev})`);
+        }
+        throw e;
+      }
     }
   }
 
