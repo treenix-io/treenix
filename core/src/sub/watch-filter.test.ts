@@ -256,3 +256,95 @@ describe('F10 — set event uses stored node for ACL, not event payload', () => 
     assert.equal(events.length, 0, 'stale set event dropped — stored node gone');
   });
 });
+
+// ── Per-session delivery order — patch-based wire protocol requires it ──
+
+describe('filteredPush — serialized per-session delivery', () => {
+  const CLAIMS = ['u:bob', 'authenticated'];
+
+  async function setupNodes() {
+    const tree = createMemoryTree();
+    const mk = (path: string) => {
+      const n = createNode(path, 't', { x: 0 });
+      n.$acl = [{ g: 'authenticated', p: R }];
+      return n;
+    };
+    await tree.set(mk('/slow'));
+    await tree.set(mk('/fast'));
+    return tree;
+  }
+
+  // Injects latency into ACL/stored-node lookups for one path — the window
+  // where an unserialized filter lets a later event overtake an earlier one.
+  function withSlowGet(tree: ReturnType<typeof createMemoryTree>, slowPath: string) {
+    const slow: typeof tree = {
+      ...tree,
+      async get(path, ctx) {
+        if (path === slowPath) await new Promise(r => setTimeout(r, 20));
+        return tree.get(path, ctx);
+      },
+    };
+    return slow;
+  }
+
+  it('events arrive in emit order even when the first needs slower ACL lookups', async () => {
+    const tree = withSlowGet(await setupNodes(), '/slow');
+
+    const delivered: string[] = [];
+    let done!: () => void;
+    const all = new Promise<void>(r => { done = r; });
+    const filtered = createFilteredPush(tree, 'bob', CLAIMS, (e) => {
+      delivered.push((e as { path?: string }).path ?? e.type);
+      if (delivered.length === 2) done();
+    });
+
+    filtered({ type: 'patch', path: '/slow', patches: [['r', 'x', 1]], rev: 2 });
+    filtered({ type: 'patch', path: '/fast', patches: [['r', 'x', 1]], rev: 2 });
+    await all;
+
+    assert.deepEqual(delivered, ['/slow', '/fast']);
+  });
+
+  it('reconnect does not overtake a slower data event', async () => {
+    const tree = withSlowGet(await setupNodes(), '/slow');
+
+    const delivered: string[] = [];
+    let done!: () => void;
+    const all = new Promise<void>(r => { done = r; });
+    const filtered = createFilteredPush(tree, 'bob', CLAIMS, (e) => {
+      delivered.push(e.type);
+      if (delivered.length === 2) done();
+    });
+
+    filtered({ type: 'patch', path: '/slow', patches: [['r', 'x', 1]], rev: 2 });
+    filtered({ type: 'reconnect', preserved: true });
+    await all;
+
+    assert.deepEqual(delivered, ['patch', 'reconnect']);
+  });
+
+  it('a failing event is dropped but the chain recovers and stays ordered', async () => {
+    const base = await setupNodes();
+    const failing: typeof base = {
+      ...base,
+      async get(path, ctx) {
+        if (path === '/slow') throw new Error('storage hiccup');
+        return base.get(path, ctx);
+      },
+    };
+
+    const delivered: string[] = [];
+    let done!: () => void;
+    const all = new Promise<void>(r => { done = r; });
+    const filtered = createFilteredPush(failing, 'bob', CLAIMS, (e) => {
+      delivered.push((e as { path?: string }).path ?? e.type);
+      done();
+    });
+
+    filtered({ type: 'patch', path: '/slow', patches: [['r', 'x', 1]], rev: 2 });
+    filtered({ type: 'patch', path: '/fast', patches: [['r', 'x', 1]], rev: 2 });
+    await all;
+
+    assert.deepEqual(delivered, ['/fast'], 'failing event dropped, next event still delivered');
+  });
+});

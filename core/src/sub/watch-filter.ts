@@ -75,14 +75,21 @@ export function createFilteredPush(
     return dynamicClaims;
   };
 
+  // Per-session delivery is serialized: filterEvent awaits ACL lookups, so
+  // without a queue a slow lookup on E1 lets E2 overtake it — out-of-order
+  // patches silently corrupt the client's patch-based cache (core-gk8.12).
+  // An error drops only its own event; the chain recovers and stays ordered.
+  let chain: Promise<void> = Promise.resolve();
   return (event: NodeEvent) => {
     // R4-WATCH-1: filter still fails closed (event silently dropped) for confidentiality —
     // a thrown filter must NEVER push a possibly-leaky event. But the swallow violates
     // "fail loud": log so policy/storage bugs surface in operations.
-    filterEvent(store, event, userId, getClaims, push).catch(err => {
-      const path = (event as { path?: string }).path ?? '<no-path>';
-      console.error('[watch-filter] dropped %s event for user=%s path=%s: %s', event.type, userId, path, (err as Error)?.message ?? err);
-    });
+    chain = chain
+      .then(() => filterEvent(store, event, userId, getClaims, push))
+      .catch(err => {
+        const path = (event as { path?: string }).path ?? '<no-path>';
+        console.error('[watch-filter] dropped %s event for user=%s path=%s: %s', event.type, userId, path, (err as Error)?.message ?? err);
+      });
   };
 }
 
