@@ -1,8 +1,14 @@
-// Offline migration: bare named components → '#'-prefixed keys (core-gk8.21).
-// One-shot, run per FS tree root while the server is STOPPED:
+// Component-namespace migration: bare named components → '#'-prefixed keys (core-gk8.21).
+// Runs automatically when an fs root opens (createFsTree → ensureMigrated). A
+// `.treenix-version` marker in the root records the completed pass; the marker is
+// correctness-bearing, not an optimization — after cutover a bare `{$type}` value
+// is legitimate plain data (snapshot escape), so the rename pass must never run
+// twice on the same root.
+//
+// Offline pre-review CLI (server stopped):
 //
 //   tsx src/tree/migrate-component-namespace.ts <fs-root> [...roots]          # dry-run
-//   tsx src/tree/migrate-component-namespace.ts --write <fs-root> [...roots]  # apply
+//   tsx src/tree/migrate-component-namespace.ts --write <fs-root> [...roots]  # apply + stamp
 //
 // Old semantics: any top-level non-$ value carrying $type WAS a component —
 // so every such entry migrates; the meaning of existing data is preserved
@@ -13,9 +19,12 @@
 import { isComponent, safeJsonParse } from '#core';
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { atomicWrite } from './fs';
+import { atomicWrite } from './fs-atomic';
 
-type Stats = { files: number; migrated: number; renames: number; warnings: number };
+export const NS_VERSION = 1;
+export const VERSION_FILE = '.treenix-version';
+
+type Stats = { files: number; migrated: number; renames: number; warnings: string[] };
 
 function transformNode(obj: Record<string, unknown>, file: string, stats: Stats, log: (line: string) => void): boolean {
   let changed = false;
@@ -48,8 +57,9 @@ function transformNode(obj: Record<string, unknown>, file: string, stats: Stats,
     const match = (mount as { match?: Record<string, unknown> }).match;
     for (const mk of Object.keys(match ?? {})) {
       if (!mk.startsWith('$') && !mk.startsWith('_') && !mk.startsWith('#') && mk.includes('.')) {
-        stats.warnings++;
-        log(`  WARN ${file}: query-mount match key "${mk}" may need the '#' prefix — review manually`);
+        const warning = `${file}: query-mount match key "${mk}" may need the '#' prefix`;
+        stats.warnings.push(warning);
+        log(`  WARN ${warning} — review manually`);
       }
     }
   }
@@ -58,7 +68,7 @@ function transformNode(obj: Record<string, unknown>, file: string, stats: Stats,
 }
 
 export async function migrateFsRoot(root: string, write: boolean, log: (line: string) => void = console.log): Promise<Stats> {
-  const stats: Stats = { files: 0, migrated: 0, renames: 0, warnings: 0 };
+  const stats: Stats = { files: 0, migrated: 0, renames: 0, warnings: [] };
 
   for (const entry of await readdir(root, { withFileTypes: true, recursive: true })) {
     if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
@@ -73,6 +83,53 @@ export async function migrateFsRoot(root: string, write: boolean, log: (line: st
   }
 
   return stats;
+}
+
+async function readDataVersion(root: string): Promise<number> {
+  let text: string;
+  try {
+    text = await readFile(join(root, VERSION_FILE), 'utf-8');
+  } catch (e: any) {
+    if (e.code === 'ENOENT') return 0;
+    throw e;
+  }
+
+  const v = Number(text.trim());
+  if (!Number.isInteger(v) || v <= 0) {
+    throw new Error(`${join(root, VERSION_FILE)}: corrupted version marker ${JSON.stringify(text)}`);
+  }
+  return v;
+}
+
+export async function stampVersion(root: string): Promise<void> {
+  await atomicWrite(join(root, VERSION_FILE), `${NS_VERSION}\n`);
+}
+
+// Boot gate, called by createFsTree before a root is served.
+export async function ensureMigrated(root: string, log: (line: string) => void = console.log): Promise<void> {
+  const version = await readDataVersion(root);
+  if (version > NS_VERSION) {
+    throw new Error(`${root}: data version ${version} is newer than this engine supports (${NS_VERSION}) — upgrade the engine`);
+  }
+  if (version === NS_VERSION) return;
+
+  // Dry pass first: a match-key warning must abort with ZERO files touched.
+  const dry = await migrateFsRoot(root, false, () => {});
+  if (dry.warnings.length > 0) {
+    throw new Error(
+      `${root}: component-namespace migration blocked — query-mount match keys need manual review:\n`
+      + dry.warnings.map(w => `  ${w}`).join('\n')
+      + `\nPrefix keys that address component fields with '#' ("task.status" → "#task.status"), then restart.`,
+    );
+  }
+
+  if (dry.migrated > 0) {
+    const s = await migrateFsRoot(root, true, log);
+    log(`[treenix] ${root}: component namespace migrated — ${s.migrated} files, ${s.renames} renames`);
+  }
+
+  // Stamp LAST: a crash mid-pass leaves no marker, so the next open resumes (renames are idempotent).
+  await stampVersion(root);
 }
 
 const isCliEntry = process.argv[1]?.endsWith('migrate-component-namespace.ts');
@@ -90,8 +147,17 @@ if (isCliEntry) {
     for (const root of roots) {
       console.log(`${write ? 'Migrating' : 'Dry-run'}: ${root}`);
       const s = await migrateFsRoot(root, write);
-      console.log(`  files=${s.files} migrated=${s.migrated} renames=${s.renames} warnings=${s.warnings}`);
+      console.log(`  files=${s.files} migrated=${s.migrated} renames=${s.renames} warnings=${s.warnings.length}`);
       if (!write && s.migrated > 0) console.log('  (re-run with --write to apply)');
+
+      if (write) {
+        if (s.warnings.length === 0) {
+          await stampVersion(root);
+          console.log(`  stamped ${VERSION_FILE}=${NS_VERSION}`);
+        } else {
+          console.log(`  ${VERSION_FILE} NOT stamped — fix the match keys above, then re-run --write`);
+        }
+      }
     }
   };
   run().catch(err => { console.error(err); process.exit(1); });

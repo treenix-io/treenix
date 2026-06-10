@@ -7,41 +7,22 @@ import type { NodeData } from '#core';
 import { assertValidType, safeJsonParse } from '#core';
 import { dirname as treeDirname } from '#core/path';
 import { OpError } from '#errors';
-import { mkdir, open, readdir, readFile, realpath, rename, rmdir, unlink } from 'node:fs/promises';
+import { mkdir, readdir, readFile, realpath, rmdir, unlink } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import sift from 'sift';
+import { atomicWrite } from './fs-atomic';
 import { scanFromCollected } from './fs-common';
+import { ensureMigrated } from './migrate-component-namespace';
 import { assertPathSafe } from './path-safety';
 import { mapNodeForSift, paginate, type TreeSource } from './index';
 import { defaultPatch } from './patch';
 
-// Atomic + durable node write: tmp file in the same dir → fsync → rename over target.
-// In-place writeFile tears on crash: a kill mid-write leaves truncated JSON at the
-// node's path and parseNode then throws forever with no repair path. rename(2) is
-// atomic on POSIX, so readers see either the old node or the new one, never a mix.
-// Orphaned tmp files from a crash are inert — readers only parse *.json / $.json.
-let tmpSeq = 0;
-export async function atomicWrite(file: string, data: string): Promise<void> {
-  const tmp = join(dirname(file), `.${process.pid}.${tmpSeq++}.tmp`);
-  const fh = await open(tmp, 'wx', 0o600);
-  try {
-    await fh.writeFile(data, 'utf-8');
-    await fh.sync();
-  } finally {
-    await fh.close();
-  }
-  try {
-    await rename(tmp, file);
-  } catch (e) {
-    // best-effort cleanup; a leftover tmp is inert (never parsed), original error wins
-    await unlink(tmp).catch(() => {});
-    throw e;
-  }
-}
-
 export async function createFsTree(rootDir: string): Promise<TreeSource> {
   await mkdir(resolve(rootDir), { recursive: true });
   rootDir = await realpath(resolve(rootDir));
+
+  // Data-format gate: strict '#' readers must never see a pre-namespace root.
+  await ensureMigrated(rootDir);
 
   // Serialize ALL mutations on one chain. promote/demote/leaf-cleanup mutate a node's
   // parent and child paths, so per-path locking can't prevent set/set and set/remove races.

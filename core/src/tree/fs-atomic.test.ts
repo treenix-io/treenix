@@ -4,7 +4,8 @@ import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
-import { atomicWrite, createFsTree } from './fs';
+import { createFsTree } from './fs';
+import { atomicWrite } from './fs-atomic';
 
 describe('atomicWrite', () => {
   let dir: string;
