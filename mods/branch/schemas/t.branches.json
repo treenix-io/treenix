@@ -1,0 +1,29 @@
+{
+  "$id": "t.branches",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Container at /branches — branches are created through it, never by hand.",
+  "properties": {},
+  "methods": {
+    "create": {
+      "description": "Create a branch: t.branch node + delta store + mounted view",
+      "arguments": [
+        {
+          "name": "data",
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            },
+            "owner": {
+              "type": "string"
+            },
+            "base": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

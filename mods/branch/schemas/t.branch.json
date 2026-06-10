@@ -1,0 +1,137 @@
+{
+  "$id": "t.branch",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "A write-isolated future. Work happens under `<path>/tree`; every write is",
+  "description": "captured under `<path>/delta` and the live tree stays untouched until merge.",
+  "properties": {
+    "base": {
+      "type": "string",
+      "default": "/"
+    },
+    "owner": {
+      "type": "string",
+      "default": ""
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "open",
+        "review",
+        "merged",
+        "conflict",
+        "abandoned"
+      ],
+      "default": "open"
+    },
+    "title": {
+      "type": "string",
+      "default": ""
+    },
+    "createdAt": {
+      "type": "number",
+      "default": 0
+    },
+    "mergedAt": {
+      "type": "number",
+      "default": 0
+    },
+    "conflicts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "expectedRev": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {}
+            ]
+          },
+          "actualRev": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {}
+            ]
+          }
+        },
+        "required": [
+          "path",
+          "expectedRev",
+          "actualRev"
+        ]
+      },
+      "default": []
+    }
+  },
+  "required": [
+    "base",
+    "owner",
+    "status",
+    "title",
+    "createdAt",
+    "mergedAt",
+    "conflicts"
+  ],
+  "methods": {
+    "diff": {
+      "description": "List the branch's changes against live (does not mutate)",
+      "arguments": [],
+      "return": {
+        "type": "object",
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "title": "Live target path (branch base + path inside the view)."
+                },
+                "op": {
+                  "type": "string",
+                  "enum": [
+                    "create",
+                    "set",
+                    "remove",
+                    "noop"
+                  ]
+                },
+                "baseRev": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {}
+                  ]
+                },
+                "node": {
+                  "title": "Future node for create/set."
+                }
+              },
+              "required": [
+                "path",
+                "op",
+                "baseRev"
+              ]
+            }
+          }
+        },
+        "required": [
+          "entries"
+        ]
+      }
+    },
+    "abandon": {
+      "description": "Close the branch without merging. Delta stays as the record.",
+      "arguments": []
+    }
+  }
+}
