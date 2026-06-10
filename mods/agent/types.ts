@@ -84,6 +84,8 @@ export class AiCost {
 export class AiRun {
   /** Reference to board task */
   taskRef = '';
+  /** Branch the run is rooted into (work mode) — its diff IS the run's effect */
+  branchRef = '';
   /** @format textarea */
   prompt = '';
   /** Clean text output */

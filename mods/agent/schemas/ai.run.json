@@ -9,6 +9,11 @@
       "title": "Reference to board task",
       "default": ""
     },
+    "branchRef": {
+      "type": "string",
+      "title": "Branch the run is rooted into (work mode) — its diff IS the run's effect",
+      "default": ""
+    },
     "prompt": {
       "type": "string",
       "format": "textarea",
@@ -37,6 +42,7 @@
   },
   "required": [
     "taskRef",
+    "branchRef",
     "prompt",
     "result",
     "mode",

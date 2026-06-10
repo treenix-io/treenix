@@ -3,8 +3,11 @@
 // Watches /board/data for tasks. Manages concurrency pool.
 // Deterministic routing — no LLM tokens burned on orchestration.
 
+import { fileMergeApprovals } from '#branch/approvals';
+import { mintWorkloadToken } from '#harness/mint';
 import { invokeClaude } from '#metatron/claude';
-import { type Class, type ComponentData, createNode, getComponent, type NodeData, register } from '@treenx/core';
+import { type Class, type ComponentData, createNode, getComponent, getComponentByName, type NodeData, register } from '@treenx/core';
+import { executeAction } from '@treenx/core/server/actions';
 import { setComponent } from '@treenx/core/comp';
 import type { ServiceCtx } from '@treenx/core/contexts/service';
 import { OpError } from '@treenx/core/errors';
@@ -173,6 +176,39 @@ Output your plan as structured markdown. The human will review, comment, and app
 **DO NOT make any changes. Planning only.**`;
 }
 
+// ── Branch placement (core-wm6.4) ──
+// The agent does not CHOOSE to work in a branch — the orchestrator places it
+// there: '/' of its MCP session IS the branch view (session.branch → re-root),
+// and the prompt explains the placement using the live /branches description.
+
+export function branchPromptSection(description: string): string {
+  return `
+## Workspace — branch-rooted session
+Your tree root '/' is a write-isolated branch view over the live tree: read anywhere (reads fall through to live), write freely (writes are captured in your branch; live stays untouched until a human merges). Your branch control node is /.branch — read it for status, execute 'diff' on it to list your changes, and finish with execute('/.branch', 'requestMerge', { note }) when the work is ready for review.
+${description ? `\n${description}\n` : ''}`;
+}
+
+/** Run-finish accounting. The agent itself asks for the merge (requestMerge) —
+ *  the orchestrator never asks on its behalf (owner decision: humans review
+ *  what agents explicitly marked ready). It only cleans up untouched branches
+ *  and makes forgotten work loudly visible. */
+export async function settleBranchAfterRun(store: ServiceCtx['tree'], branchPath: string): Promise<string> {
+  const branch = await store.get(branchPath);
+  if (!branch) return `branch ${branchPath} not found`;
+
+  if (branch.status === 'review') return `🌿 merge requested — review at /guardian/approvals (${branchPath})`;
+  if (branch.status !== 'open') return `branch ${branchPath}: ${String(branch.status)}`;
+
+  const { entries } = await executeAction<{ entries: unknown[] }>(
+    store, branchPath, undefined, undefined, 'diff', undefined,
+  );
+  if (entries.length === 0) {
+    await executeAction(store, branchPath, undefined, undefined, 'abandon', undefined);
+    return `branch ${branchPath}: no changes → abandoned`;
+  }
+  return `🌿 ${entries.length} change(s) in ${branchPath} were NOT submitted for merge — the agent finished without requestMerge`;
+}
+
 // ── Pool management ──
 
 function poolAcquire(pool: AiPool, agentPath: string): boolean {
@@ -267,17 +303,38 @@ async function runAgent(
   const chat = getComponent(agentNode, AiChat);
   const assignment = getComponent(taskNode, AiAssignment);
   const cursor = assignment?.cursors?.[agentNode.$path] ?? 0;
-  const prompt = buildWorkPrompt(role, taskNode, agentNode, cursor);
   const permissionRules = buildPermissionRules(role);
-  const canUseTool = createCanUseTool(role, agentNode.$path, store);
 
   // Create ai.run with ECS components for structured observability
   const runId = makeRunId();
   const runPath = `${agentNode.$path}/runs/${runId}`;
 
+  // Place the run into a branch: the workload session is rooted there ('/'
+  // becomes the branch view), so live stays read-only by construction and the
+  // guardian gates only merge. Owner = the per-run workload identity.
+  const workloadUserId = `agent-workload:${runId}`;
+  const { path: branchPath } = await executeAction<{ path: string }>(
+    store, '/branches', undefined, undefined, 'create',
+    { title: `${role}: ${String(taskNode.title ?? taskNode.$path)}`, owner: workloadUserId },
+  );
+  const { token: mcpToken } = await mintWorkloadToken(store, {
+    agentPath: agentNode.$path,
+    taskPath: taskNode.$path,
+    runPath,
+    mode: 'work',
+    branch: branchPath,
+  });
+  const canUseTool = createCanUseTool(role, agentNode.$path, store, { branchRoot: branchPath });
+
+  const branchesNode = await store.get('/branches');
+  const description = branchesNode ? getComponentByName(branchesNode, 'description') : undefined;
+  const prompt = buildWorkPrompt(role, taskNode, agentNode, cursor)
+    + branchPromptSection(typeof description?.text === 'string' ? description.text : '');
+
   const queryKey = agentNode.$path;
   const runNode = createNode(runPath, 'ai.run', {
     taskRef: taskNode.$path,
+    branchRef: branchPath,
     prompt,
     result: '',
     mode: 'work' as const,
@@ -317,12 +374,22 @@ async function runAgent(
       key: agentNode.$path,
       sessionId: chat?.sessionId || undefined,
       model: agent.model || undefined,
+      mcpToken,
       permissionRules,
       canUseTool,
       onLogEntry,
     });
 
     progress.cancel();
+
+    // Branch accounting — never let it mask the run result, but never lose it.
+    let branchNote = '';
+    try {
+      branchNote = await settleBranchAfterRun(store, branchPath);
+    } catch (err) {
+      log.error(`settleBranchAfterRun failed for ${branchPath}:`, err);
+      branchNote = `⚠ branch settle failed for ${branchPath}`;
+    }
 
     // Finalize ai.run — update all ECS components
     const finalStatus = result.aborted ? 'aborted' : result.error ? 'error' : 'done';
@@ -361,7 +428,8 @@ async function runAgent(
     });
 
     // Post result to board task thread + update status
-    const text = result.text || result.output || '(no output)';
+    const text = `${result.text || result.output || '(no output)'}${branchNote ? `\n\n${branchNote}` : ''}`;
+    const unrequested = branchNote.includes('NOT submitted');
     await updateNode(store, taskNode.$path, (freshTask) => {
       const thread = getComponent(freshTask, AiThread) ?? { $type: 'ai.thread' as const, messages: [] as ThreadMessage[] };
       thread.messages.push({ role, from: agentNode.$path, text, ts: Date.now() });
@@ -374,7 +442,7 @@ async function runAgent(
       }
 
       freshTask.status = 'review';
-      freshTask.aiStatus = '✅ done';
+      freshTask.aiStatus = unrequested ? '🌿 changes not submitted for merge' : '✅ done';
       freshTask.result = text;
       freshTask.updatedAt = Date.now();
     });
@@ -768,6 +836,17 @@ register('ai.pool', 'service', async (node: NodeData, ctx: ServiceCtx) => {
     if (event.type === 'set' || event.type === 'patch') processInbox();
   }, { children: true });
 
+  // Branch status=review → approval inbox entry (projection, idempotent).
+  // requestMerge only flips status — the watcher files the card, so the flip
+  // works identically from /.branch inside a branch-rooted session.
+  const projectApprovals = () => {
+    fileMergeApprovals(ctx.tree).catch(err => log.error('fileMergeApprovals error:', err));
+  };
+  const unsubBranches = ctx.subscribe('/branches', (event) => {
+    if (event.type === 'set' || event.type === 'patch') projectApprovals();
+  }, { children: true });
+  projectApprovals();
+
   processInbox();
 
   // Resume agents that were working before restart (have saved sessionId)
@@ -788,6 +867,7 @@ register('ai.pool', 'service', async (node: NodeData, ctx: ServiceCtx) => {
       stopped = true;
       unsubBoard();
       unsubAgents();
+      unsubBranches();
     },
   };
 });
