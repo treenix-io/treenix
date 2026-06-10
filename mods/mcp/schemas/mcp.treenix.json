@@ -133,6 +133,10 @@
             "data": {
               "type": "object",
               "description": "Action input payload."
+            },
+            "opId": {
+              "type": "string",
+              "description": "Idempotency key: retries with the same opId return the first execution's result instead of re-applying. Use one unique opId per logical operation when retrying on timeout."
             }
           },
           "required": [
