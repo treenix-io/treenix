@@ -17,6 +17,16 @@ registerPrefab('core', 'seed', [
     '#mount': { $type: 't.mount.mods' },
   },
   { $path: 'sys/autostart', $type: 'autostart' },
+  // Soft-delete target (tree/trash.ts). Admin-only: trash holds full copies of
+  // removed subtrees regardless of who removed them; purging an entry here is
+  // the explicit hard delete.
+  { $path: 'sys/trash', $type: 'dir',
+    $acl: [
+      { g: 'admins', p: R | W | A | S },
+      { g: 'authenticated', p: 0 },
+      { g: 'public', p: 0 },
+    ],
+  },
   { $path: 'proc', $type: 'mount-point',
     '#mount': { $type: 't.mount.memory' },
     $acl: [{ g: 'public', p: R }],

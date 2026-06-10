@@ -28,6 +28,7 @@ import { runExternalWatch } from '#sub/external-watch';
 import type { ExternalWatchStarter, MountableTree } from '#mount';
 import { createTreeRouter, type TreeRouter, type TreeRouterOpts, type TrpcContext } from './trpc';
 import { withMigration } from '#tree/migration';
+import { withTrash } from '#tree/trash';
 import { withValidation } from '#tree/validation';
 import { withVolatile } from '#tree/volatile';
 import { createWatchManager, type WatchManager } from '#sub/watch';
@@ -109,13 +110,17 @@ export function createPipeline(bootstrap: Tree, opts?: TreeRouterOpts, wrapTree?
   const refsIndexed = withRefIndex(validated);
   const cached = withCache(refsIndexed);
   cachedRef = cached;
+  // Soft-delete (gk8.8): below subscriptions so the copy-writes stay silent,
+  // above cache so copies land coherently; the remove event still emits above.
+  // systemTree (below) keeps hard remove for session revoke / GC.
+  const trashed = withTrash(cached);
   let cdcRef: CdcRegistry;
   const watcher = createWatchManager({
     onUserRemoved: (userId) => cdcRef.unwatchAllQueries(userId),
   });
   // gk8.12: sub/ stays ignorant of the auth layout and mount components —
   // the layer-owned detectors are injected here.
-  const { tree: subscribed, cdc, onSelfWrite, injectExternalEvent } = withSubscriptions(cached, (e) => watcher.notify(e), {
+  const { tree: subscribed, cdc, onSelfWrite, injectExternalEvent } = withSubscriptions(trashed, (e) => watcher.notify(e), {
     claimsUserOf: userIdFromAuthPath,
     isConfigNode: (node) => !!node && getComponentByName(node, 'mount') !== undefined,
   });

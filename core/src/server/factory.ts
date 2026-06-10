@@ -12,6 +12,7 @@ import { loadAllMods } from '#mod';
 import { getAnonKey } from '#security/auth';
 import { loadSchemasFromDir } from '#schema/load';
 import { createMemoryTree, type Tree } from '#tree';
+import { sweepTrash } from '#tree/trash';
 import type { Server } from 'node:http';
 import { applyDevDefaults } from './dev-defaults';
 import { deploySeedPrefabs } from './prefab';
@@ -118,6 +119,9 @@ export async function treenix(config: TreenixConfig): Promise<TreenixServer> {
   // missing/malformed; dev path lazy-creates persistent key in tree.
   // Caching here avoids first-request stall and makes prod misconfiguration loud.
   await getAnonKey(systemTree);
+
+  // 4c. Trash GC — systemTree sits below withTrash, so the purge is a hard delete.
+  await sweepTrash(systemTree);
 
   // 5. Wire log → tree
   addOnLog(entry => {
