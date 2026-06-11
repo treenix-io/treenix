@@ -453,6 +453,22 @@ describe('checkMcpGuardian', () => {
     assert.ok(!result.allowed && result.reason.includes('denied'));
   });
 
+  it('wildcard allow never grants a mutating tool — escalates to prompt (core-1prz)', async () => {
+    await setGuardian({ allow: ['mcp__treenix__*'], deny: [], escalate: [] });
+
+    const w = await checkMcpGuardian(store, req('set_node', { path: '/x', type: 'dir' }));
+    assert.equal(w.allowed, 'prompt', 'polluted wildcard policy must not reopen ungated writes');
+
+    const r = await checkMcpGuardian(store, req('get_node', { path: '/x' }));
+    assert.equal(r.allowed, true, 'reads still ride the wildcard');
+  });
+
+  it('policy read error → deny (fail-closed)', async () => {
+    const erroring = { ...store, get: async () => { throw new Error('storage down'); } };
+    const result = await checkMcpGuardian(erroring, req('get_node', { path: '/x' }));
+    assert.equal(result.allowed, false);
+  });
+
   it('allows tool on allow list', async () => {
     await setGuardian({ allow: ['mcp__treenix__get_node'], deny: [], escalate: [] });
     const result = await checkMcpGuardian(store, req('get_node', { path: '/x' }));

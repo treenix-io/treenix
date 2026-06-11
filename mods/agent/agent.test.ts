@@ -711,6 +711,72 @@ describe('canUseTool: policy precedence', () => {
   });
 });
 
+// ── Fail-closed: wildcards never grant mutations (core-1prz) ──
+
+describe('fail-closed mutating verdicts (core-1prz)', () => {
+  async function flush(n = 10) {
+    for (let i = 0; i < n; i++) await new Promise(r => setImmediate(r));
+  }
+
+  it('tool-segment wildcard allow does not grant mutating tools', () => {
+    const p = { allow: ['mcp__treenix__*'], deny: [], escalate: [] };
+    assert.equal(resolveVerdict(p, ['mcp__treenix__set_node:/x', 'mcp__treenix__set_node']), null);
+    assert.equal(resolveVerdict(p, ['mcp__treenix__remove_node:/x', 'mcp__treenix__remove_node']), null);
+    assert.equal(resolveVerdict(p, ['mcp__treenix__execute:run:/x', 'mcp__treenix__execute:run', 'mcp__treenix__execute']), null);
+    assert.equal(resolveVerdict(p, ['mcp__treenix__get_node:/x', 'mcp__treenix__get_node']), 'allow');
+  });
+
+  it('bare * grants reads only', () => {
+    const p = { allow: ['*'], deny: [], escalate: [] };
+    assert.equal(resolveVerdict(p, ['mcp__treenix__set_node:/x', 'mcp__treenix__set_node']), null);
+    assert.equal(resolveVerdict(p, ['mcp__treenix__catalog']), 'allow');
+  });
+
+  it('wildcard allow + explicit escalate → mutation escalates', () => {
+    const p = { allow: ['mcp__treenix__*'], deny: [], escalate: ['mcp__treenix__set_node'] };
+    assert.equal(resolveVerdict(p, ['mcp__treenix__set_node:/x', 'mcp__treenix__set_node']), 'escalate');
+  });
+
+  it('tool-literal allows still grant — scoping by path/action stays free', () => {
+    const p = { allow: ['mcp__treenix__set_node:/branches/*', 'mcp__treenix__execute:*'], deny: [], escalate: [] };
+    assert.equal(resolveVerdict(p, ['mcp__treenix__set_node:/branches/b1', 'mcp__treenix__set_node']), 'allow');
+    assert.equal(resolveVerdict(p, ['mcp__treenix__set_node:/live/x', 'mcp__treenix__set_node']), null);
+    assert.equal(resolveVerdict(p, ['mcp__treenix__execute:run:/x', 'mcp__treenix__execute:run', 'mcp__treenix__execute']), 'allow');
+  });
+
+  it('polluted live-guardian shape: wildcard allow escalates set_node to a human, reads pass', async () => {
+    const store = makeApprovalStore({
+      '/guardian': { $path: '/guardian', $type: 'ai.policy', allow: ['mcp__treenix__*'], deny: [], escalate: [] },
+    });
+    const canUse = createCanUseTool('dev', '/agents/test', store, WAIT);
+
+    assert.equal((await canUse('mcp__treenix__get_node', { path: '/x' })).behavior, 'allow');
+
+    const resultPromise = canUse('mcp__treenix__set_node', { path: '/x' });
+    await flush();
+    assert.equal(approvalsIn(store).length, 1, 'mutation escalates instead of riding the wildcard');
+    resolveApprovals(store, false);
+    assert.equal((await resultPromise).behavior, 'deny');
+  });
+
+  it('guardian subtree writes denied by fallback policy', async () => {
+    const canUse = createCanUseTool('dev', '/agents/test');
+    assert.equal((await canUse('mcp__treenix__set_node', { path: '/guardian' })).behavior, 'deny');
+    assert.equal((await canUse('mcp__treenix__set_node', { path: '/guardian/approvals/a1' })).behavior, 'deny');
+    assert.equal((await canUse('mcp__treenix__execute', { action: 'approve', path: '/guardian/approvals/a1' })).behavior, 'deny');
+    assert.equal((await canUse('mcp__treenix__remove_node', { path: '/guardian/approvals/a1' })).behavior, 'deny');
+  });
+
+  it('policy read error denies instead of degrading to fallback', async () => {
+    const erroring = {
+      ...createMemoryTree(),
+      get: async () => { throw new Error('storage down'); },
+    };
+    const r = await createCanUseTool('dev', '/agents/test', erroring)('mcp__treenix__get_node', { path: '/x' });
+    assert.equal(r.behavior, 'deny');
+  });
+});
+
 // ── Session approval cache ──
 
 describe('canUseTool: session approval cache', () => {

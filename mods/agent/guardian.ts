@@ -20,6 +20,30 @@ function patternSpecificity(pattern: string): number {
   return pattern.replace(/\*/g, '').length;
 }
 
+// ── Mutating tools require an EXPLICIT allow (core-1prz) ──
+// A wildcard in the TOOL segment of an allow pattern ('mcp__treenix__*', '*')
+// never authorizes a mutating tool: polluted or sloppy policy data must not
+// reopen ungated writes (the live-/guardian wildcard incident). Path/action
+// scoping stays free ('mcp__treenix__set_node:/branches/*' is explicit).
+// Deny and escalate are unaffected — wildcards may only restrict, never grant.
+
+const MUTATING_TOOLS = new Set([
+  'mcp__treenix__set_node', 'mcp__treenix__remove_node',
+  'mcp__treenix__execute', 'mcp__treenix__deploy_prefab',
+]);
+
+function subjectTool(s: string): string {
+  const i = s.indexOf(':');
+  return i < 0 ? s : s.slice(0, i);
+}
+
+function allowGrants(pattern: string, subject: string): boolean {
+  if (!globMatch(pattern, subject)) return false;
+  const tool = subjectTool(subject);
+  if (!MUTATING_TOOLS.has(tool)) return true;
+  return subjectTool(pattern) === tool;
+}
+
 /** Resolve policy verdict across all subjects.
  *  Deny is absolute (any match → deny). For allow/escalate, we find the best
  *  matching pattern across ALL subjects using (subject_index, pattern_specificity).
@@ -42,7 +66,7 @@ export function resolveVerdict(
 
   for (const s of subjects) {
     for (const p of policy.allow) {
-      if (!globMatch(p, s)) continue;
+      if (!allowGrants(p, s)) continue;
       const score = patternSpecificity(p);
       if (score > bestAllow) bestAllow = score;
     }
@@ -82,6 +106,11 @@ const FALLBACK_POLICY: ToolPolicy = {
   ],
   deny: [
     'mcp__treenix__guardian_approve',
+    // Guardian subtree is the gate itself — no agent may rewrite policy or
+    // resolve its own approvals through generic tools (deny survives any merge).
+    'mcp__treenix__set_node:/guardian*',
+    'mcp__treenix__remove_node:/guardian*',
+    'mcp__treenix__execute:*:/guardian*',
     'Bash:git checkout *', 'Bash:git checkout -- *',
     'Bash:git reset --hard*', 'Bash:git push --force*', 'Bash:git clean*',
     'Bash:rm -rf *', 'Bash:rm -r *', 'Bash:cat *.env*',
@@ -116,32 +145,29 @@ function mergePolicies(base: ToolPolicy, override: ToolPolicy): ToolPolicy {
 
 const GUARDIAN_PATH = '/guardian';
 
-/** Resolve policy cascade: agent → global → fallback */
+/** Resolve policy cascade: agent → global → fallback.
+ *  An ABSENT node/component is normal (fallback applies). A READ ERROR or a
+ *  malformed policy is NOT — it propagates, and the caller denies everything
+ *  (fail closed, core-1prz). Swallowing it here silently degraded the gate. */
 async function resolvePolicy(store: Tree, agentPath: string): Promise<ToolPolicy> {
   const hardcoded = FALLBACK_POLICY;
 
-  // Global policy from /guardian
   let base = hardcoded;
-  try {
-    const guardianNode = await store.get(GUARDIAN_PATH);
-    if (guardianNode) {
-      const globalPolicy = getComponent(guardianNode, AiPolicy);
-      if (globalPolicy && (globalPolicy.allow.length || globalPolicy.deny.length || globalPolicy.escalate.length)) {
-        base = mergePolicies(hardcoded, policyFromNode(globalPolicy));
-      }
+  const guardianNode = await store.get(GUARDIAN_PATH);
+  if (guardianNode) {
+    const globalPolicy = getComponent(guardianNode, AiPolicy);
+    if (globalPolicy && (globalPolicy.allow.length || globalPolicy.deny.length || globalPolicy.escalate.length)) {
+      base = mergePolicies(hardcoded, policyFromNode(globalPolicy));
     }
-  } catch { /* no guardian node yet */ }
+  }
 
-  // Agent-level policy
-  try {
-    const agentNode = await store.get(agentPath);
-    if (agentNode) {
-      const agentPolicy = getComponent(agentNode, AiPolicy);
-      if (agentPolicy && (agentPolicy.allow.length || agentPolicy.deny.length || agentPolicy.escalate.length)) {
-        return mergePolicies(base, policyFromNode(agentPolicy));
-      }
+  const agentNode = await store.get(agentPath);
+  if (agentNode) {
+    const agentPolicy = getComponent(agentNode, AiPolicy);
+    if (agentPolicy && (agentPolicy.allow.length || agentPolicy.deny.length || agentPolicy.escalate.length)) {
+      return mergePolicies(base, policyFromNode(agentPolicy));
     }
-  } catch { /* agent has no policy component */ }
+  }
 
   return base;
 }
@@ -561,11 +587,19 @@ export function createCanUseTool(
     input: Record<string, unknown>,
   ): Promise<PermissionResult> => {
 
-    // Lazy-resolve policy from tree on first call
+    // Lazy-resolve policy from tree on first call. Resolution failure (store
+    // error, malformed policy component) denies THIS call without caching —
+    // a transient store error recovers on the next call, never degrades to
+    // the fallback silently (fail closed, core-1prz).
     if (!cachedPolicy) {
-      cachedPolicy = store
-        ? await resolvePolicy(store, agentPath)
-        : FALLBACK_POLICY;
+      try {
+        cachedPolicy = store
+          ? await resolvePolicy(store, agentPath)
+          : FALLBACK_POLICY;
+      } catch (err) {
+        console.error(`[guardian] policy resolution failed for ${role}@${agentPath} — denying:`, err);
+        return deny(`${role}: guardian policy unreadable — fail closed`);
+      }
       console.log(`[guardian] resolved policy for ${role}@${agentPath}: allow=${cachedPolicy.allow.length} deny=${cachedPolicy.deny.length} escalate=${cachedPolicy.escalate.length}`);
     }
     const policy = cachedPolicy;

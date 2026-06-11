@@ -9,7 +9,11 @@ registerPrefab('agent', 'seed', [
 
   // Guardian — global base policy (applies to ALL agents)
   // Top-level node, not under agents — guardian is data, not a service.
+  // Fail closed (core-1prz): reads auto-allow, EVERY mutating tool escalates to a
+  // human, the guardian subtree itself is deny — never a blanket mcp__treenix__*.
+  // Only admins may edit policy; agents read it (p:1) so views can show the rules.
   { $path: 'guardian', $type: 'ai.policy',
+    $acl: [{ g: 'admins', p: 15 }, { g: 'agents', p: 1 }],
     allow: [
       'mcp__treenix__get_node', 'mcp__treenix__list_children',
       'mcp__treenix__catalog', 'mcp__treenix__describe_type',
@@ -19,6 +23,8 @@ registerPrefab('agent', 'seed', [
     deny: [
       'mcp__treenix__remove_node',
       'mcp__treenix__guardian_approve',
+      'mcp__treenix__set_node:/guardian*',
+      'mcp__treenix__execute:*:/guardian*',
       'Bash:git checkout *', 'Bash:git checkout -- *',
       'Bash:git reset --hard*', 'Bash:git push --force*', 'Bash:git clean*',
       'Bash:rm -rf *', 'Bash:rm -r *', 'Bash:cat *.env*',
@@ -30,14 +36,16 @@ registerPrefab('agent', 'seed', [
     ],
   },
 
-  // Approvals queue — under guardian
-  { $path: 'guardian/approvals', $type: 'ai.approvals' },
+  // Approvals queue — under guardian. Approval inputs may carry other agents'
+  // data; agents have no business reading or resolving them (p:0 sticky).
+  { $path: 'guardian/approvals', $type: 'ai.approvals',
+    $acl: [{ g: 'admins', p: 15 }, { g: 'agents', p: 0 }] },
 
   // MCP agent identity
   { $path: 'agents/mcp', $type: 'ai.agent',
     role: 'mcp', status: 'idle', currentTask: '', currentRun: '',
     lastRunAt: 0, totalTokens: 0,
-    policy: {
+    '#policy': {
       $type: 'ai.policy',
       allow: [], deny: [], escalate: [],
     },
@@ -62,9 +70,10 @@ Be concise. Facts only.`,
     currentRun: '',
     lastRunAt: 0,
     totalTokens: 0,
-    chat: { $type: 'ai.chat', streaming: false, sessionId: '' },
-    thread: { $type: 'ai.thread', messages: [] },
-    policy: {
+    // '#' keys — bare {$type} values are snapshots, getComponent would not see them
+    '#chat': { $type: 'ai.chat', streaming: false, sessionId: '' },
+    '#thread': { $type: 'ai.thread', messages: [] },
+    '#policy': {
       $type: 'ai.policy',
       allow: ['Bash:npm test*', 'Bash:npm ls*', 'Bash:ls *', 'Bash:cat *', 'Bash:git status*', 'Bash:git diff*', 'Bash:git log*'],
       deny: [],
