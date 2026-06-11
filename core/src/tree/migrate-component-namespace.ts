@@ -85,7 +85,7 @@ export async function migrateFsRoot(root: string, write: boolean, log: (line: st
   return stats;
 }
 
-async function readDataVersion(root: string): Promise<number> {
+export async function readDataVersion(root: string): Promise<number> {
   let text: string;
   try {
     text = await readFile(join(root, VERSION_FILE), 'utf-8');

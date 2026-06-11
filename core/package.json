@@ -48,7 +48,8 @@
     "servers": "./src/mods/servers.ts"
   },
   "bin": {
-    "fix-hash-imports": "./bin/fix-hash-imports.mjs"
+    "fix-hash-imports": "./bin/fix-hash-imports.mjs",
+    "treenix": "./bin/treenix.mjs"
   },
   "files": [
     "bin",
