@@ -16,7 +16,7 @@
     "dev:server": "npm run dev:server -w @treenx/core",
     "dev:front": "npm run dev -w @treenx/react",
     "schema": "npm run schema -w @treenx/core",
-    "typecheck": "tsc -p core --noEmit && tsc -p packages/react --noEmit"
+    "typecheck": "tsc -p core --noEmit && tsc -p mods --noEmit && tsc -p packages/react --noEmit"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",
