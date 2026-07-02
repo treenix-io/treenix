@@ -120,6 +120,11 @@ export function startEvents(config: EventsConfig = {}, resume = false) {
     onData(event) {
       if (event.type === 'reconnect') {
         if (!event.preserved) {
+          // Continuity lost = reset (twp-spec §5.3): the server's seq space may
+          // be new (process restart). Carrying the old watermark into it would
+          // make a later resume compare incomparable cursors — since >= seq
+          // would answer "covered" and silently drop the gap. Rebuild from 0.
+          lastSeq = 0;
           cache.signalReconnect();
           if (loadChildren) {
             for (const path of getExpanded?.() ?? []) loadChildren(path);

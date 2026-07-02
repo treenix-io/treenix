@@ -74,7 +74,10 @@ function settle(path: string, rs: RebaseState) {
  *  resulting event. A write we did NOT originate (another user, a server job)
  *  carries no `by` — it advances confirmed but must never eat a local pending
  *  slot. Blind FIFO shift did exactly that (cnr.6): a foreign patch on the same
- *  path stole an in-flight optimistic op's ack. Match by id, not position. */
+ *  path stole an in-flight optimistic op's ack. Match by id, not position.
+ *  An action that persists nothing emits no event, so its op is never acked —
+ *  predicting a local change for a non-persisting action is a handler bug;
+ *  mark such actions noOptimistic. */
 function consumeAck(rs: RebaseState, by: string | undefined) {
   if (by === undefined) return;
   const idx = rs.pending.findIndex(op => op.opId === by);
