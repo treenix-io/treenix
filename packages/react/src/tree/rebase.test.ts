@@ -275,6 +275,29 @@ describe('rebase', () => {
     assert.strictEqual(node.$rev, 2, 'confirmed $rev advanced to server rev (was stale → OCC storm before fix)');
   });
 
+  it('continuity loss drops overlays — lost ack must not zombie-replay (core-jvfv)', () => {
+    cache.put({ $path: '/c', $type: 'test.rebase.counter', $rev: 1, count: 5 } as any);
+
+    pushOptimistic('/c', Counter, undefined, action('test.rebase.counter', 'increment'), undefined, 'lost');
+    assert.strictEqual((cache.get('/c') as any).count, 6, 'optimistic applied');
+
+    // The write LANDED server-side, but its ack event fell into an SSE gap and
+    // the reconnect answered preserved:false — events.ts drops all overlays.
+    clear();
+    assert.strictEqual(hasPending('/c'), false, 'no pending survives continuity loss');
+
+    // Refetch is authoritative: server shows our landed write.
+    cache.put({ $path: '/c', $type: 'test.rebase.counter', $rev: 2, count: 6 } as any);
+
+    // Next event on the path must route through the normal cache path — with a
+    // surviving overlay this would replay stale confirmed(5)+1 over fresh data.
+    assert.strictEqual(
+      applyServerPatch('/c', [['r', 'count', 60 ]], 3, undefined), false,
+      'rebase does not handle events after reset',
+    );
+    assert.strictEqual((cache.get('/c') as any).count, 6, 'refetched truth intact, no stale replay');
+  });
+
   it('applyServerPatch ignores non-finite rev (wire garbage)', () => {
     cache.put({ $path: '/c', $type: 'test.rebase.counter', $rev: 5, count: 0 } as any);
 

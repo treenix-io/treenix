@@ -4,7 +4,7 @@
 import type { NodeData } from '@treenx/core';
 import { applyOps, type PatchOp } from '@treenx/core/tree';
 import * as cache from './cache';
-import { applyServerPatch, applyServerSet } from './rebase';
+import { applyServerPatch, applyServerSet, clear as clearRebase } from './rebase';
 import { AUTH_EXPIRED_EVENT, clearToken, getToken, trpc } from './trpc';
 
 type LoadChildren = (path: string) => Promise<void>;
@@ -125,6 +125,12 @@ export function startEvents(config: EventsConfig = {}, resume = false) {
           // make a later resume compare incomparable cursors — since >= seq
           // would answer "covered" and silently drop the gap. Rebuild from 0.
           lastSeq = 0;
+          // Overlays only mean something within a continuous stream: an ack may
+          // have been in the dropped gap, and an unacked op never drains —
+          // consumeAck matches by id (core-jvfv). In-flight writes either landed
+          // (the refetch below shows them) or failed (rollback fired); a survivor
+          // would replay stale confirmed over fresh data on the next event.
+          clearRebase();
           cache.signalReconnect();
           if (loadChildren) {
             for (const path of getExpanded?.() ?? []) loadChildren(path);

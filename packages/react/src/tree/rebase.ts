@@ -147,7 +147,7 @@ export function hasPending(path: string): boolean {
   return state.has(path);
 }
 
-/** Clear all rebase state (for testing) */
+/** Drop every overlay — continuity lost (reconnect preserved:false, core-jvfv) or test teardown */
 export function clear(): void {
   state.clear();
 }
