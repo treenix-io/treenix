@@ -155,8 +155,9 @@ export function createPipeline(bootstrap: Tree, opts?: TreeRouterOpts, wrapTree?
 type HttpServerOpts = {
   allowedOrigins?: string[];
   staticDir?: string;
-  /** When set: /health responds with the result; non-/health requests get 503 if unhealthy. */
-  healthCheck?: () => { healthy: boolean; reason: string };
+  /** When set: /health responds with the result; non-/health requests get 503 if unhealthy.
+   *  May be async — the audit gate runs a throttled recovery probe inside (core-98jr). */
+  healthCheck?: () => { healthy: boolean; reason: string } | Promise<{ healthy: boolean; reason: string }>;
 };
 
 /** HTTP server on top of an existing pipeline */
@@ -167,6 +168,10 @@ export function createHttpServer(pipeline: Pipeline, opts?: HttpServerOpts): Ser
   const staticDir = opts?.staticDir
     ? resolve(opts.staticDir)
     : (process.env.STATIC_DIR ? resolve(process.env.STATIC_DIR) : '');
+
+  // Unhealthy-rejection log throttle — one line per interval, not per request.
+  let lastRejectLogAt = 0;
+  const REJECT_LOG_INTERVAL_MS = 30_000;
 
   const MIME: Record<string, string> = {
     '.html': 'text/html', '.js': 'application/javascript', '.css': 'text/css',
@@ -218,13 +223,19 @@ export function createHttpServer(pipeline: Pipeline, opts?: HttpServerOpts): Ser
     // /health endpoint always responds with state for liveness probes.
     if (opts?.healthCheck) {
       const path = (req.url ?? '/').split('?')[0];
-      const state = opts.healthCheck();
+      const state = await opts.healthCheck();
       if (path === '/health') {
         res.writeHead(state.healthy ? 200 : 503, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(state));
         return;
       }
       if (!state.healthy) {
+        // The gate must never reject silently (core-98jr: an unhealthy server
+        // 503'd every request for hours with nothing in the terminal).
+        if (Date.now() - lastRejectLogAt > REJECT_LOG_INTERVAL_MS) {
+          lastRejectLogAt = Date.now();
+          console.error(`[health] rejecting requests with 503: ${state.reason}`);
+        }
         res.writeHead(503, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'unhealthy', reason: state.reason }));
         return;

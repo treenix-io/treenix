@@ -8,7 +8,7 @@ backend fails, the original mutation also fails (loud).
 - **with-audit.ts** — `withAudit(tree)` wrapper
 - **with-audit.test.ts** — set / remove / patch / recursion guard / loud-fail
 - **health.ts** — `markUnhealthy / isHealthy / unhealthyReason / resetHealthForTest`
-- **health.test.ts** — sticky flag behaviour
+- **health.test.ts** — flag transitions + recovery-probe behaviour
 
 ### Event shape
 Each mutation produces a node at `/sys/audit/event/<ts>-<rand>`:
@@ -39,10 +39,13 @@ Not transactional against process crash (Phase 0 trade-off), but the
 Direct writes to `/sys/audit/event/*` pass through untouched. Without this the
 audit append would itself trigger another audit append, ad infinitum.
 
-### Health flag (sticky)
-Once flipped to unhealthy by an audit failure, stays until process restart.
-Server middleware should return 503 on all non-`/health` endpoints while
-unhealthy. `resetHealthForTest()` is for unit tests only.
+### Health flag (auto-heal, core-98jr)
+Flips to unhealthy on audit append failure; server middleware returns 503 on
+all non-`/health` endpoints while unhealthy (throttled reject log — the gate
+never rejects silently). Heals two ways: any successful append calls
+`markHealthy()`, and while unhealthy `checkHealth()` (wired as the HTTP gate)
+runs a throttled REAL append probe — the probe row lands in the journal and
+documents the recovery. `resetHealthForTest()` is for unit tests only.
 
 ### Wiring (done)
 - `engine/mods/audit/seed.ts` — `/sys/audit/event` mount-point (Mongo `audit_events`)

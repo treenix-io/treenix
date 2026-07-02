@@ -8,7 +8,7 @@ import { createPipeline } from '@treenx/core/server/server';
 import { asTreeSource, createMemoryTree, type Tree } from '@treenx/core/tree';
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
-import { isHealthy, resetHealthForTest } from './health';
+import { checkHealth, isHealthy, resetHealthForTest } from './health';
 import { withAudit } from './with-audit';
 
 let inner: Tree;
@@ -114,6 +114,51 @@ describe('withAudit — loud failure', () => {
       (e: any) => e instanceof Error && /audit/i.test(e.message),
     );
     assert.equal(isHealthy(), false, 'health flag flipped on audit failure');
+  });
+
+  it('auto-heals: a successful append after an outage restores health (core-98jr)', async () => {
+    let backendDown = true;
+    const flaky: Tree = {
+      ...inner,
+      async set(node, ctx) {
+        if (backendDown && node.$path.startsWith('/sys/audit/event/')) {
+          throw new Error('audit backend down');
+        }
+        return inner.set(node, ctx);
+      },
+    };
+    const wrapped = withAudit(flaky);
+
+    await assert.rejects(wrapped.set({ $path: '/data/a', $type: 'thing', value: 1 }));
+    assert.equal(isHealthy(), false, 'unhealthy while backend down');
+
+    backendDown = false;
+    await wrapped.set({ $path: '/data/a', $type: 'thing', value: 2 });
+    assert.equal(isHealthy(), true, 'healed by the successful append');
+  });
+
+  it('recovery probe: checkHealth appends for real and heals while gated (core-98jr)', async () => {
+    let backendDown = true;
+    const flaky: Tree = {
+      ...inner,
+      async set(node, ctx) {
+        if (backendDown && node.$path.startsWith('/sys/audit/event/')) {
+          throw new Error('audit backend down');
+        }
+        return inner.set(node, ctx);
+      },
+    };
+    const wrapped = withAudit(flaky); // registers the probe
+    await assert.rejects(wrapped.set({ $path: '/data/b', $type: 'thing', value: 1 }));
+    assert.equal(isHealthy(), false);
+
+    backendDown = false;
+    const state = await checkHealth();
+    assert.equal(state.healthy, true, 'probe append healed the flag');
+
+    // The probe row landed in the journal — the recovery is itself audited.
+    const events = await inner.getChildren('/sys/audit/event');
+    assert.ok(events.items.some(e => e.op === 'probe'), 'probe event recorded');
   });
 });
 

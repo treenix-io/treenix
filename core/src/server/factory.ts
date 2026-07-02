@@ -30,7 +30,7 @@ export type TreenixConfig = {
   /** Optional health probe — when present, server gates all non-/health requests.
    *  /health endpoint always responds with the current state (200 healthy, 503 not).
    *  Leave undefined to disable health gating entirely. */
-  healthCheck?: () => { healthy: boolean; reason: string };
+  healthCheck?: () => { healthy: boolean; reason: string } | Promise<{ healthy: boolean; reason: string }>;
   /** Optional dispatcher for workload-bound sessions. Without it, sessions with
    *  `scopeRef` cannot be served — server fails the request with INTERNAL_SERVER_ERROR.
    *  Composition root (e.g. main.ts) wires this from the harness mod. */

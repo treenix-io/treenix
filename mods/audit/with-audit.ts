@@ -12,7 +12,7 @@ import type { ActorContext } from '@treenx/core/server/actions';
 import type { NodeData } from '@treenx/core';
 import type { Tree, PatchOp } from '@treenx/core/tree';
 import { randomBytes } from 'node:crypto';
-import { markUnhealthy } from './health';
+import { markHealthy, markUnhealthy, setRecoveryProbe } from './health';
 
 const AUDIT_PREFIX = '/sys/audit/event/';
 
@@ -58,6 +58,7 @@ function buildEvent(args: {
 async function appendOrFailLoud(tree: Tree, event: NodeData): Promise<void> {
   try {
     await tree.set(event);
+    markHealthy(); // append works again → auto-heal (core-98jr)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     markUnhealthy(`audit append failed: ${msg}`);
@@ -76,6 +77,19 @@ function getActor(ctx: unknown): ActorContext | undefined {
 /** Wrap a Tree so every mutation appends an audit.event. Reads pass through.
  *  Direct writes to /sys/audit/event/* are NOT re-audited (recursion guard). */
 export function withAudit(tree: Tree): Tree {
+  // Recovery probe (core-98jr): while unhealthy the 503 gate blocks the client
+  // mutations whose appends would heal organically — so the gate probes with a
+  // REAL append. A probe row lands only on success (~one per recovery), and
+  // documents the outage end in the journal itself.
+  setRecoveryProbe(() => tree.set({
+    $path: eventPath(),
+    $type: 'audit.event',
+    ts: Date.now(),
+    op: 'probe',
+    path: '/sys/audit',
+    before: null,
+    after: null,
+  }));
   // Spread forwards every read/traversal method untouched — get, getChildren,
   // and the OPTIONAL scanChildren/watch the read runtime depends on. Hand-listing
   // methods here previously dropped scanChildren, so asTreeSource threw for every
