@@ -1,6 +1,6 @@
 import assert from 'node:assert';
-import { afterEach, beforeEach, describe, it } from 'node:test';
-import { createLogger, interceptConsole, logStats, matchesLogGrep, queryLogs, setDebug } from './log.js';
+import { after, afterEach, before, beforeEach, describe, it } from 'node:test';
+import { addOnLog, createLogger, interceptConsole, logStats, matchesLogGrep, queryLogs, setDebug } from './log.js';
 
 describe('createLogger', () => {
   const calls: { method: string; args: unknown[] }[] = []
@@ -79,18 +79,34 @@ describe('createLogger', () => {
   })
 })
 
-// jre7 regression: the buffer is THE log store (the log→tree wire is cut) —
-// it must keep filling forever and stay bounded, evicting oldest first.
+// jre7 regression: the buffer must keep filling even while log listeners
+// (the factory log→tree wire) are attached — it used to freeze after boot —
+// and it must stay bounded, evicting oldest first.
 describe('ring buffer', () => {
   const original = console.info
 
-  afterEach(() => {
+  // interceptConsole is once-per-process — install the muted wrapper once for
+  // the whole suite; per-test re-intercept would silently no-op.
+  before(() => {
+    console.info = () => {} // mute the terminal; intercept wraps this
+    interceptConsole()
+  })
+
+  after(() => {
     console.info = original
   })
 
+  it('keeps filling while a listener is attached (frozen-buffer regression)', () => {
+    const seen: string[] = []
+    addOnLog(e => seen.push(e.msg))
+
+    console.info('with-listener-marker')
+
+    assert.equal(seen.filter(m => m === 'with-listener-marker').length, 1, 'listener must receive the entry')
+    assert.equal(queryLogs({ grep: 'with-listener-marker' }).length, 1, 'buffer must capture it too')
+  })
+
   it('a console flood stays bounded at max and keeps the newest entries', () => {
-    console.info = () => {} // mute the terminal; intercept wraps this
-    interceptConsole()
     const { max } = logStats()
 
     for (let i = 0; i < max + 500; i++) console.info(`flood-${i}`)

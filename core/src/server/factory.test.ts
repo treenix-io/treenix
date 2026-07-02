@@ -141,11 +141,12 @@ describe('treenix({ healthCheck })', () => {
   });
 });
 
-// jre7 regression: the per-line log→tree wire (every console line became a
-// /sys/logs/<ts> node through the full pipeline — nobody read them, memory
-// grew unboundedly) is cut. Console logging lands ONLY in the ring buffer.
+// jre7 (owner decision 2026-07-03): logs are DUAL-written — every console line
+// becomes a /sys/logs/<ts> node (the full, ever-growing history on persistent
+// roots) AND stays queryable from the ring buffer, which used to freeze once
+// the wire attached (the old `listeners ? tree : buffer` branch).
 describe('log flood (jre7)', () => {
-  it('console logging fills the ring buffer, never /sys/logs nodes', async () => {
+  it('console lines land in BOTH /sys/logs nodes and the ring buffer', async () => {
     const app = await treenix({
       modsDir: false,
       autostart: false,
@@ -156,15 +157,20 @@ describe('log flood (jre7)', () => {
     const savedInfo = console.info;
     console.info = () => {};
     interceptConsole();
-    for (let i = 0; i < 50; i++) console.info(`jre7-flood-${i}`);
+    for (let i = 0; i < 20; i++) console.info(`jre7-flood-${i}`);
     console.info = savedInfo;
 
-    // The intercept path is live — every line is queryable from the buffer…
-    assert.equal(queryLogs({ grep: 'jre7-flood-' }).length, 50);
+    // Ring buffer captured every line despite the attached tree wire.
+    assert.equal(queryLogs({ grep: 'jre7-flood-' }).length, 20);
 
-    // …and the tree stays clean: zero per-line node writes.
-    const logs = await app.systemTree.getChildren('/sys/logs');
-    assert.equal(logs.total, 0);
+    // Tree writes are fire-and-forget onto the fs-mounted root — yield until
+    // they settle (bounded; no wall-clock sleeps).
+    let total = 0;
+    for (let i = 0; i < 500 && total < 20; i++) {
+      total = (await app.systemTree.getChildren('/sys/logs', { limit: 1 })).total;
+      if (total < 20) await new Promise<void>(r => setImmediate(r));
+    }
+    assert.ok(total >= 20, `expected >= 20 /sys/logs nodes, saw ${total}`);
 
     await app.stop();
   });

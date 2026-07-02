@@ -1,5 +1,5 @@
 // treenix() — universal server factory
-// Single entry point: loads infrastructure, mods, builds pipeline.
+// Single entry point: loads infrastructure, mods, builds pipeline, wires logging.
 
 import '#contexts/text/index';
 import '#schema/action';
@@ -7,6 +7,7 @@ import '#mount/adapters';
 
 import { type ServiceHandle, startServices } from '#contexts/service/index';
 import { type NodeData } from '#core';
+import { addOnLog, makeLogPath } from '#log';
 import { loadAllMods } from '#mod';
 import { getAnonKey } from '#security/auth';
 import { loadSchemasFromDir } from '#schema/load';
@@ -122,7 +123,15 @@ export async function treenix(config: TreenixConfig): Promise<TreenixServer> {
   // 4c. Trash GC — systemTree sits below withTrash, so the purge is a hard delete.
   await sweepTrash(systemTree);
 
-  // 5. Autostart services
+  // 5. Wire log → tree: every entry becomes a /sys/logs/<ts> node — the full,
+  // ever-growing log history (owner decision 2026-07-03), browsable via tree/MCP.
+  // The ring buffer keeps filling in parallel (log.ts push) for t.logs.query.
+  addOnLog(entry => {
+    systemTree.set({ $path: makeLogPath(), $type: 't.log', ...entry })
+      .catch(e => process.stderr.write(`[log write err] ${e.message}\n`))
+  })
+
+  // 6. Autostart services
   let serviceHandle: ServiceHandle | null = null;
   if (autostart) {
     serviceHandle = await startServices(tree, cdc.subscribe.bind(cdc) as import('#contexts/service/index').ServiceCtx['subscribe']);

@@ -1,8 +1,11 @@
-// Unified logging: bounded ring buffer + debug filter + console intercept.
-// Query surface: the t.logs action node (observability/logs.ts) over queryLogs.
-// jre7 (2026-07): the per-line log→tree wire (addOnLog → /sys/logs/<ts> node per
-// line) is CUT — nothing ever read those nodes, each line was a full pipeline
-// write, and the memory tree retained ~4.6KB/line even after remove.
+// Unified logging: dual write (owner decision 2026-07-03, jre7) —
+//   1. ring buffer, bounded at MAX: the t.logs query surface (observability/);
+//   2. listeners (factory log→tree wire): every entry becomes a /sys/logs/<ts>
+//      node — the full, ever-growing log history, browsable via tree/MCP.
+// Both ALWAYS receive; the old `listeners ? tree : buffer` branch froze the
+// buffer after boot. Growth/rotation policy for memory-only roots: core-jre7 follow-up.
+
+import dayjs from 'dayjs'
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error'
 
@@ -24,7 +27,38 @@ let _getCtx: CtxProvider = () => null
 
 export function setCtxProvider(fn: CtxProvider) { _getCtx = fn }
 
-// ── Ring buffer — the log store, bounded at MAX ──
+// ── Log listeners ──
+
+type OnLog = (entry: LogEntry) => void
+const listeners: OnLog[] = []
+
+export function addOnLog(fn: OnLog) { listeners.push(fn) }
+
+// ── Timestamp ID: YYMMDD-HHmmss-mmm-NNN ──
+
+let lastMs = 0
+let seq = 0
+
+export function makeLogPath(): string {
+  const now = Date.now()
+  if (now === lastMs) {
+    seq++
+  } else {
+    lastMs = now
+    seq = 0
+  }
+
+  const stamp = dayjs(now).format('YYMMDD-HHmmss-SSS')
+  const sq = String(seq).padStart(3, '0')
+
+  return `/sys/logs/${stamp}-${sq}`
+}
+
+function notify(entry: LogEntry) {
+  for (const fn of listeners) fn(entry)
+}
+
+// ── Ring buffer — bounded query surface, bounded at MAX ──
 
 const MAX = 2000
 const buffer: LogEntry[] = []
@@ -63,6 +97,8 @@ function push(level: LogLevel, args: unknown[]) {
     path: ctx?.path as string | undefined,
   }
 
+  // Buffer FIRST, then listeners — the buffer must fill even when the
+  // log→tree wire is attached (it used to freeze after boot: jre7).
   if (total < MAX) {
     buffer.push(entry)
   } else {
@@ -70,6 +106,7 @@ function push(level: LogLevel, args: unknown[]) {
   }
   cursor = (cursor + 1) % MAX
   total++
+  notify(entry)
 }
 
 /** Get ordered log entries from ring buffer (oldest first) */
