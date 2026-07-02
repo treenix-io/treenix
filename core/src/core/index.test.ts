@@ -1,5 +1,7 @@
 import { assertSafePath, basename, dirname, isChildPath, join } from '#core/path';
-import { registerBuiltins } from '#core/builtins';
+// Registry test helpers live in #testing (public `@treenx/core/testing`, qvrt) —
+// importing it also registers the shared test.* schema types.
+import { clearRegistry, restoreRegistrySnapshot, saveRegistrySnapshot } from '#testing';
 import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
 import {
@@ -12,7 +14,6 @@ import {
   isComponent,
   isRef,
   isSafeKey,
-  mapRegistry,
   ref,
   register,
   removeComponent,
@@ -23,37 +24,6 @@ import {
   safeJsonParse,
   unregister,
 } from './index';
-
-const testTypes = ['test.doc', 'test.item', 'test.session', 'test.task'];
-
-export function registerTestTypes() {
-  for (const t of testTypes)
-    register(t, 'schema', () => ({ $id: t, type: 'object' as const, title: t, properties: {} }));
-}
-
-registerTestTypes();
-
-export function clearRegistry(): void {
-  mapRegistry((t, c) => unregister(t, c));
-  registerBuiltins();
-  registerTestTypes();
-}
-
-/** Save current registry state — pairs with restoreRegistrySnapshot */
-export function saveRegistrySnapshot(): Map<string, unknown> {
-  const snap = new Map<string, unknown>();
-  mapRegistry((t, c) => { snap.set(`${t}@${c}`, resolve(t, c, false)); });
-  return snap;
-}
-
-/** Restore a saved snapshot — clears registry then re-registers all entries */
-export function restoreRegistrySnapshot(snap: Map<string, unknown>): void {
-  mapRegistry((t, c) => unregister(t, c));
-  for (const [key, handler] of snap) {
-    const i = key.lastIndexOf('@');
-    register(key.slice(0, i), key.slice(i + 1), handler as any);
-  }
-}
 
 describe('Node', () => {
   it('creates with type and path', () => {

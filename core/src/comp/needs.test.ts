@@ -1,7 +1,7 @@
 import { registerType } from '#comp';
 import { collectDeps, getActionNeeds, parseNeedPattern } from '#comp/needs';
 import { createNode, register } from '#core';
-import { clearRegistry } from '#core/index.test';
+import { clearRegistry } from '#testing';
 import { executeAction } from '#server/actions';
 import { createMemoryTree } from '#tree';
 import assert from 'node:assert/strict';

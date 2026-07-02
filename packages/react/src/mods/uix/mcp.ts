@@ -1,7 +1,7 @@
 // UIX MCP tools live with the UIX runtime, not with core tree/catalog tools.
 
 import { getComponent } from '@treenx/core';
-import { assertSafePath } from '@treenx/core/core/path';
+import { assertSafePath } from '@treenx/core';
 import { getCtx, registerType, setComponent } from '@treenx/core/comp';
 import { UixSource, verifyViewSource } from './uix-source';
 

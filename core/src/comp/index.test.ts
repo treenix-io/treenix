@@ -3,7 +3,7 @@
 
 import { getCtx, newComponent, registerActions, registerType, setComponent } from '#comp';
 import { createNode, getComponent, getMeta, type NodeData, register, resolve } from '#core';
-import { clearRegistry } from '#core/index.test';
+import { clearRegistry } from '#testing';
 import { executeAction } from '#server/actions';
 import { createMemoryTree } from '#tree';
 import assert from 'node:assert/strict';

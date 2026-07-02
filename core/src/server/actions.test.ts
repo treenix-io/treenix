@@ -1,7 +1,7 @@
 import { registerType } from '#comp';
 import { createNode, isComponent, type NodeData, normalizeType, register, resolve } from '#core';
 import { OpError } from '#errors';
-import { clearRegistry } from '#core/index.test';
+import { clearRegistry } from '#testing';
 import { createMemoryTree } from '#tree';
 import { withCache } from '#tree/cache';
 import assert from 'node:assert/strict';

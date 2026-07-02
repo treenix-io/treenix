@@ -11,7 +11,7 @@ import { createProjector } from '@treenx/core/security/projector';
 import { wrapReadOnlyTree } from '@treenx/core/server/readonly-tree';
 import type { Tree } from '@treenx/core/tree';
 import { createBranchTree } from '@treenx/core/tree/branch';
-import { createRepathTree } from '@treenx/core/tree/repath';
+import { createRepathTree } from '@treenx/core/tree';
 import { type AgentScope, defineAgentScope } from '#harness/capability';
 import { BRANCH_SELF, MountBranch } from './types';
 

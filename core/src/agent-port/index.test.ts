@@ -1,6 +1,6 @@
 import { registerType } from '#comp';
 import { createNode, type GroupPerm, R, register, S, W } from '#core';
-import { clearRegistry } from '#core/index.test';
+import { clearRegistry } from '#testing';
 import { executeAction } from '#server/actions';
 import { createMemoryTree, type Tree } from '#tree';
 import assert from 'node:assert/strict';

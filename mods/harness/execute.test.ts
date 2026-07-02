@@ -6,7 +6,7 @@ import { createMemoryTree, type Tree } from '@treenx/core/tree';
 import { withAcl } from '@treenx/core/security/auth';
 import { OpError } from '@treenx/core/errors';
 import { register, R, W } from '@treenx/core';
-import { clearRegistry } from '@treenx/core/core/index.test';
+import { clearRegistry } from '@treenx/core/testing';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 import { executeWithCapability, type Capability } from './capability';

@@ -13,7 +13,7 @@ import { OpError } from '@treenx/core/errors';
 import { executeAction } from '@treenx/core/server/actions';
 import { buildClaims, resolveToken, type Session, withAcl } from '@treenx/core/security/auth';
 import { resolveRef, type Tree } from '@treenx/core/tree';
-import { createRepathTree } from '@treenx/core/tree/repath';
+import { createRepathTree } from '@treenx/core/tree';
 import { randomUUID } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
 import { z } from 'zod/v3';

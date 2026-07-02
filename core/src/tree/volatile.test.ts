@@ -1,5 +1,5 @@
 import { register } from '#core';
-import { clearRegistry } from '#core/index.test';
+import { clearRegistry } from '#testing';
 import { OpError } from '#errors';
 import { createMemoryTree } from '#tree';
 import { mapSiftQuery } from '#tree/query';

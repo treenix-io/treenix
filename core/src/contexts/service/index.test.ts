@@ -1,5 +1,5 @@
 import { createNode, register } from '#core';
-import { clearRegistry } from '#core/index.test';
+import { clearRegistry } from '#testing';
 import { withSubscriptions } from '#sub';
 import { createMemoryTree, resolveRef } from '#tree';
 import assert from 'node:assert/strict';

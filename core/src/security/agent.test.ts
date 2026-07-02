@@ -1,5 +1,5 @@
 import { createNode, R, S, W } from '#core';
-import { clearRegistry } from '#core/index.test';
+import { clearRegistry } from '#testing';
 import { OpError } from '#errors';
 import { createMemoryTree, type Tree } from '#tree';
 import assert from 'node:assert/strict';

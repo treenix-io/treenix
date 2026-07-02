@@ -1,5 +1,5 @@
 import { A, type ComponentData, createNode, type NodeData, R, register, S, W } from '#core';
-import { clearRegistry } from '#core/index.test';
+import { clearRegistry } from '#testing';
 import { createMemoryTree, type Tree } from '#tree';
 import { DEFAULT_BUDGET } from '#tree/read-runtime';
 import assert from 'node:assert/strict';

@@ -37,10 +37,165 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
-    "./*": {
-      "development": "./src/*.ts",
-      "types": "./dist/*.d.ts",
-      "default": "./dist/*.js"
+    "./comp": {
+      "development": "./src/comp.ts",
+      "types": "./dist/comp.d.ts",
+      "default": "./dist/comp.js"
+    },
+    "./comp/validate": {
+      "development": "./src/comp/validate.ts",
+      "types": "./dist/comp/validate.d.ts",
+      "default": "./dist/comp/validate.js"
+    },
+    "./tree": {
+      "development": "./src/tree.ts",
+      "types": "./dist/tree.d.ts",
+      "default": "./dist/tree.js"
+    },
+    "./tree/branch": {
+      "development": "./src/tree/branch.ts",
+      "types": "./dist/tree/branch.d.ts",
+      "default": "./dist/tree/branch.js"
+    },
+    "./tree/cache": {
+      "development": "./src/tree/cache.ts",
+      "types": "./dist/tree/cache.d.ts",
+      "default": "./dist/tree/cache.js"
+    },
+    "./tree/inflight": {
+      "development": "./src/tree/inflight.ts",
+      "types": "./dist/tree/inflight.d.ts",
+      "default": "./dist/tree/inflight.js"
+    },
+    "./tree/mimefs": {
+      "development": "./src/tree/mimefs.ts",
+      "types": "./dist/tree/mimefs.d.ts",
+      "default": "./dist/tree/mimefs.js"
+    },
+    "./tree/patch": {
+      "development": "./src/tree/patch.ts",
+      "types": "./dist/tree/patch.d.ts",
+      "default": "./dist/tree/patch.js"
+    },
+    "./mod": {
+      "development": "./src/mod.ts",
+      "types": "./dist/mod.d.ts",
+      "default": "./dist/mod.js"
+    },
+    "./mount": {
+      "development": "./src/mount.ts",
+      "types": "./dist/mount.d.ts",
+      "default": "./dist/mount.js"
+    },
+    "./client": {
+      "development": "./src/client.ts",
+      "types": "./dist/client.d.ts",
+      "default": "./dist/client.js"
+    },
+    "./errors": {
+      "development": "./src/errors.ts",
+      "types": "./dist/errors.d.ts",
+      "default": "./dist/errors.js"
+    },
+    "./glob": {
+      "development": "./src/glob.ts",
+      "types": "./dist/glob.d.ts",
+      "default": "./dist/glob.js"
+    },
+    "./uri": {
+      "development": "./src/uri.ts",
+      "types": "./dist/uri.d.ts",
+      "default": "./dist/uri.js"
+    },
+    "./log": {
+      "development": "./src/log.ts",
+      "types": "./dist/log.d.ts",
+      "default": "./dist/log.js"
+    },
+    "./testing": {
+      "development": "./src/testing.ts",
+      "types": "./dist/testing.d.ts",
+      "default": "./dist/testing.js"
+    },
+    "./schema/types": {
+      "development": "./src/schema/types.ts",
+      "types": "./dist/schema/types.d.ts",
+      "default": "./dist/schema/types.js"
+    },
+    "./schema/load": {
+      "development": "./src/schema/load.ts",
+      "types": "./dist/schema/load.d.ts",
+      "default": "./dist/schema/load.js"
+    },
+    "./schema/catalog": {
+      "development": "./src/schema/catalog.ts",
+      "types": "./dist/schema/catalog.d.ts",
+      "default": "./dist/schema/catalog.js"
+    },
+    "./security/auth": {
+      "development": "./src/security/auth.ts",
+      "types": "./dist/security/auth.d.ts",
+      "default": "./dist/security/auth.js"
+    },
+    "./security/projector": {
+      "development": "./src/security/projector.ts",
+      "types": "./dist/security/projector.d.ts",
+      "default": "./dist/security/projector.js"
+    },
+    "./contexts/service": {
+      "development": "./src/contexts/service.ts",
+      "types": "./dist/contexts/service.d.ts",
+      "default": "./dist/contexts/service.js"
+    },
+    "./server/actions": {
+      "development": "./src/server/actions.ts",
+      "types": "./dist/server/actions.d.ts",
+      "default": "./dist/server/actions.js"
+    },
+    "./server/server": {
+      "development": "./src/server/server.ts",
+      "types": "./dist/server/server.d.ts",
+      "default": "./dist/server/server.js"
+    },
+    "./server/client": {
+      "development": "./src/server/client.ts",
+      "types": "./dist/server/client.d.ts",
+      "default": "./dist/server/client.js"
+    },
+    "./server/prefab": {
+      "development": "./src/server/prefab.ts",
+      "types": "./dist/server/prefab.d.ts",
+      "default": "./dist/server/prefab.js"
+    },
+    "./server/readonly-tree": {
+      "development": "./src/server/readonly-tree.ts",
+      "types": "./dist/server/readonly-tree.d.ts",
+      "default": "./dist/server/readonly-tree.js"
+    },
+    "./util/safe-timers": {
+      "development": "./src/util/safe-timers.ts",
+      "types": "./dist/util/safe-timers.d.ts",
+      "default": "./dist/util/safe-timers.js"
+    },
+    "./util/debounced-write": {
+      "development": "./src/util/debounced-write.ts",
+      "types": "./dist/util/debounced-write.d.ts",
+      "default": "./dist/util/debounced-write.js"
+    },
+    "./util/yaml": {
+      "development": "./src/util/yaml.ts",
+      "types": "./dist/util/yaml.d.ts",
+      "default": "./dist/util/yaml.js"
+    },
+    "./vite-plugin": {
+      "development": "./src/vite-plugin.ts",
+      "types": "./dist/vite-plugin.d.ts",
+      "default": "./dist/vite-plugin.js"
+    },
+    "./mods/autostart/service": {
+      "development": "./src/mods/autostart/service.ts",
+      "types": "./dist/mods/autostart/service.d.ts",
+      "default": "./dist/mods/autostart/service.js"
     }
   },
   "treenix": {

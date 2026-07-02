@@ -1,5 +1,5 @@
 import { register } from '#core';
-import { clearRegistry } from '#core/index.test';
+import { clearRegistry } from '#testing';
 import { TypeCatalog } from '#schema/catalog';
 import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';

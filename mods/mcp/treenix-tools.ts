@@ -2,7 +2,7 @@
 
 import { createNode } from '@treenx/core';
 import { getCtx, registerActions } from '@treenx/core/comp';
-import { assertSafePath } from '@treenx/core/core/path';
+import { assertSafePath } from '@treenx/core';
 import { TypeCatalog } from '@treenx/core/schema/catalog';
 import { executeAction } from '@treenx/core/server/actions';
 import { deployPrefab } from '@treenx/core/server/prefab';

@@ -6,7 +6,7 @@ import { createMemoryTree, type Tree } from '@treenx/core/tree';
 import { withAcl } from '@treenx/core/security/auth';
 import { OpError } from '@treenx/core/errors';
 import { createNode, register, R, W } from '@treenx/core';
-import { clearRegistry } from '@treenx/core/core/index.test';
+import { clearRegistry } from '@treenx/core/testing';
 import type { ActionCtx } from '@treenx/core/server/actions';
 import type { Session } from '@treenx/core/security/auth';
 import assert from 'node:assert/strict';

@@ -10,7 +10,7 @@
 
 import { registerType } from '#comp';
 import { createNode, getComponentByName, type NodeData, register, resolve } from '#core';
-import { clearRegistry } from '#core/index.test';
+import { clearRegistry } from '#testing';
 import { createMemoryTree, createOverlayTree, mapNodeForSift, type Tree } from '#tree';
 import { createFsTree } from '#tree/fs';
 import { createQueryTree, mapSiftQuery, matchesFilter } from '#tree/query';

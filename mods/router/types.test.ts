@@ -1,5 +1,5 @@
 import { validateComponent } from '@treenx/core/comp/validate';
-import { resolve } from '@treenx/core/core/registry';
+import { resolve } from '@treenx/core';
 import { loadSchemasFromDir } from '@treenx/core/schema/load';
 import type { TypeSchema } from '@treenx/core/schema/types';
 import assert from 'node:assert/strict';

@@ -1,6 +1,6 @@
 import { registerType } from '#comp';
 import { getRegisteredTypes, register, resolve } from '#core';
-import { clearRegistry } from '#core/index.test';
+import { clearRegistry } from '#testing';
 import { loadSchemasFromDir } from '#schema/load';
 import assert from 'node:assert/strict';
 import { readdirSync } from 'node:fs';

@@ -1,5 +1,5 @@
 import { createNode, ref, register } from '#core';
-import { clearRegistry } from '#core/index.test';
+import { clearRegistry } from '#testing';
 import { createMemoryTree, type Tree } from '#tree';
 import { createFsTree } from '#tree/fs';
 import { createQueryTree } from '#tree/query';

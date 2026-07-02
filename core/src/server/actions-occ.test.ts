@@ -1,6 +1,6 @@
 import { registerType } from '#comp';
 import { createNode, register } from '#core';
-import { clearRegistry } from '#core/index.test';
+import { clearRegistry } from '#testing';
 import { createMemoryTree } from '#tree';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';

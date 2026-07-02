@@ -3,7 +3,7 @@
 
 import { registerType } from '#comp';
 import { createNode, type NodeData, register } from '#core';
-import { clearRegistry } from '#core/index.test';
+import { clearRegistry } from '#testing';
 import { createMemoryTree, type Tree } from '#tree';
 import { createQueryTree } from '#tree/query';
 import { enablePatches } from 'immer';
