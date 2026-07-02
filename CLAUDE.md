@@ -61,7 +61,7 @@ HI!
 ## Architecture Constraints
 "Core" below = Layer 0 (`core/src/core`) — the primitives. The @treenx/core PACKAGE is the
 server platform around them (~12k LOC); its upper layers may use focused deps.
-- **Layer 0 < 500 lines** (currently ~455). If more — something is wrong.
+- **Layer 0 < 500 lines** (currently ~500). If more — something is wrong.
 - **Layer 0 has zero imports** (only TypeScript). Upper layers: sift (tree), immer/quickjs (server), trpc (edge) — new deps need a reason at review.
 - **No decorators.** Everything explicit.
 - **No classes in Layer 0.** Plain objects + functions + TS types.

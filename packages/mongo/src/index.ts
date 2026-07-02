@@ -1,7 +1,7 @@
 // Treenix Mongo Tree — Layer 1
 // Drop-in replacement for MemoryStore.
 
-import { type NodeData, toStorageKeys, fromStorageKeys } from '@treenx/core';
+import { type NodeData } from '@treenx/core';
 import { OpError } from '@treenx/core/errors';
 import {
   type ChangeStream,
@@ -15,7 +15,9 @@ import {
   type TreeSource,
   type TreeWatchOpts,
   type TreeWatchScope,
+  fromStorageKeys,
   subscriptionToAsyncIterable,
+  toStorageKeys,
 } from '@treenx/core/tree';
 import { defaultPatch } from '@treenx/core/tree/patch';
 

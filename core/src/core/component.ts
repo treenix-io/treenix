@@ -203,24 +203,6 @@ export function getComponents<T = unknown>(
   return result;
 }
 
-// ── $ ↔ _ key mapping (Mongo/sift compat) ──
-
-export function toStorageKeys(node: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(node))
-    out[k.startsWith('$') ? `_${k.slice(1)}` : k] = v;
-  return out;
-}
-
-export function fromStorageKeys(doc: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(doc)) {
-    if (k === '_id') continue;
-    out[k.startsWith('_') ? `$${k.slice(1)}` : k] = v;
-  }
-  return out;
-}
-
 export function removeComponent(node: NodeData, name: string): boolean {
   const key = compKey(name);
   if (!isComponent(node[key])) return false;

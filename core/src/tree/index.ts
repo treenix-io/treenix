@@ -2,7 +2,7 @@
 // Storage interface + in-memory implementation
 // Depends only on core types.
 
-import { isRef, type NodeData, type Ref, toStorageKeys } from '#core';
+import { isRef, type NodeData, type Ref } from '#core';
 import { OpError } from '#errors';
 import sift from 'sift';
 import { scanFromCollected } from './fs-common';
@@ -209,10 +209,27 @@ export function createOverlayTree(upper: Tree, lower: Tree): Tree {
   };
 }
 
-// ── Storage-key view of a node ──
+// ── $ ↔ _ key mapping (D06: Mongo/sift storage compat) ──
 // $-prefixed system keys ($path, $type, $acl, ...) become _-prefixed for
-// storage matching (sift queries are pre-mapped by `mapSiftQuery`, so
-// nodes must match the same form). Pure Layer-1 helper, no query knowledge.
+// storage: Mongo forbids $-keys, and sift queries are pre-mapped by
+// `mapSiftQuery`, so nodes must match the same form. Layer-1 concern —
+// lived in core/component.ts until 2026-07 (core-tbcn).
+
+export function toStorageKeys(node: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(node))
+    out[k.startsWith('$') ? `_${k.slice(1)}` : k] = v;
+  return out;
+}
+
+export function fromStorageKeys(doc: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(doc)) {
+    if (k === '_id') continue;
+    out[k.startsWith('_') ? `$${k.slice(1)}` : k] = v;
+  }
+  return out;
+}
 
 export function mapNodeForSift(node: NodeData): Record<string, unknown> {
   return toStorageKeys(node);
