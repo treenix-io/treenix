@@ -8,7 +8,7 @@ import { executeAction } from '@treenx/core/server/actions';
 import { createMemoryTree, type Tree } from '@treenx/core/tree';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import '#branch/types';
+import '#branch/service'; // pulls types + the t.mount.branch adapter
 import { branchPromptSection, settleBranchAfterRun } from './service';
 
 loadSchemasFromDir(new URL('../branch/schemas', import.meta.url).pathname);

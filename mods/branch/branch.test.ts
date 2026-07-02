@@ -11,7 +11,7 @@ import { describe, it } from 'node:test';
 import { fileMergeApprovals } from './approvals';
 import type { DiffEntry } from './types';
 import './seed';
-import './types';
+import './service'; // types + the t.mount.branch adapter (server split)
 
 // Action args are schema-validated fail-closed — load the generated schemas
 // the way the mod loader does at boot.

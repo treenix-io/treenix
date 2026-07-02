@@ -6,7 +6,10 @@ lifecycle. Design: `core` repo `docs/engine/branches-plan.md`, epic core-wm6.
 
 ### Files
 - **types.ts** — `t.branches` (container, `create`), `t.branch` (`diff`, `requestMerge`,
-  `merge`, `abandon`), `t.mount.branch` adapter, `/.branch` control window, `branchScope`
+  `merge`, `abandon`). ISOMORPHIC (client convention entry) — no server imports;
+  security/* pulls node:crypto and kills the whole mod in the browser bundle
+- **service.ts** — server only: `t.mount.branch` adapter, `/.branch` control window,
+  `branchScope`
 - **approvals.ts** — `fileMergeApprovals(store)`: status=review → ai.approval inbox entry
   (projection, filed by the orchestrator watcher; requestMerge only flips status)
 - **seed.ts** — `/branches` root + `#description` (t.description — THE agent onboarding
