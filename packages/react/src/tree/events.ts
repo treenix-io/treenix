@@ -24,6 +24,13 @@ let unsub: (() => void) | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let lastConfig: EventsConfig | null = null;
 
+// Highest event seq processed — the resume watermark (core-gk8.1). A reconnect
+// asks the server to replay from here; the ring delivers the gap or answers
+// preserved:false and we full-refetch. Watermark (max-seen), not a counter:
+// gaps are the server's problem to detect, not ours to count. Reset to 0 only
+// on a fresh stream (new login), never on reconnect — see startEvents(resume).
+let lastSeq = 0;
+
 // Coalesce dirty refetches per vp (gk8.12): a burst of writes into one query
 // view triggers ONE listing refetch, not one per event.
 const DIRTY_COALESCE_MS = 75;
@@ -64,9 +71,13 @@ function waitForToken(cb: () => void) {
   }
 }
 
-export function startEvents(config: EventsConfig = {}) {
+export function startEvents(config: EventsConfig = {}, resume = false) {
   stopEvents();
   lastConfig = config;
+
+  // A fresh stream (mount / login) starts a new per-user seq space — a stale
+  // watermark from a prior session must not ask the server to replay it.
+  if (!resume) lastSeq = 0;
 
   // Defer SSE until a session token exists. Once a token lands (login),
   // the caller's auth-state effect or the storage listener below wakes it.
@@ -77,7 +88,7 @@ export function startEvents(config: EventsConfig = {}) {
 
   const { loadChildren, getExpanded, getSelected } = config;
 
-  const sub = trpc.events.subscribe(undefined as void, {
+  const sub = trpc.events.subscribe(lastSeq > 0 ? { since: lastSeq } : undefined, {
     onStarted() {
       window.dispatchEvent(new Event(SSE_CONNECTED));
     },
@@ -123,9 +134,13 @@ export function startEvents(config: EventsConfig = {}) {
         return;
       }
 
+      // Advance the resume watermark. Data events (set/patch/remove) carry seq;
+      // reconnect (returned above) does not.
+      if (typeof event.seq === 'number' && event.seq > lastSeq) lastSeq = event.seq;
+
       if (event.type === 'set') {
         const node = { $path: event.path, ...event.node } as NodeData;
-        if (!applyServerSet(event.path, node)) cache.put(node);
+        if (!applyServerSet(event.path, node, event.by)) cache.put(node);
         // invalidateVps — the coarse dirty signal (gk8.12): each named query
         // view may have shifted; refetch its listing through the normal
         // ACL-filtered read path. Precise add/rm deltas no longer exist.
@@ -137,7 +152,7 @@ export function startEvents(config: EventsConfig = {}) {
         // `unknown` values — server emits real PatchOp tuples, narrow here.
         const patches = event.patches as PatchOp[] | undefined;
         const rev = (event as { rev?: unknown }).rev;
-        if (patches && applyServerPatch(event.path, patches, typeof rev === 'number' ? rev : undefined)) {
+        if (patches && applyServerPatch(event.path, patches, typeof rev === 'number' ? rev : undefined, event.by)) {
           // rebase handled it
         } else {
           const existing = cache.get(event.path);
@@ -189,7 +204,7 @@ function scheduleResubscribe(delayMs: number) {
       if (lastConfig) waitForToken(() => { if (lastConfig) startEvents(lastConfig); });
       return;
     }
-    if (lastConfig) startEvents(lastConfig);
+    if (lastConfig) startEvents(lastConfig, true);
   }, delayMs);
 }
 

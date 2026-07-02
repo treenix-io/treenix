@@ -60,11 +60,11 @@ describe('rebase', () => {
   it('single action → patch → confirmed', () => {
     cache.put({ $path: '/c', $type: 'test.rebase.counter', count: 5 } as any);
 
-    pushOptimistic('/c', Counter, undefined, action('test.rebase.counter', 'increment'), undefined);
+    pushOptimistic('/c', Counter, undefined, action('test.rebase.counter', 'increment'), undefined, 'op1');
     assert.strictEqual((cache.get('/c') as any).count, 6, 'optimistic applied');
 
-    // Server patch: count 5 → 6
-    applyServerPatch('/c', [['r', 'count', 6 ]]);
+    // Server patch echoes our opId as `by` — this ack confirms op1
+    applyServerPatch('/c', [['r', 'count', 6 ]], undefined, 'op1');
     assert.strictEqual((cache.get('/c') as any).count, 6, 'server confirmed');
     assert.strictEqual(hasPending('/c'), false, 'cleaned up');
   });
@@ -72,7 +72,7 @@ describe('rebase', () => {
   it('server enriches data beyond optimistic prediction', () => {
     cache.put({ $path: '/c', $type: 'test.rebase.counter', count: 5 } as any);
 
-    pushOptimistic('/c', Counter, undefined, action('test.rebase.counter', 'increment'), undefined);
+    pushOptimistic('/c', Counter, undefined, action('test.rebase.counter', 'increment'), undefined, 'op1');
     assert.strictEqual((cache.get('/c') as any).count, 6);
     assert.strictEqual((cache.get('/c') as any).updatedBy, undefined, 'client has no enrichment');
 
@@ -80,7 +80,7 @@ describe('rebase', () => {
     applyServerPatch('/c', [
       ['r', 'count', 6 ],
       ['a', 'updatedBy', 'server' ],
-    ]);
+    ], undefined, 'op1');
     const node = cache.get('/c') as any;
     assert.strictEqual(node.count, 6);
     assert.strictEqual(node.updatedBy, 'server', 'server enrichment preserved');
@@ -92,10 +92,10 @@ describe('rebase', () => {
       '#stats': { $type: 'test.rebase.counter', count: 3 },
     } as any);
 
-    pushOptimistic('/n', Counter, 'stats', action('test.rebase.counter', 'increment'), undefined);
+    pushOptimistic('/n', Counter, 'stats', action('test.rebase.counter', 'increment'), undefined, 'op1');
     assert.strictEqual((cache.get('/n') as any)['#stats'].count, 4);
 
-    applyServerPatch('/n', [['r', '#stats.count', 4 ]]);
+    applyServerPatch('/n', [['r', '#stats.count', 4 ]], undefined, 'op1');
     assert.strictEqual((cache.get('/n') as any)['#stats'].count, 4);
     assert.strictEqual(hasPending('/n'), false);
   });
@@ -113,9 +113,9 @@ describe('rebase', () => {
     const toggleFn = action('test.rebase.checklist', 'toggle');
 
     // 3 rapid toggles
-    pushOptimistic('/t', Checklist, undefined, toggleFn, { id: 1 });
-    pushOptimistic('/t', Checklist, undefined, toggleFn, { id: 2 });
-    pushOptimistic('/t', Checklist, undefined, toggleFn, { id: 3 });
+    pushOptimistic('/t', Checklist, undefined, toggleFn, { id: 1 }, 'op1');
+    pushOptimistic('/t', Checklist, undefined, toggleFn, { id: 2 }, 'op2');
+    pushOptimistic('/t', Checklist, undefined, toggleFn, { id: 3 }, 'op3');
 
     const items = () => (cache.get('/t') as any).items;
     assert.strictEqual(items()[0].done, true, 'all 3 optimistic');
@@ -123,19 +123,19 @@ describe('rebase', () => {
     assert.strictEqual(items()[2].done, true);
 
     // Server confirms toggle 1
-    applyServerPatch('/t', [['r', 'items.0.done', true ]]);
+    applyServerPatch('/t', [['r', 'items.0.done', true ]], undefined, 'op1');
     assert.strictEqual(items()[0].done, true, 'confirmed + replayed');
     assert.strictEqual(items()[1].done, true, 'still optimistic');
     assert.strictEqual(items()[2].done, true, 'still optimistic');
     assert.strictEqual(hasPending('/t'), true);
 
     // Server confirms toggle 2
-    applyServerPatch('/t', [['r', 'items.1.done', true ]]);
+    applyServerPatch('/t', [['r', 'items.1.done', true ]], undefined, 'op2');
     assert.strictEqual(items()[1].done, true);
     assert.strictEqual(hasPending('/t'), true);
 
     // Server confirms toggle 3
-    applyServerPatch('/t', [['r', 'items.2.done', true ]]);
+    applyServerPatch('/t', [['r', 'items.2.done', true ]], undefined, 'op3');
     assert.strictEqual(items()[2].done, true);
     assert.strictEqual(hasPending('/t'), false, 'all confirmed, cleaned up');
   });
@@ -143,26 +143,47 @@ describe('rebase', () => {
   it('rollback restores confirmed state', () => {
     cache.put({ $path: '/c', $type: 'test.rebase.counter', count: 5 } as any);
 
-    pushOptimistic('/c', Counter, undefined, action('test.rebase.counter', 'increment'), undefined);
+    pushOptimistic('/c', Counter, undefined, action('test.rebase.counter', 'increment'), undefined, 'op1');
     assert.strictEqual((cache.get('/c') as any).count, 6);
 
-    rollback('/c');
+    rollback('/c', 'op1');
     assert.strictEqual((cache.get('/c') as any).count, 5, 'reverted to confirmed');
     assert.strictEqual(hasPending('/c'), false);
   });
 
-  it('rollback with remaining pending replays survivors', () => {
+  it('rollback targets the failed op by id, not position (cnr.6 regression)', () => {
     cache.put({ $path: '/c', $type: 'test.rebase.counter', count: 5 } as any);
 
     const incFn = action('test.rebase.counter', 'increment');
-    pushOptimistic('/c', Counter, undefined, incFn, undefined); // count=6
-    pushOptimistic('/c', Counter, undefined, incFn, undefined); // count=7
-
+    pushOptimistic('/c', Counter, undefined, incFn, undefined, 'a'); // count=6
+    pushOptimistic('/c', Counter, undefined, incFn, undefined, 'b'); // count=7
     assert.strictEqual((cache.get('/c') as any).count, 7);
 
-    rollback('/c'); // pop second, replay first
-    assert.strictEqual((cache.get('/c') as any).count, 6);
-    assert.strictEqual(hasPending('/c'), true, 'first op still pending');
+    // The HEAD op fails — blind pop() would wrongly drop 'b' instead.
+    rollback('/c', 'a');
+    assert.strictEqual((cache.get('/c') as any).count, 6, 'head removed, b replayed on base');
+    assert.strictEqual(hasPending('/c'), true, 'b still pending');
+
+    applyServerPatch('/c', [['r', 'count', 6 ]], undefined, 'b');
+    assert.strictEqual(hasPending('/c'), false);
+  });
+
+  it('foreign write (no by) does not consume our pending op (cnr.6 regression)', () => {
+    cache.put({ $path: '/c', $type: 'test.rebase.counter', $rev: 1, count: 5 } as any);
+
+    pushOptimistic('/c', Counter, undefined, action('test.rebase.counter', 'increment'), undefined, 'mine');
+    assert.strictEqual((cache.get('/c') as any).count, 6, 'optimistic +1');
+
+    // Another user writes the same node — the event carries no `by` of ours.
+    // Blind FIFO shift would eat our pending slot here (the cnr.6 bug).
+    applyServerPatch('/c', [['r', 'count', 50 ]], 2, undefined);
+    assert.strictEqual((cache.get('/c') as any).count, 51, 'foreign confirmed(50) + our pending +1');
+    assert.strictEqual(hasPending('/c'), true, 'our op survived the foreign write');
+
+    // Our own ack finally arrives (server applied our +1 atop 50).
+    applyServerPatch('/c', [['r', 'count', 51 ]], 3, 'mine');
+    assert.strictEqual(hasPending('/c'), false, 'matching by consumed our op');
+    assert.strictEqual((cache.get('/c') as any).count, 51);
   });
 
   it('applyServerPatch returns false when no rebase state', () => {
@@ -175,11 +196,11 @@ describe('rebase', () => {
     cache.put({ $path: '/c', $type: 'test.rebase.counter', count: 5 } as any);
 
     const incFn = action('test.rebase.counter', 'increment');
-    pushOptimistic('/c', Counter, undefined, incFn, undefined); // count=6
-    pushOptimistic('/c', Counter, undefined, incFn, undefined); // count=7
+    pushOptimistic('/c', Counter, undefined, incFn, undefined, 'op1'); // count=6
+    pushOptimistic('/c', Counter, undefined, incFn, undefined, 'op2'); // count=7
 
     // Server sends full node (set event) confirming first action
-    applyServerSet('/c', { $path: '/c', $type: 'test.rebase.counter', count: 6, extra: 'data' } as any);
+    applyServerSet('/c', { $path: '/c', $type: 'test.rebase.counter', count: 6, extra: 'data' } as any, 'op1');
 
     const node = cache.get('/c') as any;
     assert.strictEqual(node.count, 7, 'confirmed(6) + replay increment = 7');
@@ -194,14 +215,14 @@ describe('rebase', () => {
       const incFn = action('test.rebase.counter', 'increment');
       const brokenFn = action('test.rebase.counter', 'broken');
 
-      pushOptimistic('/c', Counter, undefined, incFn, undefined);    // count=6
-      pushOptimistic('/c', Counter, undefined, brokenFn, undefined); // throws, skipped
-      pushOptimistic('/c', Counter, undefined, incFn, undefined);    // count=7
+      pushOptimistic('/c', Counter, undefined, incFn, undefined, 'op1');    // count=6
+      pushOptimistic('/c', Counter, undefined, brokenFn, undefined, 'op2'); // throws, skipped
+      pushOptimistic('/c', Counter, undefined, incFn, undefined, 'op3');    // count=7
 
       assert.strictEqual((cache.get('/c') as any).count, 7);
 
       // Server confirms first
-      applyServerPatch('/c', [['r', 'count', 6 ]]);
+      applyServerPatch('/c', [['r', 'count', 6 ]], undefined, 'op1');
       // Remaining: broken (skipped) + increment → confirmed=6, replay: skip broken, +1 = 7
       assert.strictEqual((cache.get('/c') as any).count, 7);
       assert.ok(
@@ -221,6 +242,7 @@ describe('rebase', () => {
         undefined,
         () => Promise.reject(new Error('async fail')),
         undefined,
+        'op1',
         { type: 'test.rebase.counter', action: 'asyncBroken' },
       );
       await Promise.resolve();
@@ -235,19 +257,19 @@ describe('rebase', () => {
   it('cleanup leaves no state in map', () => {
     cache.put({ $path: '/c', $type: 'test.rebase.counter', count: 0 } as any);
 
-    pushOptimistic('/c', Counter, undefined, action('test.rebase.counter', 'increment'), undefined);
+    pushOptimistic('/c', Counter, undefined, action('test.rebase.counter', 'increment'), undefined, 'op1');
     assert.strictEqual(hasPending('/c'), true);
 
-    applyServerPatch('/c', [['r', 'count', 1 ]]);
+    applyServerPatch('/c', [['r', 'count', 1 ]], undefined, 'op1');
     assert.strictEqual(hasPending('/c'), false, 'state map cleaned up');
   });
 
   it('applyServerPatch updates confirmed $rev from event.rev (regression for OCC storm)', () => {
     cache.put({ $path: '/c', $type: 'test.rebase.counter', $rev: 1, count: 0 } as any);
 
-    pushOptimistic('/c', Counter, undefined, action('test.rebase.counter', 'increment'), undefined);
+    pushOptimistic('/c', Counter, undefined, action('test.rebase.counter', 'increment'), undefined, 'op1');
     // While pending, server confirms with new rev
-    applyServerPatch('/c', [['r', 'count', 1 ]], 2);
+    applyServerPatch('/c', [['r', 'count', 1 ]], 2, 'op1');
 
     const node = cache.get('/c') as any;
     assert.strictEqual(node.$rev, 2, 'confirmed $rev advanced to server rev (was stale → OCC storm before fix)');
@@ -256,8 +278,8 @@ describe('rebase', () => {
   it('applyServerPatch ignores non-finite rev (wire garbage)', () => {
     cache.put({ $path: '/c', $type: 'test.rebase.counter', $rev: 5, count: 0 } as any);
 
-    pushOptimistic('/c', Counter, undefined, action('test.rebase.counter', 'increment'), undefined);
-    applyServerPatch('/c', [['r', 'count', 1 ]], Number.NaN);
+    pushOptimistic('/c', Counter, undefined, action('test.rebase.counter', 'increment'), undefined, 'op1');
+    applyServerPatch('/c', [['r', 'count', 1 ]], Number.NaN, 'op1');
 
     const node = cache.get('/c') as any;
     assert.strictEqual(node.$rev, 5, 'NaN rev did not corrupt cached $rev');

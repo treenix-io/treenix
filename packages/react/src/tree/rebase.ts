@@ -8,6 +8,7 @@ import { applyOps, type PatchOp } from '@treenx/core/tree';
 import * as cache from './cache';
 
 interface PendingOp {
+  opId: string;
   cls: Class<any>;
   key?: string;
   handler: Function;
@@ -61,10 +62,29 @@ function cleanup(path: string, rs: RebaseState) {
   state.delete(path);
 }
 
+// State exists only while pending is non-empty (settle deletes it at zero), so
+// a live rs always carries at least one pending op.
+function settle(path: string, rs: RebaseState) {
+  if (rs.pending.length === 0) cleanup(path, rs);
+  else replayAndPut(path, rs);
+}
+
+/** Consume the pending op this server event acknowledges (core-gk8.1).
+ *  `by` = the opId the client stamped on its mutation, echoed back on the
+ *  resulting event. A write we did NOT originate (another user, a server job)
+ *  carries no `by` — it advances confirmed but must never eat a local pending
+ *  slot. Blind FIFO shift did exactly that (cnr.6): a foreign patch on the same
+ *  path stole an in-flight optimistic op's ack. Match by id, not position. */
+function consumeAck(rs: RebaseState, by: string | undefined) {
+  if (by === undefined) return;
+  const idx = rs.pending.findIndex(op => op.opId === by);
+  if (idx !== -1) rs.pending.splice(idx, 1);
+}
+
 /** Push an optimistic action — snapshot confirmed on first call, replay all pending */
 export function pushOptimistic<T extends object>(
   path: string, cls: Class<T>, key: string | undefined,
-  handler: Function, data: unknown,
+  handler: Function, data: unknown, opId: string,
   meta?: { type?: string; action?: string },
 ): void {
   const cached = cache.get(path);
@@ -75,12 +95,12 @@ export function pushOptimistic<T extends object>(
     rs = { confirmed: structuredClone(cached), pending: [] };
     state.set(path, rs);
   }
-  rs.pending.push({ cls, key, handler, data, type: meta?.type, action: meta?.action });
+  rs.pending.push({ opId, cls, key, handler, data, type: meta?.type, action: meta?.action });
   replayAndPut(path, rs);
 }
 
 /** Apply server patch to confirmed state. Returns true if rebase handled it. */
-export function applyServerPatch(path: string, patches: PatchOp[], rev?: number): boolean {
+export function applyServerPatch(path: string, patches: PatchOp[], rev?: number, by?: string): boolean {
   const rs = state.get(path);
   if (!rs) return false;
 
@@ -89,44 +109,34 @@ export function applyServerPatch(path: string, patches: PatchOp[], rev?: number)
   // and next optimistic op sends stale $rev → OptimisticConcurrencyError storm.
   // Guard against wire-level garbage (NaN, null disguised as number).
   if (typeof rev === 'number' && Number.isFinite(rev)) rs.confirmed.$rev = rev;
-  rs.pending.shift();
-
-  if (rs.pending.length === 0) {
-    cleanup(path, rs);
-  } else {
-    replayAndPut(path, rs);
-  }
+  consumeAck(rs, by);
+  settle(path, rs);
   return true;
 }
 
 /** Apply server set (full node) to confirmed state. Returns true if rebase handled it. */
-export function applyServerSet(path: string, node: NodeData): boolean {
+export function applyServerSet(path: string, node: NodeData, by?: string): boolean {
   const rs = state.get(path);
   if (!rs) return false;
 
   rs.confirmed = node;
-  rs.pending.shift();
-
-  if (rs.pending.length === 0) {
-    cleanup(path, rs);
-  } else {
-    replayAndPut(path, rs);
-  }
+  consumeAck(rs, by);
+  settle(path, rs);
   return true;
 }
 
-/** Rollback last pending op (action failed on server) */
-export function rollback(path: string): void {
+/** Rollback the pending op that failed on the server, by its opId (core-gk8.1).
+ *  Blind pop() rolled back the LAST op regardless of which one erred (cnr.6);
+ *  out-of-order failures corrupted the queue. Idempotent — a no-op if the op
+ *  was already consumed by an ack that raced the rejection. */
+export function rollback(path: string, opId: string): void {
   const rs = state.get(path);
   if (!rs) return;
 
-  rs.pending.pop();
-
-  if (rs.pending.length === 0) {
-    cleanup(path, rs);
-  } else {
-    replayAndPut(path, rs);
-  }
+  const idx = rs.pending.findIndex(op => op.opId === opId);
+  if (idx === -1) return;
+  rs.pending.splice(idx, 1);
+  settle(path, rs);
 }
 
 /** Check if path has rebase state (for testing) */

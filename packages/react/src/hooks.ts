@@ -288,6 +288,12 @@ export const execute = (
     key = parsed.key;
   }
 
+  // opId — idempotency key + ack correlator (core-gk8.1). The server threads it
+  // to the write and echoes it as `by` on the resulting event, so rebase can tell
+  // our own ack from a foreign write. Generated unconditionally: even when local
+  // prediction is skipped, the server still dedups replays on it.
+  const opId = crypto.randomUUID();
+
   // Optimistic: resolve class from cache + registry, predict locally
   const cached = cache.get(path);
   if (cached) {
@@ -296,12 +302,12 @@ export const execute = (
     if (!meta?.noOptimistic) {
       const cls = resolve(compType, 'class');
       const actionFn = resolve(compType, `action:${action}`, false);
-      if (cls && actionFn) pushOptimistic(path, cls, key, actionFn, data, { type: compType, action });
+      if (cls && actionFn) pushOptimistic(path, cls, key, actionFn, data, opId, { type: compType, action });
     }
   }
 
-  return trpc.execute.mutate({ path, type, key, action, data }).catch(err => {
-    rollback(path);
+  return trpc.execute.mutate({ path, type, key, action, data, opId }).catch(err => {
+    rollback(path, opId);
     throw err;
   });
 };
