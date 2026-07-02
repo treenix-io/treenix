@@ -1,4 +1,4 @@
-import { refVal, type TypedRef } from '#chain';
+import { refVal, type TypedRef } from './chain';
 import { registerType } from '#comp';
 import { isRef } from '#core';
 import type { Tree } from '#tree';
