@@ -76,8 +76,12 @@ export function startEvents(config: EventsConfig = {}, resume = false) {
   lastConfig = config;
 
   // A fresh stream (mount / login) starts a new per-user seq space — a stale
-  // watermark from a prior session must not ask the server to replay it.
-  if (!resume) lastSeq = 0;
+  // watermark from a prior session must not ask the server to replay it, and
+  // its overlays are equally dead (same continuity-break as preserved:false).
+  if (!resume) {
+    lastSeq = 0;
+    clearRebase();
+  }
 
   // Defer SSE until a session token exists. Once a token lands (login),
   // the caller's auth-state effect or the storage listener below wakes it.
