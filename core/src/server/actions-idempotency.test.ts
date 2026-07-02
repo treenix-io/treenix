@@ -82,6 +82,24 @@ describe('executeAction idempotency (opId)', () => {
     assert.equal((await tree.get('/p'))!.paid, 20);
   });
 
+  it('same opId from a DIFFERENT user is not a replay — no cross-user result leak', async () => {
+    const tree = createMemoryTree();
+    await tree.set(createNode('/p', 'pay', { paid: 0 }));
+    const opId = 'op-shared-guess';
+
+    const a = await executeAction(tree, '/p', undefined, undefined, 'charge', { amount: 10 }, { opId, userId: 'alice' });
+    const b = await executeAction(tree, '/p', undefined, undefined, 'charge', { amount: 10 }, { opId, userId: 'bob' });
+
+    assert.equal(attempts, 2, 'bob must execute, not read alice\'s cached result');
+    assert.equal(a, 10);
+    assert.equal(b, 20);
+
+    // Same user replay still dedups.
+    const replay = await executeAction(tree, '/p', undefined, undefined, 'charge', { amount: 10 }, { opId, userId: 'alice' });
+    assert.equal(attempts, 2);
+    assert.equal(replay, 10);
+  });
+
   it('without opId every call applies', async () => {
     const tree = createMemoryTree();
     await tree.set(createNode('/p', 'pay', { paid: 0 }));

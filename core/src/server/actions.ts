@@ -387,6 +387,8 @@ export type ActionOpts = {
 // double-applies (core-gk8.2). Failed executions are cached too: the retry
 // observes the same error rather than applying a second time. opIds are
 // client-generated and must be unique per logical operation.
+// Keyed per user: a bare opId key would let anyone who LEARNS another user's
+// opId (logs, proxy) fetch that user's cached result, bypassing ACL.
 const opResults = createBoundedCache<string, Promise<unknown>>(1000);
 
 export function executeAction<T = unknown>(
@@ -401,10 +403,11 @@ export function executeAction<T = unknown>(
   const opId = opts?.opId;
   if (!opId) return runAction<T>(tree, path, componentType, componentKey, action, data, opts);
 
-  const prior = opResults.get(opId);
+  const opKey = `${opts?.userId ?? ''} ${opId}`;
+  const prior = opResults.get(opKey);
   if (prior) return prior as Promise<T>;
   const run = runAction<T>(tree, path, componentType, componentKey, action, data, opts);
-  opResults.set(opId, run);
+  opResults.set(opKey, run);
   return run;
 }
 
