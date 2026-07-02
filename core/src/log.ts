@@ -1,6 +1,8 @@
-// Unified logging: tree-persisted nodes + ring buffer fallback + debug filter + console intercept
-
-import dayjs from 'dayjs'
+// Unified logging: bounded ring buffer + debug filter + console intercept.
+// Query surface: the t.logs action node (observability/logs.ts) over queryLogs.
+// jre7 (2026-07): the per-line log→tree wire (addOnLog → /sys/logs/<ts> node per
+// line) is CUT — nothing ever read those nodes, each line was a full pipeline
+// write, and the memory tree retained ~4.6KB/line even after remove.
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error'
 
@@ -22,38 +24,7 @@ let _getCtx: CtxProvider = () => null
 
 export function setCtxProvider(fn: CtxProvider) { _getCtx = fn }
 
-// ── Log listeners ──
-
-type OnLog = (entry: LogEntry) => void
-const listeners: OnLog[] = []
-
-export function addOnLog(fn: OnLog) { listeners.push(fn) }
-
-// ── Timestamp ID: YYMMDD-HHmmss-mmm-NNN ──
-
-let lastMs = 0
-let seq = 0
-
-export function makeLogPath(): string {
-  const now = Date.now()
-  if (now === lastMs) {
-    seq++
-  } else {
-    lastMs = now
-    seq = 0
-  }
-
-  const stamp = dayjs(now).format('YYMMDD-HHmmss-SSS')
-  const sq = String(seq).padStart(3, '0')
-
-  return `/sys/logs/${stamp}-${sq}`
-}
-
-function notify(entry: LogEntry) {
-  for (const fn of listeners) fn(entry)
-}
-
-// ── Ring buffer (fallback before tree init) ──
+// ── Ring buffer — the log store, bounded at MAX ──
 
 const MAX = 2000
 const buffer: LogEntry[] = []
@@ -92,17 +63,13 @@ function push(level: LogLevel, args: unknown[]) {
     path: ctx?.path as string | undefined,
   }
 
-  if (listeners.length) {
-    notify(entry)
+  if (total < MAX) {
+    buffer.push(entry)
   } else {
-    if (total < MAX) {
-      buffer.push(entry)
-    } else {
-      buffer[cursor] = entry
-    }
-    cursor = (cursor + 1) % MAX
-    total++
+    buffer[cursor] = entry
   }
+  cursor = (cursor + 1) % MAX
+  total++
 }
 
 /** Get ordered log entries from ring buffer (oldest first) */
@@ -111,7 +78,7 @@ function getOrdered(): LogEntry[] {
   return [...buffer.slice(cursor), ...buffer.slice(0, cursor)]
 }
 
-// ── Query (ring buffer fallback — when tree available, use sift via getChildren) ──
+// ── Query the ring buffer (t.logs action surface) ──
 
 export interface LogQuery {
   grep?: string

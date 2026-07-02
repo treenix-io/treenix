@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import { afterEach, beforeEach, describe, it } from 'node:test';
-import { createLogger, matchesLogGrep, queryLogs, setDebug } from './log.js';
+import { createLogger, interceptConsole, logStats, matchesLogGrep, queryLogs, setDebug } from './log.js';
 
 describe('createLogger', () => {
   const calls: { method: string; args: unknown[] }[] = []
@@ -76,5 +76,29 @@ describe('createLogger', () => {
 
   it('queryLogs does not compile grep as a regexp', () => {
     assert.doesNotThrow(() => queryLogs({ grep: '[' }))
+  })
+})
+
+// jre7 regression: the buffer is THE log store (the log→tree wire is cut) —
+// it must keep filling forever and stay bounded, evicting oldest first.
+describe('ring buffer', () => {
+  const original = console.info
+
+  afterEach(() => {
+    console.info = original
+  })
+
+  it('a console flood stays bounded at max and keeps the newest entries', () => {
+    console.info = () => {} // mute the terminal; intercept wraps this
+    interceptConsole()
+    const { max } = logStats()
+
+    for (let i = 0; i < max + 500; i++) console.info(`flood-${i}`)
+
+    assert.ok(logStats().buffered <= max)
+    const entries = queryLogs({ grep: 'flood-' })
+    assert.ok(entries.length <= max)
+    assert.ok(entries.some(e => e.msg === `flood-${max + 499}`), 'newest entry must be present')
+    assert.ok(!entries.some(e => e.msg === 'flood-0'), 'oldest entry must be evicted')
   })
 })

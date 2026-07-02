@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
 import { A, createNode, R, S, W } from '#core';
+import { interceptConsole, queryLogs } from '#log';
 import type { Tree } from '#tree';
 import { treenix } from './factory';
 
@@ -137,5 +138,34 @@ describe('treenix({ healthCheck })', () => {
     assert.notEqual(status, 503);
     await app.stop();
     server.close();
+  });
+});
+
+// jre7 regression: the per-line log→tree wire (every console line became a
+// /sys/logs/<ts> node through the full pipeline — nobody read them, memory
+// grew unboundedly) is cut. Console logging lands ONLY in the ring buffer.
+describe('log flood (jre7)', () => {
+  it('console logging fills the ring buffer, never /sys/logs nodes', async () => {
+    const app = await treenix({
+      modsDir: false,
+      autostart: false,
+      seed: async () => {},
+      rootNode: rootNode(tmp),
+    });
+
+    const savedInfo = console.info;
+    console.info = () => {};
+    interceptConsole();
+    for (let i = 0; i < 50; i++) console.info(`jre7-flood-${i}`);
+    console.info = savedInfo;
+
+    // The intercept path is live — every line is queryable from the buffer…
+    assert.equal(queryLogs({ grep: 'jre7-flood-' }).length, 50);
+
+    // …and the tree stays clean: zero per-line node writes.
+    const logs = await app.systemTree.getChildren('/sys/logs');
+    assert.equal(logs.total, 0);
+
+    await app.stop();
   });
 });
