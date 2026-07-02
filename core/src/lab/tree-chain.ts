@@ -10,7 +10,7 @@ import { type Class, type Raw, type TypeClass } from '#comp';
 import { getComponent, getComponentByName, isRef, type NodeData, normalizeType, resolve } from '#core';
 import { OpError } from '#errors';
 import type { Tree } from '#tree';
-import type { Chain } from './chain';
+import type { Chain } from '#chain';
 
 type Spec = { cls: Class | null; key?: string }
 type Op = string | [string, unknown[]]
