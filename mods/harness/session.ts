@@ -5,7 +5,7 @@
 import { getComponentByName } from '@treenx/core';
 import type { ActorContext } from '@treenx/core/server/actions';
 import { executeAction } from '@treenx/core/server/actions';
-import type { Session } from '@treenx/core/security/auth';
+import type { Session } from '@treenx/core/security';
 import { OpError } from '@treenx/core/errors';
 import type { Tree } from '@treenx/core/tree';
 import { randomUUID } from 'node:crypto';

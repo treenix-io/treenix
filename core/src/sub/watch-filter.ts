@@ -4,7 +4,8 @@
 
 import { A, isComponent, type NodeData, R } from '#core';
 import type { PatchOp, Tree } from '#tree';
-import { buildClaims, componentPerm, resolvePermission, stripComponents } from '#security/auth';
+import { componentPerm, resolvePermission, stripComponents } from '#security/acl';
+import { buildClaims } from '#security/claims';
 import type { NodeEvent } from './index';
 
 export type EventPush = (event: NodeEvent) => void;

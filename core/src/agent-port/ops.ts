@@ -2,7 +2,7 @@
 
 import { OpError } from '#errors';
 import { AGENT_SESSION_TTL, hashAgentKey, timingSafeCompare } from '#security/agent';
-import { createSession } from '#security/auth';
+import { createSession } from '#security/sessions';
 import { checkRate } from '#security/rate-limit';
 import type { Tree } from '#tree';
 

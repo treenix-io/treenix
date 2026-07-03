@@ -14,7 +14,7 @@
 import { A, createNode, R, register, S, unregister, W, type NodeData } from '#core';
 import { OpError } from '#errors';
 import type { MountCtx } from '#mount';
-import { withAcl } from '#security/auth';
+import { withAcl } from '#security/acl-tree';
 import { type NodeEvent, withSubscriptions } from '#sub';
 import { createMemoryTree, type Tree, type TreeWatchScope } from '#tree';
 import assert from 'node:assert/strict';

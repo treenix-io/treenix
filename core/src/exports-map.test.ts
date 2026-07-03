@@ -14,7 +14,7 @@ describe('exports map (qvrt)', () => {
     await import('@treenx/core/errors');
     await import('@treenx/core/testing');
     await import('@treenx/core/server/actions');
-    await import('@treenx/core/security/auth');
+    await import('@treenx/core/security');
   });
 
   it('internals do not resolve — pipeline wrappers and infra are private', async () => {

@@ -3,7 +3,7 @@
 // executeWithCapability (separate concern, separate test).
 
 import { createMemoryTree, type Tree } from '@treenx/core/tree';
-import { withAcl } from '@treenx/core/security/auth';
+import { withAcl } from '@treenx/core/security';
 import { OpError } from '@treenx/core/errors';
 import { R, W } from '@treenx/core';
 import assert from 'node:assert/strict';

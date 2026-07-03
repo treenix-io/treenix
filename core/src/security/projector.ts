@@ -11,7 +11,7 @@ import { A, R, type NodeData } from '#core';
 import { OpError } from '#errors';
 import type { Tree } from '#tree';
 import type { Projector } from '#tree/read-runtime';
-import { resolvePermission, stripComponents } from './auth';
+import { resolvePermission, stripComponents } from './acl';
 
 export type Actor = {
   userId: string | null;

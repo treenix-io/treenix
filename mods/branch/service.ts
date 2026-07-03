@@ -6,7 +6,7 @@
 import { register, type NodeData } from '@treenx/core';
 import { OpError } from '@treenx/core/errors';
 import type { MountCtx } from '@treenx/core/mount';
-import { buildClaims, withAcl } from '@treenx/core/security/auth';
+import { buildClaims, withAcl } from '@treenx/core/security';
 import { createProjector } from '@treenx/core/security/projector';
 import { wrapReadOnlyTree } from '@treenx/core/server/readonly-tree';
 import type { Tree } from '@treenx/core/tree';

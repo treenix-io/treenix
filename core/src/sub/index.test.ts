@@ -1,5 +1,5 @@
 import { A, createNode, getComponentByName, R, type NodeData } from '#core';
-import { userIdFromAuthPath } from '#security/auth';
+import { userIdFromAuthPath } from '#security/claims';
 import { createMemoryTree } from '#tree';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';

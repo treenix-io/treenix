@@ -57,6 +57,11 @@
       "types": "./dist/tree/branch.d.ts",
       "default": "./dist/tree/branch.js"
     },
+    "./tree/migrate-component-namespace": {
+      "development": "./src/tree/migrate-component-namespace.ts",
+      "types": "./dist/tree/migrate-component-namespace.d.ts",
+      "default": "./dist/tree/migrate-component-namespace.js"
+    },
     "./tree/cache": {
       "development": "./src/tree/cache.ts",
       "types": "./dist/tree/cache.d.ts",
@@ -132,10 +137,10 @@
       "types": "./dist/schema/catalog.d.ts",
       "default": "./dist/schema/catalog.js"
     },
-    "./security/auth": {
-      "development": "./src/security/auth.ts",
-      "types": "./dist/security/auth.d.ts",
-      "default": "./dist/security/auth.js"
+    "./security": {
+      "development": "./src/security.ts",
+      "types": "./dist/security.d.ts",
+      "default": "./dist/security.js"
     },
     "./security/projector": {
       "development": "./src/security/projector.ts",

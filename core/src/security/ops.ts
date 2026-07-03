@@ -3,7 +3,8 @@
 
 import { getComponentByName, makeNode, R, W } from '#core';
 import type { Tree } from '#tree';
-import { assertNotSystem, createSession, DUMMY_HASH, hashPassword, revokeSession, verifyPassword } from './auth';
+import { assertNotSystem } from './claims';
+import { createSession, DUMMY_HASH, hashPassword, revokeSession, verifyPassword } from './sessions';
 import { OpError } from '#errors';
 import { checkRate } from './rate-limit';
 

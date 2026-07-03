@@ -5,7 +5,7 @@
 // - F10: set event uses stored node $owner/$acl, not writer-supplied payload
 
 import { createNode, R, W, register } from '#core';
-import { resolvePermission } from '#security/auth';
+import { resolvePermission } from '#security/acl';
 import { createMemoryTree, type PatchOp } from '#tree';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';

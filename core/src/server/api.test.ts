@@ -7,7 +7,7 @@ import { createNode, R, register, S, W } from '#core';
 import { createMemoryTree, type Tree } from '#tree';
 import assert from 'node:assert/strict';
 import { before, beforeEach, describe, it } from 'node:test';
-import { type Session } from '#security/auth';
+import { type Session } from '#security/sessions';
 import '#mount/adapters';
 import { withMounts } from '#mount';
 import { type NodeEvent, withSubscriptions } from '#sub';

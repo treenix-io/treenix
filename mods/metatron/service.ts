@@ -3,7 +3,7 @@
 // withAcl.get() returns undefined for denied paths — no existence leakage.
 
 import { OpError } from '@treenx/core/errors';
-import { buildClaims, withAcl } from '@treenx/core/security/auth';
+import { buildClaims, withAcl } from '@treenx/core/security';
 import { uniqueMentionPaths } from './mentions';
 
 const SENSITIVE_RE = /(password|secret|token|key|hash|credentials|apiKey|api_key)/i;

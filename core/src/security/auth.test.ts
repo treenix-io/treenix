@@ -4,22 +4,11 @@ import { createMemoryTree, type Tree } from '#tree';
 import { DEFAULT_BUDGET } from '#tree/read-runtime';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
-import {
-  ancestorPaths,
-  assertNotSystem,
-  buildClaims,
-  buildSessionCookie,
-  componentPerm,
-  createSession,
-  resolvePermission,
-  resolveToken,
-  revokeSession,
-  SESSION_TTL_MS,
-  SYSTEM_CLAIM,
-  sessionPath,
-  stripComponents,
-  withAcl,
-} from './auth';
+import { ancestorPaths, componentPerm, resolvePermission, stripComponents } from './acl';
+import { withAcl } from './acl-tree';
+import { assertNotSystem, buildClaims, SYSTEM_CLAIM } from './claims';
+import { buildSessionCookie } from './cookies';
+import { createSession, resolveToken, revokeSession, SESSION_TTL_MS, sessionPath } from './sessions';
 import { devLogin, loginUser, registerUser } from './ops';
 import { GROUPS_ACL } from './groups';
 import { OpError } from '#errors';

@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 import { withMounts } from '#mount';
 import { createTreeRouter } from './trpc';
-import { type Session } from '#security/auth';
+import { type Session } from '#security/sessions';
 import { createWatchManager } from '#sub/watch';
 
 class Order {

@@ -8,15 +8,9 @@ import { createHmac, randomBytes } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { createMemoryTree } from '#tree';
-import {
-  _resetAnonKeyForTests,
-  ANON_COOKIE_MAX_AGE,
-  buildSessionCookie,
-  createAnonSession,
-  resolveOrIssueSession,
-  resolveToken,
-  SESSION_TTL_MS,
-} from './auth';
+import { _resetAnonKeyForTests, createAnonSession } from './anon';
+import { ANON_COOKIE_MAX_AGE, buildSessionCookie } from './cookies';
+import { resolveOrIssueSession, resolveToken, SESSION_TTL_MS } from './sessions';
 
 const TEST_KEY_HEX = randomBytes(32).toString('hex');
 

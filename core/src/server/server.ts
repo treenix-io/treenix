@@ -10,15 +10,15 @@ import { TRPCError } from '@trpc/server';
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { extname, join, resolve, sep } from 'node:path';
+import { withAcl } from '#security/acl-tree';
+import { userIdFromAuthPath } from '#security/claims';
 import {
   ANON_COOKIE_MAX_AGE,
   buildClearSessionCookie,
   buildSessionCookie,
   parseSessionCookie,
-  resolveOrIssueSession,
-  userIdFromAuthPath,
-  withAcl,
-} from '#security/auth';
+} from '#security/cookies';
+import { resolveOrIssueSession } from '#security/sessions';
 import { getComponentByName } from '#core';
 import { withMounts } from '#mount';
 import { withRefIndex } from '#tree/refs';

@@ -9,7 +9,7 @@ import { type ServiceHandle, startServices } from '#contexts/service/index';
 import { type NodeData } from '#core';
 import { addOnLog, makeLogPath } from '#log';
 import { loadAllMods } from '#mod';
-import { getAnonKey } from '#security/auth';
+import { getAnonKey } from '#security/anon';
 import { loadSchemasFromDir } from '#schema/load';
 import { createMemoryTree, type Tree } from '#tree';
 import { sweepTrash } from '#tree/trash';

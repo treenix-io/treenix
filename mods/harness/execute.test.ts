@@ -3,7 +3,7 @@
 // Tree handed to action is wrapped via withCapability so internal writes stay in scope.
 
 import { createMemoryTree, type Tree } from '@treenx/core/tree';
-import { withAcl } from '@treenx/core/security/auth';
+import { withAcl } from '@treenx/core/security';
 import { OpError } from '@treenx/core/errors';
 import { register, R, W } from '@treenx/core';
 import { clearRegistry } from '@treenx/core/testing';

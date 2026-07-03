@@ -6,7 +6,9 @@ import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 import { AGENT_SESSION_TTL, hashAgentKey, timingSafeCompare } from './agent';
 import { agentConnect, agentInitPair } from '#agent-port/ops';
-import { buildClaims, createSession, resolveToken, withAcl } from './auth';
+import { withAcl } from './acl-tree';
+import { buildClaims } from './claims';
+import { createSession, resolveToken } from './sessions';
 
 // Import agent-port type registration (side-effect: registers t.agent.port)
 import '#agent-port';

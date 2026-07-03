@@ -3,7 +3,7 @@
 
 import { createNode } from '@treenx/core';
 import { getCtx, registerActions } from '@treenx/core/comp';
-import { createSession, sessionPath } from '@treenx/core/security/auth';
+import { createSession, sessionPath } from '@treenx/core/security';
 import { ApiTokenManager } from './types';
 
 /** Server-side registry for creating and revoking machine credentials. */
@@ -30,7 +30,7 @@ class ApiTokenServer extends ApiTokenManager {
     } else {
       // Refresh groups on re-issue so admins can elevate/restrict an existing api user.
       await tree.patch(userPath, [
-        ['r', 'groups', { $type: 'groups', list: groups }],
+        ['r', '#groups', { $type: 'groups', list: groups }],
       ]);
     }
 

@@ -1,0 +1,286 @@
+// ── withAcl — the per-actor Tree wrapper ──
+// Resolves ACL per path, strips forbidden components, gates every verb.
+// Read path (depth=1) routes through the executeList read runtime.
+
+import { A, type ComponentData, isComponent, type NodeData, R, W } from '#core';
+import { OpError } from '#errors';
+import { asTreeSource, assertSafePatchPath, mapNodeForSift, type Page, paginate, type Tree } from '#tree';
+import { createSiftTest, withAclQueryTree } from '#tree/query';
+import { executeList } from '#tree/read-runtime';
+import { resolveReadPlan } from '#mount/resolve-plan';
+import { type AclState, componentPerm, resolvePermission, stripComponents } from './acl';
+import { type Actor, assertSourceReadable, createProjector } from './projector';
+
+// ── Patch op rules ──
+// Mirrors stripComponents visibility (lines 268-279, 320-324, 340-344):
+//   $path/$type/$rev/$ref always visible → t allowed; only $ref mutable.
+//   $acl/$owner visible only with A → both gates require A.
+//   $refs always stripped → both ops forbidden (oracle).
+//   other $-fields → forbidden (unknown system fields).
+function assertMutationSystemField(firstSeg: string, isAdmin: boolean): void {
+  if (!firstSeg.startsWith('$')) return;
+  if (firstSeg === '$ref') return;
+  if (firstSeg === '$acl' || firstSeg === '$owner') {
+    if (isAdmin) return;
+    throw new OpError('FORBIDDEN', `Access denied: ${firstSeg} requires A permission`);
+  }
+  throw new OpError('FORBIDDEN', `Access denied: ${firstSeg} is system-managed`);
+}
+
+function assertTestSystemField(firstSeg: string, isAdmin: boolean): void {
+  if (!firstSeg.startsWith('$')) return;
+  if (firstSeg === '$path' || firstSeg === '$type' || firstSeg === '$rev' || firstSeg === '$ref') return;
+  if (firstSeg === '$acl' || firstSeg === '$owner') {
+    if (isAdmin) return;
+    throw new OpError('FORBIDDEN', `Access denied: ${firstSeg} requires A permission`);
+  }
+  throw new OpError('FORBIDDEN', `Access denied: ${firstSeg} is hidden from reads`);
+}
+
+function assertComponentPerm(
+  bit: number,            // R for `t`, W for r/a/d
+  firstSeg: string,
+  existing: NodeData | undefined,
+  userId: string | null,
+  claims: string[],
+  owner: string | undefined,
+): void {
+  if (firstSeg.startsWith('$')) return;
+  const existingVal = existing?.[firstSeg];
+  if (isComponent(existingVal) && !(componentPerm(existingVal, userId, claims, owner) & bit)) {
+    throw new OpError('FORBIDDEN', `Access denied: component ${firstSeg}`);
+  }
+}
+
+function sameValue(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  try { return JSON.stringify(a) === JSON.stringify(b); } catch { return false; }
+}
+
+// ── Tree wrapper ──
+
+export type AclStore = Tree & {
+  /** Cached after get/getChildren — O(1) for already-resolved paths */
+  getPerm(path: string): Promise<number>;
+};
+
+// MVP read-runtime budgets. Public limit ceiling matches MVP rule 5.
+const PUBLIC_LIMIT_MAX = 200;
+const PUBLIC_LIMIT_DEFAULT = 100;
+
+export function withAcl(rawStore: Tree, userId: string | null, claims: string[]): AclStore {
+  const cache = new Map<string, number>();
+  // stateCache: accumulated ACL state per tree level — avoids re-walking shared ancestors
+  // within a single request. nodeCache is handled by withCache in the tree pipeline.
+  const stateCache = new Map<string, AclState>();
+
+  async function getPerm(path: string): Promise<number> {
+    return resolvePermission(rawStore, path, userId, claims, cache, undefined, stateCache);
+  }
+
+  // depth>1 fallback: when the caller needs descendants beyond the top
+  // level, executeList's depth-1 contract isn't enough yet (MVP rule 1).
+  // Use legacy scan+filter+strip until Stage-future deep scanning lands.
+  // Same scan-cap warning preserved so operators see the truncation.
+  const LEGACY_DEEP_SCAN_LIMIT = 1_000;
+  async function legacyDeepGetChildren(
+    path: string,
+    opts: import('#tree').ChildrenOpts | undefined,
+    ctx: unknown,
+  ): Promise<Page<NodeData>> {
+    // Wrap ctx so query-mount adapters reading via parentStore see the
+    // ACL-projected view, not the raw tree — closes the "match raw + strip
+    // after" inefficiency (and the timing side-channel that comes with it).
+    const rawCtx = withAclQueryTree(ctx, aclStore);
+    const raw = await rawStore.getChildren(path, { depth: opts?.depth, limit: LEGACY_DEEP_SCAN_LIMIT }, rawCtx);
+    const truncated = raw.items.length >= LEGACY_DEEP_SCAN_LIMIT;
+    if (truncated) {
+      console.warn(`[acl] getChildren(${path}, depth=${opts?.depth}): hit legacy deep scan limit ${LEGACY_DEEP_SCAN_LIMIT}`);
+    }
+    const filtered: NodeData[] = [];
+    for (const child of raw.items) {
+      const perm = await getPerm(child.$path);
+      if (!(perm & R)) continue;
+      const out = stripComponents(child, userId, claims);
+      if (!(perm & A)) {
+        delete out.$acl;
+        delete out.$owner;
+      }
+      filtered.push(out);
+    }
+    const queryTest = opts?.query ? createSiftTest(opts.query) : null;
+    const visible = queryTest
+      ? filtered.filter(n => queryTest(mapNodeForSift(n)))
+      : filtered;
+    const result = paginate(visible, opts);
+    if (truncated) result.truncated = true;
+    if (raw.queryMount) result.queryMount = raw.queryMount;
+    return result;
+  }
+
+  const aclStore: AclStore = {
+    getPerm,
+    async get(path, ctx) {
+      // Fail loud — same reasoning as getChildren below. Silent `undefined`
+      // for a forbidden path makes routers (and SSR) treat it as 404 instead
+      // of "auth required", which leads to wrong rendering decisions.
+      const perm = await getPerm(path);
+      if (!(perm & R)) throw new OpError('FORBIDDEN', `Access denied: ${path}`);
+      const node = await rawStore.get(path, ctx);
+      if (!node) return undefined;
+      const out = stripComponents(node, userId, claims);
+      if (!(perm & A)) {
+        delete out.$acl;
+        delete out.$owner;
+      }
+      return out;
+    },
+
+    async getChildren(path, opts, ctx) {
+      // Fail loud, not silent — caller distinguishes "no permission" from
+      // "no readable children". Returning [] for a forbidden parent makes
+      // routers happily render NotFound instead of LoginScreen.
+      const parentPerm = await getPerm(path);
+      if (!(parentPerm & R)) throw new OpError('FORBIDDEN', `Access denied: ${path}`);
+
+      const depth = opts?.depth ?? 1;
+      // depth>1 fallback: executeList is depth-1 only in MVP. Use legacy
+      // scan+filter+strip path with no scan cap (kills ACL_SCAN_LIMIT for
+      // depth-1, which is the common case AND the only case that hit it).
+      if (depth > 1) return legacyDeepGetChildren(path, opts, ctx);
+
+      // depth=1: route through the new read runtime.
+      const source = asTreeSource(rawStore);
+      const { plan, legacyQueryMount } = await resolveReadPlan(rawStore, path, opts?.query, ctx);
+      // MVP rule 7: a readable query mount over an unreadable source would
+      // act as a capability view (child R-grants leak items the actor can't
+      // otherwise list). Gate plan.source before scanning. Non-mount path:
+      // plan.source === path, parentPerm above already guarded the same path
+      // (an extra resolvePermission walk; the assertion runs on a separate
+      // cache, so it pays a second ancestor traversal — accept the cost).
+      const actor: Actor = { userId, claims };
+      await assertSourceReadable(rawStore, actor, plan.source);
+      const project = createProjector(rawStore, actor);
+
+      // Public API uses limit + offset + total; executeList uses limit + cursor.
+      // Bridge: scan up to LEGACY_DEEP_SCAN_LIMIT visible items to compute
+      // total (matches the pre-stage-3 contract). `truncated` surfaces when
+      // the scan hit its ceiling — same signal as the old ACL_SCAN_LIMIT
+      // warning, just structured into the page instead of console.warn.
+      const reqLimit = Math.min(opts?.limit ?? PUBLIC_LIMIT_DEFAULT, PUBLIC_LIMIT_MAX);
+      const offset = opts?.offset ?? 0;
+      const scanLimit = Math.max(LEGACY_DEEP_SCAN_LIMIT, offset + reqLimit);
+
+      const result = await executeList(source, plan, { limit: scanLimit }, project, ctx);
+      const items = result.items.slice(offset, offset + reqLimit);
+      const page: Page<NodeData> = { items, total: result.items.length };
+      // truncated: either more pages exist (nextCursor) or scan hit budget
+      // (result.truncated). Page.total reflects only what we managed to scan.
+      if (result.nextCursor || result.truncated) page.truncated = true;
+      // queryMount metadata preserved for CDC matrix (sub.ts active query
+      // registration). Stage-6 watchQuery consumes the plan directly.
+      if (legacyQueryMount) page.queryMount = legacyQueryMount;
+      return page;
+    },
+
+    async set(node, ctx) {
+      const perm = await getPerm(node.$path);
+      if (!(perm & W)) throw new OpError('FORBIDDEN', `Access denied: ${node.$path}`);
+      const existing = await rawStore.get(node.$path, ctx);
+      const safe = { ...node };
+
+      const preserveField = (field: string) => {
+        const kept = existing?.[field];
+        if (field in safe && !sameValue(safe[field], kept)) {
+          throw new OpError('FORBIDDEN', `Access denied: ${field}`);
+        }
+        if (kept !== undefined) safe[field] = kept;
+        else delete safe[field];
+      };
+
+      if (!(perm & A)) { preserveField('$acl'); preserveField('$owner'); }
+
+      const owner = safe.$owner ?? existing?.$owner;
+      const canWriteComponent = (val: ComponentData) => !!(componentPerm(val, userId, claims, owner) & W);
+
+      for (const [key, oldVal] of Object.entries(existing ?? {})) {
+        if (key.startsWith('$') || !isComponent(oldVal) || canWriteComponent(oldVal)) continue;
+        if (key in safe && !sameValue(safe[key], oldVal)) {
+          throw new OpError('FORBIDDEN', `Access denied: component ${key}`);
+        }
+        safe[key] = oldVal;
+      }
+
+      for (const [key, val] of Object.entries(safe)) {
+        if (key.startsWith('$') || !isComponent(val)) continue;
+        const oldVal = existing?.[key];
+        if (isComponent(oldVal) && !canWriteComponent(oldVal) && sameValue(val, oldVal)) continue;
+        if (!canWriteComponent(val)) {
+          throw new OpError('FORBIDDEN', `Access denied: component ${key}`);
+        }
+      }
+
+      return rawStore.set(safe, ctx);
+    },
+
+    async remove(path, ctx) {
+      const perm = await getPerm(path);
+      if (!(perm & W)) throw new OpError('FORBIDDEN', `Access denied: ${path}`);
+      return rawStore.remove(path, ctx);
+    },
+
+    async patch(path, ops, ctx) {
+      const perm = await getPerm(path);
+      // Patch = read-modify-write. R+W gate closes the test-op oracle (no R →
+      // no probing via [t, $field, guess]). Per-op checks below cover hidden
+      // $-fields, hidden components, and $owner mutation in the same batch.
+      if (!((perm & R) && (perm & W))) {
+        throw new OpError('FORBIDDEN', `Access denied: ${path}`);
+      }
+
+      const isAdmin = !!(perm & A);
+      const existing = await rawStore.get(path, ctx);   // may be undefined
+      // Track owner across the batch so component checks see post-mutation $owner
+      // (parity with set() at lines 367-383).
+      let currentOwner = existing?.$owner;
+
+      for (const op of ops) {
+        assertSafePatchPath(op[1]);
+        const segments = op[1].split('.');
+        const firstSeg = segments[0];
+
+        // Apply system-field rule to EVERY $-segment at any depth: prevents
+        // component-envelope bypass like `[r, secret.$acl, …]` followed by
+        // mutations to secret.* under stale ACL.
+        if (op[0] === 't') {
+          for (const seg of segments) if (seg.startsWith('$')) assertTestSystemField(seg, isAdmin);
+          assertComponentPerm(R, firstSeg, existing, userId, claims, currentOwner);
+          continue;
+        }
+
+        // r/a/d — mutation
+        for (const seg of segments) if (seg.startsWith('$')) assertMutationSystemField(seg, isAdmin);
+        assertComponentPerm(W, firstSeg, existing, userId, claims, currentOwner);
+
+        // Incoming new component value (single-segment r/a) needs W on the new value.
+        if ((op[0] === 'r' || op[0] === 'a') && op[1] === firstSeg) {
+          const newVal = (op as readonly ['r' | 'a', string, unknown])[2];
+          if (isComponent(newVal) && !(componentPerm(newVal, userId, claims, currentOwner) & W)) {
+            throw new OpError('FORBIDDEN', `Access denied: cannot write component ${firstSeg}`);
+          }
+        }
+
+        // Update tracked $owner for subsequent component checks in this batch.
+        // `a` is also a setter (patch.ts:58-66); `d` clears.
+        if ((op[0] === 'r' || op[0] === 'a') && op[1] === '$owner') {
+          currentOwner = op[2] as string | undefined;
+        } else if (op[0] === 'd' && op[1] === '$owner') {
+          currentOwner = undefined;
+        }
+      }
+
+      return rawStore.patch(path, ops, ctx);
+    },
+  };
+  return aclStore;
+}

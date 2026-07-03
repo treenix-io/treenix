@@ -4,7 +4,7 @@
 // flipping to 'work' is a separate admin/system action invoked when AiPlan.approvePlan runs.
 
 import { createNode, getComponentByName, R, W, A, S } from '@treenx/core';
-import { createSession, sessionPath } from '@treenx/core/security/auth';
+import { createSession, sessionPath } from '@treenx/core/security';
 import { OpError } from '@treenx/core/errors';
 import type { Tree } from '@treenx/core/tree';
 

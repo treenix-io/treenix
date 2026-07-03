@@ -7,7 +7,7 @@ import { createClient } from '#client/wire';
 import { createNode, R, S, W } from '#core';
 import { OpError } from '#errors';
 import { createPortConn } from '#protocol/port';
-import type { Session } from '#security/auth';
+import type { Session } from '#security/sessions';
 import { withSubscriptions } from '#sub';
 import { createWatchManager } from '#sub/watch';
 import { createMemoryTree, type Tree } from '#tree';

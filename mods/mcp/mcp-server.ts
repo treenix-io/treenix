@@ -11,7 +11,7 @@ import type { CatalogActionDoc, CatalogEntry, CatalogPropertyDoc } from '@treenx
 import type { MethodSchema, PropertySchema, TypeSchema } from '@treenx/core/schema/types';
 import { OpError } from '@treenx/core/errors';
 import { executeAction } from '@treenx/core/server/actions';
-import { buildClaims, resolveToken, type Session, withAcl } from '@treenx/core/security/auth';
+import { buildClaims, resolveToken, type Session, withAcl } from '@treenx/core/security';
 import { resolveRef, type Tree } from '@treenx/core/tree';
 import { createRepathTree } from '@treenx/core/tree';
 import { randomUUID } from 'node:crypto';
