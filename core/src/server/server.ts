@@ -4,7 +4,7 @@
 
 import { createLogger } from '#log';
 import type { Tree } from '#tree';
-import { type CachedTree, withCache } from '#tree/cache';
+import { withCache } from '#tree/cache';
 import { nodeHTTPRequestHandler } from '@trpc/server/adapters/node-http';
 import { TRPCError } from '@trpc/server';
 import { createReadStream, existsSync, statSync } from 'node:fs';
@@ -25,7 +25,7 @@ import { withRefIndex } from '#tree/refs';
 import { type CdcRegistry, type OnSelfWrite, withSubscriptions } from '#sub';
 import type { TreeEvent } from '#tree';
 import { runExternalWatch } from '#sub/external-watch';
-import type { ExternalWatchStarter, MountableTree } from '#mount';
+import type { ExternalWatchStarter } from '#mount';
 import { createTreeRouter, type TreeRouter, type TreeRouterOpts, type TrpcContext } from './trpc';
 import { withMigration } from '#tree/migration';
 import { withTrash } from '#tree/trash';
@@ -56,47 +56,41 @@ export type Pipeline = {
 
 /** Pure tree composition — no HTTP, no side effects */
 export function createPipeline(bootstrap: Tree, opts?: TreeRouterOpts, wrapTree?: (t: Tree) => Tree): Pipeline {
-  // Forward-declare onSelfWrite so mount adapters can wire external watches
-  // before withSubscriptions exists. Mounts resolve lazily on first access,
-  // long after this fn returns, so the late binding is safe.
-  let onSelfWriteRef: OnSelfWrite | null = null;
-
-  // Late-bound refs — see the comment on onSelfWriteRef. cachedRef gives
-  // runExternalWatch a hook to invalidate the outer cache; injectExternalRef
-  // routes external events through withSubscriptions so CDC (query/VP
-  // invalidate) is computed and per-user routing applies. Without this,
-  // external writes bypass cdcEval and query mounts miss them.
-  let cachedRef: CachedTree | null = null;
-  let injectExternalRef: ((e: TreeEvent) => void) | null = null;
-  let mountableRef: MountableTree | null = null;
+  // External-watch wiring contract (core-tcc1). Mounts (bottom layer) need
+  // hooks that only exist once the upper layers are built: injectExternal
+  // routes change-stream events through withSubscriptions so CDC (query/VP
+  // invalidate) is computed and per-user routing applies — without it,
+  // external writes bypass cdcEval and query mounts miss them. Filled ONCE at
+  // the end of construction; mounts resolve lazily on first access, long
+  // after this fn returns, so the single deferred assignment is safe.
+  let wiring: {
+    onSelfWrite: OnSelfWrite;
+    injectExternal: (e: TreeEvent) => void;
+    invalidatePath: (path: string) => void;
+    invalidateAll: () => void;
+  } | null = null;
 
   const startExternalWatch: ExternalWatchStarter = (tree, starterOpts) => {
-    const ac = new AbortController();
-    if (!onSelfWriteRef || !cachedRef || !injectExternalRef || !mountableRef) {
+    if (!wiring) {
       // Mount resolved during pipeline construction — shouldn't happen
       // (mounts are lazy) but fail loud if it does so the bug surfaces.
       throw new Error(`startExternalWatch[${starterOpts.source}]: pipeline not yet wired (mount resolved too early)`);
     }
-    const cache = cachedRef;
-    const inject = injectExternalRef;
-    const mounts = mountableRef;
+    const ac = new AbortController();
     runExternalWatch(tree, {
       pathPrefix: starterOpts.pathPrefix,
       dedupWindowMs: starterOpts.dedupWindowMs,
       source: starterOpts.source,
-      onSelfWrite: onSelfWriteRef,
-      forwardEvent: inject,
-      // Evict BOTH outer node cache AND mount-resolution cache. External
-      // writes can rewrite a mount config node — cached adapter must drop.
-      invalidateCachePath: (p) => { cache.invalidate(p); mounts.invalidateMount(p); },
-      invalidateCacheAll: () => { cache.invalidateAll(); mounts.invalidateMount('/'); },
+      onSelfWrite: wiring.onSelfWrite,
+      forwardEvent: wiring.injectExternal,
+      invalidateCachePath: wiring.invalidatePath,
+      invalidateCacheAll: wiring.invalidateAll,
       signal: ac.signal,
     });
     return () => ac.abort();
   };
 
   const mountable = withMounts(bootstrap, { startExternalWatch });
-  mountableRef = mountable;
   // Migration sits ABOVE mounts so fs/mongo/federation/query nodes all migrate on
   // read (the wrapper used to sit below withMounts and persistent stores bypassed
   // it entirely — R-gk8.29). Below validation: validators must see current shapes.
@@ -109,7 +103,6 @@ export function createPipeline(bootstrap: Tree, opts?: TreeRouterOpts, wrapTree?
   const validated = withValidation(volatile);
   const refsIndexed = withRefIndex(validated);
   const cached = withCache(refsIndexed);
-  cachedRef = cached;
   // Soft-delete (gk8.8): below subscriptions so the copy-writes stay silent,
   // above cache so copies land coherently; the remove event still emits above.
   // systemTree (below) keeps hard remove for session revoke / GC.
@@ -125,8 +118,14 @@ export function createPipeline(bootstrap: Tree, opts?: TreeRouterOpts, wrapTree?
     isConfigNode: (node) => !!node && getComponentByName(node, 'mount') !== undefined,
   });
   cdcRef = cdc;
-  onSelfWriteRef = onSelfWrite;
-  injectExternalRef = injectExternalEvent;
+  wiring = {
+    onSelfWrite,
+    injectExternal: injectExternalEvent,
+    // Evict BOTH outer node cache AND mount-resolution cache. External
+    // writes can rewrite a mount config node — cached adapter must drop.
+    invalidatePath: (p) => { cached.invalidate(p); mountable.invalidateMount(p); },
+    invalidateAll: () => { cached.invalidateAll(); mountable.invalidateMount('/'); },
+  };
   // Audit (or any outer wrap) sits INSIDE the pipeline — above subscriptions but
   // BEFORE the router — so the tRPC router and every per-user withAcl wrap the
   // audited tree. Applying it later (in factory, after the router) left tRPC writes
