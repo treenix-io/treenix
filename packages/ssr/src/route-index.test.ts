@@ -6,7 +6,7 @@ import { RouteIndex } from './route-index';
 const route = (path: string, type: string, wildcard = false): NodeData => ({
   $path: path,
   $type: type,
-  ...(wildcard ? { route: { $type: 't.route', wildcard: true } } : {}),
+  ...(wildcard ? { '#route': { $type: 't.route', wildcard: true } } : {}),
 });
 
 describe('RouteIndex', () => {

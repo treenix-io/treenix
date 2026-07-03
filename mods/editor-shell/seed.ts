@@ -7,6 +7,6 @@ registerPrefab('editor-shell', 'seed', [
   {
     $path: 'sys/routes/t',
     $type: 't.editor.shell',
-    route: { $type: 't.route', wildcard: true },
+    '#route': { $type: 't.route', wildcard: true },
   },
 ], undefined, { tier: 'core' });

@@ -15,7 +15,7 @@ function seedRoutes() {
   const tree = createMemoryTree();
   // Nested route: depth-2 under /sys/routes. A shallow fetch (or the -1 bug)
   // misses it; only a deep scan surfaces it.
-  return tree.set({ $path: '/sys/routes/v/admin', $type: 't.admin.shell', route: { $type: 't.route', wildcard: true } })
+  return tree.set({ $path: '/sys/routes/v/admin', $type: 't.admin.shell', '#route': { $type: 't.route', wildcard: true } })
     .then(() => tree.set({ $path: '/sys/routes/about', $type: 'page' }))
     .then(() => tree);
 }

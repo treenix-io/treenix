@@ -6,7 +6,7 @@ import { normalizeUrl, resolveRoute, resolveTarget, urlKey } from './route-resol
 const node = (path: string, wildcard?: boolean): NodeData => ({
   $path: path,
   $type: 'x',
-  ...(wildcard ? { route: { $type: 't.route', wildcard: true } } : {}),
+  ...(wildcard ? { '#route': { $type: 't.route', wildcard: true } } : {}),
 } as NodeData);
 
 describe('normalizeUrl', () => {

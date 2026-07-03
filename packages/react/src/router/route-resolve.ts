@@ -13,7 +13,7 @@
 // @treenx/mods here would invert the package dependency direction (mods
 // peer-deps on react), so we mirror the field shape locally instead.
 
-import type { NodeData } from '@treenx/core';
+import { getComponent, type NodeData } from '@treenx/core';
 
 /** Structural shape of the t.route component. The runtime class + schema
  *  live in engine/mods/router/types.ts — registered there by the mod loader. */
@@ -39,9 +39,11 @@ export function urlKey(routePath: string | undefined): string | null {
   return tail === '_index' ? '' : tail;
 }
 
-/** Read the t.route component off a node by its conventional `route` key. */
+/** Read the t.route component off a node. Accessed via getComponent so the #
+ *  namespace migration (core-gk8.21) — which stores it under '#route' — stays
+ *  transparent here; the string type-id avoids importing the class from mods. */
 export function getRoute(node: NodeData): Route | undefined {
-  return (node as { route?: Route }).route;
+  return getComponent<Route>(node, 't.route');
 }
 
 function isWildcard(node: NodeData): boolean {
