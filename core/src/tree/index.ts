@@ -207,6 +207,21 @@ export function createFilterTree(
         else { await lower.remove(path, ctx); await upper.set(patched, ctx); }
       }
     },
+
+    // execute routes to the layer owning the node — same logic as patch.
+    // Exposed only when BOTH layers carry the capability: a mixed stack
+    // (one foreign-authority layer + one storage layer) keeps today's local
+    // executor semantics — per-node authority marking is a later contract
+    // (core-pxlu design doc, "combinator table").
+    ...(upper.execute && lower.execute ? {
+      execute: async (path: string, action: string, data?: unknown, opts?: ExecOpts, ctx?: unknown) => {
+        const node = await upper.get(path, ctx) ?? await lower.get(path, ctx);
+        if (!node) throw new OpError('NOT_FOUND', `Node not found: ${path}`);
+        return toUpper(node)
+          ? upper.execute!(path, action, data, opts, ctx)
+          : lower.execute!(path, action, data, opts, ctx);
+      },
+    } : {}),
   };
 }
 

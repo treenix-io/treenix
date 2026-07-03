@@ -53,6 +53,28 @@ describe('TWP wire client', () => {
     assert.deepEqual(result, { ran: 'ping', key: 'k', type: 't' });
   });
 
+  it('tree.execute capability: act frame crosses loopback, opId passes, client.execute is sugar (core-pxlu)', async () => {
+    const tree = createMemoryTree();
+    const acts: { action: string; opId?: string; path: string }[] = [];
+    const serve: PeerServe = {
+      tree,
+      execute: async (req) => { acts.push({ action: req.action, opId: req.opId, path: req.path }); return 'ok'; },
+      hooks: { watch: () => {}, unwatch: () => {} },
+    };
+    const [clientConn, serverConn] = createLoopback();
+    createPeer(() => serve).attach(serverConn);
+    const client = createClient(clientConn);
+
+    assert.ok(client.tree.execute, 'transport tree carries the capability');
+    assert.equal(await client.tree.execute('/a', 'bump', undefined, { opId: 'wire-op' }), 'ok');
+    assert.equal(await client.execute('/a', 'bump', undefined, { opId: 'wire-op-2' }), 'ok');
+
+    assert.deepEqual(acts, [
+      { action: 'bump', opId: 'wire-op', path: '/a' },
+      { action: 'bump', opId: 'wire-op-2', path: '/a' },
+    ]);
+  });
+
   it('watchPath: registers watch, routes events by path, releases server watch once', async () => {
     const { client, server, watched, unwatched } = await harness();
 

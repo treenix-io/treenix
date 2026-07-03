@@ -68,16 +68,22 @@ export function createTrpcTransport(opts: TrpcTransportOpts): TreenixClient & { 
     });
   }
 
-  return {
-    tree: {
-      get: (path) => trpc.get.query({ path }) as Promise<NodeData | undefined>,
-      getChildren: (path, opts) => trpc.getChildren.query({ path, ...opts }),
-      set: (node) => trpc.set.mutate({ node: node as Record<string, unknown> }).then(() => {}),
-      remove: (path) => trpc.remove.mutate({ path }).then(() => true),
-      patch: (path, ops) => trpc.patch.mutate({ path, ops }).then(() => {}),
-    },
+  const tree: TreenixClient['tree'] = {
+    get: (path) => trpc.get.query({ path }) as Promise<NodeData | undefined>,
+    getChildren: (path, opts) => trpc.getChildren.query({ path, ...opts }),
+    set: (node) => trpc.set.mutate({ node: node as Record<string, unknown> }).then(() => {}),
+    remove: (path) => trpc.remove.mutate({ path }).then(() => true),
+    patch: (path, ops) => trpc.patch.mutate({ path, ops }).then(() => {}),
+    // Tree.execute capability (core-pxlu): actions run on the server side that
+    // owns this tree. Presence of this method marks the tree as a foreign
+    // authority for mount adapters (t.mount.tree.trpc → repath forwards it).
     execute: (path, action, data, o) =>
-      trpc.execute.mutate({ path, action, data, type: o?.type, key: o?.key }),
+      trpc.execute.mutate({ path, action, data, type: o?.type, key: o?.key, opId: o?.opId }),
+  };
+
+  return {
+    tree,
+    execute: (path, action, data, o) => tree.execute!(path, action, data, o),
     watch: (onEvent) =>
       // kriz: undefined as void???
       trpc.events.subscribe(undefined, { onData: onEvent }),

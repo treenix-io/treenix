@@ -6,9 +6,12 @@ import type { Tree } from '#tree';
 export type WatchSub = { unsubscribe(): void };
 
 export type TreenixClient = {
+  /** Transport tree — exec-capable (core-pxlu): `tree.execute` delegates to the
+   *  server side. Mount adapters take this tree and get federation for free. */
   tree: Tree;
   // kriz: should accept ExecuteData
-  execute(path: string, action: string, data?: unknown, opts?: { type?: string; key?: string }): Promise<unknown>;
+  /** Sugar over `tree.execute` — the public API stays stable. */
+  execute(path: string, action: string, data?: unknown, opts?: { type?: string; key?: string; opId?: string }): Promise<unknown>;
   // TODO: merge watch + watch path via setting `/` or `*` as path.
   /** Global SSE stream — all events for this user */
   watch(onEvent: (e: any) => void): WatchSub;
