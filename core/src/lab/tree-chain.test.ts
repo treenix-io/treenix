@@ -53,7 +53,7 @@ async function seed(): Promise<Tree> {
     $type: 'tch.scanner',
     intervalMs: 900_000,
     maxRetries: 3,
-    livePrices: { $type: 'ref', $ref: '/services/live-prices' },
+    '#livePrices': { $type: 'ref', $ref: '/services/live-prices' },
   })
   await tree.set({
     $path: '/services/live-prices',
@@ -195,7 +195,7 @@ describe('treeChain — ref auto-follow', () => {
     await tree.set({
       $path: '/broken',
       $type: 'tch.scanner',
-      livePrices: { $type: 'ref', $ref: '/nonexistent' },
+      '#livePrices': { $type: 'ref', $ref: '/nonexistent' },
     })
     await assert.rejects(async () => { await treeChain(tree).broken.$get(Scanner).livePrices })
   })
@@ -357,7 +357,7 @@ async function seedRealWorld(): Promise<Tree> {
     $path: '/agent',
     $type: 'tch.agent.config',
     model: 'claude-opus-4-6',
-    bot: { $type: 'ref', $ref: '/brahman' },
+    '#bot': { $type: 'ref', $ref: '/brahman' },
   })
   await tree.set({
     $path: '/brahman',
@@ -482,7 +482,7 @@ describe('real-world: ergonomics comparison', () => {
     // OLD: manual ref resolution, 4+ lines
     const agentNode = await tree.get('/agent')
     assert.ok(agentNode)
-    const botRef = (agentNode as any).bot
+    const botRef = (agentNode as any)['#bot']
     assert.ok(isRef(botRef))
     // would need: const bot = await tree.get(botRef.$ref)
     // then: executeAction(tree, botRef.$ref, ..., 'restart')
@@ -677,7 +677,7 @@ describe('treeChain — multiple ops chain', () => {
       $type: 'tch.scanner',
       intervalMs: 1,
       maxRetries: 1,
-      livePrices: { $type: 'ref', $ref: '/lp' },
+      '#livePrices': { $type: 'ref', $ref: '/lp' },
       '#nested': { $type: 'tch.wallet', address: '0x123', chain: 'polygon' },
     })
     await tree.set({ $path: '/lp', $type: 'tch.live-prices', feederUrl: 'ws://chain' })

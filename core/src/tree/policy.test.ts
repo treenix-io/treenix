@@ -76,10 +76,13 @@ describe('policy: migration step', () => {
 
     const inner = createMemoryTree();
     const { base: tree } = withStoragePolicy(inner);
+    // Bare $type-carrying value = node-body DATA (a stored snapshot), not a
+    // component — held in a variable so the codemod's literal scan stays clean.
+    const storedSnapshot = { $type: COMP_TYPE, old: 7 };
     await inner.set({
       $path: '/a', $type: 'dir',
       '#stats': { $type: COMP_TYPE, old: 42 },
-      snapshot: { $type: COMP_TYPE, old: 7 },
+      snapshot: storedSnapshot,
     });
 
     const got = await tree.get('/a');
@@ -303,7 +306,7 @@ describe('policy: $refs step', () => {
     await tree.set({
       $path: '/order/1',
       $type: 'cafe.order',
-      customer: { $type: 'ref', $ref: '/customers/ivan' },
+      '#customer': { $type: 'ref', $ref: '/customers/ivan' },
       items: [{ $type: 'ref', $ref: '/menu/latte' }],
     });
 
@@ -311,7 +314,7 @@ describe('policy: $refs step', () => {
     assert.ok(node?.$refs);
     assert.equal(node.$refs.length, 2);
     assert.ok(node.$refs.some(r => r.t === '/customers/ivan' && r.f === '#customer'));
-    assert.ok(node.$refs.some(r => r.t === '/menu/latte' && r.f === '#items.0'));
+    assert.ok(node.$refs.some(r => r.t === '/menu/latte' && r.f === 'items.0'));
   });
 
   it('preserves standalone refs (no f:)', async () => {
@@ -335,7 +338,7 @@ describe('policy: $refs step', () => {
     await tree.set({
       $path: '/order/2',
       $type: 'cafe.order',
-      customer: { $type: 'ref', $ref: '/customers/ivan' },
+      '#customer': { $type: 'ref', $ref: '/customers/ivan' },
       $refs: [{ t: '/promos/summer', d: { $type: 'applied-promo' } }],
     });
 
@@ -361,7 +364,7 @@ describe('policy: $refs step', () => {
     await tree.set({
       $path: '/node',
       $type: 'test',
-      delivery: {
+      '#delivery': {
         $type: 'logistics.delivery',
         courier: { $type: 'ref', $ref: '/couriers/alex' },
         warehouse: { $type: 'ref', $ref: '/warehouses/main' },
@@ -379,11 +382,11 @@ describe('policy: $refs step', () => {
     const tree = setup();
     await tree.set({
       $path: '/order/3', $type: 'cafe.order',
-      customer: { $type: 'ref', $ref: '/customers/alice' },
+      '#customer': { $type: 'ref', $ref: '/customers/alice' },
     });
 
     await tree.patch('/order/3', [
-      ['r', 'customer', { $type: 'ref', $ref: '/customers/bob' }],
+      ['r', '#customer', { $type: 'ref', $ref: '/customers/bob' }],
     ]);
 
     const node = await tree.get('/order/3');
@@ -397,10 +400,10 @@ describe('policy: $refs step', () => {
     const tree = setup();
     await tree.set({
       $path: '/order/4', $type: 'cafe.order',
-      customer: { $type: 'ref', $ref: '/customers/alice' },
+      '#customer': { $type: 'ref', $ref: '/customers/alice' },
     });
 
-    await tree.patch('/order/4', [['d', 'customer']]);
+    await tree.patch('/order/4', [['d', '#customer']]);
 
     const node = await tree.get('/order/4');
     assert.equal(node?.$refs, undefined);

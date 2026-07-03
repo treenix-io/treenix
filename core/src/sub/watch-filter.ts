@@ -2,7 +2,7 @@
 // Sits between WatchManager and any transport (tRPC, HTTP, WS).
 // Ensures users only receive events they're authorized to see.
 
-import { A, isComponent, type NodeData, R } from '#core';
+import { A, isCompKey, isComponent, type NodeData, R } from '#core';
 import type { PatchOp, Tree } from '#tree';
 import { componentPerm, resolvePermission, stripComponents } from '#security/acl';
 import { buildClaims } from '#security/claims';
@@ -41,12 +41,15 @@ export function filterPatches(
       // requires A.
       return path === '$rev' || hasNodeA;
     }
+    // Strict namespace: bare first segment = node body (data). Node-level R
+    // was already checked upstream, and stripComponents never strips body —
+    // gating body patches here would hide data the reader can fetch anyway.
+    if (!isCompKey(seg)) return true;
     const val = node[seg];
     // Component absent in stored — either removed or never existed. Without an
     // oldNode snapshot we cannot tell if it was restricted; fail closed unless
-    // caller has A.
-    if (val === undefined) return hasNodeA;
-    if (!isComponent(val)) return true;
+    // caller has A. Malformed '#'-entry (no $type) fails closed the same way.
+    if (val === undefined || !isComponent(val)) return hasNodeA;
     return !!(componentPerm(val, userId, claims, node.$owner) & R);
   });
 }

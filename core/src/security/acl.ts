@@ -6,6 +6,7 @@ import {
   A,
   type ComponentData,
   type GroupPerm,
+  isCompKey,
   isComponent,
   type NodeData,
   R,
@@ -194,7 +195,14 @@ export function stripComponents(node: NodeData, userId: string | null, claims: s
   if ('$ref' in node) out['$ref'] = node['$ref'];
   for (const [key, val] of Object.entries(node)) {
     if (key.startsWith('$')) continue;
-    if (!isComponent(val)) { out[key] = val; continue; }
+    // Strict namespace: only '#' keys are components. Bare keys are node body
+    // (data, incl. $type-carrying snapshots) — node-level R already covers them.
+    if (!isCompKey(key)) { out[key] = val; continue; }
+    if (!isComponent(val)) {
+      // '#'-key without $type = malformed write slipped past the barrier.
+      // Fail closed AND loud — emitting it would leak an unclassifiable value.
+      throw new Error(`stripComponents: malformed component entry "${key}" on ${node.$path}`);
+    }
     if (componentPerm(val, userId, claims, node.$owner) & R) out[key] = val;
   }
   return out;

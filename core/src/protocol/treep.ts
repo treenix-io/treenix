@@ -112,9 +112,11 @@ export function createTreeP(tree: Tree, execute?: ActionExecutor): TreeP {
         return execute(parsed.path, parsed.key, parsed.action, data, opts?.opId)
       }
 
-      // Field set → patch
+      // Field set → patch. '#key.field' targets a component's field — the '#'
+      // storage prefix (D17). A single '#name' stays a top-level data field;
+      // component writes go through key.field or a full node set.
       if (parsed.key || parsed.field) {
-        const fieldPath = parsed.field ? `${parsed.key}.${parsed.field}` : parsed.key!
+        const fieldPath = parsed.field ? `#${parsed.key}.${parsed.field}` : parsed.key!
         await tree.patch(parsed.path, [['r', fieldPath, data]])
         return
       }

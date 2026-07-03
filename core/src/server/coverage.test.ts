@@ -152,7 +152,7 @@ describe('Sift queries via memory tree', () => {
       await tree.set({
         $path: `/items/${i}`,
         $type: i % 3 === 0 ? 'order' : 'task',
-        status: { $type: 'status', value: i % 2 === 0 ? 'active' : 'done' },
+        '#status': { $type: 'status', value: i % 2 === 0 ? 'active' : 'done' },
         priority: i % 5,
         tags: i < 10 ? ['urgent'] : ['low'],
       } as any);
@@ -178,11 +178,11 @@ describe('Sift queries via memory tree', () => {
 
   it('$and (composite)', async () => {
     const result = await tree.getChildren('/items', {
-      query: { $and: [{ priority: { $gte: 2 } }, { 'status.value': 'active' }] },
+      query: { $and: [{ priority: { $gte: 2 } }, { '#status.value': 'active' }] },
     });
     for (const n of result.items) {
       assert.ok((n as any).priority >= 2);
-      assert.equal((n as any).status.value, 'active');
+      assert.equal((n as any)['#status'].value, 'active');
     }
   });
 
@@ -205,9 +205,9 @@ describe('Sift queries via memory tree', () => {
   });
 
   it('dot-path nested queries', async () => {
-    const result = await tree.getChildren('/items', { query: { 'status.value': 'done' } });
+    const result = await tree.getChildren('/items', { query: { '#status.value': 'done' } });
     assert.ok(result.items.length > 0);
-    for (const n of result.items) assert.equal((n as any).status.value, 'done');
+    for (const n of result.items) assert.equal((n as any)['#status'].value, 'done');
   });
 
   it('$elemMatch on arrays', async () => {
@@ -230,7 +230,7 @@ describe('Sift queries via memory tree', () => {
 
   it('query + pagination', async () => {
     const page = await tree.getChildren('/items', {
-      query: { 'status.value': 'active' },
+      query: { '#status.value': 'active' },
       limit: 3,
       offset: 0,
     });
@@ -295,10 +295,10 @@ describe('sub.ts: remove + CDC', () => {
     cdc = sub.cdc;
 
     // Register a query watch
-    cdc.watchQuery('/active', '/items', { 'status.value': 'active' }, 'user1');
+    cdc.watchQuery('/active', '/items', { '#status.value': 'active' }, 'user1');
 
     // Create a matching node
-    await tree.set({ $path: '/items/a', $type: 'item', status: { $type: 'status', value: 'active' } } as NodeData);
+    await tree.set({ $path: '/items/a', $type: 'item', '#status': { $type: 'status', value: 'active' } } as NodeData);
 
     events.length = 0;
 
@@ -318,9 +318,9 @@ describe('sub.ts: remove + CDC', () => {
     const tree = sub.tree;
     cdc = sub.cdc;
 
-    cdc.watchQuery('/active', '/items', { 'status.value': 'active' }, 'user1');
+    cdc.watchQuery('/active', '/items', { '#status.value': 'active' }, 'user1');
 
-    await tree.set({ $path: '/items/b', $type: 'item', status: { $type: 'status', value: 'done' } } as NodeData);
+    await tree.set({ $path: '/items/b', $type: 'item', '#status': { $type: 'status', value: 'done' } } as NodeData);
     events.length = 0;
 
     await tree.remove('/items/b');
@@ -775,11 +775,11 @@ describe('TypesStore', () => {
 describe('QueryStore advanced', () => {
   it('merges external query with config match via $and', async () => {
     const parent = createMemoryTree();
-    await parent.set({ $path: '/items/1', $type: 'item', status: { $type: 's', value: 'active' }, priority: 1 } as any);
-    await parent.set({ $path: '/items/2', $type: 'item', status: { $type: 's', value: 'active' }, priority: 5 } as any);
-    await parent.set({ $path: '/items/3', $type: 'item', status: { $type: 's', value: 'done' }, priority: 1 } as any);
+    await parent.set({ $path: '/items/1', $type: 'item', '#status': { $type: 's', value: 'active' }, priority: 1 } as any);
+    await parent.set({ $path: '/items/2', $type: 'item', '#status': { $type: 's', value: 'active' }, priority: 5 } as any);
+    await parent.set({ $path: '/items/3', $type: 'item', '#status': { $type: 's', value: 'done' }, priority: 1 } as any);
 
-    const qs = createQueryTree({ source: '/items', match: { 'status.value': 'active' } }, parent);
+    const qs = createQueryTree({ source: '/items', match: { '#status.value': 'active' } }, parent);
     // Pass additional query — should merge with $and
     const result = await qs.getChildren('/view', { query: { priority: { $gt: 3 } } });
     assert.equal(result.items.length, 1);
@@ -788,11 +788,11 @@ describe('QueryStore advanced', () => {
 
   it('returns queryMount metadata', async () => {
     const parent = createMemoryTree();
-    await parent.set({ $path: '/items/1', $type: 'item', status: { $type: 's', value: 'active' } } as any);
+    await parent.set({ $path: '/items/1', $type: 'item', '#status': { $type: 's', value: 'active' } } as any);
 
-    const qs = createQueryTree({ source: '/items', match: { 'status.value': 'active' } }, parent);
+    const qs = createQueryTree({ source: '/items', match: { '#status.value': 'active' } }, parent);
     const result = await qs.getChildren('/view');
-    assert.deepEqual(result.queryMount, { source: '/items', match: { 'status.value': 'active' } });
+    assert.deepEqual(result.queryMount, { source: '/items', match: { '#status.value': 'active' } });
   });
 });
 

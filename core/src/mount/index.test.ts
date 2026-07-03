@@ -545,14 +545,14 @@ describe('Query mount (t.mount.query)', () => {
       createNode('/', 'root', {}, { mount: { $type: 'test.mount.data' } }),
     );
     // Orders with different statuses
-    await dataStore.set({ $path: '/orders/a', $type: 'order', status: { $type: 'status', value: 'incoming' } } as any);
-    await dataStore.set({ $path: '/orders/b', $type: 'order', status: { $type: 'status', value: 'kitchen' } } as any);
-    await dataStore.set({ $path: '/orders/c', $type: 'order', status: { $type: 'status', value: 'incoming' } } as any);
+    await dataStore.set({ $path: '/orders/a', $type: 'order', '#status': { $type: 'status', value: 'incoming' } } as any);
+    await dataStore.set({ $path: '/orders/b', $type: 'order', '#status': { $type: 'status', value: 'kitchen' } } as any);
+    await dataStore.set({ $path: '/orders/c', $type: 'order', '#status': { $type: 'status', value: 'incoming' } } as any);
 
     // Query mount config lives in dataStore (like a nested mount)
     await dataStore.set(
       createNode('/orders/incoming', 'mount-point', {}, {
-        mount: { $type: 't.mount.query',  source: '/orders', match: { 'status.value': 'incoming' } },
+        mount: { $type: 't.mount.query',  source: '/orders', match: { '#status.value': 'incoming' } },
       }),
     );
 
@@ -567,10 +567,10 @@ describe('Query mount (t.mount.query)', () => {
     await rootStore.set(
       createNode('/', 'root', {}, { mount: { $type: 'test.mount.data' } }),
     );
-    await dataStore.set({ $path: '/orders/a', $type: 'order', status: { $type: 'status', value: 'done' } } as any);
+    await dataStore.set({ $path: '/orders/a', $type: 'order', '#status': { $type: 'status', value: 'done' } } as any);
     await dataStore.set(
       createNode('/orders/incoming', 'mount-point', {}, {
-        mount: { $type: 't.mount.query', source: '/orders', match: { 'status.value': 'incoming' } },
+        mount: { $type: 't.mount.query', source: '/orders', match: { '#status.value': 'incoming' } },
       }),
     );
 
@@ -586,7 +586,7 @@ describe('Query mount (t.mount.query)', () => {
     );
     await dataStore.set(
       createNode('/orders/incoming', 'mount-point', {}, {
-        mount: { $type: 't.mount.query', source: '/orders', match: { 'status.value': 'incoming' } },
+        mount: { $type: 't.mount.query', source: '/orders', match: { '#status.value': 'incoming' } },
       }),
     );
 

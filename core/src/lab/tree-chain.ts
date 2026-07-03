@@ -63,8 +63,14 @@ async function exec(tree: Tree, path: string, spec: Spec | null, ops: Op[]): Pro
   // Walk ops: field reads and action calls
   for (const op of ops) {
     if (typeof op === 'string') {
-      // Field read
-      cur = cur[op]
+      // Field read. On a NODE a natural name may address a component — those
+      // live under '#' storage keys (single-# doctrine, D17): exact key first
+      // (data / explicit '#x'), then the component form.
+      let next = cur[op]
+      if (next === undefined && cur != null && typeof cur === 'object' && '$path' in cur) {
+        next = cur[`#${op}`]
+      }
+      cur = next
       if (cur == null) throw new Error(`Field "${op}" is null at ${path}`)
 
       // Auto-follow $ref

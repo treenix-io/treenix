@@ -42,11 +42,19 @@ export function parseURI(uri: string): TreenixURI {
   return result
 }
 
-/** Extract value from node by parsed URI (key + field) */
+/** Extract value from node by parsed URI (key + field).
+ *  Natural-name resolution (D17, single-# doctrine): '#key.field' addresses a
+ *  COMPONENT's field — components live under '#'-prefixed storage keys. A
+ *  single '#name' reads the exact node key first (top-level data field), then
+ *  falls back to the '#name' component — same rule as the tree-chain DSL. */
 export function deriveURI<T>(node: Record<string, unknown> | undefined, uri: TreenixURI): T | undefined {
   if (!node) return undefined
   if (!uri.key && !uri.field) return node as T
-  const comp = uri.key ? node[uri.key] : node
+  let comp: unknown = node
+  if (uri.key) {
+    // `in` check (not ??) so null/false/'' data values don't fall through to the component.
+    comp = uri.field ? node[`#${uri.key}`] : (uri.key in node ? node[uri.key] : node[`#${uri.key}`])
+  }
   if (comp === undefined) return undefined
   if (!uri.field) return comp as T
   return (comp as Record<string, unknown>)?.[uri.field] as T

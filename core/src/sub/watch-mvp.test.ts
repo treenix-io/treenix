@@ -219,11 +219,11 @@ describe('PatchOp migration — fjp.compare → fromRfc6902 → applyOps round-t
     const { tree } = withSubscriptions(createMemoryTree());
     const oldNode: NodeData = {
       $path: '/n', $type: 't',
-      counter: { $type: 'cnt', value: 1 },
+      '#counter': { $type: 'cnt', value: 1 },
     };
     const next: NodeData = {
       $path: '/n', $type: 't',
-      counter: { $type: 'cnt', value: 42 },
+      '#counter': { $type: 'cnt', value: 42 },
     };
     await tree.set(oldNode);
 
@@ -239,7 +239,7 @@ describe('PatchOp migration — fjp.compare → fromRfc6902 → applyOps round-t
     if (event.type === 'patch') {
       const reconstructed: Record<string, unknown> = structuredClone(oldNode) as unknown as Record<string, unknown>;
       applyOps(reconstructed, event.patches);
-      assert.equal((reconstructed.counter as { value: number }).value, 42);
+      assert.equal((reconstructed['#counter'] as { value: number }).value, 42);
     }
   });
 

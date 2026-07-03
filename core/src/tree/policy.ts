@@ -144,7 +144,9 @@ function stampVersion(node: NodeData): void {
 // Scans node fields for { $ref } entries, builds the $refs array.
 // Standalone refs (no f:) pass through untouched.
 
-/** Deep-scan node for $ref fields, return derived RefEntries */
+/** Deep-scan node for $ref fields, return derived RefEntries.
+ *  f: locator is the actual access path — '#comp.field' for component fields,
+ *  bare 'field' for node-body data (strict namespace: keys are never rewritten). */
 function extractRefs(node: NodeData): RefEntry[] {
   const refs: RefEntry[] = [];
 
@@ -160,14 +162,13 @@ function extractRefs(node: NodeData): RefEntry[] {
     }
     for (const [k, v] of Object.entries(obj)) {
       if (k.startsWith('$')) continue;
-      const path = prefix ? `${prefix}.${k}` : `#${k}`;
-      scan(v, path);
+      scan(v, prefix ? `${prefix}.${k}` : k);
     }
   }
 
   for (const [k, v] of Object.entries(node)) {
     if (k.startsWith('$')) continue;
-    scan(v, `#${k}`);
+    scan(v, k);
   }
 
   return refs;

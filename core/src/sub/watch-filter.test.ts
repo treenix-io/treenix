@@ -22,8 +22,8 @@ describe('filterPatches — component-level ACL on patch events', () => {
     $type: 'test.node',
     $owner: 'alice',
     title: 'Hello', // plain field, not a component
-    publicComp: { $type: 'public.comp', data: 'visible' },
-    secretComp: {
+    '#publicComp': { $type: 'public.comp', data: 'visible' },
+    '#secretComp': {
       $type: 'secret.comp',
       apiKey: 'sk-123',
       $acl: [{ g: 'admin', p: R }, { g: 'authenticated', p: 0 }],
@@ -68,7 +68,7 @@ describe('filterPatches — component-level ACL on patch events', () => {
 
   it('drops patch for component absent in stored — fail closed (could be removed restricted comp)', () => {
     const patches: PatchOp[] = [
-      ['d', 'missingComp'],
+      ['d', '#missingComp'],
     ];
     // missingComp not in stored node — without an oldNode snapshot, treat as restricted unless caller has A.
     const filtered = filterPatches(patches, node, 'bob', ['authenticated', 'u:bob'], false);
@@ -77,7 +77,7 @@ describe('filterPatches — component-level ACL on patch events', () => {
 
   it('passes patch for absent component when caller has A', () => {
     const patches: PatchOp[] = [
-      ['d', 'missingComp'],
+      ['d', '#missingComp'],
     ];
     const filtered = filterPatches(patches, node, 'admin-user', ['admin', 'authenticated'], true);
     assert.equal(filtered.length, 1);
@@ -85,7 +85,7 @@ describe('filterPatches — component-level ACL on patch events', () => {
 
   it('passes ops targeting components user can read', () => {
     const patches: PatchOp[] = [
-      ['r', 'publicComp.data', 'new'],
+      ['r', '#publicComp.data', 'new'],
     ];
     const filtered = filterPatches(patches, node, 'bob', ['authenticated', 'u:bob'], false);
     assert.equal(filtered.length, 1);
@@ -93,7 +93,7 @@ describe('filterPatches — component-level ACL on patch events', () => {
 
   it('filters ops targeting restricted components', () => {
     const patches: PatchOp[] = [
-      ['r', 'secretComp.apiKey', 'sk-new'],
+      ['r', '#secretComp.apiKey', 'sk-new'],
     ];
     // bob is authenticated but secretComp denies authenticated (p=0), only admin gets R
     const filtered = filterPatches(patches, node, 'bob', ['authenticated', 'u:bob'], false);
@@ -102,7 +102,7 @@ describe('filterPatches — component-level ACL on patch events', () => {
 
   it('admin can see restricted component patches', () => {
     const patches: PatchOp[] = [
-      ['r', 'secretComp.apiKey', 'sk-new'],
+      ['r', '#secretComp.apiKey', 'sk-new'],
     ];
     const filtered = filterPatches(patches, node, 'admin-user', ['authenticated', 'admin', 'u:admin-user'], true);
     assert.equal(filtered.length, 1);
@@ -111,18 +111,18 @@ describe('filterPatches — component-level ACL on patch events', () => {
   it('filters mixed patches — keeps permitted, drops restricted', () => {
     const patches: PatchOp[] = [
       ['r', 'title', 'Updated'],
-      ['r', 'publicComp.data', 'new'],
-      ['r', 'secretComp.apiKey', 'sk-leaked'],
+      ['r', '#publicComp.data', 'new'],
+      ['r', '#secretComp.apiKey', 'sk-leaked'],
     ];
     const filtered = filterPatches(patches, node, 'bob', ['authenticated', 'u:bob'], false);
     assert.equal(filtered.length, 2);
-    assert.ok(filtered.every(p => !p[1].startsWith('secretComp')));
+    assert.ok(filtered.every(p => !p[1].startsWith('#secretComp')));
   });
 
   it('drops event when ALL ops target restricted components', () => {
     const patches: PatchOp[] = [
-      ['r', 'secretComp.apiKey', 'sk-new'],
-      ['a', 'secretComp.secret2', 'hidden'],
+      ['r', '#secretComp.apiKey', 'sk-new'],
+      ['a', '#secretComp.secret2', 'hidden'],
     ];
     const filtered = filterPatches(patches, node, 'bob', ['authenticated', 'u:bob'], false);
     assert.equal(filtered.length, 0);
@@ -203,7 +203,7 @@ describe('F10 — set event uses stored node for ACL, not event payload', () => 
       $type: 't',
       $owner: 'admin',
       $acl: [{ g: 'authenticated', p: R }],
-      secret: { $type: 'sec', apiKey: 'sk-real', $acl: [{ g: 'owner', p: R }, { g: 'authenticated', p: 0 }] },
+      '#secret': { $type: 'sec', apiKey: 'sk-real', $acl: [{ g: 'owner', p: R }, { g: 'authenticated', p: 0 }] },
     };
     await tree.set(stored);
 
@@ -229,7 +229,7 @@ describe('F10 — set event uses stored node for ACL, not event payload', () => 
     assert.equal(events.length, 1, 'event delivered to bob (R on /x via authenticated)');
     const evt = events[0];
     if (evt.type !== 'set') throw new Error(`expected set event, got ${evt.type}`);
-    assert.equal(evt.node.secret, undefined, 'secret stripped — bob is not real owner of stored node');
+    assert.equal(evt.node['#secret'], undefined, 'secret stripped — bob is not real owner of stored node');
   });
 
   it('drops set event when stored node is gone (race with remove)', async () => {

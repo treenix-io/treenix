@@ -141,7 +141,7 @@ describe('tRPC API integration', () => {
 
     it('CONFLICT on stale $rev', async () => {
       // Blind upsert (no $rev) — tree auto-assigns $rev: 1
-      await caller.set({ node: { $path: '/rev', $type: 'doc', x: { $type: 'x' } } });
+      await caller.set({ node: { $path: '/rev', $type: 'doc', '#x': { $type: 'x' } } });
       await assert.rejects(
         () => caller.setComponent({ path: '/rev', name: 'x', data: { $type: 'x' }, rev: 99 }),
         (e: any) => e.code === 'CONFLICT',

@@ -212,12 +212,12 @@ describe('stripComponents', () => {
   it('keeps all components when no ACL', () => {
     const node = {
       ...createNode('/test', 'test'),
-      meta: { $type: 'metadata', title: 'hi' },
-      status: { $type: 'status', value: 'ok' },
+      '#meta': { $type: 'metadata', title: 'hi' },
+      '#status': { $type: 'status', value: 'ok' },
     };
     const stripped = stripComponents(node, 'alice', ['u:alice']);
-    assert.ok('meta' in stripped);
-    assert.ok('status' in stripped);
+    assert.ok('#meta' in stripped);
+    assert.ok('#status' in stripped);
   });
 
   it('strips component with type default ACL', () => {
@@ -225,37 +225,47 @@ describe('stripComponents', () => {
     const node = {
       ...createNode('/test', 'test'),
       $owner: 'alice',
-      meta: { $type: 'metadata', title: 'hi' },
-      token: { $type: 'secret', value: 's3cret' },
+      '#meta': { $type: 'metadata', title: 'hi' },
+      '#token': { $type: 'secret', value: 's3cret' },
     };
     // alice is not admin
     const stripped = stripComponents(node, 'alice', ['u:alice']);
-    assert.ok('meta' in stripped);
-    assert.ok(!('token' in stripped));
+    assert.ok('#meta' in stripped);
+    assert.ok(!('#token' in stripped));
   });
 
   it('allows component with type ACL when user matches', () => {
     register('secret', 'acl', () => [{ g: 'admins', p: R }]);
     const node = {
       ...createNode('/test', 'test'),
-      token: { $type: 'secret', value: 's3cret' },
+      '#token': { $type: 'secret', value: 's3cret' },
     };
     const stripped = stripComponents(node, 'admin', ['u:admin', 'admins']);
-    assert.ok('token' in stripped);
+    assert.ok('#token' in stripped);
   });
 
   it('strips component with instance $acl', () => {
     const node = {
       ...createNode('/test', 'test'),
       $owner: 'alice',
-      settings: { $type: 'config', $acl: [{ g: 'owner', p: R }], api: 'key' },
+      '#settings': { $type: 'config', $acl: [{ g: 'owner', p: R }], api: 'key' },
     };
     // bob is not owner
     const stripped = stripComponents(node, 'bob', ['u:bob']);
-    assert.ok(!('settings' in stripped));
+    assert.ok(!('#settings' in stripped));
     // alice is owner
     const stripped2 = stripComponents(node, 'alice', ['u:alice']);
-    assert.ok('settings' in stripped2);
+    assert.ok('#settings' in stripped2);
+  });
+
+  it('bare $type-carrying value is node body — never stripped (strict namespace)', () => {
+    register('secret', 'acl', () => [{ g: 'admins', p: R }]);
+    const node = {
+      ...createNode('/test', 'test'),
+      snapshot: { $type: 'secret', value: 'stored-as-data' },
+    };
+    const stripped = stripComponents(node, 'alice', ['u:alice']);
+    assert.ok('snapshot' in stripped, 'bare key is body — node-level R already covers it');
   });
 
   it('preserves $path, $type, $acl, $owner', () => {
@@ -537,15 +547,13 @@ describe('withAcl', () => {
       $acl: [{ g: 'authenticated', p: R }],
     });
     await tree.set({
-      ...createNode('/docs/a', 'doc', {
-        title: 'A',
+      ...createNode('/docs/a', 'doc', { title: 'A' }, {
         secret: { $type: 'private.secret', value: 'alpha' },
       }),
       $acl: [{ g: 'authenticated', p: R }],
     });
     await tree.set({
-      ...createNode('/docs/b', 'doc', {
-        title: 'B',
+      ...createNode('/docs/b', 'doc', { title: 'B' }, {
         secret: { $type: 'private.secret', value: 'beta' },
       }),
       $acl: [{ g: 'authenticated', p: R }],
@@ -554,9 +562,9 @@ describe('withAcl', () => {
     const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);
     const all = await s.getChildren('/docs');
     assert.deepEqual(all.items.map(c => c.$path), ['/docs/a', '/docs/b']);
-    assert.ok(all.items.every(c => !('secret' in c)));
+    assert.ok(all.items.every(c => !('#secret' in c)));
 
-    const probed = await s.getChildren('/docs', { query: { 'secret.value': 'alpha' } });
+    const probed = await s.getChildren('/docs', { query: { '#secret.value': 'alpha' } });
     assert.deepEqual(probed.items, []);
     assert.equal(probed.total, 0);
   });

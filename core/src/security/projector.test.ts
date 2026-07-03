@@ -68,8 +68,8 @@ describe('createProjector', () => {
     register('secret', 'acl', () => [{ g: 'admins', p: R }]);
     await tree.set({
       ...createNode('/x', 'item'),
-      visible: { $type: 'visible-comp', text: 'ok' } as ComponentData,
-      secret: { $type: 'secret', value: 'hidden' } as ComponentData,
+      '#visible': { $type: 'visible-comp', text: 'ok' } as ComponentData,
+      '#secret': { $type: 'secret', value: 'hidden' } as ComponentData,
       $acl: [{ g: 'public', p: R }],
     });
     const node = await tree.get('/x');
@@ -78,8 +78,8 @@ describe('createProjector', () => {
     const project = createProjector(tree, PUBLIC_ACTOR);
     const visible = await project(node);
     assert.ok(visible);
-    assert.ok(visible.visible);
-    assert.equal(visible.secret, undefined);
+    assert.ok(visible['#visible']);
+    assert.equal(visible['#secret'], undefined);
   });
 
   it('caches per-path permission — same node twice skips re-resolution', async () => {

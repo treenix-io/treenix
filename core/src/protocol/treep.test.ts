@@ -31,7 +31,7 @@ async function setup() {
   await tree.set({ $path: '/orders/3', $type: 'order', status: 'pending', amount: 50 })
   await tree.set({ $path: '/users/kriz', $type: 'user', name: 'Kriz', email: 'kriz@test.com' })
   // Node with named component
-  await tree.set({ $path: '/tasks/1', $type: 'task', title: 'Fix bug', workflow: { $type: 'workflow', state: 'open' } })
+  await tree.set({ $path: '/tasks/1', $type: 'task', title: 'Fix bug', '#workflow': { $type: 'workflow', state: 'open' } })
 
   const tp = createTreeP(tree)
   return { tree, tp }
