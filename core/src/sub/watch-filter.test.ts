@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { NodeData } from '#core';
 import { createFilteredPush, filterPatches } from './watch-filter';
-import type { NodeEvent } from './index';
+import type { NodeEvent, WireEvent } from './index';
 
 // ── filterPatches (real implementation, tested directly) ──
 
@@ -207,7 +207,7 @@ describe('F10 — set event uses stored node for ACL, not event payload', () => 
     };
     await tree.set(stored);
 
-    const events: NodeEvent[] = [];
+    const events: WireEvent[] = [];
     const filtered = createFilteredPush(tree, 'bob', ['u:bob', 'authenticated'], (e) => { events.push(e); });
 
     // Crafted event with poisoned $owner='bob' — pretends bob is owner.
@@ -241,7 +241,7 @@ describe('F10 — set event uses stored node for ACL, not event payload', () => 
     };
     await tree.set(node);
 
-    const events: NodeEvent[] = [];
+    const events: WireEvent[] = [];
     const filtered = createFilteredPush(tree, 'bob', ['u:bob', 'authenticated'], (e) => { events.push(e); });
 
     // Remove the node, then deliver a stale set event
@@ -346,5 +346,96 @@ describe('filteredPush — serialized per-session delivery', () => {
     await all;
 
     assert.deepEqual(delivered, ['/fast'], 'failing event dropped, next event still delivered');
+  });
+});
+
+// ── Pathless invalidate fallback (core-dm1/0i3) ──
+// A data event that dirties a query view but is ACL-dropped for the reader must
+// still deliver the coarse "refetch this view" signal — otherwise the reader
+// (who just lost access to the node that moved) keeps a stale row forever.
+
+describe('watch-filter — invalidate fallback on ACL-dropped events', () => {
+  const drain = () => new Promise(r => setImmediate(r));
+  const BOB = ['u:bob', 'authenticated'];
+
+  it('reader lost R on the mutated node → pathless invalidate, no path/payload leaked', async () => {
+    const tree = createMemoryTree();
+    // authenticated p=0 denies bob R on /x
+    await tree.set({ $path: '/x', $type: 't', $acl: [{ g: 'authenticated', p: 0 }], title: 'hi' } as NodeData);
+
+    const events: WireEvent[] = [];
+    const filtered = createFilteredPush(tree, 'bob', BOB, (e) => events.push(e));
+    filtered({ type: 'set', path: '/x', node: { $type: 't', title: 'hi' }, invalidateVps: ['/views/open'], seq: 7 });
+    await drain();
+
+    assert.equal(events.length, 1, 'invalidate delivered despite the reader losing access');
+    const ev = events[0];
+    if (ev.type !== 'invalidate') throw new Error(`expected invalidate, got ${ev.type}`);
+    assert.deepEqual(ev.vps, ['/views/open']);
+    assert.equal(ev.seq, 7, 'seq preserved so the resume watermark advances in lockstep');
+    assert.ok(!('path' in ev), 'no node path leaked to a reader who cannot see it');
+    assert.ok(!('node' in ev), 'no payload leaked');
+  });
+
+  it('every patch op ACL-hidden → invalidate instead of a silent drop', async () => {
+    const tree = createMemoryTree();
+    await tree.set({
+      $path: '/x', $type: 't', $acl: [{ g: 'authenticated', p: R }],
+      '#secret': { $type: 'sec', k: 'v', $acl: [{ g: 'authenticated', p: 0 }] },
+    } as NodeData);
+
+    const events: WireEvent[] = [];
+    const filtered = createFilteredPush(tree, 'bob', BOB, (e) => events.push(e));
+    // bob has R on /x but not on #secret — the only op targets the hidden comp
+    filtered({ type: 'patch', path: '/x', patches: [['r', '#secret.k', 'v2']], rev: 3, invalidateVps: ['/views/open'] });
+    await drain();
+
+    assert.equal(events.length, 1);
+    const ev = events[0];
+    if (ev.type !== 'invalidate') throw new Error(`expected invalidate, got ${ev.type}`);
+    assert.deepEqual(ev.vps, ['/views/open']);
+  });
+
+  it('remove under an unreadable parent → invalidate still reaches the vp watcher', async () => {
+    const tree = createMemoryTree();
+    await tree.set({ $path: '/secret', $type: 'dir', $acl: [{ g: 'authenticated', p: 0 }] } as NodeData);
+
+    const events: WireEvent[] = [];
+    const filtered = createFilteredPush(tree, 'bob', BOB, (e) => events.push(e));
+    filtered({ type: 'remove', path: '/secret/doc', invalidateVps: ['/views/open'] });
+    await drain();
+
+    assert.equal(events.length, 1);
+    const ev = events[0];
+    if (ev.type !== 'invalidate') throw new Error(`expected invalidate, got ${ev.type}`);
+    assert.deepEqual(ev.vps, ['/views/open']);
+  });
+
+  it('dropped event WITHOUT invalidateVps emits nothing — no spurious refetch', async () => {
+    const tree = createMemoryTree();
+    await tree.set({ $path: '/x', $type: 't', $acl: [{ g: 'authenticated', p: 0 }], title: 'hi' } as NodeData);
+
+    const events: WireEvent[] = [];
+    const filtered = createFilteredPush(tree, 'bob', BOB, (e) => events.push(e));
+    filtered({ type: 'set', path: '/x', node: { $type: 't', title: 'hi' } });
+    await drain();
+
+    assert.equal(events.length, 0, 'no dirty views → no invalidate');
+  });
+
+  it('reader RETAINS access → normal data event with invalidateVps, no invalidate frame', async () => {
+    const tree = createMemoryTree();
+    await tree.set({ $path: '/x', $type: 't', $acl: [{ g: 'authenticated', p: R }], title: 'hi' } as NodeData);
+
+    const events: WireEvent[] = [];
+    const filtered = createFilteredPush(tree, 'bob', BOB, (e) => events.push(e));
+    filtered({ type: 'set', path: '/x', node: { $type: 't', title: 'hi' }, invalidateVps: ['/views/open'], seq: 4 });
+    await drain();
+
+    assert.equal(events.length, 1);
+    const ev = events[0];
+    // Readable → the field mechanism carries the signal on the data event itself.
+    assert.equal(ev.type, 'set');
+    assert.deepEqual('invalidateVps' in ev ? ev.invalidateVps : undefined, ['/views/open']);
   });
 });

@@ -6,9 +6,27 @@ import { A, isCompKey, isComponent, type NodeData, R } from '#core';
 import type { PatchOp, Tree } from '#tree';
 import { componentPerm, resolvePermission, stripComponents } from '#security/acl';
 import { buildClaims } from '#security/claims';
-import type { NodeEvent } from './index';
+import type { NodeEvent, WireEvent } from './index';
 
-export type EventPush = (event: NodeEvent) => void;
+/** Transport-facing push: carries data events AND the pathless invalidate the
+ *  filter synthesizes when a data event is ACL-dropped (core-dm1). */
+export type EventPush = (event: WireEvent) => void;
+
+/** WatchManager-facing push: only ever fed CDC data/reconnect events (NodeEvent)
+ *  — the invalidate is born inside the filter, never routed in. */
+export type FilteredPush = (event: NodeEvent) => void;
+
+/** Deliver the coarse invalidate when a data event is about to be dropped by
+ *  the ACL filter (core-dm1/0i3). The dropped event named dirty query views in
+ *  `invalidateVps`; the reader still watches those views and must refetch, even
+ *  though they can no longer read the node that shifted. Carries the event's
+ *  seq so the client's resume watermark advances in lockstep with the ring. */
+function invalidateFallback(event: Exclude<NodeEvent, { type: 'reconnect' }>, push: EventPush): void {
+  const vps = event.invalidateVps;
+  if (vps && vps.length > 0) {
+    push({ type: 'invalidate', vps, ...(event.seq === undefined ? {} : { seq: event.seq }) });
+  }
+}
 
 export type WatchFilterOpts = {
   claimsTtlMs?: number;
@@ -64,7 +82,7 @@ export function createFilteredPush(
   sessionClaims: string[] | null,
   push: EventPush,
   opts?: WatchFilterOpts,
-): EventPush {
+): FilteredPush {
   const claimsTtlMs = opts?.claimsTtlMs ?? DEFAULT_CLAIMS_TTL_MS;
 
   let dynamicClaims: string[] | null = null;
@@ -113,12 +131,13 @@ async function filterEvent(
     const parent = event.path.slice(0, event.path.lastIndexOf('/')) || '/';
     const perm = await resolvePermission(store, parent, userId, claims);
     if (perm & R) push(event);
+    else invalidateFallback(event, push);
     return;
   }
 
   const claims = await getClaims();
   const perm = await resolvePermission(store, event.path, userId, claims);
-  if (!(perm & R)) return;
+  if (!(perm & R)) { invalidateFallback(event, push); return; }
 
   if (event.type === 'set' && event.node) {
     // ACL must come from stored node, not event payload — writer-supplied $owner/$acl in body would otherwise grant view.
@@ -133,7 +152,7 @@ async function filterEvent(
     if (!node) return;
     const hasNodeA = !!(perm & A);
     const filtered = filterPatches(event.patches, node, userId, claims, hasNodeA);
-    if (filtered.length === 0) return;
+    if (filtered.length === 0) { invalidateFallback(event, push); return; }
     push(filtered.length === event.patches.length ? event : { ...event, patches: filtered });
   } else {
     push(event);

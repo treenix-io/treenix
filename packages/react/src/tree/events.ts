@@ -149,6 +149,15 @@ export function startEvents(config: EventsConfig = {}, resume = false) {
         return;
       }
 
+      // Pathless coarse invalidate (core-dm1): the mutated node is unreadable to
+      // us now (ACL revocation) so no set/patch arrives, but named query views
+      // still shifted — refetch each through the normal ACL-filtered read path.
+      if (event.type === 'invalidate') {
+        if (typeof event.seq === 'number' && event.seq > lastSeq) lastSeq = event.seq;
+        if (loadChildren) for (const vp of event.vps) refetchDirtyVp(vp, loadChildren);
+        return;
+      }
+
       // Advance the resume watermark. Data events (set/patch/remove) carry seq;
       // reconnect (returned above) does not.
       if (typeof event.seq === 'number' && event.seq > lastSeq) lastSeq = event.seq;

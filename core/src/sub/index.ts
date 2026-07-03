@@ -55,6 +55,19 @@ export type VpDelta = {
 
 export type NodeEvent = TreeEvent & Partial<VpDelta>;
 
+/** Pathless coarse-invalidate frame (core-dm1). Born at the ACL filter when a
+ *  data event carrying `invalidateVps` must be DROPPED for a reader — they lost
+ *  R on the mutated node, or every patch op is ACL-hidden. The watched view
+ *  still shifted, so the vp-watcher must refetch. No path, no payload: nothing
+ *  for the ACL filter to gate, so it reaches readers who can no longer see the
+ *  node that moved — the exact "user losing access leaves stale rows" gap. */
+export type InvalidateEvent = { type: 'invalidate'; vps: string[]; seq?: number };
+
+/** What can travel the event lane to a client: a CDC NodeEvent or a pathless
+ *  invalidate. NodeEvent stays free of the wire-only variant so L3 routing
+ *  (dispatch/notify) keeps its data-event typing with no narrowing friction. */
+export type WireEvent = NodeEvent | InvalidateEvent;
+
 /** Tree narrowed to require `watch` and produce richer NodeEvent (with VPs).
  *  Returned by withSubscriptions so L3 callers consume VPs through the type. */
 export type SubscribedTree = Tree & {

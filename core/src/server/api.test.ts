@@ -10,7 +10,7 @@ import { before, beforeEach, describe, it } from 'node:test';
 import { type Session } from '#security/sessions';
 import '#mount/adapters';
 import { withMounts } from '#mount';
-import { type NodeEvent, withSubscriptions } from '#sub';
+import { type NodeEvent, type WireEvent, withSubscriptions } from '#sub';
 import { createTreeRouter } from './trpc';
 import { withStoragePolicy } from '#tree/policy';
 import { createWatchManager, type WatchManager } from '#sub/watch';
@@ -534,7 +534,7 @@ describe('tRPC API integration', () => {
         '#mount': { $type: 't.mount.query', source: '/cdc-oracle/data', match: { '#secret.value': 'alpha' } },
       } as any);
 
-      const pushed: NodeEvent[] = [];
+      const pushed: WireEvent[] = [];
       watcher.connect(
         'alice:cdc-oracle',
         'alice',

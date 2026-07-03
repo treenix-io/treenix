@@ -17,7 +17,7 @@ import type { Session } from '#security/sessions';
 import { devLogin, loginUser, logoutUser, registerUser } from '#security/ops';
 import { OpError } from '#errors';
 import type { ErrFrame, ResFrame } from '#protocol/frames';
-import { type CdcRegistry, type NodeEvent } from '#sub';
+import { type CdcRegistry, type WireEvent } from '#sub';
 import { type WatchManager } from '#sub/watch';
 import { setComponent as setComponentOp } from './actions';
 import { deployPrefab as deployPrefabOp } from './prefab';
@@ -338,7 +338,7 @@ export function createTreeRouter(tree: Tree, systemTree: Tree, watcher: WatchMan
         throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Session expired' });
       }
 
-      return observable<NodeEvent>((emit) => {
+      return observable<WireEvent>((emit) => {
         const userId = ctx.session?.userId;
         if (!userId) return () => {};
         const expiresAt = typeof ctx.session?.expiresAt === 'number' ? ctx.session.expiresAt : null;

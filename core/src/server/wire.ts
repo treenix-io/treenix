@@ -10,7 +10,7 @@ import { createPeer, type ActReq, type Conn, type PeerServe, type ServeHooks } f
 import { withAcl } from '#security/acl-tree';
 import { buildClaims } from '#security/claims';
 import type { Session } from '#security/sessions';
-import { type CdcRegistry, type NodeEvent } from '#sub';
+import { type CdcRegistry, type NodeEvent, type WireEvent } from '#sub';
 import { type WatchManager } from '#sub/watch';
 import { createFilteredPush } from '#sub/watch-filter';
 import type { Tree } from '#tree';
@@ -55,9 +55,13 @@ export type WireSession = ReturnType<typeof createWireSession>;
  *  seq/by come stamped from WatchManager delivery (core-gk8.1); dirty frames
  *  are facets of the same event and share its seq — the cursor is a
  *  watermark, clients track max(seen). */
-export function toEventFrames(e: NodeEvent): EventFrame[] {
+export function toEventFrames(e: WireEvent): EventFrame[] {
   if (e.type === 'reconnect') {
     return e.preserved ? [] : [{ ev: 'reset', reason: 'resume' }];
+  }
+  // Pathless invalidate (core-dm1) → one dirty frame per view, no data facet.
+  if (e.type === 'invalidate') {
+    return e.vps.map(vp => ({ ...(e.seq === undefined ? {} : { seq: e.seq }), ev: 'dirty', path: vp }));
   }
   // Frames must omit absent fields, not carry undefined: structured-clone
   // transports preserve undefined keys while JSON transports drop them —
@@ -145,7 +149,7 @@ export function createWireSession(deps: WireDeps, session: Session) {
   /** Event lane: ACL-filtered push wired into the WatchManager.
    *  `since` = client's last processed seq — the ring replays the gap
    *  through the SAME filter (claims drift re-applies, core-gk8.1). */
-  function connectEvents(push: (e: NodeEvent) => void, since?: number): { connId: string; preserved: boolean } {
+  function connectEvents(push: (e: WireEvent) => void, since?: number): { connId: string; preserved: boolean } {
     const sessionClaims = session.claims?.length ? session.claims : null;
     const claimsTtlMs = deps.opts?.claimsTtlMs ?? DEFAULT_CLAIMS_TTL_MS;
     const filtered = createFilteredPush(deps.systemTree, userId, sessionClaims, push, { claimsTtlMs });

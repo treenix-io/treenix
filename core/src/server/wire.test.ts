@@ -14,7 +14,7 @@ import { createMemoryTree, type Tree } from '#tree';
 import assert from 'node:assert/strict';
 import { MessageChannel } from 'node:worker_threads';
 import { describe, it } from 'node:test';
-import { attachWireSession, createWireSession, type WireDeps } from './wire';
+import { attachWireSession, createWireSession, toEventFrames, type WireDeps } from './wire';
 
 async function harness(perm: number, ringSize?: number) {
   const memory = createMemoryTree();
@@ -187,5 +187,20 @@ describe('wire session over MessageChannel', () => {
     await new Promise<void>((r) => setImmediate(r)); // drain anything queued behind it
 
     assert.deepEqual(frames, [{ ev: 'reset', reason: 'resume' }]);
+  });
+});
+
+describe('toEventFrames — pathless invalidate (core-dm1)', () => {
+  it('one dirty frame per view, seq carried, no data facet', () => {
+    const frames = toEventFrames({ type: 'invalidate', vps: ['/views/a', '/views/b'], seq: 9 });
+    assert.deepEqual(frames, [
+      { seq: 9, ev: 'dirty', path: '/views/a' },
+      { seq: 9, ev: 'dirty', path: '/views/b' },
+    ]);
+  });
+
+  it('omits seq when unstamped (wire parity across transports)', () => {
+    const frames = toEventFrames({ type: 'invalidate', vps: ['/views/a'] });
+    assert.deepEqual(frames, [{ ev: 'dirty', path: '/views/a' }]);
   });
 });
