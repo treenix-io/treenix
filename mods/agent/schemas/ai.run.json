@@ -49,6 +49,13 @@
     "queryKey"
   ],
   "methods": {
+    "crystallize": {
+      "arguments": [
+        {
+          "name": "data"
+        }
+      ]
+    },
     "stop": {
       "description": "Stop the running task",
       "arguments": []
