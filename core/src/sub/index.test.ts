@@ -130,6 +130,26 @@ describe('Subscriptions', () => {
     assert.deepEqual(event.invalidateVps, ['/views/status']);
   });
 
+  it('two watchers on the same source with different match coexist — no cross-talk (core-wf1)', async () => {
+    const events: NodeEvent[] = [];
+    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => events.push(e));
+
+    await tree.set(createNode('/items', 'dir'));
+    // Same source, DIFFERENT vp + match — entries are keyed by vp, so they
+    // coexist; the E03 bug (source-only keying) would have collided them.
+    cdc.watchQuery('/views/open', '/items', { status: 'open' }, 'u1');
+    cdc.watchQuery('/views/closed', '/items', { status: 'closed' }, 'u1');
+    events.length = 0;
+
+    // A node that matches ONLY the 'open' view.
+    await tree.set({ ...createNode('/items/1', 'item'), status: 'open' });
+
+    const ev = events.find(e => (e.type === 'set' || e.type === 'patch') && e.path === '/items/1');
+    assert.ok(ev);
+    const invalidateVps = ev.type === 'set' ? ev.invalidateVps : (ev as any).invalidateVps;
+    assert.deepEqual(invalidateVps, ['/views/open'], 'only the matching view invalidated — predicates evaluated independently');
+  });
+
   it('coarse dirty reaches every vp watcher — visibility resolves on the read path (gk8.12)', async () => {
     const watcher = createWatchManager();
     const { tree, cdc } = withSubscriptions(createMemoryTree(), e => watcher.notify(e));
