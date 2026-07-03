@@ -157,6 +157,50 @@ describe('executeList', () => {
     );
   });
 
+  // ── callerWhere hidden-field / malformed handling (core-fnv, MVP rule 8) ──
+
+  // Projector that hides the `secret` field — models an actor lacking R on it.
+  const stripSecret: Projector = async (node) => {
+    const { secret, ...rest } = node;
+    return rest as NodeData;
+  };
+
+  it('malformed callerWhere throws BAD_REQUEST (not a generic error)', async () => {
+    const source = await seed(['/x/a']);
+    const plan: ReadPlan = { source: '/x', callerWhere: { $where: 'true' } };
+    await assert.rejects(
+      () => executeList(source, plan, { limit: 10 }, identityProject),
+      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+    );
+  });
+
+  it('callerWhere on a hidden field throws FORBIDDEN (raw matches, projected does not)', async () => {
+    const source = createMemoryTree();
+    await source.set({ $path: '/x/a', $type: 'item', secret: 'top' } as NodeData);
+    const plan: ReadPlan = { source: '/x', callerWhere: { secret: 'top' } };
+    await assert.rejects(
+      () => executeList(source, plan, { limit: 10 }, stripSecret),
+      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+    );
+  });
+
+  it('callerWhere on a visible field still works when a projector strips other fields', async () => {
+    const source = createMemoryTree();
+    await source.set({ $path: '/x/a', $type: 'item', kind: 'A', secret: 's' } as NodeData);
+    await source.set({ $path: '/x/b', $type: 'item', kind: 'B', secret: 's' } as NodeData);
+    const plan: ReadPlan = { source: '/x', callerWhere: { kind: 'A' } };
+    const res = await executeList(source, plan, { limit: 10 }, stripSecret);
+    assert.deepEqual(res.items.map(n => n.$path), ['/x/a'], 'matched on the visible field, no false FORBIDDEN');
+  });
+
+  it('callerWhere on a hidden field ABSENT for every row passes silently (documented limitation)', async () => {
+    const source = createMemoryTree();
+    await source.set({ $path: '/x/a', $type: 'item' } as NodeData); // no secret at all
+    const plan: ReadPlan = { source: '/x', callerWhere: { secret: 'top' } };
+    const res = await executeList(source, plan, { limit: 10 }, stripSecret);
+    assert.deepEqual(res.items, [], 'no rawMatch → no oracle → silent empty, per MVP known limitation');
+  });
+
   it('aborts scanning when signal triggers', async () => {
     const source = await seed(['/x/a', '/x/b', '/x/c']);
     const plan: ReadPlan = { source: '/x' };

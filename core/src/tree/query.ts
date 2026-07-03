@@ -39,9 +39,9 @@ const NESTED_QUANTIFIER_RE = /\([^)]*[+*][^)]*\)[+*]/;
 function assertSafeRegexPattern(pattern: unknown): void {
   if (typeof pattern !== 'string') return; // sift will reject non-string at runtime
   if (pattern.length > SIFT_REGEX_MAX)
-    throw new Error(`sift $regex too long (>${SIFT_REGEX_MAX})`);
+    throw new OpError('BAD_REQUEST', `sift $regex too long (>${SIFT_REGEX_MAX})`);
   if (NESTED_QUANTIFIER_RE.test(pattern))
-    throw new Error('sift $regex has nested quantifiers (ReDoS risk)');
+    throw new OpError('BAD_REQUEST', 'sift $regex has nested quantifiers (ReDoS risk)');
 }
 
 export function assertSafeSiftQuery(q: unknown): void {
@@ -49,7 +49,7 @@ export function assertSafeSiftQuery(q: unknown): void {
   if (q instanceof RegExp) { assertSafeRegexPattern(q.source); return; }
   if (!q || typeof q !== 'object' || q.constructor !== Object) return;
   for (const [k, v] of Object.entries(q)) {
-    if (SIFT_FORBIDDEN.has(k)) throw new Error(`Forbidden sift operator: ${k}`);
+    if (SIFT_FORBIDDEN.has(k)) throw new OpError('BAD_REQUEST', `Forbidden sift operator: ${k}`);
     if (k === '$regex') assertSafeRegexPattern(v);
     assertSafeSiftQuery(v);
   }
@@ -61,7 +61,7 @@ export function mapSiftQuery(q: unknown): unknown {
   if (q && typeof q === 'object' && q.constructor === Object) {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(q)) {
-      if (SIFT_FORBIDDEN.has(k)) throw new Error(`Forbidden sift operator: ${k}`);
+      if (SIFT_FORBIDDEN.has(k)) throw new OpError('BAD_REQUEST', `Forbidden sift operator: ${k}`);
       if (k === '$regex') assertSafeRegexPattern(v);
       let newKey = k;
       if (k === '$type') newKey = '_type';

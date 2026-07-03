@@ -564,9 +564,13 @@ describe('withAcl', () => {
     assert.deepEqual(all.items.map(c => c.$path), ['/docs/a', '/docs/b']);
     assert.ok(all.items.every(c => !('#secret' in c)));
 
-    const probed = await s.getChildren('/docs', { query: { '#secret.value': 'alpha' } });
-    assert.deepEqual(probed.items, []);
-    assert.equal(probed.total, 0);
+    // The probe now fails LOUD (core-fnv): #secret.value='alpha' matches a raw
+    // node whose component is stripped for alice → hidden-field oracle → FORBIDDEN,
+    // not a silent empty page that confirms the value's existence by omission.
+    await assert.rejects(
+      () => s.getChildren('/docs', { query: { '#secret.value': 'alpha' } }),
+      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+    );
   });
 
   it('does not let query probe stripped $owner or $acl fields', async () => {
@@ -583,8 +587,16 @@ describe('withAcl', () => {
     const s = withAcl(tree, 'bob', ['u:bob', 'authenticated']);
     assert.equal((await s.getChildren('/owned')).items.length, 1);
 
-    assert.equal((await s.getChildren('/owned', { query: { $owner: 'alice' } })).items.length, 0);
-    assert.equal((await s.getChildren('/owned', { query: { $acl: { $exists: true } } })).items.length, 0);
+    // bob has R but not A, so $owner/$acl are stripped from his projection —
+    // querying them is a hidden-field oracle → FORBIDDEN (core-fnv).
+    await assert.rejects(
+      () => s.getChildren('/owned', { query: { $owner: 'alice' } }),
+      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+    );
+    await assert.rejects(
+      () => s.getChildren('/owned', { query: { $acl: { $exists: true } } }),
+      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+    );
   });
 
   it('throws on write without permission', async () => {

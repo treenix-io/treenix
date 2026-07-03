@@ -99,7 +99,18 @@ export async function executeList(
     // hidden fields can't be probed via membership (see file header).
     const siftView = mapNodeForSift(visible);
     if (viewTest && !viewTest(siftView)) continue;
-    if (callerTest && !callerTest(siftView)) continue;
+    if (callerTest && !callerTest(siftView)) {
+      // MVP rule 8 — hidden-field oracle: the caller predicate did not match
+      // the PROJECTED node, but matches the RAW node. That can only happen when
+      // it references a field the caller cannot see on a node they CAN read —
+      // a membership oracle over hidden data. Refuse rather than leak. Raw eval
+      // is paid only on non-match. (Documented limitation: a predicate on a
+      // field ABSENT for every row never rawMatches and passes silently.)
+      if (callerTest(mapNodeForSift(entry.node))) {
+        throw new OpError('FORBIDDEN', 'callerWhere references a field not visible to the caller');
+      }
+      continue;
+    }
 
     collected.push({ node: visible, cursor: entry.cursor });
     if (collected.length === limit + 1) break;
