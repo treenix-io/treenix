@@ -63,6 +63,37 @@ describe('withExecute', () => {
       assert.ok(node.$rev && node.$rev >= 2, 'persist bumped $rev');
     });
 
+    it('nested same-path execute inside an action does not deadlock (core-0fa)', async () => {
+      register('test.exec.nested', 'schema', () => ({
+        $id: 'test.exec.nested', title: 'Nested', type: 'object' as const,
+        properties: { n: { type: 'number' } },
+        methods: {
+          peek: { arguments: [], kind: 'read' as const },
+          bumpAfterPeek: { arguments: [] },
+        },
+      }));
+      register('test.exec.nested', 'action:peek', async (ctx: ActionCtx) => (ctx.node as NodeData & { n: number }).n);
+      register('test.exec.nested', 'action:bumpAfterPeek', async (ctx: ActionCtx) => {
+        // Nested execute on OUR OWN node — reentrant lock, or the peek waits on
+        // the bumpAfterPeek gate that only releases when we return: deadlock.
+        const before = await ctx.tree.execute!((ctx.node as NodeData).$path, 'peek');
+        (ctx.node as NodeData & { n: number }).n += 1;
+        return before;
+      });
+
+      const inner = createMemoryTree();
+      await inner.set(createNode('/w', 'test.exec.nested', { n: 5 }));
+      const tree = withExecute(inner);
+
+      const guarded = await Promise.race([
+        tree.execute('/w', 'bumpAfterPeek'),
+        new Promise(r => setTimeout(() => r('TIMEOUT'), 2000)),
+      ]);
+      assert.equal(guarded, 5, 'nested peek returned n (=5) before bump — no deadlock');
+      const node = await tree.get('/w') as NodeData & { n: number };
+      assert.equal(node.n, 6, 'outer bump persisted after the reentrant read');
+    });
+
     it('opId replay returns first outcome without re-running', async () => {
       const { bumpRuns } = setupCounter();
       const tree = withExecute(await counterTree());
