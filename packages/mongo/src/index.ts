@@ -20,6 +20,7 @@ import {
   toStorageKeys,
 } from '@treenx/core/tree';
 import { defaultPatch } from '@treenx/core/tree/patch';
+import { ensureMigratedMongo } from './migrate';
 
 const toStorage = (node: NodeData) => toStorageKeys(node);
 const fromStorage = (doc: Record<string, unknown>) => fromStorageKeys(doc) as NodeData;
@@ -68,6 +69,10 @@ export async function createMongoTree(
   const col: Collection = db.collection(collectionName);
 
   await col.createIndex({ _path: 1 }, { unique: true });
+
+  // Component-namespace boot-gate (core-r096) — fs roots migrate in
+  // createFsTree; mongo-mounted collections migrate here, same contract.
+  await ensureMigratedMongo(col, `${dbName}.${collectionName}`);
 
   const watchEnabled = opts.watch === true;
   // Enable pre-images so DELETE events can carry _path. Best-effort —

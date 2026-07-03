@@ -24,9 +24,10 @@ import { atomicWrite } from './fs-atomic';
 export const NS_VERSION = 1;
 export const VERSION_FILE = '.treenix-version';
 
-type Stats = { files: number; migrated: number; renames: number; warnings: string[] };
+export type Stats = { files: number; migrated: number; renames: number; warnings: string[] };
 
-function transformNode(obj: Record<string, unknown>, file: string, stats: Stats, log: (line: string) => void): boolean {
+/** Exported for storage adapters with their own boot-gate (e.g. @treenx/mongo). */
+export function transformNode(obj: Record<string, unknown>, file: string, stats: Stats, log: (line: string) => void): boolean {
   let changed = false;
 
   for (const key of Object.keys(obj)) {
