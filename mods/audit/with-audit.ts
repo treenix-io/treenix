@@ -8,7 +8,7 @@
 // step is loud. Not transactional against crashes (Phase 0 trade-off), but the
 // "audit-backend-down → silent loss" mode is closed.
 
-import type { ActorContext } from '@treenx/core/server/actions';
+import type { ActorContext, DelegationHooks, DelegationInfo } from '@treenx/core/server/actions';
 import type { NodeData } from '@treenx/core';
 import type { Tree, PatchOp } from '@treenx/core/tree';
 import { randomBytes } from 'node:crypto';
@@ -72,6 +72,42 @@ function getActor(ctx: unknown): ActorContext | undefined {
     if (a && typeof a === 'object' && 'id' in a) return a as ActorContext;
   }
   return undefined;
+}
+
+/** Delegation audit hooks (core-pa3m). A delegated execute (core-pxlu) commits
+ *  on the REMOTE authority — the local write path never runs, so the mutation
+ *  wrapper below sees nothing. These hooks journal the local user→action link
+ *  instead: an intent row BEFORE the remote call (append failure rejects →
+ *  withExecute aborts the delegation, fail closed) and a settled row after
+ *  (append failure marks unhealthy; withExecute still returns the result — a
+ *  remote commit cannot be rolled back). createPipeline calls this with the
+ *  pre-wrap (subscribed) tree — same instance withAudit appends into. */
+export function auditExecHooks(tree: Tree): DelegationHooks {
+  function delegationEvent(op: 'delegate' | 'delegate-settled', info: DelegationInfo): NodeData {
+    const ev: NodeData = {
+      $path: eventPath(),
+      $type: 'audit.event',
+      ts: Date.now(),
+      op,
+      path: info.path,
+      action: info.action,
+      before: null,
+      after: null,
+    };
+    if (info.userId) ev.by = info.userId;
+    if (info.opId) ev.requestId = info.opId;
+    return ev;
+  }
+
+  return {
+    onDelegating: (info) => appendOrFailLoud(tree, delegationEvent('delegate', info)),
+    onDelegatedSettled: (info) => {
+      const ev = delegationEvent('delegate-settled', info);
+      ev.ok = info.ok;
+      if (!info.ok) ev.error = info.error instanceof Error ? info.error.message : String(info.error);
+      return appendOrFailLoud(tree, ev);
+    },
+  };
 }
 
 /** Wrap a Tree so every mutation appends an audit.event. Reads pass through.

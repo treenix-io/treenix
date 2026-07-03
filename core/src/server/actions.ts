@@ -424,7 +424,12 @@ export function executeAction<T = unknown>(
 // DELEGATED — the remote side resolves the handler and enforces permissions
 // under ITS principal (domain-owner trust model, mount token = capability).
 
-export type DelegationInfo = { path: string; action: string; userId?: string | null };
+export type DelegationInfo = { path: string; action: string; userId?: string | null; opId?: string };
+
+/** The audit-hook subset of WithExecuteOpts — what the composition root
+ *  supplies (createPipeline execHooks, core-pa3m). delegate/onDelegated stay
+ *  pipeline-owned. */
+export type DelegationHooks = Pick<WithExecuteOpts, 'onDelegating' | 'onDelegatedSettled'>;
 
 export type WithExecuteOpts = {
   /** Authority probe (MountableTree.resolveActionTree). Absent = everything local. */
@@ -443,7 +448,7 @@ export type WithExecuteOpts = {
   /** Audit outcome hook. A remote commit cannot be rolled back, so a failure
    *  here must not eat the result — the supplier handles it (mark unhealthy,
    *  as with-audit does); we log loudly and return the result regardless. */
-  onDelegatedSettled?: (info: DelegationInfo & { ok: boolean; error?: unknown }) => void;
+  onDelegatedSettled?: (info: DelegationInfo & { ok: boolean; error?: unknown }) => void | Promise<void>;
 };
 
 export function withExecute<T extends Tree>(inner: T, opts?: WithExecuteOpts): T & Required<Pick<Tree, 'execute'>> {
@@ -464,18 +469,25 @@ export function withExecute<T extends Tree>(inner: T, opts?: WithExecuteOpts): T
     assertCanCall({ kind: 'write', io: true });
 
     const info: DelegationInfo = { path, action, userId: identity?.userId ?? null };
+    if (execOpts?.opId) info.opId = execOpts.opId;
     await opts?.onDelegating?.(info);
 
     let result: unknown;
     try {
       result = await target.execute!(path, action, data, execOpts);
     } catch (e) {
-      opts?.onDelegatedSettled?.({ ...info, ok: false, error: e });
+      // Awaited in a guard: an async settled hook must not float (unhandled
+      // rejection), and its failure must never MASK the remote error.
+      try {
+        await opts?.onDelegatedSettled?.({ ...info, ok: false, error: e });
+      } catch (hookErr) {
+        console.error(`[withExecute] onDelegatedSettled failed after delegated ${action} on ${path}:`, hookErr);
+      }
       throw e;
     }
     opts?.onDelegated?.(path, action);
     try {
-      opts?.onDelegatedSettled?.({ ...info, ok: true });
+      await opts?.onDelegatedSettled?.({ ...info, ok: true });
     } catch (e) {
       // Remote already committed — swallowing the result would desync the
       // caller from reality. The supplier marks itself unhealthy; we log.

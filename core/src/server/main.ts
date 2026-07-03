@@ -24,23 +24,25 @@ const rootNode = JSON.parse(await readFile(rootPath, 'utf-8')) as NodeData;
 // (b) health-check, (c) workload session executor. Soft dep on @treenx/mods/*
 // (engine/core has no static dep on mods to avoid workspace cycle).
 let wrapTree: ((tree: import('#tree').Tree) => import('#tree').Tree) | undefined;
+let execHooks: import('./factory').TreenixConfig['execHooks'];
 let healthCheck: (() => Promise<{ healthy: boolean; reason: string }>) | undefined;
 let executor: import('./trpc').SessionExecutor | undefined;
 const seeds = (rootNode as Record<string, unknown>).seeds;
 if (Array.isArray(seeds) && seeds.includes('audit')) {
-  const { withAudit } = await import('@treenx/mods/audit/with-audit');
+  const { withAudit, auditExecHooks } = await import('@treenx/mods/audit/with-audit');
   // checkHealth runs a throttled recovery probe while unhealthy (core-98jr) —
   // the flag heals when the audit backend is back, no manual restart.
   const { checkHealth } = await import('@treenx/mods/audit/health');
   const { executeForSession } = await import('@treenx/mods/harness/session');
   wrapTree = withAudit;
+  execHooks = auditExecHooks;
   healthCheck = checkHealth;
   executor = executeForSession;
   console.log('[boot] audit + harness: enabled (seeds includes "audit")');
 }
 
 const modsDir = process.env.MODS_DIR || undefined;
-const t = await treenix({ rootNode, modsDir, wrapTree, healthCheck, executor });
+const t = await treenix({ rootNode, modsDir, wrapTree, execHooks, healthCheck, executor });
 const port = Number(process.env.PORT) || 3211;
 const host = process.env.HOST || '127.0.0.1';
 

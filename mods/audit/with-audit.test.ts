@@ -9,7 +9,7 @@ import { asTreeSource, createMemoryTree, type Tree } from '@treenx/core/tree';
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { checkHealth, isHealthy, resetHealthForTest } from './health';
-import { withAudit } from './with-audit';
+import { auditExecHooks, withAudit } from './with-audit';
 
 let inner: Tree;
 let audited: Tree;
@@ -236,5 +236,52 @@ describe('audit pipeline wiring (core-dpp)', () => {
     assert.equal(patchEvent!.by, 'u-alice');
     assert.equal(patchEvent!.action, 'bump');
     assert.equal(patchEvent!.requestId, 'req-42');
+  });
+});
+
+describe('auditExecHooks — delegation journal (core-pa3m)', () => {
+  it('onDelegating appends a delegate intent row with by/action/requestId', async () => {
+    const hooks = auditExecHooks(inner);
+
+    await hooks.onDelegating!({ path: '/fed/w', action: 'bump', userId: 'u-alice', opId: 'op-7' });
+
+    const events = await listAuditEvents(inner);
+    assert.equal(events.length, 1);
+    assert.equal(events[0].op, 'delegate');
+    assert.equal(events[0].path, '/fed/w');
+    assert.equal(events[0].action, 'bump');
+    assert.equal(events[0].by, 'u-alice');
+    assert.equal(events[0].requestId, 'op-7');
+  });
+
+  it('onDelegatedSettled appends outcome; failure carries the error message', async () => {
+    const hooks = auditExecHooks(inner);
+
+    await hooks.onDelegatedSettled!({ path: '/fed/w', action: 'bump', userId: 'u-alice', ok: true });
+    await hooks.onDelegatedSettled!({ path: '/fed/w', action: 'bump', userId: 'u-alice', ok: false, error: new Error('remote refused') });
+
+    const events = await listAuditEvents(inner);
+    assert.equal(events.length, 2);
+    assert.equal(events[0].op, 'delegate-settled');
+    assert.equal(events[0].ok, true);
+    assert.equal(events[1].ok, false);
+    assert.equal(events[1].error, 'remote refused');
+  });
+
+  it('intent append failure REJECTS (withExecute aborts the delegation) and marks unhealthy', async () => {
+    const failOnAudit: Tree = {
+      ...inner,
+      async set(node, ctx) {
+        if (node.$path.startsWith('/sys/audit/event/')) throw new Error('audit backend down');
+        return inner.set(node, ctx);
+      },
+    };
+    const hooks = auditExecHooks(failOnAudit);
+
+    await assert.rejects(
+      async () => hooks.onDelegating!({ path: '/fed/w', action: 'bump', userId: 'u-alice' }),
+      (e: unknown) => e instanceof Error && /audit/i.test(e.message),
+    );
+    assert.equal(isHealthy(), false, 'health flag flipped on intent append failure');
   });
 });

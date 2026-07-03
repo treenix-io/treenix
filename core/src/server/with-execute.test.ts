@@ -211,6 +211,46 @@ describe('withExecute', () => {
       assert.equal(settled?.ok, false);
     });
 
+    it('settled hook failure on the ERROR path never masks the remote error (core-pa3m)', async () => {
+      const inner = createMemoryTree();
+      await inner.set(createNode('/fed/w', 'anything'));
+      const failing: Tree = {
+        ...createMemoryTree(),
+        execute: async () => { throw Object.assign(new Error('remote denied'), { code: 'CONFLICT' }); },
+      };
+      const tree = withExecute(inner, {
+        delegate: async () => failing,
+        // Async hook that rejects — must be awaited (no floating rejection)
+        // and must not replace the remote error the caller needs to see.
+        onDelegatedSettled: async () => { throw new Error('journal down'); },
+      });
+
+      await assert.rejects(
+        () => tree.execute('/fed/w', 'bump'),
+        (e: { code?: string }) => e.code === 'CONFLICT',
+      );
+    });
+
+    it('async settled hook is awaited before the result returns (core-pa3m)', async () => {
+      const { tree: remote } = execRecorder('committed');
+      const inner = createMemoryTree();
+      await inner.set(createNode('/fed/w', 'anything'));
+      const order: string[] = [];
+      const tree = withExecute(inner, {
+        delegate: async () => remote,
+        onDelegatedSettled: async (info) => {
+          await Promise.resolve();
+          order.push(`settled:${info.ok}:${info.opId}`);
+        },
+      });
+
+      const result = await tree.execute('/fed/w', 'bump', undefined, { opId: 'op-9' });
+      order.push('returned');
+
+      assert.equal(result, 'committed');
+      assert.deepEqual(order, ['settled:true:op-9', 'returned'], 'hook (with opId in info) completed before return');
+    });
+
     it('read-kind frame cannot delegate (KIND_VIOLATION, conservative write+io)', async () => {
       setupCounter();
       const { tree: remote, calls } = execRecorder();

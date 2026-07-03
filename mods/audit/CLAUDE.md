@@ -5,8 +5,8 @@ audit append happens in the same pipeline tick as the write — if the audit
 backend fails, the original mutation also fails (loud).
 
 ### Files
-- **with-audit.ts** — `withAudit(tree)` wrapper
-- **with-audit.test.ts** — set / remove / patch / recursion guard / loud-fail
+- **with-audit.ts** — `withAudit(tree)` wrapper + `auditExecHooks(tree)` delegation hooks (core-pa3m)
+- **with-audit.test.ts** — set / remove / patch / recursion guard / loud-fail / delegation rows
 - **health.ts** — `markUnhealthy / isHealthy / unhealthyReason / resetHealthForTest`
 - **health.test.ts** — flag transitions + recovery-probe behaviour
 
@@ -47,11 +47,20 @@ never rejects silently). Heals two ways: any successful append calls
 runs a throttled REAL append probe — the probe row lands in the journal and
 documents the recovery. `resetHealthForTest()` is for unit tests only.
 
+### Delegated executes (core-pa3m)
+A delegated `Tree.execute` (core-pxlu federation) commits on the REMOTE side — the
+local write path never runs, so the mutation wrapper sees nothing. `auditExecHooks(tree)`
+journals the local user→action link instead: `op: 'delegate'` (intent, appended BEFORE
+the remote call; append failure rejects → withExecute aborts the delegation, fail closed)
+and `op: 'delegate-settled'` (`ok`, `error?`; append failure marks unhealthy, result still
+returned — a remote commit cannot be rolled back). Rows carry `path`, `action`, `by`
+(userId), `requestId` (opId); `before`/`after` are null (images live on the remote authority).
+
 ### Wiring (done)
 - `engine/mods/audit/seed.ts` — `/sys/audit/event` mount-point (Mongo `audit_events`)
-- `engine/core/src/server/main.ts` — `wrapTree = withAudit` gated on `'audit' ∈ seeds`
-- `engine/core/src/server/factory.ts` — passes `config.wrapTree` into `createPipeline`
-- `engine/core/src/server/server.ts` — 503 middleware reading `isHealthy()`
+- `engine/core/src/server/main.ts` — `wrapTree = withAudit` + `execHooks = auditExecHooks` gated on `'audit' ∈ seeds`
+- `engine/core/src/server/factory.ts` — passes `config.wrapTree` + `config.execHooks` into `createPipeline`
+- `engine/core/src/server/server.ts` — 503 middleware reading `isHealthy()`; `createPipeline` merges execHooks into the Tree.execute wiring
 
 **Where the wrap goes is load-bearing.** `withAudit` is applied INSIDE
 `createPipeline`, above subscriptions but BEFORE the tRPC router is built, so the

@@ -25,7 +25,7 @@ import { type CdcRegistry, type OnSelfWrite, withSubscriptions } from '#sub';
 import type { TreeEvent } from '#tree';
 import { runExternalWatch } from '#sub/external-watch';
 import type { ExternalWatchStarter } from '#mount';
-import { withExecute } from './actions';
+import { type DelegationHooks, withExecute } from './actions';
 import { createTreeRouter, type TreeRouter, type TreeRouterOpts, type TrpcContext } from './trpc';
 import { createWatchManager, type WatchManager } from '#sub/watch';
 
@@ -53,7 +53,7 @@ export type Pipeline = {
 };
 
 /** Pure tree composition — no HTTP, no side effects */
-export function createPipeline(bootstrap: Tree, opts?: TreeRouterOpts, wrapTree?: (t: Tree) => Tree): Pipeline {
+export function createPipeline(bootstrap: Tree, opts?: TreeRouterOpts, wrapTree?: (t: Tree) => Tree, execHooks?: (tree: Tree) => DelegationHooks): Pipeline {
   // External-watch wiring contract (core-tcc1). Mounts (bottom layer) need
   // hooks that only exist once the upper layers are built: injectExternal
   // routes change-stream events through withSubscriptions so CDC (query/VP
@@ -139,11 +139,17 @@ export function createPipeline(bootstrap: Tree, opts?: TreeRouterOpts, wrapTree?
       policy.invalidateAll();
       watcher.breakContinuity();
     },
+    // Delegation audit hooks from the composition root (core-pa3m). A delegated
+    // execute commits REMOTELY — the local write path never runs and the audit
+    // wrap sees nothing; these journal the local user→action link instead. They
+    // close over `subscribed` (below the wrap): delegation events are their own
+    // journal rows, not re-audited mutations.
+    ...execHooks?.(subscribed),
   };
   // withExecute OUTERMOST — local execute mutations flow through
   // subscriptions and audit. Identity-less: services get executeAction parity;
   // per-user identity binds in the wire session (per-request re-wrap).
-  const tree = withExecute(wrapped, { delegate: exec.delegate, onDelegated: exec.onDelegated });
+  const tree = withExecute(wrapped, exec);
   // System-identity tree for request-time tRPC bootstrap ops (buildClaims,
   // register/login/logout/agentConnect/devLogin, createFilteredPush) — audited like
   // user writes since it wraps the same `tree`. Boot writes (seed/log/autostart) use

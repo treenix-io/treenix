@@ -333,5 +333,55 @@ describe('Treenix Client SDK', () => {
       const result = await clientA.tree.execute('/fed/w', 'bump');
       assert.equal(result, 1);
     });
+
+    it('createPipeline execHooks reach the wire path: intent/settled fire around delegation, intent failure ABORTS (core-pa3m)', async () => {
+      // Own A-server so the pipeline carries recorder hooks end-to-end
+      // (createPipeline → WireDeps.exec → per-request withExecute).
+      const events: string[] = [];
+      let failIntent = false;
+      const bootstrap = createMemoryTree();
+      await bootstrap.set({
+        ...createNode('/', 'root'),
+        $acl: [{ g: 'public', p: R | W | S }, { g: 'system', p: R | W | A | S }],
+      });
+      const pipeline = createPipeline(bootstrap, undefined, undefined, () => ({
+        onDelegating: (info) => {
+          events.push(`intent:${info.path}:${info.action}:${info.userId ?? 'anon'}`);
+          if (failIntent) throw new Error('journal down');
+        },
+        onDelegatedSettled: (info) => { events.push(`settled:${info.ok}`); },
+      }));
+      const server = createHttpServer(pipeline);
+      const hookSockets = new Set<Socket>();
+      server.on('connection', (s: Socket) => {
+        hookSockets.add(s);
+        s.on('close', () => hookSockets.delete(s));
+      });
+      const port = await listen(server);
+      const clientH = createTrpcTransport({ url: `http://127.0.0.1:${port}` });
+
+      try {
+        await clientH.tree.set({
+          $path: '/fed',
+          $type: 'dir',
+          '#mount': { $type: 't.mount.tree.trpc', url: urlB, path: '/' },
+        });
+
+        assert.equal(await clientH.execute('/fed/w', 'bump'), 1);
+        assert.equal(events.length, 2);
+        assert.match(events[0], /^intent:\/fed\/w:bump:/);
+        assert.equal(events[1], 'settled:true');
+
+        failIntent = true;
+        await assert.rejects(() => clientH.execute('/fed/w', 'bump'));
+        assert.match(events[2], /^intent:\/fed\/w:bump:/, 'intent attempted');
+        assert.equal(events.length, 3, 'no settled row — remote never called (fail closed)');
+        const clientB = createTrpcTransport({ url: urlB });
+        assert.equal(((await clientB.tree.get('/w')) as { n?: number }).n, 1, 'B still at 1 — aborted before the remote call');
+      } finally {
+        for (const s of hookSockets) s.destroy();
+        await new Promise<void>((r) => server.close(() => r()));
+      }
+    });
   });
 });

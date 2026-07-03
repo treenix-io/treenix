@@ -14,6 +14,7 @@ import { loadSchemasFromDir } from '#schema/load';
 import { createMemoryTree, type Tree } from '#tree';
 import { sweepTrash } from '#tree/policy';
 import type { Server } from 'node:http';
+import type { DelegationHooks } from './actions';
 import { applyDevDefaults } from './dev-defaults';
 import { deploySeedPrefabs } from './prefab';
 import { createHttpServer, createPipeline, type Pipeline } from './server';
@@ -27,6 +28,11 @@ export type TreenixConfig = {
   /** Optional outer wrapper applied to the assembled pipeline tree.
    *  Mods compose extra concerns (e.g. audit) without modifying core pipeline. */
   wrapTree?: (tree: Tree) => Tree;
+  /** Delegation audit hooks factory (core-pa3m) — called by createPipeline with
+   *  the pre-wrap (subscribed) tree; returns onDelegating/onDelegatedSettled.
+   *  Wired by main.ts alongside wrapTree when the audit mod is on. Absent =
+   *  delegated executes leave no local audit record. */
+  execHooks?: (tree: Tree) => DelegationHooks;
   /** Optional health probe — when present, server gates all non-/health requests.
    *  /health endpoint always responds with the current state (200 healthy, 503 not).
    *  Leave undefined to disable health gating entirely. */
@@ -103,7 +109,7 @@ export async function treenix(config: TreenixConfig): Promise<TreenixServer> {
   // subscriptions but before the tRPC router — so per-user tRPC writes are audited
   // (core-dpp). Boot writes (seed/log/autostart) go through pipeline.systemTree
   // (= withAcl(mountable, ...), below the wrap), so audit never cycles on startup.
-  const pipeline = createPipeline(bootstrap, { executor: config.executor }, config.wrapTree);
+  const pipeline = createPipeline(bootstrap, { executor: config.executor }, config.wrapTree, config.execHooks);
   const { tree, cdc, systemTree } = pipeline;
 
   // 4. Seed — always run, deployNodes is idempotent per-node (skips existing)
