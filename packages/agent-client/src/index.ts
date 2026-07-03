@@ -39,6 +39,9 @@ function scopeClient(raw: TreenixClient, base: string): TreenixClient {
     execute: (path, action, data, o) => raw.execute(scopePath(base, path), action, data, o),
     watch: raw.watch,
     watchPath: (path, onEvent) => raw.watchPath(scopePath(base, path), onEvent),
+    // A scoped client shares the parent connection — destroy() tears down the
+    // parent (there is no scoped-only transport to release). Callers holding
+    // both must not destroy the scope independently of the parent (core-8uy).
     destroy: () => raw.destroy(),
   };
 }
