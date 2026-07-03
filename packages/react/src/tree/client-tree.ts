@@ -18,7 +18,7 @@ export function createClientTree(client: TrpcClient) {
 
   // Seed local tree
   memory.set({ $path: '/local', $type: 'dir' } as NodeData)
-  memory.set({ $path: '/local/react', $type: 'dir', mount: { $type: 't.mount.react' } } as NodeData)
+  memory.set({ $path: '/local/react', $type: 'dir', '#mount': { $type: 't.mount.react' } } as NodeData)
 
   const local = withMounts(memory)
 

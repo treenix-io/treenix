@@ -1,4 +1,4 @@
-import { register } from '@treenx/core';
+import { getComponentByName, register } from '@treenx/core';
 import { type View, useActions } from '@treenx/react';
 import { useChildren } from '@treenx/react';
 import { useState } from 'react';
@@ -96,7 +96,7 @@ const ApiTokensView: View<ApiTokenManager> = ({ value, ctx }) => {
             const createdAt = typeof child.createdAt === 'number' || typeof child.createdAt === 'string' ? child.createdAt : null;
             const preview = typeof child.preview === 'string' ? child.preview : null;
             const userNode = users.find(u => u.$path === `/auth/users/${userId}`);
-            const groupsComp = userNode && (userNode as { groups?: { list?: unknown } }).groups;
+            const groupsComp = userNode && getComponentByName(userNode, 'groups');
             const userGroups = Array.isArray(groupsComp?.list)
               ? (groupsComp!.list as unknown[]).filter((g): g is string => typeof g === 'string')
               : [];

@@ -765,7 +765,7 @@ const KanbanView: View<BoardKanban, { editable?: boolean }> = ({ value, ctx, edi
         label: label.trim(),
         color: 'border-border',
         order: maxOrder + 1,
-        mount: { $type: 't.mount.query', source: `${basePath}/data`, match: { status: slug } },
+        '#mount': { $type: 't.mount.query', source: `${basePath}/data`, match: { status: slug } },
       });
     }, `Column "${label.trim()}" created`);
   };

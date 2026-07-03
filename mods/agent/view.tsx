@@ -1,6 +1,6 @@
 // Agent Office — views for ai.pool, ai.agent, ai.approval, ai.thread, ai.run
 
-import { type ComponentData, register } from '@treenx/core';
+import { type ComponentData, getComponent, register } from '@treenx/core';
 import {
   cn,
   execute,
@@ -501,9 +501,9 @@ const ApprovalRow: View<AiApproval> = ({ value }) => {
 const AgentLayout: View<AiAgent> = ({ value, ctx }) => {
   const node = ctx!.node;
   const [collapsed, setCollapsed] = useState(true);
-  const hasChat = node.chat && typeof node.chat === 'object' && (node.chat as { $type?: string }).$type === 'ai.chat';
+  const chat = getComponent(node, 'ai.chat');
 
-  if (!hasChat) {
+  if (!chat) {
     return (
       <RenderContext name="react">
         <Render value={node} />
@@ -536,7 +536,7 @@ const AgentLayout: View<AiAgent> = ({ value, ctx }) => {
       </div>
       <div className="flex-1 min-h-0 overflow-hidden">
         <RenderContext name="react">
-          <Render value={node.chat as ComponentData} />
+          <Render value={chat} />
         </RenderContext>
       </div>
     </div>

@@ -131,7 +131,7 @@ describe('createClientTree — unified client tree', () => {
   describe('client tree output is stampable end-to-end', () => {
     it('tree.get returns nodes stampNode can annotate', async () => {
       const backing = new Map<string, NodeData>();
-      backing.set('/x', { $path: '/x', $type: 'test', comp: { $type: 'c', v: 1 } } as NodeData);
+      backing.set('/x', { $path: '/x', $type: 'test', '#comp': { $type: 'c', v: 1 } } as NodeData);
       const mock = createMockTrpc(backing);
       const { tree } = createClientTree(mock as any);
 
@@ -143,7 +143,7 @@ describe('createClientTree — unified client tree', () => {
     it('tree.getChildren returns items stampNode can annotate', async () => {
       const backing = new Map<string, NodeData>();
       backing.set('/a', { $path: '/a', $type: 'test' } as NodeData);
-      backing.set('/b', { $path: '/b', $type: 'test', comp: { $type: 'c' } } as NodeData);
+      backing.set('/b', { $path: '/b', $type: 'test', '#comp': { $type: 'c' } } as NodeData);
       const mock = createMockTrpc(backing);
       const { tree } = createClientTree(mock as any);
 

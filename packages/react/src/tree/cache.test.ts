@@ -275,21 +275,21 @@ describe('cache', () => {
   });
 
   it('nested component update works', () => {
-    cache.put({ $path: '/a', $type: 'x', comp: { $type: 'y', count: 0, label: 'hi' } } as any);
-    cache.put({ $path: '/a', $type: 'x', comp: { $type: 'y', count: 5, label: 'hi' } } as any);
-    assert.strictEqual((cache.get('/a') as any).comp.count, 5);
+    cache.put({ $path: '/a', $type: 'x', '#comp': { $type: 'y', count: 0, label: 'hi' } } as any);
+    cache.put({ $path: '/a', $type: 'x', '#comp': { $type: 'y', count: 5, label: 'hi' } } as any);
+    assert.strictEqual((cache.get('/a') as any)['#comp'].count, 5);
   });
 
   it('adding a new nested component', () => {
     cache.put({ $path: '/a', $type: 'x' } as any);
-    cache.put({ $path: '/a', $type: 'x', comp: { $type: 'y', v: 1 } } as any);
-    assert.strictEqual((cache.get('/a') as any).comp.v, 1);
+    cache.put({ $path: '/a', $type: 'x', '#comp': { $type: 'y', v: 1 } } as any);
+    assert.strictEqual((cache.get('/a') as any)['#comp'].v, 1);
   });
 
   it('removing a nested component', () => {
-    cache.put({ $path: '/a', $type: 'x', comp: { $type: 'y', v: 1 } } as any);
+    cache.put({ $path: '/a', $type: 'x', '#comp': { $type: 'y', v: 1 } } as any);
     cache.put({ $path: '/a', $type: 'x' } as any);
-    assert.strictEqual('comp' in (cache.get('/a') as any), false);
+    assert.strictEqual('#comp' in (cache.get('/a') as any), false);
   });
 
   it('array replaced wholesale', () => {

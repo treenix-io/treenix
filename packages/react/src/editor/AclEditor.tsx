@@ -1,7 +1,7 @@
 import { Button } from '#components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#components/ui/collapsible';
 import { Input } from '#components/ui/input';
-import { A, type GroupPerm, R, S, W } from '@treenx/core';
+import { A, getComponentByName, type GroupPerm, R, S, W } from '@treenx/core';
 import { ChevronRight, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import * as cache from '#tree/cache';
@@ -27,8 +27,10 @@ function getUserClaims(userId: string): Set<string> {
   const claims = new Set([`u:${userId}`, 'authenticated']);
   const userNode = cache.get(`/auth/users/${userId}`);
   if (userNode) {
-    const groups = userNode.groups as { list?: string[] } | undefined;
-    if (groups?.list) groups.list.forEach((g) => claims.add(g));
+    const groups = getComponentByName(userNode, 'groups');
+    if (Array.isArray(groups?.list)) {
+      for (const g of groups.list) if (typeof g === 'string') claims.add(g);
+    }
   }
   return claims;
 }

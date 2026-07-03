@@ -49,7 +49,7 @@ async function seedTree() {
     $path: '/demo/service',
     $type: 'test.service',
     label: 'My Service',
-    config: { $type: 'test.config', endpoint: 'https://api.example.com', apiKey: 'secret123' },
+    '#config': { $type: 'test.config', endpoint: 'https://api.example.com', apiKey: 'secret123' },
   } as NodeData);
 
   return tree;
@@ -117,7 +117,7 @@ describe('resolveContext sensitive field filtering', () => {
     await tree.set({
       $path: '/auth/users/admin1',
       $type: 'auth.user',
-      groups: { $type: 'auth.groups', list: ['admin'] },
+      '#groups': { $type: 'auth.groups', list: ['admin'] },
     } as NodeData);
 
     const result = await resolveContext(tree, ['Check @/secrets/keys'], 'admin1');
