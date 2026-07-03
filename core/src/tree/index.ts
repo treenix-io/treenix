@@ -25,6 +25,12 @@ export function paginate<T>(items: T[], opts?: PageOpts): Page<T> {
 
 export type ChildrenOpts = { depth?: number; query?: Record<string, unknown>; watch?: boolean; watchNew?: boolean } & PageOpts;
 
+/** Options for Tree.execute. Identity (userId/claims/actor) is deliberately
+ *  NOT here — it is bound when a tree is wrapped (server withExecute);
+ *  otherwise a nested action handler could spoof another principal via
+ *  ctx.tree.execute. */
+export type ExecOpts = { type?: string; key?: string; opId?: string };
+
 export interface Tree {
   get(path: string, ctx?: unknown): Promise<NodeData | undefined>;
   getChildren(path: string, opts?: ChildrenOpts, ctx?: unknown): Promise<Page<NodeData>>;
@@ -53,6 +59,14 @@ export interface Tree {
     opts?: TreeWatchOpts,
     ctx?: unknown,
   ): AsyncIterable<TreeEvent>;
+  /** Execute an action at the authority owning the path. Optional capability:
+   *  storage adapters omit it — actions on their nodes run in the LOCAL
+   *  executor (server withExecute wrapper). Transport trees (tRPC / TWP wire)
+   *  implement it — the call is delegated to the remote side, which resolves
+   *  the handler and enforces permissions/validation under ITS principal
+   *  (domain-owner trust model). Presence of this method on a mounted subtree
+   *  marks foreign authority. */
+  execute?(path: string, action: string, data?: unknown, opts?: ExecOpts, ctx?: unknown): Promise<unknown>;
 }
 
 // ── TreeSource: server-internal traversal primitive ──

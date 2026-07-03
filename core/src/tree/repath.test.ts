@@ -103,4 +103,73 @@ describe('createRepathTree', () => {
     const node = await mounted.get('/mnt');
     assert.ok(node);
   });
+
+  describe('execute capability', () => {
+    it('no execute key when inner lacks the capability', () => {
+      const inner = createMemoryTree();
+      const mounted = createRepathTree(inner, '/mnt', '/data');
+      assert.equal('execute' in mounted, false);
+    });
+
+    it('forwards with path translated to remote, opts/data intact', async () => {
+      const calls: unknown[][] = [];
+      const inner = {
+        ...createMemoryTree(),
+        execute: async (...args: unknown[]) => { calls.push(args); return 42; },
+      };
+      const mounted = createRepathTree(inner, '/mnt', '/data');
+
+      const result = await mounted.execute!('/mnt/item', 'bump', { by: 2 }, { key: 'counter', opId: 'op-1' });
+
+      assert.equal(result, 42);
+      assert.equal(calls.length, 1);
+      const [path, action, data, opts] = calls[0];
+      assert.equal(path, '/data/item');
+      assert.equal(action, 'bump');
+      assert.deepEqual(data, { by: 2 });
+      assert.deepEqual(opts, { key: 'counter', opId: 'op-1' });
+    });
+
+    it('remaps node-shaped result back to local namespace', async () => {
+      const inner = {
+        ...createMemoryTree(),
+        execute: async () => ({ $path: '/data/item', $type: 'doc', n: 1 }),
+      };
+      const mounted = createRepathTree(inner, '/mnt', '/data');
+
+      const result = await mounted.execute!('/mnt/item', 'read') as { $path: string };
+      assert.equal(result.$path, '/mnt/item');
+    });
+
+    it('remaps Page-shaped result items back to local namespace', async () => {
+      const inner = {
+        ...createMemoryTree(),
+        execute: async () => ({ items: [{ $path: '/data/a' }, { $path: '/data/b' }], total: 2 }),
+      };
+      const mounted = createRepathTree(inner, '/mnt', '/data');
+
+      const result = await mounted.execute!('/mnt', 'list') as { items: { $path: string }[] };
+      assert.deepEqual(result.items.map(i => i.$path), ['/mnt/a', '/mnt/b']);
+    });
+
+    it('leaves scalar and non-node results untouched', async () => {
+      const inner = {
+        ...createMemoryTree(),
+        execute: async () => ({ ok: true, count: 3 }),
+      };
+      const mounted = createRepathTree(inner, '/mnt', '/data');
+
+      assert.deepEqual(await mounted.execute!('/mnt/item', 'stat'), { ok: true, count: 3 });
+    });
+
+    it('fails loudly on result $path outside remoteBase', async () => {
+      const inner = {
+        ...createMemoryTree(),
+        execute: async () => ({ $path: '/outside', $type: 'doc' }),
+      };
+      const mounted = createRepathTree(inner, '/mnt', '/data');
+
+      await assert.rejects(() => mounted.execute!('/mnt/item', 'leak'), /outside remoteBase/);
+    });
+  });
 });

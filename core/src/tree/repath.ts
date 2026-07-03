@@ -6,7 +6,7 @@
 
 import type { NodeData } from '#core';
 import { assertSafePath } from '#core/path';
-import type { Page, Tree } from './index';
+import type { ExecOpts, Page, Tree } from './index';
 
 export function createRepathTree(inner: Tree, localBase: string, remoteBase: string = '/'): Tree {
   // Normalize: strip trailing slashes, handle root
@@ -49,6 +49,33 @@ export function createRepathTree(inner: Tree, localBase: string, remoteBase: str
     return { ...page, items: page.items.map(remapNode) };
   }
 
+  function isNodeShaped(v: unknown): v is NodeData {
+    return !!v && typeof v === 'object' && typeof (v as { $path?: unknown }).$path === 'string';
+  }
+
+  // Execute results come from a remote action — unlike get/getChildren, the
+  // returned $path is NOT guaranteed to sit under remoteBase. A naive toLocal
+  // on an out-of-base path would corrupt it; fail loudly instead.
+  function toLocalStrict(remotePath: string): string {
+    if (rb && remotePath !== rb && !remotePath.startsWith(rb + '/'))
+      throw new Error(`repath: execute result $path ${remotePath} outside remoteBase ${rb || '/'}`);
+    return toLocal(remotePath);
+  }
+
+  // Remap top-level node-shaped and Page-shaped action results back to the
+  // local namespace. Arbitrary nested paths inside result payloads are
+  // intentionally untranslated — only node/Page shapes carry authority paths.
+  function remapExecResult(result: unknown): unknown {
+    if (isNodeShaped(result)) return { ...result, $path: toLocalStrict(result.$path) };
+    if (result && typeof result === 'object' && Array.isArray((result as { items?: unknown }).items)) {
+      const page = result as { items: unknown[] };
+      if (page.items.every(isNodeShaped)) {
+        return { ...page, items: page.items.map((n) => ({ ...n, $path: toLocalStrict(n.$path) })) };
+      }
+    }
+    return result;
+  }
+
   return {
     get: async (path, ctx) => {
       const node = await inner.get(toRemote(path), ctx);
@@ -71,6 +98,15 @@ export function createRepathTree(inner: Tree, localBase: string, remoteBase: str
           yield { node: remapNode(entry.node), cursor: entry.cursor };
         }
       },
+    } : {}),
+
+    // execute — forwarded only when inner has the capability (same idiom as
+    // scanChildren). Presence marks foreign authority: the remote side
+    // resolves the handler and enforces permissions under ITS principal.
+    // Prerequisite for federation mounts (t.mount.tree.trpc, core-nin.7).
+    ...(inner.execute ? {
+      execute: async (path: string, action: string, data?: unknown, opts?: ExecOpts, ctx?: unknown) =>
+        remapExecResult(await inner.execute!(toRemote(path), action, data, opts, ctx)),
     } : {}),
 
     set: (node, ctx) =>
