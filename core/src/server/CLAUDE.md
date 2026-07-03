@@ -6,6 +6,7 @@ HTTP server + tRPC + store pipeline
 - factory.ts — treenix() boot: load mods, build pipeline, deploy seeds, start services
 - trpc.ts — tRPC router, Immer drafts in execute, OCC→CONFLICT mapping
 - actions.ts — executeAction(tree,path,type?,key?,action,data?), createNodeHandle, serverNodeHandle; callAction deleted
+- jobs.ts — startJob(label, body(signal), {timeoutMs?}): detached long-run job context (core-gk8.5) — no path lock, no draft, no 10s envelope; fresh kind-frame via kind-stack runDetached (read frames denied); state goes to run-record nodes via normal writes; runningJobs()/drainJobs() (drain is mandatory in afterEach of job-spawning suites)
 - prefab.ts — deploy registered prefab data into a tree
 - backup.ts + backup-cli.ts — `treenix backup|verify|restore` (bin/treenix.mjs): stop-the-world instance backup; set is the fixpoint of config + in-tree fs mounts; contract in docs/deployment.md
 - seed/ — initial tree: core.ts + domain module seeds

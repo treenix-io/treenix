@@ -52,3 +52,20 @@ export function runWithFrame<T>(frame: KindFrame, fn: () => Promise<T>): Promise
   const current = stack.getStore() ?? [];
   return stack.run([...current, frame], fn);
 }
+
+/** Detach into a FRESH frame stack — the escape hatch for long-run jobs
+ *  (core-gk8.5). Caller frames are deliberately not inherited: a job outlives
+ *  its spawning action, so a lingering parent frame would be a lie. Fail
+ *  closed: read frames cannot detach — that would launder writes past
+ *  assertCanCall. The guard lives HERE (not in startJob) so no caller of the
+ *  escape hatch can skip it. */
+export function runDetached<T>(frame: KindFrame, fn: () => Promise<T>): Promise<T> {
+  const caller = currentFrame();
+  if (caller?.kind === 'read') {
+    throw new OpError(
+      'KIND_VIOLATION',
+      `read action ${caller.action} cannot detach ${frame.action} (${frame.kind}${frame.io ? '+io' : ''})`,
+    );
+  }
+  return stack.run([frame], fn);
+}

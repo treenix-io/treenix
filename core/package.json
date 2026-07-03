@@ -157,6 +157,11 @@
       "types": "./dist/server/actions.d.ts",
       "default": "./dist/server/actions.js"
     },
+    "./server/jobs": {
+      "development": "./src/server/jobs.ts",
+      "types": "./dist/server/jobs.d.ts",
+      "default": "./dist/server/jobs.js"
+    },
     "./server/server": {
       "development": "./src/server/server.ts",
       "types": "./dist/server/server.d.ts",
