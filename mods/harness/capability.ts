@@ -109,6 +109,9 @@ export async function executeWithCapability<T = unknown>(
   // Wrap tree so internal ctx.tree.set/remove/patch inside the action handler
   // pass through capability filtering — closes confused-deputy hole where a
   // whitelisted action could write outside its declared scope.
+  // Deliberately the LOCAL executor, not Tree.execute (core-pxlu): the checks
+  // above ran against cap, and the hand-built capability tree carries no
+  // execute — a workload can never delegate around its narrowing (fail closed).
   const wrapped = withCapability(tree, cap);
   return executeAction<T>(wrapped, input.path, input.type, input.key, input.action, input.data, { actor });
 }

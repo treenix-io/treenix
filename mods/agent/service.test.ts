@@ -4,8 +4,8 @@
 import { A, createNode, makeNode, R, S, W } from '@treenx/core';
 import { withMounts } from '@treenx/core/mount';
 import { loadSchemasFromDir } from '@treenx/core/schema/load';
-import { executeAction } from '@treenx/core/server/actions';
-import { createMemoryTree, type Tree } from '@treenx/core/tree';
+import { executeAction, withExecute } from '@treenx/core/server/actions';
+import { createMemoryTree, type ExecTree } from '@treenx/core/tree';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import '#branch/service'; // pulls types + the t.mount.branch adapter
@@ -15,9 +15,9 @@ loadSchemasFromDir(new URL('../branch/schemas', import.meta.url).pathname);
 
 const OWNER = 'agent-workload:r-test';
 
-async function setup(): Promise<{ tree: Tree; branchPath: string; view: string }> {
+async function setup(): Promise<{ tree: ExecTree; branchPath: string; view: string }> {
   const root = createMemoryTree();
-  const tree = withMounts(root);
+  const tree = withExecute(withMounts(root));
   const rootNode = createNode('/', 'root');
   rootNode.$acl = [{ g: 'admins', p: R | W | A | S }, { g: 'authenticated', p: R | S }];
   await tree.set(rootNode);

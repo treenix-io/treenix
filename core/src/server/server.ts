@@ -3,7 +3,7 @@
 // createHttpServer: HTTP + CORS + tRPC + static serving.
 
 import { createLogger } from '#log';
-import type { Tree } from '#tree';
+import type { ExecTree, Tree } from '#tree';
 import { withStoragePolicy } from '#tree/policy';
 import { nodeHTTPRequestHandler } from '@trpc/server/adapters/node-http';
 import { TRPCError } from '@trpc/server';
@@ -37,7 +37,9 @@ export type RouteHandler = (req: import('node:http').IncomingMessage, res: impor
 export const routeRegistry = new Map<string, RouteHandler>();
 
 export type Pipeline = {
-  tree: Tree;
+  /** Exec-capable (core-pxlu): withExecute-wrapped — tree.execute routes
+   *  actions to the owning authority (local executor or federated mount). */
+  tree: ExecTree;
   cdc: CdcRegistry;
   mountable: Tree;
   /** Mountable wrapped with the 'system' identity. All bootstrap-layer reads/writes

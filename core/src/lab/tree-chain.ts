@@ -83,6 +83,21 @@ async function exec(tree: Tree, path: string, spec: Spec | null, ops: Op[]): Pro
     } else {
       // Action call: [name, args]
       const [action, args] = op
+
+      // Capability path (core-pxlu): exec-capable trees get FULL executor
+      // semantics — arg validation, kind-stack, Immer persist, federation for
+      // mounted paths. Addressable targets: a node (possibly ref-followed) or
+      // a component extracted from the entry node.
+      if (tree.execute && cur != null && typeof cur === 'object' && '$type' in cur) {
+        cur = '$path' in cur
+          ? await tree.execute(cur.$path as string, action, args[0], { type: curType })
+          : await tree.execute(path, action, args[0], { type: curType, key: spec?.key })
+        continue
+      }
+
+      // Direct registry path for capability-less trees: bypasses validation /
+      // kind-stack / Immer (core-simplification Task 4) — Layer 2 cannot
+      // import the Layer 4 executor; the capability above is the layer-correct fix.
       const handler = resolve(curType, `action:${action}`)
       if (!handler) throw new Error(`No action "${action}" for type "${curType}"`)
       const ctx = { node, comp: cur, tree, signal: undefined, nc: undefined, deps: {} }

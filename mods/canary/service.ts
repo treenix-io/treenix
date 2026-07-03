@@ -1,7 +1,6 @@
 // Canary smoke tests — run at server startup to verify core mechanics
 
 import { getComponent, type NodeData, register } from '@treenx/core';
-import { executeAction } from '@treenx/core/server/actions';
 import '@treenx/core/contexts/service';
 import { CanaryItem } from './types';
 
@@ -45,16 +44,16 @@ register('canary.runner', 'service', async (node, ctx) => {
     if (comp.value !== 0) throw new Error(`wrong value: ${comp.value}`);
   });
 
-  // ── 3. Action mutates state (Immer draft) ──
+  // ── 3. Action mutates state (Immer draft) — via Tree.execute (core-pxlu) ──
   await assert('action increment mutates via Immer', async () => {
-    await executeAction(tree, itemPath, 'canary.item', undefined, 'increment', undefined);
+    await tree.execute(itemPath, 'increment', undefined, { type: 'canary.item' });
     const n = await tree.get(itemPath);
     if ((n as any).value !== 1) throw new Error(`expected 1, got ${(n as any).value}`);
   });
 
   // ── 4. Action with parameters ──
   await assert('action setLabel accepts params', async () => {
-    await executeAction(tree, itemPath, 'canary.item', undefined, 'setLabel', { label: 'updated' });
+    await tree.execute(itemPath, 'setLabel', { label: 'updated' }, { type: 'canary.item' });
     const n = await tree.get(itemPath);
     if ((n as any).label !== 'updated') throw new Error(`expected "updated", got ${(n as any).label}`);
   });

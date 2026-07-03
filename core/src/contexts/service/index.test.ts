@@ -2,6 +2,7 @@ import { createNode, register } from '#core';
 import { clearRegistry } from '#testing';
 import { withSubscriptions } from '#sub';
 import { createMemoryTree, resolveRef } from '#tree';
+import { withExecute } from '#server/actions';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 import { type ServiceCtx, type ServiceHandle, startServices, type StoreEvent } from './index';
@@ -35,7 +36,7 @@ describe('startServices', () => {
 
   it('returns null when no autostart node', async () => {
     const tree = createMemoryTree();
-    assert.equal(await startServices(tree, () => () => {}), null);
+    assert.equal(await startServices(withExecute(tree), () => () => {}), null);
   });
 
   it('starts autostart service', async () => {
@@ -52,7 +53,7 @@ describe('startServices', () => {
 
     const tree = createMemoryTree();
     await tree.set(createNode('/sys/autostart', 'autostart'));
-    const handle = await startServices(tree, () => () => {});
+    const handle = await startServices(withExecute(tree), () => () => {});
 
     assert.equal(started, true);
     assert.ok(handle);
@@ -98,7 +99,7 @@ describe('startServices', () => {
     await tree.set(target);
     await tree.set({ $path: '/sys/autostart/b', $type: 'ref', $ref: '/srv/b' } as any);
 
-    const handle = await startServices(tree, () => () => {})!;
+    const handle = await startServices(withExecute(tree), () => () => {})!;
     assert.deepEqual(log, ['start:/sys/autostart/a', 'start:/srv/b']);
 
     await handle!.stop();
@@ -151,7 +152,7 @@ describe('startServices', () => {
     await tree.set(createNode('/sys/autostart/a', 'bad'));
     await tree.set(createNode('/sys/autostart/b', 'good'));
 
-    const handle = await startServices(tree, () => () => {});
+    const handle = await startServices(withExecute(tree), () => () => {});
     assert.deepEqual(log, ['started']);
     await handle!.stop();
     assert.deepEqual(log, ['started', 'stopped']);
@@ -170,7 +171,7 @@ describe('ServiceCtx.subscribe', () => {
 
     const tree = createMemoryTree();
     await tree.set(createNode('/sys/autostart', 'watcher'));
-    await startServices(tree, () => () => {});
+    await startServices(withExecute(tree), () => () => {});
     assert.equal(receivedSubscribe, true);
   });
 

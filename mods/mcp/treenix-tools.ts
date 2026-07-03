@@ -108,6 +108,9 @@ class TreenixMcpToolsServer extends TreenixMcpTools {
   /** Execute an action on a node or component. Actions are methods registered on types. May require Guardian approval. */
   async execute(data: { path: string; action: string; type?: string; key?: string; data?: Record<string, unknown>; opId?: string }) {
     assertSafePath(data.path); // R5-MCP-3
+    // Local executor by necessity (core-pxlu): the MCP ctx tree is the per-user
+    // withAcl view — execute stripped, delegation wiring lives in the pipeline.
+    // Federation for MCP executes = follow-up (thread Pipeline exec wiring here).
     const { tree, userId, claims } = getCtx();
     const result = await executeAction(tree, data.path, data.type, data.key, data.action, data.data, {
       userId: userId as string | null | undefined,

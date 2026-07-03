@@ -2,7 +2,7 @@
 // Service = register(type, "service", handler) → returns { stop() }
 
 import { resolve as resolveCtx } from '#core';
-import { type Tree } from '#tree';
+import { type ExecTree } from '#tree';
 
 // ── Types ──
 
@@ -16,7 +16,9 @@ export type StoreEvent =
 export type StoreListener = (event: StoreEvent) => void;
 export type SubscribeOpts = { children?: boolean };
 export type ServiceCtx = {
-  tree: Tree;
+  // Exec-capable by contract (core-pxlu): the factory passes the pipeline tree,
+  // so services call tree.execute directly — full executor + federation routing.
+  tree: ExecTree;
   path: string;
   // kriz: what is it for? why not tree, or sub like client! should fully review subscription/watch infostructure and unify!
   // where is node itself? look to the ExecCtx, why is the diff?
@@ -32,7 +34,7 @@ declare module '#core/context' {
 // ── Bootstrap ──
 
 export async function startServices(
-  tree: Tree,
+  tree: ExecTree,
   subscribe: ServiceCtx['subscribe'],
   path = '/sys/autostart',
 ): Promise<ServiceHandle | null> {

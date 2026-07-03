@@ -98,6 +98,11 @@ export type ScanChildrenOpts = {
   signal?: AbortSignal;
 };
 
+/** Tree narrowed to require `execute` — what withExecute returns. The server
+ *  pipeline tree and mod-service ctx.tree carry this type: services call
+ *  `tree.execute` directly, no capability guard needed (core-pxlu). */
+export type ExecTree = Tree & Required<Pick<Tree, 'execute'>>;
+
 /** Tree narrowed to require `scanChildren` — server-internal read runtime
  *  uses this so callers express the dependency at the type level. Obtain
  *  one via `asTreeSource(tree)` or via adapters that always implement it

@@ -5,6 +5,7 @@ import { startServices } from '#contexts/service/index';
 import type { NodeData } from '#core';
 import { createNode, register } from '#core';
 import { createMemoryTree } from '#tree';
+import { withExecute } from '#server/actions';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
@@ -23,7 +24,7 @@ describe('autostart dynamic start/stop', () => {
     svcLog.length = 0;
     const tree = createMemoryTree();
     await tree.set(createNode('/sys/autostart', 'autostart'));
-    const handle = await startServices(tree, () => () => {});
+    const handle = await startServices(withExecute(tree), () => () => {});
     assert.ok(handle);
     return { tree, handle: handle! };
   }
@@ -92,7 +93,7 @@ describe('autostart dynamic start/stop', () => {
     await tree.set({ $path: '/srv/d', $type: 'test.autosvc' } as NodeData);
     await tree.set({ $path: '/sys/autostart/d', $type: 'ref', $ref: '/srv/d' } as NodeData);
 
-    const handle = await startServices(tree, () => () => {});
+    const handle = await startServices(withExecute(tree), () => () => {});
     assert.deepEqual(svcLog, ['start:/srv/d']);
     await handle!.stop();
   });

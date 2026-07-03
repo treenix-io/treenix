@@ -3,6 +3,7 @@
 import { createNode, getComponent, resolve } from '@treenx/core';
 import type { ServiceHandle } from '@treenx/core/contexts/service';
 import { createMemoryTree, type Tree } from '@treenx/core/tree';
+import { withExecute } from '@treenx/core/server/actions';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 import './service'; // registers handlers once (ESM cache)
@@ -41,7 +42,7 @@ async function waitForRound(t: Tree, path: string, target: number, timeoutMs = 5
 
 function startService(worldPath: string) {
   const svc = resolve('sim.world', 'service')!;
-  return tree.get(worldPath).then(w => svc(w!, { tree, path: worldPath, subscribe: () => () => {} }));
+  return tree.get(worldPath).then(w => svc(w!, { tree: withExecute(tree), path: worldPath, subscribe: () => () => {} }));
 }
 
 beforeEach(() => {

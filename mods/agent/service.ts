@@ -7,7 +7,6 @@ import { fileMergeApprovals } from '#branch/approvals';
 import { mintWorkloadToken } from '#harness/mint';
 import { invokeClaude } from '#metatron/claude';
 import { type Class, type ComponentData, createNode, getComponent, getComponentByName, type NodeData, register } from '@treenx/core';
-import { executeAction } from '@treenx/core/server/actions';
 import { setComponent } from '@treenx/core/comp';
 import type { ServiceCtx } from '@treenx/core/contexts/service';
 import { OpError } from '@treenx/core/errors';
@@ -199,11 +198,9 @@ export async function settleBranchAfterRun(store: ServiceCtx['tree'], branchPath
   if (branch.status === 'review') return `🌿 merge requested — review at /guardian/approvals (${branchPath})`;
   if (branch.status !== 'open') return `branch ${branchPath}: ${String(branch.status)}`;
 
-  const { entries } = await executeAction<{ entries: unknown[] }>(
-    store, branchPath, undefined, undefined, 'diff', undefined,
-  );
+  const { entries } = await store.execute(branchPath, 'diff') as { entries: unknown[] };
   if (entries.length === 0) {
-    await executeAction(store, branchPath, undefined, undefined, 'abandon', undefined);
+    await store.execute(branchPath, 'abandon');
     return `branch ${branchPath}: no changes → abandoned`;
   }
   return `🌿 ${entries.length} change(s) in ${branchPath} were NOT submitted for merge — the agent finished without requestMerge`;
@@ -313,10 +310,10 @@ async function runAgent(
   // becomes the branch view), so live stays read-only by construction and the
   // guardian gates only merge. Owner = the per-run workload identity.
   const workloadUserId = `agent-workload:${runId}`;
-  const { path: branchPath } = await executeAction<{ path: string }>(
-    store, '/branches', undefined, undefined, 'create',
+  const { path: branchPath } = await store.execute(
+    '/branches', 'create',
     { title: `${role}: ${String(taskNode.title ?? taskNode.$path)}`, owner: workloadUserId },
-  );
+  ) as { path: string };
   const { token: mcpToken } = await mintWorkloadToken(store, {
     agentPath: agentNode.$path,
     taskPath: taskNode.$path,

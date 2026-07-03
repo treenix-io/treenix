@@ -4,7 +4,7 @@
 import { type NodeData, register, resolve } from '@treenx/core';
 import { registerType } from '@treenx/core/comp';
 import type { ServiceCtx } from '@treenx/core/contexts/service';
-import { serverNodeHandle } from '@treenx/core/server/actions';
+import { serverNodeHandle, withExecute } from '@treenx/core/server/actions';
 import { createMemoryTree, type Tree } from '@treenx/core/tree';
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
@@ -199,7 +199,7 @@ async function startTestBot(tree: Tree): Promise<FakeBot> {
 
   setBotFactory(() => fakeBot);
   const svcCtx: ServiceCtx = {
-    tree,
+    tree: withExecute(tree),
     path: botNode.$path,
     subscribe: () => () => {},
   };
