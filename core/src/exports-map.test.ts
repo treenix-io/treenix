@@ -20,10 +20,7 @@ describe('exports map (qvrt)', () => {
   it('internals do not resolve — pipeline wrappers and infra are private', async () => {
     // Non-literal specifiers so tsc doesn't try to resolve them at typecheck.
     const internals: string[] = [
-      '@treenx/core/tree/volatile',
-      '@treenx/core/tree/validation',
-      '@treenx/core/tree/trash',
-      '@treenx/core/tree/migration',
+      '@treenx/core/tree/policy',
       '@treenx/core/sub',
       '@treenx/core/server/trpc',
       '@treenx/core/security/seed',

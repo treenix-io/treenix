@@ -5,12 +5,8 @@ Tree interface + adapters. Layer 1 — no deps except core types.
 - index.ts — Tree interface, paginate, createMemoryTree, createOverlayTree, createFilterTree, resolveRef
 - fs.ts — FS adapter (JSON files on disk), $rev OCC
 - mimefs.ts — raw filesystem adapter with MIME/codec mapping
-- cache.ts — cache wrapper over a Tree
-- refs.ts — derived $refs index wrapper
-- volatile.ts — memory overlay routing for volatile nodes
-- validation.ts — schema validation wrapper
-- migration.ts — per-type $v migration wrapper; wraps the mounted tree (example mod: mod/examples/versioned)
-- trash.ts — soft-delete wrapper: client removes move the node into /sys/trash; GC sweep at boot
+- cache.ts — cache wrapper over a Tree (also used standalone by the client SDK)
+- policy.ts — THE storage-policy step over the mounted tree: migration ($v ladders on read, example mod: mod/examples/versioned) → validation → $refs derivation → cache → trash (soft-delete into /sys/trash + GC sweep). Former separate wrappers, collapsed core-5fqq; $volatile routing cut with the feature (mem-only subtrees = t.mount.memory)
 - repath.ts — path prefix remapping wrapper
 - query.ts — Query tree: virtual filtered view via sift (Mongo syntax). Used by t.mount.query
 - patch.ts — compact PatchOp tuples and RFC 6902 conversion

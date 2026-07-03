@@ -12,7 +12,7 @@ import { loadAllMods } from '#mod';
 import { getAnonKey } from '#security/anon';
 import { loadSchemasFromDir } from '#schema/load';
 import { createMemoryTree, type Tree } from '#tree';
-import { sweepTrash } from '#tree/trash';
+import { sweepTrash } from '#tree/policy';
 import type { Server } from 'node:http';
 import { applyDevDefaults } from './dev-defaults';
 import { deploySeedPrefabs } from './prefab';

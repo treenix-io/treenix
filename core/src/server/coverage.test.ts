@@ -6,7 +6,7 @@
 //  - actions.ts (executeAction, setComponent)
 //  - fs tree OCC
 //  - validate.ts edge cases
-//  - volatile extractPaths
+//  - peer extractPaths
 
 import { registerType } from '#comp';
 import { createNode, getComponentByName, type NodeData, register, resolve } from '#core';
@@ -25,18 +25,17 @@ import { withMounts } from '#mount';
 import { MountMemory, MountOverlay, MountQuery, MountTypes } from '#mount/adapters';
 import { type CdcRegistry, withSubscriptions } from '#sub';
 import { createTypesTree } from '#mount/types';
-import { withValidation } from '#tree/validation';
-import { extractPaths, isVolatile, withVolatile } from '#tree/volatile';
+import { withStoragePolicy } from '#tree/policy';
+import { extractPaths } from '#protocol/peer';
 
 // ── Helpers ──
 
 function fullPipeline(rootStore?: Tree) {
   const bootstrap = rootStore ?? createMemoryTree();
   const mountable = withMounts(bootstrap);
-  const volatile = withVolatile(mountable);
-  const validated = withValidation(volatile);
+  const policy = withStoragePolicy(mountable);
   const events: any[] = [];
-  const { tree, cdc } = withSubscriptions(validated, (e) => events.push(e));
+  const { tree, cdc } = withSubscriptions(policy.tree, (e) => events.push(e));
   return { bootstrap, tree, cdc, events };
 }
 
@@ -605,7 +604,7 @@ describe('Validation edge cases', () => {
       properties: { name: { type: 'string' } },
     }));
 
-    const tree = withValidation(createMemoryTree());
+    const tree = withStoragePolicy(createMemoryTree()).tree;
 
     await assert.rejects(
       () => tree.set({ $path: '/v', $type: 'x', '#comp': { $type: 'typed', name: 123 } } as any),
@@ -618,7 +617,7 @@ describe('Validation edge cases', () => {
       properties: { count: { type: 'number' } },
     }));
 
-    const tree = withValidation(createMemoryTree());
+    const tree = withStoragePolicy(createMemoryTree()).tree;
 
     await assert.rejects(
       () => tree.set({ $path: '/v', $type: 'x', '#comp': { $type: 'numtype', count: 'not a number' } } as any),
@@ -631,7 +630,7 @@ describe('Validation edge cases', () => {
       properties: { flag: { type: 'boolean' } },
     }));
 
-    const tree = withValidation(createMemoryTree());
+    const tree = withStoragePolicy(createMemoryTree()).tree;
 
     await assert.rejects(
       () => tree.set({ $path: '/v', $type: 'x', '#comp': { $type: 'booltype', flag: 42 } } as any),
@@ -644,14 +643,14 @@ describe('Validation edge cases', () => {
       properties: { name: { type: 'string' } },
     }));
 
-    const tree = withValidation(createMemoryTree());
+    const tree = withStoragePolicy(createMemoryTree()).tree;
     // null and undefined should pass — optional by default
     await tree.set({ $path: '/v', $type: 'x', '#comp': { $type: 'opttype', name: null } } as any);
     await tree.set({ $path: '/v2', $type: 'x', '#comp': { $type: 'opttype' } } as any);
   });
 
   it('skips components without schema', async () => {
-    const tree = withValidation(createMemoryTree());
+    const tree = withStoragePolicy(createMemoryTree()).tree;
     await tree.set({ $path: '/v', $type: 'x', '#comp': { $type: 'untyped', anything: 'goes' } } as any);
     const node = await tree.get('/v');
     assert.ok(node, 'node should be stored');
@@ -661,7 +660,7 @@ describe('Validation edge cases', () => {
   it('skips schemas without properties', async () => {
     register('emptyschema', 'schema', () => ({ title: 'emptyschema', type: 'object' as const, properties: {} }));
 
-    const tree = withValidation(createMemoryTree());
+    const tree = withStoragePolicy(createMemoryTree()).tree;
     await tree.set({ $path: '/v', $type: 'x', '#comp': { $type: 'emptyschema', x: 1 } } as any);
     const node = await tree.get('/v');
     assert.ok(node, 'node should be stored');
@@ -669,7 +668,9 @@ describe('Validation edge cases', () => {
   });
 });
 
-// ── volatile.ts: extractPaths ──
+// ── protocol/peer.ts: extractPaths (moved from tree/volatile.ts with the $volatile cut) ──
+// The isVolatile flag checks moved to pipeline-invariants.test.ts with inverted
+// expectations: the $volatile flag is inert, nodes persist to the backing store.
 
 describe('extractPaths', () => {
   it('extracts from { items: [...] }', () => {
@@ -696,35 +697,22 @@ describe('extractPaths', () => {
     );
   });
 
+  it('throws on item with non-string $path', () => {
+    assert.throws(
+      () => extractPaths({ items: [{ $path: 123 }], total: 1 }),
+      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+    );
+  });
+
+  it('throws on null item inside items array', () => {
+    assert.throws(
+      () => extractPaths({ items: [{ $path: '/a' }, null], total: 2 }),
+      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+    );
+  });
+
   it('returns empty for object without $path or items', () => {
     assert.deepEqual(extractPaths({ foo: 'bar' }), []);
-  });
-});
-
-// ── volatile.ts: isVolatile ──
-
-describe('isVolatile', () => {
-  beforeEach(() => {
-    clearRegistry();
-
-  });
-
-  it('returns true for $volatile flag', () => {
-    assert.equal(isVolatile({ $path: '/a', $type: 'x', $volatile: true } as any), true);
-  });
-
-  it('returns false without $volatile and no handler', () => {
-    assert.equal(isVolatile({ $path: '/a', $type: 'x' } as any), false);
-  });
-
-  it('returns true when type has volatile handler', () => {
-    register('ephemeral', 'volatile', () => true);
-    assert.equal(isVolatile({ $path: '/a', $type: 'ephemeral' } as any), true);
-  });
-
-  it('$volatile false overrides type handler', () => {
-    register('ephemeral2', 'volatile', () => true);
-    assert.equal(isVolatile({ $path: '/a', $type: 'ephemeral2', $volatile: false } as any), false);
   });
 });
 

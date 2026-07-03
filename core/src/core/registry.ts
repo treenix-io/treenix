@@ -32,7 +32,7 @@ const listeners = _shared.listeners;
 
 const DEFAULT_TYPE = normalizeType('default');
 
-// ── Registry subscription — lets React re-render when handlers change ──
+// Registry subscription
 function bump() {
   _shared.version++;
   listeners.forEach(cb => cb());

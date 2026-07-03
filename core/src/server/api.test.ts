@@ -1,5 +1,5 @@
 // Integration tests — full tRPC API from client perspective.
-// Builds the real tree pipeline (memory → mountable → volatile → validated → subscriptions),
+// Builds the real tree pipeline (memory → mountable → storage policy → subscriptions),
 // exercises every operation, verifies ACL, events, CDC Matrix, and OpError mapping.
 
 import { registerType } from '#comp';
@@ -12,8 +12,7 @@ import '#mount/adapters';
 import { withMounts } from '#mount';
 import { type NodeEvent, withSubscriptions } from '#sub';
 import { createTreeRouter } from './trpc';
-import { withValidation } from '#tree/validation';
-import { withVolatile } from '#tree/volatile';
+import { withStoragePolicy } from '#tree/policy';
 import { createWatchManager, type WatchManager } from '#sub/watch';
 import { createFilteredPush } from '#sub/watch-filter';
 
@@ -65,11 +64,10 @@ describe('tRPC API integration', () => {
     });
 
     const mountable = withMounts(bootstrap);
-    const volatile = withVolatile(mountable);
-    const validated = withValidation(volatile);
+    const policy = withStoragePolicy(mountable);
     watcher = createWatchManager();
     events = [];
-    const { tree, cdc } = withSubscriptions(validated, (e) => {
+    const { tree, cdc } = withSubscriptions(policy.tree, (e) => {
       events.push(e as DataEvent);
       watcher.notify(e);
     });

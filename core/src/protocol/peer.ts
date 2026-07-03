@@ -10,7 +10,6 @@ import { OpError } from '#errors';
 import type { Page, Tree } from '#tree';
 import type { PatchOp } from '#tree/patch';
 import { subscriptionToAsyncIterable } from '#tree/watch';
-import { extractPaths } from '#tree/volatile';
 import {
   isByeFrame, isCancelFrame, isEventFrame, isHiFrame, isPingFrame, isPongFrame,
   isReqFrame, isResFrame,
@@ -56,6 +55,31 @@ export type Peer = ReturnType<typeof createPeer>;
 
 const MAX_WATCH_FROM_RESULT = 100;
 const DEFAULT_LS_LIMIT = 100;
+
+// Strict by contract: when result IS a list (`items` array), every item must
+// be a node-shape with string `$path`. The action-watch path consumes this —
+// silently dropping malformed items would mask handler bugs and let a partial
+// watch set look like the full one. Non-node results (scalar, `{count}`,
+// undefined) return `[]` explicitly — that's "nothing to watch", not a
+// malformed shape. (Moved from tree/volatile.ts with the $volatile cut.)
+export function extractPaths(result: unknown): string[] {
+  if (!result || typeof result !== 'object') return [];
+  const r = result as Record<string, unknown>;
+  if (Array.isArray(r.items)) {
+    const items = r.items;
+    const paths: string[] = [];
+    for (let i = 0; i < items.length; i++) {
+      const n = items[i];
+      if (!n || typeof n !== 'object' || typeof (n as { $path?: unknown }).$path !== 'string') {
+        throw new OpError('BAD_REQUEST', `extractPaths: items[${i}] missing string $path`);
+      }
+      paths.push((n as { $path: string }).$path);
+    }
+    return paths;
+  }
+  if (typeof r.$path === 'string') return [r.$path];
+  return [];
+}
 
 function isAsyncIterable(v: unknown): v is AsyncIterable<ResFrame> {
   return typeof v === 'object' && v !== null && Symbol.asyncIterator in v;

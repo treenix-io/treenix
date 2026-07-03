@@ -9,5 +9,5 @@ Component registration layer (L2). Bridges core primitives and server.
 
 ### Conventions
 - registerType auto-registers prototype methods as action:{name}
-- Components never access siblings directly — use `needs` for injection
+- Components could access siblings directly — but better use `needs` for injection
 - ExecCtx = {node, tree, signal, nc, deps} — context during action execution

@@ -13,8 +13,7 @@ import { executeAction } from './actions';
 import { withMounts } from '#mount';
 import { MountQuery } from '#mount/adapters';
 import { type CdcRegistry, type NodeEvent, withSubscriptions } from '#sub';
-import { withValidation } from '#tree/validation';
-import { withVolatile } from '#tree/volatile';
+import { withStoragePolicy } from '#tree/policy';
 import { createWatchManager, type WatchManager } from '#sub/watch';
 
 enablePatches();
@@ -24,10 +23,9 @@ enablePatches();
 function fullPipeline() {
   const bootstrap = createMemoryTree();
   const mountable = withMounts(bootstrap);
-  const volatile = withVolatile(mountable);
-  const validated = withValidation(volatile);
+  const policy = withStoragePolicy(mountable);
   const watcher = createWatchManager();
-  const { tree, cdc } = withSubscriptions(validated, (e) => watcher.notify(e));
+  const { tree, cdc } = withSubscriptions(policy.tree, (e) => watcher.notify(e));
   return { bootstrap, mountable, tree, cdc, watcher };
 }
 
@@ -732,14 +730,16 @@ describe('Stress: remove operations', () => {
   });
 });
 
-// ── 9. Volatile + Validation Pipeline ──
+// ── 9. Storage-Policy Pipeline (validation + persistence) ──
+// Formerly "volatile + validation" — the $volatile feature was cut (core-5fqq);
+// the readability checks stay, now also asserting persistence to the backing.
 
-describe('Stress: volatile + validation', () => {
+describe('Stress: storage policy', () => {
   let tree: Tree;
+  let bootstrap: Tree;
 
   beforeEach(() => {
     clearRegistry();
-    register('ephemeral', 'volatile', () => true);
     register('validated', 'schema', () => ({
       title: 'validated', type: 'object' as const,
       properties: {
@@ -747,10 +747,10 @@ describe('Stress: volatile + validation', () => {
         count: { type: 'number' },
       },
     }));
-    ({ tree } = fullPipeline());
+    ({ tree, bootstrap } = fullPipeline());
   });
 
-  it('volatile nodes stored in memory layer', async () => {
+  it('50 nodes readable through the policy and persisted to the backing', async () => {
     for (let i = 0; i < 50; i++)
       await tree.set(createNode(`/live/s${i}`, 'ephemeral', { value: i }));
 
@@ -758,8 +758,9 @@ describe('Stress: volatile + validation', () => {
       const node = await tree.get(`/live/s${i}`);
       assert.ok(node);
       assert.equal((node as any).value, i);
+      assert.ok(await bootstrap.get(node!.$path), 'node persisted to backing store');
     }
-    console.log('  ✓ 50 volatile nodes readable');
+    console.log('  ✓ 50 nodes readable + persisted');
   });
 
   it('validation rejects bad data — all errors propagate', async () => {

@@ -8,6 +8,7 @@ export type ExecuteInput = { path: string; type?: string; key?: string; action: 
 export type ExecuteFn = (input: ExecuteInput) => Promise<unknown>;
 export type StreamFn = (input: ExecuteInput) => AsyncIterable<unknown>;
 
+// kriz: what is the type?
 const AsyncGenFn = Object.getPrototypeOf(async function* () {}).constructor;
 
 /** Create TypeProxy from node data + class. Actions call execute/stream, fields read from comp. */
@@ -26,6 +27,7 @@ export function makeTypedProxy<T extends object>(
     get: (_t, prop: string) => {
       const fn = (cls.prototype as any)[prop];
       if (typeof fn === 'function') {
+        // kriz: what if it is AsyncGenFn, but no stream present?
         if (stream && fn instanceof AsyncGenFn)
           return (data?: unknown) => stream({ path, type, key, action: prop, data });
         return (data?: unknown) => execute({ path, type, key, action: prop, data });

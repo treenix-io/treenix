@@ -7,8 +7,9 @@
 //
 // Covered incidents: R-gk8.29 (migration above mounts), gk8.8 (trash below
 // subscriptions; systemTree stays hard — entry shape itself is pinned in
-// tree/trash.test.ts), core-dpp (wrapTree above subscriptions, boot writes
-// below), volatile isolation, validation write-barrier atomicity, ACL
+// tree/policy.test.ts), core-dpp (wrapTree above subscriptions, boot writes
+// below), $volatile flag inert (feature cut — the checks moved to the merged
+// tree with inverted expectations), validation write-barrier atomicity, ACL
 // fail-closed, external-watch wiring (inject + cache invalidation).
 
 import { A, createNode, R, register, S, unregister, W, type NodeData } from '#core';
@@ -110,32 +111,28 @@ describe('invariant R-gk8.29: mounted nodes migrate on read', () => {
   });
 });
 
-// ── volatile: routed to memory, never the backing store ──
+// ── $volatile: flag is inert — every node persists to the backing store ──
+// The per-node volatile feature was cut (owner, core-5fqq 2026-07-03): zero
+// runtime writers existed; mem-only subtrees use t.mount.memory. These are the
+// former isolation checks ported to the merged tree with INVERTED expectations:
+// a legacy write carrying $volatile must not break — it persists like any node.
 
-describe('invariant: volatile nodes never reach the backing store', () => {
-  before(() => {
-    register('inv.volatile', 'volatile', () => true);
-  });
-
-  after(() => {
-    unregister('inv.volatile', 'volatile');
-  });
-
-  it('type-registered volatile node is readable but absent from bootstrap', async () => {
+describe('invariant: $volatile flag is inert, nodes persist to the backing store', () => {
+  it('node of a formerly-volatile type is readable AND present in bootstrap', async () => {
     const bootstrap = await grantedBootstrap();
     const { tree } = createPipeline(bootstrap);
 
     await tree.set(createNode('/vol/x', 'inv.volatile', { n: 1 }));
 
     assert.equal((await tree.get('/vol/x'))?.n, 1);
-    assert.equal(await bootstrap.get('/vol/x'), undefined);
+    assert.equal((await bootstrap.get('/vol/x'))?.n, 1);
 
     const listed = await tree.getChildren('/vol');
     assert.deepEqual(listed.items.map(n => n.$path), ['/vol/x']);
-    assert.equal((await bootstrap.getChildren('/vol')).total, 0);
+    assert.equal((await bootstrap.getChildren('/vol')).total, 1);
   });
 
-  it('instance-level $volatile flag routes the same way', async () => {
+  it('instance-level $volatile flag on a legacy write persists the same way', async () => {
     const bootstrap = await grantedBootstrap();
     const { tree } = createPipeline(bootstrap);
 
@@ -143,7 +140,7 @@ describe('invariant: volatile nodes never reach the backing store', () => {
     await tree.set(n);
 
     assert.equal((await tree.get('/vol/y'))?.n, 2);
-    assert.equal(await bootstrap.get('/vol/y'), undefined);
+    assert.equal((await bootstrap.get('/vol/y'))?.n, 2);
   });
 });
 

@@ -1,7 +1,7 @@
 // End-to-end: a mod's schema migrations over the production layering —
-// withMigration(withMounts(bootstrap)) with a REAL fs adapter underneath.
-// Old-shape JSON on disk (pre-# namespace, pre-$v) arrives to callers fully
-// migrated and converges on disk via write-back.
+// the storage policy's migration step over withMounts(bootstrap) with a REAL
+// fs adapter underneath. Old-shape JSON on disk (pre-# namespace, pre-$v)
+// arrives to callers fully migrated and converges on disk via write-back.
 import { createNode, register } from '#core';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -11,7 +11,7 @@ import { after, before, describe, it } from 'node:test';
 import { withMounts } from '#mount';
 import { createMemoryTree, type Tree } from '#tree';
 import { createFsTree } from '#tree/fs';
-import { withMigration } from '#tree/migration';
+import { withStoragePolicy } from '#tree/policy';
 import { createRepathTree } from '#tree/repath';
 import './types';
 
@@ -29,7 +29,7 @@ before(async () => {
   }, null, 2) + '\n');
 
   // createFsTree runs the one-shot # namespace pass (note → #note);
-  // withMigration then runs the per-type $v ladders on read.
+  // the policy's migration step then runs the per-type $v ladders on read.
   // Repath like the real t.mount.fs adapter: outer /data/* → adapter-local /*.
   const fsTree = await createFsTree(dir);
   register('example.versioned.mount', 'mount', () => createRepathTree(fsTree, '/data', '/'));
@@ -40,7 +40,7 @@ before(async () => {
     mount: { $type: 'example.versioned.mount' },
   }));
 
-  tree = withMigration(withMounts(bootstrap));
+  tree = withStoragePolicy(withMounts(bootstrap)).tree;
 });
 
 after(async () => {

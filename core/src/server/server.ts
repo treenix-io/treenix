@@ -4,7 +4,7 @@
 
 import { createLogger } from '#log';
 import type { Tree } from '#tree';
-import { withCache } from '#tree/cache';
+import { withStoragePolicy } from '#tree/policy';
 import { nodeHTTPRequestHandler } from '@trpc/server/adapters/node-http';
 import { TRPCError } from '@trpc/server';
 import { createReadStream, existsSync, statSync } from 'node:fs';
@@ -21,16 +21,11 @@ import {
 import { resolveOrIssueSession } from '#security/sessions';
 import { getComponentByName } from '#core';
 import { withMounts } from '#mount';
-import { withRefIndex } from '#tree/refs';
 import { type CdcRegistry, type OnSelfWrite, withSubscriptions } from '#sub';
 import type { TreeEvent } from '#tree';
 import { runExternalWatch } from '#sub/external-watch';
 import type { ExternalWatchStarter } from '#mount';
 import { createTreeRouter, type TreeRouter, type TreeRouterOpts, type TrpcContext } from './trpc';
-import { withMigration } from '#tree/migration';
-import { withTrash } from '#tree/trash';
-import { withValidation } from '#tree/validation';
-import { withVolatile } from '#tree/volatile';
 import { createWatchManager, type WatchManager } from '#sub/watch';
 
 const log = createLogger('http');
@@ -91,29 +86,22 @@ export function createPipeline(bootstrap: Tree, opts?: TreeRouterOpts, wrapTree?
   };
 
   const mountable = withMounts(bootstrap, { startExternalWatch });
-  // Migration sits ABOVE mounts so fs/mongo/federation/query nodes all migrate on
-  // read (the wrapper used to sit below withMounts and persistent stores bypassed
-  // it entirely — R-gk8.29). Below validation: validators must see current shapes.
-  const migrated = withMigration(mountable);
-  // System identity at the pre-validation layer — used by factory bootstrap (seed,
-  // anon-key, log writer) and request-edge session resolution. Mirrors the current
-  // raw-mountable layer; switching here adds the ACL gate without changing semantics.
-  const systemTree = withAcl(migrated, 'system', ['system']);
-  const volatile = withVolatile(migrated);
-  const validated = withValidation(volatile);
-  const refsIndexed = withRefIndex(validated);
-  const cached = withCache(refsIndexed);
-  // Soft-delete (gk8.8): below subscriptions so the copy-writes stay silent,
-  // above cache so copies land coherently; the remove event still emits above.
-  // systemTree (below) keeps hard remove for session revoke / GC.
-  const trashed = withTrash(cached);
+  // Storage policy (core-5fqq): migration → validation → $refs → cache → trash
+  // as ONE step above the mounts, so fs/mongo/federation/query nodes all migrate
+  // on read (R-gk8.29). Step order lives in tree/policy.ts — structural, not
+  // composition-order in this factory.
+  const policy = withStoragePolicy(mountable);
+  // System identity on the migration-only base — used by factory bootstrap (seed,
+  // anon-key, log writer) and request-edge session resolution. No validation, no
+  // cache, no trash: boot writes anything, session revoke / GC hard-delete.
+  const systemTree = withAcl(policy.base, 'system', ['system']);
   let cdcRef: CdcRegistry;
   const watcher = createWatchManager({
     onUserRemoved: (userId) => cdcRef.unwatchAllQueries(userId),
   });
   // gk8.12: sub/ stays ignorant of the auth layout and mount components —
   // the layer-owned detectors are injected here.
-  const { tree: subscribed, cdc, onSelfWrite, injectExternalEvent } = withSubscriptions(trashed, (e) => watcher.notify(e), {
+  const { tree: subscribed, cdc, onSelfWrite, injectExternalEvent } = withSubscriptions(policy.tree, (e) => watcher.notify(e), {
     claimsUserOf: userIdFromAuthPath,
     isConfigNode: (node) => !!node && getComponentByName(node, 'mount') !== undefined,
   });
@@ -123,8 +111,8 @@ export function createPipeline(bootstrap: Tree, opts?: TreeRouterOpts, wrapTree?
     injectExternal: injectExternalEvent,
     // Evict BOTH outer node cache AND mount-resolution cache. External
     // writes can rewrite a mount config node — cached adapter must drop.
-    invalidatePath: (p) => { cached.invalidate(p); mountable.invalidateMount(p); },
-    invalidateAll: () => { cached.invalidateAll(); mountable.invalidateMount('/'); },
+    invalidatePath: (p) => { policy.invalidate(p); mountable.invalidateMount(p); },
+    invalidateAll: () => { policy.invalidateAll(); mountable.invalidateMount('/'); },
   };
   // Audit (or any outer wrap) sits INSIDE the pipeline — above subscriptions but
   // BEFORE the router — so the tRPC router and every per-user withAcl wrap the

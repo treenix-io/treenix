@@ -1418,16 +1418,15 @@ describe('withAcl.patch — C1 ACL enforcement', () => {
 
   // ── Integration ──
 
-  // I1: full pipeline composition (withRefIndex below withAcl) — internal $refs
-  // replay still works after the fix; user patches that touch ref-bearing fields
-  // do NOT trip the system-field guard since the [r, $refs, ...] op is appended
-  // BELOW withAcl (in withRefIndex), where applyOps's own assertSafePatchPath
-  // permits $refs.
-  it('I1: withAcl → withRefIndex pipeline preserves auto-$refs derivation', async () => {
+  // I1: full pipeline composition ($refs step below withAcl) — internal $refs
+  // derivation still works after the fix; user patches that touch ref-bearing
+  // fields do NOT trip the system-field guard since $refs is derived BELOW
+  // withAcl (at set-time inside the storage policy), never in the user's ops.
+  it('I1: withAcl → storage-policy pipeline preserves auto-$refs derivation', async () => {
     const inner = createMemoryTree();
     await inner.set({ ...createNode('/', 'root'), $acl: [{ g: 'public', p: R | W | A }] });
-    const refsIndexed = (await import('#tree/refs')).withRefIndex(inner);
-    const s = withAcl(refsIndexed, 'alice', ['u:alice', 'public']);
+    const policied = (await import('#tree/policy')).withStoragePolicy(inner).tree;
+    const s = withAcl(policied, 'alice', ['u:alice', 'public']);
 
     await s.set({
       ...createNode('/order', 'doc'),

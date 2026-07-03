@@ -7,8 +7,8 @@
 //   v2: { body, words }     — derived word count added
 //
 // Steps are registered next to the type via the ordinary context registry and
-// run on read by withMigration (tree/migration.ts): a stored v0 node arrives
-// to callers as v2 and is written back, converging the corpus lazily.
+// run on read by the storage policy's migration step (tree/policy.ts): a stored
+// v0 node arrives to callers as v2 and is written back, converging the corpus lazily.
 import { registerType } from '#comp';
 import { register } from '#core';
 

@@ -1,5 +1,6 @@
 // Component validation — shared between client and server
 // Type-dispatched validator tree: type check → dispatch → type-specific constraints + recurse
+// kriz: this should be somewhere near schema!! not in comp!
 
 import { AnyType, type ComponentData, getComponents, type NodeData } from '#core';
 import { resolve } from '#core/registry';

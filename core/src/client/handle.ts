@@ -2,12 +2,14 @@
 // nc(path).get(Type).method() — actions, no fetch needed.
 // nc(path).fetch(Type) — async fetch + typed proxy.
 // nc(path).sub(Type, cb) — reactive subscription with typed data.
+// kriz: why this file called handle?
 
 import { type Class, type TypeProxy } from '#comp';
 import { makeTypedProxy, type ExecuteFn } from '#comp/handle';
 import type { NodeData } from '#core';
 import type { TreenixClient } from './index';
 
+// kriz: what type of return of this function?
 export function createNodeClient(client: TreenixClient) {
   const execute: ExecuteFn = (input) =>
     client.execute(input.path, input.action, input.data, { type: input.type, key: input.key });

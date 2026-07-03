@@ -7,6 +7,8 @@ import { type Tree } from '#tree';
 // ── Types ──
 
 export type ServiceHandle = { stop(): Promise<void> };
+// kriz: why this type here??? is it service context? used only in tests. i think it should be imported from somewhere
+// kriz: or belong to tests
 export type StoreEvent =
   | { type: 'set'; path: string }
   | { type: 'patch'; path: string }
@@ -16,6 +18,8 @@ export type SubscribeOpts = { children?: boolean };
 export type ServiceCtx = {
   tree: Tree;
   path: string;
+  // kriz: what is it for? why not tree, or sub like client! should fully review subscription/watch infostructure and unify!
+  // where is node itself? look to the ExecCtx, why is the diff?
   subscribe: (path: string, cb: StoreListener, opts?: SubscribeOpts) => () => void;
 };
 
