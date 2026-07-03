@@ -170,17 +170,26 @@ export function createFilterTree(
       }
       const uIter = upper.scanChildren(parent, opts, ctx)[Symbol.asyncIterator]();
       const lIter = lower.scanChildren(parent, opts, ctx)[Symbol.asyncIterator]();
-      let u = await uIter.next();
-      let l = await lIter.next();
-      while (!u.done || !l.done) {
-        if (opts?.signal?.aborted) throw opts.signal.reason;
-        if (u.done) { yield l.value!; l = await lIter.next(); continue; }
-        if (l.done) { yield u.value!; u = await uIter.next(); continue; }
-        const up = u.value!.node.$path;
-        const lp = l.value!.node.$path;
-        if (up === lp) { yield u.value!; u = await uIter.next(); l = await lIter.next(); }
-        else if (up < lp) { yield u.value!; u = await uIter.next(); }
-        else { yield l.value!; l = await lIter.next(); }
+      try {
+        let u = await uIter.next();
+        let l = await lIter.next();
+        while (!u.done || !l.done) {
+          if (opts?.signal?.aborted) throw opts.signal.reason;
+          if (u.done) { yield l.value!; l = await lIter.next(); continue; }
+          if (l.done) { yield u.value!; u = await uIter.next(); continue; }
+          const up = u.value!.node.$path;
+          const lp = l.value!.node.$path;
+          if (up === lp) { yield u.value!; u = await uIter.next(); l = await lIter.next(); }
+          else if (up < lp) { yield u.value!; u = await uIter.next(); }
+          else { yield l.value!; l = await lIter.next(); }
+        }
+      } finally {
+        // Consumer broke early, or the merge threw/aborted — close BOTH inner
+        // cursors so cursor-backed adapters (Mongo/fs) release resources.
+        // The generator's own finally runs on early return()/throw; without
+        // this the inner iterators' finally never fires (leaked cursors).
+        await uIter.return?.();
+        await lIter.return?.();
       }
     },
     async set(node, ctx) {

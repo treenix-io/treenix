@@ -19,6 +19,23 @@ async function seed(tree: ReturnType<typeof createMemoryTree>, paths: string[]) 
   for (const p of paths) await tree.set(createNode(p, 'item'));
 }
 
+/** Wrap a tree so its scanChildren records how many times its generator's
+ *  finally ran — i.e. how many times the cursor was actually closed. */
+function instrumented(tree: ReturnType<typeof createMemoryTree>) {
+  const state = { closed: 0 };
+  const wrapped: typeof tree = {
+    ...tree,
+    async *scanChildren(parent, opts, ctx) {
+      try {
+        yield* tree.scanChildren!(parent, opts, ctx);
+      } finally {
+        state.closed++;
+      }
+    },
+  };
+  return { tree: wrapped, state };
+}
+
 describe('createFilterTree.scanChildren — k-way merge', () => {
   it('disjoint paths: yields union in sorted order', async () => {
     const u = createMemoryTree();
@@ -88,6 +105,41 @@ describe('createFilterTree.scanChildren — k-way merge', () => {
     }
     const fresh = await collect(merged.scanChildren!('/x'));
     assert.equal(fresh.length, 4);
+  });
+
+  it('early break closes BOTH inner cursors (core-0x6)', async () => {
+    const u = instrumented(createMemoryTree());
+    const l = instrumented(createMemoryTree());
+    await seed(u.tree, ['/x/b', '/x/d']);
+    await seed(l.tree, ['/x/a', '/x/c']);
+    const merged = createFilterTree(u.tree, l.tree, () => true);
+
+    let n = 0;
+    for await (const _ of merged.scanChildren!('/x')) {
+      if (++n === 1) break;
+    }
+    assert.equal(u.state.closed, 1, 'upper cursor closed on early break');
+    assert.equal(l.state.closed, 1, 'lower cursor closed on early break');
+  });
+
+  it('abort mid-merge closes BOTH inner cursors (core-0x6)', async () => {
+    const u = instrumented(createMemoryTree());
+    const l = instrumented(createMemoryTree());
+    await seed(u.tree, ['/x/b', '/x/d']);
+    await seed(l.tree, ['/x/a', '/x/c']);
+    const merged = createFilterTree(u.tree, l.tree, () => true);
+
+    const ac = new AbortController();
+    await assert.rejects(async () => {
+      let n = 0;
+      // Both cursors are open after the first yield; aborting then forces the
+      // next loop iteration to throw with both still active.
+      for await (const _ of merged.scanChildren!('/x', { signal: ac.signal })) {
+        if (++n === 1) ac.abort();
+      }
+    });
+    assert.equal(u.state.closed, 1, 'upper cursor closed on abort');
+    assert.equal(l.state.closed, 1, 'lower cursor closed on abort');
   });
 
   it('aborts via signal between yields', async () => {
