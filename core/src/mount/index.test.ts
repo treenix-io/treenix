@@ -1,4 +1,5 @@
 import { createNode, ref, register } from '#core';
+import { OpError } from '#errors';
 import { clearRegistry } from '#testing';
 import { createMemoryTree, type Tree } from '#tree';
 import { createFsTree } from '#tree/fs';
@@ -94,6 +95,31 @@ describe('Mounts', () => {
       assert.equal(entry.cursor, entry.node.$path);
     }
     assert.deepEqual(collected, ['/users/alice', '/users/bob']);
+  });
+
+  // core-35t / C13: the Tree-only fallback cannot honor a cursor — it always
+  // restarts from page 1. Rather than silently hand a paginating caller a
+  // duplicated page, it must reject `after` loudly.
+  it('scanChildren fallback rejects a cursor (after) loudly on Tree-only mounts', async () => {
+    const legacy: Tree = {
+      async get() { return undefined; },
+      async getChildren() {
+        const items = [createNode('/users/alice', 'user')];
+        return { items, total: items.length };
+      },
+      async set() {},
+      async remove() { return false; },
+      async patch() {},
+    };
+    register('test.mount.legacy2', 'mount', () => legacy);
+    await rootStore.set(
+      createNode('/users', 'collection', {}, { mount: { $type: 'test.mount.legacy2' } }),
+    );
+    const ms = withMounts(rootStore);
+    await assert.rejects(
+      async () => { for await (const _ of ms.scanChildren!('/users', { after: '/users/alice' })) { /* drain */ } },
+      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+    );
   });
 
   it('delegates set to mounted tree', async () => {

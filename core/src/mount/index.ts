@@ -3,6 +3,7 @@
 // Core untouched. Tree interface preserved.
 
 import { type ComponentData, getComponentByName, isComponent, isRef, type NodeData, resolve } from '#core';
+import { OpError } from '#errors';
 import { type Tree } from '#tree';
 import { createBoundedCache } from '#util/bounded-cache';
 
@@ -127,14 +128,19 @@ export function withMounts(rootStore: Tree, opts?: WithMountsOpts): MountableTre
 
     // scanChildren dispatch — same per-path resolution as getChildren, but
     // streams. Legacy Tree-only adapters (no native scanChildren) fall back
-    // to a single getChildren page wrapped as an async generator. `after`
-    // cursor is not honored in fallback — migrate adapter to native
-    // scanChildren for cursor pagination.
+    // to a single getChildren page wrapped as an async generator — this keeps
+    // remote/Mongo Tree-only mounts LISTABLE through the ACL/public path
+    // (core-35t). The fallback CANNOT honor `after`: it always restarts from
+    // the first page, so a cursor-paginating caller would silently get
+    // duplicated/restarted pages (C13) — fail loud instead.
     async *scanChildren(path, opts, ctx) {
       const tree = await resolveContentTree(path, ctx);
       if (tree.scanChildren) {
         yield* tree.scanChildren(path, opts, ctx);
         return;
+      }
+      if (opts?.after !== undefined) {
+        throw new OpError('BAD_REQUEST', `scanChildren: mount at ${path} is a Tree-only adapter without cursor support — 'after' pagination unavailable; migrate the adapter to native scanChildren`);
       }
       if (opts?.signal?.aborted) throw opts.signal.reason;
       const page = await tree.getChildren(path, { depth: opts?.depth, limit: opts?.limitHint }, ctx);
