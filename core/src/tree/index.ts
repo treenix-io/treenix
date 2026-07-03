@@ -216,9 +216,15 @@ export function createFilterTree(
         if (wasUpper) await upper.patch(path, ops, ctx);
         else await lower.patch(path, ops, ctx);
       } else {
-        // Routing changed — relocate: remove from old layer, set in new
-        if (wasUpper) { await upper.remove(path, ctx); await lower.set(patched, ctx); }
-        else { await lower.remove(path, ctx); await upper.set(patched, ctx); }
+        // Routing changed — relocate across layers. Strip $rev: the destination
+        // store never issued it, so carrying the source's rev makes the first
+        // write throw OCC against a node it never saw (core-yje D06). Set the
+        // destination FIRST so a rejected write leaves the source intact rather
+        // than dropping the node (remove-then-set is non-atomic — loses data if
+        // the second write throws).
+        const { $rev, ...relocated } = patched;
+        if (wasUpper) { await lower.set(relocated, ctx); await upper.remove(path, ctx); }
+        else { await upper.set(relocated, ctx); await lower.remove(path, ctx); }
       }
     },
 

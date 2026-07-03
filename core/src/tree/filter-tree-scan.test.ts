@@ -156,3 +156,41 @@ describe('createFilterTree.scanChildren — k-way merge', () => {
     );
   });
 });
+
+describe('createFilterTree.patch — cross-layer relocation (core-yje)', () => {
+  it('relocation strips stale $rev so the destination write does not throw OCC', async () => {
+    const upper = createMemoryTree();
+    const lower = createMemoryTree();
+    // Predicate routes tier==='hot' → upper, else → lower.
+    const tree = createFilterTree(upper, lower, (n) => n['tier'] === 'hot');
+
+    await tree.set({ $path: '/x/a', $type: 'item', tier: 'hot', v: 1 } as NodeData);
+    assert.ok(await upper.get('/x/a'), 'seeded in upper');
+
+    // Predicate flip via patch: hot→cold relocates upper → lower. Without the
+    // $rev strip, lower.set throws OCC on a node it never issued a rev for.
+    await tree.patch('/x/a', [['r', 'tier', 'cold']]);
+    assert.equal(await upper.get('/x/a'), undefined, 'removed from source layer');
+    assert.ok(await lower.get('/x/a'), 'relocated to destination layer');
+
+    // The relocated node is writable — a subsequent write does not throw OCC.
+    await tree.patch('/x/a', [['r', 'v', 2]]);
+    assert.equal((await lower.get('/x/a'))?.['v'], 2);
+  });
+
+  it('failed destination write during relocation does not lose the source node', async () => {
+    const upper = createMemoryTree();
+    const lower = createMemoryTree();
+    // Destination (lower) rejects the relocation write.
+    const failingLower: typeof lower = {
+      ...lower,
+      async set() { throw new Error('destination write failed'); },
+    };
+    const tree = createFilterTree(upper, failingLower, (n) => n['tier'] === 'hot');
+
+    await tree.set({ $path: '/x/a', $type: 'item', tier: 'hot', v: 1 } as NodeData);
+    await assert.rejects(() => tree.patch('/x/a', [['r', 'tier', 'cold']]));
+    // Set-destination-first ordering: the source node survives the failure.
+    assert.ok(await upper.get('/x/a'), 'source node intact after failed relocation');
+  });
+});
