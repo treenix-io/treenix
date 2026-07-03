@@ -9,7 +9,7 @@ import { collectDeps as _collectDeps, type ResolvedDeps } from '#comp/needs';
 import { assertSafeKey, COMP_PREFIX, type ComponentData, compKey, getComponentField, getMeta, isComponent, type NodeData, register, resolve, safeJsonParse } from '#core';
 import { validateValue, type ValidationError } from '#comp/validate';
 import { type TypeSchema } from '#schema/types';
-import { type PatchOp, PatchTestError, type Tree } from '#tree';
+import { type ExecOpts, type PatchOp, PatchTestError, type Tree } from '#tree';
 import { createDraft, enablePatches, finishDraft, type Patch } from 'immer';
 import { createBoundedCache } from '#util/bounded-cache';
 import { createPathLock } from '#util/path-lock';
@@ -112,9 +112,14 @@ export function createNodeHandle(
 }
 // Server-side typed node client: wraps executeAction/executeStream into createNodeHandle.
 // Usage: const nc = serverNodeHandle(tree); await nc(path).get(MyComp).myMethod();
+// Prefers the tree's own execute capability (core-pxlu) so nested cross-node
+// calls inherit federation routing; capability-less trees (readonly facade,
+// bare adapters) fall back to the local executor.
 export function serverNodeHandle(tree: Tree) {
   return createNodeHandle(
-    (input) => executeAction(tree, input.path, input.type, input.key, input.action, input.data),
+    (input) => tree.execute
+      ? tree.execute(input.path, input.action, input.data, { type: input.type, key: input.key })
+      : executeAction(tree, input.path, input.type, input.key, input.action, input.data),
     (input) => executeStream(tree, input.path, input.type, input.key, input.action, input.data),
   );
 }
@@ -409,6 +414,98 @@ export function executeAction<T = unknown>(
   const run = runAction<T>(tree, path, componentType, componentKey, action, data, opts);
   opResults.set(opKey, run);
   return run;
+}
+
+// ── withExecute: Tree.execute capability wrapper (core-pxlu) ──
+// Makes a tree exec-capable: local paths run executeAction against the wrapper
+// itself (handlers' ctx.tree stays exec-capable, all reads/writes flow through
+// the wrapped pipeline — ACL, subscriptions, audit); paths owned by a foreign
+// authority (delegate probe returns an exec-capable mounted subtree) are
+// DELEGATED — the remote side resolves the handler and enforces permissions
+// under ITS principal (domain-owner trust model, mount token = capability).
+
+export type DelegationInfo = { path: string; action: string; userId?: string | null };
+
+export type WithExecuteOpts = {
+  /** Authority probe (MountableTree.resolveActionTree). Absent = everything local. */
+  delegate?: (path: string, ctx?: unknown) => Promise<Tree | undefined>;
+  /** Identity bound at wrap time — NEVER taken from ExecOpts (a nested handler
+   *  could spoof another principal via ctx.tree.execute otherwise). opId is
+   *  per-call, not identity — it arrives via ExecOpts. */
+  identity?: Omit<ActionOpts, 'opId'>;
+  /** Local coherence reset after a delegated execute committed remotely
+   *  (cache invalidation + watch continuity break). */
+  onDelegated?: (path: string, action: string) => void;
+  /** Audit intent hook, supplied by the composition root / audit mod (core has
+   *  no audit API). Failure ABORTS the delegation — fail closed: the
+   *  user→action link is recorded before any remote side effect. */
+  onDelegating?: (info: DelegationInfo) => void | Promise<void>;
+  /** Audit outcome hook. A remote commit cannot be rolled back, so a failure
+   *  here must not eat the result — the supplier handles it (mark unhealthy,
+   *  as with-audit does); we log loudly and return the result regardless. */
+  onDelegatedSettled?: (info: DelegationInfo & { ok: boolean; error?: unknown }) => void;
+};
+
+export function withExecute<T extends Tree>(inner: T, opts?: WithExecuteOpts): T & Required<Pick<Tree, 'execute'>> {
+  const identity = opts?.identity;
+  const delegateCtx = identity?.userId ? { userId: identity.userId } : undefined;
+
+  async function delegateRun(target: Tree, path: string, action: string, data: unknown, execOpts: ExecOpts | undefined): Promise<unknown> {
+    // Local check is ONLY path visibility (R) — same FORBIDDEN→NOT_FOUND mask
+    // as resolveActionHandler. Everything else is the remote authority's job.
+    const node = await self.get(path).catch((e: unknown) => {
+      if ((e as { code?: string })?.code === 'FORBIDDEN') throw new OpError('NOT_FOUND', `Node not found: ${path}`);
+      throw e;
+    });
+    if (!node) throw new OpError('NOT_FOUND', `Node not found: ${path}`);
+
+    // Kind-stack does not cross the wire — classify conservatively as write+io.
+    // Read-kind frames therefore never delegate (fail closed).
+    assertCanCall({ kind: 'write', io: true });
+
+    const info: DelegationInfo = { path, action, userId: identity?.userId ?? null };
+    await opts?.onDelegating?.(info);
+
+    let result: unknown;
+    try {
+      result = await target.execute!(path, action, data, execOpts);
+    } catch (e) {
+      opts?.onDelegatedSettled?.({ ...info, ok: false, error: e });
+      throw e;
+    }
+    opts?.onDelegated?.(path, action);
+    try {
+      opts?.onDelegatedSettled?.({ ...info, ok: true });
+    } catch (e) {
+      // Remote already committed — swallowing the result would desync the
+      // caller from reality. The supplier marks itself unhealthy; we log.
+      console.error(`[withExecute] onDelegatedSettled failed after delegated ${action} on ${path}:`, e);
+    }
+    return result;
+  }
+
+  const self: T & Required<Pick<Tree, 'execute'>> = {
+    ...inner,
+    async execute(path, action, data, execOpts, _ctx) {
+      const target = opts?.delegate ? await opts.delegate(path, delegateCtx) : undefined;
+      if (!target) {
+        // Local authority — full executor semantics (opId dedupe inside).
+        return executeAction(self, path, execOpts?.type, execOpts?.key, action, data, { ...identity, opId: execOpts?.opId });
+      }
+      // Delegated — same per-user opId cache as executeAction: a replay skips
+      // onDelegating/remote-call/onDelegated entirely and returns the first
+      // settled outcome (order: dedupe entry → intent → remote → reset → settled).
+      const opId = execOpts?.opId;
+      if (!opId) return delegateRun(target, path, action, data, execOpts);
+      const opKey = `${identity?.userId ?? ''} ${opId}`;
+      const prior = opResults.get(opKey);
+      if (prior) return prior;
+      const run = delegateRun(target, path, action, data, execOpts);
+      opResults.set(opKey, run);
+      return run;
+    },
+  };
+  return self;
 }
 
 async function runAction<T = unknown>(

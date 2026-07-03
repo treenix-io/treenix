@@ -938,3 +938,49 @@ describe('FS mount repath (dedicated)', () => {
   });
 
 });
+
+describe('resolveActionTree (core-pxlu)', () => {
+  let rootStore: Tree;
+
+  beforeEach(() => {
+    clearRegistry();
+    rootStore = createMemoryTree();
+    register('test.mount.plain', 'mount', () => createMemoryTree());
+    register('test.mount.exec', 'mount', () => ({
+      ...createMemoryTree(),
+      execute: async () => 'remote',
+    }));
+  });
+
+  it('returns the mounted subtree when it exposes execute (foreign authority)', async () => {
+    await rootStore.set(createNode('/fed', 'dir', {}, { mount: { $type: 'test.mount.exec' } }));
+
+    const ms = withMounts(rootStore);
+    const t = await ms.resolveActionTree('/fed/w');
+
+    assert.ok(t);
+    assert.ok(t.execute, 'resolved subtree carries the capability');
+    assert.equal(await t.execute!('/fed/w', 'x'), 'remote');
+  });
+
+  it('returns undefined for storage mounts (no execute)', async () => {
+    await rootStore.set(createNode('/users', 'collection', {}, { mount: { $type: 'test.mount.plain' } }));
+
+    const ms = withMounts(rootStore);
+    assert.equal(await ms.resolveActionTree('/users/alice'), undefined);
+  });
+
+  it('returns undefined for unmounted paths', async () => {
+    await rootStore.set(createNode('/plain', 'dir'));
+
+    const ms = withMounts(rootStore);
+    assert.equal(await ms.resolveActionTree('/plain/x'), undefined);
+  });
+
+  it('action on the mount node itself is local (strict ancestors)', async () => {
+    await rootStore.set(createNode('/fed', 'dir', {}, { mount: { $type: 'test.mount.exec' } }));
+
+    const ms = withMounts(rootStore);
+    assert.equal(await ms.resolveActionTree('/fed'), undefined);
+  });
+});

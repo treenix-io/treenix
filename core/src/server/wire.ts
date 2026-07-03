@@ -14,7 +14,7 @@ import { type CdcRegistry, type NodeEvent } from '#sub';
 import { type WatchManager } from '#sub/watch';
 import { createFilteredPush } from '#sub/watch-filter';
 import type { Tree } from '#tree';
-import { executeAction, executeStream } from './actions';
+import { executeStream, withExecute, type WithExecuteOpts } from './actions';
 
 /** Higher-level dispatcher: tree + session + action input → result.
  *  Mods (e.g. harness/audit) inject this to add capability narrowing or other
@@ -38,6 +38,10 @@ export type WireDeps = {
   watcher: WatchManager;
   cdc?: CdcRegistry;
   opts?: WireOpts;
+  /** Delegation wiring for Tree.execute (core-pxlu), built by createPipeline:
+   *  authority probe (mounts) + local coherence reset + audit hooks. Absent =
+   *  every action runs in the local executor. */
+  exec?: Omit<WithExecuteOpts, 'identity'>;
 };
 
 export const DEFAULT_CLAIMS_TTL_MS = 30_000;
@@ -105,10 +109,16 @@ export function createWireSession(deps: WireDeps, session: Session) {
     // audit, cross-node writes) inherits it. Workload path: executor builds it.
     const actorFor = (req: ActReq) => ({ id: userId, action: req.action, requestId: req.opId ?? randomUUID() });
 
-    const execute = (req: ActReq) =>
-      isWorkload
-        ? deps.opts!.executor!(tree, session, { ...req, type: undefined })
-        : executeAction(tree, req.path, undefined, req.key, req.action, req.data, { userId, claims, opId: req.opId, actor: actorFor(req) });
+    const execute = (req: ActReq) => {
+      if (isWorkload) return deps.opts!.executor!(tree, session, { ...req, type: undefined });
+      // Tree.execute capability path (core-pxlu): the ACL tree is wrapped
+      // per-request so identity (incl. the edge-born actor) binds at wrap time
+      // — never via ExecOpts. Local paths run executeAction against the
+      // wrapper (handlers' ctx.tree is exec-capable); foreign-authority paths
+      // (deps.exec.delegate probe) are delegated to the remote side.
+      const execTree = withExecute(tree, { ...deps.exec, identity: { userId, claims, actor: actorFor(req) } });
+      return execTree.execute(req.path, req.action, req.data, { type: undefined, key: req.key, opId: req.opId });
+    };
 
     const execStream = (req: ActReq, signal: AbortSignal) =>
       executeStream(tree, req.path, req.type, req.key, req.action, req.data, signal, { userId, claims, actor: actorFor(req) });

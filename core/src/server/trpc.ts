@@ -57,6 +57,8 @@ export type TreeRouterOpts = {
   /** Optional dispatcher for workload-bound sessions (those with `session.scopeRef`).
    *  When undefined, all sessions go through plain executeAction — zero overhead. */
   executor?: SessionExecutor;
+  /** Tree.execute delegation wiring (core-pxlu) — set by createPipeline, not by callers. */
+  exec?: WireDeps['exec'];
 };
 
 export const SSE_PING_INTERVAL_MS = 15_000;
@@ -88,6 +90,7 @@ export function createTreeRouter(tree: Tree, systemTree: Tree, watcher: WatchMan
   const deps: WireDeps = {
     tree, systemTree, watcher, cdc,
     opts: { claimsTtlMs: opts?.claimsTtlMs, executor: opts?.executor },
+    exec: opts?.exec,
   };
 
   const t = initTRPC.context<TrpcContext>().create({

@@ -25,6 +25,7 @@ import { type CdcRegistry, type OnSelfWrite, withSubscriptions } from '#sub';
 import type { TreeEvent } from '#tree';
 import { runExternalWatch } from '#sub/external-watch';
 import type { ExternalWatchStarter } from '#mount';
+import { withExecute } from './actions';
 import { createTreeRouter, type TreeRouter, type TreeRouterOpts, type TrpcContext } from './trpc';
 import { createWatchManager, type WatchManager } from '#sub/watch';
 
@@ -120,13 +121,33 @@ export function createPipeline(bootstrap: Tree, opts?: TreeRouterOpts, wrapTree?
   // un-audited (core-dpp). withAudit forwards scanChildren, so the audited tree is
   // still a valid read-runtime source for depth-1 getChildren. Absent wrapTree this
   // is a no-op — audit off = zero cost.
-  const tree = wrapTree ? wrapTree(subscribed) : subscribed;
+  const wrapped = wrapTree ? wrapTree(subscribed) : subscribed;
+
+  // Tree.execute wiring (core-pxlu). delegate probes mounts for a foreign
+  // authority; onDelegated is the v1 coherence answer to a delegated execute:
+  // a remote action can mutate children/siblings under the mount, the node
+  // cache has no prefix invalidation, and clients hold stale copies — so
+  // GLOBAL reset (deliberate v1 bluntness; delegated executes are rare
+  // federation-boundary events; mount-prefix precision comes with core-nin.7).
+  // Mount adapters are NOT invalidated — remote data writes don't change
+  // mount configs.
+  const exec: TreeRouterOpts['exec'] = {
+    delegate: (path, ctx) => mountable.resolveActionTree(path, ctx),
+    onDelegated: () => {
+      policy.invalidateAll();
+      watcher.breakContinuity();
+    },
+  };
+  // withExecute OUTERMOST — local execute mutations flow through
+  // subscriptions and audit. Identity-less: services get executeAction parity;
+  // per-user identity binds in the wire session (per-request re-wrap).
+  const tree = withExecute(wrapped, { delegate: exec.delegate, onDelegated: exec.onDelegated });
   // System-identity tree for request-time tRPC bootstrap ops (buildClaims,
   // register/login/logout/agentConnect/devLogin, createFilteredPush) — audited like
   // user writes since it wraps the same `tree`. Boot writes (seed/log/autostart) use
   // `systemTree` above (mountable, below the wrap), so audit never storms at startup.
   const systemTreeOps = withAcl(tree, 'system', ['system']);
-  const router = createTreeRouter(tree, systemTreeOps, watcher, opts, cdc);
+  const router = createTreeRouter(tree, systemTreeOps, watcher, { ...opts, exec }, cdc);
 
   const createContext = async (token: string | null): Promise<TrpcContext> => {
     // Programmatic API: treat input as bearer (no cookie). Invalid → throw loud.

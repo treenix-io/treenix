@@ -118,6 +118,9 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
     return result;
   }
 
+  // INVARIANT (core-pxlu): hand-built literal, NO `...rawStore` spread — the
+  // execute capability is intentionally stripped here; the wire session
+  // re-wraps with withExecute binding the correct per-request identity.
   const aclStore: AclStore = {
     getPerm,
     async get(path, ctx) {

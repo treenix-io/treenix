@@ -20,8 +20,13 @@ export function wrapReadOnlyTree(tree: Tree): Tree {
   // scanChildren/watch (both pure reads a handler may legitimately use); only
   // mutations are denied. Hand-listing read methods would silently drop
   // scanChildren and break the read runtime if this facade ever fed a source.
+  const { execute: _execute, ...readSurface } = tree;
+  // execute is STRIPPED, not denied: it is a write channel (core-pxlu), and
+  // capability PRESENCE marks foreign authority — a deny stub would make this
+  // facade look exec-capable. Absent key → callers fall back to the local
+  // executor, where the kind-stack rejects write actions inside a read frame.
   return {
-    ...tree,
+    ...readSurface,
     set: () => deny('tree.set()'),
     patch: () => deny('tree.patch()'),
     remove: () => deny('tree.remove()'),

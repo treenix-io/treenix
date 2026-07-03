@@ -44,6 +44,15 @@ export type WithMountsOpts = {
  *  out-of-band. In-pipeline writes invalidate automatically (set/remove/patch). */
 export type MountableTree = Tree & {
   invalidateMount(path: string): void;
+  /** Resolve the mounted subtree owning `path` IF it is a foreign authority —
+   *  i.e. the adapter tree exposes the `execute` capability (transport mounts:
+   *  t.mount.tree.trpc, future t.mount.peer). Storage mounts (memory/fs/mongo/
+   *  query) and unmounted paths return undefined → the action runs in the
+   *  LOCAL executor. Strict ancestors only (an action addressed at the mount
+   *  node itself targets the local config node). ctx carries `{userId}` bound
+   *  by withExecute — never from request data — so the per-user mount cache
+   *  keys correctly (core-pxlu). */
+  resolveActionTree(path: string, ctx?: unknown): Promise<Tree | undefined>;
 };
 
 export type MountAdapter<T = unknown> = (mount: T, ctx: MountCtx) => Tree | Promise<Tree>;
@@ -99,6 +108,13 @@ export function withMounts(rootStore: Tree, opts?: WithMountsOpts): MountableTre
 
   const self: MountableTree = {
     invalidateMount,
+
+    async resolveActionTree(path, ctx) {
+      const tree = await resolveNodeTree(path, ctx);
+      // Capability presence = authority marker. No exceptions as control flow.
+      return tree.execute ? tree : undefined;
+    },
+
     async get(path, ctx) {
       const tree = await resolveNodeTree(path, ctx);
       return tree.get(path, ctx);

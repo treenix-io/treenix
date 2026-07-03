@@ -29,6 +29,13 @@ export type WatchManager = {
   watch(userId: string, paths: string[], opts?: WatchOpts): void;
   unwatch(userId: string, paths: string[], opts?: { children?: boolean }): void;
   notify(event: NodeEvent): void;
+  /** Break continuity for EVERY tracked user — a delegated execute (federation)
+   *  mutated remote state we cannot enumerate, so every client must refetch.
+   *  Unlike notify(reconnect) — which only pushes to ACTIVE connections — this
+   *  routes through the seq/ring machinery: active clients get the reset now,
+   *  grace-period clients replay it from the ring, and users with no pushes
+   *  get missedOffline so a legacy reconnect is answered `preserved:false`. */
+  breakContinuity(): void;
   clientCount(): number;
 };
 
@@ -274,6 +281,12 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
             totalWatches++;
           }
         }
+      }
+    },
+
+    breakContinuity() {
+      for (const uid of users.keys()) {
+        pushToUser(uid, { type: 'reconnect', preserved: false });
       }
     },
 

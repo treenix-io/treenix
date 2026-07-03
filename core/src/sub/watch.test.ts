@@ -536,6 +536,77 @@ describe('WatchManager — SSE reconnect with grace period', () => {
   });
 });
 
+describe('WatchManager — breakContinuity (core-pxlu, delegated execute)', () => {
+  it('active connection receives the reset event immediately', () => {
+    const wm = createWatchManager();
+    const events: NodeEvent[] = [];
+    wm.connect('c1', 'u1', (e) => events.push(e));
+    wm.watch('u1', ['/doc']);
+
+    wm.breakContinuity();
+
+    assert.equal(events.length, 1);
+    assert.equal(events[0].type, 'reconnect');
+    assert.equal((events[0] as { preserved?: boolean }).preserved, false);
+  });
+
+  it('unrelated user with different watches also resets (deliberate v1 global reset)', () => {
+    const wm = createWatchManager();
+    const other: NodeEvent[] = [];
+    wm.connect('c1', 'u1', () => {});
+    wm.watch('u1', ['/fed/w']);
+    wm.connect('c2', 'u2', (e) => other.push(e));
+    wm.watch('u2', ['/completely/elsewhere']);
+
+    wm.breakContinuity();
+
+    assert.equal(other.length, 1);
+    assert.equal(other[0].type, 'reconnect');
+  });
+
+  it('client disconnected during the break reconnects with preserved:false (grace window)', () => {
+    const wm = createWatchManager({ gracePeriodMs: 10_000 });
+    wm.connect('c1', 'u1', () => {});
+    wm.watch('u1', ['/doc']);
+    wm.disconnect('c1');
+
+    wm.breakContinuity();
+
+    // Legacy reconnect (no since): missedOffline forces an honest refetch.
+    const preserved = wm.connect('c2', 'u1', () => {});
+    assert.equal(preserved, false);
+  });
+
+  it('resume with since replays the reset from the ring (continuity holds THROUGH the reset)', () => {
+    const wm = createWatchManager({ gracePeriodMs: 10_000 });
+    const before: NodeEvent[] = [];
+    wm.connect('c1', 'u1', (e) => before.push(e));
+    wm.watch('u1', ['/doc']);
+    wm.notify({ type: 'set', path: '/doc', node: { $path: '/doc', $type: 'doc' } });
+    const first = before[0];
+    assert.ok(first.type === 'set' && first.seq !== undefined);
+    const lastSeq = first.seq;
+    wm.disconnect('c1');
+
+    wm.breakContinuity();
+
+    const replayed: NodeEvent[] = [];
+    const covered = wm.connect('c2', 'u1', (e) => replayed.push(e), lastSeq);
+    assert.equal(covered, true, 'ring covers the gap — the reset itself is delivered');
+    assert.equal(replayed.length, 1);
+    assert.equal(replayed[0].type, 'reconnect');
+    assert.equal((replayed[0] as { preserved?: boolean }).preserved, false);
+  });
+
+  it('user with no watches and no ring history is untouched (no crash, fresh connect unaffected)', () => {
+    const wm = createWatchManager();
+    wm.breakContinuity();
+
+    const preserved = wm.connect('c1', 'u1', () => {});
+    assert.equal(preserved, false, 'fresh user — nothing preserved by definition');
+  });
+});
+
 describe('WatchManager — edge cases', () => {
   it('watch before connect: no crash, events delivered after connect', () => {
     const wm = createWatchManager();
