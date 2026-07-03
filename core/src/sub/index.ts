@@ -3,7 +3,7 @@
 // No dependencies beyond Tree + core types.
 
 import { type SubscribeOpts } from '#contexts/service/index';
-import { type NodeData } from '#core';
+import { isComponent, isCompKey, type NodeData } from '#core';
 import {
   mapNodeForSift,
   type PatchOp,
@@ -146,6 +146,11 @@ export type SubscriptionOpts = {
   claimsUserOf?: (path: string) => string | null;
   /** True when the node carries mount/config that steers reads on its vp. */
   isConfigNode?: (node: NodeData | null | undefined) => boolean;
+  /** True when a component of this type declares a type-level `acl` rule
+   *  (`register(type, 'acl', …)`). Lets sub/ detect permission-bearing
+   *  components without importing the registry. Absent = type-level rules
+   *  off; inline `component.$acl` is still detected structurally. */
+  componentHasAclRule?: (type: string) => boolean;
 };
 
 /** Self-write notification — fired for every data event emitted by
@@ -166,6 +171,35 @@ export function withSubscriptions(
   const activeQueries: QueryEntry[] = [];
   const claimsUserOf = opts?.claimsUserOf ?? (() => null);
   const isConfigNode = opts?.isConfigNode ?? (() => false);
+  const componentHasAclRule = opts?.componentHasAclRule ?? (() => false);
+
+  /** A component is permission-bearing when it carries an inline `$acl` OR its
+   *  type declares an `acl` rule — mirrors componentPerm's evaluation order. */
+  function isPermissionBearing(comp: unknown): boolean {
+    if (!isComponent(comp)) return false;
+    return !!comp.$acl || componentHasAclRule(comp.$type);
+  }
+
+  /** MVP-spec ACL-affecting rule (docs/…/read-runtime-mvp.md §"ACL-affecting"):
+   *  a mutation touching a component that declares a permission rule shifts
+   *  projection just like a `$acl`/`$owner` change. True when a permission-
+   *  bearing component was added, removed, gained/lost its rule, or changed
+   *  content — the exact-diff path can't reconstruct the visibility flip. */
+  function isComponentAclChange(oldNode: NodeData | null, newNode: NodeData | null): boolean {
+    const keys = new Set<string>();
+    for (const k in oldNode) if (isCompKey(k)) keys.add(k);
+    for (const k in newNode) if (isCompKey(k)) keys.add(k);
+    for (const k of keys) {
+      const o = oldNode?.[k];
+      const n = newNode?.[k];
+      const oBearing = isPermissionBearing(o);
+      const nBearing = isPermissionBearing(n);
+      if (!oBearing && !nBearing) continue;
+      if (oBearing !== nBearing) return true;
+      if (stableJson(o) !== stableJson(n)) return true;
+    }
+    return false;
+  }
 
   function notifySelfWrite(event: DataEvent) {
     if (selfWriteListeners.size === 0) return;
@@ -366,7 +400,7 @@ export function withSubscriptions(
       const claimsUid = claimsUserOf(node.$path);
       const cdc = dirtyVps(
         membershipVps(node.$path, oldNode ?? null, node),
-        isAclChange(oldNode ?? null, node) ? vpsForAclChange(node.$path) : [],
+        (isAclChange(oldNode ?? null, node) || isComponentAclChange(oldNode ?? null, node)) ? vpsForAclChange(node.$path) : [],
         // Config write: either side carries a mount/config component — the vp
         // node itself is being rewritten, handles on it must re-fetch.
         isConfigNode(oldNode) || isConfigNode(node) ? vpsForConfigChange(node.$path) : [],
@@ -395,7 +429,7 @@ export function withSubscriptions(
       const cdc = oldNode
         ? dirtyVps(
             membershipVps(path, oldNode, null),
-            (oldNode.$acl || oldNode.$owner) ? vpsForAclChange(path) : [],
+            (oldNode.$acl || oldNode.$owner || isComponentAclChange(oldNode, null)) ? vpsForAclChange(path) : [],
             isConfigNode(oldNode) ? vpsForConfigChange(path) : [],
             claimsUid ? vpsForClaimsChange(claimsUid) : [],
           )
@@ -427,7 +461,7 @@ export function withSubscriptions(
         membershipVps(path, oldNode ?? null, newNode ?? null),
         // Both directions: ops touched $acl/$owner directly OR the resulting
         // diff shows a $acl change (covers full-node replace via patch).
-        (ops.some(isAclOp) || isAclChange(oldNode ?? null, newNode ?? null)) ? vpsForAclChange(path) : [],
+        (ops.some(isAclOp) || isAclChange(oldNode ?? null, newNode ?? null) || isComponentAclChange(oldNode ?? null, newNode ?? null)) ? vpsForAclChange(path) : [],
         (opsTouchedMount || isConfigNode(oldNode) || isConfigNode(newNode)) ? vpsForConfigChange(path) : [],
         claimsUid ? vpsForClaimsChange(claimsUid) : [],
       );

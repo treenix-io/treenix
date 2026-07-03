@@ -281,6 +281,62 @@ describe('ACL change invalidation (Stage 6)', () => {
     assert.deepEqual(ev.invalidateVps, ['/views/open']);
   });
 
+  // ── Component permission-rule mutations are ACL-affecting (core-5tl) ──
+
+  it('component with a type-level acl rule changing → invalidateVps (MVP-spec parity)', async () => {
+    const events: NodeEvent[] = [];
+    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => events.push(e), {
+      componentHasAclRule: (type) => type === 'sec.typed',
+    });
+
+    await tree.set(createNode('/items', 'dir'));
+    cdc.watchQuery('/views/open', '/items', {}, 'u1');
+    await tree.set({ ...createNode('/items/1', 'item'), '#secret': { $type: 'sec.typed', k: 'v1' } });
+    events.length = 0;
+
+    // Rewrite the permission-bearing component — no $acl/$owner touched.
+    await tree.set({ ...createNode('/items/1', 'item'), '#secret': { $type: 'sec.typed', k: 'v2' } });
+
+    const ev = events.find(e => (e.type === 'set' || e.type === 'patch') && e.path === '/items/1');
+    assert.ok(ev);
+    const invalidateVps = ev.type === 'set' ? ev.invalidateVps : (ev as any).invalidateVps;
+    assert.deepEqual(invalidateVps, ['/views/open']);
+  });
+
+  it('inline component $acl change → invalidateVps without a type handler', async () => {
+    const events: NodeEvent[] = [];
+    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => events.push(e));
+
+    await tree.set(createNode('/items', 'dir'));
+    cdc.watchQuery('/views/open', '/items', {}, 'u1');
+    await tree.set({ ...createNode('/items/1', 'item'), '#secret': { $type: 'sec', k: 'v', $acl: [{ g: 'authenticated', p: R }] } });
+    events.length = 0;
+
+    await tree.set({ ...createNode('/items/1', 'item'), '#secret': { $type: 'sec', k: 'v', $acl: [{ g: 'authenticated', p: 0 }] } });
+
+    const ev = events.find(e => (e.type === 'set' || e.type === 'patch') && e.path === '/items/1');
+    assert.ok(ev);
+    const invalidateVps = ev.type === 'set' ? ev.invalidateVps : (ev as any).invalidateVps;
+    assert.deepEqual(invalidateVps, ['/views/open']);
+  });
+
+  it('non-permission-bearing component change does NOT trigger acl-invalidate', async () => {
+    const events: NodeEvent[] = [];
+    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => events.push(e));
+
+    await tree.set(createNode('/items', 'dir'));
+    cdc.watchQuery('/views/open', '/items', {}, 'u1');
+    await tree.set({ ...createNode('/items/1', 'item'), '#plain': { $type: 'plain', k: 'v1' } });
+    events.length = 0;
+
+    await tree.set({ ...createNode('/items/1', 'item'), '#plain': { $type: 'plain', k: 'v2' } });
+
+    const ev = events.find(e => (e.type === 'set' || e.type === 'patch') && e.path === '/items/1');
+    assert.ok(ev);
+    const invalidateVps = ev.type === 'set' ? ev.invalidateVps : (ev as any).invalidateVps;
+    assert.equal(invalidateVps, undefined, 'plain component change rides the data-diff path — no acl-invalidate');
+  });
+
   it('mount config write at vp path → invalidate that vp', async () => {
     const events: NodeEvent[] = [];
     const { tree, cdc } = withSubscriptions(createMemoryTree(), e => events.push(e), detectors);

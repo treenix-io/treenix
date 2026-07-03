@@ -19,7 +19,7 @@ import {
   parseSessionCookie,
 } from '#security/cookies';
 import { resolveOrIssueSession } from '#security/sessions';
-import { getComponentByName } from '#core';
+import { getComponentByName, resolve as resolveHandler } from '#core';
 import { withMounts } from '#mount';
 import { type CdcRegistry, type OnSelfWrite, withSubscriptions } from '#sub';
 import type { TreeEvent } from '#tree';
@@ -107,6 +107,7 @@ export function createPipeline(bootstrap: Tree, opts?: TreeRouterOpts, wrapTree?
   const { tree: subscribed, cdc, onSelfWrite, injectExternalEvent } = withSubscriptions(policy.tree, (e) => watcher.notify(e), {
     claimsUserOf: userIdFromAuthPath,
     isConfigNode: (node) => !!node && getComponentByName(node, 'mount') !== undefined,
+    componentHasAclRule: (type) => resolveHandler(type, 'acl') !== undefined,
   });
   cdcRef = cdc;
   wiring = {
