@@ -16,7 +16,7 @@ mock.module('#tree/trpc', {
 });
 
 const { renderHook, act } = await import('@testing-library/react');
-const { register } = await import('@treenx/core');
+const { register, resolve } = await import('@treenx/core');
 const { useReg, ensureType } = await import('./schema-loader');
 
 describe('useReg async race', () => {
@@ -42,5 +42,20 @@ describe('useReg async race', () => {
     });
 
     assert.equal(result.current, hB, 'current type B handler preserved, not clobbered by A');
+  });
+});
+
+describe('ensureType schema extraction', () => {
+  // Regression: component-namespace migration moved named components under '#' keys —
+  // type nodes serve the schema as '#schema', not bare 'schema'.
+  it('registers schema served under the #schema component key', async () => {
+    const schema = { $type: 'schema', $id: 'zz.ns.hashed', type: 'object', properties: {} };
+    const p = ensureType('zz.ns.hashed');
+    resolveQuery({ $path: '/sys/types/zz/ns/hashed', $type: 'type', '#schema': schema });
+    await p;
+
+    const handler = resolve('zz.ns.hashed', 'schema');
+    assert.ok(handler, 'schema context registered');
+    assert.deepEqual(handler(), schema);
   });
 });

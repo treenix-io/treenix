@@ -1,5 +1,5 @@
 // Lazy registry loader — fetches type nodes from /sys/types on demand
-import { type ContextHandlers, register, resolve } from '@treenx/core';
+import { type ContextHandlers, getComponent, type NodeData, register, resolve } from '@treenx/core';
 import type { TypeSchema } from '@treenx/core/schema/types';
 import { useEffect, useState } from 'react';
 import { trpc } from '#tree/trpc';
@@ -16,8 +16,9 @@ export async function ensureType(type: string): Promise<void> {
 
   const promise = trpc.get
     .query({ path: `/sys/types/${type.replace(/\./g, '/')}` })
-    .then((node: any) => {
-      const schema = node?.schema;
+    .then((node: NodeData | undefined) => {
+      // Named components live under '#' keys (namespace migration) — never read node.schema
+      const schema = node && getComponent<TypeSchema & { $id: string }>(node, 'schema');
       if (schema?.$id && !resolve(schema.$id, 'schema')) {
         register(schema.$id, 'schema', () => schema);
       }
