@@ -30,5 +30,6 @@ class TodoList {
 }
 
 registerType('todo.item', TodoItem);
-registerType('todo.list', TodoList);
+// add() creates a child via getCtx().tree — no client-side optimistic prediction possible.
+registerType('todo.list', TodoList, { noOptimistic: ['add'] });
 export { TodoItem, TodoList };
