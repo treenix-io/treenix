@@ -9,7 +9,9 @@ import {
   type ComponentData,
   type NodeData,
   resolve,
-  resolveExact,
+  resolveEntry,
+  resolveExactEntry,
+  type ResolvedEntry,
   subscribeRegistry,
 } from '@treenx/core';
 import { createContext, createElement, type FC, type ReactNode, useContext, useEffect, useMemo, useState } from 'react';
@@ -119,8 +121,8 @@ export function Render<E extends Record<string, unknown> = {}>({ value, onChange
   const type = value.$type;
 
   const ctx_ = context as 'react';
-  const sync = useMemo(() => resolveExact(type, ctx_), [type, ctx_]);
-  const [async_, setAsync] = useState<ReactHandler | null>(null);
+  const sync = useMemo(() => resolveExactEntry(type, ctx_), [type, ctx_]);
+  const [async_, setAsync] = useState<ResolvedEntry<'react'> | null>(null);
 
   useEffect(() => {
     if (sync) return;
@@ -128,24 +130,30 @@ export function Render<E extends Record<string, unknown> = {}>({ value, onChange
     resolve(type, ctx_);
 
     return subscribeRegistry(() => {
-      const h = resolveExact(type, ctx_);
-      if (h) setAsync(() => h);
+      const e = resolveExactEntry(type, ctx_);
+      if (e) setAsync(e);
     });
   }, [type, ctx_, sync]);
 
-  let Handler = sync ?? async_;
+  let entry = sync ?? async_;
 
-  if (!Handler) {
-    Handler = resolve(type, ctx_);
+  if (!entry) {
+    entry = resolveEntry(type, ctx_);
   }
 
-  if (!Handler) {
+  if (!entry) {
     console.warn(`[Render] no handler for ${type}@${ctx_}`);
     return null;
   }
 
+  // Registration-time props: register(type, ctx, Comp, { props: {...} }) — the SAME component can
+  // serve several contexts with different presets; identical element type means React keeps the
+  // instance mounted across a context toggle (e.g. canvas react ↔ react:edit keeps pan/zoom).
+  const preset = entry.meta?.props;
+  const regProps = preset && typeof preset === 'object' ? preset : undefined;
+
   const ctx = viewCtx(value);
-  const el = createElement(Handler, { value, onChange, ctx, ...extra } as RenderProps);
+  const el = createElement(entry.handler, { value, onChange, ctx, ...extra, ...regProps } as RenderProps);
   return ctx?.node ? createElement(NodeProvider, { value: ctx.node }, el) : el;
 }
 

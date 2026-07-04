@@ -21,6 +21,8 @@ import {
   render,
   replaceHandler,
   resolve,
+  resolveEntry,
+  resolveExactEntry,
   safeJsonParse,
   unregister,
 } from './index';
@@ -213,6 +215,26 @@ describe('Context', () => {
   it('render throws on missing handler', () => {
     clearRegistry();
     assert.throws(() => render({ $type: 'nope' }, 'react'));
+  });
+
+  it('resolveEntry carries meta of the MATCHED registration through fallback', () => {
+    clearRegistry();
+    const view = () => 'view';
+    register('task', 'test', view, { props: { editing: false } });
+    register('task', 'test:edit', view, { props: { editing: true } });
+
+    assert.deepEqual(resolveEntry('task', 'test:edit')?.meta, { props: { editing: true } });
+    assert.deepEqual(resolveEntry('task', 'test')?.meta, { props: { editing: false } });
+    // no exact 'test:edit:sub' → falls back to 'test:edit' WITH its meta
+    assert.deepEqual(resolveEntry('task', 'test:edit:sub')?.meta, { props: { editing: true } });
+    assert.equal(resolveEntry('task', 'test:edit:sub')?.handler, view);
+  });
+
+  it('resolveExactEntry: exact-only, meta optional', () => {
+    clearRegistry();
+    register('task', 'test', () => 'x');
+    assert.equal(resolveExactEntry('task', 'test')?.meta, undefined);
+    assert.equal(resolveExactEntry('task', 'test:edit'), null);
   });
 });
 

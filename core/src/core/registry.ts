@@ -66,11 +66,15 @@ export function getMeta(type: TypeId, context: string): Record<string, unknown> 
   return registry.get(normalizeType(type))?.get(context)?.meta ?? null;
 }
 
-export function resolve<C extends string>(type: TypeId, context: C, _notifyMiss = true): ContextHandler<C> | null {
+/** Handler + its registration meta, as one match. Renderers use meta.props to pass
+ *  registration-time presets — one component can serve several contexts with different props. */
+export type ResolvedEntry<C extends string> = { handler: ContextHandler<C>; meta?: Record<string, unknown> };
+
+export function resolveEntry<C extends string>(type: TypeId, context: C, _notifyMiss = true): ResolvedEntry<C> | null {
   validateContext(context);
   const n = normalizeType(type);
   const exact = registry.get(n)?.get(context);
-  if (exact) return exact.handler as ContextHandler<C>;
+  if (exact) return exact as ResolvedEntry<C>;
 
   // Notify miss BEFORE default fallback. Async loaders (UIX) start fetching, register
   // when done, bump() triggers re-render — next resolve() finds exact match. Sync
@@ -78,25 +82,33 @@ export function resolve<C extends string>(type: TypeId, context: C, _notifyMiss 
   if (_notifyMiss) {
     missResolvers.get(context)?.(n);
     const reExact = registry.get(n)?.get(context);
-    if (reExact) return reExact.handler as ContextHandler<C>;
+    if (reExact) return reExact as ResolvedEntry<C>;
   }
 
   const def = registry.get(DEFAULT_TYPE)?.get(context);
-  if (def) return def.handler as ContextHandler<C>;
+  if (def) return def as ResolvedEntry<C>;
 
   // fallback: strip last segment ("react:compact" → "react"), propagating _notifyMiss so a
   // base-context loader (e.g. UIX on 'react') fires for sub-context lookups — while a caller
   // that passed notifyMiss=false (snapshot, UixNoView) still resolves WITHOUT firing loaders.
   const sep = context.lastIndexOf(':');
-  if (sep > 0) return resolve(type, context.slice(0, sep) as C, _notifyMiss);
+  if (sep > 0) return resolveEntry(type, context.slice(0, sep) as C, _notifyMiss);
 
   return null;
 }
 
-// Returns the exact registered handler — no fallback, no miss notification.
-export function resolveExact<C extends string>(type: TypeId, context: C): ContextHandler<C> | null {
+export function resolve<C extends string>(type: TypeId, context: C, _notifyMiss = true): ContextHandler<C> | null {
+  return resolveEntry(type, context, _notifyMiss)?.handler ?? null;
+}
+
+// Exact registered entry/handler — no fallback, no miss notification.
+export function resolveExactEntry<C extends string>(type: TypeId, context: C): ResolvedEntry<C> | null {
   validateContext(context);
-  return (registry.get(normalizeType(type))?.get(context)?.handler ?? null) as ContextHandler<C> | null;
+  return (registry.get(normalizeType(type))?.get(context) ?? null) as ResolvedEntry<C> | null;
+}
+
+export function resolveExact<C extends string>(type: TypeId, context: C): ContextHandler<C> | null {
+  return resolveExactEntry(type, context)?.handler ?? null;
 }
 
 export function hasMissResolver(context: string): boolean {

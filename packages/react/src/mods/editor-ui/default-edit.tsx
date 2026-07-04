@@ -112,4 +112,6 @@ const DefaultEditForm: View<ComponentData> = ({ value, onChange }) => {
 };
 
 register('default', 'react:edit', DefaultEditForm);
+// Inspector props drawer renders under 'react:edit:props' (ComponentSection). Without this exact
+// default, resolve strips ':props' and full-page react:edit views (kanban, canvas) leak into the drawer.
 register('default', 'react:edit:props', DefaultEditForm);
