@@ -397,23 +397,31 @@ export function withSubscriptions(
       const oldNode = await tree.get(node.$path, ctx);
 
       await tree.set(node, ctx);
+      // Emit from the STORED node, not the input ref. Layers below may copy
+      // the node (repath/mount path translation), so the adapter's in-place
+      // $rev bump — and stamped fields ($refs, $v) — never reach our ref.
+      // Trusting the input emitted pre-bump revs and diffs without the $rev
+      // op, so every subscriber cached a stale $rev → false OCC conflicts on
+      // their next write (found via cnr.5 C2). Cheap: withCache.set just
+      // re-read and cached this exact node — this get is a cache hit.
+      const stored = await tree.get(node.$path, ctx) ?? node;
       const claimsUid = claimsUserOf(node.$path);
       const cdc = dirtyVps(
-        membershipVps(node.$path, oldNode ?? null, node),
-        (isAclChange(oldNode ?? null, node) || isComponentAclChange(oldNode ?? null, node)) ? vpsForAclChange(node.$path) : [],
+        membershipVps(node.$path, oldNode ?? null, stored),
+        (isAclChange(oldNode ?? null, stored) || isComponentAclChange(oldNode ?? null, stored)) ? vpsForAclChange(node.$path) : [],
         // Config write: either side carries a mount/config component — the vp
         // node itself is being rewritten, handles on it must re-fetch.
-        isConfigNode(oldNode) || isConfigNode(node) ? vpsForConfigChange(node.$path) : [],
+        isConfigNode(oldNode) || isConfigNode(stored) ? vpsForConfigChange(node.$path) : [],
         claimsUid ? vpsForClaimsChange(claimsUid) : [],
       );
 
-      const { $path, ...body } = node;
+      const { $path, ...body } = stored;
       const by = opIdOf(ctx);
 
       if (oldNode) {
-        const computed = diffNodes(oldNode, node);
+        const computed = diffNodes(oldNode, stored);
         emit(computed.length > 0
-          ? { type: 'patch', path: $path, patches: computed, rev: node.$rev, ...(by ? { by } : {}), ...cdc }
+          ? { type: 'patch', path: $path, patches: computed, rev: stored.$rev, ...(by ? { by } : {}), ...cdc }
           : { type: 'set', path: $path, node: body, ...(by ? { by } : {}), ...cdc });
       } else {
         emit({ type: 'set', path: $path, node: body, ...(by ? { by } : {}), ...cdc });

@@ -13,6 +13,25 @@ const detectors: SubscriptionOpts = {
 };
 
 describe('Subscriptions', () => {
+  it('patch event carries the STORED post-bump $rev through node-copying layers (repath)', async () => {
+    // repath.set copies the node for path translation, so the adapter's
+    // in-place $rev bump never reaches the emitter's ref. Emitting from the
+    // input ref shipped pre-bump revs — every subscriber cached a stale $rev
+    // and false-CONFLICTed on its next write (found via cnr.5 C2).
+    const { createRepathTree } = await import('#tree/repath');
+    const events: NodeEvent[] = [];
+    const { tree } = withSubscriptions(createRepathTree(createMemoryTree(), '/', '/'), e => events.push(e));
+
+    await tree.set(createNode('/x', 'doc', { title: 'v1' }));
+    const stored = await tree.get('/x');
+    await tree.set({ ...stored!, title: 'v2' });
+
+    const ev = events.find(e => e.type === 'patch');
+    assert.ok(ev && ev.type === 'patch');
+    assert.equal(ev.rev, 2, 'event rev is the post-bump stored rev');
+    assert.ok(ev.patches.some(p => p[1] === '$rev' && p[2] === 2), 'diff includes the $rev bump op');
+  });
+
   it('emits on set (children)', async () => {
     const { tree, cdc } = withSubscriptions(createMemoryTree());
     const events: NodeEvent[] = [];
