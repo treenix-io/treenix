@@ -31,14 +31,17 @@ export function parseNodeEditorJson(text: string): NodeData {
   return node as NodeData;
 }
 
-// $rev synced from `latest` (live React state) — JSON textarea doesn't auto-refresh.
+// OCC token = the $rev already IN the text, captured when the buffer was seeded.
+// Stamping the LIVE node's $rev here (pre-cnr.5 behavior) defeated OCC: stale
+// textarea content sailed through with a fresh rev, silently overwriting any
+// change made externally while the tab was open. Now such a save CONFLICTs and
+// the caller surfaces it; repeat saves stay green because the returned text
+// carries the bumped $rev and the caller re-seeds the buffer from it.
 export async function saveNodeEditorJson(
   jsonText: string,
   setFn: (node: NodeData) => Promise<NodeData>,
-  latest?: NodeData,
 ): Promise<string> {
   const parsed = parseNodeEditorJson(jsonText);
-  if (latest?.$rev !== undefined) (parsed as Record<string, unknown>).$rev = latest.$rev;
   const fresh = await setFn(parsed);
   return getNodeEditorJsonText(fresh);
 }

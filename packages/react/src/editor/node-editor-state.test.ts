@@ -93,6 +93,19 @@ describe('saveNodeEditorJson', () => {
     assert.equal(getRev(), 3);
   });
 
+  it('regression cnr.5 C2: external change since the buffer was seeded → CONFLICT, not silent overwrite', async () => {
+    // Server moved to rev 2 while the tab held a rev-1 snapshot. Pre-fix the
+    // live $rev was stamped over the stale text and OCC passed — lost update.
+    const { setFn, getRev } = makeFakeSet(2);
+    const staleText = JSON.stringify({ $path: '/docs2', $type: 't', n: 1, $rev: 1 }, null, 2);
+
+    await assert.rejects(
+      () => saveNodeEditorJson(staleText, setFn),
+      (e: unknown) => (e as { code: string }).code === 'CONFLICT',
+    );
+    assert.equal(getRev(), 2, 'server state untouched');
+  });
+
   it('propagates set errors (e.g. CONFLICT) to caller', async () => {
     const stale = async (): Promise<NodeData> => {
       const err = new Error('CONFLICT') as Error & { code: string };

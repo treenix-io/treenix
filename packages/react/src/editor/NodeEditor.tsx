@@ -13,7 +13,7 @@ import { getComponents } from '#mods/editor-ui/node-utils';
 import type { SaveHandle } from '#tree/auto-save';
 import { type ComponentData, type GroupPerm, type NodeData } from '@treenx/core';
 import { ChevronRight, Trash2 } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { proxy, useSnapshot } from 'valtio';
 import { AclEditor } from './AclEditor';
@@ -80,6 +80,10 @@ export function NodeEditor({ node, save, open, onClose, onDelete, currentUserId,
     aclEdit: null as { owner: string; rules: GroupPerm[] } | null,
     tab: 'properties' as 'properties' | 'json',
     jsonText: '',
+    // Node JSON at the moment jsonText was (re)seeded — dirty/stale anchor.
+    // Comparing jsonText against the LIVE node made external changes look
+    // like user edits (spurious Save button → one-click lost update, cnr.5 C45).
+    jsonBaseline: '',
     collapsed: { $node: true } as Record<string, boolean>,
   }));
   const snap = useSnapshot(st);
@@ -91,14 +95,29 @@ export function NodeEditor({ node, save, open, onClose, onDelete, currentUserId,
     st.aclEdit = null;
     st.tab = 'properties';
     st.jsonText = '';
+    st.jsonBaseline = '';
   }
 
   // Derived from node + system edits
   const formattedNodeJson = getNodeEditorJsonText(node);
   const aclOwner = snap.aclEdit?.owner ?? (node.$owner as string) ?? '';
   const aclRules = snap.aclEdit?.rules ?? (node.$acl as GroupPerm[]) ?? [];
-  const jsonDirty = snap.jsonText !== '' && snap.jsonText !== formattedNodeJson;
+  const jsonDirty = snap.jsonText !== snap.jsonBaseline;
+  // Node moved since the buffer was seeded. Clean buffers auto-follow (effect
+  // below), so this is visible only while the user holds unsaved JSON edits.
+  const jsonStale = snap.jsonBaseline !== '' && snap.jsonBaseline !== formattedNodeJson;
   const hasPendingSystemEdits = snap.aclEdit != null;
+
+  // Clean JSON buffer follows the live node; an edited buffer freezes and
+  // staleness is surfaced instead — Save then honestly CONFLICTs on the old $rev.
+  useEffect(() => {
+    if (st.jsonBaseline && st.jsonText === st.jsonBaseline && st.jsonBaseline !== formattedNodeJson) {
+      st.jsonText = formattedNodeJson;
+      st.jsonBaseline = formattedNodeJson;
+    }
+    // st is a stable valtio proxy — only the node text matters here
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formattedNodeJson]);
 
   const nodeName = node.$path === '/' ? '/' : node.$path.slice(node.$path.lastIndexOf('/') + 1);
   const components = getComponents(node);
@@ -112,31 +131,41 @@ export function NodeEditor({ node, save, open, onClose, onDelete, currentUserId,
   // Reset only the JSON tab buffer back to current node
   function resetJson() {
     st.jsonText = formattedNodeJson;
+    st.jsonBaseline = formattedNodeJson;
   }
 
-  // Save properties tab: $acl via set(), then flush auto-save buffer
+  // Save properties tab — ONE commit per logical save (cnr.5 C21).
   async function handleSaveProperties() {
     try {
       if (hasPendingSystemEdits) {
+        // `node` is the merged draft (cache + pending), so this set() persists
+        // data edits AND $acl/$owner together in a single OCC'd commit. The
+        // pending buffer is then discarded WITHOUT flush() — re-sending the
+        // same fields as a patch was the double-commit.
         const toSave = { ...node };
         if (snap.aclEdit) {
           toSave.$owner = aclOwner;
           toSave.$acl = [...aclRules] as GroupPerm[];
         }
         await set(toSave);
+        save.discard();
+        st.aclEdit = null;
+      } else {
+        await flush();
       }
-      await flush();
-      resetProperties();
       toast.success('Saved');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Save failed');
     }
   }
 
-  // Save JSON tab: full-node replacement via set()
+  // Save JSON tab: full-node replacement via set(). The buffer's own $rev is
+  // the OCC token — an external change since seeding surfaces as CONFLICT.
   async function handleSaveJson() {
     try {
-      st.jsonText = await saveNodeEditorJson(snap.jsonText, set, node);
+      const freshText = await saveNodeEditorJson(snap.jsonText, set);
+      st.jsonText = freshText;
+      st.jsonBaseline = freshText;
       toast.success('Saved');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Save failed');
@@ -144,7 +173,11 @@ export function NodeEditor({ node, save, open, onClose, onDelete, currentUserId,
   }
 
   async function handleRemoveComponent(name: string) {
-    await removeComponent(node.$path, name);
+    try {
+      await removeComponent(node.$path, name);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : `Failed to remove ${name}`);
+    }
   }
 
   return (
@@ -158,8 +191,10 @@ export function NodeEditor({ node, save, open, onClose, onDelete, currentUserId,
 
       <Tabs value={snap.tab} onValueChange={(v) => {
         st.tab = v as 'properties' | 'json';
-        if (v === 'json' && !st.jsonText) {
+        // (Re)seed a clean buffer on tab open; unsaved edits survive tab switches.
+        if (v === 'json' && st.jsonText === st.jsonBaseline) {
           st.jsonText = formattedNodeJson;
+          st.jsonBaseline = formattedNodeJson;
         }
       }} className="shrink-0">
         <TabsList variant="line" className="h-8">
@@ -241,6 +276,9 @@ export function NodeEditor({ node, save, open, onClose, onDelete, currentUserId,
               <Button variant="ghost" size="sm" onClick={resetJson} title="Discard JSON edits">
                 Reset
               </Button>
+            )}
+            {jsonStale && (
+              <span className="text-[10px] text-orange-500" title="Node changed externally — Save will conflict; Reset to reload">stale</span>
             )}
           </>
         )}

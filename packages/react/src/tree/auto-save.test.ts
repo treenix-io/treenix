@@ -210,6 +210,49 @@ describe('useSave: flush', () => {
     assert.equal(patchMutate.mock.callCount(), 0);
   });
 
+  it('rejects on patch failure and restores pending — edits are not lost (cnr.5 C21)', async () => {
+    seed('/fail', 'task', { title: 'Old' });
+    const { result } = renderHook(() => useSave('/fail'));
+
+    act(() => result.current.onChange({ title: 'New' }));
+    patchMutate.mock.mockImplementationOnce(async () => { throw new Error('FORBIDDEN'); });
+
+    let err: unknown;
+    await act(async () => { err = await result.current.flush().catch(e => e); });
+
+    assert.ok(err instanceof Error, 'flush rejected — caller must not toast Saved');
+    assert.equal(result.current.dirty, true, 'pending restored, still dirty');
+
+    // Retry succeeds and re-sends the SAME ops
+    await act(() => result.current.flush());
+    assert.equal(result.current.dirty, false);
+    const retry = patchMutate.mock.calls.at(-1)!.arguments[0];
+    assert.ok(retry.ops.some((op) => op[0] === 'r' && op[1] === 'title' && op[2] === 'New'));
+  });
+
+  it('failed flush keeps edits typed during the round-trip (new edits win)', async () => {
+    seed('/fail2', 'task', { title: 'A', count: 0 });
+    const { result } = renderHook(() => useSave('/fail2'));
+
+    act(() => result.current.onChange({ title: 'B', count: 1 }));
+
+    let failFlush: () => void;
+    const gate = new Promise<void>((_, rej) => { failFlush = () => rej(new Error('boom')); });
+    patchMutate.mock.mockImplementationOnce(async () => gate);
+
+    let flushed: Promise<unknown>;
+    act(() => { flushed = result.current.flush().catch(e => e); });
+    act(() => result.current.onChange({ title: 'C' }));
+    failFlush!();
+    await act(async () => { await flushed; });
+
+    // Restored pending: in-flight fields merged back, newer edit wins
+    const v = result.current.value!;
+    assert.equal(v.title, 'C');
+    assert.equal(v.count, 1);
+    assert.equal(result.current.dirty, true);
+  });
+
   it('merges pending accumulated during inflight', async () => {
     seed('/inf', 'task', { title: 'A' });
     const { result } = renderHook(() => useSave('/inf'));
@@ -253,6 +296,25 @@ describe('useSave: reset', () => {
     act(() => result.current.onChange({ title: 'Y' }));
     act(() => result.current.reset());
     assert.equal(result.current.dirty, false);
+  });
+});
+
+// ── useSave: discard ──
+
+describe('useSave: discard', () => {
+  it('drops pending WITHOUT rolling the cache back (post-set consume, cnr.5 C21)', () => {
+    seed('/dc', 'task', { title: 'Old' });
+    const { result } = renderHook(() => useSave('/dc'));
+
+    act(() => result.current.onChange({ title: 'New' }));
+
+    // Another channel persisted the draft (e.g. full-node set) — cache holds fresh state.
+    act(() => { cache.put(makeNode('/dc', 'task', { title: 'New' })); });
+
+    act(() => result.current.discard());
+
+    assert.equal(result.current.dirty, false);
+    assert.equal(cache.get('/dc')!.title, 'New', 'freshly-saved state NOT rolled back (reset() would restore Old)');
   });
 });
 

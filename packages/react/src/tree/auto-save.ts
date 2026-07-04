@@ -32,10 +32,15 @@ export type SaveHandle<T = NodeData> = {
   onChange: (partial: OnChange) => void;
   /** Scoped onChange for a named component — prefixes all keys with `key.` */
   scope: (key: string) => (partial: OnChange) => void;
-  /** Flush pending changes to server now */
+  /** Flush pending changes to server now. Rejects on server failure — pending
+   *  edits are restored (dirty stays true), callers must not report success. */
   flush: () => Promise<void>;
   /** Discard pending changes, restore cache to pre-edit state */
   reset: () => void;
+  /** Drop pending edits WITHOUT touching the cache — for when another channel
+   *  already persisted them (e.g. a full-node set() carrying the merged draft).
+   *  reset() here would roll the cache back over the freshly-saved state. */
+  discard: () => void;
   /** Has unsaved changes (pending or inflight) */
   dirty: boolean;
   /** Node changed externally while dirty — $rev mismatch */
@@ -110,15 +115,23 @@ export function useSave(path: string, options?: SaveOptions): SaveHandle {
     try {
       await trpc.patch.mutate({ path: pathRef.current, ops });
     } catch (e) {
+      // Failed write: restore pending so the edits are NOT lost (dirty stays
+      // true) and rethrow — a swallowed reject made 'flush then toast' callers
+      // report 'Saved' for a commit that never landed (cnr.5 C21). No auto-
+      // retry: the next onChange or explicit flush re-attempts.
       console.error('[useSave] patch failed:', e);
-    } finally {
       inflight.current = false;
-      if (pending.current) {
-        if (autoSave) timer.current = setTimeout(flush, delay);
-      } else {
-        clearEdit();
-        bump();
-      }
+      pending.current = { ...partial, ...(pending.current ?? {}) };
+      bump();
+      throw e;
+    }
+    inflight.current = false;
+    if (pending.current) {
+      // Edits accumulated during the round-trip — schedule the next flush.
+      if (autoSave) timer.current = setTimeout(() => { flush().catch(() => {}); }, delay);
+    } else {
+      clearEdit();
+      bump();
     }
   }, [autoSave, clearEdit, clearTimer, delay]);
 
@@ -135,9 +148,11 @@ export function useSave(path: string, options?: SaveOptions): SaveHandle {
     Object.assign(pending.current, partial as Record<string, unknown>);
     bump();
 
-    // Auto-save: start throttle timer
+    // Auto-save: start throttle timer. flush rethrows on failure (already
+    // logged inside) — catch here so a background flush can't become an
+    // unhandled rejection; pending stays restored for the next attempt.
     if (autoSave && !timer.current) {
-      timer.current = setTimeout(flush, delay);
+      timer.current = setTimeout(() => { flush().catch(() => {}); }, delay);
     }
     // delay/autoSave captured transitively via flush — listing them here is redundant
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -153,13 +168,23 @@ export function useSave(path: string, options?: SaveOptions): SaveHandle {
     bump();
   }, [clearEdit, clearTimer]);
 
+  const discard = useCallback(() => {
+    pending.current = null;
+    clearTimer();
+    clearEdit();
+    bump();
+  }, [clearEdit, clearTimer]);
+
   // Flush on unmount
   useEffect(() => () => {
     if (timer.current) clearTimeout(timer.current);
     const partial = pending.current;
     if (!partial) return;
     const ops = mergeToOps(partial);
-    if (ops.length > 0) trpc.patch.mutate({ path: pathRef.current, ops }).catch(() => {});
+    if (ops.length > 0) {
+      trpc.patch.mutate({ path: pathRef.current, ops })
+        .catch(e => console.error('[useSave] unmount flush failed:', e));
+    }
   }, []);
 
   // Derived dirty — pending + inflight are the real sources of truth (bumps re-render)
@@ -177,8 +202,8 @@ export function useSave(path: string, options?: SaveOptions): SaveHandle {
   );
 
   return useMemo(
-    () => ({ value, onChange, scope, flush, reset, dirty, stale }),
-    [value, onChange, scope, flush, reset, dirty, stale],
+    () => ({ value, onChange, scope, flush, reset, discard, dirty, stale }),
+    [value, onChange, scope, flush, reset, discard, dirty, stale],
   );
 }
 
@@ -237,10 +262,13 @@ export function usePathSave(options?: { delay?: number; cacheThrottle?: number }
       if (cached) cache.put(mergeIntoNode(cached, partial));
     }
 
-    await Promise.allSettled(entries.map(([path, partial]) => {
+    const settled = await Promise.allSettled(entries.map(([path, partial]) => {
       const ops = mergeToOps(partial);
       return ops.length > 0 ? trpc.patch.mutate({ path, ops }) : Promise.resolve();
     }));
+    settled.forEach((r, i) => {
+      if (r.status === 'rejected') console.error(`[usePathSave] patch failed for ${entries[i][0]}:`, r.reason);
+    });
   }, [clearTimer]);
 
   const change = useCallback((path: string, partial: OnChange) => {
@@ -277,7 +305,10 @@ export function usePathSave(options?: { delay?: number; cacheThrottle?: number }
     if (timer.current) clearTimeout(timer.current);
     for (const [path, partial] of pending.current) {
       const ops = mergeToOps(partial);
-      if (ops.length > 0) trpc.patch.mutate({ path, ops }).catch(() => {});
+      if (ops.length > 0) {
+        trpc.patch.mutate({ path, ops })
+          .catch(e => console.error(`[usePathSave] unmount flush failed for ${path}:`, e));
+      }
     }
     pending.current.clear();
     handleCache.current.clear();
