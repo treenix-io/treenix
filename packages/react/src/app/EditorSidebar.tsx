@@ -11,7 +11,7 @@ import {
 import { Input } from '#components/ui/input';
 import { ResizablePanel } from '#components/ui/resizable';
 import { Tree } from '#editor/Tree';
-import { createNode } from '#hooks';
+import { createNode, moveNode } from '#hooks';
 import { TypePicker } from '#mods/editor-ui/type-picker';
 import type { NavigateFn } from '#navigate';
 import * as cache from '#tree/cache';
@@ -285,8 +285,7 @@ export function EditorSidebar({
       if (newPath === fromPath) return;
 
       try {
-        await tree.remove(fromPath);
-        await tree.set({ ...fromNode, $path: newPath });
+        await moveNode(fromPath, newPath);
         const oldParent = fromPath === '/' ? '/' : fromPath.slice(0, fromPath.lastIndexOf('/')) || '/';
         await loadChildren(oldParent);
         await loadChildren(toParent);

@@ -245,22 +245,35 @@ export async function addComponent(path: string, name: string, type: string) {
   await ensureType(type);
   const comp = { $type: type, ...getDefaults(type) };
   const key = compKey(name);
-  const node = cache.get(path);
-  if (node) cache.put({ ...node, [key]: comp });
-  await trpc.patch.mutate({ path, ops: [['r', key, comp]] });
+  const prev = cache.get(path);
+  if (prev) cache.put({ ...prev, [key]: comp });
+  try {
+    await trpc.patch.mutate({ path, ops: [['r', key, comp]] });
+  } catch (err) {
+    // F15: rollback optimistic cache on server reject — a failed write emits no
+    // SSE event, so a phantom component would persist (incl. IndexedDB) forever.
+    if (prev) cache.put(prev);
+    throw err;
+  }
 }
 
 // ── removeComponent: detach a named component from a node (optimistic + patch) ──
 
 export async function removeComponent(path: string, name: string) {
   const key = compKey(name);
-  const node = cache.get(path);
-  if (node) {
-    const next = { ...node };
+  const prev = cache.get(path);
+  if (prev) {
+    const next = { ...prev };
     delete next[key];
     cache.put(next);
   }
-  await trpc.patch.mutate({ path, ops: [['d', key]] });
+  try {
+    await trpc.patch.mutate({ path, ops: [['d', key]] });
+  } catch (err) {
+    // F15: rollback — same contract as addComponent/set.
+    if (prev) cache.put(prev);
+    throw err;
+  }
 }
 
 // ── removeNode: optimistic delete + server persist ──
@@ -274,6 +287,22 @@ export async function removeNode(path: string) {
     if (prev) cache.put(prev);
     throw err;
   }
+}
+
+// ── moveNode: relocate a node to a new path ──
+// Mirrors the core relocate contract (FilterTree.patch, core-yje): strip $rev —
+// the destination path has no stored node, so a carried rev deterministically
+// throws OCC — and write the destination BEFORE removing the source, so a
+// rejected write can't lose the node (remove-then-set was cnr.5 C47).
+
+export async function moveNode(fromPath: string, newPath: string): Promise<void> {
+  const fromNode = cache.get(fromPath);
+  if (!fromNode) throw new Error(`moveNode: ${fromPath} is not in cache`);
+
+  const { $rev, ...body } = fromNode;
+  await tree.set({ ...body, $path: newPath });
+  await tree.remove(fromPath);
+  cache.remove(fromPath);
 }
 
 // ── execute: action caller ──

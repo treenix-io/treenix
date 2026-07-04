@@ -3,6 +3,7 @@ import { addComponent } from '#hooks';
 import type { NodeData } from '@treenx/core';
 import { Plus } from 'lucide-react';
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { TypePicker } from './type-picker';
 
 export function EmptyNodePlaceholder({ value }: { value: NodeData }) {
@@ -30,7 +31,11 @@ export function EmptyNodePlaceholder({ value }: { value: NodeData }) {
           onCancel={() => setPicking(false)}
           onSelect={async (name, type) => {
             setPicking(false);
-            await addComponent(value.$path, name, type);
+            try {
+              await addComponent(value.$path, name, type);
+            } catch (error) {
+              toast.error(error instanceof Error ? error.message : `Failed to add ${name}`);
+            }
           }}
         />
       )}
