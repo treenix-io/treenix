@@ -14,6 +14,7 @@ import {
   type TreeWatchScope,
 } from '#tree';
 import { createSiftTest } from '#tree/query';
+import { stableJson } from '#util/stable-json';
 import fjp from 'fast-json-patch';
 
 const { compare } = fjp;
@@ -212,15 +213,6 @@ export function withSubscriptions(
       try { l(event.path, rev); }
       catch (err) { console.error('[withSubscriptions] selfWrite listener threw:', err); }
     }
-  }
-
-  function stableJson(value: unknown): string {
-    if (!value || typeof value !== 'object') return JSON.stringify(value);
-    if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
-    return `{${Object.entries(value as Record<string, unknown>)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([k, v]) => `${JSON.stringify(k)}:${stableJson(v)}`)
-      .join(',')}}`;
   }
 
   type DataEvent = Exclude<NodeEvent, { type: 'reconnect' }>;
