@@ -140,7 +140,17 @@ export function AclEditor({ path, owner, rules, currentUserId, onChange }: Props
   useEffect(() => {
     let cancelled = false;
     const paths = ancestorPaths(path);
-    Promise.all(paths.map((p) => tree.get(p).catch(() => undefined))).then((nodes) => {
+    Promise.all(paths.map((p) => tree.get(p).catch((e: unknown) => {
+      // Unreadable ancestors (FORBIDDEN/NOT_FOUND) are expected — the chain
+      // renders with what's visible. Anything else is a real fetch failure;
+      // don't hide it behind a silently shorter inherited chain (core-pfy).
+      const code = (e as { data?: { code?: string }; code?: string })?.data?.code
+        ?? (e as { code?: string })?.code;
+      if (code !== 'NOT_FOUND' && code !== 'FORBIDDEN') {
+        console.warn('[AclEditor] ancestor fetch failed:', p, e);
+      }
+      return undefined;
+    }))).then((nodes) => {
       if (cancelled) return;
       const next: InheritedEntry[] = [];
       paths.forEach((p, i) => {

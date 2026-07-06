@@ -13,6 +13,17 @@ import type { Page } from '@treenx/core/tree';
 import * as idb from './idb';
 import { stampNode } from '#symbols';
 
+// IndexedDB persistence is best-effort — the memory cache is the source of
+// truth, so idb failures must never throw. But a fully broken IDB (private
+// mode, quota, corruption) used to fail SILENTLY on every call (core-pfy);
+// warn once so "cache empty after every reload" is diagnosable.
+let idbWarned = false;
+function idbFail(e: unknown): void {
+  if (idbWarned) return;
+  idbWarned = true;
+  console.warn('[cache] IndexedDB persistence failed, continuing memory-only:', e);
+}
+
 /** Deep-freeze in dev mode to catch accidental cache mutation (incl. nested components) */
 function deepFreeze(v: any): void {
   if (!v || typeof v !== 'object' || Object.isFrozen(v)) return;
@@ -233,7 +244,7 @@ export function put(node: NodeData, virtualParent?: string) {
 
   const ts = Date.now();
   lastUpdated.set(node.$path, ts);
-  idb.save({ path: node.$path, data: node, lastUpdated: ts, virtualParent }).catch(() => {});
+  idb.save({ path: node.$path, data: node, lastUpdated: ts, virtualParent }).catch(idbFail);
 }
 
 /** Authoritative replace of a parent's children list — used by initial fetch,
@@ -298,7 +309,7 @@ export function replaceChildren(parent: string, items: NodeData[]) {
   }
   bump();
   for (const h of putHooks) for (const n of items) h(n.$path);
-  idb.saveMany(idbEntries).catch(() => {});
+  idb.saveMany(idbEntries).catch(idbFail);
 }
 
 /** Additive page — loadMore only. Merges into existing parentIndex[parent]
@@ -345,7 +356,7 @@ export function appendChildren(parent: string, items: NodeData[]) {
   }
   bump();
   for (const h of putHooks) for (const n of items) h(n.$path);
-  idb.saveMany(idbEntries).catch(() => {});
+  idb.saveMany(idbEntries).catch(idbFail);
 }
 
 export function remove(path: string, virtualParent?: string) {
@@ -377,7 +388,7 @@ export function remove(path: string, virtualParent?: string) {
   fire(pathSubs, path);
   for (const fp of toFire) fire(childSubs, fp);
   bump();
-  idb.del(path).catch(() => {});
+  idb.del(path).catch(idbFail);
 }
 
 /** Atomic "server confirmed this path does not exist":
@@ -411,7 +422,7 @@ export function markPathMissing(path: string) {
   fire(pathErrorSubs, path);
   for (const fp of toFire) fire(childSubs, fp);
   bump();
-  idb.del(path).catch(() => {});
+  idb.del(path).catch(idbFail);
 }
 
 // ── Path status ──
@@ -590,7 +601,7 @@ export function clear() {
   childrenLoaded.clear();
   loadedCount.clear();
   bump();
-  idb.clearAll().catch(() => {});
+  idb.clearAll().catch(idbFail);
 }
 
 export type ServerHydrationState = {

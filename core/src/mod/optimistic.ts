@@ -105,8 +105,10 @@ export class OptimisticBuffer {
         m.predicted = draft;
         current = draft;
         surviving.push(m);
-      } catch {
-        // Mutation no longer valid on new base — drop it
+      } catch (err) {
+        // Mutation no longer valid on new base — drop it (sanctioned optimistic-
+        // replay exception), but say so: a silent drop hides real replay bugs.
+        console.warn(`[optimistic] dropped replay of ${m.compType} mutation on ${path}:`, err);
       }
     }
 
