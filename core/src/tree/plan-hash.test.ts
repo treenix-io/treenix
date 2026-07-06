@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { canonicalReadPlan, planHash } from './plan-hash';
+import { OpError } from '#errors';
+import { canonicalReadPlan, decodeReadCursor, encodeReadCursor, planHash } from './plan-hash';
 
 describe('planHash (core-hp7)', () => {
   it('equal plans hash equal regardless of where-key construction order', () => {
@@ -38,5 +39,33 @@ describe('planHash (core-hp7)', () => {
     const a = planHash({ source: '/x', callerWhere: { $and: [{ a: 1, b: 2 }] } });
     const b = planHash({ source: '/x', callerWhere: { $and: [{ b: 2, a: 1 }] } });
     assert.equal(a, b);
+  });
+});
+
+describe('ReadCursor (core-8an)', () => {
+  const hash = planHash({ source: '/x' });
+
+  it('round-trips storage cursors containing delimiters and unicode', () => {
+    for (const sc of ['/x/a', 'a.b.c', 'страница•2', '{"k":1}', '']) {
+      assert.equal(decodeReadCursor(encodeReadCursor(hash, sc), hash), sc);
+    }
+  });
+
+  it('rejects a cursor minted under a different plan hash', () => {
+    const other = planHash({ source: '/y' });
+    assert.throws(
+      () => decodeReadCursor(encodeReadCursor(other, '/y/a'), hash),
+      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+    );
+  });
+
+  it('rejects malformed cursors', () => {
+    for (const bad of ['', '/raw/path', `${hash}.not!base64url`, `${hash}.a.b`]) {
+      assert.throws(
+        () => decodeReadCursor(bad, hash),
+        (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+        `cursor ${JSON.stringify(bad)} must be rejected`,
+      );
+    }
   });
 });

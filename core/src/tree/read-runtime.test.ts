@@ -30,7 +30,7 @@ describe('executeList', () => {
     const page1 = await executeList(source, plan, { limit: 2 }, identityProject);
     assert.equal(page1.items.length, 2);
     assert.deepEqual(page1.items.map(n => n.$path), ['/x/a', '/x/b']);
-    assert.equal(page1.nextCursor, '/x/b');
+    assert.ok(page1.nextCursor, 'cursor is opaque — only presence is contract');
 
     const page2 = await executeList(source, plan, { limit: 2, cursor: page1.nextCursor }, identityProject);
     assert.equal(page2.items.length, 2);
@@ -222,10 +222,54 @@ describe('executeList', () => {
     const plan: ReadPlan = { source: '/x', viewWhere: { flag: 1 } };
     const page1 = await executeList(source, plan, { limit: 1 }, identityProject);
     assert.deepEqual(page1.items.map(n => n.$path), ['/x/a']);
-    assert.equal(page1.nextCursor, '/x/a');
+    assert.ok(page1.nextCursor);
 
     const page2 = await executeList(source, plan, { limit: 10, cursor: page1.nextCursor }, identityProject);
     assert.deepEqual(page2.items.map(n => n.$path), ['/x/c', '/x/d']);
     assert.equal(page2.nextCursor, undefined);
+  });
+
+  // ── cursor↔plan binding (core-8an) ──
+
+  it('rejects a cursor replayed against a different plan', async () => {
+    const source = createMemoryTree();
+    await source.set({ $path: '/x/a', $type: 'item', kind: 'A' } as NodeData);
+    await source.set({ $path: '/x/b', $type: 'item', kind: 'A' } as NodeData);
+
+    const page1 = await executeList(source, { source: '/x' }, { limit: 1 }, identityProject);
+    assert.ok(page1.nextCursor);
+
+    // Same source, different predicate — different visible sequence.
+    const other: ReadPlan = { source: '/x', callerWhere: { kind: 'A' } };
+    await assert.rejects(
+      () => executeList(source, other, { limit: 1, cursor: page1.nextCursor }, identityProject),
+      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+    );
+  });
+
+  it('accepts its own cursor under an equal plan built independently (key order differs)', async () => {
+    const source = createMemoryTree();
+    await source.set({ $path: '/x/a', $type: 'item', a: 1, b: 2 } as NodeData);
+    await source.set({ $path: '/x/b', $type: 'item', a: 1, b: 2 } as NodeData);
+    await source.set({ $path: '/x/c', $type: 'item', a: 1, b: 2 } as NodeData);
+
+    const page1 = await executeList(source, { source: '/x', callerWhere: { a: 1, b: 2 } }, { limit: 1 }, identityProject);
+    assert.ok(page1.nextCursor);
+
+    // Fresh plan object, different key order — canonicalization must equate them.
+    const page2 = await executeList(source, { source: '/x', callerWhere: { b: 2, a: 1 } }, { limit: 10, cursor: page1.nextCursor }, identityProject);
+    assert.deepEqual(page2.items.map(n => n.$path), ['/x/b', '/x/c']);
+  });
+
+  it('rejects malformed cursors — raw storage cursor, garbage, empty hash', async () => {
+    const source = await seed(['/x/a', '/x/b']);
+    const plan: ReadPlan = { source: '/x' };
+    for (const bad of ['/x/a', 'zzz', 'deadbeef.###', 'a.b.c']) {
+      await assert.rejects(
+        () => executeList(source, plan, { limit: 1, cursor: bad }, identityProject),
+        (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+        `cursor ${JSON.stringify(bad)} must be rejected`,
+      );
+    }
   });
 });

@@ -10,6 +10,7 @@
 // added here on purpose.
 
 import { createHash } from 'node:crypto';
+import { OpError } from '#errors';
 import { stableJson } from '#util/stable-json';
 import type { ReadPlan } from './read-runtime';
 
@@ -36,4 +37,27 @@ export function canonicalReadPlan(plan: ReadPlan): CanonicalPlan {
  *  replayed against another. Hex-truncated to 32 chars (128 bits). */
 export function planHash(plan: ReadPlan): string {
   return createHash('sha256').update(stableJson(canonicalReadPlan(plan))).digest('hex').slice(0, 32);
+}
+
+// ── ReadCursor (core-8an) ──
+// StorageCursor (adapter-internal order position) never crosses the API
+// boundary raw — executeList wraps it with the plan's hash. A cursor minted
+// under plan A resumed against plan B would skip/duplicate rows silently
+// (different predicates ⇒ different visible sequence), so replay is refused.
+// Wire format: `<planHash>.<base64url(storageCursor)>` — hash is hex and
+// base64url has no '.', so the delimiter is unambiguous.
+
+export function encodeReadCursor(hash: string, storageCursor: string): string {
+  return `${hash}.${Buffer.from(storageCursor, 'utf8').toString('base64url')}`;
+}
+
+export function decodeReadCursor(cursor: string, expectedHash: string): string {
+  const [hash, sc, ...extra] = cursor.split('.');
+  if (sc === undefined || extra.length > 0 || !/^[A-Za-z0-9_-]*$/.test(sc)) {
+    throw new OpError('BAD_REQUEST', 'malformed read cursor');
+  }
+  if (hash !== expectedHash) {
+    throw new OpError('BAD_REQUEST', 'cursor was issued for a different read plan — restart pagination');
+  }
+  return Buffer.from(sc, 'base64url').toString('utf8');
 }

@@ -18,6 +18,7 @@
 import type { NodeData } from '#core';
 import { OpError } from '#errors';
 import { mapNodeForSift, type TreeSource } from './index';
+import { decodeReadCursor, encodeReadCursor, planHash } from './plan-hash';
 import { assertSafeSiftQuery, createSiftTest } from './query';
 
 export type Projector = (node: NodeData) => Promise<NodeData | null>;
@@ -33,6 +34,7 @@ export type ReadPlan = {
 
 export type ExecuteListOpts = {
   limit: number;
+  /** ReadCursor minted by a previous page of the SAME plan (see plan-hash.ts). */
   cursor?: string;
   budget?: { maxRawScanned: number };
   signal?: AbortSignal;
@@ -78,8 +80,12 @@ export async function executeList(
   const collected: { node: NodeData; cursor: string }[] = [];
   let rawScanned = 0;
 
+  // Cursor↔plan binding (core-8an): cursors carry the minting plan's hash;
+  // replay under any other plan is refused (see plan-hash.ts).
+  const hash = planHash(plan);
+
   const scan = source.scanChildren(plan.source, {
-    after: opts.cursor,
+    after: opts.cursor === undefined ? undefined : decodeReadCursor(opts.cursor, hash),
     limitHint: limit + 1,
     signal: opts.signal,
   }, ctx);
@@ -119,7 +125,7 @@ export async function executeList(
   if (collected.length === limit + 1) {
     return {
       items: collected.slice(0, limit).map(c => c.node),
-      nextCursor: collected[limit - 1].cursor,
+      nextCursor: encodeReadCursor(hash, collected[limit - 1].cursor),
     };
   }
   return { items: collected.map(c => c.node) };
