@@ -26,8 +26,15 @@ export function createNodeClient(client: TreenixClient) {
       return makeTypedProxy<T>(node, cls, path, execute, undefined, key);
     },
 
-    /** Subscribe — callback with typed proxy on each change */
-    async sub<T extends object>(cls: Class<T>, cb: (data: TypeProxy<T>) => void, key?: string) {
+    /** Subscribe — callback with typed proxy on each change. `onRemove` fires
+     *  when the watched node is deleted; without it a consumer keeps serving
+     *  the dead node's data forever (core-m77 C32). */
+    async sub<T extends object>(
+      cls: Class<T>,
+      cb: (data: TypeProxy<T>) => void,
+      opts?: { key?: string; onRemove?: () => void },
+    ) {
+      const key = opts?.key;
       let cached: NodeData | undefined;
 
       function notify() {
@@ -43,7 +50,15 @@ export function createNodeClient(client: TreenixClient) {
           // Re-fetch on patch (optimize with applyPatch later)
           client.tree.get(path).then(fresh => {
             if (fresh) { cached = fresh; notify(); }
+          }).catch(err => {
+            // Keep serving `cached` — but a silent miss here means the
+            // subscriber renders stale data with no signal; surface it.
+            console.error('[nc.sub] re-fetch after patch failed:', path, err);
           });
+        }
+        if (event.type === 'remove') {
+          cached = undefined;
+          opts?.onRemove?.();
         }
       });
 
