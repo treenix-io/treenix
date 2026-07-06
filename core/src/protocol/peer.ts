@@ -176,8 +176,20 @@ export function createPeer(serve?: ServeFactory) {
 
         case 'ls': {
           const path = vPath(frame.path);
-          if (frame.query !== undefined) throw new OpError('BAD_REQUEST', 'ls.query pending read-runtime (core-fnv/core-92z)');
-          if (frame.cursor !== undefined) throw new OpError('BAD_REQUEST', 'ls.cursor pending read-runtime (core-92z)');
+          if (frame.query !== undefined) {
+            if (typeof frame.query !== 'object' || frame.query === null || Array.isArray(frame.query)) {
+              throw new OpError('BAD_REQUEST', 'ls.query must be an object');
+            }
+            // core-92z: a watch registered without callerWhere would silently
+            // miss CDC events for query-filtered items — reject the combination
+            // until Stage 6d wires the full ReadPlan into watch registration.
+            if (frame.watch || frame.watchList) {
+              throw new OpError('BAD_REQUEST', 'ls.query cannot be combined with watch/watchList until Stage 6d (core-92z)');
+            }
+          }
+          if (frame.cursor !== undefined && typeof frame.cursor !== 'string') {
+            throw new OpError('BAD_REQUEST', 'ls.cursor must be a string');
+          }
           const cap = frame.watch ? watchCaps(s) : undefined;
           const watchList = frame.watchList ? s.hooks?.watchList?.bind(s.hooks) : undefined;
           if (frame.watchList && !watchList) throw new OpError('BAD_REQUEST', 'watchList unsupported by this peer');
@@ -185,7 +197,7 @@ export function createPeer(serve?: ServeFactory) {
           // uniform threading to all tree calls is a separate decision.
           const page = await s.tree.getChildren(
             path,
-            { limit: frame.limit ?? DEFAULT_LS_LIMIT, offset: frame.offset, depth: frame.depth },
+            { limit: frame.limit ?? DEFAULT_LS_LIMIT, offset: frame.offset, depth: frame.depth, query: frame.query, cursor: frame.cursor },
             ctx,
           );
           if (cap) {

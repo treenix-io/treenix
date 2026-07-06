@@ -22,7 +22,7 @@ import * as cache from '#tree/cache';
 import { tree } from '#tree/client';
 import { trpc } from '#tree/trpc';
 import { ensureType } from '#schema-loader';
-import { type ChildrenHandle, EMPTY_PATH_SNAPSHOT, type PathHandle } from '#tree/tree-source';
+import { type ChildrenHandle, type ChildrenOpts, EMPTY_PATH_SNAPSHOT, type PathHandle } from '#tree/tree-source';
 import { useTreeSource } from '#tree/tree-source-context';
 
 const noopUnsub = () => {};
@@ -42,18 +42,15 @@ export type Query<T> = {
 };
 
 export type ChildrenQuery = Query<NodeData[]> & {
-  readonly total: number | null;   // server-reported total; null until first response
-  readonly hasMore: boolean;       // false when total===null; true when data.length < total
+  readonly total: number | null;   // server-reported total; loaded-count only for query views (core-92z)
+  readonly hasMore: boolean;       // nextCursor present (query views) OR data.length < total (plain)
   readonly loadingMore: boolean;   // next page append in flight; mutually exclusive with stale
   readonly truncated: boolean | null; // null until first response; true if server hit cap
   loadMore(): void;                // no-op if !hasMore or already loadingMore
 };
 
-export type ChildrenOpts = {
-  limit?: number;                  // page size; absent = source default (100)
-  watch?: boolean;                 // subscribe to path updates
-  watchNew?: boolean;              // subscribe to new children appearing
-};
+// Single source of truth — the TreeSource contract (limit/query/watch/watchNew).
+export type { ChildrenOpts } from '#tree/tree-source';
 
 // Watch ref-counting + page-size tracking now live in ClientTreeSource.
 
@@ -169,13 +166,15 @@ export function useChildren(parentPath: string, opts?: ChildrenOpts): ChildrenQu
 
   // Lifecycle — mountChildren owns fetch + retain/release + watch ref-counting +
   // page-size lock + SSE-reset re-fetch. dispose() reverses everything.
+  // Query identity by value — callers pass fresh object literals every render.
+  const queryKey = opts?.query ? JSON.stringify(opts.query) : undefined;
   const handleRef = useRef<ChildrenHandle | null>(null);
   useEffect(() => {
     debugPath(parentPath, 'useChildren');
     const h = source.mountChildren(parentPath, opts);
     handleRef.current = h;
     return () => { h.dispose(); handleRef.current = null; };
-  }, [source, parentPath, opts?.limit, opts?.watch, opts?.watchNew]);
+  }, [source, parentPath, opts?.limit, opts?.watch, opts?.watchNew, queryKey]);
 
   const refetch = useCallback(() => { handleRef.current?.refetch(); }, []);
   const loadMore = useCallback(() => { handleRef.current?.loadMore(); }, []);
@@ -184,7 +183,9 @@ export function useChildren(parentPath: string, opts?: ChildrenOpts): ChildrenQu
   const loading = snap.phase === 'idle' || snap.phase === 'initial';
   const stale = snap.phase === 'refetch';
   const loadingMore = snap.phase === 'append';
-  const hasMore = snap.total !== null && snap.data.length < snap.total;
+  // Query views: total tracks loaded count, so nextCursor is the real signal.
+  const hasMore = snap.nextCursor !== null
+    || (snap.total !== null && snap.data.length < snap.total);
 
   return useMemo(() => ({
     data: snap.data,

@@ -158,8 +158,10 @@ export function createTreeRouter(tree: Tree, systemTree: Tree, watcher: WatchMan
         z.object({
           path: safePath,
           limit: z.number().optional().default(100),
-          offset: z.number().optional(),
+          offset: z.number().optional(), // non-query back-compat until Stage 7; rejected with query
           depth: z.number().optional(), // levels to descend; -1 = all descendants (deep). Default 1.
+          query: z.record(z.string(), z.unknown()).optional(), // callerWhere (core-92z)
+          cursor: z.string().optional(), // resume token from Page.nextCursor
           watch: z.boolean().optional(),
           watchNew: z.boolean().optional(),
         }),
@@ -169,6 +171,7 @@ export function createTreeRouter(tree: Tree, systemTree: Tree, watcher: WatchMan
         unwrap<Omit<Page<NodeData>, 'queryMount'>>(ctx.wire.handle({
           id: 0, op: 'ls', path: input.path,
           limit: input.limit, offset: input.offset, depth: input.depth,
+          query: input.query, cursor: input.cursor,
           watch: input.watch, watchList: input.watchNew,
         }, ctx))),
 

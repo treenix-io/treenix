@@ -20,7 +20,8 @@ export type ResolveFrame = { id: number; op: 'resolve'; path: string; watch?: bo
 export type LsFrame      = {
   id: number; op: 'ls'; path: string;
   limit?: number; offset?: number; depth?: number;
-  /** Pending read-runtime (core-fnv/core-92z) — dispatcher rejects them loudly. */
+  /** Caller predicate (callerWhere) + cursor pagination (core-92z). query is
+   *  incompatible with watch/watchList until Stage 6d and with offset. */
   query?: Record<string, unknown>; cursor?: string;
   watch?: boolean;
   /** Folder membership interest (renamed from watchNew; dirty semantics per gk8.12). */

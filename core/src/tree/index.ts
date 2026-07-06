@@ -12,7 +12,16 @@ import type { TreeEvent, TreeWatchOpts, TreeWatchScope } from './watch';
 // ── Pagination ──
 
 export type PageOpts = { limit?: number; offset?: number };
-export type Page<T> = { items: T[]; total: number; truncated?: boolean; queryMount?: { source: string, match: Record<string, unknown> } };
+export type Page<T> = {
+  items: T[];
+  /** Query views (core-92z): returned-items count ONLY, never an exact total —
+   *  clients detect "more available" via nextCursor, not items.length < total. */
+  total: number;
+  truncated?: boolean;
+  /** Opaque resume token for cursor pagination. Present ⇒ more pages exist. */
+  nextCursor?: string;
+  queryMount?: { source: string, match: Record<string, unknown> };
+};
 
 export function paginate<T>(items: T[], opts?: PageOpts): Page<T> {
   const total = items.length;
@@ -23,7 +32,7 @@ export function paginate<T>(items: T[], opts?: PageOpts): Page<T> {
 
 // ── Interface ──
 
-export type ChildrenOpts = { depth?: number; query?: Record<string, unknown>; watch?: boolean; watchNew?: boolean } & PageOpts;
+export type ChildrenOpts = { depth?: number; query?: Record<string, unknown>; cursor?: string; watch?: boolean; watchNew?: boolean } & PageOpts;
 
 /** Options for Tree.execute. Identity (userId/claims/actor) is deliberately
  *  NOT here — it is bound when a tree is wrapped (server withExecute);

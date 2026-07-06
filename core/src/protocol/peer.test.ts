@@ -77,11 +77,20 @@ describe('TWP peer over loopback', () => {
     assert.deepEqual(await client.req.resolve('/missing'), []);
   });
 
-  it('ls query/cursor are rejected loudly until read-runtime lands', async () => {
+  it('ls query threads to the tree; malformed query/cursor and query+watch combos are rejected (core-92z)', async () => {
     const tree = await seededTree();
     const { client } = pair(() => ({ tree }));
-    await assert.rejects(client.req.ls('/', { query: { a: 1 } }), isCode('BAD_REQUEST'));
-    await assert.rejects(client.req.ls('/', { cursor: 'x' }), isCode('BAD_REQUEST'));
+
+    const page = await client.req.ls('/', { query: { title: 'A' } }) as { items: { $path: string }[] };
+    assert.deepEqual(page.items.map((n) => n.$path), ['/a']);
+
+    // wire-shape guards
+    await assert.rejects(client.req.ls('/', { query: 5 as unknown as Record<string, unknown> }), isCode('BAD_REQUEST'));
+    await assert.rejects(client.req.ls('/', { cursor: 7 as unknown as string }), isCode('BAD_REQUEST'));
+
+    // query + watch/watchList rejected until Stage 6d
+    await assert.rejects(client.req.ls('/', { query: { title: 'A' }, watch: true }), isCode('BAD_REQUEST'));
+    await assert.rejects(client.req.ls('/', { query: { title: 'A' }, watchList: true }), isCode('BAD_REQUEST'));
   });
 
   it('act dispatches structured fields; act without execute → BAD_REQUEST', async () => {

@@ -98,6 +98,10 @@ const childErrorSubs = new Map<string, Set<Sub>>();
 // Pagination metadata from last successful fetch. Absent key = unknown.
 const childTotals = new Map<string, number>();
 const childTruncated = new Map<string, boolean>();
+// Resume token for cursor pagination (query views, core-92z). Present ⇒ more
+// pages exist; loadMore MUST use it instead of offset (total is loaded-count
+// only for query views, so offset math would read as "nothing more").
+const childNextCursor = new Map<string, string>();
 
 function addSub(map: Map<string, Set<Sub>>, key: string, cb: Sub): () => void {
   if (!map.has(key)) map.set(key, new Set());
@@ -505,6 +509,9 @@ export function releaseChildSubscriber(parent: string) {
     childSubscribers.delete(parent);
     childPageSize.delete(parent);
     loadedCount.delete(parent);
+    // Pagination position dies with the window — a remount refetches page 1
+    // and must not resume from a stale cursor.
+    childNextCursor.delete(parent);
   } else {
     childSubscribers.set(parent, n);
   }
@@ -529,6 +536,15 @@ export function setChildrenTruncated(parent: string, truncated: boolean) {
 
 export const getChildrenTruncated = (parent: string): boolean | null =>
   childTruncated.has(parent) ? childTruncated.get(parent)! : null;
+
+export function setChildrenNextCursor(parent: string, cursor: string | null) {
+  if (cursor === null) childNextCursor.delete(parent);
+  else childNextCursor.set(parent, cursor);
+  fire(childSubs, parent);
+}
+
+export const getChildrenNextCursor = (parent: string): string | null =>
+  childNextCursor.get(parent) ?? null;
 
 // ── Subscriptions ──
 
@@ -576,6 +592,7 @@ export function signalReconnect() {
   childErrors.clear();
   childTotals.clear();
   childTruncated.clear();
+  childNextCursor.clear();
   childPageSize.clear();
   loadedCount.clear();
   childrenLoaded.clear();
@@ -596,6 +613,7 @@ export function clear() {
   childErrors.clear();
   childTotals.clear();
   childTruncated.clear();
+  childNextCursor.clear();
   childPageSize.clear();
   childSubscribers.clear();
   childrenLoaded.clear();

@@ -32,6 +32,7 @@ const LOADING_CHILDREN: ChildrenSnapshot = Object.freeze({
   phase: 'initial',
   total: null,
   truncated: null,
+  nextCursor: null,
   error: null,
 });
 
@@ -147,6 +148,7 @@ export class ServerTreeSource implements TreeSource {
         phase: 'ready',
         total: page.total,
         truncated: page.truncated ?? false,
+        nextCursor: page.nextCursor ?? null,
         error: null,
       }));
     } catch (err) {
@@ -155,6 +157,7 @@ export class ServerTreeSource implements TreeSource {
         phase: 'error',
         total: null,
         truncated: null,
+        nextCursor: null,
         error: err instanceof Error ? err : new Error(String(err)),
       }));
     }

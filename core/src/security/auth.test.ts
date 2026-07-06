@@ -517,12 +517,12 @@ describe('withAcl', () => {
     assert.equal(children.total, 1);
   });
 
-  it('paginates after query and ACL filtering', async () => {
+  it('paginates query views by cursor — no duplicate, no skip (core-92z)', async () => {
     await tree.set({
       ...createNode('/tasks', 'dir'),
       $acl: [{ g: 'authenticated', p: R }],
     });
-    for (const [name, status] of [['a', 'open'], ['b', 'closed'], ['c', 'open']] as const) {
+    for (const [name, status] of [['a', 'open'], ['b', 'closed'], ['c', 'open'], ['d', 'open']] as const) {
       await tree.set({
         ...createNode(`/tasks/${name}`, 'task', { status }),
         $acl: [{ g: 'authenticated', p: R }],
@@ -530,14 +530,27 @@ describe('withAcl', () => {
     }
 
     const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);
-    const page = await s.getChildren('/tasks', {
-      query: { status: 'open' },
-      limit: 1,
-      offset: 1,
+    const page1 = await s.getChildren('/tasks', { query: { status: 'open' }, limit: 2 });
+    assert.deepEqual(page1.items.map(c => c.$path), ['/tasks/a', '/tasks/c']);
+    assert.equal(page1.total, 2); // returned count only — never an exact total
+    assert.ok(page1.nextCursor, 'more matches exist → nextCursor present');
+
+    const page2 = await s.getChildren('/tasks', { query: { status: 'open' }, limit: 2, cursor: page1.nextCursor });
+    assert.deepEqual(page2.items.map(c => c.$path), ['/tasks/d']);
+    assert.equal(page2.nextCursor, undefined, 'end of matches → no nextCursor');
+  });
+
+  it('rejects offset on query views — cursor-only pagination (core-92z)', async () => {
+    await tree.set({
+      ...createNode('/tasks2', 'dir'),
+      $acl: [{ g: 'authenticated', p: R }],
     });
 
-    assert.deepEqual(page.items.map(c => c.$path), ['/tasks/c']);
-    assert.equal(page.total, 2);
+    const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);
+    await assert.rejects(
+      () => s.getChildren('/tasks2', { query: { status: 'open' }, limit: 1, offset: 1 }),
+      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+    );
   });
 
   it('does not let query probe hidden component fields', async () => {

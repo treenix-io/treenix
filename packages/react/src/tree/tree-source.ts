@@ -15,6 +15,12 @@ import type { ChildrenPhase, PathStatus } from './cache';
 export type ChildrenOpts = {
   /** Page size; absent = source default. First-caller-wins per parent. */
   limit?: number;
+  /** Caller predicate (callerWhere, core-92z). Server paginates query views by
+   *  cursor and rejects watch/watchNew alongside query until Stage 6d.
+   *  NOTE: children state is keyed by parent path — two mounts of the same
+   *  parent with different queries share one collection (first-caller-wins,
+   *  same as `limit`). Per-query cache keying is future work. */
+  query?: Record<string, unknown>;
   /** Subscribe to path updates server-side (ref-counted). */
   watch?: boolean;
   /** Subscribe to new-children events server-side (ref-counted). */
@@ -35,8 +41,11 @@ export type PathSnapshot = {
 export type ChildrenSnapshot = {
   data: NodeData[];
   phase: ChildrenPhase;
+  /** Query views: loaded-count only, never an exact total (core-92z). */
   total: number | null;
   truncated: boolean | null;
+  /** Resume token from the last page. Non-null ⇒ more available (query views). */
+  nextCursor: string | null;
   error: Error | null;
 };
 
@@ -106,6 +115,7 @@ export const EMPTY_CHILDREN_SNAPSHOT: ChildrenSnapshot = Object.freeze({
   phase: 'idle',
   total: null,
   truncated: null,
+  nextCursor: null,
   error: null,
 });
 

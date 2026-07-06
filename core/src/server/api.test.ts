@@ -122,6 +122,77 @@ describe('tRPC API integration', () => {
     });
   });
 
+  // ── getChildren query + cursor contract (core-92z) ──
+
+  describe('getChildren query + cursor', () => {
+    beforeEach(async () => {
+      await caller.set({ node: { $path: '/q', $type: 'folder' } });
+      await caller.set({ node: { $path: '/q/a', $type: 'doc', status: 'open', priority: 'high' } });
+      await caller.set({ node: { $path: '/q/b', $type: 'doc', status: 'closed', priority: 'high' } });
+      await caller.set({ node: { $path: '/q/c', $type: 'doc', status: 'open', priority: 'low' } });
+      await caller.set({ node: { $path: '/q/d', $type: 'doc', status: 'open', priority: 'high' } });
+    });
+
+    it('query filters via callerWhere end-to-end', async () => {
+      const res = await caller.getChildren({ path: '/q', query: { status: 'open' } });
+      assert.deepEqual(res.items.map(n => n.$path), ['/q/a', '/q/c', '/q/d']);
+      assert.equal(res.total, 3); // returned count, not an exact-total scan
+      assert.equal(res.nextCursor, undefined); // everything fit in one page
+    });
+
+    it('query mount + caller query combine viewWhere AND callerWhere', async () => {
+      await caller.set({ node: {
+        $path: '/q-open', $type: 'folder',
+        '#mount': { $type: 't.mount.query', source: '/q', match: { status: 'open' } },
+      } });
+      const res = await caller.getChildren({ path: '/q-open', query: { priority: 'high' } });
+      // /q/b is high-priority but closed (viewWhere), /q/c open but low (callerWhere)
+      assert.deepEqual(res.items.map(n => n.$path), ['/q/a', '/q/d']);
+    });
+
+    it('cursor paginates query views without duplicates or skips', async () => {
+      const p1 = await caller.getChildren({ path: '/q', query: { status: 'open' }, limit: 2 });
+      assert.equal(p1.items.length, 2);
+      assert.ok(p1.nextCursor, 'more pages exist → nextCursor present');
+
+      const p2 = await caller.getChildren({ path: '/q', query: { status: 'open' }, limit: 2, cursor: p1.nextCursor });
+      assert.equal(p2.nextCursor, undefined, 'last page → no nextCursor');
+
+      const all = [...p1.items, ...p2.items].map(n => n.$path);
+      assert.deepEqual(all, ['/q/a', '/q/c', '/q/d']); // no dup, no skip
+    });
+
+    it('rejects query + watchNew until Stage 6d', async () => {
+      await assert.rejects(
+        () => caller.getChildren({ path: '/q', query: { status: 'open' }, watchNew: true }),
+        (e: any) => e.code === 'BAD_REQUEST',
+      );
+    });
+
+    it('rejects query + watch until Stage 6d', async () => {
+      await assert.rejects(
+        () => caller.getChildren({ path: '/q', query: { status: 'open' }, watch: true }),
+        (e: any) => e.code === 'BAD_REQUEST',
+      );
+    });
+
+    it('rejects query + offset — query views are cursor-only', async () => {
+      await assert.rejects(
+        () => caller.getChildren({ path: '/q', query: { status: 'open' }, offset: 2 }),
+        (e: any) => e.code === 'BAD_REQUEST',
+      );
+    });
+
+    it('non-query offset pagination unchanged (regression)', async () => {
+      const p1 = await caller.getChildren({ path: '/q', limit: 2 });
+      const p2 = await caller.getChildren({ path: '/q', limit: 2, offset: 2 });
+      assert.equal(p1.total, 4); // exact total preserved for plain reads
+      assert.equal(p2.total, 4);
+      assert.deepEqual([...p1.items, ...p2.items].map(n => n.$path), ['/q/a', '/q/b', '/q/c', '/q/d']);
+      assert.equal(p1.nextCursor, undefined);
+    });
+  });
+
   // ── setComponent ──
 
   describe('setComponent', () => {

@@ -65,6 +65,7 @@ export class ClientTreeSource implements TreeSource {
     const phase = cache.getChildrenPhase(path);
     const total = cache.getChildrenTotal(path);
     const truncated = cache.getChildrenTruncated(path);
+    const nextCursor = cache.getChildrenNextCursor(path);
     const error = cache.getChildrenError(path);
     const prev = this.childSnaps.get(path);
     if (
@@ -73,11 +74,12 @@ export class ClientTreeSource implements TreeSource {
       && prev.phase === phase
       && prev.total === total
       && prev.truncated === truncated
+      && prev.nextCursor === nextCursor
       && prev.error === error
     ) {
       return prev;
     }
-    const next: ChildrenSnapshot = { data, phase, total, truncated, error };
+    const next: ChildrenSnapshot = { data, phase, total, truncated, nextCursor, error };
     this.childSnaps.set(path, next);
     return next;
   }
@@ -145,19 +147,19 @@ export class ClientTreeSource implements TreeSource {
     const watching = !!(opts?.watch || opts?.watchNew);
     if (watching) refWatch(this.childrenWatchRefs, path);
 
-    const initialFetch = () => {
-      if (cancelled) return;
-      const limit = cache.lockChildPageSize(path, opts?.limit ?? DEFAULT_PAGE_SIZE);
-      const hasAuthoritative = cache.hasChildrenCollectionLoaded(path);
-      cache.setChildrenPhase(path, hasAuthoritative ? 'refetch' : 'initial');
-
+    // Replace-window fetch shared by initial and refetch. Stores nextCursor —
+    // query views (caller query OR server-side query mount) signal "more
+    // available" ONLY via nextCursor; their total is the returned count.
+    const fetchWindow = (limit: number, phase: 'initial' | 'refetch') => {
+      cache.setChildrenPhase(path, phase);
       trpc.getChildren
-        .query({ path, limit, watch: opts?.watch, watchNew: opts?.watchNew })
-        .then((result: { items: NodeData[]; total: number; truncated?: boolean }) => {
+        .query({ path, limit, query: opts?.query, watch: opts?.watch, watchNew: opts?.watchNew })
+        .then((result: { items: NodeData[]; total: number; truncated?: boolean; nextCursor?: string }) => {
           if (cancelled) return;
           cache.replaceChildren(path, result.items);
           cache.setChildrenTotal(path, result.total);
           cache.setChildrenTruncated(path, !!result.truncated);
+          cache.setChildrenNextCursor(path, result.nextCursor ?? null);
           cache.setChildrenError(path, null);
           cache.setChildrenPhase(path, 'ready');
         })
@@ -166,39 +168,62 @@ export class ClientTreeSource implements TreeSource {
           cache.setChildrenError(path, err instanceof Error ? err : new Error(String(err)));
           cache.setChildrenPhase(path, 'error');
         });
+    };
+
+    const initialFetch = () => {
+      if (cancelled) return;
+      const limit = cache.lockChildPageSize(path, opts?.limit ?? DEFAULT_PAGE_SIZE);
+      const hasAuthoritative = cache.hasChildrenCollectionLoaded(path);
+      fetchWindow(limit, hasAuthoritative ? 'refetch' : 'initial');
     };
 
     const refetch = () => {
       if (cancelled) return;
       // Reload the currently-loaded window (preserves scroll position).
+      // No offset: 0 — query views reject offset (BAD_REQUEST, core-92z) and
+      // an absent offset already means "from the start".
       const windowSize = cache.getLoadedCount(path)
         || cache.getChildPageSize(path)
         || DEFAULT_PAGE_SIZE;
-      cache.setChildrenPhase(path, 'refetch');
-      trpc.getChildren
-        .query({ path, limit: windowSize, offset: 0, watch: opts?.watch, watchNew: opts?.watchNew })
-        .then((result: { items: NodeData[]; total: number; truncated?: boolean }) => {
-          if (cancelled) return;
-          cache.replaceChildren(path, result.items);
-          cache.setChildrenTotal(path, result.total);
-          cache.setChildrenTruncated(path, !!result.truncated);
-          cache.setChildrenError(path, null);
-          cache.setChildrenPhase(path, 'ready');
-        })
-        .catch((err: unknown) => {
-          if (cancelled) return;
-          cache.setChildrenError(path, err instanceof Error ? err : new Error(String(err)));
-          cache.setChildrenPhase(path, 'error');
-        });
+      fetchWindow(windowSize, 'refetch');
     };
 
     const loadMore = () => {
       if (cancelled) return;
+      if (cache.getChildrenPhase(path) === 'append') return;
+      const pageSize = cache.getChildPageSize(path) ?? DEFAULT_PAGE_SIZE;
+      const nextCursor = cache.getChildrenNextCursor(path);
+
+      // Cursor mode (query views): the stored nextCursor is the ONLY resume
+      // signal — total equals loaded count, so the offset guard below would
+      // read as "done". Absent cursor on a query view = end of matches.
+      if (nextCursor !== null) {
+        cache.setChildrenPhase(path, 'append');
+        trpc.getChildren
+          .query({ path, limit: pageSize, cursor: nextCursor, query: opts?.query })
+          .then((result: { items: NodeData[]; nextCursor?: string }) => {
+            if (cancelled) return;
+            cache.appendChildren(path, result.items);
+            cache.setChildrenNextCursor(path, result.nextCursor ?? null);
+            // Keep total in sync with the loaded count — for cursor views the
+            // page's own total is per-page, not cumulative.
+            cache.setChildrenTotal(path, cache.getLoadedCount(path));
+            cache.setChildrenPhase(path, 'ready');
+          })
+          .catch((err: unknown) => {
+            if (cancelled) return;
+            cache.setChildrenError(path, err instanceof Error ? err : new Error(String(err)));
+            cache.setChildrenPhase(path, 'error');
+          });
+        return;
+      }
+
+      if (opts?.query) return; // query view fully loaded — no offset fallback
+
+      // Offset mode (plain listings) — unchanged legacy pagination.
       const total = cache.getChildrenTotal(path);
       const loaded = cache.getLoadedCount(path);
-      const pageSize = cache.getChildPageSize(path) ?? DEFAULT_PAGE_SIZE;
       if (total === null || loaded >= total) return;
-      if (cache.getChildrenPhase(path) === 'append') return;
       cache.setChildrenPhase(path, 'append');
       trpc.getChildren
         .query({ path, limit: pageSize, offset: loaded })

@@ -243,15 +243,36 @@ describe('cache', () => {
     assert.strictEqual(cache.getLoadedCount('/p'), 2);
   });
 
+  it('nextCursor: set/get/clear round-trip fires childSubs (core-92z)', () => {
+    assert.strictEqual(cache.getChildrenNextCursor('/p'), null);
+    let calls = 0;
+    cache.subscribeChildren('/p', () => calls++);
+
+    cache.setChildrenNextCursor('/p', 'tok-1');
+    assert.strictEqual(cache.getChildrenNextCursor('/p'), 'tok-1');
+    cache.setChildrenNextCursor('/p', null);
+    assert.strictEqual(cache.getChildrenNextCursor('/p'), null);
+    assert.strictEqual(calls, 2);
+  });
+
+  it('nextCursor dies with the loaded window on last subscriber release (core-92z)', () => {
+    cache.retainChildSubscriber('/p');
+    cache.setChildrenNextCursor('/p', 'tok-1');
+    cache.releaseChildSubscriber('/p');
+    assert.strictEqual(cache.getChildrenNextCursor('/p'), null);
+  });
+
   it('signalReconnect clears fetch state but preserves subscribers', () => {
     cache.retainChildSubscriber('/p');
     cache.replaceChildren('/p', [{ $path: '/p/a', $type: 'x' } as any]);
     cache.setChildrenTotal('/p', 42);
+    cache.setChildrenNextCursor('/p', 'tok-1');
     cache.setChildrenPhase('/p', 'ready');
     cache.put({ $path: '/x', $type: 'y' } as any);
     cache.signalReconnect();
     assert.strictEqual(cache.hasChildrenCollectionLoaded('/p'), false);
     assert.strictEqual(cache.getChildrenTotal('/p'), null);
+    assert.strictEqual(cache.getChildrenNextCursor('/p'), null);
     assert.strictEqual(cache.getChildrenPhase('/p'), 'idle');
     assert.strictEqual(cache.getPathStatus('/x'), undefined);
     // Soft cache node data stays — hooks revalidate via gen bump

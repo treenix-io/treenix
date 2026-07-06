@@ -150,7 +150,14 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
       // depth>1 fallback: executeList is depth-1 only in MVP. Use legacy
       // scan+filter+strip path with no scan cap (kills ACL_SCAN_LIMIT for
       // depth-1, which is the common case AND the only case that hit it).
-      if (depth > 1) return legacyDeepGetChildren(path, opts, ctx);
+      // Cursors are a depth-1 read-runtime contract — ignoring one here would
+      // silently restart pagination from the top.
+      if (depth > 1) {
+        if (opts?.cursor !== undefined) {
+          throw new OpError('BAD_REQUEST', 'cursor pagination is not supported for depth>1 reads');
+        }
+        return legacyDeepGetChildren(path, opts, ctx);
+      }
 
       // depth=1: route through the new read runtime.
       const source = asTreeSource(rawStore);
@@ -165,12 +172,34 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
       await assertSourceReadable(rawStore, actor, plan.source);
       const project = createProjector(rawStore, actor);
 
-      // Public API uses limit + offset + total; executeList uses limit + cursor.
-      // Bridge: scan up to LEGACY_DEEP_SCAN_LIMIT visible items to compute
-      // total (matches the pre-stage-3 contract). `truncated` surfaces when
-      // the scan hit its ceiling — same signal as the old ACL_SCAN_LIMIT
-      // warning, just structured into the page instead of console.warn.
       const reqLimit = Math.min(opts?.limit ?? PUBLIC_LIMIT_DEFAULT, PUBLIC_LIMIT_MAX);
+
+      // Query views (viewWhere/callerWhere set) and explicit-cursor reads are
+      // cursor-only (core-92z): total = returned count, NEVER an exact total
+      // (the scan-to-1000 bridge is an unbounded cost on filtered views), and
+      // nextCursor is the "more available" signal. offset is a competing
+      // pagination model — reject rather than silently misinterpret.
+      const cursorMode = !!(plan.viewWhere || plan.callerWhere) || opts?.cursor !== undefined;
+      if (cursorMode) {
+        if (opts?.offset !== undefined) {
+          throw new OpError('BAD_REQUEST', 'query views paginate by cursor — offset is not supported');
+        }
+        const result = await executeList(source, plan, { limit: reqLimit, cursor: opts?.cursor }, project, ctx);
+        const page: Page<NodeData> = { items: result.items, total: result.items.length };
+        if (result.nextCursor) page.nextCursor = result.nextCursor;
+        if (result.truncated) page.truncated = true;
+        // queryMount metadata preserved for CDC matrix (sub.ts active query
+        // registration). Stage-6 watchQuery consumes the plan directly.
+        if (legacyQueryMount) page.queryMount = legacyQueryMount;
+        return page;
+      }
+
+      // Plain (non-query) reads: public API uses limit + offset + total;
+      // executeList uses limit + cursor. Bridge: scan up to
+      // LEGACY_DEEP_SCAN_LIMIT visible items to compute total (matches the
+      // pre-stage-3 contract). `truncated` surfaces when the scan hit its
+      // ceiling — same signal as the old ACL_SCAN_LIMIT warning, just
+      // structured into the page instead of console.warn.
       const offset = opts?.offset ?? 0;
       const scanLimit = Math.max(LEGACY_DEEP_SCAN_LIMIT, offset + reqLimit);
 
@@ -180,9 +209,6 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
       // truncated: either more pages exist (nextCursor) or scan hit budget
       // (result.truncated). Page.total reflects only what we managed to scan.
       if (result.nextCursor || result.truncated) page.truncated = true;
-      // queryMount metadata preserved for CDC matrix (sub.ts active query
-      // registration). Stage-6 watchQuery consumes the plan directly.
-      if (legacyQueryMount) page.queryMount = legacyQueryMount;
       return page;
     },
 

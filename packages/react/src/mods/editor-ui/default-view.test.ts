@@ -152,7 +152,7 @@ function fakeSource(childrenByPath: Record<string, NodeData[]>): TreeSource {
     getChildrenSnapshot: (p) => {
       let s = snaps.get(p);
       if (!s) {
-        s = { data: childrenByPath[p] ?? [], phase: 'ready', total: null, truncated: null, error: null };
+        s = { data: childrenByPath[p] ?? [], phase: 'ready', total: null, truncated: null, nextCursor: null, error: null };
         snaps.set(p, s);
       }
       return s;
