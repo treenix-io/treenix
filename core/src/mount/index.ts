@@ -4,7 +4,7 @@
 
 import { type ComponentData, getComponentByName, isComponent, isRef, type NodeData, resolve } from '#core';
 import { OpError } from '#errors';
-import { type Tree } from '#tree';
+import { assertPatchManyBatch, type Tree } from '#tree';
 import { createBoundedCache } from '#util/bounded-cache';
 
 // ── Adapter contract ──
@@ -165,6 +165,21 @@ export function withMounts(rootStore: Tree, opts?: WithMountsOpts): MountableTre
       const tree = await resolveNodeTree(path, ctx);
       invalidateMount(path);
       await tree.patch(path, ops, ctx);
+    },
+
+    // patchMany (core-gk8.15): batch containment (asserted BEFORE resolution —
+    // a non-contained entry would misroute) pins every member at-or-under
+    // `ancestor`, so ONE resolution — the same set/patch use — owns the whole
+    // batch. Forward only when the resolved tree carries the capability; a
+    // silent per-member fallback loop would break atomicity.
+    async patchMany(ancestor, entries, ctx) {
+      assertPatchManyBatch(ancestor, entries);
+      const tree = await resolveNodeTree(ancestor, ctx);
+      if (!tree.patchMany) {
+        throw new OpError('BAD_REQUEST', `patchMany: target tree at ${ancestor} does not support patchMany`);
+      }
+      for (const e of entries) invalidateMount(e.path);
+      await tree.patchMany(ancestor, entries, ctx);
     },
   };
 

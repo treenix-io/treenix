@@ -4,7 +4,7 @@
 
 import type { NodeData } from '#core';
 import { createBoundedCache } from '#util/bounded-cache';
-import { type Tree, type TreeEvent, type TreeWatchOpts, type TreeWatchScope } from './index';
+import { type PatchManyEntry, type Tree, type TreeEvent, type TreeWatchOpts, type TreeWatchScope } from './index';
 import { createInflight } from './inflight';
 import { patchViaSet } from './patch';
 
@@ -79,6 +79,17 @@ export function withCache(tree: Tree, max = DEFAULT_MAX): CachedTree {
     async patch(path, ops, ctx) {
       return patchViaSet(wrapper, path, ops, ctx);
     },
+
+    // patchMany forwards NATIVELY (never per-member patchViaSet — that would
+    // split the atomic batch into independent writes). Members invalidate
+    // (epoch-bumping) only AFTER the inner commit; a failed batch changed
+    // nothing underneath, so the cache stays valid.
+    ...(tree.patchMany ? {
+      async patchMany(ancestor: string, entries: PatchManyEntry[], ctx?: unknown) {
+        await tree.patchMany!(ancestor, entries, ctx);
+        for (const e of entries) wrapper.invalidate(e.path);
+      },
+    } : {}),
 
     // Federation-client case: withCache wraps a remote Tree.watch source.
     // Route through wrapper.invalidate so the epoch counter bumps too —

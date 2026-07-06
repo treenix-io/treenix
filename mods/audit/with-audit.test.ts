@@ -86,6 +86,50 @@ describe('withAudit — patch', () => {
   });
 });
 
+describe('withAudit — patchMany', () => {
+  type AuditRow = { path: string; before: { value?: unknown } | null; after: { value?: unknown } | null };
+
+  it('one journal row covers the whole batch with per-member before/after images', async () => {
+    await inner.set({ $path: '/data/a', $type: 'thing', value: 1 });
+    await inner.set({ $path: '/data/b', $type: 'thing', value: 2 });
+    assert.ok(audited.patchMany, 'audited tree exposes patchMany when the inner tree does');
+
+    await audited.patchMany!('/data', [
+      { path: '/data/a', ops: [['r', 'value', 10]] },
+      { path: '/data/b', ops: [['r', 'value', 20]] },
+    ], { actor: { id: 'u-alice', requestId: 'req-9' } });
+
+    const events = await listAuditEvents(inner);
+    assert.equal(events.length, 1, 'one row for the whole batch');
+    assert.equal(events[0].op, 'patchMany');
+    assert.equal(events[0].path, '/data');
+    assert.equal(events[0].by, 'u-alice');
+    assert.equal(events[0].requestId, 'req-9');
+
+    const rows = events[0].entries as AuditRow[]; // boundary decode: stored journal row
+    assert.equal(rows.length, 2);
+    assert.equal(rows[0].before?.value, 1);
+    assert.equal(rows[0].after?.value, 10);
+    assert.equal(rows[1].before?.value, 2);
+    assert.equal(rows[1].after?.value, 20);
+  });
+
+  it('failed batch appends nothing to the journal', async () => {
+    await inner.set({ $path: '/data/a', $type: 'thing', value: 1 });
+
+    await assert.rejects(
+      audited.patchMany!('/data', [
+        { path: '/data/a', ops: [['r', 'value', 10]] },
+        { path: '/data/missing', ops: [['r', 'value', 1]] },
+      ]),
+    );
+
+    assert.equal((await listAuditEvents(inner)).length, 0);
+    const a = await inner.get('/data/a');
+    assert.equal(a?.value, 1);
+  });
+});
+
 describe('withAudit — recursion guard', () => {
   it('writes to /sys/audit/event/* pass through without recursive auditing', async () => {
     // Direct write to audit subtree should not produce another audit event

@@ -14,8 +14,8 @@ import { atomicWrite } from './fs-atomic';
 import { scanFromCollected } from './fs-common';
 import { ensureMigrated } from './migrate-component-namespace';
 import { assertPathSafe } from './path-safety';
-import { mapNodeForSift, paginate, type TreeSource } from './index';
-import { defaultPatch } from './patch';
+import { applyPatchManyEntry, assertPatchManyBatch, mapNodeForSift, paginate, type TreeSource } from './index';
+import { defaultPatch, hasMutationOps } from './patch';
 
 export async function createFsTree(rootDir: string): Promise<TreeSource> {
   await mkdir(resolve(rootDir), { recursive: true });
@@ -188,6 +188,54 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
     return results;
   }
 
+  // Write body shared by set() and patchMany(). Runs INSIDE locked() — set()
+  // wraps it itself; patchMany() calls it per staged member under ONE lock
+  // (calling tree.set from inside locked() would deadlock the write chain).
+  async function writeNode(node: NodeData): Promise<void> {
+    const path = node.$path;
+
+    await promoteAncestors(path);
+
+    // OCC check
+    if (node.$rev != null) {
+      const existing = await readNode(path);
+      if (!existing) {
+        throw new OpError('CONFLICT', `OptimisticConcurrencyError: node ${path} does not exist but $rev was provided`);
+      }
+      if (existing.$rev !== node.$rev) {
+        throw new OpError('CONFLICT', `OptimisticConcurrencyError: node ${path} modified by another transaction. Expected $rev ${existing.$rev}, got ${node.$rev}`);
+      }
+    }
+
+    // Strip $path from on-disk body — file location is authoritative.
+    // Stamped back on read via parseNode. Prevents stale $path when files are copied/moved.
+    const { $path: _, ...rest } = node;
+    rest.$rev = (node.$rev ?? 0) + 1;
+    node.$rev = rest.$rev; // preserve caller-visible $rev bump
+    const data = JSON.stringify(rest, null, 2) + '\n';
+
+    if (path === '/' || await hasChildren(path)) {
+      // Dir form: has children
+      const dirFile = resolve(join(rootDir, path, '$.json'));
+      await assertPathSafe(rootDir, dirFile);
+      await mkdir(resolve(join(rootDir, path)), { recursive: true });
+      await atomicWrite(dirFile, data);
+      // Clean up stale leaf form
+      if (path !== '/') {
+        try { await unlink(resolve(join(rootDir, path + '.json'))); } catch (e: any) { if (e.code !== 'ENOENT') throw e; }
+      }
+    } else {
+      // Leaf form: no children
+      const leafFile = resolve(join(rootDir, path + '.json'));
+      await assertPathSafe(rootDir, leafFile);
+      await mkdir(dirname(leafFile), { recursive: true });
+      await atomicWrite(leafFile, data);
+      // Clean up stale dir form + empty dir
+      try { await unlink(resolve(join(rootDir, path, '$.json'))); } catch (e: any) { if (e.code !== 'ENOENT') throw e; }
+      try { await rmdir(resolve(join(rootDir, path))); } catch (e: any) { if (e.code !== 'ENOENT' && e.code !== 'ENOTEMPTY') throw e; }
+    }
+  }
+
   const tree: TreeSource = {
     async get(path) {
       return readNode(path);
@@ -211,50 +259,7 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
     },
 
     async set(node) {
-      return locked(async () => {
-        const path = node.$path;
-
-        await promoteAncestors(path);
-
-        // OCC check
-        if (node.$rev != null) {
-          const existing = await readNode(path);
-          if (!existing) {
-            throw new OpError('CONFLICT', `OptimisticConcurrencyError: node ${path} does not exist but $rev was provided`);
-          }
-          if (existing.$rev !== node.$rev) {
-            throw new OpError('CONFLICT', `OptimisticConcurrencyError: node ${path} modified by another transaction. Expected $rev ${existing.$rev}, got ${node.$rev}`);
-          }
-        }
-
-        // Strip $path from on-disk body — file location is authoritative.
-        // Stamped back on read via parseNode. Prevents stale $path when files are copied/moved.
-        const { $path: _, ...rest } = node;
-        rest.$rev = (node.$rev ?? 0) + 1;
-        node.$rev = rest.$rev; // preserve caller-visible $rev bump
-        const data = JSON.stringify(rest, null, 2) + '\n';
-
-        if (path === '/' || await hasChildren(path)) {
-          // Dir form: has children
-          const dirFile = resolve(join(rootDir, path, '$.json'));
-          await assertPathSafe(rootDir, dirFile);
-          await mkdir(resolve(join(rootDir, path)), { recursive: true });
-          await atomicWrite(dirFile, data);
-          // Clean up stale leaf form
-          if (path !== '/') {
-            try { await unlink(resolve(join(rootDir, path + '.json'))); } catch (e: any) { if (e.code !== 'ENOENT') throw e; }
-          }
-        } else {
-          // Leaf form: no children
-          const leafFile = resolve(join(rootDir, path + '.json'));
-          await assertPathSafe(rootDir, leafFile);
-          await mkdir(dirname(leafFile), { recursive: true });
-          await atomicWrite(leafFile, data);
-          // Clean up stale dir form + empty dir
-          try { await unlink(resolve(join(rootDir, path, '$.json'))); } catch (e: any) { if (e.code !== 'ENOENT') throw e; }
-          try { await rmdir(resolve(join(rootDir, path))); } catch (e: any) { if (e.code !== 'ENOENT' && e.code !== 'ENOTEMPTY') throw e; }
-        }
-      });
+      return locked(() => writeNode(node));
     },
 
     async remove(path) {
@@ -289,6 +294,30 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
 
     async patch(path, ops, ctx) {
       return defaultPatch(readNode, (n) => tree.set(n, ctx), path, ops, ctx);
+    },
+
+    // ALL-OR-NOTHING under the global write chain (core-gk8.15): phase 1 reads
+    // and stages every member (ops incl. test ops applied on clones) — any
+    // failure throws with ZERO disk writes. Phase 2 writes sequentially via
+    // atomicWrite. Trade-off: atomic against ERRORS (validate-all-first), NOT
+    // against process crash mid-batch — same class as trash copies
+    // (tree/policy.ts remove: a crash leaves a duplicate, never a loss).
+    async patchMany(ancestor, entries, _ctx) {
+      assertPatchManyBatch(ancestor, entries);
+      return locked(async () => {
+        const staged: NodeData[] = [];
+        for (const entry of entries) {
+          const node = await readNode(entry.path);
+          if (!node) throw new OpError('NOT_FOUND', `Node not found: ${entry.path}`);
+          const copy = applyPatchManyEntry(node, entry);
+          // Test-only member: evaluated, not written, no $rev bump.
+          if (hasMutationOps(entry.ops)) staged.push(copy);
+        }
+
+        // writeNode re-checks OCC against each copy's own (unbumped) $rev and
+        // bumps it — same semantics as single patch (defaultPatch → set).
+        for (const n of staged) await writeNode(n);
+      });
     },
   };
 

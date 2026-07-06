@@ -13,7 +13,7 @@ import {
 } from '#core';
 import { OpError } from '#errors';
 import { ulid } from '#util/ulid';
-import { type Tree } from './index';
+import { applyPatchManyEntry, assertPatchManyBatch, hasMutationOps, type PatchManyEntry, type Tree } from './index';
 import { withCache } from './cache';
 
 // ── Migration: per-type $v ladder, applied on read (R-gk8.29) ──
@@ -326,6 +326,50 @@ export function withStoragePolicy(backing: Tree): StoragePolicy {
 
       return base.set(node, ctx);
     },
+
+    // patchMany (core-gk8.15): the write policy applies per member BEFORE the
+    // batch reaches storage — post-apply clones are validated (ALL errors
+    // collected → one BAD_REQUEST, nothing written) and $refs re-derived, with
+    // the recomputed index appended as a derived op so the adapter's atomic
+    // phase 2 commits it with the member's own ops (mirror of set() above).
+    ...(base.patchMany ? {
+      async patchMany(ancestor: string, entries: PatchManyEntry[], ctx?: unknown) {
+        assertPatchManyBatch(ancestor, entries);
+
+        const augmented: PatchManyEntry[] = [];
+        const errors: string[] = [];
+        for (const entry of entries) {
+          const node = await base.get(entry.path, ctx);
+          if (!node) throw new OpError('NOT_FOUND', `Node not found: ${entry.path}`);
+          const copy = applyPatchManyEntry(node, entry);
+
+          // Test-only member: nothing changes, so no derived $refs op —
+          // appending one would turn it into a mutation and bump $rev against
+          // the per-node contract (test-only = no write).
+          if (!hasMutationOps(entry.ops)) {
+            augmented.push(entry);
+            continue;
+          }
+
+          const refs = buildRefs(copy);
+          if (refs) copy.$refs = refs;
+          else delete copy.$refs;
+
+          for (const e of validateNode(copy)) errors.push(`${entry.path} ${e.path}: ${e.message}`);
+
+          const ops: PatchManyEntry['ops'] = [...entry.ops];
+          if (refs) ops.push(['r', '$refs', refs] as const);
+          else if ('$refs' in node) ops.push(['d', '$refs'] as const);
+          augmented.push({ path: entry.path, ops });
+        }
+
+        if (errors.length) {
+          throw new OpError('BAD_REQUEST', `Validation: ${errors.join('; ')}`);
+        }
+
+        return base.patchMany!(ancestor, augmented, ctx);
+      },
+    } : {}),
   };
 
   // Cache above the write policy — populated on read AND write (post-write

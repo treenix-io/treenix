@@ -6,7 +6,7 @@
 
 import type { NodeData } from '#core';
 import { assertSafePath } from '#core/path';
-import type { ExecOpts, Page, Tree } from './index';
+import type { ExecOpts, Page, PatchManyEntry, Tree } from './index';
 
 export function createRepathTree(inner: Tree, localBase: string, remoteBase: string = '/'): Tree {
   // Normalize: strip trailing slashes, handle root
@@ -117,5 +117,16 @@ export function createRepathTree(inner: Tree, localBase: string, remoteBase: str
 
     patch: (path, ops, ctx) =>
       inner.patch(toRemote(path), ops, ctx),
+
+    // patchMany — forwarded only when inner has the capability (same idiom as
+    // scanChildren/execute); ancestor AND every member path translate.
+    ...(inner.patchMany ? {
+      patchMany: (ancestor: string, entries: PatchManyEntry[], ctx?: unknown) =>
+        inner.patchMany!(
+          toRemote(ancestor),
+          entries.map(e => ({ path: toRemote(e.path), ops: e.ops })),
+          ctx,
+        ),
+    } : {}),
   };
 }

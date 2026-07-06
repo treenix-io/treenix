@@ -10,7 +10,7 @@
 
 import type { ActorContext, DelegationHooks, DelegationInfo } from '@treenx/core/server/actions';
 import type { NodeData } from '@treenx/core';
-import type { Tree, PatchOp } from '@treenx/core/tree';
+import type { Tree, PatchManyEntry, PatchOp } from '@treenx/core/tree';
 import { randomBytes } from 'node:crypto';
 import { markHealthy, markUnhealthy, setRecoveryProbe } from './health';
 
@@ -25,7 +25,10 @@ function eventPath(): string {
   return `${AUDIT_PREFIX}${Date.now()}-${randomBytes(4).toString('hex')}`;
 }
 
-type Op = 'set' | 'remove' | 'patch';
+type Op = 'set' | 'remove' | 'patch' | 'patchMany';
+
+/** Per-member journal row for a patchMany batch — ops + both images. */
+type AuditBatchEntry = { path: string; ops: PatchOp[]; before: NodeData | null; after: NodeData | null };
 
 function buildEvent(args: {
   op: Op;
@@ -33,6 +36,7 @@ function buildEvent(args: {
   before: NodeData | null;
   after: NodeData | null;
   ops?: PatchOp[];
+  entries?: AuditBatchEntry[];
   actor?: ActorContext;
 }): NodeData {
   const ev: NodeData = {
@@ -45,6 +49,7 @@ function buildEvent(args: {
     after: args.after,
   };
   if (args.ops) ev.ops = args.ops;
+  if (args.entries) ev.entries = args.entries;
   if (args.actor) {
     if (args.actor.id) ev.by = args.actor.id;
     if (args.actor.taskPath) ev.taskPath = args.actor.taskPath;
@@ -160,5 +165,33 @@ export function withAudit(tree: Tree): Tree {
       const event = buildEvent({ op: 'patch', path, before, after, ops, actor: getActor(ctx) });
       await appendOrFailLoud(tree, event);
     },
+
+    // patchMany (core-gk8.15): explicit interception — the `...tree` spread
+    // would forward this mutation class UN-journaled otherwise. ONE row covers
+    // the whole batch: op 'patchMany' at the ancestor, per-member ops +
+    // before/after images under `entries`. Batch containment means an
+    // audit-subtree ancestor covers every member — recursion guard on it.
+    ...(tree.patchMany ? {
+      async patchMany(ancestor: string, entries: PatchManyEntry[], ctx?: unknown) {
+        if (isAuditWrite(ancestor)) return tree.patchMany!(ancestor, entries, ctx);
+
+        const befores: (NodeData | null)[] = [];
+        for (const e of entries) befores.push((await tree.get(e.path, ctx)) ?? null);
+
+        await tree.patchMany!(ancestor, entries, ctx);
+
+        const rows: AuditBatchEntry[] = [];
+        for (let i = 0; i < entries.length; i++) {
+          rows.push({
+            path: entries[i].path,
+            ops: entries[i].ops,
+            before: befores[i],
+            after: (await tree.get(entries[i].path, ctx)) ?? null,
+          });
+        }
+        const event = buildEvent({ op: 'patchMany', path: ancestor, before: null, after: null, entries: rows, actor: getActor(ctx) });
+        await appendOrFailLoud(tree, event);
+      },
+    } : {}),
   };
 }

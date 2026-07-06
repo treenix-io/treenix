@@ -30,6 +30,9 @@ export function wrapReadOnlyTree(tree: Tree): Tree {
     set: () => deny('tree.set()'),
     patch: () => deny('tree.patch()'),
     remove: () => deny('tree.remove()'),
+    // Conditional: patchMany is an optional capability — an unconditional stub
+    // would make every read facade LOOK batch-capable to probing wrappers.
+    ...(tree.patchMany ? { patchMany: () => deny('tree.patchMany()') } : {}),
   };
 }
 

@@ -6,7 +6,7 @@ import { isRef, type NodeData, type Ref } from '#core';
 import { OpError } from '#errors';
 import sift from 'sift';
 import { scanFromCollected } from './fs-common';
-import { applyOps, hasMutationOps, type PatchOp } from './patch';
+import { applyOps, hasMutationOps, type PatchOp, PatchTestError } from './patch';
 // Type-only — erased at runtime, so the read-runtime → index value-import
 // direction stays acyclic (same pattern as plan-hash.ts).
 import type { ReadPlan } from './read-runtime';
@@ -37,6 +37,44 @@ export function paginate<T>(items: T[], opts?: PageOpts): Page<T> {
   return { items: items.slice(offset, offset + opts.limit), total };
 }
 
+// ── patchMany batch (core-gk8.15) ──
+
+export type PatchManyEntry = { path: string; ops: PatchOp[] };
+
+/** Shared batch-shape guard for patchMany: non-empty, every entry contained
+ *  under `ancestor`, no duplicate paths (apply order would be ambiguous).
+ *  Wrappers that RESOLVE by ancestor (mounts) must call this before resolving —
+ *  a non-contained entry would otherwise silently misroute to ancestor's tree. */
+export function assertPatchManyBatch(ancestor: string, entries: PatchManyEntry[]): void {
+  if (!entries.length) throw new OpError('BAD_REQUEST', 'patchMany: empty batch');
+
+  const prefix = ancestor === '/' ? '/' : ancestor + '/';
+  const seen = new Set<string>();
+  for (const { path } of entries) {
+    if (path !== ancestor && !path.startsWith(prefix)) {
+      throw new OpError('BAD_REQUEST', `patchMany: entry ${path} is outside ancestor ${ancestor}`);
+    }
+    if (seen.has(path)) throw new OpError('BAD_REQUEST', `patchMany: duplicate entry path ${path}`);
+    seen.add(path);
+  }
+}
+
+/** Phase-1 helper: apply a member's ops to a clone of its node. A failing test
+ *  op maps to CONFLICT — in a batch the test is a cross-member precondition
+ *  (OCC guard), and the whole batch is denied on it. */
+export function applyPatchManyEntry(node: NodeData, entry: PatchManyEntry): NodeData {
+  const copy = structuredClone(node);
+  try {
+    applyOps(copy, entry.ops);
+  } catch (e) {
+    if (e instanceof PatchTestError) {
+      throw new OpError('CONFLICT', `patchMany: test failed for ${entry.path} (${e.field})`);
+    }
+    throw e;
+  }
+  return copy;
+}
+
 // ── Interface ──
 
 export type ChildrenOpts = { depth?: number; query?: Record<string, unknown>; cursor?: string; watch?: boolean; watchNew?: boolean } & PageOpts;
@@ -53,6 +91,14 @@ export interface Tree {
   set(node: NodeData, ctx?: unknown): Promise<void>;
   remove(path: string, ctx?: unknown): Promise<boolean>;
   patch(path: string, ops: PatchOp[], ctx?: unknown): Promise<void>;
+  /** Atomic multi-node patch, all members at-or-under `ancestor` (core-gk8.15).
+   *  ALL-OR-NOTHING: every member is validated (fresh read, ops applied on a
+   *  clone, test ops evaluated) BEFORE anything commits — one failing member
+   *  denies the whole batch. Optional capability (same precedent as
+   *  scanChildren/execute): adapters implement natively, wrappers forward;
+   *  absence throws BAD_REQUEST at the forwarding layer — never a silent
+   *  per-member fallback loop, which would break atomicity. */
+  patchMany?(ancestor: string, entries: PatchManyEntry[], ctx?: unknown): Promise<void>;
   /** Server-internal traversal primitive. Optional on the public Tree
    *  interface: the wire-facing tRPC remote tree cannot implement it
    *  (no streaming over RPC), but every server-side adapter and wrapper
@@ -248,6 +294,32 @@ export function createFilterTree(
       }
     },
 
+    // patchMany routes the WHOLE batch to one layer — same get-based routing
+    // as patch. Cross-layer splits are rejected: two independent stores cannot
+    // commit as one atomic unit (and a per-layer split would break
+    // all-or-nothing). No relocation either — batch members stay in their
+    // layer even if ops flip the toUpper predicate.
+    async patchMany(ancestor, entries, ctx) {
+      assertPatchManyBatch(ancestor, entries);
+
+      let layer: Tree | undefined;
+      for (const { path } of entries) {
+        const node = await upper.get(path, ctx) ?? await lower.get(path, ctx);
+        if (!node) throw new OpError('NOT_FOUND', `Node not found: ${path}`);
+        const target = toUpper(node) ? upper : lower;
+        if (layer && target !== layer) {
+          throw new OpError('BAD_REQUEST', 'patchMany cannot span layers');
+        }
+        layer = target;
+      }
+
+      // layer is set: assertPatchManyBatch guarantees a non-empty batch.
+      if (!layer!.patchMany) {
+        throw new OpError('BAD_REQUEST', 'patchMany: layer does not support patchMany');
+      }
+      return layer!.patchMany(ancestor, entries, ctx);
+    },
+
     // execute routes to the layer owning the node — same logic as patch.
     // Exposed only when BOTH layers carry the capability: a mixed stack
     // (one foreign-authority layer + one storage layer) keeps today's local
@@ -426,6 +498,29 @@ export function createMemoryTree(): TreeSource {
       if (!hasMutationOps(ops)) return;
       copy.$rev = (copy.$rev ?? 0) + 1;
       treeNode.data = copy;
+    },
+
+    // ALL-OR-NOTHING (core-gk8.15): phase 1 stages every member (fresh read,
+    // clone, ops incl. test ops applied) — any failure throws before anything
+    // is written. Phase 2 swaps data refs in a synchronous loop with NO await
+    // between swaps: that synchronicity IS the atomicity — no interleaved
+    // read or write can observe a half-applied batch.
+    async patchMany(ancestor, entries, _ctx) {
+      assertPatchManyBatch(ancestor, entries);
+
+      const staged: { treeNode: TreeNode<NodeData>; copy: NodeData }[] = [];
+      for (const entry of entries) {
+        const treeNode = navigate(entry.path);
+        if (!treeNode?.data) throw new OpError('NOT_FOUND', `Node not found: ${entry.path}`);
+        const copy = applyPatchManyEntry(treeNode.data, entry);
+        // Test-only member: evaluated above, never written, no $rev bump —
+        // same per-node rule as patch.
+        if (!hasMutationOps(entry.ops)) continue;
+        copy.$rev = (copy.$rev ?? 0) + 1;
+        staged.push({ treeNode, copy });
+      }
+
+      for (const s of staged) s.treeNode.data = s.copy;
     },
   };
 }

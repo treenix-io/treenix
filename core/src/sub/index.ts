@@ -6,6 +6,7 @@ import { type SubscribeOpts } from '#contexts/service/index';
 import { isComponent, isCompKey, type NodeData } from '#core';
 import {
   mapNodeForSift,
+  type PatchManyEntry,
   type PatchOp,
   subscriptionToAsyncIterable,
   type Tree,
@@ -492,32 +493,55 @@ export function withSubscriptions(
       await tree.patch(path, ops, ctx);
 
       const newNode = await tree.get(path, ctx);
-      // Config write detection on patch: either node had/has config, or an op
-      // touched the `mount` field directly (covers add/replace of the
-      // component on a previously-non-config node).
-      const opsTouchedMount = ops.some(op => {
-        const p = op[1];
-        return p === '#mount' || p.startsWith('#mount.');
-      });
-      const claimsUid = claimsUserOf(path);
-      const cdc = dirtyVps(
-        membershipVps(path, oldNode ?? null, newNode ?? null),
-        // Both directions: ops touched $acl/$owner directly OR the resulting
-        // diff shows a $acl change (covers full-node replace via patch).
-        (ops.some(isAclOp) || isAclChange(oldNode ?? null, newNode ?? null) || isComponentAclChange(oldNode ?? null, newNode ?? null)) ? vpsForAclChange(path) : [],
-        (opsTouchedMount || isConfigNode(oldNode) || isConfigNode(newNode)) ? vpsForConfigChange(path) : [],
-        claimsUid ? vpsForClaimsChange(claimsUid) : [],
-      );
-
-      // Emit only mutation ops (filter out test ops) — same PatchOp shape
-      // tree.patch consumes; no RFC 6902 conversion on the wire.
-      const mutations = ops.filter(o => o[0] !== 't');
-      if (mutations.length > 0) {
-        const by = opIdOf(ctx);
-        emit({ type: 'patch', path, patches: mutations, rev: newNode?.$rev, ...(by ? { by } : {}), ...cdc });
-      }
+      emitPatch(path, ops, oldNode, newNode, ctx);
     },
+
+    // patchMany (core-gk8.15): pre-read all old images, commit the batch,
+    // re-read, THEN emit one patch event per mutated member. Emission is
+    // strictly AFTER the inner call returns — a failed batch emits nothing.
+    ...(tree.patchMany ? {
+      async patchMany(ancestor: string, entries: PatchManyEntry[], ctx?: unknown) {
+        const oldNodes: (NodeData | undefined)[] = [];
+        for (const e of entries) oldNodes.push(await tree.get(e.path, ctx));
+
+        await tree.patchMany!(ancestor, entries, ctx);
+
+        for (let i = 0; i < entries.length; i++) {
+          const newNode = await tree.get(entries[i].path, ctx);
+          emitPatch(entries[i].path, entries[i].ops, oldNodes[i], newNode, ctx);
+        }
+      },
+    } : {}),
   };
+
+  /** CDC dirty computation + event emission for ONE patched path — shared by
+   *  patch and patchMany (per member, after the inner batch commits). */
+  function emitPatch(path: string, ops: readonly PatchOp[], oldNode: NodeData | undefined, newNode: NodeData | undefined, ctx: unknown): void {
+    // Config write detection on patch: either node had/has config, or an op
+    // touched the `mount` field directly (covers add/replace of the
+    // component on a previously-non-config node).
+    const opsTouchedMount = ops.some(op => {
+      const p = op[1];
+      return p === '#mount' || p.startsWith('#mount.');
+    });
+    const claimsUid = claimsUserOf(path);
+    const cdc = dirtyVps(
+      membershipVps(path, oldNode ?? null, newNode ?? null),
+      // Both directions: ops touched $acl/$owner directly OR the resulting
+      // diff shows a $acl change (covers full-node replace via patch).
+      (ops.some(isAclOp) || isAclChange(oldNode ?? null, newNode ?? null) || isComponentAclChange(oldNode ?? null, newNode ?? null)) ? vpsForAclChange(path) : [],
+      (opsTouchedMount || isConfigNode(oldNode) || isConfigNode(newNode)) ? vpsForConfigChange(path) : [],
+      claimsUid ? vpsForClaimsChange(claimsUid) : [],
+    );
+
+    // Emit only mutation ops (filter out test ops) — same PatchOp shape
+    // tree.patch consumes; no RFC 6902 conversion on the wire.
+    const mutations = ops.filter(o => o[0] !== 't');
+    if (mutations.length > 0) {
+      const by = opIdOf(ctx);
+      emit({ type: 'patch', path, patches: mutations, rev: newNode?.$rev, ...(by ? { by } : {}), ...cdc });
+    }
+  }
 
   const cdc: CdcRegistry = {
     subscribe(path, listener, opts) {

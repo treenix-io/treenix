@@ -4,7 +4,7 @@
 
 import { A, type ComponentData, isComponent, type NodeData, R, W } from '#core';
 import { OpError } from '#errors';
-import { asTreeSource, assertSafePatchPath, type Page, type Tree } from '#tree';
+import { asTreeSource, assertSafePatchPath, type Page, type PatchOp, type Tree } from '#tree';
 import { executeList } from '#tree/read-runtime';
 import { resolveReadPlan } from '#mount/resolve-plan';
 import { type AclState, componentPerm, resolvePermission, stripComponents } from './acl';
@@ -54,6 +54,55 @@ function assertComponentPerm(
 function sameValue(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   try { return JSON.stringify(a) === JSON.stringify(b); } catch { return false; }
+}
+
+/** Per-op ACL gate shared by patch and patchMany (per member): system-field
+ *  assertions, component perms, $owner tracking across the batch. */
+function assertPatchOps(
+  ops: readonly PatchOp[],
+  existing: NodeData | undefined,
+  isAdmin: boolean,
+  userId: string | null,
+  claims: string[],
+): void {
+  // Track owner across the batch so component checks see post-mutation $owner
+  // (parity with set()).
+  let currentOwner = existing?.$owner;
+
+  for (const op of ops) {
+    assertSafePatchPath(op[1]);
+    const segments = op[1].split('.');
+    const firstSeg = segments[0];
+
+    // Apply system-field rule to EVERY $-segment at any depth: prevents
+    // component-envelope bypass like `[r, secret.$acl, …]` followed by
+    // mutations to secret.* under stale ACL.
+    if (op[0] === 't') {
+      for (const seg of segments) if (seg.startsWith('$')) assertTestSystemField(seg, isAdmin);
+      assertComponentPerm(R, firstSeg, existing, userId, claims, currentOwner);
+      continue;
+    }
+
+    // r/a/d — mutation
+    for (const seg of segments) if (seg.startsWith('$')) assertMutationSystemField(seg, isAdmin);
+    assertComponentPerm(W, firstSeg, existing, userId, claims, currentOwner);
+
+    // Incoming new component value (single-segment r/a) needs W on the new value.
+    if ((op[0] === 'r' || op[0] === 'a') && op[1] === firstSeg) {
+      const newVal = (op as readonly ['r' | 'a', string, unknown])[2];
+      if (isComponent(newVal) && !(componentPerm(newVal, userId, claims, currentOwner) & W)) {
+        throw new OpError('FORBIDDEN', `Access denied: cannot write component ${firstSeg}`);
+      }
+    }
+
+    // Update tracked $owner for subsequent component checks in this batch.
+    // `a` is also a setter (patch.ts:58-66); `d` clears.
+    if ((op[0] === 'r' || op[0] === 'a') && op[1] === '$owner') {
+      currentOwner = op[2] as string | undefined;
+    } else if (op[0] === 'd' && op[1] === '$owner') {
+      currentOwner = undefined;
+    }
+  }
 }
 
 // ── Tree wrapper ──
@@ -224,48 +273,30 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
         throw new OpError('FORBIDDEN', `Access denied: ${path}`);
       }
 
-      const isAdmin = !!(perm & A);
       const existing = await rawStore.get(path, ctx);   // may be undefined
-      // Track owner across the batch so component checks see post-mutation $owner
-      // (parity with set() at lines 367-383).
-      let currentOwner = existing?.$owner;
-
-      for (const op of ops) {
-        assertSafePatchPath(op[1]);
-        const segments = op[1].split('.');
-        const firstSeg = segments[0];
-
-        // Apply system-field rule to EVERY $-segment at any depth: prevents
-        // component-envelope bypass like `[r, secret.$acl, …]` followed by
-        // mutations to secret.* under stale ACL.
-        if (op[0] === 't') {
-          for (const seg of segments) if (seg.startsWith('$')) assertTestSystemField(seg, isAdmin);
-          assertComponentPerm(R, firstSeg, existing, userId, claims, currentOwner);
-          continue;
-        }
-
-        // r/a/d — mutation
-        for (const seg of segments) if (seg.startsWith('$')) assertMutationSystemField(seg, isAdmin);
-        assertComponentPerm(W, firstSeg, existing, userId, claims, currentOwner);
-
-        // Incoming new component value (single-segment r/a) needs W on the new value.
-        if ((op[0] === 'r' || op[0] === 'a') && op[1] === firstSeg) {
-          const newVal = (op as readonly ['r' | 'a', string, unknown])[2];
-          if (isComponent(newVal) && !(componentPerm(newVal, userId, claims, currentOwner) & W)) {
-            throw new OpError('FORBIDDEN', `Access denied: cannot write component ${firstSeg}`);
-          }
-        }
-
-        // Update tracked $owner for subsequent component checks in this batch.
-        // `a` is also a setter (patch.ts:58-66); `d` clears.
-        if ((op[0] === 'r' || op[0] === 'a') && op[1] === '$owner') {
-          currentOwner = op[2] as string | undefined;
-        } else if (op[0] === 'd' && op[1] === '$owner') {
-          currentOwner = undefined;
-        }
-      }
+      assertPatchOps(ops, existing, !!(perm & A), userId, claims);
 
       return rawStore.patch(path, ops, ctx);
+    },
+
+    // patchMany: the SAME R+W gate + per-op loop as patch, per member. All
+    // gates run BEFORE the forward, so one forbidden member denies the whole
+    // batch with nothing written (the inner adapter is all-or-nothing).
+    async patchMany(ancestor, entries, ctx) {
+      if (!rawStore.patchMany) {
+        throw new OpError('BAD_REQUEST', 'patchMany: store does not support patchMany');
+      }
+
+      for (const { path, ops } of entries) {
+        const perm = await getPerm(path);
+        if (!((perm & R) && (perm & W))) {
+          throw new OpError('FORBIDDEN', `Access denied: ${path}`);
+        }
+        const existing = await rawStore.get(path, ctx);
+        assertPatchOps(ops, existing, !!(perm & A), userId, claims);
+      }
+
+      return rawStore.patchMany(ancestor, entries, ctx);
     },
   };
   return aclStore;
