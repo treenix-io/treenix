@@ -162,16 +162,15 @@ describe('tRPC API integration', () => {
       assert.deepEqual(all, ['/q/a', '/q/c', '/q/d']); // no dup, no skip
     });
 
-    it('rejects query + watchNew until Stage 6d', async () => {
-      await assert.rejects(
-        () => caller.getChildren({ path: '/q', query: { status: 'open' }, watchNew: true }),
-        (e: any) => e.code === 'BAD_REQUEST',
-      );
-    });
+    it('accepts query + watchNew/watch at depth-1; rejects deep query watch (Stage 6d, core-9yd)', async () => {
+      const p1 = await caller.getChildren({ path: '/q', query: { status: 'open' }, watchNew: true });
+      assert.equal(p1.items.length, 3);
+      const p2 = await caller.getChildren({ path: '/q', query: { status: 'open' }, watch: true });
+      assert.equal(p2.items.length, 3);
 
-    it('rejects query + watch until Stage 6d', async () => {
+      // Deep query watch would silently miss flips below the first level.
       await assert.rejects(
-        () => caller.getChildren({ path: '/q', query: { status: 'open' }, watch: true }),
+        () => caller.getChildren({ path: '/q', query: { status: 'open' }, depth: 2, watchNew: true }),
         (e: any) => e.code === 'BAD_REQUEST',
       );
     });
@@ -627,6 +626,22 @@ describe('tRPC API integration', () => {
       if (ev.type === 'set') {
         assert.equal('#secret' in ev.node, false, 'restricted component must be stripped from the event');
       }
+    });
+
+    it('caller-query watch: flips on the caller predicate dirty the view (Stage 6d, core-9yd)', async () => {
+      const pushed = connectAliceEvents('alice:caller-query');
+      // Plain folder + caller query + watchNew — rejected as BAD_REQUEST
+      // before 6d; now the read's plan (callerWhere included) registers the
+      // watch, so caller-side membership flips reach the watcher.
+      await authedCaller.getChildren({ path: '/orders/data', query: { '#status.status': 'new' }, watchNew: true });
+
+      await caller.execute({ path: '/orders/data/1', key: 'status', action: 'cook' });
+      await new Promise(resolve => setTimeout(resolve, 0));
+
+      const ev = pushed.find(e => (e.type === 'set' || e.type === 'patch') && e.path === '/orders/data/1');
+      assert.ok(ev, 'event delivered to the vp watcher');
+      assert.ok(('invalidateVps' in ev ? ev.invalidateVps : undefined)?.includes('/orders/data'),
+        'caller-side membership flip dirties the queried view');
     });
 
     it('multiple orders independently tracked', async () => {

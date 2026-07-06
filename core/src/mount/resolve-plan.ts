@@ -12,14 +12,11 @@ import type { ReadPlan } from '#tree/read-runtime';
 
 export type ResolvedReadPlan = {
   plan: ReadPlan;
-  /** Paths consulted during resolution. Stage-6 watch invalidation uses this
-   *  to scope mount/config-write invalidations — writes to a path in this
-   *  set invalidate ONLY handles that consulted it. */
+  /** Paths consulted during resolution. Watch invalidation (Stage 6d) scopes
+   *  mount/config-write invalidations by this set — writes to a path in it
+   *  invalidate ONLY handles that consulted it. Always contains the request
+   *  path itself. */
   mountDeps: Set<string>;
-  /** For legacy CDC matrix / subscription path that still wants the query
-   *  mount metadata propagated back to the page result. Stage-6 watchQuery
-   *  consumes the plan directly and this field goes away. */
-  legacyQueryMount?: { source: string; match: Record<string, unknown> };
 };
 
 export async function resolveReadPlan(
@@ -46,7 +43,6 @@ export async function resolveReadPlan(
         ...(callerWhere ? { callerWhere } : {}),
       },
       mountDeps,
-      legacyQueryMount: { source: mount.source, match },
     };
   }
 

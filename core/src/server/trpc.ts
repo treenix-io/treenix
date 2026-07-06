@@ -168,7 +168,7 @@ export function createTreeRouter(tree: Tree, systemTree: Tree, watcher: WatchMan
       )
       .query(({ input, ctx }) =>
         // ctx threaded into the tree call (getChildren only) — parity with the pre-TWP router.
-        unwrap<Omit<Page<NodeData>, 'queryMount'>>(ctx.wire.handle({
+        unwrap<Omit<Page<NodeData>, 'queryMount' | 'readPlan'>>(ctx.wire.handle({
           id: 0, op: 'ls', path: input.path,
           limit: input.limit, offset: input.offset, depth: input.depth,
           query: input.query, cursor: input.cursor,

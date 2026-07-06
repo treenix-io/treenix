@@ -7,6 +7,9 @@ import { OpError } from '#errors';
 import sift from 'sift';
 import { scanFromCollected } from './fs-common';
 import { applyOps, hasMutationOps, type PatchOp } from './patch';
+// Type-only — erased at runtime, so the read-runtime → index value-import
+// direction stays acyclic (same pattern as plan-hash.ts).
+import type { ReadPlan } from './read-runtime';
 import type { TreeEvent, TreeWatchOpts, TreeWatchScope } from './watch';
 
 // ── Pagination ──
@@ -20,7 +23,13 @@ export type Page<T> = {
   truncated?: boolean;
   /** Opaque resume token for cursor pagination. Present ⇒ more pages exist. */
   nextCursor?: string;
+  /** Legacy query-mount metadata — Stage 7 (core-g2e) removes it. */
   queryMount?: { source: string, match: Record<string, unknown> };
+  /** Server-internal (Stage 6d, core-9yd): the resolved plan behind this
+   *  listing, carried from the ACL read to watch registration so the initial
+   *  read and the live watch share ONE plan. Stripped at the protocol edge
+   *  (peer 'ls') — never reaches clients. */
+  readPlan?: { plan: ReadPlan; mountDeps: ReadonlySet<string> };
 };
 
 export function paginate<T>(items: T[], opts?: PageOpts): Page<T> {

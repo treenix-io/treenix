@@ -21,7 +21,8 @@ export type LsFrame      = {
   id: number; op: 'ls'; path: string;
   limit?: number; offset?: number; depth?: number;
   /** Caller predicate (callerWhere) + cursor pagination (core-92z). query is
-   *  incompatible with watch/watchList until Stage 6d and with offset. */
+   *  incompatible with offset; query + watch/watchList requires depth-1
+   *  (Stage 6d, core-9yd). */
   query?: Record<string, unknown>; cursor?: string;
   watch?: boolean;
   /** Folder membership interest (renamed from watchNew; dirty semantics per gk8.12). */

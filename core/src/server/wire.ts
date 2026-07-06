@@ -134,8 +134,11 @@ export function createWireSession(deps: WireDeps, session: Session) {
         if (o?.children) for (const p of paths) deps.cdc?.unwatchQuery(p, userId);
       },
       watchList: (path, page, itemWatch) => {
-        if (page.queryMount) {
-          deps.cdc?.watchQuery(path, page.queryMount.source, page.queryMount.match, userId);
+        // Stage 6d (core-9yd): the read's own plan registers the watch, so
+        // read and watch agree on membership (incl. callerWhere). Plain
+        // listings carry no readPlan — prefix watching covers them natively.
+        if (page.readPlan) {
+          deps.cdc?.watchQuery({ vp: path, userId, plan: page.readPlan.plan, mountDeps: page.readPlan.mountDeps });
         }
         deps.watcher.watch(userId, [path], { children: true, autoWatch: itemWatch });
       },

@@ -13,9 +13,8 @@ describe('resolveReadPlan', () => {
 
   it('non-mount path: plan source = path, no viewWhere', async () => {
     await tree.set(createNode('/orders', 'folder'));
-    const { plan, legacyQueryMount } = await resolveReadPlan(tree, '/orders');
+    const { plan } = await resolveReadPlan(tree, '/orders');
     assert.deepEqual(plan, { source: '/orders' });
-    assert.equal(legacyQueryMount, undefined);
   });
 
   it('caller query attached as callerWhere', async () => {
@@ -24,17 +23,16 @@ describe('resolveReadPlan', () => {
     assert.deepEqual(plan, { source: '/orders', callerWhere: { status: 'new' } });
   });
 
-  it('query mount: source/match → plan.source/viewWhere + legacyQueryMount', async () => {
+  it('query mount: source/match → plan.source/viewWhere', async () => {
     await tree.set({
       $path: '/orders/incoming',
       $type: 'folder',
       '#mount': { $type: 't.mount.query', source: '/orders', match: { 'status.value': 'incoming' } },
     });
-    const { plan, legacyQueryMount } = await resolveReadPlan(tree, '/orders/incoming', { kind: 'urgent' });
+    const { plan } = await resolveReadPlan(tree, '/orders/incoming', { kind: 'urgent' });
     assert.equal(plan.source, '/orders');
     assert.deepEqual(plan.viewWhere, { 'status.value': 'incoming' });
     assert.deepEqual(plan.callerWhere, { kind: 'urgent' });
-    assert.deepEqual(legacyQueryMount, { source: '/orders', match: { 'status.value': 'incoming' } });
   });
 
   it('query mount with no caller query: no callerWhere field on plan', async () => {
@@ -75,9 +73,8 @@ describe('resolveReadPlan', () => {
       $type: 'folder',
       '#mount': { $type: 't.mount.fs', root: '/tmp' },
     });
-    const { plan, legacyQueryMount } = await resolveReadPlan(tree, '/fsmount');
+    const { plan } = await resolveReadPlan(tree, '/fsmount');
     assert.deepEqual(plan, { source: '/fsmount' });
-    assert.equal(legacyQueryMount, undefined);
   });
 
   it('mountDeps always includes the requested path', async () => {

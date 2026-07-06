@@ -88,9 +88,10 @@ describe('TWP peer over loopback', () => {
     await assert.rejects(client.req.ls('/', { query: 5 as unknown as Record<string, unknown> }), isCode('BAD_REQUEST'));
     await assert.rejects(client.req.ls('/', { cursor: 7 as unknown as string }), isCode('BAD_REQUEST'));
 
-    // query + watch/watchList rejected until Stage 6d
-    await assert.rejects(client.req.ls('/', { query: { title: 'A' }, watch: true }), isCode('BAD_REQUEST'));
-    await assert.rejects(client.req.ls('/', { query: { title: 'A' }, watchList: true }), isCode('BAD_REQUEST'));
+    // Stage 6d (core-9yd): query+watch is allowed at depth-1; a DEEP query
+    // watch would silently miss flips below the first level — rejected.
+    await assert.rejects(client.req.ls('/', { query: { title: 'A' }, watchList: true, depth: 2 }), isCode('BAD_REQUEST'));
+    await assert.rejects(client.req.ls('/', { query: { title: 'A' }, watch: true, depth: -1 }), isCode('BAD_REQUEST'));
   });
 
   it('act dispatches structured fields; act without execute → BAD_REQUEST', async () => {

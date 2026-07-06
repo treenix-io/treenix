@@ -111,7 +111,7 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
       if (!(parentPerm & R)) throw new OpError('FORBIDDEN', `Access denied: ${path}`);
 
       const source = asTreeSource(rawStore);
-      const { plan, legacyQueryMount } = await resolveReadPlan(rawStore, path, opts?.query, ctx);
+      const { plan, mountDeps } = await resolveReadPlan(rawStore, path, opts?.query, ctx);
       // Deep reads (core-0bl) ride the same runtime: adapters walk descendants
       // inside scanChildren, the projector filters each node independently
       // (flat filter — legacy parity, no subtree pruning). Negatives normalize
@@ -144,9 +144,10 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
         const page: Page<NodeData> = { items: result.items, total: result.items.length };
         if (result.nextCursor) page.nextCursor = result.nextCursor;
         if (result.truncated) page.truncated = true;
-        // queryMount metadata preserved for CDC matrix (sub.ts active query
-        // registration). Stage-6 watchQuery consumes the plan directly.
-        if (legacyQueryMount) page.queryMount = legacyQueryMount;
+        // Query reads carry their plan to watch registration (Stage 6d) so
+        // the initial read and the live watch agree on membership. Stripped
+        // at the protocol edge — server-internal only.
+        if (plan.viewWhere || plan.callerWhere) page.readPlan = { plan, mountDeps };
         return page;
       }
 

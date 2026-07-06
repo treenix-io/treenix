@@ -13,7 +13,9 @@ import {
   type TreeWatchOpts,
   type TreeWatchScope,
 } from '#tree';
+import { planHash } from '#tree/plan-hash';
 import { createSiftTest } from '#tree/query';
+import type { ReadPlan } from '#tree/read-runtime';
 import { stableJson } from '#util/stable-json';
 import fjp from 'fast-json-patch';
 
@@ -118,23 +120,50 @@ function opIdOf(ctx: unknown): string | undefined {
 }
 
 // ── CDC Registry (instance-scoped) ──
+// Stage 6d (core-9yd): two-level model. A WatchGroup owns ONE compiled
+// membership test per unique plan (keyed by planHash — vp is presentation,
+// not identity; N view paths over the same plan share one evaluation). A
+// QueryHandle is one (userId, vp) registration: it carries mountDeps for
+// targeted config invalidation and dies independently of its group.
+// Evaluation stays RAW-node and user-independent (gk8.12): the dirty signal
+// carries no data, visibility re-derives on the ACL'd refetch.
 
-type QueryEntry = {
-  vp: string;
+type WatchGroup = {
+  planHash: string;
   source: string;
-  matchKey: string;
-  match: Record<string, unknown>;
+  /** Combined viewWhere ∧ callerWhere test — callerWhere participating is
+   *  the 6d fix: a watch registered without it silently missed flips on
+   *  caller-filtered views (core-92z guard, now lifted). */
   test: (node: Record<string, unknown>) => boolean;
-  /** Subscribed userIds — drives claims-change targeting and lifecycle only.
-   *  No per-user claims here: visibility is decided once, on the read path. */
-  users: Set<string>;
+  handles: Set<QueryHandle>;
+};
+
+type QueryHandle = {
+  vp: string;
+  /** Drives claims-change targeting and lifecycle only. No per-user claims
+   *  here: visibility is decided once, on the read path. */
+  userId: string;
+  /** Mount/config paths consulted by resolveReadPlan. Contract: contains at
+   *  least the vp itself — config-change targeting relies on it. */
+  mountDeps: ReadonlySet<string>;
+  group: WatchGroup;
+};
+
+/** One registration = the SAME plan the initial read ran (read-runtime-mvp:
+ *  "initial read and query watch use the same plan"). */
+export type QueryWatchRegistration = {
+  vp: string;
+  userId: string;
+  plan: ReadPlan;
+  mountDeps: ReadonlySet<string>;
 };
 
 export type CdcRegistry = {
   subscribe(path: string, listener: Listener, opts?: SubscribeOpts): () => void;
-  watchQuery(vp: string, source: string, match: Record<string, unknown>, userId: string): void;
+  watchQuery(reg: QueryWatchRegistration): void;
   unwatchQuery(vp: string, userId: string): void;
   unwatchAllQueries(userId: string): void;
+  /** Distinct execution groups (deduped plans), not registrations. */
   getActiveQueryCount(): number;
 };
 
@@ -169,7 +198,9 @@ export function withSubscriptions(
   const exactListeners = new Map<string, Set<Listener>>();
   const prefixListeners = new Map<string, Set<Listener>>();
   const selfWriteListeners = new Set<SelfWriteListener>();
-  const activeQueries: QueryEntry[] = [];
+  const groups = new Map<string, WatchGroup>();          // planHash → group
+  const handleByKey = new Map<string, QueryHandle>();    // userId\0vp → handle
+  const handleKey = (userId: string, vp: string) => `${userId}\u0000${vp}`;
   const claimsUserOf = opts?.claimsUserOf ?? (() => null);
   const isConfigNode = opts?.isConfigNode ?? (() => false);
   const componentHasAclRule = opts?.componentHasAclRule ?? (() => false);
@@ -238,32 +269,38 @@ export function withSubscriptions(
     dispatch(event);
   }
 
+  function groupVps(g: WatchGroup, out: string[]): void {
+    for (const h of g.handles) out.push(h.vp);
+  }
+
   /** Compute invalidate-vp set for a mount/config write. Targets handles
-   *  whose vp IS the mutated path — the mount node is being rewritten, so
-   *  the plan's `viewWhere`/`source` may have shifted under the watcher.
-   *  Per MVP: targeted, not a global storm. */
+   *  whose `mountDeps` contain the mutated path — the mount/config node
+   *  steering their plan was rewritten (6d: replaces `q.vp === path`; deps
+   *  always include the vp itself). Per MVP: targeted, not a global storm. */
   function vpsForConfigChange(path: string): string[] {
-    return activeQueries.filter(q => q.vp === path).map(q => q.vp);
+    const vps: string[] = [];
+    for (const h of handleByKey.values()) if (h.mountDeps.has(path)) vps.push(h.vp);
+    return vps;
   }
 
   /** Invalidate every active query whose source could be affected by an
    *  external write at `path`. Match cases:
-   *    1. path === q.source                — direct change of source node
+   *    1. path === source                  — direct change of source node
    *    2. path is a direct child of source — normal vp membership rule
    *    3. path is an ANCESTOR of source    — ACL/config change up the tree
-   *    4. path === q.vp                    — the query mount node itself
-   *       was rewritten (e.g. match changed); listing now stale
+   *    4. path ∈ handle.mountDeps          — a plan-steering node (the vp
+   *       mount itself, or any consulted config) was rewritten
    *  Grand-descendants are skipped (can't affect direct-child queries). */
   function vpsForExternalPath(path: string): string[] {
     const vps: string[] = [];
-    for (const q of activeQueries) {
-      const prefix = q.source === '/' ? '/' : q.source + '/';
+    for (const g of groups.values()) {
+      const prefix = g.source === '/' ? '/' : g.source + '/';
       const directChild = path.startsWith(prefix) && !path.slice(prefix.length).includes('/');
-      const isSource = path === q.source;
-      const isAncestor = path === '/' || (q.source !== '/' && q.source.startsWith(path + '/'));
-      const isVp = path === q.vp;
-      if (directChild || isSource || isAncestor || isVp) vps.push(q.vp);
+      const isSource = path === g.source;
+      const isAncestor = path === '/' || (g.source !== '/' && g.source.startsWith(path + '/'));
+      if (directChild || isSource || isAncestor) groupVps(g, vps);
     }
+    for (const h of handleByKey.values()) if (h.mountDeps.has(path)) vps.push(h.vp);
     return vps;
   }
 
@@ -271,7 +308,9 @@ export function withSubscriptions(
    *  dirty. The invalidate is a broadcast field — co-watchers of the same vp
    *  over-refetch; bounded and rare (claims changes), accepted (gk8.12). */
   function vpsForClaimsChange(userId: string): string[] {
-    return activeQueries.filter(q => q.users.has(userId)).map(q => q.vp);
+    const vps: string[] = [];
+    for (const h of handleByKey.values()) if (h.userId === userId) vps.push(h.vp);
+    return vps;
   }
 
   /** ACL change at `path` → dirty every query view it can affect. ACL
@@ -283,7 +322,7 @@ export function withSubscriptions(
    *  — the refetch re-derives truth through the canonical ACL read path, and
    *  the dirty signal names only the vp the subscriber already watches. */
   function vpsForAclChange(path: string): string[] {
-    if (activeQueries.length === 0) return [];
+    if (groups.size === 0) return [];
 
     function isAtOrAbove(p: string, candidate: string): boolean {
       if (p === '/' || p === candidate) return true;
@@ -296,25 +335,29 @@ export function withSubscriptions(
       return rest.length > 0 && !rest.includes('/');
     }
 
-    return activeQueries
-      .filter(q => isAtOrAbove(path, q.source) || isDirectChildOf(q.source, path))
-      .map(q => q.vp);
+    const vps: string[] = [];
+    for (const g of groups.values()) {
+      if (isAtOrAbove(path, g.source) || isDirectChildOf(g.source, path)) groupVps(g, vps);
+    }
+    return vps;
   }
 
-  /** Membership test for a direct child of a query source — ONCE per
-   *  mutation, against the RAW node, no per-user ACL (gk8.12). A flip in
-   *  either direction dirties the vp; in-folder updates of unchanged
-   *  membership ride the ordinary path event (items are exact-watched). */
+  /** Membership test for a direct child of a query source — ONCE per group
+   *  per mutation, against the RAW node, no per-user ACL (gk8.12). A flip in
+   *  either direction dirties every vp in the group; in-folder updates of
+   *  unchanged membership ride the ordinary path event (items are
+   *  exact-watched). */
   function membershipVps(path: string, oldNode: NodeData | null, newNode: NodeData | null): string[] {
+    if (groups.size === 0) return [];
     const oldSift = oldNode ? mapNodeForSift(oldNode) : null;
     const newSift = newNode ? mapNodeForSift(newNode) : null;
     const vps: string[] = [];
-    for (const q of activeQueries) {
-      const prefix = q.source === '/' ? '/' : q.source + '/';
+    for (const g of groups.values()) {
+      const prefix = g.source === '/' ? '/' : g.source + '/';
       if (!path.startsWith(prefix) || path.slice(prefix.length).includes('/')) continue;
-      const wasIn = oldSift ? q.test(oldSift) : false;
-      const isIn = newSift ? q.test(newSift) : false;
-      if (wasIn !== isIn) vps.push(q.vp);
+      const wasIn = oldSift ? g.test(oldSift) : false;
+      const isIn = newSift ? g.test(newSift) : false;
+      if (wasIn !== isIn) groupVps(g, vps);
     }
     return vps;
   }
@@ -481,41 +524,57 @@ export function withSubscriptions(
       return internalSubscribe(path, listener, opts);
     },
 
-    watchQuery(vp, source, match, userId) {
-      const matchKey = stableJson(match);
-      let entry = activeQueries.find(q => q.vp === vp);
-      if (!entry) {
-        entry = { vp, source, match, matchKey, test: createSiftTest(match), users: new Set() };
-        activeQueries.push(entry);
-      } else if (entry.source !== source || entry.matchKey !== matchKey) {
-        // E03: vp reused with different source/match — update definition
-        entry.source = source;
-        entry.match = match;
-        entry.matchKey = matchKey;
-        entry.test = createSiftTest(match);
+    watchQuery(reg) {
+      const key = handleKey(reg.userId, reg.vp);
+      const hash = planHash(reg.plan);
+      const existing = handleByKey.get(key);
+      if (existing) {
+        if (existing.group.planHash === hash) {
+          // Same plan re-registered (page refetch) — refresh deps only.
+          (existing as { mountDeps: ReadonlySet<string> }).mountDeps = reg.mountDeps;
+          return;
+        }
+        removeHandle(existing);   // E03: vp re-registered with a different plan
       }
-      entry.users.add(userId);
+
+      let group = groups.get(hash);
+      if (!group) {
+        const viewTest = reg.plan.viewWhere ? createSiftTest(reg.plan.viewWhere) : null;
+        const callerTest = reg.plan.callerWhere ? createSiftTest(reg.plan.callerWhere) : null;
+        group = {
+          planHash: hash,
+          source: reg.plan.source,
+          test: (n) => (!viewTest || viewTest(n)) && (!callerTest || callerTest(n)),
+          handles: new Set(),
+        };
+        groups.set(hash, group);
+      }
+      const handle: QueryHandle = { vp: reg.vp, userId: reg.userId, mountDeps: reg.mountDeps, group };
+      group.handles.add(handle);
+      handleByKey.set(key, handle);
     },
 
     unwatchQuery(vp, userId) {
-      const idx = activeQueries.findIndex(q => q.vp === vp);
-      if (idx === -1) return;
-      const entry = activeQueries[idx];
-      entry.users.delete(userId);
-      if (entry.users.size === 0) activeQueries.splice(idx, 1);
+      const handle = handleByKey.get(handleKey(userId, vp));
+      if (handle) removeHandle(handle);
     },
 
     unwatchAllQueries(userId) {
-      for (let i = activeQueries.length - 1; i >= 0; i--) {
-        activeQueries[i].users.delete(userId);
-        if (activeQueries[i].users.size === 0) activeQueries.splice(i, 1);
+      for (const handle of [...handleByKey.values()]) {
+        if (handle.userId === userId) removeHandle(handle);
       }
     },
 
     getActiveQueryCount() {
-      return activeQueries.length;
+      return groups.size;
     },
   };
+
+  function removeHandle(handle: QueryHandle): void {
+    handleByKey.delete(handleKey(handle.userId, handle.vp));
+    handle.group.handles.delete(handle);
+    if (handle.group.handles.size === 0) groups.delete(handle.group.planHash);
+  }
 
   const onSelfWrite: OnSelfWrite = (listener) => {
     selfWriteListeners.add(listener);

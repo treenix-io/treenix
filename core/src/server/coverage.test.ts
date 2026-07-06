@@ -295,7 +295,7 @@ describe('sub.ts: remove + CDC', () => {
     cdc = sub.cdc;
 
     // Register a query watch
-    cdc.watchQuery('/active', '/items', { '#status.value': 'active' }, 'user1');
+    cdc.watchQuery({ vp: '/active', userId: 'user1', plan: { source: '/items', viewWhere: { '#status.value': 'active' } }, mountDeps: new Set(['/active']) });
 
     // Create a matching node
     await tree.set({ $path: '/items/a', $type: 'item', '#status': { $type: 'status', value: 'active' } } as NodeData);
@@ -318,7 +318,7 @@ describe('sub.ts: remove + CDC', () => {
     const tree = sub.tree;
     cdc = sub.cdc;
 
-    cdc.watchQuery('/active', '/items', { '#status.value': 'active' }, 'user1');
+    cdc.watchQuery({ vp: '/active', userId: 'user1', plan: { source: '/items', viewWhere: { '#status.value': 'active' } }, mountDeps: new Set(['/active']) });
 
     await tree.set({ $path: '/items/b', $type: 'item', '#status': { $type: 'status', value: 'done' } } as NodeData);
     events.length = 0;
@@ -343,8 +343,8 @@ describe('sub.ts: remove + CDC', () => {
   it('unwatchQuery removes single user', () => {
     const { cdc } = withSubscriptions(createMemoryTree());
 
-    cdc.watchQuery('/vp1', '/src', { x: 1 }, 'userA');
-    cdc.watchQuery('/vp1', '/src', { x: 1 }, 'userB');
+    cdc.watchQuery({ vp: '/vp1', userId: 'userA', plan: { source: '/src', viewWhere: { x: 1 } }, mountDeps: new Set(['/vp1']) });
+    cdc.watchQuery({ vp: '/vp1', userId: 'userB', plan: { source: '/src', viewWhere: { x: 1 } }, mountDeps: new Set(['/vp1']) });
     assert.equal(cdc.getActiveQueryCount(), 1);
 
     cdc.unwatchQuery('/vp1', 'userA');
@@ -361,9 +361,9 @@ describe('sub.ts: remove + CDC', () => {
   it('unwatchAllQueries cleans up all entries for user', () => {
     const { cdc } = withSubscriptions(createMemoryTree());
 
-    cdc.watchQuery('/a', '/s', { x: 1 }, 'u1');
-    cdc.watchQuery('/b', '/s', { y: 2 }, 'u1');
-    cdc.watchQuery('/a', '/s', { x: 1 }, 'u2');
+    cdc.watchQuery({ vp: '/a', userId: 'u1', plan: { source: '/s', viewWhere: { x: 1 } }, mountDeps: new Set(['/a']) });
+    cdc.watchQuery({ vp: '/b', userId: 'u1', plan: { source: '/s', viewWhere: { y: 2 } }, mountDeps: new Set(['/b']) });
+    cdc.watchQuery({ vp: '/a', userId: 'u2', plan: { source: '/s', viewWhere: { x: 1 } }, mountDeps: new Set(['/a']) });
     assert.equal(cdc.getActiveQueryCount(), 2);
 
     cdc.unwatchAllQueries('u1');

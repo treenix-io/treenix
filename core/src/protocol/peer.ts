@@ -180,11 +180,11 @@ export function createPeer(serve?: ServeFactory) {
             if (typeof frame.query !== 'object' || frame.query === null || Array.isArray(frame.query)) {
               throw new OpError('BAD_REQUEST', 'ls.query must be an object');
             }
-            // core-92z: a watch registered without callerWhere would silently
-            // miss CDC events for query-filtered items — reject the combination
-            // until Stage 6d wires the full ReadPlan into watch registration.
-            if (frame.watch || frame.watchList) {
-              throw new OpError('BAD_REQUEST', 'ls.query cannot be combined with watch/watchList until Stage 6d (core-92z)');
+            // Query-watch membership eval fires for DIRECT children of the
+            // source only — a deep query watch would silently miss deeper
+            // flips. Reject rather than half-work (watch stays depth-1, MVP).
+            if ((frame.watch || frame.watchList) && frame.depth !== undefined && frame.depth !== 1) {
+              throw new OpError('BAD_REQUEST', 'query watch is depth-1 only');
             }
           }
           if (frame.cursor !== undefined && typeof frame.cursor !== 'string') {
@@ -206,7 +206,7 @@ export function createPeer(serve?: ServeFactory) {
             if (watchable.length) cap.watch(watchable);
           }
           watchList?.(path, page, !!frame.watch);
-          const { queryMount: _qm, ...pub } = page;
+          const { queryMount: _qm, readPlan: _rp, ...pub } = page;
           return ok(pub);
         }
 

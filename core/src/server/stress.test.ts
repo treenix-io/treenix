@@ -467,7 +467,7 @@ describe('Stress: query mounts + CDC', () => {
       }),
     );
 
-    cdc.watchQuery('/views/urgent', '/entities/tickets', { priority: 'high' }, 'user1');
+    cdc.watchQuery({ vp: '/views/urgent', userId: 'user1', plan: { source: '/entities/tickets', viewWhere: { priority: 'high' } }, mountDeps: new Set(['/views/urgent']) });
     const events: NodeEvent[] = [];
     watcher.connect('user1', 'user1', (e) => events.push(e));
     watcher.watch('user1', ['/views/urgent'], { children: true });
@@ -500,7 +500,7 @@ describe('Stress: query mounts + CDC', () => {
       }),
     );
 
-    cdc.watchQuery('/views/new', '/entities/orders', { status: 'new' }, 'watcher');
+    cdc.watchQuery({ vp: '/views/new', userId: 'watcher', plan: { source: '/entities/orders', viewWhere: { status: 'new' } }, mountDeps: new Set(['/views/new']) });
 
     const dirty: string[] = [];
     watcher.connect('watcher', 'watcher', (e) => {
@@ -544,8 +544,8 @@ describe('Stress: query mounts + CDC', () => {
       }),
     );
 
-    cdc.watchQuery('/views/new', '/entities/items', { status: 'new' }, 'u1');
-    cdc.watchQuery('/views/flagged', '/entities/items', { flagged: true }, 'u1');
+    cdc.watchQuery({ vp: '/views/new', userId: 'u1', plan: { source: '/entities/items', viewWhere: { status: 'new' } }, mountDeps: new Set(['/views/new']) });
+    cdc.watchQuery({ vp: '/views/flagged', userId: 'u1', plan: { source: '/entities/items', viewWhere: { flagged: true } }, mountDeps: new Set(['/views/flagged']) });
 
     const events: NodeEvent[] = [];
     watcher.connect('u1', 'u1', (e) => events.push(e));
@@ -861,7 +861,7 @@ describe('Stress: full watch pipeline', () => {
       }),
     );
 
-    cdc2.watchQuery('/views/hot', '/data', { hot: true }, 'observer');
+    cdc2.watchQuery({ vp: '/views/hot', userId: 'observer', plan: { source: '/data', viewWhere: { hot: true } }, mountDeps: new Set(['/views/hot']) });
 
     const exactEvents: NodeEvent[] = [];
     const childEvents: NodeEvent[] = [];
