@@ -274,9 +274,9 @@ describe('MemoryStore OCC — typed OpError', () => {
 });
 
 describe('storage key codec — $id mapping (gk8.10)', () => {
-  it('round-trips $id via _nid, never touching the Mongo primary key _id', () => {
+  it('round-trips $id via _tid, never touching the Mongo primary key _id', () => {
     const stored = toStorageKeys({ $path: '/a', $type: 'doc', $id: '01ARZ3NDEKTSV4RRFFQ69G5FAV', x: 1 });
-    assert.equal(stored._nid, '01ARZ3NDEKTSV4RRFFQ69G5FAV');
+    assert.equal(stored._tid, '01ARZ3NDEKTSV4RRFFQ69G5FAV');
     assert.equal('_id' in stored, false, '$id must not collide with the immutable Mongo _id');
 
     const back = fromStorageKeys({ ...stored, _id: 'mongo-object-id' });

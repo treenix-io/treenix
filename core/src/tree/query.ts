@@ -56,7 +56,7 @@ export function mapSiftQuery(q: unknown): unknown {
       else if (k === '$acl') newKey = '_acl';
       else if (k === '$owner') newKey = '_owner';
       else if (k === '$rev') newKey = '_rev';
-      else if (k === '$id') newKey = '_nid'; // matches toStorageKeys — queries can find nodes by identity
+      else if (k === '$id') newKey = '_tid'; // matches toStorageKeys — queries can find nodes by identity
       out[newKey] = mapSiftQuery(v);
     }
     return out;
