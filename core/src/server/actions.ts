@@ -17,9 +17,10 @@ import { OpError } from '#errors';
 import { readonlyProxy, wrapReadOnlyTree } from './readonly-tree';
 import { assertCanCall, runWithFrame, type KindFrame } from './kind-stack';
 
-function validateActionArgs(type: string, action: string, data: unknown): void {
-  const schemaFn = resolve(type, 'schema');
-  const methodSchema = schemaFn?.()?.methods?.[action];
+// Schema arrives pre-resolved (registry for static types, freshly-read stored schema for
+// dynamic ones — the latter is never register()ed, see loadDynamicAction).
+function validateActionArgs(type: string, action: string, data: unknown, schema: TypeSchema | undefined): void {
+  const methodSchema = schema?.methods?.[action];
 
   if (!methodSchema) {
     throw new OpError('BAD_REQUEST', `[SECURITY] No schema for ${type}.${action} — action args not validated`);
@@ -53,6 +54,13 @@ function assertSafeSchema(schema: unknown, ctx: string, depth = 0): void {
     }
     assertSafeSchema(v, ctx, depth + 1);
   }
+}
+
+// Deps that live outside the Immer draft (cross-node fetches, read-kind, streams) are
+// plain copies — writes to them would be silently dropped. readonlyProxy turns such a
+// write into KIND_VIOLATION while leaving deep reads untouched (proxy traps writes only).
+function readonlyDep(dep: ResolvedDeps[string]): ResolvedDeps[string] {
+  return Array.isArray(dep) ? readonlyProxy(dep.map(n => readonlyProxy(n))) : readonlyProxy(dep);
 }
 
 function immerToPatchOps(patches: Patch[]): PatchOp[] {
@@ -160,18 +168,36 @@ type ResolvedAction = {
   comp: ComponentData | undefined;
   deps: ResolvedDeps;
   fieldKey: string | undefined;
+  /** Effective schema: sealed registry first, else the freshly-read stored type schema. */
+  schema: TypeSchema | undefined;
 };
 
 // Dynamic actions: load from /sys/types/{ns}/{name} node's `actions` field.
 // Code runs in QuickJS WASM sandbox — no host FS/network/process access (C01 fix).
-// Sandbox gets: ctx.node (snapshot), ctx.tree.get/set/remove, data, Date, console.log.
+// Sandbox gets: ctx.node (sanitized snapshot), ctx.tree.get (own node only) /
+// set (own subtree, one node per call), data, console.log.
 
 const DYNAMIC_ACTION_TIMEOUT = 5_000;
 const DYNAMIC_ACTION_MEM = 8 * 1024 * 1024;
 
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+// Sandbox writes arrive as parsed JSON — a NodeData needs at least string $path/$type.
+function isSandboxNodeWrite(v: Record<string, unknown>): v is NodeData {
+  return typeof v.$path === 'string' && typeof v.$type === 'string';
+}
+
+type DynamicAction = {
+  handler: (ctx: ActionCtx, data: unknown) => unknown;
+  /** Freshly-read stored schema; undefined when the sealed registry already has one for the type. */
+  schema: TypeSchema | undefined;
+};
+
 async function loadDynamicAction(
   tree: Tree, type: string, action: string,
-): Promise<((ctx: ActionCtx, data: unknown) => unknown) | null> {
+): Promise<DynamicAction | null> {
   if (!type.includes('.')) return null;
 
   const typePath = `/sys/types/${type.replace(/\./g, '/')}`;
@@ -180,19 +206,23 @@ async function loadDynamicAction(
   // who can write any node at /sys/types/* — even one with arbitrary $type — could plant
   // executable `actions` and a poisoned `schema` (the latter disables validateActionArgs globally).
   if (!typeNode || typeNode.$type !== 'type') return null;
-  const actionCode = (typeNode as any)?.actions?.[action];
+  const actions = typeNode.actions;
+  const actionCode = isRecord(actions) ? actions[action] : undefined;
   if (!actionCode || typeof actionCode !== 'string') return null;
 
-  // Register schema from type node's `schema` field
+  // Stored schema is validated per call and NEVER register()ed: the sealed registry keeps
+  // the first entry forever, so registering would freeze a mutable stored schema (edits
+  // ignored until restart) and let a tree-writable node poison the process-wide registry.
+  let schema: TypeSchema | undefined;
   if (!resolve(type, 'schema')) {
-    const nodeSchema = (typeNode as Record<string, unknown>).schema;
-    if (!nodeSchema || typeof nodeSchema !== 'object') return null;
+    const nodeSchema = typeNode.schema;
+    if (!isRecord(nodeSchema)) return null;
     // R4-MOUNT-4: cap regex `pattern` complexity. F6 made /sys/types admin-only-write,
     // but admin typo / malicious mod can plant `pattern: '(a+)+$'` (catastrophic backtracking)
     // and DoS the single-process tenant on every action invocation.
-    assertSafeSchema(nodeSchema as Record<string, unknown>, type);
-    const s = { $id: type, ...(nodeSchema as Record<string, unknown>) };
-    register(type, 'schema', () => s as unknown as TypeSchema);
+    assertSafeSchema(nodeSchema, type);
+    // Boundary decode: schema is stored JSON; validateValue treats unknown keywords as inert.
+    schema = nodeSchema as TypeSchema;
   }
 
   // Build a sandboxed action handler — compiled once, called per invocation
@@ -213,38 +243,35 @@ async function loadDynamicAction(
     runtime.setInterruptHandler(shouldInterruptAfterDeadline(Date.now() + DYNAMIC_ACTION_TIMEOUT));
     const vm = runtime.newContext();
 
-    // Collect async operations from sandbox — QuickJS is sync, so we queue them
-    const pendingOps: Array<{ resolve: (v: string) => void; promise: Promise<string> }> = [];
-
     try {
       // Inject `data` as global
       const dataHandle = vm.evalCode(`(${JSON.stringify(data ?? {})})`);
       if ('value' in dataHandle) { vm.setProp(vm.global, 'data', dataHandle.value); dataHandle.value.dispose(); }
 
-      // Inject `ctx` with node snapshot + tree bridge stubs
-      // Tree ops are async — we use a sync→async bridge pattern:
-      // sandbox calls ctx.tree.get(path) → returns a placeholder
-      // we track the call, run it on host, and re-execute with results
-      const nodeSnapshot = { ...ctx.node };
-      const nodeJson = JSON.stringify(nodeSnapshot);
+      const nodePath = ctx.node.$path;
 
-      // Simple approach: wrap action code in async-like sequential execution
-      // The sandbox code can call ctx.tree.get/set synchronously — we proxy through host fns
-      let treeOpsResult: unknown = undefined;
+      // Strip security-sensitive fields before exposing the snapshot to
+      // sandboxed action code (dynamic JS runs in QuickJS with sync bridge).
+      const sanitized: NodeData = { ...ctx.node };
+      delete sanitized.$acl;
+      delete sanitized.$owner;
+      delete sanitized.$refs;
+      const sanitizedJson = JSON.stringify(sanitized);
+
       const treeWrites: Record<string, unknown>[] = [];
-      const treeGets = new Map<string, Record<string, unknown> | undefined>();
       let treeWriteError: string | null = null;
+      let treeReadError: string | null = null;
 
-      // Pre-fetch the action node itself
-      treeGets.set(ctx.node.$path, nodeSnapshot);
-
-      // Host function: ctx_tree_get(path) → JSON string
+      // Host function: ctx_tree_get(path) → JSON string. The bridge is sync and QuickJS
+      // can't await host promises, so only the action's own (pre-fetched) node is readable.
+      // The miss is recorded host-side too: a sandbox try/catch must not turn it into silence.
       const getFn = vm.newFunction('ctx_tree_get', (pathHandle) => {
         const p = vm.getString(pathHandle);
-        // Return cached or placeholder — will be filled in re-execution
-        const cached = treeGets.get(p);
-        if (cached !== undefined) return vm.newString(JSON.stringify(cached));
-        return vm.newString('null');
+        if (p !== nodePath) {
+          treeReadError = `Dynamic action ${type}.${action} read ${p}: sandbox reads are limited to the action's own node (${nodePath}) until an async bridge exists`;
+          throw new Error(treeReadError);
+        }
+        return vm.newString(sanitizedJson);
       });
       vm.setProp(vm.global, 'ctx_tree_get', getFn);
       getFn.dispose();
@@ -278,19 +305,11 @@ async function loadDynamicAction(
       consoleObj.dispose();
       logFn.dispose();
 
-      // Strip security-sensitive fields before exposing the snapshot to
-      // sandboxed action code (dynamic JS runs in QuickJS with sync bridge).
-      const sanitized = { ...nodeSnapshot };
-      delete sanitized.$acl;
-      delete sanitized.$owner;
-      delete sanitized.$refs;
-      const sanitizedJson = JSON.stringify(sanitized);
-
       const wrapperCode = `
         var ctx = {
           node: ${sanitizedJson},
           tree: {
-            get: function(p) { var r = ctx_tree_get(p); return r === 'null' ? null : JSON.parse(r); },
+            get: function(p) { return JSON.parse(ctx_tree_get(p)); },
             set: function(n) { ctx_tree_set(JSON.stringify(n)); },
           },
         };
@@ -301,20 +320,24 @@ async function loadDynamicAction(
       if (result.error) {
         const err = vm.dump(result.error);
         result.error.dispose();
-        throw new Error(`Dynamic action ${type}.${action} failed: ${typeof err === 'object' && err ? (err as any).message ?? JSON.stringify(err) : err}`);
+        // Bridge failures keep their precise error — the generic wrap below would mask them.
+        if (treeReadError) throw new OpError('BAD_REQUEST', treeReadError);
+        throw new Error(`Dynamic action ${type}.${action} failed: ${typeof err === 'object' && err ? err.message ?? JSON.stringify(err) : err}`);
       }
 
-      treeOpsResult = vm.dump(result.value);
+      const treeOpsResult = vm.dump(result.value);
       result.value.dispose();
 
+      if (treeReadError) throw new OpError('BAD_REQUEST', treeReadError);
       if (treeWriteError) {
         throw new OpError('BAD_REQUEST', `Dynamic action ${type}.${action} invalid ctx.tree.set: ${treeWriteError}`);
       }
 
-      // Apply tree writes to real tree — scoped to own path or children only
-      const nodePath = ctx.node.$path;
+      // Validate ALL writes before applying ANY — the sandbox has no transaction, so a
+      // mid-loop failure after a first tree.set would leave a partial commit behind.
+      const validWrites: NodeData[] = [];
       for (const n of treeWrites) {
-        if (typeof n.$path !== 'string' || typeof n.$type !== 'string') {
+        if (!isSandboxNodeWrite(n)) {
           throw new OpError('BAD_REQUEST', `Dynamic action ${type}.${action} invalid ctx.tree.set: node must include string $path and $type`);
         }
         if (n.$path !== nodePath && !n.$path.startsWith(nodePath + '/')) {
@@ -324,9 +347,20 @@ async function loadDynamicAction(
         delete n.$acl;
         delete n.$owner;
         delete n.$refs;
-        // Route through ctx.tree (read-only facade applies when parent action's kind = 'read').
-        await ctx.tree.set(n as NodeData);
+        validWrites.push(n);
       }
+
+      // tree.set/patch are atomic per path only — >1 distinct target cannot commit as one unit.
+      const distinctPaths = new Set(validWrites.map(n => n.$path));
+      if (distinctPaths.size > 1) {
+        throw new OpError('BAD_REQUEST', `Dynamic action ${type}.${action} wrote ${distinctPaths.size} distinct paths (${[...distinctPaths].join(', ')}) — sandbox writes commit as one atomic unit; write a single node per invocation`);
+      }
+
+      // set() replaces the whole node, so sequential writes to one path collapse to the last —
+      // applied as ONE commit (tree.patch can't create child nodes, set can).
+      // Route through ctx.tree (read-only facade applies when parent action's kind = 'read').
+      const finalWrite = validWrites.at(-1);
+      if (finalWrite) await ctx.tree.set(finalWrite);
 
       return treeOpsResult;
     } finally {
@@ -338,7 +372,7 @@ async function loadDynamicAction(
   // No register() — don't cache permanently. Re-evaluate from tree each time.
   // This ensures source changes take effect without server restart.
   console.warn(`[actions] loading dynamic action "${action}" for "${type}" from ${typePath}`);
-  return fn;
+  return { handler: fn, schema };
 }
 
 async function resolveActionHandler(
@@ -364,12 +398,19 @@ async function resolveActionHandler(
   let deps: ResolvedDeps = await _collectDeps(node, fieldKey!, action, tree);
 
   let handler = resolve(type, `action:${action}`);
+  let schema = resolve(type, 'schema')?.();
 
   // Fallback: try loading dynamic action from type definition node
-  if (!handler) handler = await loadDynamicAction(tree, type, action);
+  if (!handler) {
+    const dyn = await loadDynamicAction(tree, type, action);
+    if (dyn) {
+      handler = dyn.handler;
+      schema ??= dyn.schema;
+    }
+  }
   if (!handler) throw new OpError('BAD_REQUEST', `No action "${action}" for type "${type}"`);
 
-  return { node, handler, type, comp, deps, fieldKey };
+  return { node, handler, type, comp, deps, fieldKey, schema };
 }
 
 // ── executeAction: mutating action with Immer draft + patch collection ──
@@ -530,14 +571,13 @@ async function runAction<T = unknown>(
   opts?: ActionOpts,
 ): Promise<T> {
   return lockAction(path, async () => {
-  const { node, handler, type, deps, fieldKey } = await resolveActionHandler(
+  const { node, handler, type, deps, fieldKey, schema } = await resolveActionHandler(
     tree, path, componentType, componentKey, action,
   );
 
   // Pre/post condition checking (Design by Contract)
-  const schemaHandler = resolve(type, 'schema');
-  const methodSchema = schemaHandler?.()?.methods?.[action];
-  validateActionArgs(type, action, data);
+  const methodSchema = schema?.methods?.[action];
+  validateActionArgs(type, action, data, schema);
 
   const preFields: string[] = methodSchema?.pre ?? [];
   const postFields: string[] = methodSchema?.post ?? [];
@@ -576,6 +616,7 @@ async function runAction<T = unknown>(
     nodeForCtx = readonlyProxy(node);
     const rc = fieldKey ? node[fieldKey] : undefined;
     compForCtx = isComponent(rc) ? readonlyProxy(rc as ComponentData) : undefined;
+    for (const key of Object.keys(deps)) deps[key] = readonlyDep(deps[key]);
   } else {
     draft = createDraft(node);
     const dc = fieldKey ? draft[fieldKey] : undefined;
@@ -583,11 +624,14 @@ async function runAction<T = unknown>(
     compForCtx = isComponent(dc) ? dc as ComponentData : undefined;
     // Remap sibling deps to draft so Immer captures mutations through deps too.
     // Sibling deps live under their '#'-prefixed component key; cross-node deps
-    // (different node identity) never match and stay as fetched.
+    // (different node identity) never match — those are fetched copies, so a
+    // mutation would silently vanish (no patch, no persist): make it throw instead.
     for (const key of Object.keys(deps)) {
       const storageKey = COMP_PREFIX + key;
       if (deps[key] === node[storageKey]) {
         deps[key] = draft[storageKey] as ComponentData;
+      } else {
+        deps[key] = readonlyDep(deps[key]);
       }
     }
   }
@@ -650,15 +694,18 @@ export async function* executeStream(
   signal?: AbortSignal,
   opts?: ActionOpts,
 ): AsyncGenerator<unknown> {
-  const { node, handler, type, comp, deps } = await resolveActionHandler(
+  const { node, handler, type, comp, deps, schema } = await resolveActionHandler(
     tree, path, componentType, componentKey, action,
   );
 
-  validateActionArgs(type, action, data);
+  validateActionArgs(type, action, data, schema);
 
-  // comp is already node[fieldKey] from resolution — no Immer draft needed for generators
+  // No Immer draft for generators — they persist via ctx.tree.set. A mutation through
+  // ctx.node/ctx.comp/ctx.deps would therefore be silently dropped; mirror runAction's
+  // read branch so it throws KIND_VIOLATION instead. ctx.tree stays live for writes.
   const nc = serverNodeHandle(tree);
-  const actx: ActionCtx = { node, comp, deps, tree, signal: signal ?? AbortSignal.timeout(STREAM_TIMEOUT), nc, userId: opts?.userId, claims: opts?.claims, actor: opts?.actor };
+  for (const key of Object.keys(deps)) deps[key] = readonlyDep(deps[key]);
+  const actx: ActionCtx = { node: readonlyProxy(node), comp: comp && readonlyProxy(comp), deps, tree, signal: signal ?? AbortSignal.timeout(STREAM_TIMEOUT), nc, userId: opts?.userId, claims: opts?.claims, actor: opts?.actor };
   const result = handler(actx, data ?? {});
   if (!result || typeof (result as any)[Symbol.asyncIterator] !== 'function')
     throw new OpError('BAD_REQUEST', `Action "${action}" is not a generator`);

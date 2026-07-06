@@ -1,9 +1,10 @@
-import { register } from '#core';
+import { registerType } from '#comp';
+import { type ComponentData, createNode, type NodeData, register } from '#core';
 import { clearRegistry } from '#testing';
 import { createMemoryTree } from '#tree';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
-import { executeAction, type ActionCtx } from './actions';
+import { executeAction, executeStream, type ActionCtx } from './actions';
 
 describe('executeAction — kind enforcement', () => {
   beforeEach(() => {
@@ -187,5 +188,113 @@ describe('executeAction — kind enforcement', () => {
 
     const got = await tree.get('/seeded');
     assert.equal((got as any)?.$type, 'whatever');
+  });
+
+  it('generator action: ctx.node mutation throws KIND_VIOLATION (no draft — write would vanish)', async () => {
+    register('test.kind.gen', 'schema', () => ({
+      $id: 'test.kind.gen',
+      type: 'object',
+      properties: {},
+      methods: { run: { arguments: [], streaming: true } },
+    }));
+
+    register('test.kind.gen', 'action:run', async function* (ctx: ActionCtx) {
+      ctx.node.touched = true;
+      yield 1;
+    });
+
+    const tree = createMemoryTree();
+    await tree.set({ $path: '/g', $type: 'test.kind.gen' });
+
+    await assert.rejects(
+      (async () => {
+        for await (const _ of executeStream(tree, '/g', undefined, undefined, 'run')) { /* drain */ }
+      })(),
+      (err: any) => err?.code === 'KIND_VIOLATION',
+    );
+  });
+
+  it('@read action: dep mutation throws KIND_VIOLATION', async () => {
+    class ReadPeek {
+      static needs = { peek: ['status'] };
+      peek(_d: unknown, deps: { status: ComponentData }) {
+        deps.status.value = 'mutated';
+      }
+    }
+
+    registerType('test.kind.readdep', ReadPeek);
+    register('test.kind.readdep', 'schema', () => ({
+      $id: 'test.kind.readdep',
+      type: 'object',
+      properties: {},
+      methods: { peek: { arguments: [], kind: 'read' as const } },
+    }));
+
+    const tree = createMemoryTree();
+    await tree.set(createNode('/rd', 'page', {}, {
+      readdep: { $type: 'test.kind.readdep' },
+      status: { $type: 'status', value: 'draft' },
+    }));
+
+    await assert.rejects(
+      () => executeAction(tree, '/rd', 'test.kind.readdep', undefined, 'peek'),
+      (err: any) => err?.code === 'KIND_VIOLATION',
+    );
+  });
+
+  it('@write action: cross-node dep mutation throws KIND_VIOLATION (was silently dropped)', async () => {
+    class CrossPoke {
+      static needs = { poke: ['/cfg/target'] };
+      poke(_d: unknown, deps: { target: NodeData }) {
+        deps.target.value = 'mutated';
+      }
+    }
+
+    registerType('test.kind.crossdep', CrossPoke);
+    register('test.kind.crossdep', 'schema', () => ({
+      $id: 'test.kind.crossdep',
+      type: 'object',
+      properties: {},
+      methods: { poke: { arguments: [], kind: 'write' as const } },
+    }));
+
+    const tree = createMemoryTree();
+    await tree.set(createNode('/cfg/target', 'cfg', { value: 'original' }));
+    await tree.set(createNode('/w', 'page', {}, { crossdep: { $type: 'test.kind.crossdep' } }));
+
+    await assert.rejects(
+      () => executeAction(tree, '/w', 'test.kind.crossdep', undefined, 'poke'),
+      (err: any) => err?.code === 'KIND_VIOLATION',
+    );
+
+    assert.equal((await tree.get('/cfg/target'))!.value, 'original', 'dep target untouched');
+  });
+
+  it('@write action: sibling dep mutation still persists via draft (no regression)', async () => {
+    class Publisher {
+      static needs = { publish: ['status'] };
+      publish(_d: unknown, deps: { status: ComponentData }) {
+        deps.status.value = 'published';
+      }
+    }
+
+    registerType('test.kind.sibdep', Publisher);
+    register('test.kind.sibdep', 'schema', () => ({
+      $id: 'test.kind.sibdep',
+      type: 'object',
+      properties: {},
+      methods: { publish: { arguments: [], kind: 'write' as const } },
+    }));
+
+    const tree = createMemoryTree();
+    await tree.set(createNode('/pub', 'page', {}, {
+      sibdep: { $type: 'test.kind.sibdep' },
+      status: { $type: 'status', value: 'draft' },
+    }));
+
+    await executeAction(tree, '/pub', 'test.kind.sibdep', undefined, 'publish');
+
+    const after = (await tree.get('/pub'))!;
+    assert.equal((after['#status'] as ComponentData).value, 'published');
   });
 });

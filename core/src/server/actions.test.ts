@@ -518,6 +518,143 @@ describe('defineComponent', () => {
     assert.equal(r2, 2, 'updated source should take effect immediately');
   });
 
+  it('sandboxed dynamic action read outside own node throws (never null)', async () => {
+    registerBuiltinActions();
+    const tree = createMemoryTree();
+
+    await tree.set({
+      $path: '/sys/types/test/reader',
+      $type: 'type',
+      actions: {
+        // Old bug: cache miss fed 'null' into the sandbox and the action resolved 'got-null'.
+        readOther: 'var other = ctx.tree.get("/somewhere/else"); return other === null ? "got-null" : "got-node";',
+      },
+      schema: { methods: { readOther: { arguments: [] } } },
+    } as NodeData);
+    await tree.set(createNode('/reader1', 'test.reader', {}));
+
+    await assert.rejects(
+      () => executeAction(tree, '/reader1', undefined, undefined, 'readOther', {}),
+      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+    );
+  });
+
+  it('sandbox try/catch cannot swallow the read-miss error', async () => {
+    registerBuiltinActions();
+    const tree = createMemoryTree();
+
+    await tree.set({
+      $path: '/sys/types/test/swallower',
+      $type: 'type',
+      actions: {
+        swallow: 'var r = "initial"; try { ctx.tree.get("/foreign") } catch (e) { r = "caught"; } return r;',
+      },
+      schema: { methods: { swallow: { arguments: [] } } },
+    } as NodeData);
+    await tree.set(createNode('/swallow1', 'test.swallower', {}));
+
+    await assert.rejects(
+      () => executeAction(tree, '/swallow1', undefined, undefined, 'swallow', {}),
+      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+    );
+  });
+
+  it('sandboxed dynamic action writes are all-or-nothing (no partial apply)', async () => {
+    registerBuiltinActions();
+    const tree = createMemoryTree();
+
+    await tree.set({
+      $path: '/sys/types/test/partial',
+      $type: 'type',
+      actions: {
+        // Old bug: first (valid) write committed before the second (escaping) one was rejected.
+        breakout: 'var n = ctx.tree.get(ctx.node.$path); n.mutated = true; ctx.tree.set(n); ctx.tree.set({ $path: "/outside/evil", $type: "x", planted: true }); return "done";',
+      },
+      schema: { methods: { breakout: { arguments: [] } } },
+    } as NodeData);
+    await tree.set(createNode('/partial1', 'test.partial', {}));
+
+    await assert.rejects(
+      () => executeAction(tree, '/partial1', undefined, undefined, 'breakout', {}),
+      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+    );
+
+    const own = (await tree.get('/partial1'))!;
+    assert.equal(own.mutated, undefined, 'own-node write must roll back with the rejected batch');
+    assert.equal(await tree.get('/outside/evil'), undefined, 'escaping write must be blocked');
+  });
+
+  it('sandboxed dynamic action rejects writes to more than one distinct path', async () => {
+    registerBuiltinActions();
+    const tree = createMemoryTree();
+
+    await tree.set({
+      $path: '/sys/types/test/multipath',
+      $type: 'type',
+      actions: {
+        twoPaths: 'ctx.tree.set({ $path: ctx.node.$path, $type: ctx.node.$type, a: 1 }); ctx.tree.set({ $path: ctx.node.$path + "/kid", $type: "test.multipath", b: 2 }); return "x";',
+      },
+      schema: { methods: { twoPaths: { arguments: [] } } },
+    } as NodeData);
+    await tree.set(createNode('/multi1', 'test.multipath', {}));
+
+    await assert.rejects(
+      () => executeAction(tree, '/multi1', undefined, undefined, 'twoPaths', {}),
+      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+    );
+
+    assert.equal((await tree.get('/multi1'))!.a, undefined, 'no write applied');
+    assert.equal(await tree.get('/multi1/kid'), undefined, 'no write applied');
+  });
+
+  it('sandboxed dynamic action collapses repeated writes to the same path (last wins)', async () => {
+    registerBuiltinActions();
+    const tree = createMemoryTree();
+
+    await tree.set({
+      $path: '/sys/types/test/rewrite',
+      $type: 'type',
+      actions: {
+        twice: 'var n = ctx.tree.get(ctx.node.$path); n.step = 1; ctx.tree.set(n); n.step = 2; ctx.tree.set(n); return "ok";',
+      },
+      schema: { methods: { twice: { arguments: [] } } },
+    } as NodeData);
+    await tree.set(createNode('/rw1', 'test.rewrite', {}));
+
+    const result = await executeAction(tree, '/rw1', undefined, undefined, 'twice', {});
+    assert.equal(result, 'ok');
+    assert.equal((await tree.get('/rw1'))!.step, 2);
+  });
+
+  it('stored schema is not frozen into the sealed registry — edits apply immediately', async () => {
+    registerBuiltinActions();
+    const tree = createMemoryTree();
+
+    await tree.set({
+      $path: '/sys/types/test/reschema',
+      $type: 'type',
+      actions: { go: 'return "ran";' },
+      schema: { methods: { go: { arguments: [] } } },
+    } as NodeData);
+    await tree.set(createNode('/rs1', 'test.reschema', {}));
+
+    assert.equal(await executeAction(tree, '/rs1', undefined, undefined, 'go', {}), 'ran');
+
+    // Tighten the stored schema: go now requires { x: number }.
+    const typeNode = (await tree.get('/sys/types/test/reschema'))!;
+    await tree.set({
+      ...typeNode,
+      schema: { methods: { go: { arguments: [{ name: 'data', type: 'object', properties: { x: { type: 'number' } }, required: ['x'] }] } } },
+    } as NodeData);
+
+    await assert.rejects(
+      () => executeAction(tree, '/rs1', undefined, undefined, 'go', {}),
+      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+      'new stored schema must validate immediately (old code froze the first-seen schema)',
+    );
+    assert.equal(await executeAction(tree, '/rs1', undefined, undefined, 'go', { x: 1 }), 'ran');
+  });
+
   it('rejects action with invalid args', async () => {
     setup();
     const tree = createMemoryTree();
