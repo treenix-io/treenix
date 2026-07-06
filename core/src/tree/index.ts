@@ -133,7 +133,10 @@ export async function resolveRef(tree: Tree, node: NodeData): Promise<NodeData> 
 // ── Filter tree ──
 // Like overlay, but set() routes to upper only when filter matches, else lower.
 // Reads merge both layers (upper wins). Remove tries both.
-// NOTE: limit/offset pagination is approximate — merging happens after both stores paginate.
+// Pagination is EXACT: limit/offset are withheld from the layers (each returns
+// its full child set) and applied once, post-merge, over the deduped union.
+// Cost is full-fan-in per call — the cursor path (scanChildren) is the scalable
+// read; this legacy merge remains for depth>1 until Stage 7 (core-6x8).
 
 export function createFilterTree(
   upper: Tree,
@@ -156,6 +159,9 @@ export function createFilterTree(
       const result = paginate([...byPath.values()], opts);
       // Forward queryMount from lower tree (mount system → CDC Matrix)
       if (l.queryMount) result.queryMount = l.queryMount;
+      // A self-capping layer (ACL scan budget, remote page cap) must not
+      // silently under-report through the merge (core-6x8).
+      if (u.truncated || l.truncated) result.truncated = true;
       return result;
     },
     // Streaming k-way merge by $path cursor. Lazy: only pulls one entry
