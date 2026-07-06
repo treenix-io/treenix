@@ -1,10 +1,12 @@
 import { registerType } from '#comp';
 import { type ComponentData, createNode, type NodeData, register } from '#core';
+import { OpError } from '#errors';
 import { clearRegistry } from '#testing';
 import { createMemoryTree } from '#tree';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 import { executeAction, executeStream, type ActionCtx } from './actions';
+import { runWithFrame } from './kind-stack';
 
 describe('executeAction — kind enforcement', () => {
   beforeEach(() => {
@@ -296,5 +298,92 @@ describe('executeAction — kind enforcement', () => {
 
     const after = (await tree.get('/pub'))!;
     assert.equal((after['#status'] as ComponentData).value, 'published');
+  });
+});
+
+// ── executeStream kind envelope (core-gk8.15) ──
+
+describe('executeStream — kind envelope', () => {
+  beforeEach(() => {
+    clearRegistry();
+  });
+
+  it('read frame cannot start a write-kind stream (entry gate)', async () => {
+    register('test.skind.w', 'schema', () => ({
+      $id: 'test.skind.w',
+      type: 'object',
+      properties: {},
+      methods: { gen: { arguments: [], kind: 'write' as const } },
+    }));
+    register('test.skind.w', 'action:gen', async function* () { yield 1; });
+
+    const tree = createMemoryTree();
+    await tree.set({ $path: '/n', $type: 'test.skind.w' });
+
+    await assert.rejects(
+      () => runWithFrame({ kind: 'read', io: false, path: '/r', action: 'reader' }, async () => {
+        // The generator body (and its entry gate) runs on first next().
+        await executeStream(tree, '/n', undefined, undefined, 'gen')[Symbol.asyncIterator]().next();
+      }),
+      (e: unknown) => e instanceof OpError && e.code === 'KIND_VIOLATION',
+    );
+  });
+
+  it('read-kind stream: ctx.tree.set denied even AFTER the first yield (frame per resumption)', async () => {
+    register('test.skind.r', 'schema', () => ({
+      $id: 'test.skind.r',
+      type: 'object',
+      properties: {},
+      methods: { gen: { arguments: [], kind: 'read' as const } },
+    }));
+    register('test.skind.r', 'action:gen', async function* (ctx: ActionCtx) {
+      yield 'first';
+      await ctx.tree.set({ $path: '/should-not-write', $type: 'foo' });
+      yield 'never';
+    });
+
+    const tree = createMemoryTree();
+    await tree.set({ $path: '/n', $type: 'test.skind.r' });
+
+    const it = executeStream(tree, '/n', undefined, undefined, 'gen')[Symbol.asyncIterator]();
+    assert.equal((await it.next()).value, 'first');
+    await assert.rejects(
+      () => it.next(),
+      (e: unknown) => e instanceof OpError && e.code === 'KIND_VIOLATION',
+    );
+    assert.equal(await tree.get('/should-not-write'), undefined, 'nothing written');
+  });
+
+  it('nested write ACTION inside a read-kind stream body is denied mid-stream', async () => {
+    register('test.skind.rn', 'schema', () => ({
+      $id: 'test.skind.rn',
+      type: 'object',
+      properties: {},
+      methods: { gen: { arguments: [], kind: 'read' as const } },
+    }));
+    register('test.skind.wn', 'schema', () => ({
+      $id: 'test.skind.wn',
+      type: 'object',
+      properties: {},
+      methods: { mut: { arguments: [], kind: 'write' as const } },
+    }));
+    let ran = false;
+    register('test.skind.wn', 'action:mut', async () => { ran = true; });
+    register('test.skind.rn', 'action:gen', async function* (ctx: ActionCtx) {
+      yield 'first';
+      await executeAction(ctx.tree, '/wn', undefined, undefined, 'mut');
+    });
+
+    const tree = createMemoryTree();
+    await tree.set({ $path: '/n', $type: 'test.skind.rn' });
+    await tree.set({ $path: '/wn', $type: 'test.skind.wn' });
+
+    const it = executeStream(tree, '/n', undefined, undefined, 'gen')[Symbol.asyncIterator]();
+    await it.next();
+    await assert.rejects(
+      () => it.next(),
+      (e: unknown) => e instanceof OpError && e.code === 'KIND_VIOLATION',
+    );
+    assert.equal(ran, false, 'nested write handler never invoked');
   });
 });

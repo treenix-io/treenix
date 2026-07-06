@@ -9,11 +9,11 @@ import { collectDeps as _collectDeps, type ResolvedDeps } from '#comp/needs';
 import { assertSafeKey, COMP_PREFIX, type ComponentData, compKey, getComponentField, getMeta, isComponent, type NodeData, register, resolve, safeJsonParse } from '#core';
 import { validateValue, type ValidationError } from '#comp/validate';
 import { type TypeSchema } from '#schema/types';
-import { type ExecOpts, type PatchOp, PatchTestError, type Tree } from '#tree';
+import { type ExecOpts, type PatchOp, type Tree } from '#tree';
 import { createDraft, enablePatches, finishDraft, type Patch } from 'immer';
 import { createBoundedCache } from '#util/bounded-cache';
-import { createPathLock } from '#util/path-lock';
 import { OpError } from '#errors';
+import { commit, mutationLock } from './commit';
 import { readonlyProxy, wrapReadOnlyTree } from './readonly-tree';
 import { assertCanCall, runWithFrame, type KindFrame } from './kind-stack';
 
@@ -416,8 +416,10 @@ async function resolveActionHandler(
 // ── executeAction: mutating action with Immer draft + patch collection ──
 // Patches attached as $patches for subscription layer (CDC Matrix in sub.ts).
 // Pure actions (no state changes) skip persist — patches.length === 0.
-// Per-path lock prevents lost updates from concurrent mutations on the same node.
-const lockAction = createPathLock();
+// Per-path lock prevents lost updates from concurrent mutations on the same
+// node. The lock scope is SHARED with commit() (core-gk8.15) so action spans
+// and batch commits serialize against each other in-process.
+const lockAction = mutationLock;
 
 export type ActionOpts = {
   userId?: string | null;
@@ -667,9 +669,12 @@ async function runAction<T = unknown>(
         const writeCtx = opts && (opts.opId || opts.actor)
           ? { ...(opts.opId ? { opId: opts.opId } : {}), ...(opts.actor ? { actor: opts.actor } : {}) }
           : undefined;
-        await tree.patch(node.$path, ops, writeCtx);
+        // The N=1 case of the one commit envelope (core-gk8.15) — reentrant
+        // re-acquire of the action's own span path.
+        await commit(tree, node.$path, [{ path: node.$path, ops }], writeCtx);
       } catch (e) {
-        if (e instanceof PatchTestError) {
+        // Re-wrap with action context — commit's CONFLICT names only the path.
+        if (e instanceof OpError && e.code === 'CONFLICT') {
           throw new OpError('CONFLICT', `OptimisticConcurrencyError: ${type}.${action} on ${node.$path} — node changed during the action (expected $rev ${node.$rev})`);
         }
         throw e;
@@ -700,16 +705,43 @@ export async function* executeStream(
 
   validateActionArgs(type, action, data, schema);
 
+  // Kind envelope (core-gk8.15): streams get the same entry gate + frame as
+  // actions. NO span lock, deliberately — a stream holds its lane up to
+  // STREAM_TIMEOUT (600s); serializing the node that long is a liveness
+  // hazard. Stream writes are individually enveloped by the pipeline instead.
+  const methodSchema = schema?.methods?.[action];
+  const actionMeta = getMeta(type, `action:${action}`);
+  const kind: 'read' | 'write' = (actionMeta?.kind as 'read' | 'write' | undefined) ?? methodSchema?.kind ?? 'write';
+  const io: boolean = (actionMeta?.io as boolean | undefined) ?? methodSchema?.io ?? false;
+  assertCanCall({ kind, io });
+  const frame: KindFrame = { kind, io, path, action };
+
   // No Immer draft for generators — they persist via ctx.tree.set. A mutation through
   // ctx.node/ctx.comp/ctx.deps would therefore be silently dropped; mirror runAction's
-  // read branch so it throws KIND_VIOLATION instead. ctx.tree stays live for writes.
-  const nc = serverNodeHandle(tree);
+  // read branch so it throws KIND_VIOLATION instead. ctx.tree stays live for writes —
+  // unless the stream is read-kind: then the tree facade denies them too.
+  const treeForCtx = kind === 'read' ? wrapReadOnlyTree(tree) : tree;
+  const nc = serverNodeHandle(treeForCtx);
   for (const key of Object.keys(deps)) deps[key] = readonlyDep(deps[key]);
-  const actx: ActionCtx = { node: readonlyProxy(node), comp: comp && readonlyProxy(comp), deps, tree, signal: signal ?? AbortSignal.timeout(STREAM_TIMEOUT), nc, userId: opts?.userId, claims: opts?.claims, actor: opts?.actor };
-  const result = handler(actx, data ?? {});
-  if (!result || typeof (result as any)[Symbol.asyncIterator] !== 'function')
+  const actx: ActionCtx = { node: readonlyProxy(node), comp: comp && readonlyProxy(comp), deps, tree: treeForCtx, signal: signal ?? AbortSignal.timeout(STREAM_TIMEOUT), nc, userId: opts?.userId, claims: opts?.claims, actor: opts?.actor };
+
+  const result = await runWithFrame(frame, async () => handler(actx, data ?? {}));
+  if (!isAsyncIterable(result))
     throw new OpError('BAD_REQUEST', `Action "${action}" is not a generator`);
-  yield* result as AsyncIterable<unknown>;
+
+  // The frame must wrap EVERY resumption: an async generator body runs in the
+  // AWAITER's ALS context, so wrapping only the call above would drop the
+  // frame after the first yield — nested writes would then pass assertCanCall.
+  const it = result[Symbol.asyncIterator]();
+  while (true) {
+    const r = await runWithFrame(frame, () => it.next());
+    if (r.done) return r.value;
+    yield r.value;
+  }
+}
+
+function isAsyncIterable(v: unknown): v is AsyncIterable<unknown> {
+  return !!v && typeof (v as { [Symbol.asyncIterator]?: unknown })[Symbol.asyncIterator] === 'function';
 }
 
 // ── setComponent: single component update with OCC ──
