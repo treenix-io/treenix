@@ -23,8 +23,6 @@ export type Page<T> = {
   truncated?: boolean;
   /** Opaque resume token for cursor pagination. Present ⇒ more pages exist. */
   nextCursor?: string;
-  /** Legacy query-mount metadata — Stage 7 (core-g2e) removes it. */
-  queryMount?: { source: string, match: Record<string, unknown> };
   /** Server-internal (Stage 6d, core-9yd): the resolved plan behind this
    *  listing, carried from the ACL read to watch registration so the initial
    *  read and the live watch share ONE plan. Stripped at the protocol edge
@@ -175,8 +173,6 @@ export function createFilterTree(
       for (const n of l.items) byPath.set(n.$path, n);
       for (const n of u.items) byPath.set(n.$path, n);
       const result = paginate([...byPath.values()], opts);
-      // Forward queryMount from lower tree (mount system → CDC Matrix)
-      if (l.queryMount) result.queryMount = l.queryMount;
       // A self-capping layer (ACL scan budget, remote page cap) must not
       // silently under-report through the merge (core-6x8).
       if (u.truncated || l.truncated) result.truncated = true;

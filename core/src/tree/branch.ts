@@ -83,7 +83,6 @@ export function createBranchTree(upper: Tree, lower: Tree): Tree {
           .filter(n => !test || test(mapNodeForSift(n))),
       ];
       const result = paginate(items, opts);
-      if (l.queryMount) result.queryMount = l.queryMount;
       return result;
     },
 

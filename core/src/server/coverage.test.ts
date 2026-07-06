@@ -786,14 +786,6 @@ describe('QueryStore advanced', () => {
     assert.equal(result.items[0].$path, '/items/2');
   });
 
-  it('returns queryMount metadata', async () => {
-    const parent = createMemoryTree();
-    await parent.set({ $path: '/items/1', $type: 'item', '#status': { $type: 's', value: 'active' } } as any);
-
-    const qs = createQueryTree({ source: '/items', match: { '#status.value': 'active' } }, parent);
-    const result = await qs.getChildren('/view');
-    assert.deepEqual(result.queryMount, { source: '/items', match: { '#status.value': 'active' } });
-  });
 });
 
 // ── matchesFilter edge cases ──
