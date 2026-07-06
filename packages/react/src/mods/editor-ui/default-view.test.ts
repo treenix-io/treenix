@@ -3,10 +3,13 @@ import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { createElement } from 'react';
 import { register } from '@treenx/core';
-import type { ComponentData } from '@treenx/core';
+import type { ComponentData, NodeData } from '@treenx/core';
 import type { TypeSchema } from '@treenx/core/schema/types';
 import { Render } from '#context';
 import { TooltipProvider } from '#components/ui/tooltip';
+import { TreeSourceProvider } from '#tree/tree-source-context';
+import { EMPTY_PATH_SNAPSHOT, type ChildrenSnapshot, type TreeSource } from '#tree/tree-source';
+import { makeNavigateApi, NavigateProvider } from '#navigate';
 import {
   inferType,
   resolveDisplayType,
@@ -129,7 +132,68 @@ describe('default-view helpers', () => {
   });
 });
 
+const noopNavigate = makeNavigateApi(() => true, () => null);
+
+// RenderChildren consumes TreeSource + Navigate contexts — provide both statically.
+function renderWithProviders(source: TreeSource, value: ComponentData) {
+  return render(createElement(NavigateProvider, { value: noopNavigate },
+    createElement(TreeSourceProvider, {
+      source,
+      children: createElement(TooltipProvider, null, createElement(TypedRecordView, { value })),
+    }),
+  ));
+}
+
+// Static TreeSource — serves canned children, no fetch/watch side effects.
+function fakeSource(childrenByPath: Record<string, NodeData[]>): TreeSource {
+  const snaps = new Map<string, ChildrenSnapshot>();
+  return {
+    getPathSnapshot: () => EMPTY_PATH_SNAPSHOT,
+    getChildrenSnapshot: (p) => {
+      let s = snaps.get(p);
+      if (!s) {
+        s = { data: childrenByPath[p] ?? [], phase: 'ready', total: null, truncated: null, error: null };
+        snaps.set(p, s);
+      }
+      return s;
+    },
+    subscribePath: () => () => {},
+    subscribeChildren: () => () => {},
+    mountPath: () => ({ refetch() {}, dispose() {} }),
+    mountChildren: () => ({ refetch() {}, loadMore() {}, dispose() {} }),
+  };
+}
+
 describe('TypedRecordView', () => {
+  // Regression core-6s1: e764b74 unified node+component views and dropped the
+  // children block — untyped nodes showed fields but never their children.
+  it('renders children for node values ($path present)', () => {
+    const source = fakeSource({
+      '/list': [
+        { $path: '/list/a', $type: 'example.todo', title: 'First child' },
+        { $path: '/list/b', $type: 'example.todo', title: 'Second child' },
+      ],
+    });
+    const node: ComponentData = { $path: '/list', $type: 'example.todo.list', title: 'My list' };
+
+    renderWithProviders(source, node);
+
+    // DefaultListItem (react:list fallback) renders path name + type per child.
+    assert.ok(screen.getByText('a'), 'first child rendered');
+    assert.ok(screen.getByText('b'), 'second child rendered');
+    assert.equal(screen.getAllByText('example.todo').length, 2);
+    assert.ok(screen.getByText('List'), 'context switcher rendered');
+  });
+
+  it('does not render a children block for component values (no $path)', () => {
+    const source = fakeSource({});
+    const comp: ComponentData = { $type: 'demo.comp', title: 'Just a component' };
+
+    renderWithProviders(source, comp);
+
+    assert.equal(screen.queryByText('List'), null, 'no switcher for components');
+  });
+
   it('stops recursive rendering past the depth limit', () => {
     let root: ComponentData = { $type: 'deep.leaf' };
     for (let i = 0; i < 10; i++) {
