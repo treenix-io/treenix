@@ -553,6 +553,41 @@ describe('withAcl', () => {
     );
   });
 
+  it('deep query reads paginate by cursor; ACL filters at every depth (core-0bl)', async () => {
+    await tree.set({
+      ...createNode('/wiki', 'dir'),
+      $acl: [{ g: 'authenticated', p: R }],
+    });
+    await tree.set(createNode('/wiki/a', 'doc', { status: 'open' }));
+    await tree.set(createNode('/wiki/a/x', 'doc', { status: 'open' }));
+    await tree.set(createNode('/wiki/a/y', 'doc', { status: 'done' }));
+    await tree.set(createNode('/wiki/b', 'doc', { status: 'open' }));
+    await tree.set({
+      ...createNode('/wiki/b/private', 'doc', { status: 'open' }),
+      $owner: 'bob',
+      $acl: [
+        { g: 'owner', p: R | W | A },
+        { g: 'authenticated', p: 0 },
+      ],
+    });
+
+    const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);
+    const page1 = await s.getChildren('/wiki', { depth: -1, query: { status: 'open' }, limit: 2 });
+    assert.deepEqual(page1.items.map(c => c.$path), ['/wiki/a', '/wiki/a/x']);
+    assert.ok(page1.nextCursor, 'more matches exist → nextCursor present');
+
+    const page2 = await s.getChildren('/wiki', { depth: -1, query: { status: 'open' }, limit: 2, cursor: page1.nextCursor });
+    assert.deepEqual(page2.items.map(c => c.$path), ['/wiki/b'], "bob's node filtered out at depth 2");
+    assert.equal(page2.nextCursor, undefined);
+
+    // Cursor↔plan binding (core-8an): a deep-scan cursor cannot resume a
+    // depth-1 read — depth is part of plan identity.
+    await assert.rejects(
+      () => s.getChildren('/wiki', { query: { status: 'open' }, limit: 2, cursor: page1.nextCursor }),
+      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+    );
+  });
+
   it('does not let query probe hidden component fields', async () => {
     register('private.secret', 'acl', () => [{ g: 'authenticated', p: 0 }]);
     await tree.set({

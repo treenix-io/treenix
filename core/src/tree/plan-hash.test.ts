@@ -40,6 +40,12 @@ describe('planHash (core-hp7)', () => {
     const b = planHash({ source: '/x', callerWhere: { $and: [{ b: 2, a: 1 }] } });
     assert.equal(a, b);
   });
+
+  it('depth is part of plan identity; default aliases explicit 1 (core-0bl)', () => {
+    assert.equal(planHash({ source: '/x' }), planHash({ source: '/x', depth: 1 }));
+    assert.notEqual(planHash({ source: '/x' }), planHash({ source: '/x', depth: 2 }));
+    assert.notEqual(planHash({ source: '/x', depth: 2 }), planHash({ source: '/x', depth: -1 }));
+  });
 });
 
 describe('ReadCursor (core-8an)', () => {

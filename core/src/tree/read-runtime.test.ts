@@ -272,4 +272,60 @@ describe('executeList', () => {
       );
     }
   });
+
+  // ── depth>1 (core-0bl) ──
+
+  it('depth=2 yields grandchildren in path order; depth defaults to 1', async () => {
+    const source = await seed(['/x/a', '/x/a/i', '/x/b']);
+    const deep = await executeList(source, { source: '/x', depth: 2 }, { limit: 10 }, identityProject);
+    assert.deepEqual(deep.items.map(n => n.$path), ['/x/a', '/x/a/i', '/x/b']);
+
+    const flat = await executeList(source, { source: '/x' }, { limit: 10 }, identityProject);
+    assert.deepEqual(flat.items.map(n => n.$path), ['/x/a', '/x/b']);
+  });
+
+  it('depth=-1 yields all descendants', async () => {
+    const source = await seed(['/x/a', '/x/a/i', '/x/a/i/deep']);
+    const res = await executeList(source, { source: '/x', depth: -1 }, { limit: 10 }, identityProject);
+    assert.deepEqual(res.items.map(n => n.$path), ['/x/a', '/x/a/i', '/x/a/i/deep']);
+  });
+
+  it('deep page concatenation equals full deep scan (no dup, no skip)', async () => {
+    const source = await seed(['/x/a', '/x/a/i', '/x/a/j', '/x/b', '/x/b/k']);
+    const plan: ReadPlan = { source: '/x', depth: -1 };
+    const full = await executeList(source, plan, { limit: 10 }, identityProject);
+    assert.equal(full.items.length, 5);
+
+    const pages: NodeData[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await executeList(source, plan, { limit: 2, cursor }, identityProject);
+      pages.push(...page.items);
+      cursor = page.nextCursor;
+    } while (cursor);
+
+    assert.deepEqual(pages.map(n => n.$path), full.items.map(n => n.$path));
+  });
+
+  it('cursor minted at one depth cannot resume a scan at another depth', async () => {
+    const source = await seed(['/x/a', '/x/a/i', '/x/b']);
+    const page1 = await executeList(source, { source: '/x', depth: 2 }, { limit: 1 }, identityProject);
+    assert.ok(page1.nextCursor);
+
+    await assert.rejects(
+      () => executeList(source, { source: '/x' }, { limit: 1, cursor: page1.nextCursor }, identityProject),
+      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+    );
+  });
+
+  it('rejects invalid depth — zero, fractional, negatives other than -1', async () => {
+    const source = await seed(['/x/a']);
+    for (const depth of [0, 1.5, -2]) {
+      await assert.rejects(
+        () => executeList(source, { source: '/x', depth }, { limit: 1 }, identityProject),
+        (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+        `depth ${depth} must be rejected`,
+      );
+    }
+  });
 });

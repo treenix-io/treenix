@@ -16,8 +16,9 @@ import type { ReadPlan } from './read-runtime';
 
 export type CanonicalPlan = {
   source: string;
-  /** MVP reads are depth-1; field is explicit so depth>1 (core-0bl) changes
-   *  the hash instead of silently aliasing plans of different depth. */
+  /** Explicit so plans of different depth never alias (a depth-1 cursor must
+   *  not resume a depth-2 scan). Callers normalize negatives to -1 before
+   *  building the plan — adapters treat any negative as "all descendants". */
   depth: number;
   viewWhere?: Record<string, unknown>;
   callerWhere?: Record<string, unknown>;
@@ -26,7 +27,7 @@ export type CanonicalPlan = {
 export function canonicalReadPlan(plan: ReadPlan): CanonicalPlan {
   return {
     source: plan.source,
-    depth: 1,
+    depth: plan.depth ?? 1,
     ...(plan.viewWhere ? { viewWhere: plan.viewWhere } : {}),
     ...(plan.callerWhere ? { callerWhere: plan.callerWhere } : {}),
   };

@@ -1,11 +1,10 @@
 // ── withAcl — the per-actor Tree wrapper ──
 // Resolves ACL per path, strips forbidden components, gates every verb.
-// Read path (depth=1) routes through the executeList read runtime.
+// The read path (any depth) routes through the executeList read runtime.
 
 import { A, type ComponentData, isComponent, type NodeData, R, W } from '#core';
 import { OpError } from '#errors';
-import { asTreeSource, assertSafePatchPath, mapNodeForSift, type Page, paginate, type Tree } from '#tree';
-import { createSiftTest, withAclQueryTree } from '#tree/query';
+import { asTreeSource, assertSafePatchPath, type Page, type Tree } from '#tree';
 import { executeList } from '#tree/read-runtime';
 import { resolveReadPlan } from '#mount/resolve-plan';
 import { type AclState, componentPerm, resolvePermission, stripComponents } from './acl';
@@ -78,45 +77,10 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
     return resolvePermission(rawStore, path, userId, claims, cache, undefined, stateCache);
   }
 
-  // depth>1 fallback: when the caller needs descendants beyond the top
-  // level, executeList's depth-1 contract isn't enough yet (MVP rule 1).
-  // Use legacy scan+filter+strip until Stage-future deep scanning lands.
-  // Same scan-cap warning preserved so operators see the truncation.
-  const LEGACY_DEEP_SCAN_LIMIT = 1_000;
-  async function legacyDeepGetChildren(
-    path: string,
-    opts: import('#tree').ChildrenOpts | undefined,
-    ctx: unknown,
-  ): Promise<Page<NodeData>> {
-    // Wrap ctx so query-mount adapters reading via parentStore see the
-    // ACL-projected view, not the raw tree — closes the "match raw + strip
-    // after" inefficiency (and the timing side-channel that comes with it).
-    const rawCtx = withAclQueryTree(ctx, aclStore);
-    const raw = await rawStore.getChildren(path, { depth: opts?.depth, limit: LEGACY_DEEP_SCAN_LIMIT }, rawCtx);
-    const truncated = raw.items.length >= LEGACY_DEEP_SCAN_LIMIT;
-    if (truncated) {
-      console.warn(`[acl] getChildren(${path}, depth=${opts?.depth}): hit legacy deep scan limit ${LEGACY_DEEP_SCAN_LIMIT}`);
-    }
-    const filtered: NodeData[] = [];
-    for (const child of raw.items) {
-      const perm = await getPerm(child.$path);
-      if (!(perm & R)) continue;
-      const out = stripComponents(child, userId, claims);
-      if (!(perm & A)) {
-        delete out.$acl;
-        delete out.$owner;
-      }
-      filtered.push(out);
-    }
-    const queryTest = opts?.query ? createSiftTest(opts.query) : null;
-    const visible = queryTest
-      ? filtered.filter(n => queryTest(mapNodeForSift(n)))
-      : filtered;
-    const result = paginate(visible, opts);
-    if (truncated) result.truncated = true;
-    if (raw.queryMount) result.queryMount = raw.queryMount;
-    return result;
-  }
+  // Plain (non-query) reads keep the legacy limit+offset+total contract until
+  // Stage 7 (core-g2e). The bridge scans up to this many visible items to
+  // compute total; `truncated` surfaces when the ceiling was hit.
+  const OFFSET_BRIDGE_SCAN_LIMIT = 1_000;
 
   // INVARIANT (core-pxlu): hand-built literal, NO `...rawStore` spread — the
   // execute capability is intentionally stripped here; the wire session
@@ -146,22 +110,14 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
       const parentPerm = await getPerm(path);
       if (!(parentPerm & R)) throw new OpError('FORBIDDEN', `Access denied: ${path}`);
 
-      const depth = opts?.depth ?? 1;
-      // depth>1 fallback: executeList is depth-1 only in MVP. Use legacy
-      // scan+filter+strip path with no scan cap (kills ACL_SCAN_LIMIT for
-      // depth-1, which is the common case AND the only case that hit it).
-      // Cursors are a depth-1 read-runtime contract — ignoring one here would
-      // silently restart pagination from the top.
-      if (depth > 1) {
-        if (opts?.cursor !== undefined) {
-          throw new OpError('BAD_REQUEST', 'cursor pagination is not supported for depth>1 reads');
-        }
-        return legacyDeepGetChildren(path, opts, ctx);
-      }
-
-      // depth=1: route through the new read runtime.
       const source = asTreeSource(rawStore);
       const { plan, legacyQueryMount } = await resolveReadPlan(rawStore, path, opts?.query, ctx);
+      // Deep reads (core-0bl) ride the same runtime: adapters walk descendants
+      // inside scanChildren, the projector filters each node independently
+      // (flat filter — legacy parity, no subtree pruning). Negatives normalize
+      // to -1 so plan identity never aliases (-2 vs -1 are the same scan).
+      const depth = opts?.depth ?? 1;
+      if (depth !== 1) plan.depth = depth < 0 ? -1 : depth;
       // MVP rule 7: a readable query mount over an unreadable source would
       // act as a capability view (child R-grants leak items the actor can't
       // otherwise list). Gate plan.source before scanning. Non-mount path:
@@ -196,12 +152,12 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
 
       // Plain (non-query) reads: public API uses limit + offset + total;
       // executeList uses limit + cursor. Bridge: scan up to
-      // LEGACY_DEEP_SCAN_LIMIT visible items to compute total (matches the
+      // OFFSET_BRIDGE_SCAN_LIMIT visible items to compute total (matches the
       // pre-stage-3 contract). `truncated` surfaces when the scan hit its
       // ceiling — same signal as the old ACL_SCAN_LIMIT warning, just
       // structured into the page instead of console.warn.
       const offset = opts?.offset ?? 0;
-      const scanLimit = Math.max(LEGACY_DEEP_SCAN_LIMIT, offset + reqLimit);
+      const scanLimit = Math.max(OFFSET_BRIDGE_SCAN_LIMIT, offset + reqLimit);
 
       const result = await executeList(source, plan, { limit: scanLimit }, project, ctx);
       const items = result.items.slice(offset, offset + reqLimit);

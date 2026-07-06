@@ -13,7 +13,8 @@
 // deferred). Until then, any user with W on a mount node can author viewWhere
 // — running it on raw would let them probe hidden fields via membership.
 // Both predicates filter visible data; Mongo pushdown of viewWhere is also
-// deferred until F4. depth=1 only — MVP scope.
+// deferred until F4. depth>1 (core-0bl): adapters walk descendants inside
+// scanChildren; $path ASC total order keeps cursors stable at any depth.
 
 import type { NodeData } from '#core';
 import { OpError } from '#errors';
@@ -25,6 +26,10 @@ export type Projector = (node: NodeData) => Promise<NodeData | null>;
 
 export type ReadPlan = {
   source: string;
+  /** Levels to descend: 1 = direct children (default), -1 = all descendants.
+   *  Part of plan identity (canonicalReadPlan) — a cursor minted at one depth
+   *  cannot resume a scan at another. */
+  depth?: number;
   /** Trusted predicate from mount/config. Pushdown-safe. */
   viewWhere?: Record<string, unknown>;
   /** Untrusted predicate from client. Evaluated against visible (projected)
@@ -67,6 +72,10 @@ export async function executeList(
   if (!Number.isInteger(limit) || limit <= 0) {
     throw new OpError('BAD_REQUEST', `executeList: limit must be positive integer, got ${limit}`);
   }
+  const depth = plan.depth ?? 1;
+  if (!Number.isInteger(depth) || (depth < 1 && depth !== -1)) {
+    throw new OpError('BAD_REQUEST', `executeList: depth must be a positive integer or -1, got ${depth}`);
+  }
   const budget = opts.budget ?? DEFAULT_BUDGET;
 
   // callerWhere is untrusted — block code-eval operators before sift sees them.
@@ -85,6 +94,7 @@ export async function executeList(
   const hash = planHash(plan);
 
   const scan = source.scanChildren(plan.source, {
+    depth,
     after: opts.cursor === undefined ? undefined : decodeReadCursor(opts.cursor, hash),
     limitHint: limit + 1,
     signal: opts.signal,
