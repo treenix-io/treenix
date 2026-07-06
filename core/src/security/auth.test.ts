@@ -220,6 +220,12 @@ describe('stripComponents', () => {
     assert.ok('#status' in stripped);
   });
 
+  it('$id survives the read strip — identity is client-visible (gk8.10)', () => {
+    const node = { ...createNode('/test', 'test'), $id: '01ARZ3NDEKTSV4RRFFQ69G5FAV' };
+    const stripped = stripComponents(node, 'alice', ['u:alice']);
+    assert.equal(stripped.$id, '01ARZ3NDEKTSV4RRFFQ69G5FAV');
+  });
+
   it('strips component with type default ACL', () => {
     register('secret', 'acl', () => [{ g: 'admins', p: R }]);
     const node = {

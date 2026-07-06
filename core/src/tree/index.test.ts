@@ -2,7 +2,7 @@ import { createNode } from '#core';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { OpError } from '#errors';
-import { createMemoryTree, createOverlayTree, PatchTestError } from './index';
+import { createMemoryTree, createOverlayTree, fromStorageKeys, PatchTestError, toStorageKeys } from './index';
 
 describe('MemoryStore', () => {
   it('set and get', async () => {
@@ -270,5 +270,17 @@ describe('MemoryStore OCC — typed OpError', () => {
       () => tree.patch('/nope', [['r', 'x', 1]]),
       (e: unknown) => e instanceof OpError && e.code === 'NOT_FOUND',
     );
+  });
+});
+
+describe('storage key codec — $id mapping (gk8.10)', () => {
+  it('round-trips $id via _nid, never touching the Mongo primary key _id', () => {
+    const stored = toStorageKeys({ $path: '/a', $type: 'doc', $id: '01ARZ3NDEKTSV4RRFFQ69G5FAV', x: 1 });
+    assert.equal(stored._nid, '01ARZ3NDEKTSV4RRFFQ69G5FAV');
+    assert.equal('_id' in stored, false, '$id must not collide with the immutable Mongo _id');
+
+    const back = fromStorageKeys({ ...stored, _id: 'mongo-object-id' });
+    assert.equal(back.$id, '01ARZ3NDEKTSV4RRFFQ69G5FAV');
+    assert.equal('_id' in back, false, 'Mongo _id stays skipped (D06)');
   });
 });

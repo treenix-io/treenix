@@ -12,6 +12,7 @@ import {
   type NodeData, type RefEntry, resolveExact,
 } from '#core';
 import { OpError } from '#errors';
+import { ulid } from '#util/ulid';
 import { type Tree } from './index';
 import { withCache } from './cache';
 
@@ -265,6 +266,24 @@ export function withStoragePolicy(backing: Tree): StoragePolicy {
 
     async set(node, ctx) {
       stampVersion(node);
+
+      // $id (core-gk8.10): identity is minted ONCE at first persist and never
+      // changes. Stored id wins over the payload — a blind upsert from a
+      // legacy client (whose read predates $id) must not re-mint; a DIFFERENT
+      // incoming id is a forged/duplicated identity — reject, never merge.
+      // A carried $id on a NEW path is accepted: trash-restore, branch merge
+      // and backup import legitimately relocate identity. Cost: one backing
+      // get per write (fs already reads for OCC; memory get is O(depth)).
+      const existing = await backing.get(node.$path, ctx);
+      if (existing?.$id) {
+        if (node.$id !== undefined && node.$id !== existing.$id) {
+          throw new OpError('BAD_REQUEST', `$id is immutable: ${node.$path} already carries an identity`);
+        }
+        node.$id = existing.$id;
+      } else if (node.$id === undefined) {
+        node.$id = ulid();
+      }
+
       return backing.set(node, ctx);
     },
   };

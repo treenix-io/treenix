@@ -66,7 +66,9 @@ async function deployNodes(
       continue;
     }
 
-    const { $rev, $path, ...rest } = node;
+    // $id stripped: a prefab captured from a live node would replay a stale
+    // identity into every deploy — deployed nodes mint fresh ids (gk8.10).
+    const { $rev, $path, $id, ...rest } = node;
     await tree.set({ ...rest, $path: resolvedPath } as NodeData);
     deployed.push(resolvedPath);
   }

@@ -286,8 +286,12 @@ export function createOverlayTree(upper: Tree, lower: Tree): Tree {
 
 export function toStorageKeys(node: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(node))
+  for (const [k, v] of Object.entries(node)) {
+    // $id maps to _nid, NOT _id — Mongo's immutable primary key (D06: _id is
+    // skipped on read; the generic mapping would silently swallow identity).
+    if (k === '$id') { out['_nid'] = v; continue; }
     out[k.startsWith('$') ? `_${k.slice(1)}` : k] = v;
+  }
   return out;
 }
 
@@ -295,6 +299,7 @@ export function fromStorageKeys(doc: Record<string, unknown>): Record<string, un
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(doc)) {
     if (k === '_id') continue;
+    if (k === '_nid') { out['$id'] = v; continue; }
     out[k.startsWith('_') ? `$${k.slice(1)}` : k] = v;
   }
   return out;

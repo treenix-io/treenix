@@ -4,9 +4,11 @@
 // never exercised. Contracts are unchanged; only the composition surface is.
 
 import { A, createNode, type NodeData, R, register, S, unregister, W } from '#core';
+import { OpError } from '#errors';
 import { createPipeline } from '#server/server';
 import { clearRegistry } from '#testing';
 import { createMemoryTree, type Tree } from '#tree';
+import { isUlid, ulid } from '#util/ulid';
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { isTrashExempt, sweepTrash, TRASH_ENTRY_TYPE, TRASH_ROOT, withStoragePolicy } from './policy';
@@ -560,5 +562,89 @@ describe('policy: trash through the pipeline (e2e)', () => {
     assert.equal(await systemTree.remove('/board/t2'), true);
     const after = await systemTree.getChildren(TRASH_ROOT, { depth: 1 });
     assert.equal(after.items.length, 1);
+  });
+});
+
+// ── $id identity step (core-gk8.10, Stage 1) ──
+
+describe('policy: $id identity (gk8.10)', () => {
+  function setup() {
+    const inner = createMemoryTree();
+    const { base, tree } = withStoragePolicy(inner);
+    return { inner, base, tree };
+  }
+
+  it('mints a ULID at first persist — client and system paths both stamp', async () => {
+    const { inner, base, tree } = setup();
+
+    await tree.set(createNode('/a', 'doc', { title: 'hi' }));
+    await base.set(createNode('/b', 'doc', {}));
+
+    const a = await inner.get('/a');
+    const b = await inner.get('/b');
+    assert.ok(isUlid(a?.$id), 'client path stamps');
+    assert.ok(isUlid(b?.$id), 'system path stamps');
+    assert.notEqual(a?.$id, b?.$id);
+  });
+
+  it('preserves the stored $id on a blind upsert without one (legacy echo)', async () => {
+    const { inner, tree } = setup();
+    await tree.set(createNode('/a', 'doc', { title: 'v1' }));
+    const minted = (await inner.get('/a'))?.$id;
+
+    await tree.set(createNode('/a', 'doc', { title: 'v2' }));
+
+    const after = await inner.get('/a');
+    assert.equal(after?.title, 'v2');
+    assert.equal(after?.$id, minted, 'identity survives the id-less rewrite');
+  });
+
+  it('accepts a matching echo and rejects a different incoming $id', async () => {
+    const { inner, tree } = setup();
+    await tree.set(createNode('/a', 'doc', {}));
+    const stored = await inner.get('/a');
+    assert.ok(stored?.$id);
+
+    await tree.set({ ...stored, title: 'echoed' });
+    assert.equal((await inner.get('/a'))?.title, 'echoed');
+
+    await assert.rejects(
+      () => tree.set({ ...stored, $id: ulid(), $rev: undefined }),
+      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+    );
+  });
+
+  it('accepts a carried $id on a new path — restore/import relocates identity', async () => {
+    const { inner, tree } = setup();
+    const carried = ulid();
+
+    await tree.set({ ...createNode('/restored', 'doc', {}), $id: carried });
+
+    assert.equal((await inner.get('/restored'))?.$id, carried);
+  });
+
+  it('trash copy keeps the identity — restore brings the same $id back', async () => {
+    const { inner, tree } = setup();
+    await inner.set(createNode('/', 'root', {}));
+    await tree.set(createNode('/thing', 'doc', { name: 'x' }));
+    const id = (await inner.get('/thing'))?.$id;
+    assert.ok(id);
+
+    await tree.remove('/thing');
+    const { items } = await inner.getChildren(TRASH_ROOT, { depth: 1 });
+    const copy = await inner.get(`${items[0].$path}/thing`);
+    assert.equal(copy?.$id, id, 'identity survives the trash copy');
+  });
+
+  it('patch preserves $id (cache patch = get -> apply -> policied set)', async () => {
+    const { inner, tree } = setup();
+    await tree.set(createNode('/a', 'doc', { n: 1 }));
+    const id = (await inner.get('/a'))?.$id;
+
+    await tree.patch('/a', [['r', 'n', 2]]);
+
+    const after = await inner.get('/a');
+    assert.equal(after?.n, 2);
+    assert.equal(after?.$id, id);
   });
 });

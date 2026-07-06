@@ -19,6 +19,10 @@ export type RefEntry = { t: string; f?: string; d?: ComponentData };
 
 export type NodeData<T = Record<string, unknown>> = ComponentData<T> & {
   $path: string;
+  /** Stable identity (ULID), minted once at first persist and immutable —
+   *  survives rename/move/trash-restore (core-gk8.10). Optional: virtual and
+   *  legacy nodes may lack it. */
+  $id?: string;
   $owner?: string;
   $rev?: number;
   $refs?: RefEntry[];

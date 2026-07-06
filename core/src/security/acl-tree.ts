@@ -28,7 +28,7 @@ function assertMutationSystemField(firstSeg: string, isAdmin: boolean): void {
 
 function assertTestSystemField(firstSeg: string, isAdmin: boolean): void {
   if (!firstSeg.startsWith('$')) return;
-  if (firstSeg === '$path' || firstSeg === '$type' || firstSeg === '$rev' || firstSeg === '$ref') return;
+  if (firstSeg === '$path' || firstSeg === '$type' || firstSeg === '$rev' || firstSeg === '$ref' || firstSeg === '$id') return;
   if (firstSeg === '$acl' || firstSeg === '$owner') {
     if (isAdmin) return;
     throw new OpError('FORBIDDEN', `Access denied: ${firstSeg} requires A permission`);

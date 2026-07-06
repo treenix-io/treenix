@@ -192,6 +192,10 @@ export function stripComponents(node: NodeData, userId: string | null, claims: s
   if (node.$acl) out.$acl = node.$acl;
   if (node.$owner) out.$owner = node.$owner;
   if (node.$rev !== undefined) out.$rev = node.$rev;
+  // $id must survive reads: a client echoing a full-node set() without it
+  // would look like an id-less legacy write — visible identity keeps the
+  // echo round-trip consistent (write-side immutability gated in policy).
+  if (node.$id !== undefined) out.$id = node.$id;
   if ('$ref' in node) out['$ref'] = node['$ref'];
   for (const [key, val] of Object.entries(node)) {
     if (key.startsWith('$')) continue;
