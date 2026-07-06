@@ -14,7 +14,7 @@ import {
 } from '@dnd-kit/core';
 import { arrayMove, horizontalListSortingStrategy, SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { type NodeData, register } from '@treenx/core';
+import { getComponent, type NodeData, register } from '@treenx/core';
 import { Render, RenderContext, useActions, useDraft, type View } from '@treenx/react';
 import { createNode, execute, removeNode, useChildren, useNavigate, usePath } from '@treenx/react';
 import { usePathSave } from '@treenx/react';
@@ -37,9 +37,30 @@ import { useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { AttachMenu } from '../simple-components/view';
 import { getNamedComponents } from './named-components';
-import { BoardColumn, BoardKanban, BoardTask } from './types';
+import { BoardColumn, BoardKanban, BoardTask, Order } from './types';
 
 type TaskStatus = string;
+
+// Sort order lives in the shared `#order` component (getComponent by type).
+// Fallback keeps pre-existing nodes ordered: columns by legacy node-field,
+// tasks by createdAt — a distinct spread so a first drop can interleave cleanly.
+const orderValue = (node: NodeData, fallback: number): number => {
+  const o = getComponent(node, Order);
+  return o && typeof o.order === 'number' ? o.order : fallback;
+};
+const columnOrder = (c: NodeData): number =>
+  orderValue(c, typeof c.order === 'number' ? c.order : 0);
+const taskOrder = (t: NodeData): number =>
+  orderValue(t, typeof t.createdAt === 'number' ? t.createdAt : 0);
+
+const orderComponent = (order: number) => ({ $type: 'board.order' as const, order });
+
+// Fractional position between two neighbor orders (either may be absent at an edge).
+const between = (prev: number | null, next: number | null): number =>
+  prev !== null && next !== null ? (prev + next) / 2
+    : prev !== null ? prev + 1
+    : next !== null ? next - 1
+    : Date.now();
 
 async function withToast(fn: () => Promise<unknown>, successMsg?: string) {
   try {
@@ -508,15 +529,21 @@ function TaskCard({
     data: { task, status: colStatus },
   });
 
-  // dnd-kit requires inline style for runtime-computed transforms
-  const style = { transform: CSS.Transform.toString(transform), transition };
+  // dnd-kit requires inline style for runtime-computed transforms.
+  // Active card: DragOverlay is the moving visual — suppress the pointer-follow
+  // transform here so the in-place card stays parked as a dimmed placeholder
+  // (transform + 200ms transition on it = double motion, rubber-band jitter).
+  const style = isDragging ? undefined : { transform: CSS.Transform.toString(transform), transition };
 
   return (
     <div
       ref={setNodeRef}
       {...listeners}
       {...attributes}
-      className="cursor-grab active:cursor-grabbing rounded-md border border-border bg-card px-3 py-2 text-left transition-colors hover:bg-accent/50"
+      className={cn(
+        'cursor-grab active:cursor-grabbing rounded-md border border-border bg-card px-3 py-2 text-left transition-colors hover:bg-accent/50',
+        isDragging && 'opacity-30',
+      )}
       style={style}
       onClick={() => {
         if (!isDragging) onSelect(task.$path);
@@ -532,6 +559,11 @@ function TaskCard({
 // ── KanbanColumn — View<BoardColumn>, self-contained ──
 
 type ColumnExtra = {
+  // Tasks are filtered+sorted by the parent from its reactive `/board/data`
+  // subscription. Self-fetching via the query mount would miss status changes:
+  // the client cache never re-evaluates query membership on an optimistic field
+  // update, so a moved card stays linked to its old column until a refetch.
+  tasks: NodeData[];
   onSelect: (path: string) => void;
   onCreate: (status: string) => void;
   editable?: boolean;
@@ -542,13 +574,13 @@ const KanbanColumn: View<BoardColumn, ColumnExtra> = ({
   value,
   onChange,
   ctx,
+  tasks,
   onSelect,
   onCreate,
   editable = false,
   overStatus,
 }) => {
   const path = ctx!.node.$path;
-  const { data: tasks } = useChildren(path, { watch: true, watchNew: true });
   const status = path.split('/').at(-1) ?? '';
   const { setNodeRef: setDropRef, isOver } = useDroppable({ id: `col:${status}`, data: { status } });
   const sortable = useSortable({
@@ -646,6 +678,13 @@ const KanbanColumnEdit: View<BoardColumn, ColumnExtra> = (props) => <KanbanColum
 register('board.column', 'react:edit', KanbanColumnEdit);
 register('board.column', 'react', KanbanColumn);
 
+// board.order is a positioning aspect — never rendered as a card component.
+// Exact registration per context so it wins over the generic default view.
+const OrderHidden: View<Order> = () => null;
+for (const c of ['react', 'react:compact', 'react:card', 'react:list', 'react:edit'] as const) {
+  register(Order, c, OrderHidden);
+}
+
 function TaskDialog({
   node,
   onChange,
@@ -665,7 +704,8 @@ function TaskDialog({
         if (!open) onClose();
       }}
     >
-      <DialogContent className="max-w-lg">
+      {/* no visible description — silence Radix a11y warning explicitly */}
+      <DialogContent className="max-w-lg" aria-describedby={undefined}>
         <DialogTitle className="sr-only">Task</DialogTitle>
         <RenderContext name="react:edit">
           <Render value={node} onChange={onChange} draft={!!onSave} />
@@ -743,28 +783,35 @@ const KanbanView: View<BoardKanban, { editable?: boolean }> = ({ value, ctx, edi
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
   const { data: children } = useChildren(basePath, { watch: true, watchNew: true });
+  const { data: allTasks } = useChildren(`${basePath}/data`, { watch: true, watchNew: true });
   const columns = children
     .filter((c) => c.$type === 'board.column')
-    .sort((a, b) => {
-      const oa = typeof a.order === 'number' ? a.order : 0;
-      const ob = typeof b.order === 'number' ? b.order : 0;
-      return oa - ob;
-    });
+    .sort((a, b) => columnOrder(a) - columnOrder(b));
+
+  // Group tasks by status from the reactive /board/data subscription, sorted by
+  // #order. Columns render from this — reacts to status changes (cross-column
+  // moves) that the query-mount membership would miss until reload.
+  const tasksByStatus = useMemo(() => {
+    const map = new Map<string, NodeData[]>();
+    for (const task of allTasks) {
+      const s = typeof task.status === 'string' ? task.status : '';
+      (map.get(s) ?? map.set(s, []).get(s)!).push(task);
+    }
+    for (const list of map.values()) list.sort((a, b) => taskOrder(a) - taskOrder(b));
+    return map;
+  }, [allTasks]);
 
   const addColumn = async () => {
     const label = window.prompt('Column name:');
     if (!label?.trim()) return;
     const slug = cleanSlug(label);
-    const maxOrder = Math.max(
-      0,
-      ...columns.map((c) => (typeof c.order === 'number' ? c.order : 0)),
-    );
+    const maxOrder = Math.max(0, ...columns.map(columnOrder));
 
     await withToast(async () => {
       await createNode(`${basePath}/${slug}`, 'board.column', {
         label: label.trim(),
         color: 'border-border',
-        order: maxOrder + 1,
+        '#order': orderComponent(maxOrder + 1),
         '#mount': { $type: 't.mount.query', source: `${basePath}/data`, match: { status: slug } },
       });
     }, `Column "${label.trim()}" created`);
@@ -804,32 +851,44 @@ const KanbanView: View<BoardKanban, { editable?: boolean }> = ({ value, ctx, edi
 
       const reordered = arrayMove(columns, fromIdx, toIdx);
       const moved = reordered[toIdx];
-      const getOrder = (c?: NodeData) =>
-        c && typeof c.order === 'number' ? c.order : null;
-      const prev = getOrder(reordered[toIdx - 1]);
-      const next = getOrder(reordered[toIdx + 1]);
+      const prev = reordered[toIdx - 1] ? columnOrder(reordered[toIdx - 1]) : null;
+      const next = reordered[toIdx + 1] ? columnOrder(reordered[toIdx + 1]) : null;
 
-      let newOrder: number;
-      if (prev !== null && next !== null) newOrder = (prev + next) / 2;
-      else if (prev !== null) newOrder = prev + 1;
-      else if (next !== null) newOrder = next - 1;
-      else newOrder = 0;
-
-      saves.path(moved.$path).onChange({ order: newOrder });
+      saves.path(moved.$path).onChange({ '#order': orderComponent(between(prev, next)) });
+      saves.flush(); // commit to cache now — reorder in the same frame, no snap-back
       return;
     }
 
-    // ── task move (status change) ──
+    // ── task drag ──
+    if (!activeData?.task || typeof activeData.task !== 'object' || !('status' in activeData.task)) return;
+    const activeTask = activeData.task as NodeData;
+    const taskPath = activeTask.$path;
+    const currentStatus = typeof activeTask.status === 'string' ? activeTask.status : '';
+
     const overId = String(over.id);
     const targetStatus =
-      overData?.status ?? (overId.startsWith('col:') ? overId.slice(4) : undefined);
+      overData?.status ?? (overId.startsWith('col:') ? overId.slice(4) : currentStatus);
     if (typeof targetStatus !== 'string') return;
 
-    if (!activeData?.task || typeof activeData.task !== 'object' || !('status' in activeData.task)) return;
-    if (activeData.task.status === targetStatus) return;
+    // cross-column: change status (new column re-sorts by createdAt fallback)
+    if (currentStatus !== targetStatus) {
+      withToast(() => execute(taskPath, 'move', { status: targetStatus }, 'board.task'));
+      return;
+    }
 
-    const taskPath = (activeData.task as NodeData).$path;
-    withToast(() => execute(taskPath, 'move', { status: targetStatus }, 'board.task'));
+    // same-column: reorder — fractional order between the drop-slot neighbors
+    const overTaskPath = overId.startsWith('col:') ? null : overId;
+    if (!overTaskPath || overTaskPath === taskPath) return;
+    const list = tasksByStatus.get(targetStatus) ?? [];
+    const fromIdx = list.findIndex((t) => t.$path === taskPath);
+    const toIdx = list.findIndex((t) => t.$path === overTaskPath);
+    if (fromIdx < 0 || toIdx < 0) return;
+
+    const reordered = arrayMove(list, fromIdx, toIdx);
+    const prev = reordered[toIdx - 1] ? taskOrder(reordered[toIdx - 1]) : null;
+    const next = reordered[toIdx + 1] ? taskOrder(reordered[toIdx + 1]) : null;
+    saves.path(taskPath).onChange({ '#order': orderComponent(between(prev, next)) });
+    saves.flush(); // commit to cache now — reorder in the same frame, no snap-back
   };
 
   return (
@@ -852,6 +911,7 @@ const KanbanView: View<BoardKanban, { editable?: boolean }> = ({ value, ctx, edi
               <Render
                 key={col.$path}
                 value={col}
+                tasks={tasksByStatus.get(col.$path.split('/').at(-1) ?? '') ?? []}
                 onChange={saves.path(col.$path).onChange}
                 onSelect={setSelectedTask}
                 onCreate={handleCreate}

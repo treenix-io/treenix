@@ -77,11 +77,18 @@ export class BoardKanban {}
 
 registerType('board.kanban', BoardKanban);
 
-/** Kanban column — label + color + sort order. Query mount provides filtered tasks. */
+/** Sort order — reusable aspect. Composed onto columns AND task cards as `#order`.
+ *  Fractional values let a drop land between neighbors without renumbering the list. */
+export class Order {
+  order = 0;
+}
+
+registerType('board.order', Order);
+
+/** Kanban column — label + color. Sort order lives in the `#order` component. */
 export class BoardColumn {
   label = '';
   color = 'border-border';
-  order = 0;
 }
 
 registerType('board.column', BoardColumn);

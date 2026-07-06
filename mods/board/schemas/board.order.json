@@ -1,0 +1,16 @@
+{
+  "$id": "board.order",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Sort order — reusable aspect. Composed onto columns AND task cards as `#order`.",
+  "description": "Fractional values let a drop land between neighbors without renumbering the list.",
+  "properties": {
+    "order": {
+      "type": "number",
+      "default": 0
+    }
+  },
+  "required": [
+    "order"
+  ]
+}
