@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { after, before, describe, it } from 'node:test';
-import { generateSchemas } from '#schema/extract-schemas-oxc';
+import { generateSchemas, SchemaParseError } from '#schema/extract-schemas-oxc';
 
 const IMPORT_FIXTURES_DIR = path.resolve(import.meta.dirname, '_import-fixtures');
 const SCHEMAS_DIR = path.join(IMPORT_FIXTURES_DIR, 'schemas');
@@ -125,6 +125,16 @@ describe('extract-schemas-oxc', () => {
       type: 'number',
       enum: [0, 1, 2, 3, 4],
       default: 2,
+    });
+  });
+
+  it('negative numeric literal union → number enum with negative values', () => {
+    // Regression C12: `-1` parses as UnaryExpression, not Literal — used to
+    // corrupt the union into an empty/anyOf shape.
+    assert.deepEqual(schema.properties.bias, {
+      type: 'number',
+      enum: [-1, 0, 1],
+      default: 0,
     });
   });
 
@@ -398,6 +408,29 @@ describe('extract-schemas-oxc', () => {
     assert.ok(!('_cleanup' in schema.methods));
   });
 
+  it('union return type → anyOf in method schema', () => {
+    // Regression C33: anyOf-shaped returns have no .type and were dropped.
+    assert.deepEqual(schema.methods.lookup.return, {
+      anyOf: [{ type: 'string' }, { type: 'number' }],
+    });
+  });
+
+  it('union return type on arrow-field method → anyOf', () => {
+    assert.deepEqual(schema.methods.peekArrow.return, {
+      anyOf: [{ type: 'string' }, { type: 'number' }],
+    });
+  });
+
+  it('@param/@returns/@throws do not leak into method schema', () => {
+    // Regression C34: standard positional JSDoc is signature documentation,
+    // not schema metadata.
+    const m = schema.methods.lookup;
+    assert.equal(m.title, 'Look up a value by key.');
+    assert.ok(!('param' in m));
+    assert.ok(!('returns' in m));
+    assert.ok(!('throws' in m));
+  });
+
   // ── Arrow-field methods (PropertyDefinition with arrow initializer) ──
 
   it('arrow-field with @read extracts kind="read" into methods', () => {
@@ -500,6 +533,27 @@ describe('extract-schemas-oxc', () => {
 
     assert.equal(before, after);
     assert.equal(stat1.mtimeMs, stat2.mtimeMs, 'file should not be rewritten when unchanged');
+  });
+});
+
+describe('extract-schemas-oxc: parse errors', () => {
+  // Dynamic fixture — created inside the test so the main describe's scan of
+  // schema/ (which runs first) never sees the broken file.
+  const FIXTURE_DIR = path.join(IMPORT_FIXTURES_DIR, '_bad-parse');
+
+  after(async () => {
+    await fs.rm(FIXTURE_DIR, { recursive: true, force: true });
+  });
+
+  it('throws SchemaParseError carrying the file path on syntax error', async () => {
+    await fs.mkdir(FIXTURE_DIR, { recursive: true });
+    const badFile = path.join(FIXTURE_DIR, 'broken.ts');
+    await fs.writeFile(badFile, 'export class Broken {\n  foo( {\n');
+
+    await assert.rejects(
+      () => generateSchemas([FIXTURE_DIR]),
+      (err: unknown) => err instanceof SchemaParseError && err.file === badFile,
+    );
   });
 });
 

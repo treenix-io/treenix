@@ -56,6 +56,9 @@ class SchemaTestWidget {
   // Numeric literal union — should collapse to { type: 'number', enum: [...] }
   trustLevel: 0 | 1 | 2 | 3 | 4 = 2;
 
+  // Negative literal union — UnaryExpression('-') members must unwrap (C12)
+  bias: -1 | 0 | 1 = 0;
+
   // TS enum declarations
   level: Level = Level.Medium;
   rank: Rank = Rank.First;
@@ -192,6 +195,19 @@ class SchemaTestWidget {
    * @post status
    */
   archive() {}
+
+  /**
+   * Look up a value by key.
+   * @param key the lookup key
+   * @returns the stored value
+   * @throws when the key is unknown
+   */
+  lookup(key: string): string | number {
+    return 42;
+  }
+
+  /** @read */
+  peekArrow = (key: string): string | number => 42;
 
   /** @description Internal method, hidden from schema */
   _cleanup() {}

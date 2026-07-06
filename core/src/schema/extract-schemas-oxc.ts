@@ -26,6 +26,18 @@ class JSDocError extends Error {
   override readonly name = 'JSDocError';
 }
 
+// Parse failures must break the run (C11): a file that silently contributes
+// nothing yields stale/missing schemas that look like extractor bugs downstream.
+export class SchemaParseError extends Error {
+  override readonly name = 'SchemaParseError';
+  constructor(
+    message: string,
+    readonly file: string,
+  ) {
+    super(message);
+  }
+}
+
 // Whitelist of allowed JSDoc tags. Unknown tags throw to catch typos.
 // Module-specific tags can use the `@x-foo` escape (Phase 1.2).
 const KNOWN_TAGS = new Set([
@@ -37,7 +49,8 @@ const KNOWN_TAGS = new Set([
   'read', 'write', 'io',
   // dataflow contract
   'pre', 'post',
-  // standard JSDoc — silently ignored
+  // standard JSDoc — @param/@returns/@throws allowed but stripped before return
+  // (positional signature docs, not schema metadata); @default is kept
   'param', 'returns', 'throws', 'default',
 ]);
 
@@ -105,6 +118,12 @@ export function parseJSDoc(raw: string): ParsedJSDoc {
       throw new JSDocError(`Unknown JSDoc tag: @${name}`);
     }
   }
+
+  // C34: @param/@returns/@throws describe the TS signature, which is already
+  // the source of truth for arguments/return — leaking them corrupts schemas.
+  delete result.param;
+  delete result.returns;
+  delete result.throws;
 
   // Kind tags: @read/@write canonical.
   const kindTags: { tag: string; value: 'read' | 'write' }[] = [];
@@ -250,6 +269,43 @@ function enumToSchema(enumNode: N): PropertySchema {
   return namesDiffer ? { ...base, enumNames: names } : base;
 }
 
+// TS parses a negative literal type (`-1`) as UnaryExpression('-', Literal)
+// inside TSLiteralType — unwrap it like evalInit does, otherwise negative
+// members corrupt/empty the resulting enum (C12).
+function literalTypeValue(literal: N | null | undefined): unknown {
+  if (!literal) return undefined;
+  if (
+    literal.type === 'UnaryExpression' &&
+    literal.operator === '-' &&
+    literal.argument?.type === 'Literal' &&
+    typeof literal.argument.value === 'number'
+  )
+    return -literal.argument.value;
+  return literal.value;
+}
+
+// Interim fail-loud (core-2q1): unresolved type refs emit {}. Several current
+// uses legitimately rely on that (same-file interfaces, Partial<T>, bare-package
+// imports), so we aggregate into ONE warning per run instead of throwing.
+const unresolvedRefs = new Set<string>();
+
+function noteUnresolvedRef(name: string, ctx: SchemaCtx): PropertySchema {
+  const file = ctx.currentFile ? path.relative(process.cwd(), ctx.currentFile) : 'unknown file';
+  unresolvedRefs.add(`${name} (${file})`);
+  return {};
+}
+
+// `{}` is the CORRECT schema for these keywords (any value / no value) —
+// reporting them as "unresolved" would drown the real gaps in noise.
+const INTENTIONALLY_EMPTY = new Set([
+  'TSAnyKeyword',
+  'TSUnknownKeyword',
+  'TSVoidKeyword',
+  'TSUndefinedKeyword',
+  'TSNullKeyword',
+  'TSNeverKeyword',
+]);
+
 function typeToSchema(node: N | null | undefined, ctx: SchemaCtx = {}): PropertySchema {
   if (!node) return {};
 
@@ -268,19 +324,21 @@ function typeToSchema(node: N | null | undefined, ctx: SchemaCtx = {}): Property
 
     case 'TSUnionType': {
       const types = node.types as N[];
-      if (types.every((t) => t.type === 'TSLiteralType' && typeof t.literal?.value === 'string'))
-        return { type: 'string', enum: types.map((t) => t.literal.value) };
-      if (types.every((t) => t.type === 'TSLiteralType' && typeof t.literal?.value === 'number'))
-        return { type: 'number', enum: types.map((t) => t.literal.value) };
-      if (types.every((t) => t.type === 'TSLiteralType' && typeof t.literal?.value === 'boolean'))
-        return { type: 'boolean' };
+      const lits = types.map((t) =>
+        t.type === 'TSLiteralType' ? literalTypeValue(t.literal) : undefined,
+      );
+      if (lits.every((v): v is string => typeof v === 'string'))
+        return { type: 'string', enum: lits };
+      if (lits.every((v): v is number => typeof v === 'number'))
+        return { type: 'number', enum: lits };
+      if (lits.every((v) => typeof v === 'boolean')) return { type: 'boolean' };
       const nonUndef = types.filter((t) => t.type !== 'TSUndefinedKeyword');
       if (nonUndef.length === 1) return typeToSchema(nonUndef[0], ctx);
       return { anyOf: nonUndef.map((t) => typeToSchema(t, ctx)) };
     }
 
     case 'TSLiteralType': {
-      const v = node.literal?.value;
+      const v = literalTypeValue(node.literal);
       if (typeof v === 'string') return { type: 'string', enum: [v] };
       if (typeof v === 'number') return { type: 'number', enum: [v] };
       if (typeof v === 'boolean') return { type: 'boolean' };
@@ -332,14 +390,15 @@ function typeToSchema(node: N | null | undefined, ctx: SchemaCtx = {}): Property
         }
       }
 
-      return {};
+      return noteUnresolvedRef(name ?? node.typeName?.type ?? node.type, ctx);
     }
 
     case 'TSTypeAnnotation':
       return typeToSchema(node.typeAnnotation, ctx);
 
     default:
-      return {};
+      if (INTENTIONALLY_EMPTY.has(node.type)) return {};
+      return noteUnresolvedRef(node.type, ctx);
   }
 }
 
@@ -739,7 +798,8 @@ function generateClassSchema(
       ...(isGenerator && yieldsSchema && Object.keys(yieldsSchema).length
         ? { yields: yieldsSchema }
         : {}),
-      ...(!isGenerator && Object.keys(ret).length && ret.type !== undefined ? { return: ret } : {}),
+      // C33: union returns are anyOf-shaped (no .type) — only emptiness disqualifies
+      ...(!isGenerator && Object.keys(ret).length ? { return: ret } : {}),
     } as MethodSchema;
   };
 
@@ -835,9 +895,8 @@ function generateClassSchema(
         ...(isGenerator && yieldsSchema && Object.keys(yieldsSchema).length
           ? { yields: yieldsSchema }
           : {}),
-        ...(!isGenerator && Object.keys(ret).length && ret.type !== undefined
-          ? { return: ret }
-          : {}),
+        // C33: union returns are anyOf-shaped (no .type) — only emptiness disqualifies
+        ...(!isGenerator && Object.keys(ret).length ? { return: ret } : {}),
       } as MethodSchema;
     }
   }
@@ -882,6 +941,9 @@ async function globSourceFiles(dirs: string[]): Promise<string[]> {
 // ── Main ──
 
 export async function generateSchemas(dirs: string[]): Promise<void> {
+  // A thrown run (parse error) may leave stale entries — reset per run.
+  unresolvedRefs.clear();
+
   const t0 = performance.now();
   const files = await globSourceFiles(dirs);
 
@@ -898,7 +960,17 @@ export async function generateSchemas(dirs: string[]): Promise<void> {
 
   for (const file of files) {
     const source = await fs.readFile(file, 'utf-8');
-    const { program: ast, comments } = parseSync(path.basename(file), source);
+    const parsed = parseSync(path.basename(file), source);
+    // C11: a file that fails to parse must break the run — silently skipping it
+    // drops every schema it defines and downstream sees stale/missing types.
+    if (parsed.errors.length) {
+      const details = parsed.errors
+        .slice(0, 3)
+        .map((e) => e.message)
+        .join('; ');
+      throw new SchemaParseError(`[schema/oxc] parse failed for ${file}: ${details}`, file);
+    }
+    const { program: ast, comments } = parsed;
     const jsDocMap = buildJSDocMap(comments as Comment[], source);
 
     const fileAliases = findTypeAliases(ast as N);
@@ -1002,6 +1074,13 @@ export async function generateSchemas(dirs: string[]): Promise<void> {
     updated++;
   }
 
+  if (unresolvedRefs.size) {
+    console.warn(
+      `[schema] ${unresolvedRefs.size} unresolved type refs emitted {}: ${[...unresolvedRefs].sort().join(', ')}`,
+    );
+    unresolvedRefs.clear();
+  }
+
   const elapsed = Math.round(performance.now() - t0);
   if (updated) console.log(`[schema/oxc] ${updated} updated (${elapsed}ms)`);
   else console.log(`[schema/oxc] all up to date (${elapsed}ms)`);
@@ -1009,5 +1088,9 @@ export async function generateSchemas(dirs: string[]): Promise<void> {
 
 // CLI: tsx extract-schemas-oxc.ts dir1 dir2 ...
 if (process.argv[1] && path.resolve(process.argv[1]) === new URL(import.meta.url).pathname) {
-  generateSchemas(process.argv.slice(2)).catch(console.error);
+  generateSchemas(process.argv.slice(2)).catch((e) => {
+    // Non-zero exit so CI fails instead of silently shipping stale schemas
+    console.error(e);
+    process.exitCode = 1;
+  });
 }

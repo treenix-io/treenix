@@ -23,7 +23,40 @@
             }
           }
         }
-      ]
+      ],
+      "return": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "ok": {
+                "type": "boolean"
+              },
+              "saved": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "ok"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "ok": {
+                "type": "boolean"
+              },
+              "error": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "ok",
+              "error"
+            ]
+          }
+        ]
+      }
     }
   }
 }
