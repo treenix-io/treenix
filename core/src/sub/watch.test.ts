@@ -683,6 +683,137 @@ describe('WatchManager — edge cases', () => {
   });
 });
 
+describe('WatchManager — invalidateVps narrowed per user (core-cnr.8 C26)', () => {
+  it('each vp watcher receives only the vps it registered', () => {
+    const wm = createWatchManager();
+    const e1: NodeEvent[] = [], e2: NodeEvent[] = [];
+    wm.connect('c1', 'u1', (e) => e1.push(e));
+    wm.connect('c2', 'u2', (e) => e2.push(e));
+    wm.watch('u1', ['/views/a'], { children: true });
+    wm.watch('u2', ['/views/b'], { children: true });
+
+    wm.notify({ type: 'set', path: '/data/x', node: { $type: 't' }, invalidateVps: ['/views/a', '/views/b'] });
+
+    assert.equal(e1.length, 1);
+    assert.deepEqual(e1[0].invalidateVps, ['/views/a']);
+    assert.equal(e2.length, 1);
+    assert.deepEqual(e2[0].invalidateVps, ['/views/b']);
+  });
+
+  it('recipient with no vp watch gets the event stripped of foreign vps', () => {
+    const wm = createWatchManager();
+    const events: NodeEvent[] = [];
+    wm.connect('c1', 'u1', (e) => events.push(e));
+    wm.watch('u1', ['/data/x']);
+
+    wm.notify({ type: 'set', path: '/data/x', node: { $type: 't' }, invalidateVps: ['/views/other-user'] });
+
+    assert.equal(events.length, 1);
+    assert.equal(events[0].invalidateVps, undefined);
+  });
+
+  it('exact + own vp watch: keeps own vp, drops the foreign one', () => {
+    const wm = createWatchManager();
+    const events: NodeEvent[] = [];
+    wm.connect('c1', 'u1', (e) => events.push(e));
+    wm.watch('u1', ['/data/x']);
+    wm.watch('u1', ['/views/mine'], { children: true });
+
+    wm.notify({ type: 'set', path: '/data/x', node: { $type: 't' }, invalidateVps: ['/views/mine', '/views/theirs'] });
+
+    assert.equal(events.length, 1);
+    assert.deepEqual(events[0].invalidateVps, ['/views/mine']);
+  });
+
+  it('ring replay after grace delivers the narrowed event, not the union', () => {
+    const wm = createWatchManager();
+    wm.connect('c1', 'u1', () => {});
+    wm.watch('u1', ['/views/a'], { children: true });
+    wm.disconnect('c1');
+
+    wm.notify({ type: 'set', path: '/data/x', node: { $type: 't' }, invalidateVps: ['/views/a', '/views/b'] });
+
+    const replayed: NodeEvent[] = [];
+    const covered = wm.connect('c2', 'u1', (e) => replayed.push(e), 0);
+    assert.equal(covered, true);
+    assert.equal(replayed.length, 1);
+    assert.deepEqual(replayed[0].invalidateVps, ['/views/a']);
+  });
+});
+
+describe('WatchManager — auto-watch lifecycle on remove (core-cnr.8 C27)', () => {
+  it('churning children under autoWatch do not exhaust the watch budget', () => {
+    const wm = createWatchManager({ maxWatchesPerUser: 5 });
+    const events: NodeEvent[] = [];
+    wm.connect('c1', 'u1', (e) => events.push(e));
+    wm.watch('u1', ['/dir'], { children: true, autoWatch: true });
+
+    for (let i = 0; i < 20; i++) {
+      wm.notify({ type: 'set', path: `/dir/x${i}`, node: { $type: 't' } });
+      wm.notify({ type: 'remove', path: `/dir/x${i}` });
+    }
+    assert.equal(events.length, 40); // every set and remove delivered
+
+    // Without pruning, user.paths held 20 dead watches and this threw.
+    wm.watch('u1', ['/elsewhere']);
+    wm.notify({ type: 'set', path: '/elsewhere', node: { $type: 't' } });
+    assert.equal(events.length, 41);
+  });
+
+  it('remove does not promote: vp-routed remove leaves no exact watch behind', () => {
+    const wm = createWatchManager();
+    const events: NodeEvent[] = [];
+    wm.connect('c1', 'u1', (e) => events.push(e));
+    wm.watch('u1', ['/views/q'], { children: true, autoWatch: true });
+
+    wm.notify({ type: 'remove', path: '/data/x', invalidateVps: ['/views/q'] });
+    assert.equal(events.length, 1);
+
+    // No exact watch was installed on the removed node — silence.
+    wm.notify({ type: 'set', path: '/data/x', node: { $type: 't' } });
+    assert.equal(events.length, 1);
+  });
+
+  it('explicit exact watch survives remove and sees the recreate', () => {
+    const wm = createWatchManager();
+    const events: NodeEvent[] = [];
+    wm.connect('c1', 'u1', (e) => events.push(e));
+    wm.watch('u1', ['/a']);
+
+    wm.notify({ type: 'remove', path: '/a' });
+    wm.notify({ type: 'set', path: '/a', node: { $type: 't' } });
+    assert.equal(events.length, 2);
+  });
+
+  it('auto-watched child pruned on remove, re-promoted on recreate via prefix', () => {
+    const wm = createWatchManager();
+    const events: NodeEvent[] = [];
+    wm.connect('c1', 'u1', (e) => events.push(e));
+    wm.watch('u1', ['/dir'], { children: true, autoWatch: true });
+
+    wm.notify({ type: 'set', path: '/dir/a', node: { $type: 't' } });   // promoted
+    wm.notify({ type: 'remove', path: '/dir/a' });                       // delivered, pruned
+    wm.notify({ type: 'set', path: '/dir/a', node: { $type: 't' } });   // via prefix, re-promoted
+    wm.notify({ type: 'set', path: '/dir/a', node: { $type: 't' } });   // via exact
+    assert.equal(events.length, 4);
+  });
+
+  it('explicit watch on an auto-watched path upgrades it — survives remove', () => {
+    const wm = createWatchManager();
+    const events: NodeEvent[] = [];
+    wm.connect('c1', 'u1', (e) => events.push(e));
+    wm.watch('u1', ['/dir'], { children: true, autoWatch: true });
+
+    wm.notify({ type: 'set', path: '/dir/a', node: { $type: 't' } });   // auto-promoted
+    wm.watch('u1', ['/dir/a']);                                          // now explicit
+    wm.unwatch('u1', ['/dir'], { children: true });
+
+    wm.notify({ type: 'remove', path: '/dir/a' });
+    wm.notify({ type: 'set', path: '/dir/a', node: { $type: 't' } });   // explicit survives
+    assert.equal(events.length, 3);
+  });
+});
+
 describe('WatchManager — seq / ring / resume (core-gk8.1)', () => {
   const setEvent = (path: string): NodeEvent => ({ type: 'set', path, node: { $type: 't' } });
   const seqOf = (e: NodeEvent) => (e.type === 'reconnect' ? undefined : e.seq);

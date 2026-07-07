@@ -862,6 +862,9 @@ describe('Stress: full watch pipeline', () => {
     );
 
     cdc2.watchQuery({ vp: '/views/hot', userId: 'observer', plan: { source: '/data', viewWhere: { hot: true } }, mountDeps: new Set(['/views/hot']) });
+    // Production watchList registers BOTH halves (wire.ts) — the manager
+    // narrows invalidateVps to vps the user watches (core-cnr.8 C26).
+    w2.watch('observer', ['/views/hot'], { children: true });
 
     const exactEvents: NodeEvent[] = [];
     const childEvents: NodeEvent[] = [];

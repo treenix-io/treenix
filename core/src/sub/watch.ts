@@ -71,9 +71,13 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
   // monotonic; the ring keeps the last `ringSize` routed events for resume.
   // missedOffline marks events stamped while no connection was attached —
   // a legacy reconnect (no `since`) can then be answered honestly.
+  // paths value: true = auto-promoted by autoWatch (pruned on remove),
+  // false = explicit watch(). Explicit survives remove — "watch this path"
+  // includes seeing a later recreate; auto-watches must not, or a churning
+  // directory grows user.paths until every watch() call throws (C27).
   type UserEntry = {
     pushes: Map<string, WatchPush>;
-    paths: Set<string>;
+    paths: Map<string, boolean>;
     prefixes: Map<string, boolean>;
     seq: number;
     ring: { seq: number; event: NodeEvent }[];
@@ -83,11 +87,11 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
   const graceTimers = new Map<string, ReturnType<typeof setTimeout>>();
   let totalWatches = 0;
 
-  function userWatchCount(user: { paths: Set<string>; prefixes: Map<string, boolean> }): number {
+  function userWatchCount(user: { paths: Map<string, boolean>; prefixes: Map<string, boolean> }): number {
     return user.paths.size + user.prefixes.size;
   }
 
-  function checkLimits(user: { paths: Set<string>; prefixes: Map<string, boolean> }, adding: number) {
+  function checkLimits(user: { paths: Map<string, boolean>; prefixes: Map<string, boolean> }, adding: number) {
     if (userWatchCount(user) + adding > maxPerUser) {
       throw new Error(`Watch limit exceeded: max ${maxPerUser} watches per user`);
     }
@@ -100,7 +104,7 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
     const user = users.get(userId);
     if (!user) return;
     totalWatches -= userWatchCount(user);
-    for (const p of user.paths) removeFrom(pathToUsers, p, userId);
+    for (const p of user.paths.keys()) removeFrom(pathToUsers, p, userId);
     for (const p of user.prefixes.keys()) removeFrom(prefixToUsers, p, userId);
     users.delete(userId);
     opts?.onUserRemoved?.(userId);
@@ -109,6 +113,17 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
   function pushToUser(uid: string, event: NodeEvent) {
     const user = users.get(uid);
     if (!user) return;
+    // C26: event.invalidateVps is the union across ALL active queries — sent
+    // whole it leaks other users' view paths. Deliver only the vps this user
+    // registered (registration happens through their own ACL-gated read).
+    if (event.invalidateVps) {
+      const own = event.invalidateVps.filter(vp => user.prefixes.has(vp));
+      if (own.length !== event.invalidateVps.length) {
+        event = { ...event };
+        if (own.length) event.invalidateVps = own;
+        else delete event.invalidateVps;
+      }
+    }
     const safeEvent = { ...event, seq: ++user.seq };
     user.ring.push({ seq: safeEvent.seq, event: safeEvent });
     if (user.ring.length > ringSize) user.ring.shift();
@@ -119,7 +134,7 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
   function ensureUser(userId: string) {
     let user = users.get(userId);
     if (!user) {
-      user = { pushes: new Map(), paths: new Set(), prefixes: new Map(), seq: 0, ring: [], missedOffline: false };
+      user = { pushes: new Map(), paths: new Map(), prefixes: new Map(), seq: 0, ring: [], missedOffline: false };
       users.set(userId, user);
     }
     return user;
@@ -197,7 +212,7 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
         }
       } else {
         for (const p of paths) {
-          user.paths.add(p);
+          user.paths.set(p, false); // explicit — overrides a prior auto flag
           addTo(pathToUsers, p, userId);
         }
       }
@@ -254,9 +269,10 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
           const user = users.get(uid);
           if (!user) continue;
           pushToUser(uid, event);
-          // autoWatch: subscribe to exact path for future updates (respects limit)
-          if (user.prefixes.get(parent) && !user.paths.has(event.path) && userWatchCount(user) < maxPerUser && totalWatches < maxTotal) {
-            user.paths.add(event.path);
+          // autoWatch: subscribe to exact path for future updates (respects limit).
+          // Never on remove — that would watch a dead node forever (C27).
+          if (event.type !== 'remove' && user.prefixes.get(parent) && !user.paths.has(event.path) && userWatchCount(user) < maxPerUser && totalWatches < maxTotal) {
+            user.paths.set(event.path, true);
             addTo(pathToUsers, event.path, uid);
             totalWatches++;
           }
@@ -275,10 +291,27 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
           const user = users.get(uid);
           if (!user) continue;
           pushToUser(uid, event);
-          if (user.prefixes.get(vp) && !user.paths.has(event.path) && userWatchCount(user) < maxPerUser && totalWatches < maxTotal) {
-            user.paths.add(event.path);
+          if (event.type !== 'remove' && user.prefixes.get(vp) && !user.paths.has(event.path) && userWatchCount(user) < maxPerUser && totalWatches < maxTotal) {
+            user.paths.set(event.path, true);
             addTo(pathToUsers, event.path, uid);
             totalWatches++;
+          }
+        }
+      }
+
+      // C27: the removed node's auto-watches are done — prune AFTER delivery,
+      // so the remove itself still reaches exact watchers. Explicit watches
+      // (false flag) stay: they must see a recreate.
+      if (event.type === 'remove') {
+        const holders = pathToUsers.get(event.path);
+        if (holders) {
+          for (const uid of [...holders]) {
+            const user = users.get(uid);
+            if (user?.paths.get(event.path)) {
+              user.paths.delete(event.path);
+              removeFrom(pathToUsers, event.path, uid);
+              totalWatches--;
+            }
           }
         }
       }

@@ -68,6 +68,9 @@ describe('wire session over MessageChannel', () => {
     });
 
     const sub = await client.watchPath('/doc', () => {});
+    // dirty frames only for vps THIS session registered — invalidateVps is
+    // narrowed per user at the WatchManager (core-cnr.8 C26).
+    watcher.watch('wire-anon', ['/views/all', '/views/inbox'], { children: true });
 
     watcher.notify({
       type: 'patch', path: '/doc', patches: [['r', 'title', 'doc2']],
