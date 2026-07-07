@@ -359,6 +359,54 @@ describe('defineComponent', () => {
     assert.equal(result, 'safe', 'process must not be accessible in sandbox');
   });
 
+  it('sandboxed dynamic action cross-node read fails loud even under sandbox try/catch (C28)', async () => {
+    registerBuiltinActions();
+    const tree = createMemoryTree();
+    await tree.set(createNode('/sibling', 'dir', { count: 1 }));
+
+    await tree.set({
+      $path: '/sys/types/test/xread',
+      $type: 'type',
+      actions: {
+        // Swallowing catch inside the sandbox — the host-side error must still surface.
+        probe: 'var v = null; try { v = ctx.tree.get("/sibling"); } catch (e) {} return v;',
+      },
+      schema: { methods: { probe: { arguments: [] } } },
+    } as NodeData);
+    await tree.set(createNode('/xread1', 'test.xread', {}));
+
+    await assert.rejects(
+      () => executeAction(tree, '/xread1', undefined, undefined, 'probe', {}),
+      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+    );
+  });
+
+  it('dynamic action schema edits take effect without restart (C30)', async () => {
+    registerBuiltinActions();
+    const tree = createMemoryTree();
+
+    await tree.set({
+      $path: '/sys/types/test/mutable',
+      $type: 'type',
+      actions: { go: 'return "ok";' },
+      schema: { methods: { go: { arguments: [{ name: 'data', type: 'object' }] } } },
+    } as NodeData);
+    await tree.set(createNode('/mut1', 'test.mutable', {}));
+
+    // Lax schema accepts anything object-shaped.
+    assert.equal(await executeAction(tree, '/mut1', undefined, undefined, 'go', { n: 'oops' }), 'ok');
+
+    // Tighten the stored schema — next call must validate against the NEW shape.
+    const tn = (await tree.get('/sys/types/test/mutable'))!;
+    tn.schema = { methods: { go: { arguments: [{ name: 'data', type: 'object', properties: { n: { type: 'number' } } }] } } };
+    await tree.set(tn);
+
+    await assert.rejects(
+      () => executeAction(tree, '/mut1', undefined, undefined, 'go', { n: 'oops' }),
+      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+    );
+  });
+
   it('sandboxed dynamic action rejects writes outside own path', async () => {
     registerBuiltinActions();
     const tree = createMemoryTree();
