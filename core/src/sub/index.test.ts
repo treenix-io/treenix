@@ -1,4 +1,5 @@
 import { A, createNode, getComponentByName, R, type NodeData } from '#core';
+import { OpError } from '#errors';
 import { userIdFromAuthPath } from '#security/claims';
 import { createMemoryTree } from '#tree';
 import assert from 'node:assert/strict';
@@ -515,6 +516,68 @@ describe('ACL change invalidation (Stage 6)', () => {
     // routing decision (who gets delivered), not field-level filtering.
     assert.ok(aliceEv.invalidateVps?.includes('/views/open'));
     assert.ok(bobEv.invalidateVps?.includes('/views/closed'));
+  });
+});
+
+// ── patchMany emission: set-members (core-gk8.10 stage 2) ──
+
+describe('patchMany emission with set-members', () => {
+  it('CREATE set-member emits a set event carrying the stored node after commit', async () => {
+    const events: NodeEvent[] = [];
+    const { tree } = withSubscriptions(createMemoryTree(), e => events.push(e));
+
+    await tree.set({ ...createNode('/data/src', 'thing'), v: 1 });
+    events.length = 0;
+
+    assert.ok(tree.patchMany, 'memory tree exposes patchMany');
+    await tree.patchMany!('/data', [
+      { path: '/data/src', ops: [['r', 'v', 2]] },
+      { path: '/data/dst', node: { ...createNode('/data/dst', 'thing'), v: 2 } },
+    ]);
+
+    const created = events.find(e => e.type === 'set' && e.path === '/data/dst');
+    assert.ok(created, 'create in a batch is visible to subscribers');
+    if (created.type !== 'set') throw new Error('expected set event');
+    assert.equal(created.node.v, 2);
+    assert.equal(typeof created.node.$rev, 'number', 'event carries the STORED node with its bumped $rev');
+
+    const patched = events.find(e => e.type === 'patch' && e.path === '/data/src');
+    assert.ok(patched, 'ops-member in the same batch still emits');
+  });
+
+  it('set-member over an existing node emits an event at its path', async () => {
+    const events: NodeEvent[] = [];
+    const { tree } = withSubscriptions(createMemoryTree(), e => events.push(e));
+
+    await tree.set({ ...createNode('/data/a', 'thing'), v: 1 });
+    events.length = 0;
+
+    await tree.patchMany!('/data', [
+      { path: '/data/a', node: { ...createNode('/data/a', 'thing'), v: 9 } },
+    ]);
+
+    // patch-or-set per the diffNodes fallback — assert delivery, not shape.
+    const ev = events.find(e => (e.type === 'set' || e.type === 'patch') && e.path === '/data/a');
+    assert.ok(ev, 'set-member over an existing node reaches subscribers');
+  });
+
+  it('denied batch emits zero events — including for its set-members', async () => {
+    const events: NodeEvent[] = [];
+    const { tree } = withSubscriptions(createMemoryTree(), e => events.push(e));
+
+    await tree.set({ ...createNode('/data/a', 'thing'), v: 1 });
+    events.length = 0;
+
+    await assert.rejects(
+      tree.patchMany!('/data', [
+        { path: '/data/a', ops: [['t', 'v', 999]] },
+        { path: '/data/new', node: createNode('/data/new', 'thing') },
+      ]),
+      (e: unknown) => e instanceof OpError && e.code === 'CONFLICT',
+    );
+
+    assert.equal(events.length, 0, 'failed batch emits nothing');
+    assert.equal(await tree.get('/data/new'), undefined, 'atomic: nothing committed');
   });
 });
 

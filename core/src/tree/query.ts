@@ -57,6 +57,7 @@ export function mapSiftQuery(q: unknown): unknown {
       else if (k === '$owner') newKey = '_owner';
       else if (k === '$rev') newKey = '_rev';
       else if (k === '$id') newKey = '_tid'; // matches toStorageKeys — queries can find nodes by identity
+      else if (k === '$refId') newKey = '_refId'; // ref-target identity — omission here fails silently (matches nothing)
       out[newKey] = mapSiftQuery(v);
     }
     return out;

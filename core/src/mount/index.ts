@@ -4,7 +4,7 @@
 
 import { type ComponentData, getComponentByName, isComponent, isRef, type NodeData, resolve } from '#core';
 import { OpError } from '#errors';
-import { assertPatchManyBatch, type Tree } from '#tree';
+import { assertPatchManyBatch, isSetEntry, type Tree } from '#tree';
 import { createBoundedCache } from '#util/bounded-cache';
 
 // ── Adapter contract ──
@@ -177,6 +177,15 @@ export function withMounts(rootStore: Tree, opts?: WithMountsOpts): MountableTre
       const tree = await resolveNodeTree(ancestor, ctx);
       if (!tree.patchMany) {
         throw new OpError('BAD_REQUEST', `patchMany: target tree at ${ancestor} does not support patchMany`);
+      }
+      // A set-member may CREATE: if its path lives under a nested mount below
+      // `ancestor`, forwarding to the ancestor's tree would silently create a
+      // shadowed node in the outer store (an ops-member merely fails NOT_FOUND
+      // there). Only set-members pay the extra per-path resolution.
+      for (const e of entries) {
+        if (isSetEntry(e) && await resolveNodeTree(e.path, ctx) !== tree) {
+          throw new OpError('BAD_REQUEST', `patchMany: set-member ${e.path} crosses a mount boundary under ${ancestor}`);
+        }
       }
       for (const e of entries) invalidateMount(e.path);
       await tree.patchMany(ancestor, entries, ctx);

@@ -6,7 +6,7 @@
 
 import type { NodeData } from '#core';
 import { assertSafePath } from '#core/path';
-import type { ExecOpts, Page, PatchManyEntry, Tree } from './index';
+import { isSetEntry, type ExecOpts, type Page, type PatchManyEntry, type Tree } from './index';
 
 export function createRepathTree(inner: Tree, localBase: string, remoteBase: string = '/'): Tree {
   // Normalize: strip trailing slashes, handle root
@@ -124,7 +124,11 @@ export function createRepathTree(inner: Tree, localBase: string, remoteBase: str
       patchMany: (ancestor: string, entries: PatchManyEntry[], ctx?: unknown) =>
         inner.patchMany!(
           toRemote(ancestor),
-          entries.map(e => ({ path: toRemote(e.path), ops: e.ops })),
+          // Set-member carries the authority path INSIDE the node too — remap
+          // both (mirror of set()) or the inner assertPatchManyBatch denies it.
+          entries.map(e => isSetEntry(e)
+            ? { path: toRemote(e.path), node: { ...e.node, $path: toRemote(e.node.$path) } }
+            : { path: toRemote(e.path), ops: e.ops }),
           ctx,
         ),
     } : {}),

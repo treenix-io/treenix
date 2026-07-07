@@ -10,7 +10,7 @@
 
 import type { ActorContext, DelegationHooks, DelegationInfo } from '@treenx/core/server/actions';
 import type { NodeData } from '@treenx/core';
-import type { Tree, PatchManyEntry, PatchOp } from '@treenx/core/tree';
+import { isSetEntry, type PatchManyEntry, type PatchOp, type Tree } from '@treenx/core/tree';
 import { randomBytes } from 'node:crypto';
 import { markHealthy, markUnhealthy, setRecoveryProbe } from './health';
 
@@ -27,8 +27,12 @@ function eventPath(): string {
 
 type Op = 'set' | 'remove' | 'patch' | 'patchMany';
 
-/** Per-member journal row for a patchMany batch — ops + both images. */
-type AuditBatchEntry = { path: string; ops: PatchOp[]; before: NodeData | null; after: NodeData | null };
+/** Per-member journal row for a patchMany batch — mirrors the PatchManyEntry
+ *  union (gk8.10 stage 2): ops-member rows journal the ops, set-member rows
+ *  the incoming node. Both carry before/after images (before=null on create). */
+type AuditBatchEntry =
+  | { path: string; ops: PatchOp[]; before: NodeData | null; after: NodeData | null }
+  | { path: string; node: NodeData; before: NodeData | null; after: NodeData | null };
 
 function buildEvent(args: {
   op: Op;
@@ -182,12 +186,12 @@ export function withAudit(tree: Tree): Tree {
 
         const rows: AuditBatchEntry[] = [];
         for (let i = 0; i < entries.length; i++) {
-          rows.push({
-            path: entries[i].path,
-            ops: entries[i].ops,
-            before: befores[i],
-            after: (await tree.get(entries[i].path, ctx)) ?? null,
-          });
+          const entry = entries[i];
+          const before = befores[i];
+          const after = (await tree.get(entry.path, ctx)) ?? null;
+          rows.push(isSetEntry(entry)
+            ? { path: entry.path, node: entry.node, before, after }
+            : { path: entry.path, ops: entry.ops, before, after });
         }
         const event = buildEvent({ op: 'patchMany', path: ancestor, before: null, after: null, entries: rows, actor: getActor(ctx) });
         await appendOrFailLoud(tree, event);

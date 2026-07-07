@@ -61,6 +61,15 @@ function suite(factory: Factory) {
       assert.deepEqual(paths, ['/p/a', '/p/a/x', '/p/b']);
     });
 
+    it('depth=-1 yields the full subtree in $path ASC order', async () => {
+      tree = await seed(['/p', '/p/b', '/p/b/y', '/p/a', '/p/a/x', '/p/a/x/deep']);
+      const entries = await collect(tree.scanChildren('/p', { depth: -1 }));
+      assert.deepEqual(
+        entries.map(e => e.node.$path),
+        ['/p/a', '/p/a/x', '/p/a/x/deep', '/p/b', '/p/b/y'],
+      );
+    });
+
     it('default depth is 1', async () => {
       tree = await seed(['/p', '/p/a', '/p/a/x']);
       const entries = await collect(tree.scanChildren('/p'));

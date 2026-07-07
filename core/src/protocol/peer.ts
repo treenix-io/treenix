@@ -7,7 +7,7 @@
 import { isRef, type NodeData, R, S } from '#core';
 import { assertSafePath } from '#core/path';
 import { OpError } from '#errors';
-import type { Page, Tree } from '#tree';
+import { followMoved, type Page, type Tree } from '#tree';
 import type { PatchOp } from '#tree/patch';
 import { subscriptionToAsyncIterable } from '#tree/watch';
 import {
@@ -165,7 +165,19 @@ export function createPeer(serve?: ServeFactory) {
           const result: NodeData[] = [node];
           if (cap && ((await cap.getPerm(path)) & S)) cap.watch([path]);
           if (isRef(node)) {
-            const target = await s.tree.get(node.$ref);
+            // Follow 'moved' tombstone chains so the client gets the LIVE
+            // node, not the tombstone (gk8.10 stage 2). Best-effort by
+            // contract: missing target or a broken chain (identity mismatch,
+            // hop limit) degrades to [node] — the wire op is not a validator.
+            // No self-repair here: this user's surface may be read-only;
+            // repair belongs to server-side resolveRef callers.
+            let target: NodeData | undefined;
+            try {
+              ({ target } = await followMoved(s.tree, node.$ref, node.$refId));
+            } catch (e) {
+              if (!(e instanceof OpError)) throw e;
+              console.error(`[twp] resolve: broken ref chain from ${node.$ref}:`, e);
+            }
             if (target) {
               result.push(target);
               if (cap && ((await cap.getPerm(target.$path)) & S)) cap.watch([target.$path]);

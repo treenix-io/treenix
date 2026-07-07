@@ -14,7 +14,7 @@ import { atomicWrite } from './fs-atomic';
 import { scanFromCollected } from './fs-common';
 import { ensureMigrated } from './migrate-component-namespace';
 import { assertPathSafe } from './path-safety';
-import { applyPatchManyEntry, assertPatchManyBatch, mapNodeForSift, paginate, type TreeSource } from './index';
+import { applyPatchManyEntry, assertPatchManyBatch, assertSetEntryOcc, isSetEntry, mapNodeForSift, paginate, type TreeSource } from './index';
 import { defaultPatch, hasMutationOps } from './patch';
 
 export async function createFsTree(rootDir: string): Promise<TreeSource> {
@@ -307,6 +307,14 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
       return locked(async () => {
         const staged: NodeData[] = [];
         for (const entry of entries) {
+          if (isSetEntry(entry)) {
+            // Set-member may CREATE — OCC gated here in phase 1; the clone is
+            // staged UNBUMPED because phase-2 writeNode owns the re-check +
+            // bump (same locked(), so the re-check cannot fail after this gate).
+            assertSetEntryOcc(await readNode(entry.path), entry);
+            staged.push(structuredClone(entry.node));
+            continue;
+          }
           const node = await readNode(entry.path);
           if (!node) throw new OpError('NOT_FOUND', `Node not found: ${entry.path}`);
           const copy = applyPatchManyEntry(node, entry);

@@ -200,7 +200,8 @@ export class OptimisticBuffer {
 
 
 // Deep equality check for node data, ignoring server-stamped fields the
-// client cannot predict: $rev (OCC bump) and $id (minted at first persist).
+// client cannot predict: $rev (OCC bump), $id (minted at first persist),
+// $refId (adopted by resolveRef self-repair).
 function nodesMatch(a: NodeData, b: NodeData): boolean {
   const aClean = withoutServerStamps(a);
   const bClean = withoutServerStamps(b);
@@ -208,6 +209,6 @@ function nodesMatch(a: NodeData, b: NodeData): boolean {
 }
 
 function withoutServerStamps(node: NodeData): Record<string, unknown> {
-  const { $rev, $id, ...rest } = node;
+  const { $rev, $id, $refId, ...rest } = node;
   return rest;
 }

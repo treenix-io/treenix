@@ -8,12 +8,12 @@
 
 import { validateNode } from '#comp/validate';
 import {
-  getRegistryVersion, isCompKey, isComponent, isRef,
+  getRegistryVersion, isCompKey, isComponent, isMoved, isRef,
   type NodeData, type RefEntry, resolveExact,
 } from '#core';
 import { OpError } from '#errors';
 import { ulid } from '#util/ulid';
-import { applyPatchManyEntry, assertPatchManyBatch, hasMutationOps, type PatchManyEntry, type Tree } from './index';
+import { applyPatchManyEntry, assertPatchManyBatch, hasMutationOps, isSetEntry, type PatchManyEntry, type PatchOp, type Tree } from './index';
 import { withCache } from './cache';
 
 // ── Migration: per-type $v ladder, applied on read (R-gk8.29) ──
@@ -210,6 +210,37 @@ function entryId(path: string): string {
   return `${Date.now()}-${entrySeq++}-${path.replace(/^\//, '').replace(/\//g, '~')}`;
 }
 
+// ── Store preparation: $v stamp + $id mint/echo ──
+// $id (core-gk8.10): identity is minted ONCE at first persist and never
+// changes. Stored id wins over the payload — a blind upsert from a legacy
+// client (whose read predates $id) must not re-mint; a DIFFERENT incoming id
+// is a forged/duplicated identity — reject, never merge. A carried $id on a
+// NEW path is accepted: trash-restore, branch merge, move() and backup import
+// legitimately relocate identity. Shared by base.set and the patchMany
+// set-member path — both funnel every full-node write.
+
+function prepareForStore(node: NodeData, existing: NodeData | undefined): void {
+  stampVersion(node);
+
+  if (existing?.$id) {
+    // Replacing a tombstone with a real node: the identity moved away WITH
+    // the node — the sign post does not own the path's future. Echoing here
+    // would let an unrelated write steal the moved id (refs with $refId
+    // would resolve to the impostor). Carried id wins (move-back/restore);
+    // id-less write mints fresh.
+    if (isMoved(existing) && !isMoved(node)) {
+      if (node.$id === undefined) node.$id = ulid();
+      return;
+    }
+    if (node.$id !== undefined && node.$id !== existing.$id) {
+      throw new OpError('BAD_REQUEST', `$id is immutable: ${node.$path} already carries an identity`);
+    }
+    node.$id = existing.$id;
+  } else if (node.$id === undefined) {
+    node.$id = ulid();
+  }
+}
+
 // ── The policy step ──
 
 export type StoragePolicy = {
@@ -265,25 +296,9 @@ export function withStoragePolicy(backing: Tree): StoragePolicy {
     },
 
     async set(node, ctx) {
-      stampVersion(node);
-
-      // $id (core-gk8.10): identity is minted ONCE at first persist and never
-      // changes. Stored id wins over the payload — a blind upsert from a
-      // legacy client (whose read predates $id) must not re-mint; a DIFFERENT
-      // incoming id is a forged/duplicated identity — reject, never merge.
-      // A carried $id on a NEW path is accepted: trash-restore, branch merge
-      // and backup import legitimately relocate identity. Cost: one backing
-      // get per write (fs already reads for OCC; memory get is O(depth)).
-      const existing = await backing.get(node.$path, ctx);
-      if (existing?.$id) {
-        if (node.$id !== undefined && node.$id !== existing.$id) {
-          throw new OpError('BAD_REQUEST', `$id is immutable: ${node.$path} already carries an identity`);
-        }
-        node.$id = existing.$id;
-      } else if (node.$id === undefined) {
-        node.$id = ulid();
-      }
-
+      // Cost: one backing get per write (fs already reads for OCC; memory get
+      // is O(depth)).
+      prepareForStore(node, await backing.get(node.$path, ctx));
       return backing.set(node, ctx);
     },
   };
@@ -339,6 +354,23 @@ export function withStoragePolicy(backing: Tree): StoragePolicy {
         const augmented: PatchManyEntry[] = [];
         const errors: string[] = [];
         for (const entry of entries) {
+          // Set-member: full-node write, may CREATE — replicate policied.set
+          // ($refs, validation) + base.set (prepareForStore) per member, since
+          // base.patchMany forwards to the backing without either. Cloned so
+          // the caller's node is never mutated (set() mutates in place — a
+          // batch stages, so staging must not leak).
+          if (isSetEntry(entry)) {
+            const copy = structuredClone(entry.node);
+            const refs = buildRefs(copy);
+            if (refs) copy.$refs = refs;
+            else delete copy.$refs;
+
+            for (const e of validateNode(copy)) errors.push(`${entry.path} ${e.path}: ${e.message}`);
+            prepareForStore(copy, await base.get(entry.path, ctx));
+            augmented.push({ path: entry.path, node: copy });
+            continue;
+          }
+
           const node = await base.get(entry.path, ctx);
           if (!node) throw new OpError('NOT_FOUND', `Node not found: ${entry.path}`);
           const copy = applyPatchManyEntry(node, entry);
@@ -357,7 +389,7 @@ export function withStoragePolicy(backing: Tree): StoragePolicy {
 
           for (const e of validateNode(copy)) errors.push(`${entry.path} ${e.path}: ${e.message}`);
 
-          const ops: PatchManyEntry['ops'] = [...entry.ops];
+          const ops: PatchOp[] = [...entry.ops];
           if (refs) ops.push(['r', '$refs', refs] as const);
           else if ('$refs' in node) ops.push(['d', '$refs'] as const);
           augmented.push({ path: entry.path, ops });

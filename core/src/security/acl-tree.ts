@@ -4,21 +4,24 @@
 
 import { A, type ComponentData, isComponent, type NodeData, R, W } from '#core';
 import { OpError } from '#errors';
-import { asTreeSource, assertSafePatchPath, type Page, type PatchOp, type Tree } from '#tree';
+import { asTreeSource, assertSafePatchPath, isSetEntry, type Page, type PatchManyEntry, type PatchOp, type Tree } from '#tree';
 import { executeList } from '#tree/read-runtime';
 import { resolveReadPlan } from '#mount/resolve-plan';
 import { type AclState, componentPerm, resolvePermission, stripComponents } from './acl';
 import { type Actor, assertSourceReadable, createProjector } from './projector';
 
 // ── Patch op rules ──
-// Mirrors stripComponents visibility (lines 268-279, 320-324, 340-344):
-//   $path/$type/$rev/$ref always visible → t allowed; only $ref mutable.
+// Mirrors stripComponents visibility (acl.ts):
+//   $path/$type/$rev/$id/$ref/$refId always visible → t allowed; only
+//   $ref/$refId mutable — they retarget/repair together (resolveRef
+//   self-repair patches both; a frozen $refId under a mutable $ref would
+//   desync the pair).
 //   $acl/$owner visible only with A → both gates require A.
 //   $refs always stripped → both ops forbidden (oracle).
 //   other $-fields → forbidden (unknown system fields).
 function assertMutationSystemField(firstSeg: string, isAdmin: boolean): void {
   if (!firstSeg.startsWith('$')) return;
-  if (firstSeg === '$ref') return;
+  if (firstSeg === '$ref' || firstSeg === '$refId') return;
   if (firstSeg === '$acl' || firstSeg === '$owner') {
     if (isAdmin) return;
     throw new OpError('FORBIDDEN', `Access denied: ${firstSeg} requires A permission`);
@@ -28,7 +31,7 @@ function assertMutationSystemField(firstSeg: string, isAdmin: boolean): void {
 
 function assertTestSystemField(firstSeg: string, isAdmin: boolean): void {
   if (!firstSeg.startsWith('$')) return;
-  if (firstSeg === '$path' || firstSeg === '$type' || firstSeg === '$rev' || firstSeg === '$ref' || firstSeg === '$id') return;
+  if (firstSeg === '$path' || firstSeg === '$type' || firstSeg === '$rev' || firstSeg === '$ref' || firstSeg === '$refId' || firstSeg === '$id') return;
   if (firstSeg === '$acl' || firstSeg === '$owner') {
     if (isAdmin) return;
     throw new OpError('FORBIDDEN', `Access denied: ${firstSeg} requires A permission`);
@@ -103,6 +106,53 @@ function assertPatchOps(
       currentOwner = undefined;
     }
   }
+}
+
+/** ACL rewrite for a full-node write (shared by set() and patchMany
+ *  set-members): $acl/$owner must survive unchanged without A, existing
+ *  non-writable components are restored (silent echo) or denied (altered),
+ *  incoming component values need W. Returns the safe node to forward. */
+function rewriteFullNodeWrite(
+  node: NodeData,
+  existing: NodeData | undefined,
+  perm: number,
+  userId: string | null,
+  claims: string[],
+): NodeData {
+  const safe = { ...node };
+
+  const preserveField = (field: string) => {
+    const kept = existing?.[field];
+    if (field in safe && !sameValue(safe[field], kept)) {
+      throw new OpError('FORBIDDEN', `Access denied: ${field}`);
+    }
+    if (kept !== undefined) safe[field] = kept;
+    else delete safe[field];
+  };
+
+  if (!(perm & A)) { preserveField('$acl'); preserveField('$owner'); }
+
+  const owner = safe.$owner ?? existing?.$owner;
+  const canWriteComponent = (val: ComponentData) => !!(componentPerm(val, userId, claims, owner) & W);
+
+  for (const [key, oldVal] of Object.entries(existing ?? {})) {
+    if (key.startsWith('$') || !isComponent(oldVal) || canWriteComponent(oldVal)) continue;
+    if (key in safe && !sameValue(safe[key], oldVal)) {
+      throw new OpError('FORBIDDEN', `Access denied: component ${key}`);
+    }
+    safe[key] = oldVal;
+  }
+
+  for (const [key, val] of Object.entries(safe)) {
+    if (key.startsWith('$') || !isComponent(val)) continue;
+    const oldVal = existing?.[key];
+    if (isComponent(oldVal) && !canWriteComponent(oldVal) && sameValue(val, oldVal)) continue;
+    if (!canWriteComponent(val)) {
+      throw new OpError('FORBIDDEN', `Access denied: component ${key}`);
+    }
+  }
+
+  return safe;
 }
 
 // ── Tree wrapper ──
@@ -222,40 +272,7 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
       const perm = await getPerm(node.$path);
       if (!(perm & W)) throw new OpError('FORBIDDEN', `Access denied: ${node.$path}`);
       const existing = await rawStore.get(node.$path, ctx);
-      const safe = { ...node };
-
-      const preserveField = (field: string) => {
-        const kept = existing?.[field];
-        if (field in safe && !sameValue(safe[field], kept)) {
-          throw new OpError('FORBIDDEN', `Access denied: ${field}`);
-        }
-        if (kept !== undefined) safe[field] = kept;
-        else delete safe[field];
-      };
-
-      if (!(perm & A)) { preserveField('$acl'); preserveField('$owner'); }
-
-      const owner = safe.$owner ?? existing?.$owner;
-      const canWriteComponent = (val: ComponentData) => !!(componentPerm(val, userId, claims, owner) & W);
-
-      for (const [key, oldVal] of Object.entries(existing ?? {})) {
-        if (key.startsWith('$') || !isComponent(oldVal) || canWriteComponent(oldVal)) continue;
-        if (key in safe && !sameValue(safe[key], oldVal)) {
-          throw new OpError('FORBIDDEN', `Access denied: component ${key}`);
-        }
-        safe[key] = oldVal;
-      }
-
-      for (const [key, val] of Object.entries(safe)) {
-        if (key.startsWith('$') || !isComponent(val)) continue;
-        const oldVal = existing?.[key];
-        if (isComponent(oldVal) && !canWriteComponent(oldVal) && sameValue(val, oldVal)) continue;
-        if (!canWriteComponent(val)) {
-          throw new OpError('FORBIDDEN', `Access denied: component ${key}`);
-        }
-      }
-
-      return rawStore.set(safe, ctx);
+      return rawStore.set(rewriteFullNodeWrite(node, existing, perm, userId, claims), ctx);
     },
 
     async remove(path, ctx) {
@@ -279,24 +296,34 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
       return rawStore.patch(path, ops, ctx);
     },
 
-    // patchMany: the SAME R+W gate + per-op loop as patch, per member. All
-    // gates run BEFORE the forward, so one forbidden member denies the whole
-    // batch with nothing written (the inner adapter is all-or-nothing).
+    // patchMany: per member, the SAME R+W gate + per-op loop as patch.
+    // Set-members take R+W too — a batch is a read-modify-write composite
+    // and a $rev-carrying set-member is a rev oracle — while plain set()
+    // stays W-only. Set-members are REWRITTEN through the same rules as
+    // set() and the safe node is forwarded. All gates run BEFORE the
+    // forward, so one forbidden member denies the whole batch with nothing
+    // written (the inner adapter is all-or-nothing).
     async patchMany(ancestor, entries, ctx) {
       if (!rawStore.patchMany) {
         throw new OpError('BAD_REQUEST', 'patchMany: store does not support patchMany');
       }
 
-      for (const { path, ops } of entries) {
-        const perm = await getPerm(path);
+      const safeEntries: PatchManyEntry[] = [];
+      for (const entry of entries) {
+        const perm = await getPerm(entry.path);
         if (!((perm & R) && (perm & W))) {
-          throw new OpError('FORBIDDEN', `Access denied: ${path}`);
+          throw new OpError('FORBIDDEN', `Access denied: ${entry.path}`);
         }
-        const existing = await rawStore.get(path, ctx);
-        assertPatchOps(ops, existing, !!(perm & A), userId, claims);
+        const existing = await rawStore.get(entry.path, ctx);
+        if (isSetEntry(entry)) {
+          safeEntries.push({ path: entry.path, node: rewriteFullNodeWrite(entry.node, existing, perm, userId, claims) });
+        } else {
+          assertPatchOps(entry.ops, existing, !!(perm & A), userId, claims);
+          safeEntries.push(entry);
+        }
       }
 
-      return rawStore.patchMany(ancestor, entries, ctx);
+      return rawStore.patchMany(ancestor, safeEntries, ctx);
     },
   };
   return aclStore;

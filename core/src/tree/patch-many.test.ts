@@ -4,6 +4,7 @@
 
 import { A, createNode, R, register, S, unregister, W } from '#core';
 import { OpError } from '#errors';
+import { withMounts } from '#mount';
 import { withAcl } from '#security/acl-tree';
 import { createPipeline } from '#server/server';
 import type { NodeEvent } from '#sub';
@@ -141,6 +142,96 @@ function suite(factory: Factory) {
       assert.equal(b?.n, 20);
       assert.equal(b?.$rev, 2);
     });
+
+    // ── set-members (core-gk8.10 stage 2) ──
+
+    it('set-member creates at a new path', async () => {
+      tree = await seed();
+      await tree.patchMany!('/p', [
+        { path: '/p/new', node: createNode('/p/new', 'item', { n: 42 }) },
+      ]);
+      const created = await tree.get('/p/new');
+      assert.equal(created?.n, 42);
+      assert.equal(created?.$rev, 1);
+    });
+
+    it('set-member OCC mismatch denies the whole batch, nothing written', async () => {
+      tree = await seed();
+      const stale = createNode('/p/b', 'item', { n: 99 });
+      stale.$rev = 999;
+
+      await assert.rejects(
+        tree.patchMany!('/p', [
+          { path: '/p/a', ops: [['r', 'n', 10]] },
+          { path: '/p/new', node: createNode('/p/new', 'item', { n: 5 }) },
+          { path: '/p/b', node: stale },
+        ]),
+        code('CONFLICT'),
+      );
+
+      assert.equal((await tree.get('/p/a'))?.n, 1);
+      assert.equal(await tree.get('/p/new'), undefined, 'earlier create member unwritten');
+      const b = await tree.get('/p/b');
+      assert.equal(b?.n, 2);
+      assert.equal(b?.$rev, 1);
+    });
+
+    it('mixed batch (ops + OCC replace + create) applies atomically', async () => {
+      tree = await seed();
+      const replacement = createNode('/p/b', 'item', { n: 200 });
+      replacement.$rev = 1; // matches stored — OCC set
+
+      await tree.patchMany!('/p', [
+        { path: '/p/a', ops: [['r', 'n', 10]] },
+        { path: '/p/b', node: replacement },
+        { path: '/p/new', node: createNode('/p/new', 'item', { n: 5 }) },
+      ]);
+
+      const a = await tree.get('/p/a');
+      assert.equal(a?.n, 10);
+      assert.equal(a?.$rev, 2);
+      const b = await tree.get('/p/b');
+      assert.equal(b?.n, 200);
+      assert.equal(b?.$rev, 2, 'OCC set bumps the stored $rev');
+      assert.equal((await tree.get('/p/new'))?.$rev, 1);
+    });
+
+    it('set-member blind upsert replaces an existing node', async () => {
+      tree = await seed();
+      await tree.patchMany!('/p', [
+        { path: '/p/a', node: createNode('/p/a', 'item', { label: 'fresh' }) },
+      ]);
+
+      const a = await tree.get('/p/a');
+      assert.equal(a?.label, 'fresh');
+      assert.equal(a?.n, undefined, 'full-node write, not a merge');
+      // Mirrors Tree.set blind upsert: $rev stamped from the INCOMING node.
+      assert.equal(a?.$rev, 1);
+    });
+
+    it('failing later member leaves an earlier set-member unwritten (all-or-nothing)', async () => {
+      tree = await seed();
+      await assert.rejects(
+        tree.patchMany!('/p', [
+          { path: '/p/new', node: createNode('/p/new', 'item', { n: 5 }) },
+          { path: '/p/ghost', ops: [['r', 'n', 1]] },
+        ]),
+        code('NOT_FOUND'),
+      );
+      assert.equal(await tree.get('/p/new'), undefined);
+    });
+
+    it('set-member node.$path mismatching its entry path is rejected', async () => {
+      tree = await seed();
+      await assert.rejects(
+        tree.patchMany!('/p', [
+          { path: '/p/x', node: createNode('/p/y', 'item', { n: 1 }) },
+        ]),
+        code('BAD_REQUEST'),
+      );
+      assert.equal(await tree.get('/p/x'), undefined);
+      assert.equal(await tree.get('/p/y'), undefined);
+    });
   });
 }
 
@@ -244,6 +335,41 @@ describe('patchMany: filter/overlay layers', () => {
     await tree.patchMany!('/p', [{ path: '/p/a', ops: [['r', 'n', 10]] }]);
     assert.equal((await upper.get('/p/a'))?.n, 10);
   });
+
+  it('set-member routes by the INCOMING node: creates in upper and in lower', async () => {
+    const upper = createMemoryTree();
+    const lower = createMemoryTree();
+    const tree = createFilterTree(upper, lower, n => n.up === true);
+
+    await tree.patchMany!('/p', [
+      { path: '/p/u', node: createNode('/p/u', 'item', { up: true }) },
+    ]);
+    assert.equal((await upper.get('/p/u'))?.up, true);
+    assert.equal(await lower.get('/p/u'), undefined);
+
+    await tree.patchMany!('/p', [
+      { path: '/p/l', node: createNode('/p/l', 'item', { n: 1 }) },
+    ]);
+    assert.equal((await lower.get('/p/l'))?.n, 1);
+    assert.equal(await upper.get('/p/l'), undefined);
+  });
+
+  it('set-member routed upper + ops-member routed lower denies the batch, nothing written', async () => {
+    const upper = createMemoryTree();
+    const lower = createMemoryTree();
+    const tree = createFilterTree(upper, lower, n => n.up === true);
+    await lower.set(createNode('/p/b', 'item', { n: 2 }));
+
+    await assert.rejects(
+      tree.patchMany!('/p', [
+        { path: '/p/new', node: createNode('/p/new', 'item', { up: true }) },
+        { path: '/p/b', ops: [['r', 'n', 20]] },
+      ]),
+      code('BAD_REQUEST'),
+    );
+    assert.equal(await upper.get('/p/new'), undefined);
+    assert.equal((await lower.get('/p/b'))?.n, 2);
+  });
 });
 
 // ── repath ──
@@ -262,6 +388,66 @@ describe('patchMany: repath', () => {
     ]);
     assert.equal((await inner.get('/data/p/a'))?.n, 10);
     assert.equal((await inner.get('/data/p/b'))?.n, 20);
+  });
+
+  it('set-member: entry path AND node.$path both translate to the remote namespace', async () => {
+    const inner = createMemoryTree();
+    await inner.set(createNode('/data/p', 'dir'));
+    const tree = createRepathTree(inner, '/app', '/data');
+
+    await tree.patchMany!('/app/p', [
+      { path: '/app/p/new', node: createNode('/app/p/new', 'item', { n: 7 }) },
+    ]);
+
+    const created = await inner.get('/data/p/new');
+    assert.equal(created?.n, 7);
+    assert.equal(created?.$path, '/data/p/new');
+  });
+});
+
+// ── mounts: set-member boundary guard ──
+// A set-member under a NESTED mount below the batch ancestor must be denied:
+// the dispatcher resolves ONE tree at the ancestor, so forwarding would
+// silently create a shadowed node in the outer store.
+
+describe('patchMany: mounts', () => {
+  const MOUNT = 'pm.test.mount';
+
+  afterEach(() => {
+    try { unregister(MOUNT, 'mount'); } catch { /* not registered in this test */ }
+  });
+
+  it('set-member under a nested mount is rejected — no shadow node in the outer store', async () => {
+    const outer = createMemoryTree();
+    const nested = createMemoryTree();
+    register(MOUNT, 'mount', () => nested);
+    await outer.set(createNode('/p', 'dir'));
+    await outer.set(createNode('/p/m', 'dir', {}, { mount: { $type: MOUNT } }));
+    const ms = withMounts(outer);
+
+    await assert.rejects(
+      ms.patchMany!('/p', [
+        { path: '/p/m/x', node: createNode('/p/m/x', 'item', { n: 1 }) },
+      ]),
+      code('BAD_REQUEST'),
+    );
+    assert.equal(await outer.get('/p/m/x'), undefined, 'no shadow node in the outer store');
+    assert.equal(await nested.get('/p/m/x'), undefined);
+  });
+
+  it('set-member fully inside the mounted subtree forwards to the nested store', async () => {
+    const outer = createMemoryTree();
+    const nested = createMemoryTree();
+    register(MOUNT, 'mount', () => nested);
+    await outer.set(createNode('/p', 'dir'));
+    await outer.set(createNode('/p/m', 'dir', {}, { mount: { $type: MOUNT } }));
+    const ms = withMounts(outer);
+
+    await ms.patchMany!('/p/m/x', [
+      { path: '/p/m/x', node: createNode('/p/m/x', 'item', { n: 1 }) },
+    ]);
+    assert.equal((await nested.get('/p/m/x'))?.n, 1);
+    assert.equal(await outer.get('/p/m/x'), undefined);
   });
 });
 

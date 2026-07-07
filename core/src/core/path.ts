@@ -34,6 +34,14 @@ export function isInsideRoot(root: string, target: string): boolean {
   return target === root || target.startsWith(root + '/');
 }
 
+/** Deepest path containing both a and b ('/x/a', '/x/b' → '/x'; disjoint → '/'). */
+export function commonAncestor(a: string, b: string): string {
+  const as = a.split('/'), bs = b.split('/');
+  const shared: string[] = [];
+  for (let i = 1; i < as.length && i < bs.length && as[i] === bs[i]; i++) shared.push(as[i]);
+  return shared.length ? '/' + shared.join('/') : '/';
+}
+
 /** Validate a tree path — rejects traversal, dot segments, trailing slash, double-slash, null bytes,
  *  backslash, percent-escaped sequences, and the URI delimiters ?/# (paths are stored literally —
  *  no encoding layer; ?/# are reserved for query/fragment in URIs). */

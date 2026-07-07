@@ -6,7 +6,7 @@
 // request-scoped, not commit-scoped).
 
 import { OpError } from '#errors';
-import { type PatchManyEntry, type Tree } from '#tree';
+import { isSetEntry, type PatchManyEntry, type Tree } from '#tree';
 import { PatchTestError } from '#tree/patch';
 import { createPathLock } from '#util/path-lock';
 
@@ -24,7 +24,9 @@ export async function commit(tree: Tree, ancestor: string, entries: PatchManyEnt
   const apply = async (): Promise<void> => {
     try {
       if (entries.length === 1) {
-        await tree.patch(entries[0].path, entries[0].ops, ctx);
+        const only = entries[0];
+        if (isSetEntry(only)) await tree.set(only.node, ctx);
+        else await tree.patch(only.path, only.ops, ctx);
       } else {
         if (!tree.patchMany) {
           throw new OpError('BAD_REQUEST', 'commit: tree does not support patchMany');

@@ -1,6 +1,6 @@
 import { A, type ComponentData, createNode, type NodeData, R, register, S, W } from '#core';
 import { clearRegistry } from '#testing';
-import { createMemoryTree, type Tree } from '#tree';
+import { createMemoryTree, isSetEntry, type PatchManyEntry, type Tree } from '#tree';
 import { DEFAULT_BUDGET } from '#tree/read-runtime';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
@@ -287,6 +287,12 @@ describe('stripComponents', () => {
     const node = { ...createNode('/sys/autostart/bot', 'ref'), $ref: '/bot' } as any;
     const stripped = stripComponents(node, null, []);
     assert.equal((stripped as any).$ref, '/bot');
+  });
+
+  it('preserves $refId on ref nodes — lazy adoption must see it (gk8.10 stage 2)', () => {
+    const node: NodeData = { ...createNode('/sys/autostart/bot', 'ref'), $ref: '/bot', $refId: '01ARZ3NDEKTSV4RRFFQ69G5FAV' };
+    const stripped = stripComponents(node, null, []);
+    assert.equal(stripped.$refId, '01ARZ3NDEKTSV4RRFFQ69G5FAV');
   });
 
   it('preserves $rev on nodes', () => {
@@ -1263,6 +1269,39 @@ describe('withAcl.patch — C1 ACL enforcement', () => {
     assert.equal(((await tree.get('/sys/autostart/bot')) as any).$ref, '/new-bot');
   });
 
+  // N10b: $refId mutates wherever $ref does — retarget/repair write both.
+  it('N10b: $refId add/replace allowed wherever $ref replace is allowed (R+W)', async () => {
+    await tree.set({
+      ...createNode('/sys/autostart/bot', 'ref'),
+      $ref: '/bot',
+      $acl: [{ g: 'authenticated', p: R | W }],
+    });
+    const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);
+    await s.patch('/sys/autostart/bot', [
+      ['r', '$ref', '/new-bot'],
+      ['a', '$refId', '01ARZ3NDEKTSV4RRFFQ69G5FAV'],
+    ]);
+    const after = (await tree.get('/sys/autostart/bot'))!;
+    assert.equal(after.$ref, '/new-bot');
+    assert.equal(after.$refId, '01ARZ3NDEKTSV4RRFFQ69G5FAV');
+  });
+
+  // N10c: $refId is read-visible → t-op allowed (no oracle).
+  it('N10c: t on $refId allowed with R+W', async () => {
+    await tree.set({
+      ...createNode('/sys/autostart/bot', 'ref'),
+      $ref: '/bot',
+      $refId: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
+      $acl: [{ g: 'authenticated', p: R | W }],
+    });
+    const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);
+    await s.patch('/sys/autostart/bot', [
+      ['t', '$refId', '01ARZ3NDEKTSV4RRFFQ69G5FAV'],
+      ['r', '$ref', '/moved-bot'],
+    ]);
+    assert.equal((await tree.get('/sys/autostart/bot'))!.$ref, '/moved-bot');
+  });
+
   // ── Component-W rules ──
 
   // N11: modify-existing-protected-component → FORBIDDEN.
@@ -1512,6 +1551,88 @@ describe('withAcl.patch — C1 ACL enforcement', () => {
     const after = (await inner.get('/order')) as any;
     assert.ok(Array.isArray(after.$refs) && after.$refs.length === 1);
     assert.equal(after.$refs[0].t, '/customers/bob');
+  });
+});
+
+// gk8.10 stage 2: set-members in patchMany are full-node writes (may CREATE)
+// gated at R+W and REWRITTEN through the same ACL rules as set().
+describe('withAcl.patchMany — set-members', () => {
+  it('set-member without W → FORBIDDEN, nothing written', async () => {
+    await tree.set({ ...createNode('/dir', 'dir'), $acl: [{ g: 'authenticated', p: R }] });
+    await tree.set(createNode('/dir/n', 'doc', { title: 'orig' }));
+    const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);
+    await assert.rejects(
+      () => s.patchMany!('/dir', [{ path: '/dir/n', node: createNode('/dir/n', 'doc', { title: 'hacked' }) }]),
+      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+    );
+    assert.equal((await tree.get('/dir/n'))!.title, 'orig');
+  });
+
+  it('set-member with W but no R → FORBIDDEN (uniform R+W; plain set stays W-only)', async () => {
+    await tree.set({ ...createNode('/dir', 'dir'), $acl: [{ g: 'authenticated', p: W }] });
+    const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);
+    // Contrast: plain set() through the same actor is W-only and passes.
+    await s.set(createNode('/dir/plain', 'doc', { n: 1 }));
+    assert.equal((await tree.get('/dir/plain'))!.n, 1);
+    await assert.rejects(
+      () => s.patchMany!('/dir', [{ path: '/dir/created', node: createNode('/dir/created', 'doc', { n: 2 }) }]),
+      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+    );
+    assert.equal(await tree.get('/dir/created'), undefined);
+  });
+
+  it('R+W user creates via set-member; ops-members in the same batch still apply', async () => {
+    await tree.set({ ...createNode('/dir', 'dir'), $acl: [{ g: 'authenticated', p: R | W }] });
+    await tree.set(createNode('/dir/a', 'doc', { n: 1 }));
+    const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);
+    await s.patchMany!('/dir', [
+      { path: '/dir/new', node: createNode('/dir/new', 'doc', { n: 10 }) },
+      { path: '/dir/a', ops: [['r', 'n', 2]] },
+    ]);
+    assert.equal((await tree.get('/dir/new'))!.n, 10);
+    assert.equal((await tree.get('/dir/a'))!.n, 2);
+  });
+
+  it('set-member with ALTERED $acl by non-A user → FORBIDDEN', async () => {
+    await tree.set({ ...createNode('/dir', 'dir'), $acl: [{ g: 'authenticated', p: R | W }] });
+    await tree.set({ ...createNode('/dir/n', 'doc', { title: 'orig' }), $acl: [{ g: 'authenticated', p: R | W }] });
+    const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);
+    await assert.rejects(
+      () => s.patchMany!('/dir', [{
+        path: '/dir/n',
+        node: { ...createNode('/dir/n', 'doc', { title: 'x' }), $acl: [{ g: 'authenticated', p: R | W | A }] },
+      }]),
+      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+    );
+    assert.equal((await tree.get('/dir/n'))!.title, 'orig');
+  });
+
+  it('set-member omitting $acl forwards the preserved $acl — rewrite, not pass-through', async () => {
+    const raw = createMemoryTree();
+    await raw.set({ ...createNode('/', 'root'), $acl: [{ g: 'public', p: R }] });
+    await raw.set({ ...createNode('/dir', 'dir'), $acl: [{ g: 'authenticated', p: R | W }] });
+    await raw.set({ ...createNode('/dir/n', 'doc', { title: 'orig' }), $acl: [{ g: 'authenticated', p: R | W }] });
+
+    let forwarded: PatchManyEntry[] | undefined;
+    const spy: Tree = {
+      get: (p, c) => raw.get(p, c),
+      getChildren: (p, o, c) => raw.getChildren(p, o, c),
+      set: (n, c) => raw.set(n, c),
+      remove: (p, c) => raw.remove(p, c),
+      patch: (p, o, c) => raw.patch(p, o, c),
+      patchMany: (a, e, c) => { forwarded = e; return raw.patchMany!(a, e, c); },
+    };
+
+    const s = withAcl(spy, 'alice', ['u:alice', 'authenticated']);
+    await s.patchMany!('/dir', [{ path: '/dir/n', node: createNode('/dir/n', 'doc', { title: 'edited' }) }]);
+
+    assert.equal(forwarded?.length, 1);
+    const entry = forwarded![0];
+    if (!isSetEntry(entry)) assert.fail('expected a set-member to be forwarded');
+    assert.deepEqual(entry.node.$acl, [{ g: 'authenticated', p: R | W }]);
+    const after = (await raw.get('/dir/n'))!;
+    assert.equal(after.title, 'edited');
+    assert.deepEqual(after.$acl, [{ g: 'authenticated', p: R | W }]);
   });
 });
 

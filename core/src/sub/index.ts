@@ -5,6 +5,7 @@
 import { type SubscribeOpts } from '#contexts/service/index';
 import { isComponent, isCompKey, type NodeData } from '#core';
 import {
+  isSetEntry,
   mapNodeForSift,
   type PatchManyEntry,
   type PatchOp,
@@ -433,35 +434,7 @@ export function withSubscriptions(
       const oldNode = await tree.get(node.$path, ctx);
 
       await tree.set(node, ctx);
-      // Emit from the STORED node, not the input ref. Layers below may copy
-      // the node (repath/mount path translation), so the adapter's in-place
-      // $rev bump — and stamped fields ($refs, $v) — never reach our ref.
-      // Trusting the input emitted pre-bump revs and diffs without the $rev
-      // op, so every subscriber cached a stale $rev → false OCC conflicts on
-      // their next write (found via cnr.5 C2). Cheap: withCache.set just
-      // re-read and cached this exact node — this get is a cache hit.
-      const stored = await tree.get(node.$path, ctx) ?? node;
-      const claimsUid = claimsUserOf(node.$path);
-      const cdc = dirtyVps(
-        membershipVps(node.$path, oldNode ?? null, stored),
-        (isAclChange(oldNode ?? null, stored) || isComponentAclChange(oldNode ?? null, stored)) ? vpsForAclChange(node.$path) : [],
-        // Config write: either side carries a mount/config component — the vp
-        // node itself is being rewritten, handles on it must re-fetch.
-        isConfigNode(oldNode) || isConfigNode(stored) ? vpsForConfigChange(node.$path) : [],
-        claimsUid ? vpsForClaimsChange(claimsUid) : [],
-      );
-
-      const { $path, ...body } = stored;
-      const by = opIdOf(ctx);
-
-      if (oldNode) {
-        const computed = diffNodes(oldNode, stored);
-        emit(computed.length > 0
-          ? { type: 'patch', path: $path, patches: computed, rev: stored.$rev, ...(by ? { by } : {}), ...cdc }
-          : { type: 'set', path: $path, node: body, ...(by ? { by } : {}), ...cdc });
-      } else {
-        emit({ type: 'set', path: $path, node: body, ...(by ? { by } : {}), ...cdc });
-      }
+      await emitSetEvent(node.$path, oldNode, ctx, node);
     },
 
     async remove(path, ctx) {
@@ -497,7 +470,7 @@ export function withSubscriptions(
     },
 
     // patchMany (core-gk8.15): pre-read all old images, commit the batch,
-    // re-read, THEN emit one patch event per mutated member. Emission is
+    // re-read, THEN emit one event per mutated member. Emission is
     // strictly AFTER the inner call returns — a failed batch emits nothing.
     ...(tree.patchMany ? {
       async patchMany(ancestor: string, entries: PatchManyEntry[], ctx?: unknown) {
@@ -507,12 +480,54 @@ export function withSubscriptions(
         await tree.patchMany!(ancestor, entries, ctx);
 
         for (let i = 0; i < entries.length; i++) {
-          const newNode = await tree.get(entries[i].path, ctx);
-          emitPatch(entries[i].path, entries[i].ops, oldNodes[i], newNode, ctx);
+          const entry = entries[i];
+          if (isSetEntry(entry)) {
+            // Set-member = full-node write, may CREATE (gk8.10 stage 2).
+            // Routing it through emitPatch with ops=[] would emit NOTHING
+            // (mutations-length guard) — the node invisible to subscribers.
+            await emitSetEvent(entry.path, oldNodes[i], ctx, entry.node);
+          } else {
+            const newNode = await tree.get(entry.path, ctx);
+            emitPatch(entry.path, entry.ops, oldNodes[i], newNode, ctx);
+          }
         }
       },
     } : {}),
   };
+
+  /** CDC dirty computation + event emission for ONE full-node write — shared
+   *  by set() and patchMany set-members (after the inner batch commits).
+   *  Emits from the STORED node, not the caller's ref. Layers below may copy
+   *  the node (repath/mount path translation), so the adapter's in-place
+   *  $rev bump — and stamped fields ($refs, $v) — never reach our ref.
+   *  Trusting the input emitted pre-bump revs and diffs without the $rev
+   *  op, so every subscriber cached a stale $rev → false OCC conflicts on
+   *  their next write (found via cnr.5 C2). Cheap: withCache.set just
+   *  re-read and cached this exact node — this get is a cache hit. */
+  async function emitSetEvent(path: string, oldNode: NodeData | undefined, ctx: unknown, written: NodeData): Promise<void> {
+    const stored = await tree.get(path, ctx) ?? written;
+    const claimsUid = claimsUserOf(path);
+    const cdc = dirtyVps(
+      membershipVps(path, oldNode ?? null, stored),
+      (isAclChange(oldNode ?? null, stored) || isComponentAclChange(oldNode ?? null, stored)) ? vpsForAclChange(path) : [],
+      // Config write: either side carries a mount/config component — the vp
+      // node itself is being rewritten, handles on it must re-fetch.
+      isConfigNode(oldNode) || isConfigNode(stored) ? vpsForConfigChange(path) : [],
+      claimsUid ? vpsForClaimsChange(claimsUid) : [],
+    );
+
+    const { $path, ...body } = stored;
+    const by = opIdOf(ctx);
+
+    if (oldNode) {
+      const computed = diffNodes(oldNode, stored);
+      emit(computed.length > 0
+        ? { type: 'patch', path: $path, patches: computed, rev: stored.$rev, ...(by ? { by } : {}), ...cdc }
+        : { type: 'set', path: $path, node: body, ...(by ? { by } : {}), ...cdc });
+    } else {
+      emit({ type: 'set', path: $path, node: body, ...(by ? { by } : {}), ...cdc });
+    }
+  }
 
   /** CDC dirty computation + event emission for ONE patched path — shared by
    *  patch and patchMany (per member, after the inner batch commits). */

@@ -77,6 +77,40 @@ describe('TWP peer over loopback', () => {
     assert.deepEqual(await client.req.resolve('/missing'), []);
   });
 
+  it('resolve follows moved tombstones to the live node (core-gk8.10 stage 2)', async () => {
+    const tree = await seededTree();
+    // Simulate move(): live node at the new path, tombstone at the old.
+    await tree.set(createNode('/home', 'dir', { hit: true }));
+    await tree.set({ $path: '/target', $type: 'moved', $ref: '/home' });
+
+    const { client } = pair(() => ({ tree }));
+    const out = await client.req.resolve('/link') as { $path: string }[];
+    assert.deepEqual(out.map((n) => n.$path), ['/link', '/home'], 'client receives the live node, not the tombstone');
+  });
+
+  it('resolve degrades to [node] on missing target or broken chain', async () => {
+    const tree = await seededTree();
+    await tree.set({ $path: '/dangling', $type: 'ref', $ref: '/nowhere' });
+    // Identity mismatch: the tombstone belongs to a DIFFERENT node's move.
+    await tree.set({ $path: '/link2', $type: 'ref', $ref: '/t2', $refId: 'id-A' });
+    await tree.set({ $path: '/t2', $type: 'moved', $ref: '/target', $id: 'id-B' });
+    const { client } = pair(() => ({ tree }));
+
+    const dangling = await client.req.resolve('/dangling') as { $path: string }[];
+    assert.deepEqual(dangling.map((n) => n.$path), ['/dangling']);
+
+    const originalError = console.error;
+    let logged = false;
+    console.error = () => { logged = true; };
+    try {
+      const mismatched = await client.req.resolve('/link2') as { $path: string }[];
+      assert.deepEqual(mismatched.map((n) => n.$path), ['/link2'], 'broken chain resolves best-effort to the ref alone');
+    } finally {
+      console.error = originalError;
+    }
+    assert.ok(logged, 'broken chain is logged, not silent');
+  });
+
   it('ls query threads to the tree; malformed query/cursor and query+watch combos are rejected (core-92z)', async () => {
     const tree = await seededTree();
     const { client } = pair(() => ({ tree }));

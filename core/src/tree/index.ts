@@ -2,7 +2,7 @@
 // Storage interface + in-memory implementation
 // Depends only on core types.
 
-import { isRef, type NodeData, type Ref } from '#core';
+import { isMoved, isRef, type NodeData, type Ref } from '#core';
 import { OpError } from '#errors';
 import sift from 'sift';
 import { scanFromCollected } from './fs-common';
@@ -39,10 +39,23 @@ export function paginate<T>(items: T[], opts?: PageOpts): Page<T> {
 
 // ── patchMany batch (core-gk8.15) ──
 
-export type PatchManyEntry = { path: string; ops: PatchOp[] };
+/** A batch member is either a patch (ops on an EXISTING node) or a set —
+ *  a full-node write that may CREATE at a new path (core-gk8.10 stage 2:
+ *  move() = set at destination + set tombstone at source, one atomic batch).
+ *  Set semantics mirror Tree.set exactly: $rev present → OCC, absent → blind
+ *  upsert. Discriminated union on purpose — optional fields would let ops-only
+ *  consumers silently mishandle set-members instead of failing typecheck. */
+export type PatchManyEntry =
+  | { path: string; ops: PatchOp[] }
+  | { path: string; node: NodeData };
+
+export function isSetEntry(e: PatchManyEntry): e is { path: string; node: NodeData } {
+  return 'node' in e;
+}
 
 /** Shared batch-shape guard for patchMany: non-empty, every entry contained
- *  under `ancestor`, no duplicate paths (apply order would be ambiguous).
+ *  under `ancestor`, no duplicate paths (apply order would be ambiguous),
+ *  set-member node.$path consistent with its entry path.
  *  Wrappers that RESOLVE by ancestor (mounts) must call this before resolving —
  *  a non-contained entry would otherwise silently misroute to ancestor's tree. */
 export function assertPatchManyBatch(ancestor: string, entries: PatchManyEntry[]): void {
@@ -50,19 +63,23 @@ export function assertPatchManyBatch(ancestor: string, entries: PatchManyEntry[]
 
   const prefix = ancestor === '/' ? '/' : ancestor + '/';
   const seen = new Set<string>();
-  for (const { path } of entries) {
+  for (const entry of entries) {
+    const { path } = entry;
     if (path !== ancestor && !path.startsWith(prefix)) {
       throw new OpError('BAD_REQUEST', `patchMany: entry ${path} is outside ancestor ${ancestor}`);
     }
     if (seen.has(path)) throw new OpError('BAD_REQUEST', `patchMany: duplicate entry path ${path}`);
     seen.add(path);
+    if (isSetEntry(entry) && entry.node.$path !== path) {
+      throw new OpError('BAD_REQUEST', `patchMany: set-member node.$path ${entry.node.$path} does not match entry path ${path}`);
+    }
   }
 }
 
-/** Phase-1 helper: apply a member's ops to a clone of its node. A failing test
- *  op maps to CONFLICT — in a batch the test is a cross-member precondition
- *  (OCC guard), and the whole batch is denied on it. */
-export function applyPatchManyEntry(node: NodeData, entry: PatchManyEntry): NodeData {
+/** Phase-1 helper: apply an ops-member's ops to a clone of its node. A failing
+ *  test op maps to CONFLICT — in a batch the test is a cross-member
+ *  precondition (OCC guard), and the whole batch is denied on it. */
+export function applyPatchManyEntry(node: NodeData, entry: { path: string; ops: PatchOp[] }): NodeData {
   const copy = structuredClone(node);
   try {
     applyOps(copy, entry.ops);
@@ -72,6 +89,25 @@ export function applyPatchManyEntry(node: NodeData, entry: PatchManyEntry): Node
     }
     throw e;
   }
+  return copy;
+}
+
+/** Phase-1 OCC gate for a set-member — same contract as Tree.set: $rev
+ *  present must match the stored rev, absent is a blind upsert. Adapters run
+ *  this DURING staging so an OCC loss denies the batch before anything
+ *  commits (fs would otherwise hit its write-time OCC mid-batch). */
+export function assertSetEntryOcc(stored: NodeData | undefined, entry: { path: string; node: NodeData }): void {
+  if (entry.node.$rev != null && entry.node.$rev !== stored?.$rev) {
+    throw new OpError('CONFLICT', `patchMany: set-member ${entry.path} OCC failed — expected $rev ${stored?.$rev}, got ${entry.node.$rev}`);
+  }
+}
+
+/** Memory-adapter staging: OCC gate + clone + $rev bump (mirror of its set();
+ *  fs stages the raw clone instead — its writeNode owns OCC + bump). */
+export function stageSetEntry(stored: NodeData | undefined, entry: { path: string; node: NodeData }): NodeData {
+  assertSetEntryOcc(stored, entry);
+  const copy = structuredClone(entry.node);
+  copy.$rev = (copy.$rev ?? 0) + 1;
   return copy;
 }
 
@@ -181,14 +217,77 @@ export function asTreeSource(tree: Tree): TreeSource {
   return tree as TreeSource;
 }
 
-// ── In-memory implementation ──
+// ── Ref resolution (id-first, core-gk8.10 stage 2) ──
+// $ref path is a resolvable cache; $refId is the identity. Resolution follows
+// 'moved' tombstone chains left by move(), verifies identity when both sides
+// carry ids, and self-repairs standalone ref NODES: collapses the chain into
+// $ref and adopts $refId — lazy adoption IS the migration of the legacy
+// path-ref corpus.
 
-// ── Ref resolution ──
+const MAX_MOVED_HOPS = 8;
 
-export async function resolveRef(tree: Tree, node: NodeData): Promise<NodeData> {
+/** Follow tombstone redirects from `path` to the live node. `expectId` guards
+ *  chain identity: a tombstone carrying a DIFFERENT $id means the path was
+ *  reused by another node's move — that chain is not ours. */
+export async function followMoved(
+  tree: Tree,
+  path: string,
+  expectId?: string,
+  ctx?: unknown,
+): Promise<{ target: NodeData | undefined; hops: number }> {
+  let target = await tree.get(path, ctx);
+  let hops = 0;
+  const seen = new Set<string>([path]);
+
+  while (target && isMoved(target)) {
+    if (expectId && target.$id && target.$id !== expectId) {
+      throw new OpError('NOT_FOUND', `Ref identity mismatch at ${path}: tombstone for ${target.$id}, expected ${expectId}`);
+    }
+    if (++hops > MAX_MOVED_HOPS) {
+      throw new OpError('BAD_REQUEST', `Tombstone chain from ${path} exceeds ${MAX_MOVED_HOPS} hops`);
+    }
+    const next = target.$ref;
+    if (seen.has(next)) throw new OpError('BAD_REQUEST', `Tombstone cycle at ${next}`);
+    seen.add(next);
+    target = await tree.get(next, ctx);
+  }
+
+  return { target, hops };
+}
+
+export async function resolveRef(tree: Tree, node: NodeData | Ref): Promise<NodeData> {
   if (!isRef(node)) return node;
-  const target = await tree.get(node.$ref);
-  if (!target) throw new Error(`Ref not found: ${node.$ref}`);
+
+  // A standalone ref NODE (came from the tree, carries $path) can be
+  // repaired; an embedded ref object cannot — nothing to patch.
+  const selfPath = '$path' in node && typeof node.$path === 'string' ? node.$path : undefined;
+  const selfRev = '$rev' in node && typeof node.$rev === 'number' ? node.$rev : undefined;
+
+  const expectId = node.$refId;
+  const { target, hops } = await followMoved(tree, node.$ref, expectId);
+  if (!target) throw new OpError('NOT_FOUND', `Ref target not found: ${node.$ref}`);
+  if (expectId && target.$id && target.$id !== expectId) {
+    throw new OpError('NOT_FOUND', `Ref identity mismatch: ${node.$ref} → ${target.$path} carries ${target.$id}, expected ${expectId}`);
+  }
+
+  // Self-repair: collapse a followed chain into $ref, adopt the target's id
+  // ($refId adoption IS the lazy migration of the path-ref corpus).
+  const adoptId = expectId === undefined && target.$id !== undefined;
+  if ((hops > 0 || adoptId) && selfPath) {
+    const ops: PatchOp[] = [];
+    if (selfRev != null) ops.push(['t', '$rev', selfRev]);
+    if (hops > 0) ops.push(['r', '$ref', target.$path]);
+    if (adoptId) ops.push(['a', '$refId', target.$id]);
+    try {
+      await tree.patch(selfPath, ops);
+    } catch (e) {
+      // Repair is cache maintenance — the resolution above is already correct.
+      // Read-only surfaces, ACL denials and concurrent edits are expected
+      // here; the next resolve through a writable surface retries.
+      console.error(`resolveRef: self-repair of ${selfPath} failed:`, e);
+    }
+  }
+
   return target;
 }
 
@@ -303,10 +402,18 @@ export function createFilterTree(
       assertPatchManyBatch(ancestor, entries);
 
       let layer: Tree | undefined;
-      for (const { path } of entries) {
-        const node = await upper.get(path, ctx) ?? await lower.get(path, ctx);
-        if (!node) throw new OpError('NOT_FOUND', `Node not found: ${path}`);
-        const target = toUpper(node) ? upper : lower;
+      for (const entry of entries) {
+        // Ops-member: route by the STORED node (must exist). Set-member: route
+        // by the INCOMING node — parity with set(), and creates have nothing
+        // stored to route by.
+        let target: Tree;
+        if (isSetEntry(entry)) {
+          target = toUpper(entry.node) ? upper : lower;
+        } else {
+          const node = await upper.get(entry.path, ctx) ?? await lower.get(entry.path, ctx);
+          if (!node) throw new OpError('NOT_FOUND', `Node not found: ${entry.path}`);
+          target = toUpper(node) ? upper : lower;
+        }
         if (layer && target !== layer) {
           throw new OpError('BAD_REQUEST', 'patchMany cannot span layers');
         }
@@ -510,6 +617,13 @@ export function createMemoryTree(): TreeSource {
 
       const staged: { treeNode: TreeNode<NodeData>; copy: NodeData }[] = [];
       for (const entry of entries) {
+        if (isSetEntry(entry)) {
+          // Set-member: may CREATE — ensurePath instead of navigate. OCC in
+          // phase 1 (stageSetEntry) so a conflict denies before any swap.
+          const treeNode = ensurePath(entry.path);
+          staged.push({ treeNode, copy: stageSetEntry(treeNode.data, entry) });
+          continue;
+        }
         const treeNode = navigate(entry.path);
         if (!treeNode?.data) throw new OpError('NOT_FOUND', `Node not found: ${entry.path}`);
         const copy = applyPatchManyEntry(treeNode.data, entry);

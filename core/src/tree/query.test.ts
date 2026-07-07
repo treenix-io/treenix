@@ -34,6 +34,12 @@ describe('matchesFilter', () => {
     assert.equal(matchesFilter(node, {}), true);
   });
 
+  it('matches by $refId — mapped to _refId like $id → _tid (gk8.10 stage 2)', () => {
+    const node: NodeData = { $path: '/r', $type: 'ref', $ref: '/target', $refId: '01ARZ3NDEKTSV4RRFFQ69G5FAV' };
+    assert.equal(matchesFilter(node, { $refId: '01ARZ3NDEKTSV4RRFFQ69G5FAV' }), true);
+    assert.equal(matchesFilter(node, { $refId: 'other' }), false);
+  });
+
   it('deep dot-path matching', () => {
     const node = { $path: '/a', $type: 'x', '#meta': { $type: 'meta', nested: { flag: true } } } as NodeData;
     assert.equal(matchesFilter(node, { '#meta.nested.flag': true }), true);

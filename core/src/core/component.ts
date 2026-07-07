@@ -23,6 +23,8 @@ export type NodeData<T = Record<string, unknown>> = ComponentData<T> & {
    *  survives rename/move/trash-restore (core-gk8.10). Optional: virtual and
    *  legacy nodes may lack it. */
   $id?: string;
+  /** On standalone ref nodes: the TARGET's $id (see Ref.$refId). */
+  $refId?: string;
   $owner?: string;
   $rev?: number;
   $refs?: RefEntry[];
@@ -58,7 +60,10 @@ export function isOfType<T>(value: unknown, type: TypeId): value is ComponentDat
 }
 
 // ── Ref ──
-export type Ref = { $type?: string; $ref: string; $map?: string };
+// $refId = target's $id (identity), NOT the ref's own id — a standalone ref
+// NODE carries its own $id, so the target id needs a distinct field. Path in
+// $ref is a resolvable cache; $refId is the truth (core-gk8.10 stage 2).
+export type Ref = { $type?: string; $ref: string; $refId?: string; $map?: string };
 
 export function ref(path: string): Ref {
   return { $type: 'ref', $ref: path };
@@ -68,6 +73,20 @@ export function isRef(value: unknown): value is Ref {
   if (!value || typeof value !== 'object') return false;
   const v = value as Record<string, unknown>;
   return typeof v.$ref === 'string' && (!v.$type || v.$type === 'ref' || v.$type === 't.ref');
+}
+
+// ── Moved tombstone ──
+// Left at the old path by move(): redirects reads/refs to the new location.
+// Deliberately NOT a ref (isRef is false) — nothing follows it by accident;
+// resolveRef follows chains explicitly. Carries the moved node's $id (echoed
+// by the write pipeline): the tombstone is a forwarding address for exactly
+// that identity, letting resolveRef verify it is following the right chain.
+export type Moved = { $type: 'moved' | 't.moved'; $ref: string };
+
+export function isMoved(value: unknown): value is Moved {
+  if (!value || typeof value !== 'object') return false;
+  const v = value as Record<string, unknown>;
+  return (v.$type === 'moved' || v.$type === 't.moved') && typeof v.$ref === 'string';
 }
 
 // ── Node ──

@@ -197,6 +197,9 @@ export function stripComponents(node: NodeData, userId: string | null, claims: s
   // echo round-trip consistent (write-side immutability gated in policy).
   if (node.$id !== undefined) out.$id = node.$id;
   if ('$ref' in node) out['$ref'] = node['$ref'];
+  // $refId rides with $ref — dropping it on read would make resolveRef lazy
+  // adoption re-patch the same standalone ref node forever.
+  if (node.$refId !== undefined) out.$refId = node.$refId;
   for (const [key, val] of Object.entries(node)) {
     if (key.startsWith('$')) continue;
     // Strict namespace: only '#' keys are components. Bare keys are node body

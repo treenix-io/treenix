@@ -87,7 +87,13 @@ describe('withAudit — patch', () => {
 });
 
 describe('withAudit — patchMany', () => {
-  type AuditRow = { path: string; before: { value?: unknown } | null; after: { value?: unknown } | null };
+  type AuditRow = {
+    path: string;
+    ops?: unknown;
+    node?: { value?: unknown };
+    before: { value?: unknown } | null;
+    after: { value?: unknown; $rev?: unknown } | null;
+  };
 
   it('one journal row covers the whole batch with per-member before/after images', async () => {
     await inner.set({ $path: '/data/a', $type: 'thing', value: 1 });
@@ -112,6 +118,28 @@ describe('withAudit — patchMany', () => {
     assert.equal(rows[0].after?.value, 10);
     assert.equal(rows[1].before?.value, 2);
     assert.equal(rows[1].after?.value, 20);
+  });
+
+  it('set-member (create) journals the node with before=null / after=stored', async () => {
+    await inner.set({ $path: '/data/a', $type: 'thing', value: 1 });
+
+    await audited.patchMany!('/data', [
+      { path: '/data/a', ops: [['r', 'value', 2]] },
+      { path: '/data/new', node: { $path: '/data/new', $type: 'thing', value: 7 } },
+    ]);
+
+    const events = await listAuditEvents(inner);
+    assert.equal(events.length, 1, 'still one row for the whole batch');
+    const rows = events[0].entries as AuditRow[]; // boundary decode: stored journal row
+    assert.equal(rows.length, 2);
+
+    const setRow = rows[1];
+    assert.equal(setRow.path, '/data/new');
+    assert.equal('ops' in setRow, false, 'set-member journals the incoming node, not ops');
+    assert.equal(setRow.node?.value, 7);
+    assert.equal(setRow.before, null);
+    assert.equal(setRow.after?.value, 7);
+    assert.equal(typeof setRow.after?.$rev, 'number', 'after is the STORED image (rev bumped)');
   });
 
   it('failed batch appends nothing to the journal', async () => {
