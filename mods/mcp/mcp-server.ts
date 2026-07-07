@@ -3,6 +3,7 @@
 
 import { requestApproval, resolveVerdict } from '#agent/guardian';
 import { AiPolicy } from '#agent/types';
+import { buildActor } from '#harness/session';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { getComponent, resolve } from '@treenx/core';
@@ -498,7 +499,9 @@ export async function buildMcpServer(store: Tree, session: Session, claims?: str
             delegated.data,
             {
               userId: session.userId, claims,
-              actor: { id: session.userId, action: delegated.action, requestId: randomUUID() },
+              // buildActor, not an inline literal — workload sessions carry
+              // onBehalfOf/taskPath/runPath that an {id-only} actor would drop.
+              actor: buildActor(session, delegated.action),
             },
           );
           return text(typeof result === 'string' ? result : yaml(result ?? { ok: true }));
@@ -512,7 +515,7 @@ export async function buildMcpServer(store: Tree, session: Session, claims?: str
           methodPayload(method, args),
           {
             userId: session.userId, claims,
-            actor: { id: session.userId, action, requestId: randomUUID() },
+            actor: buildActor(session, action),
           },
         );
         return text(typeof result === 'string' ? result : yaml(result ?? { ok: true }));

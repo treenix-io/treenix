@@ -13,11 +13,15 @@ import { type AgentScope, type Capability, executeWithCapability } from './capab
 
 type ExecuteInput = { path: string; action: string; type?: string; key?: string; data?: unknown };
 
-function buildActor(session: Session, action: string): ActorContext {
+/** Session metadata → ActorContext. THE one mapping for every entry lane
+ *  (wire executor here, MCP server) — an entry point building its own inline
+ *  actor drops onBehalfOf/taskPath/runPath and orphans the audit trail (core-3j54). */
+export function buildActor(session: Session, action: string): ActorContext {
   return {
     id: session.userId,
     action,
     requestId: randomUUID(),
+    onBehalfOf: typeof session.onBehalfOf === 'string' ? session.onBehalfOf : undefined,
     taskPath: typeof session.taskPath === 'string' ? session.taskPath : undefined,
     runPath: typeof session.runPath === 'string' ? session.runPath : undefined,
   };

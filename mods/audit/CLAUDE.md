@@ -19,9 +19,16 @@ Each mutation produces a node at `/sys/audit/event/<ts>-<rand>`:
   before: NodeData | null,
   after:  NodeData | null,
   ops?: PatchOp[],          // patch only
-  by?, taskPath?, runPath?, action?, requestId?,   // from ctx.actor
+  by?, onBehalfOf?, taskPath?, runPath?, action?, requestId?,   // from ctx.actor
 }
 ```
+
+`ctx.actor` is stamped by `withAcl` on every mutation it forwards (core-3j54) —
+direct verbs (tRPC/TWP set/patch/rm, setComponent, deployPrefab, MCP set_node)
+land attributed as the session user without caller-threaded ctx. A caller-supplied
+actor (executor: action/requestId, workload: taskPath/runPath/onBehalfOf) wins over
+the default stamp. Writes below the ACL boundary (services, systemTree) carry no
+actor unless the caller threads one.
 
 ### Why a wrapper, not a CDC subscriber
 `withSubscriptions.emit` runs listeners **after** `tree.set` commits. A failing

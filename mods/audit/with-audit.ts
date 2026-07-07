@@ -56,6 +56,7 @@ function buildEvent(args: {
   if (args.entries) ev.entries = args.entries;
   if (args.actor) {
     if (args.actor.id) ev.by = args.actor.id;
+    if (args.actor.onBehalfOf) ev.onBehalfOf = args.actor.onBehalfOf;
     if (args.actor.taskPath) ev.taskPath = args.actor.taskPath;
     if (args.actor.runPath) ev.runPath = args.actor.runPath;
     if (args.actor.action) ev.action = args.actor.action;

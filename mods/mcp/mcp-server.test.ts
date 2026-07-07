@@ -9,10 +9,11 @@ import '#agent/guardian';
 import { AiPolicy } from '#agent/types';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { createNode, getComponent, R, resolve, S, W } from '@treenx/core';
+import { createNode, getComponent, R, register, resolve, S, W } from '@treenx/core';
 import { loadTestSchemas } from '@treenx/core/schema/load';
+import type { ActionCtx, ActorContext } from '@treenx/core/server/actions';
 import { createMemoryTree, type Tree } from '@treenx/core/tree';
-import { buildClaims, createSession, sessionPath, withAcl } from '@treenx/core/security';
+import { buildClaims, createSession, type Session, sessionPath, withAcl } from '@treenx/core/security';
 import assert from 'node:assert/strict';
 import { afterEach, before, beforeEach, describe, it } from 'node:test';
 import './server';
@@ -59,9 +60,9 @@ async function ensureMcpTarget(store: Tree, userId?: string) {
 }
 
 /** Create in-process MCP client connected to buildMcpServer */
-async function createTestClient(store: Tree, userId: string, claims?: string[]) {
+async function createTestClient(store: Tree, userId: string, claims?: string[], sessionMeta?: Record<string, unknown>) {
   await ensureMcpTarget(store, userId);
-  const session = { userId } as { userId: string };
+  const session: Session = { userId, ...sessionMeta };
   const mcp = await buildMcpServer(store, session, claims);
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await mcp.connect(serverTransport);
@@ -271,6 +272,54 @@ describe('mcp guardian elicitation', () => {
       if (saved === undefined) delete process.env.MCP_GUARDIAN_TREE_APPROVAL;
       else process.env.MCP_GUARDIAN_TREE_APPROVAL = saved;
     }
+  });
+});
+
+// core-3j54: the MCP lane used to build an {id-only} inline actor, dropping the
+// session's onBehalfOf/taskPath/runPath — the audit trail lost the human link on
+// the primary agent lane. Both execute call sites now go through harness buildActor.
+describe('mcp actor attribution (core-3j54)', () => {
+  it('delegated execute carries session workload metadata on ctx.actor', async () => {
+    const store = createMemoryTree();
+    await store.set({ ...createNode('/', 'root'), $acl: [{ g: 'public', p: R | W | S }] });
+    await store.set(createNode('/guardian', 'ai.policy', {
+      allow: [],
+      deny: [],
+      escalate: ['mcp__treenix__execute'],
+    }));
+    await store.set(createNode('/probe', 'mcptest.probe'));
+
+    let captured: ActorContext | undefined;
+    register('mcptest.probe', 'action:poke', (ctx: ActionCtx) => {
+      captured = ctx.actor;
+      return 'poked';
+    });
+    register('mcptest.probe', 'schema', () => ({
+      $id: 'mcptest.probe',
+      type: 'object',
+      properties: {},
+      methods: { poke: { arguments: [], kind: 'read' as const } },
+    }));
+
+    const userId = 'agent-workload:r-1';
+    const { client } = await createTestClient(store, userId, [`u:${userId}`, 'public'], {
+      onBehalfOf: 'kriz',
+      taskPath: '/board/t1',
+      runPath: '/agents/bot/runs/r-1',
+    });
+    const result = await client.callTool({
+      name: 'execute',
+      arguments: { path: '/probe', action: 'poke' },
+    });
+
+    assert.ok(!result.isError, textContent(result));
+    assert.ok(captured, 'probe action ran and captured ctx.actor');
+    assert.equal(captured.id, userId);
+    assert.equal(captured.onBehalfOf, 'kriz');
+    assert.equal(captured.taskPath, '/board/t1');
+    assert.equal(captured.runPath, '/agents/bot/runs/r-1');
+    assert.equal(captured.action, 'poke');
+    assert.equal(typeof captured.requestId, 'string');
   });
 });
 

@@ -80,6 +80,9 @@ export type NodeHandle = ReturnType<typeof serverNodeHandle>;
  *    in which run, doing which action, as part of which request". */
 export type ActorContext = {
   id: string;
+  /** Human principal a workload acts for (core-3j54) — set from session metadata
+   *  at the boundary that links them (mint/approval), never by the workload itself. */
+  onBehalfOf?: string;
   taskPath?: string;
   runPath?: string;
   action?: string;

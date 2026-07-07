@@ -172,6 +172,22 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
   // within a single request. nodeCache is handled by withCache in the tree pipeline.
   const stateCache = new Map<string, AclState>();
 
+  // Actor stamping (core-3j54): this wrap is where principal identity binds, so
+  // every mutation forwarded below carries WHO — direct verbs (tRPC/TWP set,
+  // patch, rm, setComponent, deployPrefab) were anonymous in the audit journal
+  // otherwise. A caller-supplied ctx.actor wins: it is richer (action/requestId
+  // from the executor) and only in-process code can pass ctx — the wire never
+  // threads client data here beyond opId, which becomes requestId.
+  function stampActor(ctx: unknown): unknown {
+    if (!userId) return ctx;
+    if (ctx === undefined || ctx === null) return { actor: { id: userId } };
+    if (typeof ctx !== 'object') return ctx;
+    const c = ctx as Record<string, unknown>;
+    if (c.actor) return ctx;
+    const opId = typeof c.opId === 'string' ? c.opId : undefined;
+    return { ...c, actor: { id: userId, ...(opId ? { requestId: opId } : {}) } };
+  }
+
   async function getPerm(path: string): Promise<number> {
     return resolvePermission(rawStore, path, userId, claims, cache, undefined, stateCache);
   }
@@ -269,19 +285,22 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
     },
 
     async set(node, ctx) {
+      const wctx = stampActor(ctx);
       const perm = await getPerm(node.$path);
       if (!(perm & W)) throw new OpError('FORBIDDEN', `Access denied: ${node.$path}`);
-      const existing = await rawStore.get(node.$path, ctx);
-      return rawStore.set(rewriteFullNodeWrite(node, existing, perm, userId, claims), ctx);
+      const existing = await rawStore.get(node.$path, wctx);
+      return rawStore.set(rewriteFullNodeWrite(node, existing, perm, userId, claims), wctx);
     },
 
     async remove(path, ctx) {
+      const wctx = stampActor(ctx);
       const perm = await getPerm(path);
       if (!(perm & W)) throw new OpError('FORBIDDEN', `Access denied: ${path}`);
-      return rawStore.remove(path, ctx);
+      return rawStore.remove(path, wctx);
     },
 
     async patch(path, ops, ctx) {
+      const wctx = stampActor(ctx);
       const perm = await getPerm(path);
       // Patch = read-modify-write. R+W gate closes the test-op oracle (no R →
       // no probing via [t, $field, guess]). Per-op checks below cover hidden
@@ -290,10 +309,10 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
         throw new OpError('FORBIDDEN', `Access denied: ${path}`);
       }
 
-      const existing = await rawStore.get(path, ctx);   // may be undefined
+      const existing = await rawStore.get(path, wctx);   // may be undefined
       assertPatchOps(ops, existing, !!(perm & A), userId, claims);
 
-      return rawStore.patch(path, ops, ctx);
+      return rawStore.patch(path, ops, wctx);
     },
 
     // patchMany: per member, the SAME R+W gate + per-op loop as patch.
@@ -307,6 +326,7 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
       if (!rawStore.patchMany) {
         throw new OpError('BAD_REQUEST', 'patchMany: store does not support patchMany');
       }
+      const wctx = stampActor(ctx);
 
       const safeEntries: PatchManyEntry[] = [];
       for (const entry of entries) {
@@ -314,7 +334,7 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
         if (!((perm & R) && (perm & W))) {
           throw new OpError('FORBIDDEN', `Access denied: ${entry.path}`);
         }
-        const existing = await rawStore.get(entry.path, ctx);
+        const existing = await rawStore.get(entry.path, wctx);
         if (isSetEntry(entry)) {
           safeEntries.push({ path: entry.path, node: rewriteFullNodeWrite(entry.node, existing, perm, userId, claims) });
         } else {
@@ -323,7 +343,7 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
         }
       }
 
-      return rawStore.patchMany(ancestor, safeEntries, ctx);
+      return rawStore.patchMany(ancestor, safeEntries, wctx);
     },
   };
   return aclStore;

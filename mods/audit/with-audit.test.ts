@@ -5,6 +5,7 @@ import { R, register, W } from '@treenx/core';
 import { registerType } from '@treenx/core/comp';
 import { executeAction } from '@treenx/core/server/actions';
 import { createPipeline } from '@treenx/core/server/server';
+import { withAcl } from '@treenx/core/security';
 import { asTreeSource, createMemoryTree, type Tree } from '@treenx/core/tree';
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
@@ -308,6 +309,65 @@ describe('audit pipeline wiring (core-dpp)', () => {
     assert.equal(patchEvent!.by, 'u-alice');
     assert.equal(patchEvent!.action, 'bump');
     assert.equal(patchEvent!.requestId, 'req-42');
+  });
+});
+
+// core-3j54: withAcl is where principal identity binds, so it default-stamps
+// ctx.actor on every mutation it forwards — direct verbs (tRPC/TWP set/patch/rm,
+// setComponent, deployPrefab, MCP set_node) land attributed without any
+// caller-threaded ctx. Caller-supplied actor (richer, from the executor) wins.
+describe('actor stamping at the ACL boundary (core-3j54)', () => {
+  const acl = () => withAcl(audited, 'alice', ['public']);
+
+  it('direct set/patch/remove through withAcl land with by=userId', async () => {
+    const user = acl();
+    await user.set({ $path: '/data/n', $type: 'thing', value: 1 });
+    await user.patch('/data/n', [['r', 'value', 2]]);
+    await user.remove('/data/n');
+
+    const events = await listAuditEvents(inner);
+    assert.equal(events.length, 3);
+    for (const ev of events) assert.equal(ev.by, 'alice');
+  });
+
+  it('opId rides onto the default actor as requestId', async () => {
+    await acl().set({ $path: '/data/n', $type: 'thing' }, { opId: 'op-7' });
+    const [ev] = await listAuditEvents(inner);
+    assert.equal(ev.by, 'alice');
+    assert.equal(ev.requestId, 'op-7');
+  });
+
+  it('caller-supplied actor wins over the default stamp', async () => {
+    await acl().set({ $path: '/data/n', $type: 'thing' }, {
+      actor: { id: 'agent-workload:r-1', action: 'run', onBehalfOf: 'kriz' },
+    });
+    const [ev] = await listAuditEvents(inner);
+    assert.equal(ev.by, 'agent-workload:r-1');
+    assert.equal(ev.action, 'run');
+    assert.equal(ev.onBehalfOf, 'kriz');
+  });
+
+  it('patchMany through withAcl is attributed', async () => {
+    await inner.set({ $path: '/data/a', $type: 'thing', value: 1 });
+    const user = acl();
+    assert.ok(user.patchMany, 'acl tree forwards patchMany');
+    await user.patchMany!('/data', [
+      { path: '/data/a', ops: [['r', 'value', 2]] },
+      { path: '/data/b', node: { $path: '/data/b', $type: 'thing', value: 3 } },
+    ]);
+    const [ev] = await listAuditEvents(inner);
+    assert.equal(ev.op, 'patchMany');
+    assert.equal(ev.by, 'alice');
+  });
+
+  it('journal is queryable by actor: getChildren query {by}', async () => {
+    await withAcl(audited, 'alice', ['public']).set({ $path: '/data/a', $type: 'thing' });
+    await withAcl(audited, 'bob', ['public']).set({ $path: '/data/b', $type: 'thing' });
+
+    const page = await withAcl(audited, 'reader', ['public'])
+      .getChildren('/sys/audit/event', { query: { by: 'alice' } });
+    assert.equal(page.items.length, 1);
+    assert.equal(page.items[0].path, '/data/a');
   });
 });
 

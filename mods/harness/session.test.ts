@@ -49,6 +49,24 @@ describe('executeForSession — no scope', () => {
     assert.equal(actor.action, 'allowed');
     assert.ok(actor.requestId, 'requestId auto-generated per call');
   });
+
+  it('stamps session.onBehalfOf onto actor; undefined when session lacks it', async () => {
+    registerThing();
+    let captured: unknown = null;
+    register('thing', 'action:allowed', (ctx: ActionCtx) => { captured = ctx.actor; });
+
+    const tree = await makeTree();
+    const withHuman: Session = { userId: 'agent:bot', onBehalfOf: 'kriz' };
+    await executeForSession(aclWrap(tree), withHuman, { path: '/work/n', action: 'allowed' });
+    const actor = captured as { onBehalfOf?: string };
+    assert.equal(actor.onBehalfOf, 'kriz');
+
+    captured = null;
+    const bare: Session = { userId: 'agent:bot' };
+    await executeForSession(aclWrap(tree), bare, { path: '/work/n', action: 'allowed' });
+    const plainActor = captured as { onBehalfOf?: string };
+    assert.equal(plainActor.onBehalfOf, undefined);
+  });
 });
 
 describe('executeForSession — scoped (workload)', () => {

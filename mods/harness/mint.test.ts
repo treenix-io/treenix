@@ -115,6 +115,27 @@ describe('mintWorkloadToken', () => {
     );
   });
 
+  it('persists onBehalfOf on the session node only when given', async () => {
+    const withHuman = await mintWorkloadToken(tree, {
+      agentPath: '/agents/bot',
+      taskPath: '/board/tasks/1',
+      runPath: '/agents/bot/runs/r-10',
+      onBehalfOf: 'kriz',
+    });
+    const node = await tree.get(withHuman.sessionPath);
+    assert.ok(node, 'session node exists');
+    assert.equal(node!.onBehalfOf, 'kriz');
+
+    const anonymousMint = await mintWorkloadToken(tree, {
+      agentPath: '/agents/bot',
+      taskPath: '/board/tasks/1',
+      runPath: '/agents/bot/runs/r-11',
+    });
+    const bare = await tree.get(anonymousMint.sessionPath);
+    assert.ok(bare, 'session node exists');
+    assert.equal('onBehalfOf' in bare!, false, 'no key when not passed');
+  });
+
   it('scoped port with a branch carries both boundaries', async () => {
     const { token } = await mintWorkloadToken(tree, {
       agentPath: '/agents/bot',

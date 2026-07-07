@@ -24,6 +24,10 @@ export type MintOpts = {
    *  A branch is a valid boundary on its own — with it, the agent-port scope
    *  component becomes optional. */
   branch?: string;
+  /** Human principal this workload acts for (core-3j54). Persisted on the
+   *  admin-only session node, so the workload cannot forge it; buildActor
+   *  stamps it onto every actor → audit rows carry the human link. */
+  onBehalfOf?: string;
 };
 
 export type MintResult = {
@@ -72,6 +76,7 @@ export async function mintWorkloadToken(tree: Tree, opts: MintOpts): Promise<Min
     runPath: opts.runPath,
     ...(scope ? { scopeRef: opts.agentPath, scopeKey, scopeMode: mode } : {}),
     ...(opts.branch ? { branch: opts.branch } : {}),
+    ...(opts.onBehalfOf ? { onBehalfOf: opts.onBehalfOf } : {}),
     // Explicit admin-only ACL — fail-closed against later code that might widen sessions.
     $acl: [{ g: 'admins', p: R | W | A | S }],
   });
