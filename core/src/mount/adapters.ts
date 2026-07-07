@@ -49,6 +49,12 @@ export class MountMongo {
    *  Effective TTL when enabled is [dedupWindowMs, 2 * dedupWindowMs] due
    *  to two-bucket rotation. */
   dedupWindowMs = 0;
+  /** Component-namespace boot policy (core-r096): 'rename' auto-migrates bare
+   *  component keys at boot, 'stamp' declares the collection's $type-carriers
+   *  legitimate data snapshots (e.g. audit before/after). The judgment is
+   *  per-collection and human-owned — unset stays fail-closed (throw on dirty;
+   *  TREENIX_NS_MIGRATE env is the fleet-wide fallback). */
+  nsMigrate?: 'rename' | 'stamp';
 }
 registerType('t.mount.mongo', MountMongo);
 
@@ -97,7 +103,7 @@ register(MountMongo, 'mount', async (mount, ctx) => {
   const uri = mount.uri || process.env.MONGO_URI;
   if (!uri) throw new Error('t.mount.mongo: no uri and MONGO_URI not set');
   const { createMongoTree } = await import('@treenx/mongo');
-  const tree = await createMongoTree(uri, mount.db, mount.collection, { watch: mount.watch });
+  const tree = await createMongoTree(uri, mount.db, mount.collection, { watch: mount.watch, nsMigrate: mount.nsMigrate });
   const wrapped = mount.shared ? tree : createRepathTree(tree, ctx.path, '/');
 
   if (mount.watch && tree.watch && ctx.startExternalWatch) {

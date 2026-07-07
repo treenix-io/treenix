@@ -20,7 +20,7 @@ import {
   toStorageKeys,
 } from '@treenx/core/tree';
 import { defaultPatch } from '@treenx/core/tree/patch';
-import { ensureMigratedMongo } from './migrate';
+import { ensureMigratedMongo, type NsMigratePolicy } from './migrate';
 
 const toStorage = (node: NodeData) => toStorageKeys(node);
 const fromStorage = (doc: Record<string, unknown>) => fromStorageKeys(doc) as NodeData;
@@ -55,6 +55,11 @@ export type MongoTreeOpts = {
    *  enabling pre-images via collMod needs admin permission. Turn on only
    *  to observe out-of-band writes. */
   watch?: boolean;
+  /** Component-namespace boot policy (core-r096): 'rename' migrates bare
+   *  component keys in place, 'stamp' declares $type-carriers legitimate data
+   *  snapshots. Unset = fail-closed throw on dirty collections (or the
+   *  TREENIX_NS_MIGRATE env fallback — see migrate.ts). */
+  nsMigrate?: NsMigratePolicy;
 };
 
 export async function createMongoTree(
@@ -72,7 +77,7 @@ export async function createMongoTree(
 
   // Component-namespace boot-gate (core-r096) — fs roots migrate in
   // createFsTree; mongo-mounted collections migrate here, same contract.
-  await ensureMigratedMongo(col, `${dbName}.${collectionName}`);
+  await ensureMigratedMongo(col, `${dbName}.${collectionName}`, console.log, opts.nsMigrate);
 
   const watchEnabled = opts.watch === true;
   // Enable pre-images so DELETE events can carry _path. Best-effort —

@@ -12,7 +12,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { Collection } from 'mongodb';
 import { NS_VERSION } from '@treenx/core/tree/migrate-component-namespace';
-import { MARKER_PATH, ensureMigratedMongo, migrateCollection } from './migrate';
+import { MARKER_PATH, ensureMigratedMongo, envNsMigratePolicy, migrateCollection } from './migrate';
 
 type Doc = Record<string, unknown>;
 
@@ -85,6 +85,73 @@ describe('ensureMigratedMongo (boot gate — fail closed)', () => {
   it('newer marker than engine supports → throws', async () => {
     const { col } = mockCol([], NS_VERSION + 1);
     await assert.rejects(() => ensureMigratedMongo(col, 'test.users', () => {}), Error);
+  });
+});
+
+// core-r096 follow-up: the rename-vs-stamp judgment is declared once (mount
+// nsMigrate field or TREENIX_NS_MIGRATE env) and boot executes it — a deploy
+// self-migrates instead of failing closed into an operator CLI session.
+describe('ensureMigratedMongo — declared policy (auto-migrate on boot)', () => {
+  it("policy 'rename': bare components migrated in place, stamped, served", async () => {
+    const { col, replaced, markerValue } = mockCol([
+      { _id: 1, _path: '/auth/users/dev', _type: 't.user',
+        groups: { $type: 'groups', list: ['admins'] } },
+    ]);
+
+    await ensureMigratedMongo(col, 'test.users', () => {}, 'rename');
+
+    assert.equal(replaced.length, 1);
+    const [, doc] = replaced[0];
+    assert.equal('groups' in doc, false);
+    assert.deepEqual(doc['#groups'], { $type: 'groups', list: ['admins'] });
+    assert.equal(markerValue(), NS_VERSION);
+  });
+
+  it("policy 'stamp': $type-carrying snapshots untouched, stamped, served", async () => {
+    const { col, replaced, markerValue } = mockCol([
+      { _id: 1, _path: '/audit/1', _type: 'audit.event', op: 'set', path: '/agents',
+        before: { $type: 'ai.pool', $rev: 115 }, after: { $type: 'ai.pool', $rev: 116 } },
+    ]);
+
+    await ensureMigratedMongo(col, 'test.audit', () => {}, 'stamp');
+
+    assert.equal(replaced.length, 0);
+    assert.equal(markerValue(), NS_VERSION);
+  });
+
+  it('policy via TREENIX_NS_MIGRATE env glob reaches the gate', async () => {
+    const { col, replaced, markerValue } = mockCol([
+      { _id: 1, _path: '/auth/users/dev', _type: 't.user',
+        groups: { $type: 'groups', list: ['admins'] } },
+    ]);
+
+    const saved = process.env.TREENIX_NS_MIGRATE;
+    process.env.TREENIX_NS_MIGRATE = '*.audit_events:stamp,*.users:rename';
+    try {
+      await ensureMigratedMongo(col, 'treenix.users', () => {});
+    } finally {
+      if (saved === undefined) delete process.env.TREENIX_NS_MIGRATE;
+      else process.env.TREENIX_NS_MIGRATE = saved;
+    }
+
+    assert.equal(replaced.length, 1);
+    assert.equal(markerValue(), NS_VERSION);
+  });
+});
+
+describe('envNsMigratePolicy', () => {
+  it('matches label against globs, later entries win', () => {
+    assert.equal(envNsMigratePolicy('treenix.users', '*.users:rename'), 'rename');
+    assert.equal(envNsMigratePolicy('treenix.audit_events', '*.users:rename,*.audit_events:stamp'), 'stamp');
+    assert.equal(envNsMigratePolicy('treenix.users', '*:stamp,*.users:rename'), 'rename');
+    assert.equal(envNsMigratePolicy('treenix.other', '*.users:rename'), undefined);
+    assert.equal(envNsMigratePolicy('treenix.users', undefined), undefined);
+  });
+
+  it('malformed entries throw instead of silently stranding collections', () => {
+    assert.throws(() => envNsMigratePolicy('treenix.users', '*.users:oops'));
+    assert.throws(() => envNsMigratePolicy('treenix.users', 'no-colon'));
+    assert.throws(() => envNsMigratePolicy('treenix.users', ':rename'));
   });
 });
 
