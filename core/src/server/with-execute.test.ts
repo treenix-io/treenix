@@ -171,6 +171,49 @@ describe('withExecute', () => {
       assert.equal(delegatedCount, 1);
     });
 
+    it('opId replay stays deduplicated when authority changes from local to remote', async () => {
+      const { bumpRuns } = setupCounter();
+      const { tree: remote, calls } = execRecorder();
+      let delegated = false;
+      const tree = withExecute(await counterTree(), {
+        delegate: async () => delegated ? remote : undefined,
+      });
+
+      const first = await tree.execute('/w', 'bump', undefined, { opId: 'route-switch-op' });
+      delegated = true;
+      const replay = await tree.execute('/w', 'bump', undefined, { opId: 'route-switch-op' });
+
+      assert.equal(first, 1);
+      assert.equal(replay, 1);
+      assert.equal(bumpRuns(), 1);
+      assert.equal(calls.length, 0);
+    });
+
+    it('idempotency key keeps userId and opId as an unambiguous tuple', async () => {
+      let remoteRuns = 0;
+      const remote: Tree = {
+        ...createMemoryTree(),
+        execute: async () => ++remoteRuns,
+      };
+      const inner = createMemoryTree();
+      await inner.set(createNode('/fed/w', 'anything'));
+      const firstUser = withExecute(inner, {
+        identity: { userId: 'a' },
+        delegate: async () => remote,
+      });
+      const secondUser = withExecute(inner, {
+        identity: { userId: 'a b' },
+        delegate: async () => remote,
+      });
+
+      const first = await firstUser.execute('/fed/w', 'bump', undefined, { opId: 'b c' });
+      const second = await secondUser.execute('/fed/w', 'bump', undefined, { opId: 'c' });
+
+      assert.equal(first, 1);
+      assert.equal(second, 2);
+      assert.equal(remoteRuns, 2);
+    });
+
     it('no R visibility → NOT_FOUND, target never called', async () => {
       const { tree: remote, calls } = execRecorder();
       const forbidden: Tree = {

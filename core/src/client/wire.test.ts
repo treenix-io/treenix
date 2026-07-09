@@ -53,6 +53,39 @@ describe('TWP wire client', () => {
     assert.deepEqual(result, { ran: 'ping', key: 'k', type: 't' });
   });
 
+  it('getChildren forwards the cursor when requesting the next page', async () => {
+    const tree = createMemoryTree();
+    const firstNode = createNode('/a', 'dir', { title: 'A' });
+    const secondNode = createNode('/b', 'dir', { title: 'B' });
+    const seenCursors: Array<string | undefined> = [];
+    const pagedTree = Object.assign(Object.create(tree) as typeof tree, {
+      getPerm: async () => (R | S),
+      getChildren: async (
+        _path: string,
+        opts?: Parameters<typeof tree.getChildren>[1],
+      ) => {
+        seenCursors.push(opts?.cursor);
+        return opts?.cursor === 'page-2'
+          ? { items: [secondNode], total: 1 }
+          : { items: [firstNode], total: 1, nextCursor: 'page-2' };
+      },
+    });
+    const serve: PeerServe = {
+      tree: pagedTree,
+      hooks: { watch: () => {}, unwatch: () => {} },
+    };
+    const [clientConn, serverConn] = createLoopback();
+    createPeer(() => serve).attach(serverConn);
+    const client = createClient(clientConn);
+
+    const first = await client.tree.getChildren('/', { limit: 1 });
+    const second = await client.tree.getChildren('/', { limit: 1, cursor: first.nextCursor });
+
+    assert.equal(first.items[0].$path, '/a');
+    assert.equal(second.items[0].$path, '/b');
+    assert.deepEqual(seenCursors, [undefined, 'page-2']);
+  });
+
   it('tree.execute capability: act frame crosses loopback, opId passes, client.execute is sugar (core-pxlu)', async () => {
     const tree = createMemoryTree();
     const acts: { action: string; opId?: string; path: string }[] = [];

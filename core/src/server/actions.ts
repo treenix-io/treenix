@@ -442,6 +442,20 @@ export type ActionOpts = {
 // opId (logs, proxy) fetch that user's cached result, bypassing ACL.
 const opResults = createBoundedCache<string, Promise<unknown>>(1000);
 
+function runIdempotent<T>(
+  userId: string | null | undefined,
+  opId: string,
+  run: () => Promise<T>,
+): Promise<T> {
+  const key = JSON.stringify([userId ?? '', opId]);
+  const prior = opResults.get(key);
+  if (prior) return prior as Promise<T>;
+
+  const result = run();
+  opResults.set(key, result);
+  return result;
+}
+
 export function executeAction<T = unknown>(
   tree: Tree,
   path: string,
@@ -454,12 +468,8 @@ export function executeAction<T = unknown>(
   const opId = opts?.opId;
   if (!opId) return runAction<T>(tree, path, componentType, componentKey, action, data, opts);
 
-  const opKey = `${opts?.userId ?? ''} ${opId}`;
-  const prior = opResults.get(opKey);
-  if (prior) return prior as Promise<T>;
-  const run = runAction<T>(tree, path, componentType, componentKey, action, data, opts);
-  opResults.set(opKey, run);
-  return run;
+  return runIdempotent(opts?.userId, opId, () =>
+    runAction<T>(tree, path, componentType, componentKey, action, data, opts));
 }
 
 // ── withExecute: Tree.execute capability wrapper (core-pxlu) ──
@@ -555,12 +565,8 @@ export function withExecute<T extends Tree>(inner: T, opts?: WithExecuteOpts): T
       // settled outcome (order: dedupe entry → intent → remote → reset → settled).
       const opId = execOpts?.opId;
       if (!opId) return delegateRun(target, path, action, data, execOpts);
-      const opKey = `${identity?.userId ?? ''} ${opId}`;
-      const prior = opResults.get(opKey);
-      if (prior) return prior;
-      const run = delegateRun(target, path, action, data, execOpts);
-      opResults.set(opKey, run);
-      return run;
+      return runIdempotent(identity?.userId, opId, () =>
+        delegateRun(target, path, action, data, execOpts));
     },
   };
   return self;

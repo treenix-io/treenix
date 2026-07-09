@@ -27,8 +27,6 @@ export type TypeClass<T> = Class<T> & {
   // kriz: why needs here and not on the registerType options? think should move there
   /** Per-action needs declared as a static class field. registerType reads this and calls registerActionNeeds. */
   needs?: Record<string, string[]>;
-  /** Bracket-access marker so `proxy[Counter]` resolves to "§<$type>" inside treeChain. */
-  [Symbol.toPrimitive]?: () => string;
 };
 
 // Strip methods from a type — only keep data fields (recursive)
@@ -113,8 +111,6 @@ export function registerType<T extends object>(type: string, cls: Class<T>, opts
 
   const compClass = cls as TypeClass<T>;
   compClass.$type = normalizeType(type);
-  // Bracket access in treeChain: proxy[Counter] → Proxy.get(_, "§app.counter")
-  compClass[Symbol.toPrimitive] = () => `§${compClass.$type}`;
   register(type, 'class', cls, opts);
   trackType(compClass.$type);
 
