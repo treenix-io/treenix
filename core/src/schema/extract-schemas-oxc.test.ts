@@ -29,7 +29,7 @@ describe('extract-schemas-oxc', () => {
     const originalWarn = console.warn;
     console.warn = (...args: unknown[]) => warnings.push(args.map(String).join(' '));
     try {
-      await generateSchemas([import.meta.dirname]);
+      await generateSchemas([IMPORT_FIXTURES_DIR]);
     } finally {
       console.warn = originalWarn;
     }
@@ -526,7 +526,7 @@ describe('extract-schemas-oxc', () => {
 
     // Small delay so mtime would differ if file were rewritten
     await new Promise((r) => setTimeout(r, 50));
-    await generateSchemas([import.meta.dirname]);
+    await generateSchemas([IMPORT_FIXTURES_DIR]);
 
     const after = await fs.readFile(SCHEMA_FILE, 'utf-8');
     const stat2 = await fs.stat(SCHEMA_FILE);
