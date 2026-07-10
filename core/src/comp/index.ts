@@ -2,6 +2,7 @@
 // registerType(type, cls) → stamps $type, registers class, auto-registers actions from methods
 
 import { registerActionNeeds } from '#comp/needs';
+import { currentExecCtx, runWithExecCtx, type ExecCtx } from '#comp/context';
 import {
   type Class,
   ComponentData,
@@ -15,11 +16,8 @@ import {
   type TypeId,
   unregister,
 } from '#core';
-// Wire ExecCtx into logger — safe (returns null outside action context)
-import { setCtxProvider } from '#log';
 import { trackType } from '#mod/tracking';
 import { type TypeSchema } from '#schema/types';
-import { type Tree } from '#tree';
 
 export type { Class };
 export type TypeClass<T> = Class<T> & {
@@ -64,30 +62,10 @@ declare module '#core/context' {
   }
 }
 
-// ── Action context for class methods ──
-// Node.js: AsyncLocalStorage (survives await, concurrent-safe)
-// Browser: global _ctx fallback (NOT safe with concurrent async actions — needs polyfill)
-
-let _als: any = null;
-let _ctx: ExecCtx | null = null;
-
-// Async IIFE: schedules AsyncLocalStorage init without top-level await
-// (Metro wraps modules in non-async functions, so top-level `await` breaks RN).
-// Race with first action is harmless — getCtx falls back to _ctx until _als settles.
-// Browser/RN: import fails → _als stays null → falls back to _ctx global.
-void (async () => {
-  try { _als = new (await import('node:async_hooks')).AsyncLocalStorage(); }
-  catch (e) {
-    if (typeof window === 'undefined' && typeof process !== 'undefined') console.warn('[comp] AsyncLocalStorage init failed:', e);
-  }
-})();
-
-setCtxProvider(() => _als?.getStore() ?? _ctx);
-
-export type ExecCtx = { node: NodeData; tree: Tree; signal: AbortSignal; [k: string]: unknown };
+export type { ExecCtx };
 
 export function getCtx(): ExecCtx {
-  const ctx = _als?.getStore() ?? _ctx;
+  const ctx = currentExecCtx();
   if (!ctx) throw new Error('getCtx(): called outside action context');
   return ctx;
 }
@@ -99,8 +77,30 @@ export function getCtx(): ExecCtx {
 // kriz: what is port, why is in core?
 export type PortDecl = { pre?: string[]; post?: string[] };
 type CompOptions = { needs?: string[]; ports?: Record<string, PortDecl>; override?: boolean; noOptimistic?: string[] };
-// kriz: alot of repetition of this
 const AsyncGenFn = Object.getPrototypeOf(async function* () { }).constructor;
+
+type ActionExecCtx = ExecCtx & { comp?: object; deps?: unknown };
+
+function registerMethods<T>(type: TypeId, cls: Class<T>, opts?: CompOptions): void {
+  const normalizedType = normalizeType(type);
+  const proto = cls.prototype as Record<string, unknown>;
+  for (const name of Object.getOwnPropertyNames(proto)) {
+    if (name === 'constructor') continue;
+    const method = proto[name];
+    if (typeof method !== 'function') continue;
+
+    const context = `action:${name}`;
+    const meta: Record<string, unknown> = { ...opts?.ports?.[name] };
+    if (opts?.noOptimistic?.includes(name)) meta.noOptimistic = true;
+    if (method instanceof AsyncGenFn) meta.stream = true;
+    if (opts?.override) unregister(normalizedType, context);
+
+    register(normalizedType, context, (ctx: ActionExecCtx, data: unknown) => {
+      const target = ctx.comp ?? ctx.node;
+      return runWithExecCtx(ctx, () => method.call(target, data, ctx.deps));
+    }, Object.keys(meta).length ? meta : undefined);
+  }
+}
 
 export function registerType<T extends object>(type: string, cls: Class<T>, opts?: CompOptions): TypeClass<T> {
   if (opts?.override) {
@@ -126,52 +126,13 @@ export function registerType<T extends object>(type: string, cls: Class<T>, opts
   // kriz: should be full needs here, including * needs for all methods
   if (opts?.needs) registerActionNeeds(type, '*', opts.needs);
 
-  const proto = cls.prototype;
-  for (const name of Object.getOwnPropertyNames(proto)) {
-    if (name === 'constructor') continue;
-    if (typeof proto[name] === 'function') {
-      // kriz: what is ports for method? I think we misunderstood each other. let's discuss
-      const meta: Record<string, unknown> = { ...opts?.ports?.[name] };
-      if (opts?.noOptimistic?.includes(name)) meta.noOptimistic = true;
-      if (proto[name] instanceof AsyncGenFn) meta.stream = true;
-
-      register(type, `action:${name}`, (ctx: any, data: unknown) => {
-        // kriz: node should === comp if the node itself
-        const target = ctx.comp ?? ctx.node;
-        if (_als) return _als.run(ctx, () => proto[name].call(target, data, ctx.deps));
-
-        _ctx = ctx;
-        try { return proto[name].call(target, data, ctx.deps); }
-        finally { _ctx = null; }
-      }, meta);
-    }
-  }
+  registerMethods(type, cls, opts);
   return compClass;
 }
 
 // Register server-only actions from a class. _ prefixed = internal (hidden from clients).
-// kriz: omg, why code repetition??? this should be reused in registerType! and apply all the comments from there
 export function registerActions<T>(type: TypeId, cls: Class<T>, opts?: CompOptions): void {
-  const t = normalizeType(type);
-  const proto = cls.prototype;
-  for (const name of Object.getOwnPropertyNames(proto)) {
-    if (name === 'constructor') continue;
-    if (typeof proto[name] === 'function') {
-      const context = `action:${name}`;
-      const meta: Record<string, unknown> = { ...opts?.ports?.[name] };
-      if (opts?.noOptimistic?.includes(name)) meta.noOptimistic = true;
-      if (proto[name] instanceof AsyncGenFn) meta.stream = true;
-      if (opts?.override) unregister(t, context);
-
-      register(t, context, (ctx: any, data: unknown) => {
-        const target = ctx.comp ?? ctx.node;
-        if (_als) return _als.run(ctx, () => proto[name].call(target, data, ctx.deps));
-        _ctx = ctx;
-        try { return proto[name].call(target, data, ctx.deps); }
-        finally { _ctx = null; }
-      }, Object.keys(meta).length ? meta : undefined);
-    }
-  }
+  registerMethods(type, cls, opts);
 }
 
 // ── Type-safe component access ──

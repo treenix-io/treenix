@@ -2,6 +2,7 @@
 // Server-specific: ActionCtx, SchemaHandler, client proxy
 // Component registration lives in @/comp
 
+import './action-context';
 import { chain, type Chain } from '#chain';
 import { Class, type TypeProxy } from '#comp';
 import { type ExecuteFn, makeTypedProxy, type StreamFn } from '#comp/handle';
