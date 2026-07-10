@@ -2,7 +2,7 @@
 // Storage interface + in-memory implementation
 // Depends only on core types.
 
-import { isMoved, isRef, type NodeData, type Ref } from '#core';
+import { comparePaths, isMoved, isRef, type NodeData, type Ref } from '#core';
 import { OpError } from '#errors';
 import sift from 'sift';
 import { scanFromCollected } from './fs-common';
@@ -23,10 +23,10 @@ export type Page<T> = {
 };
 
 export function paginate<T extends { $path: string }>(items: T[], opts?: PageOpts): Page<T> {
-  const ordered = [...items].sort((a, b) => a.$path.localeCompare(b.$path));
+  const ordered = [...items].sort((a, b) => comparePaths(a.$path, b.$path));
   const start = opts?.cursor === undefined
     ? 0
-    : ordered.findIndex(item => item.$path > opts.cursor!);
+    : ordered.findIndex(item => comparePaths(item.$path, opts.cursor!) > 0);
   if (start < 0) return { items: [], total: 0 };
 
   const pageItems = opts?.limit

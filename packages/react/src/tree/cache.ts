@@ -8,7 +8,7 @@
 // `childrenLoaded` is the authoritative "children list fetched" flag, kept
 // separate from `parentIndex` (incidental node cache).
 
-import type { NodeData } from '@treenx/core';
+import { comparePaths, type NodeData } from '@treenx/core';
 import type { Page } from '@treenx/core/tree';
 import * as idb from './idb';
 import { stampNode } from '#symbols';
@@ -188,7 +188,7 @@ export function getChildren(parent: string): NodeData[] {
     }
   }
 
-  out.sort((a, b) => a.$path.localeCompare(b.$path));
+  out.sort((a, b) => comparePaths(a.$path, b.$path));
   childSnap.set(parent, out);
   return out;
 }

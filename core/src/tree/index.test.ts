@@ -109,6 +109,24 @@ describe('MemoryStore', () => {
     assert.equal(second.nextCursor, undefined);
   });
 
+  it('getChildren uses one Unicode order for sorting and cursor resume', async () => {
+    const tree = createMemoryTree();
+    const paths = ['/p/z', '/p/\u00e4', '/p/\u{1F600}', '/p/A'];
+    await tree.set(createNode('/p', 'dir'));
+    for (const path of paths) await tree.set(createNode(path, 'item'));
+
+    const expected = [...paths].sort((a, b) => a < b ? -1 : a > b ? 1 : 0);
+    const actual: string[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await tree.getChildren('/p', { limit: 1, cursor });
+      actual.push(...page.items.map(node => node.$path));
+      cursor = page.nextCursor;
+    } while (cursor);
+
+    assert.deepEqual(actual, expected);
+  });
+
   it('get returns isolated copy — mutating result does not affect stored node', async () => {
     const tree = createMemoryTree();
     await tree.set(createNode('/x', 'item', { tags: ['a', 'b'] }));

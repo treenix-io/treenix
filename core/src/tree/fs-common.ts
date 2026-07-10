@@ -3,7 +3,7 @@
 // mimefs.ts (real-file MIME representation). Pure helpers — no Tree
 // implementation, no node:fs dependency in callers other than these.
 
-import type { NodeData } from '#core';
+import { comparePaths, type NodeData } from '#core';
 import type { ChildEntry, ScanChildrenOpts } from './index';
 
 // Pure helpers — no node:* deps. Reachable from React bundles via
@@ -25,14 +25,12 @@ export async function* scanFromCollected(
   if (signal?.aborted) throw signal.reason;
 
   const after = opts?.after;
-  const sorted = [...nodes].sort((a, b) =>
-    a.$path < b.$path ? -1 : a.$path > b.$path ? 1 : 0,
-  );
+  const sorted = [...nodes].sort((a, b) => comparePaths(a.$path, b.$path));
 
   for (const node of sorted) {
     if (signal?.aborted) throw signal.reason;
     const cursor = node.$path;
-    if (after !== undefined && cursor <= after) continue;
+    if (after !== undefined && comparePaths(cursor, after) <= 0) continue;
     yield { node, cursor };
   }
 }

@@ -16,6 +16,11 @@ export function join(parent: string, name: string): string {
   return parent === '/' ? `/${name}` : `${parent}/${name}`;
 }
 
+/** Canonical path order used by scans and cursor pagination. */
+export function comparePaths(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
 export function isChildPath(parent: string, candidate: string, directOnly = true): boolean {
   if (candidate === parent) return false;
   // Must match parent + '/' to avoid /board matching /boards

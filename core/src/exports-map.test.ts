@@ -4,9 +4,55 @@
 // bring the wildcard back.
 
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { describe, it } from 'node:test';
 
+const PUBLIC_DOORS = [
+  '.',
+  './client',
+  './comp',
+  './comp/validate',
+  './contexts/service',
+  './errors',
+  './glob',
+  './log',
+  './mod',
+  './mods/autostart/service',
+  './mount',
+  './schema/catalog',
+  './schema/load',
+  './schema/types',
+  './security',
+  './security/projector',
+  './server/actions',
+  './server/client',
+  './server/jobs',
+  './server/prefab',
+  './server/readonly-tree',
+  './server/server',
+  './testing',
+  './tree',
+  './tree/branch',
+  './tree/cache',
+  './tree/inflight',
+  './tree/migrate-component-namespace',
+  './tree/mimefs',
+  './tree/patch',
+  './uri',
+  './util/debounced-write',
+  './util/safe-timers',
+  './util/yaml',
+  './vite-plugin',
+] as const;
+
 describe('exports map (qvrt)', () => {
+  it('pins the complete public package surface for migration accounting', async () => {
+    const packageJson = JSON.parse(
+      await readFile(new URL('../package.json', import.meta.url), 'utf8'),
+    ) as { exports: Record<string, unknown> };
+    assert.deepEqual(Object.keys(packageJson.exports).sort(), [...PUBLIC_DOORS].sort());
+  });
+
   it('public doors resolve via package self-reference', async () => {
     await import('@treenx/core');
     await import('@treenx/core/comp');
