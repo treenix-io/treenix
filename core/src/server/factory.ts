@@ -65,10 +65,19 @@ export async function treenix(config: TreenixConfig): Promise<TreenixServer> {
   // factory without duplicating bootstrap code in every entry point.
   applyDevDefaults();
 
-  // 1. Load mods
+  // 1. Load mods. A failed mod leaves partially published registrations (types
+  // registered before the throw stay visible) — booting on that state serves a
+  // half-alive mod, so fail the boot loudly instead (joint decision core-ns6p.1;
+  // atomic registry generations parked until real hot reload/unload exists).
   if (config.modsDir !== false) {
     const extraDirs = config.modsDir ? [config.modsDir] : [];
-    await loadAllMods('server', ...extraDirs);
+    const mods = await loadAllMods('server', ...extraDirs);
+    if (mods.failed.length) {
+      throw new AggregateError(
+        mods.failed.map((f) => f.error),
+        `mod load failed: ${mods.failed.map((f) => f.name).join(', ')}`,
+      );
+    }
   }
 
   // 2. Bootstrap: root node from config (root.json)
