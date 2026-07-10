@@ -1,5 +1,5 @@
 import type { NodeData } from '@treenx/core';
-import type { TreeEvent } from '@treenx/core/tree';
+import { applyOps, type PatchOp, type TreeEvent } from '@treenx/core/tree';
 import { withCache } from '@treenx/core/tree/cache';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
@@ -9,12 +9,14 @@ import { createRemoteTree } from './remote-tree';
 
 function createMockTrpc(backing: Map<string, NodeData>) {
   let getCalls = 0;
+  let patchCalls = 0;
   // events: minimal sim of trpc.events.subscribe — caller-driven push.
   let lastOnData: ((e: TreeEvent) => void) | null = null;
   let unsubscribed = false;
 
   const mock = {
     get getCalls() { return getCalls; },
+    get patchCalls() { return patchCalls; },
     resetCalls() { getCalls = 0; },
 
     // Test helpers — drive the events stream
@@ -43,6 +45,15 @@ function createMockTrpc(backing: Map<string, NodeData>) {
     set: {
       mutate: async ({ node }: { node: Record<string, unknown> }) => {
         backing.set(node.$path as string, node as NodeData);
+      },
+    },
+    patch: {
+      mutate: async ({ path, ops }: { path: string; ops: PatchOp[] }) => {
+        patchCalls++;
+        const node = structuredClone(backing.get(path));
+        if (!node) throw new Error(`missing node: ${path}`);
+        applyOps(node, ops);
+        backing.set(path, node);
       },
     },
     remove: {
@@ -111,6 +122,19 @@ describe('createRemoteTree — method mapping', () => {
     const result = await tree.remove('/x');
     assert.equal(result, true);
     assert.ok(!data.has('/x'));
+  });
+
+  it('patch delegates atomically without a get + set roundtrip', async () => {
+    const data = new Map<string, NodeData>();
+    data.set('/x', { $path: '/x', $type: 'test', value: 1 } as NodeData);
+    const mock = createMockTrpc(data);
+    const tree = createRemoteTree(mock as any);
+
+    await tree.patch('/x', [['r', 'value', 2]]);
+
+    assert.equal(mock.patchCalls, 1);
+    assert.equal(mock.getCalls, 0);
+    assert.equal((data.get('/x') as any).value, 2);
   });
 });
 

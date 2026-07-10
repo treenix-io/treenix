@@ -5,7 +5,7 @@
 
 import type { NodeData } from '@treenx/core';
 import type { PatchOp, Tree, TreeEvent, TreeWatchOpts, TreeWatchScope } from '@treenx/core/tree';
-import { defaultPatch, subscriptionToAsyncIterable } from '@treenx/core/tree';
+import { subscriptionToAsyncIterable } from '@treenx/core/tree';
 import type { trpc } from './trpc';
 
 type TrpcClient = typeof trpc;
@@ -77,8 +77,10 @@ export function createRemoteTree(client: TrpcClient): Tree {
       debugPath(path, 'remove');
       return client.remove.mutate({ path }).then(() => true);
     },
-    // TODO: add tRPC patch endpoint for single-RPC atomic patch
-    patch: (path, ops) => defaultPatch(get, set, path, ops),
+    patch: (path, ops) => {
+      debugPath(path, 'patch');
+      return client.patch.mutate({ path, ops }).then(() => {});
+    },
 
     /** Watch via trpc.events — the per-user wire stream from WatchManager.
      *  Strips VPs to fit the L1 TreeEvent contract and filters client-side
