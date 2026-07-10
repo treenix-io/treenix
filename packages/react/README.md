@@ -73,7 +73,7 @@ Ships with shadcn/ui components (Tailwind CSS v4):
 
 ```typescript
 import { Button } from '@treenx/react/ui/button';
-import { Slider } from '@treenx/react/ui/slider';
+import { Input } from '@treenx/react/ui/input';
 ```
 
 ## Admin UI
