@@ -9,8 +9,9 @@ import type { EventFrame } from '#protocol/frames';
 import { createPeer, type ActReq, type Conn, type PeerServe, type ServeHooks } from '#protocol/peer';
 import { withAcl } from '#security/acl-tree';
 import { buildClaims } from '#security/claims';
+import { getPageReadPlan } from '#security/read-page';
 import type { Session } from '#security/sessions';
-import { type CdcRegistry, type NodeEvent, type WireEvent } from '#sub';
+import { type NodeEvent, type WireEvent } from '#sub';
 import { type WatchManager } from '#sub/watch';
 import { createFilteredPush } from '#sub/watch-filter';
 import type { Tree } from '#tree';
@@ -36,7 +37,6 @@ export type WireDeps = {
   tree: Tree;
   systemTree: Tree;
   watcher: WatchManager;
-  cdc?: CdcRegistry;
   opts?: WireOpts;
   /** Delegation wiring for Tree.execute (core-pxlu), built by createPipeline:
    *  authority probe (mounts) + local coherence reset + audit hooks. Absent =
@@ -129,18 +129,10 @@ export function createWireSession(deps: WireDeps, session: Session) {
 
     const hooks: ServeHooks = {
       watch: (paths, o) => deps.watcher.watch(userId, paths, o),
-      unwatch: (paths, o) => {
-        deps.watcher.unwatch(userId, paths, o);
-        if (o?.children) for (const p of paths) deps.cdc?.unwatchQuery(p, userId);
-      },
+      unwatch: (paths, o) => deps.watcher.unwatch(userId, paths, o),
       watchList: (path, page, itemWatch) => {
-        // Stage 6d (core-9yd): the read's own plan registers the watch, so
-        // read and watch agree on membership (incl. callerWhere). Plain
-        // listings carry no readPlan — prefix watching covers them natively.
-        if (page.readPlan) {
-          deps.cdc?.watchQuery({ vp: path, userId, plan: page.readPlan.plan, mountDeps: page.readPlan.mountDeps });
-        }
-        deps.watcher.watch(userId, [path], { children: true, autoWatch: itemWatch });
+        const query = getPageReadPlan(page);
+        deps.watcher.watch(userId, [path], { children: true, autoWatch: itemWatch, query });
       },
     };
 

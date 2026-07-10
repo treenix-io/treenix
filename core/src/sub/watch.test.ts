@@ -4,6 +4,31 @@ import { type NodeEvent } from './index';
 import { createWatchManager } from './watch';
 
 describe('WatchManager', () => {
+  it('owns query registration, unwatch, and user cleanup', async () => {
+    const watched: unknown[] = [];
+    const unwatched: unknown[] = [];
+    const removed: string[] = [];
+    const wm = createWatchManager({ gracePeriodMs: 5 });
+    wm.bindQueryRegistry({
+      watchQuery: (reg) => watched.push(reg),
+      unwatchQuery: (vp, userId) => unwatched.push({ vp, userId }),
+      unwatchAllQueries: (userId) => removed.push(userId),
+    });
+    wm.connect('c1', 'u1', () => {});
+    const query = { plan: { source: '/data', callerWhere: { open: true } }, mountDeps: new Set(['/view']) };
+
+    wm.watch('u1', ['/view'], { children: true, query });
+    assert.deepEqual(watched, [{ vp: '/view', userId: 'u1', ...query }]);
+
+    wm.unwatch('u1', ['/view'], { children: true });
+    assert.deepEqual(unwatched, [{ vp: '/view', userId: 'u1' }]);
+
+    wm.watch('u1', ['/view'], { children: true, query });
+    wm.disconnect('c1');
+    await new Promise(resolve => setTimeout(resolve, 15));
+    assert.deepEqual(removed, ['u1']);
+  });
+
   it('notify delivers to watching user', () => {
     const wm = createWatchManager();
     const events: NodeEvent[] = [];

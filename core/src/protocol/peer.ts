@@ -34,7 +34,7 @@ export type ActionStream = (req: ActReq, signal: AbortSignal) => AsyncIterable<u
 export type ServeHooks = {
   watch(paths: string[], opts?: { children?: boolean; autoWatch?: boolean }): void;
   unwatch(paths: string[], opts?: { children?: boolean }): void;
-  /** ls{watchList}: receives the RAW page (incl. readPlan) before it is stripped from the response. */
+  /** ls{watchList}: receives the page before the response is returned. */
   watchList?(path: string, page: Page<NodeData>, itemWatch: boolean): void;
 };
 
@@ -218,8 +218,7 @@ export function createPeer(serve?: ServeFactory) {
             if (watchable.length) cap.watch(watchable);
           }
           watchList?.(path, page, !!frame.watch);
-          const { readPlan: _rp, ...pub } = page;
-          return ok(pub);
+          return ok(page);
         }
 
         case 'set': {

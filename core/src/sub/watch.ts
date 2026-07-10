@@ -3,7 +3,7 @@
 // Supports multiple connections per user (multi-tab).
 // Grace period: on last disconnect, watches survive briefly for SSE auto-reconnect.
 
-import { type NodeEvent } from './index';
+import type { CdcRegistry, NodeEvent, QueryWatchRegistration } from './index';
 
 export type WatchPush = (event: NodeEvent) => void;
 
@@ -16,7 +16,10 @@ export type WatchManagerOpts = {
   ringSize?: number;
 };
 
-export type WatchOpts = { children?: boolean; autoWatch?: boolean };
+type QueryWatchRegistry = Pick<CdcRegistry, 'watchQuery' | 'unwatchQuery' | 'unwatchAllQueries'>;
+type QueryWatchPlan = Omit<QueryWatchRegistration, 'vp' | 'userId'>;
+
+export type WatchOpts = { children?: boolean; autoWatch?: boolean; query?: QueryWatchPlan };
 
 export type WatchManager = {
   /** Attach push channel. `since` = last seq this client processed; events
@@ -26,6 +29,8 @@ export type WatchManager = {
    *  the client MUST full-refetch and re-register watches. */
   connect(connId: string, userId: string, push: WatchPush, since?: number): boolean;
   disconnect(connId: string): void;
+  /** Bind the instance-scoped query evaluator after withSubscriptions creates it. */
+  bindQueryRegistry(registry: QueryWatchRegistry): void;
   watch(userId: string, paths: string[], opts?: WatchOpts): void;
   unwatch(userId: string, paths: string[], opts?: { children?: boolean }): void;
   notify(event: NodeEvent): void;
@@ -85,6 +90,7 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
   };
   const users = new Map<string, UserEntry>();
   const graceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  let queryRegistry: QueryWatchRegistry | undefined;
   let totalWatches = 0;
 
   function userWatchCount(user: { paths: Map<string, boolean>; prefixes: Map<string, boolean> }): number {
@@ -106,6 +112,7 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
     totalWatches -= userWatchCount(user);
     for (const p of user.paths.keys()) removeFrom(pathToUsers, p, userId);
     for (const p of user.prefixes.keys()) removeFrom(prefixToUsers, p, userId);
+    queryRegistry?.unwatchAllQueries(userId);
     users.delete(userId);
     opts?.onUserRemoved?.(userId);
   }
@@ -192,6 +199,10 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
       }
     },
 
+    bindQueryRegistry(registry) {
+      queryRegistry = registry;
+    },
+
     watch(userId, paths, watchOpts) {
       const user = ensureUser(userId);
 
@@ -209,6 +220,9 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
         for (const p of paths) {
           user.prefixes.set(p, watchOpts.autoWatch ?? false);
           addTo(prefixToUsers, p, userId);
+        }
+        if (watchOpts.query) {
+          for (const vp of paths) queryRegistry!.watchQuery({ vp, userId, ...watchOpts.query });
         }
       } else {
         for (const p of paths) {
@@ -228,6 +242,7 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
         for (const p of paths) {
           if (user.prefixes.has(p)) { user.prefixes.delete(p); removed++; }
           removeFrom(prefixToUsers, p, userId);
+          queryRegistry?.unwatchQuery(p, userId);
         }
       } else {
         for (const p of paths) {

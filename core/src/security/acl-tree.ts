@@ -8,6 +8,7 @@ import { asTreeSource, assertSafePatchPath, isSetEntry, type Page, type PatchMan
 import { executeList } from '#tree/read-runtime';
 import { resolveReadPlan } from '#mount/resolve-plan';
 import { type AclState, componentPerm, resolvePermission, stripComponents } from './acl';
+import { attachPageReadPlan } from './read-page';
 import { type Actor, assertSourceReadable, createProjector } from './projector';
 
 // ── Patch op rules ──
@@ -248,7 +249,7 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
       if (result.truncated) page.truncated = true;
       // Query reads carry their plan to watch registration (Stage 6d) so the
       // initial read and live watch agree on membership.
-      if (plan.viewWhere || plan.callerWhere) page.readPlan = { plan, mountDeps };
+      if (plan.viewWhere || plan.callerWhere) attachPageReadPlan(page, { plan, mountDeps });
       return page;
     },
 

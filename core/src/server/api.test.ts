@@ -71,9 +71,10 @@ describe('tRPC API integration', () => {
       events.push(e as DataEvent);
       watcher.notify(e);
     });
+    watcher.bindQueryRegistry(cdc);
     rawStore = tree;
 
-    const router = createTreeRouter(tree, tree, watcher, undefined, cdc);
+    const router = createTreeRouter(tree, tree, watcher);
     // Unauthenticated caller: anon session (mimics what HTTP outer handler issues).
     const anonSession: Session = { userId: 'anon:test', claims: ['public'], anonymous: true };
     caller = router.createCaller({ session: anonSession, token: 'anon.test', clientIp: null });

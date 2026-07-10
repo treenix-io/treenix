@@ -17,7 +17,7 @@ import type { Session } from '#security/sessions';
 import { devLogin, loginUser, logoutUser, registerUser } from '#security/ops';
 import { OpError } from '#errors';
 import type { ErrFrame, ResFrame } from '#protocol/frames';
-import { type CdcRegistry, type WireEvent } from '#sub';
+import { type WireEvent } from '#sub';
 import { type WatchManager } from '#sub/watch';
 import { setComponent as setComponentOp } from './actions';
 import { deployPrefab as deployPrefabOp } from './prefab';
@@ -86,9 +86,9 @@ async function unwrap<T>(r: Promise<ResFrame> | AsyncIterable<ResFrame>): Promis
   throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'twp: unexpected frame for unary op' });
 }
 
-export function createTreeRouter(tree: Tree, systemTree: Tree, watcher: WatchManager, opts?: TreeRouterOpts, cdc?: CdcRegistry) {
+export function createTreeRouter(tree: Tree, systemTree: Tree, watcher: WatchManager, opts?: TreeRouterOpts) {
   const deps: WireDeps = {
-    tree, systemTree, watcher, cdc,
+    tree, systemTree, watcher,
     opts: { claimsTtlMs: opts?.claimsTtlMs, executor: opts?.executor },
     exec: opts?.exec,
   };
@@ -167,7 +167,7 @@ export function createTreeRouter(tree: Tree, systemTree: Tree, watcher: WatchMan
       )
       .query(({ input, ctx }) =>
         // ctx threaded into the tree call (getChildren only) — parity with the pre-TWP router.
-        unwrap<Omit<Page<NodeData>, 'readPlan'>>(ctx.wire.handle({
+        unwrap<Page<NodeData>>(ctx.wire.handle({
           id: 0, op: 'ls', path: input.path,
           limit: input.limit, depth: input.depth,
           query: input.query, cursor: input.cursor,

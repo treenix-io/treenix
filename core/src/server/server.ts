@@ -98,10 +98,7 @@ export function createPipeline(bootstrap: Tree, opts?: TreeRouterOpts, wrapTree?
   // anon-key, log writer) and request-edge session resolution. No validation, no
   // cache, no trash: boot writes anything, session revoke / GC hard-delete.
   const systemTree = withAcl(policy.base, 'system', ['system']);
-  let cdcRef: CdcRegistry;
-  const watcher = createWatchManager({
-    onUserRemoved: (userId) => cdcRef.unwatchAllQueries(userId),
-  });
+  const watcher = createWatchManager();
   // gk8.12: sub/ stays ignorant of the auth layout and mount components —
   // the layer-owned detectors are injected here.
   const { tree: subscribed, cdc, onSelfWrite, injectExternalEvent } = withSubscriptions(policy.tree, (e) => watcher.notify(e), {
@@ -109,7 +106,7 @@ export function createPipeline(bootstrap: Tree, opts?: TreeRouterOpts, wrapTree?
     isConfigNode: (node) => !!node && getComponentByName(node, 'mount') !== undefined,
     componentHasAclRule: (type) => resolveHandler(type, 'acl') !== undefined,
   });
-  cdcRef = cdc;
+  watcher.bindQueryRegistry(cdc);
   wiring = {
     onSelfWrite,
     injectExternal: injectExternalEvent,
@@ -156,7 +153,7 @@ export function createPipeline(bootstrap: Tree, opts?: TreeRouterOpts, wrapTree?
   // user writes since it wraps the same `tree`. Boot writes (seed/log/autostart) use
   // `systemTree` above (mountable, below the wrap), so audit never storms at startup.
   const systemTreeOps = withAcl(tree, 'system', ['system']);
-  const router = createTreeRouter(tree, systemTreeOps, watcher, { ...opts, exec }, cdc);
+  const router = createTreeRouter(tree, systemTreeOps, watcher, { ...opts, exec });
 
   const createContext = async (token: string | null): Promise<TrpcContext> => {
     // Programmatic API: treat input as bearer (no cookie). Invalid → throw loud.
