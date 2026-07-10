@@ -26,6 +26,10 @@
     "ai-native"
   ],
   "imports": {
+    "#chain": {
+      "development": "./src/lab/tree-chain-support.ts",
+      "default": "./dist/lab/tree-chain-support.js"
+    },
     "#*": {
       "development": "./src/*.ts",
       "default": "./dist/*.js"

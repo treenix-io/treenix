@@ -3,7 +3,6 @@
 // Component registration lives in @/comp
 
 import './action-context';
-import { chain, type Chain } from '#chain';
 import { Class, type TypeProxy } from '#comp';
 import { type ExecuteFn, makeTypedProxy, type StreamFn } from '#comp/handle';
 import { collectDeps as _collectDeps, type ResolvedDeps } from '#comp/needs';
@@ -117,8 +116,8 @@ export function createNodeHandle(
   getNode?: (path: string) => NodeData | undefined,
 ) {
   return (path: string) => ({
-    get<T extends object>(cls: Class<T>, key?: string): Chain<TypeProxy<T>> {
-      return chain(makeTypedProxy(getNode?.(path), cls, path, execute, stream, key)) as Chain<TypeProxy<T>>;
+    get<T extends object>(cls: Class<T>, key?: string): TypeProxy<T> {
+      return makeTypedProxy(getNode?.(path), cls, path, execute, stream, key);
     },
   });
 }
