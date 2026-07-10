@@ -1,7 +1,6 @@
 import { registerType } from '#comp';
 import { createNode, register } from '#core';
 import { clearRegistry } from '#testing';
-import { createTreeP } from '#protocol/treep';
 import { createMemoryTree } from '#tree';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
@@ -128,19 +127,4 @@ describe('executeAction idempotency (opId)', () => {
     assert.equal(attempts, 1);
   });
 
-  it('treep forwards opId from set() to the action executor', async () => {
-    const tree = createMemoryTree();
-    await tree.set(createNode('/p', 'pay', { paid: 0 }));
-
-    const seen: Array<string | undefined> = [];
-    const tp = createTreeP(tree, async (_path, _key, _action, _data, opId) => {
-      seen.push(opId);
-      return null;
-    });
-
-    await tp.set('/p#charge()', { amount: 1 }, { opId: 'op-via-treep' });
-    await tp.set('/p#charge()', { amount: 1 });
-
-    assert.deepEqual(seen, ['op-via-treep', undefined]);
-  });
 });

@@ -328,7 +328,7 @@ describe('assertSafePath (F03)', () => {
 
   it('rejects URI-reserved delimiters (? and #)', () => {
     // '?' (query) and '#' (fragment / component-key) are URI delimiters — a raw node $path
-    // must never contain them (blocks mount cache-key collision + TreeP path mis-targeting).
+    // must never contain them (blocks mount cache-key collisions and URI reinterpretation).
     assert.throws(() => assertSafePath('/data/x?uid=admin'), /reserved/);
     assert.throws(() => assertSafePath('/data/x#secret'), /reserved/);
   });
