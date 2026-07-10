@@ -568,21 +568,30 @@ register('sim.world', 'service', async (node, ctx) => {
     console.log(`[sim] round ${num} done: ${newEntries.length} events`);
   }
 
-  // Main loop
-  (async () => {
+  // Main loop. stop() must JOIN it: a fire-and-forget loop kept mutating the
+  // tree after stop() resolved (extra round), making observers racy.
+  let wake: (() => void) | undefined;
+  const sleep = (ms: number) =>
+    new Promise<void>((r) => {
+      wake = r;
+      setTimeout(r, ms);
+    });
+
+  const loop = (async () => {
     console.log(`[sim] started on ${wp}`);
     while (!stopped) {
       try {
         const w = await ctx.tree.get(wp);
         const cfg = w ? getComponent(w, SimConfig) : null;
         if (cfg?.running) await runRound();
-        await new Promise((r) => setTimeout(r, cfg?.roundDelay ?? 5000));
+        if (stopped) break;
+        await sleep(cfg?.roundDelay ?? 5000);
       } catch (e) {
         if (e instanceof OpError && e.code === 'CONFLICT') {
           continue;
         }
         console.error('[sim] error:', e);
-        await new Promise((r) => setTimeout(r, 5000));
+        await sleep(5000);
       }
     }
   })();
@@ -590,6 +599,8 @@ register('sim.world', 'service', async (node, ctx) => {
   return {
     stop: async () => {
       stopped = true;
+      wake?.();
+      await loop;
     },
   };
 });

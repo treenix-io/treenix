@@ -1,6 +1,7 @@
 // AgentSim tests — round engine, proximity, tools, quorum
 
 import { createNode, getComponent, resolve } from '@treenx/core';
+import { SimPosition } from './types';
 import type { ServiceHandle } from '@treenx/core/contexts/service';
 import { createMemoryTree, type Tree } from '@treenx/core/tree';
 import { withExecute } from '@treenx/core/server/actions';
@@ -107,10 +108,16 @@ describe('proximity', () => {
     await waitForRound(tree, '/w', 1);
     await handle.stop();
 
+    // Mock agents move randomly each round, so assert the proximity contract
+    // against the ACTUAL final positions, not the initial ones.
     const a = await tree.get('/w/a');
+    const b = await tree.get('/w/b');
+    const pa = getComponent(a!, SimPosition)!;
+    const pb = getComponent(b!, SimPosition)!;
     const nearby = getComponent(a!, 'sim.nearby') as any;
     assert.ok(nearby);
-    assert.equal(nearby.agents.length, 0);
+    const d = Math.hypot(pa.x - pb.x, pa.y - pb.y);
+    assert.equal(nearby.agents.includes('Bob'), d <= pa.radius);
   });
 });
 
