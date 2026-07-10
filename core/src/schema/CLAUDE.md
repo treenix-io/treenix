@@ -9,5 +9,6 @@ JSON Schema generation and loading for registerType/defineComponent classes.
 ### Conventions
 - Schemas are colocated: each mod has its own `schemas/` dir next to source
 - Mod loader calls `loadSchemasFromDir()` per mod during startup
-- Schemas auto-generate on dev server startup; `npm run schema` for CI or to regenerate without restarting
+- `npm run dev:server` runs `npm run schema` before starting the watcher; `treenix()` itself only loads generated artifacts
+- Run `npm run schema` directly for CI or regeneration without starting the server
 - JSDoc on class → schema title; @format/@description on properties → schema annotations
