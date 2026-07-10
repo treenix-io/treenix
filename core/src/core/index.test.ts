@@ -18,7 +18,6 @@ import {
   register,
   removeComponent,
   onResolveMiss,
-  render,
   replaceHandler,
   resolve,
   resolveEntry,
@@ -210,11 +209,6 @@ describe('Context', () => {
   it('returns null when nothing found', () => {
     clearRegistry();
     assert.equal(resolve('unknown', 'test'), null);
-  });
-
-  it('render throws on missing handler', () => {
-    clearRegistry();
-    assert.throws(() => render({ $type: 'nope' }, 'react'));
   });
 
   it('resolveEntry carries meta of the MATCHED registration through fallback', () => {

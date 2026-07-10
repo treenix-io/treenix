@@ -2,7 +2,7 @@
 // Pure functions, no tree deps.
 
 import { getLoadedMods } from '#mod/loader';
-import { getModPrefabs, getRegisteredMods } from '#mod/prefab';
+import { getModPrefabs } from '#mod/prefab';
 import { getTypesForMod } from '#mod/tracking';
 import type { ModState } from '#mod/types';
 import type { CatalogEntry } from '#schema/catalog';
@@ -22,13 +22,6 @@ const catalog = new TypeCatalog();
 export function getModInfo(name: string): ModInfo {
   const loaded = getLoadedMods().find(m => m.name === name);
   return buildModInfo(name, loaded?.state ?? 'loaded', loaded?.error);
-}
-
-/** Get info for all known mods (loader + prefab registry) */
-export function getAllMods(): ModInfo[] {
-  const names = new Set(getLoadedMods().map(m => m.name));
-  for (const n of getRegisteredMods()) names.add(n);
-  return [...names].map(n => getModInfo(n));
 }
 
 function buildModInfo(name: string, state: ModState, error?: Error): ModInfo {

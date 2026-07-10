@@ -111,11 +111,6 @@ export function resolveExact<C extends string>(type: TypeId, context: C): Contex
   return resolveExactEntry(type, context)?.handler ?? null;
 }
 
-export function hasMissResolver(context: string): boolean {
-  validateContext(context);
-  return missResolvers.has(context);
-}
-
 export function unregister(type: string, context: string): boolean {
   validateContext(context);
   const t = normalizeType(type);
@@ -175,10 +170,3 @@ export function onResolveMiss(context: string, resolver: (type: string) => void)
   missResolvers.set(context, resolver);
 }
 
-// ── Render (context-aware) ──
-
-export function render(data: ComponentData, context: string, ...args: unknown[]): unknown {
-  const handler = resolve(data.$type, context);
-  if (!handler) throw new Error(`No handler for type "${data.$type}" in context "${context}"`);
-  return handler(data, ...args);
-}
