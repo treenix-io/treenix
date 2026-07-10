@@ -47,4 +47,6 @@ const authFetch = async (url: string | URL | Request, opts?: RequestInit): Promi
   return res;
 };
 
-export const { trpc } = createTrpcTransport({ url, getToken, fetch: authFetch });
+type TrpcClient = ReturnType<typeof createTrpcTransport>['trpc'];
+
+export const trpc: TrpcClient = createTrpcTransport({ url, getToken, fetch: authFetch }).trpc;
