@@ -129,6 +129,7 @@ describe('cache', () => {
           items: [{ $path: '/sys/routes/index', $type: 'route', route: '/' }],
           total: 3,
           truncated: true,
+          nextCursor: 'next-page',
         },
       },
     });
@@ -141,6 +142,7 @@ describe('cache', () => {
     assert.strictEqual(cache.getChildrenPhase('/sys/routes'), 'ready');
     assert.strictEqual(cache.getChildrenTotal('/sys/routes'), 3);
     assert.strictEqual(cache.getChildrenTruncated('/sys/routes'), true);
+    assert.strictEqual(cache.getChildrenNextCursor('/sys/routes'), 'next-page');
   });
 
   it('appendChildren() merges without removing existing', () => {

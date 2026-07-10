@@ -152,8 +152,9 @@ function createTrpcTree(url: string): Tree {
       const items = await c.getChildren.query({
         path,
         limit: copts?.limit ?? 1000,
-        offset: copts?.offset,
         depth: copts?.depth,
+        query: copts?.query,
+        cursor: copts?.cursor,
       });
       return items as Page<NodeData>;
     },

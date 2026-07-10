@@ -226,6 +226,7 @@ function suite(t: Target) {
       await seedFamily();
       const page = await tree.getChildren('/p');
       assert.equal(page.total, 3);
+      assert.equal(page.nextCursor, undefined);
       assert.deepEqual(page.items.map(n => n.$path).sort(), ['/p/a', '/p/b', '/p/c']);
     });
 
@@ -248,15 +249,12 @@ function suite(t: Target) {
       assert.deepEqual(page.items.map(n => n.$path).sort(), ['/p/a', '/p/c']);
     });
 
-    it('limit/offset paginate while total reports the full set', async () => {
+    it('limit bounds the loaded window and returns a continuation cursor', async () => {
       await seedFamily();
       const page = await tree.getChildren('/p', { limit: 2 });
       assert.equal(page.items.length, 2);
-      assert.equal(page.total, 3);
-
-      const rest = await tree.getChildren('/p', { limit: 2, offset: 2 });
-      assert.equal(rest.items.length, 1);
-      assert.equal(rest.total, 3);
+      assert.equal(page.total, 2);
+      assert.ok(page.nextCursor);
     });
 
     // ── remove ──

@@ -185,6 +185,7 @@ export class ServerTreeSource implements TreeSource {
           items: v.data,
           total: v.total ?? v.data.length,
           truncated: v.truncated ?? false,
+          ...(v.nextCursor ? { nextCursor: v.nextCursor } : {}),
         };
       }
     }

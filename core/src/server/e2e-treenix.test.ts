@@ -186,7 +186,8 @@ describe('e2e: treenix minimal (public)', () => {
 
     const page = await c.getChildren.query({ path: '/parent', limit: 2 })
     assert.equal(page.items.length, 2)
-    assert.equal(page.total, 3)
+    assert.equal(page.total, 2)
+    assert.ok(page.nextCursor)
   })
 
   it('auth: register → login → me', async () => {

@@ -232,7 +232,6 @@ describe('Sift queries via memory tree', () => {
     const page = await tree.getChildren('/items', {
       query: { '#status.value': 'active' },
       limit: 3,
-      offset: 0,
     });
     assert.equal(page.items.length, 3);
     assert.ok(page.total >= 3);

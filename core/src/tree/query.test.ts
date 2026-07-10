@@ -71,7 +71,13 @@ describe('QueryStore', () => {
     const page = await qs.getChildren('/view/active', { limit: 2 });
 
     assert.equal(page.items.length, 2);
-    assert.equal(page.total, 5);
+    assert.equal(page.total, 2);
+    assert.ok(page.nextCursor);
+
+    const next = await qs.getChildren('/view/active', { limit: 2, cursor: page.nextCursor });
+    assert.deepEqual([...page.items, ...next.items].map(n => n.$path), [
+      '/items/0', '/items/1', '/items/2', '/items/3',
+    ]);
   });
 
   it('get delegates to parent tree', async () => {

@@ -239,7 +239,8 @@ function createTrpcTree(url: string): Tree {
     async getChildren(path: string, copts?: ChildrenOpts): Promise<Page<NodeData>> {
       const c = await getClient();
       const items = await c.getChildren.query({
-        path, limit: copts?.limit ?? 1000, offset: copts?.offset, depth: copts?.depth,
+        path, limit: copts?.limit ?? 1000, depth: copts?.depth,
+        query: copts?.query, cursor: copts?.cursor,
       });
       return items as Page<NodeData>;
     },

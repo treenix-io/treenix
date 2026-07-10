@@ -29,15 +29,14 @@ function createMockTrpc(backing: Map<string, NodeData>) {
       },
     },
     getChildren: {
-      query: async ({ path, limit, offset }: { path: string; limit?: number; offset?: number }) => {
+      query: async ({ path, limit }: { path: string; limit?: number }) => {
         getCalls++;
         const prefix = path === '/' ? '/' : path + '/';
         const items = [...backing.values()].filter(
           n => n.$path.startsWith(prefix) && n.$path !== path
             && n.$path.slice(prefix.length).indexOf('/') === -1,
         );
-        const start = offset ?? 0;
-        const sliced = limit ? items.slice(start, start + limit) : items.slice(start);
+        const sliced = limit ? items.slice(0, limit) : items;
         return { items: sliced, total: items.length };
       },
     },

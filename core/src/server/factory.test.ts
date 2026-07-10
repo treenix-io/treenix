@@ -167,7 +167,7 @@ describe('log flood (jre7)', () => {
     // they settle (bounded; no wall-clock sleeps).
     let total = 0;
     for (let i = 0; i < 500 && total < 20; i++) {
-      total = (await app.systemTree.getChildren('/sys/logs', { limit: 1 })).total;
+      total = (await app.systemTree.getChildren('/sys/logs')).total;
       if (total < 20) await new Promise<void>(r => setImmediate(r));
     }
     assert.ok(total >= 20, `expected >= 20 /sys/logs nodes, saw ${total}`);

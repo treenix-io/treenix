@@ -211,7 +211,8 @@ describe('e2e: tRPC over HTTP', () => {
 
       const page = await client.getChildren.query({ path: '/p', limit: 2 });
       assert.equal(page.items.length, 2);
-      assert.equal(page.total, 5);
+      assert.equal(page.total, 2);
+      assert.ok(page.nextCursor);
     });
 
     it('remove works', async () => {

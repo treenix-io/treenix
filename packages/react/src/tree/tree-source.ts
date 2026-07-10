@@ -41,10 +41,10 @@ export type PathSnapshot = {
 export type ChildrenSnapshot = {
   data: NodeData[];
   phase: ChildrenPhase;
-  /** Query views: loaded-count only, never an exact total (core-92z). */
+  /** Number of items in the loaded window. */
   total: number | null;
   truncated: boolean | null;
-  /** Resume token from the last page. Non-null ⇒ more available (query views). */
+  /** Resume token from the last page. Non-null means more items are available. */
   nextCursor: string | null;
   error: Error | null;
 };

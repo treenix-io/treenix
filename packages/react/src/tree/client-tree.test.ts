@@ -20,7 +20,7 @@ function createMockTrpc(backing: Map<string, NodeData>) {
       },
     },
     getChildren: {
-      query: async ({ path }: { path: string; limit?: number; offset?: number }) => {
+      query: async ({ path }: { path: string; limit?: number }) => {
         calls++;
         const prefix = path === '/' ? '/' : path + '/';
         const items = [...backing.values()].filter(

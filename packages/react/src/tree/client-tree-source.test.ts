@@ -1,5 +1,4 @@
-// ClientTreeSource pagination contract (core-92z):
-// query views paginate via stored nextCursor; plain listings keep offset.
+// ClientTreeSource pagination contract: every listing resumes via nextCursor.
 
 import { describe, it, beforeEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
@@ -82,13 +81,12 @@ describe('ClientTreeSource — cursor pagination (core-92z)', () => {
     assert.equal(getChildrenCalls.length, 2);
     assert.equal(getChildrenCalls[1].cursor, 'cur-b');
     assert.deepEqual(getChildrenCalls[1].query, { status: 'open' });
-    assert.equal(getChildrenCalls[1].offset, undefined);
     assert.deepEqual(cache.getChildren('/q').map(n => n.$path), ['/q/a', '/q/b', '/q/c']);
     assert.equal(source.getChildrenSnapshot('/q').nextCursor, null);
     // total tracks loaded count, not a per-page value
     assert.equal(source.getChildrenSnapshot('/q').total, 3);
 
-    // exhausted query view: loadMore is a no-op (no offset fallback)
+    // Exhausted view: loadMore is a no-op.
     h.loadMore();
     assert.equal(getChildrenCalls.length, 2);
     h.dispose();
@@ -107,15 +105,14 @@ describe('ClientTreeSource — cursor pagination (core-92z)', () => {
     await waitPhase('/view', 'ready');
 
     assert.equal(getChildrenCalls[1].cursor, 'cur-a');
-    assert.equal(getChildrenCalls[1].offset, undefined);
     assert.deepEqual(cache.getChildren('/view').map(n => n.$path), ['/view/a', '/view/b']);
     h.dispose();
   });
 
-  it('plain listing: loadMore keeps offset pagination (regression)', async () => {
+  it('plain listing: loadMore resumes via the server cursor', async () => {
     pages = [
-      { items: [node('/p/a'), node('/p/b')], total: 4 },
-      { items: [node('/p/c'), node('/p/d')], total: 4 },
+      { items: [node('/p/a'), node('/p/b')], total: 2, nextCursor: 'cur-b' },
+      { items: [node('/p/c'), node('/p/d')], total: 2 },
     ];
     const source = createClientTreeSource();
     const h = source.mountChildren('/p', { limit: 2 });
@@ -124,8 +121,7 @@ describe('ClientTreeSource — cursor pagination (core-92z)', () => {
     h.loadMore();
     await waitPhase('/p', 'ready');
 
-    assert.equal(getChildrenCalls[1].offset, 2);
-    assert.equal(getChildrenCalls[1].cursor, undefined);
+    assert.equal(getChildrenCalls[1].cursor, 'cur-b');
     assert.deepEqual(cache.getChildren('/p').map(n => n.$path), ['/p/a', '/p/b', '/p/c', '/p/d']);
 
     // fully loaded — no further calls
@@ -134,7 +130,7 @@ describe('ClientTreeSource — cursor pagination (core-92z)', () => {
     h.dispose();
   });
 
-  it('refetch on a query view sends no offset (server rejects offset+query)', async () => {
+  it('refetch restarts the listing without a cursor', async () => {
     pages = [
       { items: [node('/q2/a')], total: 1 },
       { items: [node('/q2/a')], total: 1 },
@@ -147,7 +143,7 @@ describe('ClientTreeSource — cursor pagination (core-92z)', () => {
     await waitPhase('/q2', 'ready');
 
     assert.equal(getChildrenCalls.length, 2);
-    assert.equal(getChildrenCalls[1].offset, undefined);
+    assert.equal(getChildrenCalls[1].cursor, undefined);
     assert.deepEqual(getChildrenCalls[1].query, { status: 'open' });
     h.dispose();
   });

@@ -14,11 +14,11 @@ import type { TreeEvent, TreeWatchOpts, TreeWatchScope } from './watch';
 
 // ── Pagination ──
 
-export type PageOpts = { limit?: number; offset?: number };
+export type PageOpts = { limit?: number; cursor?: string };
 export type Page<T> = {
   items: T[];
-  /** Query views (core-92z): returned-items count ONLY, never an exact total —
-   *  clients detect "more available" via nextCursor, not items.length < total. */
+  /** Number of items represented by the loaded window. It is not an exact
+   *  cardinality contract; clients detect more pages via nextCursor. */
   total: number;
   truncated?: boolean;
   /** Opaque resume token for cursor pagination. Present ⇒ more pages exist. */
@@ -30,11 +30,21 @@ export type Page<T> = {
   readPlan?: { plan: ReadPlan; mountDeps: ReadonlySet<string> };
 };
 
-export function paginate<T>(items: T[], opts?: PageOpts): Page<T> {
-  const total = items.length;
-  if (!opts?.limit) return { items, total };
-  const offset = opts.offset ?? 0;
-  return { items: items.slice(offset, offset + opts.limit), total };
+export function paginate<T extends { $path: string }>(items: T[], opts?: PageOpts): Page<T> {
+  const ordered = [...items].sort((a, b) => a.$path.localeCompare(b.$path));
+  const start = opts?.cursor === undefined
+    ? 0
+    : ordered.findIndex(item => item.$path > opts.cursor!);
+  if (start < 0) return { items: [], total: 0 };
+
+  const pageItems = opts?.limit
+    ? ordered.slice(start, start + opts.limit)
+    : ordered.slice(start);
+  const page: Page<T> = { items: pageItems, total: pageItems.length };
+  if (opts?.limit && start + pageItems.length < ordered.length) {
+    page.nextCursor = pageItems[pageItems.length - 1].$path;
+  }
+  return page;
 }
 
 // ── patchMany batch (core-gk8.15) ──
@@ -113,7 +123,7 @@ export function stageSetEntry(stored: NodeData | undefined, entry: { path: strin
 
 // ── Interface ──
 
-export type ChildrenOpts = { depth?: number; query?: Record<string, unknown>; cursor?: string; watch?: boolean; watchNew?: boolean } & PageOpts;
+export type ChildrenOpts = { depth?: number; query?: Record<string, unknown>; watch?: boolean; watchNew?: boolean } & PageOpts;
 
 /** Options for Tree.execute. Identity (userId/claims/actor) is deliberately
  *  NOT here — it is bound when a tree is wrapped (server withExecute);
@@ -294,8 +304,8 @@ export async function resolveRef(tree: Tree, node: NodeData | Ref): Promise<Node
 // ── Filter tree ──
 // Like overlay, but set() routes to upper only when filter matches, else lower.
 // Reads merge both layers (upper wins). Remove tries both.
-// Pagination is EXACT: limit/offset are withheld from the layers (each returns
-// its full child set) and applied once, post-merge, over the deduped union.
+// Limiting is withheld from the layers (each returns its full child set) and
+// applied once, post-merge, over the deduped union.
 // Cost is full-fan-in per call — the cursor path (scanChildren) is the scalable
 // read; this legacy merge remains for depth>1 until Stage 7 (core-6x8).
 

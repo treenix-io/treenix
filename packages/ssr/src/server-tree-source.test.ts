@@ -109,6 +109,20 @@ describe('ServerTreeSource', () => {
     assert.equal(out.children['/p']?.total, 1);
   });
 
+  it('serialize preserves the next page cursor', async () => {
+    const tree = fakeTree([{ $path: '/p/a', $type: 'x' }]);
+    tree.getChildren = async () => ({
+      items: [{ $path: '/p/a', $type: 'x' }],
+      total: 1,
+      nextCursor: 'next-page',
+    });
+    const src = new ServerTreeSource(tree);
+    src.getChildrenSnapshot('/p');
+    await src.flushPending();
+
+    assert.equal(src.serialize().children['/p']?.nextCursor, 'next-page');
+  });
+
   it('serialize emits notFound for missing paths', async () => {
     const src = new ServerTreeSource(fakeTree([]));
     src.getPathSnapshot('/missing');

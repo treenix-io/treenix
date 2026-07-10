@@ -79,7 +79,8 @@ describe('MemoryStore', () => {
 
     const result = await tree.getChildren('/p', { limit: 2 });
     assert.equal(result.items.length, 2);
-    assert.equal(result.total, 3);
+    assert.equal(result.total, 2);
+    assert.ok(result.nextCursor);
   });
 
   it('remove does not cascade to children', async () => {
@@ -93,18 +94,19 @@ describe('MemoryStore', () => {
     assert.equal((await tree.get('/a/b/c'))?.$type, 't.item');
   });
 
-  it('getChildren with limit and offset', async () => {
+  it('getChildren resumes after a cursor', async () => {
     const tree = createMemoryTree();
     await tree.set(createNode('/p', 'dir'));
     await tree.set(createNode('/p/a', 'item'));
     await tree.set(createNode('/p/b', 'item'));
     await tree.set(createNode('/p/c', 'item'));
 
-    const all = await tree.getChildren('/p');
-    const result = await tree.getChildren('/p', { limit: 2, offset: 1 });
-    assert.equal(result.items.length, 2);
-    assert.equal(result.total, 3);
-    assert.deepEqual(result.items, all.items.slice(1, 3));
+    const first = await tree.getChildren('/p', { limit: 2 });
+    const second = await tree.getChildren('/p', { limit: 2, cursor: first.nextCursor });
+    assert.deepEqual(first.items.map(n => n.$path), ['/p/a', '/p/b']);
+    assert.deepEqual(second.items.map(n => n.$path), ['/p/c']);
+    assert.equal(second.total, 1);
+    assert.equal(second.nextCursor, undefined);
   });
 
   it('get returns isolated copy — mutating result does not affect stored node', async () => {

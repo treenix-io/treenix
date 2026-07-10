@@ -670,15 +670,13 @@ describe('Stress: deep trees', () => {
     for (let i = 0; i < 1000; i++)
       await tree.set(createNode(`/wide/c${i}`, 'item', { idx: i }));
 
-    const all = await tree.getChildren('/wide');
-    assert.equal(all.total, 1000);
-    console.log(`    total=${all.total} ✓`);
-
-    const page1 = await tree.getChildren('/wide', { limit: 100, offset: 0 });
+    const page1 = await tree.getChildren('/wide', { limit: 100 });
     assert.equal(page1.items.length, 100);
+    assert.ok(page1.nextCursor);
 
-    const page10 = await tree.getChildren('/wide', { limit: 100, offset: 900 });
-    assert.equal(page10.items.length, 100);
+    const page2 = await tree.getChildren('/wide', { limit: 100, cursor: page1.nextCursor });
+    assert.equal(page2.items.length, 100);
+    assert.notEqual(page1.items[0].$path, page2.items[0].$path);
     console.log('  ✓ pagination correct');
   });
 });

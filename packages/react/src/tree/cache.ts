@@ -98,9 +98,7 @@ const childErrorSubs = new Map<string, Set<Sub>>();
 // Pagination metadata from last successful fetch. Absent key = unknown.
 const childTotals = new Map<string, number>();
 const childTruncated = new Map<string, boolean>();
-// Resume token for cursor pagination (query views, core-92z). Present ⇒ more
-// pages exist; loadMore MUST use it instead of offset (total is loaded-count
-// only for query views, so offset math would read as "nothing more").
+// Resume token for cursor pagination. Present means more pages exist.
 const childNextCursor = new Map<string, string>();
 
 function addSub(map: Map<string, Set<Sub>>, key: string, cb: Sub): () => void {
@@ -647,6 +645,7 @@ export function hydrateFromServerSnapshot(snapshot: ServerHydrationState | undef
       replaceChildren(parent, page.items);
       setChildrenTotal(parent, page.total);
       setChildrenTruncated(parent, !!page.truncated);
+      setChildrenNextCursor(parent, page.nextCursor ?? null);
       setChildrenPhase(parent, 'ready');
     }
   }

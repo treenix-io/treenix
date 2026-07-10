@@ -111,7 +111,8 @@ describe('tRPC API integration', () => {
 
       const page = await caller.getChildren({ path: '/list', limit: 2 });
       assert.equal(page.items.length, 2);
-      assert.equal(page.total, 5);
+      assert.equal(page.total, 2);
+      assert.ok(page.nextCursor);
     });
 
     it('remove deletes node', async () => {
@@ -175,20 +176,14 @@ describe('tRPC API integration', () => {
       );
     });
 
-    it('rejects query + offset — query views are cursor-only', async () => {
-      await assert.rejects(
-        () => caller.getChildren({ path: '/q', query: { status: 'open' }, offset: 2 }),
-        (e: any) => e.code === 'BAD_REQUEST',
-      );
-    });
-
-    it('non-query offset pagination unchanged (regression)', async () => {
+    it('cursor paginates plain listings without duplicates or skips', async () => {
       const p1 = await caller.getChildren({ path: '/q', limit: 2 });
-      const p2 = await caller.getChildren({ path: '/q', limit: 2, offset: 2 });
-      assert.equal(p1.total, 4); // exact total preserved for plain reads
-      assert.equal(p2.total, 4);
+      assert.ok(p1.nextCursor);
+      const p2 = await caller.getChildren({ path: '/q', limit: 2, cursor: p1.nextCursor });
+      assert.equal(p1.total, 2);
+      assert.equal(p2.total, 2);
       assert.deepEqual([...p1.items, ...p2.items].map(n => n.$path), ['/q/a', '/q/b', '/q/c', '/q/d']);
-      assert.equal(p1.nextCursor, undefined);
+      assert.equal(p2.nextCursor, undefined);
     });
   });
 

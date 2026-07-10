@@ -76,7 +76,7 @@ describe('RawFsStore', () => {
     assert.equal(byPath['/sub'], 'dir');
   });
 
-  it('getChildren applies query filter before pagination', async () => {
+  it('getChildren applies query filter before limiting', async () => {
     const tree = await setup();
     await writeFile(join(dir, 'a.txt'), 'text');
     await writeFile(join(dir, 'b.txt'), 'text');
@@ -85,11 +85,11 @@ describe('RawFsStore', () => {
     const page = await tree.getChildren('/', {
       query: mapSiftQuery({ $type: 'text/plain' }) as Record<string, unknown>,
       limit: 1,
-      offset: 1,
     });
 
-    assert.equal(page.total, 2);
-    assert.deepEqual(page.items.map(n => n.$path), ['/b.txt']);
+    assert.equal(page.total, 1);
+    assert.ok(page.nextCursor);
+    assert.deepEqual(page.items.map(n => n.$path), ['/a.txt']);
   });
 
   it('getChildren respects depth', async () => {

@@ -147,9 +147,8 @@ export class ClientTreeSource implements TreeSource {
     const watching = !!(opts?.watch || opts?.watchNew);
     if (watching) refWatch(this.childrenWatchRefs, path);
 
-    // Replace-window fetch shared by initial and refetch. Stores nextCursor —
-    // query views (caller query OR server-side query mount) signal "more
-    // available" ONLY via nextCursor; their total is the returned count.
+    // Replace-window fetch shared by initial and refetch. Every listing uses
+    // nextCursor as its only "more available" signal.
     const fetchWindow = (limit: number, phase: 'initial' | 'refetch') => {
       cache.setChildrenPhase(path, phase);
       trpc.getChildren
@@ -180,8 +179,6 @@ export class ClientTreeSource implements TreeSource {
     const refetch = () => {
       if (cancelled) return;
       // Reload the currently-loaded window (preserves scroll position).
-      // No offset: 0 — query views reject offset (BAD_REQUEST, core-92z) and
-      // an absent offset already means "from the start".
       const windowSize = cache.getLoadedCount(path)
         || cache.getChildPageSize(path)
         || DEFAULT_PAGE_SIZE;
@@ -194,43 +191,15 @@ export class ClientTreeSource implements TreeSource {
       const pageSize = cache.getChildPageSize(path) ?? DEFAULT_PAGE_SIZE;
       const nextCursor = cache.getChildrenNextCursor(path);
 
-      // Cursor mode (query views): the stored nextCursor is the ONLY resume
-      // signal — total equals loaded count, so the offset guard below would
-      // read as "done". Absent cursor on a query view = end of matches.
-      if (nextCursor !== null) {
-        cache.setChildrenPhase(path, 'append');
-        trpc.getChildren
-          .query({ path, limit: pageSize, cursor: nextCursor, query: opts?.query })
-          .then((result: { items: NodeData[]; nextCursor?: string }) => {
-            if (cancelled) return;
-            cache.appendChildren(path, result.items);
-            cache.setChildrenNextCursor(path, result.nextCursor ?? null);
-            // Keep total in sync with the loaded count — for cursor views the
-            // page's own total is per-page, not cumulative.
-            cache.setChildrenTotal(path, cache.getLoadedCount(path));
-            cache.setChildrenPhase(path, 'ready');
-          })
-          .catch((err: unknown) => {
-            if (cancelled) return;
-            cache.setChildrenError(path, err instanceof Error ? err : new Error(String(err)));
-            cache.setChildrenPhase(path, 'error');
-          });
-        return;
-      }
-
-      if (opts?.query) return; // query view fully loaded — no offset fallback
-
-      // Offset mode (plain listings) — unchanged legacy pagination.
-      const total = cache.getChildrenTotal(path);
-      const loaded = cache.getLoadedCount(path);
-      if (total === null || loaded >= total) return;
+      if (nextCursor === null) return;
       cache.setChildrenPhase(path, 'append');
       trpc.getChildren
-        .query({ path, limit: pageSize, offset: loaded })
-        .then((result: { items: NodeData[]; total: number }) => {
+        .query({ path, limit: pageSize, cursor: nextCursor, query: opts?.query })
+        .then((result: { items: NodeData[]; nextCursor?: string }) => {
           if (cancelled) return;
           cache.appendChildren(path, result.items);
-          cache.setChildrenTotal(path, result.total);
+          cache.setChildrenNextCursor(path, result.nextCursor ?? null);
+          cache.setChildrenTotal(path, cache.getLoadedCount(path));
           cache.setChildrenPhase(path, 'ready');
         })
         .catch((err: unknown) => {

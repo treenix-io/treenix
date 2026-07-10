@@ -42,8 +42,8 @@ export type Query<T> = {
 };
 
 export type ChildrenQuery = Query<NodeData[]> & {
-  readonly total: number | null;   // server-reported total; loaded-count only for query views (core-92z)
-  readonly hasMore: boolean;       // nextCursor present (query views) OR data.length < total (plain)
+  readonly total: number | null;   // number of items in the loaded window
+  readonly hasMore: boolean;       // nextCursor present
   readonly loadingMore: boolean;   // next page append in flight; mutually exclusive with stale
   readonly truncated: boolean | null; // null until first response; true if server hit cap
   loadMore(): void;                // no-op if !hasMore or already loadingMore
@@ -183,9 +183,7 @@ export function useChildren(parentPath: string, opts?: ChildrenOpts): ChildrenQu
   const loading = snap.phase === 'idle' || snap.phase === 'initial';
   const stale = snap.phase === 'refetch';
   const loadingMore = snap.phase === 'append';
-  // Query views: total tracks loaded count, so nextCursor is the real signal.
-  const hasMore = snap.nextCursor !== null
-    || (snap.total !== null && snap.data.length < snap.total);
+  const hasMore = snap.nextCursor !== null;
 
   return useMemo(() => ({
     data: snap.data,

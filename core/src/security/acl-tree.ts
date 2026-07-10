@@ -192,11 +192,6 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
     return resolvePermission(rawStore, path, userId, claims, cache, undefined, stateCache);
   }
 
-  // Plain (non-query) reads keep the legacy limit+offset+total contract until
-  // Stage 7 (core-g2e). The bridge scans up to this many visible items to
-  // compute total; `truncated` surfaces when the ceiling was hit.
-  const OFFSET_BRIDGE_SCAN_LIMIT = 1_000;
-
   // INVARIANT (core-pxlu): hand-built literal, NO `...rawStore` spread — the
   // execute capability is intentionally stripped here; the wire session
   // re-wraps with withExecute binding the correct per-request identity.
@@ -245,42 +240,15 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
 
       const reqLimit = Math.min(opts?.limit ?? PUBLIC_LIMIT_DEFAULT, PUBLIC_LIMIT_MAX);
 
-      // Query views (viewWhere/callerWhere set) and explicit-cursor reads are
-      // cursor-only (core-92z): total = returned count, NEVER an exact total
-      // (the scan-to-1000 bridge is an unbounded cost on filtered views), and
-      // nextCursor is the "more available" signal. offset is a competing
-      // pagination model — reject rather than silently misinterpret.
-      const cursorMode = !!(plan.viewWhere || plan.callerWhere) || opts?.cursor !== undefined;
-      if (cursorMode) {
-        if (opts?.offset !== undefined) {
-          throw new OpError('BAD_REQUEST', 'query views paginate by cursor — offset is not supported');
-        }
-        const result = await executeList(source, plan, { limit: reqLimit, cursor: opts?.cursor }, project, ctx);
-        const page: Page<NodeData> = { items: result.items, total: result.items.length };
-        if (result.nextCursor) page.nextCursor = result.nextCursor;
-        if (result.truncated) page.truncated = true;
-        // Query reads carry their plan to watch registration (Stage 6d) so
-        // the initial read and the live watch agree on membership. Stripped
-        // at the protocol edge — server-internal only.
-        if (plan.viewWhere || plan.callerWhere) page.readPlan = { plan, mountDeps };
-        return page;
-      }
-
-      // Plain (non-query) reads: public API uses limit + offset + total;
-      // executeList uses limit + cursor. Bridge: scan up to
-      // OFFSET_BRIDGE_SCAN_LIMIT visible items to compute total (matches the
-      // pre-stage-3 contract). `truncated` surfaces when the scan hit its
-      // ceiling — same signal as the old ACL_SCAN_LIMIT warning, just
-      // structured into the page instead of console.warn.
-      const offset = opts?.offset ?? 0;
-      const scanLimit = Math.max(OFFSET_BRIDGE_SCAN_LIMIT, offset + reqLimit);
-
-      const result = await executeList(source, plan, { limit: scanLimit }, project, ctx);
-      const items = result.items.slice(offset, offset + reqLimit);
-      const page: Page<NodeData> = { items, total: result.items.length };
-      // truncated: either more pages exist (nextCursor) or scan hit budget
-      // (result.truncated). Page.total reflects only what we managed to scan.
-      if (result.nextCursor || result.truncated) page.truncated = true;
+      // Every listing uses the read-runtime cursor contract. `total` describes
+      // the returned window; nextCursor is the only "more available" signal.
+      const result = await executeList(source, plan, { limit: reqLimit, cursor: opts?.cursor }, project, ctx);
+      const page: Page<NodeData> = { items: result.items, total: result.items.length };
+      if (result.nextCursor) page.nextCursor = result.nextCursor;
+      if (result.truncated) page.truncated = true;
+      // Query reads carry their plan to watch registration (Stage 6d) so the
+      // initial read and live watch agree on membership.
+      if (plan.viewWhere || plan.callerWhere) page.readPlan = { plan, mountDeps };
       return page;
     },
 

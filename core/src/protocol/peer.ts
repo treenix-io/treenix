@@ -209,7 +209,7 @@ export function createPeer(serve?: ServeFactory) {
           // uniform threading to all tree calls is a separate decision.
           const page = await s.tree.getChildren(
             path,
-            { limit: frame.limit ?? DEFAULT_LS_LIMIT, offset: frame.offset, depth: frame.depth, query: frame.query, cursor: frame.cursor },
+            { limit: frame.limit ?? DEFAULT_LS_LIMIT, depth: frame.depth, query: frame.query, cursor: frame.cursor },
             ctx,
           );
           if (cap) {

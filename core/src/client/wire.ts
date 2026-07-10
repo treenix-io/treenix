@@ -48,7 +48,7 @@ export function createClient(conn: Conn): WireClient {
     get: (path) => peer.req.get(path) as Promise<NodeData | undefined>,
     getChildren: (path, opts?: ChildrenOpts) =>
       peer.req.ls(path, {
-        limit: opts?.limit, offset: opts?.offset, depth: opts?.depth,
+        limit: opts?.limit, depth: opts?.depth,
         query: opts?.query, cursor: opts?.cursor,
         watch: opts?.watch, watchList: opts?.watchNew,
       }) as Promise<Page<NodeData>>,

@@ -552,17 +552,19 @@ describe('withAcl', () => {
     assert.equal(page2.nextCursor, undefined, 'end of matches → no nextCursor');
   });
 
-  it('rejects offset on query views — cursor-only pagination (core-92z)', async () => {
+  it('paginates plain listings by cursor', async () => {
     await tree.set({
       ...createNode('/tasks2', 'dir'),
       $acl: [{ g: 'authenticated', p: R }],
     });
+    await tree.set(createNode('/tasks2/a', 'task'));
+    await tree.set(createNode('/tasks2/b', 'task'));
 
     const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);
-    await assert.rejects(
-      () => s.getChildren('/tasks2', { query: { status: 'open' }, limit: 1, offset: 1 }),
-      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
-    );
+    const page1 = await s.getChildren('/tasks2', { limit: 1 });
+    assert.ok(page1.nextCursor);
+    const page2 = await s.getChildren('/tasks2', { limit: 1, cursor: page1.nextCursor });
+    assert.deepEqual([...page1.items, ...page2.items].map(n => n.$path), ['/tasks2/a', '/tasks2/b']);
   });
 
   it('deep query reads paginate by cursor; ACL filters at every depth (core-0bl)', async () => {
@@ -932,7 +934,7 @@ describe('system identity guards (F15)', () => {
 describe('getChildren truncation', () => {
   beforeEach(() => clearRegistry());
 
-  it('sets truncated=true when scan hits the soft cap', async () => {
+  it('plain listings stop at the page limit and return a cursor', async () => {
     const base = createMemoryTree();
     // Parent must be readable now that getChildren throws FORBIDDEN on
     // unreadable parents — otherwise we'd never reach the truncation path.
@@ -940,15 +942,15 @@ describe('getChildren truncation', () => {
       ...createNode('/big', 'folder'),
       $acl: [{ g: 'authenticated', p: R }],
     });
-    // Seed > scanLimit (1000) so executeList stops with nextCursor — same
-    // signal as the legacy ACL_SCAN_LIMIT warning, now structured.
     for (let i = 0; i < 1_001; i++) {
       await base.set(createNode(`/big/${String(i).padStart(4, '0')}`, 'doc'));
     }
 
     const s = withAcl(base, 'admin', ['u:admin', 'authenticated']);
     const result = await s.getChildren('/big');
-    assert.equal(result.truncated, true);
+    assert.equal(result.items.length, 100);
+    assert.ok(result.nextCursor);
+    assert.equal(result.truncated, undefined);
   });
 
   it('truncated is undefined for normal results', async () => {
