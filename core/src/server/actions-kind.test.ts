@@ -218,13 +218,12 @@ describe('executeAction — kind enforcement', () => {
 
   it('@read action: dep mutation throws KIND_VIOLATION', async () => {
     class ReadPeek {
-      static needs = { peek: ['status'] };
       peek(_d: unknown, deps: { status: ComponentData }) {
         deps.status.value = 'mutated';
       }
     }
 
-    registerType('test.kind.readdep', ReadPeek);
+    registerType('test.kind.readdep', ReadPeek, { needs: { peek: ['status'] } });
     register('test.kind.readdep', 'schema', () => ({
       $id: 'test.kind.readdep',
       type: 'object',
@@ -246,13 +245,12 @@ describe('executeAction — kind enforcement', () => {
 
   it('@write action: cross-node dep mutation throws KIND_VIOLATION (was silently dropped)', async () => {
     class CrossPoke {
-      static needs = { poke: ['/cfg/target'] };
       poke(_d: unknown, deps: { target: NodeData }) {
         deps.target.value = 'mutated';
       }
     }
 
-    registerType('test.kind.crossdep', CrossPoke);
+    registerType('test.kind.crossdep', CrossPoke, { needs: { poke: ['/cfg/target'] } });
     register('test.kind.crossdep', 'schema', () => ({
       $id: 'test.kind.crossdep',
       type: 'object',
@@ -274,13 +272,12 @@ describe('executeAction — kind enforcement', () => {
 
   it('@write action: sibling dep mutation still persists via draft (no regression)', async () => {
     class Publisher {
-      static needs = { publish: ['status'] };
       publish(_d: unknown, deps: { status: ComponentData }) {
         deps.status.value = 'published';
       }
     }
 
-    registerType('test.kind.sibdep', Publisher);
+    registerType('test.kind.sibdep', Publisher, { needs: { publish: ['status'] } });
     register('test.kind.sibdep', 'schema', () => ({
       $id: 'test.kind.sibdep',
       type: 'object',

@@ -137,7 +137,6 @@ export function serverNodeHandle(tree: Tree) {
 }
 
 export { collectDeps } from '#comp/needs';
-export { registerActionNeeds, getActionNeeds } from '#comp/needs';
 
 // ── Server-side operations ──
 // Single entry point for tRPC, MCP, cook-bot, services — no boilerplate.

@@ -63,18 +63,16 @@ describe('per-action needs', () => {
 
   });
 
-  it('static needs registers per-action', () => {
+  it('registration needs compile per action', () => {
     class Article {
       title = '';
-      static needs = {
-        publish: ['status'],
-        ship: ['status', 'delivery'],
-      };
       publish() { this.title = 'published'; }
       ship() { this.title = 'shipped'; }
     }
 
-    registerType('t.article', Article);
+    registerType('t.article', Article, {
+      needs: { publish: ['status'], ship: ['status', 'delivery'] },
+    });
     registerType('t.status', Status);
     registerType('t.delivery', Delivery);
 
@@ -86,9 +84,9 @@ describe('per-action needs', () => {
     assert.equal(shipNeeds.length, 2);
   });
 
-  it('opts.needs registers as * fallback', () => {
+  it('registration needs supports a * fallback', () => {
     class Meta { title = ''; rename() {} }
-    registerType('t.meta', Meta, { needs: ['status'] });
+    registerType('t.meta', Meta, { needs: { '*': ['status'] } });
     registerType('t.status', Status);
 
     // '*' fallback applies to any action
@@ -100,12 +98,13 @@ describe('per-action needs', () => {
   it('per-action overrides fallback', () => {
     class Article {
       title = '';
-      static needs = { publish: ['payment'] };
       publish() {}
       archive() {}
     }
 
-    registerType('t.article', Article, { needs: ['status'] });
+    registerType('t.article', Article, {
+      needs: { '*': ['status'], publish: ['payment'] },
+    });
     registerType('t.status', Status);
     registerType('t.payment', Payment);
 
@@ -125,14 +124,13 @@ describe('collectDeps', () => {
   it('sibling deps from same node', async () => {
     class Article {
       title = '';
-      static needs = { publish: ['status'] };
       publish(_d: unknown, deps: any) {
         this.title = 'new';
         deps.status.value = 'published';
       }
     }
 
-    registerType('t.article', Article);
+    registerType('t.article', Article, { needs: { publish: ['status'] } });
     registerType('t.status', Status);
 
     const tree = createMemoryTree();
@@ -149,11 +147,10 @@ describe('collectDeps', () => {
   it('@fieldRef resolves to remote node', async () => {
     class Connector {
       targetRef = '/config/warehouse';
-      static needs = { check: ['@targetRef'] };
       check() {}
     }
 
-    registerType('t.connector', Connector);
+    registerType('t.connector', Connector, { needs: { check: ['@targetRef'] } });
 
     const tree = createMemoryTree();
     await tree.set(createNode('/config/warehouse', 'warehouse', { capacity: 100 }));
@@ -168,11 +165,10 @@ describe('collectDeps', () => {
 
   it('relative path ./child resolves', async () => {
     class Parent {
-      static needs = { run: ['./config'] };
       run() {}
     }
 
-    registerType('t.parent', Parent);
+    registerType('t.parent', Parent, { needs: { run: ['./config'] } });
 
     const tree = createMemoryTree();
     await tree.set(createNode('/app/config', 'cfg', { debug: true }));
@@ -187,11 +183,10 @@ describe('collectDeps', () => {
 
   it('parent-relative path ../sibling resolves', async () => {
     class Child {
-      static needs = { run: ['../settings'] };
       run() {}
     }
 
-    registerType('t.child', Child);
+    registerType('t.child', Child, { needs: { run: ['../settings'] } });
 
     const tree = createMemoryTree();
     await tree.set(createNode('/app/settings', 'cfg', { lang: 'en' }));
@@ -206,11 +201,10 @@ describe('collectDeps', () => {
 
   it('absolute path resolves', async () => {
     class Widget {
-      static needs = { init: ['/sys/config'] };
       init() {}
     }
 
-    registerType('t.widget', Widget);
+    registerType('t.widget', Widget, { needs: { init: ['/sys/config'] } });
 
     const tree = createMemoryTree();
     await tree.set(createNode('/sys/config', 'cfg', { version: 2 }));
@@ -225,11 +219,10 @@ describe('collectDeps', () => {
 
   it('./children/* returns array of child nodes', async () => {
     class List {
-      static needs = { report: ['./items/*'] };
       report() {}
     }
 
-    registerType('t.list', List);
+    registerType('t.list', List, { needs: { report: ['./items/*'] } });
 
     const tree = createMemoryTree();
     await tree.set(createNode('/orders/1/items/a', 'item', { name: 'apple' }));
@@ -248,13 +241,12 @@ describe('collectDeps', () => {
       value = 'draft';
       warehouseRef = '/config/wh';
 
-      static needs = {
-        advance: ['payment', '@warehouseRef', './items/*'],
-      };
       advance() {}
     }
 
-    registerType('t.order-status', OrderStatus);
+    registerType('t.order-status', OrderStatus, {
+      needs: { advance: ['payment', '@warehouseRef', './items/*'] },
+    });
     registerType('t.payment', Payment);
 
     const tree = createMemoryTree();
@@ -279,11 +271,10 @@ describe('collectDeps', () => {
 
   it('empty needs = no deps', async () => {
     class Simple {
-      static needs = { run: [] };
       run() {}
     }
 
-    registerType('t.simple', Simple);
+    registerType('t.simple', Simple, { needs: { run: [] } });
     const tree = createMemoryTree();
     const node = createNode('/x', 'dir', {}, { simple: { $type: 't.simple' } });
 
@@ -291,7 +282,7 @@ describe('collectDeps', () => {
     assert.deepEqual(deps, {});
   });
 
-  it('no static needs + no opts.needs = no deps', async () => {
+  it('no registration needs = no deps', async () => {
     class Plain { run() {} }
     registerType('t.plain', Plain);
     const tree = createMemoryTree();
@@ -305,10 +296,9 @@ describe('collectDeps', () => {
 
   it('throws on missing sibling', async () => {
     class NeedsMissing {
-      static needs = { run: ['nonexistent'] };
       run() {}
     }
-    registerType('t.needs-missing', NeedsMissing);
+    registerType('t.needs-missing', NeedsMissing, { needs: { run: ['nonexistent'] } });
     const tree = createMemoryTree();
     const node = createNode('/x', 'dir', {}, { comp: { $type: 't.needs-missing' } });
 
@@ -318,10 +308,9 @@ describe('collectDeps', () => {
   it('throws on missing @fieldRef target', async () => {
     class BadRef {
       targetRef = '/nowhere';
-      static needs = { run: ['@targetRef'] };
       run() {}
     }
-    registerType('t.bad-ref', BadRef);
+    registerType('t.bad-ref', BadRef, { needs: { run: ['@targetRef'] } });
     const tree = createMemoryTree();
     const node = createNode('/x', 'dir', {}, {
       comp: { $type: 't.bad-ref', targetRef: '/nowhere' },
@@ -332,10 +321,9 @@ describe('collectDeps', () => {
 
   it('throws on missing path dep', async () => {
     class BadPath {
-      static needs = { run: ['/missing/node'] };
       run() {}
     }
-    registerType('t.bad-path', BadPath);
+    registerType('t.bad-path', BadPath, { needs: { run: ['/missing/node'] } });
     const tree = createMemoryTree();
     const node = createNode('/x', 'dir', {}, { comp: { $type: 't.bad-path' } });
 
@@ -345,10 +333,9 @@ describe('collectDeps', () => {
   it('throws on @field that is not a string', async () => {
     class BadField {
       targetRef = 42;
-      static needs = { run: ['@targetRef'] };
       run() {}
     }
-    registerType('t.bad-field', BadField as any);
+    registerType('t.bad-field', BadField, { needs: { run: ['@targetRef'] } });
     const tree = createMemoryTree();
     const node = createNode('/x', 'dir', {}, {
       comp: { $type: 't.bad-field', targetRef: 42 },
@@ -359,10 +346,19 @@ describe('collectDeps', () => {
 
   it('throws at registration on duplicate dep keys', () => {
     class DupKeys {
-      static needs = { run: ['payment', '/other/payment'] };
       run() {}
     }
-    assert.throws(() => registerType('t.dup', DupKeys), /Duplicate need key/);
+    assert.throws(() => registerType('t.dup', DupKeys, {
+      needs: { run: ['payment', '/other/payment'] },
+    }), /Duplicate need key/);
+  });
+
+  it('throws before publishing when needs names a missing action', () => {
+    class Article { publish() {} }
+    assert.throws(() => registerType('t.bad-needs', Article, {
+      needs: { missing: ['status'] } as any,
+    }), /missing action/);
+    assert.equal(getActionNeeds('t.bad-needs', 'publish').length, 0);
   });
 });
 
@@ -376,17 +372,13 @@ describe('executeAction with deps', () => {
     class Article {
       title = '';
 
-      static needs = {
-        publishAndRename: ['status'],
-      };
-
       publishAndRename({ title }: { title: string }, deps: { status: any }) {
         this.title = title;
         deps.status.value = 'published';
       }
     }
 
-    registerType('t.article', Article);
+    registerType('t.article', Article, { needs: { publishAndRename: ['status'] } });
     register('t.article', 'schema', () => ({
       $id: 't.article', title: 'Article', type: 'object' as const,
       properties: { title: { type: 'string' } },
@@ -411,11 +403,6 @@ describe('executeAction with deps', () => {
     class Processor {
       value = '';
 
-      static needs = {
-        quick: ['status'],
-        full: ['status', 'payment'],
-      };
-
       quick(_d: unknown, deps: any) {
         this.value = `status=${deps.status.value}`;
       }
@@ -425,7 +412,9 @@ describe('executeAction with deps', () => {
       }
     }
 
-    registerType('t.processor', Processor);
+    registerType('t.processor', Processor, {
+      needs: { quick: ['status'], full: ['status', 'payment'] },
+    });
     register('t.processor', 'schema', () => ({
       $id: 't.processor', title: 'Processor', type: 'object' as const,
       properties: { value: { type: 'string' } },
@@ -455,14 +444,12 @@ describe('executeAction with deps', () => {
       targetRef = '';
       result = '';
 
-      static needs = { fetch: ['@targetRef'] };
-
       fetch(_d: unknown, deps: any) {
         this.result = deps.targetRef.$path;
       }
     }
 
-    registerType('t.connector', Connector);
+    registerType('t.connector', Connector, { needs: { fetch: ['@targetRef'] } });
     register('t.connector', 'schema', () => ({
       $id: 't.connector', title: 'Connector', type: 'object' as const,
       properties: { targetRef: { type: 'string' }, result: { type: 'string' } },

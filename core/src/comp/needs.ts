@@ -1,4 +1,4 @@
-import { AnyType, type ComponentData, getComponent, getComponentByName, type NodeData } from '#core';
+import { AnyType, type ComponentData, getComponent, getComponentByName, getMeta, type NodeData, type TypeId } from '#core';
 import { basename, dirname, join } from '#core/path';
 import { type Tree } from '#tree';
 
@@ -12,26 +12,18 @@ export type NeedSpec =
 
 export type ResolvedDeps = Record<string, ComponentData | NodeData | NodeData[]>;
 
-// ── Needs tree ──
-// Local map keyed by type@action. Populated by registerActionNeeds (called from registerType).
-// Separate from registry meta because needs are registered before actions exist in the registry.
-// kriz: should be in registry! it doesn't matter that actions not yet exists!
-const needsMap = new Map<string, NeedSpec[]>();
-
-export function registerActionNeeds(type: string, action: string, patterns: string[]): void {
+export function parseNeeds(patterns: readonly string[]): NeedSpec[] {
   const specs = patterns.map(parseNeedPattern);
   const seen = new Set<string>();
   for (const s of specs) {
-    if (seen.has(s.key)) throw new Error(`Duplicate need key "${s.key}" for ${type}@${action}`);
+    if (seen.has(s.key)) throw new Error(`Duplicate need key "${s.key}"`);
     seen.add(s.key);
   }
-  needsMap.set(`${type}@${action}`, specs);
+  return specs;
 }
 
-export function getActionNeeds(type: string, action: string): NeedSpec[] {
-  return needsMap.get(`${type}@${action}`)
-    ?? needsMap.get(`${type}@*`)
-    ?? [];
+export function getActionNeeds(type: TypeId, action: string): NeedSpec[] {
+  return (getMeta(type, `action:${action}`)?.needs as NeedSpec[] | undefined) ?? [];
 }
 
 // ── Pattern parsing ──

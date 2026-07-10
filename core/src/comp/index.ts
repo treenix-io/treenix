@@ -1,7 +1,7 @@
 // Treenix Component Registration — between core and server
 // registerType(type, cls) → stamps $type, registers class, auto-registers actions from methods
 
-import { registerActionNeeds } from '#comp/needs';
+import { parseNeeds, type NeedSpec } from '#comp/needs';
 import { currentExecCtx, runWithExecCtx, type ExecCtx } from '#comp/context';
 import {
   type Class,
@@ -22,9 +22,6 @@ import { type TypeSchema } from '#schema/types';
 export type { Class };
 export type TypeClass<T> = Class<T> & {
   $type: string;
-  // kriz: why needs here and not on the registerType options? think should move there
-  /** Per-action needs declared as a static class field. registerType reads this and calls registerActionNeeds. */
-  needs?: Record<string, string[]>;
 };
 
 // Strip methods from a type — only keep data fields (recursive)
@@ -76,21 +73,65 @@ export function getCtx(): ExecCtx {
 // Stored as registry meta on action:* contexts. Queried via comp/ports.ts and comp/planner.ts.
 // kriz: what is port, why is in core?
 export type PortDecl = { pre?: string[]; post?: string[] };
-type CompOptions = { needs?: string[]; ports?: Record<string, PortDecl>; override?: boolean; noOptimistic?: string[] };
+type ActionName<T> = Extract<{
+  [K in keyof T]: T[K] extends (...args: any[]) => any ? K : never;
+}[keyof T], string>;
+export type CompOptions<T> = {
+  needs?: Partial<Record<ActionName<T> | '*', readonly string[]>>;
+  ports?: Record<string, PortDecl>;
+  override?: boolean;
+  noOptimistic?: string[];
+};
 const AsyncGenFn = Object.getPrototypeOf(async function* () { }).constructor;
 
 type ActionExecCtx = ExecCtx & { comp?: object; deps?: unknown };
 
-function registerMethods<T>(type: TypeId, cls: Class<T>, opts?: CompOptions): void {
-  const normalizedType = normalizeType(type);
+type ActionMethod = { name: string; method: (...args: any[]) => unknown };
+
+function actionMethods<T>(cls: Class<T>): ActionMethod[] {
   const proto = cls.prototype as Record<string, unknown>;
+  const methods: ActionMethod[] = [];
   for (const name of Object.getOwnPropertyNames(proto)) {
     if (name === 'constructor') continue;
     const method = proto[name];
-    if (typeof method !== 'function') continue;
+    if (typeof method === 'function') methods.push({ name, method: method as ActionMethod['method'] });
+  }
+  return methods;
+}
+
+function compileNeeds<T>(methods: ActionMethod[], opts?: CompOptions<T>): Map<string, NeedSpec[]> {
+  const declared = opts?.needs;
+  if (!declared) return new Map();
+
+  const names = new Set(methods.map(({ name }) => name));
+  for (const name of Object.keys(declared)) {
+    if (name !== '*' && !names.has(name)) {
+      throw new Error(`needs declared for missing action "${name}"`);
+    }
+  }
+
+  const compiled = new Map<string, NeedSpec[]>();
+  for (const { name } of methods) {
+    const patterns = declared[name as ActionName<T>] ?? declared['*'];
+    if (patterns) compiled.set(name, parseNeeds(patterns));
+  }
+  return compiled;
+}
+
+function registerMethods<T>(
+  type: TypeId,
+  cls: Class<T>,
+  opts: CompOptions<T> | undefined,
+  methods = actionMethods(cls),
+  needs = compileNeeds(methods, opts),
+): void {
+  const normalizedType = normalizeType(type);
+  for (const { name, method } of methods) {
 
     const context = `action:${name}`;
     const meta: Record<string, unknown> = { ...opts?.ports?.[name] };
+    const actionNeeds = needs.get(name);
+    if (actionNeeds) meta.needs = actionNeeds;
     if (opts?.noOptimistic?.includes(name)) meta.noOptimistic = true;
     if (method instanceof AsyncGenFn) meta.stream = true;
     if (opts?.override) unregister(normalizedType, context);
@@ -102,7 +143,10 @@ function registerMethods<T>(type: TypeId, cls: Class<T>, opts?: CompOptions): vo
   }
 }
 
-export function registerType<T extends object>(type: string, cls: Class<T>, opts?: CompOptions): TypeClass<T> {
+export function registerType<T extends object>(type: string, cls: Class<T>, opts?: CompOptions<T>): TypeClass<T> {
+  // Compile registration metadata before publishing any registry entries.
+  const methods = actionMethods(cls);
+  const needs = compileNeeds(methods, opts);
   if (opts?.override) {
     const n = normalizeType(type);
     // kriz: why unregister ALL contexts? and not only needed?
@@ -114,24 +158,12 @@ export function registerType<T extends object>(type: string, cls: Class<T>, opts
   register(type, 'class', cls, opts);
   trackType(compClass.$type);
 
-  // Per-action needs from static property on class
-  const staticNeeds = compClass.needs;
-  if (staticNeeds) {
-    for (const [action, patterns] of Object.entries(staticNeeds)) {
-      registerActionNeeds(type, action, patterns);
-    }
-  }
-
-  // opts.needs = global fallback ('*') for all actions
-  // kriz: should be full needs here, including * needs for all methods
-  if (opts?.needs) registerActionNeeds(type, '*', opts.needs);
-
-  registerMethods(type, cls, opts);
+  registerMethods(type, cls, opts, methods, needs);
   return compClass;
 }
 
 // Register server-only actions from a class. _ prefixed = internal (hidden from clients).
-export function registerActions<T>(type: TypeId, cls: Class<T>, opts?: CompOptions): void {
+export function registerActions<T>(type: TypeId, cls: Class<T>, opts?: CompOptions<T>): void {
   registerMethods(type, cls, opts);
 }
 

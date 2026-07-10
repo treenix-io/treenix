@@ -171,7 +171,7 @@ describe('defineComponent', () => {
       }
     }
 
-    registerType('article', Article, { needs: ['status'] });
+    registerType('article', Article, { needs: { '*': ['status'] } });
     registerType('status', Status);
 
     const node = createNode('/a', 'page', {}, {
@@ -259,7 +259,7 @@ describe('defineComponent', () => {
       }
     }
 
-    registerType('article', Article, { needs: ['status'] });
+    registerType('article', Article, { needs: { '*': ['status'] } });
     registerType('status', Status);
     register('article', 'schema', articleSchema);
 
