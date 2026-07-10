@@ -20,9 +20,17 @@ function isAuditWrite(path: string): boolean {
   return path.startsWith(AUDIT_PREFIX);
 }
 
+let lastTs = 0;
+let seq = 0;
+
 function eventPath(): string {
   // Sortable (lexicographic == temporal) + collision-resistant for parallel writes.
-  return `${AUDIT_PREFIX}${Date.now()}-${randomBytes(4).toString('hex')}`;
+  // seq breaks same-millisecond ties — without it two appends in one ms sorted by
+  // the RANDOM suffix, so a delegate-settled row could sort before its intent row.
+  const ts = Date.now();
+  seq = ts === lastTs ? seq + 1 : 0;
+  lastTs = ts;
+  return `${AUDIT_PREFIX}${ts}-${seq.toString(36).padStart(3, '0')}-${randomBytes(4).toString('hex')}`;
 }
 
 type Op = 'set' | 'remove' | 'patch' | 'patchMany';
