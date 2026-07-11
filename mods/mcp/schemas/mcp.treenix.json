@@ -7,6 +7,7 @@
   "methods": {
     "get_node": {
       "description": "Read a node by path. Returns full untruncated values.",
+      "kind": "read",
       "arguments": [
         {
           "name": "_data",
@@ -25,6 +26,7 @@
     },
     "list_children": {
       "description": "List children of a node. Long string values may be truncated; use get_node for full data.",
+      "kind": "read",
       "arguments": [
         {
           "name": "_data",
@@ -195,10 +197,12 @@
     },
     "catalog": {
       "description": "List all registered types with compact descriptions plus property/action docs.",
+      "kind": "read",
       "arguments": []
     },
     "describe_type": {
       "description": "Get full schema of a type: properties, actions, and cross-references.",
+      "kind": "read",
       "arguments": [
         {
           "name": "_data",
@@ -217,6 +221,7 @@
     },
     "search_types": {
       "description": "Search types by keyword across names, titles, property names, and action names.",
+      "kind": "read",
       "arguments": [
         {
           "name": "_data",

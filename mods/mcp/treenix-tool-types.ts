@@ -2,13 +2,13 @@ import { registerType } from '@treenx/core/comp';
 
 /** Treenix tree and type-catalog tools exposed through the generic MCP adapter. */
 export class TreenixMcpTools {
-  /** @description Read a node by path. Returns full untruncated values. */
+  /** @read @description Read a node by path. Returns full untruncated values. */
   get_node(_data: {
     /** @description Node path to read. */
     path: string;
   }) {}
 
-  /** @description List children of a node. Long string values may be truncated; use get_node for full data. */
+  /** @read @description List children of a node. Long string values may be truncated; use get_node for full data. */
   list_children(_data: {
     /** @description Parent node path. */
     path: string;
@@ -71,16 +71,16 @@ export class TreenixMcpTools {
     path: string;
   }) {}
 
-  /** @description List all registered types with compact descriptions plus property/action docs. */
+  /** @read @description List all registered types with compact descriptions plus property/action docs. */
   catalog() {}
 
-  /** @description Get full schema of a type: properties, actions, and cross-references. */
+  /** @read @description Get full schema of a type: properties, actions, and cross-references. */
   describe_type(_data: {
     /** @description Type id to describe. */
     type: string;
   }) {}
 
-  /** @description Search types by keyword across names, titles, property names, and action names. */
+  /** @read @description Search types by keyword across names, titles, property names, and action names. */
   search_types(_data: {
     /** @description Search query text. */
     query: string;

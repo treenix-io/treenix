@@ -371,9 +371,12 @@ function methodPayload(method: MethodSchema, args: Record<string, unknown>): unk
 
 // Guard signal is the method's declared kind/side-effect — not noOptimistic
 // (noOptimistic is a frontend rendering hint, semantically unrelated to policy).
-// Declare via JSDoc: @write → kind:'write'; @io → io:true.
+// Declare via JSDoc: @read → kind:'read'; @io → io:true.
+// core-anz4.1: fail-closed — the executor defaults an absent kind to 'write'
+// (actions.ts), so a method escapes the guardian only when explicitly @read;
+// @io guards even reads (external side effect).
 export function actionIsGuarded(_type: string, _action: string, method: MethodSchema): boolean {
-  return method.kind === 'write' || method.io === true;
+  return method.kind !== 'read' || method.io === true;
 }
 
 function delegatesToAction(method: MethodSchema): boolean {
@@ -408,6 +411,9 @@ function delegatedActionCall(method: MethodSchema, args: Record<string, unknown>
     type: typeof args.type === 'string' ? args.type : undefined,
     key: typeof args.key === 'string' ? args.key : undefined,
     data: args.data,
+    // core-anz4.13(2): opId is promised by the execute tool schema — thread it
+    // through to the executor's idempotency layer instead of dropping it.
+    opId: typeof args.opId === 'string' ? args.opId : undefined,
   };
 }
 
@@ -502,6 +508,7 @@ export async function buildMcpServer(store: Tree, session: Session, claims?: str
               // buildActor, not an inline literal — workload sessions carry
               // onBehalfOf/taskPath/runPath that an {id-only} actor would drop.
               actor: buildActor(session, delegated.action),
+              opId: delegated.opId,
             },
           );
           return text(typeof result === 'string' ? result : yaml(result ?? { ok: true }));

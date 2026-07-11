@@ -275,6 +275,70 @@ describe('mcp guardian elicitation', () => {
   });
 });
 
+// core-anz4.1: guardian kind-mismatch bypass. A delegated generic execute must be
+// classified by its TARGET action's kind (callIsGuarded swaps in the target). A
+// target action that declares no kind is fail-closed (executor defaults it to 'write'),
+// so it must be guarded — never allowed to slip past policy unchecked. And an opId
+// passed to MCP execute must reach the executor's idempotency layer.
+describe('mcp guardian kind classification (core-anz4.1)', () => {
+  it('guards a delegated execute whose target action declares no kind (fail-closed)', async () => {
+    const store = createMemoryTree();
+    await store.set({ ...createNode('/', 'root'), $acl: [{ g: 'public', p: R | W | S }] });
+    // Deny all execute so a consulted guardian visibly blocks the call.
+    await store.set(createNode('/guardian', 'ai.policy', {
+      allow: [], deny: ['mcp__treenix__execute'], escalate: [],
+    }));
+    await store.set(createNode('/kindless', 'mcptest.kindless'));
+
+    let ran = false;
+    register('mcptest.kindless', 'action:mutate', () => { ran = true; return 'mutated'; });
+    register('mcptest.kindless', 'schema', () => ({
+      $id: 'mcptest.kindless',
+      type: 'object',
+      properties: {},
+      methods: { mutate: { arguments: [] } },   // NO kind → must be guarded
+    }));
+
+    const { client } = await createTestClient(store, 'anon', ['u:anon', 'public']);
+    const result = await client.callTool({
+      name: 'execute',
+      arguments: { path: '/kindless', action: 'mutate' },
+    });
+
+    // If the kind-absent target were mis-classified as read, the guardian would be
+    // skipped and the handler would run. Fail-closed: guardian consulted → denied.
+    assert.equal(ran, false, 'kind-absent target action must be guarded, not silently executed');
+    assert.ok(!textContent(result).includes('mutated'), 'blocked call must not return the handler result');
+  });
+
+  it('threads opId through delegated execute into the idempotency layer (same opId → single execution)', async () => {
+    const store = createMemoryTree();
+    await store.set({ ...createNode('/', 'root'), $acl: [{ g: 'public', p: R | W | S }] });
+    // read-kind target → unguarded, so execute actually runs and dedupe is observable.
+    await store.set(createNode('/guardian', 'ai.policy', {
+      allow: ['mcp__treenix__execute'], deny: [], escalate: [],
+    }));
+    await store.set(createNode('/counter', 'mcptest.counter'));
+
+    let runs = 0;
+    register('mcptest.counter', 'action:tick', () => { runs += 1; return runs; });
+    register('mcptest.counter', 'schema', () => ({
+      $id: 'mcptest.counter',
+      type: 'object',
+      properties: {},
+      methods: { tick: { arguments: [], kind: 'read' as const } },
+    }));
+
+    const { client } = await createTestClient(store, 'op-user', ['u:op-user', 'public']);
+    // Unique opId per test run — opResults cache is module-level and process-lived.
+    const opId = `mcp-op-${Date.now()}-${Math.random()}`;
+    await client.callTool({ name: 'execute', arguments: { path: '/counter', action: 'tick', opId } });
+    await client.callTool({ name: 'execute', arguments: { path: '/counter', action: 'tick', opId } });
+
+    assert.equal(runs, 1, 'replayed opId must return the cached result without re-running the action');
+  });
+});
+
 // core-3j54: the MCP lane used to build an {id-only} inline actor, dropping the
 // session's onBehalfOf/taskPath/runPath — the audit trail lost the human link on
 // the primary agent lane. Both execute call sites now go through harness buildActor.
@@ -413,14 +477,21 @@ describe('actionIsGuarded', () => {
     assert.equal(actionIsGuarded('x', 'get_node', m({ kind: 'read' })), false);
   });
 
-  it('does not guard methods without kind or io (default to unguarded)', () => {
-    assert.equal(actionIsGuarded('x', 'catalog', m()), false);
+  it('guards a kind=read method that also declares io=true (external side effect)', () => {
+    assert.equal(actionIsGuarded('x', 'exportCsv', m({ kind: 'read', io: true })), true);
+  });
+
+  // core-anz4.1: absent kind is fail-closed. The executor defaults a kind-less method
+  // to 'write' (actions.ts), so the guardian must treat it as guarded too — an
+  // unclassified action must never silently escape policy (guardian kind-mismatch bypass).
+  it('guards methods with no kind and no io (fail-closed, matches executor write-default)', () => {
+    assert.equal(actionIsGuarded('x', 'catalog', m()), true);
   });
 
   it('ignores noOptimistic-like meta — only kind/io decide', () => {
-    // noOptimistic is a frontend hint; even if some method had it, actionIsGuarded must
-    // not treat it as a guard signal. The check looks only at the MethodSchema fields.
-    const method = m() as MethodSchema & { noOptimistic?: boolean };
+    // noOptimistic is a frontend hint; actionIsGuarded must not consult it. A read method
+    // stays unguarded even with noOptimistic set — proving the flag is not a guard signal.
+    const method = m({ kind: 'read' }) as MethodSchema & { noOptimistic?: boolean };
     method.noOptimistic = true;
     assert.equal(actionIsGuarded('x', 'whatever', method), false);
   });
