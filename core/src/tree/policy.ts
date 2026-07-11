@@ -203,6 +203,20 @@ export function isTrashExempt(path: string): boolean {
   return path === '/' || EXEMPT.some(p => path === p || path.startsWith(p + '/'));
 }
 
+/** Direct child of /sys/trash — one soft-delete entry (marker + copied payload). */
+function isTrashEntry(path: string): boolean {
+  return path.startsWith(TRASH_ROOT + '/') && !path.includes('/', TRASH_ROOT.length + 1);
+}
+
+// core-anz4.8: remove() is single-node engine-wide, so purging a trash entry by
+// its marker alone orphans the copied payload forever (retention broken,
+// duplicate $id permanent). Depth-first: children before parents, marker last.
+async function removeSubtree(tree: Tree, path: string, ctx?: unknown): Promise<boolean> {
+  const { items } = await tree.getChildren(path, { depth: 1 });
+  for (const child of items) await removeSubtree(tree, child.$path);
+  return tree.remove(path, ctx);
+}
+
 // Monotonic suffix de-dups entries created for the same path within one ms.
 let entrySeq = 0;
 
@@ -418,6 +432,9 @@ export function withStoragePolicy(backing: Tree): StoragePolicy {
     ...cached,
 
     async remove(path, ctx) {
+      // Manual purge of a trash entry must take its copied payload subtree too
+      // (core-anz4.8); other exempt paths keep the single-node contract.
+      if (isTrashEntry(path)) return removeSubtree(cached, path, ctx);
       if (isTrashExempt(path)) return cached.remove(path, ctx);
 
       const node = await cached.get(path);
@@ -467,7 +484,7 @@ export async function sweepTrash(tree: Tree, ttlMs = trashTtlMs()): Promise<numb
   for (const entry of items) {
     const ts = Number(entry.$path.slice(TRASH_ROOT.length + 1).split('-', 1)[0]);
     if (Number.isFinite(ts) && ts < cutoff) {
-      await tree.remove(entry.$path);
+      await removeSubtree(tree, entry.$path);
       purged++;
     }
   }

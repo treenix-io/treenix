@@ -5,7 +5,17 @@
 import { type ComponentData, getComponentByName, isComponent, isRef, type NodeData, resolve } from '#core';
 import { OpError } from '#errors';
 import { assertPatchManyBatch, isSetEntry, type Tree } from '#tree';
+import { TRASH_ROOT } from '#tree/policy';
 import { createBoundedCache } from '#util/bounded-cache';
+
+// core-anz4.8: /sys/trash/** is mount-INERT. A trashed node keeps its mount
+// component, but under the trash prefix it is plain stored data — resolving it
+// would let GC activate the mount, enumerate and DELETE external adapter
+// content. Inertness is by-prefix (not by stripping the component): after
+// restore the node returns to a normal path and the mount activates again.
+function isTrashInert(path: string): boolean {
+  return path === TRASH_ROOT || path.startsWith(TRASH_ROOT + '/');
+}
 
 // ── Adapter contract ──
 // Lives here (not in mount-adapters.ts) so that mount.ts and adapters share
@@ -128,7 +138,7 @@ export function withMounts(rootStore: Tree, opts?: WithMountsOpts): MountableTre
 
     // scanChildren dispatch — same per-path resolution as getChildren, but
     // streams. Legacy Tree-only adapters (no native scanChildren) fall back
-    // to a single getChildren page wrapped as an async generator — this keeps
+    // to getChildren paging wrapped as an async generator — this keeps
     // remote/Mongo Tree-only mounts LISTABLE through the ACL/public path
     // (core-35t). The fallback CANNOT honor `after`: it always restarts from
     // the first page, so a cursor-paginating caller would silently get
@@ -142,11 +152,28 @@ export function withMounts(rootStore: Tree, opts?: WithMountsOpts): MountableTre
       if (opts?.after !== undefined) {
         throw new OpError('BAD_REQUEST', `scanChildren: mount at ${path} is a Tree-only adapter without cursor support — 'after' pagination unavailable; migrate the adapter to native scanChildren`);
       }
-      if (opts?.signal?.aborted) throw opts.signal.reason;
-      const page = await tree.getChildren(path, { depth: opts?.depth, limit: opts?.limitHint }, ctx);
-      for (const node of page.items) {
-        yield { node, cursor: node.$path };
-      }
+      // limitHint is a batching hint only — it MUST NOT truncate the stream
+      // (core-anz4.16: downstream ACL/query filters drop rows, so a single
+      // limitHint-sized page under-reports). Page via nextCursor until the
+      // source is exhausted; the lazy generator stops fetching once the
+      // consumer stops pulling.
+      let cursor: string | undefined;
+      const seen = new Set<string>();
+      do {
+        if (opts?.signal?.aborted) throw opts.signal.reason;
+        if (cursor !== undefined) seen.add(cursor);
+        const page = await tree.getChildren(path, { depth: opts?.depth, limit: opts?.limitHint, cursor }, ctx);
+        for (const node of page.items) {
+          yield { node, cursor: node.$path };
+        }
+        const next = page.nextCursor;
+        // core-anz4.16: a legacy adapter returning a repeating/cyclic nextCursor
+        // would loop forever — fail loud on the adapter-contract violation.
+        if (next !== undefined && seen.has(next)) {
+          throw new OpError('BAD_REQUEST', `scanChildren: mount at ${path} returned a repeating nextCursor "${next}" — cyclic pagination from a Tree-only adapter`);
+        }
+        cursor = next;
+      } while (cursor !== undefined);
     },
 
     async set(node, ctx) {
@@ -274,6 +301,10 @@ export function withMounts(rootStore: Tree, opts?: WithMountsOpts): MountableTre
   }
 
   async function resolveNodeTree(path: string, ctx?: unknown): Promise<Tree> {
+    // Trash is inert: a mount component under /sys/trash is never resolved, so
+    // the node (and its subtree) is plain rootStore data (core-anz4.8).
+    if (isTrashInert(path)) return rootStore;
+
     // Walk strict ancestors only. The target node itself belongs to the tree
     // that contains its config, even when the target is a mount point.
     const checks = strictAncestorPaths(path);
@@ -301,6 +332,10 @@ export function withMounts(rootStore: Tree, opts?: WithMountsOpts): MountableTre
 
   async function resolveContentTree(path: string, ctx?: unknown): Promise<Tree> {
     const nodeStore = await resolveNodeTree(path, ctx);
+    // Trash is inert — never activate the node's own mount to enumerate its
+    // children; the copied subtree lives as plain data in rootStore (anz4.8).
+    if (isTrashInert(path)) return nodeStore;
+
     const cached = cache.get(mountCacheKey(path, ctx));
     if (cached) return cached.tree;
 

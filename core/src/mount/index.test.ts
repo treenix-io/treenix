@@ -1,7 +1,7 @@
 import { createNode, ref, register } from '#core';
 import { OpError } from '#errors';
 import { clearRegistry } from '#testing';
-import { createMemoryTree, type Tree } from '#tree';
+import { createMemoryTree, paginate, type Tree } from '#tree';
 import { createFsTree } from '#tree/fs';
 import { createQueryTree } from '#tree/query';
 import { createRepathTree } from '#tree/repath';
@@ -120,6 +120,48 @@ describe('Mounts', () => {
       async () => { for await (const _ of ms.scanChildren!('/users', { after: '/users/alice' })) { /* drain */ } },
       (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
     );
+  });
+
+  // Regression core-anz4.16: limitHint applied as a hard getChildren limit
+  // truncated the fallback at one page — a downstream filter dropping rows
+  // then under-reported with no truncated flag. The fallback must keep
+  // paging via nextCursor until the consumer stops pulling or the source
+  // is exhausted.
+  it('scanChildren fallback pages past limitHint until the source is exhausted', async () => {
+    const nodes = Array.from({ length: 9 }, (_, i) =>
+      createNode(`/users/u${i}`, i % 3 === 0 ? 'user' : 'ghost'));
+    const userType = nodes[0].$type;
+    let calls = 0;
+    const legacy: Tree = {
+      async get() { return undefined; },
+      async getChildren(_path, opts) {
+        calls++;
+        return paginate(nodes, { limit: opts?.limit, cursor: opts?.cursor });
+      },
+      async set() {},
+      async remove() { return false; },
+      async patch() {},
+    };
+    register('test.mount.legacy3', 'mount', () => legacy);
+    await rootStore.set(
+      createNode('/users', 'collection', {}, { mount: { $type: 'test.mount.legacy3' } }),
+    );
+    const ms = withMounts(rootStore);
+
+    // Consumer filter drops 2/3 of rows and wants a page of 3 with limitHint 3
+    // — must still fill the page by pulling more source pages.
+    const matched: string[] = [];
+    for await (const entry of ms.scanChildren!('/users', { limitHint: 3 })) {
+      if (entry.node.$type === userType) matched.push(entry.node.$path);
+      if (matched.length === 3) break;
+    }
+    assert.deepEqual(matched, ['/users/u0', '/users/u3', '/users/u6']);
+    assert.ok(calls > 1);
+
+    // Full drain crosses page boundaries without skip or duplicate.
+    const all: string[] = [];
+    for await (const e of ms.scanChildren!('/users', { limitHint: 4 })) all.push(e.node.$path);
+    assert.deepEqual(all, nodes.map(n => n.$path));
   });
 
   it('delegates set to mounted tree', async () => {
