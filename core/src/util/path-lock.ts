@@ -9,11 +9,20 @@
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 
-export function createPathLock() {
+export type PathLock = {
+  <T>(path: string, fn: () => Promise<T>): Promise<T>;
+  /** Run `fn` with a CLEARED held-path set (core-anz4.21). A body detached from
+   *  its spawning span (a job) inherits the spawner's held set via ALS; without
+   *  this reset it would re-enter a same-path lock nobody holds and violate
+   *  mutual exclusion. Compose at the detachment boundary. */
+  detach<T>(fn: () => Promise<T>): Promise<T>;
+};
+
+export function createPathLock(): PathLock {
   const locks = new Map<string, Promise<void>>();
   const held = new AsyncLocalStorage<Set<string>>();
 
-  return <T>(path: string, fn: () => Promise<T>): Promise<T> => {
+  const lock = <T>(path: string, fn: () => Promise<T>): Promise<T> => {
     const current = held.getStore();
     // Reentrant: this chain already owns `path` — run inline. The outer holder
     // is parked awaiting us, so there is no concurrent mutation to guard.
@@ -33,4 +42,7 @@ export function createPathLock() {
       release();
     });
   };
+
+  lock.detach = <T>(fn: () => Promise<T>): Promise<T> => held.run(new Set(), fn);
+  return lock;
 }

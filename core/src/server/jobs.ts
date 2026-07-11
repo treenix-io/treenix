@@ -5,6 +5,7 @@
 // source of truth (the gk8.6 restart scanner depends on this).
 // Identity-agnostic: the body closes over what it needs (tree, actor).
 
+import { mutationLock } from './commit';
 import { type KindFrame, runDetached } from './kind-stack';
 
 export type JobInfo = { label: string; startedAt: number };
@@ -30,7 +31,10 @@ export function startJob(
   const frame: KindFrame = { kind: 'write', io: true, path: label, action: 'job' };
 
   const info: JobInfo = { label, startedAt: Date.now() };
-  const done = runDetached(frame, () => body(signal)).then(
+  // Detachment resets BOTH ambient ALS: kind stack (runDetached) and the
+  // mutation-lock held-path set (core-anz4.21) — else the job inherits the
+  // spawner's held paths and re-enters a lock nobody holds.
+  const done = runDetached(frame, () => mutationLock.detach(() => body(signal))).then(
     (): JobResult => ({ ok: true }),
     (error): JobResult => {
       console.error(`[job] ${label} failed:`, error);

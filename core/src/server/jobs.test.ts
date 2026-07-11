@@ -7,6 +7,7 @@ import { createMemoryTree } from '#tree';
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { type ActionCtx, executeAction } from './actions';
+import { mutationLock } from './commit';
 import { drainJobs, type JobHandle, runningJobs, startJob } from './jobs';
 
 describe('startJob', () => {
@@ -43,6 +44,37 @@ describe('startJob', () => {
     assert.equal(r.ok, true);
     const node = await tree.get('/h') as NodeData & { n: number };
     assert.equal(node.n, 1, 'job mutation landed after the spawner released the lock');
+  });
+
+  it('detached job genuinely CONTENDS for a path lock the spawner holds — no ALS-inherited reentry (core-anz4.21)', async () => {
+    const log: string[] = [];
+    let handle: JobHandle | undefined;
+    register('test.job.contend', 'schema', () => ({
+      $id: 'test.job.contend', title: 'Contend', type: 'object' as const,
+      properties: {}, methods: { go: { arguments: [] } },
+    }));
+    register('test.job.contend', 'action:go', async () => {
+      // The whole handler runs inside lockAction('/c') — '/c' is in the held
+      // set. A reentrant job would acquire the SAME lock inline (bug); a
+      // detached job must queue behind the still-held gate.
+      log.push('span:start');
+      handle = startJob('contend-job', async () => {
+        await mutationLock('/c', async () => { log.push('job:acquired'); });
+      });
+      log.push('span:end');
+    });
+    const tree = createMemoryTree();
+    await tree.set(createNode('/c', 'test.job.contend'));
+
+    await executeAction(tree, '/c', undefined, undefined, 'go');
+    assert.ok(handle, 'job spawned');
+    await handle.done;
+
+    assert.ok(log.includes('job:acquired'), 'job acquired the lock');
+    assert.ok(
+      log.indexOf('span:end') < log.indexOf('job:acquired'),
+      'job acquired the lock only AFTER the action span released it (contended, did not reenter)',
+    );
   });
 
   it('read action cannot detach a job (KIND_VIOLATION, fail closed)', async () => {
