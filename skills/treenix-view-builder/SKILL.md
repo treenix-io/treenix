@@ -334,11 +334,13 @@ Before writing a custom button/input/dialog, use `@treenx/react/ui/<name>`:
 
 ```tsx
 import { Button } from '@treenx/react/ui/button';
-import { Card, CardContent } from '@treenx/react/ui/card';
+import { Badge } from '@treenx/react/ui/badge';
 import { Dialog, DialogContent } from '@treenx/react/ui/dialog';
 ```
 
-Available: `accordion`, `alert-dialog`, `badge`, `breadcrumb`, `button`, `card`, `checkbox`, `collapsible`, `command`, `dialog`, `drawer`, `dropdown-menu`, `form-field`, `input`, `label`, `pagination`, `popover`, `progress`, `resizable`, `scroll-area`, `select`, `separator`, `sheet`, `skeleton`, `slider`, `sonner`, `switch`, `table`, `tabs`, `textarea`, `toggle`, `toggle-group`, `tooltip`. All already wired to tokens — they honour every theme without extra work.
+For a card surface, compose tokens directly: `<div className="bg-card text-card-foreground border border-border rounded-md p-4">`.
+
+Available: `alert-dialog`, `badge`, `breadcrumb`, `button`, `checkbox`, `collapsible`, `command`, `dialog`, `dropdown-menu`, `form-field`, `input`, `label`, `pagination`, `popover`, `resizable`, `scroll-area`, `select`, `sonner`, `switch`, `table`, `tabs`, `textarea`, `tooltip`. All already wired to tokens — they honour every theme without extra work.
 
 ### Conditional classes — `cn()`
 
