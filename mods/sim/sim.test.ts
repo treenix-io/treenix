@@ -6,7 +6,7 @@ import type { ServiceHandle } from '@treenx/core/contexts/service';
 import { createMemoryTree, type Tree } from '@treenx/core/tree';
 import { withExecute } from '@treenx/core/server/actions';
 import assert from 'node:assert/strict';
-import { beforeEach, describe, it } from 'node:test';
+import { afterEach, beforeEach, describe, it } from 'node:test';
 import './service'; // registers handlers once (ESM cache)
 
 let tree: Tree;
@@ -284,5 +284,192 @@ describe('log trimming', () => {
     const w = await tree.get('/w');
     const round = getComponent(w!, 'sim.round') as any;
     assert.ok(round.log.length <= 50, `log has ${round.log.length} entries, expected <= 50`);
+  });
+});
+
+// Codex hardening of 8c21727: stop() must not run a round / mutate / hang after
+// landing mid-await (holes: loop tree.get, wake timer, throwing runRound, stuck fetch).
+describe('stop() lifecycle hardening', () => {
+  const realFetch = globalThis.fetch;
+  const hadKey = 'ANTHROPIC_API_KEY' in process.env;
+  const realKey = process.env.ANTHROPIC_API_KEY;
+
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    if (hadKey) process.env.ANTHROPIC_API_KEY = realKey;
+    else delete process.env.ANTHROPIC_API_KEY;
+  });
+
+  // Gate tree.get so the Nth get of '/w' parks until released with 'pass' | 'throw'.
+  function parkWorldGet(nth: number) {
+    const origGet = tree.get;
+    let n = 0;
+    let onParked!: () => void;
+    const parked = new Promise<void>((r) => { onParked = r; });
+    let release!: (mode: 'pass' | 'throw') => void;
+    const held = new Promise<'pass' | 'throw'>((r) => { release = r; });
+    const gated: Tree['get'] = async (path, gctx) => {
+      if (path === '/w') {
+        n++;
+        if (n === nth) {
+          onParked();
+          if ((await held) === 'throw') throw new Error('injected get failure');
+        }
+      }
+      return origGet(path, gctx);
+    };
+    tree.get = gated;
+    return { parked, release, origGet };
+  }
+
+  function startInline(w0: NonNullable<Awaited<ReturnType<Tree['get']>>>): Promise<ServiceHandle> {
+    const svc = resolve('sim.world', 'service')!;
+    return svc(w0, { tree: withExecute(tree), path: '/w', subscribe: () => () => {} });
+  }
+
+  it('stop() while parked in the loop tree.get runs no round and mutates nothing', { timeout: 3000 }, async () => {
+    await tree.set(world('/w', true));
+    await tree.set(agent('/w/a', 'Alice', 'A', 100, 100));
+    const w0 = await tree.get('/w');
+
+    const gate = parkWorldGet(1); // park the loop's very first world get
+    const handle = await startInline(w0!);
+    await gate.parked;
+
+    const stopping = handle.stop(); // stopped=true, then awaits the parked loop
+    gate.release('pass'); // let the get resolve — loop must see stopped and break
+    await stopping;
+
+    const w = await gate.origGet('/w', undefined);
+    assert.equal((getComponent(w!, 'sim.round') as any).current, 0, 'no round after stop');
+    const a = await gate.origGet('/w/a', undefined);
+    assert.equal(getComponent(a!, 'sim.nearby'), undefined, 'agent untouched after stop');
+  });
+
+  it('stop() resolves via wake without waiting out roundDelay', { timeout: 2000 }, async () => {
+    // running=false → loop sleeps roundDelay; a broken wake would block 100s.
+    await tree.set(createNode('/w', 'sim.world', {}, {
+      config: { $type: 'sim.config', width: 600, height: 400, roundDelay: 100000, running: false },
+      round: { $type: 'sim.round', current: 0, phase: 'idle', log: [] },
+    }));
+    const handle: ServiceHandle = await startService('/w');
+    await handle.stop();
+
+    const w = await tree.get('/w');
+    assert.equal((getComponent(w!, 'sim.round') as any).current, 0);
+  });
+
+  it('stop() during a throwing runRound does not wait out the error backoff', { timeout: 3000 }, async () => {
+    await tree.set(world('/w', true));
+    await tree.set(agent('/w/a', 'Alice', 'A', 100, 100));
+    const w0 = await tree.get('/w');
+
+    const gate = parkWorldGet(2); // get#1 = loop, get#2 = runRound's world read
+    const handle = await startInline(w0!);
+    await gate.parked;
+
+    const stopping = handle.stop();
+    gate.release('throw'); // runRound throws → catch must break, not sleep(5000)
+    await stopping;
+
+    const w = await gate.origGet('/w', undefined);
+    assert.equal((getComponent(w!, 'sim.round') as any).current, 0, 'round did not advance');
+  });
+
+  it('stop() aborts a stuck LLM request AND lands no tree writes after it resolves', { timeout: 3000 }, async () => {
+    process.env.ANTHROPIC_API_KEY = 'test-key';
+    let sig: AbortSignal | undefined;
+    let onFetch!: () => void;
+    const fetched = new Promise<void>((r) => { onFetch = r; });
+    globalThis.fetch = Object.assign(
+      (_input: RequestInfo | URL, init?: RequestInit): Promise<Response> =>
+        new Promise<Response>((_res, reject) => {
+          sig = init?.signal ?? undefined;
+          onFetch();
+          init?.signal?.addEventListener('abort', () =>
+            reject(new DOMException('aborted', 'AbortError')));
+        }),
+      { preconnect: realFetch.preconnect },
+    );
+
+    await tree.set(world('/w', true));
+    await tree.set(agent('/w/a', 'Alice', 'A', 100, 100));
+
+    const handle: ServiceHandle = await startService('/w');
+    await fetched; // LLM fetch is in flight and blocked, mid-runRound
+
+    // Snapshot the mutable state the aborted round would touch: the round counter
+    // and the proximity cache. Abort empties tools to [] but must NOT let the round
+    // recompute proximity or advance — those writes must never land (hardens 8c21727).
+    const before = await tree.get('/w');
+    const roundBefore = (getComponent(before!, 'sim.round') as any).current;
+    const aBefore = await tree.get('/w/a');
+    const nearbyBefore = getComponent(aBefore!, 'sim.nearby');
+
+    await handle.stop(); // aborts the fetch, joins the loop, no writes may follow
+
+    assert.ok(sig?.aborted, 'stop() must abort the in-flight LLM request');
+
+    const after = await tree.get('/w');
+    assert.equal((getComponent(after!, 'sim.round') as any).current, roundBefore,
+      'round must not advance after stop() resolves');
+    const aAfter = await tree.get('/w/a');
+    assert.equal(getComponent(aAfter!, 'sim.nearby'), nearbyBefore,
+      'proximity write must not land after stop() resolves');
+  });
+
+  // Round-2: a stop() landing WHILE a tool branch is awaiting mid-write must not
+  // let the post-await mutation land. Drive a deterministic move tool and park the
+  // move branch's agent get, then stop() before releasing it.
+  it('stop() while the move tool branch is parked on the agent get lands no write', { timeout: 3000 }, async () => {
+    process.env.ANTHROPIC_API_KEY = 'test-key';
+    globalThis.fetch = Object.assign(
+      async (): Promise<Response> =>
+        new Response(
+          JSON.stringify({ content: [{ type: 'tool_use', name: 'move', input: { x: 500, y: 300 } }] }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      { preconnect: realFetch.preconnect },
+    );
+
+    await tree.set(world('/w', true));
+    await tree.set(agent('/w/a', 'Alice', 'A', 100, 100));
+
+    // The move branch issues the FIRST tree.get('/w/a'); park it there.
+    const origGet = tree.get;
+    let onParked!: () => void;
+    const parked = new Promise<void>((r) => { onParked = r; });
+    let release!: () => void;
+    const held = new Promise<void>((r) => { release = r; });
+    let seen = 0;
+    const gated: Tree['get'] = async (path, gctx) => {
+      if (path === '/w/a' && ++seen === 1) {
+        onParked();
+        await held;
+      }
+      return origGet(path, gctx);
+    };
+    tree.get = gated;
+
+    const w0 = await origGet('/w', undefined);
+    const handle = await startInline(w0!);
+    await parked; // inside the move branch, blocked on the agent get
+
+    const before = await origGet('/w/a', undefined);
+    const posBefore = getComponent(before!, SimPosition)!;
+    const wBefore = await origGet('/w', undefined);
+    const roundBefore = (getComponent(wBefore!, 'sim.round') as any).current;
+
+    const stopping = handle.stop(); // stopped=true; joins the loop parked at the agent get
+    release();                       // get resolves — barrier must return before the move set
+    await stopping;
+
+    const after = await origGet('/w/a', undefined);
+    const posAfter = getComponent(after!, SimPosition)!;
+    assert.equal(posAfter.x, posBefore.x, 'move must not write x after stop()');
+    assert.equal(posAfter.y, posBefore.y, 'move must not write y after stop()');
+    const wAfter = await origGet('/w', undefined);
+    assert.equal((getComponent(wAfter!, 'sim.round') as any).current, roundBefore,
+      'round must not advance after stop()');
   });
 });

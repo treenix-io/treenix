@@ -171,6 +171,7 @@ async function callLLM(
   worldLog: EventEntry[],
   round: number,
   model: string,
+  signal: AbortSignal,
 ): Promise<Tool[]> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return mockThink(agent, allEntities);
@@ -212,21 +213,29 @@ ${agentEvents ? `Recent events involving you:\n${agentEvents}` : 'No recent even
 
 Round ${round}. Use tools to act. You can speak (optionally TO someone), move, remember, or interact with nearby entities by calling their actions. Be concise. Stay in character.`;
 
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model: ai?.model ?? model,
-      max_tokens: 400,
-      system,
-      messages: [{ role: 'user', content: "It's your turn. What do you do?" }],
-      tools: BASE_TOOLS,
-    }),
-  });
+  let res: Response;
+  try {
+    res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: ai?.model ?? model,
+        max_tokens: 400,
+        system,
+        messages: [{ role: 'user', content: "It's your turn. What do you do?" }],
+        tools: BASE_TOOLS,
+      }),
+      signal,
+    });
+  } catch (e) {
+    // Service stop() aborts in-flight requests — clean exit, not a failure (hardens 8c21727)
+    if (signal.aborted) return [];
+    throw e;
+  }
 
   if (!res.ok) {
     console.error(`[sim] AI ${res.status}:`, await res.text());
@@ -375,6 +384,11 @@ register('sim.item', 'action:use', async (ctx: ActionCtx, params: any) => {
 register('sim.world', 'service', async (node, ctx) => {
   let stopped = false;
   const wp = node.$path;
+  // Aborts in-flight LLM fetches so stop() can never hang on a stuck request (hardens 8c21727)
+  const ac = new AbortController();
+  // stop() can land during any await inside a tool branch; re-check before every
+  // mutation so no write escapes the join (Codex round-2 of 8c21727).
+  const aborted = () => stopped || ac.signal.aborted;
 
   async function getAllEntities() {
     return (await ctx.tree.getChildren(wp)).items.filter(
@@ -388,6 +402,7 @@ register('sim.world', 'service', async (node, ctx) => {
 
   async function runRound() {
     const world = await ctx.tree.get(wp);
+    if (stopped) return; // stop() landed during the read — no mutation may follow (hardens 8c21727)
     if (!world) return;
     const cfg = getComponent(world, SimConfig);
     if (!cfg?.running) return;
@@ -395,12 +410,14 @@ register('sim.world', 'service', async (node, ctx) => {
     const round = getComponent(world, SimRound)!;
     const num = round.current ?? 0;
     const allEntities = await getAllEntities();
+    if (stopped) return;
     const agents = allEntities.filter((n) => n.$type === 'sim.agent');
     if (!agents.length) return;
 
     // Phase: thinking
     setComponent(world, SimRound, { ...round, phase: 'thinking' });
     await ctx.tree.set(world);
+    if (stopped) return;
 
     const log = round.log ?? [];
     const model = cfg.model ?? 'claude-haiku-4-5-20251001';
@@ -409,9 +426,12 @@ register('sim.world', 'service', async (node, ctx) => {
     const results = await Promise.allSettled(
       agents.map(async (a) => ({
         agent: a,
-        tools: await callLLM(a, allEntities, log, num, model),
+        tools: await callLLM(a, allEntities, log, num, model, ac.signal),
       })),
     );
+    // ac.abort() empties tools to [] but leaves the write phases below intact —
+    // stop here or the round still recomputes proximity + advances (hardens 8c21727).
+    if (stopped) return;
 
     // Execute actions
     const newEntries: EventEntry[] = [];
@@ -420,12 +440,14 @@ register('sim.world', 'service', async (node, ctx) => {
     for (const e of allEntities) nameToPath.set(eName(e), e.$path);
 
     for (const r of results) {
+      if (stopped) return;
       if (r.status !== 'fulfilled') continue;
       const { agent, tools } = r.value;
       const agentName = eName(agent);
       const desc = getComponent(agent, SimDescriptive);
 
       for (const t of tools) {
+        if (aborted()) return;
         const ts = Date.now();
         switch (t.tool) {
           case 'speak': {
@@ -435,7 +457,9 @@ register('sim.world', 'service', async (node, ctx) => {
 
             // Push event to directed target or all hearers
             for (const hearer of nearAgents) {
+              if (aborted()) return;
               const fresh = await ctx.tree.get(hearer.$path);
+              if (aborted()) return;
               if (!fresh) continue;
               const hName = eName(fresh);
               const eventType = to && to === hName ? 'speak' : 'hear';
@@ -463,6 +487,7 @@ register('sim.world', 'service', async (node, ctx) => {
           }
           case 'move': {
             const fresh = await ctx.tree.get(agent.$path);
+            if (aborted()) return;
             if (!fresh) break;
             const pos = getComponent(fresh, SimPosition)!;
             setComponent(fresh, SimPosition, {
@@ -483,6 +508,7 @@ register('sim.world', 'service', async (node, ctx) => {
           }
           case 'remember': {
             const fresh = await ctx.tree.get(agent.$path);
+            if (aborted()) return;
             if (!fresh) break;
             const mem = getComponent(fresh, SimMemory);
             setComponent(fresh, SimMemory, {
@@ -499,6 +525,7 @@ register('sim.world', 'service', async (node, ctx) => {
             if (!targetPath) break;
 
             const targetNode = await ctx.tree.get(targetPath);
+            if (aborted()) return;
             if (!targetNode) break;
 
             // Check proximity
@@ -512,16 +539,19 @@ register('sim.world', 'service', async (node, ctx) => {
             const actx: ActionCtx = {
               node: targetNode,
               tree: ctx.tree,
-              signal: AbortSignal.timeout(5000),
+              // stop() aborts in-flight handlers too, alongside the 5s cap (hardens 8c21727)
+              signal: AbortSignal.any([ac.signal, AbortSignal.timeout(5000)]),
               nc: serverNodeHandle(ctx.tree),
             };
             const result = await (handler as any)(actx, data);
+            if (aborted()) return;
             // Persist handler mutations (handlers don't call tree.set — executeAction/caller does)
             await ctx.tree.set(targetNode);
 
             // Push event to target agent's inbox
             if (targetNode.$type === 'sim.agent') {
               const freshTarget = await ctx.tree.get(targetPath);
+              if (aborted()) return;
               if (freshTarget) {
                 pushAgentEvent(freshTarget, {
                   round: num,
@@ -550,14 +580,17 @@ register('sim.world', 'service', async (node, ctx) => {
 
     // Recompute proximity links on all entities (engine-owned data)
     const freshEntities = await getAllEntities();
+    if (stopped) return;
     for (const a of freshEntities) {
       const near = getNearby(a, freshEntities);
       setComponent(a, SimNearby, { agents: near.map(eName) });
       await ctx.tree.set(a);
+      if (stopped) return;
     }
 
     // Advance round
     const worldFresh = await ctx.tree.get(wp);
+    if (stopped) return;
     if (!worldFresh) return;
     setComponent(worldFresh, SimRound, {
       current: num + 1,
@@ -570,11 +603,17 @@ register('sim.world', 'service', async (node, ctx) => {
 
   // Main loop. stop() must JOIN it: a fire-and-forget loop kept mutating the
   // tree after stop() resolved (extra round), making observers racy.
+  // Every await is followed by a `stopped` re-check so a stop() landing mid-await
+  // exits before the next mutation, and sleep clears its timer on wake so no
+  // stray timeout keeps the process alive (hardens 8c21727).
   let wake: (() => void) | undefined;
   const sleep = (ms: number) =>
     new Promise<void>((r) => {
-      wake = r;
-      setTimeout(r, ms);
+      const timer = setTimeout(r, ms);
+      wake = () => {
+        clearTimeout(timer);
+        r();
+      };
     });
 
   const loop = (async () => {
@@ -582,6 +621,7 @@ register('sim.world', 'service', async (node, ctx) => {
     while (!stopped) {
       try {
         const w = await ctx.tree.get(wp);
+        if (stopped) break;
         const cfg = w ? getComponent(w, SimConfig) : null;
         if (cfg?.running) await runRound();
         if (stopped) break;
@@ -590,6 +630,7 @@ register('sim.world', 'service', async (node, ctx) => {
         if (e instanceof OpError && e.code === 'CONFLICT') {
           continue;
         }
+        if (stopped) break;
         console.error('[sim] error:', e);
         await sleep(5000);
       }
@@ -599,6 +640,7 @@ register('sim.world', 'service', async (node, ctx) => {
   return {
     stop: async () => {
       stopped = true;
+      ac.abort();
       wake?.();
       await loop;
     },
