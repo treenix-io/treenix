@@ -4,6 +4,7 @@
 
 import { type SubscribeOpts } from '#contexts/service/index';
 import { isComponent, isCompKey, type NodeData } from '#core';
+import { OpError } from '#errors';
 import {
   isSetEntry,
   mapNodeForSift,
@@ -109,6 +110,45 @@ function isAclOp(op: PatchOp): boolean {
   const path = op[1];
   return path === '$acl' || path === '$owner'
     || path.startsWith('$acl.') || path.startsWith('$owner.');
+}
+
+// core-anz4.3: query-watch predicates are VALIDATED at registration and
+// rejected if they reference a hidden field. membershipVps (below) DOES
+// evaluate viewWhere/callerWhere on the write path, against a storage-shaped
+// node — mapNodeForSift maps $acl→_acl, $owner→_owner, $refs→_refs
+// (tree/index.ts toStorageKeys) — so a predicate over $acl/$owner/$refs (or
+// their storage aliases _acl/_owner/_refs) would leak a hidden match via an
+// enter/leave flip. Fail closed on those and on any other unknown $-field; it
+// also keeps executeList parity (core-fnv) and is F4-ready (viewWhere is NOT
+// trusted at HEAD: a mount can be user-authored until F4). Visible system
+// fields, plain data fields, and #-component predicates are allowed.
+// Both namespaces are allowlists, not denylists: toStorageKeys maps EVERY
+// top-level $foo→_foo, so any unknown _-field (e.g. _v for $v, _secret for a
+// hidden $secret) is a storage alias for a hidden system field and must fail
+// closed too — enumerating only _acl/_owner/_refs would leak the rest.
+const VISIBLE_SYSTEM_FIELDS = new Set(['$path', '$type', '$rev', '$id', '$ref', '$refId']);
+const VISIBLE_STORAGE_FIELDS = new Set(['_path', '_type', '_rev', '_tid', '_ref', '_refId']);
+const LOGICAL_OPS = new Set(['$and', '$or', '$nor']);
+
+/** Throw FORBIDDEN if a sift predicate references a hidden field (system field
+ *  or its storage alias). Walks $and/$or/$nor branches; checks the head segment
+ *  of dotted paths. Value-level operators ($exists/$gt/…) live under a field key
+ *  and are not re-examined. */
+function assertVisiblePredicate(q: unknown, where: 'callerWhere' | 'viewWhere'): void {
+  if (!q || typeof q !== 'object' || q.constructor !== Object) return;
+  for (const [k, v] of Object.entries(q)) {
+    if (LOGICAL_OPS.has(k)) {
+      const branches = Array.isArray(v) ? v : [v];
+      for (const b of branches) assertVisiblePredicate(b, where);
+      continue;
+    }
+    const head = k.split('.')[0];
+    const hiddenSystem = head.startsWith('$') && !VISIBLE_SYSTEM_FIELDS.has(head);
+    const hiddenStorage = head.startsWith('_') && !VISIBLE_STORAGE_FIELDS.has(head);
+    if (hiddenSystem || hiddenStorage) {
+      throw new OpError('FORBIDDEN', `${where} references a hidden field: ${k}`);
+    }
+  }
 }
 
 export type Listener = (event: NodeEvent) => void;
@@ -564,6 +604,19 @@ export function withSubscriptions(
     },
 
     watchQuery(reg) {
+      // core-anz4.15: membershipVps dirties DIRECT children of plan.source
+      // only — a depth>1 (or -1 = all descendants) watch silently misses
+      // mutations at deeper levels. executeList READ walks descendants, the
+      // watch does not; refuse registration until deep membership lands.
+      if ((reg.plan.depth ?? 1) !== 1) {
+        throw new OpError('BAD_REQUEST', `query watch supports depth 1 only, got ${reg.plan.depth}`);
+      }
+      // core-anz4.3: validate both predicates — reject hidden fields the
+      // projector strips, matching the oracle executeList closes with
+      // FORBIDDEN (core-fnv). viewWhere is guarded too (NOT trusted at HEAD: a
+      // mount can be user-authored until F4).
+      if (reg.plan.callerWhere) assertVisiblePredicate(reg.plan.callerWhere, 'callerWhere');
+      if (reg.plan.viewWhere) assertVisiblePredicate(reg.plan.viewWhere, 'viewWhere');
       const key = handleKey(reg.userId, reg.vp);
       const hash = planHash(reg.plan);
       const existing = handleByKey.get(key);

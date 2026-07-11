@@ -2,6 +2,7 @@ import { A, createNode, getComponentByName, R, type NodeData } from '#core';
 import { OpError } from '#errors';
 import { userIdFromAuthPath } from '#security/claims';
 import { createMemoryTree } from '#tree';
+import { executeList, type Projector } from '#tree/read-runtime';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { type NodeEvent, type SubscriptionOpts, withSubscriptions } from './index';
@@ -643,6 +644,134 @@ describe('watch registration (Stage 6d, core-9yd)', () => {
     const ev = events.find(e => (e.type === 'set' || e.type === 'patch') && e.path === '/config/filters');
     assert.ok(ev);
     assert.deepEqual(ev.invalidateVps, ['/views/composite'], 'only the handle that consulted the dep goes dirty');
+  });
+
+  it('rejects a query watch whose callerWhere probes an ACL-gated field (hidden-field oracle, core-anz4.3)', () => {
+    const { cdc } = withSubscriptions(createMemoryTree());
+    assert.throws(
+      () => cdc.watchQuery({
+        vp: '/views/x', userId: 'u1',
+        plan: { source: '/items', viewWhere: { kind: 'task' }, callerWhere: { $owner: 'u2' } },
+        mountDeps: new Set(['/views/x']),
+      }),
+      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+    );
+    assert.equal(cdc.getActiveQueryCount(), 0, 'rejected registration leaves no group');
+  });
+
+  it('hidden-field callerWhere is caught inside a nested $and branch too', () => {
+    const { cdc } = withSubscriptions(createMemoryTree());
+    assert.throws(
+      () => cdc.watchQuery({
+        vp: '/views/y', userId: 'u1',
+        plan: { source: '/items', callerWhere: { $and: [{ status: 'open' }, { $acl: { $exists: true } }] } },
+        mountDeps: new Set(['/views/y']),
+      }),
+      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+    );
+  });
+
+  it('rejects predicates on storage-key aliases _acl/_owner/_refs (core-anz4.3)', () => {
+    // mapNodeForSift maps a node to storage shape ($owner→_owner etc.), so a
+    // predicate keyed on the alias probes the same hidden data the projector
+    // strips. Guard both predicate positions.
+    const { cdc } = withSubscriptions(createMemoryTree());
+    const forbidden = (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN';
+    assert.throws(() => cdc.watchQuery({
+      vp: '/views/a', userId: 'u1',
+      plan: { source: '/items', callerWhere: { _owner: 'u2' } },
+      mountDeps: new Set(['/views/a']),
+    }), forbidden);
+    assert.throws(() => cdc.watchQuery({
+      vp: '/views/b', userId: 'u1',
+      plan: { source: '/items', viewWhere: { _acl: { $exists: true } } },
+      mountDeps: new Set(['/views/b']),
+    }), forbidden);
+    assert.throws(() => cdc.watchQuery({
+      vp: '/views/c', userId: 'u1',
+      plan: { source: '/items', callerWhere: { $and: [{ status: 'open' }, { '_refs.a': { $exists: true } }] } },
+      mountDeps: new Set(['/views/c']),
+    }), forbidden);
+    // toStorageKeys maps EVERY $foo→_foo, so unknown aliases (e.g. _v for $v)
+    // must fail closed too — an enumerated denylist would leak them.
+    assert.throws(() => cdc.watchQuery({
+      vp: '/views/d', userId: 'u1',
+      plan: { source: '/items', viewWhere: { $nor: [{ _v: 2 }] } },
+      mountDeps: new Set(['/views/d']),
+    }), forbidden);
+    assert.equal(cdc.getActiveQueryCount(), 0, 'no group left behind by rejected registrations');
+  });
+
+  it('allows a visible-component predicate — hidden-component oracle deferred to F4 (core-anz4.3)', () => {
+    // Querying a '#'-component is a first-class feature; the residual leak on an
+    // ACL-gated component needs actor-projected membership (F4) to close without
+    // breaking visible component queries. Only hidden SYSTEM fields are rejected.
+    const { cdc } = withSubscriptions(createMemoryTree());
+    cdc.watchQuery({
+      vp: '/views/salary', userId: 'u1',
+      plan: { source: '/staff', viewWhere: { kind: 'person' }, callerWhere: { '#dept.name': 'eng' } },
+      mountDeps: new Set(['/views/salary']),
+    });
+    assert.equal(cdc.getActiveQueryCount(), 1, 'visible-component predicate registers');
+  });
+
+  it('rejects a viewWhere referencing a hidden system field — viewWhere is NOT trusted at HEAD (core-anz4.3)', () => {
+    // read-runtime §header: both predicates run on the projected node until F4
+    // (a mount can be user-authored), so viewWhere leaks a hidden system field
+    // ($acl/$owner/$refs) just as callerWhere does. Guard it the same.
+    const { cdc } = withSubscriptions(createMemoryTree());
+    assert.throws(
+      () => cdc.watchQuery({
+        vp: '/views/acl', userId: 'u1',
+        plan: { source: '/items', viewWhere: { $acl: { $exists: true } } },
+        mountDeps: new Set(['/views/acl']),
+      }),
+      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+    );
+    assert.equal(cdc.getActiveQueryCount(), 0, 'no group left behind by rejected registration');
+  });
+
+  it('allows predicates on guaranteed-visible fields ($type + plain field) — still registers', () => {
+    const { cdc } = withSubscriptions(createMemoryTree());
+    cdc.watchQuery({
+      vp: '/views/ok', userId: 'u1',
+      plan: { source: '/items', viewWhere: { $type: 'item' }, callerWhere: { status: 'open' } },
+      mountDeps: new Set(['/views/ok']),
+    });
+    assert.equal(cdc.getActiveQueryCount(), 1, 'visible-field predicate registers a group');
+  });
+
+  it('executeList still rejects the same callerWhere on a hidden field (parity, core-fnv)', async () => {
+    const source = createMemoryTree();
+    await source.set({ ...createNode('/items/a', 'item'), $owner: 'u2' } as NodeData);
+    const stripOwner: Projector = async (node) => { const { $owner, ...rest } = node; return rest as NodeData; };
+    await assert.rejects(
+      () => executeList(source, { source: '/items', callerWhere: { $owner: 'u2' } }, { limit: 10 }, stripOwner),
+      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+    );
+  });
+
+  it('rejects a depth>1 query watch (deep membership unsupported, core-anz4.15)', () => {
+    const { cdc } = withSubscriptions(createMemoryTree());
+    assert.throws(
+      () => cdc.watchQuery({ vp: '/views/deep', userId: 'u1', plan: { source: '/items', depth: 2, viewWhere: {} }, mountDeps: new Set(['/views/deep']) }),
+      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+    );
+    assert.throws(
+      () => cdc.watchQuery({ vp: '/views/all', userId: 'u1', plan: { source: '/items', depth: -1, viewWhere: {} }, mountDeps: new Set(['/views/all']) }),
+      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+    );
+    assert.equal(cdc.getActiveQueryCount(), 0, 'no group left behind by rejected deep watches');
+  });
+
+  it('depth:1 query watch works end-to-end (explicit depth)', async () => {
+    const events: NodeEvent[] = [];
+    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => events.push(e));
+    cdc.watchQuery({ vp: '/views/open', userId: 'u1', plan: { source: '/items', depth: 1, viewWhere: { status: 'open' } }, mountDeps: new Set(['/views/open']) });
+
+    await tree.set({ ...createNode('/items/1', 'item'), status: 'open' });
+    const ev = events.find(e => (e.type === 'set' || e.type === 'patch') && e.path === '/items/1');
+    assert.ok(ev?.invalidateVps?.includes('/views/open'), 'depth:1 membership flip dirties the view');
   });
 
   it('group GC: the last handle removal drops the group', async () => {
