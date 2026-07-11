@@ -22,7 +22,7 @@ mock.module('./trpc', {
 });
 
 const { renderHook, act } = await import('@testing-library/react');
-const { mergeToOps, mergeIntoNode, useSave, usePathSave } = await import('./auto-save');
+const { mergeToOps, mergeIntoNode, useSave, useAutoSave, usePathSave } = await import('./auto-save');
 const cache = await import('#tree/cache');
 const { makeNode } = await import('@treenx/core');
 const { $key, $node } = await import('#symbols');
@@ -271,6 +271,332 @@ describe('useSave: flush', () => {
     await flushPromise;
 
     assert.equal(result.current.dirty, true);
+  });
+});
+
+// ── useSave: cancel pending auto-save (core-anz4.17) ──
+
+describe('useSave: cancel pending auto-save (core-anz4.17)', () => {
+  it('discard cancels the armed auto-save timer — no flush fires after the delay', (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    seed('/cancel', 'task', { title: 'A' });
+    const { result } = renderHook(() => useAutoSave('/cancel', { delay: 100 }));
+
+    act(() => result.current.onChange({ title: 'B' })); // arms the debounced auto-save
+    act(() => result.current.discard());                // JSON-tab open / explicit JSON Save cancels it
+
+    act(() => t.mock.timers.tick(500));                 // well past the delay
+    assert.equal(patchMutate.mock.callCount(), 0, 'canceled auto-save must not flush');
+    assert.equal(result.current.dirty, false);
+  });
+
+  it('control: an armed auto-save timer DOES flush after the delay', (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    seed('/arm', 'task', { title: 'A' });
+    const { result } = renderHook(() => useAutoSave('/arm', { delay: 100 }));
+
+    act(() => result.current.onChange({ title: 'B' }));
+    act(() => t.mock.timers.tick(500));
+    assert.equal(patchMutate.mock.callCount(), 1, 'armed timer fired the flush');
+  });
+});
+
+// ── useSave: flush during inflight (verify-index 27) ──
+
+describe('useSave: flush during inflight (verify-index 27)', () => {
+  it('does not resolve until the inflight request really commits', async () => {
+    seed('/inflight-await', 'task', { title: 'A' });
+    const { result } = renderHook(() => useSave('/inflight-await'));
+    act(() => result.current.onChange({ title: 'B' }));
+
+    let release: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    patchMutate.mock.mockImplementationOnce(async () => { await gate; });
+
+    let flush1: Promise<unknown> | undefined;
+    let flush2: Promise<unknown> | undefined;
+    act(() => { flush1 = result.current.flush(); });
+    act(() => { flush2 = result.current.flush(); });
+
+    let flush2Settled = false;
+    flush2!.then(() => { flush2Settled = true; }, () => { flush2Settled = true; });
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(flush2Settled, false, 'flush() during inflight must await the real commit, not resolve early');
+
+    release!();
+    await act(async () => { await Promise.all([flush1, flush2]); });
+    assert.equal(flush2Settled, true);
+    assert.equal(patchMutate.mock.callCount(), 1, 'the second flush chained, did not re-send');
+  });
+
+  it('rejects when the inflight request rejects', async () => {
+    seed('/inflight-reject', 'task', { title: 'A' });
+    const { result } = renderHook(() => useSave('/inflight-reject'));
+    act(() => result.current.onChange({ title: 'B' }));
+
+    let fail: () => void;
+    const gate = new Promise<void>((_, rej) => { fail = () => rej(new Error('boom')); });
+    patchMutate.mock.mockImplementationOnce(async () => gate);
+
+    let flush1: Promise<unknown> | undefined;
+    let flush2: Promise<unknown> | undefined;
+    act(() => { flush1 = result.current.flush().catch((e) => e); });
+    act(() => { flush2 = result.current.flush(); });
+
+    fail!();
+    await act(async () => {
+      await flush1;
+      await assert.rejects(() => flush2!, (e) => e instanceof Error);
+    });
+  });
+});
+
+// ── useSave: stale badge (own-rev counting reverted, core-anz4.17) ──
+
+describe('useSave: stale badge (core-anz4.17)', () => {
+  it('foreign rev bump trips stale', () => {
+    cache.put({ ...makeNode('/foreign', 'task', { title: 'A' }), $rev: 1 });
+    const { result } = renderHook(() => useSave('/foreign'));
+
+    act(() => result.current.onChange({ title: 'B' })); // editing at rev 1, dirty
+    act(() => { cache.put({ ...makeNode('/foreign', 'task', { title: 'X' }), $rev: 2 }); });
+
+    assert.equal(result.current.dirty, true);
+    assert.equal(result.current.stale, true, 'external change surfaces as stale');
+  });
+
+  it('a foreign rev after an own write echo is never swallowed (rev-counting was wrong)', async () => {
+    // Reproduces the reviewer scenario: the own write's SSE echo lands BEFORE
+    // the mutate response, then a genuine foreign write follows. The old
+    // ownBumps counter, incremented only after the response, was left over and
+    // swallowed this foreign bump — hiding the conflict. Counting rev bumps
+    // cannot tell own from foreign, so we no longer try.
+    cache.put({ ...makeNode('/noswallow', 'task', { title: 'A' }), $rev: 1 });
+    const { result } = renderHook(() => useSave('/noswallow'));
+
+    act(() => result.current.onChange({ title: 'B' })); // edit at rev 1, editRev=1, dirty
+
+    let commit: () => void;
+    const gate = new Promise<void>((r) => { commit = r; });
+    patchMutate.mock.mockImplementationOnce(async () => { await gate; });
+
+    let flushing: Promise<unknown> | undefined;
+    act(() => { flushing = result.current.flush(); });
+    act(() => result.current.onChange({ title: 'C' })); // pending accumulates → stays dirty
+
+    // Own write's SSE echo arrives BEFORE the mutate response resolves.
+    act(() => { cache.put({ ...makeNode('/noswallow', 'task', { title: 'B' }), $rev: 2 }); });
+    commit!();
+    await act(async () => { await flushing; });
+
+    // Genuine foreign write bumps rev again.
+    act(() => { cache.put({ ...makeNode('/noswallow', 'task', { title: 'X' }), $rev: 3 }); });
+
+    assert.equal(result.current.dirty, true);
+    assert.equal(result.current.stale, true, 'foreign rev after own echo must still surface — not swallowed');
+  });
+});
+
+// ── useSave: settle serializes a full-set against an in-flight patch (core-anz4.17) ──
+
+describe('useSave: settle vs in-flight patch (core-anz4.17)', () => {
+  it('settle awaits the in-flight patch; discard then drops parked pending so a full-set is not clobbered', async () => {
+    seed('/jsonrace', 'task', { title: 'A' });
+    const { result } = renderHook(() => useSave('/jsonrace'));
+
+    act(() => result.current.onChange({ title: 'B' }));
+
+    let land: () => void;
+    const gate = new Promise<void>((r) => { land = r; });
+    patchMutate.mock.mockImplementationOnce(async () => { await gate; });
+
+    let flushing: Promise<unknown> | undefined;
+    act(() => { flushing = result.current.flush().catch((e) => e); }); // patch parked in flight
+    act(() => result.current.onChange({ title: 'B2' }));               // pending accumulates during round-trip
+
+    let settled = false;
+    let settleP: Promise<void> | undefined;
+    act(() => { settleP = result.current.settle().then(() => { settled = true; }); });
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(settled, false, 'settle must not resolve while the patch is still in flight');
+
+    land!();
+    await act(async () => { await flushing; await settleP; });
+    assert.equal(settled, true);
+    assert.equal(patchMutate.mock.callCount(), 1, 'only the in-flight patch was sent');
+
+    // JSON Save: drop parked pending, then full-set the whole node.
+    act(() => result.current.discard());
+    act(() => { cache.put(makeNode('/jsonrace', 'task', { title: 'JSON' })); });
+
+    assert.equal(cache.get('/jsonrace')!.title, 'JSON', 'full-set is the final stored state');
+    assert.equal(patchMutate.mock.callCount(), 1, 'discard prevented a parked patch from clobbering the set');
+    assert.equal(result.current.dirty, false);
+  });
+
+  it('a stale settle on an old path does not wipe the new path in-flight patch', async () => {
+    seed('/pa', 'task', { title: 'A' });
+    seed('/pb', 'task', { title: 'B' });
+    const { result, rerender } = renderHook(
+      ({ path }: { path: string }) => useSave(path),
+      { initialProps: { path: '/pa' } },
+    );
+
+    act(() => result.current.onChange({ title: 'A2' }));
+    let landA: () => void;
+    const gateA = new Promise<void>((r) => { landA = r; });
+    patchMutate.mock.mockImplementationOnce(async () => { await gateA; });
+    let flushA: Promise<unknown> | undefined;
+    act(() => { flushA = result.current.flush().catch((e) => e); }); // runA in flight on /pa
+
+    rerender({ path: '/pb' });
+
+    act(() => result.current.onChange({ title: 'B2' }));
+    let landB: () => void;
+    const gateB = new Promise<void>((r) => { landB = r; });
+    patchMutate.mock.mockImplementationOnce(async () => { await gateB; });
+    let flushB: Promise<unknown> | undefined;
+    act(() => { flushB = result.current.flush().catch((e) => e); }); // runB in flight on /pb
+
+    // Old path's patch settles — its finally must NOT null the new path's slot.
+    landA!();
+    await act(async () => { await flushA; });
+
+    let bSettled = false;
+    let settleP: Promise<void> | undefined;
+    act(() => { settleP = result.current.settle().then(() => { bSettled = true; }); });
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(bSettled, false, 'settle must still await /pb in-flight patch — stale settle must not have wiped it');
+
+    landB!();
+    await act(async () => { await flushB; await settleP; });
+    assert.equal(bSettled, true);
+    assert.equal(patchMutate.mock.callCount(), 2, 'one patch per path — no re-send');
+  });
+
+  it('a stale /a run rejecting does not pollute /b pending nor drop /b in-flight (r2)', async () => {
+    seed('/ra', 'task', { title: 'A' });
+    seed('/rb', 'task', { title: 'B' });
+    const { result, rerender } = renderHook(
+      ({ path }: { path: string }) => useSave(path),
+      { initialProps: { path: '/ra' } },
+    );
+
+    act(() => result.current.onChange({ title: 'A2', fromA: 'leak' }));
+    let failA: () => void;
+    const gateA = new Promise<void>((_, rej) => { failA = () => rej(new Error('boom')); });
+    patchMutate.mock.mockImplementationOnce(async () => gateA);
+    let flushA: Promise<unknown> | undefined;
+    act(() => { flushA = result.current.flush().catch((e) => e); }); // runA in flight on /ra
+
+    rerender({ path: '/rb' });
+
+    act(() => result.current.onChange({ title: 'B2' }));
+    let landB: () => void;
+    const gateB = new Promise<void>((r) => { landB = r; });
+    patchMutate.mock.mockImplementationOnce(async () => { await gateB; });
+    let flushB: Promise<unknown> | undefined;
+    act(() => { flushB = result.current.flush().catch((e) => e); }); // runB in flight on /rb
+    act(() => result.current.onChange({ extra: 'B3' }));             // /rb pending accumulates
+
+    // Stale /ra run rejects — must NOT restore /ra's partial into /rb pending.
+    failA!();
+    await act(async () => { await flushA; });
+
+    const v = result.current.value!;
+    assert.equal(v.title, 'B2', "/rb value keeps its own title, not /ra's A2");
+    assert.equal('fromA' in v, false, "/ra fields must not leak into /rb pending");
+    assert.equal(v.extra, 'B3');
+    assert.equal(result.current.dirty, true, '/rb stays dirty (pending + in-flight)');
+
+    // settle must still await /rb — the stale reject must not have cleared inflight.
+    let bSettled = false;
+    let settleP: Promise<void> | undefined;
+    act(() => { settleP = result.current.settle().then(() => { bSettled = true; }); });
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(bSettled, false, 'settle awaits /rb — stale reject did not drop its in-flight patch');
+
+    landB!();
+    await act(async () => { await flushB; await settleP; });
+    assert.equal(bSettled, true);
+  });
+
+  it('a stale /a run succeeding does not clearEdit for /b — stale detection survives (r2)', async () => {
+    cache.put({ ...makeNode('/sa', 'task', { title: 'A' }), $rev: 1 });
+    cache.put({ ...makeNode('/sb', 'task', { title: 'B' }), $rev: 1 });
+    const { result, rerender } = renderHook(
+      ({ path }: { path: string }) => useSave(path),
+      { initialProps: { path: '/sa' } },
+    );
+
+    act(() => result.current.onChange({ title: 'A2' }));
+    let landA: () => void;
+    const gateA = new Promise<void>((r) => { landA = r; });
+    patchMutate.mock.mockImplementationOnce(async () => { await gateA; });
+    let flushA: Promise<unknown> | undefined;
+    act(() => { flushA = result.current.flush().catch((e) => e); }); // runA in flight on /sa
+
+    rerender({ path: '/sb' });
+
+    act(() => result.current.onChange({ title: 'B2' }));             // edits /sb at rev 1, editRev=1
+    let landB: () => void;
+    const gateB = new Promise<void>((r) => { landB = r; });
+    patchMutate.mock.mockImplementationOnce(async () => { await gateB; });
+    let flushB: Promise<unknown> | undefined;
+    act(() => { flushB = result.current.flush().catch((e) => e); }); // runB in flight on /sb, pending null
+
+    // Stale /sa run SUCCEEDS — its success branch must not clearEdit() for /sb.
+    landA!();
+    await act(async () => { await flushA; });
+
+    // Genuine foreign write on /sb bumps rev — must still surface as stale.
+    act(() => { cache.put({ ...makeNode('/sb', 'task', { title: 'X' }), $rev: 2 }); });
+
+    assert.equal(result.current.dirty, true, '/sb still dirty (in-flight)');
+    assert.equal(result.current.stale, true, 'editRev intact — stale detection not wiped by stale run');
+
+    landB!();
+    await act(async () => { await flushB; });
+  });
+
+  it('a flush chained behind an inflight run does not fire for the new path after a switch (r2)', async () => {
+    seed('/ca', 'task', { title: 'A' });
+    seed('/cb', 'task', { title: 'B' });
+    const { result, rerender } = renderHook(
+      ({ path }: { path: string }) => useSave(path),
+      { initialProps: { path: '/ca' } },
+    );
+
+    act(() => result.current.onChange({ title: 'A2' }));
+    let landA: () => void;
+    const gateA = new Promise<void>((r) => { landA = r; });
+    patchMutate.mock.mockImplementationOnce(async () => { await gateA; }); // runA (patch #1)
+    let flushA: Promise<unknown> | undefined;
+    act(() => { flushA = result.current.flush().catch((e) => e); });        // runA in flight on /ca
+    // Second flush parks on the inflight run — captures /ca's generation.
+    let flush2: Promise<unknown> | undefined;
+    act(() => { flush2 = result.current.flush().catch((e) => e); });
+
+    rerender({ path: '/cb' });                                              // genRef++
+    act(() => result.current.onChange({ title: 'B2' }));                    // /cb pending
+
+    landA!();                                                              // runA settles
+    await act(async () => { await flushA; await flush2; });
+
+    // The chained flush2 belongs to /ca — it must NOT have sent /cb's pending.
+    assert.equal(patchMutate.mock.calls.length, 1, 'stale chained flush must not fire a patch for /cb');
+    assert.equal(result.current.dirty, true, '/cb pending is still unsent');
+    assert.equal(result.current.value!.title, 'B2', '/cb keeps its own pending edit');
+
+    // An explicit /cb flush now genuinely sends it.
+    const gateB = new Promise<void>((r) => { r(); });
+    patchMutate.mock.mockImplementationOnce(async () => { await gateB; });
+    await act(async () => { await result.current.flush(); });
+    assert.equal(patchMutate.mock.calls.length, 2, 'explicit /cb flush sends the pending patch');
   });
 });
 

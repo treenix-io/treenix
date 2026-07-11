@@ -163,6 +163,13 @@ export function NodeEditor({ node, save, open, onClose, onDelete, currentUserId,
   // the OCC token — an external change since seeding surfaces as CONFLICT.
   async function handleSaveJson() {
     try {
+      // Serialize against auto-save: an already-dispatched patch carries the
+      // pre-Save snapshot and, if it lands AFTER our set(), reverts this Save.
+      // discard() only cancels the armed TIMER, not an in-flight request — so
+      // await it to settle first, then drop parked pending, then full-set
+      // (core-anz4.17 / JSON-race).
+      await save.settle();
+      save.discard();
       const freshText = await saveNodeEditorJson(snap.jsonText, set);
       st.jsonText = freshText;
       st.jsonBaseline = freshText;
@@ -191,10 +198,17 @@ export function NodeEditor({ node, save, open, onClose, onDelete, currentUserId,
 
       <Tabs value={snap.tab} onValueChange={(v) => {
         st.tab = v as 'properties' | 'json';
-        // (Re)seed a clean buffer on tab open; unsaved edits survive tab switches.
-        if (v === 'json' && st.jsonText === st.jsonBaseline) {
-          st.jsonText = formattedNodeJson;
-          st.jsonBaseline = formattedNodeJson;
+        if (v === 'json') {
+          // (Re)seed a clean buffer on tab open; unsaved edits survive tab switches.
+          // formattedNodeJson is the merged draft (cache + pending), so the buffer
+          // captures the pending form edits before we cancel them below.
+          if (st.jsonText === st.jsonBaseline) {
+            st.jsonText = formattedNodeJson;
+            st.jsonBaseline = formattedNodeJson;
+          }
+          // Cancel the armed form auto-save — the JSON buffer now owns these edits;
+          // a debounced flush firing after JSON Save would clobber it (core-anz4.17).
+          save.discard();
         }
       }} className="shrink-0">
         <TabsList variant="line" className="h-8">

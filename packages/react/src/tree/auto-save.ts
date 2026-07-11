@@ -35,6 +35,10 @@ export type SaveHandle<T = NodeData> = {
   /** Flush pending changes to server now. Rejects on server failure — pending
    *  edits are restored (dirty stays true), callers must not report success. */
   flush: () => Promise<void>;
+  /** Await any in-flight patch to settle (resolve OR reject) WITHOUT sending
+   *  parked pending. Used before a full-node set() so an already-dispatched
+   *  auto-save patch can't land after — and overwrite — the set (core-anz4.17). */
+  settle: () => Promise<void>;
   /** Discard pending changes, restore cache to pre-edit state */
   reset: () => void;
   /** Drop pending edits WITHOUT touching the cache — for when another channel
@@ -61,8 +65,15 @@ export function useSave(path: string, options?: SaveOptions): SaveHandle {
   const pending = useRef<Record<string, unknown> | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inflight = useRef(false);
+  // In-progress flush promise — a second flush() chains on it instead of
+  // resolving early (verify-index 27).
+  const inflightRef = useRef<Promise<void> | null>(null);
   const pathRef = useRef(path);
   pathRef.current = path;
+  // Bumped on every tracked-path change. A run captures it at start; a run whose
+  // generation no longer matches is stale and must touch none of the new path's
+  // state on completion (core-anz4.17 r2).
+  const genRef = useRef(0);
 
   const [version, bump] = useReducer((v: number) => v + 1, 0);
   const editRevRef = useRef<unknown>(null);
@@ -88,15 +99,32 @@ export function useSave(path: string, options?: SaveOptions): SaveHandle {
   const prevPathRef = useRef(path);
   if (path !== prevPathRef.current) {
     prevPathRef.current = path;
+    genRef.current++;
     pending.current = null;
     clearTimer();
     inflight.current = false;
+    inflightRef.current = null;
     clearEdit();
   }
 
-  const flush = useCallback(async () => {
+  const flush = useCallback(async (): Promise<void> => {
+    // A flush called while another is inflight must await THAT request's real
+    // outcome (rejecting if it rejects), then flush whatever accumulated —
+    // resolving early made callers toast 'Saved' for an unfinished commit
+    // (verify-index 27).
+    if (inflightRef.current) {
+      const callGen = genRef.current;
+      await inflightRef.current;
+      // Path changed while we waited on the prior run — this caller belongs to
+      // the OLD path; firing flush() now would send the NEW path's pending under
+      // a stale caller (core-anz4.17).
+      if (genRef.current !== callGen) return;
+      if (pending.current) return flush();
+      return;
+    }
+
     const partial = pending.current;
-    if (!partial || inflight.current) return;
+    if (!partial) return;
     pending.current = null;
     clearTimer();
 
@@ -112,28 +140,53 @@ export function useSave(path: string, options?: SaveOptions): SaveHandle {
     if (cached) cache.put(mergeIntoNode(cached, partial));
 
     inflight.current = true;
+    const gen = genRef.current;
+    const run = (async () => {
+      try {
+        await trpc.patch.mutate({ path: pathRef.current, ops });
+      } catch (e) {
+        // Failed write: restore pending so the edits are NOT lost (dirty stays
+        // true) and rethrow — a swallowed reject made 'flush then toast' callers
+        // report 'Saved' for a commit that never landed (cnr.5 C21). No auto-
+        // retry: the next onChange or explicit flush re-attempts.
+        // Skip when stale: the path changed under us, so this partial belongs to
+        // the OLD path and must not resurrect into the new path's pending (r2).
+        console.error('[useSave] patch failed:', e);
+        if (genRef.current === gen) pending.current = { ...partial, ...(pending.current ?? {}) };
+        throw e;
+      } finally {
+        // A new run owns inflight after a path change — only the current run clears it.
+        if (genRef.current === gen) inflight.current = false;
+      }
+      // Stale run: the new path owns pending/timer/edit tracking now — touch none.
+      if (genRef.current !== gen) return;
+      if (pending.current) {
+        // Edits accumulated during the round-trip — schedule the next flush.
+        if (autoSave) timer.current = setTimeout(() => { flush().catch(() => {}); }, delay);
+      } else {
+        clearEdit();
+      }
+    })();
+    inflightRef.current = run;
     try {
-      await trpc.patch.mutate({ path: pathRef.current, ops });
-    } catch (e) {
-      // Failed write: restore pending so the edits are NOT lost (dirty stays
-      // true) and rethrow — a swallowed reject made 'flush then toast' callers
-      // report 'Saved' for a commit that never landed (cnr.5 C21). No auto-
-      // retry: the next onChange or explicit flush re-attempts.
-      console.error('[useSave] patch failed:', e);
-      inflight.current = false;
-      pending.current = { ...partial, ...(pending.current ?? {}) };
-      bump();
-      throw e;
-    }
-    inflight.current = false;
-    if (pending.current) {
-      // Edits accumulated during the round-trip — schedule the next flush.
-      if (autoSave) timer.current = setTimeout(() => { flush().catch(() => {}); }, delay);
-    } else {
-      clearEdit();
-      bump();
+      await run;
+    } finally {
+      // Only clear if we still own the slot — a path change (or a later flush)
+      // may have replaced it. A stale settle nulling a successor's promise let
+      // settle()/flush() lose the real in-flight request (core-anz4.17).
+      if (inflightRef.current === run) inflightRef.current = null;
+      // version feeds the debounce dependency — a stale run must not bump it, or
+      // it resets the new path's timer (core-anz4.17).
+      if (genRef.current === gen) bump();
     }
   }, [autoSave, clearEdit, clearTimer, delay]);
+
+  const settle = useCallback(async (): Promise<void> => {
+    const running = inflightRef.current;
+    // allSettled: wait for the real outcome without re-throwing here — the
+    // flush() that owns this promise already surfaces/logs any rejection.
+    if (running) await Promise.allSettled([running]);
+  }, []);
 
   const onChange = useCallback((partial: OnChange) => {
     // Track dirty state — capture snapshot + $rev on first edit for reset/stale detection
@@ -190,7 +243,10 @@ export function useSave(path: string, options?: SaveOptions): SaveHandle {
   // Derived dirty — pending + inflight are the real sources of truth (bumps re-render)
   const dirty = !!pending.current || inflight.current;
 
-  // Stale: $rev changed externally while we have pending edits
+  // Stale: $rev changed while we hold pending edits. Counting rev bumps cannot
+  // tell an own SSE echo from a foreign write, and opId/`by` is consumed by the
+  // rebase layer before it reaches here — so an own committed write shows stale
+  // briefly until its echo lands (accepted cosmetic, core-anz4.17).
   const currentRev = node?.$rev;
   const stale = dirty && editRevRef.current != null && currentRev !== editRevRef.current;
 
@@ -202,8 +258,8 @@ export function useSave(path: string, options?: SaveOptions): SaveHandle {
   );
 
   return useMemo(
-    () => ({ value, onChange, scope, flush, reset, discard, dirty, stale }),
-    [value, onChange, scope, flush, reset, discard, dirty, stale],
+    () => ({ value, onChange, scope, flush, settle, reset, discard, dirty, stale }),
+    [value, onChange, scope, flush, settle, reset, discard, dirty, stale],
   );
 }
 
