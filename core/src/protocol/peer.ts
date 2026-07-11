@@ -226,7 +226,11 @@ export function createPeer(serve?: ServeFactory) {
           if (typeof frame.node !== 'object' || frame.node === null) throw new OpError('BAD_REQUEST', 'node must be an object');
           if (typeof frame.node.$type !== 'string') throw new OpError('BAD_REQUEST', 'node.$type required');
           // path field is authoritative; wire payload never carries $path/$patches (spec §6).
-          const { $path: _wirePath, $patches: _patches, ...clean } = frame.node;
+          // $id is the node's OWN server-minted identity (bd core-anz4.2): a client-supplied $id
+          // on a fresh path would store a foreign ULID verbatim — strip; policy re-echoes/mints.
+          // $refId stays: it's the ref TARGET's identity, client-editable with $ref and
+          // load-bearing for id-first ref resolution — stripping it downgrades to path-only.
+          const { $path: _wirePath, $patches: _patches, $id: _id, ...clean } = frame.node;
           await s.tree.set({ ...clean, $type: frame.node.$type, $path: path }, writeCtx(frame.opId));
           return ok(undefined);
         }

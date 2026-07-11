@@ -3,6 +3,7 @@
 import { createNode, R, S } from '#core';
 import { OpError } from '#errors';
 import { createMemoryTree } from '#tree';
+import { withStoragePolicy } from '#tree/policy';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { createLoopback } from './loopback';
@@ -61,6 +62,46 @@ describe('TWP peer over loopback', () => {
     await client.req.set('/c', { $type: 'dir', $path: '/evil', $patches: [['r', 'x', 1]], v: 7 });
     assert.deepEqual(await tree.get('/c'), { $path: '/c', $type: 'dir', v: 7, $rev: 1 });
     assert.equal(await tree.get('/evil'), undefined);
+  });
+
+  // bd core-anz4.2: the node's OWN $id must never reach the store from the wire —
+  // a foreign $id on a fresh path would put two live nodes on one ULID. But $refId
+  // is the ref TARGET's identity (client-editable with $ref, load-bearing for
+  // id-first resolution) — it must ROUND-TRIP intact.
+  it('set: wire strips foreign $id but preserves client $refId', async () => {
+    const policy = withStoragePolicy(createMemoryTree());
+    const { client } = pair(() => ({ tree: policy.tree }));
+
+    const FOREIGN = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
+    const TARGET_ID = '01BX5ZZKBKACTAV9WEVGEMMVRZ';
+    await client.req.set('/aref', { $type: 'ref', $ref: '/target', $refId: TARGET_ID, $id: FOREIGN, v: 1 });
+
+    const stored = await policy.tree.get('/aref');
+    assert.ok(stored, 'node stored');
+    assert.equal(typeof stored.$id, 'string', 'server minted an identity');
+    assert.notEqual(stored.$id, FOREIGN, 'foreign $id discarded');
+    assert.equal(stored.$refId, TARGET_ID, 'client $refId round-trips to storage');
+    assert.equal((await client.req.get('/aref') as { v: number }).v, 1, 'data fields preserved');
+  });
+
+  it('set without $id over the wire mints normally', async () => {
+    const policy = withStoragePolicy(createMemoryTree());
+    const { client } = pair(() => ({ tree: policy.tree }));
+
+    await client.req.set('/plain', { $type: 'dir', v: 2 });
+
+    const stored = await policy.tree.get('/plain');
+    assert.ok(stored?.$id, 'fresh id minted');
+    assert.equal((await client.req.get('/plain') as { v: number }).v, 2);
+  });
+
+  it('server-side set (below the wire boundary) preserves a carried $id', async () => {
+    const policy = withStoragePolicy(createMemoryTree());
+
+    const CARRIED = '01BX5ZZKBKACTAV9WEVGEMMVRZ';
+    await policy.tree.set({ $path: '/restored', $type: 'dir', $id: CARRIED });
+
+    assert.equal((await policy.tree.get('/restored'))?.$id, CARRIED, 'move/restore/import path keeps identity');
   });
 
   it('set without $type → BAD_REQUEST', async () => {
