@@ -7,7 +7,7 @@ import '#mount/adapters';
 
 import { type ServiceHandle, startServices } from '#contexts/service/index';
 import { type NodeData } from '#core';
-import { addOnLog, makeLogPath } from '#log';
+import { addOnLog, createLogger, makeLogPath } from '#log';
 import { loadAllMods } from '#mod';
 import { getAnonKey } from '#security/anon';
 import { createMemoryTree, type Tree } from '#tree';
@@ -40,6 +40,11 @@ export type TreenixConfig = {
    *  `scopeRef` cannot be served — server fails the request with INTERNAL_SERVER_ERROR.
    *  Composition root (e.g. main.ts) wires this from the harness mod. */
   executor?: SessionExecutor;
+  /** Opt out of fail-fast mod loading (core-ns6p.1). Default false: any failed mod
+   *  aborts boot (AggregateError). Set true only when modsDir is USER-writable
+   *  (e.g. desktop plugin dirs) — a broken user plugin must not brick boot; each
+   *  failure is logged loudly and boot continues with the mods that loaded. */
+  allowPartialMods?: boolean;
 };
 
 export type ListenOpts = {
@@ -73,10 +78,15 @@ export async function treenix(config: TreenixConfig): Promise<TreenixServer> {
     const extraDirs = config.modsDir ? [config.modsDir] : [];
     const mods = await loadAllMods('server', ...extraDirs);
     if (mods.failed.length) {
-      throw new AggregateError(
-        mods.failed.map((f) => f.error),
-        `mod load failed: ${mods.failed.map((f) => f.name).join(', ')}`,
-      );
+      if (config.allowPartialMods) {
+        const log = createLogger('boot');
+        for (const f of mods.failed) log.error(`mod load failed: ${f.name}`, f.error);
+      } else {
+        throw new AggregateError(
+          mods.failed.map((f) => f.error),
+          `mod load failed: ${mods.failed.map((f) => f.name).join(', ')}`,
+        );
+      }
     }
   }
 
