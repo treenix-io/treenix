@@ -383,4 +383,81 @@ describe('executeStream — kind envelope', () => {
     );
     assert.equal(ran, false, 'nested write handler never invoked');
   });
+
+  // core-anz4.20: manual pump must forward return() so handler cleanup runs.
+  it('consumer break closes the handler iterator (try/finally runs)', async () => {
+    register('test.skind.fin', 'schema', () => ({
+      $id: 'test.skind.fin',
+      type: 'object',
+      properties: {},
+      methods: { gen: { arguments: [], kind: 'read' as const } },
+    }));
+    let cleaned = false;
+    register('test.skind.fin', 'action:gen', async function* () {
+      try {
+        yield 'a';
+        yield 'b';
+      } finally {
+        cleaned = true;
+      }
+    });
+
+    const tree = createMemoryTree();
+    await tree.set({ $path: '/n', $type: 'test.skind.fin' });
+
+    for await (const v of executeStream(tree, '/n', undefined, undefined, 'gen')) {
+      assert.equal(v, 'a');
+      break;
+    }
+    assert.equal(cleaned, true, 'handler finally ran on consumer break');
+  });
+
+  // core-anz4.20: a custom async iterable's return() is IteratorClose — only for
+  // ABRUPT completion. Natural end (r.done) must NOT call return() again (double-close).
+  function customIterable(counter: { returns: number }) {
+    let i = 0;
+    const values = ['a', 'b'];
+    const iterator = {
+      next() {
+        return Promise.resolve(i < values.length ? { value: values[i++], done: false } : { value: undefined, done: true });
+      },
+      return() {
+        counter.returns++;
+        return Promise.resolve({ value: undefined, done: true });
+      },
+    };
+    return { [Symbol.asyncIterator]: () => iterator };
+  }
+
+  it('consumer break => custom iterable return() called exactly once', async () => {
+    const counter = { returns: 0 };
+    register('test.skind.custombreak', 'schema', () => ({
+      $id: 'test.skind.custombreak', type: 'object', properties: {},
+      methods: { gen: { arguments: [], kind: 'read' as const } },
+    }));
+    register('test.skind.custombreak', 'action:gen', () => customIterable(counter));
+
+    const tree = createMemoryTree();
+    await tree.set({ $path: '/n', $type: 'test.skind.custombreak' });
+
+    for await (const _ of executeStream(tree, '/n', undefined, undefined, 'gen')) break;
+    assert.equal(counter.returns, 1);
+  });
+
+  it('natural completion => custom iterable return() NOT called (no double-close)', async () => {
+    const counter = { returns: 0 };
+    register('test.skind.customdrain', 'schema', () => ({
+      $id: 'test.skind.customdrain', type: 'object', properties: {},
+      methods: { gen: { arguments: [], kind: 'read' as const } },
+    }));
+    register('test.skind.customdrain', 'action:gen', () => customIterable(counter));
+
+    const tree = createMemoryTree();
+    await tree.set({ $path: '/n', $type: 'test.skind.customdrain' });
+
+    const seen: unknown[] = [];
+    for await (const v of executeStream(tree, '/n', undefined, undefined, 'gen')) seen.push(v);
+    assert.deepEqual(seen, ['a', 'b']);
+    assert.equal(counter.returns, 0);
+  });
 });

@@ -741,10 +741,22 @@ export async function* executeStream(
   // AWAITER's ALS context, so wrapping only the call above would drop the
   // frame after the first yield — nested writes would then pass assertCanCall.
   const it = result[Symbol.asyncIterator]();
-  while (true) {
-    const r = await runWithFrame(frame, () => it.next());
-    if (r.done) return r.value;
-    yield r.value;
+  let completed = false;
+  try {
+    while (true) {
+      const r = await runWithFrame(frame, () => it.next());
+      if (r.done) { completed = true; return r.value; }
+      yield r.value;
+    }
+  } finally {
+    // core-anz4.20: only ABRUPT completion (consumer break/throw) needs IteratorClose —
+    // forward return() so the handler's try/finally runs. Natural end (r.done) already
+    // closed the handler; calling return() again would double-close a custom iterable.
+    // In-frame: the handler's finally may issue writes gated by assertCanCall.
+    if (!completed) {
+      const ret = it.return?.bind(it);
+      if (ret) await runWithFrame(frame, () => ret());
+    }
   }
 }
 
