@@ -23,14 +23,21 @@ function isAuditWrite(path: string): boolean {
 let lastTs = 0;
 let seq = 0;
 
-function eventPath(): string {
+// 36^8 same-ms events (~2.8e12) — unreachable; overflow would break lexicographic order, so fail loud.
+const SEQ_PAD = 8;
+const SEQ_LIMIT = 36 ** SEQ_PAD;
+
+export function eventPath(): string {
   // Sortable (lexicographic == temporal) + collision-resistant for parallel writes.
   // seq breaks same-millisecond ties — without it two appends in one ms sorted by
   // the RANDOM suffix, so a delegate-settled row could sort before its intent row.
-  const ts = Date.now();
+  // Logical timestamp: never goes backwards even if Date.now() does (NTP rollback),
+  // otherwise a rollback would reset seq and emit paths sorting before earlier rows.
+  const ts = Math.max(Date.now(), lastTs);
   seq = ts === lastTs ? seq + 1 : 0;
   lastTs = ts;
-  return `${AUDIT_PREFIX}${ts}-${seq.toString(36).padStart(3, '0')}-${randomBytes(4).toString('hex')}`;
+  if (seq >= SEQ_LIMIT) throw new Error(`audit eventPath seq overflow at ts=${ts}`);
+  return `${AUDIT_PREFIX}${ts}-${seq.toString(36).padStart(SEQ_PAD, '0')}-${randomBytes(4).toString('hex')}`;
 }
 
 type Op = 'set' | 'remove' | 'patch' | 'patchMany';

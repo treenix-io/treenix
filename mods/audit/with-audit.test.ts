@@ -10,7 +10,7 @@ import { asTreeSource, createMemoryTree, type Tree } from '@treenx/core/tree';
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { checkHealth, isHealthy, resetHealthForTest } from './health';
-import { auditExecHooks, withAudit } from './with-audit';
+import { auditExecHooks, eventPath, withAudit } from './with-audit';
 
 let inner: Tree;
 let audited: Tree;
@@ -368,6 +368,44 @@ describe('actor stamping at the ACL boundary (core-3j54)', () => {
       .getChildren('/sys/audit/event', { query: { by: 'alice' } });
     assert.equal(page.items.length, 1);
     assert.equal(page.items[0].path, '/data/a');
+  });
+});
+
+// Regression for eventPath ordering holes (Codex on fafe885): (a) 3-char seq pad
+// broke lexicographic order past 46655 same-ms events; (b) Date.now() rollback
+// reset the ordering. Fixed via 8-char pad + logical (never-backwards) timestamp.
+describe('eventPath — lexicographic ordering', () => {
+  const realNow = Date.now;
+
+  afterEach(() => {
+    Date.now = realNow;
+  });
+
+  it('same-millisecond paths sort strictly increasing across seq digit boundaries', () => {
+    const frozen = realNow();
+    Date.now = () => frozen;
+
+    let prev = eventPath();
+    // 3000 spans the 2→3 base36-digit seq boundary (36^2 = 1296) within one frozen ms.
+    for (let i = 0; i < 3000; i++) {
+      const next = eventPath();
+      assert.ok(next > prev, `path ${i} must sort after its predecessor`);
+      prev = next;
+    }
+  });
+
+  it('clock rollback: paths keep increasing after Date.now goes backwards', () => {
+    const frozen = realNow();
+    Date.now = () => frozen;
+    const before = eventPath();
+
+    Date.now = () => frozen - 60_000;
+    let prev = before;
+    for (let i = 0; i < 100; i++) {
+      const next = eventPath();
+      assert.ok(next > prev, `post-rollback path ${i} must sort after its predecessor`);
+      prev = next;
+    }
   });
 });
 
