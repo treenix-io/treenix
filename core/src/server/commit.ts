@@ -43,14 +43,44 @@ export async function commit(tree: Tree, ancestor: string, entries: PatchManyEnt
     }
   };
 
-  // Sorted acquisition: two commits sharing members always lock in the same
-  // order — no deadlock; reentrancy covers an enclosing action span that
-  // already holds one of the paths. Fold builds outermost = first sorted path.
-  const paths = [...new Set(entries.map(e => e.path))].sort();
-  let run = apply;
-  for (const p of paths.reverse()) {
+  await lockPaths(entries.map(e => e.path), apply);
+}
+
+/** Acquire the mutationLock on every path (dedup, sorted) around fn.
+ *  Sorted acquisition: two batches sharing members always lock in the same
+ *  order — no deadlock; reentrancy covers an enclosing action span that
+ *  already holds one of the paths. Fold builds outermost = first sorted path. */
+export function lockPaths<T>(paths: string[], fn: () => Promise<T>): Promise<T> {
+  let run = fn;
+  for (const p of [...new Set(paths)].sort().reverse()) {
     const inner = run;
     run = () => mutationLock(p, inner);
   }
-  await run();
+  return run();
+}
+
+/** Route every in-process mutation verb through the mutationLock
+ *  (core-anz4.4). Composed in createPipeline between audit and withExecute,
+ *  so wire verbs, foreign-path ctx.tree.* writes, stream writes and the full
+ *  soft-remove span (trash copy → remove — policy sits below) serialize with
+ *  executeAction spans and commit() batches. Closes the write→stored-reread
+ *  windows in sub events and audit spans: a second write can no longer land
+ *  inside them and poison the first write's event/row with a foreign
+ *  after-image. Reads pass through — this is in-process serialization only;
+ *  adapters' OCC stays the cross-process guard. */
+export function withCommitEnvelope(tree: Tree): Tree {
+  return {
+    ...tree,
+
+    set: (node, ctx) => mutationLock(node.$path, () => tree.set(node, ctx)),
+
+    remove: (path, ctx) => mutationLock(path, () => tree.remove(path, ctx)),
+
+    patch: (path, ops, ctx) => mutationLock(path, () => tree.patch(path, ops, ctx)),
+
+    ...(tree.patchMany ? {
+      patchMany: (ancestor: string, entries: PatchManyEntry[], ctx?: unknown) =>
+        lockPaths(entries.map(e => e.path), () => tree.patchMany!(ancestor, entries, ctx)),
+    } : {}),
+  };
 }

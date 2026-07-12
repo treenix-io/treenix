@@ -223,6 +223,12 @@ export type SubscriptionOpts = {
    *  components without importing the registry. Absent = type-level rules
    *  off; inline `component.$acl` is still detected structurally. */
   componentHasAclRule?: (type: string) => boolean;
+  /** Run listener fan-out with a CLEARED mutation-lock held-set (core-anz4.4).
+   *  Dispatch fires synchronously inside the commit envelope's lock span;
+   *  listeners spawn async work that inherits lock ownership via ALS and would
+   *  falsely re-enter the emitting write's lock. Injected from the composition
+   *  root (the server owns the lock; sub/ stays layer-ignorant). */
+  detachLocks?: <T>(fn: () => T) => T;
 };
 
 /** Self-write notification — fired for every data event emitted by
@@ -245,6 +251,7 @@ export function withSubscriptions(
   const handleKey = (userId: string, vp: string) => `${userId}\u0000${vp}`;
   const claimsUserOf = opts?.claimsUserOf ?? (() => null);
   const isConfigNode = opts?.isConfigNode ?? (() => false);
+  const detachLocks: NonNullable<SubscriptionOpts['detachLocks']> = opts?.detachLocks ?? (fn => fn());
   const componentHasAclRule = opts?.componentHasAclRule ?? (() => false);
 
   /** A component is permission-bearing when it carries an inline `$acl` OR its
@@ -291,16 +298,21 @@ export function withSubscriptions(
   type DataEvent = Exclude<NodeEvent, { type: 'reconnect' }>;
 
   function dispatch(event: NodeEvent) {
-    if (event.type !== 'reconnect') {
-      const exact = exactListeners.get(event.path);
-      if (exact) for (const fn of exact) fn(event);
-      for (const [prefix, subs] of prefixListeners) {
-        if (event.path === prefix || event.path.startsWith(prefix === '/' ? '/' : prefix + '/')) {
-          for (const fn of subs) fn(event);
+    // Listener fan-out runs lock-detached (core-anz4.4): dispatch fires inside
+    // the emitting write's lock span, and listener-spawned async work must
+    // queue like any independent writer, not inherit ownership.
+    detachLocks(() => {
+      if (event.type !== 'reconnect') {
+        const exact = exactListeners.get(event.path);
+        if (exact) for (const fn of exact) fn(event);
+        for (const [prefix, subs] of prefixListeners) {
+          if (event.path === prefix || event.path.startsWith(prefix === '/' ? '/' : prefix + '/')) {
+            for (const fn of subs) fn(event);
+          }
         }
       }
-    }
-    onEvent?.(event);
+      onEvent?.(event);
+    });
   }
 
   function emit(raw: DataEvent) {

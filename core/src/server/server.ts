@@ -26,6 +26,7 @@ import type { TreeEvent } from '#tree';
 import { runExternalWatch } from '#sub/external-watch';
 import type { ExternalWatchStarter } from '#mount';
 import { type DelegationHooks, withExecute } from './actions';
+import { mutationLock, withCommitEnvelope } from './commit';
 import { createTreeRouter, type TreeRouter, type TreeRouterOpts, type TrpcContext } from './trpc';
 import { createWatchManager, type WatchManager } from '#sub/watch';
 
@@ -105,6 +106,9 @@ export function createPipeline(bootstrap: Tree, opts?: TreeRouterOpts, wrapTree?
     claimsUserOf: userIdFromAuthPath,
     isConfigNode: (node) => !!node && getComponentByName(node, 'mount') !== undefined,
     componentHasAclRule: (type) => resolveHandler(type, 'acl') !== undefined,
+    // Listener fan-out must not inherit the commit envelope's lock ownership
+    // (core-anz4.4) — a listener-spawned write queues like any writer.
+    detachLocks: mutationLock.detach,
   });
   watcher.bindQueryRegistry(cdc);
   wiring = {
@@ -144,10 +148,16 @@ export function createPipeline(bootstrap: Tree, opts?: TreeRouterOpts, wrapTree?
     // journal rows, not re-audited mutations.
     ...execHooks?.(subscribed),
   };
+  // Commit envelope between audit and execute (core-anz4.4): every mutation
+  // verb reaching the pipeline — wire set/patch/remove, stream writes, foreign-
+  // path ctx.tree.* writes, the full soft-remove span — serializes through the
+  // shared mutationLock with executeAction spans and commit() batches, closing
+  // the write→stored-reread windows in sub events and audit spans.
+  const enveloped = withCommitEnvelope(wrapped);
   // withExecute OUTERMOST — local execute mutations flow through
   // subscriptions and audit. Identity-less: services get executeAction parity;
   // per-user identity binds in the wire session (per-request re-wrap).
-  const tree = withExecute(wrapped, exec);
+  const tree = withExecute(enveloped, exec);
   // System-identity tree for request-time tRPC bootstrap ops (buildClaims,
   // register/login/logout/agentConnect/devLogin, createFilteredPush) — audited like
   // user writes since it wraps the same `tree`. Boot writes (seed/log/autostart) use
