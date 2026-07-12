@@ -327,7 +327,9 @@ export const execute = (
   if (cached) {
     const compType = type ?? (key ? getComponentByName(cached, key)?.$type : undefined) ?? cached.$type;
     const meta = getMeta(compType, `action:${action}`);
-    if (!meta?.noOptimistic) {
+    // needs → deps are injected server-side only; prediction would run the
+    // method with undefined deps (core-anz4.18) — skip, server result syncs.
+    if (!meta?.noOptimistic && !meta?.needs) {
       const cls = resolve(compType, 'class');
       const actionFn = resolve(compType, `action:${action}`, false);
       if (cls && actionFn) pushOptimistic(path, cls, key, actionFn, data, opId, { type: compType, action });

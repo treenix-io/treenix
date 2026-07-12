@@ -2,7 +2,7 @@
 // registerType(type, cls) → stamps $type, registers class, auto-registers actions from methods
 
 import { parseNeeds, type NeedSpec } from '#comp/needs';
-import { currentExecCtx, runWithExecCtx, type ExecCtx } from '#comp/context';
+import { CtxUnavailableError, currentExecCtx, runWithExecCtx, type ExecCtx } from '#comp/context';
 import {
   type Class,
   ComponentData,
@@ -60,10 +60,11 @@ declare module '#core/context' {
 }
 
 export type { ExecCtx };
+export { CtxUnavailableError, predictionCtx } from '#comp/context';
 
 export function getCtx(): ExecCtx {
   const ctx = currentExecCtx();
-  if (!ctx) throw new Error('getCtx(): called outside action context');
+  if (!ctx) throw new CtxUnavailableError('getCtx(): called outside action context');
   return ctx;
 }
 

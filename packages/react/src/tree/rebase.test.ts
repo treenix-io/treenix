@@ -1,6 +1,6 @@
 // Rebase tests — confirmed + pending + replay
 
-import { registerType } from '@treenx/core/comp';
+import { getCtx, registerType } from '@treenx/core/comp';
 import { resolve } from '@treenx/core';
 import assert from 'node:assert';
 import { afterEach, describe, it } from 'node:test';
@@ -36,6 +36,43 @@ class Checklist {
   }
 }
 registerType('test.rebase.checklist', Checklist);
+
+// core-anz4.18: standard mod actions read getCtx() — no server ALS runtime here,
+// exactly the browser situation.
+class Doc {
+  title = '';
+  local = 0;
+
+  rename(data: { title: string }) {
+    const { node } = getCtx();
+    node.title = data.title;
+  }
+
+  publish() {
+    this.local++; // mutates BEFORE touching server-only ctx
+    const { tree } = getCtx();
+    void tree;
+  }
+
+  async publishLater() {
+    this.local++; // sync-span mutation, then await, then server-only ctx
+    await Promise.resolve();
+    const { tree } = getCtx();
+    void tree;
+  }
+
+  // Conforming PromiseLike carries ONLY .then — no .catch (core-anz4.18 round 3).
+  thenableResolve() {
+    this.local++;
+    return { then(res?: (v: unknown) => void) { res?.(undefined); } };
+  }
+
+  thenableReject() {
+    this.local++;
+    return { then(_res?: (v: unknown) => void, rej?: (e: unknown) => void) { rej?.(new Error('boom')); } };
+  }
+}
+registerType('test.rebase.doc', Doc);
 
 const action = (type: string, name: string) => resolve(type, `action:${name}`, false)!;
 
@@ -296,6 +333,67 @@ describe('rebase', () => {
       'rebase does not handle events after reset',
     );
     assert.strictEqual((cache.get('/c') as any).count, 6, 'refetched truth intact, no stale replay');
+  });
+
+  it('getCtx().node action predicts client-side without server runtime (core-anz4.18)', () => {
+    cache.put({ $path: '/doc', $type: 'test.rebase.doc', title: 'old', local: 0 } as any);
+
+    pushOptimistic('/doc', Doc, undefined, action('test.rebase.doc', 'rename'), { title: 'new' }, 'op1');
+    assert.strictEqual((cache.get('/doc') as any).title, 'new', 'prediction applied');
+
+    applyServerPatch('/doc', [['r', 'title', 'new']], undefined, 'op1');
+    assert.strictEqual((cache.get('/doc') as any).title, 'new', 'server confirmed');
+    assert.strictEqual(hasPending('/doc'), false);
+  });
+
+  it('server-only ctx access skips prediction atomically — no half-applied draft (core-anz4.18)', () => {
+    cache.put({ $path: '/doc', $type: 'test.rebase.doc', title: 'old', local: 0 } as any);
+
+    pushOptimistic('/doc', Doc, undefined, action('test.rebase.doc', 'publish'), undefined, 'op1');
+    // publish() mutated `local` before hitting ctx.tree — that mutation must not leak
+    assert.strictEqual((cache.get('/doc') as any).local, 0, 'no half-executed prediction in cache');
+    assert.strictEqual(hasPending('/doc'), true, 'op still pending — server round-trip settles it');
+
+    applyServerPatch('/doc', [['r', 'local', 1]], undefined, 'op1');
+    assert.strictEqual((cache.get('/doc') as any).local, 1, 'server result authoritative');
+    assert.strictEqual(hasPending('/doc'), false);
+  });
+
+  it('async prediction never commits — sync-span mutation must not leak (core-anz4.18)', async () => {
+    cache.put({ $path: '/doc', $type: 'test.rebase.doc', title: 'old', local: 0 } as any);
+
+    pushOptimistic('/doc', Doc, undefined, action('test.rebase.doc', 'publishLater'), undefined, 'op1');
+    assert.strictEqual((cache.get('/doc') as any).local, 0, 'thenable candidate discarded at push');
+    assert.strictEqual(hasPending('/doc'), true);
+
+    // Drain microtasks: post-await rejection + its .catch handler
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.strictEqual((cache.get('/doc') as any).local, 0, 'no mutation leaked after settlement');
+
+    applyServerPatch('/doc', [['r', 'local', 1]], undefined, 'op1');
+    assert.strictEqual((cache.get('/doc') as any).local, 1, 'server result authoritative');
+    assert.strictEqual(hasPending('/doc'), false);
+  });
+
+  it('then-only thenables (no .catch) skip cleanly — resolution silent, rejection reported (core-anz4.18)', async () => {
+    cache.put({ $path: '/doc', $type: 'test.rebase.doc', title: 'old', local: 0 });
+
+    const clean = await captureWarnings(async () => {
+      pushOptimistic('/doc', Doc, undefined, action('test.rebase.doc', 'thenableResolve'), undefined, 'op1');
+      assert.strictEqual(cache.get('/doc')?.local, 0, 'candidate discarded');
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    assert.strictEqual(clean.length, 0, 'clean resolution reports nothing');
+
+    const warned = await captureWarnings(async () => {
+      pushOptimistic('/doc', Doc, undefined, action('test.rebase.doc', 'thenableReject'), undefined, 'op2');
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    assert.strictEqual(cache.get('/doc')?.local, 0, 'rejecting thenable also discarded');
+    assert.strictEqual(warned.length, 1, 'rejection reported once, not orphaned');
   });
 
   it('applyServerPatch ignores non-finite rev (wire garbage)', () => {

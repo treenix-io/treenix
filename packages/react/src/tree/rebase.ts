@@ -3,7 +3,7 @@
 // Zero React deps, pure logic.
 
 import { getComponent, type NodeData } from '@treenx/core';
-import type { Class } from '@treenx/core/comp';
+import { type Class, predictionCtx } from '@treenx/core/comp';
 import { applyOps, type PatchOp } from '@treenx/core/tree';
 import * as cache from './cache';
 
@@ -25,30 +25,59 @@ interface RebaseState {
 const state = new Map<string, RebaseState>();
 
 /** Replay all pending ops on confirmed and put result in cache.
- *  Handlers may be async — sync try/catch only catches sync throws, so we also
- *  attach .catch() to any returned promise to report async rejections.
- *  Without this, one failing optimistic op (e.g. action calling server-only
- *  tree.set on the client) becomes an "Uncaught (in promise)" and cascades
- *  through every subsequent replay. Optimistic UX is best-effort; the server
- *  result is authoritative. */
+ *  Each op runs against its own candidate clone; the clone commits ONLY on
+ *  synchronous, non-thenable success (core-anz4.18). Sync throw (e.g.
+ *  CTX_UNAVAILABLE from server-only ctx) → candidate discarded — no
+ *  half-executed draft. Thenable return → discarded too: settlement may
+ *  still reject after the sync span mutated the candidate, and post-await
+ *  continuations would mutate an object already in cache — async
+ *  predictions cannot commit atomically, so they never commit; escaped
+ *  continuations mutate only the orphaned clone. We still attach .catch()
+ *  so a rejection is reported instead of becoming an "Uncaught (in
+ *  promise)". Optimistic UX is best-effort; the server result is
+ *  authoritative. */
 function replayAndPut(path: string, rs: RebaseState) {
-  const draft = structuredClone(rs.confirmed);
+  let draft = structuredClone(rs.confirmed);
   for (const op of rs.pending) {
+    const candidate = structuredClone(draft);
     try {
-      const comp = getComponent(draft, op.cls, op.key);
+      const comp = getComponent(candidate, op.cls, op.key);
       if (!comp) continue;
-      const result = op.handler({ comp, node: draft }, op.data) as unknown;
+      const result = op.handler(predictionCtx(candidate, comp), op.data) as unknown;
       if (result && typeof (result as Promise<unknown>).then === 'function') {
-        (result as Promise<unknown>).catch(err => warnReplayFailure(path, op, err));
+        // Promise.resolve wrap: a conforming PromiseLike guarantees only .then —
+        // calling .catch on it directly throws and orphans the rejection.
+        Promise.resolve(result).catch(err => reportReplayFailure(path, op, err));
+        logSkipOnce(op, 'async prediction');
+        continue;
       }
+      draft = candidate;
     } catch (err) {
-      warnReplayFailure(path, op, err);
+      reportReplayFailure(path, op, err);
     }
   }
   cache.put(draft);
 }
 
-function warnReplayFailure(path: string, op: PendingOp, err: unknown) {
+// Skipped predictions are an EXPECTED lane (server event re-syncs) —
+// log once per action+reason, not a warn per replay.
+const skipLogged = new Set<string>();
+
+function logSkipOnce(op: PendingOp, reason: string) {
+  const key = `${op.type ?? op.cls.name}:${op.action ?? ''}:${reason}`;
+  if (skipLogged.has(key)) return;
+  skipLogged.add(key);
+  console.info(
+    `[treenix] optimistic prediction skipped (${reason}) type=${op.type ?? op.cls.name}`
+    + `${op.action ? ` action=${op.action}` : ''} — server result will sync`,
+  );
+}
+
+function reportReplayFailure(path: string, op: PendingOp, err: unknown) {
+  if (err instanceof Error && 'code' in err && err.code === 'CTX_UNAVAILABLE') {
+    logSkipOnce(op, 'needs server ctx');
+    return;
+  }
   console.warn(
     `[treenix] optimistic replay failed path=${path} type=${op.type ?? op.cls.name}`
     + `${op.key ? ` key=${op.key}` : ''}`
