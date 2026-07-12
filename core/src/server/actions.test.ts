@@ -1,5 +1,6 @@
 import { registerType } from '#comp';
-import { createNode, isComponent, type NodeData, normalizeType, register, resolve } from '#core';
+import { registerSchemaAction } from '#schema/action';
+import { createNode, isComponent, type NodeData, normalizeType, register, resolve, resolveExact } from '#core';
 import { OpError } from '#errors';
 import { clearRegistry } from '#testing';
 import { createMemoryTree } from '#tree';
@@ -890,5 +891,168 @@ describe('setComponent', () => {
     const after = await cached.get('/n1');
     assert.equal((after as any).foo, 'original', 'original field preserved');
     assert.equal((after as any).bar, undefined, 'ghost component must not appear in cache');
+  });
+});
+
+// core-anz4.23: 3943f50 removed the dev-only default.json loader, so $schema/patch on
+// schema-less types died in validateActionArgs. The 'default' schema is code-registered
+// now; these tests also pin the resolution order (exact → stored dynamic → default) so
+// the default fallback cannot shadow a type's own or stored schema.
+describe('default schema — built-in $schema/patch (core-anz4.23)', () => {
+  beforeEach(() => {
+    clearRegistry();
+    registerBuiltinActions();
+    registerSchemaAction();
+  });
+
+  it('$schema executes on a schema-less type', async () => {
+    const tree = createMemoryTree();
+    await tree.set({ $path: '/d', $type: 'dir' });
+
+    const result = await executeAction<{ type: string; components: object }>(
+      tree, '/d', undefined, undefined, '$schema');
+    assert.equal(result.type, 'dir');
+    assert.ok(result.components);
+  });
+
+  it('patch executes on a schema-less type', async () => {
+    const tree = createMemoryTree();
+    await tree.set({ $path: '/d', $type: 'dir', title: 'a' });
+
+    await executeAction(tree, '/d', undefined, undefined, 'patch', { title: 'b' });
+    assert.equal((await tree.get('/d'))!.title, 'b');
+  });
+
+  it('patch executes on a type whose own schema lacks a patch entry', async () => {
+    register('anz.owned', 'schema', () => ({
+      $id: 'anz.owned', type: 'object' as const,
+      properties: { title: { type: 'string' } },
+      methods: { rename: { arguments: [] } },
+    }));
+    const tree = createMemoryTree();
+    await tree.set(createNode('/o', 'anz.owned', { title: 'a' }));
+
+    await executeAction(tree, '/o', undefined, undefined, 'patch', { title: 'b' });
+    assert.equal((await tree.get('/o'))!.title, 'b');
+  });
+
+  it("a type's own schema wins for its own actions", async () => {
+    register('anz.strict', 'schema', () => ({
+      $id: 'anz.strict', type: 'object' as const,
+      properties: { title: { type: 'string' } },
+      methods: { setTitle: { arguments: [{ name: 'data', type: 'object', properties: { title: { type: 'string' } } }] } },
+    }));
+    register('anz.strict', 'action:setTitle', (ctx: import('./actions').ActionCtx, data: unknown) => {
+      Object.assign(ctx.node, data);
+    });
+    const tree = createMemoryTree();
+    await tree.set(createNode('/s', 'anz.strict', { title: 'a' }));
+
+    // Success proves the own method entry was found (the default schema has no setTitle).
+    await executeAction(tree, '/s', undefined, undefined, 'setTitle', { title: 'b' });
+    assert.equal((await tree.get('/s'))!.title, 'b');
+
+    // Rejection proves args were validated against the own schema's types.
+    await assert.rejects(
+      () => executeAction(tree, '/s', undefined, undefined, 'setTitle', { title: 123 }),
+      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+    );
+  });
+
+  it('dynamic type still validates against its stored schema (shadow regression)', async () => {
+    const tree = createMemoryTree();
+    await tree.set({
+      $path: '/sys/types/anz/dyn', $type: 'type',
+      actions: { go: 'return "ok";' },
+      schema: { methods: { go: { arguments: [{ name: 'data', type: 'object', properties: { n: { type: 'number' } } }] } } },
+    });
+    await tree.set(createNode('/i', 'anz.dyn', {}));
+
+    assert.equal(await executeAction(tree, '/i', undefined, undefined, 'go', { n: 1 }), 'ok');
+    await assert.rejects(
+      () => executeAction(tree, '/i', undefined, undefined, 'go', { n: 'oops' }),
+      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+    );
+  });
+
+  it('code-registered type schema wins over the stored dynamic one', async () => {
+    register('anz.hybrid', 'schema', () => ({
+      $id: 'anz.hybrid', type: 'object' as const, properties: {},
+      methods: { go: { arguments: [{ name: 'data', type: 'object', properties: { n: { type: 'number' } } }] } },
+    }));
+    const tree = createMemoryTree();
+    await tree.set({
+      $path: '/sys/types/anz/hybrid', $type: 'type',
+      actions: { go: 'return "ok";' },
+      // Lax stored schema — would accept anything; must NOT be consulted.
+      schema: { methods: { go: { arguments: [{ name: 'data' }] } } },
+    });
+    await tree.set(createNode('/h', 'anz.hybrid', {}));
+
+    await assert.rejects(
+      () => executeAction(tree, '/h', undefined, undefined, 'go', { n: 'oops' }),
+      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+    );
+    assert.equal(await executeAction(tree, '/h', undefined, undefined, 'go', { n: 1 }), 'ok');
+  });
+
+  it('non-default action without any schema still fails closed', async () => {
+    register('anz.bare', 'action:doit', () => 'done');
+    const tree = createMemoryTree();
+    await tree.set(createNode('/b', 'anz.bare', {}));
+
+    await assert.rejects(
+      () => executeAction(tree, '/b', undefined, undefined, 'doit'),
+      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+    );
+  });
+
+  it('exact custom handler named patch without schema stays fail-closed', async () => {
+    register('anz.custompatch', 'action:patch', () => 'custom');
+    const tree = createMemoryTree();
+    await tree.set(createNode('/cp', 'anz.custompatch', { title: 'a' }));
+
+    // The default patch schema must NOT validate a type's own handler.
+    await assert.rejects(
+      () => executeAction(tree, '/cp', undefined, undefined, 'patch', { title: 'b' }),
+      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+    );
+    assert.equal((await tree.get('/cp'))!.title, 'a');
+  });
+
+  it('dynamic stored patch overrides the built-in and its stored schema validates', async () => {
+    const tree = createMemoryTree();
+    await tree.set({
+      $path: '/sys/types/anz/dpatch', $type: 'type',
+      actions: { patch: 'return "custom-patch";' },
+      schema: { methods: { patch: { arguments: [{ name: 'data', type: 'object', properties: { n: { type: 'number' } } }] } } },
+    });
+    await tree.set(createNode('/dp', 'anz.dpatch', {}));
+
+    // Stored handler runs (the built-in patch returns undefined)…
+    assert.equal(await executeAction(tree, '/dp', undefined, undefined, 'patch', { n: 1 }), 'custom-patch');
+    // …and its stored schema governs (the default patch schema would accept anything).
+    await assert.rejects(
+      () => executeAction(tree, '/dp', undefined, undefined, 'patch', { n: 'oops' }),
+      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+    );
+  });
+
+  it('dynamic type without stored patch keeps the built-in', async () => {
+    const tree = createMemoryTree();
+    await tree.set({
+      $path: '/sys/types/anz/nopatch', $type: 'type',
+      actions: { go: 'return "ok";' },
+      schema: { methods: { go: { arguments: [] } } },
+    });
+    await tree.set(createNode('/np', 'anz.nopatch', { title: 'a' }));
+
+    await executeAction(tree, '/np', undefined, undefined, 'patch', { title: 'b' });
+    assert.equal((await tree.get('/np'))!.title, 'b');
+  });
+
+  it('default schema $id matches its normalized registration key', () => {
+    const schema = resolveExact('default', 'schema')?.();
+    assert.equal(schema?.$id, normalizeType('default'));
   });
 });

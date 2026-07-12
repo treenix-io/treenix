@@ -6,7 +6,7 @@ import './action-context';
 import { Class, type TypeProxy } from '#comp';
 import { type ExecuteFn, makeTypedProxy, type StreamFn } from '#comp/handle';
 import { collectDeps as _collectDeps, type ResolvedDeps } from '#comp/needs';
-import { assertSafeKey, COMP_PREFIX, type ComponentData, compKey, getComponentField, getMeta, isComponent, type NodeData, register, resolve, safeJsonParse } from '#core';
+import { assertSafeKey, COMP_PREFIX, type ComponentData, compKey, getComponentField, getMeta, isComponent, type NodeData, normalizeType, register, resolve, resolveExact, safeJsonParse } from '#core';
 import { validateValue, type ValidationError } from '#comp/validate';
 import { type TypeSchema } from '#schema/types';
 import { type ExecOpts, type PatchOp, type Tree } from '#tree';
@@ -170,7 +170,8 @@ type ResolvedAction = {
   comp: ComponentData | undefined;
   deps: ResolvedDeps;
   fieldKey: string | undefined;
-  /** Effective schema: sealed registry first, else the freshly-read stored type schema. */
+  /** Effective schema: exact registry entry, else freshly-read stored type schema, else
+   *  the 'default' schema when it carries this action's method (built-in $schema/patch). */
   schema: TypeSchema | undefined;
 };
 
@@ -215,8 +216,10 @@ async function loadDynamicAction(
   // Stored schema is validated per call and NEVER register()ed: the sealed registry keeps
   // the first entry forever, so registering would freeze a mutable stored schema (edits
   // ignored until restart) and let a tree-writable node poison the process-wide registry.
+  // Exact: resolve() falls back to the code-registered 'default' schema, which would
+  // mask the stored one for every dynamic type (core-anz4.23).
   let schema: TypeSchema | undefined;
-  if (!resolve(type, 'schema')) {
+  if (!resolveExact(type, 'schema')) {
     const nodeSchema = typeNode.schema;
     if (!isRecord(nodeSchema)) return null;
     // R4-MOUNT-4: cap regex `pattern` complexity. F6 made /sys/types admin-only-write,
@@ -399,18 +402,33 @@ async function resolveActionHandler(
 
   let deps: ResolvedDeps = await _collectDeps(node, fieldKey!, action, tree);
 
-  let handler = resolve(type, `action:${action}`);
-  let schema = resolve(type, 'schema')?.();
+  // Precedence: exact registered handler → dynamic stored handler → inherited default
+  // built-in. Exact-only lookups — resolve() falls back to the 'default' entries, which
+  // would shadow both the stored dynamic handler/schema and a missing one (core-anz4.23).
+  let handler = resolveExact(type, `action:${action}`);
+  let schema = resolveExact(type, 'schema')?.();
 
-  // Fallback: try loading dynamic action from type definition node
   if (!handler) {
+    // A stored type node may override the built-ins (patch/$schema) too. Safe to consult
+    // before the inherited default: /sys/types is admin-only-write (F6), the code runs in
+    // the QuickJS sandbox, and the stored schema passes assertSafeSchema.
     const dyn = await loadDynamicAction(tree, type, action);
     if (dyn) {
       handler = dyn.handler;
       schema ??= dyn.schema;
+    } else {
+      handler = resolve(type, `action:${action}`);
     }
   }
   if (!handler) throw new OpError('BAD_REQUEST', `No action "${action}" for type "${type}"`);
+
+  // Default-schema fallback ONLY for the inherited built-in handler (identity check): an
+  // exact custom or dynamic handler without a matching schema entry stays fail-closed
+  // BAD_REQUEST even when named 'patch'/'$schema'.
+  if (!schema?.methods?.[action] && handler === resolveExact('default', `action:${action}`)) {
+    const def = resolveExact('default', 'schema')?.();
+    if (def?.methods?.[action]) schema = def;
+  }
 
   return { node, handler, type, comp, deps, fieldKey, schema };
 }
@@ -799,7 +817,21 @@ function deepAssign(target: any, source: Record<string, unknown>) {
   }
 }
 
+// Validates the built-in actions on types whose own schema lacks the method entry.
+// Code-registered: the old schemas/default.json loader was dev-only and removed in
+// 3943f50, silently breaking $schema/patch on schema-less types (core-anz4.23).
+const DEFAULT_SCHEMA: TypeSchema = {
+  $id: normalizeType('default'), // 't.default' — register() normalizes the key identically
+  type: 'object',
+  properties: {},
+  methods: {
+    $schema: { arguments: [] },
+    patch: { arguments: [{ name: 'data' }] },
+  },
+};
+
 export function registerBuiltinActions() {
+  register('default', 'schema', () => DEFAULT_SCHEMA);
   register('default', 'action:patch', (ctx: ActionCtx, data: unknown) => {
     if (!data || typeof data !== 'object') throw new OpError('BAD_REQUEST', 'patch: data must be an object');
     deepAssign(ctx.node, data as Record<string, unknown>);

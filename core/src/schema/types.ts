@@ -46,6 +46,7 @@ export type MethodSchema = {
 };
 
 export type TypeSchema = {
+  $id?: string; // registry type id — set on all loaded/generated schemas
   title?: string;
   description?: string;
   type: 'object';
