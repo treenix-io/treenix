@@ -14,6 +14,7 @@ import {
 import { OpError } from '#errors';
 import { ulid } from '#util/ulid';
 import { applyPatchManyEntry, assertPatchManyBatch, hasMutationOps, isSetEntry, type PatchManyEntry, type PatchOp, type Tree } from './index';
+import { patchViaSet } from './patch';
 import { withCache } from './cache';
 
 // ── Migration: per-type $v ladder, applied on read (R-gk8.29) ──
@@ -24,9 +25,11 @@ import { withCache } from './cache';
 // The policy wraps the MOUNTED tree — above fs/mongo/federation/query adapters —
 // so every adapter's nodes migrate on read and one layer covers all read verbs
 // (R-gk8.29: an earlier wrapper sat below the mounts and persistent stores — the
-// only data that outlives code versions — bypassed it entirely). Reads write the
-// migrated node back, so the corpus converges lazily; set() stamps $v so fresh
-// writes never re-enter the ladder.
+// only data that outlives code versions — bypassed it entirely). Reads migrate
+// in memory ONLY — no write-back (core-anz4.9: read-path writes lost OCC,
+// skipped audit/subs, false-CONFLICTed the caller's $rev through repath, and
+// broke read-only query mounts). The corpus converges when a migrated node is
+// next written; set() stamps $v so fresh writes never re-enter the ladder.
 //
 // Hot path:
 //  1. checked: WeakSet — same NodeData object seen twice → instant skip
@@ -125,6 +128,7 @@ function migrateNode(node: NodeData): NodeData {
     applyMigrations(val as Record<string, unknown>, val.$type);
   }
 
+  checked.add(clone);
   return clone;
 }
 
@@ -272,40 +276,25 @@ export type StoragePolicy = {
 
 export function withStoragePolicy(backing: Tree): StoragePolicy {
   // Migrate-on-read base — shared by the client path and the system identity.
-  // patch stays delegated to the backing (spread): re-implementing it here as
-  // get+set would break mounts with native patch semantics (federation
-  // forwards ops remotely; the remote migrates its own data). Every action
-  // flows through get() before drafting, which converges the node first.
+  // patch delegates to the backing for CONVERGED nodes (mounts keep native
+  // patch semantics: federation forwards ops remotely; the remote migrates its
+  // own data). A node with a pending ladder must NOT take ops against the old
+  // stored shape (reads no longer converge storage, core-anz4.9 — mixed-schema
+  // corruption), so it converges via get→apply→set instead. The extra backing
+  // get is system-path only: the client path patches through withCache, which
+  // never calls this. Every action flows through get() before drafting, which
+  // migrates the node first.
   const base: Tree = {
     ...backing,
 
     async get(path, ctx) {
       const node = await backing.get(path, ctx);
-      if (!node) return node;
-
-      const migrated = migrateNode(node);
-      if (migrated !== node) {
-        await backing.set(migrated, ctx);
-        checked.add(migrated);
-      }
-      return migrated;
+      return node ? migrateNode(node) : node;
     },
 
     async getChildren(path, opts, ctx) {
       const page = await backing.getChildren(path, opts, ctx);
-      const writebacks: Promise<void>[] = [];
-      const items = page.items.map(n => {
-        const migrated = migrateNode(n);
-        if (migrated !== n) {
-          writebacks.push(backing.set(migrated, ctx));
-          checked.add(migrated);
-        }
-        return migrated;
-      });
-      if (writebacks.length) {
-        await Promise.all(writebacks);
-        page.items = items;
-      }
+      page.items = page.items.map(n => migrateNode(n));
       return page;
     },
 
@@ -315,23 +304,49 @@ export function withStoragePolicy(backing: Tree): StoragePolicy {
       prepareForStore(node, await backing.get(node.$path, ctx));
       return backing.set(node, ctx);
     },
+
+    async patch(path, ops, ctx) {
+      const raw = await backing.get(path, ctx);
+      if (raw && migrateNode(raw) !== raw) return patchViaSet(base, path, ops, ctx);
+      return backing.patch(path, ops, ctx);
+    },
   };
 
   // scanChildren is the read-runtime list path (ACL listings) — it MUST migrate
   // too, or lists serve old shapes while get serves new ones. Override only when
   // the backing exposes it; the spread already forwarded the original.
   if (backing.scanChildren) {
-    base.scanChildren = async function* (parent, opts) {
-      for await (const entry of backing.scanChildren!(parent, opts)) {
-        const migrated = migrateNode(entry.node);
-        if (migrated !== entry.node) {
-          await backing.set(migrated);
-          checked.add(migrated);
-          yield { ...entry, node: migrated };
-        } else {
-          yield entry;
-        }
+    base.scanChildren = async function* (parent, opts, ctx) {
+      for await (const entry of backing.scanChildren!(parent, opts, ctx)) {
+        yield { ...entry, node: migrateNode(entry.node) };
       }
+    };
+  }
+
+  // System-path batches (base/systemTree) need the same migration convergence
+  // as the client path below — ops against a pending-ladder node would apply
+  // to the old stored shape. No validation/$refs here (system semantics);
+  // converged nodes and set-members pass through untouched.
+  if (backing.patchMany) {
+    base.patchMany = async (ancestor, entries, ctx) => {
+      assertPatchManyBatch(ancestor, entries);
+
+      const augmented: PatchManyEntry[] = [];
+      for (const entry of entries) {
+        if (isSetEntry(entry)) { augmented.push(entry); continue; }
+
+        const raw = await backing.get(entry.path, ctx);
+        if (!raw) { augmented.push(entry); continue; } // adapter throws NOT_FOUND itself
+        const node = migrateNode(raw);
+        if (node === raw) { augmented.push(entry); continue; }
+
+        const copy = applyPatchManyEntry(node, entry);
+        augmented.push(hasMutationOps(entry.ops)
+          ? { path: entry.path, node: copy }
+          : { path: entry.path, ops: [['t', '$rev', raw.$rev] as const] });
+      }
+
+      return backing.patchMany!(ancestor, augmented, ctx);
     };
   }
 
@@ -361,7 +376,7 @@ export function withStoragePolicy(backing: Tree): StoragePolicy {
     // collected → one BAD_REQUEST, nothing written) and $refs re-derived, with
     // the recomputed index appended as a derived op so the adapter's atomic
     // phase 2 commits it with the member's own ops (mirror of set() above).
-    ...(base.patchMany ? {
+    ...(backing.patchMany ? {
       async patchMany(ancestor: string, entries: PatchManyEntry[], ctx?: unknown) {
         assertPatchManyBatch(ancestor, entries);
 
@@ -380,20 +395,25 @@ export function withStoragePolicy(backing: Tree): StoragePolicy {
             else delete copy.$refs;
 
             for (const e of validateNode(copy)) errors.push(`${entry.path} ${e.path}: ${e.message}`);
-            prepareForStore(copy, await base.get(entry.path, ctx));
+            prepareForStore(copy, await backing.get(entry.path, ctx));
             augmented.push({ path: entry.path, node: copy });
             continue;
           }
 
-          const node = await base.get(entry.path, ctx);
-          if (!node) throw new OpError('NOT_FOUND', `Node not found: ${entry.path}`);
+          const raw = await backing.get(entry.path, ctx);
+          if (!raw) throw new OpError('NOT_FOUND', `Node not found: ${entry.path}`);
+          const node = migrateNode(raw);
           const copy = applyPatchManyEntry(node, entry);
 
-          // Test-only member: nothing changes, so no derived $refs op —
-          // appending one would turn it into a mutation and bump $rev against
-          // the per-node contract (test-only = no write).
+          // Test-only member: preconditions were just evaluated against the
+          // MIGRATED shape (applyPatchManyEntry above). Converged node: forward
+          // as-is — the adapter re-evaluates identically; no derived $refs op
+          // (test-only = no write). Migration pending: raw storage still holds
+          // the old shape, so the client's field tests would false-CONFLICT at
+          // the adapter — forward a $rev guard instead ($rev is ladder-
+          // invariant), preserving the commit-time precondition.
           if (!hasMutationOps(entry.ops)) {
-            augmented.push(entry);
+            augmented.push(node === raw ? entry : { path: entry.path, ops: [['t', '$rev', raw.$rev] as const] });
             continue;
           }
 
@@ -403,17 +423,36 @@ export function withStoragePolicy(backing: Tree): StoragePolicy {
 
           for (const e of validateNode(copy)) errors.push(`${entry.path} ${e.path}: ${e.message}`);
 
-          const ops: PatchOp[] = [...entry.ops];
-          if (refs) ops.push(['r', '$refs', refs] as const);
-          else if ('$refs' in node) ops.push(['d', '$refs'] as const);
-          augmented.push({ path: entry.path, ops });
+          if (node === raw) {
+            // Converged node: forward ops — the adapter applies them against
+            // current storage under its own lock (concurrent-merge semantics
+            // preserved, no implicit OCC added), with the recomputed $refs
+            // index appended as a derived op (mirror of set() above).
+            const ops: PatchOp[] = [...entry.ops];
+            if (refs) ops.push(['r', '$refs', refs] as const);
+            else if ('$refs' in raw) ops.push(['d', '$refs'] as const);
+            augmented.push({ path: entry.path, ops });
+          } else {
+            // Migration pending: ops against the still-old stored shape would
+            // corrupt (reads no longer converge storage, core-anz4.9), so ship
+            // the full migrated post-image as a set-member. copy carries the
+            // pre-read $rev — the adapter's set-member gate enforces it as OCC,
+            // denying the WHOLE batch (loud CONFLICT) on a concurrent write. A
+            // revisionless legacy node has no token to guard with — documented
+            // blind-upsert residual, still narrower than the pre-anz4.9
+            // writeback, which blind-upserted on every read.
+            augmented.push({ path: entry.path, node: copy });
+          }
         }
 
         if (errors.length) {
           throw new OpError('BAD_REQUEST', `Validation: ${errors.join('; ')}`);
         }
 
-        return base.patchMany!(ancestor, augmented, ctx);
+        // Straight to the backing: base.patchMany's migration conversion
+        // (system path) would re-read every ops-member for nothing — this
+        // loop already converged them.
+        return backing.patchMany!(ancestor, augmented, ctx);
       },
     } : {}),
   };

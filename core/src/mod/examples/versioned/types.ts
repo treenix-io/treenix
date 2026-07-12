@@ -8,7 +8,8 @@
 //
 // Steps are registered next to the type via the ordinary context registry and
 // run on read by the storage policy's migration step (tree/policy.ts): a stored
-// v0 node arrives to callers as v2 and is written back, converging the corpus lazily.
+// v0 node arrives to callers as v2 (in memory); the migrated shape converges on
+// disk when the node is next written (core-anz4.9 — reads never write back).
 import { registerType } from '#comp';
 import { register } from '#core';
 

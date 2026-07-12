@@ -66,8 +66,9 @@ const backings = new Map<string, Tree>();
 
 // ── R-gk8.29: migration wraps the MOUNTED tree ──
 // Nodes served by mount adapters (fs/mongo/federation — the only data that
-// outlives code versions) MUST migrate on read, and reads write the migrated
-// shape back so the corpus converges.
+// outlives code versions) MUST migrate on read (in memory); the corpus
+// converges when a migrated node is next written (core-anz4.9 — reads never
+// write back).
 
 describe('invariant R-gk8.29: mounted nodes migrate on read', () => {
   before(() => {
@@ -88,10 +89,11 @@ describe('invariant R-gk8.29: mounted nodes migrate on read', () => {
     unregister('inv.versioned', 'migrate');
   });
 
-  it('old-shape node behind a mount is served migrated and written back', async () => {
+  it('old-shape node behind a mount is served migrated, backing untouched by the read (core-anz4.9)', async () => {
     const backing = createMemoryTree();
     backings.set('versioned', backing);
     await backing.set(createNode('/data/x', 'inv.versioned', { old: 'v' }));
+    const rev0 = (await backing.get('/data/x'))?.$rev;
 
     const bootstrap = await grantedBootstrap();
     await bootstrap.set(createNode('/data', 'test.dir', {}, { mount: { $type: 'inv.mount.backing', key: 'versioned' } }));
@@ -103,11 +105,12 @@ describe('invariant R-gk8.29: mounted nodes migrate on read', () => {
     assert.equal(got.old, undefined);
     assert.equal(got.$v, 1);
 
-    // Write-back converged the PERSISTENT store, not just the response.
+    // Read migrates in memory only — the persistent store is untouched.
     const stored = await backing.get('/data/x');
-    assert.equal(stored?.renamed, 'v');
-    assert.equal(stored?.old, undefined);
-    assert.equal(stored?.$v, 1);
+    assert.equal(stored?.old, 'v');
+    assert.equal(stored?.renamed, undefined);
+    assert.equal(stored?.$v, undefined);
+    assert.equal(stored?.$rev, rev0, 'no $rev bump from a read');
   });
 });
 

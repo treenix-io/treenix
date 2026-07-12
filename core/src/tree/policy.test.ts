@@ -9,8 +9,12 @@ import { createPipeline } from '#server/server';
 import { clearRegistry } from '#testing';
 import { withMounts } from '#mount';
 import { createMemoryTree, type Tree } from '#tree';
+import { createFsTree } from '#tree/fs';
 import { isUlid, ulid } from '#util/ulid';
 import assert from 'node:assert/strict';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { isTrashExempt, sweepTrash, TRASH_ENTRY_TYPE, TRASH_ROOT, withStoragePolicy } from './policy';
 
@@ -98,7 +102,7 @@ describe('policy: migration step', () => {
     assert.equal(snapshot.$v, undefined, 'bare $type value is plain data — never migrated');
   });
 
-  it('writes the migrated node back to the inner tree', async () => {
+  it('read migrates in memory but does NOT write back — raw stays old, converges on next write (core-anz4.9)', async () => {
     register(TEST_TYPE, 'migrate', () => ({
       1: (n: Record<string, unknown>) => { n.fixed = true; },
     }));
@@ -106,11 +110,22 @@ describe('policy: migration step', () => {
     const inner = createMemoryTree();
     const { base: tree } = withStoragePolicy(inner);
     await inner.set(createNode('/a', TEST_TYPE, {}));
+    const rev0 = (await inner.get('/a'))?.$rev;
 
-    await tree.get('/a');
+    const got = await tree.get('/a');
+    assert.equal(got?.fixed, true, 'caller sees the migrated shape');
+
     const raw = await inner.get('/a');
-    assert.equal(raw?.fixed, true);
-    assert.equal(raw?.$v, 1);
+    assert.equal(raw?.fixed, undefined, 'storage untouched by the read');
+    assert.equal(raw?.$v, undefined);
+    assert.equal(raw?.$rev, rev0, 'no $rev bump from a read');
+
+    // Convergence happens on the next ordinary write, not on the read.
+    await tree.set(got!);
+    const converged = await inner.get('/a');
+    assert.equal(converged?.fixed, true);
+    assert.equal(converged?.$v, 1);
+    assert.equal(converged?.$rev, (rev0 ?? 0) + 1, 'write persists migrated shape N -> N+1');
   });
 
   it('set() stamps $v on node and # components', async () => {
@@ -166,6 +181,209 @@ describe('policy: migration step', () => {
     const got = await tree.get('/plain');
     assert.equal(got?.bumped, undefined);
     assert.equal(got?.$v, undefined);
+  });
+
+  it('patchMany persists the migrated post-image, not ops against the stale stored shape (core-anz4.9)', async () => {
+    register(TEST_TYPE, 'migrate', () => ({
+      1: (n: Record<string, unknown>) => { n.body = n.text; delete n.text; },
+    }));
+
+    const inner = createMemoryTree();
+    const { tree } = withStoragePolicy(inner);
+    await inner.set(createNode('/p', 'dir', {}));
+    await inner.set(createNode('/p/a', TEST_TYPE, { text: 'hi', count: 1 }));
+    const rev0 = (await inner.get('/p/a'))?.$rev;
+
+    assert.ok(tree.patchMany, 'memory-backed policy exposes patchMany');
+    await tree.patchMany('/p', [{ path: '/p/a', ops: [['r', 'count', 2]] }]);
+
+    // Reads no longer converge storage, so the stored node was still v0 when the
+    // batch ran. The mutation-member must ship the migrated post-image, not ops
+    // applied to the stale shape (which would leave `text` and drop the rename).
+    const raw = await inner.get('/p/a');
+    assert.equal(raw?.body, 'hi', 'migrated: text renamed to body');
+    assert.equal(raw?.text, undefined, 'old field gone');
+    assert.equal(raw?.count, 2, 'mutation applied');
+    assert.equal(raw?.$v, 1, 'stamped to current version');
+    assert.equal(raw?.$rev, (rev0 ?? 0) + 1, 'converted set-member passes OCC and bumps exactly once');
+  });
+
+  it('patchMany mixed batch: set-member, mutation on a v0 node, and test-only member in one commit (core-anz4.9)', async () => {
+    register(TEST_TYPE, 'migrate', () => ({
+      1: (n: Record<string, unknown>) => { n.body = n.text; delete n.text; },
+    }));
+
+    const inner = createMemoryTree();
+    const { tree } = withStoragePolicy(inner);
+    await inner.set(createNode('/p', 'dir', {}));
+    await inner.set(createNode('/p/a', TEST_TYPE, { text: 'hi', count: 1 }));
+    await inner.set(createNode('/p/b', 'dir', { flag: 'x' }));
+    const aRev = (await inner.get('/p/a'))?.$rev;
+    const bRev = (await inner.get('/p/b'))?.$rev;
+
+    await tree.patchMany!('/p', [
+      { path: '/p/new', node: createNode('/p/new', 'dir', { label: 'n' }) },
+      { path: '/p/a', ops: [['r', 'count', 2]] },
+      { path: '/p/b', ops: [['t', 'flag', 'x']] },
+    ]);
+
+    const created = await inner.get('/p/new');
+    assert.equal(created?.label, 'n');
+    assert.ok(isUlid(created?.$id ?? ''), 'set-member minted identity');
+
+    const a = await inner.get('/p/a');
+    assert.equal(a?.body, 'hi', 'mutation-member converged the migrated shape');
+    assert.equal(a?.count, 2);
+    assert.equal(a?.$v, 1);
+    assert.equal(a?.$rev, (aRev ?? 0) + 1, 'mutation-member bumps exactly once');
+
+    const b = await inner.get('/p/b');
+    assert.equal(b?.$rev, bRev, 'test-only member does not write or bump');
+  });
+
+  it('test-only member preconditions evaluate against the MIGRATED shape (core-anz4.9)', async () => {
+    register(TEST_TYPE, 'migrate', () => ({
+      1: (n: Record<string, unknown>) => { n.body = n.text; delete n.text; },
+    }));
+
+    const inner = createMemoryTree();
+    const { tree } = withStoragePolicy(inner);
+    await inner.set(createNode('/p', 'dir', {}));
+    await inner.set(createNode('/p/a', TEST_TYPE, { text: 'hi' }));
+    const rev0 = (await inner.get('/p/a'))?.$rev;
+
+    // Precondition on a field that only exists AFTER migration: must pass even
+    // though raw storage still holds `text`, and must write nothing.
+    await tree.patchMany!('/p', [{ path: '/p/a', ops: [['t', 'body', 'hi']] }]);
+    const raw = await inner.get('/p/a');
+    assert.equal(raw?.text, 'hi', 'test-only member wrote nothing');
+    assert.equal(raw?.$rev, rev0, 'no $rev bump');
+
+    await assert.rejects(
+      () => tree.patchMany!('/p', [{ path: '/p/a', ops: [['t', 'body', 'nope']] }]),
+      (e: OpError) => e.code === 'CONFLICT',
+    );
+  });
+
+  it('concurrent write during a batch: migration-pending member denies the whole batch, converged member merges (core-anz4.9)', async () => {
+    register(TEST_TYPE, 'migrate', () => ({
+      1: (n: Record<string, unknown>) => { n.body = n.text; delete n.text; },
+    }));
+
+    const mem = createMemoryTree();
+    await mem.set(createNode('/p', 'dir', {}));
+    await mem.set(createNode('/p/a', TEST_TYPE, { text: 'hi', count: 1 }));
+    await mem.set(createNode('/p/c', 'dir', { count: 1 }));
+
+    // Interpose the backing: a concurrent writer lands right after the policy's
+    // pre-read returns its (stale) snapshot.
+    let inject: string | undefined;
+    const backing: Tree = {
+      ...mem,
+      async get(path, ctx) {
+        const n = await mem.get(path, ctx);
+        if (path === inject) {
+          inject = undefined;
+          await mem.set({ ...(await mem.get(path))!, note: 'concurrent' });
+        }
+        return n;
+      },
+    };
+    const { tree } = withStoragePolicy(backing);
+
+    // Migration pending → converted set-member carries the pre-read $rev → OCC
+    // denies the whole batch; the concurrent write survives untouched.
+    inject = '/p/a';
+    await assert.rejects(
+      () => tree.patchMany!('/p', [{ path: '/p/a', ops: [['r', 'count', 2]] }]),
+      (e: OpError) => e.code === 'CONFLICT',
+    );
+    const a = await mem.get('/p/a');
+    assert.equal(a?.note, 'concurrent', 'concurrent write preserved');
+    assert.equal(a?.text, 'hi', 'denied batch left storage untouched');
+    assert.equal(a?.count, 1);
+
+    // Converged node → ops-member forwarded → the adapter merges against
+    // CURRENT storage under its lock (old semantics, no implicit OCC).
+    inject = '/p/c';
+    await tree.patchMany!('/p', [{ path: '/p/c', ops: [['r', 'count', 2]] }]);
+    const c = await mem.get('/p/c');
+    assert.equal(c?.note, 'concurrent', 'concurrent write merged, not clobbered');
+    assert.equal(c?.count, 2, 'batch op applied on top');
+  });
+
+  it('system path (base) converges a migration-pending node on patch and patchMany (core-anz4.9)', async () => {
+    register(TEST_TYPE, 'migrate', () => ({
+      1: (n: Record<string, unknown>) => { n.body = n.text; delete n.text; },
+    }));
+
+    const inner = createMemoryTree();
+    const { base } = withStoragePolicy(inner);
+    await inner.set(createNode('/p', 'dir', {}));
+    await inner.set(createNode('/p/a', TEST_TYPE, { text: 'hi', count: 1 }));
+    await inner.set(createNode('/p/b', TEST_TYPE, { text: 'yo', count: 1 }));
+    const aRev = (await inner.get('/p/a'))?.$rev;
+
+    // patch: ops built against a migrated read must not land on the old shape.
+    await base.patch('/p/a', [['r', 'count', 2]]);
+    const a = await inner.get('/p/a');
+    assert.equal(a?.body, 'hi', 'patch converged the migrated shape');
+    assert.equal(a?.text, undefined);
+    assert.equal(a?.count, 2);
+    assert.equal(a?.$v, 1);
+    assert.equal(a?.$rev, (aRev ?? 0) + 1, 'exactly one bump');
+
+    // patchMany test-only against a migrated field (v0 in storage), then mutation.
+    await base.patchMany!('/p', [{ path: '/p/b', ops: [['t', 'body', 'yo']] }]);
+    assert.equal((await inner.get('/p/b'))?.text, 'yo', 'test-only member wrote nothing');
+
+    await base.patchMany!('/p', [{ path: '/p/b', ops: [['r', 'count', 2]] }]);
+    const b = await inner.get('/p/b');
+    assert.equal(b?.body, 'yo', 'patchMany converged the migrated shape');
+    assert.equal(b?.text, undefined);
+    assert.equal(b?.count, 2);
+    assert.equal(b?.$v, 1);
+  });
+
+  it('revisionless legacy fs node: pending-migration mutation converges via blind upsert — documented residual (core-anz4.9)', async () => {
+    register(TEST_TYPE, 'migrate', () => ({
+      1: (n: Record<string, unknown>) => { n.body = n.text; delete n.text; },
+    }));
+
+    const dir = await mkdtemp(join(tmpdir(), 'treenix-policy-revless-'));
+    try {
+      // Hand-written legacy file: no $rev, no $v — fs serves it as-is.
+      await writeFile(join(dir, 'a.json'), JSON.stringify({ $type: TEST_TYPE, text: 'hi', count: 1 }) + '\n');
+      const fsTree = await createFsTree(dir);
+
+      let fired = false;
+      const backing: Tree = {
+        ...fsTree,
+        async get(path, ctx) {
+          const n = await fsTree.get(path, ctx);
+          if (path === '/a' && !fired) {
+            fired = true;
+            await fsTree.set({ ...(await fsTree.get(path))!, note: 'concurrent' });
+          }
+          return n;
+        },
+      };
+      const { tree } = withStoragePolicy(backing);
+
+      // No $rev on the pre-read snapshot → the converted set-member has no OCC
+      // token → blind upsert: the migrated post-image wins and the concurrent
+      // write is lost. Documented residual — narrower than the pre-anz4.9
+      // writeback, which blind-upserted the same nodes on every read.
+      await tree.patchMany!('/', [{ path: '/a', ops: [['r', 'count', 2]] }]);
+      const raw = await fsTree.get('/a');
+      assert.equal(raw?.body, 'hi', 'migrated shape converged on disk');
+      assert.equal(raw?.text, undefined);
+      assert.equal(raw?.count, 2);
+      assert.equal(raw?.$v, 1);
+      assert.equal(raw?.note, undefined, 'residual: revisionless blind upsert clobbers the concurrent write');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
 
