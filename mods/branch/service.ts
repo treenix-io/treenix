@@ -12,8 +12,14 @@ import { wrapReadOnlyTree } from '@treenx/core/server/readonly-tree';
 import type { Tree } from '@treenx/core/tree';
 import { createBranchTree } from '@treenx/core/tree/branch';
 import { createRepathTree } from '@treenx/core/tree';
+import { addTrashExempt } from '@treenx/core/tree/trash-exempt';
 import { type AgentScope, defineAgentScope } from '#harness/capability';
 import { BRANCH_SELF, MountBranch } from './types';
+
+// core-anz4.7: the policy trash step judges a remove by its VIEW path — a
+// branch-view remove would copy isolated branch content into the real
+// /sys/trash. Branch removes hard-delete: the delta whiteout IS the safety copy.
+addTrashExempt('/branches');
 
 const parentOf = (p: string) => p.slice(0, p.lastIndexOf('/')) || '/';
 

@@ -66,6 +66,11 @@
       "types": "./dist/tree/migrate-component-namespace.d.ts",
       "default": "./dist/tree/migrate-component-namespace.js"
     },
+    "./tree/trash-exempt": {
+      "development": "./src/tree/trash-exempt.ts",
+      "types": "./dist/tree/trash-exempt.d.ts",
+      "default": "./dist/tree/trash-exempt.js"
+    },
     "./tree/cache": {
       "development": "./src/tree/cache.ts",
       "types": "./dist/tree/cache.d.ts",

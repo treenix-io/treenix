@@ -1,4 +1,4 @@
-import { A, getComponentByName, makeNode, R, register, S, W, type NodeData } from '@treenx/core';
+import { A, getComponentByName, isRef, makeNode, R, register, S, W, type NodeData } from '@treenx/core';
 import { registerType } from '@treenx/core/comp';
 import { OpError } from '@treenx/core/errors';
 import { withMounts } from '@treenx/core/mount';
@@ -299,11 +299,10 @@ describe('branch mod: requestMerge + merge', () => {
     await assert.rejects(tree.remove(self), isCode('FORBIDDEN'));
   });
 
-  it('clean merge applies create/set/remove, skips noop, journals revs via OCC', async () => {
+  it('clean merge applies create/set in one atomic batch, skips noop, journals revs via OCC', async () => {
     const { root, tree, branchPath, view } = await setup();
 
     await tree.set(makeNode(`${view}/company/doc`, 'branchtest.doc', { title: 'merged-title', count: 7 }));
-    await tree.remove(`${view}/company/other`);
     await tree.set(makeNode(`${view}/fresh`, 'branchtest.doc', { title: 'born', count: 0 }));
     await tree.set(makeNode(`${view}/tmp`, 'branchtest.doc', { title: 'gone', count: 0 }));
     await tree.remove(`${view}/tmp`);
@@ -314,19 +313,37 @@ describe('branch mod: requestMerge + merge', () => {
     );
 
     assert.equal(res.conflicts.length, 0);
-    assert.equal(res.merged, 3);
-    assert.deepEqual([...res.applied].sort(), ['/company/doc', '/company/other', '/fresh']);
+    assert.equal(res.merged, 2);
+    assert.deepEqual([...res.applied].sort(), ['/company/doc', '/fresh']);
 
     const doc = await root.get('/company/doc');
     assert.equal(doc?.title, 'merged-title');
     assert.equal(doc?.$rev, 2); // OCC: set with $rev=1 bumped to 2
-    assert.equal(await root.get('/company/other'), undefined);
     assert.equal((await root.get('/fresh'))?.title, 'born');
     assert.equal(await root.get('/tmp'), undefined);
 
     const branch = await tree.get(branchPath);
     assert.equal(branch?.status, 'merged');
     assert.ok(typeof branch?.mergedAt === 'number' && branch.mergedAt > 0);
+  });
+
+  // core-anz4.6: PatchManyEntry has no remove member — a remove applied outside
+  // the batch would reopen the partial-merge hole, so merge refuses whole.
+  it('merge with a remove entry is refused loudly before any write', async () => {
+    const { root, tree, branchPath, view } = await setup();
+
+    await tree.set(makeNode(`${view}/company/doc`, 'branchtest.doc', { title: 'kept-edit', count: 2 }));
+    await tree.remove(`${view}/company/other`);
+
+    await assert.rejects(
+      executeAction(tree, branchPath, undefined, undefined, 'merge', undefined, ACTOR),
+      isCode('BAD_REQUEST'),
+    );
+
+    assert.equal((await root.get('/company/doc'))?.title, 'live', 'set entry not applied');
+    assert.equal((await root.get('/company/other'))?.title, 'other', 'remove entry not applied');
+    assert.equal((await tree.get(branchPath))?.status, 'open', 'no status flip on refusal');
+    assert.equal((await root.get(`${branchPath}/delta/company/other`))?.$type, BRANCH_WHITEOUT_TYPE, 'delta intact');
   });
 
   it('preflight conflict: live drift reports all conflicts, applies NOTHING', async () => {
@@ -357,22 +374,23 @@ describe('branch mod: requestMerge + merge', () => {
     assert.equal((branch?.conflicts as unknown[])?.length, 2);
   });
 
-  it('mid-apply OCC slip: stops, records applied list, re-merge re-preflights', async () => {
+  // core-anz4.6 regression: a writer slipping in between preflight and apply
+  // (stale $rev on the SECOND member) must deny the WHOLE batch — the old
+  // sequential apply left the first member live.
+  it('mid-batch OCC slip: nothing applied, branch intact, conflict surfaced', async () => {
     const { root, tree, branchPath, view } = await setup();
 
     await tree.set(makeNode(`${view}/company/doc`, 'branchtest.doc', { title: 'first', count: 1 }));
     await tree.set(makeNode(`${view}/company/other`, 'branchtest.doc', { title: 'second', count: 2 }));
 
-    // Sabotage: while the first target is being applied, an out-of-band writer
-    // bumps the second target — its OCC re-check must then fail.
+    // Sabotage: an out-of-band writer bumps the second target after preflight,
+    // right before the batch commits — OCC staging must deny the whole batch.
     const sabotaged: Tree = {
       ...tree,
-      async set(node, ctx) {
-        if (node.$path === '/company/doc') {
-          const other = await root.get('/company/other');
-          await root.set({ ...other!, title: 'raced' });
-        }
-        return tree.set(node, ctx);
+      async patchMany(ancestor, entries, ctx) {
+        const other = await root.get('/company/other');
+        await root.set({ ...other!, title: 'raced' });
+        return tree.patchMany!(ancestor, entries, ctx);
       },
     };
 
@@ -380,14 +398,47 @@ describe('branch mod: requestMerge + merge', () => {
       sabotaged, branchPath, undefined, undefined, 'merge', undefined, ACTOR,
     );
 
-    assert.equal(res.merged, 1);
-    assert.deepEqual(res.applied, ['/company/doc']);
-    assert.equal(res.conflicts.length, 1);
-    assert.equal(res.conflicts[0].path, '/company/other');
+    assert.equal(res.merged, 0);
+    assert.deepEqual(res.applied, []);
+    assert.deepEqual(res.conflicts, [{ path: '/company/other', expectedRev: 1, actualRev: 2 }]);
 
-    assert.equal((await root.get('/company/doc'))?.title, 'first');
+    assert.equal((await root.get('/company/doc'))?.title, 'live', 'first member NOT applied');
     assert.equal((await root.get('/company/other'))?.title, 'raced');
     assert.equal((await tree.get(branchPath))?.status, 'conflict');
+
+    // Delta untouched — the branch can be re-merged after the conflict clears.
+    assert.equal((await root.get(`${branchPath}/delta/company/doc`))?.$type, BRANCH_DELTA_TYPE);
+  });
+
+  // core-anz4.22: refs written through the view carry view coordinates —
+  // merge must relocate them to the base namespace or they dangle after the
+  // branch mount is gone. Refs pointing outside the view stay untouched.
+  it('merged nodes carry refs rewritten to base namespace; outside refs untouched', async () => {
+    const { root, tree, branchPath, view } = await setup();
+
+    const linked = makeNode(`${view}/company/linked`, 'branchtest.doc', { title: 'linked', count: 0 });
+    linked.inside = { $type: 'ref', $ref: `${view}/company/doc`, $refId: 'id-doc' };
+    linked.outside = { $type: 'ref', $ref: '/company/other' };
+    linked.$refs = [{ t: `${view}/company/doc` }];
+    await tree.set(linked);
+
+    const { entries } = await executeAction<{ entries: DiffEntry[] }>(
+      tree, branchPath, undefined, undefined, 'diff', undefined, ACTOR,
+    );
+    assert.equal(entries.length, 1);
+    const diffed = entries[0].node;
+    assert.ok(diffed && isRef(diffed.inside) && isRef(diffed.outside));
+    assert.equal(diffed.inside.$ref, '/company/doc');
+    assert.equal(diffed.inside.$refId, 'id-doc', 'identity untouched by the path rewrite');
+    assert.equal(diffed.outside.$ref, '/company/other');
+    assert.equal(diffed.$refs?.[0]?.t, '/company/doc', 'standalone $refs entry rewritten');
+
+    await executeAction(tree, branchPath, undefined, undefined, 'merge', undefined, ACTOR);
+    const live = await root.get('/company/linked');
+    assert.ok(live && isRef(live.inside) && isRef(live.outside));
+    assert.equal(live.inside.$ref, '/company/doc');
+    assert.equal(live.inside.$refId, 'id-doc');
+    assert.equal(live.outside.$ref, '/company/other');
   });
 
   it('merge is refused on merged/abandoned branches', async () => {

@@ -6,11 +6,11 @@
 // Lifecycle: create → work under /branches/<id>/tree → diff →
 // requestMerge (human reviews) → merge | abandon.
 
-import { A, makeNode, type NodeData, R, S, W } from '@treenx/core';
+import { A, isRef, makeNode, type NodeData, R, S, W } from '@treenx/core';
 import { getCtx, registerType } from '@treenx/core/comp';
 import { OpError } from '@treenx/core/errors';
 import type { ActorContext } from '@treenx/core/server/actions';
-import type { Tree } from '@treenx/core/tree';
+import type { PatchManyEntry, Tree } from '@treenx/core/tree';
 import { isBranchDelta, isBranchWhiteout } from '@treenx/core/tree/branch';
 
 export type BranchStatus = 'open' | 'review' | 'merged' | 'conflict' | 'abandoned';
@@ -45,10 +45,57 @@ function actorCtxOf(ctx: { [k: string]: unknown }): { actor: ActorContext } | un
   return undefined;
 }
 
+// core-anz4.22: refs written through the view carry VIEW coordinates
+// (<branch>/tree/...) — merge relocates nodes to the base namespace, so refs
+// targeting INSIDE the view must move with them or they dangle once the
+// branch mount is gone. Refs deliberately pointing outside the view stay
+// untouched. $refId rides along unchanged — identity merges WITH the target
+// node, so id-first resolution keeps working. Standalone $refs entries (no
+// f:) are rewritten too: the policy passes them through as-is on merge, while
+// derived entries get recomputed from the rewritten fields. Clone first —
+// adapters may hand out shared references.
+function rewriteViewRefs(node: NodeData, viewRoot: string, base: string): NodeData {
+  const mapTarget = (p: string): string | undefined => {
+    if (p !== viewRoot && !p.startsWith(viewRoot + '/')) return undefined;
+    const rest = p.slice(viewRoot.length);
+    return base === '/' ? (rest || '/') : base + rest;
+  };
+
+  const clone = structuredClone(node);
+
+  // Same traversal shape as the policy's extractRefs: skip $-keys, walk
+  // component keys and plain data alike.
+  const walk = (obj: unknown): void => {
+    if (!obj || typeof obj !== 'object') return;
+    if (isRef(obj)) {
+      const mapped = mapTarget(obj.$ref);
+      if (mapped !== undefined) obj.$ref = mapped;
+      return;
+    }
+    if (Array.isArray(obj)) {
+      for (const item of obj) walk(item);
+      return;
+    }
+    for (const [key, value] of Object.entries(obj)) {
+      if (key.startsWith('$')) continue;
+      walk(value);
+    }
+  };
+  walk(clone);
+
+  for (const entry of clone.$refs ?? []) {
+    const mapped = mapTarget(entry.t);
+    if (mapped !== undefined) entry.t = mapped;
+  }
+
+  return clone;
+}
+
 // Shared by diff/merge — action methods run on an Immer draft of node DATA
 // (class methods are not callable via `this` there).
 async function collectDiff(tree: Tree, branchPath: string, base: string): Promise<DiffEntry[]> {
   const deltaRoot = `${branchPath}/delta`;
+  const viewRoot = `${branchPath}/tree`;
   if (!tree.scanChildren) {
     throw new OpError('BAD_REQUEST', 'branch.diff requires a tree with scanChildren');
   }
@@ -64,7 +111,7 @@ async function collectDiff(tree: Tree, branchPath: string, base: string): Promis
         path: livePath,
         op: w.baseRev === null ? 'create' : 'set',
         baseRev: w.baseRev,
-        node: { ...w.node, $path: livePath },
+        node: { ...rewriteViewRefs(w.node, viewRoot, base), $path: livePath },
       });
     } else {
       throw new OpError('CONFLICT', `branch: foreign node in delta subtree at ${w.$path} ($type=${w.$type})`);
@@ -147,66 +194,89 @@ export class Branch {
   /** @description Merge the branch into live. Run by an approver — agents hold
    *  no live W, so the human invoking this IS the gate. Preflight checks every
    *  entry against its captured baseRev; any mismatch reports conflicts and
-   *  applies NOTHING. */
+   *  applies NOTHING. Apply is ONE tree.patchMany batch (core-anz4.6): each
+   *  set-member carries $rev = baseRev, so a writer slipping in after
+   *  preflight fails adapter OCC during staging and the WHOLE batch is denied
+   *  — never a partial merge. Remove entries are refused before any write:
+   *  PatchManyEntry has no remove member, and applying removes outside the
+   *  batch would reopen the partial-merge hole (remove-merge parked). */
   async merge() {
     if (this.status !== 'open' && this.status !== 'review') {
       throw new OpError('CONFLICT', `cannot merge branch in status "${this.status}"`);
     }
     const ctx = getCtx();
-    const entries = await collectDiff(ctx.tree, realBranchPath(ctx.node.$path), this.base);
+    const tree = ctx.tree;
+    const entries = await collectDiff(tree, realBranchPath(ctx.node.$path), this.base);
 
-    const conflicts: ConflictEntry[] = [];
-    for (const e of entries) {
-      const live = await ctx.tree.get(e.path);
-      const actualRev = live?.$rev ?? null;
-      const ok = (e.op === 'create' || e.op === 'noop')
-        ? live === undefined
-        : actualRev === e.baseRev;
-      if (!ok) conflicts.push({ path: e.path, expectedRev: e.baseRev, actualRev });
+    // Loud refusals BEFORE any write and before any status change.
+    const removes = entries.filter(e => e.op === 'remove').map(e => e.path);
+    if (removes.length) {
+      throw new OpError('BAD_REQUEST',
+        `branch merge with remove entries is not supported yet (remove-merge parked): ${removes.join(', ')}`);
     }
+    if (!tree.patchMany) {
+      throw new OpError('BAD_REQUEST', 'branch merge requires a tree with patchMany (atomic batch)');
+    }
+
+    const findConflicts = async (): Promise<ConflictEntry[]> => {
+      const found: ConflictEntry[] = [];
+      for (const e of entries) {
+        const live = await tree.get(e.path);
+        const actualRev = live?.$rev ?? null;
+        const ok = (e.op === 'create' || e.op === 'noop')
+          ? live === undefined
+          : actualRev === e.baseRev;
+        if (!ok) found.push({ path: e.path, expectedRev: e.baseRev, actualRev });
+      }
+      return found;
+    };
+
+    const conflicts = await findConflicts();
     if (conflicts.length) {
       this.status = 'conflict';
       this.conflicts = conflicts;
       return { merged: 0, applied: [] as string[], conflicts };
     }
 
-    // Apply with $rev = baseRev so storage OCC re-checks each set. A writer can
-    // still slip between preflight and apply (single-process window, see
-    // branches-plan.md) — that surfaces as CONFLICT mid-apply below.
-    const applied: string[] = [];
-    let current: DiffEntry | undefined;
-    const writeCtx = actorCtxOf(ctx); // one requestId across the whole span
-    try {
-      for (const e of entries) {
-        if (e.op === 'noop') continue;
-        current = e;
-        if (e.op === 'remove') {
-          await ctx.tree.remove(e.path, writeCtx);
-        } else {
-          const future = e.node;
-          if (!future) throw new OpError('CONFLICT', `merge: entry ${e.path} is missing its node`);
-          const node: NodeData = { ...future, $path: e.path };
-          if (e.baseRev !== null) node.$rev = e.baseRev;
-          await ctx.tree.set(node, writeCtx);
+    // Compile the batch: set-members only. Creates (baseRev null) have no rev
+    // token to guard with — blind-upsert residual, narrowed by the preflight
+    // existence check above. Cross-mount members are refused by the mounts
+    // layer before anything commits; ancestor = base contains every live path
+    // by construction (livePath = base + rest).
+    const members: PatchManyEntry[] = [];
+    for (const e of entries) {
+      if (e.op === 'noop') continue;
+      const future = e.node;
+      if (!future) throw new OpError('CONFLICT', `merge: entry ${e.path} is missing its node`);
+      const node: NodeData = { ...future, $path: e.path };
+      if (e.baseRev !== null) node.$rev = e.baseRev;
+      members.push({ path: e.path, node });
+    }
+
+    if (members.length) {
+      try {
+        // actorCtxOf: one requestId across the whole span (withAudit).
+        await tree.patchMany!(this.base, members, actorCtxOf(ctx));
+      } catch (err) {
+        // OCC slip after preflight is the expected race — the batch was denied
+        // whole, so re-read live and report the drift. Anything else (layer
+        // without patchMany, cross-mount member, validation) rethrows loud.
+        if (err instanceof OpError && err.code === 'CONFLICT') {
+          const raced = await findConflicts();
+          if (raced.length) {
+            this.status = 'conflict';
+            this.conflicts = raced;
+            return { merged: 0, applied: [] as string[], conflicts: raced };
+          }
         }
-        applied.push(e.path);
+        throw err;
       }
-    } catch (err) {
-      // OCC slip is the expected race — report it; applied entries stay live
-      // and journaled, re-merge re-preflights the remainder. Anything else is
-      // a real failure and rethrows.
-      if (err instanceof OpError && err.code === 'CONFLICT' && current) {
-        const live = await ctx.tree.get(current.path);
-        this.status = 'conflict';
-        this.conflicts = [{ path: current.path, expectedRev: current.baseRev, actualRev: live?.$rev ?? null }];
-        return { merged: applied.length, applied, conflicts: this.conflicts };
-      }
-      throw err;
     }
 
     this.status = 'merged';
     this.mergedAt = Date.now();
     this.conflicts = [];
+    const applied = members.map(m => m.path);
     return { merged: applied.length, applied, conflicts: [] as ConflictEntry[] };
   }
 }

@@ -35,6 +35,14 @@ branch node as overlay DATA inside the view: nested tree addressing aliases
 delta paths, and control writes would sink into the branch's own delta.
 
 ### Load-bearing invariants
+- **Merge is ONE tree.patchMany batch** (core-anz4.6): set-members carry
+  $rev=baseRev, so a writer slipping in after preflight denies the WHOLE batch
+  (adapter OCC in staging) — never a partial merge. Remove entries are REFUSED
+  before any write (PatchManyEntry has no remove member; remove-merge parked).
+- **collectDiff rewrites view-coordinate refs** (core-anz4.22):
+  `<branch>/tree/...` targets (embedded $ref and standalone $refs entries)
+  translate to base coordinates; refs pointing outside the view and $refId
+  pass untouched.
 - **Owner-projected lower**: the view reads live as `withAcl(store, owner)` —
   mount adapters are caller-blind and outer ACL checks only view paths; without
   projection a branch reads live paths its owner cannot see.

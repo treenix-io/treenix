@@ -38,6 +38,7 @@ const PUBLIC_DOORS = [
   './tree/migrate-component-namespace',
   './tree/mimefs',
   './tree/patch',
+  './tree/trash-exempt',
   './uri',
   './util/debounced-write',
   './util/safe-timers',
