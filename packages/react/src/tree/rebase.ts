@@ -98,6 +98,59 @@ function settle(path: string, rs: RebaseState) {
   else replayAndPut(path, rs);
 }
 
+// ── Ack-via-response (core-anz4.13) ──
+// A caller with R+W but no S never receives the `by`-matched event, so its
+// overlay would hang forever. execute() confirms the op from its response via
+// an authoritative refetch (confirmFromResponse); the {path,opId} is recorded
+// here so the event — IF it arrives after all (S callers) — is not applied a
+// second time on top of the already-refetched state. Bounded FIFO: entries
+// whose event never comes (the no-S case) age out by capacity.
+const SUPPRESS_MAX = 1024;
+const suppressedAcks = new Set<string>();
+
+const ackKey = (path: string, opId: string) => `${path}\u0000${opId}`;
+
+function recordSuppressedAck(path: string, opId: string) {
+  if (suppressedAcks.size >= SUPPRESS_MAX) {
+    const oldest = suppressedAcks.values().next().value;
+    if (oldest !== undefined) suppressedAcks.delete(oldest);
+  }
+  suppressedAcks.add(ackKey(path, opId));
+}
+
+function consumeSuppressedAck(path: string, by: string): boolean {
+  return suppressedAcks.delete(ackKey(path, by));
+}
+
+/** Confirm a pending op from the execute response (core-anz4.13): the caller
+ *  refetched `path` after the action succeeded and hands us the authoritative
+ *  node. `node` undefined = refetch denied (no R on the result) or node gone —
+ *  the action still succeeded, but overlay and cache entry are lies now: drop
+ *  both. Idempotent vs the event lane: if the `by`-matched event already
+ *  consumed the op, this only heals confirmed onto the fresher refetch. */
+export function confirmFromResponse(path: string, opId: string, node: NodeData | undefined): void {
+  const rs = state.get(path);
+  if (!rs) return;
+
+  if (node === undefined) {
+    state.delete(path);
+    cache.remove(path);
+    return;
+  }
+
+  const idx = rs.pending.findIndex(op => op.opId === opId);
+  if (idx === -1) {
+    rs.confirmed = node;
+    settle(path, rs);
+    return;
+  }
+
+  rs.pending.splice(idx, 1);
+  rs.confirmed = node;
+  recordSuppressedAck(path, opId);
+  settle(path, rs);
+}
+
 /** Consume the pending op this server event acknowledges (core-gk8.1).
  *  `by` = the opId the client stamped on its mutation, echoed back on the
  *  resulting event. A write we did NOT originate (another user, a server job)
@@ -133,6 +186,10 @@ export function pushOptimistic<T extends object>(
 
 /** Apply server patch to confirmed state. Returns true if rebase handled it. */
 export function applyServerPatch(path: string, patches: PatchOp[], rev?: number, by?: string): boolean {
+  // Op already confirmed from the execute response — cache is authoritative;
+  // re-applying (e.g. an array append) would double-apply (core-anz4.13).
+  if (by !== undefined && consumeSuppressedAck(path, by)) return true;
+
   const rs = state.get(path);
   if (!rs) return false;
 
@@ -148,6 +205,10 @@ export function applyServerPatch(path: string, patches: PatchOp[], rev?: number,
 
 /** Apply server set (full node) to confirmed state. Returns true if rebase handled it. */
 export function applyServerSet(path: string, node: NodeData, by?: string): boolean {
+  // Response-confirmed op (core-anz4.13): the refetch is at least as fresh as
+  // this event's image — replay would regress the newer state.
+  if (by !== undefined && consumeSuppressedAck(path, by)) return true;
+
   const rs = state.get(path);
   if (!rs) return false;
 
@@ -171,12 +232,16 @@ export function rollback(path: string, opId: string): void {
   settle(path, rs);
 }
 
-/** Check if path has rebase state (for testing) */
-export function hasPending(path: string): boolean {
-  return state.has(path);
+/** Rebase state probe. With opId: is that exact op still unconfirmed — the
+ *  ack-via-response gate in execute() (core-anz4.13). Without: any overlay. */
+export function hasPending(path: string, opId?: string): boolean {
+  const rs = state.get(path);
+  if (!rs) return false;
+  return opId === undefined || rs.pending.some(op => op.opId === opId);
 }
 
 /** Drop every overlay — continuity lost (reconnect preserved:false, core-jvfv) or test teardown */
 export function clear(): void {
   state.clear();
+  suppressedAcks.clear();
 }

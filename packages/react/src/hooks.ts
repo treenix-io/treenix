@@ -9,7 +9,7 @@ import { compKey, getComponent, getComponentByName, getMeta, type NodeData, norm
 import { type Class, getDefaults, type TypeProxy } from '@treenx/core/comp';
 import { deriveURI, parseURI } from '@treenx/core/uri';
 import { mergeIntoNode, type OnChange } from '#tree/on-change';
-import { pushOptimistic, rollback } from '#tree/rebase';
+import { confirmFromResponse, hasPending, pushOptimistic, rollback } from '#tree/rebase';
 import {
   useCallback,
   useEffect,
@@ -336,11 +336,36 @@ export const execute = (
     }
   }
 
-  return trpc.execute.mutate({ path, type, key, action, data, opId }).catch(err => {
-    rollback(path, opId);
-    throw err;
-  });
+  return trpc.execute.mutate({ path, type, key, action, data, opId }).then(
+    async result => {
+      // Ack-via-response (core-anz4.13): a caller with R+W but no S never gets
+      // the `by`-matched event — the overlay would hang forever. The response
+      // proves commit; confirm against an authoritative refetch. S callers pass
+      // here too — rebase suppresses the later event so it isn't double-applied.
+      if (hasPending(path, opId)) await confirmPending(path, opId);
+      return result;
+    },
+    err => {
+      rollback(path, opId);
+      throw err;
+    },
+  );
 };
+
+async function confirmPending(path: string, opId: string): Promise<void> {
+  try {
+    const fresh = await trpc.get.query({ path });
+    confirmFromResponse(path, opId, fresh ?? undefined);
+  } catch (err) {
+    const code = (err as { data?: { code?: string }; code?: string }).data?.code
+      ?? (err as { code?: string }).code;
+    // No R on the result — the action still succeeded; overlay and cache entry
+    // are unverifiable now, drop both (confirmFromResponse undefined branch).
+    if (code === 'FORBIDDEN') { confirmFromResponse(path, opId, undefined); return; }
+    console.warn('[treenix] ack refetch failed — dropping optimistic op for', path, err);
+    rollback(path, opId);
+  }
+}
 
 // ── useCanWrite: ACL-based write permission check ──
 // Returns plain boolean — NOT wrapped in Query<T>. See plan §2.4:

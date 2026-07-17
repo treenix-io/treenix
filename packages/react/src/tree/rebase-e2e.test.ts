@@ -10,6 +10,7 @@ import {
   applyServerPatch,
   applyServerSet,
   clear,
+  confirmFromResponse,
   hasPending,
   pushOptimistic,
   rollback,
@@ -426,6 +427,107 @@ describe('rebase e2e — deferred server responses', () => {
     applyServerPatch('/todo', [['r', '#checklist.items.0.done', true ]], undefined, id3);
     assert.strictEqual(done(), true, 'after server #3');
     assert.strictEqual(hasPending('/todo'), false);
+  });
+
+  // ── Ack-via-response (core-anz4.13) — R+W-without-S callers get no event ──
+  // simulateExecute = the optimistic half of hooks.execute; confirmFromResponse
+  // = what execute() calls on success with the authoritative refetch.
+
+  it('no event delivery: response refetch confirms the op; the late by-event is suppressed, not double-applied', () => {
+    cache.put({
+      $path: '/todo', $type: 'dir',
+      '#checklist': { $type: 'test.e2e.checklist', items: [] },
+    } as any);
+    const items = () => (cache.get('/todo') as any)['#checklist'].items;
+
+    const id1 = simulateExecute('/todo', 'add', { text: 'A' }, 'checklist');
+    const id2 = simulateExecute('/todo', 'add', { text: 'B' }, 'checklist');
+    assert.strictEqual(items().length, 2, 'optimistic');
+    assert.strictEqual(hasPending('/todo', id1), true, 'per-op probe sees op1');
+
+    // execute #1 resolved; NO event arrives (no S). Refetch shows op1 committed.
+    confirmFromResponse('/todo', id1, {
+      $path: '/todo', $type: 'dir', $rev: 2,
+      '#checklist': { $type: 'test.e2e.checklist', items: [{ id: 1, text: 'A', done: false }] },
+    } as any);
+
+    assert.strictEqual(hasPending('/todo', id1), false, 'op1 confirmed from response');
+    assert.strictEqual(hasPending('/todo', id2), true, 'op2 still pending');
+    assert.strictEqual(items().length, 2, 'confirmed A + replayed B');
+    assert.strictEqual(items()[0].id, 1, 'authoritative server enrichment');
+
+    // The by-matched event arrives after all (S present / another consumer):
+    // must be handled WITHOUT re-applying — a second append would show 3 items.
+    const handled = applyServerPatch('/todo', [
+      ['a', '#checklist.items.0', { id: 1, text: 'A', done: false }],
+    ], 2, id1);
+    assert.strictEqual(handled, true, 'suppressed event counts as handled — no cache fallback');
+    assert.strictEqual(items().length, 2, 'not double-applied');
+
+    // op2 settles through the normal event lane — suppression is per-op.
+    applyServerPatch('/todo', [
+      ['a', '#checklist.items.1', { id: 2, text: 'B', done: false }],
+    ], 3, id2);
+    assert.strictEqual(items().length, 2);
+    assert.strictEqual(hasPending('/todo'), false, 'all confirmed');
+  });
+
+  it('suppression consumed once: a later foreign patch with no by applies normally', () => {
+    cache.put({ $path: '/c', $type: 'test.e2e.counter', count: 0 } as any);
+    const id = simulateExecute('/c', 'increment', undefined);
+    confirmFromResponse('/c', id, { $path: '/c', $type: 'test.e2e.counter', count: 1, $rev: 2 } as any);
+    assert.strictEqual(hasPending('/c'), false);
+    assert.strictEqual((cache.get('/c') as any).count, 1);
+
+    applyServerPatch('/c', [['r', 'count', 1]], 2, id); // late own event — suppressed
+    assert.strictEqual((cache.get('/c') as any).count, 1);
+
+    // No rebase state, suppression spent → foreign event falls through to the
+    // caller's cache path (events.ts fallback), exactly as before the fix.
+    const handled = applyServerPatch('/c', [['r', 'count', 5]], 3, 'someone-else');
+    assert.strictEqual(handled, false, 'foreign by is never suppressed');
+  });
+
+  it('event ack raced ahead of the response: confirm heals confirmed onto the fresher refetch', () => {
+    cache.put({ $path: '/c', $type: 'test.e2e.counter', count: 0 } as any);
+    const id1 = simulateExecute('/c', 'increment', undefined);
+    const id2 = simulateExecute('/c', 'increment', undefined);
+
+    // Event for op1 lands BEFORE the response refetch completes.
+    applyServerPatch('/c', [['r', 'count', 1]], 2, id1);
+    assert.strictEqual(hasPending('/c', id1), false);
+
+    // Refetch (started after commit of op1) resolves now — op1 gone from
+    // pending; the refetched node still replaces confirmed, op2 replays on top.
+    confirmFromResponse('/c', id1, { $path: '/c', $type: 'test.e2e.counter', count: 1, $rev: 2 } as any);
+    assert.strictEqual((cache.get('/c') as any).count, 2, 'confirmed 1 + replay op2');
+    assert.strictEqual(hasPending('/c', id2), true);
+
+    applyServerPatch('/c', [['r', 'count', 2]], 3, id2);
+    assert.strictEqual((cache.get('/c') as any).count, 2);
+    assert.strictEqual(hasPending('/c'), false);
+  });
+
+  it('refetch denied (FORBIDDEN/gone): success stands, pending + cache entry cleared', () => {
+    cache.put({ $path: '/c', $type: 'test.e2e.counter', count: 0 } as any);
+    const id = simulateExecute('/c', 'increment', undefined);
+    assert.strictEqual(hasPending('/c', id), true);
+
+    // hooks.confirmPending maps a FORBIDDEN refetch (or null node) to undefined.
+    confirmFromResponse('/c', id, undefined);
+
+    assert.strictEqual(hasPending('/c'), false, 'overlay dropped');
+    assert.strictEqual(cache.get('/c'), undefined, 'unreadable node evicted from cache');
+  });
+
+  it('suppressed set event: refetched state wins over the older event image', () => {
+    cache.put({ $path: '/c', $type: 'test.e2e.counter', count: 0 } as any);
+    const id = simulateExecute('/c', 'increment', undefined);
+    confirmFromResponse('/c', id, { $path: '/c', $type: 'test.e2e.counter', count: 1, $rev: 5 } as any);
+
+    const handled = applyServerSet('/c', { $path: '/c', $type: 'test.e2e.counter', count: 1, $rev: 4 } as any, id);
+    assert.strictEqual(handled, true, 'set event suppressed');
+    assert.strictEqual((cache.get('/c') as any).$rev, 5, 'refetched rev kept');
   });
 
   it('frozen cache objects dont break rebase', () => {
