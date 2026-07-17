@@ -506,7 +506,7 @@ export async function buildMcpServer(store: Tree, session: Session, claims?: str
               userId: session.userId, claims,
               // buildActor, not an inline literal — workload sessions carry
               // onBehalfOf/taskPath/runPath that an {id-only} actor would drop.
-              actor: buildActor(session, delegated.action),
+              actor: buildActor(session, delegated.action, delegated.opId),
               opId: delegated.opId,
             },
           );

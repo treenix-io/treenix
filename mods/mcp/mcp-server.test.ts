@@ -311,6 +311,39 @@ describe('mcp guardian kind classification (core-anz4.1)', () => {
     assert.ok(!textContent(result).includes('mutated'), 'blocked call must not return the handler result');
   });
 
+  it('guards a DIRECT typed tool whose own method declares no kind (fail-closed)', async () => {
+    const store = createMemoryTree();
+    await store.set({ ...createNode('/', 'root'), $acl: [{ g: 'public', p: R | W | S }] });
+    // Deny the tool so a consulted guardian visibly blocks the call.
+    await store.set(createNode('/guardian', 'ai.policy', {
+      allow: [], deny: ['mcp__treenix__poke'], escalate: [],
+    }));
+    await store.set(createNode('/direct-kindless', 'mcptest.directkindless'));
+
+    let ran = false;
+    register('mcptest.directkindless', 'action:poke', () => { ran = true; return 'poked'; });
+    register('mcptest.directkindless', 'schema', () => ({
+      $id: 'mcptest.directkindless',
+      type: 'object',
+      properties: {},
+      methods: { poke: { arguments: [] } },   // NO kind → must be guarded
+    }));
+
+    // Custom target: each schema method becomes a direct MCP tool (no delegation),
+    // so callIsGuarded classifies by the tool method itself — the other half of anz4.1.
+    const session: Session = { userId: 'anon' };
+    const mcp = await buildMcpServer(store, session, ['u:anon', 'public'], { target: '/direct-kindless' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await mcp.connect(serverTransport);
+    const client = new Client({ name: 'test', version: '1.0.0' });
+    await client.connect(clientTransport);
+
+    const result = await client.callTool({ name: 'poke', arguments: {} });
+
+    assert.equal(ran, false, 'kind-absent direct tool must be guarded, not silently executed');
+    assert.ok(!textContent(result).includes('poked'), 'blocked call must not return the handler result');
+  });
+
   it('threads opId through delegated execute into the idempotency layer (same opId → single execution)', async () => {
     const store = createMemoryTree();
     await store.set({ ...createNode('/', 'root'), $acl: [{ g: 'public', p: R | W | S }] });
@@ -321,7 +354,12 @@ describe('mcp guardian kind classification (core-anz4.1)', () => {
     await store.set(createNode('/counter', 'mcptest.counter'));
 
     let runs = 0;
-    register('mcptest.counter', 'action:tick', () => { runs += 1; return runs; });
+    let seenRequestId: string | undefined;
+    register('mcptest.counter', 'action:tick', (ctx: ActionCtx) => {
+      runs += 1;
+      seenRequestId = ctx.actor?.requestId;
+      return runs;
+    });
     register('mcptest.counter', 'schema', () => ({
       $id: 'mcptest.counter',
       type: 'object',
@@ -336,6 +374,9 @@ describe('mcp guardian kind classification (core-anz4.1)', () => {
     await client.callTool({ name: 'execute', arguments: { path: '/counter', action: 'tick', opId } });
 
     assert.equal(runs, 1, 'replayed opId must return the cached result without re-running the action');
+    // Audit rows take requestId from ctx.actor — a random UUID here would sever
+    // the wire-op ↔ journal link even though dedupe works.
+    assert.equal(seenRequestId, opId, 'wire opId must reach actor.requestId, not a generated one');
   });
 });
 
