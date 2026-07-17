@@ -177,9 +177,9 @@ export function withAudit(tree: Tree): Tree {
         event = buildEvent({ op: 'set', path: node.$path, before: null, after: null, actor: getActor(ctx), opaque: true });
       } else {
         const c = receipt.changes[0];
-        // A local set commits exactly one member — absence is a receipt bug,
-        // and journaling it as opaque would mask it.
-        if (!c) throw new Error(`withAudit: set receipt for ${node.$path} has no member`);
+        // A local set commits EXACTLY one member at the verb's path — anything
+        // else is a receipt bug; journaling it as opaque would mask it.
+        if (receipt.changes.length !== 1 || !c || c.path !== node.$path) throw new Error(`withAudit: set receipt for ${node.$path} malformed`);
         event = buildEvent({ op: 'set', path: node.$path, before: c.before, after: c.after, actor: getActor(ctx) });
       }
       await appendOrFailLoud(tree, event);
@@ -192,7 +192,9 @@ export function withAudit(tree: Tree): Tree {
       if (receipt.changes === null) {
         await appendOrFailLoud(tree, buildEvent({ op: 'remove', path, before: null, after: null, actor: getActor(ctx), opaque: true }));
       } else if (receipt.changes.length) {
-        const event = buildEvent({ op: 'remove', path, before: receipt.changes[0].before, after: null, actor: getActor(ctx) });
+        const c = receipt.changes[0];
+        if (receipt.changes.length !== 1 || c.path !== path) throw new Error(`withAudit: remove receipt for ${path} malformed`);
+        const event = buildEvent({ op: 'remove', path, before: c.before, after: null, actor: getActor(ctx) });
         await appendOrFailLoud(tree, event);
       }
       return receipt;
@@ -206,7 +208,7 @@ export function withAudit(tree: Tree): Tree {
         event = buildEvent({ op: 'patch', path, before: null, after: null, ops, actor: getActor(ctx), opaque: true });
       } else {
         const c = receipt.changes[0];
-        if (!c) throw new Error(`withAudit: patch receipt for ${path} has no member`);
+        if (receipt.changes.length !== 1 || !c || c.path !== path) throw new Error(`withAudit: patch receipt for ${path} malformed`);
         event = buildEvent({ op: 'patch', path, before: c.before, after: c.after, ops, actor: getActor(ctx) });
       }
       await appendOrFailLoud(tree, event);
@@ -225,6 +227,11 @@ export function withAudit(tree: Tree): Tree {
         const receipt = await tree.patchMany!(ancestor, entries, ctx);
 
         const byPath = new Map((receipt.changes ?? []).map(c => [c.path, c]));
+        // Exact coverage: every entry present (checked below) and no extras —
+        // a surplus change would be a committed write this journal never saw.
+        if (receipt.changes !== null && receipt.changes.length !== entries.length) {
+          throw new Error(`withAudit: patchMany receipt member count ${receipt.changes.length} != entries ${entries.length}`);
+        }
         const rows: AuditBatchEntry[] = [];
         for (const entry of entries) {
           const c = byPath.get(entry.path);
