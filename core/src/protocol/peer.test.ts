@@ -169,6 +169,27 @@ describe('TWP peer over loopback', () => {
     await assert.rejects(client.req.ls('/', { query: { title: 'A' }, watch: true, depth: -1 }), isCode('BAD_REQUEST'));
   });
 
+  it('deep ls+watchList WITHOUT query is rejected — list-watch notify is direct-parent-only (core-karx)', async () => {
+    const tree = await seededTree();
+    const pages: string[] = [];
+    const serve: PeerServe = {
+      tree,
+      hooks: {
+        watch: () => {},
+        unwatch: () => {},
+        watchList: (path) => pages.push(path),
+      },
+    };
+    const { client } = pair(() => serve);
+
+    await assert.rejects(client.req.ls('/', { watchList: true, depth: 2 }), isCode('BAD_REQUEST'));
+    await assert.rejects(client.req.ls('/', { watchList: true, depth: -1 }), isCode('BAD_REQUEST'));
+    assert.deepEqual(pages, [], 'rejected registration must not reach the watchList hook');
+
+    await client.req.ls('/', { watchList: true });
+    assert.deepEqual(pages, ['/'], 'depth-1 (default) list watch stays allowed');
+  });
+
   it('act dispatches structured fields; act without execute → BAD_REQUEST', async () => {
     const tree = await seededTree();
     const seen: unknown[] = [];

@@ -195,9 +195,16 @@ export function createPeer(serve?: ServeFactory) {
             // Query-watch membership eval fires for DIRECT children of the
             // source only — a deep query watch would silently miss deeper
             // flips. Reject rather than half-work (watch stays depth-1, MVP).
-            if ((frame.watch || frame.watchList) && frame.depth !== undefined && frame.depth !== 1) {
+            if (frame.watch && frame.depth !== undefined && frame.depth !== 1) {
               throw new OpError('BAD_REQUEST', 'query watch is depth-1 only');
             }
+          }
+          // List-watch notify is direct-parent-only (sub/watch.ts) regardless of
+          // query: a deep ls+watchList would read grandchildren then silently
+          // miss their changes (core-karx). Exact-path item watches (frame.watch
+          // without query) work at any depth and stay allowed.
+          if (frame.watchList && frame.depth !== undefined && frame.depth !== 1) {
+            throw new OpError('BAD_REQUEST', 'watchList is depth-1 only');
           }
           if (frame.cursor !== undefined && typeof frame.cursor !== 'string') {
             throw new OpError('BAD_REQUEST', 'ls.cursor must be a string');
