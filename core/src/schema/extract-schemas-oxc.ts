@@ -1050,6 +1050,9 @@ export async function generateSchemas(dirs: string[]): Promise<void> {
 
   // Orphan external actions
   for (const [typeName, actions] of allExternalActions) {
+    // 'default' schema is code-registered (server/actions.ts DEFAULT_SCHEMA, core-anz4.23);
+    // emitting default.json here would re-register it via loadSchemasFromDir.
+    if (typeName === 'default') continue;
     actions.sort((a, b) => a.fileName.localeCompare(b.fileName));
     const methods: Record<string, MethodSchema> = {};
     for (const act of actions) {
