@@ -172,10 +172,16 @@ export function withAudit(tree: Tree): Tree {
     async set(node, ctx) {
       if (isAuditWrite(node.$path)) return tree.set(node, ctx);
       const receipt = await tree.set(node, ctx);
-      const c = receipt.changes?.[0];
-      const event = c
-        ? buildEvent({ op: 'set', path: node.$path, before: c.before, after: c.after, actor: getActor(ctx) })
-        : buildEvent({ op: 'set', path: node.$path, before: null, after: null, actor: getActor(ctx), opaque: true });
+      let event: NodeData;
+      if (receipt.changes === null) {
+        event = buildEvent({ op: 'set', path: node.$path, before: null, after: null, actor: getActor(ctx), opaque: true });
+      } else {
+        const c = receipt.changes[0];
+        // A local set commits exactly one member — absence is a receipt bug,
+        // and journaling it as opaque would mask it.
+        if (!c) throw new Error(`withAudit: set receipt for ${node.$path} has no member`);
+        event = buildEvent({ op: 'set', path: node.$path, before: c.before, after: c.after, actor: getActor(ctx) });
+      }
       await appendOrFailLoud(tree, event);
       return receipt;
     },
@@ -195,10 +201,14 @@ export function withAudit(tree: Tree): Tree {
     async patch(path, ops: PatchOp[], ctx) {
       if (isAuditWrite(path)) return tree.patch(path, ops, ctx);
       const receipt = await tree.patch(path, ops, ctx);
-      const c = receipt.changes?.[0];
-      const event = c
-        ? buildEvent({ op: 'patch', path, before: c.before, after: c.after, ops, actor: getActor(ctx) })
-        : buildEvent({ op: 'patch', path, before: null, after: null, ops, actor: getActor(ctx), opaque: true });
+      let event: NodeData;
+      if (receipt.changes === null) {
+        event = buildEvent({ op: 'patch', path, before: null, after: null, ops, actor: getActor(ctx), opaque: true });
+      } else {
+        const c = receipt.changes[0];
+        if (!c) throw new Error(`withAudit: patch receipt for ${path} has no member`);
+        event = buildEvent({ op: 'patch', path, before: c.before, after: c.after, ops, actor: getActor(ctx) });
+      }
       await appendOrFailLoud(tree, event);
       return receipt;
     },
@@ -218,6 +228,12 @@ export function withAudit(tree: Tree): Tree {
         const rows: AuditBatchEntry[] = [];
         for (const entry of entries) {
           const c = byPath.get(entry.path);
+          // Non-opaque receipts report every member (policy augmentation
+          // preserves paths) — silence here would journal null images for a
+          // committed change.
+          if (!c && receipt.changes !== null) {
+            throw new Error(`withAudit: patchMany receipt missing member ${entry.path}`);
+          }
           const before = c?.before ?? null;
           const after = c?.after ?? null;
           rows.push(isSetEntry(entry)

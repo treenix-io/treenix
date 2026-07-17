@@ -53,12 +53,13 @@ export function createRepathTree(inner: Tree, localBase: string, remoteBase: str
     return !!v && typeof v === 'object' && typeof (v as { $path?: unknown }).$path === 'string';
   }
 
-  // Execute results come from a remote action — unlike get/getChildren, the
-  // returned $path is NOT guaranteed to sit under remoteBase. A naive toLocal
-  // on an out-of-base path would corrupt it; fail loudly instead.
+  // Execute results and commit receipts come back from the inner side —
+  // unlike get/getChildren, their paths are NOT guaranteed to sit under
+  // remoteBase (handler-controlled results; composite receipts). A naive
+  // toLocal on an out-of-base path would corrupt it (often to '/'); fail loud.
   function toLocalStrict(remotePath: string): string {
     if (rb && remotePath !== rb && !remotePath.startsWith(rb + '/'))
-      throw new Error(`repath: execute result $path ${remotePath} outside remoteBase ${rb || '/'}`);
+      throw new Error(`repath: inner $path ${remotePath} outside remoteBase ${rb || '/'}`);
     return toLocal(remotePath);
   }
 
@@ -135,14 +136,15 @@ export function createRepathTree(inner: Tree, localBase: string, remoteBase: str
   };
 
   // Receipts come back in the inner namespace — translate change paths and
-  // image $path back to local (mirror of remapNode on the read side).
+  // image $path back to local. STRICT: an out-of-base change (composite
+  // receipt reaching beyond this mount) must fail loud, not corrupt paths.
   function remapReceipt(receipt: CommitReceipt): CommitReceipt {
     if (receipt.changes === null) return receipt;
     return {
       changes: receipt.changes.map(c => ({
-        path: toLocal(c.path),
-        before: c.before ? remapNode(c.before) : null,
-        after: c.after ? remapNode(c.after) : null,
+        path: toLocalStrict(c.path),
+        before: c.before ? { ...c.before, $path: toLocalStrict(c.before.$path) } : null,
+        after: c.after ? { ...c.after, $path: toLocalStrict(c.after.$path) } : null,
       })),
     };
   }

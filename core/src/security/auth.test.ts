@@ -1039,6 +1039,45 @@ describe('withAcl denial — typed OpError', () => {
   });
 });
 
+// ── Commit receipts at the ACL boundary (core-ns6p.2) ──
+// Receipts are read-backs: images must obey the SAME projection as get() —
+// $acl/$owner gated on A, components stripped — and a caller who cannot READ
+// the path commits blind (opaque receipt), never sees before-images.
+
+describe('withAcl — receipt projection (core-ns6p.2)', () => {
+  it('R+W without A: receipt images carry data but never $acl/$owner', async () => {
+    await tree.set({
+      ...createNode('/rcpt/a', 'doc'),
+      $acl: [{ g: 'authenticated', p: R | W }],
+      title: 'v1',
+    });
+    const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);
+
+    const node = (await s.get('/rcpt/a'))!;
+    const receipt = await s.set({ ...node, title: 'v2' });
+
+    const c = receipt.changes?.[0];
+    assert.ok(c?.after, 'receipt present for a readable writer');
+    assert.equal(c.after.title, 'v2');
+    assert.equal(c.after.$acl, undefined, '$acl projected out without A');
+    assert.equal(c.before?.title, 'v1');
+    assert.equal(c.before?.$acl, undefined);
+  });
+
+  it('W-without-R: the write commits but the receipt is opaque — no images', async () => {
+    await tree.set({
+      ...createNode('/rcpt/blind', 'doc'),
+      $acl: [{ g: 'authenticated', p: W }],
+      secret: 'hidden-before',
+    });
+    const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);
+
+    const receipt = await s.set(createNode('/rcpt/blind', 'doc', { note: 'dropped off' }));
+    assert.equal(receipt.changes, null, 'no R — fail closed, images stay server-side');
+    assert.equal((await tree.get('/rcpt/blind'))?.note, 'dropped off', 'the write itself landed');
+  });
+});
+
 // Comprehensive C1 fix tests for withAcl.patch (per plan
 // /Users/kriz/.claude/plans/c1-acl-patch-bypass.md). TDD order:
 // - B* baseline: legitimate flows that must already pass and stay green

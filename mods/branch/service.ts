@@ -9,7 +9,7 @@ import type { MountCtx } from '@treenx/core/mount';
 import { buildClaims, withAcl } from '@treenx/core/security';
 import { createProjector } from '@treenx/core/security/projector';
 import { wrapReadOnlyTree } from '@treenx/core/server/readonly-tree';
-import type { Tree } from '@treenx/core/tree';
+import type { CommitReceipt, Tree } from '@treenx/core/tree';
 import { createBranchTree } from '@treenx/core/tree/branch';
 import { createRepathTree } from '@treenx/core/tree';
 import { addTrashExempt } from '@treenx/core/tree/trash-exempt';
@@ -83,6 +83,20 @@ function withControlWindow(view: Tree, store: Tree, branchPath: string, mountPat
     return real ? { ...real, $path: SELF } : undefined;
   }
 
+  // The window writes the REAL t.branch node — its receipt carries the real
+  // path/images. Callers live in VIEW coordinates: remap to SELF, or the
+  // receipt poisons receipt-fed caches with an out-of-view path (core-ns6p.2).
+  function toSelfReceipt(receipt: CommitReceipt): CommitReceipt {
+    if (receipt.changes === null) return receipt;
+    return {
+      changes: receipt.changes.map(ch => ({
+        path: SELF,
+        before: ch.before ? { ...ch.before, $path: SELF } : null,
+        after: ch.after ? { ...ch.after, $path: SELF } : null,
+      })),
+    };
+  }
+
   return {
     ...view,
     async get(path, c) {
@@ -111,11 +125,11 @@ function withControlWindow(view: Tree, store: Tree, branchPath: string, mountPat
       },
     } : {}),
     async set(node, c) {
-      if (node.$path === SELF) return store.set({ ...node, $path: branchPath }, c);
+      if (node.$path === SELF) return toSelfReceipt(await store.set({ ...node, $path: branchPath }, c));
       return view.set(node, c);
     },
     async patch(path, ops, c) {
-      if (path === SELF) return store.patch(branchPath, ops, c);
+      if (path === SELF) return toSelfReceipt(await store.patch(branchPath, ops, c));
       return view.patch(path, ops, c);
     },
     async remove(path, c) {

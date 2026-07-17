@@ -187,7 +187,10 @@ export function createBranchTree(upper: Tree, lower: Tree): Tree {
       const baseRev = existing ? existing.baseRev : (lowerNode?.$rev ?? null);
       const whiteout: BranchWhiteout = { $path: path, $type: BRANCH_WHITEOUT_TYPE, baseRev };
       if (existing?.$rev != null) whiteout.$rev = existing.$rev;
-      await upper.set(whiteout, ctx);
+      // Mirror of set(): an opaque delta store must not become a falsely
+      // authoritative view receipt.
+      const upperReceipt = await upper.set(whiteout, ctx);
+      if (upperReceipt.changes === null) return { changes: null };
       const before = existing ? unwrap(existing) : (lowerNode ?? null);
       return { changes: [{ path, before, after: null }] };
     },

@@ -4,7 +4,7 @@
 
 import { A, type ComponentData, isComponent, type NodeData, R, W } from '#core';
 import { OpError } from '#errors';
-import { asTreeSource, assertSafePatchPath, isSetEntry, type Page, type PatchManyEntry, type PatchOp, type Tree } from '#tree';
+import { asTreeSource, assertSafePatchPath, type CommitChange, type CommitReceipt, isSetEntry, type Page, type PatchManyEntry, type PatchOp, type Tree } from '#tree';
 import { executeList } from '#tree/read-runtime';
 import { resolveReadPlan } from '#mount/resolve-plan';
 import { type AclState, componentPerm, resolvePermission, stripComponents } from './acl';
@@ -196,6 +196,32 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
     return resolvePermission(rawStore, path, userId, claims, cache, undefined, stateCache);
   }
 
+  // Receipts cross this trust boundary too (core-ns6p.2): action handlers can
+  // return them, and results serialize to the wire. Images are projected with
+  // the SAME rules as get() — stripComponents + $acl/$owner gated on A. A
+  // member the caller cannot READ opaques the whole receipt (fail closed:
+  // W-without-R commits but sees no images — parity with reads throwing).
+  function projectImage(node: NodeData | null, perm: number): NodeData | null {
+    if (!node) return null;
+    const out = stripComponents(node, userId, claims);
+    if (!(perm & A)) {
+      delete out.$acl;
+      delete out.$owner;
+    }
+    return out;
+  }
+
+  async function projectReceipt(receipt: CommitReceipt): Promise<CommitReceipt> {
+    if (receipt.changes === null) return receipt;
+    const changes: CommitChange[] = [];
+    for (const c of receipt.changes) {
+      const perm = await getPerm(c.path);
+      if (!(perm & R)) return { changes: null };
+      changes.push({ path: c.path, before: projectImage(c.before, perm), after: projectImage(c.after, perm) });
+    }
+    return { changes };
+  }
+
   // INVARIANT (core-pxlu): hand-built literal, NO `...rawStore` spread — the
   // execute capability is intentionally stripped here; the wire session
   // re-wraps with withExecute binding the correct per-request identity.
@@ -261,14 +287,14 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
       const perm = await getPerm(node.$path);
       if (!(perm & W)) throw new OpError('FORBIDDEN', `Access denied: ${node.$path}`);
       const existing = await rawStore.get(node.$path, wctx);
-      return rawStore.set(rewriteFullNodeWrite(node, existing, perm, userId, claims), wctx);
+      return projectReceipt(await rawStore.set(rewriteFullNodeWrite(node, existing, perm, userId, claims), wctx));
     },
 
     async remove(path, ctx) {
       const wctx = stampActor(ctx);
       const perm = await getPerm(path);
       if (!(perm & W)) throw new OpError('FORBIDDEN', `Access denied: ${path}`);
-      return rawStore.remove(path, wctx);
+      return projectReceipt(await rawStore.remove(path, wctx));
     },
 
     async patch(path, ops, ctx) {
@@ -284,7 +310,7 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
       const existing = await rawStore.get(path, wctx);   // may be undefined
       assertPatchOps(ops, existing, !!(perm & A), userId, claims);
 
-      return rawStore.patch(path, ops, wctx);
+      return projectReceipt(await rawStore.patch(path, ops, wctx));
     },
 
     // patchMany: per member, the SAME R+W gate + per-op loop as patch.
@@ -315,7 +341,7 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
         }
       }
 
-      return rawStore.patchMany(ancestor, safeEntries, wctx);
+      return projectReceipt(await rawStore.patchMany(ancestor, safeEntries, wctx));
     },
   };
   return aclStore;
