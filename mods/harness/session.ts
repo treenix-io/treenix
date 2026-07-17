@@ -11,7 +11,7 @@ import { OpError } from '@treenx/core/errors';
 import type { Tree } from '@treenx/core/tree';
 import { type AgentScope, type Capability, executeWithCapability } from './capability';
 
-type ExecuteInput = { path: string; action: string; type?: string; key?: string; data?: unknown };
+type ExecuteInput = { path: string; action: string; type?: string; key?: string; data?: unknown; opId?: string };
 
 async function resolveScope(tree: Tree, session: Session): Promise<Capability | null> {
   const ref = session.scopeRef;
@@ -38,10 +38,14 @@ export async function executeForSession<T = unknown>(
   session: Session,
   input: ExecuteInput,
 ): Promise<T> {
-  const actor = buildActor(session, input.action);
+  // Wire opId threads through like on the tRPC lane (core-anz4.13): it becomes
+  // actor.requestId and keys the per-user idempotent-replay cache — without it
+  // a workload retry double-applies and audit events lack the request id.
+  const actor = buildActor(session, input.action, input.opId);
   const cap = await resolveScope(tree, session);
   if (!cap) {
-    return executeAction<T>(tree, input.path, input.type, input.key, input.action, input.data, { actor });
+    return executeAction<T>(tree, input.path, input.type, input.key, input.action, input.data,
+      { actor, userId: session.userId, opId: input.opId });
   }
   return executeWithCapability<T>(tree, cap, input, actor);
 }

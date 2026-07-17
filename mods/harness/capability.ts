@@ -97,7 +97,7 @@ export function withCapability(tree: Tree, cap: Capability): Tree {
 export async function executeWithCapability<T = unknown>(
   tree: Tree,
   cap: Capability,
-  input: { path: string; action: string; type?: string; key?: string; data?: unknown },
+  input: { path: string; action: string; type?: string; key?: string; data?: unknown; opId?: string },
   actor: ActorContext,
 ): Promise<T> {
   if (!matchesAny(cap.allowedExec, input.action)) {
@@ -113,5 +113,8 @@ export async function executeWithCapability<T = unknown>(
   // above ran against cap, and the hand-built capability tree carries no
   // execute — a workload can never delegate around its narrowing (fail closed).
   const wrapped = withCapability(tree, cap);
-  return executeAction<T>(wrapped, input.path, input.type, input.key, input.action, input.data, { actor });
+  // opId + userId: idempotent replay is keyed per principal (core-anz4.13) —
+  // same semantics as the tRPC lane, actor.id IS the session principal.
+  return executeAction<T>(wrapped, input.path, input.type, input.key, input.action, input.data,
+    { actor, userId: actor.id, opId: input.opId });
 }

@@ -50,6 +50,24 @@ describe('executeForSession — no scope', () => {
     assert.ok(actor.requestId, 'requestId auto-generated per call');
   });
 
+  it('wire opId becomes actor.requestId; retry with the same opId applies once (core-anz4.13)', async () => {
+    registerThing();
+    let runs = 0;
+    let captured: unknown = null;
+    register('thing', 'action:allowed', (ctx: ActionCtx) => { runs++; captured = ctx.actor; return runs; });
+
+    const tree = await makeTree();
+    const session: Session = { userId: 'agent:bot' };
+    const opId = 'op-anz413-plain';
+    const first = await executeForSession(aclWrap(tree), session, { path: '/work/n', action: 'allowed', opId });
+    const replay = await executeForSession(aclWrap(tree), session, { path: '/work/n', action: 'allowed', opId });
+
+    assert.equal((captured as { requestId?: string }).requestId, opId, 'audit actor carries the wire opId');
+    assert.equal(runs, 1, 'replay must not apply a second time');
+    assert.equal(first, 1);
+    assert.equal(replay, 1, 'replay returns the first result');
+  });
+
   it('stamps session.onBehalfOf onto actor; undefined when session lacks it', async () => {
     registerThing();
     let captured: unknown = null;
@@ -99,6 +117,27 @@ describe('executeForSession — scoped (workload)', () => {
     await executeForSession(aclWrap(tree), session,
       { path: '/work/n', action: 'allowed' });
     assert.ok(captured, 'handler ran');
+  });
+
+  it('workload lane threads opId: actor.requestId set, retry idempotent (core-anz4.13)', async () => {
+    registerThing();
+    let runs = 0;
+    let captured: unknown = null;
+    register('thing', 'action:allowed', (ctx: ActionCtx) => { runs++; captured = ctx.actor; return runs; });
+
+    const tree = await setupScoped(['allowed']);
+    const session: Session = {
+      userId: 'agent-workload:r-1',
+      scopeRef: '/agents/bot', scopeKey: 'scope', scopeMode: 'work',
+    };
+    const opId = 'op-anz413-scoped';
+    const first = await executeForSession(aclWrap(tree), session, { path: '/work/n', action: 'allowed', opId });
+    const replay = await executeForSession(aclWrap(tree), session, { path: '/work/n', action: 'allowed', opId });
+
+    assert.equal((captured as { requestId?: string }).requestId, opId);
+    assert.equal(runs, 1, 'capability lane must dedupe the retry too');
+    assert.equal(first, 1);
+    assert.equal(replay, 1);
   });
 
   it('scopeRef + mode=work: action NOT in allowedExec rejected', async () => {
