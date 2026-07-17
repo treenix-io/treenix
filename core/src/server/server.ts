@@ -12,6 +12,7 @@ import { createServer, type Server } from 'node:http';
 import { extname, join, resolve, sep } from 'node:path';
 import { withAcl } from '#security/acl-tree';
 import { userIdFromAuthPath } from '#security/claims';
+import { createMembershipProjector } from '#security/projector';
 import {
   ANON_COOKIE_MAX_AGE,
   buildClearSessionCookie,
@@ -106,6 +107,10 @@ export function createPipeline(bootstrap: Tree, opts?: TreeRouterOpts, wrapTree?
     claimsUserOf: userIdFromAuthPath,
     isConfigNode: (node) => !!node && getComponentByName(node, 'mount') !== undefined,
     componentHasAclRule: (type) => resolveHandler(type, 'acl') !== undefined,
+    // F4 (core-anz4.3): query-watch membership judges each subscriber on
+    // their OWN ACL projection — perms via the pre-ACL pipeline, claims via
+    // the system tree (same sources the read path uses).
+    projectMembership: createMembershipProjector(policy.tree, systemTree),
     // Listener fan-out must not inherit the commit envelope's lock ownership
     // (core-anz4.4) — a listener-spawned write queues like any writer.
     detachLocks: mutationLock.detach,

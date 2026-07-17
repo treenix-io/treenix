@@ -1,11 +1,14 @@
 import { A, createNode, getComponentByName, R, type NodeData } from '#core';
 import { OpError } from '#errors';
+import { withAcl } from '#security/acl-tree';
 import { userIdFromAuthPath } from '#security/claims';
-import { createMemoryTree } from '#tree';
+import { createProjector } from '#security/projector';
+import { getPageReadPlan } from '#security/read-page';
+import { createMemoryTree, type Tree } from '#tree';
 import { executeList, type Projector } from '#tree/read-runtime';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { type NodeEvent, type SubscriptionOpts, withSubscriptions } from './index';
+import { type MembershipProjector, type NodeEvent, type SubscriptionOpts, withSubscriptions } from './index';
 import { createWatchManager } from './watch';
 
 // Production detectors are layer-injected (gk8.12) — tests wire the real ones.
@@ -13,6 +16,13 @@ const detectors: SubscriptionOpts = {
   claimsUserOf: userIdFromAuthPath,
   isConfigNode: (node: NodeData | null | undefined) => !!node && getComponentByName(node, 'mount') !== undefined,
 };
+
+// F4 (core-anz4.3): query watches fail closed without a membership projector.
+// Suites here exercise CDC mechanics on trees without ACL data, where the raw
+// pair IS every actor's projection; real per-actor stripping is covered in the
+// 'actor-projected membership' describe below.
+const withSubs = (...[tree, onEvent, opts]: Parameters<typeof withSubscriptions>) =>
+  withSubscriptions(tree, onEvent, { projectMembership: async (_u, o, n) => [o, n], ...opts });
 
 describe('Subscriptions', () => {
   it('patch event carries the STORED post-bump $rev through node-copying layers (repath)', async () => {
@@ -22,7 +32,7 @@ describe('Subscriptions', () => {
     // and false-CONFLICTed on its next write (found via cnr.5 C2).
     const { createRepathTree } = await import('#tree/repath');
     const events: NodeEvent[] = [];
-    const { tree } = withSubscriptions(createRepathTree(createMemoryTree(), '/', '/'), e => events.push(e));
+    const { tree } = withSubs(createRepathTree(createMemoryTree(), '/', '/'), e => events.push(e));
 
     await tree.set(createNode('/x', 'doc', { title: 'v1' }));
     const stored = await tree.get('/x');
@@ -35,7 +45,7 @@ describe('Subscriptions', () => {
   });
 
   it('emits on set (children)', async () => {
-    const { tree, cdc } = withSubscriptions(createMemoryTree());
+    const { tree, cdc } = withSubs(createMemoryTree());
     const events: NodeEvent[] = [];
     cdc.subscribe('/bot', (e) => events.push(e), { children: true });
 
@@ -46,7 +56,7 @@ describe('Subscriptions', () => {
   });
 
   it('emits on remove (children)', async () => {
-    const { tree, cdc } = withSubscriptions(createMemoryTree());
+    const { tree, cdc } = withSubs(createMemoryTree());
     const events: NodeEvent[] = [];
     await tree.set(createNode('/bot/x', 'page'));
     cdc.subscribe('/bot', (e) => events.push(e), { children: true });
@@ -56,7 +66,7 @@ describe('Subscriptions', () => {
   });
 
   it('does not emit for unrelated paths', async () => {
-    const { tree, cdc } = withSubscriptions(createMemoryTree());
+    const { tree, cdc } = withSubs(createMemoryTree());
     const events: NodeEvent[] = [];
     cdc.subscribe('/bot', (e) => events.push(e), { children: true });
     await tree.set(createNode('/users/1', 'user'));
@@ -64,7 +74,7 @@ describe('Subscriptions', () => {
   });
 
   it('emits for exact path match', async () => {
-    const { tree, cdc } = withSubscriptions(createMemoryTree());
+    const { tree, cdc } = withSubs(createMemoryTree());
     const events: NodeEvent[] = [];
     cdc.subscribe('/bot', (e) => events.push(e));
     await tree.set(createNode('/bot', 'bot'));
@@ -72,7 +82,7 @@ describe('Subscriptions', () => {
   });
 
   it('unsubscribe stops events (children)', async () => {
-    const { tree, cdc } = withSubscriptions(createMemoryTree());
+    const { tree, cdc } = withSubs(createMemoryTree());
     const events: NodeEvent[] = [];
     const unsub = cdc.subscribe('/bot', (e) => events.push(e), { children: true });
     await tree.set(createNode('/bot/x', 'page'));
@@ -83,7 +93,7 @@ describe('Subscriptions', () => {
   });
 
   it('set with changed field emits computed patch', async () => {
-    const { tree, cdc } = withSubscriptions(createMemoryTree());
+    const { tree, cdc } = withSubs(createMemoryTree());
     const events: NodeEvent[] = [];
     await tree.set({ ...createNode('/x', 'test'), foo: 'old' });
     cdc.subscribe('/x', (e) => events.push(e));
@@ -102,7 +112,7 @@ describe('Subscriptions', () => {
   });
 
   it('string $patches are stripped and ignored — injection blocked', async () => {
-    const { tree, cdc } = withSubscriptions(createMemoryTree());
+    const { tree, cdc } = withSubs(createMemoryTree());
     const events: NodeEvent[] = [];
     await tree.set({ ...createNode('/x', 'test'), amount: 100 });
     cdc.subscribe('/x', (e) => events.push(e));
@@ -124,7 +134,7 @@ describe('Subscriptions', () => {
 
   it('string $patches are not persisted to storage', async () => {
     const mem = createMemoryTree();
-    const { tree } = withSubscriptions(mem);
+    const { tree } = withSubs(mem);
 
     const node: any = { ...createNode('/x', 'test'), foo: 'bar' };
     node.$patches = [{ op: 'replace', path: ['foo'], value: 'FAKE' }];
@@ -137,7 +147,7 @@ describe('Subscriptions', () => {
 
   it('updates query watch match when vp and source stay the same', async () => {
     const events: NodeEvent[] = [];
-    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => events.push(e));
+    const { tree, cdc } = withSubs(createMemoryTree(), e => events.push(e));
 
     cdc.watchQuery({ vp: '/views/status', userId: 'u1', plan: { source: '/items', viewWhere: { status: 'open' } }, mountDeps: new Set(['/views/status']) });
     cdc.watchQuery({ vp: '/views/status', userId: 'u1', plan: { source: '/items', viewWhere: { status: 'closed' } }, mountDeps: new Set(['/views/status']) });
@@ -153,7 +163,7 @@ describe('Subscriptions', () => {
 
   it('two watchers on the same source with different match coexist — no cross-talk (core-wf1)', async () => {
     const events: NodeEvent[] = [];
-    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => events.push(e));
+    const { tree, cdc } = withSubs(createMemoryTree(), e => events.push(e));
 
     await tree.set(createNode('/items', 'dir'));
     // Same source, DIFFERENT vp + match — distinct plans key distinct groups,
@@ -172,7 +182,7 @@ describe('Subscriptions', () => {
 
   it('coarse dirty reaches every vp watcher — visibility resolves on the read path (gk8.12)', async () => {
     const watcher = createWatchManager();
-    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => watcher.notify(e));
+    const { tree, cdc } = withSubs(createMemoryTree(), e => watcher.notify(e));
     const legacyEvents: NodeEvent[] = [];
     const memberEvents: NodeEvent[] = [];
     const anonEvents: NodeEvent[] = [];
@@ -213,7 +223,7 @@ describe('Subscriptions', () => {
 describe('ACL change invalidation (Stage 6)', () => {
   it('$acl change on the query source path → invalidateVps', async () => {
     const events: NodeEvent[] = [];
-    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => events.push(e));
+    const { tree, cdc } = withSubs(createMemoryTree(), e => events.push(e));
 
     await tree.set(createNode('/items', 'dir'));
     cdc.watchQuery({ vp: '/views/open', userId: 'u1', plan: { source: '/items', viewWhere: { status: 'open' } }, mountDeps: new Set(['/views/open']) });
@@ -235,7 +245,7 @@ describe('ACL change invalidation (Stage 6)', () => {
 
   it('$acl change on a direct child of the query source → invalidateVps', async () => {
     const events: NodeEvent[] = [];
-    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => events.push(e));
+    const { tree, cdc } = withSubs(createMemoryTree(), e => events.push(e));
 
     await tree.set(createNode('/items', 'dir'));
     cdc.watchQuery({ vp: '/views/open', userId: 'u1', plan: { source: '/items', viewWhere: { status: 'open' } }, mountDeps: new Set(['/views/open']) });
@@ -252,7 +262,7 @@ describe('ACL change invalidation (Stage 6)', () => {
 
   it('$acl change on an ancestor of the query source → invalidateVps', async () => {
     const events: NodeEvent[] = [];
-    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => events.push(e));
+    const { tree, cdc } = withSubs(createMemoryTree(), e => events.push(e));
 
     await tree.set(createNode('/a', 'dir'));
     await tree.set(createNode('/a/items', 'dir'));
@@ -270,7 +280,7 @@ describe('ACL change invalidation (Stage 6)', () => {
 
   it('stay-in mutation does NOT dirty the folder (gk8.12)', async () => {
     const events: NodeEvent[] = [];
-    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => events.push(e));
+    const { tree, cdc } = withSubs(createMemoryTree(), e => events.push(e));
 
     await tree.set(createNode('/items', 'dir'));
     cdc.watchQuery({ vp: '/views/open', userId: 'u1', plan: { source: '/items', viewWhere: { status: 'open' } }, mountDeps: new Set(['/views/open']) });
@@ -291,7 +301,7 @@ describe('ACL change invalidation (Stage 6)', () => {
 
   it('$owner change emits invalidateVps just like $acl change', async () => {
     const events: NodeEvent[] = [];
-    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => events.push(e));
+    const { tree, cdc } = withSubs(createMemoryTree(), e => events.push(e));
 
     await tree.set(createNode('/items', 'dir'));
     cdc.watchQuery({ vp: '/views/open', userId: 'u1', plan: { source: '/items', viewWhere: {} }, mountDeps: new Set(['/views/open']) });
@@ -308,7 +318,7 @@ describe('ACL change invalidation (Stage 6)', () => {
 
   it('patch op touching $acl emits invalidateVps', async () => {
     const events: NodeEvent[] = [];
-    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => events.push(e));
+    const { tree, cdc } = withSubs(createMemoryTree(), e => events.push(e));
 
     await tree.set(createNode('/items', 'dir'));
     cdc.watchQuery({ vp: '/views/open', userId: 'u1', plan: { source: '/items', viewWhere: {} }, mountDeps: new Set(['/views/open']) });
@@ -325,7 +335,7 @@ describe('ACL change invalidation (Stage 6)', () => {
 
   it('component with a type-level acl rule changing → invalidateVps (MVP-spec parity)', async () => {
     const events: NodeEvent[] = [];
-    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => events.push(e), {
+    const { tree, cdc } = withSubs(createMemoryTree(), e => events.push(e), {
       componentHasAclRule: (type) => type === 'sec.typed',
     });
 
@@ -345,7 +355,7 @@ describe('ACL change invalidation (Stage 6)', () => {
 
   it('inline component $acl change → invalidateVps without a type handler', async () => {
     const events: NodeEvent[] = [];
-    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => events.push(e));
+    const { tree, cdc } = withSubs(createMemoryTree(), e => events.push(e));
 
     await tree.set(createNode('/items', 'dir'));
     cdc.watchQuery({ vp: '/views/open', userId: 'u1', plan: { source: '/items', viewWhere: {} }, mountDeps: new Set(['/views/open']) });
@@ -362,7 +372,7 @@ describe('ACL change invalidation (Stage 6)', () => {
 
   it('non-permission-bearing component change does NOT trigger acl-invalidate', async () => {
     const events: NodeEvent[] = [];
-    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => events.push(e));
+    const { tree, cdc } = withSubs(createMemoryTree(), e => events.push(e));
 
     await tree.set(createNode('/items', 'dir'));
     cdc.watchQuery({ vp: '/views/open', userId: 'u1', plan: { source: '/items', viewWhere: {} }, mountDeps: new Set(['/views/open']) });
@@ -379,7 +389,7 @@ describe('ACL change invalidation (Stage 6)', () => {
 
   it('mount config write at vp path → invalidate that vp', async () => {
     const events: NodeEvent[] = [];
-    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => events.push(e), detectors);
+    const { tree, cdc } = withSubs(createMemoryTree(), e => events.push(e), detectors);
 
     await tree.set({
       $path: '/views/orders',
@@ -405,7 +415,7 @@ describe('ACL change invalidation (Stage 6)', () => {
 
   it('patch op touching mount field emits invalidateVps for that vp', async () => {
     const events: NodeEvent[] = [];
-    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => events.push(e));
+    const { tree, cdc } = withSubs(createMemoryTree(), e => events.push(e));
 
     await tree.set({
       $path: '/views/orders',
@@ -425,7 +435,7 @@ describe('ACL change invalidation (Stage 6)', () => {
 
   it('removing a mount node emits invalidateVps for that vp', async () => {
     const events: NodeEvent[] = [];
-    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => events.push(e), detectors);
+    const { tree, cdc } = withSubs(createMemoryTree(), e => events.push(e), detectors);
 
     await tree.set({
       $path: '/views/orders',
@@ -445,7 +455,7 @@ describe('ACL change invalidation (Stage 6)', () => {
 
   it('write to /auth/users/{uid} invalidates all queries for that user', async () => {
     const events: NodeEvent[] = [];
-    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => events.push(e), detectors);
+    const { tree, cdc } = withSubs(createMemoryTree(), e => events.push(e), detectors);
 
     await tree.set(createNode('/items', 'dir'));
     await tree.set(createNode('/orders', 'dir'));
@@ -472,7 +482,7 @@ describe('ACL change invalidation (Stage 6)', () => {
 
   it('write to /auth/users/{uid}/sub-path does NOT invalidate (different node)', async () => {
     const events: NodeEvent[] = [];
-    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => events.push(e), detectors);
+    const { tree, cdc } = withSubs(createMemoryTree(), e => events.push(e), detectors);
 
     await tree.set(createNode('/items', 'dir'));
     cdc.watchQuery({ vp: '/views/open', userId: 'alice', plan: { source: '/items', viewWhere: {} }, mountDeps: new Set(['/views/open']) });
@@ -489,7 +499,7 @@ describe('ACL change invalidation (Stage 6)', () => {
 
   it('routes invalidateVps to per-user CDC routes', async () => {
     const watcher = createWatchManager();
-    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => watcher.notify(e));
+    const { tree, cdc } = withSubs(createMemoryTree(), e => watcher.notify(e));
     const aliceEvents: NodeEvent[] = [];
     const bobEvents: NodeEvent[] = [];
 
@@ -525,7 +535,7 @@ describe('ACL change invalidation (Stage 6)', () => {
 describe('patchMany emission with set-members', () => {
   it('CREATE set-member emits a set event carrying the stored node after commit', async () => {
     const events: NodeEvent[] = [];
-    const { tree } = withSubscriptions(createMemoryTree(), e => events.push(e));
+    const { tree } = withSubs(createMemoryTree(), e => events.push(e));
 
     await tree.set({ ...createNode('/data/src', 'thing'), v: 1 });
     events.length = 0;
@@ -548,7 +558,7 @@ describe('patchMany emission with set-members', () => {
 
   it('set-member over an existing node emits an event at its path', async () => {
     const events: NodeEvent[] = [];
-    const { tree } = withSubscriptions(createMemoryTree(), e => events.push(e));
+    const { tree } = withSubs(createMemoryTree(), e => events.push(e));
 
     await tree.set({ ...createNode('/data/a', 'thing'), v: 1 });
     events.length = 0;
@@ -564,7 +574,7 @@ describe('patchMany emission with set-members', () => {
 
   it('denied batch emits zero events — including for its set-members', async () => {
     const events: NodeEvent[] = [];
-    const { tree } = withSubscriptions(createMemoryTree(), e => events.push(e));
+    const { tree } = withSubs(createMemoryTree(), e => events.push(e));
 
     await tree.set({ ...createNode('/data/a', 'thing'), v: 1 });
     events.length = 0;
@@ -587,7 +597,7 @@ describe('patchMany emission with set-members', () => {
 describe('watch registration (Stage 6d, core-9yd)', () => {
   it('callerWhere participates in membership — caller-side flips dirty the vp', async () => {
     const events: NodeEvent[] = [];
-    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => events.push(e));
+    const { tree, cdc } = withSubs(createMemoryTree(), e => events.push(e));
 
     cdc.watchQuery({
       vp: '/views/mine', userId: 'u1',
@@ -610,7 +620,7 @@ describe('watch registration (Stage 6d, core-9yd)', () => {
 
   it('dedup: two vps over one canonical plan share a group; a flip dirties both', async () => {
     const events: NodeEvent[] = [];
-    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => events.push(e));
+    const { tree, cdc } = withSubs(createMemoryTree(), e => events.push(e));
 
     cdc.watchQuery({ vp: '/views/a', userId: 'u1', plan: { source: '/items', viewWhere: { status: 'open' } }, mountDeps: new Set(['/views/a']) });
     cdc.watchQuery({ vp: '/views/b', userId: 'u2', plan: { source: '/items', viewWhere: { status: 'open' } }, mountDeps: new Set(['/views/b']) });
@@ -624,7 +634,7 @@ describe('watch registration (Stage 6d, core-9yd)', () => {
 
   it('mountDeps: config write at a consulted dep dirties only the handles that consulted it', async () => {
     const events: NodeEvent[] = [];
-    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => events.push(e), detectors);
+    const { tree, cdc } = withSubs(createMemoryTree(), e => events.push(e), detectors);
 
     cdc.watchQuery({
       vp: '/views/composite', userId: 'u1',
@@ -647,7 +657,7 @@ describe('watch registration (Stage 6d, core-9yd)', () => {
   });
 
   it('rejects a query watch whose callerWhere probes an ACL-gated field (hidden-field oracle, core-anz4.3)', () => {
-    const { cdc } = withSubscriptions(createMemoryTree());
+    const { cdc } = withSubs(createMemoryTree());
     assert.throws(
       () => cdc.watchQuery({
         vp: '/views/x', userId: 'u1',
@@ -660,7 +670,7 @@ describe('watch registration (Stage 6d, core-9yd)', () => {
   });
 
   it('hidden-field callerWhere is caught inside a nested $and branch too', () => {
-    const { cdc } = withSubscriptions(createMemoryTree());
+    const { cdc } = withSubs(createMemoryTree());
     assert.throws(
       () => cdc.watchQuery({
         vp: '/views/y', userId: 'u1',
@@ -675,7 +685,7 @@ describe('watch registration (Stage 6d, core-9yd)', () => {
     // mapNodeForSift maps a node to storage shape ($owner→_owner etc.), so a
     // predicate keyed on the alias probes the same hidden data the projector
     // strips. Guard both predicate positions.
-    const { cdc } = withSubscriptions(createMemoryTree());
+    const { cdc } = withSubs(createMemoryTree());
     const forbidden = (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN';
     assert.throws(() => cdc.watchQuery({
       vp: '/views/a', userId: 'u1',
@@ -702,11 +712,12 @@ describe('watch registration (Stage 6d, core-9yd)', () => {
     assert.equal(cdc.getActiveQueryCount(), 0, 'no group left behind by rejected registrations');
   });
 
-  it('allows a visible-component predicate — hidden-component oracle deferred to F4 (core-anz4.3)', () => {
-    // Querying a '#'-component is a first-class feature; the residual leak on an
-    // ACL-gated component needs actor-projected membership (F4) to close without
-    // breaking visible component queries. Only hidden SYSTEM fields are rejected.
-    const { cdc } = withSubscriptions(createMemoryTree());
+  it('allows a visible-component predicate — hidden-component oracle closed by projected eval (core-anz4.3)', () => {
+    // Querying a '#'-component is a first-class feature, so registration
+    // rejects only hidden SYSTEM fields. An ACL-gated component is handled at
+    // EVAL time: actor-projected membership (F4) strips it before the test
+    // runs — see the 'actor-projected membership' describe.
+    const { cdc } = withSubs(createMemoryTree());
     cdc.watchQuery({
       vp: '/views/salary', userId: 'u1',
       plan: { source: '/staff', viewWhere: { kind: 'person' }, callerWhere: { '#dept.name': 'eng' } },
@@ -719,7 +730,7 @@ describe('watch registration (Stage 6d, core-9yd)', () => {
     // read-runtime §header: both predicates run on the projected node until F4
     // (a mount can be user-authored), so viewWhere leaks a hidden system field
     // ($acl/$owner/$refs) just as callerWhere does. Guard it the same.
-    const { cdc } = withSubscriptions(createMemoryTree());
+    const { cdc } = withSubs(createMemoryTree());
     assert.throws(
       () => cdc.watchQuery({
         vp: '/views/acl', userId: 'u1',
@@ -732,7 +743,7 @@ describe('watch registration (Stage 6d, core-9yd)', () => {
   });
 
   it('allows predicates on guaranteed-visible fields ($type + plain field) — still registers', () => {
-    const { cdc } = withSubscriptions(createMemoryTree());
+    const { cdc } = withSubs(createMemoryTree());
     cdc.watchQuery({
       vp: '/views/ok', userId: 'u1',
       plan: { source: '/items', viewWhere: { $type: 'item' }, callerWhere: { status: 'open' } },
@@ -752,7 +763,7 @@ describe('watch registration (Stage 6d, core-9yd)', () => {
   });
 
   it('rejects a depth>1 query watch (deep membership unsupported, core-anz4.15)', () => {
-    const { cdc } = withSubscriptions(createMemoryTree());
+    const { cdc } = withSubs(createMemoryTree());
     assert.throws(
       () => cdc.watchQuery({ vp: '/views/deep', userId: 'u1', plan: { source: '/items', depth: 2, viewWhere: {} }, mountDeps: new Set(['/views/deep']) }),
       (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
@@ -766,7 +777,7 @@ describe('watch registration (Stage 6d, core-9yd)', () => {
 
   it('depth:1 query watch works end-to-end (explicit depth)', async () => {
     const events: NodeEvent[] = [];
-    const { tree, cdc } = withSubscriptions(createMemoryTree(), e => events.push(e));
+    const { tree, cdc } = withSubs(createMemoryTree(), e => events.push(e));
     cdc.watchQuery({ vp: '/views/open', userId: 'u1', plan: { source: '/items', depth: 1, viewWhere: { status: 'open' } }, mountDeps: new Set(['/views/open']) });
 
     await tree.set({ ...createNode('/items/1', 'item'), status: 'open' });
@@ -775,7 +786,7 @@ describe('watch registration (Stage 6d, core-9yd)', () => {
   });
 
   it('group GC: the last handle removal drops the group', async () => {
-    const { cdc } = withSubscriptions(createMemoryTree());
+    const { cdc } = withSubs(createMemoryTree());
     cdc.watchQuery({ vp: '/views/a', userId: 'u1', plan: { source: '/items', viewWhere: { s: 1 } }, mountDeps: new Set(['/views/a']) });
     cdc.watchQuery({ vp: '/views/b', userId: 'u2', plan: { source: '/items', viewWhere: { s: 1 } }, mountDeps: new Set(['/views/b']) });
     assert.equal(cdc.getActiveQueryCount(), 1);
@@ -787,11 +798,107 @@ describe('watch registration (Stage 6d, core-9yd)', () => {
   });
 });
 
+describe('actor-projected membership (F4, core-anz4.3)', () => {
+  // Real security projection with fixed per-user claims — perms and component
+  // stripping resolved by the same code the read path uses.
+  const claimsOf: Record<string, string[]> = { u1: ['users'], admin: ['admins'] };
+  const projectFor = (store: Tree): MembershipProjector => async (userId, o, n) => {
+    const project = createProjector(store, { userId, claims: claimsOf[userId] ?? [] });
+    return [o ? await project(o) : null, n ? await project(n) : null];
+  };
+
+  it('a hidden component field cannot gate membership — flip judged per actor projection', async () => {
+    const store = createMemoryTree();
+    const events: NodeEvent[] = [];
+    const { tree, cdc } = withSubscriptions(store, e => events.push(e), { projectMembership: projectFor(store) });
+
+    await tree.set({ ...createNode('/board', 'dir'), $acl: [{ g: 'users', p: R }, { g: 'admins', p: R }] });
+    // #secret readable by admins only — u1 matches no component-ACL entry.
+    await tree.set({
+      ...createNode('/board/t1', 'task'), status: 'draft',
+      '#secret': { $type: 'x.secret', level: 7, $acl: [{ g: 'admins', p: R }] },
+    });
+
+    // Same plan for both actors → ONE group, membership diverges per actor.
+    const plan = { source: '/board', viewWhere: { $and: [{ status: 'active' }, { '#secret.level': 7 }] } };
+    cdc.watchQuery({ vp: '/views/u1', userId: 'u1', plan, mountDeps: new Set(['/views/u1']) });
+    cdc.watchQuery({ vp: '/views/admin', userId: 'admin', plan, mountDeps: new Set(['/views/admin']) });
+    assert.equal(cdc.getActiveQueryCount(), 1, 'same plan registers one group with two actors');
+
+    // Flip via the VISIBLE field only — the hidden field gates the predicate.
+    // Raw eval would enter the vp for BOTH actors (level=7 matches raw);
+    // projected eval strips #secret for u1, so u1 must see NO enter.
+    events.length = 0;
+    await tree.patch('/board/t1', [['r', 'status', 'active']]);
+    const ev = events.find(e => (e.type === 'set' || e.type === 'patch') && e.path === '/board/t1');
+    assert.ok(ev, 'patch event emitted');
+    assert.ok(ev.invalidateVps?.includes('/views/admin'), 'admin reads #secret → enter dirties their view');
+    assert.ok(!ev.invalidateVps?.includes('/views/u1'), 'hidden-field-gated flip must not signal u1');
+  });
+
+  it('a node the actor cannot read never flips their membership (executeList parity)', async () => {
+    const store = createMemoryTree();
+    const events: NodeEvent[] = [];
+    const { tree, cdc } = withSubscriptions(store, e => events.push(e), { projectMembership: projectFor(store) });
+
+    await tree.set({ ...createNode('/board', 'dir'), $acl: [{ g: 'users', p: R }, { g: 'admins', p: R }] });
+    // t1 readable by admins only — sticky deny-all for users.
+    await tree.set({ ...createNode('/board/t1', 'task'), score: 50, $acl: [{ g: 'users', p: 0 }, { g: 'admins', p: R }] });
+
+    const plan = { source: '/board', viewWhere: { score: { $gt: 100 } } };
+    cdc.watchQuery({ vp: '/views/u1', userId: 'u1', plan, mountDeps: new Set(['/views/u1']) });
+    cdc.watchQuery({ vp: '/views/admin', userId: 'admin', plan, mountDeps: new Set(['/views/admin']) });
+
+    events.length = 0;
+    await tree.patch('/board/t1', [['r', 'score', 150]]);
+    const ev = events.find(e => (e.type === 'set' || e.type === 'patch') && e.path === '/board/t1');
+    assert.ok(ev?.invalidateVps?.includes('/views/admin'), 'readable actor gets the flip');
+    assert.ok(!ev?.invalidateVps?.includes('/views/u1'), 'R-denied node must not signal membership to u1');
+  });
+
+  it('query watch registration fails closed without a membership projector', () => {
+    const { cdc } = withSubscriptions(createMemoryTree());
+    assert.throws(
+      () => cdc.watchQuery({ vp: '/views/x', userId: 'u1', plan: { source: '/items', viewWhere: { status: 'open' } }, mountDeps: new Set(['/views/x']) }),
+      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+    );
+    assert.equal(cdc.getActiveQueryCount(), 0, 'refused registration leaves no group');
+  });
+
+  it('registration parity: the plan a watch registers is the one executeList vetted (core-fnv coupling)', async () => {
+    const store = createMemoryTree();
+    await store.set({ ...createNode('/board', 'dir'), $acl: [{ g: 'users', p: R }, { g: 'admins', p: R }] });
+    await store.set({
+      ...createNode('/board/t1', 'task'), status: 'active',
+      '#secret': { $type: 'x.secret', level: 7, $acl: [{ g: 'admins', p: R }] },
+    });
+
+    // Registration is reachable ONLY through a successful read of the same
+    // plan (wire watchList couples them via getPageReadPlan). Non-privileged
+    // caller: the read dies with FORBIDDEN ⇒ no page ⇒ nothing to register.
+    const u1Tree = withAcl(store, 'u1', ['users']);
+    await assert.rejects(
+      () => u1Tree.getChildren('/board', { query: { '#secret.level': 7 } }),
+      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+    );
+
+    // Privileged caller: read succeeds, the attached plan registers cleanly.
+    const adminTree = withAcl(store, 'admin', ['admins']);
+    const page = await adminTree.getChildren('/board', { query: { '#secret.level': 7 } });
+    assert.equal(page.items.length, 1);
+    const readPlan = getPageReadPlan(page);
+    assert.ok(readPlan, 'query read attaches its plan for watch registration');
+    const { cdc } = withSubs(store);
+    cdc.watchQuery({ vp: '/board', userId: 'admin', plan: readPlan.plan, mountDeps: readPlan.mountDeps });
+    assert.equal(cdc.getActiveQueryCount(), 1);
+  });
+});
+
 // ── onSelfWrite — channel for external-watch dedup ──
 
 describe('withSubscriptions.onSelfWrite', () => {
   it('fires on set with (path, rev)', async () => {
-    const { tree, onSelfWrite } = withSubscriptions(createMemoryTree());
+    const { tree, onSelfWrite } = withSubs(createMemoryTree());
     const calls: Array<[string, number | undefined]> = [];
     onSelfWrite((p, r) => calls.push([p, r]));
 
@@ -805,7 +912,7 @@ describe('withSubscriptions.onSelfWrite', () => {
 
   it('fires on patch with rev from event', async () => {
     const tree0 = createMemoryTree();
-    const { tree, onSelfWrite } = withSubscriptions(tree0);
+    const { tree, onSelfWrite } = withSubs(tree0);
     await tree.set({ ...createNode('/n', 'test'), n: 0 } as any);
 
     const calls: Array<[string, number | undefined]> = [];
@@ -819,7 +926,7 @@ describe('withSubscriptions.onSelfWrite', () => {
   });
 
   it('fires on remove with undefined rev', async () => {
-    const { tree, onSelfWrite } = withSubscriptions(createMemoryTree());
+    const { tree, onSelfWrite } = withSubs(createMemoryTree());
     await tree.set(createNode('/x', 'test'));
 
     const calls: Array<[string, number | undefined]> = [];
@@ -833,7 +940,7 @@ describe('withSubscriptions.onSelfWrite', () => {
   });
 
   it('multiple listeners — all fired', async () => {
-    const { tree, onSelfWrite } = withSubscriptions(createMemoryTree());
+    const { tree, onSelfWrite } = withSubs(createMemoryTree());
     const a: string[] = [];
     const b: string[] = [];
     onSelfWrite((p) => a.push(p));
@@ -846,7 +953,7 @@ describe('withSubscriptions.onSelfWrite', () => {
   });
 
   it('unsubscribe stops further calls', async () => {
-    const { tree, onSelfWrite } = withSubscriptions(createMemoryTree());
+    const { tree, onSelfWrite } = withSubs(createMemoryTree());
     const calls: string[] = [];
     const unsub = onSelfWrite((p) => calls.push(p));
 
@@ -864,7 +971,7 @@ describe('withSubscriptions.onSelfWrite', () => {
     // could have been affected, so query/VP watchers refetch instead of
     // silently missing the change.
     const events: NodeEvent[] = [];
-    const { tree, cdc, injectExternalEvent } = withSubscriptions(createMemoryTree(), e => events.push(e));
+    const { tree, cdc, injectExternalEvent } = withSubs(createMemoryTree(), e => events.push(e));
 
     await tree.set(createNode('/items', 'dir'));
     cdc.watchQuery({ vp: '/views/open', userId: 'u1', plan: { source: '/items', viewWhere: { status: 'open' } }, mountDeps: new Set(['/views/open']) });
@@ -890,7 +997,7 @@ describe('withSubscriptions.onSelfWrite', () => {
     // match: {status:'closed'}) must invalidate that vp — its listing is
     // now driven by a different filter.
     const events: NodeEvent[] = [];
-    const { tree, cdc, injectExternalEvent } = withSubscriptions(createMemoryTree(), e => events.push(e));
+    const { tree, cdc, injectExternalEvent } = withSubs(createMemoryTree(), e => events.push(e));
 
     await tree.set(createNode('/items', 'dir'));
     cdc.watchQuery({ vp: '/views/open', userId: 'u1', plan: { source: '/items', viewWhere: { status: 'open' } }, mountDeps: new Set(['/views/open']) });
@@ -911,7 +1018,7 @@ describe('withSubscriptions.onSelfWrite', () => {
   });
 
   it('injectExternalEvent does NOT fire onSelfWrite (external events must not poison dedup)', async () => {
-    const { tree, onSelfWrite, injectExternalEvent } = withSubscriptions(createMemoryTree());
+    const { tree, onSelfWrite, injectExternalEvent } = withSubs(createMemoryTree());
     const selfWriteFires: string[] = [];
     onSelfWrite((p) => selfWriteFires.push(p));
 
@@ -926,7 +1033,7 @@ describe('withSubscriptions.onSelfWrite', () => {
 
   it('injectExternalEvent reconnect routes straight to onEvent (no CDC, no listeners)', async () => {
     const events: NodeEvent[] = [];
-    const { injectExternalEvent } = withSubscriptions(createMemoryTree(), e => events.push(e));
+    const { injectExternalEvent } = withSubs(createMemoryTree(), e => events.push(e));
 
     injectExternalEvent({ type: 'reconnect', preserved: false });
 
@@ -936,7 +1043,7 @@ describe('withSubscriptions.onSelfWrite', () => {
   });
 
   it('throwing listener does not break the write or other listeners', async () => {
-    const { tree, onSelfWrite } = withSubscriptions(createMemoryTree());
+    const { tree, onSelfWrite } = withSubs(createMemoryTree());
 
     const originalError = console.error;
     let errored = false;

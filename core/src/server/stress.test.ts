@@ -20,12 +20,17 @@ enablePatches();
 
 // ── Helpers ──
 
+// F4 (core-anz4.3): query watches fail closed without a membership projector;
+// trees here carry no ACL data, so the raw pair IS every actor's projection.
+const withSubs = (...[tree, onEvent, opts]: Parameters<typeof withSubscriptions>) =>
+  withSubscriptions(tree, onEvent, { projectMembership: async (_u, o, n) => [o, n], ...opts });
+
 function fullPipeline() {
   const bootstrap = createMemoryTree();
   const mountable = withMounts(bootstrap);
   const policy = withStoragePolicy(mountable);
   const watcher = createWatchManager();
-  const { tree, cdc } = withSubscriptions(policy.tree, (e) => watcher.notify(e));
+  const { tree, cdc } = withSubs(policy.tree, (e) => watcher.notify(e));
   return { bootstrap, mountable, tree, cdc, watcher };
 }
 

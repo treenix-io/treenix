@@ -113,15 +113,17 @@ function isAclOp(op: PatchOp): boolean {
 }
 
 // core-anz4.3: query-watch predicates are VALIDATED at registration and
-// rejected if they reference a hidden field. membershipVps (below) DOES
-// evaluate viewWhere/callerWhere on the write path, against a storage-shaped
-// node — mapNodeForSift maps $acl→_acl, $owner→_owner, $refs→_refs
-// (tree/index.ts toStorageKeys) — so a predicate over $acl/$owner/$refs (or
-// their storage aliases _acl/_owner/_refs) would leak a hidden match via an
-// enter/leave flip. Fail closed on those and on any other unknown $-field; it
-// also keeps executeList parity (core-fnv) and is F4-ready (viewWhere is NOT
-// trusted at HEAD: a mount can be user-authored until F4). Visible system
-// fields, plain data fields, and #-component predicates are allowed.
+// rejected if they reference a hidden field. membershipVps (below) evaluates
+// viewWhere/callerWhere on the write path against ACTOR-PROJECTED,
+// storage-shaped nodes (F4) — but projection keeps $acl/$owner for A-holders,
+// and mapNodeForSift maps $acl→_acl, $owner→_owner, $refs→_refs
+// (tree/index.ts toStorageKeys), so a predicate over $acl/$owner/$refs (or
+// their storage aliases _acl/_owner/_refs) stays statically rejected. Fail
+// closed on those and on any other unknown $-field; keeps executeList parity
+// (core-fnv), and viewWhere is guarded too (NOT trusted: a mount can be
+// user-authored). Visible system fields, plain data fields, and #-component
+// predicates are allowed — a #-component the actor cannot read is stripped
+// by projection before evaluation, so it can never gate their membership.
 // Both namespaces are allowlists, not denylists: toStorageKeys maps EVERY
 // top-level $foo→_foo, so any unknown _-field (e.g. _v for $v, _secret for a
 // hidden $secret) is a storage alias for a hidden system field and must fail
@@ -167,8 +169,10 @@ function opIdOf(ctx: unknown): string | undefined {
 // not identity; N view paths over the same plan share one evaluation). A
 // QueryHandle is one (userId, vp) registration: it carries mountDeps for
 // targeted config invalidation and dies independently of its group.
-// Evaluation stays RAW-node and user-independent (gk8.12): the dirty signal
-// carries no data, visibility re-derives on the ACL'd refetch.
+// Membership evaluation is per-ACTOR on the projected node (F4, core-anz4.3):
+// the dirty signal still carries no data — visibility re-derives on the ACL'd
+// refetch — but a flip is signalled only to subscribers whose OWN projection
+// changed, so hidden fields cannot drive their membership timing.
 
 type WatchGroup = {
   planHash: string;
@@ -182,8 +186,8 @@ type WatchGroup = {
 
 type QueryHandle = {
   vp: string;
-  /** Drives claims-change targeting and lifecycle only. No per-user claims
-   *  here: visibility is decided once, on the read path. */
+  /** Drives claims-change targeting, lifecycle, and actor projection (F4).
+   *  No claims stored here — projectMembership resolves them at eval time. */
   userId: string;
   /** Mount/config paths consulted by resolveReadPlan. Contract: contains at
    *  least the vp itself — config-change targeting relies on it. */
@@ -199,6 +203,16 @@ export type QueryWatchRegistration = {
   plan: ReadPlan;
   mountDeps: ReadonlySet<string>;
 };
+
+/** Project one commit's (old, new) node pair as `userId` may read it — null
+ *  means the user cannot read the node at all (executeList's Projector
+ *  contract). Injected from the composition root: security owns projection,
+ *  sub/ stays auth-ignorant. */
+export type MembershipProjector = (
+  userId: string,
+  oldNode: NodeData | null,
+  newNode: NodeData | null,
+) => Promise<readonly [NodeData | null, NodeData | null]>;
 
 export type CdcRegistry = {
   subscribe(path: string, listener: Listener, opts?: SubscribeOpts): () => void;
@@ -223,6 +237,11 @@ export type SubscriptionOpts = {
    *  components without importing the registry. Absent = type-level rules
    *  off; inline `component.$acl` is still detected structurally. */
   componentHasAclRule?: (type: string) => boolean;
+  /** F4 actor-projected membership (core-anz4.3). Unlike the detectors above
+   *  this is ACCESS CONTROL, not liveness: absent projector = query watches
+   *  are REFUSED at registration (fail closed) — raw-node membership eval
+   *  would leak hidden fields via enter/leave dirty timing. */
+  projectMembership?: MembershipProjector;
   /** Run listener fan-out with a CLEARED mutation-lock held-set (core-anz4.4).
    *  Dispatch fires synchronously inside the commit envelope's lock span;
    *  listeners spawn async work that inherits lock ownership via ALS and would
@@ -253,6 +272,7 @@ export function withSubscriptions(
   const isConfigNode = opts?.isConfigNode ?? (() => false);
   const detachLocks: NonNullable<SubscriptionOpts['detachLocks']> = opts?.detachLocks ?? (fn => fn());
   const componentHasAclRule = opts?.componentHasAclRule ?? (() => false);
+  const projectMembership = opts?.projectMembership;
 
   /** A component is permission-bearing when it carries an inline `$acl` OR its
    *  type declares an `acl` rule — mirrors componentPerm's evaluation order. */
@@ -396,22 +416,58 @@ export function withSubscriptions(
     return vps;
   }
 
-  /** Membership test for a direct child of a query source — ONCE per group
-   *  per mutation, against the RAW node, no per-user ACL (gk8.12). A flip in
-   *  either direction dirties every vp in the group; in-folder updates of
-   *  unchanged membership ride the ordinary path event (items are
-   *  exact-watched). */
-  function membershipVps(path: string, oldNode: NodeData | null, newNode: NodeData | null): string[] {
+  /** Membership test for a direct child of a query source — evaluated per
+   *  SUBSCRIBING ACTOR against the ACL-projected node pair (F4, core-anz4.3).
+   *  Raw-node eval was a blind oracle: a predicate gated on data the watcher
+   *  cannot read (ACL-stripped component, R-denied node) flipped their
+   *  membership, so enter/leave dirty TIMING leaked hidden values — the same
+   *  channel executeList closes with FORBIDDEN (core-fnv). Projection runs
+   *  once per distinct userId per commit and is shared across groups;
+   *  in-folder updates of unchanged membership still ride the ordinary path
+   *  event (items are exact-watched). A failed projection over-invalidates
+   *  that user's handles (uncorrelated with hidden data; the refetch
+   *  re-derives truth through the ACL read path) — raw eval is never a
+   *  fallback. */
+  async function membershipVps(path: string, oldNode: NodeData | null, newNode: NodeData | null): Promise<string[]> {
     if (groups.size === 0) return [];
-    const oldSift = oldNode ? mapNodeForSift(oldNode) : null;
-    const newSift = newNode ? mapNodeForSift(newNode) : null;
-    const vps: string[] = [];
+    const matching: WatchGroup[] = [];
     for (const g of groups.values()) {
       const prefix = g.source === '/' ? '/' : g.source + '/';
-      if (!path.startsWith(prefix) || path.slice(prefix.length).includes('/')) continue;
-      const wasIn = oldSift ? g.test(oldSift) : false;
-      const isIn = newSift ? g.test(newSift) : false;
-      if (wasIn !== isIn) groupVps(g, vps);
+      if (path.startsWith(prefix) && !path.slice(prefix.length).includes('/')) matching.push(g);
+    }
+    if (matching.length === 0) return [];
+
+    const project = projectMembership;
+    // Unreachable via watchQuery (registration fails closed without a
+    // projector) — kept loud against future registration bypasses.
+    if (!project) throw new Error('membershipVps: query watches active without projectMembership');
+
+    type SiftPair = { o: Record<string, unknown> | null; n: Record<string, unknown> | null };
+    const perUser = new Map<string, Promise<SiftPair | 'error'>>();
+    const projectFor = (userId: string) => {
+      let p = perUser.get(userId);
+      if (!p) {
+        p = project(userId, oldNode, newNode).then(
+          ([o, n]): SiftPair => ({ o: o && mapNodeForSift(o), n: n && mapNodeForSift(n) }),
+          (err): 'error' => {
+            console.error('[withSubscriptions] membership projection failed for user=%s path=%s:', userId, path, err);
+            return 'error';
+          },
+        );
+        perUser.set(userId, p);
+      }
+      return p;
+    };
+
+    const vps: string[] = [];
+    for (const g of matching) {
+      for (const h of g.handles) {
+        const pair = await projectFor(h.userId);
+        if (pair === 'error') { vps.push(h.vp); continue; }
+        const wasIn = pair.o ? g.test(pair.o) : false;
+        const isIn = pair.n ? g.test(pair.n) : false;
+        if (wasIn !== isIn) vps.push(h.vp);
+      }
     }
     return vps;
   }
@@ -497,7 +553,7 @@ export function withSubscriptions(
       // through this node may flip).
       const cdc = oldNode
         ? dirtyVps(
-            membershipVps(path, oldNode, null),
+            await membershipVps(path, oldNode, null),
             (oldNode.$acl || oldNode.$owner || isComponentAclChange(oldNode, null)) ? vpsForAclChange(path) : [],
             isConfigNode(oldNode) ? vpsForConfigChange(path) : [],
             claimsUid ? vpsForClaimsChange(claimsUid) : [],
@@ -518,7 +574,7 @@ export function withSubscriptions(
       await tree.patch(path, ops, ctx);
 
       const newNode = await tree.get(path, ctx);
-      emitPatch(path, ops, oldNode, newNode, ctx);
+      await emitPatch(path, ops, oldNode, newNode, ctx);
     },
 
     // patchMany (core-gk8.15): pre-read all old images, commit the batch,
@@ -540,7 +596,7 @@ export function withSubscriptions(
             await emitSetEvent(entry.path, oldNodes[i], ctx, entry.node);
           } else {
             const newNode = await tree.get(entry.path, ctx);
-            emitPatch(entry.path, entry.ops, oldNodes[i], newNode, ctx);
+            await emitPatch(entry.path, entry.ops, oldNodes[i], newNode, ctx);
           }
         }
       },
@@ -560,7 +616,7 @@ export function withSubscriptions(
     const stored = await tree.get(path, ctx) ?? written;
     const claimsUid = claimsUserOf(path);
     const cdc = dirtyVps(
-      membershipVps(path, oldNode ?? null, stored),
+      await membershipVps(path, oldNode ?? null, stored),
       (isAclChange(oldNode ?? null, stored) || isComponentAclChange(oldNode ?? null, stored)) ? vpsForAclChange(path) : [],
       // Config write: either side carries a mount/config component — the vp
       // node itself is being rewritten, handles on it must re-fetch.
@@ -583,7 +639,7 @@ export function withSubscriptions(
 
   /** CDC dirty computation + event emission for ONE patched path — shared by
    *  patch and patchMany (per member, after the inner batch commits). */
-  function emitPatch(path: string, ops: readonly PatchOp[], oldNode: NodeData | undefined, newNode: NodeData | undefined, ctx: unknown): void {
+  async function emitPatch(path: string, ops: readonly PatchOp[], oldNode: NodeData | undefined, newNode: NodeData | undefined, ctx: unknown): Promise<void> {
     // Config write detection on patch: either node had/has config, or an op
     // touched the `mount` field directly (covers add/replace of the
     // component on a previously-non-config node).
@@ -593,7 +649,7 @@ export function withSubscriptions(
     });
     const claimsUid = claimsUserOf(path);
     const cdc = dirtyVps(
-      membershipVps(path, oldNode ?? null, newNode ?? null),
+      await membershipVps(path, oldNode ?? null, newNode ?? null),
       // Both directions: ops touched $acl/$owner directly OR the resulting
       // diff shows a $acl change (covers full-node replace via patch).
       (ops.some(isAclOp) || isAclChange(oldNode ?? null, newNode ?? null) || isComponentAclChange(oldNode ?? null, newNode ?? null)) ? vpsForAclChange(path) : [],
@@ -629,6 +685,12 @@ export function withSubscriptions(
       // mount can be user-authored until F4).
       if (reg.plan.callerWhere) assertVisiblePredicate(reg.plan.callerWhere, 'callerWhere');
       if (reg.plan.viewWhere) assertVisiblePredicate(reg.plan.viewWhere, 'viewWhere');
+      // F4 fail closed (core-anz4.3): membership must evaluate on the actor's
+      // projection; raw-node eval re-opens the hidden-field oracle. No
+      // projector configured = no query watch.
+      if (!projectMembership) {
+        throw new OpError('FORBIDDEN', 'query watch requires a membership projector (SubscriptionOpts.projectMembership)');
+      }
       const key = handleKey(reg.userId, reg.vp);
       const hash = planHash(reg.plan);
       const existing = handleByKey.get(key);

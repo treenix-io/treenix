@@ -9,9 +9,11 @@
 
 import { A, R, type NodeData } from '#core';
 import { OpError } from '#errors';
+import type { MembershipProjector } from '#sub';
 import type { Tree } from '#tree';
 import type { Projector } from '#tree/read-runtime';
 import { resolvePermission, stripComponents } from './acl';
+import { buildClaims } from './claims';
 
 export type Actor = {
   userId: string | null;
@@ -33,6 +35,41 @@ export function createProjector(tree: Tree, actor: Actor): Projector {
       delete out.$owner;
     }
     return out;
+  };
+}
+
+// Same freshness window as the event-lane ACL filter (watch-filter.ts).
+const MEMBERSHIP_CLAIMS_TTL_MS = 30_000;
+
+/** F4 actor-projected membership (core-anz4.3): project a commit's (old, new)
+ *  node pair as `userId` may read it — query-watch membership eval runs on
+ *  THIS, never on the raw node. Claims are TTL-cached per user (event-filter
+ *  parity); permissions and component stripping resolve fresh per call, so an
+ *  ACL change never serves a stale membership verdict. Old and new share one
+ *  projector instance — same path, one ancestor-permission walk. */
+export function createMembershipProjector(
+  tree: Tree,
+  claimsTree: Tree,
+  opts?: { claimsTtlMs?: number },
+): MembershipProjector {
+  const claimsTtlMs = opts?.claimsTtlMs ?? MEMBERSHIP_CLAIMS_TTL_MS;
+  const claimsCache = new Map<string, { claims: string[]; at: number }>();
+
+  async function claimsFor(userId: string): Promise<string[]> {
+    const hit = claimsCache.get(userId);
+    if (hit && Date.now() - hit.at <= claimsTtlMs) return hit.claims;
+    // Lazy prune bounds the map by ACTIVE watchers, not all-time users.
+    if (claimsCache.size >= 1024) {
+      for (const [k, v] of claimsCache) if (Date.now() - v.at > claimsTtlMs) claimsCache.delete(k);
+    }
+    const claims = await buildClaims(claimsTree, userId);
+    claimsCache.set(userId, { claims, at: Date.now() });
+    return claims;
+  }
+
+  return async (userId, oldNode, newNode) => {
+    const project = createProjector(tree, { userId, claims: await claimsFor(userId) });
+    return [oldNode ? await project(oldNode) : null, newNode ? await project(newNode) : null];
   };
 }
 

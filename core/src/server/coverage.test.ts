@@ -30,12 +30,17 @@ import { extractPaths } from '#protocol/peer';
 
 // ── Helpers ──
 
+// F4 (core-anz4.3): query watches fail closed without a membership projector;
+// trees here carry no ACL data, so the raw pair IS every actor's projection.
+const withSubs = (...[tree, onEvent, opts]: Parameters<typeof withSubscriptions>) =>
+  withSubscriptions(tree, onEvent, { projectMembership: async (_u, o, n) => [o, n], ...opts });
+
 function fullPipeline(rootStore?: Tree) {
   const bootstrap = rootStore ?? createMemoryTree();
   const mountable = withMounts(bootstrap);
   const policy = withStoragePolicy(mountable);
   const events: any[] = [];
-  const { tree, cdc } = withSubscriptions(policy.tree, (e) => events.push(e));
+  const { tree, cdc } = withSubs(policy.tree, (e) => events.push(e));
   return { bootstrap, tree, cdc, events };
 }
 
@@ -289,7 +294,7 @@ describe('sub.ts: remove + CDC', () => {
   it('remove emits invalidateVps when node was in query', async () => {
     const mem = createMemoryTree();
     const events: any[] = [];
-    const sub = withSubscriptions(mem, (e) => events.push(e));
+    const sub = withSubs(mem, (e) => events.push(e));
     const tree = sub.tree;
     cdc = sub.cdc;
 
@@ -313,7 +318,7 @@ describe('sub.ts: remove + CDC', () => {
   it('remove of non-matching node has empty invalidateVps', async () => {
     const mem = createMemoryTree();
     const events: any[] = [];
-    const sub = withSubscriptions(mem, (e) => events.push(e));
+    const sub = withSubs(mem, (e) => events.push(e));
     const tree = sub.tree;
     cdc = sub.cdc;
 
@@ -333,14 +338,14 @@ describe('sub.ts: remove + CDC', () => {
   it('remove of non-existent node emits nothing', async () => {
     const mem = createMemoryTree();
     const events: any[] = [];
-    const { tree } = withSubscriptions(mem, (e) => events.push(e));
+    const { tree } = withSubs(mem, (e) => events.push(e));
 
     await tree.remove('/ghost');
     assert.equal(events.length, 0);
   });
 
   it('unwatchQuery removes single user', () => {
-    const { cdc } = withSubscriptions(createMemoryTree());
+    const { cdc } = withSubs(createMemoryTree());
 
     cdc.watchQuery({ vp: '/vp1', userId: 'userA', plan: { source: '/src', viewWhere: { x: 1 } }, mountDeps: new Set(['/vp1']) });
     cdc.watchQuery({ vp: '/vp1', userId: 'userB', plan: { source: '/src', viewWhere: { x: 1 } }, mountDeps: new Set(['/vp1']) });
@@ -358,7 +363,7 @@ describe('sub.ts: remove + CDC', () => {
   });
 
   it('unwatchAllQueries cleans up all entries for user', () => {
-    const { cdc } = withSubscriptions(createMemoryTree());
+    const { cdc } = withSubs(createMemoryTree());
 
     cdc.watchQuery({ vp: '/a', userId: 'u1', plan: { source: '/s', viewWhere: { x: 1 } }, mountDeps: new Set(['/a']) });
     cdc.watchQuery({ vp: '/b', userId: 'u1', plan: { source: '/s', viewWhere: { y: 2 } }, mountDeps: new Set(['/b']) });

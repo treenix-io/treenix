@@ -3,7 +3,8 @@
 // exercises every operation, verifies ACL, events, CDC Matrix, and OpError mapping.
 
 import { registerType } from '#comp';
-import { createNode, R, register, S, W } from '#core';
+import { createNode, R, register, resolve as resolveHandler, S, W } from '#core';
+import { createMembershipProjector } from '#security/projector';
 import { createMemoryTree, type Tree } from '#tree';
 import assert from 'node:assert/strict';
 import { before, beforeEach, describe, it } from 'node:test';
@@ -57,19 +58,27 @@ describe('tRPC API integration', () => {
   beforeEach(async () => {
     const bootstrap = createMemoryTree();
 
-    // Seed root with public RW+S directly (bypasses ACL)
+    // Seed root with public+authenticated RW+S directly (bypasses ACL).
+    // `authenticated` mirrors the production seed: F4 membership projection
+    // derives claims via buildClaims (alice → authenticated, not public), so
+    // a public-only root would project every node as unreadable for her.
     await bootstrap.set({
       ...createNode('/', 'root'),
-      $acl: [{ g: 'public', p: R | W | S }],
+      $acl: [{ g: 'public', p: R | W | S }, { g: 'authenticated', p: R | W | S }],
     });
 
     const mountable = withMounts(bootstrap);
     const policy = withStoragePolicy(mountable);
     watcher = createWatchManager();
     events = [];
+    // Production-shaped wiring (server.ts parity): type-level acl detection +
+    // F4 actor-projected membership (query watches fail closed without it).
     const { tree, cdc } = withSubscriptions(policy.tree, (e) => {
       events.push(e as DataEvent);
       watcher.notify(e);
+    }, {
+      componentHasAclRule: (type) => resolveHandler(type, 'acl') !== undefined,
+      projectMembership: createMembershipProjector(policy.tree, policy.tree),
     });
     watcher.bindQueryRegistry(cdc);
     rawStore = tree;
@@ -586,11 +595,14 @@ describe('tRPC API integration', () => {
     });
 
     it('hidden-field membership flip reaches vp watchers only as an opaque dirty (gk8.12)', async () => {
-      // Membership is sifted against the RAW node once per mutation — no
-      // per-user ACL on the write path. A watcher of the secret view gets a
-      // dirty signal (bounded metadata channel, see core-cnr.8); the DATA
-      // stays protected: the event is component-stripped and the refetch
-      // goes through the ACL read path (see the read-path oracle test above).
+      // F4 (core-anz4.3): membership is judged on ALICE's projection, where
+      // #secret is stripped — the predicate can never flip for her. The dirty
+      // she receives here comes from the permission-bearing-component channel
+      // (a component with an acl rule appeared under the source), which fires
+      // regardless of the hidden VALUE — an uncorrelated, bounded metadata
+      // signal (core-cnr.8). The DATA stays protected: the event is
+      // component-stripped and the refetch goes through the ACL read path
+      // (see the read-path oracle test above).
       register('private.secret.cdc', 'acl', () => [{ g: 'admins', p: R }]);
       await rawStore.set({ $path: '/cdc-oracle', $type: 'folder' });
       await rawStore.set({ $path: '/cdc-oracle/data', $type: 'folder' });
