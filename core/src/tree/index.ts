@@ -367,11 +367,12 @@ export function createFilterTree(
       if (toUpper(node)) {
         const receipt = await upper.set(node, ctx);
         // Upper CREATE over a visible lower node: the view's before-image was
-        // lower's node, not null — patch audit/CDC truth into the receipt.
+        // lower's node, not null — but a post-commit lower.get is outside the
+        // committing adapter's span and can tear under concurrency. Opaque is
+        // the only honest receipt without a cross-layer atomic snapshot.
         const c = receipt.changes?.[0];
-        if (c && c.before === null) {
-          const shadowed = await lower.get(node.$path, ctx);
-          if (shadowed !== undefined) return { changes: [{ ...c, before: shadowed }] };
+        if (c && c.before === null && await lower.get(node.$path, ctx) !== undefined) {
+          return { changes: null };
         }
         return receipt;
       }
@@ -460,15 +461,15 @@ export function createFilterTree(
           if (await upper.get(e.path, ctx) !== undefined) return { changes: null };
         }
       }
-      // Upper-routed creates over visible lower nodes: view-before was lower.
+      // Upper-routed creates over visible lower nodes: view-before was lower,
+      // but reading it post-commit can tear (outside the adapter span) — the
+      // whole batch goes opaque (same rule as set()).
       if (layer === upper && receipt.changes !== null) {
-        const changes: CommitChange[] = [];
         for (const c of receipt.changes) {
-          if (c.before !== null) { changes.push(c); continue; }
-          const shadowed = await lower.get(c.path, ctx);
-          changes.push(shadowed === undefined ? c : { ...c, before: shadowed });
+          if (c.before === null && await lower.get(c.path, ctx) !== undefined) {
+            return { changes: null };
+          }
         }
-        return { changes };
       }
       return receipt;
     },
