@@ -364,7 +364,17 @@ export function createFilterTree(
       }
     },
     async set(node, ctx) {
-      if (toUpper(node)) return upper.set(node, ctx);
+      if (toUpper(node)) {
+        const receipt = await upper.set(node, ctx);
+        // Upper CREATE over a visible lower node: the view's before-image was
+        // lower's node, not null — patch audit/CDC truth into the receipt.
+        const c = receipt.changes?.[0];
+        if (c && c.before === null) {
+          const shadowed = await lower.get(node.$path, ctx);
+          if (shadowed !== undefined) return { changes: [{ ...c, before: shadowed }] };
+        }
+        return receipt;
+      }
       const receipt = await lower.set(node, ctx);
       // Shadowed write: upper wins reads, so the view never shows the image
       // lower just committed — reporting it would poison caches with an
@@ -403,12 +413,12 @@ export function createFilterTree(
       const { $rev, ...relocated } = patched;
       const dest = wasUpper ? lower : upper;
       const src = wasUpper ? upper : lower;
-      const destReceipt = await dest.set(relocated, ctx);
+      await dest.set(relocated, ctx);
       await src.remove(path, ctx);
-      // One logical patch at the view level: before = merged pre-image,
-      // after = what the destination committed (opaque dest → opaque receipt).
-      if (destReceipt.changes === null) return { changes: null };
-      return { changes: [{ path, before: node, after: destReceipt.changes[0]?.after ?? null }] };
+      // The relocation is a NON-ATOMIC two-store composite: a concurrent
+      // write can land between set and remove, so any synthesized image may
+      // be stale. Opaque is the only honest receipt here.
+      return { changes: null };
     },
 
     // patchMany routes the WHOLE batch to one layer — same get-based routing
@@ -449,6 +459,16 @@ export function createFilterTree(
         for (const e of entries) {
           if (await upper.get(e.path, ctx) !== undefined) return { changes: null };
         }
+      }
+      // Upper-routed creates over visible lower nodes: view-before was lower.
+      if (layer === upper && receipt.changes !== null) {
+        const changes: CommitChange[] = [];
+        for (const c of receipt.changes) {
+          if (c.before !== null) { changes.push(c); continue; }
+          const shadowed = await lower.get(c.path, ctx);
+          changes.push(shadowed === undefined ? c : { ...c, before: shadowed });
+        }
+        return { changes };
       }
       return receipt;
     },

@@ -1113,6 +1113,23 @@ describe('opaque receipts (core-ns6p.2)', () => {
     assert.equal(events[0].type, 'remove', 'current state is reflected loudly');
   });
 
+  it('remove that reveals a lower node emits set (the view still serves it), not remove', async () => {
+    const mem = createMemoryTree();
+    // Overlay-style receipt: remove uncovers a lower image.
+    const inner: Tree = {
+      ...mem,
+      remove: async (p) => ({ changes: [{ path: p, before: { $path: p, $type: 'doc', v: 'up' }, after: { $path: p, $type: 'doc', v: 'low', $rev: 3 } }] }),
+    };
+    const { tree, cdc } = withSubs(inner);
+    const events: NodeEvent[] = [];
+    cdc.subscribe('/x', (e) => events.push(e));
+
+    await tree.remove('/x');
+
+    assert.equal(events.length, 1);
+    assert.notEqual(events[0].type, 'remove', 'a revealed node must not be deleted client-side');
+  });
+
   it('opaque write to a claims path dirties every query view of that user', async () => {
     const inner = opaqueTree();
     const { tree, cdc } = withSubs(inner, undefined, detectors);

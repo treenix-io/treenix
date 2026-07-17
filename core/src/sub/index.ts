@@ -559,6 +559,14 @@ export function withSubscriptions(
         await emitOpaque('remove', path, undefined, ctx);
         return receipt;
       }
+      // Overlay reveal: the remove UNCOVERED a lower node — the view now
+      // serves it, so subscribers get a set (emitting remove would make
+      // clients delete a node that is still visible).
+      const revealed = receipt.changes[0]?.after;
+      if (revealed) {
+        await emitSetEvent(path, receipt.changes[0].before ?? undefined, ctx, revealed);
+        return receipt;
+      }
       const oldNode = receipt.changes[0]?.before;
       if (oldNode) {
         const claimsUid = claimsUserOf(path);
