@@ -239,7 +239,12 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
       try { await rmdir(resolve(join(rootDir, path))); } catch (e: any) { if (e.code !== 'ENOENT' && e.code !== 'ENOTEMPTY') throw e; }
     }
 
-    return { path, before: existing ?? null, after: { ...rest, $path: path } };
+    // After-image parsed back from the exact serialized body: an owned deep
+    // snapshot with on-disk fidelity — a shallow {...rest} would alias the
+    // caller's nested objects and could diverge from disk post-mutation.
+    const after = safeJsonParse(data);
+    after.$path = path;
+    return { path, before: existing ?? null, after };
   }
 
   const tree: TreeSource = {

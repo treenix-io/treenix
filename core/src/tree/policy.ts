@@ -133,19 +133,21 @@ function migrateNode(node: NodeData): NodeData {
   return clone;
 }
 
-/** Migrate receipt before-images (core-ns6p.2): raw stored shapes must not
- *  leak above the policy — subs diff against before, audit journals it, and
- *  both must see the same migrated shape reads serve. After-images are fresh
- *  writes stamped to the current $v — migrateNode would no-op, skip them. */
+/** Migrate receipt images (core-ns6p.2): raw stored shapes must not leak
+ *  above the policy — subs diff them, audit journals them, the cache SERVES
+ *  the after. Fresh-write afters are stamped to the current $v (migrateNode
+ *  no-ops via the checked fast path); guarded no-op members (after===before,
+ *  e.g. test-only patch on a pending-ladder node) share ONE migrated image so
+ *  equality — and the cache's shape — survive migration. */
 function migrateReceipt(receipt: CommitReceipt): CommitReceipt {
   if (receipt.changes === null) return receipt;
   let dirty = false;
   const changes = receipt.changes.map(c => {
-    if (!c.before) return c;
-    const migrated = migrateNode(c.before);
-    if (migrated === c.before) return c;
+    const before = c.before ? migrateNode(c.before) : c.before;
+    const after = c.after === c.before ? before : (c.after ? migrateNode(c.after) : c.after);
+    if (before === c.before && after === c.after) return c;
     dirty = true;
-    return { ...c, before: migrated };
+    return { ...c, before, after };
   });
   return dirty ? { changes } : receipt;
 }

@@ -1063,3 +1063,66 @@ describe('withSubscriptions.onSelfWrite', () => {
     assert.ok(errored, 'thrown error was logged, not swallowed silently');
   });
 });
+
+// ── Opaque receipts (core-ns6p.2): remote authority, changes: null ──
+// A transport tree cannot see the authority's images — subs degrade to the
+// coarse external-write dirty set + the image-free detectors, and the event
+// carries the authority's post-image (one read).
+
+describe('opaque receipts (core-ns6p.2)', () => {
+  /** Memory tree whose mutations commit for real but report changes: null. */
+  function opaqueTree(): Tree {
+    const mem = createMemoryTree();
+    return {
+      ...mem,
+      set: async (n, c) => { await mem.set(n, c); return { changes: null }; },
+      patch: async (p, o, c) => { await mem.patch(p, o, c); return { changes: null }; },
+      remove: async (p, c) => { await mem.remove(p, c); return { changes: null }; },
+    };
+  }
+
+  it('opaque set emits the authority post-image and dirties watched queries coarsely', async () => {
+    const inner = opaqueTree();
+    const { tree, cdc } = withSubs(inner);
+    cdc.watchQuery({ vp: '/views/items', userId: 'u1', plan: { source: '/items' }, mountDeps: new Set(['/views/items']) });
+    const events: NodeEvent[] = [];
+    cdc.subscribe('/items/a', (e) => events.push(e));
+
+    await tree.set(createNode('/items/a', 'doc', { v: 1 }));
+
+    assert.equal(events.length, 1);
+    assert.equal(events[0].type, 'set');
+    assert.ok(events[0].invalidateVps?.includes('/views/items'), 'coarse external-path dirty reaches the query watcher');
+  });
+
+  it('opaque set whose post-read finds nothing emits remove, never silence', async () => {
+    const mem = createMemoryTree();
+    // set commits then the node vanishes (concurrent remote remove won).
+    const inner: Tree = {
+      ...mem,
+      get: async () => undefined,
+      set: async () => ({ changes: null }),
+    };
+    const { tree, cdc } = withSubs(inner);
+    const events: NodeEvent[] = [];
+    cdc.subscribe('/items/a', (e) => events.push(e));
+
+    await tree.set(createNode('/items/a', 'doc', { v: 1 }));
+
+    assert.equal(events.length, 1);
+    assert.equal(events[0].type, 'remove', 'current state is reflected loudly');
+  });
+
+  it('opaque write to a claims path dirties every query view of that user', async () => {
+    const inner = opaqueTree();
+    const { tree, cdc } = withSubs(inner, undefined, detectors);
+    cdc.watchQuery({ vp: '/views/mine', userId: 'alice', plan: { source: '/stuff' }, mountDeps: new Set(['/views/mine']) });
+    const events: NodeEvent[] = [];
+    cdc.subscribe('/auth/users/alice', (e) => events.push(e));
+
+    await tree.set(createNode('/auth/users/alice', 'user', { role: 'admin' }));
+
+    assert.equal(events.length, 1);
+    assert.ok(events[0].invalidateVps?.includes('/views/mine'), 'claims change dirties the user\'s views even without images');
+  });
+});

@@ -2,7 +2,7 @@ import { createNode } from '#core';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { OpError } from '#errors';
-import { createMemoryTree, createOverlayTree, fromStorageKeys, PatchTestError, toStorageKeys } from './index';
+import { createFilterTree, createMemoryTree, createOverlayTree, fromStorageKeys, PatchTestError, toStorageKeys } from './index';
 
 describe('MemoryStore', () => {
   it('set and get', async () => {
@@ -268,6 +268,32 @@ describe('OverlayStore', () => {
     const tree = createOverlayTree(upper, lower);
     assert.ok((await tree.remove('/x')).changes?.length);
     assert.deepEqual((await tree.remove('/y')).changes, []);
+  });
+
+  it('remove that reveals lower reports the revealed node as after (core-ns6p.2)', async () => {
+    const upper = createMemoryTree();
+    const lower = createMemoryTree();
+    await upper.set(createNode('/x', 'upper', { v: 'up' }));
+    await lower.set(createNode('/x', 'lower', { v: 'low' }));
+    const tree = createOverlayTree(upper, lower);
+
+    const receipt = await tree.remove('/x');
+    // The view still serves lower after the upper copy is gone — an
+    // after: null receipt would tell caches the path died.
+    assert.equal(receipt.changes?.[0]?.after?.v, 'low');
+    assert.equal((await tree.get('/x'))?.v, 'low');
+  });
+
+  it('filter set shadowed by upper goes opaque instead of reporting an invisible image (core-ns6p.2)', async () => {
+    const upper = createMemoryTree();
+    const lower = createMemoryTree();
+    await upper.set(createNode('/x', 't.upper', { v: 'up' }));
+    // Content-based predicate routes this write to LOWER while upper shadows reads.
+    const tree = createFilterTree(upper, lower, (n) => n.$type === 't.upper');
+
+    const receipt = await tree.set(createNode('/x', 't.lower', { v: 'low' }));
+    assert.equal(receipt.changes, null, 'view-level truth unknowable — receipt is opaque');
+    assert.equal((await tree.get('/x'))?.v, 'up', 'view still serves the shadowing upper');
   });
 });
 

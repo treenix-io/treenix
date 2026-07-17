@@ -32,7 +32,10 @@ export function withCache(tree: Tree, max = DEFAULT_MAX): CachedTree {
    *  Opaque receipt (remote authority) → invalidate the verb's own paths. */
   function absorb(receipt: CommitReceipt, verbPaths: string[]): CommitReceipt {
     invalidateEpoch++;
-    if (receipt.changes === null) {
+    // null: opaque authority — images unknown. []: known no-op — but the
+    // verb's own paths may hold stale phantoms (remove of a node the backing
+    // lost out-of-band); the old unconditional invalidate evicted those.
+    if (receipt.changes === null || receipt.changes.length === 0) {
       for (const p of verbPaths) cache.delete(p);
       return receipt;
     }

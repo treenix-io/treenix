@@ -209,6 +209,30 @@ describe('policy: migration step', () => {
     assert.equal(raw?.$rev, (rev0 ?? 0) + 1, 'converted set-member passes OCC and bumps exactly once');
   });
 
+  it('receipt images pass up MIGRATED — guarded no-op member keeps one shared image (core-ns6p.2)', async () => {
+    register(TEST_TYPE, 'migrate', () => ({
+      1: (n: Record<string, unknown>) => { n.body = n.text; delete n.text; },
+    }));
+
+    const inner = createMemoryTree();
+    const { tree } = withStoragePolicy(inner);
+    await inner.set(createNode('/p', 'dir', {}));
+    await inner.set(createNode('/p/a', TEST_TYPE, { text: 'hi' }));
+    const rev0 = (await inner.get('/p/a'))?.$rev;
+
+    // Test-only member on a pending-ladder node: policy forwards a $rev guard,
+    // the adapter reports a guarded no-op pair (before === after, RAW shape).
+    // The policy boundary must migrate BOTH images and keep them identical —
+    // the cache SERVES the after, so a raw after would leak the old shape.
+    const receipt = await tree.patchMany!('/p', [{ path: '/p/a', ops: [['t', 'body', 'hi']] }]);
+    const c = receipt.changes?.[0];
+    assert.ok(c, 'guarded member reported');
+    assert.equal(c.before, c.after, 'guarded no-op keeps one shared image');
+    assert.equal(c.after?.body, 'hi', 'image is the MIGRATED shape');
+    assert.equal(c.after?.text, undefined);
+    assert.equal((await inner.get('/p/a'))?.$rev, rev0, 'nothing written');
+  });
+
   it('patchMany mixed batch: set-member, mutation on a v0 node, and test-only member in one commit (core-anz4.9)', async () => {
     register(TEST_TYPE, 'migrate', () => ({
       1: (n: Record<string, unknown>) => { n.body = n.text; delete n.text; },

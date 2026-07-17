@@ -365,7 +365,12 @@ export function createFilterTree(
     },
     async set(node, ctx) {
       if (toUpper(node)) return upper.set(node, ctx);
-      return lower.set(node, ctx);
+      const receipt = await lower.set(node, ctx);
+      // Shadowed write: upper wins reads, so the view never shows the image
+      // lower just committed — reporting it would poison caches with an
+      // invisible node. View-level truth is unknowable here → opaque.
+      if (await upper.get(node.$path, ctx) !== undefined) return { changes: null };
+      return receipt;
     },
     async remove(path, ctx) {
       const a = await upper.remove(path, ctx);
@@ -437,7 +442,15 @@ export function createFilterTree(
       if (!layer!.patchMany) {
         throw new OpError('BAD_REQUEST', 'patchMany: layer does not support patchMany');
       }
-      return layer!.patchMany(ancestor, entries, ctx);
+      const receipt = await layer!.patchMany(ancestor, entries, ctx);
+      // Same shadowed-write rule as set(): a lower-routed member the upper
+      // shadows commits invisibly — the batch receipt goes opaque.
+      if (layer === lower && receipt.changes !== null) {
+        for (const e of entries) {
+          if (await upper.get(e.path, ctx) !== undefined) return { changes: null };
+        }
+      }
+      return receipt;
     },
 
     // execute routes to the layer owning the node — same logic as patch.
@@ -465,7 +478,15 @@ export function createOverlayTree(upper: Tree, lower: Tree): Tree {
   return {
     ...createFilterTree(upper, lower, () => true),
     async remove(path, ctx) {
-      return upper.remove(path, ctx);
+      const receipt = await upper.remove(path, ctx);
+      if (receipt.changes === null || receipt.changes.length === 0) return receipt;
+      // Whiteout-free overlay: removing the upper copy REVEALS lower — the
+      // view now serves lower's node, so the receipt carries it as the
+      // after-image (caches stay view-correct; the remove event still fires,
+      // parity with the pre-receipt contract).
+      const revealed = await lower.get(path, ctx);
+      if (revealed === undefined) return receipt;
+      return { changes: [{ ...receipt.changes[0], after: revealed }] };
     },
   };
 }

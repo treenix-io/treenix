@@ -496,3 +496,36 @@ describe('withCache — invalidate generation guards in-flight reads', () => {
     assert.equal(calls, 1, 'invalidate of unrelated path did not poison /a cache');
   });
 });
+
+describe('withCache — receipt absorb (core-ns6p.2)', () => {
+  it('known no-op remove still evicts a stale cached phantom', async () => {
+    const mem = createMemoryTree();
+    await mem.set(makeNode('/a', { v: 1 }));
+    const cached = withCache(mem);
+
+    await cached.get('/a'); // cache holds /a
+    await mem.remove('/a'); // backing loses it out-of-band
+
+    // remove through the cache: adapter reports changes: [] (nothing there) —
+    // the verb's path must still be evicted, or the phantom outlives reality.
+    const receipt = await cached.remove('/a');
+    assert.deepEqual(receipt.changes, []);
+    assert.equal(await cached.get('/a'), undefined, 'phantom evicted');
+  });
+
+  it('opaque receipt evicts the verb path instead of populating', async () => {
+    const mem = createMemoryTree();
+    await mem.set(makeNode('/a', { v: 1 }));
+    const opaque: typeof mem = {
+      ...mem,
+      async set(n, c) { await mem.set(n, c); return { changes: null }; },
+    };
+    const cached = withCache(opaque);
+
+    await cached.get('/a');
+    await cached.set(makeNode('/a', { v: 2 }));
+
+    const got = await cached.get('/a');
+    assert.equal(got?.v, 2, 'stale image was evicted — the read refetched fresh');
+  });
+});

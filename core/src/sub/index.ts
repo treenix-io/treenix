@@ -624,23 +624,37 @@ export function withSubscriptions(
 
   /** Coarse emission for an OPAQUE receipt (remote authority, core-ns6p.2):
    *  no images to diff or evaluate membership on, so the dirty set is the
-   *  same over-approximation external writes get (vpsForExternalPath) and the
+   *  external-write over-approximation (vpsForExternalPath) PLUS the
+   *  image-free detectors (claims by path; config from the post-image). The
    *  event carries the authority's post-image (one remote read — the only
    *  read left on this path; the wire-ack upgrade in core-anz4.13 deletes it). */
   async function emitOpaque(verb: 'set' | 'patch' | 'remove', path: string, ops: readonly PatchOp[] | undefined, ctx: unknown): Promise<void> {
-    const cdc = dirtyVps(vpsForExternalPath(path));
+    // Test-only patch: nothing written, nothing to signal (non-opaque parity).
+    const mutations = verb === 'patch' && ops ? ops.filter(o => o[0] !== 't') : undefined;
+    if (mutations && mutations.length === 0) return;
+
     const by = opIdOf(ctx);
+    const claimsUid = claimsUserOf(path);
     if (verb === 'remove') {
+      const cdc = dirtyVps(vpsForExternalPath(path), claimsUid ? vpsForClaimsChange(claimsUid) : []);
       emit({ type: 'remove', path, ...(by ? { by } : {}), ...cdc });
       return;
     }
+
     const stored = await tree.get(path, ctx);
-    // Gone already = a concurrent remote remove won; its own event supersedes
-    // ours, and a fabricated payload would carry a stale rev (cnr.5 class).
-    if (!stored) return;
-    if (verb === 'patch' && ops) {
-      const mutations = ops.filter(o => o[0] !== 't');
-      if (mutations.length === 0) return;
+    const cdc = dirtyVps(
+      vpsForExternalPath(path),
+      claimsUid ? vpsForClaimsChange(claimsUid) : [],
+      isConfigNode(stored) ? vpsForConfigChange(path) : [],
+    );
+    if (!stored) {
+      // A concurrent remote remove won. Reflect the CURRENT state loudly — a
+      // silent return would drop both the event and the dirty signal, and a
+      // fabricated set payload would carry a stale rev (cnr.5 class).
+      emit({ type: 'remove', path, ...(by ? { by } : {}), ...cdc });
+      return;
+    }
+    if (mutations) {
       emit({ type: 'patch', path, patches: mutations, rev: stored.$rev, ...(by ? { by } : {}), ...cdc });
       return;
     }
