@@ -165,7 +165,7 @@ export class Branch {
   mergedAt = 0;
   conflicts: ConflictEntry[] = [];
 
-  /** @description List the branch's changes against live (does not mutate) */
+  /** @read @description List the branch's changes against live (does not mutate) */
   async diff(): Promise<{ entries: DiffEntry[] }> {
     const ctx = getCtx();
     return { entries: await collectDiff(ctx.tree, realBranchPath(ctx.node.$path), this.base) };

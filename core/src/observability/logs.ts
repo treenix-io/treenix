@@ -8,7 +8,7 @@ interceptConsole();
 
 /** @description Server log buffer — query, literal grep, filter by level */
 export class Logs {
-  /** @description Query log buffer with literal grep, level filter, head/tail */
+  /** @read @description Query log buffer with literal grep, level filter, head/tail */
   async query(data: {
     /** Literal text to filter messages */ grep?: string;
     /** Log level(s) to include */ level?: LogLevel | LogLevel[];
@@ -18,7 +18,7 @@ export class Logs {
     return queryLogs(data);
   }
 
-  /** @description Buffer stats: buffered count, total ever, max capacity */
+  /** @read @description Buffer stats: buffered count, total ever, max capacity */
   async stats() {
     return logStats();
   }

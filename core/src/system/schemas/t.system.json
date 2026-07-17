@@ -7,10 +7,12 @@
   "methods": {
     "catalog": {
       "description": "List all registered types with properties and actions",
+      "kind": "read",
       "arguments": []
     },
     "search_types": {
       "description": "Search types by keyword across names, properties, and actions",
+      "kind": "read",
       "arguments": [
         {
           "name": "data",
@@ -29,6 +31,7 @@
     },
     "describe_type": {
       "description": "Full type schema with properties, actions, args, and cross-references",
+      "kind": "read",
       "arguments": [
         {
           "name": "data",

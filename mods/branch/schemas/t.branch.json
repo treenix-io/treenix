@@ -82,6 +82,7 @@
   "methods": {
     "diff": {
       "description": "List the branch's changes against live (does not mutate)",
+      "kind": "read",
       "arguments": [],
       "return": {
         "type": "object",

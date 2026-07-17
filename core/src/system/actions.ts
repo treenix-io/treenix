@@ -11,17 +11,17 @@ const catalog = new TypeCatalog();
 
 /** @description System actions — type discovery and prefab deployment */
 export class SystemActions {
-  /** @description List all registered types with properties and actions */
+  /** @read @description List all registered types with properties and actions */
   async catalog() {
     return catalog.list();
   }
 
-  /** @description Search types by keyword across names, properties, and actions */
+  /** @read @description Search types by keyword across names, properties, and actions */
   async search_types(data: { /** Search keyword */ query: string }) {
     return catalog.search(data.query);
   }
 
-  /** @description Full type schema with properties, actions, args, and cross-references */
+  /** @read @description Full type schema with properties, actions, args, and cross-references */
   async describe_type(data: { /** Type name, e.g. "cafe.contact" */ type: string }) {
     const desc = catalog.describe(data.type);
     if (!desc) throw new Error(`type not found: ${data.type}`);

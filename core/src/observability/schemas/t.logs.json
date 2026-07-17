@@ -7,6 +7,7 @@
   "methods": {
     "query": {
       "description": "Query log buffer with literal grep, level filter, head/tail",
+      "kind": "read",
       "arguments": [
         {
           "name": "data",
@@ -56,6 +57,7 @@
     },
     "stats": {
       "description": "Buffer stats: buffered count, total ever, max capacity",
+      "kind": "read",
       "arguments": []
     }
   }
