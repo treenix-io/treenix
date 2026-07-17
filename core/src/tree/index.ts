@@ -310,6 +310,20 @@ export function createFilterTree(
   lower: Tree,
   toUpper: (node: NodeData) => boolean,
 ): Tree {
+  // Post-commit shadow detection for upper creates. The read sits outside the
+  // committing adapter's span: in-pipeline same-path writes are serialized by
+  // the commit envelope, so only out-of-band lower drift can race it — and a
+  // FAILING read must never report a committed write as failed. Any doubt
+  // (shadow present, or the read itself erroring) degrades to opaque.
+  async function shadowedOrUnknown(layer: Tree, path: string, ctx: unknown): Promise<boolean> {
+    try {
+      return await layer.get(path, ctx) !== undefined;
+    } catch (e) {
+      console.error(`createFilterTree: post-commit shadow check failed for ${path}:`, e);
+      return true;
+    }
+  }
+
   return {
     async get(path, ctx) {
       return (await upper.get(path, ctx)) ?? (await lower.get(path, ctx));
@@ -371,7 +385,7 @@ export function createFilterTree(
         // committing adapter's span and can tear under concurrency. Opaque is
         // the only honest receipt without a cross-layer atomic snapshot.
         const c = receipt.changes?.[0];
-        if (c && c.before === null && await lower.get(node.$path, ctx) !== undefined) {
+        if (c && c.before === null && await shadowedOrUnknown(lower, node.$path, ctx)) {
           return { changes: null };
         }
         return receipt;
@@ -380,7 +394,7 @@ export function createFilterTree(
       // Shadowed write: upper wins reads, so the view never shows the image
       // lower just committed — reporting it would poison caches with an
       // invisible node. View-level truth is unknowable here → opaque.
-      if (await upper.get(node.$path, ctx) !== undefined) return { changes: null };
+      if (await shadowedOrUnknown(upper, node.$path, ctx)) return { changes: null };
       return receipt;
     },
     async remove(path, ctx) {
@@ -458,7 +472,7 @@ export function createFilterTree(
       // shadows commits invisibly — the batch receipt goes opaque.
       if (layer === lower && receipt.changes !== null) {
         for (const e of entries) {
-          if (await upper.get(e.path, ctx) !== undefined) return { changes: null };
+          if (await shadowedOrUnknown(upper, e.path, ctx)) return { changes: null };
         }
       }
       // Upper-routed creates over visible lower nodes: view-before was lower,
@@ -466,7 +480,7 @@ export function createFilterTree(
       // whole batch goes opaque (same rule as set()).
       if (layer === upper && receipt.changes !== null) {
         for (const c of receipt.changes) {
-          if (c.before === null && await lower.get(c.path, ctx) !== undefined) {
+          if (c.before === null && await shadowedOrUnknown(lower, c.path, ctx)) {
             return { changes: null };
           }
         }
