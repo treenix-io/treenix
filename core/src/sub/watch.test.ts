@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { type NodeEvent } from './index';
-import { createWatchManager } from './watch';
+import { createWatchManager, type StampedEvent, type WatchCursor } from './watch';
+
+/** Build the resume cursor a client would hold after processing `e`. */
+function cursorOf(e: StampedEvent): WatchCursor {
+  assert.ok(typeof e.seq === 'number', 'delivered event must be seq-stamped');
+  assert.ok(typeof e.epoch === 'string', 'delivered event must carry the stream epoch');
+  return { seq: e.seq, epoch: e.epoch };
+}
 
 describe('WatchManager', () => {
   it('owns query registration, unwatch, and user cleanup', async () => {
@@ -602,25 +609,23 @@ describe('WatchManager — breakContinuity (core-pxlu, delegated execute)', () =
     assert.equal(preserved, false);
   });
 
-  it('resume with since replays the reset from the ring (continuity holds THROUGH the reset)', () => {
+  it('resume across a break fails closed — the break re-mints the epoch, a pre-break cursor is refused', () => {
     const wm = createWatchManager({ gracePeriodMs: 10_000 });
-    const before: NodeEvent[] = [];
+    const before: StampedEvent[] = [];
     wm.connect('c1', 'u1', (e) => before.push(e));
     wm.watch('u1', ['/doc']);
     wm.notify({ type: 'set', path: '/doc', node: { $path: '/doc', $type: 'doc' } });
-    const first = before[0];
-    assert.ok(first.type === 'set' && first.seq !== undefined);
-    const lastSeq = first.seq;
+    const preBreak = cursorOf(before[0]);
     wm.disconnect('c1');
 
     wm.breakContinuity();
 
+    // anz4.10/11: the break invalidated the whole pre-break seq space — the
+    // cursor is answered false with NO replay, the client full-refetches.
     const replayed: NodeEvent[] = [];
-    const covered = wm.connect('c2', 'u1', (e) => replayed.push(e), lastSeq);
-    assert.equal(covered, true, 'ring covers the gap — the reset itself is delivered');
-    assert.equal(replayed.length, 1);
-    assert.equal(replayed[0].type, 'reconnect');
-    assert.equal((replayed[0] as { preserved?: boolean }).preserved, false);
+    const covered = wm.connect('c2', 'u1', (e) => replayed.push(e), preBreak);
+    assert.equal(covered, false);
+    assert.deepEqual(replayed, []);
   });
 
   it('user with no watches and no ring history is untouched (no crash, fresh connect unaffected)', () => {
@@ -752,14 +757,17 @@ describe('WatchManager — invalidateVps narrowed per user (core-cnr.8 C26)', ()
 
   it('ring replay after grace delivers the narrowed event, not the union', () => {
     const wm = createWatchManager();
-    wm.connect('c1', 'u1', () => {});
+    const live: StampedEvent[] = [];
+    wm.connect('c1', 'u1', (e) => live.push(e));
     wm.watch('u1', ['/views/a'], { children: true });
+    wm.notify({ type: 'set', path: '/data/x', node: { $type: 't' }, invalidateVps: ['/views/a'] });
+    const cursor = cursorOf(live[0]);
     wm.disconnect('c1');
 
     wm.notify({ type: 'set', path: '/data/x', node: { $type: 't' }, invalidateVps: ['/views/a', '/views/b'] });
 
     const replayed: NodeEvent[] = [];
-    const covered = wm.connect('c2', 'u1', (e) => replayed.push(e), 0);
+    const covered = wm.connect('c2', 'u1', (e) => replayed.push(e), cursor);
     assert.equal(covered, true);
     assert.equal(replayed.length, 1);
     assert.deepEqual(replayed[0].invalidateVps, ['/views/a']);
@@ -858,34 +866,53 @@ describe('WatchManager — seq / ring / resume (core-gk8.1)', () => {
     assert.deepEqual(e2.map(seqOf), [1]); // per-user stream, not global
   });
 
-  it('connect(since) replays grace-window events — preserved means continuity', () => {
+  it('connect(cursor) replays grace-window events — preserved means continuity', () => {
     const wm = createWatchManager();
-    const a: NodeEvent[] = [];
+    const a: StampedEvent[] = [];
     wm.connect('c1', 'u1', (e) => a.push(e));
     wm.watch('u1', ['/a']);
     wm.notify(setEvent('/a')); // seq 1, delivered live
+    const cursor = cursorOf(a[0]);
     wm.disconnect('c1');
     wm.notify(setEvent('/a')); // seq 2 — offline, ringed
     wm.notify(setEvent('/a')); // seq 3 — offline, ringed
 
     const b: NodeEvent[] = [];
-    const preserved = wm.connect('c2', 'u1', (e) => b.push(e), 1);
+    const preserved = wm.connect('c2', 'u1', (e) => b.push(e), cursor);
     assert.equal(preserved, true);
     assert.deepEqual(b.map(seqOf), [2, 3]); // exactly the gap, in order
   });
 
+  it('cursor at the head of the stream: covered, nothing replayed (happy path)', () => {
+    const wm = createWatchManager();
+    const a: StampedEvent[] = [];
+    wm.connect('c1', 'u1', (e) => a.push(e));
+    wm.watch('u1', ['/a']);
+    wm.notify(setEvent('/a'));
+    wm.notify(setEvent('/a'));
+    const cursor = cursorOf(a[1]);
+    wm.disconnect('c1');
+
+    const b: NodeEvent[] = [];
+    const preserved = wm.connect('c2', 'u1', (e) => b.push(e), cursor);
+    assert.equal(preserved, true);
+    assert.deepEqual(b, []);
+  });
+
   it('ring overflow → preserved false, no partial replay', () => {
     const wm = createWatchManager({ ringSize: 2 });
-    wm.connect('c1', 'u1', () => {});
+    const a: StampedEvent[] = [];
+    wm.connect('c1', 'u1', (e) => a.push(e));
     wm.watch('u1', ['/a']);
     wm.notify(setEvent('/a')); // seq 1
+    const cursor = cursorOf(a[0]);
     wm.disconnect('c1');
     wm.notify(setEvent('/a')); // 2
     wm.notify(setEvent('/a')); // 3
     wm.notify(setEvent('/a')); // 4 — ring now [3,4], seq 2 evicted
 
     const b: NodeEvent[] = [];
-    const preserved = wm.connect('c2', 'u1', (e) => b.push(e), 1);
+    const preserved = wm.connect('c2', 'u1', (e) => b.push(e), cursor);
     assert.equal(preserved, false); // gap not covered — client must refetch
     assert.deepEqual(b, []);        // never replay a hole silently
   });
@@ -905,18 +932,278 @@ describe('WatchManager — seq / ring / resume (core-gk8.1)', () => {
   it('multi-tab: shared seq stream; resuming tab replays only to itself', () => {
     const wm = createWatchManager();
     const tab1: NodeEvent[] = [];
-    const tab2: NodeEvent[] = [];
+    const tab2: StampedEvent[] = [];
     wm.connect('c1', 'u1', (e) => tab1.push(e));
     wm.connect('c2', 'u1', (e) => tab2.push(e));
     wm.watch('u1', ['/a']);
     wm.notify(setEvent('/a')); // seq 1 → both tabs
+    const cursor = cursorOf(tab2[0]);
     wm.disconnect('c2');
     wm.notify(setEvent('/a')); // seq 2 → tab1 only (user online — not "missed")
 
     const tab2b: NodeEvent[] = [];
-    const preserved = wm.connect('c2b', 'u1', (e) => tab2b.push(e), 1);
+    const preserved = wm.connect('c2b', 'u1', (e) => tab2b.push(e), cursor);
     assert.equal(preserved, true);
     assert.deepEqual(tab2b.map(seqOf), [2]); // replayed to the new tab
     assert.deepEqual(tab1.map(seqOf), [1, 2]); // no duplicates to the live tab
+  });
+});
+
+// ── P1 continuity bundle (core-anz4.10 / 4.11 / 4.12) ──
+
+describe('WatchManager — resume epoch (core-anz4.10)', () => {
+  const setEvent = (path: string): NodeEvent => ({ type: 'set', path, node: { $type: 't' } });
+
+  it('two tabs sleep; A resets the entry; B\'s stale cursor is refused — never silently covered', (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const wm = createWatchManager({ gracePeriodMs: 100 });
+    const b: StampedEvent[] = [];
+    wm.connect('cA', 'u1', () => {});
+    wm.connect('cB', 'u1', (e) => b.push(e));
+    wm.watch('u1', ['/doc']);
+    for (let i = 0; i < 5; i++) wm.notify(setEvent('/doc')); // both tabs at seq 5
+    const staleCursor = cursorOf(b[4]);
+    wm.disconnect('cA');
+    wm.disconnect('cB');
+    t.mock.timers.tick(100); // grace expires → entry (and its seq space) is gone
+
+    // Tab A returns first: honest refetch, re-registers, the NEW entry counts 1..3.
+    assert.equal(wm.connect('cA2', 'u1', () => {}), false);
+    wm.watch('u1', ['/doc']);
+    wm.notify(setEvent('/doc'));
+    wm.notify(setEvent('/doc'));
+    wm.notify(setEvent('/doc'));
+
+    // Tab B resumes with its pre-sleep cursor: seq 5 >= 3 numerically — the
+    // old seq-only compare answered covered=true and B silently kept a cache
+    // missing EVERYTHING (including removes). Epoch mismatch refuses it.
+    const b2: NodeEvent[] = [];
+    assert.equal(wm.connect('cB2', 'u1', (e) => b2.push(e), staleCursor), false);
+    assert.deepEqual(b2, []);
+  });
+
+  it('cursor without epoch (legacy bare number) fails closed even when seq looks covered', () => {
+    const wm = createWatchManager();
+    wm.connect('c1', 'u1', () => {});
+    wm.watch('u1', ['/a']);
+    wm.notify(setEvent('/a'));
+    wm.notify(setEvent('/a'));
+    wm.disconnect('c1');
+
+    assert.equal(wm.connect('c2', 'u1', () => {}, 2), false);
+  });
+
+  it('cursor ahead of the stream under the live epoch fails closed (corrupt client)', () => {
+    const wm = createWatchManager();
+    const a: StampedEvent[] = [];
+    wm.connect('c1', 'u1', (e) => a.push(e));
+    wm.watch('u1', ['/a']);
+    wm.notify(setEvent('/a'));
+    const { epoch } = cursorOf(a[0]);
+    wm.disconnect('c1');
+
+    assert.equal(wm.connect('c2', 'u1', () => {}, { seq: 99, epoch }), false);
+  });
+});
+
+describe('WatchManager — external continuity break (core-anz4.11)', () => {
+  const setEvent = (path: string): NodeEvent => ({ type: 'set', path, node: { $type: 't' } });
+
+  it('external reconnect{preserved:false} invalidates every pre-break cursor', () => {
+    const wm = createWatchManager({ gracePeriodMs: 10_000 });
+    const a: StampedEvent[] = [];
+    wm.connect('c1', 'u1', (e) => a.push(e));
+    wm.watch('u1', ['/doc']);
+    wm.notify(setEvent('/doc'));
+    const preBreak = cursorOf(a[0]);
+    wm.disconnect('c1');
+
+    // The signal external-watch forwards on a change-stream error / fs-watcher
+    // drop — previously broadcast-only, invisible to the seq/ring accounting.
+    wm.notify({ type: 'reconnect', preserved: false });
+
+    const replayed: NodeEvent[] = [];
+    assert.equal(wm.connect('c2', 'u1', (e) => replayed.push(e), preBreak), false);
+    assert.deepEqual(replayed, []);
+  });
+
+  it('live client adopts the post-break epoch from the stamped reset and resumes covered later', () => {
+    const wm = createWatchManager({ gracePeriodMs: 10_000 });
+    const a: StampedEvent[] = [];
+    wm.connect('c1', 'u1', (e) => a.push(e));
+    wm.watch('u1', ['/doc']);
+    wm.notify(setEvent('/doc'));            // seq 1, epoch E1
+    const preBreak = cursorOf(a[0]);
+
+    wm.notify({ type: 'reconnect', preserved: false }); // seq 2, stamped epoch E2
+    const breakEvent = a[1];
+    assert.equal(breakEvent.type, 'reconnect');
+    const postBreak = cursorOf(breakEvent);
+    assert.notEqual(postBreak.epoch, preBreak.epoch);
+
+    wm.notify(setEvent('/doc'));            // seq 3 under E2 — client stays current
+    const head = cursorOf(a[2]);
+    assert.equal(head.epoch, postBreak.epoch);
+    wm.disconnect('c1');
+
+    const b: NodeEvent[] = [];
+    assert.equal(wm.connect('c2', 'u1', (e) => b.push(e), head), true);
+    assert.deepEqual(b, []);
+  });
+
+  it('preserved:true reconnect is informational — continuity (and epoch) intact', () => {
+    const wm = createWatchManager({ gracePeriodMs: 10_000 });
+    const a: StampedEvent[] = [];
+    wm.connect('c1', 'u1', (e) => a.push(e));
+    wm.watch('u1', ['/doc']);
+    wm.notify(setEvent('/doc'));
+    const cursor = cursorOf(a[0]);
+
+    wm.notify({ type: 'reconnect', preserved: true });
+    wm.disconnect('c1');
+
+    assert.equal(wm.connect('c2', 'u1', () => {}, cursor), true);
+  });
+
+  it('break while offline: legacy no-cursor reconnect is answered false (missedOffline)', () => {
+    const wm = createWatchManager({ gracePeriodMs: 10_000 });
+    wm.connect('c1', 'u1', () => {});
+    wm.watch('u1', ['/doc']);
+    wm.disconnect('c1');
+
+    wm.notify({ type: 'reconnect', preserved: false });
+
+    assert.equal(wm.connect('c2', 'u1', () => {}), false);
+  });
+});
+
+describe('WatchManager — token-scoped watch ownership (core-anz4.12)', () => {
+  const setEvent = (path: string): NodeEvent => ({ type: 'set', path, node: { $type: 't' } });
+
+  it('two consumers, same user+path: first release keeps the second receiving', () => {
+    const wm = createWatchManager();
+    const got: NodeEvent[] = [];
+    wm.connect('c1', 'u1', (e) => got.push(e), undefined, 't1');
+    wm.connect('c2', 'u1', () => {}, undefined, 't2');
+    wm.watch('u1', ['/a'], { token: 't1' });
+    wm.watch('u1', ['/a'], { token: 't2' });
+
+    wm.unwatch('u1', ['/a'], { token: 't1' });
+    wm.notify(setEvent('/a'));
+    assert.equal(got.length, 1, 'registration must survive the co-holder\'s release');
+
+    wm.unwatch('u1', ['/a'], { token: 't2' });
+    wm.notify(setEvent('/a'));
+    assert.equal(got.length, 1, 'last holder released — watch gone');
+  });
+
+  it('children watch co-held: first unwatch keeps the prefix AND its query registration', () => {
+    const unwatchedQueries: string[] = [];
+    const wm = createWatchManager();
+    wm.bindQueryRegistry({
+      watchQuery: () => {},
+      unwatchQuery: (vp) => unwatchedQueries.push(vp),
+      unwatchAllQueries: () => {},
+    });
+    const got: NodeEvent[] = [];
+    wm.connect('c1', 'u1', (e) => got.push(e));
+    const query = { plan: { source: '/data' }, mountDeps: new Set(['/view']) };
+    wm.watch('u1', ['/view'], { children: true, query, token: 't1' });
+    wm.watch('u1', ['/view'], { children: true, query, token: 't2' });
+
+    wm.unwatch('u1', ['/view'], { children: true, token: 't1' });
+    assert.deepEqual(unwatchedQueries, [], 'query watch must survive the co-holder\'s release');
+    wm.notify(setEvent('/view/x'));
+    assert.equal(got.length, 1);
+
+    wm.unwatch('u1', ['/view'], { children: true, token: 't2' });
+    assert.deepEqual(unwatchedQueries, ['/view']);
+  });
+
+  it('token disconnect releases ALL its registrations after grace; co-held path survives', (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const wm = createWatchManager({ gracePeriodMs: 100 });
+    const got: NodeEvent[] = [];
+    wm.connect('c1', 'u1', () => {}, undefined, 't1');
+    wm.connect('c2', 'u1', (e) => got.push(e), undefined, 't2');
+    wm.watch('u1', ['/x', '/y'], { token: 't1' });
+    wm.watch('u1', ['/shared'], { token: 't1' });
+    wm.watch('u1', ['/shared'], { token: 't2' });
+
+    wm.disconnect('c1');
+    wm.disconnect('c1'); // idempotent — second disconnect of the same lane is a no-op
+    t.mock.timers.tick(100);
+
+    wm.notify(setEvent('/x'));
+    wm.notify(setEvent('/y'));
+    assert.equal(got.length, 0, 't1\'s exclusive registrations released exactly once');
+    wm.notify(setEvent('/shared'));
+    assert.equal(got.length, 1, 'co-held registration survives t1\'s death');
+  });
+
+  it('token reconnect within grace keeps its registrations', (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const wm = createWatchManager({ gracePeriodMs: 100 });
+    const got: NodeEvent[] = [];
+    wm.connect('c1', 'u1', () => {}, undefined, 't1');
+    wm.connect('cKeep', 'u1', (e) => got.push(e), undefined, 'tKeep'); // keeps the user entry alive
+    wm.watch('u1', ['/x'], { token: 't1' });
+
+    wm.disconnect('c1');
+    t.mock.timers.tick(50);
+    wm.connect('c1b', 'u1', () => {}, undefined, 't1'); // same tab, new lane
+    t.mock.timers.tick(100); // past the original grace deadline
+
+    wm.notify(setEvent('/x'));
+    assert.equal(got.length, 1, 'watch survives — the tab came back in time');
+  });
+
+  it('double release cannot underflow the budget', () => {
+    const wm = createWatchManager({ maxWatchesPerUser: 2 });
+    wm.connect('c1', 'u1', () => {}, undefined, 't1');
+    wm.watch('u1', ['/a'], { token: 't1' });
+    wm.watch('u1', ['/b'], { token: 't1' });
+
+    wm.unwatch('u1', ['/a'], { token: 't1' });
+    wm.unwatch('u1', ['/a'], { token: 't1' }); // double release — must be a no-op
+
+    wm.watch('u1', ['/c'], { token: 't1' });   // back at the limit of 2
+    // An underflow would have freed a phantom slot and let this succeed.
+    assert.throws(() => wm.watch('u1', ['/d'], { token: 't1' }));
+  });
+
+  it('refetch re-registration never moves the count (the previous refcount leak)', () => {
+    const wm = createWatchManager({ maxWatchesPerUser: 2 });
+    wm.connect('c1', 'u1', () => {}, undefined, 't1');
+    for (let i = 0; i < 50; i++) wm.watch('u1', ['/a'], { token: 't1' }); // refetch loop
+    wm.watch('u1', ['/b'], { token: 't1' }); // still fits — count is 2, not 51
+
+    assert.throws(() => wm.watch('u1', ['/c'], { token: 't1' }));
+
+    // And the single release still frees exactly one slot.
+    wm.unwatch('u1', ['/a'], { token: 't1' });
+    wm.watch('u1', ['/c'], { token: 't1' });
+    assert.throws(() => wm.watch('u1', ['/d'], { token: 't1' }));
+  });
+
+  it('auto-promotion is owned by the promoting token; explicit co-hold survives its release', (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const wm = createWatchManager({ gracePeriodMs: 100 });
+    const got: NodeEvent[] = [];
+    wm.connect('c1', 'u1', () => {}, undefined, 't1');
+    wm.connect('c2', 'u1', (e) => got.push(e), undefined, 't2');
+    wm.watch('u1', ['/dir'], { children: true, autoWatch: true, token: 't1' });
+    wm.watch('u1', ['/dir/a'], { token: 't2' }); // explicit hold by the other tab
+
+    wm.notify(setEvent('/dir/a')); // t1 gains an auto hold alongside t2's explicit
+    assert.equal(got.length, 1);
+
+    wm.disconnect('c1');
+    t.mock.timers.tick(100); // t1 dies with its prefix watch and auto holds
+
+    wm.notify(setEvent('/dir/a'));
+    assert.equal(got.length, 2, 't2\'s explicit watch must survive t1\'s auto hold');
+    wm.notify(setEvent('/dir/b'));
+    assert.equal(got.length, 2, 't1\'s prefix watch is gone');
   });
 });

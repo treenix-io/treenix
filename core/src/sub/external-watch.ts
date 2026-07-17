@@ -149,6 +149,9 @@ export function runExternalWatch(tree: Tree, opts: RunExternalWatchOpts): void {
         // Clear cache BEFORE reconnect: a concurrent watch-filter read
         // would otherwise see stale pre-error data.
         if (invalidateCacheAll) invalidateCacheAll();
+        // Downstream, WatchManager.notify treats this frame as a continuity
+        // break: every user's resume epoch re-mints, so no pre-break cursor
+        // can resume "covered" over writes we never saw (core-anz4.11).
         forwardEvent({ type: 'reconnect', preserved: false });
       }
 

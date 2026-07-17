@@ -34,6 +34,8 @@ mock.module('#tree/trpc', {
     setToken: () => {},
     clearToken: () => {},
     AUTH_EXPIRED_EVENT: 'trpc:auth-expired',
+    TAB_TOKEN: 'test-tab',
+    tabTokenInput: { token: 'test-tab' },
   },
 });
 

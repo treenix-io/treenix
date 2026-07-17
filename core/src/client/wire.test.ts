@@ -160,4 +160,29 @@ describe('TWP wire client', () => {
     client.destroy();
     await assert.rejects(client.tree.get('/a'), /not attached|closed/);
   });
+
+  it('cursor: seq watermark from stamped frames; reset adopts its cursor and fans out to watchPath consumers (anz4.10/11)', async () => {
+    const { client, server } = await harness();
+    const got: { ev?: string }[] = [];
+    await client.watchPath('/a', (e) => got.push(e));
+
+    server.emit({ seq: 3, ev: 'patch', path: '/a', ops: [['r', 'title', 'B']] });
+    await new Promise<void>((r) => setImmediate(r));
+    assert.deepEqual(client.cursor(), { seq: 3 });
+
+    // Stamped break: adopt the break-point watermark + post-break epoch, and
+    // every watchPath consumer is told to refetch (the reset has no path —
+    // the path router alone would silently drop it).
+    server.emit({ ev: 'reset', reason: 'resume', seq: 7, epoch: 'E2' });
+    await new Promise<void>((r) => setImmediate(r));
+    assert.deepEqual(client.cursor(), { seq: 7, epoch: 'E2' });
+    assert.equal(got.filter((f) => f.ev === 'reset').length, 1);
+
+    // Plain verdict reset (no cursor): epoch drops — a later resume without an
+    // epoch is refused server-side, which is the fail-closed default.
+    server.emit({ ev: 'reset', reason: 'resume' });
+    await new Promise<void>((r) => setImmediate(r));
+    assert.deepEqual(client.cursor(), { seq: 0 });
+    assert.equal(got.filter((f) => f.ev === 'reset').length, 2);
+  });
 });

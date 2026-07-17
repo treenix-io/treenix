@@ -50,3 +50,15 @@ const authFetch = async (url: string | URL | Request, opts?: RequestInit): Promi
 type TrpcClient = ReturnType<typeof createTrpcTransport>['trpc'];
 
 export const trpc: TrpcClient = createTrpcTransport({ url, getToken, fetch: authFetch }).trpc;
+
+// Per-tab watch-ownership token (core-anz4.12): the session token is shared
+// across tabs (localStorage), so only a client-minted id can tell the server
+// WHICH tab holds a watch — without it, one tab's unwatch releases the other
+// tab's registration. Sent via input spread (spreads bypass excess-property
+// checks); the server's zod strips it until the token wiring lands.
+export const TAB_TOKEN: string =
+  typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : Date.now().toString(36) + '.' + Math.random().toString(36).slice(2, 10);
+
+export const tabTokenInput = { token: TAB_TOKEN } as const;

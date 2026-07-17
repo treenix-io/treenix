@@ -333,8 +333,15 @@ export function createTreeRouter(tree: Tree, systemTree: Tree, watcher: WatchMan
       }),
 
     events: withSession
-      // since = last seq the client processed — ring replay on resubscribe (core-gk8.1)
-      .input(z.object({ since: z.number().int().nonnegative().optional() }).optional())
+      // since = last seq the client processed — ring replay on resubscribe (core-gk8.1).
+      // epoch = the stream epoch that seq was issued under (core-anz4.10); token =
+      // watch-ownership scope for this tab (core-anz4.12). A since without epoch
+      // is answered preserved:false — fail closed.
+      .input(z.object({
+        since: z.number().int().nonnegative().optional(),
+        epoch: z.string().optional(),
+        token: z.string().optional(),
+      }).optional())
       .subscription(({ input, ctx }) => {
       if (ctx.token && !ctx.session) {
         throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Session expired' });
@@ -352,7 +359,10 @@ export function createTreeRouter(tree: Tree, systemTree: Tree, watcher: WatchMan
           }, Math.max(0, expiresAt - Date.now()));
         }
 
-        const { connId, preserved } = ctx.wire.connectEvents((e) => emit.next(e), input?.since);
+        const resume = input?.epoch !== undefined && input?.since !== undefined
+          ? { seq: input.since, epoch: input.epoch }
+          : input?.since;
+        const { connId, preserved } = ctx.wire.connectEvents((e) => emit.next(e), resume, input?.token);
         emit.next({ type: 'reconnect', preserved });
         return () => {
           if (expiryTimer) clearTimeout(expiryTimer);

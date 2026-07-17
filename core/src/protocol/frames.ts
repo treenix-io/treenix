@@ -10,8 +10,17 @@ import type { ErrorCode } from '#errors';
 
 // ── handshake (implemented by bindings, core-nin.3) ──
 
-export type HiFrame = { v: number; op: 'hi'; token?: string; sess?: string; since?: number; caps?: string[] };
-export type HiOkFrame = { op: 'hi'; ok: { sess: string; seq: number; actor: string | null; caps: string[] } };
+/** Client-side resume cursor (core-anz4.10): highest processed event seq plus
+ *  the stream epoch it was issued under (learned from stamped events / reset
+ *  frames / hi-ok). Echoed on reconnect as hi{since,epoch}; a cursor without
+ *  epoch is answered preserved:false — fail closed, the seq alone cannot prove
+ *  it belongs to the live stream. */
+export type ResumeCursor = { seq: number; epoch?: string };
+
+// hi.epoch rides next to since — the resume cursor; hi-ok.epoch announces the
+// current stream epoch so the client can resume covered next time (anz4.10).
+export type HiFrame = { v: number; op: 'hi'; token?: string; sess?: string; since?: number; epoch?: string; caps?: string[] };
+export type HiOkFrame = { op: 'hi'; ok: { sess: string; seq: number; epoch?: string; actor: string | null; caps: string[] } };
 
 // ── requests ──
 
@@ -65,7 +74,11 @@ export type SetEvent   = { seq?: number; ev: 'set'; path: string; node: Record<s
 export type PatchEvent = { seq?: number; ev: 'patch'; path: string; ops: PatchOp[]; rev?: number; by?: string };
 export type RmEvent    = { seq?: number; ev: 'rm'; path: string; by?: string };
 export type DirtyEvent = { seq?: number; ev: 'dirty'; path: string; reason?: 'plan' | 'visibility' | 'claims'; dead?: boolean };
-export type ResetEvent = { ev: 'reset'; reason?: 'overflow' | 'resume' };
+// reset.seq/epoch (core-anz4.10/11): a ring-routed continuity break arrives
+// stamped — the client adopts the break-point watermark + post-break epoch and
+// can resume covered later. A plain verdict reset carries neither; the client
+// must drop its epoch (an epoch-less resume fails closed by design).
+export type ResetEvent = { ev: 'reset'; reason?: 'overflow' | 'resume'; seq?: number; epoch?: string };
 export type EventFrame = SetEvent | PatchEvent | RmEvent | DirtyEvent | ResetEvent;
 
 // ── control ──

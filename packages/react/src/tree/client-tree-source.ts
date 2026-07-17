@@ -10,7 +10,10 @@ import type { NodeData } from '@treenx/core';
 // produce two ESM module instances, two cache singletons, broken reactivity.
 import * as cache from '#tree/cache';
 import { tree as clientTree } from '#tree/client';
-import { trpc } from '#tree/trpc';
+// tabTokenInput spreads into every watch-registering/releasing input so the
+// server can key watch ownership to THIS tab (core-anz4.12) — zod strips it
+// until the token wiring lands.
+import { tabTokenInput, trpc } from '#tree/trpc';
 import {
   type ChildrenHandle,
   type ChildrenOpts,
@@ -107,7 +110,7 @@ export class ClientTreeSource implements TreeSource {
     const fetchOnce = () => {
       if (cancelled) return;
       cache.setPathStatus(path, 'loading');
-      trpc.get.query({ path, watch: watching })
+      trpc.get.query({ path, watch: watching, ...(watching ? tabTokenInput : {}) })
         .then((n) => {
           if (cancelled) return;
           if (n) cache.put(n);
@@ -132,7 +135,7 @@ export class ClientTreeSource implements TreeSource {
         unsubReset();
         if (watching && unrefWatch(this.pathWatchRefs, path)) {
           // core-m77: failure here means the server-side watch leaks — surface it.
-          trpc.unwatch.mutate({ paths: [path] })
+          trpc.unwatch.mutate({ paths: [path], ...tabTokenInput })
             .catch((e: unknown) => console.error('[tree-source] unwatch failed:', path, e));
         }
       },
@@ -152,7 +155,7 @@ export class ClientTreeSource implements TreeSource {
     const fetchWindow = (limit: number, phase: 'initial' | 'refetch') => {
       cache.setChildrenPhase(path, phase);
       trpc.getChildren
-        .query({ path, limit, query: opts?.query, watch: opts?.watch, watchNew: opts?.watchNew })
+        .query({ path, limit, query: opts?.query, watch: opts?.watch, watchNew: opts?.watchNew, ...(watching ? tabTokenInput : {}) })
         .then((result: { items: NodeData[]; total: number; truncated?: boolean; nextCursor?: string }) => {
           if (cancelled) return;
           cache.replaceChildren(path, result.items);
@@ -221,7 +224,7 @@ export class ClientTreeSource implements TreeSource {
         cache.releaseChildSubscriber(path);
         if (watching && unrefWatch(this.childrenWatchRefs, path)) {
           // core-m77: failure here means the server-side children watch leaks — surface it.
-          trpc.unwatchChildren.mutate({ paths: [path] })
+          trpc.unwatchChildren.mutate({ paths: [path], ...tabTokenInput })
             .catch((e: unknown) => console.error('[tree-source] unwatchChildren failed:', path, e));
         }
       },

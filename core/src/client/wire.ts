@@ -6,13 +6,16 @@
 
 import type { NodeData } from '#core';
 import type { ChildrenOpts, Page } from '#tree';
-import type { EventFrame } from '#protocol/frames';
+import type { EventFrame, ResumeCursor } from '#protocol/frames';
 import { createPeer, type Conn, type Peer } from '#protocol/peer';
 import type { TreenixClient } from './index';
 
 export type WireClient = TreenixClient & {
   /** Underlying peer — actStream, sub/unsub, symmetric serving (advanced consumers). */
   peer: Peer;
+  /** Resume cursor for reconnecting bindings (core-anz4.10): max seq seen +
+   *  the stream epoch (from reset frames; hi-ok once the handshake lands). */
+  cursor(): ResumeCursor;
 };
 
 export function createClient(conn: Conn): WireClient {
@@ -24,6 +27,23 @@ export function createClient(conn: Conn): WireClient {
   const pathCbs = new Map<string, Set<(e: EventFrame) => void>>();
   let offEvents: (() => void) | null = null;
   let destroyed = false;
+
+  // Continuity lane (core-anz4.10/11) — always on, independent of pathCbs.
+  // Watermark from stamped frames; a reset frame breaks continuity: adopt its
+  // cursor (a stamped break carries the post-break epoch; a plain verdict
+  // clears it — an epoch-less resume can only fail closed) and fan the reset
+  // to every watchPath consumer so each refetches + re-registers its node.
+  let lastSeq = 0;
+  let epoch: string | undefined;
+  const offCursor = peer.onEvent((e) => {
+    if (e.ev === 'reset') {
+      lastSeq = e.seq ?? 0;
+      epoch = e.epoch;
+      for (const set of pathCbs.values()) for (const cb of [...set]) cb(e);
+      return;
+    }
+    if (typeof e.seq === 'number' && e.seq > lastSeq) lastSeq = e.seq;
+  });
 
   function ensureEventRouting() {
     if (offEvents) return;
@@ -86,9 +106,12 @@ export function createClient(conn: Conn): WireClient {
 
     peer,
 
+    cursor: () => (epoch === undefined ? { seq: lastSeq } : { seq: lastSeq, epoch }),
+
     destroy() {
       destroyed = true;
       pathCbs.clear();
+      offCursor();
       if (offEvents) { offEvents(); offEvents = null; }
       detach();
       conn.close();

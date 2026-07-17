@@ -137,7 +137,12 @@ describe('wire session over MessageChannel', () => {
     assert.equal(frame?.seq, 1);
   });
 
-  it('resume: re-dial with since replays exactly the gap (gk8.1)', async (t) => {
+  it('resume: bare-number since fails closed — reset frame, never a stale replay (anz4.10)', async (t) => {
+    // attachWireSession still passes a number-only `since`; an epoch-less
+    // cursor cannot prove it belongs to the live seq space, so the verdict is
+    // a reset and the ring is NOT replayed. Covered resume (seq + epoch) is
+    // exercised at the WatchManager contract level until the binding threads
+    // the epoch through hi{since,epoch}.
     const { tree, client, teardown, dial } = await harness(R | W | S, 8);
 
     let firstEv!: () => void;
@@ -155,17 +160,17 @@ describe('wire session over MessageChannel', () => {
 
     const b = dial(1);
     t.after(() => b.client.destroy());
-    const replayed: { ev?: string; seq?: number }[] = [];
-    let caughtUp!: () => void;
-    const two = new Promise<void>((r) => { caughtUp = r; });
-    b.client.watch((e: { ev?: string; seq?: number }) => {
-      replayed.push(e);
-      if (replayed.length === 2) caughtUp();
+    const frames: { ev?: string }[] = [];
+    let gotReset!: () => void;
+    const reset = new Promise<void>((r) => { gotReset = r; });
+    b.client.watch((e: { ev?: string }) => {
+      frames.push(e);
+      if (e.ev === 'reset') gotReset();
     });
-    await two;
+    await reset;
+    await new Promise<void>((r) => setImmediate(r)); // drain anything queued behind it
 
-    assert.deepEqual(replayed.map((f) => f.seq), [2, 3]);
-    assert.ok(replayed.every((f) => f.ev === 'patch'));
+    assert.deepEqual(frames, [{ ev: 'reset', reason: 'resume' }]);
   });
 
   it('stale cursor → reset frame, never a partial replay (gk8.1)', async (t) => {

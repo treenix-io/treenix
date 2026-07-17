@@ -5,7 +5,7 @@ import type { NodeData } from '@treenx/core';
 import { applyOps, type PatchOp } from '@treenx/core/tree';
 import * as cache from './cache';
 import { applyServerPatch, applyServerSet, clear as clearRebase } from './rebase';
-import { AUTH_EXPIRED_EVENT, clearToken, getToken, trpc } from './trpc';
+import { AUTH_EXPIRED_EVENT, clearToken, getToken, tabTokenInput, trpc } from './trpc';
 
 type LoadChildren = (path: string) => Promise<void>;
 
@@ -30,6 +30,25 @@ let lastConfig: EventsConfig | null = null;
 // gaps are the server's problem to detect, not ours to count. Reset to 0 only
 // on a fresh stream (new login), never on reconnect — see startEvents(resume).
 let lastSeq = 0;
+
+// Stream epoch (core-anz4.10) — stamped by the server WatchManager on every
+// delivered event; names the seq space the watermark belongs to. Echoed with
+// `since` so the server can refuse a cursor from a dead stream (fail closed).
+// Never cleared on reconnect: a stale epoch is refused server-side, which is
+// exactly the honest answer; only a fresh stream (new login) drops it.
+// Not in the tRPC-inferred event type until the server wiring lands — decode
+// structurally at the wire boundary.
+let lastEpoch: string | null = null;
+
+function epochOf(event: object): string | undefined {
+  if ('epoch' in event && typeof event.epoch === 'string') return event.epoch;
+  return undefined;
+}
+
+function seqOf(event: object): number | undefined {
+  if ('seq' in event && typeof event.seq === 'number') return event.seq;
+  return undefined;
+}
 
 // Coalesce dirty refetches per vp (gk8.12): a burst of writes into one query
 // view triggers ONE listing refetch, not one per event.
@@ -80,6 +99,7 @@ export function startEvents(config: EventsConfig = {}, resume = false) {
   // its overlays are equally dead (same continuity-break as preserved:false).
   if (!resume) {
     lastSeq = 0;
+    lastEpoch = null;
     clearRebase();
   }
 
@@ -92,7 +112,18 @@ export function startEvents(config: EventsConfig = {}, resume = false) {
 
   const { loadChildren, getExpanded, getSelected } = config;
 
-  const sub = trpc.events.subscribe(lastSeq > 0 ? { since: lastSeq } : undefined, {
+  // Resume cursor + tab token ride the input. epoch/token cross as spreads
+  // (spreads bypass excess-property checks against the inferred input type);
+  // the server's zod strips them until the anz4.10/4.12 wiring lands — after
+  // it, the epoch makes resumes provably continuous and the token keys watch
+  // ownership to this tab.
+  const sub = trpc.events.subscribe(
+    {
+      ...(lastSeq > 0 || lastEpoch !== null ? { since: lastSeq } : {}),
+      ...(lastEpoch !== null ? { epoch: lastEpoch } : {}),
+      ...tabTokenInput,
+    },
+    {
     onStarted() {
       window.dispatchEvent(new Event(SSE_CONNECTED));
     },
@@ -122,13 +153,20 @@ export function startEvents(config: EventsConfig = {}, resume = false) {
       scheduleResubscribe(0);
     },
     onData(event) {
+      // Adopt the stream epoch from any stamped event — live events always
+      // carry the CURRENT epoch, so a ring-routed break teaches the new one.
+      const epoch = epochOf(event);
+      if (epoch !== undefined) lastEpoch = epoch;
+
       if (event.type === 'reconnect') {
         if (!event.preserved) {
           // Continuity lost = reset (twp-spec §5.3): the server's seq space may
-          // be new (process restart). Carrying the old watermark into it would
-          // make a later resume compare incomparable cursors — since >= seq
-          // would answer "covered" and silently drop the gap. Rebuild from 0.
-          lastSeq = 0;
+          // be new (process restart) or the epoch re-minted (external break).
+          // A ring-routed break arrives stamped — adopt its seq as the new
+          // watermark ("current as of the break, refetching now") so the next
+          // resume can be covered; an unstamped verdict rebuilds from 0 (the
+          // stale-epoch cursor is refused server-side either way).
+          lastSeq = seqOf(event) ?? 0;
           // Overlays only mean something within a continuous stream: an ack may
           // have been in the dropped gap, and an unacked op never drains —
           // consumeAck matches by id (core-jvfv). In-flight writes either landed
