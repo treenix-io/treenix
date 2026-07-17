@@ -179,6 +179,9 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
   // otherwise. A caller-supplied ctx.actor wins: it is richer (action/requestId
   // from the executor) and only in-process code can pass ctx — the wire never
   // threads client data here beyond opId, which becomes requestId.
+  // Since core-anz4.14 action handlers and services write through withActor-bound
+  // trees (actions.ts), so their ctx arrives pre-stamped with the rich actor;
+  // this default covers only the direct-verb lane.
   function stampActor(ctx: unknown): unknown {
     if (!userId) return ctx;
     if (ctx === undefined || ctx === null) return { actor: { id: userId } };

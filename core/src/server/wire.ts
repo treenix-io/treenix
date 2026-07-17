@@ -4,7 +4,6 @@
 // Extracted from the tRPC withSession middleware + events subscription body.
 
 import { OpError } from '#errors';
-import { randomUUID } from 'node:crypto';
 import type { EventFrame } from '#protocol/frames';
 import { createPeer, type ActReq, type Conn, type PeerServe, type ServeHooks } from '#protocol/peer';
 import { withAcl } from '#security/acl-tree';
@@ -12,10 +11,10 @@ import { buildClaims } from '#security/claims';
 import { getPageReadPlan } from '#security/read-page';
 import type { Session } from '#security/sessions';
 import { type NodeEvent, type WireEvent } from '#sub';
-import { type WatchManager } from '#sub/watch';
+import { type WatchCursor, type WatchManager } from '#sub/watch';
 import { createFilteredPush } from '#sub/watch-filter';
 import type { Tree } from '#tree';
-import { executeStream, withExecute, type WithExecuteOpts } from './actions';
+import { buildActor, executeStream, withExecute, type WithExecuteOpts } from './actions';
 
 /** Higher-level dispatcher: tree + session + action input → result.
  *  Mods (e.g. harness/audit) inject this to add capability narrowing or other
@@ -111,7 +110,7 @@ export function createWireSession(deps: WireDeps, session: Session) {
     // is a behavior change, decide separately. Stream path passes it (parity).
     // Actor is born once, at the request edge — every layer below (commit,
     // audit, cross-node writes) inherits it. Workload path: executor builds it.
-    const actorFor = (req: ActReq) => ({ id: userId, action: req.action, requestId: req.opId ?? randomUUID() });
+    const actorFor = (req: ActReq) => buildActor(session, req.action, req.opId);
 
     const execute = (req: ActReq) => {
       if (isWorkload) return deps.opts!.executor!(tree, session, { ...req, type: undefined });
@@ -144,21 +143,21 @@ export function createWireSession(deps: WireDeps, session: Session) {
   /** Event lane: ACL-filtered push wired into the WatchManager.
    *  `since` = client's last processed seq — the ring replays the gap
    *  through the SAME filter (claims drift re-applies, core-gk8.1). */
-  function connectEvents(push: (e: WireEvent) => void, since?: number): { connId: string; preserved: boolean } {
+  function connectEvents(push: (e: WireEvent) => void, since?: number | WatchCursor, token?: string): { connId: string; preserved: boolean } {
     const sessionClaims = session.claims?.length ? session.claims : null;
     const claimsTtlMs = deps.opts?.claimsTtlMs ?? DEFAULT_CLAIMS_TTL_MS;
     const filtered = createFilteredPush(deps.systemTree, userId, sessionClaims, push, { claimsTtlMs });
     const connId = `${userId}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
-    const preserved = deps.watcher.connect(connId, userId, filtered, since);
+    const preserved = deps.watcher.connect(connId, userId, filtered, since, token);
     return { connId, preserved };
   }
 
   /** Event lane in TWP frames — native bindings (port/WS). The initial
    *  continuity verdict maps to a reset frame when watches were not preserved. */
-  function connectEventFrames(emit: (f: EventFrame) => void, since?: number): { connId: string } {
+  function connectEventFrames(emit: (f: EventFrame) => void, since?: number | WatchCursor, token?: string): { connId: string } {
     const { connId, preserved } = connectEvents((e) => {
       for (const f of toEventFrames(e)) emit(f);
-    }, since);
+    }, since, token);
     if (!preserved) emit({ ev: 'reset', reason: 'resume' });
     return { connId };
   }
@@ -182,9 +181,9 @@ export function createWireSession(deps: WireDeps, session: Session) {
  *    attachWireSession(createWireSession(deps, session), createPortConn(port))
  *  Auth is ambient: the host constructs the session (spec §5.3) — no hi frame.
  *  Returns a teardown that detaches the peer and releases the event connection. */
-export function attachWireSession(session: WireSession, conn: Conn, since?: number): () => void {
+export function attachWireSession(session: WireSession, conn: Conn, since?: number | WatchCursor, token?: string): () => void {
   const detach = session.peer.attach(conn);
-  const { connId } = session.connectEventFrames((f) => session.peer.emit(f), since);
+  const { connId } = session.connectEventFrames((f) => session.peer.emit(f), since, token);
   return () => {
     session.disconnectEvents(connId);
     detach();

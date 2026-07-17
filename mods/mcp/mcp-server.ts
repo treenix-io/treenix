@@ -3,7 +3,6 @@
 
 import { requestApproval, resolveVerdict } from '#agent/guardian';
 import { AiPolicy } from '#agent/types';
-import { buildActor } from '#harness/session';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { getComponent, resolve } from '@treenx/core';
@@ -11,7 +10,7 @@ import { matchesAny } from '@treenx/core/glob';
 import type { CatalogActionDoc, CatalogEntry, CatalogPropertyDoc } from '@treenx/core/schema/catalog';
 import type { MethodSchema, PropertySchema, TypeSchema } from '@treenx/core/schema/types';
 import { OpError } from '@treenx/core/errors';
-import { executeAction } from '@treenx/core/server/actions';
+import { buildActor, executeAction } from '@treenx/core/server/actions';
 import { buildClaims, resolveToken, type Session, withAcl } from '@treenx/core/security';
 import { resolveRef, type Tree } from '@treenx/core/tree';
 import { createRepathTree } from '@treenx/core/tree';

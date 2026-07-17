@@ -9,8 +9,10 @@ import { collectDeps as _collectDeps, type ResolvedDeps } from '#comp/needs';
 import { assertSafeKey, COMP_PREFIX, type ComponentData, compKey, getComponentField, getMeta, isComponent, type NodeData, normalizeType, register, resolve, resolveExact, safeJsonParse } from '#core';
 import { validateValue, type ValidationError } from '#comp/validate';
 import { type TypeSchema } from '#schema/types';
-import { type ExecOpts, type PatchOp, type Tree } from '#tree';
+import type { Session } from '#security/sessions';
+import { type ExecOpts, type PatchManyEntry, type PatchOp, type Tree } from '#tree';
 import { createDraft, enablePatches, finishDraft, type Patch } from 'immer';
+import { randomUUID } from 'node:crypto';
 import { createBoundedCache } from '#util/bounded-cache';
 import { OpError } from '#errors';
 import { commit, mutationLock } from './commit';
@@ -88,6 +90,51 @@ export type ActorContext = {
   action?: string;
   requestId?: string;
 };
+
+/** Session metadata → ActorContext — THE one mapping for every entry lane
+ *  (TWP wire, workload executor, MCP). An entry lane building its own inline
+ *  actor drops onBehalfOf/taskPath/runPath and orphans the audit trail
+ *  (core-3j54, core-anz4.14). requestId: the caller's opId when present (a
+ *  replayed op keeps one id), else minted. */
+export function buildActor(session: Session, action: string, requestId?: string): ActorContext {
+  return {
+    id: session.userId,
+    action,
+    requestId: requestId ?? randomUUID(),
+    onBehalfOf: typeof session.onBehalfOf === 'string' ? session.onBehalfOf : undefined,
+    taskPath: typeof session.taskPath === 'string' ? session.taskPath : undefined,
+    runPath: typeof session.runPath === 'string' ? session.runPath : undefined,
+  };
+}
+
+/** Actor-bound Tree (core-anz4.14): every mutation verb forwards its ctx with
+ *  the bound ActorContext stamped in — so audit/events attribute cross-node
+ *  handler writes and service writes instead of degrading to bare {id} or
+ *  anonymous. Binding happens at tree construction, server side — node
+ *  payloads and wire input never reach ctx, so the actor is not spoofable
+ *  (same principle as ExecOpts excluding identity, tree/index.ts:120).
+ *  A ctx that already carries an actor wins: only in-process code can pass
+ *  ctx, and a nested lane's stamp is more specific (e.g. a per-service wrap
+ *  over the autostart-level wrap). */
+export function withActor<T extends Tree>(inner: T, actor: ActorContext): T {
+  const stamp = (ctx: unknown): unknown => {
+    if (ctx === undefined || ctx === null) return { actor };
+    if (typeof ctx !== 'object') return ctx;
+    if ((ctx as { actor?: unknown }).actor) return ctx;
+    return { ...ctx, actor };
+  };
+  const bound: T = {
+    ...inner,
+    set: (node: NodeData, ctx?: unknown) => inner.set(node, stamp(ctx)),
+    remove: (path: string, ctx?: unknown) => inner.remove(path, stamp(ctx)),
+    patch: (path: string, ops: PatchOp[], ctx?: unknown) => inner.patch(path, ops, stamp(ctx)),
+    ...(inner.patchMany ? {
+      patchMany: (ancestor: string, entries: PatchManyEntry[], ctx?: unknown) =>
+        inner.patchMany!(ancestor, entries, stamp(ctx)),
+    } : {}),
+  };
+  return bound;
+}
 
 /** @opaque Runtime-injected, not part of public schema */
 export type ActionCtx = {
@@ -664,7 +711,11 @@ async function runAction<T = unknown>(
     }
   }
 
-  const treeForCtx = kind === 'read' ? wrapReadOnlyTree(tree) : tree;
+  // Actor-bound ctx.tree (core-anz4.14): a handler's cross-node write inherits
+  // this action's rich actor — without the bind, withAcl default-stamps a bare
+  // {id} and audit loses action/requestId on every foreign-path write.
+  const actorTree = opts?.actor ? withActor(tree, opts.actor) : tree;
+  const treeForCtx = kind === 'read' ? wrapReadOnlyTree(actorTree) : actorTree;
   const nc = serverNodeHandle(treeForCtx);
   const signal = AbortSignal.timeout(ACTION_TIMEOUT);
   const actx: ActionCtx = { node: nodeForCtx, comp: compForCtx, deps, tree: treeForCtx, signal, nc, userId: opts?.userId, claims: opts?.claims, actor: opts?.actor };
@@ -746,7 +797,10 @@ export async function* executeStream(
   // ctx.node/ctx.comp/ctx.deps would therefore be silently dropped; mirror runAction's
   // read branch so it throws KIND_VIOLATION instead. ctx.tree stays live for writes —
   // unless the stream is read-kind: then the tree facade denies them too.
-  const treeForCtx = kind === 'read' ? wrapReadOnlyTree(tree) : tree;
+  // Streams persist via ctx.tree.set directly — the actor bind (core-anz4.14)
+  // is what attributes every one of those writes.
+  const actorTree = opts?.actor ? withActor(tree, opts.actor) : tree;
+  const treeForCtx = kind === 'read' ? wrapReadOnlyTree(actorTree) : actorTree;
   const nc = serverNodeHandle(treeForCtx);
   for (const key of Object.keys(deps)) deps[key] = readonlyDep(deps[key]);
   const actx: ActionCtx = { node: readonlyProxy(node), comp: comp && readonlyProxy(comp), deps, tree: treeForCtx, signal: signal ?? AbortSignal.timeout(STREAM_TIMEOUT), nc, userId: opts?.userId, claims: opts?.claims, actor: opts?.actor };

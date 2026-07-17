@@ -13,7 +13,7 @@ import { getAnonKey } from '#security/anon';
 import { createMemoryTree, type Tree } from '#tree';
 import { sweepTrash } from '#tree/policy';
 import type { Server } from 'node:http';
-import type { DelegationHooks } from './actions';
+import { type DelegationHooks, withActor } from './actions';
 import { applyDevDefaults } from './dev-defaults';
 import { deploySeedPrefabs } from './prefab';
 import { createHttpServer, createPipeline, type Pipeline } from './server';
@@ -126,10 +126,13 @@ export async function treenix(config: TreenixConfig): Promise<TreenixServer> {
       .catch(e => process.stderr.write(`[log write err] ${e.message}\n`))
   })
 
-  // 6. Autostart services
+  // 6. Autostart services. Actor-bound tree (core-anz4.14): supervisor
+  // bookkeeping writes (ref children) attribute as system:autostart; the
+  // autostart handler re-binds per started service (service:<path>).
   let serviceHandle: ServiceHandle | null = null;
   if (autostart) {
-    serviceHandle = await startServices(tree, cdc.subscribe.bind(cdc) as import('#contexts/service/index').ServiceCtx['subscribe']);
+    const serviceTree = withActor(tree, { id: 'system:autostart' });
+    serviceHandle = await startServices(serviceTree, cdc.subscribe.bind(cdc) as import('#contexts/service/index').ServiceCtx['subscribe']);
   }
 
   const stop = async () => {

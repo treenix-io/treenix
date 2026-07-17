@@ -5,6 +5,7 @@
 import { registerType } from '#comp';
 import { type ServiceCtx, type ServiceHandle } from '#contexts/service/index';
 import { isRef, type NodeData, register, resolve as coreResolve } from '#core';
+import { withActor } from '#server/actions';
 import { resolveRef } from '#tree';
 
 // ── Module-scope service tracking ──
@@ -23,7 +24,11 @@ async function _startService(path: string): Promise<void> {
   const handler = coreResolve(node.$type, 'service');
   if (!handler) throw new Error(`autostart: no service handler for ${node.$type}`);
 
-  handles.set(path, await handler(node, { ..._svcCtx, path }));
+  // Per-service actor (core-anz4.14): every write the service issues through
+  // its ctx.tree attributes as service:<path> in audit — never anonymous. The
+  // wrap refines the supervisor-level system:autostart bind from the factory.
+  const tree = withActor(_svcCtx.tree, { id: `service:${path}` });
+  handles.set(path, await handler(node, { ..._svcCtx, tree, path }));
   console.log(`[autostart] started ${path}`);
 }
 

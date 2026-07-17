@@ -3,29 +3,15 @@
 // capability-narrowed execution without those layers knowing about workloads.
 
 import { getComponentByName } from '@treenx/core';
-import type { ActorContext } from '@treenx/core/server/actions';
-import { executeAction } from '@treenx/core/server/actions';
+// buildActor moved to core (core-anz4.14) — the wire lane needs the same
+// session→actor mapping and core cannot import mods.
+import { buildActor, executeAction } from '@treenx/core/server/actions';
 import type { Session } from '@treenx/core/security';
 import { OpError } from '@treenx/core/errors';
 import type { Tree } from '@treenx/core/tree';
-import { randomUUID } from 'node:crypto';
 import { type AgentScope, type Capability, executeWithCapability } from './capability';
 
 type ExecuteInput = { path: string; action: string; type?: string; key?: string; data?: unknown };
-
-/** Session metadata → ActorContext. THE one mapping for every entry lane
- *  (wire executor here, MCP server) — an entry point building its own inline
- *  actor drops onBehalfOf/taskPath/runPath and orphans the audit trail (core-3j54). */
-export function buildActor(session: Session, action: string): ActorContext {
-  return {
-    id: session.userId,
-    action,
-    requestId: randomUUID(),
-    onBehalfOf: typeof session.onBehalfOf === 'string' ? session.onBehalfOf : undefined,
-    taskPath: typeof session.taskPath === 'string' ? session.taskPath : undefined,
-    runPath: typeof session.runPath === 'string' ? session.runPath : undefined,
-  };
-}
 
 async function resolveScope(tree: Tree, session: Session): Promise<Capability | null> {
   const ref = session.scopeRef;
