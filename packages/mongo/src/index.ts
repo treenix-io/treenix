@@ -150,6 +150,7 @@ export async function createMongoTree(
       const prevRev = doc._rev as number | undefined;
       doc._rev = (prevRev ?? 0) + 1;
 
+      let before: NodeData | null = null;
       if (prevRev === undefined) {
          try {
            await col.insertOne(doc);
@@ -158,17 +159,22 @@ export async function createMongoTree(
            throw e;
          }
       } else {
-         const result = await col.replaceOne({ _path: doc._path, _rev: prevRev }, doc);
-         if (result.matchedCount === 0) {
+         // findOneAndReplace: the OCC-guarded replace AND the receipt's
+         // before-image in one roundtrip (core-ns6p.2).
+         const prev = await col.findOneAndReplace({ _path: doc._path, _rev: prevRev }, doc, { returnDocument: 'before' });
+         if (!prev) {
            throw new OpError('CONFLICT', `OptimisticConcurrencyError: node ${node.$path} modified by another transaction`);
          }
+         before = fromStorage(prev as Record<string, unknown>);
       }
       node.$rev = doc._rev as number;
+      return { changes: [{ path: node.$path, before, after: { ...node } }] };
     },
 
     async remove(path) {
-      const result = await col.deleteOne({ _path: path });
-      return result.deletedCount > 0;
+      const prev = await col.findOneAndDelete({ _path: path });
+      if (!prev) return { changes: [] };
+      return { changes: [{ path, before: fromStorage(prev as Record<string, unknown>), after: null }] };
     },
 
     // TODO: native Mongo $set — for now, fallback via get+apply+set

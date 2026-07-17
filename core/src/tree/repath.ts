@@ -6,7 +6,7 @@
 
 import type { NodeData } from '#core';
 import { assertSafePath } from '#core/path';
-import { isSetEntry, type ExecOpts, type Page, type PatchManyEntry, type Tree } from './index';
+import { type CommitReceipt, isSetEntry, type ExecOpts, type Page, type PatchManyEntry, type Tree } from './index';
 
 export function createRepathTree(inner: Tree, localBase: string, remoteBase: string = '/'): Tree {
   // Normalize: strip trailing slashes, handle root
@@ -109,20 +109,20 @@ export function createRepathTree(inner: Tree, localBase: string, remoteBase: str
         remapExecResult(await inner.execute!(toRemote(path), action, data, opts, ctx)),
     } : {}),
 
-    set: (node, ctx) =>
-      inner.set({ ...node, $path: toRemote(node.$path) }, ctx),
+    set: async (node, ctx) =>
+      remapReceipt(await inner.set({ ...node, $path: toRemote(node.$path) }, ctx)),
 
-    remove: (path, ctx) =>
-      inner.remove(toRemote(path), ctx),
+    remove: async (path, ctx) =>
+      remapReceipt(await inner.remove(toRemote(path), ctx)),
 
-    patch: (path, ops, ctx) =>
-      inner.patch(toRemote(path), ops, ctx),
+    patch: async (path, ops, ctx) =>
+      remapReceipt(await inner.patch(toRemote(path), ops, ctx)),
 
     // patchMany — forwarded only when inner has the capability (same idiom as
     // scanChildren/execute); ancestor AND every member path translate.
     ...(inner.patchMany ? {
-      patchMany: (ancestor: string, entries: PatchManyEntry[], ctx?: unknown) =>
-        inner.patchMany!(
+      patchMany: async (ancestor: string, entries: PatchManyEntry[], ctx?: unknown) =>
+        remapReceipt(await inner.patchMany!(
           toRemote(ancestor),
           // Set-member carries the authority path INSIDE the node too — remap
           // both (mirror of set()) or the inner assertPatchManyBatch denies it.
@@ -130,7 +130,20 @@ export function createRepathTree(inner: Tree, localBase: string, remoteBase: str
             ? { path: toRemote(e.path), node: { ...e.node, $path: toRemote(e.node.$path) } }
             : { path: toRemote(e.path), ops: e.ops }),
           ctx,
-        ),
+        )),
     } : {}),
   };
+
+  // Receipts come back in the inner namespace — translate change paths and
+  // image $path back to local (mirror of remapNode on the read side).
+  function remapReceipt(receipt: CommitReceipt): CommitReceipt {
+    if (receipt.changes === null) return receipt;
+    return {
+      changes: receipt.changes.map(c => ({
+        path: toLocal(c.path),
+        before: c.before ? remapNode(c.before) : null,
+        after: c.after ? remapNode(c.after) : null,
+      })),
+    };
+  }
 }

@@ -148,22 +148,28 @@ export async function createRawFsTree(rootDir: string, mountPath: string = ''): 
       const encode = ctxResolve(node.$type, 'encode');
       if (!encode) throw new Error(`No encode registered for type "${node.$type}"`);
 
+      // Receipt before-image: one decode of the current file (core-ns6p.2).
+      // mimefs has no $rev lifecycle, so this read is purely for the receipt.
+      const before = await tree.get(node.$path);
+
       await mkdir(dirname(filePath), { recursive: true });
       await encode(node, filePath, toOuter(node.$path));
+      return { changes: [{ path: node.$path, before: before ?? null, after: { ...node } }] };
     },
 
     async remove(path) {
       const filePath = await safeFilePath(path);
       try {
+        const before = await tree.get(path);
         const st = await stat(filePath);
         if (st.isDirectory()) {
           await rmdir(filePath);
         } else {
           await unlink(filePath);
         }
-        return true;
+        return { changes: [{ path, before: before ?? null, after: null }] };
       } catch (e: any) {
-        if (e.code === 'ENOENT') return false;
+        if (e.code === 'ENOENT') return { changes: [] };
         throw e;
       }
     },

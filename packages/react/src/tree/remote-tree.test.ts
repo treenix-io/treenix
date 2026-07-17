@@ -57,9 +57,9 @@ function createMockTrpc(backing: Map<string, NodeData>) {
       },
     },
     remove: {
-      mutate: async ({ path }: { path: string }) => {
-        backing.delete(path);
-      },
+      // Real router returns the removed boolean — the mock must too, or the
+      // opaque-receipt mapping (ok ? null : []) misreports a known no-op.
+      mutate: async ({ path }: { path: string }) => backing.delete(path),
     },
     events: {
       subscribe(_: void, callbacks: { onData?(e: TreeEvent): void; onError?(err: unknown): void }) {
@@ -120,7 +120,8 @@ describe('createRemoteTree — method mapping', () => {
     const tree = createRemoteTree(createMockTrpc(data) as any);
 
     const result = await tree.remove('/x');
-    assert.equal(result, true);
+    // Transport receipt is opaque: null = committed on the authority (core-ns6p.2).
+    assert.equal(result.changes, null);
     assert.ok(!data.has('/x'));
   });
 
@@ -151,7 +152,7 @@ describe('withCache(remoteStore) — client pipeline', () => {
     assert.equal(mock.getCalls, 0);
   });
 
-  it('write-populate: set warms cache for next get', async () => {
+  it('set over a remote tree does NOT warm the cache — opaque receipt, next get fetches fresh (core-ns6p.2)', async () => {
     const data = new Map<string, NodeData>();
     const mock = createMockTrpc(data);
     const tree = withCache(createRemoteTree(mock as any));
@@ -159,9 +160,13 @@ describe('withCache(remoteStore) — client pipeline', () => {
     await tree.set({ $path: '/a', $type: 'test', v: 1 } as NodeData);
     mock.resetCalls();
 
-    const node = await tree.get('/a'); // should hit cache (write-populated)
-    assert.equal(mock.getCalls, 0);
+    const node = await tree.get('/a'); // remote fetch — the write did not warm the cache
+    assert.equal(mock.getCalls, 1);
     assert.equal((node as any).v, 1);
+
+    mock.resetCalls();
+    await tree.get('/a'); // read-populated now
+    assert.equal(mock.getCalls, 0);
   });
 
   it('inflight dedup: concurrent gets produce single tRPC call', async () => {

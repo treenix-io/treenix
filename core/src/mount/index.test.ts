@@ -78,9 +78,9 @@ describe('Mounts', () => {
         const items = [createNode('/users/alice', 'user'), createNode('/users/bob', 'user')];
         return { items, total: items.length };
       },
-      async set() {},
-      async remove() { return false; },
-      async patch() {},
+      async set() { return { changes: [] }; },
+      async remove() { return { changes: [] }; },
+      async patch() { return { changes: [] }; },
     };
     register('test.mount.legacy', 'mount', () => legacy);
     await rootStore.set(
@@ -107,9 +107,9 @@ describe('Mounts', () => {
         const items = [createNode('/users/alice', 'user')];
         return { items, total: items.length };
       },
-      async set() {},
-      async remove() { return false; },
-      async patch() {},
+      async set() { return { changes: [] }; },
+      async remove() { return { changes: [] }; },
+      async patch() { return { changes: [] }; },
     };
     register('test.mount.legacy2', 'mount', () => legacy);
     await rootStore.set(
@@ -138,9 +138,9 @@ describe('Mounts', () => {
         calls++;
         return paginate(nodes, { limit: opts?.limit, cursor: opts?.cursor });
       },
-      async set() {},
-      async remove() { return false; },
-      async patch() {},
+      async set() { return { changes: [] }; },
+      async remove() { return { changes: [] }; },
+      async patch() { return { changes: [] }; },
     };
     register('test.mount.legacy3', 'mount', () => legacy);
     await rootStore.set(
@@ -185,7 +185,7 @@ describe('Mounts', () => {
     await usersStore.set(createNode('/users/alice', 'user'));
     const ms = withMounts(rootStore);
     const removed = await ms.remove('/users/alice');
-    assert.equal(removed, true);
+    assert.ok(removed.changes?.length);
     assert.equal(await usersStore.get('/users/alice'), undefined);
   });
 
@@ -772,7 +772,7 @@ describe('Types mount adapter', () => {
     const ts = createTypesTree(backingStore, '/types');
     await ts.set(createNode('/types/custom/card', 'type'));
     const removed = await ts.remove('/types/custom/card');
-    assert.equal(removed, true);
+    assert.ok(removed.changes?.length);
     assert.equal(await backingStore.get('/types/custom/card'), undefined);
   });
 

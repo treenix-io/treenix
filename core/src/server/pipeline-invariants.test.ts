@@ -239,7 +239,7 @@ describe('invariant gk8.8: trash copy-writes are silent, remove emits', () => {
     const w = pump(tree, { kind: 'all' });
 
     await systemTree.set(createNode('/biz/boot', 'test.item', { name: 'boot' }));
-    assert.equal(await systemTree.remove('/biz/boot'), true);
+    assert.ok((await systemTree.remove('/biz/boot')).changes?.length);
 
     // Hard delete: no trash entry either.
     assert.equal((await systemTree.getChildren('/sys/trash')).total, 0);
@@ -382,5 +382,137 @@ describe('invariant: ACL fails closed', () => {
 
     const sys = withAcl(granted, 'system', ['system']);
     assert.equal((await sys.get('/doc'))?.name, 'A');
+  });
+});
+
+// ── core-ns6p.2: commit receipt — ONE coherent image, ZERO rereads ──
+// The bd acceptance contract: the revision the cache serves, the wrap (audit)
+// journals, and observers receive is the SAME adapter-committed image, with no
+// post-write reads of the written node anywhere in the pipeline. Counts are
+// pinned per TARGET path — ancestor reads (mount resolution, ACL inheritance)
+// are config walks, orthogonal to the receipt and unchanged by it.
+
+describe('invariant core-ns6p.2: commit receipt — one image, zero rereads', () => {
+  /** Bootstrap that counts adapter reads per path. */
+  async function countingBootstrap() {
+    const mem = createMemoryTree();
+    const reads = new Map<string, number>();
+    const counted: Tree = {
+      ...mem,
+      get: (p, c) => { reads.set(p, (reads.get(p) ?? 0) + 1); return mem.get(p, c); },
+    };
+    const root = createNode('/', 'root', {});
+    root.$acl = [{ g: 'system', p: R | W | A | S }];
+    await counted.set(root);
+    reads.clear();
+    return { counted, reads };
+  }
+
+  it('set: one adapter read of the target (prepareForStore), cache/wrap/observer all see the committed $rev', async () => {
+    const { counted, reads } = await countingBootstrap();
+    const wrapRevs: (number | undefined)[] = [];
+    const wrap = (t: Tree): Tree => ({
+      ...t,
+      async set(n, ctx) {
+        const r = await t.set(n, ctx);
+        wrapRevs.push(r.changes?.[0]?.after?.$rev);
+        return r;
+      },
+    });
+    const { tree } = createPipeline(counted, undefined, wrap);
+    const w = pump(tree, { kind: 'path', path: '/biz/doc' });
+
+    const receipt = await tree.set(createNode('/biz/doc', 'test.item', { v: 1 }));
+
+    // Exactly ONE target read: policy base.set's prepareForStore existing-get.
+    // The old pipeline added up to 4 more (subs before, cache re-get, subs
+    // stored-get, audit before) — all deleted by the receipt.
+    assert.equal(reads.get('/biz/doc'), 1, 'set = one pre-write read of the target, zero rereads');
+
+    const committedRev = receipt.changes?.[0]?.after?.$rev;
+    assert.ok(committedRev, 'receipt carries the committed rev');
+    assert.equal(wrapRevs[0], committedRev, 'wrap (audit position) sees the same rev');
+
+    const ev = await w.take();
+    assert.equal(ev.type, 'set');
+    assert.equal(ev.type === 'set' && (ev.node as { $rev?: number }).$rev, committedRev, 'observer event carries the committed rev');
+    w.stop();
+
+    // The cache serves the receipt image — no adapter read for it.
+    reads.clear();
+    assert.equal((await tree.get('/biz/doc'))?.$rev, committedRev);
+    assert.equal(reads.get('/biz/doc'), undefined, 'post-write get is served from the receipt-populated cache');
+  });
+
+  it('patch: one target read, observer patch event carries the committed rev', async () => {
+    const { counted, reads } = await countingBootstrap();
+    const { tree } = createPipeline(counted);
+    await tree.set(createNode('/biz/p', 'test.item', { v: 1 }));
+
+    const w = pump(tree, { kind: 'path', path: '/biz/p' });
+    reads.clear();
+    const receipt = await tree.patch('/biz/p', [['r', 'v', 2]]);
+
+    // withCache.patch = patchViaSet: the pre-image comes from the cache (hit),
+    // so the only target read is again prepareForStore inside base.set.
+    assert.equal(reads.get('/biz/p'), 1, 'patch = one pre-write read of the target, zero rereads');
+
+    const committedRev = receipt.changes?.[0]?.after?.$rev;
+    assert.ok(committedRev);
+    const ev = await w.take();
+    assert.equal(ev.type, 'patch');
+    assert.equal(ev.type === 'patch' && ev.rev, committedRev, 'patch event rev == receipt rev');
+    w.stop();
+
+    reads.clear();
+    assert.equal((await tree.get('/biz/p'))?.$rev, committedRev);
+    assert.equal(reads.get('/biz/p'), undefined);
+  });
+
+  it('patchMany: one staging read per member, per-member events carry committed revs', async () => {
+    const { counted, reads } = await countingBootstrap();
+    const { tree } = createPipeline(counted);
+    await tree.set(createNode('/biz/a', 'test.item', { v: 1 }));
+    await tree.set(createNode('/biz/b', 'test.item', { v: 1 }));
+
+    const w = pump(tree, { kind: 'children', path: '/biz' });
+    reads.clear();
+    const receipt = await tree.patchMany!('/biz', [
+      { path: '/biz/a', ops: [['r', 'v', 2]] },
+      { path: '/biz/b', ops: [['r', 'v', 2]] },
+    ]);
+
+    // policy patchMany stages each ops-member against a fresh backing read
+    // (migration convergence) — one pre-write read per member, ZERO after.
+    assert.equal(reads.get('/biz/a'), 1, 'one staging read for /biz/a, zero rereads');
+    assert.equal(reads.get('/biz/b'), 1, 'one staging read for /biz/b, zero rereads');
+
+    const revs = new Map(receipt.changes!.map(c => [c.path, c.after?.$rev]));
+    for (let i = 0; i < 2; i++) {
+      const ev = await w.take();
+      assert.equal(ev.type, 'patch');
+      if (ev.type === 'patch') {
+        assert.equal(ev.rev, revs.get(ev.path), `event rev for ${ev.path} == receipt rev`);
+      }
+    }
+    w.stop();
+
+    reads.clear();
+    assert.equal((await tree.get('/biz/a'))?.$rev, revs.get('/biz/a'));
+    assert.equal(reads.get('/biz/a'), undefined, 'members were cache-populated from the receipt');
+  });
+
+  it('remove: receipt before-image feeds the caller — zero reads of the target', async () => {
+    const { counted, reads } = await countingBootstrap();
+    const { systemTree } = createPipeline(counted);
+    // systemTree (policy.base): hard delete, no trash copy — isolates the
+    // receipt path from the trash machinery's own legitimate reads.
+    await systemTree.set(createNode('/biz/gone', 'test.item', { v: 1 }));
+
+    reads.clear();
+    const receipt = await systemTree.remove('/biz/gone');
+    assert.equal(reads.get('/biz/gone'), undefined, 'remove = zero reads of the target (before-image from the receipt)');
+    assert.equal(receipt.changes?.[0]?.before?.v, 1, 'receipt carries the removed image');
+    assert.equal(receipt.changes?.[0]?.after, null);
   });
 });

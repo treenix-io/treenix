@@ -47,7 +47,10 @@ describe('TWP wire client', () => {
     const b = await client.tree.get('/b');
     assert.equal(b?.n, 2);
 
-    assert.equal(await client.tree.remove('/b'), true);
+    // Transport receipt is opaque (changes: null = committed, contents on the
+    // authority); a known no-op would be changes: [].
+    assert.equal((await client.tree.remove('/b')).changes, null);
+    assert.equal(await client.tree.get('/b'), undefined);
 
     const result = await client.execute('/a', 'ping', { x: 1 }, { key: 'k', type: 't' });
     assert.deepEqual(result, { ran: 'ping', key: 'k', type: 't' });

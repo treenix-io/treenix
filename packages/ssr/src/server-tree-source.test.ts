@@ -14,9 +14,9 @@ function fakeTree(seed: NodeData[]): Tree {
         n.$path !== parent && n.$path.startsWith(parent === '/' ? '/' : parent + '/'));
       return { items, total: items.length };
     },
-    async set() {},
-    async remove() { return false; },
-    async patch() {},
+    async set() { return { changes: [] }; },
+    async remove() { return { changes: [] }; },
+    async patch() { return { changes: [] }; },
   };
   return tree;
 }
@@ -52,7 +52,7 @@ describe('ServerTreeSource', () => {
     const tree: Tree = {
       async get() { throw new Error('boom'); },
       async getChildren() { return { items: [], total: 0 }; },
-      async set() {}, async remove() { return false; }, async patch() {},
+      async set() { return { changes: [] }; }, async remove() { return { changes: [] }; }, async patch() { return { changes: [] }; },
     };
     const src = new ServerTreeSource(tree);
     src.getPathSnapshot('/x');

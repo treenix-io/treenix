@@ -58,7 +58,7 @@ describe('createRepathTree', () => {
     const mounted = createRepathTree(inner, '/mnt', '/data');
     const removed = await mounted.remove('/mnt/tmp');
 
-    assert.ok(removed);
+    assert.ok(removed.changes?.length);
     assert.equal(await inner.get('/data/tmp'), undefined);
   });
 

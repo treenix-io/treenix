@@ -77,7 +77,7 @@ describe('createBranchTree (memory)', () => {
   });
 
   it('remove writes a whiteout: invisible in branch, intact in lower', async () => {
-    assert.equal(await branch.remove('/a'), true);
+    assert.ok((await branch.remove('/a')).changes?.length);
     assert.equal(await branch.get('/a'), undefined);
     assert.equal((await lower.get('/a'))?.title, 'live-a');
 
@@ -88,17 +88,17 @@ describe('createBranchTree (memory)', () => {
     assert.equal(wrapper?.$type, BRANCH_WHITEOUT_TYPE);
     assert.equal(wrapper?.baseRev, 1);
 
-    assert.equal(await branch.remove('/a'), false);
+    assert.deepEqual((await branch.remove('/a')).changes, []);
   });
 
   it('remove of nonexistent path returns false, writes nothing', async () => {
-    assert.equal(await branch.remove('/nope'), false);
+    assert.deepEqual((await branch.remove('/nope')).changes, []);
     assert.equal(await upper.get('/nope'), undefined);
   });
 
   it('create-then-delete leaves a baseRev:null whiteout', async () => {
     await branch.set(createNode('/tmp', 'doc', {}));
-    assert.equal(await branch.remove('/tmp'), true);
+    assert.ok((await branch.remove('/tmp')).changes?.length);
     assert.equal(await branch.get('/tmp'), undefined);
     const wrapper = await upper.get('/tmp');
     assert.equal(wrapper?.$type, BRANCH_WHITEOUT_TYPE);

@@ -107,7 +107,8 @@ export async function resolveToken(tree: Tree, token: string): Promise<Session |
 }
 
 export async function revokeSession(tree: Tree, token: string): Promise<boolean> {
-  return tree.remove(sessionPath(token));
+  const { changes } = await tree.remove(sessionPath(token));
+  return changes === null || changes.length > 0;
 }
 
 /** Outer auth dispatcher. Distinguishes absent / bad-bearer / expired-session / ok.

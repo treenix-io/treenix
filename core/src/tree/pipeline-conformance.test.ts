@@ -264,13 +264,13 @@ function suite(t: Target) {
       await tree.set(createNode('/p', 'test.dir', {}));
       await tree.set(createNode('/p/a', 'test.item', {}));
 
-      assert.equal(await tree.remove('/p/a'), true);
+      assert.ok((await tree.remove('/p/a')).changes?.length);
       assert.equal(await tree.get('/p/a'), undefined);
     });
 
     it('remove of a missing path returns false', async () => {
       await fresh();
-      assert.equal(await tree.remove('/nope'), false);
+      assert.deepEqual((await tree.remove('/nope')).changes, []);
     });
 
     // ── scanChildren (composed pipeline only — adapters covered in

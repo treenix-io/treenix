@@ -13,7 +13,7 @@ import {
 } from '#core';
 import { OpError } from '#errors';
 import { ulid } from '#util/ulid';
-import { applyPatchManyEntry, assertPatchManyBatch, hasMutationOps, isSetEntry, type PatchManyEntry, type PatchOp, type Tree } from './index';
+import { applyPatchManyEntry, assertPatchManyBatch, type CommitReceipt, hasMutationOps, isSetEntry, type PatchManyEntry, type PatchOp, type Tree } from './index';
 import { patchViaSet } from './patch';
 import { withCache } from './cache';
 import { isTrashExempt } from './trash-exempt';
@@ -133,6 +133,23 @@ function migrateNode(node: NodeData): NodeData {
   return clone;
 }
 
+/** Migrate receipt before-images (core-ns6p.2): raw stored shapes must not
+ *  leak above the policy — subs diff against before, audit journals it, and
+ *  both must see the same migrated shape reads serve. After-images are fresh
+ *  writes stamped to the current $v — migrateNode would no-op, skip them. */
+function migrateReceipt(receipt: CommitReceipt): CommitReceipt {
+  if (receipt.changes === null) return receipt;
+  let dirty = false;
+  const changes = receipt.changes.map(c => {
+    if (!c.before) return c;
+    const migrated = migrateNode(c.before);
+    if (migrated === c.before) return c;
+    dirty = true;
+    return { ...c, before: migrated };
+  });
+  return dirty ? { changes } : receipt;
+}
+
 function stampVersion(node: NodeData): void {
   const m = getMigrations(node.$type);
   if (m) node['$v'] = m.version;
@@ -210,7 +227,8 @@ function isTrashEntry(path: string): boolean {
 // core-anz4.8: remove() is single-node engine-wide, so purging a trash entry by
 // its marker alone orphans the copied payload forever (retention broken,
 // duplicate $id permanent). Depth-first: children before parents, marker last.
-async function removeSubtree(tree: Tree, path: string, ctx?: unknown): Promise<boolean> {
+// Receipt: the entry marker's — the marker is the logical object being purged.
+async function removeSubtree(tree: Tree, path: string, ctx?: unknown): Promise<CommitReceipt> {
   const { items } = await tree.getChildren(path, { depth: 1 });
   for (const child of items) await removeSubtree(tree, child.$path);
   return tree.remove(path, ctx);
@@ -321,13 +339,17 @@ export function withStoragePolicy(backing: Tree): StoragePolicy {
       // Cost: one backing get per write (fs already reads for OCC; memory get
       // is O(depth)).
       prepareForStore(node, await backing.get(node.$path, ctx), ctx);
-      return backing.set(node, ctx);
+      return migrateReceipt(await backing.set(node, ctx));
     },
 
     async patch(path, ops, ctx) {
       const raw = await backing.get(path, ctx);
       if (raw && migrateNode(raw) !== raw) return patchViaSet(base, path, ops, ctx);
-      return backing.patch(path, ops, ctx);
+      return migrateReceipt(await backing.patch(path, ops, ctx));
+    },
+
+    async remove(path, ctx) {
+      return migrateReceipt(await backing.remove(path, ctx));
     },
   };
 
@@ -365,7 +387,7 @@ export function withStoragePolicy(backing: Tree): StoragePolicy {
           : { path: entry.path, ops: [['t', '$rev', raw.$rev] as const] });
       }
 
-      return backing.patchMany!(ancestor, augmented, ctx);
+      return migrateReceipt(await backing.patchMany!(ancestor, augmented, ctx));
     };
   }
 
@@ -471,7 +493,7 @@ export function withStoragePolicy(backing: Tree): StoragePolicy {
         // Straight to the backing: base.patchMany's migration conversion
         // (system path) would re-read every ops-member for nothing — this
         // loop already converged them.
-        return backing.patchMany!(ancestor, augmented, ctx);
+        return migrateReceipt(await backing.patchMany!(ancestor, augmented, ctx));
       },
     } : {}),
   };
@@ -496,7 +518,7 @@ export function withStoragePolicy(backing: Tree): StoragePolicy {
       if (isTrashExempt(path)) return cached.remove(path, ctx);
 
       const node = await cached.get(path);
-      if (!node) return false;
+      if (!node) return { changes: [] };
 
       const entryPath = `${TRASH_ROOT}/${entryId(path)}`;
       const removedAt = new Date().toISOString();

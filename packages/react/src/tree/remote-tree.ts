@@ -61,9 +61,12 @@ export function createRemoteTree(client: TrpcClient): Tree {
     debugPath(path, 'get');
     return client.get.query({ path }) as Promise<NodeData | undefined>;
   };
+  // Transport receipts are OPAQUE (core-ns6p.2): `changes: null` = committed,
+  // contents unknown — the server's images arrive via the event lane; the
+  // anz4.13 wire-ack upgrade will carry them in the response.
   const set = (node: NodeData) => {
     debugPath(node.$path, 'set');
-    return client.set.mutate({ node: node as Record<string, unknown> }).then(() => {});
+    return client.set.mutate({ node: node as Record<string, unknown> }).then(() => ({ changes: null }));
   };
 
   return {
@@ -75,11 +78,11 @@ export function createRemoteTree(client: TrpcClient): Tree {
     set,
     remove: (path) => {
       debugPath(path, 'remove');
-      return client.remove.mutate({ path }).then(() => true);
+      return client.remove.mutate({ path }).then((ok) => ({ changes: ok ? null : [] }));
     },
     patch: (path, ops) => {
       debugPath(path, 'patch');
-      return client.patch.mutate({ path, ops }).then(() => {});
+      return client.patch.mutate({ path, ops }).then(() => ({ changes: null }));
     },
 
     /** Watch via trpc.events — the per-user wire stream from WatchManager.

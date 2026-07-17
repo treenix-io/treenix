@@ -73,7 +73,7 @@ describe('withCapability — write', () => {
   it('allows remove inside writePaths', async () => {
     const wrapped = withCapability(aclTree(), cap);
     const ok = await wrapped.remove('/allowed/a');
-    assert.equal(ok, true);
+    assert.ok(ok.changes?.length);
   });
 });
 

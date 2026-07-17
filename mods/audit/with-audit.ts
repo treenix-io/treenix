@@ -57,6 +57,9 @@ function buildEvent(args: {
   ops?: PatchOp[];
   entries?: AuditBatchEntry[];
   actor?: ActorContext;
+  /** Opaque receipt (remote authority, core-ns6p.2): images live on the
+   *  authority's own journal — this row records the local intent only. */
+  opaque?: boolean;
 }): NodeData {
   const ev: NodeData = {
     $path: eventPath(),
@@ -69,6 +72,7 @@ function buildEvent(args: {
   };
   if (args.ops) ev.ops = args.ops;
   if (args.entries) ev.entries = args.entries;
+  if (args.opaque) ev.opaque = true;
   if (args.actor) {
     if (args.actor.id) ev.by = args.actor.id;
     if (args.actor.onBehalfOf) ev.onBehalfOf = args.actor.onBehalfOf;
@@ -142,48 +146,61 @@ export function withAudit(tree: Tree): Tree {
   // mutations whose appends would heal organically — so the gate probes with a
   // REAL append. A probe row lands only on success (~one per recovery), and
   // documents the outage end in the journal itself.
-  setRecoveryProbe(() => tree.set({
-    $path: eventPath(),
-    $type: 'audit.event',
-    ts: Date.now(),
-    op: 'probe',
-    path: '/sys/audit',
-    before: null,
-    after: null,
-  }));
+  setRecoveryProbe(async () => {
+    await tree.set({
+      $path: eventPath(),
+      $type: 'audit.event',
+      ts: Date.now(),
+      op: 'probe',
+      path: '/sys/audit',
+      before: null,
+      after: null,
+    });
+  });
   // Spread forwards every read/traversal method untouched — get, getChildren,
   // and the OPTIONAL scanChildren/watch the read runtime depends on. Hand-listing
   // methods here previously dropped scanChildren, so asTreeSource threw for every
   // service reading through this wrap. Only the three mutating ops are overridden.
+  // Images come from the CommitReceipt (core-ns6p.2) — the adapter's atomic
+  // span — so the row can no longer be poisoned by a write landing inside the
+  // old before/after reread window. An opaque receipt (remote authority)
+  // journals the local intent with `opaque: true`; the real images live in
+  // the authority's own journal.
   return {
     ...tree,
 
     async set(node, ctx) {
       if (isAuditWrite(node.$path)) return tree.set(node, ctx);
-      const before = (await tree.get(node.$path, ctx)) ?? null;
-      await tree.set(node, ctx);
-      const event = buildEvent({ op: 'set', path: node.$path, before, after: node, actor: getActor(ctx) });
+      const receipt = await tree.set(node, ctx);
+      const c = receipt.changes?.[0];
+      const event = c
+        ? buildEvent({ op: 'set', path: node.$path, before: c.before, after: c.after, actor: getActor(ctx) })
+        : buildEvent({ op: 'set', path: node.$path, before: null, after: null, actor: getActor(ctx), opaque: true });
       await appendOrFailLoud(tree, event);
+      return receipt;
     },
 
     async remove(path, ctx) {
       if (isAuditWrite(path)) return tree.remove(path, ctx);
-      const before = (await tree.get(path, ctx)) ?? null;
-      const ok = await tree.remove(path, ctx);
-      if (ok) {
-        const event = buildEvent({ op: 'remove', path, before, after: null, actor: getActor(ctx) });
+      const receipt = await tree.remove(path, ctx);
+      if (receipt.changes === null) {
+        await appendOrFailLoud(tree, buildEvent({ op: 'remove', path, before: null, after: null, actor: getActor(ctx), opaque: true }));
+      } else if (receipt.changes.length) {
+        const event = buildEvent({ op: 'remove', path, before: receipt.changes[0].before, after: null, actor: getActor(ctx) });
         await appendOrFailLoud(tree, event);
       }
-      return ok;
+      return receipt;
     },
 
     async patch(path, ops: PatchOp[], ctx) {
       if (isAuditWrite(path)) return tree.patch(path, ops, ctx);
-      const before = (await tree.get(path, ctx)) ?? null;
-      await tree.patch(path, ops, ctx);
-      const after = (await tree.get(path, ctx)) ?? null;
-      const event = buildEvent({ op: 'patch', path, before, after, ops, actor: getActor(ctx) });
+      const receipt = await tree.patch(path, ops, ctx);
+      const c = receipt.changes?.[0];
+      const event = c
+        ? buildEvent({ op: 'patch', path, before: c.before, after: c.after, ops, actor: getActor(ctx) })
+        : buildEvent({ op: 'patch', path, before: null, after: null, ops, actor: getActor(ctx), opaque: true });
       await appendOrFailLoud(tree, event);
+      return receipt;
     },
 
     // patchMany (core-gk8.15): explicit interception — the `...tree` spread
@@ -195,22 +212,24 @@ export function withAudit(tree: Tree): Tree {
       async patchMany(ancestor: string, entries: PatchManyEntry[], ctx?: unknown) {
         if (isAuditWrite(ancestor)) return tree.patchMany!(ancestor, entries, ctx);
 
-        const befores: (NodeData | null)[] = [];
-        for (const e of entries) befores.push((await tree.get(e.path, ctx)) ?? null);
+        const receipt = await tree.patchMany!(ancestor, entries, ctx);
 
-        await tree.patchMany!(ancestor, entries, ctx);
-
+        const byPath = new Map((receipt.changes ?? []).map(c => [c.path, c]));
         const rows: AuditBatchEntry[] = [];
-        for (let i = 0; i < entries.length; i++) {
-          const entry = entries[i];
-          const before = befores[i];
-          const after = (await tree.get(entry.path, ctx)) ?? null;
+        for (const entry of entries) {
+          const c = byPath.get(entry.path);
+          const before = c?.before ?? null;
+          const after = c?.after ?? null;
           rows.push(isSetEntry(entry)
             ? { path: entry.path, node: entry.node, before, after }
             : { path: entry.path, ops: entry.ops, before, after });
         }
-        const event = buildEvent({ op: 'patchMany', path: ancestor, before: null, after: null, entries: rows, actor: getActor(ctx) });
+        const event = buildEvent({
+          op: 'patchMany', path: ancestor, before: null, after: null, entries: rows,
+          actor: getActor(ctx), ...(receipt.changes === null ? { opaque: true } : {}),
+        });
         await appendOrFailLoud(tree, event);
+        return receipt;
       },
     } : {}),
   };

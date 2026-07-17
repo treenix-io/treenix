@@ -15,7 +15,7 @@ import { scanFromCollected } from './fs-common';
 import { ensureMigrated } from './migrate-component-namespace';
 import { assertPathSafe } from './path-safety';
 import { applyPatchManyEntry, assertPatchManyBatch, assertSetEntryOcc, isSetEntry, mapNodeForSift, paginate, type TreeSource } from './index';
-import { defaultPatch, hasMutationOps } from './patch';
+import { type CommitChange, type CommitReceipt, defaultPatch, hasMutationOps } from './patch';
 
 export async function createFsTree(rootDir: string): Promise<TreeSource> {
   await mkdir(resolve(rootDir), { recursive: true });
@@ -191,14 +191,18 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
   // Write body shared by set() and patchMany(). Runs INSIDE locked() — set()
   // wraps it itself; patchMany() calls it per staged member under ONE lock
   // (calling tree.set from inside locked() would deadlock the write chain).
-  async function writeNode(node: NodeData): Promise<void> {
+  // Returns the committed change (core-ns6p.2); the existing read doubles as
+  // OCC source and before-image, so the receipt costs no extra IO on the OCC
+  // path and one page-cached read on blind upserts.
+  async function writeNode(node: NodeData): Promise<CommitChange> {
     const path = node.$path;
 
     await promoteAncestors(path);
 
+    const existing = await readNode(path);
+
     // OCC check
     if (node.$rev != null) {
-      const existing = await readNode(path);
       if (!existing) {
         throw new OpError('CONFLICT', `OptimisticConcurrencyError: node ${path} does not exist but $rev was provided`);
       }
@@ -234,6 +238,8 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
       try { await unlink(resolve(join(rootDir, path, '$.json'))); } catch (e: any) { if (e.code !== 'ENOENT') throw e; }
       try { await rmdir(resolve(join(rootDir, path))); } catch (e: any) { if (e.code !== 'ENOENT' && e.code !== 'ENOTEMPTY') throw e; }
     }
+
+    return { path, before: existing ?? null, after: { ...rest, $path: path } };
   }
 
   const tree: TreeSource = {
@@ -259,18 +265,22 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
     },
 
     async set(node) {
-      return locked(() => writeNode(node));
+      return locked(async () => ({ changes: [await writeNode(node)] }));
     },
 
     async remove(path) {
       return locked(async () => {
+        // Before-image for the receipt — read inside the lock, before unlink.
+        const before = await readNode(path);
+        const removed: CommitReceipt = { changes: before ? [{ path, before, after: null }] : [] };
+
         // Try dir form first
         const dirFile = resolve(join(rootDir, path, '$.json'));
         await assertPathSafe(rootDir, dirFile);
         try {
           await unlink(dirFile);
           await cleanupAfterRemove(path);
-          return true;
+          return removed;
         } catch (e: any) {
           if (e.code !== 'ENOENT') throw e;
         }
@@ -282,13 +292,13 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
           try {
             await unlink(leafFile);
             await cleanupAfterRemove(path);
-            return true;
+            return removed;
           } catch (e: any) {
             if (e.code !== 'ENOENT') throw e;
           }
         }
 
-        return false;
+        return { changes: [] };
       });
     },
 
@@ -306,6 +316,7 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
       assertPatchManyBatch(ancestor, entries);
       return locked(async () => {
         const staged: NodeData[] = [];
+        const guarded: CommitChange[] = [];
         for (const entry of entries) {
           if (isSetEntry(entry)) {
             // Set-member may CREATE — OCC gated here in phase 1; the clone is
@@ -318,13 +329,17 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
           const node = await readNode(entry.path);
           if (!node) throw new OpError('NOT_FOUND', `Node not found: ${entry.path}`);
           const copy = applyPatchManyEntry(node, entry);
-          // Test-only member: evaluated, not written, no $rev bump.
+          // Test-only member: evaluated, not written, no $rev bump — reported
+          // as a guarded no-op member.
           if (hasMutationOps(entry.ops)) staged.push(copy);
+          else guarded.push({ path: entry.path, before: copy, after: copy });
         }
 
         // writeNode re-checks OCC against each copy's own (unbumped) $rev and
         // bumps it — same semantics as single patch (defaultPatch → set).
-        for (const n of staged) await writeNode(n);
+        const changes: CommitChange[] = [];
+        for (const n of staged) changes.push(await writeNode(n));
+        return { changes: [...changes, ...guarded] };
       });
     },
   };

@@ -132,8 +132,10 @@ class TreenixMcpToolsServer extends TreenixMcpTools {
   async remove_node(data: { path: string }) {
     assertSafePath(data.path); // R5-MCP-3
     const { tree } = getCtx();
-    const ok = await tree.remove(data.path);
-    return ok ? `removed: ${data.path}` : `not found: ${data.path}`;
+    // Opaque receipt (remote authority) counts as removed — parity with the
+    // pre-receipt transport contract (core-ns6p.2).
+    const { changes } = await tree.remove(data.path);
+    return changes === null || changes.length > 0 ? `removed: ${data.path}` : `not found: ${data.path}`;
   }
 
   /** List all registered types with compact descriptions plus property/action docs. */

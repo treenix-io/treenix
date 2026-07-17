@@ -6,7 +6,7 @@
 // request-scoped, not commit-scoped).
 
 import { OpError } from '#errors';
-import { isSetEntry, type PatchManyEntry, type Tree } from '#tree';
+import { type CommitReceipt, isSetEntry, type PatchManyEntry, type Tree } from '#tree';
 import { PatchTestError } from '#tree/patch';
 import { createPathLock } from '#util/path-lock';
 
@@ -18,21 +18,20 @@ export const mutationLock = createPathLock();
 /** Commit a batch of patches under the lock envelope. N=1 compiles to
  *  tree.patch (what executeAction's commit block always was); N>1 dispatches
  *  tree.patchMany under `ancestor` (all-or-nothing, stage A). */
-export async function commit(tree: Tree, ancestor: string, entries: PatchManyEntry[], ctx?: unknown): Promise<void> {
+export async function commit(tree: Tree, ancestor: string, entries: PatchManyEntry[], ctx?: unknown): Promise<CommitReceipt> {
   if (!entries.length) throw new OpError('BAD_REQUEST', 'commit: empty batch');
 
-  const apply = async (): Promise<void> => {
+  const apply = async (): Promise<CommitReceipt> => {
     try {
       if (entries.length === 1) {
         const only = entries[0];
-        if (isSetEntry(only)) await tree.set(only.node, ctx);
-        else await tree.patch(only.path, only.ops, ctx);
-      } else {
-        if (!tree.patchMany) {
-          throw new OpError('BAD_REQUEST', 'commit: tree does not support patchMany');
-        }
-        await tree.patchMany(ancestor, entries, ctx);
+        if (isSetEntry(only)) return await tree.set(only.node, ctx);
+        return await tree.patch(only.path, only.ops, ctx);
       }
+      if (!tree.patchMany) {
+        throw new OpError('BAD_REQUEST', 'commit: tree does not support patchMany');
+      }
+      return await tree.patchMany(ancestor, entries, ctx);
     } catch (e) {
       // Single-patch path propagates raw PatchTestError (pipeline contract);
       // inside the envelope a failed test op IS a concurrency loss.
@@ -43,7 +42,7 @@ export async function commit(tree: Tree, ancestor: string, entries: PatchManyEnt
     }
   };
 
-  await lockPaths(entries.map(e => e.path), apply);
+  return lockPaths(entries.map(e => e.path), apply);
 }
 
 /** Acquire the mutationLock on every path (dedup, sorted) around fn.

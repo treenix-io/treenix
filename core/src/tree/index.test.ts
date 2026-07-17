@@ -65,9 +65,9 @@ describe('MemoryStore', () => {
   it('remove', async () => {
     const tree = createMemoryTree();
     await tree.set(createNode('/x', 'x'));
-    assert.equal(await tree.remove('/x'), true);
+    assert.ok((await tree.remove('/x')).changes?.length);
     assert.equal(await tree.get('/x'), undefined);
-    assert.equal(await tree.remove('/x'), false);
+    assert.deepEqual((await tree.remove('/x')).changes, []);
   });
 
   it('getChildren with limit', async () => {
@@ -88,7 +88,7 @@ describe('MemoryStore', () => {
     await tree.set(createNode('/a', 'dir'));
     await tree.set(createNode('/a/b', 'item'));
     await tree.set(createNode('/a/b/c', 'item'));
-    assert.equal(await tree.remove('/a'), true);
+    assert.ok((await tree.remove('/a')).changes?.length);
     assert.equal(await tree.get('/a'), undefined);
     assert.equal((await tree.get('/a/b'))?.$type, 't.item');
     assert.equal((await tree.get('/a/b/c'))?.$type, 't.item');
@@ -266,8 +266,8 @@ describe('OverlayStore', () => {
     await upper.set(createNode('/x', 'upper'));
     await lower.set(createNode('/y', 'lower'));
     const tree = createOverlayTree(upper, lower);
-    assert.equal(await tree.remove('/x'), true);
-    assert.equal(await tree.remove('/y'), false);
+    assert.ok((await tree.remove('/x')).changes?.length);
+    assert.deepEqual((await tree.remove('/y')).changes, []);
   });
 });
 

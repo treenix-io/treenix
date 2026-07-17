@@ -279,14 +279,14 @@ describe('RawFsStore', () => {
     await writeFile(join(dir, 'gone.txt'), 'bye');
 
     const result = await tree.remove('/gone.txt');
-    assert.equal(result, true);
+    assert.ok(result.changes?.length);
     await assert.rejects(() => stat(join(dir, 'gone.txt')), { code: 'ENOENT' });
   });
 
   it('remove() missing file returns false', async () => {
     const tree = await setup();
     const result = await tree.remove('/nope.txt');
-    assert.equal(result, false);
+    assert.deepEqual(result.changes, []);
   });
 
   it('remove() deletes empty directory', async () => {
@@ -294,7 +294,7 @@ describe('RawFsStore', () => {
     await mkdir(join(dir, 'empty'));
 
     const result = await tree.remove('/empty');
-    assert.equal(result, true);
+    assert.ok(result.changes?.length);
     await assert.rejects(() => stat(join(dir, 'empty')), { code: 'ENOENT' });
   });
 

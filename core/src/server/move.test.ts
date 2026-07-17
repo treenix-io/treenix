@@ -238,12 +238,12 @@ describe('move: concurrent writes during scan→commit (core-anz4.5)', () => {
     return { policy, log, logged, envelope };
   }
 
-  async function moveWithInjectedWrite(inject: (h: ReturnType<typeof harness>) => Promise<void>) {
+  async function moveWithInjectedWrite(inject: (h: ReturnType<typeof harness>) => Promise<unknown>) {
     const h = harness();
     await h.policy.set(createNode('/x', 'dir', {}));
     await h.policy.set(createNode('/x/a', 'doc', { n: 1 }));
 
-    let writer: Promise<void> | undefined;
+    let writer: Promise<unknown> | undefined;
     const interposed: Tree = {
       ...h.logged,
       scanChildren: async function* (parent, opts, ctx) {

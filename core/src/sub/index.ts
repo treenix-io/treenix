@@ -532,6 +532,9 @@ export function withSubscriptions(
     ...(tree.scanChildren ? { scanChildren: tree.scanChildren.bind(tree) } : {}),
     watch,
 
+    // Events derive from the CommitReceipt (core-ns6p.2): before/after images
+    // come from the adapter's atomic span, so the pre/post rereads — and the
+    // coherency window where a second write could poison them — are gone.
     async set(node, ctx) {
       // Defense in depth: strip string $patches if injected
       if ('$patches' in node) {
@@ -539,81 +542,120 @@ export function withSubscriptions(
         delete node['$patches'];
       }
 
-      const oldNode = await tree.get(node.$path, ctx);
-
-      await tree.set(node, ctx);
-      await emitSetEvent(node.$path, oldNode, ctx, node);
+      const receipt = await tree.set(node, ctx);
+      if (receipt.changes === null) {
+        await emitOpaque('set', node.$path, undefined, ctx);
+        return receipt;
+      }
+      const c = receipt.changes[0];
+      if (!c?.after) throw new Error(`withSubscriptions: set receipt for ${node.$path} missing after image`);
+      await emitSetEvent(c.path, c.before ?? undefined, ctx, c.after);
+      return receipt;
     },
 
     async remove(path, ctx) {
-      const oldNode = await tree.get(path, ctx);
-      const claimsUid = claimsUserOf(path);
-      // Remove drops $acl entirely — treat as ACL change so subscribers
-      // re-fetch (visibility of siblings whose ACL inheritance chain ran
-      // through this node may flip).
-      const cdc = oldNode
-        ? dirtyVps(
-            await membershipVps(path, oldNode, null),
-            (oldNode.$acl || oldNode.$owner || isComponentAclChange(oldNode, null)) ? vpsForAclChange(path) : [],
-            isConfigNode(oldNode) ? vpsForConfigChange(path) : [],
-            claimsUid ? vpsForClaimsChange(claimsUid) : [],
-          )
-        : undefined;
-      const result = await tree.remove(path, ctx);
-
-      if (result && oldNode) {
+      const receipt = await tree.remove(path, ctx);
+      if (receipt.changes === null) {
+        await emitOpaque('remove', path, undefined, ctx);
+        return receipt;
+      }
+      const oldNode = receipt.changes[0]?.before;
+      if (oldNode) {
+        const claimsUid = claimsUserOf(path);
+        // Remove drops $acl entirely — treat as ACL change so subscribers
+        // re-fetch (visibility of siblings whose ACL inheritance chain ran
+        // through this node may flip).
+        const cdc = dirtyVps(
+          await membershipVps(path, oldNode, null),
+          (oldNode.$acl || oldNode.$owner || isComponentAclChange(oldNode, null)) ? vpsForAclChange(path) : [],
+          isConfigNode(oldNode) ? vpsForConfigChange(path) : [],
+          claimsUid ? vpsForClaimsChange(claimsUid) : [],
+        );
         const by = opIdOf(ctx);
         emit({ type: 'remove', path, ...(by ? { by } : {}), ...cdc });
       }
-      return result;
+      return receipt;
     },
 
     async patch(path, ops, ctx) {
-      const oldNode = await tree.get(path, ctx);
-
-      await tree.patch(path, ops, ctx);
-
-      const newNode = await tree.get(path, ctx);
-      await emitPatch(path, ops, oldNode, newNode, ctx);
+      const receipt = await tree.patch(path, ops, ctx);
+      if (receipt.changes === null) {
+        await emitOpaque('patch', path, ops, ctx);
+        return receipt;
+      }
+      const c = receipt.changes[0];
+      if (c) await emitPatch(path, ops, c.before ?? undefined, c.after ?? undefined, ctx);
+      return receipt;
     },
 
-    // patchMany (core-gk8.15): pre-read all old images, commit the batch,
-    // re-read, THEN emit one event per mutated member. Emission is
-    // strictly AFTER the inner call returns — a failed batch emits nothing.
+    // patchMany (core-gk8.15): one event per member, derived from the batch
+    // receipt. Emission is strictly AFTER the inner call returns — a failed
+    // batch emits nothing.
     ...(tree.patchMany ? {
       async patchMany(ancestor: string, entries: PatchManyEntry[], ctx?: unknown) {
-        const oldNodes: (NodeData | undefined)[] = [];
-        for (const e of entries) oldNodes.push(await tree.get(e.path, ctx));
+        const receipt = await tree.patchMany!(ancestor, entries, ctx);
+        if (receipt.changes === null) {
+          for (const e of entries) {
+            await emitOpaque(isSetEntry(e) ? 'set' : 'patch', e.path, isSetEntry(e) ? undefined : e.ops, ctx);
+          }
+          return receipt;
+        }
 
-        await tree.patchMany!(ancestor, entries, ctx);
-
-        for (let i = 0; i < entries.length; i++) {
-          const entry = entries[i];
+        const byPath = new Map(receipt.changes.map(c => [c.path, c]));
+        for (const entry of entries) {
+          // Adapters report every member (policy augmentation preserves paths);
+          // a missing one is a receipt bug, not a skippable condition.
+          const c = byPath.get(entry.path);
+          if (!c) throw new Error(`withSubscriptions: patchMany receipt missing member ${entry.path}`);
           if (isSetEntry(entry)) {
             // Set-member = full-node write, may CREATE (gk8.10 stage 2).
             // Routing it through emitPatch with ops=[] would emit NOTHING
             // (mutations-length guard) — the node invisible to subscribers.
-            await emitSetEvent(entry.path, oldNodes[i], ctx, entry.node);
+            if (!c.after) throw new Error(`withSubscriptions: set-member receipt for ${entry.path} missing after image`);
+            await emitSetEvent(entry.path, c.before ?? undefined, ctx, c.after);
           } else {
-            const newNode = await tree.get(entry.path, ctx);
-            await emitPatch(entry.path, entry.ops, oldNodes[i], newNode, ctx);
+            await emitPatch(entry.path, entry.ops, c.before ?? undefined, c.after ?? undefined, ctx);
           }
         }
+        return receipt;
       },
     } : {}),
   };
 
+  /** Coarse emission for an OPAQUE receipt (remote authority, core-ns6p.2):
+   *  no images to diff or evaluate membership on, so the dirty set is the
+   *  same over-approximation external writes get (vpsForExternalPath) and the
+   *  event carries the authority's post-image (one remote read — the only
+   *  read left on this path; the wire-ack upgrade in core-anz4.13 deletes it). */
+  async function emitOpaque(verb: 'set' | 'patch' | 'remove', path: string, ops: readonly PatchOp[] | undefined, ctx: unknown): Promise<void> {
+    const cdc = dirtyVps(vpsForExternalPath(path));
+    const by = opIdOf(ctx);
+    if (verb === 'remove') {
+      emit({ type: 'remove', path, ...(by ? { by } : {}), ...cdc });
+      return;
+    }
+    const stored = await tree.get(path, ctx);
+    // Gone already = a concurrent remote remove won; its own event supersedes
+    // ours, and a fabricated payload would carry a stale rev (cnr.5 class).
+    if (!stored) return;
+    if (verb === 'patch' && ops) {
+      const mutations = ops.filter(o => o[0] !== 't');
+      if (mutations.length === 0) return;
+      emit({ type: 'patch', path, patches: mutations, rev: stored.$rev, ...(by ? { by } : {}), ...cdc });
+      return;
+    }
+    const { $path, ...body } = stored;
+    emit({ type: 'set', path: $path, node: body, ...(by ? { by } : {}), ...cdc });
+  }
+
   /** CDC dirty computation + event emission for ONE full-node write — shared
    *  by set() and patchMany set-members (after the inner batch commits).
-   *  Emits from the STORED node, not the caller's ref. Layers below may copy
-   *  the node (repath/mount path translation), so the adapter's in-place
-   *  $rev bump — and stamped fields ($refs, $v) — never reach our ref.
-   *  Trusting the input emitted pre-bump revs and diffs without the $rev
-   *  op, so every subscriber cached a stale $rev → false OCC conflicts on
-   *  their next write (found via cnr.5 C2). Cheap: withCache.set just
-   *  re-read and cached this exact node — this get is a cache hit. */
-  async function emitSetEvent(path: string, oldNode: NodeData | undefined, ctx: unknown, written: NodeData): Promise<void> {
-    const stored = await tree.get(path, ctx) ?? written;
+   *  Emits from the receipt's STORED after-image, never the caller's ref —
+   *  layers below may copy the node (repath/mount path translation), so the
+   *  adapter's in-place $rev bump — and stamped fields ($refs, $v) — never
+   *  reach the caller's object. Trusting the input emitted pre-bump revs, so
+   *  every subscriber cached a stale $rev → false OCC conflicts (cnr.5 C2). */
+  async function emitSetEvent(path: string, oldNode: NodeData | undefined, ctx: unknown, stored: NodeData): Promise<void> {
     const claimsUid = claimsUserOf(path);
     const cdc = dirtyVps(
       await membershipVps(path, oldNode ?? null, stored),

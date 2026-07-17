@@ -34,13 +34,17 @@ async function listAuditEvents(tree: Tree) {
 
 describe('withAudit — set', () => {
   it('appends audit.event with op=set, path, before=undefined for new node', async () => {
-    await audited.set({ $path: '/data/n', $type: 'thing', value: 1 });
+    const receipt = await audited.set({ $path: '/data/n', $type: 'thing', value: 1 });
     const events = await listAuditEvents(inner);
     assert.equal(events.length, 1);
     assert.equal(events[0].op, 'set');
     assert.equal(events[0].path, '/data/n');
     assert.equal(events[0].before, null);
     assert.deepEqual((events[0].after as any).value, 1);
+    // core-ns6p.2 acceptance: the journaled after IS the committed image —
+    // same $rev the caller's receipt carries, no reread involved.
+    assert.equal((events[0].after as any).$rev, receipt.changes?.[0]?.after?.$rev);
+    assert.equal(typeof (events[0].after as any).$rev, 'number');
   });
 
   it('captures before-image for existing node', async () => {

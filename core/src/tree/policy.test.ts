@@ -512,7 +512,7 @@ describe('policy: validation step (Write-Barrier)', () => {
     assert.ok(await tree.get('/a'));
     const children = await tree.getChildren('/');
     assert.equal(children.items.length, 1);
-    assert.equal(await tree.remove('/a'), true);
+    assert.ok((await tree.remove('/a')).changes?.length);
   });
 });
 
@@ -667,7 +667,7 @@ describe('policy: trash step', () => {
   it('moves the removed node into /sys/trash and reports the origin', async () => {
     const { inner, tree } = await trashSetup();
 
-    assert.equal(await tree.remove('/clients/acme'), true);
+    assert.ok((await tree.remove('/clients/acme')).changes?.length);
     assert.equal(await inner.get('/clients/acme'), undefined);
 
     // remove() is single-node engine-wide (children live by prefix query, D04):
@@ -693,8 +693,8 @@ describe('policy: trash step', () => {
     await inner.set(createNode('/sys', 'dir', {}));
     await inner.set(createNode('/sys/log', 'dir', {}));
 
-    assert.equal(await tree.remove('/auth/sessions/tok'), true);
-    assert.equal(await tree.remove('/sys/log'), true);
+    assert.ok((await tree.remove('/auth/sessions/tok')).changes?.length);
+    assert.ok((await tree.remove('/sys/log')).changes?.length);
 
     assert.deepEqual(await trashEntries(inner), []);
     assert.equal(await inner.get('/auth/sessions/tok'), undefined);
@@ -708,7 +708,7 @@ describe('policy: trash step', () => {
     // core-anz4.8 regression: the copied payload subtree must go with the marker.
     await inner.set(createNode(`${entry.$path}/acme/deal`, 'crm.deal', { sum: 100 }));
 
-    assert.equal(await tree.remove(entry.$path), true);
+    assert.ok((await tree.remove(entry.$path)).changes?.length);
     assert.deepEqual(await trashEntries(inner), []);
     assert.equal(await inner.get(`${entry.$path}/acme`), undefined);
     assert.equal(await inner.get(`${entry.$path}/acme/deal`), undefined);
@@ -716,7 +716,7 @@ describe('policy: trash step', () => {
 
   it('returns false for a missing node and writes nothing', async () => {
     const { inner, tree } = await trashSetup();
-    assert.equal(await tree.remove('/clients/ghost'), false);
+    assert.deepEqual((await tree.remove('/clients/ghost')).changes, []);
     assert.deepEqual(await trashEntries(inner), []);
   });
 
@@ -737,7 +737,7 @@ describe('policy: trash step', () => {
 
     const unregister = addTrashExempt('/overlays');
     try {
-      assert.equal(await tree.remove('/overlays/b1/doc'), true);
+      assert.ok((await tree.remove('/overlays/b1/doc')).changes?.length);
       assert.equal(await inner.get('/overlays/b1/doc'), undefined, 'hard-deleted');
       assert.deepEqual(await trashEntries(inner), [], 'nothing copied into the real trash');
     } finally {
@@ -746,7 +746,7 @@ describe('policy: trash step', () => {
 
     // Unregistered: the namespace soft-deletes again.
     await inner.set(createNode('/overlays/b1/doc2', 'crm.client', { name: 'Back' }));
-    assert.equal(await tree.remove('/overlays/b1/doc2'), true);
+    assert.ok((await tree.remove('/overlays/b1/doc2')).changes?.length);
     assert.equal((await trashEntries(inner)).length, 1, 'trash copy resumes after unregister');
   });
 });
@@ -827,9 +827,9 @@ describe('policy: trash GC is mount-inert (core-anz4.8)', () => {
           : [];
         return { items, total: items.length };
       },
-      async set() {},
-      async remove() { spy.remove++; return true; },
-      async patch() {},
+      async set() { return { changes: [] }; },
+      async remove() { spy.remove++; return { changes: [] }; },
+      async patch() { return { changes: [] }; },
     };
     register(FAKE_MOUNT, 'mount', () => fake);
 
@@ -840,7 +840,7 @@ describe('policy: trash GC is mount-inert (core-anz4.8)', () => {
     // A live mount point in the business tree, then soft-delete it: the copy
     // under /sys/trash carries the #mount component.
     await tree.set(createNode('/ext', 'dir', {}, { mount: { $type: FAKE_MOUNT } }));
-    assert.equal(await tree.remove('/ext'), true);
+    assert.ok((await tree.remove('/ext')).changes?.length, 'remove reported the change');
 
     const [entry] = (await base.getChildren(TRASH_ROOT, { depth: 1 })).items;
     assert.ok(entry, 'a trash entry exists');
@@ -866,7 +866,7 @@ describe('policy: trash through the pipeline (e2e)', () => {
     await tree.set(createNode('/board', 'dir', {}));
     await tree.set(createNode('/board/t1', 'task', { title: 'x' }));
 
-    assert.equal(await tree.remove('/board/t1'), true);
+    assert.ok((await tree.remove('/board/t1')).changes?.length);
     assert.equal(await tree.get('/board/t1'), undefined);
 
     const { items } = await systemTree.getChildren(TRASH_ROOT, { depth: 1 });
@@ -876,7 +876,7 @@ describe('policy: trash through the pipeline (e2e)', () => {
 
     // Internal path: the system base sits below the trash step — hard delete, no new entry.
     await systemTree.set(createNode('/board/t2', 'task', { title: 'y' }));
-    assert.equal(await systemTree.remove('/board/t2'), true);
+    assert.ok((await systemTree.remove('/board/t2')).changes?.length);
     const after = await systemTree.getChildren(TRASH_ROOT, { depth: 1 });
     assert.equal(after.items.length, 1);
   });

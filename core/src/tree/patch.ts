@@ -26,6 +26,24 @@ export class PatchTestError extends Error {
   }
 }
 
+// ── Commit receipt (core-ns6p.2) ──
+// Every mutation verb returns what it committed, minted INSIDE the adapter's
+// atomic span — cache/subs/audit consume the receipt instead of re-reading
+// (each reread was a coherency window: a second write could land inside it
+// and poison the first write's event/audit row with a foreign after-image).
+
+/** One committed member. before=null → created; after=null → removed; a
+ *  guarded no-op (test-only ops) reports before/after with equal content.
+ *  Images are SHARED READ-ONLY snapshots (same rule as cached nodes):
+ *  consumers never mutate them, adapters never alias live internal state. */
+export type CommitChange = { path: string; before: NodeData | null; after: NodeData | null };
+
+/** `changes` lists every member the verb touched ([] = known no-op, e.g.
+ *  remove of a missing node). `null` = OPAQUE authority: a remote transport
+ *  that cannot see the authority's images (federation) — consumers take an
+ *  explicit degraded branch, never treat it as "nothing changed". */
+export type CommitReceipt = { changes: CommitChange[] | null };
+
 // ── Path safety (prototype pollution guard) ──
 
 export function assertSafePatchPath(path: string): void {
@@ -154,31 +172,33 @@ export function fromRfc6902(ops: readonly Rfc6902Op[]): PatchOp[] {
 
 export async function defaultPatch(
   get: (path: string, ctx?: unknown) => Promise<NodeData | undefined>,
-  set: (node: NodeData, ctx?: unknown) => Promise<void>,
+  set: (node: NodeData, ctx?: unknown) => Promise<CommitReceipt>,
   path: string,
   ops: readonly PatchOp[],
   ctx?: unknown,
-): Promise<void> {
+): Promise<CommitReceipt> {
   const node = await get(path, ctx);
   if (!node) throw new OpError('NOT_FOUND', `Node not found: ${path}`);
   const copy = structuredClone(node);
   applyOps(copy, ops);
-  if (!hasMutationOps(ops)) return;
-  await set(copy, ctx);
+  // Test-only: nothing written — report the guarded member (copy is the
+  // ops-validated clone, content-equal to stored; exclusive by construction).
+  if (!hasMutationOps(ops)) return { changes: [{ path, before: copy, after: copy }] };
+  return set(copy, ctx);
 }
 
 /** Patch via get→apply→set on the combinator itself.
  *  Ensures patch goes through the same set() pipeline (validation, refs, cache, etc.) */
 export async function patchViaSet(
-  self: { get(path: string, ctx?: unknown): Promise<NodeData | undefined>; set(node: NodeData, ctx?: unknown): Promise<void> },
+  self: { get(path: string, ctx?: unknown): Promise<NodeData | undefined>; set(node: NodeData, ctx?: unknown): Promise<CommitReceipt> },
   path: string,
   ops: readonly PatchOp[],
   ctx?: unknown,
-): Promise<void> {
+): Promise<CommitReceipt> {
   const node = await self.get(path, ctx);
   if (!node) throw new OpError('NOT_FOUND', `Node not found: ${path}`);
   const copy = structuredClone(node);
   applyOps(copy, ops);
-  if (!hasMutationOps(ops)) return;
-  await self.set(copy, ctx);
+  if (!hasMutationOps(ops)) return { changes: [{ path, before: copy, after: copy }] };
+  return self.set(copy, ctx);
 }

@@ -19,9 +19,9 @@ const deps = (routes: RouteIndex, tree: Tree) => ({ routes, tree, render: testRe
 const emptyTree: Tree = {
   async get() { return undefined; },
   async getChildren(): Promise<Page<NodeData>> { return { items: [], total: 0 }; },
-  async set() {},
-  async remove() { return false; },
-  async patch() {},
+  async set() { return { changes: [] }; },
+  async remove() { return { changes: [] }; },
+  async patch() { return { changes: [] }; },
 };
 
 before(() => {

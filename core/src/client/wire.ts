@@ -72,9 +72,13 @@ export function createClient(conn: Conn): WireClient {
         query: opts?.query, cursor: opts?.cursor,
         watch: opts?.watch, watchList: opts?.watchNew,
       }) as Promise<Page<NodeData>>,
-    set: (node) => peer.req.set(node.$path, node).then(() => {}),
-    remove: (path) => peer.req.rm(path) as Promise<boolean>,
-    patch: (path, ops) => peer.req.patch(path, ops).then(() => {}),
+    // Transport receipts are OPAQUE (core-ns6p.2): the authority's images stay
+    // on the server; `changes: null` says "committed, contents unknown" —
+    // never `[]`, which would claim a no-op. rm's boolean ack keeps the known
+    // no-op distinguishable. Full acks land with the anz4.13 wire upgrade.
+    set: (node) => peer.req.set(node.$path, node).then(() => ({ changes: null })),
+    remove: (path) => peer.req.rm(path).then((ok) => ({ changes: ok ? null : [] })),
+    patch: (path, ops) => peer.req.patch(path, ops).then(() => ({ changes: null })),
     // Tree.execute capability (core-pxlu): act is a native TWP frame op; the
     // serving side owns handler resolution and permissions. Presence marks
     // foreign authority for mount adapters (future t.mount.peer, core-nin.7).

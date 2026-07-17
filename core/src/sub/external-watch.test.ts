@@ -65,9 +65,9 @@ function makeMockTree(): { tree: Tree; ctl: MockWatch } {
   const tree: Tree = {
     get: async () => undefined,
     getChildren: async () => ({ items: [], total: 0 }),
-    set: async () => {},
-    remove: async () => false,
-    patch: async () => {},
+    set: async () => ({ changes: [] }),
+    remove: async () => ({ changes: [] }),
+    patch: async () => ({ changes: [] }),
     watch(_scope, opts) {
       callCount++;
       // Reset stream state for the new subscription (retry created a fresh one)
@@ -161,9 +161,9 @@ describe('runExternalWatch — basic forwarding', () => {
     const tree: Tree = {
       get: async () => undefined,
       getChildren: async () => ({ items: [], total: 0 }),
-      set: async () => {},
-      remove: async () => false,
-      patch: async () => {},
+      set: async () => ({ changes: [] }),
+      remove: async () => ({ changes: [] }),
+      patch: async () => ({ changes: [] }),
     };
     const ac = new AbortController();
     assert.throws(() => runExternalWatch(tree, {

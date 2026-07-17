@@ -127,7 +127,7 @@ describe('branch mod: create + mounted view', () => {
   it('remove through the view writes a whiteout, live stays', async () => {
     const { root, tree, branchPath, view } = await setup();
 
-    assert.equal(await tree.remove(`${view}/company/doc`), true);
+    assert.ok((await tree.remove(`${view}/company/doc`)).changes?.length);
     assert.equal(await tree.get(`${view}/company/doc`), undefined);
     assert.equal((await root.get('/company/doc'))?.title, 'live');
     assert.equal((await root.get(`${branchPath}/delta/company/doc`))?.$type, BRANCH_WHITEOUT_TYPE);

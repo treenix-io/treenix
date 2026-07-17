@@ -4,7 +4,7 @@
 
 import type { NodeData } from '#core';
 import { createBoundedCache } from '#util/bounded-cache';
-import { type PatchManyEntry, type Tree, type TreeEvent, type TreeWatchOpts, type TreeWatchScope } from './index';
+import { type CommitReceipt, type PatchManyEntry, type Tree, type TreeEvent, type TreeWatchOpts, type TreeWatchScope } from './index';
 import { createInflight } from './inflight';
 import { patchViaSet } from './patch';
 
@@ -25,6 +25,23 @@ export function withCache(tree: Tree, max = DEFAULT_MAX): CachedTree {
   // Monotonic counter bumped on every invalidate. get() snapshots it at
   // entry and refuses to repopulate cache if it advanced mid-read.
   let invalidateEpoch = 0;
+
+  /** Fold a commit receipt into the cache (core-ns6p.2): epoch-bump FIRST so
+   *  an in-flight get cannot overwrite the fresh image with a stale read (the
+   *  old post-set reread had this race), then populate committed after-images.
+   *  Opaque receipt (remote authority) → invalidate the verb's own paths. */
+  function absorb(receipt: CommitReceipt, verbPaths: string[]): CommitReceipt {
+    invalidateEpoch++;
+    if (receipt.changes === null) {
+      for (const p of verbPaths) cache.delete(p);
+      return receipt;
+    }
+    for (const c of receipt.changes) {
+      if (c.after) cache.set(c.path, c.after);
+      else cache.delete(c.path);
+    }
+    return receipt;
+  }
 
   const wrapper: CachedTree = {
     invalidate(path) { cache.delete(path); invalidateEpoch++; },
@@ -64,16 +81,11 @@ export function withCache(tree: Tree, max = DEFAULT_MAX): CachedTree {
     } : {}),
 
     async set(node, ctx) {
-      await tree.set(node, ctx);
-      // Re-read after set to capture the inner store's $rev bump.
-      const fresh = await tree.get(node.$path, ctx);
-      if (fresh) cache.set(node.$path, fresh);
+      return absorb(await tree.set(node, ctx), [node.$path]);
     },
 
     async remove(path, ctx) {
-      const result = await tree.remove(path, ctx);
-      wrapper.invalidate(path); // bump epoch — raw cache.delete lets an in-flight get repopulate
-      return result;
+      return absorb(await tree.remove(path, ctx), [path]);
     },
 
     async patch(path, ops, ctx) {
@@ -81,13 +93,12 @@ export function withCache(tree: Tree, max = DEFAULT_MAX): CachedTree {
     },
 
     // patchMany forwards NATIVELY (never per-member patchViaSet — that would
-    // split the atomic batch into independent writes). Members invalidate
+    // split the atomic batch into independent writes). Members absorb
     // (epoch-bumping) only AFTER the inner commit; a failed batch changed
     // nothing underneath, so the cache stays valid.
     ...(tree.patchMany ? {
       async patchMany(ancestor: string, entries: PatchManyEntry[], ctx?: unknown) {
-        await tree.patchMany!(ancestor, entries, ctx);
-        for (const e of entries) wrapper.invalidate(e.path);
+        return absorb(await tree.patchMany!(ancestor, entries, ctx), entries.map(e => e.path));
       },
     } : {}),
 

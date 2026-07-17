@@ -189,9 +189,9 @@ describe('scanChildren mount fallback: cyclic nextCursor', () => {
       async getChildren() {
         return { items: [createNode('/users/alice', 'item')], total: 1, nextCursor: 'STUCK' };
       },
-      async set() {},
-      async remove() { return false; },
-      async patch() {},
+      async set() { return { changes: [] }; },
+      async remove() { return { changes: [] }; },
+      async patch() { return { changes: [] }; },
     };
     register('test.mount.cyclic', 'mount', () => stuck);
     const rootStore = createMemoryTree();

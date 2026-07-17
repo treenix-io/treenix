@@ -187,8 +187,9 @@ describe('withCommitEnvelope (core-anz4.4)', () => {
         log.push('pm:start');
         entered();
         await mem.get(entries[0].path); // yield inside the batch span
-        await mem.patchMany!(ancestor, entries, ctx);
+        const receipt = await mem.patchMany!(ancestor, entries, ctx);
         log.push('pm:end');
+        return receipt;
       },
       async set(node, ctx) {
         log.push(`set:${node.$path}`);
@@ -247,7 +248,7 @@ describe('withCommitEnvelope (core-anz4.4)', () => {
       },
     };
 
-    let listenerWrite: Promise<void> | undefined;
+    let listenerWrite: Promise<unknown> | undefined;
     let treeRef!: Tree;
     const { tree: subbed } = withSubscriptions(inner, () => {
       // Fire-and-forget async work spawned synchronously inside dispatch —
@@ -263,8 +264,9 @@ describe('withCommitEnvelope (core-anz4.4)', () => {
     const parked: Tree = {
       ...subbed,
       async set(node, ctx) {
-        await subbed.set(node, ctx);
+        const receipt = await subbed.set(node, ctx);
         if (node.v === 1) { tailReached(); await tailGate; }
+        return receipt;
       },
     };
     treeRef = withCommitEnvelope(parked);

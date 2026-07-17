@@ -761,7 +761,7 @@ describe('TypesStore', () => {
 
     const ts = createTypesTree(backing);
     const result = await ts.remove('/sys/types/custom/thing');
-    assert.equal(result, true);
+    assert.ok(result.changes?.length);
   });
 
   it('set goes to backing tree', async () => {

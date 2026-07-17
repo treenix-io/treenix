@@ -85,9 +85,9 @@ describe('FsStore', () => {
   it('remove', async () => {
     const tree = await setup();
     await tree.set(createNode('/z', 'item'));
-    assert.equal(await tree.remove('/z'), true);
+    assert.ok((await tree.remove('/z')).changes?.length);
     assert.equal(await tree.get('/z'), undefined);
-    assert.equal(await tree.remove('/z'), false);
+    assert.deepEqual((await tree.remove('/z')).changes, []);
   });
 
   it('handles nested paths', async () => {

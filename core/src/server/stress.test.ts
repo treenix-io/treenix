@@ -42,7 +42,7 @@ function timer() {
   };
 }
 
-async function timeBatch(label: string, ops: number, fn: (i: number) => Promise<void>, progressEvery = 0) {
+async function timeBatch(label: string, ops: number, fn: (i: number) => Promise<unknown>, progressEvery = 0) {
   const t = timer();
   for (let i = 0; i < ops; i++) {
     await fn(i);
@@ -727,7 +727,7 @@ describe('Stress: remove operations', () => {
     cdc.subscribe('/phantom', (e) => events.push(e));
 
     const result = await tree.remove('/phantom/ghost');
-    assert.equal(result, false);
+    assert.deepEqual(result.changes, []);
     assert.equal(events.length, 0);
     console.log('  ✓ no event for phantom remove');
   });

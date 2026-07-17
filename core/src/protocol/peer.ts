@@ -244,7 +244,12 @@ export function createPeer(serve?: ServeFactory) {
 
         case 'rm': {
           const path = vPath(frame.path);
-          return ok(await s.tree.remove(path, writeCtx(frame.opId)));
+          // Wire ack stays boolean (core-ns6p.2 keeps the protocol frozen).
+          // Opaque receipt (path behind a remote authority) maps to true —
+          // parity with the pre-receipt transport, which reported forwarded
+          // removes as removed.
+          const receipt = await s.tree.remove(path, writeCtx(frame.opId));
+          return ok(receipt.changes === null ? true : receipt.changes.length > 0);
         }
 
         case 'act': {

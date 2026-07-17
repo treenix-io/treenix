@@ -179,7 +179,7 @@ export function withMounts(rootStore: Tree, opts?: WithMountsOpts): MountableTre
     async set(node, ctx) {
       const tree = await resolveNodeTree(node.$path, ctx);
       invalidateMount(node.$path);
-      await tree.set(node, ctx);
+      return tree.set(node, ctx);
     },
 
     async remove(path, ctx) {
@@ -191,7 +191,7 @@ export function withMounts(rootStore: Tree, opts?: WithMountsOpts): MountableTre
     async patch(path, ops, ctx) {
       const tree = await resolveNodeTree(path, ctx);
       invalidateMount(path);
-      await tree.patch(path, ops, ctx);
+      return tree.patch(path, ops, ctx);
     },
 
     // patchMany (core-gk8.15): batch containment (asserted BEFORE resolution —
@@ -215,7 +215,7 @@ export function withMounts(rootStore: Tree, opts?: WithMountsOpts): MountableTre
         }
       }
       for (const e of entries) invalidateMount(e.path);
-      await tree.patchMany(ancestor, entries, ctx);
+      return tree.patchMany(ancestor, entries, ctx);
     },
   };
 

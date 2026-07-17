@@ -71,9 +71,12 @@ export function createTrpcTransport(opts: TrpcTransportOpts): TreenixClient & { 
   const tree: TreenixClient['tree'] = {
     get: (path) => trpc.get.query({ path }) as Promise<NodeData | undefined>,
     getChildren: (path, opts) => trpc.getChildren.query({ path, ...opts }),
-    set: (node) => trpc.set.mutate({ node: node as Record<string, unknown> }).then(() => {}),
-    remove: (path) => trpc.remove.mutate({ path }).then(() => true),
-    patch: (path, ops) => trpc.patch.mutate({ path, ops }).then(() => {}),
+    // Transport receipts are OPAQUE (core-ns6p.2): `changes: null` = committed,
+    // contents unknown — the authority's images stay server-side until the
+    // anz4.13 wire-ack upgrade. rm's boolean keeps known no-ops honest.
+    set: (node) => trpc.set.mutate({ node: node as Record<string, unknown> }).then(() => ({ changes: null })),
+    remove: (path) => trpc.remove.mutate({ path }).then((ok) => ({ changes: ok ? null : [] })),
+    patch: (path, ops) => trpc.patch.mutate({ path, ops }).then(() => ({ changes: null })),
     // Tree.execute capability (core-pxlu): actions run on the server side that
     // owns this tree. Presence of this method marks the tree as a foreign
     // authority for mount adapters (t.mount.tree.trpc → repath forwards it).

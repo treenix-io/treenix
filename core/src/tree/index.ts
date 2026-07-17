@@ -6,7 +6,7 @@ import { comparePaths, isMoved, isRef, type NodeData, type Ref } from '#core';
 import { OpError } from '#errors';
 import sift from 'sift';
 import { scanFromCollected } from './fs-common';
-import { applyOps, hasMutationOps, type PatchOp, PatchTestError } from './patch';
+import { applyOps, type CommitChange, type CommitReceipt, hasMutationOps, type PatchOp, PatchTestError } from './patch';
 import type { TreeEvent, TreeWatchOpts, TreeWatchScope } from './watch';
 
 // ── Pagination ──
@@ -126,9 +126,13 @@ export type ExecOpts = { type?: string; key?: string; opId?: string };
 export interface Tree {
   get(path: string, ctx?: unknown): Promise<NodeData | undefined>;
   getChildren(path: string, opts?: ChildrenOpts, ctx?: unknown): Promise<Page<NodeData>>;
-  set(node: NodeData, ctx?: unknown): Promise<void>;
-  remove(path: string, ctx?: unknown): Promise<boolean>;
-  patch(path: string, ops: PatchOp[], ctx?: unknown): Promise<void>;
+  /** Mutation verbs return a CommitReceipt (core-ns6p.2): what was committed,
+   *  with before/after images minted inside the adapter's atomic span.
+   *  Wrappers forward/translate it; cache/subs/audit consume it instead of
+   *  re-reading. remove: `changes: []` = nothing existed (the old `false`). */
+  set(node: NodeData, ctx?: unknown): Promise<CommitReceipt>;
+  remove(path: string, ctx?: unknown): Promise<CommitReceipt>;
+  patch(path: string, ops: PatchOp[], ctx?: unknown): Promise<CommitReceipt>;
   /** Atomic multi-node patch, all members at-or-under `ancestor` (core-gk8.15).
    *  ALL-OR-NOTHING: every member is validated (fresh read, ops applied on a
    *  clone, test ops evaluated) BEFORE anything commits — one failing member
@@ -136,7 +140,7 @@ export interface Tree {
    *  scanChildren/execute): adapters implement natively, wrappers forward;
    *  absence throws BAD_REQUEST at the forwarding layer — never a silent
    *  per-member fallback loop, which would break atomicity. */
-  patchMany?(ancestor: string, entries: PatchManyEntry[], ctx?: unknown): Promise<void>;
+  patchMany?(ancestor: string, entries: PatchManyEntry[], ctx?: unknown): Promise<CommitReceipt>;
   /** Server-internal traversal primitive. Optional on the public Tree
    *  interface: the wire-facing tRPC remote tree cannot implement it
    *  (no streaming over RPC), but every server-side adapter and wrapper
@@ -360,13 +364,15 @@ export function createFilterTree(
       }
     },
     async set(node, ctx) {
-      if (toUpper(node)) await upper.set(node, ctx);
-      else await lower.set(node, ctx);
+      if (toUpper(node)) return upper.set(node, ctx);
+      return lower.set(node, ctx);
     },
     async remove(path, ctx) {
       const a = await upper.remove(path, ctx);
       const b = await lower.remove(path, ctx);
-      return a || b;
+      if (a.changes === null || b.changes === null) return { changes: null };
+      // Upper wins reads, so its before-image is what the merged view served.
+      return { changes: a.changes.length ? a.changes : b.changes };
     },
     async patch(path, ops, ctx) {
       const node = await upper.get(path, ctx) ?? await lower.get(path, ctx);
@@ -380,19 +386,24 @@ export function createFilterTree(
 
       if (wasUpper === nowUpper) {
         // Same layer — patch in place
-        if (wasUpper) await upper.patch(path, ops, ctx);
-        else await lower.patch(path, ops, ctx);
-      } else {
-        // Routing changed — relocate across layers. Strip $rev: the destination
-        // store never issued it, so carrying the source's rev makes the first
-        // write throw OCC against a node it never saw (core-yje D06). Set the
-        // destination FIRST so a rejected write leaves the source intact rather
-        // than dropping the node (remove-then-set is non-atomic — loses data if
-        // the second write throws).
-        const { $rev, ...relocated } = patched;
-        if (wasUpper) { await lower.set(relocated, ctx); await upper.remove(path, ctx); }
-        else { await upper.set(relocated, ctx); await lower.remove(path, ctx); }
+        if (wasUpper) return upper.patch(path, ops, ctx);
+        return lower.patch(path, ops, ctx);
       }
+      // Routing changed — relocate across layers. Strip $rev: the destination
+      // store never issued it, so carrying the source's rev makes the first
+      // write throw OCC against a node it never saw (core-yje D06). Set the
+      // destination FIRST so a rejected write leaves the source intact rather
+      // than dropping the node (remove-then-set is non-atomic — loses data if
+      // the second write throws).
+      const { $rev, ...relocated } = patched;
+      const dest = wasUpper ? lower : upper;
+      const src = wasUpper ? upper : lower;
+      const destReceipt = await dest.set(relocated, ctx);
+      await src.remove(path, ctx);
+      // One logical patch at the view level: before = merged pre-image,
+      // after = what the destination committed (opaque dest → opaque receipt).
+      if (destReceipt.changes === null) return { changes: null };
+      return { changes: [{ path, before: node, after: destReceipt.changes[0]?.after ?? null }] };
     },
 
     // patchMany routes the WHOLE batch to one layer — same get-based routing
@@ -588,15 +599,22 @@ export function createMemoryTree(): TreeSource {
         }
       }
 
+      // Receipt images: before = the replaced store object (orphaned by the
+      // swap — exclusively ours); after = a second clone so the receipt never
+      // aliases live store state (isolation, same reason get() clones).
+      const before = treeNode.data ?? null;
       node.$rev = (node.$rev ?? 0) + 1;
-      treeNode.data = structuredClone(node);
+      const stored = structuredClone(node);
+      treeNode.data = stored;
+      return { changes: [{ path: node.$path, before, after: structuredClone(stored) }] };
     },
 
     async remove(path, _ctx) {
       const treeNode = navigate(path);
-      if (!treeNode?.data) return false;
+      if (!treeNode?.data) return { changes: [] };
+      const before = treeNode.data;
       treeNode.data = undefined;
-      return true;
+      return { changes: [{ path, before, after: null }] };
     },
 
     async patch(path, ops, _ctx) {
@@ -604,9 +622,13 @@ export function createMemoryTree(): TreeSource {
       if (!treeNode?.data) throw new OpError('NOT_FOUND', `Node not found: ${path}`);
       const copy = structuredClone(treeNode.data);
       applyOps(copy, ops);
-      if (!hasMutationOps(ops)) return;
+      if (!hasMutationOps(ops)) {
+        return { changes: [{ path, before: copy, after: copy }] };
+      }
       copy.$rev = (copy.$rev ?? 0) + 1;
+      const before = treeNode.data;
       treeNode.data = copy;
+      return { changes: [{ path, before, after: structuredClone(copy) }] };
     },
 
     // ALL-OR-NOTHING (core-gk8.15): phase 1 stages every member (fresh read,
@@ -618,28 +640,36 @@ export function createMemoryTree(): TreeSource {
       assertPatchManyBatch(ancestor, entries);
 
       const staged: { treeNode: TreeNode<NodeData>; copy: NodeData }[] = [];
+      const changes: CommitChange[] = [];
       for (const entry of entries) {
         if (isSetEntry(entry)) {
           // Set-member: may CREATE — ensurePath instead of navigate. OCC in
           // phase 1 (stageSetEntry) so a conflict denies before any swap.
           const treeNode = ensurePath(entry.path);
-          staged.push({ treeNode, copy: stageSetEntry(treeNode.data, entry) });
+          const copy = stageSetEntry(treeNode.data, entry);
+          staged.push({ treeNode, copy });
+          changes.push({ path: entry.path, before: treeNode.data ?? null, after: structuredClone(copy) });
           continue;
         }
         const treeNode = navigate(entry.path);
         if (!treeNode?.data) throw new OpError('NOT_FOUND', `Node not found: ${entry.path}`);
         const copy = applyPatchManyEntry(treeNode.data, entry);
         // Test-only member: evaluated above, never written, no $rev bump —
-        // same per-node rule as patch.
-        if (!hasMutationOps(entry.ops)) continue;
+        // same per-node rule as patch. Reported as a guarded no-op member.
+        if (!hasMutationOps(entry.ops)) {
+          changes.push({ path: entry.path, before: copy, after: copy });
+          continue;
+        }
         copy.$rev = (copy.$rev ?? 0) + 1;
         staged.push({ treeNode, copy });
+        changes.push({ path: entry.path, before: treeNode.data, after: structuredClone(copy) });
       }
 
       for (const s of staged) s.treeNode.data = s.copy;
+      return { changes };
     },
   };
 }
 
-export { type PatchOp, type Rfc6902Op, PatchTestError, applyOps, assertSafePatchPath, toRfc6902, fromRfc6902, defaultPatch, hasMutationOps, patchViaSet } from './patch';
+export { type CommitChange, type CommitReceipt, type PatchOp, type Rfc6902Op, PatchTestError, applyOps, assertSafePatchPath, toRfc6902, fromRfc6902, defaultPatch, hasMutationOps, patchViaSet } from './patch';
 export { type TreeEvent, type TreeWatchScope, type TreeWatchOpts, subscriptionToAsyncIterable } from './watch';

@@ -159,7 +159,18 @@ export function createBranchTree(upper: Tree, lower: Tree): Tree {
         node: future,
       };
       if (existing?.$rev != null) wrapper.$rev = existing.$rev;
-      await upper.set(wrapper, ctx);
+      const upperReceipt = await upper.set(wrapper, ctx);
+
+      // View-level receipt: the wrapper is a storage detail — report the
+      // VIEW's change. before = what the view served pre-write; after = the
+      // future node under the view's OCC identity (wrapper's new $rev).
+      if (upperReceipt.changes === null) return { changes: null };
+      const wrapperAfter = upperReceipt.changes[0]?.after;
+      if (!wrapperAfter) throw new OpError('CONFLICT', `branch: delta store returned no after image for ${node.$path}`);
+      const before = existing
+        ? (isBranchWhiteout(existing) ? null : unwrap(existing))
+        : (lowerNode ?? null);
+      return { changes: [{ path: node.$path, before, after: { ...future, $path: node.$path, $rev: wrapperAfter.$rev } }] };
     },
 
     // Whiteout-always (even for created-in-branch): after remove the path is
@@ -169,15 +180,16 @@ export function createBranchTree(upper: Tree, lower: Tree): Tree {
     async remove(path, ctx) {
       const found = await upper.get(path, ctx);
       const existing = found ? asWrapper(found) : undefined;
-      if (existing && isBranchWhiteout(existing)) return false;
+      if (existing && isBranchWhiteout(existing)) return { changes: [] };
       const lowerNode = existing ? undefined : await lower.get(path, ctx);
-      if (!existing && !lowerNode) return false;
+      if (!existing && !lowerNode) return { changes: [] };
 
       const baseRev = existing ? existing.baseRev : (lowerNode?.$rev ?? null);
       const whiteout: BranchWhiteout = { $path: path, $type: BRANCH_WHITEOUT_TYPE, baseRev };
       if (existing?.$rev != null) whiteout.$rev = existing.$rev;
       await upper.set(whiteout, ctx);
-      return true;
+      const before = existing ? unwrap(existing) : (lowerNode ?? null);
+      return { changes: [{ path, before, after: null }] };
     },
 
     patch: (path, ops, ctx) => patchViaSet(self, path, ops, ctx),
