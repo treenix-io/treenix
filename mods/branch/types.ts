@@ -10,7 +10,7 @@ import { A, isRef, makeNode, type NodeData, R, S, W } from '@treenx/core';
 import { getCtx, registerType } from '@treenx/core/comp';
 import { OpError } from '@treenx/core/errors';
 import type { ActorContext } from '@treenx/core/server/actions';
-import type { PatchManyEntry, Tree } from '@treenx/core/tree';
+import { type PatchManyEntry, relocateCtx, type Tree } from '@treenx/core/tree';
 import { isBranchDelta, isBranchWhiteout } from '@treenx/core/tree/branch';
 
 export type BranchStatus = 'open' | 'review' | 'merged' | 'conflict' | 'abandoned';
@@ -241,8 +241,7 @@ export class Branch {
     // Compile the batch: set-members only. Creates (baseRev null) have no rev
     // token to guard with — blind-upsert residual, narrowed by the preflight
     // existence check above. Cross-mount members are refused by the mounts
-    // layer before anything commits; ancestor = base contains every live path
-    // by construction (livePath = base + rest).
+    // layer before anything commits.
     const members: PatchManyEntry[] = [];
     for (const e of entries) {
       if (e.op === 'noop') continue;
@@ -253,31 +252,56 @@ export class Branch {
       members.push({ path: e.path, node });
     }
 
-    if (members.length) {
-      try {
-        // actorCtxOf: one requestId across the whole span (withAudit).
-        await tree.patchMany!(this.base, members, actorCtxOf(ctx));
-      } catch (err) {
-        // OCC slip after preflight is the expected race — the batch was denied
-        // whole, so re-read live and report the drift. Anything else (layer
-        // without patchMany, cross-mount member, validation) rethrows loud.
-        if (err instanceof OpError && err.code === 'CONFLICT') {
-          const raced = await findConflicts();
-          if (raced.length) {
-            this.status = 'conflict';
-            this.conflicts = raced;
-            return { merged: 0, applied: [] as string[], conflicts: raced };
-          }
+    // Status flip rides the SAME batch (anz4.6 review): a second commit could
+    // crash between "live merged" and "branch closed", leaving an open branch
+    // over already-merged data. OCC-guarded by the branch node's rev; the
+    // Immer draft stays untouched on success so the action framework does not
+    // issue a competing second write. Ancestor is '/' — branch node and base
+    // live in the root store; a mounted base fails the cross-mount check LOUD
+    // (atomicity across stores is physically impossible — not merged blind).
+    const branchPath = realBranchPath(ctx.node.$path);
+    const branchRev = ctx.node.$rev;
+    const mergedAt = Date.now();
+    if (typeof branchRev !== 'number') {
+      throw new OpError('CONFLICT', `merge: branch node ${branchPath} has no $rev to guard the status flip`);
+    }
+    members.push({
+      path: branchPath,
+      ops: [
+        ['t', '$rev', branchRev],
+        ['r', 'status', 'merged'],
+        ['r', 'mergedAt', mergedAt],
+        ['r', 'conflicts', []],
+      ],
+    });
+
+    try {
+      // actorCtxOf: one requestId across the whole span (withAudit).
+      // relocateCtx (anz4.2): created-in-branch nodes minted their $id at the
+      // VIEW path — carrying it to the live path is the sanctioned relocation
+      // (without the marker the pipeline rejects the whole merge).
+      await tree.patchMany!('/', members, relocateCtx(actorCtxOf(ctx)));
+    } catch (err) {
+      // OCC slip after preflight is the expected race — the batch was denied
+      // whole, so re-read live and report the drift. Anything else (layer
+      // without patchMany, cross-mount member, validation) rethrows loud.
+      if (err instanceof OpError && err.code === 'CONFLICT') {
+        const raced = await findConflicts();
+        if (raced.length) {
+          this.status = 'conflict';
+          this.conflicts = raced;
+          return { merged: 0, applied: [] as string[], conflicts: raced };
         }
-        throw err;
       }
+      throw err;
     }
 
-    this.status = 'merged';
-    this.mergedAt = Date.now();
-    this.conflicts = [];
-    const applied = members.map(m => m.path);
-    return { merged: applied.length, applied, conflicts: [] as ConflictEntry[] };
+    // Storage already holds status='merged' from the batch. The draft stays
+    // UNTOUCHED on this path — mutating it would make the action framework
+    // issue a second commit against the rev the batch just bumped (CONFLICT).
+    // The result reports from locals; the last member is the status flip.
+    const applied = members.slice(0, -1).map(m => m.path);
+    return { merged: applied.length, applied, conflicts: [] as ConflictEntry[], status: 'merged' as const };
   }
 }
 

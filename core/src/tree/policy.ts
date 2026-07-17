@@ -376,7 +376,16 @@ export function withStoragePolicy(backing: Tree): StoragePolicy {
 
       const augmented: PatchManyEntry[] = [];
       for (const entry of entries) {
-        if (isSetEntry(entry)) { augmented.push(entry); continue; }
+        if (isSetEntry(entry)) {
+          // Identity preparation for system-path set-members too (anz4.2
+          // review): without it a systemTree batch stores an arbitrary
+          // duplicate $id verbatim — the exact door prepareForStore closes on
+          // set(). Cloned: staging must not mutate the caller's node.
+          const copy = structuredClone(entry.node);
+          prepareForStore(copy, await backing.get(entry.path, ctx), ctx);
+          augmented.push({ path: entry.path, node: copy });
+          continue;
+        }
 
         const raw = await backing.get(entry.path, ctx);
         if (!raw) { augmented.push(entry); continue; } // adapter throws NOT_FOUND itself

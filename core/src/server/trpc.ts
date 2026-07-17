@@ -340,7 +340,7 @@ export function createTreeRouter(tree: Tree, systemTree: Tree, watcher: WatchMan
       .input(z.object({
         since: z.number().int().nonnegative().optional(),
         epoch: z.string().optional(),
-        token: z.string().optional(),
+        token: z.string().min(1).max(256).optional(),
       }).optional())
       .subscription(({ input, ctx }) => {
       if (ctx.token && !ctx.session) {

@@ -12,19 +12,29 @@
 
 import { assertSafePath } from '#core/path';
 
-const EXEMPT = ['/sys', '/auth', '/proc'];
+// Built-ins are immutable; dynamic registrations are reference-counted so a
+// duplicate registration's unregister cannot strip someone else's exemption.
+const BUILTIN = ['/sys', '/auth', '/proc'];
+const DYNAMIC = new Map<string, number>();
 
 export function isTrashExempt(path: string): boolean {
-  return path === '/' || EXEMPT.some(p => path === p || path.startsWith(p + '/'));
+  if (path === '/') return true;
+  const hit = (p: string) => path === p || path.startsWith(p + '/');
+  return BUILTIN.some(hit) || [...DYNAMIC.keys()].some(hit);
 }
 
 /** Register an additional hard-delete namespace (core-anz4.7). Trusted-mod
  *  surface (same in-process trust as register()). Returns the unregister. */
 export function addTrashExempt(prefix: string): () => void {
   assertSafePath(prefix);
-  if (!EXEMPT.includes(prefix)) EXEMPT.push(prefix);
+  if (BUILTIN.includes(prefix)) return () => {};
+  DYNAMIC.set(prefix, (DYNAMIC.get(prefix) ?? 0) + 1);
+  let released = false;
   return () => {
-    const i = EXEMPT.indexOf(prefix);
-    if (i >= 0) EXEMPT.splice(i, 1);
+    if (released) return;
+    released = true;
+    const n = DYNAMIC.get(prefix) ?? 0;
+    if (n <= 1) DYNAMIC.delete(prefix);
+    else DYNAMIC.set(prefix, n - 1);
   };
 }

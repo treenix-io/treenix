@@ -258,6 +258,9 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
 
   return {
     connect(connId, userId, push, since, token) {
+      // '' is the internal LEGACY_TOKEN shared hold — an external empty token
+      // would alias it and its disconnect would release every legacy watch.
+      if (token === '') throw new Error('watch connect: connection token must be non-empty');
       // Cancel grace timer — user reconnected in time
       const timer = graceTimers.get(userId);
       if (timer) {
@@ -294,10 +297,12 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
       // real gap (the two-tab resume hole). No epoch → fail closed.
       let covered: boolean;
       if (since === undefined) {
-        // No cursor = a client with no history claiming nothing; missedOffline
-        // is the only honest signal available. Clients with any history send a
-        // full cursor and go through the epoch gate.
-        covered = !user.missedOffline;
+        // No cursor = a client with no history claiming nothing. missedOffline
+        // only flips while ZERO pushes are attached — with another tab live,
+        // events between this tab's initial fetch and this connect went to the
+        // other tab and left no trace, so "covered" would silently skip them.
+        // Alone + nothing missed is the only honest yes (core-anz4.11 review).
+        covered = !user.missedOffline && user.pushes.size === 1;
       } else {
         const cSeq = typeof since === 'number' ? since : since.seq;
         const cEpoch = typeof since === 'number' ? undefined : since.epoch;
@@ -377,6 +382,22 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
       if (fresh.size > 0) checkLimits(user, fresh.size);
 
       if (watchOpts?.children) {
+        // Query membership registers FIRST — watchQuery validates (projector
+        // present, visible predicates, depth) and can refuse; publishing the
+        // prefix holders before a refusal would leak a live watch with no
+        // query registration behind it. Partial multi-vp failure rolls back.
+        if (watchOpts.query) {
+          const registered: string[] = [];
+          try {
+            for (const vp of paths) {
+              queryRegistry!.watchQuery({ vp, userId, ...watchOpts.query });
+              registered.push(vp);
+            }
+          } catch (e) {
+            for (const vp of registered) queryRegistry!.unwatchQuery(vp, userId);
+            throw e;
+          }
+        }
         for (const p of paths) {
           let holders = user.prefixes.get(p);
           if (!holders) {
@@ -385,9 +406,6 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
           }
           holders.set(token, watchOpts.autoWatch ?? false);
           addTo(prefixToUsers, p, userId);
-        }
-        if (watchOpts.query) {
-          for (const vp of paths) queryRegistry!.watchQuery({ vp, userId, ...watchOpts.query });
         }
       } else {
         for (const p of paths) {

@@ -4,6 +4,7 @@ import { OpError } from '@treenx/core/errors';
 import { withMounts } from '@treenx/core/mount';
 import { loadSchemasFromDir } from '@treenx/core/schema/load';
 import { executeAction } from '@treenx/core/server/actions';
+import { createPipeline } from '@treenx/core/server/server';
 import { createMemoryTree, type Tree } from '@treenx/core/tree';
 import { BRANCH_DELTA_TYPE, BRANCH_WHITEOUT_TYPE } from '@treenx/core/tree/branch';
 import assert from 'node:assert/strict';
@@ -325,6 +326,42 @@ describe('branch mod: requestMerge + merge', () => {
     const branch = await tree.get(branchPath);
     assert.equal(branch?.status, 'merged');
     assert.ok(typeof branch?.mergedAt === 'number' && branch.mergedAt > 0);
+  });
+
+  // Review 2026-07-17 (anz4.2 × anz4.6): the raw-mounts fixtures above miss the
+  // storage policy, which mints $id at the VIEW path on create — merge must
+  // relocate that identity to live (relocateCtx) and flip status in the SAME
+  // batch. This is the production pipeline the earlier tests bypassed.
+  it('full-pipeline merge: policy-minted $id relocates to live, status flips atomically', async () => {
+    const bootstrap = createMemoryTree();
+    const rootNode = makeNode('/', 'root');
+    rootNode.$acl = [
+      { g: 'system', p: R | W | A | S },
+      { g: 'agents', p: R | S },
+    ];
+    await bootstrap.set(rootNode);
+    const { tree } = createPipeline(bootstrap);
+
+    await tree.set(makeNode(`/auth/users/${OWNER}`, 'user', { status: 'active' }, {
+      groups: { $type: 'groups', list: ['agents'] },
+    }));
+    await tree.set(makeNode('/branches', 't.branches'));
+    const created = await executeAction<{ path: string }>(
+      tree, '/branches', undefined, undefined, 'create', { title: 'pipeline branch' }, ACTOR,
+    );
+    const branchPath = created.path;
+    const view = `${branchPath}/tree`;
+
+    await tree.set(makeNode(`${view}/fresh`, 'branchtest.doc', { title: 'born', count: 0 }));
+    const minted = await tree.get(`${view}/fresh`);
+    assert.equal(typeof minted?.$id, 'string', 'policy minted identity at the view path');
+
+    await executeAction(tree, branchPath, undefined, undefined, 'merge', undefined, ACTOR);
+
+    const live = await tree.get('/fresh');
+    assert.equal(live?.title, 'born');
+    assert.equal(live?.$id, minted?.$id, 'identity relocated with the node — not rejected, not re-minted');
+    assert.equal((await tree.get(branchPath))?.status, 'merged', 'status flipped in the same batch');
   });
 
   // core-anz4.6: PatchManyEntry has no remove member — a remove applied outside
