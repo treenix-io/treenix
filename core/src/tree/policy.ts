@@ -16,6 +16,7 @@ import { ulid } from '#util/ulid';
 import { applyPatchManyEntry, assertPatchManyBatch, hasMutationOps, isSetEntry, type PatchManyEntry, type PatchOp, type Tree } from './index';
 import { patchViaSet } from './patch';
 import { withCache } from './cache';
+import { isTrashExempt } from './trash-exempt';
 
 // ── Migration: per-type $v ladder, applied on read (R-gk8.29) ──
 // THE mechanism mod developers use to evolve stored data shapes:
@@ -201,12 +202,6 @@ function buildRefs(node: NodeData): RefEntry[] | undefined {
 export const TRASH_ROOT = '/sys/trash';
 export const TRASH_ENTRY_TYPE = 't.trash.entry';
 
-const EXEMPT = ['/sys', '/auth', '/proc'];
-
-export function isTrashExempt(path: string): boolean {
-  return path === '/' || EXEMPT.some(p => path === p || path.startsWith(p + '/'));
-}
-
 /** Direct child of /sys/trash — one soft-delete entry (marker + copied payload). */
 function isTrashEntry(path: string): boolean {
   return path.startsWith(TRASH_ROOT + '/') && !path.includes('/', TRASH_ROOT.length + 1);
@@ -233,21 +228,43 @@ function entryId(path: string): string {
 // changes. Stored id wins over the payload — a blind upsert from a legacy
 // client (whose read predates $id) must not re-mint; a DIFFERENT incoming id
 // is a forged/duplicated identity — reject, never merge. A carried $id on a
-// NEW path is accepted: trash-restore, branch merge, move() and backup import
-// legitimately relocate identity. Shared by base.set and the patchMany
+// NEW path is a RELOCATION of identity and needs the relocate marker below
+// (core-anz4.2): no store enforces $id uniqueness, so a foreign ULID stored
+// verbatim mints a live duplicate ($id queries return dupes, $refId
+// authenticates the impostor). Shared by base.set and the patchMany
 // set-member path — both funnel every full-node write.
 
-function prepareForStore(node: NodeData, existing: NodeData | undefined): void {
+// Trusted-relocation marker (core-anz4.2): move() and the trash copy carry an
+// existing $id to a new path ON PURPOSE. The permit is a module-private token
+// under a symbol ctx key — JSON and structuredClone both drop symbol-keyed
+// props, so no wire lane (set/patch frames, tRPC, MCP) can ever smuggle it;
+// only in-process callers wrapping their ctx in relocateCtx may relocate.
+const RELOCATE = Symbol('treenix.relocate');
+const RELOCATE_TOKEN = {};
+
+/** Wrap a write ctx with the in-process permission to carry $id to a new path. */
+export function relocateCtx(ctx?: unknown): object {
+  return { ...(typeof ctx === 'object' && ctx !== null ? ctx : undefined), [RELOCATE]: RELOCATE_TOKEN };
+}
+
+function isRelocate(ctx: unknown): boolean {
+  return typeof ctx === 'object' && ctx !== null && RELOCATE in ctx && ctx[RELOCATE] === RELOCATE_TOKEN;
+}
+
+function prepareForStore(node: NodeData, existing: NodeData | undefined, ctx?: unknown): void {
   stampVersion(node);
 
   if (existing?.$id) {
     // Replacing a tombstone with a real node: the identity moved away WITH
     // the node — the sign post does not own the path's future. Echoing here
     // would let an unrelated write steal the moved id (refs with $refId
-    // would resolve to the impostor). Carried id wins (move-back/restore);
-    // id-less write mints fresh.
+    // would resolve to the impostor). Carried id wins only for a trusted
+    // relocation (move-back/restore); id-less write mints fresh.
     if (isMoved(existing) && !isMoved(node)) {
-      if (node.$id === undefined) node.$id = ulid();
+      if (node.$id === undefined) { node.$id = ulid(); return; }
+      if (!isRelocate(ctx)) {
+        throw new OpError('BAD_REQUEST', `$id carried onto tombstone path ${node.$path} without a trusted relocation`);
+      }
       return;
     }
     if (node.$id !== undefined && node.$id !== existing.$id) {
@@ -256,6 +273,8 @@ function prepareForStore(node: NodeData, existing: NodeData | undefined): void {
     node.$id = existing.$id;
   } else if (node.$id === undefined) {
     node.$id = ulid();
+  } else if (!isRelocate(ctx)) {
+    throw new OpError('BAD_REQUEST', `$id carried onto ${node.$path} without a trusted relocation`);
   }
 }
 
@@ -301,7 +320,7 @@ export function withStoragePolicy(backing: Tree): StoragePolicy {
     async set(node, ctx) {
       // Cost: one backing get per write (fs already reads for OCC; memory get
       // is O(depth)).
-      prepareForStore(node, await backing.get(node.$path, ctx));
+      prepareForStore(node, await backing.get(node.$path, ctx), ctx);
       return backing.set(node, ctx);
     },
 
@@ -395,7 +414,7 @@ export function withStoragePolicy(backing: Tree): StoragePolicy {
             else delete copy.$refs;
 
             for (const e of validateNode(copy)) errors.push(`${entry.path} ${e.path}: ${e.message}`);
-            prepareForStore(copy, await backing.get(entry.path, ctx));
+            prepareForStore(copy, await backing.get(entry.path, ctx), ctx);
             augmented.push({ path: entry.path, node: copy });
             continue;
           }
@@ -489,8 +508,10 @@ export function withStoragePolicy(backing: Tree): StoragePolicy {
       // are fresh nodes, OCC history does not transfer.
       await cached.set({ $path: entryPath, $type: TRASH_ENTRY_TYPE, from: path, removedAt });
 
+      // relocateCtx: the copy carries the live $id to the trash path — the
+      // sanctioned duplicate that makes restore identity-preserving.
       const { $rev: _r, ...data } = node;
-      await cached.set({ ...data, $path: `${entryPath}/${path.split('/').pop()!}` } as NodeData);
+      await cached.set({ ...data, $path: `${entryPath}/${path.split('/').pop()!}` } as NodeData, relocateCtx());
 
       // ctx (opId, actor) forwards only to the real remove — the event that
       // subscribers and audit see; copy-writes above are internal.

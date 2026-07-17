@@ -3,7 +3,7 @@
 import { createNode, R, S } from '#core';
 import { OpError } from '#errors';
 import { createMemoryTree } from '#tree';
-import { withStoragePolicy } from '#tree/policy';
+import { relocateCtx, withStoragePolicy } from '#tree/policy';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { createLoopback } from './loopback';
@@ -95,13 +95,13 @@ describe('TWP peer over loopback', () => {
     assert.equal((await client.req.get('/plain') as { v: number }).v, 2);
   });
 
-  it('server-side set (below the wire boundary) preserves a carried $id', async () => {
+  it('server-side set under relocateCtx preserves a carried $id (core-anz4.2)', async () => {
     const policy = withStoragePolicy(createMemoryTree());
 
     const CARRIED = '01BX5ZZKBKACTAV9WEVGEMMVRZ';
-    await policy.tree.set({ $path: '/restored', $type: 'dir', $id: CARRIED });
+    await policy.tree.set({ $path: '/restored', $type: 'dir', $id: CARRIED }, relocateCtx());
 
-    assert.equal((await policy.tree.get('/restored'))?.$id, CARRIED, 'move/restore/import path keeps identity');
+    assert.equal((await policy.tree.get('/restored'))?.$id, CARRIED, 'move/restore path keeps identity');
   });
 
   it('set without $type → BAD_REQUEST', async () => {

@@ -13,7 +13,8 @@
 import { assertSafePath, commonAncestor, isChildPath, isMoved, type NodeData } from '#core';
 import { OpError } from '#errors';
 import { asTreeSource, type PatchManyEntry, type Tree } from '#tree';
-import { commit } from './commit';
+import { relocateCtx } from '#tree/policy';
+import { commit, mutationLock } from './commit';
 
 /** Batch cap: the commit envelope acquires one lock per member path and both
  *  scan buffers live in memory — an unbounded subtree move is a liveness
@@ -30,6 +31,16 @@ export async function move(tree: Tree, from: string, to: string, ctx?: unknown):
   if (to === from) throw new OpError('BAD_REQUEST', 'move: destination equals source');
   if (isChildPath(from, to, false)) throw new OpError('BAD_REQUEST', `move: destination ${to} is inside the moved subtree ${from}`);
 
+  // Subtree spans over source AND destination, sorted, held from the first
+  // scan through the commit (core-anz4.5): a concurrent in-process write under
+  // either prefix parks until the span ends (or CONFLICTs by lock order)
+  // instead of landing in the scan→commit window — no orphan left under a
+  // tombstone, no foreign node adopted mid-move.
+  const [lo, hi] = from < to ? [from, to] : [to, from];
+  return mutationLock.subtree(lo, () => mutationLock.subtree(hi, () => moveLocked(tree, from, to, ctx)));
+}
+
+async function moveLocked(tree: Tree, from: string, to: string, ctx?: unknown): Promise<MoveResult> {
   const src = asTreeSource(tree);
 
   const root = await tree.get(from, ctx);
@@ -72,7 +83,7 @@ export async function move(tree: Tree, from: string, to: string, ctx?: unknown):
 
     // Carried $id at a new path — the stage-1 relocation contract. $rev is
     // stripped: the destination store never issued one (vacancy pre-checked
-    // above; the in-process commit lock covers the window).
+    // above; the subtree spans cover the window).
     dests.push({ path: dest, node: { ...data, $path: dest } });
 
     // Tombstone: id-less on purpose — the pipeline echoes the stored $id.
@@ -86,6 +97,8 @@ export async function move(tree: Tree, from: string, to: string, ctx?: unknown):
     stones.push({ path: n.$path, node: stone });
   }
 
-  await commit(tree, commonAncestor(from, to), [...dests, ...stones], ctx);
+  // relocateCtx: the dests carry stored $id to new paths — the trusted
+  // relocation the policy's $id gate demands (core-anz4.2).
+  await commit(tree, commonAncestor(from, to), [...dests, ...stones], relocateCtx(ctx));
   return { moved: nodes.length, from, to };
 }

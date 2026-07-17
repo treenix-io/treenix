@@ -9,6 +9,7 @@ import { createMemoryTree, resolveRef, type Tree } from '#tree';
 import { withStoragePolicy } from '#tree/policy';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { mutationLock, withCommitEnvelope } from './commit';
 import { move } from './move';
 
 const isCode = (code: string) => (e: unknown) => e instanceof OpError && e.code === code;
@@ -180,6 +181,22 @@ describe('move (core-gk8.10 stage 2)', () => {
     assert.ok(!isMoved((await tree.get('/x'))!), 'no tombstone written');
   });
 
+  it('a carried foreign $id cannot replace a tombstone without a trusted relocation (core-anz4.2)', async () => {
+    const tree = pipeline();
+    await tree.set(createNode('/victim', 'doc', {}));
+    const victimId = (await tree.get('/victim'))?.$id;
+    assert.ok(victimId);
+    await tree.set(createNode('/a', 'doc', {}));
+    await move(tree, '/a', '/b');
+
+    // Impersonation: a plain write replacing /a's tombstone while claiming the
+    // victim's identity — must fail loud, not store a duplicate ULID.
+    await assert.rejects(
+      () => tree.set({ ...createNode('/a', 'doc', {}), $id: victimId }),
+      isCode('BAD_REQUEST'),
+    );
+  });
+
   it('a fresh write onto a tombstoned path mints a NEW identity (no id theft)', async () => {
     const tree = pipeline();
     await tree.set(createNode('/a', 'doc', {}));
@@ -198,5 +215,69 @@ describe('move (core-gk8.10 stage 2)', () => {
       () => resolveRef(tree, { $ref: '/a', $refId: id }),
       isCode('NOT_FOUND'),
     );
+  });
+});
+
+// ── scan→commit TOCTOU (core-anz4.5) ──
+// move holds subtree spans on source+destination in the shared mutationLock;
+// a concurrent in-process write (which always flows through the commit
+// envelope in the real pipeline) parks until the span ends instead of landing
+// inside the window. detach() models an independent request chain — without
+// it the injected write would inherit move's held set via ALS and run inline.
+
+describe('move: concurrent writes during scan→commit (core-anz4.5)', () => {
+  function harness() {
+    const policy = withStoragePolicy(createMemoryTree()).tree;
+    const log: string[] = [];
+    const logged: Tree = {
+      ...policy,
+      async set(node, ctx) { log.push(`set:${node.$path}`); return policy.set(node, ctx); },
+      async patchMany(ancestor, entries, ctx) { log.push('move-commit'); return policy.patchMany!(ancestor, entries, ctx); },
+    };
+    const envelope = withCommitEnvelope(logged);
+    return { policy, log, logged, envelope };
+  }
+
+  async function moveWithInjectedWrite(inject: (h: ReturnType<typeof harness>) => Promise<void>) {
+    const h = harness();
+    await h.policy.set(createNode('/x', 'dir', {}));
+    await h.policy.set(createNode('/x/a', 'doc', { n: 1 }));
+
+    let writer: Promise<void> | undefined;
+    const interposed: Tree = {
+      ...h.logged,
+      scanChildren: async function* (parent, opts, ctx) {
+        for await (const e of h.policy.scanChildren!(parent, opts, ctx)) {
+          if (parent === '/x' && !writer) writer = mutationLock.detach(() => inject(h));
+          yield e;
+        }
+      },
+    };
+
+    const res = await move(interposed, '/x', '/y');
+    assert.ok(writer, 'the concurrent write was injected during the scan');
+    await writer;
+    return { ...h, res };
+  }
+
+  it('a create under the SOURCE waits for the whole span — no orphan under the tombstone', async () => {
+    const { res, log, policy } = await moveWithInjectedWrite(
+      ({ envelope }) => envelope.set(createNode('/x/late', 'doc', {})),
+    );
+
+    assert.equal(res.moved, 2, 'exactly the scanned members moved');
+    assert.ok(log.indexOf('set:/x/late') > log.indexOf('move-commit'), 'the write waited for the move span');
+    assert.equal(await policy.get('/y/late'), undefined, 'nothing slipped into the moved set');
+    assert.ok(await policy.get('/x/late'), 'the write landed after the span as an ordinary post-move write');
+  });
+
+  it('a create under the DESTINATION waits instead of being adopted mid-move', async () => {
+    const { res, log, policy } = await moveWithInjectedWrite(
+      ({ envelope }) => envelope.set(createNode('/y/stray', 'doc', {})),
+    );
+
+    assert.equal(res.moved, 2);
+    assert.ok(log.indexOf('set:/y/stray') > log.indexOf('move-commit'), 'the write waited for the move span');
+    assert.ok(await policy.get('/y/stray'), 'landed after the move as an ordinary child of the new subtree');
   });
 });

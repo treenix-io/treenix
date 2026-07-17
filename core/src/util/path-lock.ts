@@ -17,6 +17,19 @@
 // only in ascending path order — every wait cycle needs a descending wait
 // somewhere, so ordered waits cannot cycle. A descending acquire is taken
 // inline when free; contended → loud CONFLICT (caller retries), never parked.
+//
+// Prefix spans (core-anz4.5): subtree(path, fn) = the exact lock on `path`
+// PLUS a registered prefix — for the span, this chain is the only runner
+// anywhere under `path`. Composition with the two invariants above:
+//   • an acquire under an OWN active span (gate-identity checked) runs inline —
+//     the span already IS the subtree's mutual exclusion; parking would
+//     deadlock on our own gate;
+//   • an acquire under a FOREIGN span waits on the span's gate, with the
+//     ordered-wait rule applied to the PREFIX path (the lowest wait target):
+//     a chain holding anything greater — e.g. an exact lock inside that very
+//     subtree — rejects CONFLICT instead of parking, which is exactly the
+//     edge that would otherwise close a writer↔span wait cycle.
+// Hot path pays one `prefixes.size` integer check while no span is active.
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { OpError } from '#errors';
@@ -29,12 +42,21 @@ export type PathLock = {
    *  nobody holds and violate mutual exclusion. Compose at the detachment
    *  boundary. */
   detach<T>(fn: () => T): T;
+  /** Exclusive subtree span (core-anz4.5): exact lock on `path`, then a prefix
+   *  registration + drain of in-flight holders below `path`. While the span
+   *  runs, no other chain acquires anything under `path`. Spanning several
+   *  prefixes → take them in sorted order (same rule as lockPaths). */
+  subtree<T>(path: string, fn: () => Promise<T>): Promise<T>;
 };
 
 export function createPathLock(): PathLock {
-  const locks = new Map<string, Promise<void>>();   // path → queue TAIL gate
-  const owners = new Map<string, Promise<void>>();  // path → RUNNING owner's gate
+  const locks = new Map<string, Promise<void>>();    // path → queue TAIL gate
+  const owners = new Map<string, Promise<void>>();   // path → RUNNING owner's gate
+  const prefixes = new Map<string, Promise<void>>(); // path → subtree SPAN's gate
   const held = new AsyncLocalStorage<Map<string, Promise<void>>>();
+
+  const isUnder = (p: string, prefix: string) =>
+    prefix === '/' ? p !== '/' : p.length > prefix.length && p.startsWith(prefix + '/');
 
   const lock = <T>(path: string, fn: () => Promise<T>): Promise<T> => {
     const current = held.getStore();
@@ -43,17 +65,34 @@ export function createPathLock(): PathLock {
     const own = current?.get(path);
     if (own !== undefined && own === owners.get(path)) return fn();
 
-    // Ordering rule: holding any GREATER path forbids waiting on this one.
-    if (current?.size && locks.has(path)) {
+    // Subtree spans: an OWN covering span subsumes this acquire (inline);
+    // FOREIGN covering spans become extra wait targets chained into prev.
+    let spanGates: Promise<void>[] | null = null;
+    let waitFloor = path; // lowest path this acquire would wait on
+    if (prefixes.size) {
+      let ownedSpan = false;
+      for (const [prefix, gate] of prefixes) {
+        if (!isUnder(path, prefix)) continue;
+        if (current?.get(prefix) === gate) { ownedSpan = true; break; }
+        (spanGates ??= []).push(gate);
+        if (prefix < waitFloor) waitFloor = prefix;
+      }
+      if (ownedSpan) return fn();
+    }
+
+    // Ordering rule: holding any path GREATER than the lowest wait target
+    // (the contended path itself, or a foreign span's prefix) forbids waiting.
+    if (current?.size && (spanGates || locks.has(path))) {
       for (const h of current.keys()) {
-        if (path < h) {
+        if (waitFloor < h) {
           return Promise.reject(new OpError('CONFLICT',
-            `lock order: ${path} is contended while holding ${[...current.keys()].sort().join(', ')} — descending wait risks deadlock, retry`));
+            `lock order: ${waitFloor} is contended while holding ${[...current.keys()].sort().join(', ')} — descending wait risks deadlock, retry`));
         }
       }
     }
 
-    const prev = locks.get(path) ?? Promise.resolve();
+    const tail = locks.get(path) ?? Promise.resolve();
+    const prev: Promise<unknown> = spanGates ? Promise.all([tail, ...spanGates]) : tail;
 
     let release!: () => void;
     const gate = new Promise<void>(r => { release = r; });
@@ -73,5 +112,40 @@ export function createPathLock(): PathLock {
   };
 
   lock.detach = <T>(fn: () => T): T => held.run(new Map(), fn);
+
+  lock.subtree = <T>(path: string, fn: () => Promise<T>): Promise<T> =>
+    lock(path, () => {
+      const gate = owners.get(path);
+      const current = held.getStore();
+      // Inline acquisition (own covering span / stale identity): the subtree
+      // is already exclusively this chain's — no nested registration needed.
+      if (gate === undefined || current?.get(path) !== gate) return fn();
+
+      prefixes.set(path, gate);
+      const run = (async () => {
+        // Snapshot in-flight holders below `path` in the SAME sync block as
+        // the registration: anything already in `locks` is drained here;
+        // anything later chains behind the span gate inside lock().
+        const drains: Promise<void>[] = [];
+        for (const [p, tail] of locks) {
+          if (!isUnder(p, path)) continue;
+          if (current.get(p) === owners.get(p)) continue; // own enclosing hold
+          for (const h of current.keys()) {
+            // Drain waits obey the ordered-wait rule too — fail loud, no park.
+            if (p < h) {
+              throw new OpError('CONFLICT',
+                `lock order: subtree ${path} must drain ${p} while holding ${h} — descending wait risks deadlock, retry`);
+            }
+          }
+          drains.push(tail);
+        }
+        if (drains.length) await Promise.all(drains);
+        return fn();
+      })();
+      return run.finally(() => {
+        if (prefixes.get(path) === gate) prefixes.delete(path);
+      });
+    });
+
   return lock;
 }

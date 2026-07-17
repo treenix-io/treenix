@@ -16,7 +16,8 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
-import { isTrashExempt, sweepTrash, TRASH_ENTRY_TYPE, TRASH_ROOT, withStoragePolicy } from './policy';
+import { relocateCtx, sweepTrash, TRASH_ENTRY_TYPE, TRASH_ROOT, withStoragePolicy } from './policy';
+import { addTrashExempt, isTrashExempt } from './trash-exempt';
 
 // ── migration step (base + client path) ──
 
@@ -727,6 +728,27 @@ describe('policy: trash step', () => {
       assert.equal(isTrashExempt(p), false, p);
     }
   });
+
+  it('addTrashExempt registers a hard-delete namespace — overlay removes never reach /sys/trash (core-anz4.7)', async () => {
+    const { inner, tree } = await trashSetup();
+    await inner.set(createNode('/overlays', 'dir', {}));
+    await inner.set(createNode('/overlays/b1', 'dir', {}));
+    await inner.set(createNode('/overlays/b1/doc', 'crm.client', { name: 'Iso' }));
+
+    const unregister = addTrashExempt('/overlays');
+    try {
+      assert.equal(await tree.remove('/overlays/b1/doc'), true);
+      assert.equal(await inner.get('/overlays/b1/doc'), undefined, 'hard-deleted');
+      assert.deepEqual(await trashEntries(inner), [], 'nothing copied into the real trash');
+    } finally {
+      unregister();
+    }
+
+    // Unregistered: the namespace soft-deletes again.
+    await inner.set(createNode('/overlays/b1/doc2', 'crm.client', { name: 'Back' }));
+    assert.equal(await tree.remove('/overlays/b1/doc2'), true);
+    assert.equal((await trashEntries(inner)).length, 1, 'trash copy resumes after unregister');
+  });
 });
 
 describe('policy: sweepTrash', () => {
@@ -909,13 +931,61 @@ describe('policy: $id identity (gk8.10)', () => {
     );
   });
 
-  it('accepts a carried $id on a new path — restore/import relocates identity', async () => {
+  // core-anz4.2: a carried $id on a NEW path is a relocation of identity —
+  // only the in-process relocate marker permits it. Without it, a foreign
+  // ULID would mint a live duplicate (no store enforces $id uniqueness).
+  it('rejects a carried $id on a new path without the relocate marker', async () => {
+    const { tree } = setup();
+
+    await assert.rejects(
+      () => tree.set({ ...createNode('/dupe', 'doc', {}), $id: ulid() }),
+      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+    );
+  });
+
+  it('rejects a carried $id in a patchMany set-member on a new path', async () => {
+    const { tree } = setup();
+
+    await assert.rejects(
+      () => tree.patchMany!('/x', [
+        { path: '/x/a', node: { ...createNode('/x/a', 'doc', {}), $id: ulid() } },
+        { path: '/x/b', node: createNode('/x/b', 'doc', {}) },
+      ]),
+      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+    );
+  });
+
+  it('duplicating a live $id onto a second path is rejected — no two nodes on one ULID', async () => {
+    const { inner, tree } = setup();
+    await tree.set(createNode('/a', 'doc', {}));
+    const victim = (await inner.get('/a'))?.$id;
+    assert.ok(victim);
+
+    await assert.rejects(
+      () => tree.set({ ...createNode('/b', 'doc', {}), $id: victim }),
+      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+    );
+    assert.equal(await inner.get('/b'), undefined, 'nothing stored');
+  });
+
+  it('accepts a carried $id on a new path under relocateCtx — restore/move relocates identity', async () => {
     const { inner, tree } = setup();
     const carried = ulid();
 
-    await tree.set({ ...createNode('/restored', 'doc', {}), $id: carried });
+    await tree.set({ ...createNode('/restored', 'doc', {}), $id: carried }, relocateCtx());
 
     assert.equal((await inner.get('/restored'))?.$id, carried);
+  });
+
+  it('the relocate marker never survives serialization — wire ctx cannot forge it', async () => {
+    const { tree } = setup();
+    // A ctx that round-tripped through JSON (any wire lane) loses the symbol key.
+    const laundered: unknown = JSON.parse(JSON.stringify(relocateCtx({ opId: 'x' })));
+
+    await assert.rejects(
+      () => tree.set({ ...createNode('/forged', 'doc', {}), $id: ulid() }, laundered),
+      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+    );
   });
 
   it('trash copy keeps the identity — restore brings the same $id back', async () => {
