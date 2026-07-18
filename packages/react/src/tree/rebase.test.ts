@@ -1,11 +1,14 @@
 // Rebase tests — confirmed + pending + replay
 
 import { getCtx, registerType } from '@treenx/core/comp';
-import { resolve } from '@treenx/core';
+import { resolve, type NodeData } from '@treenx/core';
 import assert from 'node:assert';
 import { afterEach, describe, it } from 'node:test';
 import * as cache from './cache';
-import { applyServerPatch, applyServerSet, clear, hasPending, pushOptimistic, rollback } from './rebase';
+import {
+  applyServerPatch, applyServerSet, clear, confirmFromResponse, hasPending,
+  ingestNode, pushOptimistic, rollback,
+} from './rebase';
 
 // ── Test types ──
 
@@ -404,5 +407,90 @@ describe('rebase', () => {
 
     const node = cache.get('/c') as any;
     assert.strictEqual(node.$rev, 5, 'NaN rev did not corrupt cached $rev');
+  });
+});
+
+// ── ingestNode — non-regressing, rebase-aware snapshot ingest (ns6p.4 §3.3) ──
+
+describe('ingestNode', () => {
+  const img = (path: string, rev: number | undefined, v: string): NodeData =>
+    rev === undefined ? { $path: path, $type: 'doc', v } : { $path: path, $type: 'doc', $rev: rev, v };
+  const counter = (rev: number, count: number): NodeData =>
+    ({ $path: '/c', $type: 'test.rebase.counter', $rev: rev, count });
+  const vOf = (p: string) => (cache.get(p) as { v?: string } | undefined)?.v;
+  const countOf = (p: string) => (cache.get(p) as { count?: number } | undefined)?.count;
+
+  it('keeps the cached image when the read raced a newer event (invariant 28)', () => {
+    cache.put(img('/i', 3, 'newer'));
+
+    cache.put(ingestNode(img('/i', 2, 'stale')));
+
+    assert.strictEqual(vOf('/i'), 'newer');
+    assert.strictEqual(cache.get('/i')?.$rev, 3);
+  });
+
+  it('replaces on equal or newer rev, and when either rev is missing', () => {
+    cache.put(img('/i', 3, 'old'));
+    cache.put(ingestNode(img('/i', 3, 'equal')));
+    assert.strictEqual(vOf('/i'), 'equal', 'equal rev replaces');
+
+    cache.put(ingestNode(img('/i', 4, 'ahead')));
+    assert.strictEqual(vOf('/i'), 'ahead');
+
+    cache.put(ingestNode(img('/i', undefined, 'unversioned')));
+    assert.strictEqual(vOf('/i'), 'unversioned', 'unorderable rev: snapshot is authoritative for a read');
+
+    cache.put(ingestNode(img('/i', 1, 'later')));
+    assert.strictEqual(vOf('/i'), 'later', 'cached without rev cannot prove regression');
+  });
+
+  it('uncached path: returns the node itself', () => {
+    const n = img('/fresh', 1, 'x');
+    assert.strictEqual(ingestNode(n), n);
+  });
+
+  it('overlay present: snapshot becomes the confirmed base, pendings replay on top (invariant 18)', () => {
+    cache.put(counter(1, 0));
+    pushOptimistic('/c', Counter, undefined, action('test.rebase.counter', 'increment'), undefined, 'op1');
+    assert.strictEqual(countOf('/c'), 1, 'optimistic');
+
+    // Read raced ahead: server already at rev 2 / count 5 (foreign writes).
+    cache.put(ingestNode(counter(2, 5)));
+
+    assert.strictEqual(countOf('/c'), 6, 'confirmed 5 + replayed increment');
+    assert.strictEqual(cache.get('/c')?.$rev, 2, 'confirmed base rev adopted');
+    assert.strictEqual(hasPending('/c', 'op1'), true, 'pending op survives the snapshot');
+
+    // The op's ack settles through the normal event lane on the new base.
+    applyServerPatch('/c', [['r', 'count', 6]], 3, 'op1');
+    assert.strictEqual(countOf('/c'), 6);
+    assert.strictEqual(hasPending('/c'), false);
+  });
+
+  it('overlay + stale page image: overlay is not clobbered, confirmed base keeps the newer rev', () => {
+    cache.put(counter(5, 10));
+    pushOptimistic('/c', Counter, undefined, action('test.rebase.counter', 'increment'), undefined, 'op1');
+    assert.strictEqual(countOf('/c'), 11);
+
+    cache.put(ingestNode(counter(4, 3)));
+
+    assert.strictEqual(countOf('/c'), 11, 'stale image kept out, overlay intact');
+    assert.strictEqual(hasPending('/c', 'op1'), true);
+  });
+
+  it('confirmFromResponse does not roll the confirmed base back behind a newer event', () => {
+    cache.put(counter(5, 0));
+    pushOptimistic('/c', Counter, undefined, action('test.rebase.counter', 'increment'), undefined, 'op1');
+
+    // Foreign set advances confirmed to rev 7 while op1 is in flight.
+    applyServerSet('/c', counter(7, 40));
+    assert.strictEqual(countOf('/c'), 41, 'foreign base + replay');
+
+    // op1's response refetch resolved BEFORE the foreign write — older image.
+    confirmFromResponse('/c', 'op1', counter(6, 1));
+
+    assert.strictEqual(cache.get('/c')?.$rev, 7, 'newer confirmed base kept');
+    assert.strictEqual(countOf('/c'), 40, 'op consumed, no rollback to rev 6 image');
+    assert.strictEqual(hasPending('/c'), false);
   });
 });

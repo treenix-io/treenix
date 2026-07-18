@@ -6,6 +6,7 @@ import { resolve } from '@treenx/core';
 import assert from 'node:assert';
 import { afterEach, describe, it } from 'node:test';
 import * as cache from './cache';
+import { applyDataEvent, stopEvents } from './events';
 import {
   applyServerPatch,
   applyServerSet,
@@ -48,7 +49,7 @@ registerType('test.e2e.counter', Counter);
 const action = (type: string, name: string) => resolve(type, `action:${name}`, false)!;
 
 let opSeq = 0;
-afterEach(() => { cache.clear(); clear(); opSeq = 0; });
+afterEach(() => { cache.clear(); clear(); stopEvents(); opSeq = 0; });
 
 // ── Helper: simulate what hooks.ts execute() does ──
 // Mints an opId per call (as execute() does) and returns it so the test can
@@ -470,6 +471,40 @@ describe('rebase e2e — deferred server responses', () => {
     ], 3, id2);
     assert.strictEqual(items().length, 2);
     assert.strictEqual(hasPending('/todo'), false, 'all confirmed');
+  });
+
+  it('double-apply impossibility (ns6p.4 §3.3): response confirm + late by-event + network redelivery → single element', () => {
+    cache.put({
+      $path: '/todo', $type: 'dir', $rev: 1,
+      '#checklist': { $type: 'test.e2e.checklist', items: [] },
+    });
+    const items = () =>
+      (cache.get('/todo') as { '#checklist'?: { items: unknown[] } } | undefined)?.['#checklist']?.items ?? [];
+
+    const id1 = simulateExecute('/todo', 'add', { text: 'A' }, 'checklist');
+    assert.strictEqual(items().length, 1, 'optimistic');
+
+    // execute response refetch confirms op1 at rev 2 (ack-via-response, anz4.13).
+    confirmFromResponse('/todo', id1, {
+      $path: '/todo', $type: 'dir', $rev: 2,
+      '#checklist': { $type: 'test.e2e.checklist', items: [{ id: 1, text: 'A', done: false }] },
+    });
+    assert.strictEqual(items().length, 1);
+
+    // The by-matched event arrives late through the FULL event lane.
+    const event = {
+      type: 'patch' as const, path: '/todo',
+      patches: [['a', '#checklist.items.0', { id: 1, text: 'A', done: false }]],
+      rev: 2, by: id1,
+    };
+    applyDataEvent(event);
+    assert.strictEqual(items().length, 1, 'suppressed/skipped — not appended again');
+
+    // Redelivery after the one-shot suppression is spent: before the rev
+    // machine this double-applied the append (rev 2 <= cached 2 now skips).
+    applyDataEvent(event);
+    assert.strictEqual(items().length, 1, 'rev machine makes double-apply impossible');
+    assert.strictEqual(hasPending('/todo'), false);
   });
 
   it('suppression consumed once: a later foreign patch with no by applies normally', () => {

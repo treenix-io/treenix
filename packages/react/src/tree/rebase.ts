@@ -37,6 +37,12 @@ const state = new Map<string, RebaseState>();
  *  promise)". Optimistic UX is best-effort; the server result is
  *  authoritative. */
 function replayAndPut(path: string, rs: RebaseState) {
+  cache.put(replayDraft(path, rs));
+}
+
+/** Pure replay half of replayAndPut — snapshot ingest needs the overlay image
+ *  without an extra cache.put per node (pages batch through replaceChildren). */
+function replayDraft(path: string, rs: RebaseState): NodeData {
   let draft = structuredClone(rs.confirmed);
   for (const op of rs.pending) {
     const candidate = structuredClone(draft);
@@ -56,7 +62,7 @@ function replayAndPut(path: string, rs: RebaseState) {
       reportReplayFailure(path, op, err);
     }
   }
-  cache.put(draft);
+  return draft;
 }
 
 // Skipped predictions are an EXPECTED lane (server event re-syncs) —
@@ -140,13 +146,15 @@ export function confirmFromResponse(path: string, opId: string, node: NodeData |
 
   const idx = rs.pending.findIndex(op => op.opId === opId);
   if (idx === -1) {
-    rs.confirmed = node;
+    if (!regresses(rs.confirmed, node)) rs.confirmed = node;
     settle(path, rs);
     return;
   }
 
   rs.pending.splice(idx, 1);
-  rs.confirmed = node;
+  // Invariant 18 on the response lane too: a refetch that raced a newer
+  // event must not roll the confirmed base back.
+  if (!regresses(rs.confirmed, node)) rs.confirmed = node;
   recordSuppressedAck(path, opId);
   settle(path, rs);
 }
@@ -160,10 +168,54 @@ export function confirmFromResponse(path: string, opId: string, node: NodeData |
  *  An action that persists nothing emits no event, so its op is never acked —
  *  predicting a local change for a non-persisting action is a handler bug;
  *  mark such actions noOptimistic. */
-function consumeAck(rs: RebaseState, by: string | undefined) {
-  if (by === undefined) return;
+function consumeAck(rs: RebaseState, by: string | undefined): boolean {
+  if (by === undefined) return false;
   const idx = rs.pending.findIndex(op => op.opId === by);
-  if (idx !== -1) rs.pending.splice(idx, 1);
+  if (idx === -1) return false;
+  rs.pending.splice(idx, 1);
+  return true;
+}
+
+/** Consume the ack an event carries WITHOUT applying its payload (ns6p.4 §3.3):
+ *  the rev machine skipped the event as stale or routed it to refetch — the
+ *  op's effect is already inside the cached image (rev ≥ event) or arrives
+ *  with the refetch, but the ack must still settle the pending op. */
+export function consumeAckOnly(path: string, by: string | undefined): void {
+  if (by === undefined) return;
+  if (consumeSuppressedAck(path, by)) return;
+  const rs = state.get(path);
+  if (!rs) return;
+  if (consumeAck(rs, by)) settle(path, rs);
+}
+
+const finiteRev = (r: unknown): number | undefined =>
+  typeof r === 'number' && Number.isFinite(r) ? r : undefined;
+
+/** True when `next` is a provably older image than `cur` (both revs finite). */
+function regresses(cur: NodeData | undefined, next: NodeData): boolean {
+  if (!cur) return false;
+  const a = finiteRev(cur.$rev);
+  const b = finiteRev(next.$rev);
+  return a !== undefined && b !== undefined && b < a;
+}
+
+/** Non-regressing, rebase-aware snapshot ingest (ns6p.4 §3.3, invariants 18/28)
+ *  — every node arriving from a READ passes through here. Returns the image to
+ *  place in cache: the kept cached image when the read raced a newer event
+ *  (known rev > returned rev); the overlay replayed on the adopted confirmed
+ *  base when pendings exist; otherwise the returned node itself. */
+export function ingestNode(node: NodeData): NodeData {
+  const path = node.$path;
+  const rs = state.get(path);
+  const known = rs ? rs.confirmed : cache.get(path);
+
+  if (known !== undefined && regresses(known, node)) {
+    return rs ? cache.get(path) ?? replayDraft(path, rs) : known;
+  }
+
+  if (!rs) return node;
+  rs.confirmed = node;
+  return replayDraft(path, rs);
 }
 
 /** Push an optimistic action — snapshot confirmed on first call, replay all pending */

@@ -123,7 +123,7 @@ function bump() {
   for (const cb of globalSubs) cb();
 }
 
-function parentOf(p: string): string | null {
+export function parentOf(p: string): string | null {
   if (p === '/') return null;
   const i = p.lastIndexOf('/');
   return i <= 0 ? '/' : p.slice(0, i);
@@ -597,9 +597,40 @@ export function signalReconnect() {
   for (const cb of genSubs) cb();
 }
 
+// ── In-flight listing reads (ns6p.4 §3.3-3, invariant 19) ──
+// Membership can't be rev-ordered: a create/remove event landing mid-read may
+// be authoritatively undone by that read's page. The event flags the resource;
+// the applying response consumes the flag and refetches to reconverge.
+
+const inflightChildrenReads = new Map<string, number>();
+const overlappedReads = new Set<string>();
+
+export function beginChildrenRead(parent: string): void {
+  inflightChildrenReads.set(parent, (inflightChildrenReads.get(parent) ?? 0) + 1);
+}
+
+/** `applied` = this response won its generation and was written. Returns true
+ *  when the applying read must refetch. A stale/errored read leaves the flag
+ *  for the read that will apply; the last read out clears it (nothing left to
+ *  consume it). */
+export function endChildrenRead(parent: string, applied: boolean): boolean {
+  const n = (inflightChildrenReads.get(parent) ?? 0) - 1;
+  if (n <= 0) inflightChildrenReads.delete(parent);
+  else inflightChildrenReads.set(parent, n);
+  if (!overlappedReads.has(parent)) return false;
+  if (applied || n <= 0) overlappedReads.delete(parent);
+  return applied;
+}
+
+export function flagChildrenReadOverlap(parent: string): void {
+  if (inflightChildrenReads.has(parent)) overlappedReads.add(parent);
+}
+
 // ── Bulk ──
 
 export function clear() {
+  inflightChildrenReads.clear();
+  overlappedReads.clear();
   nodes.clear();
   parentIndex.clear();
   nodeToParents.clear();

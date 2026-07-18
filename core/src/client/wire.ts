@@ -106,6 +106,9 @@ export function createClient(conn: Conn, opts?: { token?: string }): WireClient 
       return { unsubscribe: off };
     },
 
+    // No node cache here — pathCbs is pure callback fan-out and the initial
+    // image is handed over once, so the ns6p.4 §3.3 rev machine / snapshot
+    // ingest is N/A: snapshot-vs-event ordering belongs to caching consumers.
     watchPath: async (path, onEvent) => {
       const node = await peer.req.get(path, true, token);
       ensureEventRouting();

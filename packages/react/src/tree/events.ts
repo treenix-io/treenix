@@ -4,7 +4,7 @@
 import type { NodeData } from '@treenx/core';
 import { applyOps, type PatchOp } from '@treenx/core/tree';
 import * as cache from './cache';
-import { applyServerPatch, applyServerSet, clear as clearRebase } from './rebase';
+import { applyServerPatch, applyServerSet, clear as clearRebase, consumeAckOnly, ingestNode } from './rebase';
 import { AUTH_EXPIRED_EVENT, clearToken, getToken, tabTokenInput, trpc } from './trpc';
 
 type LoadChildren = (path: string) => Promise<void>;
@@ -52,7 +52,7 @@ function seqOf(event: object): number | undefined {
 
 // Coalesce dirty refetches per vp (gk8.12): a burst of writes into one query
 // view triggers ONE listing refetch, not one per event.
-const DIRTY_COALESCE_MS = 75;
+export const DIRTY_COALESCE_MS = 75;
 const dirtyTimers = new Map<string, ReturnType<typeof setTimeout>>();
 function refetchDirtyVp(vp: string, loadChildren: LoadChildren) {
   if (dirtyTimers.has(vp)) return;
@@ -75,7 +75,7 @@ export function refetchInvalidatedPath(path: string, fetchNode: FetchNode) {
   invalidatedTimers.set(path, setTimeout(() => {
     invalidatedTimers.delete(path);
     fetchNode(path).then(
-      (n) => { if (n) cache.put(n); else cache.remove(path); },
+      (n) => { if (n) cache.put(ingestNode(n)); else cache.remove(path); },
       (err: unknown) => {
         console.error('[sse] refetch of invalidated %s failed — evicting:', path, err);
         cache.remove(path);
@@ -85,6 +85,139 @@ export function refetchInvalidatedPath(path: string, fetchNode: FetchNode) {
 }
 
 const fetchInvalidatedNode: FetchNode = (path) => trpc.get.query({ path });
+
+// ── Data-event rev machine (ns6p.4 §3.3, §3.3.3a) ──
+
+/** Wire-lane data-event subset the cache consumes. Fields the tRPC inference
+ *  leaves wide stay `unknown` — narrowed here, at the boundary, as before. */
+export type WireDataEvent = {
+  type: 'set' | 'patch' | 'remove';
+  path: string;
+  node?: object;
+  patches?: unknown;
+  rev?: unknown;
+  by?: string;
+  invalidateVps?: unknown;
+};
+
+const validRev = (r: unknown): number | undefined =>
+  typeof r === 'number' && Number.isFinite(r) ? r : undefined;
+
+/** Apply one server data event under per-node rev ordering (previously events
+ *  applied blindly: late duplicates double-applied array ops, old events
+ *  regressed the cache). Skipped/refetch-routed events still consume their
+ *  `by`-ack so pending optimistic ops settle; membership effects rev can't
+ *  order flag any in-flight listing read (invariant 19). */
+export function applyDataEvent(
+  event: WireDataEvent,
+  loadChildren?: LoadChildren,
+  fetchNode: FetchNode = fetchInvalidatedNode,
+): void {
+  // invalidateVps — the coarse dirty signal (gk8.12): each named query view
+  // may have shifted; refetch its listing through the normal ACL-filtered
+  // read path. Precise add/rm deltas no longer exist.
+  const refetchVps = () => {
+    const vps = event.invalidateVps as string[] | undefined;
+    if (!vps) return;
+    for (const vp of vps) {
+      cache.flagChildrenReadOverlap(vp);
+      if (loadChildren) refetchDirtyVp(vp, loadChildren);
+    }
+  };
+
+  const flagParent = () => {
+    const parent = cache.parentOf(event.path);
+    if (parent !== null) cache.flagChildrenReadOverlap(parent);
+  };
+
+  if (event.type === 'remove') {
+    // Always an invalidation, never rev-gated (§3.3.3a).
+    flagParent();
+    cache.remove(event.path);
+    refetchVps();
+    return;
+  }
+
+  const cached = cache.get(event.path);
+
+  if (event.type === 'set') {
+    const node = { $path: event.path, ...event.node } as NodeData;
+
+    if (cached === undefined) {
+      // Uncached can't regress; create/reveal is a membership change.
+      flagParent();
+      if (!applyServerSet(event.path, node, event.by)) cache.put(node);
+      refetchVps();
+      return;
+    }
+
+    const evRev = validRev(node.$rev);
+    const cachedRev = validRev(cached.$rev);
+    const bothIds = typeof node.$id === 'string' && typeof cached.$id === 'string';
+    const ordered = evRev !== undefined && cachedRev !== undefined;
+
+    if (bothIds && node.$id !== cached.$id) {
+      // Different identity = generation change (recreate / overlay reveal,
+      // invariant 29): rev spaces are incomparable, the full image wins.
+      if (!applyServerSet(event.path, node, event.by)) cache.put(node);
+    } else if (ordered && evRev > cachedRev) {
+      // Full image ahead of the cache is authoritative — no +1 contiguity needed.
+      if (!applyServerSet(event.path, node, event.by)) cache.put(node);
+    } else if (bothIds && ordered) {
+      consumeAckOnly(event.path, event.by); // same identity, stale duplicate
+    } else {
+      // Equal/lower rev without provable identity, or unorderable revs
+      // (mimefs-class) — never blind-skip: refetch decides (§3.3.1).
+      consumeAckOnly(event.path, event.by);
+      refetchInvalidatedPath(event.path, fetchNode);
+    }
+    refetchVps();
+    return;
+  }
+
+  // patch
+  const patches = event.patches as PatchOp[] | undefined;
+  const rev = validRev(event.rev);
+
+  if (cached !== undefined) {
+    const cachedRev = validRev(cached.$rev);
+    const unorderable = rev === undefined || cachedRev === undefined;
+    if (unorderable || rev > cachedRev + 1) {
+      // Missing/non-numeric rev, or a gap (intermediate events ACL-filtered or
+      // lost — the ops don't compose onto our older image): refetch decides,
+      // cache untouched until it lands.
+      consumeAckOnly(event.path, event.by);
+      refetchInvalidatedPath(event.path, fetchNode);
+      refetchVps();
+      return;
+    }
+    if (rev <= cachedRev) {
+      // Duplicate/stale: non-idempotent ops (array append) must not re-apply.
+      consumeAckOnly(event.path, event.by);
+      refetchVps();
+      return;
+    }
+  }
+
+  if (patches && applyServerPatch(event.path, patches, rev, event.by)) {
+    // rebase handled it
+  } else if (cached !== undefined && patches) {
+    try {
+      const patched = structuredClone(cached);
+      applyOps(patched, patches);
+      // Server's new $rev must land in cache too, otherwise next optimistic
+      // write sends pre-patch $rev → OCC storm.
+      if (rev !== undefined) patched.$rev = rev;
+      cache.put(patched);
+    } catch (e) {
+      console.error('[sse] patch apply failed for %s — refetching:', event.path, e);
+      refetchInvalidatedPath(event.path, fetchNode);
+    }
+  } else {
+    refetchInvalidatedPath(event.path, fetchNode);
+  }
+  refetchVps();
+}
 
 function isUnauthorized(err: unknown): boolean {
   const data = (err as { data?: { code?: string; httpStatus?: number } }).data;
@@ -206,7 +339,7 @@ export function startEvents(config: EventsConfig = {}, resume = false) {
             // Re-registration after a continuity break must carry the tab token
             // too — a tokenless re-watch would land on the shared LEGACY hold.
             trpc.get.query({ path: sel, watch: true, ...tabTokenInput }).then(n => {
-              if (n) cache.put(n);
+              if (n) cache.put(ingestNode(n));
             });
           }
         }
@@ -220,7 +353,10 @@ export function startEvents(config: EventsConfig = {}, resume = false) {
       // was dropped — refetch the node itself; FORBIDDEN/gone evicts.
       if (event.type === 'invalidate') {
         if (typeof event.seq === 'number' && event.seq > lastSeq) lastSeq = event.seq;
-        if (loadChildren) for (const vp of event.vps) refetchDirtyVp(vp, loadChildren);
+        for (const vp of event.vps) {
+          cache.flagChildrenReadOverlap(vp);
+          if (loadChildren) refetchDirtyVp(vp, loadChildren);
+        }
         for (const p of event.paths ?? []) refetchInvalidatedPath(p, fetchInvalidatedNode);
         return;
       }
@@ -229,52 +365,8 @@ export function startEvents(config: EventsConfig = {}, resume = false) {
       // reconnect (returned above) does not.
       if (typeof event.seq === 'number' && event.seq > lastSeq) lastSeq = event.seq;
 
-      if (event.type === 'set') {
-        const node = { $path: event.path, ...event.node } as NodeData;
-        if (!applyServerSet(event.path, node, event.by)) cache.put(node);
-        // invalidateVps — the coarse dirty signal (gk8.12): each named query
-        // view may have shifted; refetch its listing through the normal
-        // ACL-filtered read path. Precise add/rm deltas no longer exist.
-        if (event.invalidateVps && loadChildren) {
-          for (const vp of event.invalidateVps as string[]) refetchDirtyVp(vp, loadChildren);
-        }
-      } else if (event.type === 'patch') {
-        // tRPC infers the wire type with `unknown[]` for tuples that contain
-        // `unknown` values — server emits real PatchOp tuples, narrow here.
-        const patches = event.patches as PatchOp[] | undefined;
-        const rev = (event as { rev?: unknown }).rev;
-        if (patches && applyServerPatch(event.path, patches, typeof rev === 'number' ? rev : undefined, event.by)) {
-          // rebase handled it
-        } else {
-          const existing = cache.get(event.path);
-          if (existing && patches) {
-            try {
-              const patched = structuredClone(existing);
-              applyOps(patched, patches);
-              // Non-rebase fallback: server's new $rev must land in cache too,
-              // otherwise next optimistic write sends pre-patch $rev → OCC storm.
-              if (typeof rev === 'number' && Number.isFinite(rev)) patched.$rev = rev;
-              cache.put(patched);
-            } catch (e) {
-              console.error('Failed to apply patches, fetching full node:', e);
-              trpc.get.query({ path: event.path }).then((n) => {
-                if (n) cache.put(n);
-              });
-            }
-          } else {
-            trpc.get.query({ path: event.path }).then((n) => {
-              if (n) cache.put(n);
-            });
-          }
-        }
-        if (event.invalidateVps && loadChildren) {
-          for (const vp of event.invalidateVps as string[]) refetchDirtyVp(vp, loadChildren);
-        }
-      } else if (event.type === 'remove') {
-        cache.remove(event.path);
-        if (event.invalidateVps && loadChildren) {
-          for (const vp of event.invalidateVps as string[]) refetchDirtyVp(vp, loadChildren);
-        }
+      if (event.type === 'set' || event.type === 'patch' || event.type === 'remove') {
+        applyDataEvent(event, loadChildren);
       }
     },
   });
