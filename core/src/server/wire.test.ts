@@ -6,15 +6,16 @@
 import { createClient } from '#client/wire';
 import { createNode, R, S, W } from '#core';
 import { OpError } from '#errors';
+import type { ResolvedReadPlan } from '#mount/resolve-plan';
 import { createPortConn } from '#protocol/port';
 import type { Session } from '#security/sessions';
-import { withSubscriptions } from '#sub';
+import { withSubscriptions, type NodeEvent } from '#sub';
 import { createWatchManager, type WatchCursor } from '#sub/watch';
 import { createMemoryTree, type Tree } from '#tree';
 import assert from 'node:assert/strict';
 import { MessageChannel } from 'node:worker_threads';
 import { describe, it } from 'node:test';
-import { attachWireSession, createWireSession, toEventFrames, type WireDeps } from './wire';
+import { attachWireSession, createWireSession, registerWatchList, toEventFrames, type WireDeps } from './wire';
 
 async function harness(perm: number, ringSize?: number) {
   const memory = createMemoryTree();
@@ -305,6 +306,97 @@ describe('wire session over MessageChannel', () => {
     assert.ok(!resumed.some((f) => f.ev === 'reset'), 'covered resume');
     const rd = resumed.find((f) => f.ev === 'dirty');
     assert.equal(rd?.path, '/hidden', 'the SAME invalidate(paths) — envelope from the ring, not recomputed');
+  });
+});
+
+// ── ns6p.4 slice 2: plan re-validate after registration (invariants 21+23) ──
+
+describe('registerWatchList — plan re-validate (ns6p.4 slice 2)', () => {
+  async function revalidateHarness() {
+    const store = createMemoryTree();
+    await store.set(createNode('/data', 'dir'));
+    const watcher = createWatchManager();
+    const lane: NodeEvent[] = [];
+    const { tree, cdc } = withSubscriptions(store, (e) => watcher.notify(e), {
+      projectMembership: async (_u, o, n) => [o, n],
+    });
+    watcher.bindQueryRegistry(cdc);
+    watcher.connect('c1', 'u1', (env) => lane.push(env.event), undefined, 'tab');
+    return { subTree: tree, watcher, cdc, lane };
+  }
+
+  const freshPlan = (source: string, kind: string): ResolvedReadPlan => ({
+    plan: { source, callerWhere: { kind } },
+    mountDeps: new Set([source]),
+  });
+
+  it('stable plan: one registration, one validation probe', async () => {
+    const { watcher, cdc } = await revalidateHarness();
+    const frozen = freshPlan('/data', 'a');
+    let probes = 0;
+    const tree = { planChildren: async () => { probes++; return freshPlan('/data', 'a'); } };
+
+    await registerWatchList(watcher, tree, 'u1', '/view', false, 'tab', frozen);
+
+    assert.equal(probes, 1);
+    assert.equal(cdc.getActiveQueryCount(), 1);
+  });
+
+  it('config flip between freeze and registration: converges on attempt 2 with the FRESH plan active', async () => {
+    const { subTree, watcher, cdc, lane } = await revalidateHarness();
+    const frozen = freshPlan('/data', 'a');
+    let probes = 0;
+    // The mount now points at /data2 — every probe returns the flipped plan.
+    const tree = { planChildren: async () => { probes++; return freshPlan('/data2', 'a'); } };
+
+    await registerWatchList(watcher, tree, 'u1', '/view', false, 'tab', frozen);
+
+    assert.equal(probes, 2, 'validate after each of the two registration attempts');
+    assert.equal(cdc.getActiveQueryCount(), 1);
+
+    // Membership evaluates the FLIPPED plan, not the stale frozen one.
+    await subTree.set(createNode('/data2/x', 'item', { kind: 'a' }));
+    assert.ok(
+      lane.some((e) => e.type !== 'reconnect' && e.invalidateVps?.includes('/view')),
+      'flip under the fresh source dirties the view',
+    );
+    lane.length = 0;
+    await subTree.set(createNode('/data/x', 'item', { kind: 'a' }));
+    assert.ok(
+      !lane.some((e) => e.type !== 'reconnect' && e.invalidateVps?.includes('/view')),
+      'the undone frozen plan no longer evaluates',
+    );
+  });
+
+  it('plan keeps diverging: CONFLICT after 2 attempts, nothing left registered', async () => {
+    const store = createMemoryTree();
+    const watcher = createWatchManager({ maxWatchesPerUser: 1 });
+    const { cdc } = withSubscriptions(store, undefined, {
+      projectMembership: async (_u, o, n) => [o, n],
+    });
+    watcher.bindQueryRegistry(cdc);
+    watcher.connect('c1', 'u1', () => {}, undefined, 'tab');
+
+    let n = 0;
+    const tree = { planChildren: async () => freshPlan(`/d${++n}`, 'x') };
+
+    await assert.rejects(
+      registerWatchList(watcher, tree, 'u1', '/view', false, 'tab', freshPlan('/data', 'x')),
+      isCode('CONFLICT'),
+    );
+    assert.equal(cdc.getActiveQueryCount(), 0, 'no stale query handle survives the CONFLICT');
+    // The prefix hold is gone too: with a budget of 1, a fresh registration fits.
+    watcher.watch('u1', ['/other'], { children: true, token: 'tab' });
+  });
+
+  it('no frozen plan (peer without the pre-step): plain registration, no probe', async () => {
+    const { watcher, cdc } = await revalidateHarness();
+    const tree = {
+      planChildren: async (): Promise<ResolvedReadPlan> => { throw new Error('must not re-resolve without a frozen plan'); },
+    };
+
+    await registerWatchList(watcher, tree, 'u1', '/view', false, 'tab', undefined);
+    assert.equal(cdc.getActiveQueryCount(), 0, 'plain prefix watch — no query registration');
   });
 });
 

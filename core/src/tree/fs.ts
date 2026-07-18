@@ -214,7 +214,9 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
     // Strip $path from on-disk body — file location is authoritative.
     // Stamped back on read via parseNode. Prevents stale $path when files are copied/moved.
     const { $path: _, ...rest } = node;
-    rest.$rev = (node.$rev ?? 0) + 1;
+    // Advance from STORED (ns6p.4 invariant 24): blind set continues the rev
+    // line instead of resetting to 1. OCC path: incoming === existing above.
+    rest.$rev = (existing?.$rev ?? 0) + 1;
     node.$rev = rest.$rev; // preserve caller-visible $rev bump
     const data = JSON.stringify(rest, null, 2) + '\n';
 

@@ -91,12 +91,17 @@ function suite(t: Target) {
       assert.equal(typeof got.$rev, 'number');
     });
 
-    it('set without $rev is a blind upsert over an existing node', async () => {
+    it('set without $rev is a blind upsert over an existing node — $rev advances from STORED (ns6p.4 invariant 24)', async () => {
       await fresh();
       await tree.set(createNode('/p', 'test.item', { name: 'A' }));
+      const stored = await tree.get('/p');
       await tree.set(createNode('/p', 'test.item', { name: 'B' }));
       const got = await tree.get('/p');
       assert.equal(got?.name, 'B');
+      // Owner-approved contract change (2026-07-18): a blind replace CONTINUES
+      // the stored rev line — the old reset-to-1 made the overwritten node
+      // "older" than it was, so rev-guarded clients skipped fresh events.
+      assert.equal(got?.$rev, stored!.$rev! + 1);
     });
 
     it('mutating the caller node after set does not alter the store', async () => {

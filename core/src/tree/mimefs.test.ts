@@ -453,4 +453,24 @@ describe('RawFsStore', () => {
       assert.equal(ret.done, true);
     });
   });
+
+  // ns6p.4 §3.3.1: mimefs is rev-incapable BY DESIGN — arbitrary codecs
+  // rebuild nodes from plain files, $rev is never persisted. A read must
+  // come back rev-less and writes must not throw over it; the missing rev
+  // routes clients into their refetch branch (invariant 24 scope pin).
+  it('rev-incapable: nodes read without $rev stay without, overwrite does not throw', async () => {
+    const tree = await setup();
+    register('text/plain', 'encode', async (node: NodeData, filePath: string) => {
+      await writeFile(filePath, (node as any).content ?? '');
+    });
+    await writeFile(join(dir, 'note.txt'), 'v1');
+
+    const node = await tree.get('/note.txt');
+    assert.ok(node);
+    assert.equal(node.$rev, undefined, 'no rev machinery — none synthesized');
+
+    await tree.set({ ...node, $path: '/note.txt', content: 'v2' });
+    const again = await tree.get('/note.txt');
+    assert.equal(again?.$rev, undefined, 'round-trip through set stays rev-less');
+  });
 });

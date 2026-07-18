@@ -205,8 +205,9 @@ function suite(factory: Factory) {
       const a = await tree.get('/p/a');
       assert.equal(a?.label, 'fresh');
       assert.equal(a?.n, undefined, 'full-node write, not a merge');
-      // Mirrors Tree.set blind upsert: $rev stamped from the INCOMING node.
-      assert.equal(a?.$rev, 1);
+      // Mirrors Tree.set blind upsert: $rev advances from the STORED node
+      // (ns6p.4 invariant 24, owner-approved 2026-07-18 — was reset-to-1).
+      assert.equal(a?.$rev, 2);
     });
 
     it('failing later member leaves an earlier set-member unwritten (all-or-nothing)', async () => {

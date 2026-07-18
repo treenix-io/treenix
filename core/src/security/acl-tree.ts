@@ -4,11 +4,10 @@
 
 import { A, type ComponentData, isComponent, type NodeData, R, W } from '#core';
 import { OpError } from '#errors';
-import { asTreeSource, assertSafePatchPath, type CommitChange, type CommitReceipt, isSetEntry, type Page, type PatchManyEntry, type PatchOp, type Tree } from '#tree';
+import { asTreeSource, assertSafePatchPath, type ChildrenOpts, type CommitChange, type CommitReceipt, isSetEntry, type Page, type PatchManyEntry, type PatchOp, type Tree } from '#tree';
 import { executeList } from '#tree/read-runtime';
-import { resolveReadPlan } from '#mount/resolve-plan';
+import { type ResolvedReadPlan, resolveReadPlan } from '#mount/resolve-plan';
 import { type AclState, componentPerm, resolvePermission, stripComponents } from './acl';
-import { attachPageReadPlan } from './read-page';
 import { type Actor, assertSourceReadable, createProjector } from './projector';
 
 // ── Patch op rules ──
@@ -158,9 +157,23 @@ function rewriteFullNodeWrite(
 
 // ── Tree wrapper ──
 
+/** getChildren opts on the ACL surface: a pre-resolved frozen plan makes the
+ *  read execute EXACTLY that plan object — no re-resolution, so registration
+ *  and read agree by construction (ns6p.4 invariant 21). Stays off the core
+ *  Tree waist: only the ACL layer runs the read runtime. */
+export type AclChildrenOpts = ChildrenOpts & { plan?: ResolvedReadPlan };
+
+/** Opts that shape a read plan — the subset planChildren consumes. */
+export type PlanChildrenOpts = Pick<ChildrenOpts, 'query' | 'depth'>;
+
 export type AclStore = Tree & {
   /** Cached after get/getChildren — O(1) for already-resolved paths */
   getPerm(path: string): Promise<number>;
+  /** Frozen-plan pre-step (ns6p.4 §3.2.2): pure config read, no ACL gate —
+   *  the plan never leaves the server, and the read executing it carries the
+   *  full gate. Also the re-validate probe (invariant 23). */
+  planChildren(path: string, opts?: PlanChildrenOpts, ctx?: unknown): Promise<ResolvedReadPlan>;
+  getChildren(path: string, opts?: AclChildrenOpts, ctx?: unknown): Promise<Page<NodeData>>;
 };
 
 // MVP read-runtime budgets. Public limit ceiling matches MVP rule 5.
@@ -222,11 +235,26 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
     return { changes };
   }
 
+  // Single resolution path (ns6p.4 §3.2.2): callers that pre-resolve get a
+  // frozen plan object they later pass to getChildren AND to watch
+  // registration; getChildren without one calls this internally.
+  async function planChildren(path: string, opts?: PlanChildrenOpts, ctx?: unknown): Promise<ResolvedReadPlan> {
+    const resolved = await resolveReadPlan(rawStore, path, opts?.query, ctx);
+    // Deep reads (core-0bl) ride the same runtime: adapters walk descendants
+    // inside scanChildren, the projector filters each node independently
+    // (flat filter — legacy parity, no subtree pruning). Negatives normalize
+    // to -1 so plan identity never aliases (-2 vs -1 are the same scan).
+    const depth = opts?.depth ?? 1;
+    if (depth !== 1) resolved.plan.depth = depth < 0 ? -1 : depth;
+    return resolved;
+  }
+
   // INVARIANT (core-pxlu): hand-built literal, NO `...rawStore` spread — the
   // execute capability is intentionally stripped here; the wire session
   // re-wraps with withExecute binding the correct per-request identity.
   const aclStore: AclStore = {
     getPerm,
+    planChildren,
     async get(path, ctx) {
       // Fail loud — same reasoning as getChildren below. Silent `undefined`
       // for a forbidden path makes routers (and SSR) treat it as 404 instead
@@ -243,7 +271,7 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
       return out;
     },
 
-    async getChildren(path, opts, ctx) {
+    async getChildren(path: string, opts?: AclChildrenOpts, ctx?: unknown) {
       // Fail loud, not silent — caller distinguishes "no permission" from
       // "no readable children". Returning [] for a forbidden parent makes
       // routers happily render NotFound instead of LoginScreen.
@@ -251,13 +279,10 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
       if (!(parentPerm & R)) throw new OpError('FORBIDDEN', `Access denied: ${path}`);
 
       const source = asTreeSource(rawStore);
-      const { plan, mountDeps } = await resolveReadPlan(rawStore, path, opts?.query, ctx);
-      // Deep reads (core-0bl) ride the same runtime: adapters walk descendants
-      // inside scanChildren, the projector filters each node independently
-      // (flat filter — legacy parity, no subtree pruning). Negatives normalize
-      // to -1 so plan identity never aliases (-2 vs -1 are the same scan).
-      const depth = opts?.depth ?? 1;
-      if (depth !== 1) plan.depth = depth < 0 ? -1 : depth;
+      // Frozen plan wins (invariant 21): execute the caller's pre-resolved
+      // object verbatim — parity with its registration by identity, not by a
+      // side-channel. No plan supplied → resolve through the same pre-step.
+      const { plan } = opts?.plan ?? await planChildren(path, opts, ctx);
       // MVP rule 7: a readable query mount over an unreadable source would
       // act as a capability view (child R-grants leak items the actor can't
       // otherwise list). Gate plan.source before scanning. Non-mount path:
@@ -276,9 +301,6 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
       const page: Page<NodeData> = { items: result.items, total: result.items.length };
       if (result.nextCursor) page.nextCursor = result.nextCursor;
       if (result.truncated) page.truncated = true;
-      // Query reads carry their plan to watch registration (Stage 6d) so the
-      // initial read and live watch agree on membership.
-      if (plan.viewWhere || plan.callerWhere) attachPageReadPlan(page, { plan, mountDeps });
       return page;
     },
 

@@ -180,10 +180,12 @@ describe('Tree.watch — withSubscriptions integration', () => {
     assert.equal(event.type, 'patch', 'old node existed → set emits diff patch');
     if (event.type === 'patch') {
       // Each entry is a PatchOp tuple, NOT an RFC 6902 {op, path, value} object.
+      // The diff also carries the $rev advance (invariant 24: blind set
+      // continues the stored rev line, so $rev always changes) — assert the
+      // data op by field, not by position.
       assert.ok(Array.isArray(event.patches[0]));
-      assert.equal(event.patches[0][0], 'r');
-      assert.equal(event.patches[0][1], 'foo');
-      assert.equal(event.patches[0][2], 'new');
+      const fooOp = event.patches.find((p) => p[1] === 'foo');
+      assert.deepEqual(fooOp, ['r', 'foo', 'new']);
     }
   });
 });

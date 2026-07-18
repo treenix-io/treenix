@@ -7,7 +7,8 @@
 import { isRef, type NodeData, R, S } from '#core';
 import { assertSafePath } from '#core/path';
 import { OpError } from '#errors';
-import { followMoved, type Page, type Tree } from '#tree';
+import { followMoved, type ChildrenOpts, type Page, type Tree } from '#tree';
+import type { ResolvedReadPlan } from '#mount/resolve-plan';
 import type { PatchOp } from '#tree/patch';
 import { subscriptionToAsyncIterable } from '#tree/watch';
 import {
@@ -36,12 +37,26 @@ export type ActionStream = (req: ActReq, signal: AbortSignal) => AsyncIterable<u
 export type ServeHooks = {
   watch(paths: string[], opts?: { children?: boolean; autoWatch?: boolean; token?: string }): void;
   unwatch(paths: string[], opts?: { children?: boolean; token?: string }): void;
-  /** ls{watchList}: receives the page before the response is returned. */
-  watchList?(path: string, page: Page<NodeData>, itemWatch: boolean, token?: string): void;
+  /** ls{watchList}: register the list watch. `plan` is the FROZEN plan the
+   *  read executed (ns6p.4 invariant 21) — the peer resolves it once and
+   *  threads the same object to both; the page side-channel is gone. Awaited:
+   *  a registration failure (plan re-validate CONFLICT, invariant 23) must
+   *  fail the request, not race past it. */
+  watchList?(path: string, itemWatch: boolean, token?: string, plan?: ResolvedReadPlan): void | Promise<void>;
+};
+
+/** Served tree: the core waist plus the ACL-layer capabilities the protocol
+ *  exploits when present — getPerm for S/R gates, planChildren + plan-aware
+ *  getChildren for the frozen-plan pre-step (ns6p.4 §3.2). Structural on
+ *  purpose: peers can serve bare adapters (no gates ⇒ watch ops fail closed). */
+export type ServeTree = Tree & {
+  getPerm?(path: string): Promise<number>;
+  planChildren?(path: string, opts?: Pick<ChildrenOpts, 'query' | 'depth'>, ctx?: unknown): Promise<ResolvedReadPlan>;
+  getChildren(path: string, opts?: ChildrenOpts & { plan?: ResolvedReadPlan }, ctx?: unknown): Promise<Page<NodeData>>;
 };
 
 export type PeerServe = {
-  tree: Tree & { getPerm?(path: string): Promise<number> };
+  tree: ServeTree;
   execute?: ActionDispatch;
   executeStream?: ActionStream;
   hooks?: ServeHooks;
@@ -237,11 +252,23 @@ export function createPeer(serve?: ServeFactory) {
           const cap = frame.watch ? watchCaps(s, token) : undefined;
           const watchList = frame.watchList ? s.hooks?.watchList?.bind(s.hooks) : undefined;
           if (frame.watchList && !watchList) throw new OpError('BAD_REQUEST', 'watchList unsupported by this peer');
+          let frozen: ResolvedReadPlan | undefined;
+          if (frame.watchList) {
+            // S-gate on the PARENT (ns6p.4 invariant 22) — same permission the
+            // sub prefix gate takes below. Fail closed: no perm surface = no
+            // list watch; no S = FORBIDDEN, the client re-issues without it.
+            const getPerm = s.tree.getPerm?.bind(s.tree);
+            if (!getPerm) throw new OpError('BAD_REQUEST', 'watchList unsupported by this peer');
+            if (!((await getPerm(path)) & S)) throw new OpError('FORBIDDEN', `watchList denied: ${path}`);
+            // Freeze the plan ONCE (invariant 21): the read below executes this
+            // object and the hook registers the same one — parity by identity.
+            frozen = await s.tree.planChildren?.(path, { query: frame.query, depth: frame.depth }, ctx);
+          }
           // ctx threaded to getChildren only — parity with the pre-TWP router;
           // uniform threading to all tree calls is a separate decision.
           const page = await s.tree.getChildren(
             path,
-            { limit: frame.limit ?? DEFAULT_LS_LIMIT, depth: frame.depth, query: frame.query, cursor: frame.cursor },
+            { limit: frame.limit ?? DEFAULT_LS_LIMIT, depth: frame.depth, query: frame.query, cursor: frame.cursor, ...(frozen ? { plan: frozen } : {}) },
             ctx,
           );
           if (cap) {
@@ -249,7 +276,7 @@ export function createPeer(serve?: ServeFactory) {
             for (const n of page.items) if ((await cap.getPerm(n.$path)) & S) watchable.push(n.$path);
             if (watchable.length) cap.watch(watchable);
           }
-          watchList?.(path, page, !!frame.watch, token);
+          if (watchList) await watchList(path, !!frame.watch, token, frozen);
           return ok(page);
         }
 

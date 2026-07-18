@@ -4,16 +4,17 @@
 // Extracted from the tRPC withSession middleware + events subscription body.
 
 import { OpError } from '#errors';
+import type { ResolvedReadPlan } from '#mount/resolve-plan';
 import type { EventFrame } from '#protocol/frames';
 import { createPeer, type ActReq, type Conn, type PeerServe, type ServeHooks } from '#protocol/peer';
-import { withAcl } from '#security/acl-tree';
+import { withAcl, type AclStore } from '#security/acl-tree';
 import { buildClaims } from '#security/claims';
-import { getPageReadPlan } from '#security/read-page';
 import type { Session } from '#security/sessions';
 import { type InvalidateEvent, type WireEvent } from '#sub';
 import { type ConnectVerdict, type StampedEvent, type WatchCursor, type WatchManager } from '#sub/watch';
 import { createFilteredPush } from '#sub/watch-filter';
 import type { Tree } from '#tree';
+import { planHash } from '#tree/plan-hash';
 import { buildActor, executeStream, withExecute, type WithExecuteOpts } from './actions';
 
 /** Higher-level dispatcher: tree + session + action input → result.
@@ -46,6 +47,59 @@ export type WireDeps = {
 export const DEFAULT_CLAIMS_TTL_MS = 30_000;
 
 export type WireSession = ReturnType<typeof createWireSession>;
+
+/** Plan equality for re-validate (F8-r3): canonical planHash + mountDeps. */
+function samePlan(a: ResolvedReadPlan, b: ResolvedReadPlan): boolean {
+  if (planHash(a.plan) !== planHash(b.plan)) return false;
+  if (a.mountDeps.size !== b.mountDeps.size) return false;
+  for (const dep of a.mountDeps) if (!b.mountDeps.has(dep)) return false;
+  return true;
+}
+
+/** ls{watchList} registration (ns6p.4 §3.2.3-3b). Registers the FROZEN plan
+ *  the read executed, then re-resolves and compares (invariant 23): a mount
+ *  config flip between freeze and registration would otherwise leave a handle
+ *  the config-event machinery can't find — the client stays stale forever.
+ *  Mismatch → lease.undo() + re-register with the fresh plan, bounded to 2
+ *  registration attempts; still diverging → CONFLICT with nothing registered.
+ *  No frozen plan (peer without the pre-step) → legacy plain registration. */
+export async function registerWatchList(
+  watcher: WatchManager,
+  tree: Pick<AclStore, 'planChildren'>,
+  userId: string,
+  path: string,
+  itemWatch: boolean,
+  token: string | undefined,
+  planned?: ResolvedReadPlan,
+): Promise<void> {
+  const register = (p?: ResolvedReadPlan) => watcher.watch(userId, [path], {
+    children: true,
+    autoWatch: itemWatch,
+    // Query registration only for plans that filter (parity with the dead
+    // read-page condition) — a bare listing is a plain prefix watch.
+    ...(p && (p.plan.viewWhere || p.plan.callerWhere) ? { query: { plan: p.plan, mountDeps: p.mountDeps } } : {}),
+    ...(token === undefined ? {} : { token }),
+  });
+
+  if (!planned) {
+    register();
+    return;
+  }
+
+  let active = planned;
+  let lease = register(active);
+  for (let attempt = 1; ; attempt++) {
+    // Pure config read through the same pre-step the freeze used (invariant 21).
+    const fresh = await tree.planChildren(path, { query: planned.plan.callerWhere, depth: planned.plan.depth });
+    if (samePlan(fresh, active)) return;
+    lease.undo();
+    if (attempt === 2) {
+      throw new OpError('CONFLICT', `read plan for ${path} kept changing during watch registration`);
+    }
+    active = fresh;
+    lease = register(active);
+  }
+}
 
 /** NodeEvent → TWP event frames. VP membership/config deltas collapse into
  *  one `dirty` per affected view path (gk8.12 refetch semantics — precise
@@ -140,12 +194,10 @@ export function createWireSession(deps: WireDeps, session: Session) {
     // Watch/unwatch opts (incl. the anz4.28 ownership token) pass through as-is:
     // ServeHooks opts are structurally a subset of WatchOpts/UnwatchOpts.
     const hooks: ServeHooks = {
-      watch: (paths, o) => deps.watcher.watch(userId, paths, o),
+      watch: (paths, o) => { deps.watcher.watch(userId, paths, o); },
       unwatch: (paths, o) => deps.watcher.unwatch(userId, paths, o),
-      watchList: (path, page, itemWatch, token) => {
-        const query = getPageReadPlan(page);
-        deps.watcher.watch(userId, [path], { children: true, autoWatch: itemWatch, query, token });
-      },
+      watchList: (path, itemWatch, token, plan) =>
+        registerWatchList(deps.watcher, tree, userId, path, itemWatch, token, plan),
     };
 
     return { tree, execute, executeStream: execStream, hooks };

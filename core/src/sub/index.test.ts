@@ -3,7 +3,6 @@ import { OpError } from '#errors';
 import { withAcl } from '#security/acl-tree';
 import { userIdFromAuthPath } from '#security/claims';
 import { createProjector } from '#security/projector';
-import { getPageReadPlan } from '#security/read-page';
 import { createMemoryTree, type Tree } from '#tree';
 import { executeList, type Projector } from '#tree/read-runtime';
 import assert from 'node:assert/strict';
@@ -874,20 +873,21 @@ describe('actor-projected membership (F4, core-anz4.3)', () => {
     });
 
     // Registration is reachable ONLY through a successful read of the same
-    // plan (wire watchList couples them via getPageReadPlan). Non-privileged
-    // caller: the read dies with FORBIDDEN ⇒ no page ⇒ nothing to register.
+    // frozen plan (the wire threads ONE planChildren object to both — ns6p.4
+    // invariant 21). Non-privileged caller: the read of that plan dies with
+    // FORBIDDEN ⇒ no page ⇒ nothing to register.
     const u1Tree = withAcl(store, 'u1', ['users']);
+    const u1Plan = await u1Tree.planChildren('/board', { query: { '#secret.level': 7 } });
     await assert.rejects(
-      () => u1Tree.getChildren('/board', { query: { '#secret.level': 7 } }),
+      () => u1Tree.getChildren('/board', { query: { '#secret.level': 7 }, plan: u1Plan }),
       (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
     );
 
-    // Privileged caller: read succeeds, the attached plan registers cleanly.
+    // Privileged caller: the SAME frozen object drives read and registration.
     const adminTree = withAcl(store, 'admin', ['admins']);
-    const page = await adminTree.getChildren('/board', { query: { '#secret.level': 7 } });
+    const readPlan = await adminTree.planChildren('/board', { query: { '#secret.level': 7 } });
+    const page = await adminTree.getChildren('/board', { query: { '#secret.level': 7 }, plan: readPlan });
     assert.equal(page.items.length, 1);
-    const readPlan = getPageReadPlan(page);
-    assert.ok(readPlan, 'query read attaches its plan for watch registration');
     const { cdc } = withSubs(store);
     cdc.watchQuery({ vp: '/board', userId: 'admin', plan: readPlan.plan, mountDeps: readPlan.mountDeps });
     assert.equal(cdc.getActiveQueryCount(), 1);

@@ -105,11 +105,14 @@ export function assertSetEntryOcc(stored: NodeData | undefined, entry: { path: s
 }
 
 /** Memory-adapter staging: OCC gate + clone + $rev bump (mirror of its set();
- *  fs stages the raw clone instead — its writeNode owns OCC + bump). */
+ *  fs stages the raw clone instead — its writeNode owns OCC + bump).
+ *  Rev advances from STORED (ns6p.4 invariant 24): a blind set-member over an
+ *  existing node continues its rev line instead of resetting to 1 — resets
+ *  made the client's ≤-skip branch swallow fresh events forever. */
 export function stageSetEntry(stored: NodeData | undefined, entry: { path: string; node: NodeData }): NodeData {
   assertSetEntryOcc(stored, entry);
   const copy = structuredClone(entry.node);
-  copy.$rev = (copy.$rev ?? 0) + 1;
+  copy.$rev = (stored?.$rev ?? 0) + 1;
   return copy;
 }
 
@@ -659,7 +662,9 @@ export function createMemoryTree(): TreeSource {
       // swap — exclusively ours); after = a second clone so the receipt never
       // aliases live store state (isolation, same reason get() clones).
       const before = treeNode.data ?? null;
-      node.$rev = (node.$rev ?? 0) + 1;
+      // Advance from STORED (invariant 24): blind set continues the rev line.
+      // On the OCC path incoming === stored by the check above — same value.
+      node.$rev = (before?.$rev ?? 0) + 1;
       const stored = structuredClone(node);
       treeNode.data = stored;
       return { changes: [{ path: node.$path, before, after: structuredClone(stored) }] };

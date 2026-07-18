@@ -1,6 +1,8 @@
+import { createNode } from '#core';
+import { createMemoryTree } from '#tree';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { type NodeEvent } from './index';
+import { withSubscriptions, type NodeEvent } from './index';
 import { createWatchManager, type RouteEnvelope, type StampedEvent, type WatchCursor } from './watch';
 
 /** Build the resume cursor a client would hold after processing `e`. */
@@ -17,7 +19,7 @@ describe('WatchManager', () => {
     const removed: string[] = [];
     const wm = createWatchManager({ gracePeriodMs: 5 });
     wm.bindQueryRegistry({
-      watchQuery: (reg) => watched.push(reg),
+      watchQuery: (reg) => { watched.push(reg); return null; },
       unwatchQuery: (vp, userId) => unwatched.push({ vp, userId }),
       unwatchAllQueries: (userId) => removed.push(userId),
     });
@@ -1101,7 +1103,7 @@ describe('WatchManager — token-scoped watch ownership (core-anz4.12)', () => {
     const unwatchedQueries: string[] = [];
     const wm = createWatchManager();
     wm.bindQueryRegistry({
-      watchQuery: () => {},
+      watchQuery: () => null,
       unwatchQuery: (vp) => unwatchedQueries.push(vp),
       unwatchAllQueries: () => {},
     });
@@ -1313,5 +1315,242 @@ describe('WatchManager — connect verdict + route envelope (ns6p.4 slice 1)', (
       assert.deepEqual(env.heldPaths, []);
       assert.deepEqual(env.heldVps, []);
     }
+  });
+});
+
+// ── ns6p.4 slice 2: registration lease (invariant 15) ──
+
+describe('WatchManager — registration lease (ns6p.4 slice 2)', () => {
+  const setEvent = (path: string): NodeEvent => ({ type: 'set', path, node: { $type: 't' } });
+
+  it('undo of a re-registration keeps the pre-existing hold under the SAME token', () => {
+    const wm = createWatchManager();
+    const got: NodeEvent[] = [];
+    wm.connect('c1', 'u1', (e) => got.push(e.event), undefined, 't1');
+    wm.watch('u1', ['/doc'], { token: 't1' });
+
+    // Failed request path: the re-registration is compensated — the tab's
+    // ORIGINAL hold must survive (bare unwatch would strip it, F4-r1).
+    const lease = wm.watch('u1', ['/doc'], { token: 't1' });
+    assert.deepEqual(lease.created, [], 're-registration created nothing');
+    lease.undo();
+
+    wm.notify(setEvent('/doc'));
+    assert.equal(got.length, 1, 'pre-existing hold survives the undo');
+  });
+
+  it('undo drops only holds this call created; a co-holder keeps the registration', () => {
+    const wm = createWatchManager();
+    const got: NodeEvent[] = [];
+    wm.connect('c2', 'u1', (e) => got.push(e.event), undefined, 't2');
+    wm.watch('u1', ['/shared'], { token: 't2' });
+
+    const lease = wm.watch('u1', ['/shared', '/mine'], { token: 't1' });
+    assert.deepEqual(
+      lease.created.map((c) => c.path).sort(),
+      ['/mine', '/shared'],
+      'both HOLDS are new for t1 even though /shared registration pre-exists',
+    );
+    lease.undo();
+
+    wm.notify(setEvent('/shared'));
+    assert.equal(got.length, 1, 'co-held registration survives');
+    wm.notify(setEvent('/mine'));
+    assert.equal(got.length, 1, 'created-and-undone hold is gone');
+  });
+
+  it('undo is idempotent and frees the budget slot of a created hold', () => {
+    const wm = createWatchManager({ maxWatchesPerUser: 1 });
+    wm.connect('c1', 'u1', () => {}, undefined, 't1');
+    const lease = wm.watch('u1', ['/a'], { token: 't1' });
+
+    lease.undo();
+    lease.undo(); // second undo must not underflow
+
+    wm.watch('u1', ['/b'], { token: 't1' }); // slot freed exactly once
+    assert.throws(() => wm.watch('u1', ['/c'], { token: 't1' }));
+  });
+
+  it('undo restores a REPLACED query plan — membership fires for the previous plan again', async () => {
+    const store = createMemoryTree();
+    const events: NodeEvent[] = [];
+    const { tree, cdc } = withSubscriptions(store, (e) => events.push(e), {
+      projectMembership: async (_u, o, n) => [o, n],
+    });
+    const wm = createWatchManager();
+    wm.bindQueryRegistry(cdc);
+    wm.connect('c1', 'u1', () => {}, undefined, 't1');
+    await tree.set(createNode('/data', 'dir'));
+
+    const planA = { plan: { source: '/data', callerWhere: { kind: 'a' } }, mountDeps: new Set(['/view']) };
+    const planB = { plan: { source: '/data', callerWhere: { kind: 'b' } }, mountDeps: new Set(['/view']) };
+    wm.watch('u1', ['/view'], { children: true, query: planA, token: 't1' });
+
+    const lease = wm.watch('u1', ['/view'], { children: true, query: planB, token: 't1' });
+    assert.equal(lease.replaced.length, 1);
+    assert.ok(lease.replaced[0].prev, 'replace captured the previous registration');
+    lease.undo();
+
+    events.length = 0;
+    await tree.set(createNode('/data/x', 'item', { kind: 'a' })); // member of plan A only
+    const ev = events.find((e) => e.type === 'set' && e.path === '/data/x');
+    assert.ok(ev?.invalidateVps?.includes('/view'), 'previous plan active again after undo');
+
+    events.length = 0;
+    await tree.set(createNode('/data/y', 'item', { kind: 'b' })); // member of plan B only
+    const evB = events.find((e) => e.type === 'set' && e.path === '/data/y');
+    assert.ok(!evB?.invalidateVps?.includes('/view'), 'undone plan no longer evaluates');
+  });
+
+  it('undo of a FRESH query registration removes the handle with the hold', async () => {
+    const store = createMemoryTree();
+    const { cdc } = withSubscriptions(store, undefined, {
+      projectMembership: async (_u, o, n) => [o, n],
+    });
+    const wm = createWatchManager();
+    wm.bindQueryRegistry(cdc);
+    wm.connect('c1', 'u1', () => {}, undefined, 't1');
+
+    const lease = wm.watch('u1', ['/view'], {
+      children: true,
+      query: { plan: { source: '/data', callerWhere: { open: true } }, mountDeps: new Set(['/view']) },
+      token: 't1',
+    });
+    assert.deepEqual(lease.replaced, [{ vp: '/view', prev: null }]);
+    assert.equal(cdc.getActiveQueryCount(), 1);
+
+    lease.undo();
+    assert.equal(cdc.getActiveQueryCount(), 0, 'no stale handle behind a released hold');
+  });
+
+  it('partial multi-vp failure rolls the earlier vp back — fresh registration removed, replaced plan restored', async () => {
+    const store = createMemoryTree();
+    const { tree, cdc } = withSubscriptions(store, undefined, {
+      projectMembership: async (_u, o, n) => [o, n],
+    });
+    await tree.set(createNode('/d', 'dir'));
+    const wm = createWatchManager();
+    // Wrap the real registry: /v2 refuses (as a validator would), the rest
+    // flows through so rollback effects are observable on real state.
+    wm.bindQueryRegistry({
+      watchQuery: (reg) => {
+        if (reg.vp === '/v2') throw new Error('refused');
+        return cdc.watchQuery(reg);
+      },
+      unwatchQuery: (vp, userId) => cdc.unwatchQuery(vp, userId),
+      unwatchAllQueries: (userId) => cdc.unwatchAllQueries(userId),
+    });
+    wm.connect('c1', 'u1', () => {}, undefined, 't1');
+
+    assert.throws(() =>
+      wm.watch('u1', ['/v1', '/v2'], {
+        children: true,
+        query: { plan: { source: '/d', callerWhere: { x: 1 } }, mountDeps: new Set(['/v1']) },
+        token: 't1',
+      }),
+    );
+    assert.equal(cdc.getActiveQueryCount(), 0, '/v1 fresh registration rolled back, nothing leaked');
+  });
+});
+
+// ── ns6p.4 slice 2: unbound-token TTL (invariant 25) ──
+
+describe('WatchManager — unbound-token TTL (ns6p.4 slice 2)', () => {
+  const setEvent = (path: string): NodeEvent => ({ type: 'set', path, node: { $type: 't' } });
+
+  it('registration without a lane expires: holdings released, late connect fails closed despite a covering cursor', (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const wm = createWatchManager({ unboundTokenTtlMs: 1000, gracePeriodMs: 100 });
+    const other: StampedEvent[] = [];
+    // Another tab keeps the user entry alive — the exact leak scenario (F7-r2).
+    wm.connect('cOther', 'u1', (e) => other.push(e.event), undefined, 'tOther');
+    wm.watch('u1', ['/doc'], { token: 'tGhost' }); // registered, never connects
+
+    wm.notify(setEvent('/doc')); // routes via tGhost's hold to the user's lanes
+    assert.equal(other.length, 1, 'holding alive before expiry');
+    const head = cursorOf(other[0]);
+
+    t.mock.timers.tick(1000);
+
+    wm.notify(setEvent('/doc'));
+    assert.equal(other.length, 1, 'ghost holdings released at expiry');
+
+    // Head cursor would prove coverage — the tombstone must override it:
+    // events after expiry were unrouted, so continuity is a lie.
+    const verdict = wm.connect('cGhost', 'u1', () => {}, head, 'tGhost');
+    assert.equal(verdict.preserved, false, 'expiry is a continuity break — tombstoned token fails closed');
+
+    // Tombstone consumed exactly once: reconnect with the head cursor now
+    // judges continuity honestly again.
+    wm.disconnect('cGhost');
+    const again = wm.connect('cGhost2', 'u1', () => {}, { seq: verdict.seq, epoch: verdict.epoch }, 'tGhost');
+    assert.equal(again.preserved, true);
+  });
+
+  it('connect before expiry cancels the TTL — holdings survive past the deadline', (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const wm = createWatchManager({ unboundTokenTtlMs: 1000 });
+    const got: NodeEvent[] = [];
+    wm.watch('u1', ['/doc'], { token: 't1' });
+
+    t.mock.timers.tick(500);
+    const verdict = wm.connect('c1', 'u1', (e) => got.push(e.event), undefined, 't1');
+    t.mock.timers.tick(1000); // past the original deadline
+
+    wm.notify(setEvent('/doc'));
+    assert.equal(got.length, 1, 'first connect disarmed the TTL');
+    assert.equal(verdict.preserved, true, 'no tombstone — sole lane, nothing missed');
+  });
+
+  it('removeUser clears armed TTL timers — the stale deadline cannot strip a re-created registration', (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const removed: string[] = [];
+    const wm = createWatchManager({ unboundTokenTtlMs: 1000, gracePeriodMs: 100, onUserRemoved: (u) => removed.push(u) });
+    wm.watch('u1', ['/doc'], { token: 'tGhost' }); // TTL armed at 0ms, never connects
+
+    // A different tab's lane comes and goes → user-grace removes the entry;
+    // the armed ghost TTL must die with it (mirror of tokenGrace clearing).
+    wm.connect('c1', 'u1', () => {}, undefined, 't1');
+    wm.disconnect('c1');
+    t.mock.timers.tick(100); // user-grace fires → removeUser
+    assert.deepEqual(removed, ['u1']);
+
+    // Same user+token re-register under a fresh entry; the ORIGINAL 1000ms
+    // deadline passes — it must neither release the new hold nor tombstone.
+    const got: NodeEvent[] = [];
+    wm.watch('u1', ['/doc'], { token: 'tGhost' });
+    wm.connect('c2', 'u1', (e) => got.push(e.event), undefined, 'tGhost');
+    t.mock.timers.tick(1000);
+
+    wm.notify(setEvent('/doc'));
+    assert.equal(got.length, 1, 'stale TTL deadline caused no damage to the re-created state');
+  });
+
+  it('LEGACY (tokenless) registrations never TTL — they live on user-grace alone', (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const wm = createWatchManager({ unboundTokenTtlMs: 1000 });
+    const got: NodeEvent[] = [];
+    wm.watch('u1', ['/doc']); // legacy shared hold, no lane
+
+    t.mock.timers.tick(5000);
+
+    wm.connect('c1', 'u1', (e) => got.push(e.event));
+    wm.notify(setEvent('/doc'));
+    assert.equal(got.length, 1, 'legacy hold survived — no TTL, no tombstone');
+  });
+
+  it('TTL arms once per token — a later registration does not extend the deadline', (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const wm = createWatchManager({ unboundTokenTtlMs: 1000 });
+    const other: NodeEvent[] = [];
+    wm.connect('cOther', 'u1', (e) => other.push(e.event), undefined, 'tOther');
+    wm.watch('u1', ['/a'], { token: 'tGhost' });
+
+    t.mock.timers.tick(900);
+    wm.watch('u1', ['/b'], { token: 'tGhost' }); // must NOT re-arm
+    t.mock.timers.tick(100); // original deadline
+
+    assert.equal(wm.connect('cG', 'u1', () => {}, undefined, 'tGhost').preserved, false,
+      'deadline counted from the FIRST laneless registration');
   });
 });

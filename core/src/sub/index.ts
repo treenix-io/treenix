@@ -200,6 +200,10 @@ type QueryHandle = {
   /** Mount/config paths consulted by resolveReadPlan. Contract: contains at
    *  least the vp itself — config-change targeting relies on it. */
   mountDeps: ReadonlySet<string>;
+  /** The registered plan, kept verbatim so a replace can hand the PREVIOUS
+   *  registration back for lease-undo restore (ns6p.4 invariant 15) — the
+   *  group's compiled test cannot reconstruct it. */
+  plan: ReadPlan;
   group: WatchGroup;
 };
 
@@ -224,7 +228,10 @@ export type MembershipProjector = (
 
 export type CdcRegistry = {
   subscribe(path: string, listener: Listener, opts?: SubscribeOpts): () => void;
-  watchQuery(reg: QueryWatchRegistration): void;
+  /** Returns the registration this call REPLACED for (userId, vp) — null when
+   *  none existed. Callers building an undo-lease (ns6p.4 invariant 15)
+   *  re-register the returned value to restore the previous plan. */
+  watchQuery(reg: QueryWatchRegistration): QueryWatchRegistration | null;
   unwatchQuery(vp: string, userId: string): void;
   unwatchAllQueries(userId: string): void;
   /** Distinct execution groups (deduped plans), not registrations. */
@@ -766,11 +773,14 @@ export function withSubscriptions(
       const key = handleKey(reg.userId, reg.vp);
       const hash = planHash(reg.plan);
       const existing = handleByKey.get(key);
+      let prev: QueryWatchRegistration | null = null;
       if (existing) {
+        prev = { vp: existing.vp, userId: existing.userId, plan: existing.plan, mountDeps: existing.mountDeps };
         if (existing.group.planHash === hash) {
           // Same plan re-registered (page refetch) — refresh deps only.
-          (existing as { mountDeps: ReadonlySet<string> }).mountDeps = reg.mountDeps;
-          return;
+          existing.mountDeps = reg.mountDeps;
+          existing.plan = reg.plan;
+          return prev;
         }
         removeHandle(existing);   // E03: vp re-registered with a different plan
       }
@@ -787,9 +797,10 @@ export function withSubscriptions(
         };
         groups.set(hash, group);
       }
-      const handle: QueryHandle = { vp: reg.vp, userId: reg.userId, mountDeps: reg.mountDeps, group };
+      const handle: QueryHandle = { vp: reg.vp, userId: reg.userId, mountDeps: reg.mountDeps, plan: reg.plan, group };
       group.handles.add(handle);
       handleByKey.set(key, handle);
+      return prev;
     },
 
     unwatchQuery(vp, userId) {

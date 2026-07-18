@@ -2,6 +2,8 @@
 
 import { createNode, R, S } from '#core';
 import { OpError } from '#errors';
+import type { ResolvedReadPlan } from '#mount/resolve-plan';
+import { withAcl, type AclChildrenOpts } from '#security/acl-tree';
 import { createMemoryTree } from '#tree';
 import { relocateCtx, withStoragePolicy } from '#tree/policy';
 import assert from 'node:assert/strict';
@@ -173,11 +175,13 @@ describe('TWP peer over loopback', () => {
     const tree = await seededTree();
     const pages: string[] = [];
     const serve: PeerServe = {
-      tree,
+      tree: Object.assign(Object.create(tree) as typeof tree, {
+        getPerm: async () => (R | S),
+      }),
       hooks: {
         watch: () => {},
         unwatch: () => {},
-        watchList: (path) => pages.push(path),
+        watchList: (path) => { pages.push(path); },
       },
     };
     const { client } = pair(() => serve);
@@ -356,7 +360,7 @@ describe('TWP peer over loopback', () => {
       hooks: {
         watch: (paths, o) => calls.push({ op: 'watch', paths, token: o?.token, children: o?.children }),
         unwatch: (paths, o) => calls.push({ op: 'unwatch', paths, token: o?.token, children: o?.children }),
-        watchList: (path, _page, itemWatch, token) => listCalls.push({ path, itemWatch, token }),
+        watchList: (path, itemWatch, token) => { listCalls.push({ path, itemWatch, token }); },
       },
     };
     return { serve, calls, listCalls };
@@ -408,5 +412,86 @@ describe('TWP peer over loopback', () => {
     await assert.rejects(client.req.get('/a', true, ''), isCode('BAD_REQUEST'));
     await assert.rejects(client.req.sub({ paths: ['/a'], token: '' }), isCode('BAD_REQUEST'));
     await assert.rejects(client.req.ls('/a', { watch: true, token: '' }), isCode('BAD_REQUEST'));
+  });
+
+  // ── ns6p.4 slice 2: watchList S-gate (invariant 22) + frozen plan (invariant 21) ──
+
+  function aclPair(rootPerm: number) {
+    const listCalls: unknown[][] = [];
+    const watchCalls: string[][] = [];
+    const setup = async () => {
+      const store = createMemoryTree();
+      await store.set({ ...createNode('/', 'root'), $acl: [{ g: 'public', p: rootPerm }] });
+      await store.set(createNode('/dir', 'dir', {}));
+      await store.set(createNode('/dir/a', 'item', { status: 'open' }));
+      const acl = withAcl(store, 'u1', ['public']);
+      const serve: PeerServe = {
+        tree: acl,
+        hooks: {
+          watch: (paths) => { watchCalls.push(paths); },
+          unwatch: () => {},
+          watchList: (...args) => { listCalls.push(args); },
+        },
+      };
+      return { store, client: pair(() => serve).client };
+    };
+    return { setup, listCalls, watchCalls };
+  }
+
+  it('watchList without S on the parent → FORBIDDEN, no page, no registration (invariant 22)', async () => {
+    const { setup, listCalls } = aclPair(R); // read, no subscribe
+    const { client } = await setup();
+
+    await assert.rejects(client.req.ls('/dir', { watchList: true }), isCode('FORBIDDEN'));
+    assert.deepEqual(listCalls, [], 'gate fires before any registration');
+
+    // The plain read stays available — the client re-issues without watchList.
+    const page = await client.req.ls('/dir') as { items: { $path: string }[] };
+    assert.equal(page.items.length, 1);
+  });
+
+  it('watchList with S registers; item-level S filtering of frame.watch is unchanged', async () => {
+    const { setup, listCalls, watchCalls } = aclPair(R | S);
+    const { store, client } = await setup();
+    // Child grants R only — public's allow is overridden at this level, so the
+    // ITEM watch is silently filtered while the LIST watch stands.
+    await store.set({ ...createNode('/dir/locked', 'item', { status: 'open' }), $acl: [{ g: 'public', p: R }] });
+
+    const page = await client.req.ls('/dir', { watchList: true, watch: true }) as { items: { $path: string }[] };
+    assert.equal(page.items.length, 2, 'page carries both items');
+    assert.equal(listCalls.length, 1, 'list watch registered');
+    assert.deepEqual(watchCalls, [['/dir/a']], 'no-S item filtered from item watches');
+  });
+
+  it('ls{watchList}: ONE frozen plan object drives the read AND the registration (invariant 21)', async () => {
+    const store = createMemoryTree();
+    await store.set({ ...createNode('/', 'root'), $acl: [{ g: 'public', p: R | S }] });
+    await store.set(createNode('/orders', 'dir', {}));
+    await store.set(createNode('/orders/a', 'item', { status: 'open' }));
+    await store.set(createNode('/orders/b', 'item', { status: 'done' }));
+    const acl = withAcl(store, 'u1', ['public']);
+
+    let executed: ResolvedReadPlan | undefined;
+    let registered: ResolvedReadPlan | undefined;
+    const serve: PeerServe = {
+      tree: Object.assign(Object.create(acl) as typeof acl, {
+        getChildren: (p: string, o?: AclChildrenOpts, c?: unknown) => {
+          executed = o?.plan;
+          return acl.getChildren(p, o, c);
+        },
+      }),
+      hooks: {
+        watch: () => {},
+        unwatch: () => {},
+        watchList: (_path, _itemWatch, _token, plan) => { registered = plan; },
+      },
+    };
+    const { client } = pair(() => serve);
+
+    const page = await client.req.ls('/orders', { watchList: true, query: { status: 'open' } }) as { items: { $path: string }[] };
+    assert.deepEqual(page.items.map((n) => n.$path), ['/orders/a'], 'the frozen plan filtered the read');
+    assert.ok(executed, 'read received a pre-resolved plan');
+    assert.equal(registered, executed, 'registration and read share the plan by object identity');
+    assert.deepEqual(registered!.plan, { source: '/orders', callerWhere: { status: 'open' } });
   });
 });
