@@ -32,17 +32,32 @@ export type ActReq = { path: string; type?: string; key?: string; action: string
 export type ActionDispatch = (req: ActReq) => Promise<unknown>;
 export type ActionStream = (req: ActReq, signal: AbortSignal) => AsyncIterable<unknown>;
 
+/** Compensation handle of one registration (ns6p.4 invariant 15): undo drops
+ *  exactly the holds that call created, restoring pre-existing state. */
+export type WatchUndo = { undo(): void };
+
+/** watchList hook result (ns6p.4 slice 4): the committed lease plus the plan
+ *  the registration SETTLED on after re-validate (invariant 23) — the read
+ *  must execute that plan, not the pre-validate freeze (invariant 21 parity
+ *  by construction). */
+export type ListRegistration = WatchUndo & { plan?: ResolvedReadPlan };
+
 // `token` = watch-ownership scope of the requesting consumer (core-anz4.28):
 // threaded from the frame so registration and release land on the same holder.
 export type ServeHooks = {
-  watch(paths: string[], opts?: { children?: boolean; autoWatch?: boolean; token?: string }): void;
+  /** Returns the lease when the backing manager leases (register-first verbs
+   *  undo it if the read behind the registration fails). */
+  watch(paths: string[], opts?: { children?: boolean; autoWatch?: boolean; token?: string }): WatchUndo | void;
   unwatch(paths: string[], opts?: { children?: boolean; token?: string }): void;
-  /** ls{watchList}: register the list watch. `plan` is the FROZEN plan the
-   *  read executed (ns6p.4 invariant 21) — the peer resolves it once and
-   *  threads the same object to both; the page side-channel is gone. Awaited:
-   *  a registration failure (plan re-validate CONFLICT, invariant 23) must
-   *  fail the request, not race past it. */
-  watchList?(path: string, itemWatch: boolean, token?: string, plan?: ResolvedReadPlan): void | Promise<void>;
+  /** ls{watchList}: register the list watch BEFORE the read (ns6p.4 slice 4,
+   *  closes W2). `plan` is the frozen plan (invariant 21) — the peer resolves
+   *  it once and threads it here, then reads with the plan the registration
+   *  settled on. Awaited: a registration failure (plan re-validate CONFLICT,
+   *  invariant 23) must fail the request, not race past it. */
+  watchList?(path: string, itemWatch: boolean, token?: string, plan?: ResolvedReadPlan): void | ListRegistration | Promise<void | ListRegistration>;
+  /** Request-scoped provisional prefix (ns6p.4 §3.2.6a, invariant 27): unique
+   *  per-request holder minted by the manager; returns the release. */
+  holdPrefix?(path: string): () => void;
 };
 
 /** Served tree: the core waist plus the ACL-layer capabilities the protocol
@@ -119,9 +134,11 @@ function vPaths(v: unknown): string[] {
 
 // Wire tokens are untrusted (isReqFrame checks id/op only). Empty string is
 // rejected loudly — it would silently alias the server's internal LEGACY hold.
+// \0 is reserved for internal provisional holders (ns6p.4 invariant 27): a
+// guessed holder id could strip an in-flight request's window coverage.
 function vToken(v: unknown): string | undefined {
   if (v === undefined) return undefined;
-  if (typeof v !== 'string' || v.length === 0 || v.length > 256) {
+  if (typeof v !== 'string' || v.length === 0 || v.length > 256 || v.includes('\0')) {
     throw new OpError('BAD_REQUEST', 'token must be a non-empty string (max 256)');
   }
   return v;
@@ -140,6 +157,22 @@ function toError(err: ErrFrame['err']): Error {
 /** Write ctx carrying the client mutation id — events echo it as `by` (gk8.1). */
 function writeCtx(opId: string | undefined): { opId: string } | undefined {
   return opId ? { opId } : undefined;
+}
+
+// Register-first compensation (ns6p.4 §3.2.5): a failed request rolls back
+// exactly its own registrations. An undo failure is logged loudly and never
+// masks the request's own error — the orphan hold dies by token-TTL/grace
+// (accepted residual, design §8). Leases are idempotent: double-undo is safe.
+function undoHolds(...holds: (WatchUndo | (() => void) | void | undefined)[]) {
+  for (const h of holds) {
+    if (!h) continue;
+    try {
+      if (typeof h === 'function') h();
+      else h.undo();
+    } catch (e) {
+      console.error('[twp] watch compensation failed:', e);
+    }
+  }
 }
 
 export function createPeer(serve?: ServeFactory) {
@@ -190,8 +223,19 @@ export function createPeer(serve?: ServeFactory) {
           // token is a protocol error, not a value to ignore.
           const token = vToken(frame.token);
           const cap = frame.watch ? watchCaps(s, token) : undefined;
-          const node = await s.tree.get(path);
-          if (cap && node && ((await cap.getPerm(path)) & S)) cap.watch([path]);
+          // Register-first (ns6p.4 §3.2, closes W-get): S-gate → register →
+          // read, so a write landing mid-read is already routed to the lane.
+          let lease: WatchUndo | undefined;
+          if (cap && ((await cap.getPerm(path)) & S)) lease = cap.watch([path]) ?? undefined;
+          let node: NodeData | undefined;
+          try {
+            node = await s.tree.get(path);
+          } catch (e) {
+            undoHolds(lease);
+            throw e;
+          }
+          // Pre-slice-4 contract pinned: an absent path holds no watch.
+          if (!node) undoHolds(lease);
           return ok(node);
         }
 
@@ -199,30 +243,52 @@ export function createPeer(serve?: ServeFactory) {
           const path = vPath(frame.path);
           const token = vToken(frame.token);
           const cap = frame.watch ? watchCaps(s, token) : undefined;
-          const node = await s.tree.get(path);
-          if (!node) return ok([]);
-          const result: NodeData[] = [node];
-          if (cap && ((await cap.getPerm(path)) & S)) cap.watch([path]);
-          if (isRef(node)) {
-            // Follow 'moved' tombstone chains so the client gets the LIVE
-            // node, not the tombstone (gk8.10 stage 2). Best-effort by
-            // contract: missing target or a broken chain (identity mismatch,
-            // hop limit) degrades to [node] — the wire op is not a validator.
-            // No self-repair here: this user's surface may be read-only;
-            // repair belongs to server-side resolveRef callers.
-            let target: NodeData | undefined;
-            try {
-              ({ target } = await followMoved(s.tree, node.$ref, node.$refId));
-            } catch (e) {
-              if (!(e instanceof OpError)) throw e;
-              console.error(`[twp] resolve: broken ref chain from ${node.$ref}:`, e);
+          // Register-first (ns6p.4 §3.2/§3.2.7): each watch precedes the read
+          // it covers; any failure undoes every hold THIS request created.
+          const leases: WatchUndo[] = [];
+          try {
+            if (cap && ((await cap.getPerm(path)) & S)) {
+              const l = cap.watch([path]);
+              if (l) leases.push(l);
             }
-            if (target) {
-              result.push(target);
-              if (cap && ((await cap.getPerm(target.$path)) & S)) cap.watch([target.$path]);
+            const node = await s.tree.get(path);
+            if (!node) {
+              undoHolds(...leases); // absent path holds no watch (contract pin)
+              return ok([]);
             }
+            const result: NodeData[] = [node];
+            if (isRef(node)) {
+              // Follow 'moved' tombstone chains so the client gets the LIVE
+              // node, not the tombstone (gk8.10 stage 2). Best-effort by
+              // contract: missing target or a broken chain (identity mismatch,
+              // hop limit) degrades to [node] — the wire op is not a validator.
+              // No self-repair here: this user's surface may be read-only;
+              // repair belongs to server-side resolveRef callers.
+              let target: NodeData | undefined;
+              try {
+                ({ target } = await followMoved(s.tree, node.$ref, node.$refId));
+              } catch (e) {
+                if (!(e instanceof OpError)) throw e;
+                console.error(`[twp] resolve: broken ref chain from ${node.$ref}:`, e);
+              }
+              if (target && cap && ((await cap.getPerm(target.$path)) & S)) {
+                const tl = cap.watch([target.$path]) ?? undefined;
+                if (tl) leases.push(tl);
+                // Re-get closes the target window (§3.2.7): the response
+                // carries the post-registration image. Vanished meanwhile →
+                // degrade to [node], keep no watch on the absent path.
+                const fresh = await s.tree.get(target.$path);
+                if (fresh) result.push(fresh);
+                else undoHolds(tl);
+              } else if (target) {
+                result.push(target);
+              }
+            }
+            return ok(result);
+          } catch (e) {
+            undoHolds(...leases);
+            throw e;
           }
-          return ok(result);
         }
 
         case 'ls': {
@@ -253,30 +319,57 @@ export function createPeer(serve?: ServeFactory) {
           const watchList = frame.watchList ? s.hooks?.watchList?.bind(s.hooks) : undefined;
           if (frame.watchList && !watchList) throw new OpError('BAD_REQUEST', 'watchList unsupported by this peer');
           let frozen: ResolvedReadPlan | undefined;
-          if (frame.watchList) {
+          let listReg: ListRegistration | undefined;
+          if (watchList) {
             // S-gate on the PARENT (ns6p.4 invariant 22) — same permission the
             // sub prefix gate takes below. Fail closed: no perm surface = no
             // list watch; no S = FORBIDDEN, the client re-issues without it.
             const getPerm = s.tree.getPerm?.bind(s.tree);
             if (!getPerm) throw new OpError('BAD_REQUEST', 'watchList unsupported by this peer');
             if (!((await getPerm(path)) & S)) throw new OpError('FORBIDDEN', `watchList denied: ${path}`);
-            // Freeze the plan ONCE (invariant 21): the read below executes this
-            // object and the hook registers the same one — parity by identity.
+            // Freeze the plan ONCE (invariant 21): the registration takes this
+            // object and the read executes the plan it settles on.
             frozen = await s.tree.planChildren?.(path, { query: frame.query, depth: frame.depth }, ctx);
+            // Register BEFORE the read (ns6p.4 §3.2 step 3, closes W2): a
+            // membership flip mid-scan is routed to the lane instead of being
+            // lost forever; the client's overlap machinery reconciles order.
+            listReg = (await watchList(path, !!frame.watch, token, frozen)) ?? undefined;
+            // Re-validate may have settled on a fresher plan (invariant 23);
+            // read what the registration holds — parity by construction.
+            if (listReg?.plan) frozen = listReg.plan;
           }
-          // ctx threaded to getChildren only — parity with the pre-TWP router;
-          // uniform threading to all tree calls is a separate decision.
-          const page = await s.tree.getChildren(
-            path,
-            { limit: frame.limit ?? DEFAULT_LS_LIMIT, depth: frame.depth, query: frame.query, cursor: frame.cursor, ...(frozen ? { plan: frozen } : {}) },
-            ctx,
-          );
-          if (cap) {
-            const watchable: string[] = [];
-            for (const n of page.items) if ((await cap.getPerm(n.$path)) & S) watchable.push(n.$path);
-            if (watchable.length) cap.watch(watchable);
+          // Provisional request-scoped prefix (ns6p.4 §3.2.6a, invariant 27):
+          // covers the [scan → item-watch] window of watch-without-watchList.
+          // Gated on parent-S (same probe as the sub prefix gate) and depth-1;
+          // no-S and deep ls stay documented residuals (§3.5).
+          let provisional: (() => void) | undefined;
+          if (cap && !watchList && s.hooks?.holdPrefix
+            && (frame.depth === undefined || frame.depth === 1)
+            && ((await cap.getPerm(path)) & S)) {
+            provisional = s.hooks.holdPrefix(path);
           }
-          if (watchList) await watchList(path, !!frame.watch, token, frozen);
+          let page: Page<NodeData>;
+          try {
+            // ctx threaded to getChildren only — parity with the pre-TWP router;
+            // uniform threading to all tree calls is a separate decision.
+            page = await s.tree.getChildren(
+              path,
+              { limit: frame.limit ?? DEFAULT_LS_LIMIT, depth: frame.depth, query: frame.query, cursor: frame.cursor, ...(frozen ? { plan: frozen } : {}) },
+              ctx,
+            );
+            if (cap) {
+              const watchable: string[] = [];
+              for (const n of page.items) if ((await cap.getPerm(n.$path)) & S) watchable.push(n.$path);
+              if (watchable.length) cap.watch(watchable);
+            }
+          } catch (e) {
+            undoHolds(listReg);
+            throw e;
+          } finally {
+            // Released only AFTER item watches stand (or the request failed):
+            // events during the window already reached the lane.
+            undoHolds(provisional);
+          }
           return ok(page);
         }
 

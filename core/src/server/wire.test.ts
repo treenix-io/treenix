@@ -336,10 +336,15 @@ describe('registerWatchList — plan re-validate (ns6p.4 slice 2)', () => {
     let probes = 0;
     const tree = { planChildren: async () => { probes++; return freshPlan('/data', 'a'); } };
 
-    await registerWatchList(watcher, tree, 'u1', '/view', false, 'tab', frozen);
+    const reg = await registerWatchList(watcher, tree, 'u1', '/view', false, 'tab', frozen);
 
     assert.equal(probes, 1);
     assert.equal(cdc.getActiveQueryCount(), 1);
+    // Slice 4: the register-first peer reads with the settled plan and undoes
+    // the returned lease on read failure.
+    assert.equal(reg.plan, frozen, 'settled plan IS the frozen object (invariant 21)');
+    reg.undo();
+    assert.equal(cdc.getActiveQueryCount(), 0, 'returned lease releases the registration');
   });
 
   it('config flip between freeze and registration: converges on attempt 2 with the FRESH plan active', async () => {
@@ -349,10 +354,11 @@ describe('registerWatchList — plan re-validate (ns6p.4 slice 2)', () => {
     // The mount now points at /data2 — every probe returns the flipped plan.
     const tree = { planChildren: async () => { probes++; return freshPlan('/data2', 'a'); } };
 
-    await registerWatchList(watcher, tree, 'u1', '/view', false, 'tab', frozen);
+    const reg = await registerWatchList(watcher, tree, 'u1', '/view', false, 'tab', frozen);
 
     assert.equal(probes, 2, 'validate after each of the two registration attempts');
     assert.equal(cdc.getActiveQueryCount(), 1);
+    assert.equal(reg.plan?.plan.source, '/data2', 'register-first read must execute the SETTLED plan');
 
     // Membership evaluates the FLIPPED plan, not the stale frozen one.
     await subTree.set(createNode('/data2/x', 'item', { kind: 'a' }));

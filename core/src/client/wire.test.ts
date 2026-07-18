@@ -20,7 +20,7 @@ async function harness() {
     }),
     execute: async (req) => ({ ran: req.action, key: req.key, type: req.type }),
     hooks: {
-      watch: (paths) => watched.push(paths),
+      watch: (paths) => { watched.push(paths); },
       unwatch: (paths) => unwatched.push(paths),
     },
   };

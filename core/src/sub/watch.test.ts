@@ -1554,3 +1554,60 @@ describe('WatchManager — unbound-token TTL (ns6p.4 slice 2)', () => {
       'deadline counted from the FIRST laneless registration');
   });
 });
+
+// ── ns6p.4 slice 4: provisional prefix hold (invariant 27) ──
+
+describe('WatchManager — provisional prefix hold (ns6p.4 slice 4)', () => {
+  const setEvent = (path: string): NodeEvent => ({ type: 'set', path, node: { $type: 't' } });
+
+  it('routes children while held; release is idempotent and frees the budget slot', () => {
+    const wm = createWatchManager({ maxWatchesPerUser: 1 });
+    const got: NodeEvent[] = [];
+    wm.connect('c1', 'u1', (e) => got.push(e.event), undefined, 'tab');
+
+    const release = wm.holdPrefix('u1', '/dir');
+    wm.notify(setEvent('/dir/x'));
+    assert.equal(got.length, 1, 'children routed under the provisional hold');
+
+    release();
+    release(); // idempotent — double release must not underflow
+    wm.notify(setEvent('/dir/y'));
+    assert.equal(got.length, 1, 'released — routing stopped');
+    // Budget of 1 free again — a leaked provisional would throw here.
+    wm.watch('u1', ['/other'], { children: true, token: 'tab' });
+  });
+
+  it('two concurrent holds on one path are independent holders — first release keeps coverage (r3-F3)', () => {
+    const wm = createWatchManager();
+    const got: NodeEvent[] = [];
+    wm.connect('c1', 'u1', (e) => got.push(e.event), undefined, 'tab');
+
+    const relA = wm.holdPrefix('u1', '/dir');
+    const relB = wm.holdPrefix('u1', '/dir');
+    relA();
+    wm.notify(setEvent('/dir/x'));
+    assert.equal(got.length, 1, "A's release must not strip B's coverage");
+
+    relB();
+    wm.notify(setEvent('/dir/y'));
+    assert.equal(got.length, 1, 'last holder released — registration gone');
+  });
+
+  it('provisional holders never arm the unbound-token TTL', (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const wm = createWatchManager({ unboundTokenTtlMs: 1000 });
+    const got: NodeEvent[] = [];
+    wm.connect('cOther', 'u1', (e) => got.push(e.event), undefined, 'tOther');
+
+    const release = wm.holdPrefix('u1', '/dir'); // held past the TTL deadline
+    t.mock.timers.tick(1000);
+    wm.notify(setEvent('/dir/x'));
+    assert.equal(got.length, 1, 'no TTL fired — the hold outlived the laneless-token deadline');
+    release();
+  });
+
+  it('connect rejects the reserved provisional namespace', () => {
+    const wm = createWatchManager();
+    assert.throws(() => wm.connect('c1', 'u1', () => {}, undefined, '\0prov:1'));
+  });
+});

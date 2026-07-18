@@ -3,13 +3,16 @@
 import { createNode, R, S } from '#core';
 import { OpError } from '#errors';
 import type { ResolvedReadPlan } from '#mount/resolve-plan';
-import { withAcl, type AclChildrenOpts } from '#security/acl-tree';
+import { withAcl, type AclChildrenOpts, type PlanChildrenOpts } from '#security/acl-tree';
+import { registerWatchList } from '#server/wire';
+import { withSubscriptions } from '#sub';
+import { createWatchManager, type StampedEvent } from '#sub/watch';
 import { createMemoryTree } from '#tree';
 import { relocateCtx, withStoragePolicy } from '#tree/policy';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { createLoopback } from './loopback';
-import { createPeer, type PeerServe, type ServeFactory } from './peer';
+import { createPeer, type PeerServe, type ServeFactory, type ServeHooks } from './peer';
 
 function pair(serve?: ServeFactory) {
   const [ca, cb] = createLoopback();
@@ -267,7 +270,7 @@ describe('TWP peer over loopback', () => {
         getPerm: async (p: string) => (p === '/a' ? (R | S) : R),
       }),
       hooks: {
-        watch: (paths) => watched.push(paths),
+        watch: (paths) => { watched.push(paths); },
         unwatch: () => {},
       },
     };
@@ -289,7 +292,7 @@ describe('TWP peer over loopback', () => {
         getPerm: async () => (R | S),
       }),
       hooks: {
-        watch: (paths, o) => calls.push({ op: 'watch', paths, children: o?.children }),
+        watch: (paths, o) => { calls.push({ op: 'watch', paths, children: o?.children }); },
         unwatch: (paths, o) => calls.push({ op: 'unwatch', paths, children: o?.children }),
       },
     };
@@ -358,7 +361,7 @@ describe('TWP peer over loopback', () => {
       }),
       execute: async () => ({ $path: '/target' }),
       hooks: {
-        watch: (paths, o) => calls.push({ op: 'watch', paths, token: o?.token, children: o?.children }),
+        watch: (paths, o) => { calls.push({ op: 'watch', paths, token: o?.token, children: o?.children }); },
         unwatch: (paths, o) => calls.push({ op: 'unwatch', paths, token: o?.token, children: o?.children }),
         watchList: (path, itemWatch, token) => { listCalls.push({ path, itemWatch, token }); },
       },
@@ -412,6 +415,10 @@ describe('TWP peer over loopback', () => {
     await assert.rejects(client.req.get('/a', true, ''), isCode('BAD_REQUEST'));
     await assert.rejects(client.req.sub({ paths: ['/a'], token: '' }), isCode('BAD_REQUEST'));
     await assert.rejects(client.req.ls('/a', { watch: true, token: '' }), isCode('BAD_REQUEST'));
+
+    // \0 would reach into the internal provisional-holder namespace (ns6p.4
+    // invariant 27) — a guessed holder id could strip a request's coverage.
+    await assert.rejects(client.req.get('/a', true, 'x\0y'), isCode('BAD_REQUEST'));
   });
 
   // ── ns6p.4 slice 2: watchList S-gate (invariant 22) + frozen plan (invariant 21) ──
@@ -493,5 +500,305 @@ describe('TWP peer over loopback', () => {
     assert.ok(executed, 'read received a pre-resolved plan');
     assert.equal(registered, executed, 'registration and read share the plan by object identity');
     assert.deepEqual(registered!.plan, { source: '/orders', callerWhere: { status: 'open' } });
+  });
+});
+
+// ── ns6p.4 slice 4: server register-first (closes 0w8z W1/W2/W-get) ──
+// Real WatchManager behind a hand-built ServeTree: writes injected INSIDE
+// instrumented reads interleave deterministically, the lane records what a
+// client's event channel receives, the journal records hook call order.
+
+describe('register-first observe (ns6p.4 slice 4)', () => {
+  const isCode = (code: string) => (e: unknown) => e instanceof OpError && e.code === code;
+
+  async function observed(opts?: { maxWatchesPerUser?: number }) {
+    const memory = createMemoryTree();
+    await memory.set(createNode('/dir', 'dir', {}));
+    await memory.set(createNode('/dir/a', 'item', { n: 1 }));
+    const watcher = createWatchManager(opts);
+    const { tree, cdc } = withSubscriptions(memory, (e) => watcher.notify(e), {
+      projectMembership: async (_u, o, n) => [o, n],
+    });
+    watcher.bindQueryRegistry(cdc);
+    const lane: StampedEvent[] = [];
+    watcher.connect('c1', 'u1', (env) => lane.push(env.event), undefined, 'tab');
+
+    const journal: string[] = [];
+    const base = Object.assign(Object.create(tree) as typeof tree, {
+      getPerm: async () => R | S,
+    });
+    const hooks: ServeHooks = {
+      watch: (paths, o) => {
+        journal.push(`watch:${paths.join(',')}`);
+        return watcher.watch('u1', paths, o);
+      },
+      unwatch: (paths, o) => watcher.unwatch('u1', paths, o),
+      watchList: (path, itemWatch, token, plan) => {
+        journal.push(`watchList:${path}`);
+        const probe = {
+          planChildren: async () => {
+            if (!plan) throw new Error('re-validate probe without a frozen plan');
+            return plan;
+          },
+        };
+        return registerWatchList(watcher, probe, 'u1', path, itemWatch, token, plan);
+      },
+      holdPrefix: (path) => {
+        journal.push(`hold:${path}`);
+        const release = watcher.holdPrefix('u1', path);
+        return () => {
+          journal.push(`release:${path}`);
+          release();
+        };
+      },
+    };
+    return { memory, watcher, tree, lane, journal, base, hooks };
+  }
+
+  it('ls{watchList}: registration precedes the read — a create landing mid-scan reaches the lane (W2)', async () => {
+    const h = await observed();
+    const serveTree = Object.assign(Object.create(h.base) as typeof h.base, {
+      getChildren: async (p: string, o?: AclChildrenOpts, c?: unknown) => {
+        h.journal.push('read');
+        const page = await h.tree.getChildren(p, o, c);
+        // Lands after the scan, before the response — the old read-then-
+        // register order lost this event forever (no prefix stood yet).
+        await h.tree.set(createNode('/dir/mid', 'item', { n: 2 }));
+        return page;
+      },
+    });
+    const { client } = pair(() => ({ tree: serveTree, hooks: h.hooks }));
+
+    const page = await client.req.ls('/dir', { watchList: true, token: 'tab' }) as { items: { $path: string }[] };
+
+    assert.deepEqual(page.items.map((n) => n.$path), ['/dir/a'], 'scan predates the create');
+    assert.deepEqual(h.journal, ['watchList:/dir', 'read'], 'register-first call order');
+    const created = h.lane.find((e) => e.type === 'set' && e.path === '/dir/mid');
+    assert.ok(created, 'mid-scan create routed to the lane');
+    assert.equal(typeof created.seq, 'number', 'delivered seq-stamped');
+  });
+
+  it('ls{watch} without watchList under parent-S: provisional prefix covers the scan window, then dies (invariant 27)', async () => {
+    const h = await observed({ maxWatchesPerUser: 2 });
+    const serveTree = Object.assign(Object.create(h.base) as typeof h.base, {
+      getChildren: async (p: string, o?: AclChildrenOpts, c?: unknown) => {
+        const page = await h.tree.getChildren(p, o, c);
+        await h.tree.patch('/dir/a', [['r', 'n', 10]]); // item write mid-scan
+        return page;
+      },
+    });
+    const { client } = pair(() => ({ tree: serveTree, hooks: h.hooks }));
+
+    await client.req.ls('/dir', { watch: true, token: 'tab' });
+
+    assert.ok(h.lane.some((e) => e.type === 'patch' && e.path === '/dir/a'),
+      'mid-scan item write routed via the provisional prefix');
+    assert.deepEqual(h.journal, ['hold:/dir', 'watch:/dir/a', 'release:/dir'],
+      'hold → read → item watches → release');
+
+    // Provisional gone: children routing ended with the request…
+    h.lane.length = 0;
+    await h.tree.set(createNode('/dir/b', 'item', { n: 3 }));
+    assert.ok(!h.lane.some((e) => e.type === 'set' && e.path === '/dir/b'), 'no prefix hold survives the response');
+    // …while the tab-token item hold stays live.
+    await h.tree.patch('/dir/a', [['r', 'n', 11]]);
+    assert.ok(h.lane.some((e) => e.type === 'patch' && e.path === '/dir/a'), 'item hold under the real token remains');
+    // Budget freed: cap of 2 with one live item hold — a fresh slot must fit.
+    h.watcher.watch('u1', ['/elsewhere'], { token: 'tab' });
+  });
+
+  it('overlapping same-token requests hold independent provisionals — one completing keeps the other covered (r3-F3)', async () => {
+    const h = await observed();
+    let scan = 0;
+    let releaseFirst!: () => void;
+    let releaseSecond!: () => void;
+    const gateFirst = new Promise<void>((r) => { releaseFirst = r; });
+    const gateSecond = new Promise<void>((r) => { releaseSecond = r; });
+    let firstParked!: () => void;
+    let secondParked!: () => void;
+    const parked = Promise.all([
+      new Promise<void>((r) => { firstParked = r; }),
+      new Promise<void>((r) => { secondParked = r; }),
+    ]);
+    const serveTree = Object.assign(Object.create(h.base) as typeof h.base, {
+      getChildren: async (p: string, o?: AclChildrenOpts, c?: unknown) => {
+        const page = await h.tree.getChildren(p, o, c);
+        if (++scan === 1) { firstParked(); await gateFirst; }
+        else { secondParked(); await gateSecond; }
+        return page;
+      },
+    });
+    const { client } = pair(() => ({ tree: serveTree, hooks: h.hooks }));
+
+    const pa = client.req.ls('/dir', { watch: true, token: 'tab' });
+    const pb = client.req.ls('/dir', { watch: true, token: 'tab' });
+    await parked; // both mid-scan — both provisionals held on /dir
+
+    releaseFirst();
+    await Promise.race([pa, pb]); // one request completed and released ITS provisional
+
+    await h.tree.set(createNode('/dir/late', 'item', { n: 9 }));
+    assert.ok(h.lane.some((e) => e.type === 'set' && e.path === '/dir/late'),
+      "the in-flight request's provisional still covers the window");
+
+    releaseSecond();
+    await Promise.all([pa, pb]);
+    h.lane.length = 0;
+    await h.tree.set(createNode('/dir/post', 'item', { n: 10 }));
+    assert.ok(!h.lane.some((e) => e.type === 'set' && e.path === '/dir/post'),
+      'all provisionals released — converged holds are item-only');
+  });
+
+  it('ls{watch} without parent-S: no provisional — the window stays residual (§3.5), items still watched', async () => {
+    const h = await observed();
+    const gated = Object.assign(Object.create(h.tree) as typeof h.tree, {
+      getPerm: async (p: string) => (p === '/dir' ? R : R | S), // S on items only
+    });
+    const serveTree = Object.assign(Object.create(gated) as typeof gated, {
+      getChildren: async (p: string, o?: AclChildrenOpts, c?: unknown) => {
+        const page = await h.tree.getChildren(p, o, c);
+        await h.tree.set(createNode('/dir/mid', 'item', { n: 2 }));
+        return page;
+      },
+    });
+    const { client } = pair(() => ({ tree: serveTree, hooks: h.hooks }));
+
+    await client.req.ls('/dir', { watch: true, token: 'tab' });
+
+    assert.deepEqual(h.journal, ['watch:/dir/a'], 'no provisional hold without parent-S; item watches post-read');
+    assert.ok(!h.lane.some((e) => e.type === 'set' && e.path === '/dir/mid'),
+      'mid-scan create lost — the documented residual for this sub-case');
+    await h.tree.patch('/dir/a', [['r', 'n', 5]]);
+    assert.ok(h.lane.some((e) => e.type === 'patch' && e.path === '/dir/a'), 'item hold live');
+  });
+
+  it('read failure after registration: lease undone — pre-existing hold and replaced query plan restored (invariant 15)', async () => {
+    const h = await observed();
+    // Pre-existing under the SAME token: prefix hold + query plan A on /dir.
+    const planA: ResolvedReadPlan = { plan: { source: '/dir', callerWhere: { kind: 'a' } }, mountDeps: new Set(['/dir']) };
+    h.watcher.watch('u1', ['/dir'], { children: true, query: { plan: planA.plan, mountDeps: planA.mountDeps }, token: 'tab' });
+
+    const serveTree = Object.assign(Object.create(h.base) as typeof h.base, {
+      planChildren: async (p: string, o?: PlanChildrenOpts): Promise<ResolvedReadPlan> => ({
+        plan: { source: p, ...(o?.query ? { callerWhere: o.query } : {}) },
+        mountDeps: new Set([p]),
+      }),
+      getChildren: async (): Promise<never> => { throw new OpError('NOT_FOUND', 'scan failed'); },
+    });
+    const { client } = pair(() => ({ tree: serveTree, hooks: h.hooks }));
+
+    await assert.rejects(
+      client.req.ls('/dir', { watchList: true, query: { kind: 'b' }, token: 'tab' }),
+      isCode('NOT_FOUND'),
+    );
+
+    // The pre-existing prefix hold survives the undo…
+    await h.tree.set(createNode('/dir/n1', 'item', { kind: 'a' }));
+    const ev = h.lane.find((e) => e.type === 'set' && e.path === '/dir/n1');
+    assert.ok(ev, 'pre-existing hold under the same token survives compensation');
+    // …and membership evaluates the RESTORED plan A, not the undone plan B.
+    assert.ok(ev.invalidateVps?.includes('/dir'), 'replaced query plan restored by the undo');
+  });
+
+  it('undo failure is loud and never masks the read error', async () => {
+    const h = await observed();
+    const serveTree = Object.assign(Object.create(h.base) as typeof h.base, {
+      getChildren: async (): Promise<never> => { throw new OpError('NOT_FOUND', 'scan failed'); },
+    });
+    const hooks: ServeHooks = {
+      ...h.hooks,
+      watchList: () => ({ undo: () => { throw new Error('undo boom'); } }),
+    };
+    const { client } = pair(() => ({ tree: serveTree, hooks }));
+
+    const originalError = console.error;
+    let logged = false;
+    console.error = () => { logged = true; };
+    try {
+      await assert.rejects(client.req.ls('/dir', { watchList: true, token: 'tab' }), isCode('NOT_FOUND'));
+    } finally {
+      console.error = originalError;
+    }
+    assert.ok(logged, 'undo failure logged loudly');
+  });
+
+  it('resolve{watch}: target watch registered before the re-get; response carries the post-registration image (§3.2.7)', async () => {
+    const h = await observed();
+    await h.memory.set(createNode('/target', 'item', { v: 1 }));
+    await h.memory.set({ $path: '/link', $type: 'ref', $ref: '/target' });
+    let targetGets = 0;
+    const serveTree = Object.assign(Object.create(h.base) as typeof h.base, {
+      get: async (p: string, c?: unknown) => {
+        const n = await h.tree.get(p, c);
+        if (p === '/target') {
+          h.journal.push(`get:/target#${++targetGets}`);
+          if (targetGets === 2 && n) return { ...n, v: 2 }; // image AFTER registration
+        }
+        return n;
+      },
+    });
+    const { client } = pair(() => ({ tree: serveTree, hooks: h.hooks }));
+
+    const out = await client.req.resolve('/link', true, 'tab') as { $path: string; v?: number }[];
+
+    assert.deepEqual(out.map((n) => n.$path), ['/link', '/target']);
+    assert.equal(out[1].v, 2, 'response carries the re-get image, not the pre-registration one');
+    const wi = h.journal.indexOf('watch:/target');
+    const gi = h.journal.indexOf('get:/target#2');
+    assert.ok(wi !== -1 && gi !== -1 && wi < gi, 'target watch stood before the re-get');
+  });
+
+  it('resolve{watch} on an absent path returns [] and keeps no watch', async () => {
+    const h = await observed();
+    const { client } = pair(() => ({ tree: h.base, hooks: h.hooks }));
+
+    assert.deepEqual(await client.req.resolve('/dir/ghost', true, 'tab'), []);
+
+    await h.tree.set(createNode('/dir/ghost', 'item', { n: 1 }));
+    assert.ok(!h.lane.some((e) => e.type === 'set' && e.path === '/dir/ghost'), 'no watch left behind');
+  });
+
+  it('get{watch}: registration precedes the read — a write mid-read reaches the lane (W-get)', async () => {
+    const h = await observed();
+    const serveTree = Object.assign(Object.create(h.base) as typeof h.base, {
+      get: async (p: string, c?: unknown) => {
+        const n = await h.tree.get(p, c);
+        await h.tree.patch('/dir/a', [['r', 'n', 7]]); // lands mid-read
+        return n;
+      },
+    });
+    const { client } = pair(() => ({ tree: serveTree, hooks: h.hooks }));
+
+    await client.req.get('/dir/a', true, 'tab');
+
+    assert.deepEqual(h.journal, ['watch:/dir/a'], 'register-first call order');
+    assert.ok(h.lane.some((e) => e.type === 'patch' && e.path === '/dir/a'), 'mid-read write delivered');
+  });
+
+  it('get{watch} read failure: created hold undone, pre-existing hold under the same token survives', async () => {
+    const h = await observed();
+    h.watcher.watch('u1', ['/dir/a'], { token: 'tab' }); // pre-existing
+    const serveTree = Object.assign(Object.create(h.base) as typeof h.base, {
+      get: async (): Promise<never> => { throw new OpError('NOT_FOUND', 'read failed'); },
+    });
+    const { client } = pair(() => ({ tree: serveTree, hooks: h.hooks }));
+
+    await assert.rejects(client.req.get('/dir/b', true, 'tab'), isCode('NOT_FOUND')); // fresh hold → undone
+    await assert.rejects(client.req.get('/dir/a', true, 'tab'), isCode('NOT_FOUND')); // pre-existing → kept
+
+    await h.tree.set(createNode('/dir/b', 'item', { n: 1 }));
+    assert.ok(!h.lane.some((e) => e.type === 'set' && e.path === '/dir/b'), 'created hold gone');
+    await h.tree.patch('/dir/a', [['r', 'n', 9]]);
+    assert.ok(h.lane.some((e) => e.type === 'patch' && e.path === '/dir/a'), 'pre-existing hold survives');
+  });
+
+  it('get{watch} on an absent path keeps no watch (pre-slice-4 contract pinned)', async () => {
+    const h = await observed();
+    const { client } = pair(() => ({ tree: h.base, hooks: h.hooks }));
+
+    assert.equal(await client.req.get('/dir/ghost', true, 'tab'), undefined);
+
+    await h.tree.set(createNode('/dir/ghost', 'item', { n: 1 }));
+    assert.ok(!h.lane.some((e) => e.type === 'set' && e.path === '/dir/ghost'), 'no watch left behind');
   });
 });

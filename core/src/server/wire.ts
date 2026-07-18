@@ -6,7 +6,7 @@
 import { OpError } from '#errors';
 import type { ResolvedReadPlan } from '#mount/resolve-plan';
 import type { EventFrame } from '#protocol/frames';
-import { createPeer, type ActReq, type Conn, type PeerServe, type ServeHooks } from '#protocol/peer';
+import { createPeer, type ActReq, type Conn, type ListRegistration, type PeerServe, type ServeHooks } from '#protocol/peer';
 import { withAcl, type AclStore } from '#security/acl-tree';
 import { buildClaims } from '#security/claims';
 import type { Session } from '#security/sessions';
@@ -56,13 +56,16 @@ function samePlan(a: ResolvedReadPlan, b: ResolvedReadPlan): boolean {
   return true;
 }
 
-/** ls{watchList} registration (ns6p.4 §3.2.3-3b). Registers the FROZEN plan
- *  the read executed, then re-resolves and compares (invariant 23): a mount
- *  config flip between freeze and registration would otherwise leave a handle
- *  the config-event machinery can't find — the client stays stale forever.
+/** ls{watchList} registration (ns6p.4 §3.2.3-3b). Registers the FROZEN plan,
+ *  then re-resolves and compares (invariant 23): a mount config flip between
+ *  freeze and registration would otherwise leave a handle the config-event
+ *  machinery can't find — the client stays stale forever.
  *  Mismatch → lease.undo() + re-register with the fresh plan, bounded to 2
  *  registration attempts; still diverging → CONFLICT with nothing registered.
- *  No frozen plan (peer without the pre-step) → legacy plain registration. */
+ *  No frozen plan (peer without the pre-step) → legacy plain registration.
+ *  Returns the committed lease (the register-first peer undoes it if the read
+ *  fails, slice 4) plus the plan the registration settled on — the read must
+ *  execute THAT plan for invariant-21 parity. */
 export async function registerWatchList(
   watcher: WatchManager,
   tree: Pick<AclStore, 'planChildren'>,
@@ -71,7 +74,7 @@ export async function registerWatchList(
   itemWatch: boolean,
   token: string | undefined,
   planned?: ResolvedReadPlan,
-): Promise<void> {
+): Promise<ListRegistration> {
   const register = (p?: ResolvedReadPlan) => watcher.watch(userId, [path], {
     children: true,
     autoWatch: itemWatch,
@@ -82,8 +85,7 @@ export async function registerWatchList(
   });
 
   if (!planned) {
-    register();
-    return;
+    return { undo: register().undo };
   }
 
   let active = planned;
@@ -91,7 +93,7 @@ export async function registerWatchList(
   for (let attempt = 1; ; attempt++) {
     // Pure config read through the same pre-step the freeze used (invariant 21).
     const fresh = await tree.planChildren(path, { query: planned.plan.callerWhere, depth: planned.plan.depth });
-    if (samePlan(fresh, active)) return;
+    if (samePlan(fresh, active)) return { undo: lease.undo, plan: active };
     lease.undo();
     if (attempt === 2) {
       throw new OpError('CONFLICT', `read plan for ${path} kept changing during watch registration`);
@@ -193,11 +195,14 @@ export function createWireSession(deps: WireDeps, session: Session) {
 
     // Watch/unwatch opts (incl. the anz4.28 ownership token) pass through as-is:
     // ServeHooks opts are structurally a subset of WatchOpts/UnwatchOpts.
+    // watch/watchList return their lease — the register-first peer (ns6p.4
+    // slice 4) undoes it when the read behind the registration fails.
     const hooks: ServeHooks = {
-      watch: (paths, o) => { deps.watcher.watch(userId, paths, o); },
+      watch: (paths, o) => deps.watcher.watch(userId, paths, o),
       unwatch: (paths, o) => deps.watcher.unwatch(userId, paths, o),
       watchList: (path, itemWatch, token, plan) =>
         registerWatchList(deps.watcher, tree, userId, path, itemWatch, token, plan),
+      holdPrefix: (path) => deps.watcher.holdPrefix(userId, path),
     };
 
     return { tree, execute, executeStream: execStream, hooks };

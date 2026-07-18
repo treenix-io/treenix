@@ -57,8 +57,9 @@ export type UnwatchOpts = { children?: boolean; token?: string };
  *  a failed request without it would strip pre-existing holds and lose the
  *  query plan a re-registration replaced (F4-r1/r2).
  *  Provisional-holder seam (r4-m7): holds are booked under the caller's token;
- *  slice 4 layers a unique per-request holder id + merge-on-commit on top of
- *  this same bookkeeping. */
+ *  slice 4 layers a unique per-request provisional holder (`holdPrefix`) on
+ *  this same bookkeeping — nothing persists past the request, so release is
+ *  plain undo, no merge. */
 export type WatchLease = {
   /** Holds this call CREATED for its token — pre-existing holds (any holder,
    *  including the same token) are not listed and never touched by undo(). */
@@ -89,6 +90,13 @@ export type WatchManager = {
   /** Bind the instance-scoped query evaluator after withSubscriptions creates it. */
   bindQueryRegistry(registry: QueryWatchRegistry): void;
   watch(userId: string, paths: string[], opts?: WatchOpts): WatchLease;
+  /** Request-scoped provisional prefix hold (ns6p.4 §3.2.6a, invariant 27):
+   *  covers the [scan → item-watch] window of ls{watch} without a list watch.
+   *  Booked under a unique INTERNAL holder — the tab token would collapse
+   *  concurrent requests (A's release would strip B's coverage). Budget-counted;
+   *  never TTL'd/tombstoned (the peer releases it in a request-scoped finally).
+   *  Returns the idempotent release. */
+  holdPrefix(userId: string, path: string): () => void;
   unwatch(userId: string, paths: string[], opts?: UnwatchOpts): void;
   notify(event: NodeEvent): void;
   /** Break continuity for EVERY tracked user — a delegated execute (federation)
@@ -114,6 +122,12 @@ const TOKEN_TOMBSTONE_CAP = 256;
 /** Shared hold for callers that don't scope ownership by connection token —
  *  they collapse into one holder, i.e. exactly the pre-anz4.12 semantics. */
 const LEGACY_TOKEN = '';
+
+/** Reserved holder namespace of provisional per-request prefixes (invariant
+ *  27). Unreachable from outside: wire tokens reject `\0` (peer vToken) and
+ *  connect() refuses it — a lane bound to a guessed holder id could otherwise
+ *  release an in-flight request's window coverage via token-grace. */
+const PROVISIONAL_NS = '\0prov:';
 
 function addTo(map: Map<string, Set<string>>, key: string, uid: string) {
   let set = map.get(key);
@@ -187,6 +201,7 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
   const graceTimers = new Map<string, ReturnType<typeof setTimeout>>();
   let queryRegistry: QueryWatchRegistry | undefined;
   let totalWatches = 0;
+  let provisionalSeq = 0;
 
   function userWatchCount(user: UserEntry): number {
     return user.paths.size + user.prefixes.size;
@@ -332,11 +347,14 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
     }
   }
 
-  return {
+  const manager: WatchManager = {
     connect(connId, userId, push, since, token) {
       // '' is the internal LEGACY_TOKEN shared hold — an external empty token
       // would alias it and its disconnect would release every legacy watch.
       if (token === '') throw new Error('watch connect: connection token must be non-empty');
+      // \0-prefixed = provisional-holder namespace (invariant 27): a lane bound
+      // to it would release an in-flight request's coverage on disconnect.
+      if (token?.startsWith('\0')) throw new Error('watch connect: reserved token namespace');
       // Cancel grace timer — user reconnected in time
       const timer = graceTimers.get(userId);
       if (timer) {
@@ -527,8 +545,10 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
       // Registration committed — arm the unbound-token TTL (invariant 25):
       // only here, never mid-request, and never for LEGACY (legacy clients
       // rely on user-grace). Not re-armed per call — the clock starts at the
-      // token's first laneless registration.
-      if (token !== LEGACY_TOKEN && !user.tokenLanes.has(token) && !user.tokenTtl.has(token)) {
+      // token's first laneless registration. Provisional holders (invariant 27)
+      // never arm it: they die in the request's finally, and their tombstones
+      // would churn real tabs' out of the FIFO cap.
+      if (token !== LEGACY_TOKEN && !token.startsWith(PROVISIONAL_NS) && !user.tokenLanes.has(token) && !user.tokenTtl.has(token)) {
         const ttlTimer = setTimeout(() => {
           const u = users.get(userId);
           if (!u || u.tokenTtl.get(token) !== ttlTimer) return;
@@ -583,6 +603,15 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
         replaced,
         undo,
       };
+    },
+
+    holdPrefix(userId, path) {
+      // Unique holder per call: same-token holders.set would collapse two
+      // concurrent requests on one parent — A's release would strip B's
+      // coverage mid-scan (r3-F3). Undo is the exact release: the created
+      // hold dies, a co-held registration merely loses one holder.
+      const lease = manager.watch(userId, [path], { children: true, token: PROVISIONAL_NS + ++provisionalSeq });
+      return lease.undo;
     },
 
     unwatch(userId, paths, unwatchOpts) {
@@ -708,4 +737,5 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
       return count;
     },
   };
+  return manager;
 }
