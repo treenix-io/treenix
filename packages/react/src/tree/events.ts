@@ -64,11 +64,10 @@ function refetchDirtyVp(vp: string, loadChildren: LoadChildren) {
 
 type FetchNode = (path: string) => Promise<NodeData | null | undefined>;
 
-// Exact-path invalidation (ns6p.4 §3.4): the server dropped the payload for a
-// path this client holds (ACL) — refetch through the normal read path. A
-// denied/gone refetch must EVICT: the entry is known-stale and the reader may
-// no longer see the node at all; keeping it freezes stale data forever.
-// Coalesced like vp refetches. `fetchNode` is injected so tests can stub it.
+// Exact-path invalidation (§3.4): the server ACL-dropped a payload for a path
+// we hold — refetch through the normal read path; a denied/gone refetch must
+// EVICT or the known-stale entry freezes forever. Coalesced like vp refetches;
+// `fetchNode` is injected so tests can stub it.
 const invalidatedTimers = new Map<string, ReturnType<typeof setTimeout>>();
 export function refetchInvalidatedPath(path: string, fetchNode: FetchNode) {
   if (invalidatedTimers.has(path)) return;
@@ -103,19 +102,17 @@ export type WireDataEvent = {
 const validRev = (r: unknown): number | undefined =>
   typeof r === 'number' && Number.isFinite(r) ? r : undefined;
 
-/** Apply one server data event under per-node rev ordering (previously events
- *  applied blindly: late duplicates double-applied array ops, old events
- *  regressed the cache). Skipped/refetch-routed events still consume their
- *  `by`-ack so pending optimistic ops settle; membership effects rev can't
- *  order flag any in-flight listing read (invariant 19). */
+/** Apply one server data event under per-node rev ordering (blind apply used
+ *  to double-apply late duplicates and regress the cache). Skipped/refetch-
+ *  routed events still consume their `by`-ack so pending optimistic ops settle;
+ *  membership effects rev can't order flag in-flight listing reads (inv.19). */
 export function applyDataEvent(
   event: WireDataEvent,
   loadChildren?: LoadChildren,
   fetchNode: FetchNode = fetchInvalidatedNode,
 ): void {
-  // invalidateVps — the coarse dirty signal (gk8.12): each named query view
-  // may have shifted; refetch its listing through the normal ACL-filtered
-  // read path. Precise add/rm deltas no longer exist.
+  // invalidateVps — the coarse dirty signal (gk8.12): refetch each named query
+  // view's listing through the normal ACL-filtered read path.
   const refetchVps = () => {
     const vps = event.invalidateVps as string[] | undefined;
     if (!vps) return;
@@ -184,8 +181,7 @@ export function applyDataEvent(
     const unorderable = rev === undefined || cachedRev === undefined;
     if (unorderable || rev > cachedRev + 1) {
       // Missing/non-numeric rev, or a gap (intermediate events ACL-filtered or
-      // lost — the ops don't compose onto our older image): refetch decides,
-      // cache untouched until it lands.
+      // lost): the ops don't compose onto our older image — refetch decides.
       consumeAckOnly(event.path, event.by);
       refetchInvalidatedPath(event.path, fetchNode);
       refetchVps();
@@ -348,9 +344,8 @@ export function startEvents(config: EventsConfig = {}, resume = false) {
 
       // Pathless coarse invalidate (core-dm1): the mutated node is unreadable to
       // us now (ACL revocation) so no set/patch arrives, but named query views
-      // still shifted — refetch each through the normal ACL-filtered read path.
-      // `paths` (ns6p.4 §3.4) names exact registrations we hold whose payload
-      // was dropped — refetch the node itself; FORBIDDEN/gone evicts.
+      // still shifted — refetch each. `paths` (§3.4) = our exact registrations
+      // whose payload was dropped: refetch the node; FORBIDDEN/gone evicts.
       if (event.type === 'invalidate') {
         if (typeof event.seq === 'number' && event.seq > lastSeq) lastSeq = event.seq;
         for (const vp of event.vps) {

@@ -23,6 +23,6 @@ export type TreenixClient = {
 };
 
 // kriz: circular import, trpc and handle need this index.ts
-export { createTrpcTransport } from './trpc';
+export { createTrpcTransport, mintWatchToken } from './trpc';
 export { createNodeClient } from './handle';
 export { createClient, type WireClient } from './wire';

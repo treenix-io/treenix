@@ -17,13 +17,11 @@ export type EventPush = (event: WireEvent) => void;
  *  §3.4) — the invalidate is born inside the filter, never routed in. */
 export type FilteredPush = (envelope: RouteEnvelope) => void;
 
-/** Deliver the coarse invalidate when a data event is about to be dropped by
- *  the ACL filter (core-dm1/0i3, invariant 16: EVERY routed drop signals).
- *  Provenance-bounded (invariant 26): `paths` only from the recipient's own
- *  held paths, `vps` only from their held vps (C26-narrowed upstream) — a
- *  vp-only recipient never learns the hidden source path. Carries the event's
- *  seq/epoch so the client's resume cursor advances in lockstep with the ring
- *  even on a signal-only stream (anz4.28e). */
+/** Coarse invalidate for a routed-then-ACL-dropped data event (core-dm1/0i3,
+ *  inv.16: EVERY routed drop signals). Provenance-bounded (inv.26): only the
+ *  recipient's own held paths/vps — a vp-only recipient never learns the
+ *  hidden source path. Carries seq/epoch so the resume cursor advances even
+ *  on a signal-only stream (anz4.28e). */
 function invalidateFallback(envelope: RouteEnvelope, push: EventPush): void {
   const { event, heldPaths, heldVps } = envelope;
   push({
@@ -110,11 +108,9 @@ export function createFilteredPush(
   // An error drops only its own event; the chain recovers and stays ordered.
   let chain: Promise<void> = Promise.resolve();
   return (envelope: RouteEnvelope) => {
-    // R4-WATCH-1: filter still fails closed (payload dropped) for confidentiality —
-    // a thrown filter must NEVER push a possibly-leaky event. But the swallow violates
-    // "fail loud": log so policy/storage bugs surface in operations, AND emit the
-    // provenance-bounded invalidate (invariant 16) — it carries no payload, only the
-    // recipient's own registrations, so the holder refetches instead of staling forever.
+    // R4-WATCH-1: a thrown filter must NEVER push a possibly-leaky event (fail
+    // closed) — but log loudly AND emit the provenance-bounded invalidate
+    // (inv.16): payload-free, so the holder refetches instead of staling forever.
     chain = chain
       .then(() => filterEvent(store, envelope, userId, getClaims, push))
       .catch(err => {
@@ -158,9 +154,8 @@ async function filterEvent(
   if (event.type === 'set' && event.node) {
     // ACL must come from stored node, not event payload — writer-supplied $owner/$acl in body would otherwise grant view.
     const stored = await store.get(event.path);
-    // Node vanished mid-emit (race with remove): the payload is undeliverable,
-    // but the routed drop must still signal (invariant 16) — the holder
-    // refetches and sees the node gone.
+    // Vanished mid-emit (race with remove): payload undeliverable, but the
+    // routed drop must still signal (inv.16) — the refetch sees the node gone.
     if (!stored) { invalidateFallback(envelope, push); return; }
     const stripped = stripComponents(stored, userId, claims);
     const { $path, ...body } = stripped;

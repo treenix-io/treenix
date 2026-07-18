@@ -8,6 +8,8 @@
 // its vp lane routes by event-carried invalidateVps (no path key), and holder
 // maps / C26 / C27 / provenance need per-user state at push time.
 
+import { dirname } from '#core/path';
+
 export type NotifyScope = 'exact' | 'children' | 'subtree';
 
 export type PathNotifier<E> = {
@@ -16,13 +18,6 @@ export type PathNotifier<E> = {
    *  propagate to the emitter — parity with the dispatch this replaced. */
   notify(path: string, event: E): void;
 };
-
-function parentOf(path: string): string | null {
-  if (path === '/') return null;
-  const idx = path.lastIndexOf('/');
-  if (idx < 0) return null;
-  return idx === 0 ? '/' : path.slice(0, idx);
-}
 
 export function createPathNotifier<E>(): PathNotifier<E> {
   type Consumer = (event: E) => void;
@@ -50,14 +45,14 @@ export function createPathNotifier<E>(): PathNotifier<E> {
       const exact = byScope.exact.get(path);
       if (exact) for (const fn of exact) fn(event);
 
-      const parent = parentOf(path);
+      const parent = dirname(path);
       if (parent !== null) {
         const children = byScope.children.get(parent);
         if (children) for (const fn of children) fn(event);
       }
 
       // subtree: ancestor walk (self first) — O(depth), not O(#registrations).
-      for (let p: string | null = path; p !== null; p = parentOf(p)) {
+      for (let p: string | null = path; p !== null; p = dirname(p)) {
         const subtree = byScope.subtree.get(p);
         if (subtree) for (const fn of subtree) fn(event);
       }

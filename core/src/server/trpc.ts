@@ -371,10 +371,8 @@ export function createTreeRouter(tree: Tree, systemTree: Tree, watcher: WatchMan
           ? { seq: input.since, epoch: input.epoch }
           : input?.since;
         const { connId, preserved, seq, epoch } = ctx.wire.connectEvents((e) => emit.next(e), resume, input?.token);
-        // Initial verdict carries the stream {seq, epoch} (anz4.28e): a client
-        // that then sees only signal frames still holds an epoch-bearing
-        // cursor — without it, a quiet/dirty-only client resumes epoch-less
-        // and fails closed into a guaranteed reset loop.
+        // Initial verdict carries the stream {seq, epoch} (anz4.28e) — without
+        // it a quiet/dirty-only client resumes epoch-less and reset-loops forever.
         const verdict: StampedEvent = { type: 'reconnect', preserved, seq, epoch };
         emit.next(verdict);
         return () => {

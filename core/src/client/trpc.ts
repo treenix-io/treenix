@@ -23,17 +23,19 @@ export type TrpcTransportOpts = {
   fetch?: (input: any, init?: any) => Promise<Response>;
 };
 
+/** Client-minted watch-ownership id (core-anz4.28): the AUTH token is shared
+ *  across consumers — only this id tells the server WHICH consumer holds a
+ *  watch, so one consumer's release cannot strip the others' (React tabs mint
+ *  one per tab as TAB_TOKEN). */
+export function mintWatchToken(): string {
+  return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : Date.now().toString(36) + '.' + Math.random().toString(36).slice(2, 10);
+}
+
 export function createTrpcTransport(opts: TrpcTransportOpts): TreenixClient & { trpc: ReturnType<typeof createTRPCClient<TreeRouter>> } {
   const getToken = opts.getToken ?? (() => opts.token ?? null);
-
-  // Per-instance watch-ownership token (core-anz4.28): the AUTH token is shared
-  // across consumers, so only a client-minted id tells the server WHICH consumer
-  // holds a watch — without it every registration lands on the shared legacy
-  // hold and one consumer's release strips the others. Mirrors React's TAB_TOKEN.
-  const watchToken: string =
-    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-      ? crypto.randomUUID()
-      : Date.now().toString(36) + '.' + Math.random().toString(36).slice(2, 10);
+  const watchToken = mintWatchToken();
 
   // Browser fetch: include credentials so cookies flow on cross-origin (CORS) requests too.
   // Custom fetch from caller (e.g. node tests with a cookie jar) overrides.

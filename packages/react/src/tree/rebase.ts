@@ -176,10 +176,9 @@ function consumeAck(rs: RebaseState, by: string | undefined): boolean {
   return true;
 }
 
-/** Consume the ack an event carries WITHOUT applying its payload (ns6p.4 §3.3):
- *  the rev machine skipped the event as stale or routed it to refetch — the
- *  op's effect is already inside the cached image (rev ≥ event) or arrives
- *  with the refetch, but the ack must still settle the pending op. */
+/** Consume the ack WITHOUT applying the payload (§3.3): the rev machine skipped
+ *  the event as stale or routed it to refetch — the op's effect is already in
+ *  the image (or arrives with the refetch), but the ack must still settle. */
 export function consumeAckOnly(path: string, by: string | undefined): void {
   if (by === undefined) return;
   if (consumeSuppressedAck(path, by)) return;
@@ -199,11 +198,10 @@ function regresses(cur: NodeData | undefined, next: NodeData): boolean {
   return a !== undefined && b !== undefined && b < a;
 }
 
-/** Non-regressing, rebase-aware snapshot ingest (ns6p.4 §3.3, invariants 18/28)
- *  — every node arriving from a READ passes through here. Returns the image to
- *  place in cache: the kept cached image when the read raced a newer event
- *  (known rev > returned rev); the overlay replayed on the adopted confirmed
- *  base when pendings exist; otherwise the returned node itself. */
+/** Non-regressing, rebase-aware snapshot ingest (§3.3, inv.18/28) — every node
+ *  arriving from a READ passes through here. Returns the image to cache: the
+ *  kept cached image when the read raced a newer event; the overlay replayed
+ *  on the adopted confirmed base when pendings exist; else the node itself. */
 export function ingestNode(node: NodeData): NodeData {
   const path = node.$path;
   const rs = state.get(path);

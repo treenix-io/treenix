@@ -13,8 +13,7 @@ import { tree as clientTree } from '#tree/client';
 import { DIRTY_COALESCE_MS } from '#tree/events';
 import { ingestNode } from '#tree/rebase';
 // tabTokenInput spreads into every watch-registering/releasing input so the
-// server can key watch ownership to THIS tab (core-anz4.12) — zod strips it
-// until the token wiring lands.
+// server keys watch ownership to THIS tab (core-anz4.12/28).
 import { tabTokenInput, trpc } from '#tree/trpc';
 import {
   type ChildrenHandle,
@@ -31,7 +30,8 @@ const DEFAULT_PAGE_SIZE = 100;
 // ── Read resources (ns6p.4 §3.3-1, invariant 17) ──
 // A read is identified by path + normalized query — NOT parent path alone, so
 // two queries over one parent don't share a generation counter. Key order in
-// the query object must not fork resources.
+// the query object must not fork resources (kept local: core's stableJson is
+// behind the curated exports map — no public door, qvrt).
 
 function sortKeysDeep(v: unknown): unknown {
   if (Array.isArray(v)) return v.map(sortKeysDeep);
@@ -53,6 +53,12 @@ function dropStale(kind: string, path: string): void {
   if (import.meta.env?.DEV) {
     console.warn(`[tree-source] stale ${kind} response for ${path} dropped (superseded read)`);
   }
+}
+
+// End a tracked children read exactly once (a throw inside .then falls into .catch).
+function readEnder(path: string): (applied: boolean) => boolean {
+  let ended = false;
+  return (applied) => ended ? false : ((ended = true), cache.endChildrenRead(path, applied));
 }
 
 // Watch ref-counting — multiple components may mount the same path; only
@@ -199,9 +205,8 @@ export class ClientTreeSource implements TreeSource {
     if (watching) refWatch(this.childrenWatchRefs, path);
 
     const key = resourceKey('ls', path, opts?.query);
-    // §4.2 gate: the SERVER coexists query handles (slice 5), but children
-    // state here is still keyed by parent — concurrent different-query mounts
-    // interleave in one collection. Loud, not fatal: first-caller-wins.
+    // §4.2 gate: the SERVER coexists query handles (slice 5) but children state
+    // here is parent-keyed — different-query mounts interleave. Loud, not fatal.
     let keys = this.activeChildKeys.get(path);
     if (!keys) { keys = new Map(); this.activeChildKeys.set(path, keys); }
     if (keys.size > 0 && !keys.has(key)) {
@@ -226,10 +231,7 @@ export class ClientTreeSource implements TreeSource {
       const gen = this.issueRead(key);
       cache.setChildrenPhase(path, phase);
       cache.beginChildrenRead(path);
-      // A throw inside .then falls into .catch — end exactly once.
-      let ended = false;
-      const end = (applied: boolean) =>
-        ended ? false : ((ended = true), cache.endChildrenRead(path, applied));
+      const end = readEnder(path);
       trpc.getChildren
         .query({ path, limit, query: opts?.query, watch: opts?.watch, watchNew: opts?.watchNew, ...(watching ? tabTokenInput : {}) })
         .then((result: { items: NodeData[]; total: number; truncated?: boolean; nextCursor?: string }) => {
@@ -280,9 +282,7 @@ export class ClientTreeSource implements TreeSource {
       const gen = this.issueRead(key);
       cache.setChildrenPhase(path, 'append');
       cache.beginChildrenRead(path);
-      let ended = false;
-      const end = (applied: boolean) =>
-        ended ? false : ((ended = true), cache.endChildrenRead(path, applied));
+      const end = readEnder(path);
       trpc.getChildren
         .query({ path, limit: pageSize, cursor: nextCursor, query: opts?.query })
         .then((result: { items: NodeData[]; nextCursor?: string }) => {

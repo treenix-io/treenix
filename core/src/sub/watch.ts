@@ -17,18 +17,15 @@ export type WatchCursor = { seq: number; epoch: string };
  *  seen, and echo both on resume. */
 export type StampedEvent = NodeEvent & { seq?: number; epoch?: string };
 
-/** Per-recipient route provenance (ns6p.4 §3.4, invariant 26): which of THIS
- *  user's own registrations matched at routing time. The ACL filter's
- *  drop-fallback may reveal ONLY these — a vp-only recipient must never learn
- *  the hidden source path. Frozen into the ring: replay pushes the SAME
- *  envelope, never recomputes routes (holds may have changed since). */
+/** Per-recipient route provenance (inv.26): which of THIS user's registrations
+ *  matched at routing time — the ACL drop-fallback may reveal ONLY these.
+ *  Frozen into the ring: replay pushes the same envelope, never recomputes. */
 export type RouteEnvelope = { event: StampedEvent; heldPaths: string[]; heldVps: string[] };
 
 export type WatchPush = (envelope: RouteEnvelope) => void;
 
-/** connect() result (ns6p.4 §4.5): the continuity verdict plus the CURRENT
- *  {seq, epoch}, which the lane stamps onto its initial reset/reconnect frame
- *  so even a signal-only client holds an epoch-bearing resume cursor. */
+/** Continuity verdict + CURRENT {seq, epoch} for the lane's initial frame —
+ *  even a signal-only client holds an epoch-bearing resume cursor (anz4.28e). */
 export type ConnectVerdict = WatchCursor & { preserved: boolean };
 
 export type WatchManagerOpts = {
@@ -38,10 +35,9 @@ export type WatchManagerOpts = {
   maxTotalWatches?: number;
   /** Per-user replay ring capacity (core-gk8.1). Default 1024. */
   ringSize?: number;
-  /** TTL for registrations under a token whose lane never connected (ns6p.4
-   *  invariant 25). Token-grace only starts after connect+disconnect — a
-   *  client that registers and dies pre-connect would otherwise hold forever
-   *  while another tab keeps the user alive. Default 5 min. */
+  /** TTL for registrations under a never-connected token (inv.25): token-grace
+   *  starts only after connect+disconnect, so a client dying pre-connect would
+   *  otherwise hold forever while another tab keeps the user alive. Default 5 min. */
   unboundTokenTtlMs?: number;
 };
 
@@ -53,24 +49,19 @@ type QueryWatchPlan = Omit<QueryWatchRegistration, 'vp' | 'userId'>;
 export type WatchOpts = { children?: boolean; autoWatch?: boolean; query?: QueryWatchPlan; token?: string };
 export type UnwatchOpts = { children?: boolean; token?: string };
 
-/** Undo-delta of one watch() call (ns6p.4 §3.2.3, invariant 15). Captured at
- *  registration time because unwatch() releases unconditionally — compensating
- *  a failed request without it would strip pre-existing holds and lose the
- *  query plan a re-registration replaced (F4-r1/r2).
- *  Provisional-holder seam (r4-m7): holds are booked under the caller's token;
- *  slice 4 layers a unique per-request provisional holder (`holdPrefix`) on
- *  this same bookkeeping — nothing persists past the request, so release is
- *  plain undo, no merge. */
+/** Undo-delta of one watch() call (inv.15), captured at registration time:
+ *  unwatch() releases unconditionally, so compensating a failed request
+ *  without it would strip pre-existing holds and lose replaced query plans
+ *  (F4-r1/r2). holdPrefix (inv.27, r4-m7) layers on this same bookkeeping. */
 export type WatchLease = {
-  /** Holds this call CREATED for its token — pre-existing holds (any holder,
-   *  including the same token) are not listed and never touched by undo(). */
+  /** Holds this call CREATED for its token — pre-existing holds (any holder)
+   *  are not listed and never touched by undo(). */
   created: { path: string; kind: 'exact' | 'prefix' }[];
   /** Per vp: the same-plan registration this call refreshed, or null = fresh
    *  handle (coexists with any other plans on the vp, §4.2). */
   replaced: { vp: string; prev: QueryWatchRegistration | null }[];
-  /** Roll back exactly this call: drop created holds (releasing registrations
-   *  only when the last holder goes), restore overwritten holder flags, and
-   *  re-register replaced query plans. Idempotent. */
+  /** Roll back exactly this call: drop created holds (a registration dies only
+   *  with its last holder), restore flags, re-register replaced plans. Idempotent. */
   undo(): void;
 };
 
@@ -82,8 +73,7 @@ export type WatchManager = {
    *  alive, cursor epoch matches the live stream, AND the gap is covered
    *  (replayed, or nothing was missed). A bare-number cursor (no epoch — old
    *  client) can never prove continuity → false, fail closed. False means the
-   *  client MUST full-refetch and re-register watches. The verdict also
-   *  carries the current {seq, epoch} for the lane's initial frame (anz4.28e).
+   *  client MUST full-refetch and re-register watches.
    *  `token` binds this lane to a watch-ownership token (core-anz4.12): the
    *  token's registrations are released when its last lane disconnects and
    *  outlives the grace period. */
@@ -92,12 +82,10 @@ export type WatchManager = {
   /** Bind the instance-scoped query evaluator after withSubscriptions creates it. */
   bindQueryRegistry(registry: QueryWatchRegistry): void;
   watch(userId: string, paths: string[], opts?: WatchOpts): WatchLease;
-  /** Request-scoped provisional prefix hold (ns6p.4 §3.2.6a, invariant 27):
-   *  covers the [scan → item-watch] window of ls{watch} without a list watch.
-   *  Booked under a unique INTERNAL holder — the tab token would collapse
-   *  concurrent requests (A's release would strip B's coverage). Budget-counted;
-   *  never TTL'd/tombstoned (the peer releases it in a request-scoped finally).
-   *  Returns the idempotent release. */
+  /** Request-scoped provisional prefix hold (inv.27): covers the [scan →
+   *  item-watch] window of ls{watch}. Booked under a unique INTERNAL holder —
+   *  a tab token would collapse concurrent requests. Budget-counted; never
+   *  TTL'd (the peer releases it in a request finally). Idempotent release. */
   holdPrefix(userId: string, path: string): () => void;
   unwatch(userId: string, paths: string[], opts?: UnwatchOpts): void;
   notify(event: NodeEvent): void;
@@ -117,18 +105,16 @@ const MAX_WATCHES_PER_USER = 10_000;
 const MAX_TOTAL_WATCHES = 100_000;
 const DEFAULT_RING_SIZE = 1024;
 const DEFAULT_UNBOUND_TOKEN_TTL_MS = 300_000;
-// Bounded FIFO — enough to outlive any realistic set of dead tabs; an evicted
-// tombstone degrades to user-entry-death semantics (fresh entry ⇒ preserved:false).
+// Bounded FIFO; an evicted tombstone degrades to fresh-entry semantics (preserved:false).
 const TOKEN_TOMBSTONE_CAP = 256;
 
 /** Shared hold for callers that don't scope ownership by connection token —
  *  they collapse into one holder, i.e. exactly the pre-anz4.12 semantics. */
 const LEGACY_TOKEN = '';
 
-/** Reserved holder namespace of provisional per-request prefixes (invariant
- *  27). Unreachable from outside: wire tokens reject `\0` (peer vToken) and
- *  connect() refuses it — a lane bound to a guessed holder id could otherwise
- *  release an in-flight request's window coverage via token-grace. */
+/** Reserved holder namespace of per-request provisional prefixes (inv.27).
+ *  Unreachable from outside: vToken and connect() reject `\0` — a guessed
+ *  holder id could otherwise release an in-flight request's coverage. */
 const PROVISIONAL_NS = '\0prov:';
 
 function addTo(map: Map<string, Set<string>>, key: string, uid: string) {
@@ -186,16 +172,14 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
     /** Unbound-token TTL (invariant 25): armed by watch() for a token with no
      *  connected lane; first connect() of that token cancels it. */
     tokenTtl: Map<string, ReturnType<typeof setTimeout>>;
-    /** Tokens whose TTL expired (fail-closed continuity break): a late
-     *  connect() consumes the tombstone and answers preserved:false — events
-     *  after expiry were unrouted, no cursor can cover them. FIFO-capped. */
+    /** Tokens whose TTL expired: a late connect() consumes the tombstone and
+     *  answers preserved:false — events after expiry were unrouted. FIFO-capped. */
     tokenTombstones: Set<string>;
     paths: Map<string, Map<string, boolean>>;
     prefixes: Map<string, Map<string, boolean>>;
     seq: number;
     epoch: string;
-    /** Entries hold the full route envelope (F6-r3): resume replays what was
-     *  ROUTED, under the holds of that moment — not today's holds. */
+    /** Full envelopes (F6-r3): resume replays what was ROUTED under the holds of that moment. */
     ring: { seq: number; envelope: RouteEnvelope }[];
     missedOffline: boolean;
   };
@@ -251,6 +235,8 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
     }
   }
 
+  // Root is its own parent here ('/' → '/') — notify()'s prefix-routing
+  // contract; core dirname ('/' → null) would drop root-event provenance.
   function parentOf(path: string): string | null {
     const idx = path.lastIndexOf('/');
     if (idx < 0) return null;
@@ -260,10 +246,9 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
   function pushToUser(uid: string, event: NodeEvent) {
     const user = users.get(uid);
     if (!user) return;
-    // C26: deliver only the vps this user registered (the union leaks other
-    // users' view paths) — and membership-sourced vps only when THIS user's
-    // projection flipped (anz4.27). The audience map is routing-internal:
-    // stripped here, so it never reaches the ring or the wire.
+    // C26 + anz4.27: deliver only this user's own vps, membership-sourced ones
+    // only when THIS user flipped. Audience is routing-internal — stripped
+    // here, never reaching the ring or the wire.
     if (event.invalidateVps || event.membershipAudience) {
       const aud = event.membershipAudience;
       const own = (event.invalidateVps ?? []).filter(
@@ -274,11 +259,9 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
       if (own.length) event.invalidateVps = own;
       else delete event.invalidateVps;
     }
-    // Route provenance (ns6p.4 §3.4, invariant 26): capture which of THIS
-    // recipient's own registrations matched — before autoWatch promotion and
-    // C27 pruning mutate the holds. The drop-fallback downstream may reveal
-    // only these, so an exact/prefix holder still gets a refetch signal while
-    // a vp-only recipient never learns the source path.
+    // inv.26: capture the recipient's matched registrations BEFORE autoWatch
+    // promotion / C27 pruning mutate the holds — the drop-fallback downstream
+    // may reveal only these.
     const heldPaths: string[] = [];
     const heldVps: string[] = [];
     if (event.type !== 'reconnect') {
@@ -357,8 +340,8 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
       // '' is the internal LEGACY_TOKEN shared hold — an external empty token
       // would alias it and its disconnect would release every legacy watch.
       if (token === '') throw new Error('watch connect: connection token must be non-empty');
-      // \0-prefixed = provisional-holder namespace (invariant 27): a lane bound
-      // to it would release an in-flight request's coverage on disconnect.
+      // \0 = provisional namespace (inv.27): such a lane would release an
+      // in-flight request's coverage on disconnect.
       if (token?.startsWith('\0')) throw new Error('watch connect: reserved token namespace');
       // Cancel grace timer — user reconnected in time
       const timer = graceTimers.get(userId);
@@ -390,8 +373,8 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
           clearTimeout(ttlTimer);
           user.tokenTtl.delete(token);
         }
-        // Consumed once: this connect fails closed; the client refetches and
-        // re-registers, so a LATER connect of the token judges continuity anew.
+        // Consumed once: this connect fails closed; a LATER connect of the
+        // token judges continuity anew (client refetched and re-registered).
         tokenExpired = user.tokenTombstones.delete(token);
       }
 
@@ -419,9 +402,7 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
         } else if (cSeq === user.seq) {
           covered = true;
         } else if (cSeq < user.seq && user.ring.length > 0 && user.ring[0].seq <= cSeq + 1) {
-          // Replay the STORED envelopes (invariant 26): routes were computed
-          // when the event fired; recomputing here would leak/lose provenance
-          // for holds that changed during the gap.
+          // inv.26: replay the STORED envelopes — holds may have changed during the gap.
           for (const entry of user.ring) {
             if (entry.seq > cSeq) push(entry.envelope);
           }
@@ -433,8 +414,7 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
         }
       }
       user.missedOffline = false;
-      // Tombstone overrides any coverage proof (invariant 25): the token's
-      // holdings were released at expiry, so events since then were unrouted.
+      // inv.25: tombstone overrides coverage — events since expiry were unrouted.
       return { preserved: covered && !tokenExpired, seq: user.seq, epoch: user.epoch };
     },
 
@@ -495,67 +475,51 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
       for (const p of paths) if (!target.has(p)) fresh.add(p);
       if (fresh.size > 0) checkLimits(user, fresh.size);
 
-      // Lease bookkeeping (invariant 15): per path, THIS token's prior hold
-      // flag — undefined = no hold (created by this call), boolean = the flag
-      // this call overwrites. Captured before mutation; undo restores exactly it.
+      // inv.15: per path, THIS token's prior hold flag — undefined = created by
+      // this call. Captured before mutation; undo restores exactly it.
       const priorFlags = new Map<string, boolean | undefined>();
       const replaced: { vp: string; prev: QueryWatchRegistration | null }[] = [];
-      // Handle identity (§4.2 coexistence): undo/rollback release only the
-      // plan THIS lease registered, never a coexisting plan on the same vp.
+      // §4.2 coexistence: undo releases only the plan THIS lease registered.
       const queryHash = watchOpts?.query ? planHash(watchOpts.query.plan) : undefined;
 
-      if (watchOpts?.children) {
-        // Query membership registers FIRST — watchQuery validates (projector
-        // present, visible predicates, depth) and can refuse; publishing the
-        // prefix holders before a refusal would leak a live watch with no
-        // query registration behind it. Partial multi-vp failure rolls back —
-        // restoring any plan an earlier vp's registration replaced.
-        if (watchOpts.query) {
-          try {
-            for (const vp of paths) {
-              const prev = queryRegistry!.watchQuery({ vp, userId, ...watchOpts.query });
-              replaced.push({ vp, prev });
-            }
-          } catch (e) {
-            for (const r of replaced) {
-              if (r.prev) queryRegistry!.watchQuery(r.prev);
-              else queryRegistry!.unwatchQuery(r.vp, userId, queryHash);
-            }
-            throw e;
+      // Query membership registers FIRST — watchQuery validates and can refuse;
+      // publishing prefix holders before a refusal would leak a live watch with
+      // no query registration behind it. Partial multi-vp failure rolls back,
+      // restoring any plan an earlier vp's registration replaced.
+      if (watchOpts?.children && watchOpts.query) {
+        try {
+          for (const vp of paths) {
+            const prev = queryRegistry!.watchQuery({ vp, userId, ...watchOpts.query });
+            replaced.push({ vp, prev });
           }
-        }
-        for (const p of paths) {
-          let holders = user.prefixes.get(p);
-          // First capture wins — a duplicate path in one call must not record
-          // its own just-written flag as "pre-existing".
-          if (!priorFlags.has(p)) priorFlags.set(p, holders?.get(token));
-          if (!holders) {
-            holders = new Map();
-            user.prefixes.set(p, holders);
+        } catch (e) {
+          for (const r of replaced) {
+            if (r.prev) queryRegistry!.watchQuery(r.prev);
+            else queryRegistry!.unwatchQuery(r.vp, userId, queryHash);
           }
-          holders.set(token, watchOpts.autoWatch ?? false);
-          addTo(prefixToUsers, p, userId);
+          throw e;
         }
-      } else {
-        for (const p of paths) {
-          let holders = user.paths.get(p);
-          if (!priorFlags.has(p)) priorFlags.set(p, holders?.get(token));
-          if (!holders) {
-            holders = new Map();
-            user.paths.set(p, holders);
-          }
-          holders.set(token, true); // explicit — upgrades a prior auto hold
-          addTo(pathToUsers, p, userId);
+      }
+
+      const index = kind === 'prefix' ? prefixToUsers : pathToUsers;
+      for (const p of paths) {
+        let holders = target.get(p);
+        // First capture wins — a duplicate path in one call must not record
+        // its own just-written flag as "pre-existing".
+        if (!priorFlags.has(p)) priorFlags.set(p, holders?.get(token));
+        if (!holders) {
+          holders = new Map();
+          target.set(p, holders);
         }
+        // exact = explicit (upgrades a prior auto hold); prefix carries the autoWatch flag
+        holders.set(token, kind === 'prefix' ? (watchOpts?.autoWatch ?? false) : true);
+        addTo(index, p, userId);
       }
       totalWatches += fresh.size;
 
-      // Registration committed — arm the unbound-token TTL (invariant 25):
-      // only here, never mid-request, and never for LEGACY (legacy clients
-      // rely on user-grace). Not re-armed per call — the clock starts at the
-      // token's first laneless registration. Provisional holders (invariant 27)
-      // never arm it: they die in the request's finally, and their tombstones
-      // would churn real tabs' out of the FIFO cap.
+      // Arm the unbound-token TTL (inv.25) only on commit, and only for real
+      // tabs: LEGACY relies on user-grace; provisional holders (inv.27) die in
+      // the request finally (their tombstones would churn real tabs' out of the cap).
       if (token !== LEGACY_TOKEN && !token.startsWith(PROVISIONAL_NS) && !user.tokenLanes.has(token) && !user.tokenTtl.has(token)) {
         const ttlTimer = setTimeout(() => {
           const u = users.get(userId);
@@ -570,8 +534,7 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
             if (oldest !== undefined) u.tokenTombstones.delete(oldest);
           }
         }, unboundTokenTtlMs);
-        // Minutes-long timer must never hold the process open (mock timers
-        // and non-Node runtimes may not expose unref).
+        // Never hold the process open (mock timers / non-Node may lack unref).
         if (typeof ttlTimer.unref === 'function') ttlTimer.unref();
         user.tokenTtl.set(token, ttlTimer);
       }
@@ -599,8 +562,7 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
           totalWatches--;
         }
         for (const r of replaced) {
-          // Restore only while a prefix holder still backs the vp — otherwise
-          // drop this lease's handle too (a plan with no watcher is a leak).
+          // Restore only while a prefix holder still backs the vp — a plan with no watcher is a leak.
           if (r.prev && u.prefixes.has(r.vp)) queryRegistry?.watchQuery(r.prev);
           else queryRegistry?.unwatchQuery(r.vp, userId, queryHash);
         }
@@ -614,10 +576,8 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
     },
 
     holdPrefix(userId, path) {
-      // Unique holder per call: same-token holders.set would collapse two
-      // concurrent requests on one parent — A's release would strip B's
-      // coverage mid-scan (r3-F3). Undo is the exact release: the created
-      // hold dies, a co-held registration merely loses one holder.
+      // Unique holder per call (r3-F3): a same-token hold would collapse two
+      // concurrent requests on one parent. lease.undo is the exact release.
       const lease = manager.watch(userId, [path], { children: true, token: PROVISIONAL_NS + ++provisionalSeq });
       return lease.undo;
     },
@@ -626,27 +586,19 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
       const user = users.get(userId);
       if (!user) return;
       const token = unwatchOpts?.token ?? LEGACY_TOKEN;
+      const children = unwatchOpts?.children ?? false;
+      const map = children ? user.prefixes : user.paths;
+      const index = children ? prefixToUsers : pathToUsers;
 
       let removed = 0;
-      if (unwatchOpts?.children) {
-        for (const p of paths) {
-          const holders = user.prefixes.get(p);
-          if (!holders || !holders.delete(token)) continue;
-          if (holders.size > 0) continue; // co-held by another token — keep (anz4.12)
-          user.prefixes.delete(p);
-          removeFrom(prefixToUsers, p, userId);
-          queryRegistry?.unwatchQuery(p, userId);
-          removed++;
-        }
-      } else {
-        for (const p of paths) {
-          const holders = user.paths.get(p);
-          if (!holders || !holders.delete(token)) continue;
-          if (holders.size > 0) continue;
-          user.paths.delete(p);
-          removeFrom(pathToUsers, p, userId);
-          removed++;
-        }
+      for (const p of paths) {
+        const holders = map.get(p);
+        if (!holders || !holders.delete(token)) continue;
+        if (holders.size > 0) continue; // co-held by another token — keep (anz4.12)
+        map.delete(p);
+        removeFrom(index, p, userId);
+        if (children) queryRegistry?.unwatchQuery(p, userId);
+        removed++;
       }
       totalWatches -= removed;
     },
@@ -680,9 +632,8 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
         }
 
       // Prefix match: direct parent only (mirrors getChildren depth=1)
-      const idx = event.path.lastIndexOf('/');
-      if (idx < 0) return;
-      const parent = idx === 0 ? '/' : event.path.slice(0, idx);
+      const parent = parentOf(event.path);
+      if (parent === null) return;
       const watchers = prefixToUsers.get(parent);
       if (watchers)
         for (const uid of watchers) {

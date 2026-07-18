@@ -24,10 +24,9 @@ export type HiOkFrame = { op: 'hi'; ok: { sess: string; seq: number; epoch?: str
 
 // ── requests ──
 
-// `token` on watch-capable frames = watch-ownership scope (core-anz4.28,
-// ns6p.4 slice 0): identifies the CONSUMER (tab), not the transport socket —
-// registrations arrive as separate HTTP requests with no link to the SSE lane.
-// Optional additive field; absent = shared LEGACY hold (pre-token semantics).
+// `token` on watch-capable frames = watch-ownership scope (anz4.28): the
+// CONSUMER (tab), not the transport socket — registrations arrive as separate
+// HTTP requests with no link to the SSE lane. Absent = shared LEGACY hold.
 export type GetFrame     = { id: number; op: 'get'; path: string; watch?: boolean; token?: string };
 export type ResolveFrame = { id: number; op: 'resolve'; path: string; watch?: boolean; token?: string };
 export type LsFrame      = {
@@ -79,9 +78,8 @@ export type ResFrame = OkFrame | ErrFrame | ChFrame | EndFrame;
 export type SetEvent   = { seq?: number; ev: 'set'; path: string; node: Record<string, unknown>; by?: string };
 export type PatchEvent = { seq?: number; ev: 'patch'; path: string; ops: PatchOp[]; rev?: number; by?: string };
 export type RmEvent    = { seq?: number; ev: 'rm'; path: string; by?: string };
-// dirty.epoch (anz4.28e, ns6p.4 §4.5 — owner-approved additive field): dirty
-// is the only stamped frame a signal-only client sees; without the epoch its
-// resume cursor stays epoch-less and fails closed into a guaranteed reset loop.
+// dirty.epoch (anz4.28e, owner-approved additive): the only stamped frame a
+// signal-only client sees — without it the resume cursor fails closed into a reset loop.
 export type DirtyEvent = { seq?: number; epoch?: string; ev: 'dirty'; path: string; reason?: 'plan' | 'visibility' | 'claims'; dead?: boolean };
 // reset.seq/epoch (core-anz4.10/11): a ring-routed continuity break arrives
 // stamped — the client adopts the break-point watermark + post-break epoch and

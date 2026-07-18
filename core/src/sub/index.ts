@@ -61,10 +61,9 @@ export type VpDelta = {
   /** Query views whose membership/config/visibility may have shifted —
    *  the caller MUST refetch the listing (coarse dirty, core-gk8.12). */
   invalidateVps?: string[];
-  /** anz4.27: audience of membership-sourced vps. Routing-internal — the
-   *  WatchManager gates vp delivery on it and strips it before stamping
-   *  (never rings, never wires). Coarse-sourced vps (Acl/Config/Claims) have
-   *  no entry: they stay user-independent broadcast (owner-approved §6.3). */
+  /** anz4.27: audience of membership-sourced vps. Routing-internal — gates vp
+   *  delivery, stripped before stamping (never rings, never wires). Coarse vps
+   *  (Acl/Config/Claims) have no entry: broadcast (owner-approved §6.3). */
   membershipAudience?: MembershipAudience;
 };
 
@@ -77,13 +76,10 @@ export type NodeEvent = TreeEvent & Partial<VpDelta>;
  *  for the ACL filter to gate, so it reaches readers who can no longer see the
  *  node that moved — the exact "user losing access leaves stale rows" gap.
  *  `vps` is ALWAYS present (min `[]`) — old clients iterate it unconditionally.
- *  `paths`/`epoch` are ns6p.4 slice-1 additive fields (owner-approved §6):
- *    paths — exact/prefix registrations of THIS recipient whose payload was
- *            dropped (invariant 16/26). Populated ONLY from the recipient's
- *            own route envelope, so a vp-only recipient never learns the
- *            hidden source path the pathless fallback deliberately hides.
- *    epoch — stream epoch (anz4.28e): a signal-only client must still learn
- *            the epoch or its resume cursor fails closed into a reset loop. */
+ *  Additive fields (owner-approved §6): `paths` = THIS recipient's own
+ *  dropped-payload registrations (inv.16/26 — a vp-only recipient never learns
+ *  the hidden source path); `epoch` = stream epoch (anz4.28e — a signal-only
+ *  client's resume cursor fails closed without it). */
 export type InvalidateEvent = { type: 'invalidate'; vps: string[]; paths?: string[]; seq?: number; epoch?: string };
 
 /** What can travel the event lane to a client: a CDC NodeEvent or a pathless
@@ -209,9 +205,8 @@ type QueryHandle = {
   /** Mount/config paths consulted by resolveReadPlan. Contract: contains at
    *  least the vp itself — config-change targeting relies on it. */
   mountDeps: ReadonlySet<string>;
-  /** The registered plan, kept verbatim so a replace can hand the PREVIOUS
-   *  registration back for lease-undo restore (ns6p.4 invariant 15) — the
-   *  group's compiled test cannot reconstruct it. */
+  /** Kept verbatim so a replace hands the PREVIOUS registration back for
+   *  lease-undo restore (inv.15) — the compiled test cannot reconstruct it. */
   plan: ReadPlan;
   group: WatchGroup;
 };
@@ -237,14 +232,12 @@ export type MembershipProjector = (
 
 export type CdcRegistry = {
   subscribe(path: string, listener: Listener, opts?: SubscribeOpts): () => void;
-  /** Handles key on (userId, vp, planHash) — different plans on one vp
-   *  COEXIST (E03 → coexistence, §4.2). Returns the prior registration of the
-   *  SAME plan (deps refresh) for lease-undo restore (invariant 15); null
-   *  when the handle is new. */
+  /** Handle key = (userId, vp, planHash) — different plans on one vp COEXIST
+   *  (E03 → coexistence, §4.2). Returns the prior SAME-plan registration
+   *  (deps refresh) for lease-undo restore (inv.15); null = new handle. */
   watchQuery(reg: QueryWatchRegistration): QueryWatchRegistration | null;
   /** With `planHash`: release only that plan's handle (lease-scoped). Without:
-   *  every plan of (userId, vp) — the registration-death path (last prefix
-   *  holder gone; a plan with no watcher is a leak). */
+   *  every plan of (userId, vp) — registration death (a watcherless plan is a leak). */
   unwatchQuery(vp: string, userId: string, planHash?: string): void;
   unwatchAllQueries(userId: string): void;
   /** Distinct execution groups (deduped plans), not registrations. */
@@ -436,13 +429,10 @@ export function withSubscriptions(
 
   /** Membership flips for a direct child of a query source, evaluated per
    *  SUBSCRIBING ACTOR on the ACL-projected pair (F4, core-anz4.3 — raw eval
-   *  was a hidden-field timing oracle, executeList parity core-fnv).
-   *  Returns vp → flipped userIds (anz4.27): the audience rides to routing so
-   *  a co-watcher whose own projection did not flip receives nothing. A flip
-   *  is per PLAN — two coexisting plans on one vp each contribute (§4.2).
-   *  Projection runs once per distinct userId per commit, shared across
-   *  groups; a failed projection over-invalidates THAT user only (never raw
-   *  eval as fallback). */
+   *  was a hidden-field timing oracle; executeList parity core-fnv). Returns
+   *  vp → flipped userIds (anz4.27); a flip is per PLAN (§4.2). Projection
+   *  runs once per userId per commit, shared across groups; a failed
+   *  projection over-invalidates THAT user only — raw eval is never a fallback. */
   async function membershipVps(path: string, oldNode: NodeData | null, newNode: NodeData | null): Promise<Map<string, Set<string>>> {
     const flips = new Map<string, Set<string>>();
     if (groups.size === 0) return flips;
@@ -757,9 +747,8 @@ export function withSubscriptions(
       if (!projectMembership) {
         throw new OpError('FORBIDDEN', 'query watch requires a membership projector (SubscriptionOpts.projectMembership)');
       }
-      // E03 → coexistence (owner sign-off 2026-07-18, §4.2): a DIFFERENT plan
-      // on the same (userId, vp) registers alongside — planHash is part of the
-      // handle identity, so release/re-validate touch only their own handle.
+      // E03 → coexistence (§4.2, owner sign-off 2026-07-18): planHash is part of
+      // the handle identity — a DIFFERENT plan on the same (userId, vp) coexists.
       const hash = planHash(reg.plan);
       const key = handleKey(reg.userId, reg.vp, hash);
       const existing = handleByKey.get(key);

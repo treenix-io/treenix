@@ -56,16 +56,12 @@ function samePlan(a: ResolvedReadPlan, b: ResolvedReadPlan): boolean {
   return true;
 }
 
-/** ls{watchList} registration (ns6p.4 §3.2.3-3b). Registers the FROZEN plan,
- *  then re-resolves and compares (invariant 23): a mount config flip between
- *  freeze and registration would otherwise leave a handle the config-event
- *  machinery can't find — the client stays stale forever.
- *  Mismatch → lease.undo() + re-register with the fresh plan, bounded to 2
- *  registration attempts; still diverging → CONFLICT with nothing registered.
- *  No frozen plan (peer without the pre-step) → legacy plain registration.
- *  Returns the committed lease (the register-first peer undoes it if the read
- *  fails, slice 4) plus the plan the registration settled on — the read must
- *  execute THAT plan for invariant-21 parity. */
+/** ls{watchList} registration (§3.2.3-3b): register the FROZEN plan, then
+ *  re-resolve and compare (inv.23) — a mount-config flip between freeze and
+ *  registration would leave a handle the config-event machinery can't find.
+ *  Mismatch → undo + re-register (max 2 attempts, then CONFLICT with nothing
+ *  registered). No frozen plan → legacy plain registration. Returns the
+ *  committed lease + the plan it settled on (the read executes THAT, inv.21). */
 export async function registerWatchList(
   watcher: WatchManager,
   tree: Pick<AclStore, 'planChildren'>,
@@ -78,8 +74,7 @@ export async function registerWatchList(
   const register = (p?: ResolvedReadPlan) => watcher.watch(userId, [path], {
     children: true,
     autoWatch: itemWatch,
-    // Query registration only for plans that filter (parity with the dead
-    // read-page condition) — a bare listing is a plain prefix watch.
+    // Query registration only for filtering plans — a bare listing is a plain prefix watch.
     ...(p && (p.plan.viewWhere || p.plan.callerWhere) ? { query: { plan: p.plan, mountDeps: p.mountDeps } } : {}),
     ...(token === undefined ? {} : { token }),
   });
@@ -110,9 +105,8 @@ export async function registerWatchList(
  *  seq/by come stamped from WatchManager delivery (core-gk8.1); dirty frames
  *  are facets of the same event and share its seq — the cursor is a
  *  watermark, clients track max(seen). Signal frames (dirty/reset) also carry
- *  the stream epoch (anz4.28e): a dirty-only client must learn it or its
- *  resume cursor fails closed. Data frames stay epoch-free (owner-approved
- *  additive surface is dirty/invalidate + the existing reset fields, §6). */
+ *  the stream epoch (anz4.28e) — a dirty-only client must learn it. Data
+ *  frames stay epoch-free (owner-approved additive surface §6). */
 export function toEventFrames(e: StampedEvent | InvalidateEvent): EventFrame[] {
   // Frames must omit absent fields, not carry undefined: structured-clone
   // transports preserve undefined keys while JSON transports drop them —
@@ -122,13 +116,11 @@ export function toEventFrames(e: StampedEvent | InvalidateEvent): EventFrame[] {
     ...(e.epoch === undefined ? {} : { epoch: e.epoch }),
   };
   if (e.type === 'reconnect') {
-    // A ring-routed break arrives stamped — the reset must carry {seq, epoch}
-    // so the client adopts the post-break cursor (anz4.10/11).
+    // A ring-routed break arrives stamped — the client adopts the post-break cursor (anz4.10/11).
     return e.preserved ? [] : [{ ev: 'reset', reason: 'resume', ...sig }];
   }
-  // Pathless invalidate (core-dm1) → one dirty frame per view — plus one per
-  // provenance-held exact path (ns6p.4 §3.4; already recipient-scoped
-  // upstream, so emission here reveals nothing new).
+  // Pathless invalidate (core-dm1) → one dirty per view + per provenance-held
+  // exact path (§3.4; recipient-scoped upstream, emission reveals nothing new).
   if (e.type === 'invalidate') {
     return [...e.vps, ...(e.paths ?? [])].map(p => ({ ...sig, ev: 'dirty', path: p }));
   }
@@ -193,10 +185,8 @@ export function createWireSession(deps: WireDeps, session: Session) {
     const execStream = (req: ActReq, signal: AbortSignal) =>
       executeStream(tree, req.path, req.type, req.key, req.action, req.data, signal, { userId, claims, actor: actorFor(req) });
 
-    // Watch/unwatch opts (incl. the anz4.28 ownership token) pass through as-is:
-    // ServeHooks opts are structurally a subset of WatchOpts/UnwatchOpts.
-    // watch/watchList return their lease — the register-first peer (ns6p.4
-    // slice 4) undoes it when the read behind the registration fails.
+    // Opts (incl. the anz4.28 token) pass through — ServeHooks opts are a subset
+    // of WatchOpts/UnwatchOpts. Leases return so the register-first peer can undo.
     const hooks: ServeHooks = {
       watch: (paths, o) => deps.watcher.watch(userId, paths, o),
       unwatch: (paths, o) => deps.watcher.unwatch(userId, paths, o),
@@ -213,9 +203,7 @@ export function createWireSession(deps: WireDeps, session: Session) {
   /** Event lane: ACL-filtered push wired into the WatchManager.
    *  `since` = client's last processed seq — the ring replays the gap
    *  through the SAME filter (claims drift re-applies, core-gk8.1).
-   *  The verdict's {seq, epoch} is for the lane's INITIAL frame (anz4.28e):
-   *  stamped there, even a client that then sees only signal frames holds an
-   *  epoch-bearing cursor and can resume covered. */
+   *  The verdict's {seq, epoch} is for the lane's INITIAL frame (anz4.28e). */
   function connectEvents(push: (e: WireEvent) => void, since?: number | WatchCursor, token?: string): { connId: string } & ConnectVerdict {
     const sessionClaims = session.claims?.length ? session.claims : null;
     const claimsTtlMs = deps.opts?.claimsTtlMs ?? DEFAULT_CLAIMS_TTL_MS;
@@ -225,10 +213,9 @@ export function createWireSession(deps: WireDeps, session: Session) {
     return { connId, ...verdict };
   }
 
-  /** Event lane in TWP frames — native bindings (port/WS). The initial
-   *  continuity verdict maps to a reset frame when watches were not preserved,
-   *  stamped with the current {seq, epoch} (anz4.28e) so the reset teaches the
-   *  client a resumable cursor instead of looping through resets forever. */
+  /** Event lane in TWP frames — native bindings (port/WS). An unpreserved
+   *  verdict maps to a reset frame stamped with {seq, epoch} (anz4.28e), so it
+   *  teaches the client a resumable cursor instead of looping through resets. */
   function connectEventFrames(emit: (f: EventFrame) => void, since?: number | WatchCursor, token?: string): { connId: string } {
     const { connId, preserved, seq, epoch } = connectEvents((e) => {
       for (const f of toEventFrames(e)) emit(f);

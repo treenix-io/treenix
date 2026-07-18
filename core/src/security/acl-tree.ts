@@ -157,10 +157,9 @@ function rewriteFullNodeWrite(
 
 // ── Tree wrapper ──
 
-/** getChildren opts on the ACL surface: a pre-resolved frozen plan makes the
- *  read execute EXACTLY that plan object — no re-resolution, so registration
- *  and read agree by construction (ns6p.4 invariant 21). Stays off the core
- *  Tree waist: only the ACL layer runs the read runtime. */
+/** ACL getChildren opts: a pre-resolved frozen plan is executed EXACTLY as
+ *  passed — registration and read agree by construction (inv.21). Off the
+ *  core Tree waist: only the ACL layer runs the read runtime. */
 export type AclChildrenOpts = ChildrenOpts & { plan?: ResolvedReadPlan };
 
 /** Opts that shape a read plan — the subset planChildren consumes. */
@@ -235,9 +234,8 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
     return { changes };
   }
 
-  // Single resolution path (ns6p.4 §3.2.2): callers that pre-resolve get a
-  // frozen plan object they later pass to getChildren AND to watch
-  // registration; getChildren without one calls this internally.
+  // Single resolution path (§3.2.2): pre-resolvers pass the frozen object to
+  // getChildren AND registration; getChildren without one calls this internally.
   async function planChildren(path: string, opts?: PlanChildrenOpts, ctx?: unknown): Promise<ResolvedReadPlan> {
     const resolved = await resolveReadPlan(rawStore, path, opts?.query, ctx);
     // Deep reads (core-0bl) ride the same runtime: adapters walk descendants
@@ -279,9 +277,8 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
       if (!(parentPerm & R)) throw new OpError('FORBIDDEN', `Access denied: ${path}`);
 
       const source = asTreeSource(rawStore);
-      // Frozen plan wins (invariant 21): execute the caller's pre-resolved
-      // object verbatim — parity with its registration by identity, not by a
-      // side-channel. No plan supplied → resolve through the same pre-step.
+      // Frozen plan wins (inv.21): execute the caller's pre-resolved object
+      // verbatim — parity by identity. No plan → the same pre-step internally.
       const { plan } = opts?.plan ?? await planChildren(path, opts, ctx);
       // MVP rule 7: a readable query mount over an unreadable source would
       // act as a capability view (child R-grants leak items the actor can't

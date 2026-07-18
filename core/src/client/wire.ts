@@ -18,10 +18,10 @@ export type WireClient = TreenixClient & {
   cursor(): ResumeCursor;
 };
 
-/** `token` = this consumer's watch-ownership id (core-anz4.28). Pass the SAME
- *  value the binding hands to connectEventFrames/attachWireSession — the lane
- *  token and the registration token must match or token-grace never releases
- *  this client's holds. Absent = shared legacy hold (pre-token semantics). */
+/** `token` = this consumer's watch-ownership id (anz4.28). Pass the SAME value
+ *  the binding hands to connectEventFrames/attachWireSession — mismatched lane
+ *  and registration tokens mean token-grace never releases this client's holds.
+ *  Absent = shared legacy hold. */
 export function createClient(conn: Conn, opts?: { token?: string }): WireClient {
   const peer = createPeer();
   const detach = peer.attach(conn);
@@ -49,8 +49,7 @@ export function createClient(conn: Conn, opts?: { token?: string }): WireClient 
     }
     if (typeof e.seq === 'number' && e.seq > lastSeq) lastSeq = e.seq;
     // anz4.28e: dirty is the only epoch-stamped frame on a signal-only stream —
-    // without adopting it here the cursor stays epoch-less and resume fails
-    // closed into a reset loop.
+    // without adopting it the cursor stays epoch-less and resume reset-loops.
     if (e.ev === 'dirty' && e.epoch !== undefined) epoch = e.epoch;
   });
 
@@ -106,9 +105,8 @@ export function createClient(conn: Conn, opts?: { token?: string }): WireClient 
       return { unsubscribe: off };
     },
 
-    // No node cache here — pathCbs is pure callback fan-out and the initial
-    // image is handed over once, so the ns6p.4 §3.3 rev machine / snapshot
-    // ingest is N/A: snapshot-vs-event ordering belongs to caching consumers.
+    // No node cache here — pathCbs is pure fan-out, the initial image is handed
+    // over once: the §3.3 rev machine belongs to caching consumers, N/A here.
     watchPath: async (path, onEvent) => {
       const node = await peer.req.get(path, true, token);
       ensureEventRouting();

@@ -176,20 +176,15 @@ export async function createMongoTree(
   return tree;
 }
 
-/** Tree.set against a Mongo collection. Exported (like mongoWatch) so the
- *  unit suite can drive it with a mocked Collection — real-mongod integration
- *  lives outside the package.
- *
- *  Rev contract (ns6p.4 invariant 24, owner-approved): the written _rev ALWAYS
- *  advances from the STORED doc.
- *  - OCC set (incoming $rev): filter {_path, _rev} guarantees stored === incoming,
- *    so writing incoming+1 IS stored+1; no match → CONFLICT. Unchanged.
- *  - Blind set (no $rev): true upsert with NO rev filter (last write wins —
- *    parity with the memory/fs blind-upsert contract; it used to CONFLICT on
- *    existing paths). _rev is computed SERVER-side from the stored doc via an
- *    aggregation-pipeline update — a read-then-replace would race a concurrent
- *    blind set into a duplicated rev. $literal shields node fields whose
- *    values start with '$' from expression parsing. */
+/** Tree.set against a Mongo collection. Exported (like mongoWatch) so the unit
+ *  suite drives it with a mocked Collection; real-mongod lives outside the package.
+ *  Rev contract (inv.24, owner-approved): written _rev ALWAYS advances from the
+ *  STORED doc. OCC set: filter {_path, _rev} makes incoming+1 = stored+1; no
+ *  match → CONFLICT. Blind set: true upsert, last write wins (memory/fs parity —
+ *  it used to CONFLICT on existing paths); _rev computes SERVER-side via an
+ *  aggregation-pipeline update (read-then-replace would race a concurrent blind
+ *  set into a duplicated rev); $literal shields '$'-prefixed node values from
+ *  expression parsing. */
 export async function mongoSet(col: Collection, node: NodeData): Promise<{ changes: { path: string; before: NodeData | null; after: NodeData }[] }> {
   const doc = toStorage(node);
   const prevRev = doc._rev as number | undefined;
