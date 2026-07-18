@@ -146,29 +146,7 @@ export async function createMongoTree(
     },
 
     async set(node, ctx) {
-      const doc = toStorage(node);
-      const prevRev = doc._rev as number | undefined;
-      doc._rev = (prevRev ?? 0) + 1;
-
-      let before: NodeData | null = null;
-      if (prevRev === undefined) {
-         try {
-           await col.insertOne(doc);
-         } catch(e: any) {
-           if (e.code === 11000) throw new OpError('CONFLICT', `OptimisticConcurrencyError: node ${node.$path} already exists ($rev not set — did you mean to update?)`);
-           throw e;
-         }
-      } else {
-         // findOneAndReplace: the OCC-guarded replace AND the receipt's
-         // before-image in one roundtrip (core-ns6p.2).
-         const prev = await col.findOneAndReplace({ _path: doc._path, _rev: prevRev }, doc, { returnDocument: 'before' });
-         if (!prev) {
-           throw new OpError('CONFLICT', `OptimisticConcurrencyError: node ${node.$path} modified by another transaction`);
-         }
-         before = fromStorage(prev as Record<string, unknown>);
-      }
-      node.$rev = doc._rev as number;
-      return { changes: [{ path: node.$path, before, after: { ...node } }] };
+      return mongoSet(col, node);
     },
 
     async remove(path) {
@@ -196,6 +174,56 @@ export async function createMongoTree(
   };
 
   return tree;
+}
+
+/** Tree.set against a Mongo collection. Exported (like mongoWatch) so the
+ *  unit suite can drive it with a mocked Collection — real-mongod integration
+ *  lives outside the package.
+ *
+ *  Rev contract (ns6p.4 invariant 24, owner-approved): the written _rev ALWAYS
+ *  advances from the STORED doc.
+ *  - OCC set (incoming $rev): filter {_path, _rev} guarantees stored === incoming,
+ *    so writing incoming+1 IS stored+1; no match → CONFLICT. Unchanged.
+ *  - Blind set (no $rev): true upsert with NO rev filter (last write wins —
+ *    parity with the memory/fs blind-upsert contract; it used to CONFLICT on
+ *    existing paths). _rev is computed SERVER-side from the stored doc via an
+ *    aggregation-pipeline update — a read-then-replace would race a concurrent
+ *    blind set into a duplicated rev. $literal shields node fields whose
+ *    values start with '$' from expression parsing. */
+export async function mongoSet(col: Collection, node: NodeData): Promise<{ changes: { path: string; before: NodeData | null; after: NodeData }[] }> {
+  const doc = toStorage(node);
+  const prevRev = doc._rev as number | undefined;
+
+  if (prevRev === undefined) {
+    const blindUpsert = () => col.findOneAndUpdate(
+      { _path: doc._path },
+      [{ $replaceWith: { $mergeObjects: [{ $literal: doc }, { _rev: { $add: [{ $ifNull: ['$_rev', 0] }, 1] } }] } }],
+      { upsert: true, returnDocument: 'before' },
+    );
+    let prev: Record<string, unknown> | null;
+    try {
+      prev = await blindUpsert();
+    } catch (e) {
+      // Two concurrent upserts on a fresh path can both miss the filter and
+      // race the unique _path index; the loser retries once onto the
+      // now-existing doc (standard upsert-race handling).
+      if ((e as { code?: number }).code !== 11000) throw e;
+      prev = await blindUpsert();
+    }
+    const before = prev ? fromStorage(prev) : null;
+    node.$rev = (before?.$rev ?? 0) + 1;
+    return { changes: [{ path: node.$path, before, after: { ...node } }] };
+  }
+
+  doc._rev = prevRev + 1;
+  // findOneAndReplace: the OCC-guarded replace AND the receipt's
+  // before-image in one roundtrip (core-ns6p.2).
+  const prev = await col.findOneAndReplace({ _path: doc._path, _rev: prevRev }, doc, { returnDocument: 'before' });
+  if (!prev) {
+    throw new OpError('CONFLICT', `OptimisticConcurrencyError: node ${node.$path} modified by another transaction`);
+  }
+  node.$rev = doc._rev as number;
+  return { changes: [{ path: node.$path, before: fromStorage(prev as Record<string, unknown>), after: { ...node } }] };
 }
 
 /** Direct-child check: matches /parent/x but not /parent (itself) or /parent/x/y. */
