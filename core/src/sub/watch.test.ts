@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { type NodeEvent } from './index';
-import { createWatchManager, type StampedEvent, type WatchCursor } from './watch';
+import { createWatchManager, type RouteEnvelope, type StampedEvent, type WatchCursor } from './watch';
 
 /** Build the resume cursor a client would hold after processing `e`. */
 function cursorOf(e: StampedEvent): WatchCursor {
@@ -39,7 +39,7 @@ describe('WatchManager', () => {
   it('notify delivers to watching user', () => {
     const wm = createWatchManager();
     const events: NodeEvent[] = [];
-    wm.connect('c1', 'u1', (e) => events.push(e));
+    wm.connect('c1', 'u1', (e) => events.push(e.event));
     wm.watch('u1', ['/a']);
     wm.notify({ type: 'set', path: '/a', node: { $path: '/a', $type: 't' } });
     assert.equal(events.length, 1);
@@ -49,7 +49,7 @@ describe('WatchManager', () => {
   it('does not deliver to non-watching user', () => {
     const wm = createWatchManager();
     const events: NodeEvent[] = [];
-    wm.connect('c1', 'u1', (e) => events.push(e));
+    wm.connect('c1', 'u1', (e) => events.push(e.event));
     wm.watch('u1', ['/a']);
     wm.notify({ type: 'set', path: '/b', node: { $path: '/b', $type: 't' } });
     assert.equal(events.length, 0);
@@ -58,7 +58,7 @@ describe('WatchManager', () => {
   it('unwatch stops delivery', () => {
     const wm = createWatchManager();
     const events: NodeEvent[] = [];
-    wm.connect('c1', 'u1', (e) => events.push(e));
+    wm.connect('c1', 'u1', (e) => events.push(e.event));
     wm.watch('u1', ['/a']);
     wm.unwatch('u1', ['/a']);
     wm.notify({ type: 'set', path: '/a', node: { $path: '/a', $type: 't' } });
@@ -68,7 +68,7 @@ describe('WatchManager', () => {
   it('disconnect removes all watches when last connection closes', () => {
     const wm = createWatchManager();
     const events: NodeEvent[] = [];
-    wm.connect('c1', 'u1', (e) => events.push(e));
+    wm.connect('c1', 'u1', (e) => events.push(e.event));
     wm.watch('u1', ['/a', '/b', '/c']);
     wm.disconnect('c1');
     wm.notify({ type: 'set', path: '/a', node: { $path: '/a', $type: 't' } });
@@ -80,8 +80,8 @@ describe('WatchManager', () => {
     const wm = createWatchManager();
     const e1: NodeEvent[] = [],
       e2: NodeEvent[] = [];
-    wm.connect('c1', 'u1', (e) => e1.push(e));
-    wm.connect('c2', 'u2', (e) => e2.push(e));
+    wm.connect('c1', 'u1', (e) => e1.push(e.event));
+    wm.connect('c2', 'u2', (e) => e2.push(e.event));
     wm.watch('u1', ['/a']);
     wm.watch('u2', ['/a']);
     wm.notify({ type: 'set', path: '/a', node: { $path: '/a', $type: 't' } });
@@ -98,9 +98,9 @@ describe('WatchManager', () => {
     const wm = createWatchManager();
     const e1: NodeEvent[] = [],
       e2: NodeEvent[] = [];
-    wm.connect('c1', 'u1', (e) => e1.push(e));
+    wm.connect('c1', 'u1', (e) => e1.push(e.event));
     wm.watch('u1', ['/a']);
-    wm.connect('c1', 'u1', (e) => e2.push(e));
+    wm.connect('c1', 'u1', (e) => e2.push(e.event));
     wm.notify({ type: 'set', path: '/a', node: { $path: '/a', $type: 't' } });
     assert.equal(e1.length, 0);
     assert.equal(e2.length, 1);
@@ -109,7 +109,7 @@ describe('WatchManager', () => {
   it('remove event delivered', () => {
     const wm = createWatchManager();
     const events: NodeEvent[] = [];
-    wm.connect('c1', 'u1', (e) => events.push(e));
+    wm.connect('c1', 'u1', (e) => events.push(e.event));
     wm.watch('u1', ['/a']);
     wm.notify({ type: 'remove', path: '/a' });
     assert.equal(events.length, 1);
@@ -119,8 +119,8 @@ describe('WatchManager', () => {
   it('multi-tab: both tabs receive events', () => {
     const wm = createWatchManager();
     const tab1: NodeEvent[] = [], tab2: NodeEvent[] = [];
-    wm.connect('c1', 'u1', (e) => tab1.push(e));
-    wm.connect('c2', 'u1', (e) => tab2.push(e));
+    wm.connect('c1', 'u1', (e) => tab1.push(e.event));
+    wm.connect('c2', 'u1', (e) => tab2.push(e.event));
     wm.watch('u1', ['/a']);
     wm.notify({ type: 'set', path: '/a', node: { $path: '/a', $type: 't' } });
     assert.equal(tab1.length, 1);
@@ -130,8 +130,8 @@ describe('WatchManager', () => {
   it('multi-tab: closing one tab keeps other alive', () => {
     const wm = createWatchManager();
     const tab1: NodeEvent[] = [], tab2: NodeEvent[] = [];
-    wm.connect('c1', 'u1', (e) => tab1.push(e));
-    wm.connect('c2', 'u1', (e) => tab2.push(e));
+    wm.connect('c1', 'u1', (e) => tab1.push(e.event));
+    wm.connect('c2', 'u1', (e) => tab2.push(e.event));
     wm.watch('u1', ['/a']);
     wm.disconnect('c1');
     wm.notify({ type: 'set', path: '/a', node: { $path: '/a', $type: 't' } });
@@ -158,7 +158,7 @@ describe('WatchManager — children watch', () => {
   it('delivers on direct child', () => {
     const wm = createWatchManager();
     const events: NodeEvent[] = [];
-    wm.connect('c1', 'u1', (e) => events.push(e));
+    wm.connect('c1', 'u1', (e) => events.push(e.event));
     wm.watch('u1', ['/sensors'], { children: true });
     wm.notify({
       type: 'set',
@@ -172,7 +172,7 @@ describe('WatchManager — children watch', () => {
   it('does NOT deliver on nested descendant (direct only)', () => {
     const wm = createWatchManager();
     const events: NodeEvent[] = [];
-    wm.connect('c1', 'u1', (e) => events.push(e));
+    wm.connect('c1', 'u1', (e) => events.push(e.event));
     wm.watch('u1', ['/a'], { children: true });
     wm.notify({ type: 'set', path: '/a/b/c', node: { $path: '/a/b/c', $type: 't' } });
     assert.equal(events.length, 0);
@@ -181,7 +181,7 @@ describe('WatchManager — children watch', () => {
   it('does NOT deliver on parent itself', () => {
     const wm = createWatchManager();
     const events: NodeEvent[] = [];
-    wm.connect('c1', 'u1', (e) => events.push(e));
+    wm.connect('c1', 'u1', (e) => events.push(e.event));
     wm.watch('u1', ['/sensors'], { children: true });
     wm.notify({ type: 'set', path: '/sensors', node: { $path: '/sensors', $type: 'dir' } });
     assert.equal(events.length, 0);
@@ -190,7 +190,7 @@ describe('WatchManager — children watch', () => {
   it('does NOT deliver on sibling path', () => {
     const wm = createWatchManager();
     const events: NodeEvent[] = [];
-    wm.connect('c1', 'u1', (e) => events.push(e));
+    wm.connect('c1', 'u1', (e) => events.push(e.event));
     wm.watch('u1', ['/sensors'], { children: true });
     wm.notify({ type: 'set', path: '/other/temp1', node: { $path: '/other/temp1', $type: 't' } });
     assert.equal(events.length, 0);
@@ -199,7 +199,7 @@ describe('WatchManager — children watch', () => {
   it('unwatch with children stops delivery', () => {
     const wm = createWatchManager();
     const events: NodeEvent[] = [];
-    wm.connect('c1', 'u1', (e) => events.push(e));
+    wm.connect('c1', 'u1', (e) => events.push(e.event));
     wm.watch('u1', ['/sensors'], { children: true });
     wm.unwatch('u1', ['/sensors'], { children: true });
     wm.notify({
@@ -213,7 +213,7 @@ describe('WatchManager — children watch', () => {
   it('disconnect cleans up prefix watches', () => {
     const wm = createWatchManager();
     const events: NodeEvent[] = [];
-    wm.connect('c1', 'u1', (e) => events.push(e));
+    wm.connect('c1', 'u1', (e) => events.push(e.event));
     wm.watch('u1', ['/sensors'], { children: true });
     wm.disconnect('c1');
     wm.notify({
@@ -227,7 +227,7 @@ describe('WatchManager — children watch', () => {
   it('exact + children: no duplicate delivery', () => {
     const wm = createWatchManager();
     const events: NodeEvent[] = [];
-    wm.connect('c1', 'u1', (e) => events.push(e));
+    wm.connect('c1', 'u1', (e) => events.push(e.event));
     wm.watch('u1', ['/sensors/temp1']);
     wm.watch('u1', ['/sensors'], { children: true });
     wm.notify({
@@ -241,7 +241,7 @@ describe('WatchManager — children watch', () => {
   it('children watch on root delivers for top-level paths', () => {
     const wm = createWatchManager();
     const events: NodeEvent[] = [];
-    wm.connect('c1', 'u1', (e) => events.push(e));
+    wm.connect('c1', 'u1', (e) => events.push(e.event));
     wm.watch('u1', ['/'], { children: true });
     wm.notify({ type: 'set', path: '/sensors', node: { $path: '/sensors', $type: 't' } });
     assert.equal(events.length, 1);
@@ -250,7 +250,7 @@ describe('WatchManager — children watch', () => {
   it('children watch on root does NOT deliver for nested paths', () => {
     const wm = createWatchManager();
     const events: NodeEvent[] = [];
-    wm.connect('c1', 'u1', (e) => events.push(e));
+    wm.connect('c1', 'u1', (e) => events.push(e.event));
     wm.watch('u1', ['/'], { children: true });
     wm.notify({ type: 'set', path: '/a/b', node: { $path: '/a/b', $type: 't' } });
     wm.notify({ type: 'set', path: '/a/b/c', node: { $path: '/a/b/c', $type: 't' } });
@@ -260,7 +260,7 @@ describe('WatchManager — children watch', () => {
   it('autoWatch child does NOT leak into grandchildren', () => {
     const wm = createWatchManager();
     const events: NodeEvent[] = [];
-    wm.connect('c1', 'u1', (e) => events.push(e));
+    wm.connect('c1', 'u1', (e) => events.push(e.event));
     wm.watch('u1', ['/a'], { children: true, autoWatch: true });
     // /a/b arrives → auto-subscribed to exact /a/b
     wm.notify({ type: 'set', path: '/a/b', node: { $path: '/a/b', $type: 't' } });
@@ -277,9 +277,9 @@ describe('WatchManager — children watch', () => {
     const wm = createWatchManager();
     const e1: NodeEvent[] = [],
       e2: NodeEvent[] = [];
-    wm.connect('c1', 'u1', (e) => e1.push(e));
+    wm.connect('c1', 'u1', (e) => e1.push(e.event));
     wm.watch('u1', ['/sensors'], { children: true });
-    wm.connect('c1', 'u1', (e) => e2.push(e));
+    wm.connect('c1', 'u1', (e) => e2.push(e.event));
     wm.notify({
       type: 'set',
       path: '/sensors/temp1',
@@ -294,7 +294,7 @@ describe('WatchManager — autoWatch', () => {
   it('autoWatch=true: new child gets exact watch, subsequent updates delivered', () => {
     const wm = createWatchManager();
     const events: NodeEvent[] = [];
-    wm.connect('c1', 'u1', (e) => events.push(e));
+    wm.connect('c1', 'u1', (e) => events.push(e.event));
     wm.watch('u1', ['/sensors'], { children: true, autoWatch: true });
     // New child arrives
     wm.notify({
@@ -315,7 +315,7 @@ describe('WatchManager — autoWatch', () => {
   it('autoWatch=false: new child NOT auto-subscribed, update not delivered', () => {
     const wm = createWatchManager();
     const events: NodeEvent[] = [];
-    wm.connect('c1', 'u1', (e) => events.push(e));
+    wm.connect('c1', 'u1', (e) => events.push(e.event));
     wm.watch('u1', ['/sensors'], { children: true });
     wm.notify({
       type: 'set',
@@ -336,7 +336,7 @@ describe('WatchManager — autoWatch', () => {
   it('autoWatch default is false', () => {
     const wm = createWatchManager();
     const events: NodeEvent[] = [];
-    wm.connect('c1', 'u1', (e) => events.push(e));
+    wm.connect('c1', 'u1', (e) => events.push(e.event));
     wm.watch('u1', ['/sensors'], { children: true });
     wm.notify({
       type: 'set',
@@ -355,7 +355,7 @@ describe('WatchManager — autoWatch', () => {
   it('autoWatch: multiple new children each get subscribed', () => {
     const wm = createWatchManager();
     const events: NodeEvent[] = [];
-    wm.connect('c1', 'u1', (e) => events.push(e));
+    wm.connect('c1', 'u1', (e) => events.push(e.event));
     wm.watch('u1', ['/sensors'], { children: true, autoWatch: true });
     wm.notify({ type: 'set', path: '/sensors/a', node: { $path: '/sensors/a', $type: 's' } });
     wm.notify({ type: 'set', path: '/sensors/b', node: { $path: '/sensors/b', $type: 's' } });
@@ -374,7 +374,7 @@ describe('WatchManager — autoWatch', () => {
   it('autoWatch: remove event also delivered after auto-subscribe', () => {
     const wm = createWatchManager();
     const events: NodeEvent[] = [];
-    wm.connect('c1', 'u1', (e) => events.push(e));
+    wm.connect('c1', 'u1', (e) => events.push(e.event));
     wm.watch('u1', ['/sensors'], { children: true, autoWatch: true });
     wm.notify({
       type: 'set',
@@ -389,7 +389,7 @@ describe('WatchManager — autoWatch', () => {
   it('autoWatch + exact watch preexisting: no double subscribe', () => {
     const wm = createWatchManager();
     const events: NodeEvent[] = [];
-    wm.connect('c1', 'u1', (e) => events.push(e));
+    wm.connect('c1', 'u1', (e) => events.push(e.event));
     wm.watch('u1', ['/sensors/temp1']);
     wm.watch('u1', ['/sensors'], { children: true, autoWatch: true });
     // Event hits exact first, dedup prevents prefix push — but addTo is idempotent
@@ -413,8 +413,8 @@ describe('WatchManager — autoWatch', () => {
     const wm = createWatchManager();
     const e1: NodeEvent[] = [],
       e2: NodeEvent[] = [];
-    wm.connect('c1', 'u1', (e) => e1.push(e));
-    wm.connect('c2', 'u2', (e) => e2.push(e));
+    wm.connect('c1', 'u1', (e) => e1.push(e.event));
+    wm.connect('c2', 'u2', (e) => e2.push(e.event));
     wm.watch('u1', ['/sensors'], { children: true, autoWatch: true });
     wm.watch('u2', ['/sensors'], { children: true });
     wm.notify({
@@ -439,7 +439,7 @@ describe('WatchManager — autoWatch', () => {
   it('children watch on / with autoWatch: top-level child gets subscribed', () => {
     const wm = createWatchManager();
     const events: NodeEvent[] = [];
-    wm.connect('c1', 'u1', (e) => events.push(e));
+    wm.connect('c1', 'u1', (e) => events.push(e.event));
     wm.watch('u1', ['/'], { children: true, autoWatch: true });
     wm.notify({ type: 'set', path: '/sensors', node: { $path: '/sensors', $type: 't' } });
     wm.unwatch('u1', ['/'], { children: true });
@@ -454,7 +454,7 @@ describe('WatchManager — NodeEditor browse lifecycle', () => {
   it('open folder → watch children → click node → navigate back → different folder', () => {
     const wm = createWatchManager();
     const events: NodeEvent[] = [];
-    wm.connect('c1', 'admin', (e) => events.push(e));
+    wm.connect('c1', 'admin', (e) => events.push(e.event));
 
     // 1. Admin opens /orders folder — watches children + autoWatch for live list
     wm.watch('admin', ['/orders'], { children: true, autoWatch: true });
@@ -492,7 +492,7 @@ describe('WatchManager — NodeEditor browse lifecycle', () => {
   it('open node detail + list side-by-side, close detail panel', () => {
     const wm = createWatchManager();
     const events: NodeEvent[] = [];
-    wm.connect('c1', 'admin', (e) => events.push(e));
+    wm.connect('c1', 'admin', (e) => events.push(e.event));
 
     // List view: children watch on /tasks
     wm.watch('admin', ['/tasks'], { children: true });
@@ -523,7 +523,7 @@ describe('WatchManager — SSE reconnect with grace period', () => {
     const events1: NodeEvent[] = [];
     const events2: NodeEvent[] = [];
 
-    wm.connect('c1', 'u1', (e) => events1.push(e));
+    wm.connect('c1', 'u1', (e) => events1.push(e.event));
     wm.watch('u1', ['/doc']);
     wm.watch('u1', ['/items'], { children: true });
 
@@ -531,7 +531,7 @@ describe('WatchManager — SSE reconnect with grace period', () => {
     wm.disconnect('c1');
 
     // Reconnect with new push channel (same userId)
-    const preserved = wm.connect('c2', 'u1', (e) => events2.push(e));
+    const { preserved } = wm.connect('c2', 'u1', (e) => events2.push(e.event));
     assert.equal(preserved, true, 'should report watches were preserved');
 
     // Events go to new push, not old
@@ -559,7 +559,7 @@ describe('WatchManager — SSE reconnect with grace period', () => {
 
     // Late reconnect — starts fresh
     const events: NodeEvent[] = [];
-    const preserved = wm.connect('c2', 'u1', (e) => events.push(e));
+    const { preserved } = wm.connect('c2', 'u1', (e) => events.push(e.event));
     assert.equal(preserved, false, 'watches were not preserved');
 
     // Old watch is gone
@@ -572,7 +572,7 @@ describe('WatchManager — breakContinuity (core-pxlu, delegated execute)', () =
   it('active connection receives the reset event immediately', () => {
     const wm = createWatchManager();
     const events: NodeEvent[] = [];
-    wm.connect('c1', 'u1', (e) => events.push(e));
+    wm.connect('c1', 'u1', (e) => events.push(e.event));
     wm.watch('u1', ['/doc']);
 
     wm.breakContinuity();
@@ -587,7 +587,7 @@ describe('WatchManager — breakContinuity (core-pxlu, delegated execute)', () =
     const other: NodeEvent[] = [];
     wm.connect('c1', 'u1', () => {});
     wm.watch('u1', ['/fed/w']);
-    wm.connect('c2', 'u2', (e) => other.push(e));
+    wm.connect('c2', 'u2', (e) => other.push(e.event));
     wm.watch('u2', ['/completely/elsewhere']);
 
     wm.breakContinuity();
@@ -605,14 +605,14 @@ describe('WatchManager — breakContinuity (core-pxlu, delegated execute)', () =
     wm.breakContinuity();
 
     // Legacy reconnect (no since): missedOffline forces an honest refetch.
-    const preserved = wm.connect('c2', 'u1', () => {});
+    const { preserved } = wm.connect('c2', 'u1', () => {});
     assert.equal(preserved, false);
   });
 
   it('resume across a break fails closed — the break re-mints the epoch, a pre-break cursor is refused', () => {
     const wm = createWatchManager({ gracePeriodMs: 10_000 });
     const before: StampedEvent[] = [];
-    wm.connect('c1', 'u1', (e) => before.push(e));
+    wm.connect('c1', 'u1', (e) => before.push(e.event));
     wm.watch('u1', ['/doc']);
     wm.notify({ type: 'set', path: '/doc', node: { $path: '/doc', $type: 'doc' } });
     const preBreak = cursorOf(before[0]);
@@ -623,7 +623,7 @@ describe('WatchManager — breakContinuity (core-pxlu, delegated execute)', () =
     // anz4.10/11: the break invalidated the whole pre-break seq space — the
     // cursor is answered false with NO replay, the client full-refetches.
     const replayed: NodeEvent[] = [];
-    const covered = wm.connect('c2', 'u1', (e) => replayed.push(e), preBreak);
+    const { preserved: covered } = wm.connect('c2', 'u1', (e) => replayed.push(e.event), preBreak);
     assert.equal(covered, false);
     assert.deepEqual(replayed, []);
   });
@@ -632,7 +632,7 @@ describe('WatchManager — breakContinuity (core-pxlu, delegated execute)', () =
     const wm = createWatchManager();
     wm.breakContinuity();
 
-    const preserved = wm.connect('c1', 'u1', () => {});
+    const { preserved } = wm.connect('c1', 'u1', () => {});
     assert.equal(preserved, false, 'fresh user — nothing preserved by definition');
   });
 });
@@ -644,7 +644,7 @@ describe('WatchManager — edge cases', () => {
     wm.watch('u1', ['/x']);
 
     const events: NodeEvent[] = [];
-    wm.connect('c1', 'u1', (e) => events.push(e));
+    wm.connect('c1', 'u1', (e) => events.push(e.event));
 
     wm.notify({ type: 'set', path: '/x', node: { $path: '/x', $type: 't' } });
     assert.equal(events.length, 1);
@@ -666,7 +666,7 @@ describe('WatchManager — edge cases', () => {
   it('double watch same path is idempotent', () => {
     const wm = createWatchManager();
     const events: NodeEvent[] = [];
-    wm.connect('c1', 'u1', (e) => events.push(e));
+    wm.connect('c1', 'u1', (e) => events.push(e.event));
     wm.watch('u1', ['/a']);
     wm.watch('u1', ['/a']); // duplicate
     wm.notify({ type: 'set', path: '/a', node: { $path: '/a', $type: 't' } });
@@ -676,7 +676,7 @@ describe('WatchManager — edge cases', () => {
   it('double watch children same path is idempotent', () => {
     const wm = createWatchManager();
     const events: NodeEvent[] = [];
-    wm.connect('c1', 'u1', (e) => events.push(e));
+    wm.connect('c1', 'u1', (e) => events.push(e.event));
     wm.watch('u1', ['/a'], { children: true });
     wm.watch('u1', ['/a'], { children: true }); // duplicate
     wm.notify({ type: 'set', path: '/a/b', node: { $path: '/a/b', $type: 't' } });
@@ -691,8 +691,8 @@ describe('WatchManager — edge cases', () => {
     const wm = createWatchManager();
     const ev1: NodeEvent[] = [];
     const ev2: NodeEvent[] = [];
-    wm.connect('c1', 'u1', (e) => ev1.push(e));
-    wm.connect('c2', 'u2', (e) => ev2.push(e));
+    wm.connect('c1', 'u1', (e) => ev1.push(e.event));
+    wm.connect('c2', 'u2', (e) => ev2.push(e.event));
     // No watches registered — still must receive the broadcast.
     wm.notify({ type: 'reconnect', preserved: false });
     assert.equal(ev1.length, 1);
@@ -705,8 +705,8 @@ describe('WatchManager — edge cases', () => {
     const wm = createWatchManager();
     const tab1: NodeEvent[] = [];
     const tab2: NodeEvent[] = [];
-    wm.connect('c1', 'u1', (e) => tab1.push(e));
-    wm.connect('c2', 'u1', (e) => tab2.push(e));
+    wm.connect('c1', 'u1', (e) => tab1.push(e.event));
+    wm.connect('c2', 'u1', (e) => tab2.push(e.event));
     wm.notify({ type: 'reconnect', preserved: true });
     assert.equal(tab1.length, 1);
     assert.equal(tab2.length, 1);
@@ -717,8 +717,8 @@ describe('WatchManager — invalidateVps narrowed per user (core-cnr.8 C26)', ()
   it('each vp watcher receives only the vps it registered', () => {
     const wm = createWatchManager();
     const e1: NodeEvent[] = [], e2: NodeEvent[] = [];
-    wm.connect('c1', 'u1', (e) => e1.push(e));
-    wm.connect('c2', 'u2', (e) => e2.push(e));
+    wm.connect('c1', 'u1', (e) => e1.push(e.event));
+    wm.connect('c2', 'u2', (e) => e2.push(e.event));
     wm.watch('u1', ['/views/a'], { children: true });
     wm.watch('u2', ['/views/b'], { children: true });
 
@@ -733,7 +733,7 @@ describe('WatchManager — invalidateVps narrowed per user (core-cnr.8 C26)', ()
   it('recipient with no vp watch gets the event stripped of foreign vps', () => {
     const wm = createWatchManager();
     const events: NodeEvent[] = [];
-    wm.connect('c1', 'u1', (e) => events.push(e));
+    wm.connect('c1', 'u1', (e) => events.push(e.event));
     wm.watch('u1', ['/data/x']);
 
     wm.notify({ type: 'set', path: '/data/x', node: { $type: 't' }, invalidateVps: ['/views/other-user'] });
@@ -745,7 +745,7 @@ describe('WatchManager — invalidateVps narrowed per user (core-cnr.8 C26)', ()
   it('exact + own vp watch: keeps own vp, drops the foreign one', () => {
     const wm = createWatchManager();
     const events: NodeEvent[] = [];
-    wm.connect('c1', 'u1', (e) => events.push(e));
+    wm.connect('c1', 'u1', (e) => events.push(e.event));
     wm.watch('u1', ['/data/x']);
     wm.watch('u1', ['/views/mine'], { children: true });
 
@@ -758,7 +758,7 @@ describe('WatchManager — invalidateVps narrowed per user (core-cnr.8 C26)', ()
   it('ring replay after grace delivers the narrowed event, not the union', () => {
     const wm = createWatchManager();
     const live: StampedEvent[] = [];
-    wm.connect('c1', 'u1', (e) => live.push(e));
+    wm.connect('c1', 'u1', (e) => live.push(e.event));
     wm.watch('u1', ['/views/a'], { children: true });
     wm.notify({ type: 'set', path: '/data/x', node: { $type: 't' }, invalidateVps: ['/views/a'] });
     const cursor = cursorOf(live[0]);
@@ -767,7 +767,7 @@ describe('WatchManager — invalidateVps narrowed per user (core-cnr.8 C26)', ()
     wm.notify({ type: 'set', path: '/data/x', node: { $type: 't' }, invalidateVps: ['/views/a', '/views/b'] });
 
     const replayed: NodeEvent[] = [];
-    const covered = wm.connect('c2', 'u1', (e) => replayed.push(e), cursor);
+    const { preserved: covered } = wm.connect('c2', 'u1', (e) => replayed.push(e.event), cursor);
     assert.equal(covered, true);
     assert.equal(replayed.length, 1);
     assert.deepEqual(replayed[0].invalidateVps, ['/views/a']);
@@ -778,7 +778,7 @@ describe('WatchManager — auto-watch lifecycle on remove (core-cnr.8 C27)', () 
   it('churning children under autoWatch do not exhaust the watch budget', () => {
     const wm = createWatchManager({ maxWatchesPerUser: 5 });
     const events: NodeEvent[] = [];
-    wm.connect('c1', 'u1', (e) => events.push(e));
+    wm.connect('c1', 'u1', (e) => events.push(e.event));
     wm.watch('u1', ['/dir'], { children: true, autoWatch: true });
 
     for (let i = 0; i < 20; i++) {
@@ -796,7 +796,7 @@ describe('WatchManager — auto-watch lifecycle on remove (core-cnr.8 C27)', () 
   it('remove does not promote: vp-routed remove leaves no exact watch behind', () => {
     const wm = createWatchManager();
     const events: NodeEvent[] = [];
-    wm.connect('c1', 'u1', (e) => events.push(e));
+    wm.connect('c1', 'u1', (e) => events.push(e.event));
     wm.watch('u1', ['/views/q'], { children: true, autoWatch: true });
 
     wm.notify({ type: 'remove', path: '/data/x', invalidateVps: ['/views/q'] });
@@ -810,7 +810,7 @@ describe('WatchManager — auto-watch lifecycle on remove (core-cnr.8 C27)', () 
   it('explicit exact watch survives remove and sees the recreate', () => {
     const wm = createWatchManager();
     const events: NodeEvent[] = [];
-    wm.connect('c1', 'u1', (e) => events.push(e));
+    wm.connect('c1', 'u1', (e) => events.push(e.event));
     wm.watch('u1', ['/a']);
 
     wm.notify({ type: 'remove', path: '/a' });
@@ -821,7 +821,7 @@ describe('WatchManager — auto-watch lifecycle on remove (core-cnr.8 C27)', () 
   it('auto-watched child pruned on remove, re-promoted on recreate via prefix', () => {
     const wm = createWatchManager();
     const events: NodeEvent[] = [];
-    wm.connect('c1', 'u1', (e) => events.push(e));
+    wm.connect('c1', 'u1', (e) => events.push(e.event));
     wm.watch('u1', ['/dir'], { children: true, autoWatch: true });
 
     wm.notify({ type: 'set', path: '/dir/a', node: { $type: 't' } });   // promoted
@@ -834,7 +834,7 @@ describe('WatchManager — auto-watch lifecycle on remove (core-cnr.8 C27)', () 
   it('explicit watch on an auto-watched path upgrades it — survives remove', () => {
     const wm = createWatchManager();
     const events: NodeEvent[] = [];
-    wm.connect('c1', 'u1', (e) => events.push(e));
+    wm.connect('c1', 'u1', (e) => events.push(e.event));
     wm.watch('u1', ['/dir'], { children: true, autoWatch: true });
 
     wm.notify({ type: 'set', path: '/dir/a', node: { $type: 't' } });   // auto-promoted
@@ -855,11 +855,11 @@ describe('WatchManager — seq / ring / resume (core-gk8.1)', () => {
     const wm = createWatchManager();
     const e1: NodeEvent[] = [];
     const e2: NodeEvent[] = [];
-    wm.connect('c1', 'u1', (e) => e1.push(e));
+    wm.connect('c1', 'u1', (e) => e1.push(e.event));
     wm.watch('u1', ['/a']);
     wm.notify(setEvent('/a'));
     wm.notify(setEvent('/a'));
-    wm.connect('c2', 'u2', (e) => e2.push(e));
+    wm.connect('c2', 'u2', (e) => e2.push(e.event));
     wm.watch('u2', ['/a']);
     wm.notify(setEvent('/a'));
     assert.deepEqual(e1.map(seqOf), [1, 2, 3]);
@@ -869,7 +869,7 @@ describe('WatchManager — seq / ring / resume (core-gk8.1)', () => {
   it('connect(cursor) replays grace-window events — preserved means continuity', () => {
     const wm = createWatchManager();
     const a: StampedEvent[] = [];
-    wm.connect('c1', 'u1', (e) => a.push(e));
+    wm.connect('c1', 'u1', (e) => a.push(e.event));
     wm.watch('u1', ['/a']);
     wm.notify(setEvent('/a')); // seq 1, delivered live
     const cursor = cursorOf(a[0]);
@@ -878,7 +878,7 @@ describe('WatchManager — seq / ring / resume (core-gk8.1)', () => {
     wm.notify(setEvent('/a')); // seq 3 — offline, ringed
 
     const b: NodeEvent[] = [];
-    const preserved = wm.connect('c2', 'u1', (e) => b.push(e), cursor);
+    const { preserved } = wm.connect('c2', 'u1', (e) => b.push(e.event), cursor);
     assert.equal(preserved, true);
     assert.deepEqual(b.map(seqOf), [2, 3]); // exactly the gap, in order
   });
@@ -886,7 +886,7 @@ describe('WatchManager — seq / ring / resume (core-gk8.1)', () => {
   it('cursor at the head of the stream: covered, nothing replayed (happy path)', () => {
     const wm = createWatchManager();
     const a: StampedEvent[] = [];
-    wm.connect('c1', 'u1', (e) => a.push(e));
+    wm.connect('c1', 'u1', (e) => a.push(e.event));
     wm.watch('u1', ['/a']);
     wm.notify(setEvent('/a'));
     wm.notify(setEvent('/a'));
@@ -894,7 +894,7 @@ describe('WatchManager — seq / ring / resume (core-gk8.1)', () => {
     wm.disconnect('c1');
 
     const b: NodeEvent[] = [];
-    const preserved = wm.connect('c2', 'u1', (e) => b.push(e), cursor);
+    const { preserved } = wm.connect('c2', 'u1', (e) => b.push(e.event), cursor);
     assert.equal(preserved, true);
     assert.deepEqual(b, []);
   });
@@ -902,7 +902,7 @@ describe('WatchManager — seq / ring / resume (core-gk8.1)', () => {
   it('ring overflow → preserved false, no partial replay', () => {
     const wm = createWatchManager({ ringSize: 2 });
     const a: StampedEvent[] = [];
-    wm.connect('c1', 'u1', (e) => a.push(e));
+    wm.connect('c1', 'u1', (e) => a.push(e.event));
     wm.watch('u1', ['/a']);
     wm.notify(setEvent('/a')); // seq 1
     const cursor = cursorOf(a[0]);
@@ -912,7 +912,7 @@ describe('WatchManager — seq / ring / resume (core-gk8.1)', () => {
     wm.notify(setEvent('/a')); // 4 — ring now [3,4], seq 2 evicted
 
     const b: NodeEvent[] = [];
-    const preserved = wm.connect('c2', 'u1', (e) => b.push(e), cursor);
+    const { preserved } = wm.connect('c2', 'u1', (e) => b.push(e.event), cursor);
     assert.equal(preserved, false); // gap not covered — client must refetch
     assert.deepEqual(b, []);        // never replay a hole silently
   });
@@ -922,19 +922,19 @@ describe('WatchManager — seq / ring / resume (core-gk8.1)', () => {
     wm.connect('c1', 'u1', () => {});
     wm.watch('u1', ['/a']);
     wm.disconnect('c1');
-    assert.equal(wm.connect('c2', 'u1', () => {}), true); // nothing missed
+    assert.equal(wm.connect('c2', 'u1', () => {}).preserved, true); // nothing missed
 
     wm.disconnect('c2');
     wm.notify(setEvent('/a')); // missed while offline
-    assert.equal(wm.connect('c3', 'u1', () => {}), false); // old preserved:true lie is gone
+    assert.equal(wm.connect('c3', 'u1', () => {}).preserved, false); // old preserved:true lie is gone
   });
 
   it('multi-tab: shared seq stream; resuming tab replays only to itself', () => {
     const wm = createWatchManager();
     const tab1: NodeEvent[] = [];
     const tab2: StampedEvent[] = [];
-    wm.connect('c1', 'u1', (e) => tab1.push(e));
-    wm.connect('c2', 'u1', (e) => tab2.push(e));
+    wm.connect('c1', 'u1', (e) => tab1.push(e.event));
+    wm.connect('c2', 'u1', (e) => tab2.push(e.event));
     wm.watch('u1', ['/a']);
     wm.notify(setEvent('/a')); // seq 1 → both tabs
     const cursor = cursorOf(tab2[0]);
@@ -942,7 +942,7 @@ describe('WatchManager — seq / ring / resume (core-gk8.1)', () => {
     wm.notify(setEvent('/a')); // seq 2 → tab1 only (user online — not "missed")
 
     const tab2b: NodeEvent[] = [];
-    const preserved = wm.connect('c2b', 'u1', (e) => tab2b.push(e), cursor);
+    const { preserved } = wm.connect('c2b', 'u1', (e) => tab2b.push(e.event), cursor);
     assert.equal(preserved, true);
     assert.deepEqual(tab2b.map(seqOf), [2]); // replayed to the new tab
     assert.deepEqual(tab1.map(seqOf), [1, 2]); // no duplicates to the live tab
@@ -959,7 +959,7 @@ describe('WatchManager — resume epoch (core-anz4.10)', () => {
     const wm = createWatchManager({ gracePeriodMs: 100 });
     const b: StampedEvent[] = [];
     wm.connect('cA', 'u1', () => {});
-    wm.connect('cB', 'u1', (e) => b.push(e));
+    wm.connect('cB', 'u1', (e) => b.push(e.event));
     wm.watch('u1', ['/doc']);
     for (let i = 0; i < 5; i++) wm.notify(setEvent('/doc')); // both tabs at seq 5
     const staleCursor = cursorOf(b[4]);
@@ -968,7 +968,7 @@ describe('WatchManager — resume epoch (core-anz4.10)', () => {
     t.mock.timers.tick(100); // grace expires → entry (and its seq space) is gone
 
     // Tab A returns first: honest refetch, re-registers, the NEW entry counts 1..3.
-    assert.equal(wm.connect('cA2', 'u1', () => {}), false);
+    assert.equal(wm.connect('cA2', 'u1', () => {}).preserved, false);
     wm.watch('u1', ['/doc']);
     wm.notify(setEvent('/doc'));
     wm.notify(setEvent('/doc'));
@@ -978,7 +978,7 @@ describe('WatchManager — resume epoch (core-anz4.10)', () => {
     // old seq-only compare answered covered=true and B silently kept a cache
     // missing EVERYTHING (including removes). Epoch mismatch refuses it.
     const b2: NodeEvent[] = [];
-    assert.equal(wm.connect('cB2', 'u1', (e) => b2.push(e), staleCursor), false);
+    assert.equal(wm.connect('cB2', 'u1', (e) => b2.push(e.event), staleCursor).preserved, false);
     assert.deepEqual(b2, []);
   });
 
@@ -990,19 +990,19 @@ describe('WatchManager — resume epoch (core-anz4.10)', () => {
     wm.notify(setEvent('/a'));
     wm.disconnect('c1');
 
-    assert.equal(wm.connect('c2', 'u1', () => {}, 2), false);
+    assert.equal(wm.connect('c2', 'u1', () => {}, 2).preserved, false);
   });
 
   it('cursor ahead of the stream under the live epoch fails closed (corrupt client)', () => {
     const wm = createWatchManager();
     const a: StampedEvent[] = [];
-    wm.connect('c1', 'u1', (e) => a.push(e));
+    wm.connect('c1', 'u1', (e) => a.push(e.event));
     wm.watch('u1', ['/a']);
     wm.notify(setEvent('/a'));
     const { epoch } = cursorOf(a[0]);
     wm.disconnect('c1');
 
-    assert.equal(wm.connect('c2', 'u1', () => {}, { seq: 99, epoch }), false);
+    assert.equal(wm.connect('c2', 'u1', () => {}, { seq: 99, epoch }).preserved, false);
   });
 });
 
@@ -1012,7 +1012,7 @@ describe('WatchManager — external continuity break (core-anz4.11)', () => {
   it('external reconnect{preserved:false} invalidates every pre-break cursor', () => {
     const wm = createWatchManager({ gracePeriodMs: 10_000 });
     const a: StampedEvent[] = [];
-    wm.connect('c1', 'u1', (e) => a.push(e));
+    wm.connect('c1', 'u1', (e) => a.push(e.event));
     wm.watch('u1', ['/doc']);
     wm.notify(setEvent('/doc'));
     const preBreak = cursorOf(a[0]);
@@ -1023,14 +1023,14 @@ describe('WatchManager — external continuity break (core-anz4.11)', () => {
     wm.notify({ type: 'reconnect', preserved: false });
 
     const replayed: NodeEvent[] = [];
-    assert.equal(wm.connect('c2', 'u1', (e) => replayed.push(e), preBreak), false);
+    assert.equal(wm.connect('c2', 'u1', (e) => replayed.push(e.event), preBreak).preserved, false);
     assert.deepEqual(replayed, []);
   });
 
   it('live client adopts the post-break epoch from the stamped reset and resumes covered later', () => {
     const wm = createWatchManager({ gracePeriodMs: 10_000 });
     const a: StampedEvent[] = [];
-    wm.connect('c1', 'u1', (e) => a.push(e));
+    wm.connect('c1', 'u1', (e) => a.push(e.event));
     wm.watch('u1', ['/doc']);
     wm.notify(setEvent('/doc'));            // seq 1, epoch E1
     const preBreak = cursorOf(a[0]);
@@ -1047,14 +1047,14 @@ describe('WatchManager — external continuity break (core-anz4.11)', () => {
     wm.disconnect('c1');
 
     const b: NodeEvent[] = [];
-    assert.equal(wm.connect('c2', 'u1', (e) => b.push(e), head), true);
+    assert.equal(wm.connect('c2', 'u1', (e) => b.push(e.event), head).preserved, true);
     assert.deepEqual(b, []);
   });
 
   it('preserved:true reconnect is informational — continuity (and epoch) intact', () => {
     const wm = createWatchManager({ gracePeriodMs: 10_000 });
     const a: StampedEvent[] = [];
-    wm.connect('c1', 'u1', (e) => a.push(e));
+    wm.connect('c1', 'u1', (e) => a.push(e.event));
     wm.watch('u1', ['/doc']);
     wm.notify(setEvent('/doc'));
     const cursor = cursorOf(a[0]);
@@ -1062,7 +1062,7 @@ describe('WatchManager — external continuity break (core-anz4.11)', () => {
     wm.notify({ type: 'reconnect', preserved: true });
     wm.disconnect('c1');
 
-    assert.equal(wm.connect('c2', 'u1', () => {}, cursor), true);
+    assert.equal(wm.connect('c2', 'u1', () => {}, cursor).preserved, true);
   });
 
   it('break while offline: legacy no-cursor reconnect is answered false (missedOffline)', () => {
@@ -1073,7 +1073,7 @@ describe('WatchManager — external continuity break (core-anz4.11)', () => {
 
     wm.notify({ type: 'reconnect', preserved: false });
 
-    assert.equal(wm.connect('c2', 'u1', () => {}), false);
+    assert.equal(wm.connect('c2', 'u1', () => {}).preserved, false);
   });
 });
 
@@ -1083,7 +1083,7 @@ describe('WatchManager — token-scoped watch ownership (core-anz4.12)', () => {
   it('two consumers, same user+path: first release keeps the second receiving', () => {
     const wm = createWatchManager();
     const got: NodeEvent[] = [];
-    wm.connect('c1', 'u1', (e) => got.push(e), undefined, 't1');
+    wm.connect('c1', 'u1', (e) => got.push(e.event), undefined, 't1');
     wm.connect('c2', 'u1', () => {}, undefined, 't2');
     wm.watch('u1', ['/a'], { token: 't1' });
     wm.watch('u1', ['/a'], { token: 't2' });
@@ -1106,7 +1106,7 @@ describe('WatchManager — token-scoped watch ownership (core-anz4.12)', () => {
       unwatchAllQueries: () => {},
     });
     const got: NodeEvent[] = [];
-    wm.connect('c1', 'u1', (e) => got.push(e));
+    wm.connect('c1', 'u1', (e) => got.push(e.event));
     const query = { plan: { source: '/data' }, mountDeps: new Set(['/view']) };
     wm.watch('u1', ['/view'], { children: true, query, token: 't1' });
     wm.watch('u1', ['/view'], { children: true, query, token: 't2' });
@@ -1125,7 +1125,7 @@ describe('WatchManager — token-scoped watch ownership (core-anz4.12)', () => {
     const wm = createWatchManager({ gracePeriodMs: 100 });
     const got: NodeEvent[] = [];
     wm.connect('c1', 'u1', () => {}, undefined, 't1');
-    wm.connect('c2', 'u1', (e) => got.push(e), undefined, 't2');
+    wm.connect('c2', 'u1', (e) => got.push(e.event), undefined, 't2');
     wm.watch('u1', ['/x', '/y'], { token: 't1' });
     wm.watch('u1', ['/shared'], { token: 't1' });
     wm.watch('u1', ['/shared'], { token: 't2' });
@@ -1146,7 +1146,7 @@ describe('WatchManager — token-scoped watch ownership (core-anz4.12)', () => {
     const wm = createWatchManager({ gracePeriodMs: 100 });
     const got: NodeEvent[] = [];
     wm.connect('c1', 'u1', () => {}, undefined, 't1');
-    wm.connect('cKeep', 'u1', (e) => got.push(e), undefined, 'tKeep'); // keeps the user entry alive
+    wm.connect('cKeep', 'u1', (e) => got.push(e.event), undefined, 'tKeep'); // keeps the user entry alive
     wm.watch('u1', ['/x'], { token: 't1' });
 
     wm.disconnect('c1');
@@ -1191,7 +1191,7 @@ describe('WatchManager — token-scoped watch ownership (core-anz4.12)', () => {
     const wm = createWatchManager({ gracePeriodMs: 100 });
     const got: NodeEvent[] = [];
     wm.connect('c1', 'u1', () => {}, undefined, 't1');
-    wm.connect('c2', 'u1', (e) => got.push(e), undefined, 't2');
+    wm.connect('c2', 'u1', (e) => got.push(e.event), undefined, 't2');
     wm.watch('u1', ['/dir'], { children: true, autoWatch: true, token: 't1' });
     wm.watch('u1', ['/dir/a'], { token: 't2' }); // explicit hold by the other tab
 
@@ -1205,5 +1205,113 @@ describe('WatchManager — token-scoped watch ownership (core-anz4.12)', () => {
     assert.equal(got.length, 2, 't2\'s explicit watch must survive t1\'s auto hold');
     wm.notify(setEvent('/dir/b'));
     assert.equal(got.length, 2, 't1\'s prefix watch is gone');
+  });
+});
+
+// ── ns6p.4 slice 1: connect verdict {seq, epoch} + route provenance ──
+
+describe('WatchManager — connect verdict + route envelope (ns6p.4 slice 1)', () => {
+  const setEvent = (path: string, extra?: { invalidateVps?: string[] }): NodeEvent =>
+    ({ type: 'set', path, node: { $type: 't' }, ...extra });
+
+  it('connect verdict carries the current {seq, epoch} — the lane can stamp its initial frame', () => {
+    const wm = createWatchManager();
+    const a: StampedEvent[] = [];
+    const v0 = wm.connect('c1', 'u1', (e) => a.push(e.event));
+    assert.equal(v0.preserved, false, 'fresh user — nothing preserved by definition');
+    assert.equal(v0.seq, 0);
+    assert.equal(typeof v0.epoch, 'string');
+
+    wm.watch('u1', ['/a']);
+    wm.notify(setEvent('/a')); // seq 1
+    assert.equal(a[0].epoch, v0.epoch, 'verdict epoch IS the stream epoch events are stamped with');
+
+    const v1 = wm.connect('c2', 'u1', () => {});
+    assert.equal(v1.seq, 1, 'verdict reports the current watermark');
+    assert.equal(v1.epoch, v0.epoch);
+  });
+
+  it('exact holder: envelope names the held path; vp-only recipient: vps only, never the path (security pin)', () => {
+    const wm = createWatchManager();
+    const exact: RouteEnvelope[] = [];
+    const vpOnly: RouteEnvelope[] = [];
+    wm.connect('cE', 'uExact', (env) => exact.push(env));
+    wm.connect('cV', 'uVp', (env) => vpOnly.push(env));
+    wm.watch('uExact', ['/data/x']);
+    wm.watch('uVp', ['/views/q'], { children: true });
+
+    wm.notify(setEvent('/data/x', { invalidateVps: ['/views/q'] }));
+
+    assert.equal(exact.length, 1);
+    assert.deepEqual(exact[0].heldPaths, ['/data/x']);
+    assert.deepEqual(exact[0].heldVps, []);
+    assert.equal(vpOnly.length, 1);
+    assert.deepEqual(vpOnly[0].heldPaths, [], 'vp-only recipient must never learn the source path');
+    assert.deepEqual(vpOnly[0].heldVps, ['/views/q']);
+  });
+
+  it('prefix-parent holder: envelope names the held parent as a vp (refetch the listing, not the child)', () => {
+    const wm = createWatchManager();
+    const got: RouteEnvelope[] = [];
+    wm.connect('c1', 'u1', (env) => got.push(env));
+    wm.watch('u1', ['/dir'], { children: true });
+
+    wm.notify(setEvent('/dir/a'));
+
+    assert.equal(got.length, 1);
+    assert.deepEqual(got[0].heldPaths, []);
+    assert.deepEqual(got[0].heldVps, ['/dir']);
+  });
+
+  it('exact + prefix + vp holder: one delivery, envelope carries every matched route', () => {
+    const wm = createWatchManager();
+    const got: RouteEnvelope[] = [];
+    wm.connect('c1', 'u1', (env) => got.push(env));
+    wm.watch('u1', ['/dir/a']);
+    wm.watch('u1', ['/dir'], { children: true });
+    wm.watch('u1', ['/views/q'], { children: true });
+
+    wm.notify(setEvent('/dir/a', { invalidateVps: ['/views/q'] }));
+
+    assert.equal(got.length, 1, 'dedup: one push per recipient');
+    assert.deepEqual(got[0].heldPaths, ['/dir/a']);
+    assert.deepEqual(got[0].heldVps.slice().sort(), ['/dir', '/views/q']);
+  });
+
+  it('ring replay delivers the FROZEN envelope — a hold released in the gap does not rewrite provenance', () => {
+    const wm = createWatchManager({ gracePeriodMs: 10_000 });
+    const live: RouteEnvelope[] = [];
+    wm.connect('c1', 'u1', (env) => live.push(env));
+    wm.watch('u1', ['/data/x']);
+    wm.notify(setEvent('/data/x')); // seq 1 — live
+    const cursor = cursorOf(live[0].event);
+    wm.disconnect('c1');
+
+    wm.notify(setEvent('/data/x')); // seq 2 — ringed WITH heldPaths
+    wm.unwatch('u1', ['/data/x']);  // hold released AFTER the event, BEFORE resume
+
+    const replayed: RouteEnvelope[] = [];
+    const verdict = wm.connect('c2', 'u1', (env) => replayed.push(env), cursor);
+    assert.equal(verdict.preserved, true);
+    assert.equal(replayed.length, 1);
+    assert.deepEqual(replayed[0].heldPaths, ['/data/x'], 'provenance frozen at routing time, never recomputed');
+    assert.equal(replayed[0].event.seq, 2);
+  });
+
+  it('reconnect events carry an empty envelope — no provenance to leak', () => {
+    const wm = createWatchManager();
+    const got: RouteEnvelope[] = [];
+    wm.connect('c1', 'u1', (env) => got.push(env));
+    wm.watch('u1', ['/a']);
+
+    wm.notify({ type: 'reconnect', preserved: true });
+    wm.breakContinuity();
+
+    assert.equal(got.length, 2);
+    for (const env of got) {
+      assert.equal(env.event.type, 'reconnect');
+      assert.deepEqual(env.heldPaths, []);
+      assert.deepEqual(env.heldVps, []);
+    }
   });
 });

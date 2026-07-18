@@ -16,7 +16,19 @@ export type WatchCursor = { seq: number; epoch: string };
  *  seen, and echo both on resume. */
 export type StampedEvent = NodeEvent & { seq?: number; epoch?: string };
 
-export type WatchPush = (event: StampedEvent) => void;
+/** Per-recipient route provenance (ns6p.4 §3.4, invariant 26): which of THIS
+ *  user's own registrations matched at routing time. The ACL filter's
+ *  drop-fallback may reveal ONLY these — a vp-only recipient must never learn
+ *  the hidden source path. Frozen into the ring: replay pushes the SAME
+ *  envelope, never recomputes routes (holds may have changed since). */
+export type RouteEnvelope = { event: StampedEvent; heldPaths: string[]; heldVps: string[] };
+
+export type WatchPush = (envelope: RouteEnvelope) => void;
+
+/** connect() result (ns6p.4 §4.5): the continuity verdict plus the CURRENT
+ *  {seq, epoch}, which the lane stamps onto its initial reset/reconnect frame
+ *  so even a signal-only client holds an epoch-bearing resume cursor. */
+export type ConnectVerdict = WatchCursor & { preserved: boolean };
 
 export type WatchManagerOpts = {
   gracePeriodMs?: number;
@@ -39,15 +51,16 @@ export type WatchManager = {
   /** Attach push channel. `since` = resume cursor: last seq this client
    *  processed + the epoch it was issued under (core-anz4.10); events after it
    *  are replayed from the per-user ring through `push`.
-   *  Returns true ONLY when continuity holds (core-gk8.1): watch-sets alive,
-   *  cursor epoch matches the live stream, AND the gap is covered (replayed,
-   *  or nothing was missed). A bare-number cursor (no epoch — old client)
-   *  can never prove continuity → false, fail closed. False means the client
-   *  MUST full-refetch and re-register watches.
+   *  `preserved` is true ONLY when continuity holds (core-gk8.1): watch-sets
+   *  alive, cursor epoch matches the live stream, AND the gap is covered
+   *  (replayed, or nothing was missed). A bare-number cursor (no epoch — old
+   *  client) can never prove continuity → false, fail closed. False means the
+   *  client MUST full-refetch and re-register watches. The verdict also
+   *  carries the current {seq, epoch} for the lane's initial frame (anz4.28e).
    *  `token` binds this lane to a watch-ownership token (core-anz4.12): the
    *  token's registrations are released when its last lane disconnects and
    *  outlives the grace period. */
-  connect(connId: string, userId: string, push: WatchPush, since?: number | WatchCursor, token?: string): boolean;
+  connect(connId: string, userId: string, push: WatchPush, since?: number | WatchCursor, token?: string): ConnectVerdict;
   disconnect(connId: string): void;
   /** Bind the instance-scoped query evaluator after withSubscriptions creates it. */
   bindQueryRegistry(registry: QueryWatchRegistry): void;
@@ -129,7 +142,9 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
     prefixes: Map<string, Map<string, boolean>>;
     seq: number;
     epoch: string;
-    ring: { seq: number; event: StampedEvent }[];
+    /** Entries hold the full route envelope (F6-r3): resume replays what was
+     *  ROUTED, under the holds of that moment — not today's holds. */
+    ring: { seq: number; envelope: RouteEnvelope }[];
     missedOffline: boolean;
   };
   const users = new Map<string, UserEntry>();
@@ -182,6 +197,12 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
     }
   }
 
+  function parentOf(path: string): string | null {
+    const idx = path.lastIndexOf('/');
+    if (idx < 0) return null;
+    return idx === 0 ? '/' : path.slice(0, idx);
+  }
+
   function pushToUser(uid: string, event: NodeEvent) {
     const user = users.get(uid);
     if (!user) return;
@@ -196,12 +217,28 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
         else delete event.invalidateVps;
       }
     }
+    // Route provenance (ns6p.4 §3.4, invariant 26): capture which of THIS
+    // recipient's own registrations matched — before autoWatch promotion and
+    // C27 pruning mutate the holds. The drop-fallback downstream may reveal
+    // only these, so an exact/prefix holder still gets a refetch signal while
+    // a vp-only recipient never learns the source path.
+    const heldPaths: string[] = [];
+    const heldVps: string[] = [];
+    if (event.type !== 'reconnect') {
+      if (user.paths.has(event.path)) heldPaths.push(event.path);
+      const parent = parentOf(event.path);
+      if (parent !== null && user.prefixes.has(parent)) heldVps.push(parent);
+      // Post-narrowing invalidateVps ⊆ user.prefixes — all safe to name.
+      for (const vp of event.invalidateVps ?? []) {
+        if (vp !== parent) heldVps.push(vp);
+      }
+    }
     const seq = ++user.seq;
-    const safeEvent: StampedEvent = { ...event, seq, epoch: user.epoch };
-    user.ring.push({ seq, event: safeEvent });
+    const envelope: RouteEnvelope = { event: { ...event, seq, epoch: user.epoch }, heldPaths, heldVps };
+    user.ring.push({ seq, envelope });
     if (user.ring.length > ringSize) user.ring.shift();
     if (user.pushes.size === 0) user.missedOffline = true;
-    for (const push of user.pushes.values()) push(safeEvent);
+    for (const push of user.pushes.values()) push(envelope);
   }
 
   function ensureUser(userId: string) {
@@ -287,7 +324,7 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
         }
       }
 
-      if (!watchSetsAlive) return false;
+      if (!watchSetsAlive) return { preserved: false, seq: user.seq, epoch: user.epoch };
 
       // Continuity (core-gk8.1): preserved must mean "you missed nothing" —
       // replayed from the ring, or provably no events during the gap. The
@@ -311,8 +348,11 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
         } else if (cSeq === user.seq) {
           covered = true;
         } else if (cSeq < user.seq && user.ring.length > 0 && user.ring[0].seq <= cSeq + 1) {
+          // Replay the STORED envelopes (invariant 26): routes were computed
+          // when the event fired; recomputing here would leak/lose provenance
+          // for holds that changed during the gap.
           for (const entry of user.ring) {
-            if (entry.seq > cSeq) push(entry.event);
+            if (entry.seq > cSeq) push(entry.envelope);
           }
           covered = true;
         } else {
@@ -322,7 +362,7 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
         }
       }
       user.missedOffline = false;
-      return covered;
+      return { preserved: covered, seq: user.seq, epoch: user.epoch };
     },
 
     disconnect(connId) {
@@ -462,8 +502,9 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
         }
         // Continuity held — informational broadcast to every connection;
         // source can't tell which paths each user holds in cache.
+        const envelope: RouteEnvelope = { event, heldPaths: [], heldVps: [] };
         for (const user of users.values()) {
-          for (const push of user.pushes.values()) push(event);
+          for (const push of user.pushes.values()) push(envelope);
         }
         return;
       }

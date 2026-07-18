@@ -48,6 +48,10 @@ export function createClient(conn: Conn, opts?: { token?: string }): WireClient 
       return;
     }
     if (typeof e.seq === 'number' && e.seq > lastSeq) lastSeq = e.seq;
+    // anz4.28e: dirty is the only epoch-stamped frame on a signal-only stream —
+    // without adopting it here the cursor stays epoch-less and resume fails
+    // closed into a reset loop.
+    if (e.ev === 'dirty' && e.epoch !== undefined) epoch = e.epoch;
   });
 
   function ensureEventRouting() {

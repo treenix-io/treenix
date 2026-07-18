@@ -187,9 +187,9 @@ describe('Subscriptions', () => {
     const memberEvents: NodeEvent[] = [];
     const anonEvents: NodeEvent[] = [];
 
-    watcher.connect('legacy-conn', 'legacy', e => legacyEvents.push(e));
-    watcher.connect('member-conn', 'member', e => memberEvents.push(e));
-    watcher.connect('anon-conn', 'anon', e => anonEvents.push(e));
+    watcher.connect('legacy-conn', 'legacy', e => legacyEvents.push(e.event));
+    watcher.connect('member-conn', 'member', e => memberEvents.push(e.event));
+    watcher.connect('anon-conn', 'anon', e => anonEvents.push(e.event));
     watcher.watch('legacy', ['/views/open'], { children: true });
     watcher.watch('member', ['/views/open'], { children: true });
     watcher.watch('anon', ['/views/open'], { children: true });
@@ -503,8 +503,8 @@ describe('ACL change invalidation (Stage 6)', () => {
     const aliceEvents: NodeEvent[] = [];
     const bobEvents: NodeEvent[] = [];
 
-    watcher.connect('alice-conn', 'alice', e => aliceEvents.push(e));
-    watcher.connect('bob-conn', 'bob', e => bobEvents.push(e));
+    watcher.connect('alice-conn', 'alice', e => aliceEvents.push(e.event));
+    watcher.connect('bob-conn', 'bob', e => bobEvents.push(e.event));
     watcher.watch('alice', ['/views/open'], { children: true });
     watcher.watch('bob', ['/views/closed'], { children: true });
 

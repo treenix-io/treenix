@@ -11,7 +11,13 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { NodeData } from '#core';
 import { createFilteredPush, filterPatches } from './watch-filter';
+import type { RouteEnvelope, StampedEvent } from './watch';
 import type { NodeEvent, WireEvent } from './index';
+
+/** Build the per-recipient route envelope the WatchManager delivers (ns6p.4
+ *  §3.4): `held` mirrors which of the recipient's registrations matched. */
+const env = (event: StampedEvent, held?: { paths?: string[]; vps?: string[] }): RouteEnvelope =>
+  ({ event, heldPaths: held?.paths ?? [], heldVps: held?.vps ?? [] });
 
 // ── filterPatches (real implementation, tested directly) ──
 
@@ -221,7 +227,7 @@ describe('F10 — set event uses stored node for ACL, not event payload', () => 
         secret: { $type: 'sec', apiKey: 'sk-real', $acl: [{ g: 'owner', p: R }, { g: 'authenticated', p: 0 }] },
       },
     };
-    filtered(poisoned);
+    filtered(env(poisoned));
 
     // filterEvent is async — wait for microtasks to drain
     await new Promise(r => setImmediate(r));
@@ -232,7 +238,10 @@ describe('F10 — set event uses stored node for ACL, not event payload', () => 
     assert.equal(evt.node['#secret'], undefined, 'secret stripped — bob is not real owner of stored node');
   });
 
-  it('drops set event when stored node is gone (race with remove)', async () => {
+  it('set event whose stored node is gone (race with remove) → payload dropped, invalidate signals the holder', async () => {
+    // ns6p.4 invariant 16: the payload stays dropped (never push writer-supplied
+    // body unverified), but the routed drop must SIGNAL — the exact holder
+    // refetches, sees the node gone, and evicts instead of staling forever.
     const tree = createMemoryTree();
 
     const node: NodeData = {
@@ -250,10 +259,14 @@ describe('F10 — set event uses stored node for ACL, not event payload', () => 
     const stale: NodeEvent = {
       type: 'set', path: '/x', node: { $type: 't', $acl: [{ g: 'authenticated', p: R }] },
     };
-    filtered(stale);
+    filtered(env(stale, { paths: ['/x'] }));
     await new Promise(r => setImmediate(r));
 
-    assert.equal(events.length, 0, 'stale set event dropped — stored node gone');
+    assert.equal(events.length, 1, 'routed drop must signal, never silence');
+    const ev = events[0];
+    if (ev.type !== 'invalidate') throw new Error(`expected invalidate, got ${ev.type}`);
+    assert.deepEqual(ev.paths, ['/x']);
+    assert.ok(!('node' in ev), 'no payload leaked');
   });
 });
 
@@ -298,8 +311,8 @@ describe('filteredPush — serialized per-session delivery', () => {
       if (delivered.length === 2) done();
     });
 
-    filtered({ type: 'patch', path: '/slow', patches: [['r', 'x', 1]], rev: 2 });
-    filtered({ type: 'patch', path: '/fast', patches: [['r', 'x', 1]], rev: 2 });
+    filtered(env({ type: 'patch', path: '/slow', patches: [['r', 'x', 1]], rev: 2 }));
+    filtered(env({ type: 'patch', path: '/fast', patches: [['r', 'x', 1]], rev: 2 }));
     await all;
 
     assert.deepEqual(delivered, ['/slow', '/fast']);
@@ -316,14 +329,16 @@ describe('filteredPush — serialized per-session delivery', () => {
       if (delivered.length === 2) done();
     });
 
-    filtered({ type: 'patch', path: '/slow', patches: [['r', 'x', 1]], rev: 2 });
-    filtered({ type: 'reconnect', preserved: true });
+    filtered(env({ type: 'patch', path: '/slow', patches: [['r', 'x', 1]], rev: 2 }));
+    filtered(env({ type: 'reconnect', preserved: true }));
     await all;
 
     assert.deepEqual(delivered, ['patch', 'reconnect']);
   });
 
-  it('a failing event is dropped but the chain recovers and stays ordered', async () => {
+  it('a failing event falls back to an invalidate (loud), the chain recovers and stays ordered', async (t) => {
+    // ns6p.4 invariant 16: a filter exception fails closed on the PAYLOAD but
+    // must still signal the holder — silence would freeze their cache forever.
     const base = await setupNodes();
     const failing: typeof base = {
       ...base,
@@ -332,20 +347,27 @@ describe('filteredPush — serialized per-session delivery', () => {
         return base.get(path, ctx);
       },
     };
+    const errors = t.mock.method(console, 'error');
 
-    const delivered: string[] = [];
+    const delivered: WireEvent[] = [];
     let done!: () => void;
     const all = new Promise<void>(r => { done = r; });
     const filtered = createFilteredPush(failing, 'bob', CLAIMS, (e) => {
-      delivered.push((e as { path?: string }).path ?? e.type);
-      done();
+      delivered.push(e);
+      if (delivered.length === 2) done();
     });
 
-    filtered({ type: 'patch', path: '/slow', patches: [['r', 'x', 1]], rev: 2 });
-    filtered({ type: 'patch', path: '/fast', patches: [['r', 'x', 1]], rev: 2 });
+    filtered(env({ type: 'patch', path: '/slow', patches: [['r', 'x', 1]], rev: 2 }, { paths: ['/slow'] }));
+    filtered(env({ type: 'patch', path: '/fast', patches: [['r', 'x', 1]], rev: 2 }));
     await all;
 
-    assert.deepEqual(delivered, ['/fast'], 'failing event dropped, next event still delivered');
+    assert.equal(delivered.length, 2);
+    const fallback = delivered[0];
+    if (fallback.type !== 'invalidate') throw new Error(`expected invalidate fallback, got ${fallback.type}`);
+    assert.deepEqual(fallback.paths, ['/slow'], 'provenance-held path signalled');
+    assert.ok(!('patches' in fallback), 'no payload leaked through the failure');
+    assert.equal((delivered[1] as { path?: string }).path, '/fast', 'chain recovered, order kept');
+    assert.ok(errors.mock.calls.length >= 1, 'the failure is logged, not swallowed');
   });
 });
 
@@ -365,7 +387,10 @@ describe('watch-filter — invalidate fallback on ACL-dropped events', () => {
 
     const events: WireEvent[] = [];
     const filtered = createFilteredPush(tree, 'bob', BOB, (e) => events.push(e));
-    filtered({ type: 'set', path: '/x', node: { $type: 't', title: 'hi' }, invalidateVps: ['/views/open'], seq: 7 });
+    filtered(env(
+      { type: 'set', path: '/x', node: { $type: 't', title: 'hi' }, invalidateVps: ['/views/open'], seq: 7, epoch: 'E1' },
+      { vps: ['/views/open'] },
+    ));
     await drain();
 
     assert.equal(events.length, 1, 'invalidate delivered despite the reader losing access');
@@ -373,7 +398,9 @@ describe('watch-filter — invalidate fallback on ACL-dropped events', () => {
     if (ev.type !== 'invalidate') throw new Error(`expected invalidate, got ${ev.type}`);
     assert.deepEqual(ev.vps, ['/views/open']);
     assert.equal(ev.seq, 7, 'seq preserved so the resume watermark advances in lockstep');
+    assert.equal(ev.epoch, 'E1', 'epoch preserved — a signal-only client must still learn it (anz4.28e)');
     assert.ok(!('path' in ev), 'no node path leaked to a reader who cannot see it');
+    assert.ok(!('paths' in ev), 'vp-only recipient: held no exact path, learns no path');
     assert.ok(!('node' in ev), 'no payload leaked');
   });
 
@@ -387,7 +414,10 @@ describe('watch-filter — invalidate fallback on ACL-dropped events', () => {
     const events: WireEvent[] = [];
     const filtered = createFilteredPush(tree, 'bob', BOB, (e) => events.push(e));
     // bob has R on /x but not on #secret — the only op targets the hidden comp
-    filtered({ type: 'patch', path: '/x', patches: [['r', '#secret.k', 'v2']], rev: 3, invalidateVps: ['/views/open'] });
+    filtered(env(
+      { type: 'patch', path: '/x', patches: [['r', '#secret.k', 'v2']], rev: 3, invalidateVps: ['/views/open'] },
+      { vps: ['/views/open'] },
+    ));
     await drain();
 
     assert.equal(events.length, 1);
@@ -402,7 +432,7 @@ describe('watch-filter — invalidate fallback on ACL-dropped events', () => {
 
     const events: WireEvent[] = [];
     const filtered = createFilteredPush(tree, 'bob', BOB, (e) => events.push(e));
-    filtered({ type: 'remove', path: '/secret/doc', invalidateVps: ['/views/open'] });
+    filtered(env({ type: 'remove', path: '/secret/doc', invalidateVps: ['/views/open'] }, { vps: ['/views/open'] }));
     await drain();
 
     assert.equal(events.length, 1);
@@ -411,16 +441,65 @@ describe('watch-filter — invalidate fallback on ACL-dropped events', () => {
     assert.deepEqual(ev.vps, ['/views/open']);
   });
 
-  it('dropped event WITHOUT invalidateVps emits nothing — no spurious refetch', async () => {
+  it('exact-path holder: dropped payload → invalidate names the HELD path (ns6p.4 §3.4)', async () => {
+    // Pre-slice-1 this was the silent-drop hole: no invalidateVps → nothing
+    // emitted, the exact holder kept a stale cache forever. Invariant 16:
+    // every routed drop signals; provenance bounds what it may name.
     const tree = createMemoryTree();
     await tree.set({ $path: '/x', $type: 't', $acl: [{ g: 'authenticated', p: 0 }], title: 'hi' } as NodeData);
 
     const events: WireEvent[] = [];
     const filtered = createFilteredPush(tree, 'bob', BOB, (e) => events.push(e));
-    filtered({ type: 'set', path: '/x', node: { $type: 't', title: 'hi' } });
+    filtered(env({ type: 'set', path: '/x', node: { $type: 't', title: 'hi' }, seq: 3, epoch: 'E1' }, { paths: ['/x'] }));
     await drain();
 
-    assert.equal(events.length, 0, 'no dirty views → no invalidate');
+    assert.equal(events.length, 1, 'routed drop must signal the exact holder');
+    const ev = events[0];
+    if (ev.type !== 'invalidate') throw new Error(`expected invalidate, got ${ev.type}`);
+    assert.deepEqual(ev.paths, ['/x'], 'held path named — recipient already holds it, no reveal');
+    assert.deepEqual(ev.vps, [], 'vps stays present (min []) for old clients');
+    assert.equal(ev.seq, 3);
+    assert.equal(ev.epoch, 'E1');
+    assert.ok(!('node' in ev), 'no payload leaked');
+  });
+
+  it('same dropped event, vp-only recipient: vps only, NEVER the source path (anz4.27-adjacent pin)', async () => {
+    const tree = createMemoryTree();
+    await tree.set({ $path: '/x', $type: 't', $acl: [{ g: 'authenticated', p: 0 }], title: 'hi' } as NodeData);
+
+    const events: WireEvent[] = [];
+    const filtered = createFilteredPush(tree, 'bob', BOB, (e) => events.push(e));
+    // Routed to this recipient only via their query view — the envelope holds
+    // no exact path, so the fallback may not name one.
+    filtered(env(
+      { type: 'set', path: '/x', node: { $type: 't', title: 'hi' }, invalidateVps: ['/views/open'], seq: 4 },
+      { vps: ['/views/open'] },
+    ));
+    await drain();
+
+    assert.equal(events.length, 1);
+    const ev = events[0];
+    if (ev.type !== 'invalidate') throw new Error(`expected invalidate, got ${ev.type}`);
+    assert.deepEqual(ev.vps, ['/views/open']);
+    assert.ok(!('paths' in ev), 'hidden source path stays hidden from a vp-only recipient');
+    assert.ok(!('path' in ev), 'no bare path either');
+  });
+
+  it('drop with empty provenance still signals (seq watermark advances, nothing named)', async () => {
+    const tree = createMemoryTree();
+    await tree.set({ $path: '/x', $type: 't', $acl: [{ g: 'authenticated', p: 0 }], title: 'hi' } as NodeData);
+
+    const events: WireEvent[] = [];
+    const filtered = createFilteredPush(tree, 'bob', BOB, (e) => events.push(e));
+    filtered(env({ type: 'set', path: '/x', node: { $type: 't', title: 'hi' }, seq: 5 }));
+    await drain();
+
+    assert.equal(events.length, 1, 'invariant 16: every routed drop produces a signal');
+    const ev = events[0];
+    if (ev.type !== 'invalidate') throw new Error(`expected invalidate, got ${ev.type}`);
+    assert.deepEqual(ev.vps, []);
+    assert.ok(!('paths' in ev));
+    assert.equal(ev.seq, 5);
   });
 
   it('reader RETAINS access → normal data event with invalidateVps, no invalidate frame', async () => {
@@ -429,7 +508,10 @@ describe('watch-filter — invalidate fallback on ACL-dropped events', () => {
 
     const events: WireEvent[] = [];
     const filtered = createFilteredPush(tree, 'bob', BOB, (e) => events.push(e));
-    filtered({ type: 'set', path: '/x', node: { $type: 't', title: 'hi' }, invalidateVps: ['/views/open'], seq: 4 });
+    filtered(env(
+      { type: 'set', path: '/x', node: { $type: 't', title: 'hi' }, invalidateVps: ['/views/open'], seq: 4 },
+      { vps: ['/views/open'] },
+    ));
     await drain();
 
     assert.equal(events.length, 1);

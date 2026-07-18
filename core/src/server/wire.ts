@@ -10,8 +10,8 @@ import { withAcl } from '#security/acl-tree';
 import { buildClaims } from '#security/claims';
 import { getPageReadPlan } from '#security/read-page';
 import type { Session } from '#security/sessions';
-import { type NodeEvent, type WireEvent } from '#sub';
-import { type WatchCursor, type WatchManager } from '#sub/watch';
+import { type InvalidateEvent, type WireEvent } from '#sub';
+import { type ConnectVerdict, type StampedEvent, type WatchCursor, type WatchManager } from '#sub/watch';
 import { createFilteredPush } from '#sub/watch-filter';
 import type { Tree } from '#tree';
 import { buildActor, executeStream, withExecute, type WithExecuteOpts } from './actions';
@@ -53,18 +53,29 @@ export type WireSession = ReturnType<typeof createWireSession>;
  *  `reconnect` becomes `reset` only when continuity was lost.
  *  seq/by come stamped from WatchManager delivery (core-gk8.1); dirty frames
  *  are facets of the same event and share its seq — the cursor is a
- *  watermark, clients track max(seen). */
-export function toEventFrames(e: WireEvent): EventFrame[] {
-  if (e.type === 'reconnect') {
-    return e.preserved ? [] : [{ ev: 'reset', reason: 'resume' }];
-  }
-  // Pathless invalidate (core-dm1) → one dirty frame per view, no data facet.
-  if (e.type === 'invalidate') {
-    return e.vps.map(vp => ({ ...(e.seq === undefined ? {} : { seq: e.seq }), ev: 'dirty', path: vp }));
-  }
+ *  watermark, clients track max(seen). Signal frames (dirty/reset) also carry
+ *  the stream epoch (anz4.28e): a dirty-only client must learn it or its
+ *  resume cursor fails closed. Data frames stay epoch-free (owner-approved
+ *  additive surface is dirty/invalidate + the existing reset fields, §6). */
+export function toEventFrames(e: StampedEvent | InvalidateEvent): EventFrame[] {
   // Frames must omit absent fields, not carry undefined: structured-clone
   // transports preserve undefined keys while JSON transports drop them —
   // explicit omission keeps the wire identical everywhere.
+  const sig = {
+    ...(e.seq === undefined ? {} : { seq: e.seq }),
+    ...(e.epoch === undefined ? {} : { epoch: e.epoch }),
+  };
+  if (e.type === 'reconnect') {
+    // A ring-routed break arrives stamped — the reset must carry {seq, epoch}
+    // so the client adopts the post-break cursor (anz4.10/11).
+    return e.preserved ? [] : [{ ev: 'reset', reason: 'resume', ...sig }];
+  }
+  // Pathless invalidate (core-dm1) → one dirty frame per view — plus one per
+  // provenance-held exact path (ns6p.4 §3.4; already recipient-scoped
+  // upstream, so emission here reveals nothing new).
+  if (e.type === 'invalidate') {
+    return [...e.vps, ...(e.paths ?? [])].map(p => ({ ...sig, ev: 'dirty', path: p }));
+  }
   const meta = {
     ...(e.seq === undefined ? {} : { seq: e.seq }),
     ...(e.by === undefined ? {} : { by: e.by }),
@@ -78,7 +89,7 @@ export function toEventFrames(e: WireEvent): EventFrame[] {
   } else frames.push({ ...meta, ev: 'rm', path: e.path });
 
   for (const vp of e.invalidateVps ?? []) {
-    frames.push({ ...(e.seq === undefined ? {} : { seq: e.seq }), ev: 'dirty', path: vp });
+    frames.push({ ...sig, ev: 'dirty', path: vp });
   }
   return frames;
 }
@@ -144,23 +155,28 @@ export function createWireSession(deps: WireDeps, session: Session) {
 
   /** Event lane: ACL-filtered push wired into the WatchManager.
    *  `since` = client's last processed seq — the ring replays the gap
-   *  through the SAME filter (claims drift re-applies, core-gk8.1). */
-  function connectEvents(push: (e: WireEvent) => void, since?: number | WatchCursor, token?: string): { connId: string; preserved: boolean } {
+   *  through the SAME filter (claims drift re-applies, core-gk8.1).
+   *  The verdict's {seq, epoch} is for the lane's INITIAL frame (anz4.28e):
+   *  stamped there, even a client that then sees only signal frames holds an
+   *  epoch-bearing cursor and can resume covered. */
+  function connectEvents(push: (e: WireEvent) => void, since?: number | WatchCursor, token?: string): { connId: string } & ConnectVerdict {
     const sessionClaims = session.claims?.length ? session.claims : null;
     const claimsTtlMs = deps.opts?.claimsTtlMs ?? DEFAULT_CLAIMS_TTL_MS;
     const filtered = createFilteredPush(deps.systemTree, userId, sessionClaims, push, { claimsTtlMs });
     const connId = `${userId}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
-    const preserved = deps.watcher.connect(connId, userId, filtered, since, token);
-    return { connId, preserved };
+    const verdict = deps.watcher.connect(connId, userId, filtered, since, token);
+    return { connId, ...verdict };
   }
 
   /** Event lane in TWP frames — native bindings (port/WS). The initial
-   *  continuity verdict maps to a reset frame when watches were not preserved. */
+   *  continuity verdict maps to a reset frame when watches were not preserved,
+   *  stamped with the current {seq, epoch} (anz4.28e) so the reset teaches the
+   *  client a resumable cursor instead of looping through resets forever. */
   function connectEventFrames(emit: (f: EventFrame) => void, since?: number | WatchCursor, token?: string): { connId: string } {
-    const { connId, preserved } = connectEvents((e) => {
+    const { connId, preserved, seq, epoch } = connectEvents((e) => {
       for (const f of toEventFrames(e)) emit(f);
     }, since, token);
-    if (!preserved) emit({ ev: 'reset', reason: 'resume' });
+    if (!preserved) emit({ ev: 'reset', reason: 'resume', seq, epoch });
     return { connId };
   }
 

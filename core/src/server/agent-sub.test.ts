@@ -42,7 +42,7 @@ describe('Agent task subscription', () => {
 
     // Simulate user: connect SSE + register prefix watch
     const events: NodeEvent[] = [];
-    watcher.connect('conn1', 'user1', (e) => events.push(e));
+    watcher.connect('conn1', 'user1', (e) => events.push(e.event));
     watcher.watch('user1', ['/agent/tasks'], { children: true, autoWatch: true });
 
     // Execute the action (same as trpc.execute.mutate)
@@ -79,7 +79,7 @@ describe('Agent task subscription', () => {
     await tree.set(createNode('/agent/tasks', 'dir'));
 
     const events: NodeEvent[] = [];
-    watcher.connect('c1', 'u1', (e) => events.push(e));
+    watcher.connect('c1', 'u1', (e) => events.push(e.event));
     watcher.watch('u1', ['/agent/tasks'], { children: true, autoWatch: true });
 
     await executeAction(tree, '/agent', undefined, undefined, 'task', { prompt: 'hello' });

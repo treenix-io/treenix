@@ -193,4 +193,20 @@ describe('TWP wire client', () => {
     assert.equal(got.filter((f) => f.ev === 'reset').length, 2);
     assert.equal(gotB.filter((f) => f.ev === 'reset').length, 2);
   });
+
+  it('cursor adopts epoch from dirty frames — a signal-only client can resume covered (anz4.28e)', async () => {
+    const { client, server } = await harness();
+
+    // Dirty-only stream: no data frames, no reset — pre-slice-1 the epoch
+    // stayed undefined and every resume failed closed into a reset loop.
+    server.emit({ seq: 4, ev: 'dirty', path: '/views/q', epoch: 'E9' });
+    await new Promise<void>((r) => setImmediate(r));
+    assert.deepEqual(client.cursor(), { seq: 4, epoch: 'E9' });
+
+    // Unstamped dirty (old server): watermark still advances, epoch keeps its
+    // last known value.
+    server.emit({ seq: 5, ev: 'dirty', path: '/views/q' });
+    await new Promise<void>((r) => setImmediate(r));
+    assert.deepEqual(client.cursor(), { seq: 5, epoch: 'E9' });
+  });
 });

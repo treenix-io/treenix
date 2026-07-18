@@ -6,26 +6,33 @@ import { A, isCompKey, isComponent, type NodeData, R } from '#core';
 import type { PatchOp, Tree } from '#tree';
 import { componentPerm, resolvePermission, stripComponents } from '#security/acl';
 import { buildClaims } from '#security/claims';
-import type { NodeEvent, WireEvent } from './index';
+import type { RouteEnvelope } from './watch';
+import type { WireEvent } from './index';
 
 /** Transport-facing push: carries data events AND the pathless invalidate the
  *  filter synthesizes when a data event is ACL-dropped (core-dm1). */
 export type EventPush = (event: WireEvent) => void;
 
-/** WatchManager-facing push: only ever fed CDC data/reconnect events (NodeEvent)
- *  — the invalidate is born inside the filter, never routed in. */
-export type FilteredPush = (event: NodeEvent) => void;
+/** WatchManager-facing push: fed the per-recipient route envelope (ns6p.4
+ *  §3.4) — the invalidate is born inside the filter, never routed in. */
+export type FilteredPush = (envelope: RouteEnvelope) => void;
 
 /** Deliver the coarse invalidate when a data event is about to be dropped by
- *  the ACL filter (core-dm1/0i3). The dropped event named dirty query views in
- *  `invalidateVps`; the reader still watches those views and must refetch, even
- *  though they can no longer read the node that shifted. Carries the event's
- *  seq so the client's resume watermark advances in lockstep with the ring. */
-function invalidateFallback(event: Exclude<NodeEvent, { type: 'reconnect' }>, push: EventPush): void {
-  const vps = event.invalidateVps;
-  if (vps && vps.length > 0) {
-    push({ type: 'invalidate', vps, ...(event.seq === undefined ? {} : { seq: event.seq }) });
-  }
+ *  the ACL filter (core-dm1/0i3, invariant 16: EVERY routed drop signals).
+ *  Provenance-bounded (invariant 26): `paths` only from the recipient's own
+ *  held paths, `vps` only from their held vps (C26-narrowed upstream) — a
+ *  vp-only recipient never learns the hidden source path. Carries the event's
+ *  seq/epoch so the client's resume cursor advances in lockstep with the ring
+ *  even on a signal-only stream (anz4.28e). */
+function invalidateFallback(envelope: RouteEnvelope, push: EventPush): void {
+  const { event, heldPaths, heldVps } = envelope;
+  push({
+    type: 'invalidate',
+    vps: heldVps, // always present, min [] — old clients iterate unconditionally
+    ...(heldPaths.length ? { paths: heldPaths } : {}),
+    ...(event.seq === undefined ? {} : { seq: event.seq }),
+    ...(event.epoch === undefined ? {} : { epoch: event.epoch }),
+  });
 }
 
 export type WatchFilterOpts = {
@@ -102,26 +109,35 @@ export function createFilteredPush(
   // patches silently corrupt the client's patch-based cache (core-gk8.12).
   // An error drops only its own event; the chain recovers and stays ordered.
   let chain: Promise<void> = Promise.resolve();
-  return (event: NodeEvent) => {
-    // R4-WATCH-1: filter still fails closed (event silently dropped) for confidentiality —
+  return (envelope: RouteEnvelope) => {
+    // R4-WATCH-1: filter still fails closed (payload dropped) for confidentiality —
     // a thrown filter must NEVER push a possibly-leaky event. But the swallow violates
-    // "fail loud": log so policy/storage bugs surface in operations.
+    // "fail loud": log so policy/storage bugs surface in operations, AND emit the
+    // provenance-bounded invalidate (invariant 16) — it carries no payload, only the
+    // recipient's own registrations, so the holder refetches instead of staling forever.
     chain = chain
-      .then(() => filterEvent(store, event, userId, getClaims, push))
+      .then(() => filterEvent(store, envelope, userId, getClaims, push))
       .catch(err => {
-        const path = (event as { path?: string }).path ?? '<no-path>';
+        const event = envelope.event;
+        const path = 'path' in event ? event.path : '<no-path>';
         console.error('[watch-filter] dropped %s event for user=%s path=%s: %s', event.type, userId, path, (err as Error)?.message ?? err);
+        if (event.type === 'reconnect') return;
+        try { invalidateFallback(envelope, push); }
+        catch (fbErr) {
+          console.error('[watch-filter] invalidate fallback failed for user=%s path=%s:', userId, path, fbErr);
+        }
       });
   };
 }
 
 async function filterEvent(
   store: Tree,
-  event: NodeEvent,
+  envelope: RouteEnvelope,
   userId: string,
   getClaims: () => Promise<string[]>,
   push: EventPush,
 ) {
+  const { event } = envelope;
   if (event.type === 'reconnect') { push(event); return; }
 
   // Remove: node is already deleted — check parent ACL instead.
@@ -131,28 +147,31 @@ async function filterEvent(
     const parent = event.path.slice(0, event.path.lastIndexOf('/')) || '/';
     const perm = await resolvePermission(store, parent, userId, claims);
     if (perm & R) push(event);
-    else invalidateFallback(event, push);
+    else invalidateFallback(envelope, push);
     return;
   }
 
   const claims = await getClaims();
   const perm = await resolvePermission(store, event.path, userId, claims);
-  if (!(perm & R)) { invalidateFallback(event, push); return; }
+  if (!(perm & R)) { invalidateFallback(envelope, push); return; }
 
   if (event.type === 'set' && event.node) {
     // ACL must come from stored node, not event payload — writer-supplied $owner/$acl in body would otherwise grant view.
     const stored = await store.get(event.path);
-    if (!stored) return;
+    // Node vanished mid-emit (race with remove): the payload is undeliverable,
+    // but the routed drop must still signal (invariant 16) — the holder
+    // refetches and sees the node gone.
+    if (!stored) { invalidateFallback(envelope, push); return; }
     const stripped = stripComponents(stored, userId, claims);
     const { $path, ...body } = stripped;
     push({ ...event, node: body });
   } else if (event.type === 'patch' && event.patches.length > 0) {
     // Fail closed if stored node disappeared mid-emit — never push raw writer-supplied patches without filtering.
     const node = await store.get(event.path);
-    if (!node) return;
+    if (!node) { invalidateFallback(envelope, push); return; }
     const hasNodeA = !!(perm & A);
     const filtered = filterPatches(event.patches, node, userId, claims, hasNodeA);
-    if (filtered.length === 0) { invalidateFallback(event, push); return; }
+    if (filtered.length === 0) { invalidateFallback(envelope, push); return; }
     push(filtered.length === event.patches.length ? event : { ...event, patches: filtered });
   } else {
     push(event);

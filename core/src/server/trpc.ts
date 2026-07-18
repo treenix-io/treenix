@@ -18,7 +18,7 @@ import { devLogin, loginUser, logoutUser, registerUser } from '#security/ops';
 import { OpError } from '#errors';
 import type { ErrFrame, ResFrame } from '#protocol/frames';
 import { type WireEvent } from '#sub';
-import { type WatchManager } from '#sub/watch';
+import { type StampedEvent, type WatchManager } from '#sub/watch';
 import { setComponent as setComponentOp } from './actions';
 import { deployPrefab as deployPrefabOp } from './prefab';
 import { createWireSession, type SessionExecutor, type WireDeps } from './wire';
@@ -370,8 +370,13 @@ export function createTreeRouter(tree: Tree, systemTree: Tree, watcher: WatchMan
         const resume = input?.epoch !== undefined && input?.since !== undefined
           ? { seq: input.since, epoch: input.epoch }
           : input?.since;
-        const { connId, preserved } = ctx.wire.connectEvents((e) => emit.next(e), resume, input?.token);
-        emit.next({ type: 'reconnect', preserved });
+        const { connId, preserved, seq, epoch } = ctx.wire.connectEvents((e) => emit.next(e), resume, input?.token);
+        // Initial verdict carries the stream {seq, epoch} (anz4.28e): a client
+        // that then sees only signal frames still holds an epoch-bearing
+        // cursor — without it, a quiet/dirty-only client resumes epoch-less
+        // and fails closed into a guaranteed reset loop.
+        const verdict: StampedEvent = { type: 'reconnect', preserved, seq, epoch };
+        emit.next(verdict);
         return () => {
           if (expiryTimer) clearTimeout(expiryTimer);
           ctx.wire.disconnectEvents(connId);

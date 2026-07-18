@@ -284,7 +284,7 @@ describe('Stress: watch fan-out', () => {
       const uid = `user-${u}`;
       const events: NodeEvent[] = [];
       received.set(uid, events);
-      watcher.connect(uid, uid, (e) => events.push(e));
+      watcher.connect(uid, uid, (e) => events.push(e.event));
       watcher.watch(uid, ['/shared/doc']);
     }
     console.log('    100 users connected, writing...');
@@ -301,7 +301,7 @@ describe('Stress: watch fan-out', () => {
 
   it('watchChildren — 50 new nodes auto-notified', async () => {
     const events: NodeEvent[] = [];
-    watcher.connect('watcher', 'watcher', (e) => events.push(e));
+    watcher.connect('watcher', 'watcher', (e) => events.push(e.event));
     watcher.watch('watcher', ['/items'], { children: true });
 
     for (let i = 0; i < 50; i++)
@@ -313,7 +313,7 @@ describe('Stress: watch fan-out', () => {
 
   it('autoWatch — subsequent updates delivered via exact watch', async () => {
     const events: NodeEvent[] = [];
-    watcher.connect('auto', 'auto', (e) => events.push(e));
+    watcher.connect('auto', 'auto', (e) => events.push(e.event));
     watcher.watch('auto', ['/auto'], { children: true, autoWatch: true });
 
     await tree.set(createNode('/auto/target', 'item', { v: 1 }));
@@ -327,7 +327,7 @@ describe('Stress: watch fan-out', () => {
 
   it('disconnected user stops receiving events', async () => {
     const events: NodeEvent[] = [];
-    watcher.connect('ephemeral', 'ephemeral', (e) => events.push(e));
+    watcher.connect('ephemeral', 'ephemeral', (e) => events.push(e.event));
     watcher.watch('ephemeral', ['/bye/node']);
 
     await tree.set(createNode('/bye/node', 'item'));
@@ -474,7 +474,7 @@ describe('Stress: query mounts + CDC', () => {
 
     cdc.watchQuery({ vp: '/views/urgent', userId: 'user1', plan: { source: '/entities/tickets', viewWhere: { priority: 'high' } }, mountDeps: new Set(['/views/urgent']) });
     const events: NodeEvent[] = [];
-    watcher.connect('user1', 'user1', (e) => events.push(e));
+    watcher.connect('user1', 'user1', (e) => events.push(e.event));
     watcher.watch('user1', ['/views/urgent'], { children: true });
 
     // Low priority — no CDC
@@ -508,7 +508,7 @@ describe('Stress: query mounts + CDC', () => {
     cdc.watchQuery({ vp: '/views/new', userId: 'watcher', plan: { source: '/entities/orders', viewWhere: { status: 'new' } }, mountDeps: new Set(['/views/new']) });
 
     const dirty: string[] = [];
-    watcher.connect('watcher', 'watcher', (e) => {
+    watcher.connect('watcher', 'watcher', ({ event: e }) => {
       if ('invalidateVps' in e && e.invalidateVps?.length) dirty.push((e as { path: string }).path);
     });
     watcher.watch('watcher', ['/views/new'], { children: true });
@@ -553,7 +553,7 @@ describe('Stress: query mounts + CDC', () => {
     cdc.watchQuery({ vp: '/views/flagged', userId: 'u1', plan: { source: '/entities/items', viewWhere: { flagged: true } }, mountDeps: new Set(['/views/flagged']) });
 
     const events: NodeEvent[] = [];
-    watcher.connect('u1', 'u1', (e) => events.push(e));
+    watcher.connect('u1', 'u1', (e) => events.push(e.event));
     watcher.watch('u1', ['/views/new', '/views/flagged'], { children: true });
 
     await tree.set(createNode('/entities/items/x', 'item', { status: 'new', flagged: true }));
@@ -873,7 +873,7 @@ describe('Stress: full watch pipeline', () => {
     const childEvents: NodeEvent[] = [];
     const cdcEvents: NodeEvent[] = [];
 
-    w2.connect('observer', 'observer', (e) => {
+    w2.connect('observer', 'observer', ({ event: e }) => {
       const path = 'path' in e ? e.path : '';
       if (path === '/data/tracked') exactEvents.push(e);
       if ('invalidateVps' in e && (e as any).invalidateVps?.includes('/views/hot')) cdcEvents.push(e);

@@ -62,6 +62,30 @@ function refetchDirtyVp(vp: string, loadChildren: LoadChildren) {
   }, DIRTY_COALESCE_MS));
 }
 
+type FetchNode = (path: string) => Promise<NodeData | null | undefined>;
+
+// Exact-path invalidation (ns6p.4 §3.4): the server dropped the payload for a
+// path this client holds (ACL) — refetch through the normal read path. A
+// denied/gone refetch must EVICT: the entry is known-stale and the reader may
+// no longer see the node at all; keeping it freezes stale data forever.
+// Coalesced like vp refetches. `fetchNode` is injected so tests can stub it.
+const invalidatedTimers = new Map<string, ReturnType<typeof setTimeout>>();
+export function refetchInvalidatedPath(path: string, fetchNode: FetchNode) {
+  if (invalidatedTimers.has(path)) return;
+  invalidatedTimers.set(path, setTimeout(() => {
+    invalidatedTimers.delete(path);
+    fetchNode(path).then(
+      (n) => { if (n) cache.put(n); else cache.remove(path); },
+      (err: unknown) => {
+        console.error('[sse] refetch of invalidated %s failed — evicting:', path, err);
+        cache.remove(path);
+      },
+    );
+  }, DIRTY_COALESCE_MS));
+}
+
+const fetchInvalidatedNode: FetchNode = (path) => trpc.get.query({ path });
+
 function isUnauthorized(err: unknown): boolean {
   const data = (err as { data?: { code?: string; httpStatus?: number } }).data;
   return data?.code === 'UNAUTHORIZED' || data?.httpStatus === 401;
@@ -192,9 +216,12 @@ export function startEvents(config: EventsConfig = {}, resume = false) {
       // Pathless coarse invalidate (core-dm1): the mutated node is unreadable to
       // us now (ACL revocation) so no set/patch arrives, but named query views
       // still shifted — refetch each through the normal ACL-filtered read path.
+      // `paths` (ns6p.4 §3.4) names exact registrations we hold whose payload
+      // was dropped — refetch the node itself; FORBIDDEN/gone evicts.
       if (event.type === 'invalidate') {
         if (typeof event.seq === 'number' && event.seq > lastSeq) lastSeq = event.seq;
         if (loadChildren) for (const vp of event.vps) refetchDirtyVp(vp, loadChildren);
+        for (const p of event.paths ?? []) refetchInvalidatedPath(p, fetchInvalidatedNode);
         return;
       }
 
@@ -276,6 +303,8 @@ export function stopEvents() {
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
   for (const t of dirtyTimers.values()) clearTimeout(t);
   dirtyTimers.clear();
+  for (const t of invalidatedTimers.values()) clearTimeout(t);
+  invalidatedTimers.clear();
   if (unsub) { unsub(); unsub = null; }
   if (tokenWaitTimer) { clearInterval(tokenWaitTimer); tokenWaitTimer = null; }
   if (tokenWaitListener && typeof window !== 'undefined') {

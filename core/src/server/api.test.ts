@@ -681,7 +681,7 @@ describe('tRPC API integration', () => {
   describe('watch', () => {
     it('exact path watch receives events', async () => {
       const received: DataEvent[] = [];
-      watcher.connect('watcher1', 'watcher1', (e) => received.push(e as DataEvent));
+      watcher.connect('watcher1', 'watcher1', (e) => received.push(e.event as DataEvent));
       watcher.watch('watcher1', ['/w']);
 
       await caller.set({ node: { $path: '/w', $type: 'doc' } });
@@ -691,7 +691,7 @@ describe('tRPC API integration', () => {
 
     it('children watch receives child events', async () => {
       const received: DataEvent[] = [];
-      watcher.connect('watcher2', 'watcher2', (e) => received.push(e as DataEvent));
+      watcher.connect('watcher2', 'watcher2', (e) => received.push(e.event as DataEvent));
       watcher.watch('watcher2', ['/parent'], { children: true });
 
       await caller.set({ node: { $path: '/parent', $type: 'folder' } });
@@ -702,7 +702,7 @@ describe('tRPC API integration', () => {
 
     it('unwatch stops receiving events', async () => {
       const received: DataEvent[] = [];
-      watcher.connect('watcher3', 'watcher3', (e) => received.push(e as DataEvent));
+      watcher.connect('watcher3', 'watcher3', (e) => received.push(e.event as DataEvent));
       watcher.watch('watcher3', ['/uw']);
 
       await caller.set({ node: { $path: '/uw', $type: 'doc' } });

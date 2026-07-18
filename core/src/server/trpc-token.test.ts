@@ -31,7 +31,7 @@ async function harness() {
   // Direct push lane: if the user still holds the path, notify routes here.
   const received: StampedEvent[] = [];
   const waiters: ((e: StampedEvent) => void)[] = [];
-  watcher.connect(`${USER}:lane`, USER, (e) => {
+  watcher.connect(`${USER}:lane`, USER, ({ event: e }) => {
     received.push(e);
     waiters.splice(0).forEach((w) => w(e));
   });
@@ -97,5 +97,24 @@ describe('tRPC token threading (anz4.28 slice 0)', () => {
     const p = nextEvent();
     notify({ type: 'set', path: '/dir/new', node: { $path: '/dir/new', $type: 'dir' } });
     assert.equal(pathOf(await p), '/dir/new', 'tab-2 prefix hold survived tab-1 release');
+  });
+
+  it('events verdict: the initial reconnect carries {seq, epoch} (anz4.28e, ns6p.4 slice 1)', async () => {
+    const { caller } = await harness();
+
+    const obs = await caller.events({ token: 'tab-1' });
+    const first = await new Promise<{ type?: string; seq?: unknown; epoch?: unknown }>((resolve, reject) => {
+      const sub = obs.subscribe({
+        next: (e) => {
+          resolve(e);
+          queueMicrotask(() => sub.unsubscribe());
+        },
+        error: reject,
+      });
+    });
+
+    assert.equal(first.type, 'reconnect');
+    assert.equal(typeof first.seq, 'number', 'verdict must carry the current seq');
+    assert.equal(typeof first.epoch, 'string', 'verdict must carry the stream epoch — a signal-only client needs it to resume');
   });
 });

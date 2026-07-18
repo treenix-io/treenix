@@ -79,7 +79,10 @@ export type ResFrame = OkFrame | ErrFrame | ChFrame | EndFrame;
 export type SetEvent   = { seq?: number; ev: 'set'; path: string; node: Record<string, unknown>; by?: string };
 export type PatchEvent = { seq?: number; ev: 'patch'; path: string; ops: PatchOp[]; rev?: number; by?: string };
 export type RmEvent    = { seq?: number; ev: 'rm'; path: string; by?: string };
-export type DirtyEvent = { seq?: number; ev: 'dirty'; path: string; reason?: 'plan' | 'visibility' | 'claims'; dead?: boolean };
+// dirty.epoch (anz4.28e, ns6p.4 §4.5 — owner-approved additive field): dirty
+// is the only stamped frame a signal-only client sees; without the epoch its
+// resume cursor stays epoch-less and fails closed into a guaranteed reset loop.
+export type DirtyEvent = { seq?: number; epoch?: string; ev: 'dirty'; path: string; reason?: 'plan' | 'visibility' | 'claims'; dead?: boolean };
 // reset.seq/epoch (core-anz4.10/11): a ring-routed continuity break arrives
 // stamped — the client adopts the break-point watermark + post-break epoch and
 // can resume covered later. A plain verdict reset carries neither; the client

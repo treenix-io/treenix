@@ -66,8 +66,16 @@ export type NodeEvent = TreeEvent & Partial<VpDelta>;
  *  R on the mutated node, or every patch op is ACL-hidden. The watched view
  *  still shifted, so the vp-watcher must refetch. No path, no payload: nothing
  *  for the ACL filter to gate, so it reaches readers who can no longer see the
- *  node that moved — the exact "user losing access leaves stale rows" gap. */
-export type InvalidateEvent = { type: 'invalidate'; vps: string[]; seq?: number };
+ *  node that moved — the exact "user losing access leaves stale rows" gap.
+ *  `vps` is ALWAYS present (min `[]`) — old clients iterate it unconditionally.
+ *  `paths`/`epoch` are ns6p.4 slice-1 additive fields (owner-approved §6):
+ *    paths — exact/prefix registrations of THIS recipient whose payload was
+ *            dropped (invariant 16/26). Populated ONLY from the recipient's
+ *            own route envelope, so a vp-only recipient never learns the
+ *            hidden source path the pathless fallback deliberately hides.
+ *    epoch — stream epoch (anz4.28e): a signal-only client must still learn
+ *            the epoch or its resume cursor fails closed into a reset loop. */
+export type InvalidateEvent = { type: 'invalidate'; vps: string[]; paths?: string[]; seq?: number; epoch?: string };
 
 /** What can travel the event lane to a client: a CDC NodeEvent or a pathless
  *  invalidate. NodeEvent stays free of the wire-only variant so L3 routing

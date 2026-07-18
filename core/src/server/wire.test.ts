@@ -9,7 +9,7 @@ import { OpError } from '#errors';
 import { createPortConn } from '#protocol/port';
 import type { Session } from '#security/sessions';
 import { withSubscriptions } from '#sub';
-import { createWatchManager } from '#sub/watch';
+import { createWatchManager, type WatchCursor } from '#sub/watch';
 import { createMemoryTree, type Tree } from '#tree';
 import assert from 'node:assert/strict';
 import { MessageChannel } from 'node:worker_threads';
@@ -31,7 +31,7 @@ async function harness(perm: number, ringSize?: number) {
   const session: Session = { userId: 'wire-anon', anonymous: true, claims: ['public'] };
   const wire = createWireSession(deps, session);
 
-  function dial(since?: number) {
+  function dial(since?: number | WatchCursor) {
     const { port1, port2 } = new MessageChannel();
     const teardown = attachWireSession(wire, createPortConn(port1), since);
     const client = createClient(createPortConn(port2));
@@ -39,7 +39,15 @@ async function harness(perm: number, ringSize?: number) {
   }
 
   const first = dial();
-  return { tree: tree as Tree, watcher, wire, dial, client: first.client, teardown: first.teardown };
+  return { tree: tree as Tree, memory, watcher, wire, dial, client: first.client, teardown: first.teardown };
+}
+
+/** Assert the frame is a reset stamped with a resumable cursor (anz4.28e). */
+function assertStampedReset(f: { ev?: string; reason?: string; seq?: number; epoch?: string } | undefined): asserts f is { ev: 'reset'; reason: 'resume'; seq: number; epoch: string } {
+  assert.equal(f?.ev, 'reset');
+  assert.equal(f?.reason, 'resume');
+  assert.equal(typeof f?.seq, 'number', 'reset must carry the current seq');
+  assert.equal(typeof f?.epoch, 'string', 'reset must carry the stream epoch');
 }
 
 const isCode = (code: string) => (e: unknown) => e instanceof OpError && e.code === code;
@@ -78,7 +86,7 @@ describe('wire session over MessageChannel', () => {
     });
     await batch;
 
-    assert.deepEqual(frames[0], { ev: 'reset', reason: 'resume' }); // fresh connect → continuity verdict
+    assertStampedReset(frames[0]); // fresh connect → continuity verdict, stamped (anz4.28e)
     const patch = frames.find((f) => f.ev === 'patch');
     assert.deepEqual(patch, { seq: 1, ev: 'patch', path: '/doc', ops: [['r', 'title', 'doc2']] });
     const dirty = frames.filter((f) => f.ev === 'dirty');
@@ -160,7 +168,7 @@ describe('wire session over MessageChannel', () => {
 
     const b = dial(1);
     t.after(() => b.client.destroy());
-    const frames: { ev?: string }[] = [];
+    const frames: { ev?: string; seq?: number }[] = [];
     let gotReset!: () => void;
     const reset = new Promise<void>((r) => { gotReset = r; });
     b.client.watch((e: { ev?: string }) => {
@@ -170,7 +178,9 @@ describe('wire session over MessageChannel', () => {
     await reset;
     await new Promise<void>((r) => setImmediate(r)); // drain anything queued behind it
 
-    assert.deepEqual(frames, [{ ev: 'reset', reason: 'resume' }]);
+    assert.equal(frames.length, 1, 'reset only — never a stale replay');
+    assertStampedReset(frames[0]);
+    assert.equal(frames[0].seq, 3, 'reset teaches the current watermark so the NEXT resume can be covered');
   });
 
   it('stale cursor → reset frame, never a partial replay (gk8.1)', async (t) => {
@@ -194,7 +204,107 @@ describe('wire session over MessageChannel', () => {
     await reset;
     await new Promise<void>((r) => setImmediate(r)); // drain anything queued behind it
 
-    assert.deepEqual(frames, [{ ev: 'reset', reason: 'resume' }]);
+    assert.equal(frames.length, 1, 'reset only — never a partial replay');
+    assertStampedReset(frames[0]);
+  });
+
+  // ── ns6p.4 slice 1: signal-frame epoch + route-provenance drops ──
+
+  it('signal-only client: dirty carries {seq, epoch}, cursor resumes covered — the reset loop is dead (anz4.28e)', async (t) => {
+    const { memory, watcher, client, teardown, dial } = await harness(R | S);
+    // Node the session cannot read: the ACL filter drops every payload, so
+    // this client lives on dirty frames alone.
+    const hidden = createNode('/hidden', 't', { v: 1 });
+    hidden.$acl = [{ g: 'public', p: 0 }];
+    await memory.set(hidden);
+
+    const frames: { ev?: string; path?: string; seq?: number; epoch?: string }[] = [];
+    let sawDirty!: () => void;
+    const dirty = new Promise<void>((r) => { sawDirty = r; });
+    client.watch((e: { ev?: string }) => {
+      frames.push(e);
+      if (e.ev === 'dirty') sawDirty();
+    });
+    watcher.watch('wire-anon', ['/views/q'], { children: true });
+
+    watcher.notify({ type: 'set', path: '/hidden', node: { $type: 't', v: 2 }, invalidateVps: ['/views/q'] });
+    await dirty;
+
+    const d = frames.find((f) => f.ev === 'dirty');
+    assert.equal(d?.path, '/views/q');
+    assert.equal(d?.seq, 1);
+    const epoch = d?.epoch;
+    if (typeof epoch !== 'string') throw new Error('dirty must carry the stream epoch (anz4.28e)');
+    assert.deepEqual(client.cursor(), { seq: 1, epoch }, 'client adopted the cursor from signal frames alone');
+
+    teardown();
+    client.destroy();
+    watcher.notify({ type: 'set', path: '/hidden', node: { $type: 't', v: 3 }, invalidateVps: ['/views/q'] }); // seq 2 — ringed
+
+    const b = dial({ seq: 1, epoch });
+    t.after(() => b.client.destroy());
+    const resumed: { ev?: string; path?: string; seq?: number }[] = [];
+    let caughtUp!: () => void;
+    const replayed = new Promise<void>((r) => { caughtUp = r; });
+    b.client.watch((e: { ev?: string; seq?: number }) => {
+      resumed.push(e);
+      if (e.ev === 'dirty' && e.seq === 2) caughtUp();
+    });
+    await replayed;
+
+    assert.ok(!resumed.some((f) => f.ev === 'reset'), 'covered resume — no reset, the loop is gone');
+    const rd = resumed.find((f) => f.ev === 'dirty');
+    assert.equal(rd?.path, '/views/q');
+    assert.equal(rd?.seq, 2, 'exactly the gap replayed');
+  });
+
+  it('ring replay reproduces the SAME invalidate(paths) — provenance frozen in the ring, hold release does not rewrite it', async (t) => {
+    const { memory, watcher, client, teardown, dial } = await harness(R | S);
+    const hidden = createNode('/hidden', 't', { v: 1 });
+    hidden.$acl = [{ g: 'public', p: 0 }];
+    await memory.set(hidden);
+
+    // Exact hold on the unreadable path (registered server-side, e.g. before
+    // the ACL flipped): the drop must signal THIS path to THIS holder.
+    watcher.watch('wire-anon', ['/hidden']);
+
+    const frames: { ev?: string; path?: string; seq?: number; epoch?: string }[] = [];
+    let sawDirty!: () => void;
+    const dirty = new Promise<void>((r) => { sawDirty = r; });
+    client.watch((e: { ev?: string }) => {
+      frames.push(e);
+      if (e.ev === 'dirty') sawDirty();
+    });
+
+    watcher.notify({ type: 'set', path: '/hidden', node: { $type: 't', v: 2 } });
+    await dirty;
+
+    const live = frames.find((f) => f.ev === 'dirty');
+    assert.equal(live?.path, '/hidden', 'exact holder gets the held path as a dirty signal');
+    assert.equal(live?.seq, 1);
+    const epoch = live?.epoch;
+    if (typeof epoch !== 'string') throw new Error('dirty must carry the stream epoch (anz4.28e)');
+
+    teardown();
+    client.destroy();
+    // Hold released between event and resume: replay must NOT recompute routes.
+    watcher.unwatch('wire-anon', ['/hidden']);
+
+    // Pre-event cursor under the live epoch — forces a ring replay on resume.
+    const b = dial({ seq: 0, epoch });
+    t.after(() => b.client.destroy());
+    const resumed: { ev?: string; path?: string; seq?: number }[] = [];
+    let caughtUp!: () => void;
+    const replayed = new Promise<void>((r) => { caughtUp = r; });
+    b.client.watch((e: { ev?: string; seq?: number }) => {
+      resumed.push(e);
+      if (e.ev === 'dirty' && e.seq === 1) caughtUp();
+    });
+    await replayed;
+
+    assert.ok(!resumed.some((f) => f.ev === 'reset'), 'covered resume');
+    const rd = resumed.find((f) => f.ev === 'dirty');
+    assert.equal(rd?.path, '/hidden', 'the SAME invalidate(paths) — envelope from the ring, not recomputed');
   });
 });
 
@@ -210,5 +320,28 @@ describe('toEventFrames — pathless invalidate (core-dm1)', () => {
   it('omits seq when unstamped (wire parity across transports)', () => {
     const frames = toEventFrames({ type: 'invalidate', vps: ['/views/a'] });
     assert.deepEqual(frames, [{ ev: 'dirty', path: '/views/a' }]);
+  });
+
+  it('carries epoch on dirty frames and fans provenance paths into dirty (ns6p.4 slice 1)', () => {
+    const frames = toEventFrames({ type: 'invalidate', vps: ['/views/a'], paths: ['/data/x'], seq: 9, epoch: 'E1' });
+    assert.deepEqual(frames, [
+      { seq: 9, epoch: 'E1', ev: 'dirty', path: '/views/a' },
+      { seq: 9, epoch: 'E1', ev: 'dirty', path: '/data/x' },
+    ]);
+  });
+
+  it('stamps the reset from a ring-routed break with {seq, epoch} (anz4.10/11)', () => {
+    const frames = toEventFrames({ type: 'reconnect', preserved: false, seq: 12, epoch: 'E2' });
+    assert.deepEqual(frames, [{ ev: 'reset', reason: 'resume', seq: 12, epoch: 'E2' }]);
+  });
+
+  it('dirty facets of a data event share its seq and epoch', () => {
+    const frames = toEventFrames({
+      type: 'set', path: '/data/x', node: { $type: 't' }, seq: 3, epoch: 'E1', invalidateVps: ['/views/a'],
+    });
+    assert.deepEqual(frames, [
+      { seq: 3, ev: 'set', path: '/data/x', node: { $type: 't' } },
+      { seq: 3, epoch: 'E1', ev: 'dirty', path: '/views/a' },
+    ]);
   });
 });
