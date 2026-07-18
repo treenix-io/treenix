@@ -24,8 +24,12 @@ export type HiOkFrame = { op: 'hi'; ok: { sess: string; seq: number; epoch?: str
 
 // ── requests ──
 
-export type GetFrame     = { id: number; op: 'get'; path: string; watch?: boolean };
-export type ResolveFrame = { id: number; op: 'resolve'; path: string; watch?: boolean };
+// `token` on watch-capable frames = watch-ownership scope (core-anz4.28,
+// ns6p.4 slice 0): identifies the CONSUMER (tab), not the transport socket —
+// registrations arrive as separate HTTP requests with no link to the SSE lane.
+// Optional additive field; absent = shared LEGACY hold (pre-token semantics).
+export type GetFrame     = { id: number; op: 'get'; path: string; watch?: boolean; token?: string };
+export type ResolveFrame = { id: number; op: 'resolve'; path: string; watch?: boolean; token?: string };
 export type LsFrame      = {
   id: number; op: 'ls'; path: string;
   limit?: number; depth?: number;
@@ -35,6 +39,7 @@ export type LsFrame      = {
   watch?: boolean;
   /** Folder membership interest (renamed from watchNew; dirty semantics per gk8.12). */
   watchList?: boolean;
+  token?: string;
 };
 // opId on writes: echoed back as `by` on resulting events (core-gk8.1).
 // Dedup/idempotent retry for plain writes is NOT implemented yet — only act
@@ -48,10 +53,11 @@ export type ActFrame     = {
   /** Subscribe to paths found in the result (R4-MOUNT-5: asserted, capped, R-filtered). */
   watch?: boolean;
   stream?: boolean;
+  token?: string;
 };
 export type PermFrame    = { id: number; op: 'perm'; path: string };
-export type SubFrame     = { id: number; op: 'sub'; paths?: string[]; prefixes?: string[] };
-export type UnsubFrame   = { id: number; op: 'unsub'; paths?: string[]; prefixes?: string[] };
+export type SubFrame     = { id: number; op: 'sub'; paths?: string[]; prefixes?: string[]; token?: string };
+export type UnsubFrame   = { id: number; op: 'unsub'; paths?: string[]; prefixes?: string[]; token?: string };
 
 export type ReqFrame =
   | GetFrame | ResolveFrame | LsFrame | SetFrame | PatchFrame | RmFrame

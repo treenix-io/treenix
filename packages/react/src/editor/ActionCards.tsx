@@ -7,7 +7,7 @@ import { renderField } from '#mods/editor-ui/form-field';
 import { getActions, getActionSchema } from '#mods/editor-ui/node-utils';
 import { useSchema } from '#schema-loader';
 import * as cache from '#tree/cache';
-import { trpc } from '#tree/trpc';
+import { tabTokenInput, trpc } from '#tree/trpc';
 import type { ComponentData, NodeData } from '@treenx/core';
 import type { PropertySchema } from '@treenx/core/schema/types';
 import { useState } from 'react';
@@ -79,7 +79,7 @@ export function ActionCardList({
         }
       }
       const result = await execute(path, a, data, undefined, componentName);
-      const fresh = (await trpc.get.query({ path, watch: true })) as NodeData | undefined;
+      const fresh = (await trpc.get.query({ path, watch: true, ...tabTokenInput })) as NodeData | undefined;
       if (fresh) cache.put(fresh);
       onActionComplete?.();
       setResults((prev) => ({ ...prev, [a]: { ok: true, value: result } }));

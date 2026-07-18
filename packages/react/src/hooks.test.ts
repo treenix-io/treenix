@@ -21,11 +21,15 @@ mock.module('#tree/trpc', {
       set: { mutate: setMutate },
       remove: { mutate: removeMutate },
       execute: { mutate: async () => undefined },
+      unwatch: { mutate: async () => {} },
+      unwatchChildren: { mutate: async () => {} },
     },
     getToken: () => null,
     setToken: () => {},
     clearToken: () => {},
     AUTH_EXPIRED_EVENT: 'trpc:auth-expired',
+    TAB_TOKEN: 'test-tab',
+    tabTokenInput: { token: 'test-tab' },
   },
 });
 

@@ -340,4 +340,73 @@ describe('TWP peer over loopback', () => {
     const { client } = pair(() => ({ tree }));
     await assert.rejects(client.req.get('/a/../b'), isCode('BAD_REQUEST'));
   });
+
+  // ── token threading (core-anz4.28, ns6p.4 slice 0) ──
+  // Every watch-registering op and unsub carries the frame token into hooks —
+  // registration and release must land on the same holder.
+
+  function tokenServe(tree: Awaited<ReturnType<typeof seededTree>>) {
+    const calls: { op: string; paths: string[]; token?: string; children?: boolean }[] = [];
+    const listCalls: { path: string; itemWatch: boolean; token?: string }[] = [];
+    const serve: PeerServe = {
+      tree: Object.assign(Object.create(tree) as typeof tree, {
+        getPerm: async () => (R | S),
+      }),
+      execute: async () => ({ $path: '/target' }),
+      hooks: {
+        watch: (paths, o) => calls.push({ op: 'watch', paths, token: o?.token, children: o?.children }),
+        unwatch: (paths, o) => calls.push({ op: 'unwatch', paths, token: o?.token, children: o?.children }),
+        watchList: (path, _page, itemWatch, token) => listCalls.push({ path, itemWatch, token }),
+      },
+    };
+    return { serve, calls, listCalls };
+  }
+
+  it('get/resolve/act/sub/unsub thread the frame token into hooks', async () => {
+    const tree = await seededTree();
+    const { serve, calls } = tokenServe(tree);
+    const { client } = pair(() => serve);
+
+    await client.req.get('/a', true, 'tok-get');
+    await client.req.resolve('/link', true, 'tok-res');
+    await client.req.act({ path: '/a', action: 'go', watch: true, token: 'tok-act' });
+    await client.req.sub({ paths: ['/a'], prefixes: ['/a'], token: 'tok-sub' });
+    await client.req.unsub({ paths: ['/a'], prefixes: ['/a'], token: 'tok-sub' });
+
+    assert.deepEqual(calls, [
+      { op: 'watch', paths: ['/a'], token: 'tok-get', children: undefined },
+      { op: 'watch', paths: ['/link'], token: 'tok-res', children: undefined },
+      { op: 'watch', paths: ['/target'], token: 'tok-res', children: undefined }, // followed-ref target
+      { op: 'watch', paths: ['/target'], token: 'tok-act', children: undefined }, // R4-MOUNT-5 result watch
+      { op: 'watch', paths: ['/a'], token: 'tok-sub', children: undefined },
+      { op: 'watch', paths: ['/a'], token: 'tok-sub', children: true },
+      { op: 'unwatch', paths: ['/a'], token: 'tok-sub', children: undefined },
+      { op: 'unwatch', paths: ['/a'], token: 'tok-sub', children: true },
+    ]);
+  });
+
+  it('ls threads the token to item watches AND the watchList hook', async () => {
+    const tree = await seededTree();
+    const { serve, calls, listCalls } = tokenServe(tree);
+    const { client } = pair(() => serve);
+
+    await client.req.ls('/a', { watch: true, watchList: true, token: 'tok-ls' });
+
+    assert.deepEqual(calls, [{ op: 'watch', paths: ['/a/one'], token: 'tok-ls', children: undefined }]);
+    assert.deepEqual(listCalls, [{ path: '/a', itemWatch: true, token: 'tok-ls' }]);
+  });
+
+  it('absent token stays absent (legacy hold); empty token is rejected loudly', async () => {
+    const tree = await seededTree();
+    const { serve, calls } = tokenServe(tree);
+    const { client } = pair(() => serve);
+
+    await client.req.get('/a', true);
+    assert.deepEqual(calls, [{ op: 'watch', paths: ['/a'], token: undefined, children: undefined }]);
+
+    // '' would alias the server-internal shared LEGACY hold — protocol error.
+    await assert.rejects(client.req.get('/a', true, ''), isCode('BAD_REQUEST'));
+    await assert.rejects(client.req.sub({ paths: ['/a'], token: '' }), isCode('BAD_REQUEST'));
+    await assert.rejects(client.req.ls('/a', { watch: true, token: '' }), isCode('BAD_REQUEST'));
+  });
 });

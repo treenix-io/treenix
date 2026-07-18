@@ -16,7 +16,7 @@ import { TypePicker } from '#mods/editor-ui/type-picker';
 import type { NavigateFn } from '#navigate';
 import * as cache from '#tree/cache';
 import { tree } from '#tree/client';
-import { trpc } from '#tree/trpc';
+import { tabTokenInput, trpc } from '#tree/trpc';
 import type { NodeData } from '@treenx/core';
 import { ChevronDown, Eye, EyeOff, LogIn, LogOut, RotateCcw } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
@@ -99,7 +99,11 @@ export function EditorSidebar({
 
   const loadChildren = useCallback(async (path: string) => {
     if (loadedRef.current.has(path)) return;
-    const { items: children } = await tree.getChildren(path, { watch: true, watchNew: true });
+    // Direct trpc, not tree.getChildren: remote-tree no longer forwards watch
+    // flags (r4-M4) — live registration must carry the tab token and pair with
+    // the tokened unwatch in handleExpand.
+    const { items: children } = await trpc.getChildren
+      .query({ path, watch: true, watchNew: true, ...tabTokenInput });
     cache.replaceChildren(path, children);
     const next = new Set(loadedRef.current).add(path);
     loadedRef.current = next;
@@ -145,7 +149,7 @@ export function EditorSidebar({
     setLoaded(new Set());
     setExpanded(new Set([root]));
     (async () => {
-      const rootNode = (await trpc.get.query({ path: root, watch: true })) as NodeData | undefined;
+      const rootNode = (await trpc.get.query({ path: root, watch: true, ...tabTokenInput })) as NodeData | undefined;
       if (rootNode) cache.put(rootNode);
       await loadChildren(root);
       await ensurePathVisible(root, selectedRef.current);
@@ -220,8 +224,8 @@ export function EditorSidebar({
         await loadChildren(path);
       } else {
         const childPaths = cache.getChildren(path).map((n) => n.$path).filter((p) => p !== path);
-        trpc.unwatchChildren.mutate({ paths: [path] });
-        if (childPaths.length) trpc.unwatch.mutate({ paths: childPaths });
+        trpc.unwatchChildren.mutate({ paths: [path], ...tabTokenInput });
+        if (childPaths.length) trpc.unwatch.mutate({ paths: childPaths, ...tabTokenInput });
       }
     },
     [expanded, loadChildren],
@@ -244,7 +248,7 @@ export function EditorSidebar({
         setExpanded((prev) => new Set(prev).add(parentPath));
         await onSelect(childPath);
 
-        const node = (await trpc.get.query({ path: childPath, watch: true })) as NodeData | undefined;
+        const node = (await trpc.get.query({ path: childPath, watch: true, ...tabTokenInput })) as NodeData | undefined;
         if (node) cache.put(node);
         toast.success(`Created ${name}`);
       } catch (e: unknown) {

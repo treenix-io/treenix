@@ -179,7 +179,9 @@ export function startEvents(config: EventsConfig = {}, resume = false) {
           }
           const sel = getSelected?.();
           if (sel) {
-            trpc.get.query({ path: sel, watch: true }).then(n => {
+            // Re-registration after a continuity break must carry the tab token
+            // too — a tokenless re-watch would land on the shared LEGACY hold.
+            trpc.get.query({ path: sel, watch: true, ...tabTokenInput }).then(n => {
               if (n) cache.put(n);
             });
           }

@@ -43,6 +43,10 @@ const safePath = z.string().superRefine((p, ctx) => {
   }
 });
 
+/** Watch-ownership token (core-anz4.28): scopes registration/release to one tab.
+ *  Same constraint as the events-subscription token — the two must interoperate. */
+const watchToken = z.string().min(1).max(256).optional();
+
 /** Zod schema matching PatchOp — test, replace, add, delete */
 const patchOps = z.array(z.union([
   z.tuple([z.literal('t'), z.string(), z.unknown()]).readonly(),
@@ -143,15 +147,15 @@ export function createTreeRouter(tree: Tree, systemTree: Tree, watcher: WatchMan
 
   return t.router({
     get: withSession
-      .input(z.object({ path: safePath, watch: z.boolean().optional() }))
+      .input(z.object({ path: safePath, watch: z.boolean().optional(), token: watchToken }))
       .query(({ input, ctx }) =>
-        unwrap<NodeData | undefined>(ctx.wire.handle({ id: 0, op: 'get', path: input.path, watch: input.watch }))),
+        unwrap<NodeData | undefined>(ctx.wire.handle({ id: 0, op: 'get', path: input.path, watch: input.watch, token: input.token }))),
 
     // Fetch node + resolve $ref targets. Returns [requested, ...resolved].
     resolve: withSession
-      .input(z.object({ path: safePath, watch: z.boolean().optional() }))
+      .input(z.object({ path: safePath, watch: z.boolean().optional(), token: watchToken }))
       .query(({ input, ctx }) =>
-        unwrap<NodeData[]>(ctx.wire.handle({ id: 0, op: 'resolve', path: input.path, watch: input.watch }))),
+        unwrap<NodeData[]>(ctx.wire.handle({ id: 0, op: 'resolve', path: input.path, watch: input.watch, token: input.token }))),
 
     getChildren: withSession
       .input(
@@ -163,6 +167,7 @@ export function createTreeRouter(tree: Tree, systemTree: Tree, watcher: WatchMan
           cursor: z.string().optional(), // resume token from Page.nextCursor
           watch: z.boolean().optional(),
           watchNew: z.boolean().optional(),
+          token: watchToken,
         }),
       )
       .query(({ input, ctx }) =>
@@ -172,6 +177,7 @@ export function createTreeRouter(tree: Tree, systemTree: Tree, watcher: WatchMan
           limit: input.limit, depth: input.depth,
           query: input.query, cursor: input.cursor,
           watch: input.watch, watchList: input.watchNew,
+          token: input.token,
         }, ctx))),
 
     set: withSession
@@ -214,6 +220,7 @@ export function createTreeRouter(tree: Tree, systemTree: Tree, watcher: WatchMan
           data: z.unknown().optional(),
           watch: z.boolean().optional(), // subscribe to paths returned in result
           opId: z.string().min(1).max(128).optional(), // idempotency key — replays return the first result
+          token: watchToken,
         }),
       )
       .mutation(({ input, ctx }) =>
@@ -221,6 +228,7 @@ export function createTreeRouter(tree: Tree, systemTree: Tree, watcher: WatchMan
           id: 0, op: 'act', path: input.path,
           type: input.type, key: input.key, action: input.action,
           data: input.data, opId: input.opId, watch: input.watch,
+          token: input.token,
         }))),
 
     // R5-SRV-1: `params` removed from tRPC surface — only used by internal seed
@@ -289,13 +297,13 @@ export function createTreeRouter(tree: Tree, systemTree: Tree, watcher: WatchMan
         return agentInitPair(userTree, input.path, input.key);
       }),
 
-    unwatch: withSession.input(z.object({ paths: z.array(safePath) })).mutation(({ input, ctx }) =>
-      unwrap<void>(ctx.wire.handle({ id: 0, op: 'unsub', paths: input.paths }))),
+    unwatch: withSession.input(z.object({ paths: z.array(safePath), token: watchToken })).mutation(({ input, ctx }) =>
+      unwrap<void>(ctx.wire.handle({ id: 0, op: 'unsub', paths: input.paths, token: input.token }))),
 
     unwatchChildren: withSession
-      .input(z.object({ paths: z.array(safePath) }))
+      .input(z.object({ paths: z.array(safePath), token: watchToken }))
       .mutation(({ input, ctx }) =>
-        unwrap<void>(ctx.wire.handle({ id: 0, op: 'unsub', prefixes: input.paths }))),
+        unwrap<void>(ctx.wire.handle({ id: 0, op: 'unsub', prefixes: input.paths, token: input.token }))),
 
     devLogin: base.mutation(async ({ ctx }) => {
       const r = await devLogin(systemTree);

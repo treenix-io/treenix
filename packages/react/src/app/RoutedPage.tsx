@@ -6,7 +6,7 @@ import { Render, RenderContext } from '#context';
 import { useEffect, useState } from 'react';
 import * as cache from '#tree/cache';
 import { usePath } from '#hooks';
-import { trpc } from '#tree/trpc';
+import { tabTokenInput, trpc } from '#tree/trpc';
 
 export function RoutedPage({ path }: { path: string }) {
   // Strip trailing slash before composing the route path. Server rejects
@@ -23,10 +23,10 @@ export function RoutedPage({ path }: { path: string }) {
     let cancelled = false;
     let watched: string[] | null = null;
     const release = (paths: string[]) =>
-      trpc.unwatch.mutate({ paths })
+      trpc.unwatch.mutate({ paths, ...tabTokenInput })
         .catch((e: unknown) => console.error('[routed-page] unwatch failed:', paths, e));
 
-    trpc.resolve.query({ path: routePath, watch: true }).then((nodes: unknown) => {
+    trpc.resolve.query({ path: routePath, watch: true, ...tabTokenInput }).then((nodes: unknown) => {
       const arr = nodes as NodeData[];
       const paths = arr.length ? [routePath, ...(arr[1] ? [arr[1].$path] : [])] : null;
       // Fast navigation: cleanup ran before resolve settled — the server watch

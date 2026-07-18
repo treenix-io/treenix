@@ -126,12 +126,14 @@ export function createWireSession(deps: WireDeps, session: Session) {
     const execStream = (req: ActReq, signal: AbortSignal) =>
       executeStream(tree, req.path, req.type, req.key, req.action, req.data, signal, { userId, claims, actor: actorFor(req) });
 
+    // Watch/unwatch opts (incl. the anz4.28 ownership token) pass through as-is:
+    // ServeHooks opts are structurally a subset of WatchOpts/UnwatchOpts.
     const hooks: ServeHooks = {
       watch: (paths, o) => deps.watcher.watch(userId, paths, o),
       unwatch: (paths, o) => deps.watcher.unwatch(userId, paths, o),
-      watchList: (path, page, itemWatch) => {
+      watchList: (path, page, itemWatch, token) => {
         const query = getPageReadPlan(page);
-        deps.watcher.watch(userId, [path], { children: true, autoWatch: itemWatch, query });
+        deps.watcher.watch(userId, [path], { children: true, autoWatch: itemWatch, query, token });
       },
     };
 

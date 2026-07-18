@@ -18,9 +18,14 @@ export type WireClient = TreenixClient & {
   cursor(): ResumeCursor;
 };
 
-export function createClient(conn: Conn): WireClient {
+/** `token` = this consumer's watch-ownership id (core-anz4.28). Pass the SAME
+ *  value the binding hands to connectEventFrames/attachWireSession — the lane
+ *  token and the registration token must match or token-grace never releases
+ *  this client's holds. Absent = shared legacy hold (pre-token semantics). */
+export function createClient(conn: Conn, opts?: { token?: string }): WireClient {
   const peer = createPeer();
   const detach = peer.attach(conn);
+  const token = opts?.token;
 
   // Per-path fan-out for watchPath consumers; refcounted so the server-side
   // watch is released exactly when the last local consumer unsubscribes.
@@ -58,7 +63,7 @@ export function createClient(conn: Conn): WireClient {
     if (set.size) return;
     pathCbs.delete(path);
     // unsub racing destroy is benign — server releases all watches on disconnect.
-    peer.req.unsub({ paths: [path] }).catch((e) => {
+    peer.req.unsub({ paths: [path], token }).catch((e) => {
       if (!destroyed) console.error('[twp-client] unsub failed:', e);
     });
     if (!pathCbs.size && offEvents) { offEvents(); offEvents = null; }
@@ -66,11 +71,12 @@ export function createClient(conn: Conn): WireClient {
 
   const tree: WireClient['tree'] = {
     get: (path) => peer.req.get(path) as Promise<NodeData | undefined>,
-    getChildren: (path, opts?: ChildrenOpts) =>
+    getChildren: (path, o?: ChildrenOpts) =>
       peer.req.ls(path, {
-        limit: opts?.limit, depth: opts?.depth,
-        query: opts?.query, cursor: opts?.cursor,
-        watch: opts?.watch, watchList: opts?.watchNew,
+        limit: o?.limit, depth: o?.depth,
+        query: o?.query, cursor: o?.cursor,
+        watch: o?.watch, watchList: o?.watchNew,
+        ...(o?.watch || o?.watchNew ? { token } : {}),
       }) as Promise<Page<NodeData>>,
     // Transport receipts are OPAQUE (core-ns6p.2): the authority's images stay
     // on the server; `changes: null` says "committed, contents unknown" —
@@ -97,7 +103,7 @@ export function createClient(conn: Conn): WireClient {
     },
 
     watchPath: async (path, onEvent) => {
-      const node = await peer.req.get(path, true);
+      const node = await peer.req.get(path, true, token);
       ensureEventRouting();
       let set = pathCbs.get(path);
       if (!set) { set = new Set(); pathCbs.set(path, set); }

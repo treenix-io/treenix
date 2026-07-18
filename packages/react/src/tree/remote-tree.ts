@@ -73,7 +73,11 @@ export function createRemoteTree(client: TrpcClient): Tree {
     get,
     getChildren: (path, opts) => {
       debugPath(path, 'getChildren');
-      return client.getChildren.query({ path, ...opts });
+      // r4-M4 (ns6p.4): watch/watchNew are NOT forwarded — plain Tree has no
+      // release primitive, so a wire registration here leaks by construction.
+      // Live lifecycles belong to client-tree-source (dispose + tokened unwatch).
+      const { watch: _watch, watchNew: _watchNew, ...rest } = opts ?? {};
+      return client.getChildren.query({ path, ...rest });
     },
     set,
     remove: (path) => {

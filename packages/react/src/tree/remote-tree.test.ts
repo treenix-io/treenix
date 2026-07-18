@@ -10,6 +10,7 @@ import { createRemoteTree } from './remote-tree';
 function createMockTrpc(backing: Map<string, NodeData>) {
   let getCalls = 0;
   let patchCalls = 0;
+  const lsInputs: Record<string, unknown>[] = [];
   // events: minimal sim of trpc.events.subscribe — caller-driven push.
   let lastOnData: ((e: TreeEvent) => void) | null = null;
   let unsubscribed = false;
@@ -17,6 +18,7 @@ function createMockTrpc(backing: Map<string, NodeData>) {
   const mock = {
     get getCalls() { return getCalls; },
     get patchCalls() { return patchCalls; },
+    lsInputs,
     resetCalls() { getCalls = 0; },
 
     // Test helpers — drive the events stream
@@ -31,8 +33,10 @@ function createMockTrpc(backing: Map<string, NodeData>) {
       },
     },
     getChildren: {
-      query: async ({ path, limit }: { path: string; limit?: number }) => {
+      query: async (input: { path: string; limit?: number }) => {
         getCalls++;
+        lsInputs.push(input);
+        const { path, limit } = input;
         const prefix = path === '/' ? '/' : path + '/';
         const items = [...backing.values()].filter(
           n => n.$path.startsWith(prefix) && n.$path !== path
@@ -103,6 +107,21 @@ describe('createRemoteTree — method mapping', () => {
     const result = await tree.getChildren('/p');
     assert.equal(result.items.length, 2);
     assert.equal(result.total, 2);
+  });
+
+  it('getChildren does NOT forward watch/watchNew — a plain Tree has no release primitive (r4-M4)', async () => {
+    const data = new Map<string, NodeData>();
+    data.set('/p', { $path: '/p', $type: 'dir' } as NodeData);
+    data.set('/p/a', { $path: '/p/a', $type: 'test' } as NodeData);
+    const mock = createMockTrpc(data);
+    const tree = createRemoteTree(mock as any);
+
+    await tree.getChildren('/p', { watch: true, watchNew: true, limit: 5 });
+
+    const input = mock.lsInputs[0];
+    assert.ok(!('watch' in input), 'watch flag stripped');
+    assert.ok(!('watchNew' in input), 'watchNew flag stripped');
+    assert.equal(input.limit, 5, 'paging opts still forwarded');
   });
 
   it('set delegates to trpc.set.mutate', async () => {

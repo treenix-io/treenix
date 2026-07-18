@@ -14,7 +14,7 @@ import {
   isByeFrame, isCancelFrame, isEventFrame, isHiFrame, isPingFrame, isPongFrame,
   isReqFrame, isResFrame,
   type ActFrame, type ErrFrame, type EventFrame, type Frame, type LsFrame,
-  type OkFrame, type ReqFrame, type ResFrame,
+  type OkFrame, type ReqFrame, type ResFrame, type SubFrame, type UnsubFrame,
 } from './frames';
 
 /** Ordered, reliable, duplex channel of structured frames (spec §4).
@@ -31,11 +31,13 @@ export type ActReq = { path: string; type?: string; key?: string; action: string
 export type ActionDispatch = (req: ActReq) => Promise<unknown>;
 export type ActionStream = (req: ActReq, signal: AbortSignal) => AsyncIterable<unknown>;
 
+// `token` = watch-ownership scope of the requesting consumer (core-anz4.28):
+// threaded from the frame so registration and release land on the same holder.
 export type ServeHooks = {
-  watch(paths: string[], opts?: { children?: boolean; autoWatch?: boolean }): void;
-  unwatch(paths: string[], opts?: { children?: boolean }): void;
+  watch(paths: string[], opts?: { children?: boolean; autoWatch?: boolean; token?: string }): void;
+  unwatch(paths: string[], opts?: { children?: boolean; token?: string }): void;
   /** ls{watchList}: receives the page before the response is returned. */
-  watchList?(path: string, page: Page<NodeData>, itemWatch: boolean): void;
+  watchList?(path: string, page: Page<NodeData>, itemWatch: boolean, token?: string): void;
 };
 
 export type PeerServe = {
@@ -100,6 +102,16 @@ function vPaths(v: unknown): string[] {
   return v.map(vPath);
 }
 
+// Wire tokens are untrusted (isReqFrame checks id/op only). Empty string is
+// rejected loudly — it would silently alias the server's internal LEGACY hold.
+function vToken(v: unknown): string | undefined {
+  if (v === undefined) return undefined;
+  if (typeof v !== 'string' || v.length === 0 || v.length > 256) {
+    throw new OpError('BAD_REQUEST', 'token must be a non-empty string (max 256)');
+  }
+  return v;
+}
+
 function toErrFrame(id: number, e: unknown): ErrFrame {
   if (e instanceof OpError) return { id, err: { code: e.code, msg: e.message } };
   console.error('[twp] handler error:', e);
@@ -126,11 +138,19 @@ export function createPeer(serve?: ServeFactory) {
 
   // ── serving side ──
 
-  function watchCaps(s: PeerServe) {
+  // Token is injected HERE so no registration/release site can forget it —
+  // a missed site would land the hold on the shared LEGACY holder (anz4.28).
+  function watchCaps(s: PeerServe, token: string | undefined) {
     const getPerm = s.tree.getPerm?.bind(s.tree);
     const hooks = s.hooks;
     if (!getPerm || !hooks) throw new OpError('BAD_REQUEST', 'watch unsupported by this peer');
-    return { getPerm, watch: hooks.watch.bind(hooks), unwatch: hooks.unwatch.bind(hooks) };
+    return {
+      getPerm,
+      watch: (paths: string[], opts?: { children?: boolean; autoWatch?: boolean }) =>
+        hooks.watch(paths, { ...opts, token }),
+      unwatch: (paths: string[], opts?: { children?: boolean }) =>
+        hooks.unwatch(paths, { ...opts, token }),
+    };
   }
 
   async function resolveServe(): Promise<PeerServe> {
@@ -151,7 +171,10 @@ export function createPeer(serve?: ServeFactory) {
       switch (frame.op) {
         case 'get': {
           const path = vPath(frame.path);
-          const cap = frame.watch ? watchCaps(s) : undefined;
+          // Token validated on presence (not only under watch) — a malformed
+          // token is a protocol error, not a value to ignore.
+          const token = vToken(frame.token);
+          const cap = frame.watch ? watchCaps(s, token) : undefined;
           const node = await s.tree.get(path);
           if (cap && node && ((await cap.getPerm(path)) & S)) cap.watch([path]);
           return ok(node);
@@ -159,7 +182,8 @@ export function createPeer(serve?: ServeFactory) {
 
         case 'resolve': {
           const path = vPath(frame.path);
-          const cap = frame.watch ? watchCaps(s) : undefined;
+          const token = vToken(frame.token);
+          const cap = frame.watch ? watchCaps(s, token) : undefined;
           const node = await s.tree.get(path);
           if (!node) return ok([]);
           const result: NodeData[] = [node];
@@ -209,7 +233,8 @@ export function createPeer(serve?: ServeFactory) {
           if (frame.cursor !== undefined && typeof frame.cursor !== 'string') {
             throw new OpError('BAD_REQUEST', 'ls.cursor must be a string');
           }
-          const cap = frame.watch ? watchCaps(s) : undefined;
+          const token = vToken(frame.token);
+          const cap = frame.watch ? watchCaps(s, token) : undefined;
           const watchList = frame.watchList ? s.hooks?.watchList?.bind(s.hooks) : undefined;
           if (frame.watchList && !watchList) throw new OpError('BAD_REQUEST', 'watchList unsupported by this peer');
           // ctx threaded to getChildren only — parity with the pre-TWP router;
@@ -224,7 +249,7 @@ export function createPeer(serve?: ServeFactory) {
             for (const n of page.items) if ((await cap.getPerm(n.$path)) & S) watchable.push(n.$path);
             if (watchable.length) cap.watch(watchable);
           }
-          watchList?.(path, page, !!frame.watch);
+          watchList?.(path, page, !!frame.watch, token);
           return ok(page);
         }
 
@@ -263,7 +288,8 @@ export function createPeer(serve?: ServeFactory) {
           const path = vPath(frame.path);
           if (typeof frame.action !== 'string' || !frame.action) throw new OpError('BAD_REQUEST', 'action must be a string');
           if (!s.execute) throw new OpError('BAD_REQUEST', 'peer does not execute actions');
-          const cap = frame.watch ? watchCaps(s) : undefined;
+          const token = vToken(frame.token);
+          const cap = frame.watch ? watchCaps(s, token) : undefined;
           const result = await s.execute({
             path, type: frame.type, key: frame.key, action: frame.action, data: frame.data, opId: frame.opId,
           });
@@ -289,7 +315,7 @@ export function createPeer(serve?: ServeFactory) {
         }
 
         case 'sub': {
-          const cap = watchCaps(s);
+          const cap = watchCaps(s, vToken(frame.token));
           // S-gate; non-S paths silently dropped — same ACL trust-boundary rule as ls.watch.
           const paths: string[] = [];
           for (const p of vPaths(frame.paths)) if ((await cap.getPerm(p)) & S) paths.push(p);
@@ -301,7 +327,7 @@ export function createPeer(serve?: ServeFactory) {
         }
 
         case 'unsub': {
-          const cap = watchCaps(s);
+          const cap = watchCaps(s, vToken(frame.token));
           const paths = vPaths(frame.paths);
           if (paths.length) cap.unwatch(paths);
           const prefixes = vPaths(frame.prefixes);
@@ -495,17 +521,17 @@ export function createPeer(serve?: ServeFactory) {
     },
 
     req: {
-      get: (path: string, watch?: boolean) => call((id) => ({ id, op: 'get', path, watch })),
-      resolve: (path: string, watch?: boolean) => call((id) => ({ id, op: 'resolve', path, watch })),
+      get: (path: string, watch?: boolean, token?: string) => call((id) => ({ id, op: 'get', path, watch, token })),
+      resolve: (path: string, watch?: boolean, token?: string) => call((id) => ({ id, op: 'resolve', path, watch, token })),
       ls: (path: string, o?: Omit<LsFrame, 'id' | 'op' | 'path'>) => call((id) => ({ id, op: 'ls', path, ...o })),
       set: (path: string, node: Record<string, unknown>, opId?: string) => call((id) => ({ id, op: 'set', path, node, opId })),
       patch: (path: string, ops: PatchOp[], opId?: string) => call((id) => ({ id, op: 'patch', path, ops, opId })),
       rm: (path: string, opId?: string) => call((id) => ({ id, op: 'rm', path, opId })),
-      act: (a: ActReq & { watch?: boolean }) => call((id) => ({ id, op: 'act', ...a })),
+      act: (a: ActReq & { watch?: boolean; token?: string }) => call((id) => ({ id, op: 'act', ...a })),
       actStream: (a: ActReq) => callStream((id) => ({ id, op: 'act', stream: true, ...a })),
       perm: (path: string) => call((id) => ({ id, op: 'perm', path })),
-      sub: (o: { paths?: string[]; prefixes?: string[] }) => call((id) => ({ id, op: 'sub', ...o })),
-      unsub: (o: { paths?: string[]; prefixes?: string[] }) => call((id) => ({ id, op: 'unsub', ...o })),
+      sub: (o: Omit<SubFrame, 'id' | 'op'>) => call((id) => ({ id, op: 'sub', ...o })),
+      unsub: (o: Omit<UnsubFrame, 'id' | 'op'>) => call((id) => ({ id, op: 'unsub', ...o })),
     },
   };
 }

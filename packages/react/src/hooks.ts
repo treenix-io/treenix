@@ -20,7 +20,7 @@ import {
 } from 'react';
 import * as cache from '#tree/cache';
 import { tree } from '#tree/client';
-import { trpc } from '#tree/trpc';
+import { tabTokenInput, trpc } from '#tree/trpc';
 import { ensureType } from '#schema-loader';
 import { type ChildrenHandle, type ChildrenOpts, EMPTY_PATH_SNAPSHOT, type PathHandle } from '#tree/tree-source';
 import { useTreeSource } from '#tree/tree-source-context';
@@ -471,6 +471,11 @@ function makeProxy<T extends object>(
 
 // ── watch: universal async generator ──
 
+// Server holds are per (user, tab-token, path) — ONE hold regardless of how
+// many generators watch the path. Refcount locally so the first generator's
+// return doesn't strip a co-consumer's hold (anz4.28 co-hold, tab-local).
+const watchGenRefs = new Map<string, number>();
+
 export async function* watch<T = unknown>(uri: string): AsyncGenerator<T> {
   const parsed = parseURI(uri);
 
@@ -485,8 +490,9 @@ export async function* watch<T = unknown>(uri: string): AsyncGenerator<T> {
   }
 
   const { path } = parsed;
-  const initial = await trpc.get.query({ path, watch: true });
+  const initial = await trpc.get.query({ path, watch: true, ...tabTokenInput });
   if (initial) cache.put(initial as NodeData);
+  watchGenRefs.set(path, (watchGenRefs.get(path) ?? 0) + 1);
 
   let resolve: (() => void) | null = null;
   const unsub = cache.subscribePath(path, () => { resolve?.(); resolve = null; });
@@ -500,6 +506,16 @@ export async function* watch<T = unknown>(uri: string): AsyncGenerator<T> {
     }
   } finally {
     unsub();
+    const left = (watchGenRefs.get(path) ?? 1) - 1;
+    if (left > 0) {
+      watchGenRefs.set(path, left);
+    } else {
+      watchGenRefs.delete(path);
+      // core-m77: get{watch:true} registered a server-side hold — release it
+      // with the last generator or it leaks until tab-token grace.
+      trpc.unwatch.mutate({ paths: [path], ...tabTokenInput })
+        .catch((e: unknown) => console.error('[watch] unwatch failed:', path, e));
+    }
   }
 }
 

@@ -26,6 +26,15 @@ export type TrpcTransportOpts = {
 export function createTrpcTransport(opts: TrpcTransportOpts): TreenixClient & { trpc: ReturnType<typeof createTRPCClient<TreeRouter>> } {
   const getToken = opts.getToken ?? (() => opts.token ?? null);
 
+  // Per-instance watch-ownership token (core-anz4.28): the AUTH token is shared
+  // across consumers, so only a client-minted id tells the server WHICH consumer
+  // holds a watch — without it every registration lands on the shared legacy
+  // hold and one consumer's release strips the others. Mirrors React's TAB_TOKEN.
+  const watchToken: string =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : Date.now().toString(36) + '.' + Math.random().toString(36).slice(2, 10);
+
   // Browser fetch: include credentials so cookies flow on cross-origin (CORS) requests too.
   // Custom fetch from caller (e.g. node tests with a cookie jar) overrides.
   const defaultFetch = (input: any, init?: any) => fetch(input, { ...init, credentials: 'include' });
@@ -59,8 +68,7 @@ export function createTrpcTransport(opts: TrpcTransportOpts): TreenixClient & { 
 
   function ensureSSE() {
     if (eventSub) return;
-    // kriz: why as void??? find such places and remove, meaningless
-    eventSub = trpc.events.subscribe(undefined as void, {
+    eventSub = trpc.events.subscribe({ token: watchToken }, {
       onData: (event: any) => {
         // kriz: what if no path in event?
         if ('path' in event) pathCbs.get(event.path)?.forEach(cb => cb(event));
@@ -70,7 +78,8 @@ export function createTrpcTransport(opts: TrpcTransportOpts): TreenixClient & { 
 
   const tree: TreenixClient['tree'] = {
     get: (path) => trpc.get.query({ path }) as Promise<NodeData | undefined>,
-    getChildren: (path, opts) => trpc.getChildren.query({ path, ...opts }),
+    getChildren: (path, opts) =>
+      trpc.getChildren.query({ path, ...opts, ...(opts?.watch || opts?.watchNew ? { token: watchToken } : {}) }),
     // Transport receipts are OPAQUE (core-ns6p.2): `changes: null` = committed,
     // contents unknown — the authority's images stay server-side until the
     // anz4.13 wire-ack upgrade. rm's boolean keeps known no-ops honest.
@@ -88,12 +97,11 @@ export function createTrpcTransport(opts: TrpcTransportOpts): TreenixClient & { 
     tree,
     execute: (path, action, data, o) => tree.execute!(path, action, data, o),
     watch: (onEvent) =>
-      // kriz: undefined as void???
-      trpc.events.subscribe(undefined, { onData: onEvent }),
+      trpc.events.subscribe({ token: watchToken }, { onData: onEvent }),
 
     // kriz: repeated in starter why? should reuse!
     watchPath: async (path, onEvent) => {
-      const node = await trpc.get.query({ path, watch: true });
+      const node = await trpc.get.query({ path, watch: true, token: watchToken });
       ensureSSE();
       // kriz: patchCbs.get, if !found -> add; equals, then found.add. dont (has + get)
       if (!pathCbs.has(path)) pathCbs.set(path, new Set());
@@ -108,7 +116,7 @@ export function createTrpcTransport(opts: TrpcTransportOpts): TreenixClient & { 
               pathCbs.delete(path);
               // core-m77: get{watch:true} registered a server-side watch — release it
               // with the last local consumer, or it leaks for the session's lifetime.
-              trpc.unwatch.mutate({ paths: [path] })
+              trpc.unwatch.mutate({ paths: [path], token: watchToken })
                 .catch((e: unknown) => console.error('[trpc] unwatch failed:', path, e));
             }
           }
