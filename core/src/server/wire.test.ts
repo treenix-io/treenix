@@ -395,6 +395,28 @@ describe('registerWatchList — plan re-validate (ns6p.4 slice 2)', () => {
     watcher.watch('u1', ['/other'], { children: true, token: 'tab' });
   });
 
+  it('re-validate probe throw: lease undone — no leaked holders or handles, error propagates (F6, inv.15)', async () => {
+    const store = createMemoryTree();
+    const watcher = createWatchManager({ maxWatchesPerUser: 1 });
+    const { cdc } = withSubscriptions(store, undefined, {
+      projectMembership: async (_u, o, n) => [o, n],
+    });
+    watcher.bindQueryRegistry(cdc);
+    watcher.connect('c1', 'u1', () => {}, undefined, 'tab');
+
+    const probeFail = new Error('probe died');
+    const tree = { planChildren: async (): Promise<ResolvedReadPlan> => { throw probeFail; } };
+
+    await assert.rejects(
+      registerWatchList(watcher, tree, 'u1', '/view', false, 'tab', freshPlan('/data', 'x')),
+      (e: unknown) => e === probeFail,
+    );
+
+    assert.equal(cdc.getActiveQueryCount(), 0, 'no query handle survives the probe throw');
+    // The prefix hold is gone too: with a budget of 1, a fresh registration fits.
+    watcher.watch('u1', ['/other'], { children: true, token: 'tab' });
+  });
+
   it('no frozen plan (peer without the pre-step): plain registration, no probe', async () => {
     const { watcher, cdc } = await revalidateHarness();
     const tree = {

@@ -86,6 +86,15 @@ function waitChildren(parent: string, pred: () => boolean): Promise<void> {
   });
 }
 
+/** Event-driven wait on a single path's cache state. */
+function waitPath(path: string, pred: () => boolean): Promise<void> {
+  return new Promise((resolvePromise) => {
+    const check = () => { if (pred()) { unsub(); resolvePromise(); } };
+    const unsub = cache.subscribePath(path, check);
+    check();
+  });
+}
+
 const ready = (parent: string) => () => cache.getChildrenPhase(parent) === 'ready';
 
 /** Drain microtasks after a deferred settles — a DROPPED response emits no
@@ -100,7 +109,7 @@ beforeEach(() => {
   getResults.length = 0;
 });
 
-afterEach(() => stopEvents());
+afterEach(() => { stopEvents(); mock.restoreAll(); });
 
 describe('read ordering — request generations (invariant 17)', () => {
   it('two overlapping reads of one resource: the older response settling LAST is dropped', async () => {
@@ -262,5 +271,103 @@ describe('read ordering — non-regressing snapshot ingest (invariants 18/28)', 
     assert.equal(cache.get('/q/c')?.$rev, 3);
     assert.equal(hasPending('/q/c'), false);
     h.dispose();
+  });
+});
+
+describe('vp dirty reaches mounted listings (ns6p.4 F1, invariants 16/19)', () => {
+  it('idle vp dirty with no mounted resource: no fetch, no crash', async () => {
+    applyDataEvent({ type: 'set', path: '/items/y', node: { $type: 'doc', $rev: 1 }, invalidateVps: ['/nobody'] });
+    await flush();
+    assert.equal(getChildrenCalls.length, 0);
+  });
+
+  it('vp dirty on a SETTLED listing refetches through the mount itself — no loadChildren wiring', async () => {
+    childrenPages.push({ items: [node('/vp/a')], total: 1 });
+    const source = createClientTreeSource();
+    const h = source.mountChildren('/vp', { limit: 10, watchNew: true });
+    await waitChildren('/vp', ready('/vp'));
+    assert.equal(getChildrenCalls.length, 1, 'page settled, nothing in flight');
+
+    // Membership flipped server-side; the event names the vp only. Production
+    // startEvents passes NO loadChildren — the mount must heal itself.
+    childrenPages.push({ items: [node('/vp/a'), node('/vp/b')], total: 2 });
+    applyDataEvent({ type: 'set', path: '/items/x', node: { $type: 'doc', $rev: 1 }, invalidateVps: ['/vp'] });
+
+    await waitChildren('/vp', () =>
+      getChildrenCalls.length === 2 && cache.getChildrenPhase('/vp') === 'ready'
+      && members('/vp').includes('/vp/b'));
+    h.dispose();
+  });
+});
+
+describe('exact-read overlap ordering (ns6p.4 F2, invariants 17/18)', () => {
+  it('create event during an in-flight get: the older absent response cannot delete the created node', async () => {
+    const dg = deferred<NodeData | null>();
+    getResults.push(dg.promise, node('/cx', 1, 'born'));
+    const source = createClientTreeSource();
+    const h = source.mountPath('/cx');
+    const before = getQuery.mock.callCount();
+
+    applyDataEvent({ type: 'set', path: '/cx', node: { $type: 'doc', $rev: 1, v: 'born' } });
+    assert.equal(vOf('/cx'), 'born', 'event created the node');
+
+    dg.resolve(null); // server snapshot predates the create
+    await flush();
+
+    assert.ok(cache.get('/cx'), 'older absent response must not delete the created node');
+    assert.notEqual(cache.getPathStatus('/cx'), 'not_found');
+
+    // The coalesced re-get settles the truth.
+    await waitPath('/cx', () =>
+      getQuery.mock.callCount() === before + 1 && cache.getPathStatus('/cx') === 'ready');
+    assert.equal(vOf('/cx'), 'born');
+    h.dispose();
+  });
+
+  it('remove during an in-flight get: the older node response cannot permanently resurrect it', async () => {
+    const dg = deferred<NodeData | null>();
+    getResults.push(dg.promise, null);
+    const source = createClientTreeSource();
+    const h = source.mountPath('/rx');
+
+    applyDataEvent({ type: 'remove', path: '/rx' });
+
+    dg.resolve(node('/rx', 1, 'zombie')); // snapshot predates the remove
+    await waitPath('/rx', () => cache.getPathStatus('/rx') === 'not_found');
+
+    assert.equal(cache.get('/rx'), undefined, 'reconverge re-get healed the resurrection');
+    h.dispose();
+  });
+});
+
+describe('multi-query gate (ns6p.4 F5, §4.2)', () => {
+  it('second different-query mount is non-live and loud; a remount after the first unmounts goes live', async () => {
+    const errors = mock.method(console, 'error', () => {});
+    childrenPages.push(
+      { items: [node('/mq/a')], total: 1 },
+      { items: [node('/mq/b')], total: 1 },
+      { items: [node('/mq/b')], total: 1 },
+    );
+    const source = createClientTreeSource();
+
+    const h1 = source.mountChildren('/mq', { query: { kind: 'a' }, watchNew: true, limit: 10 });
+    await waitChildren('/mq', () => getChildrenCalls.length === 1 && ready('/mq')());
+    assert.equal(getChildrenCalls[0].watchNew, true, 'first mount registers live');
+    assert.equal(getChildrenCalls[0].token, 'test-tab');
+
+    const h2 = source.mountChildren('/mq', { query: { kind: 'b' }, watchNew: true, limit: 10 });
+    await waitChildren('/mq', () => getChildrenCalls.length === 2 && ready('/mq')());
+    assert.equal(getChildrenCalls[1].watchNew, undefined, 'gated mount must not open a second live query stream');
+    assert.equal(getChildrenCalls[1].token, undefined, 'no registration input at all');
+    assert.ok(errors.mock.calls.length >= 1, 'the gate is loud (core-jsh1)');
+
+    h1.dispose();
+    const h3 = source.mountChildren('/mq', { query: { kind: 'b' }, watchNew: true, limit: 10 });
+    await waitChildren('/mq', () => getChildrenCalls.length === 3 && ready('/mq')());
+    assert.equal(getChildrenCalls[2].watchNew, true, 'gate lifted — the remount goes live');
+    assert.equal(getChildrenCalls[2].token, 'test-tab');
+
+    h2.dispose();
+    h3.dispose();
   });
 });

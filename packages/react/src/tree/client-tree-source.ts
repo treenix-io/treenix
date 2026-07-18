@@ -55,10 +55,10 @@ function dropStale(kind: string, path: string): void {
   }
 }
 
-// End a tracked children read exactly once (a throw inside .then falls into .catch).
-function readEnder(path: string): (applied: boolean) => boolean {
+// End a tracked read exactly once (a throw inside .then falls into .catch).
+function readEnder(end: (applied: boolean) => boolean): (applied: boolean) => boolean {
   let ended = false;
-  return (applied) => ended ? false : ((ended = true), cache.endChildrenRead(path, applied));
+  return (applied) => ended ? false : ((ended = true), end(applied));
 }
 
 // Watch ref-counting — multiple components may mount the same path; only
@@ -158,20 +158,37 @@ export class ClientTreeSource implements TreeSource {
     const key = resourceKey('get', path);
     let cancelled = false;
 
+    // Coalesced reconverge after a set/remove overlapped an in-flight get
+    // (F2, inv.17/18): presence/absence isn't rev-ordered, refetch decides.
+    let overlapTimer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleOverlapRefetch = () => {
+      if (overlapTimer || cancelled) return;
+      overlapTimer = setTimeout(() => {
+        overlapTimer = null;
+        if (!cancelled) fetchOnce();
+      }, DIRTY_COALESCE_MS);
+    };
+
     const fetchOnce = () => {
       if (cancelled) return;
       const gen = this.issueRead(key);
       cache.setPathStatus(path, 'loading');
+      cache.beginPathRead(path);
+      const end = readEnder((a) => cache.endPathRead(path, a));
       trpc.get.query({ path, watch: watching, ...(watching ? tabTokenInput : {}) })
         .then((n) => {
-          if (cancelled) return;
-          if (!this.isCurrentRead(key, gen)) return dropStale('get', path);
+          const applied = !cancelled && this.isCurrentRead(key, gen);
+          const overlapped = end(applied);
+          if (!applied) { if (!cancelled) dropStale('get', path); return; }
           if (n) cache.put(ingestNode(n));
-          else cache.markPathMissing(path);
+          // Absent response that raced a create event (F2): the older 'absent'
+          // must not delete the created node — the re-get below decides.
+          else if (!overlapped) cache.markPathMissing(path);
+          if (overlapped) scheduleOverlapRefetch();
         })
         .catch((err: unknown) => {
-          if (cancelled) return;
-          if (!this.isCurrentRead(key, gen)) return dropStale('get', path);
+          end(false);
+          if (cancelled || !this.isCurrentRead(key, gen)) return;
           cache.setPathError(path, err instanceof Error ? err : new Error(String(err)));
           cache.setPathStatus(path, 'error');
         });
@@ -186,6 +203,7 @@ export class ClientTreeSource implements TreeSource {
       refetch: fetchOnce,
       dispose: () => {
         cancelled = true;
+        if (overlapTimer) { clearTimeout(overlapTimer); overlapTimer = null; }
         unsubReset();
         if (watching && unrefWatch(this.pathWatchRefs, path)) {
           // core-m77: failure here means the server-side watch leaks — surface it.
@@ -201,18 +219,24 @@ export class ClientTreeSource implements TreeSource {
   mountChildren(path: string, opts?: ChildrenOpts): ChildrenHandle {
     let cancelled = false;
     cache.retainChildSubscriber(path);
-    const watching = !!(opts?.watch || opts?.watchNew);
-    if (watching) refWatch(this.childrenWatchRefs, path);
 
     const key = resourceKey('ls', path, opts?.query);
-    // §4.2 gate: the SERVER coexists query handles (slice 5) but children state
-    // here is parent-keyed — different-query mounts interleave. Loud, not fatal.
+    // §4.2 gate (F5): the SERVER coexists query handles (slice 5) but children
+    // state here is parent-keyed — two LIVE query streams would fight over one
+    // cache slot. Only the first-mounted resource key stays live; a different-
+    // query mount reads without watch registration until a remount after the
+    // first unmounts (core-jsh1 lifts this with a resource-keyed cache).
     let keys = this.activeChildKeys.get(path);
     if (!keys) { keys = new Map(); this.activeChildKeys.set(path, keys); }
-    if (keys.size > 0 && !keys.has(key)) {
-      console.error(`[tree-source] concurrent listings with different queries on ${path} — client cache is parent-keyed, one live query per parent until the cache is resource-keyed`);
+    const firstKey = keys.keys().next().value;
+    const gated = firstKey !== undefined && firstKey !== key;
+    if (gated) {
+      console.error(`[tree-source] concurrent listings with different queries on ${path} — client cache is parent-keyed; this mount reads non-live until the first unmounts (core-jsh1)`);
     }
     keys.set(key, (keys.get(key) ?? 0) + 1);
+
+    const watching = !gated && !!(opts?.watch || opts?.watchNew);
+    if (watching) refWatch(this.childrenWatchRefs, path);
 
     // Coalesced reconverge after an event overlapped an in-flight page
     // (invariant 19): membership isn't rev-ordered, refetch decides.
@@ -231,9 +255,9 @@ export class ClientTreeSource implements TreeSource {
       const gen = this.issueRead(key);
       cache.setChildrenPhase(path, phase);
       cache.beginChildrenRead(path);
-      const end = readEnder(path);
+      const end = readEnder((a) => cache.endChildrenRead(path, a));
       trpc.getChildren
-        .query({ path, limit, query: opts?.query, watch: opts?.watch, watchNew: opts?.watchNew, ...(watching ? tabTokenInput : {}) })
+        .query({ path, limit, query: opts?.query, ...(watching ? { watch: opts?.watch, watchNew: opts?.watchNew, ...tabTokenInput } : {}) })
         .then((result: { items: NodeData[]; total: number; truncated?: boolean; nextCursor?: string }) => {
           const applied = !cancelled && this.isCurrentRead(key, gen);
           const overlapped = end(applied);
@@ -282,7 +306,7 @@ export class ClientTreeSource implements TreeSource {
       const gen = this.issueRead(key);
       cache.setChildrenPhase(path, 'append');
       cache.beginChildrenRead(path);
-      const end = readEnder(path);
+      const end = readEnder((a) => cache.endChildrenRead(path, a));
       trpc.getChildren
         .query({ path, limit: pageSize, cursor: nextCursor, query: opts?.query })
         .then((result: { items: NodeData[]; nextCursor?: string }) => {
@@ -305,6 +329,11 @@ export class ClientTreeSource implements TreeSource {
 
     initialFetch();
     const unsubReset = cache.subscribeSSEGen(initialFetch);
+    // F1 (inv.16/19): a vp-dirty on a SETTLED listing refetches through this
+    // mount's own coalesced lane — the in-flight overlap flag alone is a no-op
+    // when idle. Gated mounts stay passive: their refetch would fight the live
+    // query's cache slot.
+    const unsubDirty = gated ? null : cache.subscribeChildrenDirty(path, scheduleOverlapRefetch);
 
     return {
       refetch,
@@ -318,6 +347,7 @@ export class ClientTreeSource implements TreeSource {
           if (n <= 0) active.delete(key); else active.set(key, n);
           if (active.size === 0) this.activeChildKeys.delete(path);
         }
+        unsubDirty?.();
         unsubReset();
         cache.releaseChildSubscriber(path);
         if (watching && unrefWatch(this.childrenWatchRefs, path)) {

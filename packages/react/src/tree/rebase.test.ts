@@ -494,3 +494,63 @@ describe('ingestNode', () => {
     assert.strictEqual(hasPending('/c'), false);
   });
 });
+
+// ── Generation change on the read/response lanes (ns6p.4 F3, invariant 29) ──
+// A delete/recreate during an outage hands the client a NEW $id at rev 1.
+// Rev-only regression guards pinned the client on the dead identity forever;
+// predictions against the old identity must never replay onto the new one.
+
+describe('generation change adoption (invariant 29)', () => {
+  const gen = (id: string, rev: number, count: number): NodeData =>
+    ({ $path: '/g', $type: 'test.rebase.counter', $id: id, $rev: rev, count });
+  const countOf = () => (cache.get('/g') as { count?: number } | undefined)?.count;
+
+  it('ingestNode adopts a NEW $id at a LOWER rev; pendings against the dead identity drop loudly', async () => {
+    const warnings = await captureWarnings(() => {
+      cache.put(gen('A', 47, 4));
+      pushOptimistic('/g', Counter, undefined, action('test.rebase.counter', 'increment'), undefined, 'op1');
+      assert.strictEqual(countOf(), 5, 'optimistic on the old identity');
+
+      const adopted = ingestNode(gen('B', 1, 0));
+      assert.strictEqual(adopted.$id, 'B', 'new identity adopted regardless of rev');
+      assert.strictEqual(adopted.$rev, 1);
+      assert.strictEqual((adopted as { count?: number }).count, 0, 'prediction NOT replayed onto the new identity');
+      cache.put(adopted);
+
+      assert.strictEqual(hasPending('/g'), false, 'dead-generation pendings dropped');
+      rollback('/g', 'op1');
+      assert.strictEqual(countOf(), 0, 'late rollback of the dropped op is a no-op');
+    });
+    assert.ok(warnings.length >= 1, 'drop is loud, not silent');
+  });
+
+  it('confirmFromResponse with a new-identity refetch adopts it and drops the other pendings', async () => {
+    await captureWarnings(() => {
+      cache.put(gen('A', 47, 4));
+      pushOptimistic('/g', Counter, undefined, action('test.rebase.counter', 'increment'), undefined, 'op1');
+      pushOptimistic('/g', Counter, undefined, action('test.rebase.counter', 'increment'), undefined, 'op2');
+
+      confirmFromResponse('/g', 'op1', gen('B', 1, 9));
+
+      assert.strictEqual(cache.get('/g')?.$id, 'B');
+      assert.strictEqual(countOf(), 9, 'authoritative image, no replay of op2 onto the new identity');
+      assert.strictEqual(hasPending('/g'), false, 'surviving prediction dropped, not replayed');
+    });
+  });
+
+  it('event-lane set with a new $id: ack consumed, survivors dropped, image wins', async () => {
+    await captureWarnings(() => {
+      cache.put(gen('A', 47, 4));
+      pushOptimistic('/g', Counter, undefined, action('test.rebase.counter', 'increment'), undefined, 'op1');
+      pushOptimistic('/g', Counter, undefined, action('test.rebase.counter', 'increment'), undefined, 'op2');
+
+      // rebase declined (returns false) — the caller puts the image, like events.ts does.
+      const handled = applyServerSet('/g', gen('B', 1, 7), 'op1');
+      if (!handled) cache.put(gen('B', 1, 7));
+
+      assert.strictEqual(cache.get('/g')?.$id, 'B');
+      assert.strictEqual(countOf(), 7);
+      assert.strictEqual(hasPending('/g'), false, 'op1 acked, op2 dropped');
+    });
+  });
+});

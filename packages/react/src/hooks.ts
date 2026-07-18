@@ -9,7 +9,7 @@ import { compKey, getComponent, getComponentByName, getMeta, type NodeData, norm
 import { type Class, getDefaults, type TypeProxy } from '@treenx/core/comp';
 import { deriveURI, parseURI } from '@treenx/core/uri';
 import { mergeIntoNode, type OnChange } from '#tree/on-change';
-import { confirmFromResponse, hasPending, pushOptimistic, rollback } from '#tree/rebase';
+import { confirmFromResponse, hasPending, ingestNode, pushOptimistic, rollback } from '#tree/rebase';
 import {
   useCallback,
   useEffect,
@@ -491,7 +491,9 @@ export async function* watch<T = unknown>(uri: string): AsyncGenerator<T> {
 
   const { path } = parsed;
   const initial = await trpc.get.query({ path, watch: true, ...tabTokenInput });
-  if (initial) cache.put(initial as NodeData);
+  // F2/inv.18: ingest, never raw put — the initial get may be older than a
+  // mid-flight event image or carry a node with a live optimistic overlay.
+  if (initial) cache.put(ingestNode(initial as NodeData));
   watchGenRefs.set(path, (watchGenRefs.get(path) ?? 0) + 1);
 
   let resolve: (() => void) | null = null;

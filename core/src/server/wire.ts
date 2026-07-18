@@ -85,16 +85,24 @@ export async function registerWatchList(
 
   let active = planned;
   let lease = register(active);
-  for (let attempt = 1; ; attempt++) {
-    // Pure config read through the same pre-step the freeze used (invariant 21).
-    const fresh = await tree.planChildren(path, { query: planned.plan.callerWhere, depth: planned.plan.depth });
-    if (samePlan(fresh, active)) return { undo: lease.undo, plan: active };
-    lease.undo();
-    if (attempt === 2) {
-      throw new OpError('CONFLICT', `read plan for ${path} kept changing during watch registration`);
+  try {
+    for (let attempt = 1; ; attempt++) {
+      // Pure config read through the same pre-step the freeze used (invariant 21).
+      const fresh = await tree.planChildren(path, { query: planned.plan.callerWhere, depth: planned.plan.depth });
+      if (samePlan(fresh, active)) return { undo: lease.undo, plan: active };
+      lease.undo();
+      if (attempt === 2) {
+        throw new OpError('CONFLICT', `read plan for ${path} kept changing during watch registration`);
+      }
+      active = fresh;
+      lease = register(active);
     }
-    active = fresh;
-    lease = register(active);
+  } catch (e) {
+    // F6/inv.15: a probe throw would escape with the lease live — the peer
+    // hasn't received it yet, so its compensation can't help. undo() is
+    // idempotent: already-undone paths (CONFLICT, register throw) are no-ops.
+    lease.undo();
+    throw e;
   }
 }
 
@@ -193,6 +201,7 @@ export function createWireSession(deps: WireDeps, session: Session) {
       watchList: (path, itemWatch, token, plan) =>
         registerWatchList(deps.watcher, tree, userId, path, itemWatch, token, plan),
       holdPrefix: (path) => deps.watcher.holdPrefix(userId, path),
+      armUnboundTtl: (token) => deps.watcher.armUnboundTtl(userId, token),
     };
 
     return { tree, execute, executeStream: execStream, hooks };

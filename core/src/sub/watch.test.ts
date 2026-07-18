@@ -19,7 +19,7 @@ describe('WatchManager', () => {
     const removed: string[] = [];
     const wm = createWatchManager({ gracePeriodMs: 5 });
     wm.bindQueryRegistry({
-      watchQuery: (reg) => { watched.push(reg); return null; },
+      watchQuery: (reg) => { watched.push(reg); return { prev: null, holderAdded: true }; },
       unwatchQuery: (vp, userId) => unwatched.push({ vp, userId }),
       unwatchAllQueries: (userId) => removed.push(userId),
     });
@@ -27,7 +27,8 @@ describe('WatchManager', () => {
     const query = { plan: { source: '/data', callerWhere: { open: true } }, mountDeps: new Set(['/view']) };
 
     wm.watch('u1', ['/view'], { children: true, query });
-    assert.deepEqual(watched, [{ vp: '/view', userId: 'u1', ...query }]);
+    // holder = the lease's token (F5); tokenless watch registers the legacy shared holder.
+    assert.deepEqual(watched, [{ vp: '/view', userId: 'u1', ...query, holder: '' }]);
 
     wm.unwatch('u1', ['/view'], { children: true });
     assert.deepEqual(unwatched, [{ vp: '/view', userId: 'u1' }]);
@@ -1103,8 +1104,12 @@ describe('WatchManager — token-scoped watch ownership (core-anz4.12)', () => {
     const unwatchedQueries: string[] = [];
     const wm = createWatchManager();
     wm.bindQueryRegistry({
-      watchQuery: () => null,
-      unwatchQuery: (vp) => unwatchedQueries.push(vp),
+      watchQuery: () => ({ prev: null, holderAdded: true }),
+      // Record registration DEATHS only — a holder-scoped release (F5) merely
+      // detaches one token and must not count as the query watch dying.
+      unwatchQuery: (vp, _userId, hash, holder) => {
+        if (hash === undefined && holder === undefined) unwatchedQueries.push(vp);
+      },
       unwatchAllQueries: () => {},
     });
     const got: NodeEvent[] = [];
@@ -1503,7 +1508,7 @@ describe('WatchManager — registration lease (ns6p.4 slice 2)', () => {
         if (reg.vp === '/v2') throw new Error('refused');
         return cdc.watchQuery(reg);
       },
-      unwatchQuery: (vp, userId, hash) => cdc.unwatchQuery(vp, userId, hash),
+      unwatchQuery: (vp, userId, hash, holder) => cdc.unwatchQuery(vp, userId, hash, holder),
       unwatchAllQueries: (userId) => cdc.unwatchAllQueries(userId),
     });
     wm.connect('c1', 'u1', () => {}, undefined, 't1');
@@ -1519,6 +1524,80 @@ describe('WatchManager — registration lease (ns6p.4 slice 2)', () => {
   });
 });
 
+// ── ns6p.4 F5: query-handle holder lifecycle (§4.2) ──
+
+describe('WatchManager — query-handle holder lifecycle (ns6p.4 F5)', () => {
+  async function coexistHarness() {
+    const store = createMemoryTree();
+    const events: NodeEvent[] = [];
+    const { tree, cdc } = withSubscriptions(store, (e) => events.push(e), {
+      projectMembership: async (_u, o, n) => [o, n],
+    });
+    const wm = createWatchManager({ gracePeriodMs: 100 });
+    wm.bindQueryRegistry(cdc);
+    await tree.set(createNode('/data', 'dir'));
+    return { tree, cdc, wm, events };
+  }
+  const planOf = (kind: string) => ({ plan: { source: '/data', callerWhere: { kind } }, mountDeps: new Set(['/view']) });
+  const dirtied = (events: NodeEvent[], vp: string) =>
+    events.some((e) => e.type !== 'reconnect' && e.invalidateVps?.includes(vp));
+
+  it("released token's plan dies with it; the co-holder's own plan stays live", async () => {
+    const { tree, cdc, wm, events } = await coexistHarness();
+    wm.connect('cA', 'u1', () => {}, undefined, 'tA');
+    wm.connect('cB', 'u1', () => {}, undefined, 'tB');
+    wm.watch('u1', ['/view'], { children: true, query: planOf('a'), token: 'tA' });
+    wm.watch('u1', ['/view'], { children: true, query: planOf('b'), token: 'tB' });
+    assert.equal(cdc.getActiveQueryCount(), 2, 'coexisting plans under two holders');
+
+    wm.unwatch('u1', ['/view'], { children: true, token: 'tA' });
+    assert.equal(cdc.getActiveQueryCount(), 1, "tA's plan released WITH its holder — not parked behind tB");
+
+    events.length = 0;
+    await tree.set(createNode('/data/x', 'item', { kind: 'a' }));
+    assert.ok(!dirtied(events, '/view'), "the released token's plan no longer evaluates");
+
+    events.length = 0;
+    await tree.set(createNode('/data/y', 'item', { kind: 'b' }));
+    assert.ok(dirtied(events, '/view'), "the co-holder's plan survives the release");
+  });
+
+  it('same plan co-held by two tokens: one release keeps the handle live', async () => {
+    const { tree, cdc, wm, events } = await coexistHarness();
+    wm.connect('cA', 'u1', () => {}, undefined, 'tA');
+    wm.connect('cB', 'u1', () => {}, undefined, 'tB');
+    wm.watch('u1', ['/view'], { children: true, query: planOf('a'), token: 'tA' });
+    wm.watch('u1', ['/view'], { children: true, query: planOf('a'), token: 'tB' });
+    assert.equal(cdc.getActiveQueryCount(), 1, 'one shared handle');
+
+    wm.unwatch('u1', ['/view'], { children: true, token: 'tA' });
+    assert.equal(cdc.getActiveQueryCount(), 1, 'handle survives on the co-holder');
+    events.length = 0;
+    await tree.set(createNode('/data/z', 'item', { kind: 'a' }));
+    assert.ok(dirtied(events, '/view'), 'still evaluating for the co-holder');
+
+    wm.unwatch('u1', ['/view'], { children: true, token: 'tB' });
+    assert.equal(cdc.getActiveQueryCount(), 0, 'last holder releases the handle');
+  });
+
+  it("token-grace release (dead tab) drops its plan while the co-holder keeps its own", async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const { tree, cdc, wm, events } = await coexistHarness();
+    wm.connect('cA', 'u1', () => {}, undefined, 'tA');
+    wm.connect('cB', 'u1', () => {}, undefined, 'tB');
+    wm.watch('u1', ['/view'], { children: true, query: planOf('a'), token: 'tA' });
+    wm.watch('u1', ['/view'], { children: true, query: planOf('b'), token: 'tB' });
+
+    wm.disconnect('cA');
+    t.mock.timers.tick(100); // token grace releases tA's holdings
+
+    assert.equal(cdc.getActiveQueryCount(), 1, "the dead tab's plan died with its token");
+    events.length = 0;
+    await tree.set(createNode('/data/y2', 'item', { kind: 'b' }));
+    assert.ok(dirtied(events, '/view'), "the surviving tab's plan still evaluates");
+  });
+});
+
 // ── ns6p.4 slice 2: unbound-token TTL (invariant 25) ──
 
 describe('WatchManager — unbound-token TTL (ns6p.4 slice 2)', () => {
@@ -1531,6 +1610,7 @@ describe('WatchManager — unbound-token TTL (ns6p.4 slice 2)', () => {
     // Another tab keeps the user entry alive — the exact leak scenario (F7-r2).
     wm.connect('cOther', 'u1', (e) => other.push(e.event), undefined, 'tOther');
     wm.watch('u1', ['/doc'], { token: 'tGhost' }); // registered, never connects
+    wm.armUnboundTtl('u1', 'tGhost'); // request boundary (F7)
 
     wm.notify(setEvent('/doc')); // routes via tGhost's hold to the user's lanes
     assert.equal(other.length, 1, 'holding alive before expiry');
@@ -1558,6 +1638,7 @@ describe('WatchManager — unbound-token TTL (ns6p.4 slice 2)', () => {
     const wm = createWatchManager({ unboundTokenTtlMs: 1000 });
     const got: NodeEvent[] = [];
     wm.watch('u1', ['/doc'], { token: 't1' });
+    wm.armUnboundTtl('u1', 't1');
 
     t.mock.timers.tick(500);
     const verdict = wm.connect('c1', 'u1', (e) => got.push(e.event), undefined, 't1');
@@ -1572,7 +1653,8 @@ describe('WatchManager — unbound-token TTL (ns6p.4 slice 2)', () => {
     t.mock.timers.enable({ apis: ['setTimeout'] });
     const removed: string[] = [];
     const wm = createWatchManager({ unboundTokenTtlMs: 1000, gracePeriodMs: 100, onUserRemoved: (u) => removed.push(u) });
-    wm.watch('u1', ['/doc'], { token: 'tGhost' }); // TTL armed at 0ms, never connects
+    wm.watch('u1', ['/doc'], { token: 'tGhost' }); // never connects
+    wm.armUnboundTtl('u1', 'tGhost'); // TTL armed at 0ms
 
     // A different tab's lane comes and goes → user-grace removes the entry;
     // the armed ghost TTL must die with it (mirror of tokenGrace clearing).
@@ -1597,6 +1679,7 @@ describe('WatchManager — unbound-token TTL (ns6p.4 slice 2)', () => {
     const wm = createWatchManager({ unboundTokenTtlMs: 1000 });
     const got: NodeEvent[] = [];
     wm.watch('u1', ['/doc']); // legacy shared hold, no lane
+    wm.armUnboundTtl('u1', ''); // even an explicit arm attempt must be refused
 
     t.mock.timers.tick(5000);
 
@@ -1611,13 +1694,75 @@ describe('WatchManager — unbound-token TTL (ns6p.4 slice 2)', () => {
     const other: NodeEvent[] = [];
     wm.connect('cOther', 'u1', (e) => other.push(e.event), undefined, 'tOther');
     wm.watch('u1', ['/a'], { token: 'tGhost' });
+    wm.armUnboundTtl('u1', 'tGhost');
 
     t.mock.timers.tick(900);
     wm.watch('u1', ['/b'], { token: 'tGhost' }); // must NOT re-arm
+    wm.armUnboundTtl('u1', 'tGhost');
     t.mock.timers.tick(100); // original deadline
 
     assert.equal(wm.connect('cG', 'u1', () => {}, undefined, 'tGhost').preserved, false,
       'deadline counted from the FIRST laneless registration');
+  });
+
+  it('TTL never fires mid-request — the countdown starts only at the request-boundary arm (F7)', (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const wm = createWatchManager({ unboundTokenTtlMs: 1000 });
+    const other: NodeEvent[] = [];
+    wm.connect('cOther', 'u1', (e) => other.push(e.event), undefined, 'tOther');
+    wm.watch('u1', ['/doc'], { token: 'tSlow' }); // registered; the request's read still runs
+
+    t.mock.timers.tick(5000); // the read outlives the whole TTL window
+    wm.notify(setEvent('/doc'));
+    assert.equal(other.length, 1, 'coverage intact — no TTL ran during the request');
+
+    wm.armUnboundTtl('u1', 'tSlow'); // request completed
+    t.mock.timers.tick(999);
+    wm.notify(setEvent('/doc'));
+    assert.equal(other.length, 2, 'held until the armed deadline');
+    t.mock.timers.tick(1);
+    wm.notify(setEvent('/doc'));
+    assert.equal(other.length, 2, 'released exactly at the armed deadline');
+    assert.equal(wm.connect('cS', 'u1', () => {}, undefined, 'tSlow').preserved, false, 'tombstoned');
+  });
+
+  it("tombstone-cap eviction breaks the user's continuity — the evicted token still fails closed (F7, inv.25)", (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const wm = createWatchManager({ unboundTokenTtlMs: 1000, tokenTombstoneCap: 1 });
+    const other: StampedEvent[] = [];
+    wm.connect('cOther', 'u1', (e) => other.push(e.event), undefined, 'tOther');
+    wm.watch('u1', ['/a'], { token: 'g1' });
+    wm.armUnboundTtl('u1', 'g1');
+    wm.watch('u1', ['/b'], { token: 'g2' });
+    wm.armUnboundTtl('u1', 'g2');
+
+    wm.notify(setEvent('/a'));
+    const head = cursorOf(other[0]); // pre-break cursor under the live epoch
+
+    t.mock.timers.tick(1000); // both expire; g2's tombstone evicts g1 over the cap
+
+    assert.ok(other.some((e) => e.type === 'reconnect' && !e.preserved),
+      'eviction pushed a continuity break to the live lanes — the proof is not silently forgotten');
+    const verdict = wm.connect('cG1', 'u1', () => {}, head, 'g1');
+    assert.equal(verdict.preserved, false, 'evicted tombstone fails closed via the epoch break');
+  });
+
+  it('tombstones live until user death — removeUser clears them with the entry', (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const removed: string[] = [];
+    const wm = createWatchManager({ unboundTokenTtlMs: 1000, gracePeriodMs: 100, onUserRemoved: (u) => removed.push(u) });
+    wm.connect('cKeep', 'u1', () => {}, undefined, 'tKeep');
+    wm.watch('u1', ['/doc'], { token: 'tGhost' });
+    wm.armUnboundTtl('u1', 'tGhost');
+    t.mock.timers.tick(1000); // expire → tombstone
+
+    const v1 = wm.connect('cG', 'u1', () => {}, undefined, 'tGhost');
+    assert.equal(v1.preserved, false, 'tombstone survived until consumed — no TTL-side forgetting');
+
+    wm.disconnect('cG');
+    wm.disconnect('cKeep');
+    t.mock.timers.tick(100); // user-grace → removeUser wipes the entry (tombstones die with it)
+    assert.deepEqual(removed, ['u1']);
   });
 });
 

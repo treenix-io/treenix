@@ -69,6 +69,12 @@ export type VpDelta = {
 
 export type NodeEvent = TreeEvent & Partial<VpDelta>;
 
+/** Shared holder for legacy/anonymous query registrations (no `holder` on the
+ *  reg): mirrors the WatchManager LEGACY_TOKEN — such handles die only via
+ *  outright kill (registration death / hash-scoped release), never via a real
+ *  token's holder-scoped release. */
+const SHARED_HOLDER = '';
+
 /** Pathless coarse-invalidate frame (core-dm1). Born at the ACL filter when a
  *  data event carrying `invalidateVps` must be DROPPED for a reader — they lost
  *  R on the mutated node, or every patch op is ACL-hidden. The watched view
@@ -209,6 +215,11 @@ type QueryHandle = {
    *  lease-undo restore (inv.15) — the compiled test cannot reconstruct it. */
   plan: ReadPlan;
   group: WatchGroup;
+  /** Holder tokens, same shape as WatchManager path holders (§4.2 F5): the
+   *  handle dies with its LAST holder — a released token's plan must not stay
+   *  live behind a co-holder, and a co-holder's release must not nuke plans
+   *  it never registered. */
+  holders: Set<string>;
 };
 
 /** One registration = the SAME plan the initial read ran (read-runtime-mvp:
@@ -218,6 +229,10 @@ export type QueryWatchRegistration = {
   userId: string;
   plan: ReadPlan;
   mountDeps: ReadonlySet<string>;
+  /** Watch-ownership token of the registering lease (§4.2 F5). Absent =
+   *  legacy/anonymous: seeds the shared holder on create, touches no holders
+   *  on refresh (the lease-undo deps-restore path relies on that). */
+  holder?: string;
 };
 
 /** Project one commit's (old, new) node pair as `userId` may read it — null
@@ -234,11 +249,15 @@ export type CdcRegistry = {
   subscribe(path: string, listener: Listener, opts?: SubscribeOpts): () => void;
   /** Handle key = (userId, vp, planHash) — different plans on one vp COEXIST
    *  (E03 → coexistence, §4.2). Returns the prior SAME-plan registration
-   *  (deps refresh) for lease-undo restore (inv.15); null = new handle. */
-  watchQuery(reg: QueryWatchRegistration): QueryWatchRegistration | null;
-  /** With `planHash`: release only that plan's handle (lease-scoped). Without:
-   *  every plan of (userId, vp) — registration death (a watcherless plan is a leak). */
-  unwatchQuery(vp: string, userId: string, planHash?: string): void;
+   *  (deps refresh; null = new handle) for lease-undo restore (inv.15), plus
+   *  whether `reg.holder` was newly added — undo must strip exactly that (F5). */
+  watchQuery(reg: QueryWatchRegistration): { prev: QueryWatchRegistration | null; holderAdded: boolean };
+  /** With `holder`: release that token's hold — the handle dies only when its
+   *  holders empty (F5; scoped by `planHash` when given, else every plan of
+   *  the vp). Without `holder`: outright kill — lease-scoped when `planHash`
+   *  given, else registration death for every plan of (userId, vp) (a
+   *  watcherless plan is a leak). */
+  unwatchQuery(vp: string, userId: string, planHash?: string, holder?: string): void;
   unwatchAllQueries(userId: string): void;
   /** Distinct execution groups (deduped plans), not registrations. */
   getActiveQueryCount(): number;
@@ -753,11 +772,13 @@ export function withSubscriptions(
       const key = handleKey(reg.userId, reg.vp, hash);
       const existing = handleByKey.get(key);
       if (existing) {
-        // Same plan re-registered (page refetch) — refresh deps only.
+        // Same plan re-registered (page refetch) — refresh deps, add the holder.
         const prev = { vp: existing.vp, userId: existing.userId, plan: existing.plan, mountDeps: existing.mountDeps };
         existing.mountDeps = reg.mountDeps;
         existing.plan = reg.plan;
-        return prev;
+        const holderAdded = reg.holder !== undefined && !existing.holders.has(reg.holder);
+        if (reg.holder !== undefined) existing.holders.add(reg.holder);
+        return { prev, holderAdded };
       }
 
       let group = groups.get(hash);
@@ -772,16 +793,21 @@ export function withSubscriptions(
         };
         groups.set(hash, group);
       }
-      const handle: QueryHandle = { vp: reg.vp, userId: reg.userId, mountDeps: reg.mountDeps, plan: reg.plan, group };
+      const handle: QueryHandle = {
+        vp: reg.vp, userId: reg.userId, mountDeps: reg.mountDeps, plan: reg.plan, group,
+        holders: new Set([reg.holder ?? SHARED_HOLDER]),
+      };
       group.handles.add(handle);
       handleByKey.set(key, handle);
-      return null;
+      return { prev: null, holderAdded: true };
     },
 
-    unwatchQuery(vp, userId, hash) {
+    unwatchQuery(vp, userId, hash, holder) {
       for (const handle of [...handleByKey.values()]) {
         if (handle.userId !== userId || handle.vp !== vp) continue;
         if (hash !== undefined && handle.group.planHash !== hash) continue;
+        // F5 holder-scoped release: the handle survives on its co-holders.
+        if (holder !== undefined && (!handle.holders.delete(holder) || handle.holders.size > 0)) continue;
         removeHandle(handle);
       }
     },

@@ -4,7 +4,7 @@
 import type { NodeData } from '@treenx/core';
 import { applyOps, type PatchOp } from '@treenx/core/tree';
 import * as cache from './cache';
-import { applyServerPatch, applyServerSet, clear as clearRebase, consumeAckOnly, ingestNode } from './rebase';
+import { applyServerPatch, applyServerRemove, applyServerSet, clear as clearRebase, consumeAckOnly, ingestNode } from './rebase';
 import { AUTH_EXPIRED_EVENT, clearToken, getToken, tabTokenInput, trpc } from './trpc';
 
 type LoadChildren = (path: string) => Promise<void>;
@@ -62,6 +62,15 @@ function refetchDirtyVp(vp: string, loadChildren: LoadChildren) {
   }, DIRTY_COALESCE_MS));
 }
 
+/** One dirtied view path (F1, inv.16/19): flag any in-flight read, wake the
+ *  mounted resource's own refetch (idle-settled vps healed nothing before),
+ *  and keep the legacy loadChildren callback for callers that still inject it. */
+function dirtyVp(vp: string, loadChildren?: LoadChildren) {
+  cache.flagChildrenReadOverlap(vp);
+  cache.signalChildrenDirty(vp);
+  if (loadChildren) refetchDirtyVp(vp, loadChildren);
+}
+
 type FetchNode = (path: string) => Promise<NodeData | null | undefined>;
 
 // Exact-path invalidation (§3.4): the server ACL-dropped a payload for a path
@@ -116,10 +125,7 @@ export function applyDataEvent(
   const refetchVps = () => {
     const vps = event.invalidateVps as string[] | undefined;
     if (!vps) return;
-    for (const vp of vps) {
-      cache.flagChildrenReadOverlap(vp);
-      if (loadChildren) refetchDirtyVp(vp, loadChildren);
-    }
+    for (const vp of vps) dirtyVp(vp, loadChildren);
   };
 
   const flagParent = () => {
@@ -130,6 +136,8 @@ export function applyDataEvent(
   if (event.type === 'remove') {
     // Always an invalidation, never rev-gated (§3.3.3a).
     flagParent();
+    cache.flagPathReadOverlap(event.path); // F2: an in-flight get must not resurrect it
+    applyServerRemove(event.path, event.by); // F4: dead overlay — rollback() must find nothing
     cache.remove(event.path);
     refetchVps();
     return;
@@ -139,6 +147,8 @@ export function applyDataEvent(
 
   if (event.type === 'set') {
     const node = { $path: event.path, ...event.node } as NodeData;
+    // F2: a create/recreate landing mid-get outranks the read's absent/older snapshot.
+    cache.flagPathReadOverlap(event.path);
 
     if (cached === undefined) {
       // Uncached can't regress; create/reveal is a membership change.
@@ -348,10 +358,7 @@ export function startEvents(config: EventsConfig = {}, resume = false) {
       // whose payload was dropped: refetch the node; FORBIDDEN/gone evicts.
       if (event.type === 'invalidate') {
         if (typeof event.seq === 'number' && event.seq > lastSeq) lastSeq = event.seq;
-        for (const vp of event.vps) {
-          cache.flagChildrenReadOverlap(vp);
-          if (loadChildren) refetchDirtyVp(vp, loadChildren);
-        }
+        for (const vp of event.vps) dirtyVp(vp, loadChildren);
         for (const p of event.paths ?? []) refetchInvalidatedPath(p, fetchInvalidatedNode);
         return;
       }

@@ -626,11 +626,53 @@ export function flagChildrenReadOverlap(parent: string): void {
   if (inflightChildrenReads.has(parent)) overlappedReads.add(parent);
 }
 
+// ── vp-dirty fan-out (ns6p.4 F1, invariants 16/19) ──
+// A dirty/invalidate naming a SETTLED resource (no in-flight read) must still
+// reach its mounted consumer's own coalesced refetch — the overlap flag above
+// is a no-op when idle, and the legacy loadChildren callback is optional.
+
+const childDirtySubs = new Map<string, Set<Sub>>();
+
+export const subscribeChildrenDirty = (parent: string, cb: Sub) => addSub(childDirtySubs, parent, cb);
+
+export function signalChildrenDirty(parent: string): void {
+  fire(childDirtySubs, parent);
+}
+
+// ── In-flight exact reads (ns6p.4 F2, invariants 17/18) ──
+// Same machinery as children reads: presence/absence of a single node can't be
+// rev-ordered against a create/remove landing mid-read — the event flags the
+// path, the applying response refetches instead of trusting its snapshot.
+
+const inflightPathReads = new Map<string, number>();
+const overlappedPathReads = new Set<string>();
+
+export function beginPathRead(path: string): void {
+  inflightPathReads.set(path, (inflightPathReads.get(path) ?? 0) + 1);
+}
+
+/** Mirror of endChildrenRead: `applied` = this response won its generation.
+ *  Returns true when the applying read must refetch. */
+export function endPathRead(path: string, applied: boolean): boolean {
+  const n = (inflightPathReads.get(path) ?? 0) - 1;
+  if (n <= 0) inflightPathReads.delete(path);
+  else inflightPathReads.set(path, n);
+  if (!overlappedPathReads.has(path)) return false;
+  if (applied || n <= 0) overlappedPathReads.delete(path);
+  return applied;
+}
+
+export function flagPathReadOverlap(path: string): void {
+  if (inflightPathReads.has(path)) overlappedPathReads.add(path);
+}
+
 // ── Bulk ──
 
 export function clear() {
   inflightChildrenReads.clear();
   overlappedReads.clear();
+  inflightPathReads.clear();
+  overlappedPathReads.clear();
   nodes.clear();
   parentIndex.clear();
   nodeToParents.clear();

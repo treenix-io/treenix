@@ -39,10 +39,13 @@ export type WatchManagerOpts = {
    *  starts only after connect+disconnect, so a client dying pre-connect would
    *  otherwise hold forever while another tab keeps the user alive. Default 5 min. */
   unboundTokenTtlMs?: number;
+  /** Per-user cap on expired-token tombstones (F7). Default 256. */
+  tokenTombstoneCap?: number;
 };
 
 type QueryWatchRegistry = Pick<CdcRegistry, 'watchQuery' | 'unwatchQuery' | 'unwatchAllQueries'>;
-type QueryWatchPlan = Omit<QueryWatchRegistration, 'vp' | 'userId'>;
+// holder excluded: the lease supplies its own token (F5) — a caller-provided one would lie.
+type QueryWatchPlan = Omit<QueryWatchRegistration, 'vp' | 'userId' | 'holder'>;
 
 /** `token` scopes watch ownership to one wire session/tab (core-anz4.12).
  *  Callers that don't scope share a single legacy hold — pre-token behavior. */
@@ -87,6 +90,11 @@ export type WatchManager = {
    *  a tab token would collapse concurrent requests. Budget-counted; never
    *  TTL'd (the peer releases it in a request finally). Idempotent release. */
   holdPrefix(userId: string, path: string): () => void;
+  /** Start the unbound-token TTL countdown (inv.25) for a token that
+   *  registered while laneless — called at the REQUEST boundary (F7: arming
+   *  inside watch() could expire mid-read). No-op for tokens that didn't
+   *  register, have a lane, or already run a TTL; first connect() disarms. */
+  armUnboundTtl(userId: string, token: string): void;
   unwatch(userId: string, paths: string[], opts?: UnwatchOpts): void;
   notify(event: NodeEvent): void;
   /** Break continuity for EVERY tracked user — a delegated execute (federation)
@@ -105,8 +113,10 @@ const MAX_WATCHES_PER_USER = 10_000;
 const MAX_TOTAL_WATCHES = 100_000;
 const DEFAULT_RING_SIZE = 1024;
 const DEFAULT_UNBOUND_TOKEN_TTL_MS = 300_000;
-// Bounded FIFO; an evicted tombstone degrades to fresh-entry semantics (preserved:false).
-const TOKEN_TOMBSTONE_CAP = 256;
+// Bounded FIFO; eviction breaks the USER's continuity (F7) — forgetting the
+// fail-closed proof would let a late connect judge preserved:true from
+// surviving user state.
+const DEFAULT_TOKEN_TOMBSTONE_CAP = 256;
 
 /** Shared hold for callers that don't scope ownership by connection token —
  *  they collapse into one holder, i.e. exactly the pre-anz4.12 semantics. */
@@ -145,6 +155,7 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
   const maxTotal = opts?.maxTotalWatches ?? MAX_TOTAL_WATCHES;
   const ringSize = opts?.ringSize ?? DEFAULT_RING_SIZE;
   const unboundTokenTtlMs = opts?.unboundTokenTtlMs ?? DEFAULT_UNBOUND_TOKEN_TTL_MS;
+  const tombstoneCap = opts?.tokenTombstoneCap ?? DEFAULT_TOKEN_TOMBSTONE_CAP;
   const pathToUsers = new Map<string, Set<string>>();
   const prefixToUsers = new Map<string, Set<string>>();
   // seq/ring/missedOffline — replay machinery (core-gk8.1). seq is per-user
@@ -169,11 +180,16 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
     laneToken: Map<string, string>;
     tokenLanes: Map<string, Set<string>>;
     tokenGrace: Map<string, ReturnType<typeof setTimeout>>;
-    /** Unbound-token TTL (invariant 25): armed by watch() for a token with no
-     *  connected lane; first connect() of that token cancels it. */
+    /** Unbound-token TTL (invariant 25): armed at the REQUEST boundary via
+     *  armUnboundTtl (F7 — arming inside watch() could expire mid-read);
+     *  first connect() of that token cancels it. */
     tokenTtl: Map<string, ReturnType<typeof setTimeout>>;
+    /** Laneless tokens that registered this request — armUnboundTtl consumes
+     *  the flag when the request completes (F7). */
+    ttlPending: Set<string>;
     /** Tokens whose TTL expired: a late connect() consumes the tombstone and
-     *  answers preserved:false — events after expiry were unrouted. FIFO-capped. */
+     *  answers preserved:false — events after expiry were unrouted. Capped;
+     *  eviction breaks the user's continuity instead of forgetting (F7). */
     tokenTombstones: Set<string>;
     paths: Map<string, Map<string, boolean>>;
     prefixes: Map<string, Map<string, boolean>>;
@@ -227,7 +243,14 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
       totalWatches--;
     }
     for (const [p, holders] of user.prefixes) {
-      if (!holders.delete(token) || holders.size > 0) continue;
+      if (!holders.delete(token)) continue;
+      if (holders.size > 0) {
+        // F5: behind a co-holder the token's plan handles would stay live
+        // forever, and the co-holder's later release would nuke plans it
+        // never registered — release only THIS token's holds.
+        queryRegistry?.unwatchQuery(p, userId, undefined, token);
+        continue;
+      }
       user.prefixes.delete(p);
       removeFrom(prefixToUsers, p, userId);
       queryRegistry?.unwatchQuery(p, userId);
@@ -290,6 +313,7 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
         tokenLanes: new Map(),
         tokenGrace: new Map(),
         tokenTtl: new Map(),
+        ttlPending: new Set(),
         tokenTombstones: new Set(),
         paths: new Map(),
         prefixes: new Map(),
@@ -324,15 +348,17 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
     }
   }
 
-  /** Continuity break: re-mint every epoch FIRST, then ring-route the reset —
-   *  the pushed reconnect is stamped under the NEW epoch, so live clients
-   *  adopt it and can resume covered later, while every pre-break cursor now
-   *  fails the epoch compare regardless of seq (anz4.10/11). */
+  /** Continuity break for one user: re-mint the epoch FIRST, then ring-route
+   *  the reset — the pushed reconnect is stamped under the NEW epoch, so live
+   *  clients adopt it and can resume covered later, while every pre-break
+   *  cursor now fails the epoch compare regardless of seq (anz4.10/11). */
+  function breakUser(uid: string, user: UserEntry) {
+    user.epoch = mintEpoch();
+    pushToUser(uid, { type: 'reconnect', preserved: false });
+  }
+
   function breakAll() {
-    for (const [uid, user] of users) {
-      user.epoch = mintEpoch();
-      pushToUser(uid, { type: 'reconnect', preserved: false });
-    }
+    for (const [uid, user] of users) breakUser(uid, user);
   }
 
   const manager: WatchManager = {
@@ -373,6 +399,8 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
           clearTimeout(ttlTimer);
           user.tokenTtl.delete(token);
         }
+        // A lane arrived before the request-boundary arm (F7) — nothing to TTL.
+        user.ttlPending.delete(token);
         // Consumed once: this connect fails closed; a LATER connect of the
         // token judges continuity anew (client refetched and re-registered).
         tokenExpired = user.tokenTombstones.delete(token);
@@ -479,8 +507,22 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
       // this call. Captured before mutation; undo restores exactly it.
       const priorFlags = new Map<string, boolean | undefined>();
       const replaced: { vp: string; prev: QueryWatchRegistration | null }[] = [];
+      // F5: vps where THIS call added the token as plan holder — undo strips
+      // exactly those (a hold an earlier lease established must survive).
+      const planHolderAdded = new Set<string>();
       // §4.2 coexistence: undo releases only the plan THIS lease registered.
       const queryHash = watchOpts?.query ? planHash(watchOpts.query.plan) : undefined;
+      // Compensation of the plan-holds this call took: restore replaced deps,
+      // then drop only the newly-added holder (handle dies with its last one).
+      const undoPlans = (u: UserEntry | undefined) => {
+        for (const r of replaced) {
+          // Restore only while a prefix holder still backs the vp — a plan with
+          // no watcher is a leak. (u = undefined: pre-publish rollback, prefix
+          // holds were never taken, restore unconditionally.)
+          if (r.prev && (!u || u.prefixes.has(r.vp))) queryRegistry!.watchQuery(r.prev);
+          if (planHolderAdded.has(r.vp)) queryRegistry!.unwatchQuery(r.vp, userId, queryHash, token);
+        }
+      };
 
       // Query membership registers FIRST — watchQuery validates and can refuse;
       // publishing prefix holders before a refusal would leak a live watch with
@@ -489,14 +531,12 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
       if (watchOpts?.children && watchOpts.query) {
         try {
           for (const vp of paths) {
-            const prev = queryRegistry!.watchQuery({ vp, userId, ...watchOpts.query });
+            const { prev, holderAdded } = queryRegistry!.watchQuery({ vp, userId, ...watchOpts.query, holder: token });
             replaced.push({ vp, prev });
+            if (holderAdded) planHolderAdded.add(vp);
           }
         } catch (e) {
-          for (const r of replaced) {
-            if (r.prev) queryRegistry!.watchQuery(r.prev);
-            else queryRegistry!.unwatchQuery(r.vp, userId, queryHash);
-          }
+          undoPlans(undefined);
           throw e;
         }
       }
@@ -517,26 +557,12 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
       }
       totalWatches += fresh.size;
 
-      // Arm the unbound-token TTL (inv.25) only on commit, and only for real
-      // tabs: LEGACY relies on user-grace; provisional holders (inv.27) die in
-      // the request finally (their tombstones would churn real tabs' out of the cap).
-      if (token !== LEGACY_TOKEN && !token.startsWith(PROVISIONAL_NS) && !user.tokenLanes.has(token) && !user.tokenTtl.has(token)) {
-        const ttlTimer = setTimeout(() => {
-          const u = users.get(userId);
-          if (!u || u.tokenTtl.get(token) !== ttlTimer) return;
-          u.tokenTtl.delete(token);
-          releaseTokenHoldings(userId, token);
-          // FIFO-bounded tombstone: a later connect() must fail closed.
-          u.tokenTombstones.delete(token);
-          u.tokenTombstones.add(token);
-          if (u.tokenTombstones.size > TOKEN_TOMBSTONE_CAP) {
-            const oldest = u.tokenTombstones.values().next().value;
-            if (oldest !== undefined) u.tokenTombstones.delete(oldest);
-          }
-        }, unboundTokenTtlMs);
-        // Never hold the process open (mock timers / non-Node may lack unref).
-        if (typeof ttlTimer.unref === 'function') ttlTimer.unref();
-        user.tokenTtl.set(token, ttlTimer);
+      // Flag for the unbound-token TTL (inv.25) — armed by armUnboundTtl at
+      // the REQUEST boundary (F7: arming here could expire mid-read and strip
+      // coverage the response still relies on). Only real tabs: LEGACY relies
+      // on user-grace; provisional holders (inv.27) die in the request finally.
+      if (token !== LEGACY_TOKEN && !token.startsWith(PROVISIONAL_NS) && !user.tokenLanes.has(token)) {
+        user.ttlPending.add(token);
       }
 
       let undone = false;
@@ -561,11 +587,7 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
           if (kind === 'prefix') queryRegistry?.unwatchQuery(p, userId);
           totalWatches--;
         }
-        for (const r of replaced) {
-          // Restore only while a prefix holder still backs the vp — a plan with no watcher is a leak.
-          if (r.prev && u.prefixes.has(r.vp)) queryRegistry?.watchQuery(r.prev);
-          else queryRegistry?.unwatchQuery(r.vp, userId, queryHash);
-        }
+        undoPlans(u);
       };
 
       return {
@@ -582,6 +604,35 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
       return lease.undo;
     },
 
+    armUnboundTtl(userId, token) {
+      const user = users.get(userId);
+      // Consumed flag = the token registered while laneless during this
+      // request (watch() sets it); anything else is a no-op.
+      if (!user || !user.ttlPending.delete(token)) return;
+      if (user.tokenLanes.has(token) || user.tokenTtl.has(token)) return;
+      const ttlTimer = setTimeout(() => {
+        const u = users.get(userId);
+        if (!u || u.tokenTtl.get(token) !== ttlTimer) return;
+        u.tokenTtl.delete(token);
+        u.ttlPending.delete(token);
+        releaseTokenHoldings(userId, token);
+        // Fail-closed tombstone: a later connect() must answer preserved:false.
+        u.tokenTombstones.delete(token);
+        u.tokenTombstones.add(token);
+        if (u.tokenTombstones.size > tombstoneCap) {
+          // F7/inv.25: eviction must not FORGET the proof — breaking this
+          // user's continuity re-mints the epoch, so every pre-break cursor
+          // (the evicted token's included) fails closed anyway.
+          const oldest = u.tokenTombstones.values().next().value;
+          if (oldest !== undefined) u.tokenTombstones.delete(oldest);
+          breakUser(userId, u);
+        }
+      }, unboundTokenTtlMs);
+      // Never hold the process open (mock timers / non-Node may lack unref).
+      if (typeof ttlTimer.unref === 'function') ttlTimer.unref();
+      user.tokenTtl.set(token, ttlTimer);
+    },
+
     unwatch(userId, paths, unwatchOpts) {
       const user = users.get(userId);
       if (!user) return;
@@ -594,7 +645,12 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
       for (const p of paths) {
         const holders = map.get(p);
         if (!holders || !holders.delete(token)) continue;
-        if (holders.size > 0) continue; // co-held by another token — keep (anz4.12)
+        if (holders.size > 0) {
+          // Co-held by another token — the registration stays (anz4.12), but
+          // THIS token's plan handles release with its prefix hold (F5).
+          if (children) queryRegistry?.unwatchQuery(p, userId, undefined, token);
+          continue;
+        }
         map.delete(p);
         removeFrom(index, p, userId);
         if (children) queryRegistry?.unwatchQuery(p, userId);

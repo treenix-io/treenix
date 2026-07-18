@@ -16,6 +16,7 @@ import { TypePicker } from '#mods/editor-ui/type-picker';
 import type { NavigateFn } from '#navigate';
 import * as cache from '#tree/cache';
 import { tree } from '#tree/client';
+import { ingestNode } from '#tree/rebase';
 import { tabTokenInput, trpc } from '#tree/trpc';
 import type { NodeData } from '@treenx/core';
 import { ChevronDown, Eye, EyeOff, LogIn, LogOut, RotateCcw } from 'lucide-react';
@@ -104,7 +105,9 @@ export function EditorSidebar({
     // the tokened unwatch in handleExpand.
     const { items: children } = await trpc.getChildren
       .query({ path, watch: true, watchNew: true, ...tabTokenInput });
-    cache.replaceChildren(path, children);
+    // F2/inv.18: same ingest-mapped replace as client-tree-source — a raw
+    // listing write would clobber overlays and regress newer event images.
+    cache.replaceChildren(path, children.map(ingestNode));
     const next = new Set(loadedRef.current).add(path);
     loadedRef.current = next;
     setLoaded(next);
@@ -150,7 +153,7 @@ export function EditorSidebar({
     setExpanded(new Set([root]));
     (async () => {
       const rootNode = (await trpc.get.query({ path: root, watch: true, ...tabTokenInput })) as NodeData | undefined;
-      if (rootNode) cache.put(rootNode);
+      if (rootNode) cache.put(ingestNode(rootNode));
       await loadChildren(root);
       await ensurePathVisible(root, selectedRef.current);
     })().catch((e: unknown) => {

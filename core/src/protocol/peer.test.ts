@@ -802,3 +802,44 @@ describe('register-first observe (ns6p.4 slice 4)', () => {
     assert.ok(!h.lane.some((e) => e.type === 'set' && e.path === '/dir/ghost'), 'no watch left behind');
   });
 });
+
+// ── ns6p.4 F7: unbound-token TTL arms at the request boundary (inv.25) ──
+
+describe('request-boundary TTL arm (ns6p.4 F7)', () => {
+  function armHarness() {
+    const armed: string[] = [];
+    const tree = createMemoryTree();
+    const base = Object.assign(Object.create(tree) as typeof tree, {
+      getPerm: async () => R | S,
+    });
+    const hooks: ServeHooks = {
+      watch: () => {},
+      unwatch: () => {},
+      armUnboundTtl: (token) => armed.push(token),
+    };
+    return { armed, tree, base, hooks };
+  }
+
+  it('a tokened request arms AFTER completion; tokenless never arms', async () => {
+    const h = armHarness();
+    await h.tree.set(createNode('/doc', 'dir', {}));
+    const { client } = pair(() => ({ tree: h.base, hooks: h.hooks }));
+
+    await client.req.get('/doc', true, 'tab1');
+    assert.deepEqual(h.armed, ['tab1'], 'arm called once, with the frame token');
+
+    await client.req.get('/doc', true);
+    assert.deepEqual(h.armed, ['tab1'], 'tokenless request never arms');
+  });
+
+  it('arms even when the request fails — a lease undone mid-request must still not outlive its token silently', async () => {
+    const h = armHarness();
+    const failing = Object.assign(Object.create(h.base) as typeof h.base, {
+      get: async (): Promise<never> => { throw new OpError('NOT_FOUND', 'read failed'); },
+    });
+    const { client } = pair(() => ({ tree: failing, hooks: h.hooks }));
+
+    await assert.rejects(client.req.get('/doc', true, 'tab2'), isCode('NOT_FOUND'));
+    assert.deepEqual(h.armed, ['tab2'], 'failure path reaches the arm too');
+  });
+});

@@ -145,17 +145,22 @@ export function confirmFromResponse(path: string, opId: string, node: NodeData |
   }
 
   const idx = rs.pending.findIndex(op => op.opId === opId);
-  if (idx === -1) {
-    if (!regresses(rs.confirmed, node)) rs.confirmed = node;
-    settle(path, rs);
+  if (idx !== -1) {
+    rs.pending.splice(idx, 1);
+    recordSuppressedAck(path, opId);
+  }
+
+  // inv.29 on the response lane: refetch shows a NEW identity — remaining
+  // pendings predicted against the old one, never replay them onto it.
+  if (generationChanged(rs.confirmed, node)) {
+    dropDeadGenerationPendings(path, rs, node);
+    cache.put(node);
     return;
   }
 
-  rs.pending.splice(idx, 1);
   // Invariant 18 on the response lane too: a refetch that raced a newer
   // event must not roll the confirmed base back.
   if (!regresses(rs.confirmed, node)) rs.confirmed = node;
-  recordSuppressedAck(path, opId);
   settle(path, rs);
 }
 
@@ -190,12 +195,31 @@ export function consumeAckOnly(path: string, by: string | undefined): void {
 const finiteRev = (r: unknown): number | undefined =>
   typeof r === 'number' && Number.isFinite(r) ? r : undefined;
 
+/** Distinct $id on both images = generation change (delete/recreate, overlay
+ *  reveal — invariant 29): rev spaces are incomparable, the incoming image is
+ *  a different node. */
+function generationChanged(cur: NodeData | undefined, next: NodeData): boolean {
+  return !!cur && typeof cur.$id === 'string' && typeof next.$id === 'string'
+    && cur.$id !== next.$id;
+}
+
 /** True when `next` is a provably older image than `cur` (both revs finite). */
 function regresses(cur: NodeData | undefined, next: NodeData): boolean {
   if (!cur) return false;
+  // inv.29: a NEW identity at any rev is never a regression — adopt it, or a
+  // delete/recreate during an outage pins the client on the dead node forever.
+  if (generationChanged(cur, next)) return false;
   const a = finiteRev(cur.$rev);
   const b = finiteRev(next.$rev);
   return a !== undefined && b !== undefined && b < a;
+}
+
+/** Predictions target the DEAD generation — replaying them onto the new
+ *  identity would fabricate state (inv.29). Drop them loudly, kill the state. */
+function dropDeadGenerationPendings(path: string, rs: RebaseState, next: NodeData): void {
+  const err = new Error(`node identity changed (${String(rs.confirmed.$id)} → ${String(next.$id)}) — prediction targets the dead generation`);
+  for (const op of rs.pending) reportReplayFailure(path, op, err);
+  state.delete(path);
 }
 
 /** Non-regressing, rebase-aware snapshot ingest (§3.3, inv.18/28) — every node
@@ -212,6 +236,10 @@ export function ingestNode(node: NodeData): NodeData {
   }
 
   if (!rs) return node;
+  if (generationChanged(rs.confirmed, node)) {
+    dropDeadGenerationPendings(path, rs, node);
+    return node;
+  }
   rs.confirmed = node;
   return replayDraft(path, rs);
 }
@@ -262,10 +290,29 @@ export function applyServerSet(path: string, node: NodeData, by?: string): boole
   const rs = state.get(path);
   if (!rs) return false;
 
-  rs.confirmed = node;
   consumeAck(rs, by);
+  // inv.29: new identity — survivors predicted against the dead one; caller
+  // puts the incoming image directly.
+  if (generationChanged(rs.confirmed, node)) {
+    dropDeadGenerationPendings(path, rs, node);
+    return false;
+  }
+  rs.confirmed = node;
   settle(path, rs);
   return true;
+}
+
+/** Authoritative remove reached the event lane (F4, inv.12/18): the path's
+ *  overlay is dead. Consume the `by`-ack, drop surviving predictions via the
+ *  loud skipped-prediction lane, delete the state — a later rollback() of an
+ *  in-flight op must find nothing to restore (it resurrected the node). */
+export function applyServerRemove(path: string, by?: string): void {
+  if (by !== undefined) consumeSuppressedAck(path, by);
+  const rs = state.get(path);
+  if (!rs) return;
+  consumeAck(rs, by);
+  for (const op of rs.pending) logSkipOnce(op, 'node removed');
+  state.delete(path);
 }
 
 /** Rollback the pending op that failed on the server, by its opId (core-gk8.1).

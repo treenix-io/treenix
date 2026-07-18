@@ -7,10 +7,11 @@
 
 import { describe, it, beforeEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
+import type { NodeData } from '@treenx/core';
 
 const getCalls: Record<string, unknown>[] = [];
 const unwatchCalls: Record<string, unknown>[] = [];
-const getQuery = mock.fn(async (input: { path: string }) => {
+const getQuery = mock.fn(async (input: { path: string }): Promise<NodeData> => {
   getCalls.push(input);
   return { $path: input.path, $type: 'doc', v: 1 };
 });
@@ -82,5 +83,17 @@ describe('universal watch() — server-hold lifecycle (anz4.28)', () => {
     const gen = watch('/w3');
     await assert.rejects(() => gen.next(), /FORBIDDEN/);
     assert.equal(unwatchMutate.mock.callCount(), 0);
+  });
+
+  it('initial get ingests through rebase — an older wire image cannot regress a newer cached one (ns6p.4 F2, inv.18)', async () => {
+    cache.put({ $path: '/w5', $type: 'doc', $rev: 5, v: 'newer' });
+    getQuery.mock.mockImplementationOnce(async (input: { path: string }) =>
+      ({ $path: input.path, $type: 'doc', $rev: 1, v: 'stale' }));
+
+    const gen = watch('/w5');
+    await gen.next();
+
+    assert.equal(cache.get('/w5')?.$rev, 5, 'raw put would have regressed the node to the stale image');
+    await gen.return(undefined);
   });
 });

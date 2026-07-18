@@ -5,6 +5,7 @@ import { isRef, type NodeData } from '@treenx/core';
 import { Render, RenderContext } from '#context';
 import { useEffect, useState } from 'react';
 import * as cache from '#tree/cache';
+import { ingestNode } from '#tree/rebase';
 import { usePath } from '#hooks';
 import { tabTokenInput, trpc } from '#tree/trpc';
 
@@ -35,7 +36,9 @@ export function RoutedPage({ path }: { path: string }) {
       watched = paths;
       if (!arr.length) { setNotFound(true); return; }
 
-      for (const n of arr) cache.put(n);
+      // F2/inv.18: reads never bypass the rebase-aware ingest — a raw put
+      // would clobber overlays and regress newer event images.
+      for (const n of arr) cache.put(ingestNode(n));
 
       const route = arr[0];
       setTargetPath(isRef(route) && arr[1] ? arr[1].$path : route.$path);

@@ -52,6 +52,9 @@ export type ServeHooks = {
   watchList?(path: string, itemWatch: boolean, token?: string, plan?: ResolvedReadPlan): void | ListRegistration | Promise<void | ListRegistration>;
   /** Request-scoped provisional prefix (inv.27): unique per-request holder; returns the release. */
   holdPrefix?(path: string): () => void;
+  /** Unbound-token TTL arm (inv.25/F7): the peer calls it when a tokened
+   *  request completes — the countdown must not start mid-read. */
+  armUnboundTtl?(token: string): void;
 };
 
 /** Core waist + the ACL-layer capabilities the protocol exploits when present
@@ -203,8 +206,9 @@ export function createPeer(serve?: ServeFactory) {
   }
 
   async function handleUnary(frame: ReqFrame, ctx?: unknown): Promise<ResFrame> {
+    let served: PeerServe | undefined;
     try {
-      const s = await resolveServe();
+      const s = served = await resolveServe();
       const ok = (v: unknown): OkFrame => (s.at ? { id: frame.id, ok: v, at: s.at() } : { id: frame.id, ok: v });
 
       switch (frame.op) {
@@ -438,8 +442,19 @@ export function createPeer(serve?: ServeFactory) {
           return ok(undefined);
         }
       }
+      // isReqFrame admitted the op set above — reaching here is a routing bug.
+      throw new OpError('BAD_REQUEST', 'unknown op');
     } catch (e) {
       return toErrFrame(frame.id, e);
+    } finally {
+      // inv.25/F7: start the unbound-token TTL countdown only once the request
+      // is DONE — a mid-read expiry would strip coverage the response still
+      // relies on. The manager no-ops unless this token registered lanelessly.
+      const t = 'token' in frame ? frame.token : undefined;
+      if (served?.hooks?.armUnboundTtl && typeof t === 'string' && t.length > 0) {
+        try { served.hooks.armUnboundTtl(t); }
+        catch (e) { console.error('[twp] unbound-token TTL arm failed:', e); }
+      }
     }
   }
 

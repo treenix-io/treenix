@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it, mock } from 'node:test';
 import * as cache from './cache';
 import { applyDataEvent, refetchInvalidatedPath, stopEvents } from './events';
-import { clear as clearRebase, hasPending, ingestNode, pushOptimistic } from './rebase';
+import { clear as clearRebase, hasPending, ingestNode, pushOptimistic, rollback } from './rebase';
 
 const node = (path: string, v: number): NodeData => ({ $path: path, $type: 't', v });
 
@@ -222,6 +222,32 @@ describe('events — data-event rev machine', () => {
     cache.put(vnode('/d', 9, 'x'));
     applyDataEvent({ type: 'remove', path: '/d' });
     assert.equal(cache.get('/d'), undefined);
+  });
+
+  it('foreign remove clears the overlay — a later rollback cannot resurrect the node (F4, inv.12/18)', () => {
+    cache.put(cnode(1, 4));
+    pushOptimistic('/n', Counter, undefined, incrementAction, undefined, 'op1');
+    assert.equal(countOf('/n'), 5, 'optimistic');
+
+    applyDataEvent({ type: 'remove', path: '/n' }); // no `by` — another user's remove
+
+    assert.equal(cache.get('/n'), undefined, 'remove is authoritative');
+    assert.equal(hasPending('/n'), false, 'overlay state cleared with the node');
+
+    rollback('/n', 'op1'); // the op's server rejection arrives late
+    assert.equal(cache.get('/n'), undefined, 'rollback restored nothing — no resurrection');
+  });
+
+  it('own remove (`by` ack) consumes the pending op and still leaves nothing to restore (F4)', () => {
+    cache.put(cnode(1, 4));
+    pushOptimistic('/n', Counter, undefined, incrementAction, undefined, 'op1');
+
+    applyDataEvent({ type: 'remove', path: '/n', by: 'op1' });
+
+    assert.equal(cache.get('/n'), undefined);
+    assert.equal(hasPending('/n'), false, 'ack consumed');
+    rollback('/n', 'op1');
+    assert.equal(cache.get('/n'), undefined);
   });
 
   it('set on an uncached path enters the cache (nothing to regress)', () => {
