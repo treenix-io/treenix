@@ -4,6 +4,7 @@ import { withAcl } from '#security/acl-tree';
 import { userIdFromAuthPath } from '#security/claims';
 import { createProjector } from '#security/projector';
 import { createMemoryTree, type Tree } from '#tree';
+import { planHash } from '#tree/plan-hash';
 import { executeList, type Projector } from '#tree/read-runtime';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
@@ -144,20 +145,37 @@ describe('Subscriptions', () => {
     assert.equal('$patches' in stored, false, '$patches should not be stored');
   });
 
-  it('updates query watch match when vp and source stay the same', async () => {
+  it('two plans on one (userId, vp) coexist — each releasable independently (E03 → coexistence, ns6p.4 §4.2)', async () => {
     const events: NodeEvent[] = [];
     const { tree, cdc } = withSubs(createMemoryTree(), e => events.push(e));
 
     cdc.watchQuery({ vp: '/views/status', userId: 'u1', plan: { source: '/items', viewWhere: { status: 'open' } }, mountDeps: new Set(['/views/status']) });
     cdc.watchQuery({ vp: '/views/status', userId: 'u1', plan: { source: '/items', viewWhere: { status: 'closed' } }, mountDeps: new Set(['/views/status']) });
+    assert.equal(cdc.getActiveQueryCount(), 2, 'a different plan registers ALONGSIDE, not over (budget counts both groups)');
 
     await tree.set({ $path: '/items/1', $type: 'item', status: 'closed' });
+    const enter = events.find(e => (e.type === 'set' || e.type === 'patch') && e.path === '/items/1');
+    assert.ok(enter);
+    assert.deepEqual(enter.invalidateVps, ['/views/status'], 'either coexisting plan flipping dirties the vp');
 
-    const event = events.find(e => e.type === 'set' && e.path === '/items/1');
-    assert.ok(event);
-    if (event.type !== 'set') throw new Error('expected set event');
-    // Membership flip against the UPDATED match → coarse dirty (gk8.12).
-    assert.deepEqual(event.invalidateVps, ['/views/status']);
+    // Lease-scoped release: only the closed-plan handle dies.
+    cdc.unwatchQuery('/views/status', 'u1', planHash({ source: '/items', viewWhere: { status: 'closed' } }));
+    assert.equal(cdc.getActiveQueryCount(), 1, 'release removes only the caller\'s handle');
+
+    events.length = 0;
+    await tree.set({ $path: '/items/2', $type: 'item', status: 'closed' });
+    const released = events.find(e => (e.type === 'set' || e.type === 'patch') && e.path === '/items/2');
+    assert.ok(released);
+    assert.equal(released.invalidateVps, undefined, 'released plan no longer evaluates');
+
+    events.length = 0;
+    await tree.set({ $path: '/items/3', $type: 'item', status: 'open' });
+    const survivor = events.find(e => (e.type === 'set' || e.type === 'patch') && e.path === '/items/3');
+    assert.deepEqual(survivor?.invalidateVps, ['/views/status'], 'the coexisting plan stays live');
+
+    // Hashless release = registration death: every plan of (userId, vp) goes.
+    cdc.unwatchQuery('/views/status', 'u1');
+    assert.equal(cdc.getActiveQueryCount(), 0);
   });
 
   it('two watchers on the same source with different match coexist — no cross-talk (core-wf1)', async () => {
@@ -853,6 +871,46 @@ describe('actor-projected membership (F4, core-anz4.3)', () => {
     const ev = events.find(e => (e.type === 'set' || e.type === 'patch') && e.path === '/board/t1');
     assert.ok(ev?.invalidateVps?.includes('/views/admin'), 'readable actor gets the flip');
     assert.ok(!ev?.invalidateVps?.includes('/views/u1'), 'R-denied node must not signal membership to u1');
+  });
+
+  it('co-watchers of ONE vp: a flip invisible to B\'s projection routes to A only; coarse dirty reaches both (core-anz4.27, §6.3)', async () => {
+    // The verify-probe scenario: membershipVps used to flatten per-user flips
+    // into string[] — B received A's flip as a timing/existence oracle.
+    const store = createMemoryTree();
+    const watcher = createWatchManager();
+    const { tree, cdc } = withSubscriptions(store, e => watcher.notify(e), { projectMembership: projectFor(store) });
+    const adminGot: NodeEvent[] = [];
+    const u1Got: NodeEvent[] = [];
+    watcher.connect('cA', 'admin', e => adminGot.push(e.event));
+    watcher.connect('cB', 'u1', e => u1Got.push(e.event));
+    watcher.watch('admin', ['/views/shared'], { children: true });
+    watcher.watch('u1', ['/views/shared'], { children: true });
+
+    await tree.set({ ...createNode('/board', 'dir'), $acl: [{ g: 'users', p: R }, { g: 'admins', p: R }] });
+    await tree.set({
+      ...createNode('/board/t1', 'task'), status: 'draft',
+      '#secret': { $type: 'x.secret', level: 7, $acl: [{ g: 'admins', p: R }] },
+    });
+
+    const plan = { source: '/board', viewWhere: { $and: [{ status: 'active' }, { '#secret.level': 7 }] } };
+    cdc.watchQuery({ vp: '/views/shared', userId: 'u1', plan, mountDeps: new Set(['/views/shared']) });
+    cdc.watchQuery({ vp: '/views/shared', userId: 'admin', plan, mountDeps: new Set(['/views/shared']) });
+    adminGot.length = 0;
+    u1Got.length = 0;
+
+    // Flip gated by the admin-only #secret: admin's projection enters, u1's never was a member.
+    await tree.patch('/board/t1', [['r', 'status', 'active']]);
+
+    const flip = adminGot.find(e => e.invalidateVps?.includes('/views/shared'));
+    assert.ok(flip, 'flipped user receives the membership dirty');
+    assert.equal(flip.membershipAudience, undefined, 'audience map is routing-internal — stripped before delivery');
+    assert.equal(u1Got.length, 0, 'co-watcher whose own projection did not flip receives NOTHING');
+
+    // Coarse source (ACL change) stays user-independent broadcast (owner-approved §6.3).
+    const t1 = await store.get('/board/t1');
+    await tree.set({ ...t1!, $acl: [{ g: 'users', p: R }, { g: 'admins', p: R }] });
+    assert.ok(u1Got.some(e => e.invalidateVps?.includes('/views/shared')), 'coarse ACL dirty reaches the non-flipped co-watcher');
+    assert.ok(adminGot.some(e => e !== flip && e.invalidateVps?.includes('/views/shared')), 'and the flipped one');
   });
 
   it('query watch registration fails closed without a membership projector', () => {

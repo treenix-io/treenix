@@ -1,11 +1,11 @@
 import { createNode, register } from '#core';
 import { clearRegistry } from '#testing';
 import { withSubscriptions } from '#sub';
-import { createMemoryTree, resolveRef } from '#tree';
+import { createMemoryTree, resolveRef, type TreeEvent } from '#tree';
 import { withExecute } from '#server/actions';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
-import { type ServiceCtx, type ServiceHandle, startServices, type StoreEvent } from './index';
+import { type ServiceCtx, type ServiceHandle, startServices } from './index';
 
 describe('resolveRef', () => {
   it('returns node as-is when not a ref', async () => {
@@ -176,17 +176,18 @@ describe('ServiceCtx.subscribe', () => {
   });
 
   it('subscribe fires on set', async () => {
-    const events: StoreEvent[] = [];
+    const events: TreeEvent[] = [];
     const { tree, cdc } = withSubscriptions(createMemoryTree());
-    const subscribe: ServiceCtx['subscribe'] = (path, cb) =>
-      cdc.subscribe(path, (e) => { if ('path' in e) cb(e as StoreEvent); });
+    const subscribe: ServiceCtx['subscribe'] = cdc.subscribe;
 
     const unsub = subscribe('/config/bot', (e) => events.push(e));
 
     await tree.set(createNode('/config/bot', 'dir'));
     assert.equal(events.length, 1);
-    assert.equal(events[0].type, 'set');
-    assert.equal(events[0].path, '/config/bot');
+    const e = events[0];
+    assert.equal(e.type, 'set');
+    if (e.type !== 'set') throw new Error('expected set event');
+    assert.equal(e.path, '/config/bot');
 
     unsub();
     await tree.set({ ...createNode('/config/bot', 'dir'), name: 'changed' });
@@ -194,55 +195,57 @@ describe('ServiceCtx.subscribe', () => {
   });
 
   it('subscribe fires on remove', async () => {
-    const events: StoreEvent[] = [];
+    const events: TreeEvent[] = [];
     const { tree, cdc } = withSubscriptions(createMemoryTree());
-    const subscribe: ServiceCtx['subscribe'] = (path, cb) =>
-      cdc.subscribe(path, (e) => { if ('path' in e) cb(e as StoreEvent); });
+    const subscribe: ServiceCtx['subscribe'] = cdc.subscribe;
 
     await tree.set(createNode('/config/bot', 'dir'));
     subscribe('/config/bot', (e) => events.push(e));
 
     await tree.remove('/config/bot');
     assert.equal(events.length, 1);
-    assert.equal(events[0].type, 'remove');
-    assert.equal(events[0].path, '/config/bot');
+    const e = events[0];
+    assert.equal(e.type, 'remove');
+    if (e.type !== 'remove') throw new Error('expected remove event');
+    assert.equal(e.path, '/config/bot');
   });
 
   it('subscribe fires patch on update', async () => {
-    const events: StoreEvent[] = [];
+    const events: TreeEvent[] = [];
     const { tree, cdc } = withSubscriptions(createMemoryTree());
-    const subscribe: ServiceCtx['subscribe'] = (path, cb) =>
-      cdc.subscribe(path, (e) => { if ('path' in e) cb(e as StoreEvent); });
+    const subscribe: ServiceCtx['subscribe'] = cdc.subscribe;
 
     await tree.set(createNode('/config/bot', 'dir'));
     subscribe('/config/bot', (e) => events.push(e));
 
     await tree.set({ ...createNode('/config/bot', 'dir'), token: 'abc', $rev: 1 });
     assert.equal(events.length, 1);
-    assert.equal(events[0].type, 'patch');
-    assert.equal(events[0].path, '/config/bot');
+    const e = events[0];
+    assert.equal(e.type, 'patch');
+    if (e.type !== 'patch') throw new Error('expected patch event');
+    assert.equal(e.path, '/config/bot');
   });
 
   it('prefix subscribe catches children', async () => {
-    const events: StoreEvent[] = [];
+    const events: TreeEvent[] = [];
     const { tree, cdc } = withSubscriptions(createMemoryTree());
-    const subscribe: ServiceCtx['subscribe'] = (path, cb, opts) =>
-      cdc.subscribe(path, (e) => { if ('path' in e) cb(e as StoreEvent); }, opts);
+    const subscribe: ServiceCtx['subscribe'] = cdc.subscribe;
 
     subscribe('/config', (e) => events.push(e), { children: true });
 
     await tree.set(createNode('/config/bot', 'dir'));
     await tree.set(createNode('/config/db', 'dir'));
     assert.equal(events.length, 2);
-    assert.equal(events[0].path, '/config/bot');
-    assert.equal(events[1].path, '/config/db');
+    const [e0, e1] = events;
+    if (e0.type === 'reconnect' || e1.type === 'reconnect') throw new Error('unexpected reconnect');
+    assert.equal(e0.path, '/config/bot');
+    assert.equal(e1.path, '/config/db');
   });
 
   it('exact subscribe does NOT catch children', async () => {
-    const events: StoreEvent[] = [];
+    const events: TreeEvent[] = [];
     const { tree, cdc } = withSubscriptions(createMemoryTree());
-    const subscribe: ServiceCtx['subscribe'] = (path, cb, opts) =>
-      cdc.subscribe(path, (e) => { if ('path' in e) cb(e as StoreEvent); }, opts);
+    const subscribe: ServiceCtx['subscribe'] = cdc.subscribe;
 
     subscribe('/config', (e) => events.push(e));
 
@@ -251,10 +254,9 @@ describe('ServiceCtx.subscribe', () => {
   });
 
   it('does not fire for unrelated paths', async () => {
-    const events: StoreEvent[] = [];
+    const events: TreeEvent[] = [];
     const { tree, cdc } = withSubscriptions(createMemoryTree());
-    const subscribe: ServiceCtx['subscribe'] = (path, cb) =>
-      cdc.subscribe(path, (e) => { if ('path' in e) cb(e as StoreEvent); });
+    const subscribe: ServiceCtx['subscribe'] = cdc.subscribe;
 
     subscribe('/config/bot', (e) => events.push(e));
 
@@ -264,15 +266,14 @@ describe('ServiceCtx.subscribe', () => {
 
   it('service hot-reload: watches own config, reacts to admin update', async () => {
     const { tree, cdc } = withSubscriptions(createMemoryTree());
-    const subscribe: ServiceCtx['subscribe'] = (path, cb, opts) =>
-      cdc.subscribe(path, (e) => { if ('path' in e) cb(e as StoreEvent); }, opts);
+    const subscribe: ServiceCtx['subscribe'] = cdc.subscribe;
 
     // Seed bot config
     await tree.set(createNode('/config/bot', 'bot-config', { token: 'old-token', lang: 'en' }));
 
     // Service starts and subscribes to its own config
     let reloadCount = 0;
-    let lastEvent: StoreEvent | null = null;
+    let lastEvent: TreeEvent | null = null;
     const unsub = subscribe('/config/bot', (e) => {
       reloadCount++;
       lastEvent = e;
@@ -298,8 +299,7 @@ describe('ServiceCtx.subscribe', () => {
 
   it('service watches session dir for new users', async () => {
     const { tree, cdc } = withSubscriptions(createMemoryTree());
-    const subscribe: ServiceCtx['subscribe'] = (path, cb, opts) =>
-      cdc.subscribe(path, (e) => { if ('path' in e) cb(e as StoreEvent); }, opts);
+    const subscribe: ServiceCtx['subscribe'] = cdc.subscribe;
 
     await tree.set(createNode('/sessions', 'dir'));
 

@@ -199,13 +199,13 @@ export class ClientTreeSource implements TreeSource {
     if (watching) refWatch(this.childrenWatchRefs, path);
 
     const key = resourceKey('ls', path, opts?.query);
-    // §4.2 gate: children state is keyed by parent — until server-side handle
-    // coexistence (slice 5), concurrent different-query mounts interleave in
-    // one collection. Loud, not fatal: first-caller-wins like the limit lock.
+    // §4.2 gate: the SERVER coexists query handles (slice 5), but children
+    // state here is still keyed by parent — concurrent different-query mounts
+    // interleave in one collection. Loud, not fatal: first-caller-wins.
     let keys = this.activeChildKeys.get(path);
     if (!keys) { keys = new Map(); this.activeChildKeys.set(path, keys); }
     if (keys.size > 0 && !keys.has(key)) {
-      console.error(`[tree-source] concurrent listings with different queries on ${path} — unsupported until handle coexistence (ns6p.4 §4.2), results will interleave`);
+      console.error(`[tree-source] concurrent listings with different queries on ${path} — client cache is parent-keyed, one live query per parent until the cache is resource-keyed`);
     }
     keys.set(key, (keys.get(key) ?? 0) + 1);
 

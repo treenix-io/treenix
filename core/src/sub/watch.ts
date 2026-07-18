@@ -3,6 +3,7 @@
 // Supports multiple connections per user (multi-tab).
 // Grace period: on last disconnect, watches survive briefly for SSE auto-reconnect.
 
+import { planHash } from '#tree/plan-hash';
 import type { CdcRegistry, NodeEvent, QueryWatchRegistration } from './index';
 
 /** Resume cursor as round-tripped over the wire (core-anz4.10). `epoch` names
@@ -64,7 +65,8 @@ export type WatchLease = {
   /** Holds this call CREATED for its token — pre-existing holds (any holder,
    *  including the same token) are not listed and never touched by undo(). */
   created: { path: string; kind: 'exact' | 'prefix' }[];
-  /** Query plans this call replaced per vp (null = registered fresh). */
+  /** Per vp: the same-plan registration this call refreshed, or null = fresh
+   *  handle (coexists with any other plans on the vp, §4.2). */
   replaced: { vp: string; prev: QueryWatchRegistration | null }[];
   /** Roll back exactly this call: drop created holds (releasing registrations
    *  only when the last holder goes), restore overwritten holder flags, and
@@ -258,16 +260,19 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
   function pushToUser(uid: string, event: NodeEvent) {
     const user = users.get(uid);
     if (!user) return;
-    // C26: event.invalidateVps is the union across ALL active queries — sent
-    // whole it leaks other users' view paths. Deliver only the vps this user
-    // registered (registration happens through their own ACL-gated read).
-    if (event.invalidateVps) {
-      const own = event.invalidateVps.filter(vp => user.prefixes.has(vp));
-      if (own.length !== event.invalidateVps.length) {
-        event = { ...event };
-        if (own.length) event.invalidateVps = own;
-        else delete event.invalidateVps;
-      }
+    // C26: deliver only the vps this user registered (the union leaks other
+    // users' view paths) — and membership-sourced vps only when THIS user's
+    // projection flipped (anz4.27). The audience map is routing-internal:
+    // stripped here, so it never reaches the ring or the wire.
+    if (event.invalidateVps || event.membershipAudience) {
+      const aud = event.membershipAudience;
+      const own = (event.invalidateVps ?? []).filter(
+        vp => user.prefixes.has(vp) && (!aud?.has(vp) || aud.get(vp)!.has(uid)),
+      );
+      event = { ...event };
+      delete event.membershipAudience;
+      if (own.length) event.invalidateVps = own;
+      else delete event.invalidateVps;
     }
     // Route provenance (ns6p.4 §3.4, invariant 26): capture which of THIS
     // recipient's own registrations matched — before autoWatch promotion and
@@ -495,6 +500,9 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
       // this call overwrites. Captured before mutation; undo restores exactly it.
       const priorFlags = new Map<string, boolean | undefined>();
       const replaced: { vp: string; prev: QueryWatchRegistration | null }[] = [];
+      // Handle identity (§4.2 coexistence): undo/rollback release only the
+      // plan THIS lease registered, never a coexisting plan on the same vp.
+      const queryHash = watchOpts?.query ? planHash(watchOpts.query.plan) : undefined;
 
       if (watchOpts?.children) {
         // Query membership registers FIRST — watchQuery validates (projector
@@ -511,7 +519,7 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
           } catch (e) {
             for (const r of replaced) {
               if (r.prev) queryRegistry!.watchQuery(r.prev);
-              else queryRegistry!.unwatchQuery(r.vp, userId);
+              else queryRegistry!.unwatchQuery(r.vp, userId, queryHash);
             }
             throw e;
           }
@@ -592,9 +600,9 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
         }
         for (const r of replaced) {
           // Restore only while a prefix holder still backs the vp — otherwise
-          // drop the current handle too (a plan with no watcher is a leak).
+          // drop this lease's handle too (a plan with no watcher is a leak).
           if (r.prev && u.prefixes.has(r.vp)) queryRegistry?.watchQuery(r.prev);
-          else queryRegistry?.unwatchQuery(r.vp, userId);
+          else queryRegistry?.unwatchQuery(r.vp, userId, queryHash);
         }
       };
 
@@ -690,10 +698,15 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
       // carries invalidateVps; vp prefix-watchers receive it (and refetch),
       // with the same autoWatch promotion as plain parents.
       const vps = 'invalidateVps' in event && event.invalidateVps ? event.invalidateVps : [];
+      const audience = event.membershipAudience;
       for (const vp of vps) {
         const vpWatchers = prefixToUsers.get(vp);
         if (!vpWatchers) continue;
+        // anz4.27: membership vps route only to flipped users; no audience
+        // entry = coarse source = broadcast (owner-approved §6.3).
+        const flipped = audience?.get(vp);
         for (const uid of vpWatchers) {
+          if (flipped && !flipped.has(uid)) continue;
           if (notified.has(uid)) continue;
           notified.add(uid);
           const user = users.get(uid);

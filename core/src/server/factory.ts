@@ -132,7 +132,7 @@ export async function treenix(config: TreenixConfig): Promise<TreenixServer> {
   let serviceHandle: ServiceHandle | null = null;
   if (autostart) {
     const serviceTree = withActor(tree, { id: 'system:autostart' });
-    serviceHandle = await startServices(serviceTree, cdc.subscribe.bind(cdc) as import('#contexts/service/index').ServiceCtx['subscribe']);
+    serviceHandle = await startServices(serviceTree, cdc.subscribe.bind(cdc));
   }
 
   const stop = async () => {

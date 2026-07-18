@@ -21,6 +21,7 @@ import { createSiftTest } from '#tree/query';
 import type { ReadPlan } from '#tree/read-runtime';
 import { stableJson } from '#util/stable-json';
 import fjp from 'fast-json-patch';
+import { createPathNotifier } from './notifier';
 
 const { compare } = fjp;
 
@@ -53,10 +54,18 @@ function diffNodes(oldNode: NodeData, newNode: NodeData): PatchOp[] {
 // have shifted, refetch through the canonical ACL read path". A wrong refetch
 // is impossible; a wrong predicted patch silently corrupts the client cache.
 
+/** vp → userIds whose OWN projection flipped (anz4.27). */
+export type MembershipAudience = ReadonlyMap<string, ReadonlySet<string>>;
+
 export type VpDelta = {
   /** Query views whose membership/config/visibility may have shifted —
    *  the caller MUST refetch the listing (coarse dirty, core-gk8.12). */
   invalidateVps?: string[];
+  /** anz4.27: audience of membership-sourced vps. Routing-internal — the
+   *  WatchManager gates vp delivery on it and strips it before stamping
+   *  (never rings, never wires). Coarse-sourced vps (Acl/Config/Claims) have
+   *  no entry: they stay user-independent broadcast (owner-approved §6.3). */
+  membershipAudience?: MembershipAudience;
 };
 
 export type NodeEvent = TreeEvent & Partial<VpDelta>;
@@ -228,11 +237,15 @@ export type MembershipProjector = (
 
 export type CdcRegistry = {
   subscribe(path: string, listener: Listener, opts?: SubscribeOpts): () => void;
-  /** Returns the registration this call REPLACED for (userId, vp) — null when
-   *  none existed. Callers building an undo-lease (ns6p.4 invariant 15)
-   *  re-register the returned value to restore the previous plan. */
+  /** Handles key on (userId, vp, planHash) — different plans on one vp
+   *  COEXIST (E03 → coexistence, §4.2). Returns the prior registration of the
+   *  SAME plan (deps refresh) for lease-undo restore (invariant 15); null
+   *  when the handle is new. */
   watchQuery(reg: QueryWatchRegistration): QueryWatchRegistration | null;
-  unwatchQuery(vp: string, userId: string): void;
+  /** With `planHash`: release only that plan's handle (lease-scoped). Without:
+   *  every plan of (userId, vp) — the registration-death path (last prefix
+   *  holder gone; a plan with no watcher is a leak). */
+  unwatchQuery(vp: string, userId: string, planHash?: string): void;
   unwatchAllQueries(userId: string): void;
   /** Distinct execution groups (deduped plans), not registrations. */
   getActiveQueryCount(): number;
@@ -277,12 +290,11 @@ export function withSubscriptions(
   onEvent?: (event: NodeEvent) => void,
   opts?: SubscriptionOpts,
 ): { tree: SubscribedTree; cdc: CdcRegistry; onSelfWrite: OnSelfWrite; injectExternalEvent: (event: TreeEvent) => void } {
-  const exactListeners = new Map<string, Set<Listener>>();
-  const prefixListeners = new Map<string, Set<Listener>>();
+  const notifier = createPathNotifier<NodeEvent>();
   const selfWriteListeners = new Set<SelfWriteListener>();
   const groups = new Map<string, WatchGroup>();          // planHash → group
-  const handleByKey = new Map<string, QueryHandle>();    // userId\0vp → handle
-  const handleKey = (userId: string, vp: string) => `${userId}\u0000${vp}`;
+  const handleByKey = new Map<string, QueryHandle>();    // userId\0vp\0planHash → handle (§4.2 coexistence)
+  const handleKey = (userId: string, vp: string, hash: string) => `${userId}\u0000${vp}\u0000${hash}`;
   const claimsUserOf = opts?.claimsUserOf ?? (() => null);
   const isConfigNode = opts?.isConfigNode ?? (() => false);
   const detachLocks: NonNullable<SubscriptionOpts['detachLocks']> = opts?.detachLocks ?? (fn => fn());
@@ -333,19 +345,10 @@ export function withSubscriptions(
   type DataEvent = Exclude<NodeEvent, { type: 'reconnect' }>;
 
   function dispatch(event: NodeEvent) {
-    // Listener fan-out runs lock-detached (core-anz4.4): dispatch fires inside
-    // the emitting write's lock span, and listener-spawned async work must
-    // queue like any independent writer, not inherit ownership.
+    // Lock-detached fan-out (core-anz4.4): listener-spawned async work must
+    // queue like an independent writer, not inherit the emitting write's lock.
     detachLocks(() => {
-      if (event.type !== 'reconnect') {
-        const exact = exactListeners.get(event.path);
-        if (exact) for (const fn of exact) fn(event);
-        for (const [prefix, subs] of prefixListeners) {
-          if (event.path === prefix || event.path.startsWith(prefix === '/' ? '/' : prefix + '/')) {
-            for (const fn of subs) fn(event);
-          }
-        }
-      }
+      if (event.type !== 'reconnect') notifier.notify(event.path, event);
       onEvent?.(event);
     });
   }
@@ -431,26 +434,24 @@ export function withSubscriptions(
     return vps;
   }
 
-  /** Membership test for a direct child of a query source — evaluated per
-   *  SUBSCRIBING ACTOR against the ACL-projected node pair (F4, core-anz4.3).
-   *  Raw-node eval was a blind oracle: a predicate gated on data the watcher
-   *  cannot read (ACL-stripped component, R-denied node) flipped their
-   *  membership, so enter/leave dirty TIMING leaked hidden values — the same
-   *  channel executeList closes with FORBIDDEN (core-fnv). Projection runs
-   *  once per distinct userId per commit and is shared across groups;
-   *  in-folder updates of unchanged membership still ride the ordinary path
-   *  event (items are exact-watched). A failed projection over-invalidates
-   *  that user's handles (uncorrelated with hidden data; the refetch
-   *  re-derives truth through the ACL read path) — raw eval is never a
-   *  fallback. */
-  async function membershipVps(path: string, oldNode: NodeData | null, newNode: NodeData | null): Promise<string[]> {
-    if (groups.size === 0) return [];
+  /** Membership flips for a direct child of a query source, evaluated per
+   *  SUBSCRIBING ACTOR on the ACL-projected pair (F4, core-anz4.3 — raw eval
+   *  was a hidden-field timing oracle, executeList parity core-fnv).
+   *  Returns vp → flipped userIds (anz4.27): the audience rides to routing so
+   *  a co-watcher whose own projection did not flip receives nothing. A flip
+   *  is per PLAN — two coexisting plans on one vp each contribute (§4.2).
+   *  Projection runs once per distinct userId per commit, shared across
+   *  groups; a failed projection over-invalidates THAT user only (never raw
+   *  eval as fallback). */
+  async function membershipVps(path: string, oldNode: NodeData | null, newNode: NodeData | null): Promise<Map<string, Set<string>>> {
+    const flips = new Map<string, Set<string>>();
+    if (groups.size === 0) return flips;
     const matching: WatchGroup[] = [];
     for (const g of groups.values()) {
       const prefix = g.source === '/' ? '/' : g.source + '/';
       if (path.startsWith(prefix) && !path.slice(prefix.length).includes('/')) matching.push(g);
     }
-    if (matching.length === 0) return [];
+    if (matching.length === 0) return flips;
 
     const project = projectMembership;
     // Unreachable via watchQuery (registration fails closed without a
@@ -474,67 +475,50 @@ export function withSubscriptions(
       return p;
     };
 
-    const vps: string[] = [];
     for (const g of matching) {
       for (const h of g.handles) {
         const pair = await projectFor(h.userId);
-        if (pair === 'error') { vps.push(h.vp); continue; }
-        const wasIn = pair.o ? g.test(pair.o) : false;
-        const isIn = pair.n ? g.test(pair.n) : false;
-        if (wasIn !== isIn) vps.push(h.vp);
+        const flipped = pair === 'error'
+          || (pair.o ? g.test(pair.o) : false) !== (pair.n ? g.test(pair.n) : false);
+        if (!flipped) continue;
+        let uids = flips.get(h.vp);
+        if (!uids) flips.set(h.vp, uids = new Set());
+        uids.add(h.userId);
       }
     }
-    return vps;
+    return flips;
   }
 
-  /** Union the dirty sources; undefined when nothing is dirty. */
-  function dirtyVps(...lists: string[][]): { invalidateVps: string[] } | undefined {
+  type DirtyCdc = { invalidateVps: string[]; membershipAudience?: MembershipAudience } | undefined;
+
+  /** Union the dirty sources; undefined when nothing is dirty. Membership vps
+   *  carry their audience UNLESS a coarse source also names the vp — coarse
+   *  stays user-independent broadcast (owner-approved §6.3). */
+  function dirtyVps(membership: Map<string, Set<string>> | null, ...coarse: string[][]): DirtyCdc {
     const set = new Set<string>();
-    for (const l of lists) for (const vp of l) set.add(vp);
-    return set.size ? { invalidateVps: [...set] } : undefined;
-  }
+    if (membership) for (const vp of membership.keys()) set.add(vp);
+    for (const l of coarse) for (const vp of l) set.add(vp);
+    if (set.size === 0) return undefined;
 
-  /** Internal subscribe — shared between cdc.subscribe() and watch(). Returns
-   *  unregister. `children:true` uses prefixListeners (event.path === prefix
-   *  OR starts with prefix + '/'). */
-  function internalSubscribe(path: string, listener: Listener, opts?: { children?: boolean }): () => void {
-    const map = opts?.children ? prefixListeners : exactListeners;
-    if (!map.has(path)) map.set(path, new Set());
-    map.get(path)!.add(listener);
-    return () => {
-      const subs = map.get(path);
-      if (subs) {
-        subs.delete(listener);
-        if (subs.size === 0) map.delete(path);
+    let audience: Map<string, Set<string>> | undefined;
+    if (membership && membership.size > 0) {
+      const broadcast = new Set(coarse.flat());
+      for (const [vp, uids] of membership) {
+        if (broadcast.has(vp)) continue;
+        (audience ??= new Map()).set(vp, uids);
       }
-    };
+    }
+    return { invalidateVps: [...set], ...(audience ? { membershipAudience: audience } : {}) };
   }
 
-  function isDirectChild(parent: string, candidate: string): boolean {
-    const prefix = parent === '/' ? '/' : parent + '/';
-    if (!candidate.startsWith(prefix)) return false;
-    const rest = candidate.slice(prefix.length);
-    return rest.length > 0 && !rest.includes('/');
-  }
-
+  /** Thin adapter over the PathNotifier (invariant 20): path → exact,
+   *  children → direct-only, all → subtree at root. */
   function watch(scope: TreeWatchScope, opts?: TreeWatchOpts, _ctx?: unknown): AsyncIterable<NodeEvent> {
     const reconnectOverflow: NodeEvent = { type: 'reconnect', preserved: false };
     return subscriptionToAsyncIterable<NodeEvent>(
-      (push) => {
-        if (scope.kind === 'path') {
-          return internalSubscribe(scope.path, (event) => push(event));
-        }
-        if (scope.kind === 'children') {
-          // prefixListeners fires on parent + every descendant; we yield
-          // only direct children, dropping the parent and grandchildren.
-          return internalSubscribe(scope.path, (event) => {
-            if (event.type === 'reconnect') { push(event); return; }
-            if (isDirectChild(scope.path, event.path)) push(event);
-          }, { children: true });
-        }
-        // 'all' — subscribe to root prefix; every path matches.
-        return internalSubscribe('/', (event) => push(event), { children: true });
-      },
+      (push) => scope.kind === 'path' ? notifier.register(scope.path, 'exact', push)
+        : scope.kind === 'children' ? notifier.register(scope.path, 'children', push)
+        : notifier.register('/', 'subtree', push),
       reconnectOverflow,
       opts,
     );
@@ -659,13 +643,14 @@ export function withSubscriptions(
     const by = opIdOf(ctx);
     const claimsUid = claimsUserOf(path);
     if (verb === 'remove') {
-      const cdc = dirtyVps(vpsForExternalPath(path), claimsUid ? vpsForClaimsChange(claimsUid) : []);
+      const cdc = dirtyVps(null, vpsForExternalPath(path), claimsUid ? vpsForClaimsChange(claimsUid) : []);
       emit({ type: 'remove', path, ...(by ? { by } : {}), ...cdc });
       return;
     }
 
     const stored = await tree.get(path, ctx);
     const cdc = dirtyVps(
+      null,
       vpsForExternalPath(path),
       claimsUid ? vpsForClaimsChange(claimsUid) : [],
       isConfigNode(stored) ? vpsForConfigChange(path) : [],
@@ -747,7 +732,9 @@ export function withSubscriptions(
 
   const cdc: CdcRegistry = {
     subscribe(path, listener, opts) {
-      return internalSubscribe(path, listener, opts);
+      // CDC "children" = self + every descendant (subtree), unlike the L3
+      // watch children scope (direct-only) — invariant 20 keeps both contracts.
+      return notifier.register(path, opts?.children ? 'subtree' : 'exact', listener);
     },
 
     watchQuery(reg) {
@@ -770,19 +757,18 @@ export function withSubscriptions(
       if (!projectMembership) {
         throw new OpError('FORBIDDEN', 'query watch requires a membership projector (SubscriptionOpts.projectMembership)');
       }
-      const key = handleKey(reg.userId, reg.vp);
+      // E03 → coexistence (owner sign-off 2026-07-18, §4.2): a DIFFERENT plan
+      // on the same (userId, vp) registers alongside — planHash is part of the
+      // handle identity, so release/re-validate touch only their own handle.
       const hash = planHash(reg.plan);
+      const key = handleKey(reg.userId, reg.vp, hash);
       const existing = handleByKey.get(key);
-      let prev: QueryWatchRegistration | null = null;
       if (existing) {
-        prev = { vp: existing.vp, userId: existing.userId, plan: existing.plan, mountDeps: existing.mountDeps };
-        if (existing.group.planHash === hash) {
-          // Same plan re-registered (page refetch) — refresh deps only.
-          existing.mountDeps = reg.mountDeps;
-          existing.plan = reg.plan;
-          return prev;
-        }
-        removeHandle(existing);   // E03: vp re-registered with a different plan
+        // Same plan re-registered (page refetch) — refresh deps only.
+        const prev = { vp: existing.vp, userId: existing.userId, plan: existing.plan, mountDeps: existing.mountDeps };
+        existing.mountDeps = reg.mountDeps;
+        existing.plan = reg.plan;
+        return prev;
       }
 
       let group = groups.get(hash);
@@ -800,12 +786,15 @@ export function withSubscriptions(
       const handle: QueryHandle = { vp: reg.vp, userId: reg.userId, mountDeps: reg.mountDeps, plan: reg.plan, group };
       group.handles.add(handle);
       handleByKey.set(key, handle);
-      return prev;
+      return null;
     },
 
-    unwatchQuery(vp, userId) {
-      const handle = handleByKey.get(handleKey(userId, vp));
-      if (handle) removeHandle(handle);
+    unwatchQuery(vp, userId, hash) {
+      for (const handle of [...handleByKey.values()]) {
+        if (handle.userId !== userId || handle.vp !== vp) continue;
+        if (hash !== undefined && handle.group.planHash !== hash) continue;
+        removeHandle(handle);
+      }
     },
 
     unwatchAllQueries(userId) {
@@ -820,7 +809,7 @@ export function withSubscriptions(
   };
 
   function removeHandle(handle: QueryHandle): void {
-    handleByKey.delete(handleKey(handle.userId, handle.vp));
+    handleByKey.delete(handleKey(handle.userId, handle.vp, handle.group.planHash));
     handle.group.handles.delete(handle);
     if (handle.group.handles.size === 0) groups.delete(handle.group.planHash);
   }
@@ -841,7 +830,7 @@ export function withSubscriptions(
       dispatch(event);
       return;
     }
-    const inv = dirtyVps(vpsForExternalPath(event.path));
+    const inv = dirtyVps(null, vpsForExternalPath(event.path));
     dispatch(cleanEvent({ ...event, ...inv } as DataEvent));
   }
 

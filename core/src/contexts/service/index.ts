@@ -2,27 +2,22 @@
 // Service = register(type, "service", handler) → returns { stop() }
 
 import { resolve as resolveCtx } from '#core';
-import { type ExecTree } from '#tree';
+import { type ExecTree, type TreeEvent } from '#tree';
 
 // ── Types ──
 
 export type ServiceHandle = { stop(): Promise<void> };
-// kriz: why this type here??? is it service context? used only in tests. i think it should be imported from somewhere
-// kriz: or belong to tests
-export type StoreEvent =
-  | { type: 'set'; path: string }
-  | { type: 'patch'; path: string }
-  | { type: 'remove'; path: string };
-export type StoreListener = (event: StoreEvent) => void;
 export type SubscribeOpts = { children?: boolean };
 export type ServiceCtx = {
   // Exec-capable by contract (core-pxlu): the factory passes the pipeline tree,
   // so services call tree.execute directly — full executor + federation routing.
   tree: ExecTree;
   path: string;
-  // kriz: what is it for? why not tree, or sub like client! should fully review subscription/watch infostructure and unify!
-  // where is node itself? look to the ExecCtx, why is the diff?
-  subscribe: (path: string, cb: StoreListener, opts?: SubscribeOpts) => () => void;
+  /** Pipeline CDC feed — cdc.subscribe wired by the factory. Events are the
+   *  store's own TreeEvents (ns6p.4 §4.3: the StoreEvent mirror + factory
+   *  `as`-bridge died); typed at L1 so this layer stays below #sub. Rename/
+   *  seal into Tree.watch is ns6p.3. */
+  subscribe: (path: string, cb: (event: TreeEvent) => void, opts?: SubscribeOpts) => () => void;
 };
 
 declare module '#core/context' {

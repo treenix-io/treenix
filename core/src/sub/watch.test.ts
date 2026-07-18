@@ -1280,6 +1280,52 @@ describe('WatchManager — connect verdict + route envelope (ns6p.4 slice 1)', (
     assert.deepEqual(got[0].heldVps.slice().sort(), ['/dir', '/views/q']);
   });
 
+  it('membership audience: flipped user gets the vp (and its heldVps); a co-watcher outside the audience is untouched by it (anz4.27)', () => {
+    const wm = createWatchManager();
+    const a: RouteEnvelope[] = [];
+    const b: RouteEnvelope[] = [];
+    wm.connect('cA', 'uA', (env) => a.push(env));
+    wm.connect('cB', 'uB', (env) => b.push(env));
+    wm.watch('uA', ['/views/q'], { children: true });
+    wm.watch('uB', ['/views/q'], { children: true });
+    wm.watch('uB', ['/data/x']); // second route — makes uB's narrowed copy observable
+
+    wm.notify({
+      type: 'set', path: '/data/x', node: { $type: 't' },
+      invalidateVps: ['/views/q'],
+      membershipAudience: new Map([['/views/q', new Set(['uA'])]]),
+    });
+
+    assert.equal(a.length, 1);
+    assert.ok(a[0].event.invalidateVps?.includes('/views/q'));
+    assert.deepEqual(a[0].heldVps, ['/views/q'], 'flipped user\'s provenance names the vp');
+    assert.equal(a[0].event.membershipAudience, undefined, 'audience is routing-internal — never stamped');
+
+    assert.equal(b.length, 1, 'uB still delivered via his exact route');
+    assert.equal(b[0].event.invalidateVps, undefined, 'membership vp outside the audience narrowed out (invariant 26)');
+    assert.deepEqual(b[0].heldVps, [], 'heldVps narrows with it');
+    assert.deepEqual(b[0].heldPaths, ['/data/x']);
+  });
+
+  it('membership audience as the ONLY route: a co-watcher outside it gets no push at all (anz4.27)', () => {
+    const wm = createWatchManager();
+    const b: RouteEnvelope[] = [];
+    wm.connect('cB', 'uB', (env) => b.push(env));
+    wm.watch('uB', ['/views/q'], { children: true });
+
+    wm.notify({
+      type: 'set', path: '/data/x', node: { $type: 't' },
+      invalidateVps: ['/views/q'],
+      membershipAudience: new Map([['/views/q', new Set(['uA'])]]),
+    });
+    assert.equal(b.length, 0, 'the flip is invisible to uB\'s projection — no dirty, no oracle');
+
+    // Same vp WITHOUT an audience entry = coarse source → broadcast (§6.3).
+    wm.notify({ type: 'set', path: '/data/x', node: { $type: 't' }, invalidateVps: ['/views/q'] });
+    assert.equal(b.length, 1);
+    assert.ok(b[0].event.invalidateVps?.includes('/views/q'));
+  });
+
   it('ring replay delivers the FROZEN envelope — a hold released in the gap does not rewrite provenance', () => {
     const wm = createWatchManager({ gracePeriodMs: 10_000 });
     const live: RouteEnvelope[] = [];
@@ -1371,7 +1417,7 @@ describe('WatchManager — registration lease (ns6p.4 slice 2)', () => {
     assert.throws(() => wm.watch('u1', ['/c'], { token: 't1' }));
   });
 
-  it('undo restores a REPLACED query plan — membership fires for the previous plan again', async () => {
+  it('undo of a second-plan registration releases only its own handle — the prior plan keeps evaluating (E03 → coexistence)', async () => {
     const store = createMemoryTree();
     const events: NodeEvent[] = [];
     const { tree, cdc } = withSubscriptions(store, (e) => events.push(e), {
@@ -1387,19 +1433,39 @@ describe('WatchManager — registration lease (ns6p.4 slice 2)', () => {
     wm.watch('u1', ['/view'], { children: true, query: planA, token: 't1' });
 
     const lease = wm.watch('u1', ['/view'], { children: true, query: planB, token: 't1' });
-    assert.equal(lease.replaced.length, 1);
-    assert.ok(lease.replaced[0].prev, 'replace captured the previous registration');
+    assert.equal(cdc.getActiveQueryCount(), 2, 'different plan on the same vp COEXISTS (ns6p.4 §4.2)');
+    assert.deepEqual(lease.replaced, [{ vp: '/view', prev: null }], 'coexistence: nothing was replaced');
     lease.undo();
+    assert.equal(cdc.getActiveQueryCount(), 1, 'undo released only the lease\'s own plan handle');
 
     events.length = 0;
     await tree.set(createNode('/data/x', 'item', { kind: 'a' })); // member of plan A only
     const ev = events.find((e) => e.type === 'set' && e.path === '/data/x');
-    assert.ok(ev?.invalidateVps?.includes('/view'), 'previous plan active again after undo');
+    assert.ok(ev?.invalidateVps?.includes('/view'), 'prior plan untouched by the undo');
 
     events.length = 0;
     await tree.set(createNode('/data/y', 'item', { kind: 'b' })); // member of plan B only
     const evB = events.find((e) => e.type === 'set' && e.path === '/data/y');
     assert.ok(!evB?.invalidateVps?.includes('/view'), 'undone plan no longer evaluates');
+  });
+
+  it('same-plan re-registration refreshes the handle; undo restores it (deps-restore path survives coexistence)', async () => {
+    const store = createMemoryTree();
+    const { cdc } = withSubscriptions(store, undefined, {
+      projectMembership: async (_u, o, n) => [o, n],
+    });
+    const wm = createWatchManager();
+    wm.bindQueryRegistry(cdc);
+    wm.connect('c1', 'u1', () => {}, undefined, 't1');
+
+    const query = { plan: { source: '/data', callerWhere: { kind: 'a' } }, mountDeps: new Set(['/view']) };
+    wm.watch('u1', ['/view'], { children: true, query, token: 't1' });
+
+    const lease = wm.watch('u1', ['/view'], { children: true, query, token: 't1' });
+    assert.equal(lease.replaced.length, 1);
+    assert.ok(lease.replaced[0].prev, 'same plan re-registered — prior registration captured for restore');
+    lease.undo();
+    assert.equal(cdc.getActiveQueryCount(), 1, 'the original registration survives the undo');
   });
 
   it('undo of a FRESH query registration removes the handle with the hold', async () => {
@@ -1437,7 +1503,7 @@ describe('WatchManager — registration lease (ns6p.4 slice 2)', () => {
         if (reg.vp === '/v2') throw new Error('refused');
         return cdc.watchQuery(reg);
       },
-      unwatchQuery: (vp, userId) => cdc.unwatchQuery(vp, userId),
+      unwatchQuery: (vp, userId, hash) => cdc.unwatchQuery(vp, userId, hash),
       unwatchAllQueries: (userId) => cdc.unwatchAllQueries(userId),
     });
     wm.connect('c1', 'u1', () => {}, undefined, 't1');
