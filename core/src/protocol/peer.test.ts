@@ -842,4 +842,28 @@ describe('request-boundary TTL arm (ns6p.4 F7)', () => {
     await assert.rejects(client.req.get('/doc', true, 'tab2'), isCode('NOT_FOUND'));
     assert.deepEqual(h.armed, ['tab2'], 'failure path reaches the arm too');
   });
+
+  it('brackets the request: begin before the read, arm at the boundary — one pair per tokened request (r2-F3, inv.25)', async () => {
+    const journal: string[] = [];
+    const tree = createMemoryTree();
+    await tree.set(createNode('/doc', 'dir', {}));
+    const base = Object.assign(Object.create(tree) as typeof tree, {
+      getPerm: async () => R | S,
+      get: async (p: string, c?: unknown) => { journal.push('read'); return tree.get(p, c); },
+    });
+    const hooks: ServeHooks = {
+      watch: () => {},
+      unwatch: () => {},
+      beginTokenRequest: (token) => journal.push(`begin:${token}`),
+      armUnboundTtl: (token) => journal.push(`arm:${token}`),
+    };
+    const { client } = pair(() => ({ tree: base, hooks }));
+
+    await client.req.get('/doc', true, 'tab1');
+    assert.deepEqual(journal, ['begin:tab1', 'read', 'arm:tab1'], 'exactly one begin/arm pair, bracketing the read');
+
+    journal.length = 0;
+    await client.req.get('/doc', true);
+    assert.deepEqual(journal, ['read'], 'tokenless request opens no bracket');
+  });
 });

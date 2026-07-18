@@ -61,7 +61,7 @@ mock.module('#tree/trpc', {
 
 const { createClientTreeSource } = await import('./client-tree-source');
 const cache = await import('#tree/cache');
-const { applyDataEvent, stopEvents } = await import('./events');
+const { applyDataEvent, refetchInvalidatedPath, stopEvents } = await import('./events');
 const { clear: clearRebase, hasPending, pushOptimistic } = await import('./rebase');
 
 class Counter {
@@ -340,6 +340,47 @@ describe('exact-read overlap ordering (ns6p.4 F2, invariants 17/18)', () => {
   });
 });
 
+describe('invalidate-evict vs in-flight mounted get (ns6p.4 r2-F2)', () => {
+  it('FORBIDDEN refetch evicts while a mounted get is in flight: the older response cannot resurrect the node', async () => {
+    const errors = mock.method(console, 'error', () => {});
+    getResults.push(node('/acl', 1, 'v1'));
+    const source = createClientTreeSource();
+    const h = source.mountPath('/acl');
+    await waitPath('/acl', () => cache.getPathStatus('/acl') === 'ready');
+
+    // The ACL-invalidate lane issues its refetch (coalesced), we control when
+    // it settles; issueing is observable through the injected fetchNode.
+    const issued = deferred<void>();
+    const denied = deferred<never>();
+    refetchInvalidatedPath('/acl', () => {
+      issued.resolve();
+      return denied.promise;
+    });
+    await issued.promise;
+
+    // A mounted refetch starts AFTER the lane's read — it owns the newest
+    // generation, so only the overlap recorded by the evict can order it.
+    const dMount = deferred<NodeData | null>();
+    getResults.push(dMount.promise);
+    h.refetch();
+
+    // ACL says FORBIDDEN → evict; the eviction records the overlap.
+    denied.reject(Object.assign(new Error('forbidden'), { data: { code: 'FORBIDDEN' } }));
+    await waitPath('/acl', () => cache.get('/acl') === undefined);
+
+    // The mounted get returns the pre-revocation node — must NOT re-enter.
+    getResults.push(null); // its reconverge refetch settles the truth
+    dMount.resolve(node('/acl', 1, 'v1'));
+    await flush();
+    assert.equal(cache.get('/acl'), undefined, 'no resurrection from the in-flight mounted read');
+
+    await waitPath('/acl', () => cache.getPathStatus('/acl') === 'not_found');
+    assert.equal(cache.get('/acl'), undefined);
+    assert.ok(errors.mock.calls.length >= 1, 'the eviction is loud');
+    h.dispose();
+  });
+});
+
 describe('multi-query gate (ns6p.4 F5, §4.2)', () => {
   it('second different-query mount is non-live and loud; a remount after the first unmounts goes live', async () => {
     const errors = mock.method(console, 'error', () => {});
@@ -369,5 +410,36 @@ describe('multi-query gate (ns6p.4 F5, §4.2)', () => {
 
     h2.dispose();
     h3.dispose();
+  });
+
+  it("gated mount serves its own data from a per-handle lane — the live query's cached collection is untouched (r2-F6)", async () => {
+    const errors = mock.method(console, 'error', () => {});
+    childrenPages.push(
+      { items: [node('/mq2/a1'), node('/mq2/a2')], total: 2 },
+      { items: [node('/mq2/b1')], total: 1 },
+    );
+    const source = createClientTreeSource();
+
+    const h1 = source.mountChildren('/mq2', { query: { kind: 'a' }, watchNew: true, limit: 10 });
+    await waitChildren('/mq2', ready('/mq2'));
+    assert.deepEqual(members('/mq2'), ['/mq2/a1', '/mq2/a2']);
+
+    const h2 = source.mountChildren('/mq2', { query: { kind: 'b' }, watchNew: true, limit: 10 });
+    assert.ok(h2.getSnapshot && h2.subscribe, 'gated mount publishes a per-handle lane');
+    await new Promise<void>((res) => {
+      const done = () => h2.getSnapshot!().phase === 'ready';
+      const unsub = h2.subscribe!(() => { if (done()) { unsub(); res(); } });
+      if (done()) { unsub(); res(); }
+    });
+
+    assert.deepEqual(h2.getSnapshot!().data.map((n) => n.$path), ['/mq2/b1'], 'B renders ITS OWN result');
+    assert.equal(h2.getSnapshot!().total, 1);
+    // The round-1 miss: B's fetch must not overwrite A's shared collection.
+    assert.deepEqual(members('/mq2'), ['/mq2/a1', '/mq2/a2'], "A's cached collection unchanged");
+    assert.equal(source.getChildrenSnapshot('/mq2').total, 2);
+    assert.ok(errors.mock.calls.length >= 1, 'the gate stays loud');
+
+    h1.dispose();
+    h2.dispose();
   });
 });

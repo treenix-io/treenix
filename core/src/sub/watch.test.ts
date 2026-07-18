@@ -1726,6 +1726,32 @@ describe('WatchManager — unbound-token TTL (ns6p.4 slice 2)', () => {
     assert.equal(wm.connect('cS', 'u1', () => {}, undefined, 'tSlow').preserved, false, 'tombstoned');
   });
 
+  it('concurrent same-token requests: the first boundary must not arm while the second still reads (r2-F3, inv.25)', (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const wm = createWatchManager({ unboundTokenTtlMs: 1000 });
+    const other: NodeEvent[] = [];
+    wm.connect('cOther', 'u1', (e) => other.push(e.event), undefined, 'tOther');
+
+    // Requests A and B overlap on one laneless token (peer brackets both).
+    wm.beginTokenRequest('u1', 'tGhost');
+    wm.beginTokenRequest('u1', 'tGhost');
+    wm.watch('u1', ['/doc'], { token: 'tGhost' }); // A registers
+    wm.armUnboundTtl('u1', 'tGhost'); // A's boundary — B still reads
+
+    t.mock.timers.tick(5000); // B's read outlives 5× the TTL window
+    wm.notify(setEvent('/doc'));
+    assert.equal(other.length, 1, 'coverage intact — no countdown ran under the in-flight request');
+
+    wm.armUnboundTtl('u1', 'tGhost'); // B's boundary — last one out arms
+    t.mock.timers.tick(999);
+    wm.notify(setEvent('/doc'));
+    assert.equal(other.length, 2, 'held until the deadline armed by the LAST boundary');
+    t.mock.timers.tick(1);
+    wm.notify(setEvent('/doc'));
+    assert.equal(other.length, 2, 'released exactly at that deadline');
+    assert.equal(wm.connect('cG', 'u1', () => {}, undefined, 'tGhost').preserved, false, 'tombstoned');
+  });
+
   it("tombstone-cap eviction breaks the user's continuity — the evicted token still fails closed (F7, inv.25)", (t) => {
     t.mock.timers.enable({ apis: ['setTimeout'] });
     const wm = createWatchManager({ unboundTokenTtlMs: 1000, tokenTombstoneCap: 1 });
@@ -1745,6 +1771,26 @@ describe('WatchManager — unbound-token TTL (ns6p.4 slice 2)', () => {
       'eviction pushed a continuity break to the live lanes — the proof is not silently forgotten');
     const verdict = wm.connect('cG1', 'u1', () => {}, head, 'g1');
     assert.equal(verdict.preserved, false, 'evicted tombstone fails closed via the epoch break');
+  });
+
+  it('evicted tombstone of a NEVER-connected token: lone cursorless connect fails closed (r2-F4, inv.25)', (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const wm = createWatchManager({ unboundTokenTtlMs: 1000, tokenTombstoneCap: 1, gracePeriodMs: 60_000 });
+    // A live tab holds the user entry while both ghosts expire.
+    wm.connect('cLive', 'u1', () => {}, undefined, 'tLive');
+    wm.watch('u1', ['/a'], { token: 'g1' }); // never connects → no cursor exists
+    wm.armUnboundTtl('u1', 'g1');
+    wm.watch('u1', ['/b'], { token: 'g2' });
+    wm.armUnboundTtl('u1', 'g2');
+
+    t.mock.timers.tick(1000); // both expire; g2's tombstone evicts g1 over the cap
+
+    // The epoch re-mint alone cannot refuse g1 — it has no cursor to compare.
+    // The live tab leaves (entry alive under grace); g1 connects alone,
+    // cursorless: covered-when-alone must find the eviction's missedOffline.
+    wm.disconnect('cLive');
+    const verdict = wm.connect('cG1', 'u1', () => {}, undefined, 'g1');
+    assert.equal(verdict.preserved, false, 'events after expiry were unrouted — never-connected evicted token fails closed');
   });
 
   it('tombstones live until user death — removeUser clears them with the entry', (t) => {

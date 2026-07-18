@@ -3,6 +3,11 @@
 // All side effects (fetch, watch ref-counting, reset re-fetch) live here so
 // the React hooks become thin presenters and the SSR ServerTreeSource can
 // implement the same interface without touching tRPC or SSE.
+//
+// Reads go through the read-track door (ns6p.4 F1): generations, overlap
+// consumption and ingest routing live THERE; this class owns presentation
+// state (status/phase) and mount lifecycles. Server holds count in the
+// tab-global holds registry (F5) — never released directly from here.
 
 import type { NodeData } from '@treenx/core';
 // Use the package-internal alias (#tree/...) — NOT relative './cache' — so
@@ -10,10 +15,11 @@ import type { NodeData } from '@treenx/core';
 // produce two ESM module instances, two cache singletons, broken reactivity.
 import * as cache from '#tree/cache';
 import { tree as clientTree } from '#tree/client';
-import { DIRTY_COALESCE_MS } from '#tree/events';
+import { acquireChildrenHold, acquireHold, acquireHolds, releaseChildrenHold, releaseHold } from '#tree/holds';
+import { applyListingWindow, DIRTY_COALESCE_MS, resourceKey, trackedGet, trackedList } from '#tree/read-track';
 import { ingestNode } from '#tree/rebase';
-// tabTokenInput spreads into every watch-registering/releasing input so the
-// server keys watch ownership to THIS tab (core-anz4.12/28).
+// tabTokenInput spreads into every watch-registering input so the server keys
+// watch ownership to THIS tab (core-anz4.12/28).
 import { tabTokenInput, trpc } from '#tree/trpc';
 import {
   type ChildrenHandle,
@@ -27,51 +33,57 @@ import {
 
 const DEFAULT_PAGE_SIZE = 100;
 
-// ── Read resources (ns6p.4 §3.3-1, invariant 17) ──
-// A read is identified by path + normalized query — NOT parent path alone, so
-// two queries over one parent don't share a generation counter. Key order in
-// the query object must not fork resources (kept local: core's stableJson is
-// behind the curated exports map — no public door, qvrt).
+type WirePage = { items: NodeData[]; total: number; truncated?: boolean; nextCursor?: string };
 
-function sortKeysDeep(v: unknown): unknown {
-  if (Array.isArray(v)) return v.map(sortKeysDeep);
-  if (v && typeof v === 'object') {
-    const src = v as Record<string, unknown>;
-    const out: Record<string, unknown> = {};
-    for (const k of Object.keys(src).sort()) out[k] = sortKeysDeep(src[k]);
-    return out;
+// ── One-shot tracked reads (door consumers shared by UI chrome) ──
+// EditorSidebar / ActionCards read outside the mount lifecycle; these helpers
+// keep every such read inside the door (F1) and every hold counted (F5).
+
+/** Tracked watch-registering exact get. Returns the fetched node; callers
+ *  decide hold accounting — an absent path holds no server watch (peer pin). */
+export async function trackedWatchGet(path: string): Promise<NodeData | null> {
+  const o = await trackedGet(path, () => trpc.get.query({ path, watch: true, ...tabTokenInput }));
+  if (o.error !== undefined) throw o.error;
+  return o.node;
+}
+
+/** Post-action / post-create refresh: tracked watch-get with TRANSIENT hold
+ *  accounting — co-held (Inspector on the same node) → the registration
+ *  stays; alone → the release fires and the get's watch never leaks. */
+export async function refreshWatchedNode(path: string): Promise<void> {
+  const node = await trackedWatchGet(path);
+  if (node) { acquireHold(path); releaseHold(path); }
+}
+
+/** Tracked watch-registering listing (sidebar dirs). Registers the children
+ *  hold + one exact hold per loaded item; returns the item paths so collapse
+ *  releases exactly what this load acquired. */
+export async function loadWatchedListing(parent: string): Promise<string[]> {
+  let loaded: string[] = [];
+  const o = await trackedList(
+    parent,
+    undefined,
+    // Direct trpc, not tree.getChildren: remote-tree no longer forwards watch
+    // flags (r4-M4) — live registration must carry the tab token.
+    (): Promise<WirePage> => trpc.getChildren.query({ path: parent, watch: true, watchNew: true, ...tabTokenInput }),
+    (result) => {
+      // Full window settle (phase included): this read may have superseded a
+      // useChildren mount's fetch of the same parent — leaving phase unsettled
+      // would strand that mount's presentation.
+      applyListingWindow(parent, result);
+      loaded = result.items.map((n) => n.$path);
+    },
+  );
+  if (o.error !== undefined) {
+    if (o.current) {
+      cache.setChildrenError(parent, o.error instanceof Error ? o.error : new Error(String(o.error)));
+      cache.setChildrenPhase(parent, 'error');
+    }
+    throw o.error;
   }
-  return v;
-}
-
-const resourceKey = (kind: 'get' | 'ls', path: string, query?: Record<string, unknown>): string =>
-  `${kind}\u0000${path}\u0000${query ? JSON.stringify(sortKeysDeep(query)) : ''}`;
-
-// A response that lost its generation is dropped — latest-issued wins, never
-// last-settled. Silent in prod (the drop IS the correct behavior), loud in dev.
-function dropStale(kind: string, path: string): void {
-  if (import.meta.env?.DEV) {
-    console.warn(`[tree-source] stale ${kind} response for ${path} dropped (superseded read)`);
-  }
-}
-
-// End a tracked read exactly once (a throw inside .then falls into .catch).
-function readEnder(end: (applied: boolean) => boolean): (applied: boolean) => boolean {
-  let ended = false;
-  return (applied) => ended ? false : ((ended = true), end(applied));
-}
-
-// Watch ref-counting — multiple components may mount the same path; only
-// unwatch on the server when the last consumer goes away.
-type RefMap = Map<string, number>;
-function refWatch(map: RefMap, path: string): void {
-  map.set(path, (map.get(path) ?? 0) + 1);
-}
-function unrefWatch(map: RefMap, path: string): boolean {
-  const n = (map.get(path) ?? 0) - 1;
-  if (n <= 0) { map.delete(path); return true; }
-  map.set(path, n);
-  return false;
+  acquireChildrenHold(parent);
+  acquireHolds(loaded);
+  return loaded;
 }
 
 export class ClientTreeSource implements TreeSource {
@@ -80,23 +92,8 @@ export class ClientTreeSource implements TreeSource {
   private pathSnaps = new Map<string, PathSnapshot>();
   private childSnaps = new Map<string, ChildrenSnapshot>();
 
-  private pathWatchRefs: RefMap = new Map();
-  private childrenWatchRefs: RefMap = new Map();
-
-  // Monotonic generation per read resource (invariant 17).
-  private readGens = new Map<string, number>();
   // Active listing resource keys per parent — the §4.2 multi-query gate.
   private activeChildKeys = new Map<string, Map<string, number>>();
-
-  private issueRead(key: string): number {
-    const gen = (this.readGens.get(key) ?? 0) + 1;
-    this.readGens.set(key, gen);
-    return gen;
-  }
-
-  private isCurrentRead(key: string, gen: number): boolean {
-    return this.readGens.get(key) === gen;
-  }
 
   // ── Snapshots ──
 
@@ -155,7 +152,6 @@ export class ClientTreeSource implements TreeSource {
 
   mountPath(path: string, opts?: PathOpts): PathHandle {
     const watching = !opts?.once;
-    const key = resourceKey('get', path);
     let cancelled = false;
 
     // Coalesced reconverge after a set/remove overlapped an in-flight get
@@ -171,31 +167,21 @@ export class ClientTreeSource implements TreeSource {
 
     const fetchOnce = () => {
       if (cancelled) return;
-      const gen = this.issueRead(key);
       cache.setPathStatus(path, 'loading');
-      cache.beginPathRead(path);
-      const end = readEnder((a) => cache.endPathRead(path, a));
-      trpc.get.query({ path, watch: watching, ...(watching ? tabTokenInput : {}) })
-        .then((n) => {
-          const applied = !cancelled && this.isCurrentRead(key, gen);
-          const overlapped = end(applied);
-          if (!applied) { if (!cancelled) dropStale('get', path); return; }
-          if (n) cache.put(ingestNode(n));
-          // Absent response that raced a create event (F2): the older 'absent'
-          // must not delete the created node — the re-get below decides.
-          else if (!overlapped) cache.markPathMissing(path);
-          if (overlapped) scheduleOverlapRefetch();
-        })
-        .catch((err: unknown) => {
-          end(false);
-          if (cancelled || !this.isCurrentRead(key, gen)) return;
-          cache.setPathError(path, err instanceof Error ? err : new Error(String(err)));
-          cache.setPathStatus(path, 'error');
-        });
+      void trackedGet(
+        path,
+        () => trpc.get.query({ path, watch: watching, ...(watching ? tabTokenInput : {}) }),
+        { isCancelled: () => cancelled, onOverlap: scheduleOverlapRefetch },
+      ).then((o) => {
+        // A superseded read's failure must not clobber the fresher read's state.
+        if (o.error === undefined || cancelled || !o.current) return;
+        cache.setPathError(path, o.error instanceof Error ? o.error : new Error(String(o.error)));
+        cache.setPathStatus(path, 'error');
+      });
     };
 
     fetchOnce();
-    if (watching) refWatch(this.pathWatchRefs, path);
+    if (watching) acquireHold(path);
     // SSE reconnect → re-fetch (preserved=false means generation bumped).
     const unsubReset = cache.subscribeSSEGen(fetchOnce);
 
@@ -205,11 +191,7 @@ export class ClientTreeSource implements TreeSource {
         cancelled = true;
         if (overlapTimer) { clearTimeout(overlapTimer); overlapTimer = null; }
         unsubReset();
-        if (watching && unrefWatch(this.pathWatchRefs, path)) {
-          // core-m77: failure here means the server-side watch leaks — surface it.
-          trpc.unwatch.mutate({ paths: [path], ...tabTokenInput })
-            .catch((e: unknown) => console.error('[tree-source] unwatch failed:', path, e));
-        }
+        if (watching) releaseHold(path);
       },
     };
   }
@@ -217,26 +199,37 @@ export class ClientTreeSource implements TreeSource {
   // ── mountChildren: fetch + paginate + watch + reset listener ──
 
   mountChildren(path: string, opts?: ChildrenOpts): ChildrenHandle {
-    let cancelled = false;
-    cache.retainChildSubscriber(path);
-
     const key = resourceKey('ls', path, opts?.query);
-    // §4.2 gate (F5): the SERVER coexists query handles (slice 5) but children
-    // state here is parent-keyed — two LIVE query streams would fight over one
-    // cache slot. Only the first-mounted resource key stays live; a different-
-    // query mount reads without watch registration until a remount after the
-    // first unmounts (core-jsh1 lifts this with a resource-keyed cache).
+    // §4.2 gate (F5/F6): the SERVER coexists query handles (slice 5) but
+    // children state here is parent-keyed — two LIVE query streams would fight
+    // over one cache slot. Only the first-mounted resource key stays live; a
+    // different-query mount is served from a per-mount local snapshot and
+    // never touches the shared cache (core-jsh1 lifts this with a
+    // resource-keyed cache).
     let keys = this.activeChildKeys.get(path);
     if (!keys) { keys = new Map(); this.activeChildKeys.set(path, keys); }
     const firstKey = keys.keys().next().value;
     const gated = firstKey !== undefined && firstKey !== key;
     if (gated) {
-      console.error(`[tree-source] concurrent listings with different queries on ${path} — client cache is parent-keyed; this mount reads non-live until the first unmounts (core-jsh1)`);
+      console.error(`[tree-source] concurrent listings with different queries on ${path} — client cache is parent-keyed; this mount reads non-live into a local snapshot until the first unmounts (core-jsh1)`);
     }
     keys.set(key, (keys.get(key) ?? 0) + 1);
 
-    const watching = !gated && !!(opts?.watch || opts?.watchNew);
-    if (watching) refWatch(this.childrenWatchRefs, path);
+    const releaseKey = () => {
+      const active = this.activeChildKeys.get(path);
+      if (!active) return;
+      const n = (active.get(key) ?? 0) - 1;
+      if (n <= 0) active.delete(key); else active.set(key, n);
+      if (active.size === 0) this.activeChildKeys.delete(path);
+    };
+
+    if (gated) return this.mountChildrenGated(path, opts, releaseKey);
+
+    let cancelled = false;
+    cache.retainChildSubscriber(path);
+
+    const watching = !!(opts?.watch || opts?.watchNew);
+    if (watching) acquireChildrenHold(path);
 
     // Coalesced reconverge after an event overlapped an in-flight page
     // (invariant 19): membership isn't rev-ordered, refetch decides.
@@ -249,33 +242,26 @@ export class ClientTreeSource implements TreeSource {
       }, DIRTY_COALESCE_MS);
     };
 
+    const settleError = (err: unknown) => {
+      cache.setChildrenError(path, err instanceof Error ? err : new Error(String(err)));
+      cache.setChildrenPhase(path, 'error');
+    };
+
     // Replace-window fetch shared by initial and refetch. Every listing uses
     // nextCursor as its only "more available" signal.
     const fetchWindow = (limit: number, phase: 'initial' | 'refetch') => {
-      const gen = this.issueRead(key);
       cache.setChildrenPhase(path, phase);
-      cache.beginChildrenRead(path);
-      const end = readEnder((a) => cache.endChildrenRead(path, a));
-      trpc.getChildren
-        .query({ path, limit, query: opts?.query, ...(watching ? { watch: opts?.watch, watchNew: opts?.watchNew, ...tabTokenInput } : {}) })
-        .then((result: { items: NodeData[]; total: number; truncated?: boolean; nextCursor?: string }) => {
-          const applied = !cancelled && this.isCurrentRead(key, gen);
-          const overlapped = end(applied);
-          if (!applied) { if (!cancelled) dropStale('ls', path); return; }
-          cache.replaceChildren(path, result.items.map(ingestNode));
-          cache.setChildrenTotal(path, result.total);
-          cache.setChildrenTruncated(path, !!result.truncated);
-          cache.setChildrenNextCursor(path, result.nextCursor ?? null);
-          cache.setChildrenError(path, null);
-          cache.setChildrenPhase(path, 'ready');
-          if (overlapped) scheduleOverlapRefetch();
-        })
-        .catch((err: unknown) => {
-          end(false);
-          if (cancelled || !this.isCurrentRead(key, gen)) return;
-          cache.setChildrenError(path, err instanceof Error ? err : new Error(String(err)));
-          cache.setChildrenPhase(path, 'error');
-        });
+      void trackedList(
+        path,
+        opts?.query,
+        (): Promise<WirePage> => trpc.getChildren
+          .query({ path, limit, query: opts?.query, ...(watching ? { watch: opts?.watch, watchNew: opts?.watchNew, ...tabTokenInput } : {}) }),
+        (result) => applyListingWindow(path, result),
+        { isCancelled: () => cancelled, onOverlap: scheduleOverlapRefetch },
+      ).then((o) => {
+        if (o.error === undefined || cancelled || !o.current) return;
+        settleError(o.error);
+      });
     };
 
     const initialFetch = () => {
@@ -301,39 +287,33 @@ export class ClientTreeSource implements TreeSource {
       const nextCursor = cache.getChildrenNextCursor(path);
 
       if (nextCursor === null) return;
-      // Pages share the window's generation lane: a refetch issued mid-flight
+      // Pages share the window's resource key: a refetch issued mid-flight
       // supersedes this page — appending it would corrupt the fresh window.
-      const gen = this.issueRead(key);
       cache.setChildrenPhase(path, 'append');
-      cache.beginChildrenRead(path);
-      const end = readEnder((a) => cache.endChildrenRead(path, a));
-      trpc.getChildren
-        .query({ path, limit: pageSize, cursor: nextCursor, query: opts?.query })
-        .then((result: { items: NodeData[]; nextCursor?: string }) => {
-          const applied = !cancelled && this.isCurrentRead(key, gen);
-          const overlapped = end(applied);
-          if (!applied) { if (!cancelled) dropStale('loadMore', path); return; }
-          cache.appendChildren(path, result.items.map(ingestNode));
+      void trackedList(
+        path,
+        opts?.query,
+        (): Promise<WirePage> => trpc.getChildren
+          .query({ path, limit: pageSize, cursor: nextCursor, query: opts?.query }),
+        (result) => {
+          cache.appendChildren(path, result.items);
           cache.setChildrenNextCursor(path, result.nextCursor ?? null);
           cache.setChildrenTotal(path, cache.getLoadedCount(path));
           cache.setChildrenPhase(path, 'ready');
-          if (overlapped) scheduleOverlapRefetch();
-        })
-        .catch((err: unknown) => {
-          end(false);
-          if (cancelled || !this.isCurrentRead(key, gen)) return;
-          cache.setChildrenError(path, err instanceof Error ? err : new Error(String(err)));
-          cache.setChildrenPhase(path, 'error');
-        });
+        },
+        { isCancelled: () => cancelled, onOverlap: scheduleOverlapRefetch },
+      ).then((o) => {
+        if (o.error === undefined || cancelled || !o.current) return;
+        settleError(o.error);
+      });
     };
 
     initialFetch();
     const unsubReset = cache.subscribeSSEGen(initialFetch);
     // F1 (inv.16/19): a vp-dirty on a SETTLED listing refetches through this
     // mount's own coalesced lane — the in-flight overlap flag alone is a no-op
-    // when idle. Gated mounts stay passive: their refetch would fight the live
-    // query's cache slot.
-    const unsubDirty = gated ? null : cache.subscribeChildrenDirty(path, scheduleOverlapRefetch);
+    // when idle.
+    const unsubDirty = cache.subscribeChildrenDirty(path, scheduleOverlapRefetch);
 
     return {
       refetch,
@@ -341,20 +321,94 @@ export class ClientTreeSource implements TreeSource {
       dispose: () => {
         cancelled = true;
         if (overlapTimer) { clearTimeout(overlapTimer); overlapTimer = null; }
-        const active = this.activeChildKeys.get(path);
-        if (active) {
-          const n = (active.get(key) ?? 0) - 1;
-          if (n <= 0) active.delete(key); else active.set(key, n);
-          if (active.size === 0) this.activeChildKeys.delete(path);
-        }
-        unsubDirty?.();
+        releaseKey();
+        unsubDirty();
         unsubReset();
         cache.releaseChildSubscriber(path);
-        if (watching && unrefWatch(this.childrenWatchRefs, path)) {
-          // core-m77: failure here means the server-side children watch leaks — surface it.
-          trpc.unwatchChildren.mutate({ paths: [path], ...tabTokenInput })
-            .catch((e: unknown) => console.error('[tree-source] unwatchChildren failed:', path, e));
-        }
+        if (watching) releaseChildrenHold(path);
+      },
+    };
+  }
+
+  // §4.2 fail-closed gate (F6): the gated mount's reads live entirely in a
+  // per-mount snapshot — no shared cache writes, no shared read tracking (its
+  // begin/end would consume the LIVE query's overlap flags), no watch
+  // registration, no page-size lock. Its subscriber renders this lane via the
+  // handle's own getSnapshot/subscribe.
+  private mountChildrenGated(
+    path: string,
+    opts: ChildrenOpts | undefined,
+    releaseKey: () => void,
+  ): ChildrenHandle {
+    let cancelled = false;
+    let localGen = 0;
+
+    let snap: ChildrenSnapshot = {
+      data: [], phase: 'idle', total: null, truncated: null, nextCursor: null, error: null,
+    };
+    const subs = new Set<() => void>();
+    const publish = (next: Partial<ChildrenSnapshot>) => {
+      snap = { ...snap, ...next };
+      for (const cb of subs) cb();
+    };
+
+    const fetchWindow = (phase: 'initial' | 'refetch') => {
+      if (cancelled) return;
+      const gen = ++localGen;
+      publish({ phase });
+      trpc.getChildren
+        .query({ path, limit: opts?.limit ?? DEFAULT_PAGE_SIZE, query: opts?.query })
+        .then((result: WirePage) => {
+          if (cancelled || gen !== localGen) return;
+          publish({
+            // ingest keeps payloads non-regressing vs cache/overlays without
+            // touching membership (inv.18/28); plain map, no cache.put.
+            data: result.items.map(ingestNode),
+            total: result.total,
+            truncated: !!result.truncated,
+            nextCursor: result.nextCursor ?? null,
+            error: null,
+            phase: 'ready',
+          });
+        })
+        .catch((err: unknown) => {
+          if (cancelled || gen !== localGen) return;
+          publish({ error: err instanceof Error ? err : new Error(String(err)), phase: 'error' });
+        });
+    };
+
+    const loadMore = () => {
+      if (cancelled || snap.phase === 'append' || snap.nextCursor === null) return;
+      const gen = ++localGen;
+      const cursor = snap.nextCursor;
+      publish({ phase: 'append' });
+      trpc.getChildren
+        .query({ path, limit: opts?.limit ?? DEFAULT_PAGE_SIZE, cursor, query: opts?.query })
+        .then((result: WirePage) => {
+          if (cancelled || gen !== localGen) return;
+          const seen = new Set(snap.data.map((n) => n.$path));
+          const fresh = result.items.map(ingestNode).filter((n) => !seen.has(n.$path));
+          const data = [...snap.data, ...fresh];
+          publish({ data, total: data.length, nextCursor: result.nextCursor ?? null, phase: 'ready' });
+        })
+        .catch((err: unknown) => {
+          if (cancelled || gen !== localGen) return;
+          publish({ error: err instanceof Error ? err : new Error(String(err)), phase: 'error' });
+        });
+    };
+
+    fetchWindow('initial');
+    const unsubReset = cache.subscribeSSEGen(() => fetchWindow('refetch'));
+
+    return {
+      refetch: () => fetchWindow('refetch'),
+      loadMore,
+      getSnapshot: () => snap,
+      subscribe: (cb) => { subs.add(cb); return () => subs.delete(cb); },
+      dispose: () => {
+        cancelled = true;
+        releaseKey();
+        unsubReset();
       },
     };
   }

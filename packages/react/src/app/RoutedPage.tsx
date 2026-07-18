@@ -5,9 +5,27 @@ import { isRef, type NodeData } from '@treenx/core';
 import { Render, RenderContext } from '#context';
 import { useEffect, useState } from 'react';
 import * as cache from '#tree/cache';
+import { acquireHolds, releaseHolds } from '#tree/holds';
+import { trackedGet } from '#tree/read-track';
 import { ingestNode } from '#tree/rebase';
 import { usePath } from '#hooks';
 import { tabTokenInput, trpc } from '#tree/trpc';
+
+/** Tracked resolve (the F1 door): the route path competes in its generation
+ *  lane with full overlap ordering; the ref target rides the same response —
+ *  its own mid-flight overlap is unknowable before the response names it, so
+ *  it is ingest-routed here and re-read through the door by the target's
+ *  usePath mount. Exported for tests. */
+export async function resolveRouteTracked(routePath: string): Promise<NodeData[]> {
+  let arr: NodeData[] = [];
+  const o = await trackedGet(routePath, async () => {
+    arr = (await trpc.resolve.query({ path: routePath, watch: true, ...tabTokenInput })) as NodeData[];
+    return arr[0] ?? null;
+  });
+  if (o.error !== undefined) throw o.error;
+  if (o.applied && arr[1]) cache.put(ingestNode(arr[1]));
+  return arr;
+}
 
 export function RoutedPage({ path }: { path: string }) {
   // Strip trailing slash before composing the route path. Server rejects
@@ -23,22 +41,17 @@ export function RoutedPage({ path }: { path: string }) {
     setNotFound(false);
     let cancelled = false;
     let watched: string[] | null = null;
-    const release = (paths: string[]) =>
-      trpc.unwatch.mutate({ paths, ...tabTokenInput })
-        .catch((e: unknown) => console.error('[routed-page] unwatch failed:', paths, e));
 
-    trpc.resolve.query({ path: routePath, watch: true, ...tabTokenInput }).then((nodes: unknown) => {
-      const arr = nodes as NodeData[];
+    resolveRouteTracked(routePath).then((arr) => {
       const paths = arr.length ? [routePath, ...(arr[1] ? [arr[1].$path] : [])] : null;
+      // F5: the resolve registered server watches — count them tab-wide; the
+      // release below fires unwatch only when no co-consumer holds the path.
+      if (paths) acquireHolds(paths);
       // Fast navigation: cleanup ran before resolve settled — the server watch
       // was still registered, release it right here (core-m77/C46).
-      if (cancelled) { if (paths) release(paths); return; }
+      if (cancelled) { if (paths) releaseHolds(paths); return; }
       watched = paths;
       if (!arr.length) { setNotFound(true); return; }
-
-      // F2/inv.18: reads never bypass the rebase-aware ingest — a raw put
-      // would clobber overlays and regress newer event images.
-      for (const n of arr) cache.put(ingestNode(n));
 
       const route = arr[0];
       setTargetPath(isRef(route) && arr[1] ? arr[1].$path : route.$path);
@@ -51,7 +64,7 @@ export function RoutedPage({ path }: { path: string }) {
     return () => {
       cancelled = true;
       // core-m77/C46: resolve{watch:true} registered server watches — release on unmount/route change.
-      if (watched) release(watched);
+      if (watched) releaseHolds(watched);
     };
   }, [routePath]);
 

@@ -8,8 +8,10 @@
 import { compKey, getComponent, getComponentByName, getMeta, type NodeData, normalizeType, resolve } from '@treenx/core';
 import { type Class, getDefaults, type TypeProxy } from '@treenx/core/comp';
 import { deriveURI, parseURI } from '@treenx/core/uri';
+import { acquireHold, releaseHold } from '#tree/holds';
 import { mergeIntoNode, type OnChange } from '#tree/on-change';
-import { confirmFromResponse, hasPending, ingestNode, pushOptimistic, rollback } from '#tree/rebase';
+import { trackedGet } from '#tree/read-track';
+import { confirmFromResponse, hasPending, pushOptimistic, rollback } from '#tree/rebase';
 import {
   useCallback,
   useEffect,
@@ -156,12 +158,25 @@ function debugPath(path: string, hook: string) {
 export function useChildren(parentPath: string, opts?: ChildrenOpts): ChildrenQuery {
   const source = useTreeSource();
 
+  // Gated multi-query mounts (§4.2, ns6p.4 F6) publish a per-handle snapshot
+  // lane instead of the shared parent-keyed cache — consume it when present.
+  const [ownLane, setOwnLane] = useState<ChildrenHandle | null>(null);
+
   // Single bundled snapshot — data + phase + total + truncated + error.
   // Source merges all five into one stable reference; one subscribe channel.
   const snap = useSyncExternalStore(
-    useCallback((cb: () => void) => source.subscribeChildren(parentPath, cb), [source, parentPath]),
-    useCallback(() => source.getChildrenSnapshot(parentPath), [source, parentPath]),
-    useCallback(() => source.getChildrenSnapshot(parentPath), [source, parentPath]),
+    useCallback(
+      (cb: () => void) => ownLane?.subscribe ? ownLane.subscribe(cb) : source.subscribeChildren(parentPath, cb),
+      [source, parentPath, ownLane],
+    ),
+    useCallback(
+      () => ownLane?.getSnapshot ? ownLane.getSnapshot() : source.getChildrenSnapshot(parentPath),
+      [source, parentPath, ownLane],
+    ),
+    useCallback(
+      () => ownLane?.getSnapshot ? ownLane.getSnapshot() : source.getChildrenSnapshot(parentPath),
+      [source, parentPath, ownLane],
+    ),
   );
 
   // Lifecycle — mountChildren owns fetch + retain/release + watch ref-counting +
@@ -173,7 +188,12 @@ export function useChildren(parentPath: string, opts?: ChildrenOpts): ChildrenQu
     debugPath(parentPath, 'useChildren');
     const h = source.mountChildren(parentPath, opts);
     handleRef.current = h;
-    return () => { h.dispose(); handleRef.current = null; };
+    if (h.getSnapshot && h.subscribe) setOwnLane(h);
+    return () => {
+      h.dispose();
+      handleRef.current = null;
+      setOwnLane((cur) => cur === h ? null : cur);
+    };
   }, [source, parentPath, opts?.limit, opts?.watch, opts?.watchNew, queryKey]);
 
   const refetch = useCallback(() => { handleRef.current?.refetch(); }, []);
@@ -471,11 +491,6 @@ function makeProxy<T extends object>(
 
 // ── watch: universal async generator ──
 
-// Server holds are per (user, tab-token, path) — ONE hold regardless of how
-// many generators watch the path. Refcount locally so the first generator's
-// return doesn't strip a co-consumer's hold (anz4.28 co-hold, tab-local).
-const watchGenRefs = new Map<string, number>();
-
 export async function* watch<T = unknown>(uri: string): AsyncGenerator<T> {
   const parsed = parseURI(uri);
 
@@ -490,11 +505,14 @@ export async function* watch<T = unknown>(uri: string): AsyncGenerator<T> {
   }
 
   const { path } = parsed;
-  const initial = await trpc.get.query({ path, watch: true, ...tabTokenInput });
-  // F2/inv.18: ingest, never raw put — the initial get may be older than a
-  // mid-flight event image or carry a node with a live optimistic overlay.
-  if (initial) cache.put(ingestNode(initial as NodeData));
-  watchGenRefs.set(path, (watchGenRefs.get(path) ?? 0) + 1);
+  // Through the door (ns6p.4 F1): generation + overlap ordering — the initial
+  // get can neither regress a mid-flight event image nor resurrect a node a
+  // concurrent remove just evicted.
+  const initial = await trackedGet(path, () => trpc.get.query({ path, watch: true, ...tabTokenInput }));
+  if (initial.error !== undefined) throw initial.error;
+  // Server holds are per (user, tab-token, path) — count in the tab-global
+  // registry (F5) so no co-consumer's release strips this generator's hold.
+  acquireHold(path);
 
   let resolve: (() => void) | null = null;
   const unsub = cache.subscribePath(path, () => { resolve?.(); resolve = null; });
@@ -508,16 +526,9 @@ export async function* watch<T = unknown>(uri: string): AsyncGenerator<T> {
     }
   } finally {
     unsub();
-    const left = (watchGenRefs.get(path) ?? 1) - 1;
-    if (left > 0) {
-      watchGenRefs.set(path, left);
-    } else {
-      watchGenRefs.delete(path);
-      // core-m77: get{watch:true} registered a server-side hold — release it
-      // with the last generator or it leaks until tab-token grace.
-      trpc.unwatch.mutate({ paths: [path], ...tabTokenInput })
-        .catch((e: unknown) => console.error('[watch] unwatch failed:', path, e));
-    }
+    // core-m77: get{watch:true} registered a server-side hold — release it
+    // with the last tab-wide consumer or it leaks until tab-token grace.
+    releaseHold(path);
   }
 }
 

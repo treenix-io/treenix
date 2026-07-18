@@ -5,7 +5,7 @@
 //
 // Run: npm test (tsx --import test/register-dom.mjs --experimental-test-module-mocks)
 
-import { describe, it, beforeEach, mock } from 'node:test';
+import { describe, it, beforeEach, afterEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import type { NodeData } from '@treenx/core';
 
@@ -44,14 +44,19 @@ mock.module('#tree/trpc', {
 
 const { watch } = await import('#hooks');
 const cache = await import('#tree/cache');
+const { cancelReadReconverges } = await import('#tree/read-track');
+const { resetHolds } = await import('#tree/holds');
 
 beforeEach(() => {
   cache.clear();
+  resetHolds();
   getCalls.length = 0;
   unwatchCalls.length = 0;
   getQuery.mock.resetCalls();
   unwatchMutate.mock.resetCalls();
 });
+
+afterEach(() => cancelReadReconverges());
 
 describe('universal watch() — server-hold lifecycle (anz4.28)', () => {
   it('registers with the tab token and releases the server hold on return', async () => {
@@ -94,6 +99,26 @@ describe('universal watch() — server-hold lifecycle (anz4.28)', () => {
     await gen.next();
 
     assert.equal(cache.get('/w5')?.$rev, 5, 'raw put would have regressed the node to the stale image');
+    await gen.return(undefined);
+  });
+
+  it('initial get goes through the door — an eviction mid-flight is not resurrected by the older response (ns6p.4 r2-F1)', async () => {
+    let settle!: (n: NodeData) => void;
+    getQuery.mock.mockImplementationOnce((input: { path: string }) =>
+      new Promise<NodeData>((res) => { settle = res; void input; }));
+
+    const gen = watch('/w6');
+    const first = gen.next();
+    await new Promise<void>((r) => setImmediate(r)); // the get is in flight
+
+    // Remove/evict lands mid-read (what applyDataEvent's remove branch does).
+    cache.flagPathReadOverlap('/w6');
+    cache.remove('/w6');
+
+    settle({ $path: '/w6', $type: 'doc', $rev: 1, v: 'zombie' });
+    await first;
+
+    assert.equal(cache.get('/w6'), undefined, 'a door-bypassing put would have resurrected the removed node');
     await gen.return(undefined);
   });
 });

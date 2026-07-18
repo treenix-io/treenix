@@ -65,6 +65,11 @@ export type ChildrenHandle = {
   loadMore(): void;
   /** Tear down: unsubscribe, ref-decrement watch, release page-size lock. */
   dispose(): void;
+  /** Present on gated multi-query mounts (§4.2, ns6p.4 F6): the mount's
+   *  results live in a per-handle snapshot, never the shared parent-keyed
+   *  cache — its consumer must read/subscribe HERE instead of the source. */
+  getSnapshot?(): ChildrenSnapshot;
+  subscribe?(cb: () => void): () => void;
 };
 
 export interface TreeSource {

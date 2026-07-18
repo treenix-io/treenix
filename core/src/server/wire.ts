@@ -201,6 +201,7 @@ export function createWireSession(deps: WireDeps, session: Session) {
       watchList: (path, itemWatch, token, plan) =>
         registerWatchList(deps.watcher, tree, userId, path, itemWatch, token, plan),
       holdPrefix: (path) => deps.watcher.holdPrefix(userId, path),
+      beginTokenRequest: (token) => deps.watcher.beginTokenRequest(userId, token),
       armUnboundTtl: (token) => deps.watcher.armUnboundTtl(userId, token),
     };
 

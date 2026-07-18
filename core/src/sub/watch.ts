@@ -90,10 +90,17 @@ export type WatchManager = {
    *  a tab token would collapse concurrent requests. Budget-counted; never
    *  TTL'd (the peer releases it in a request finally). Idempotent release. */
   holdPrefix(userId: string, path: string): () => void;
+  /** Bracket-open of one tokened request (inv.25 F3): pairs with the
+   *  armUnboundTtl the request boundary calls — the TTL countdown may start
+   *  only when the LAST overlapping same-token request completes, or the
+   *  first boundary would arm while a concurrent request still reads under
+   *  the coverage. */
+  beginTokenRequest(userId: string, token: string): void;
   /** Start the unbound-token TTL countdown (inv.25) for a token that
    *  registered while laneless — called at the REQUEST boundary (F7: arming
-   *  inside watch() could expire mid-read). No-op for tokens that didn't
-   *  register, have a lane, or already run a TTL; first connect() disarms. */
+   *  inside watch() could expire mid-read). Decrements the in-flight bracket
+   *  and arms only at zero. No-op for tokens that didn't register, have a
+   *  lane, or already run a TTL; first connect() disarms. */
   armUnboundTtl(userId: string, token: string): void;
   unwatch(userId: string, paths: string[], opts?: UnwatchOpts): void;
   notify(event: NodeEvent): void;
@@ -201,6 +208,11 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
   };
   const users = new Map<string, UserEntry>();
   const graceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  // In-flight tokened requests per (user, token) — F3/inv.25. Outside the user
+  // entry: a request may begin before any watch() creates one, and the map
+  // self-cleans at the last boundary. '\0' is safe — vToken rejects it.
+  const tokenInflight = new Map<string, number>();
+  const inflightKey = (userId: string, token: string) => userId + '\0' + token;
   let queryRegistry: QueryWatchRegistry | undefined;
   let totalWatches = 0;
   let provisionalSeq = 0;
@@ -604,7 +616,24 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
       return lease.undo;
     },
 
+    beginTokenRequest(userId, token) {
+      const k = inflightKey(userId, token);
+      tokenInflight.set(k, (tokenInflight.get(k) ?? 0) + 1);
+    },
+
     armUnboundTtl(userId, token) {
+      // F3: earlier boundaries of overlapping same-token requests only
+      // decrement — ttlPending survives them, and only the LAST request out
+      // may arm. An unbracketed call (no begin — legacy/direct) arms as before.
+      const k = inflightKey(userId, token);
+      const inflight = tokenInflight.get(k);
+      if (inflight !== undefined) {
+        if (inflight > 1) {
+          tokenInflight.set(k, inflight - 1);
+          return;
+        }
+        tokenInflight.delete(k);
+      }
       const user = users.get(userId);
       // Consumed flag = the token registered while laneless during this
       // request (watch() sets it); anything else is a no-op.
@@ -626,6 +655,12 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
           const oldest = u.tokenTombstones.values().next().value;
           if (oldest !== undefined) u.tokenTombstones.delete(oldest);
           breakUser(userId, u);
+          // F4: the evicted token may NEVER have connected — it has no cursor
+          // for the epoch re-mint to refuse, and the cursorless-alone rule
+          // reads missedOffline. Leave the proof there, or a later lone
+          // connect of the evicted token would judge preserved:true over
+          // registrations that died at expiry.
+          u.missedOffline = true;
         }
       }, unboundTokenTtlMs);
       // Never hold the process open (mock timers / non-Node may lack unref).

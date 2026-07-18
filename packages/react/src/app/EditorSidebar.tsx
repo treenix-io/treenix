@@ -16,9 +16,8 @@ import { TypePicker } from '#mods/editor-ui/type-picker';
 import type { NavigateFn } from '#navigate';
 import * as cache from '#tree/cache';
 import { tree } from '#tree/client';
-import { ingestNode } from '#tree/rebase';
-import { tabTokenInput, trpc } from '#tree/trpc';
-import type { NodeData } from '@treenx/core';
+import { loadWatchedListing, refreshWatchedNode, trackedWatchGet } from '#tree/client-tree-source';
+import { acquireHold, releaseChildrenHold, releaseHold, releaseHolds, releaseUnheld } from '#tree/holds';
 import { ChevronDown, Eye, EyeOff, LogIn, LogOut, RotateCcw } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { flushSync } from 'react-dom';
@@ -86,6 +85,8 @@ export function EditorSidebar({
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [loaded, setLoaded] = useState<Set<string>>(new Set());
   const [creatingAt, setCreatingAt] = useState<string | null>(null);
+  // Item holds acquired per expanded dir (F5) — collapse releases exactly these.
+  const [watchedItems] = useState(() => new Map<string, string[]>());
   const selectedRef = useRef(selected);
   const phaseRef = useRef(phase);
   // Mirror of `loaded` updated synchronously inside loadChildren so concurrent
@@ -100,18 +101,12 @@ export function EditorSidebar({
 
   const loadChildren = useCallback(async (path: string) => {
     if (loadedRef.current.has(path)) return;
-    // Direct trpc, not tree.getChildren: remote-tree no longer forwards watch
-    // flags (r4-M4) — live registration must carry the tab token and pair with
-    // the tokened unwatch in handleExpand.
-    const { items: children } = await trpc.getChildren
-      .query({ path, watch: true, watchNew: true, ...tabTokenInput });
-    // F2/inv.18: same ingest-mapped replace as client-tree-source — a raw
-    // listing write would clobber overlays and regress newer event images.
-    cache.replaceChildren(path, children.map(ingestNode));
+    const acquired = await loadWatchedListing(path);
+    watchedItems.set(path, acquired);
     const next = new Set(loadedRef.current).add(path);
     loadedRef.current = next;
     setLoaded(next);
-  }, []);
+  }, [watchedItems]);
 
   // Loads ancestor children for `selected` within `root` and merges those ancestors
   // into `expanded`. Idempotent via loadChildren's early-return.
@@ -151,14 +146,26 @@ export function EditorSidebar({
     loadedRef.current = new Set();
     setLoaded(new Set());
     setExpanded(new Set([root]));
+    let cancelled = false;
+    let rootHeld = false;
     (async () => {
-      const rootNode = (await trpc.get.query({ path: root, watch: true, ...tabTokenInput })) as NodeData | undefined;
-      if (rootNode) cache.put(ingestNode(rootNode));
+      const rootNode = await trackedWatchGet(root);
+      if (rootNode) {
+        acquireHold(root);
+        // Fast root switch: cleanup already ran — release right here (C46).
+        if (cancelled) { releaseHold(root); return; }
+        rootHeld = true;
+      }
+      if (cancelled) return;
       await loadChildren(root);
       await ensurePathVisible(root, selectedRef.current);
     })().catch((e: unknown) => {
       toast.error(e instanceof Error ? e.message : 'Failed to connect to server');
     });
+    return () => {
+      cancelled = true;
+      if (rootHeld) releaseHold(root);
+    };
   }, [root, loadChildren, ensurePathVisible]);
 
   // Selected change (e.g. browser back/forward, deep link inside same root):
@@ -226,12 +233,23 @@ export function EditorSidebar({
       if (!wasExpanded) {
         await loadChildren(path);
       } else {
-        const childPaths = cache.getChildren(path).map((n) => n.$path).filter((p) => p !== path);
-        trpc.unwatchChildren.mutate({ paths: [path], ...tabTokenInput });
-        if (childPaths.length) trpc.unwatch.mutate({ paths: childPaths, ...tabTokenInput });
+        // F5: release through the tab-global registry — a child co-held by
+        // another consumer (Inspector usePath on the selected node) keeps its
+        // server hold; only tab-wide-last releases fire unwatch mutations.
+        const acquired = watchedItems.get(path);
+        if (acquired) {
+          watchedItems.delete(path);
+          // Strays: children born while expanded got server-side autoWatch
+          // promotions nobody counted — sweep only the unheld ones.
+          const strays = cache.getChildren(path).map((n) => n.$path)
+            .filter((p) => p !== path && !acquired.includes(p));
+          releaseChildrenHold(path);
+          releaseHolds(acquired);
+          releaseUnheld(strays);
+        }
       }
     },
-    [expanded, loadChildren],
+    [expanded, loadChildren, watchedItems],
   );
 
   const handleCreateChild = useCallback((parentPath: string) => {
@@ -251,8 +269,8 @@ export function EditorSidebar({
         setExpanded((prev) => new Set(prev).add(parentPath));
         await onSelect(childPath);
 
-        const node = (await trpc.get.query({ path: childPath, watch: true, ...tabTokenInput })) as NodeData | undefined;
-        if (node) cache.put(node);
+        // Door-routed re-get with transient hold accounting (F1/F5).
+        await refreshWatchedNode(childPath);
         toast.success(`Created ${name}`);
       } catch (e: unknown) {
         toast.error(e instanceof Error ? e.message : `Failed to create ${name}`);

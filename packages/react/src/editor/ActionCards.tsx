@@ -6,9 +6,8 @@ import { execute } from '#hooks';
 import { renderField } from '#mods/editor-ui/form-field';
 import { getActions, getActionSchema } from '#mods/editor-ui/node-utils';
 import { useSchema } from '#schema-loader';
-import * as cache from '#tree/cache';
-import { tabTokenInput, trpc } from '#tree/trpc';
-import type { ComponentData, NodeData } from '@treenx/core';
+import { refreshWatchedNode } from '#tree/client-tree-source';
+import type { ComponentData } from '@treenx/core';
 import type { PropertySchema } from '@treenx/core/schema/types';
 import { useState } from 'react';
 import { toast } from 'sonner';
@@ -79,8 +78,10 @@ export function ActionCardList({
         }
       }
       const result = await execute(path, a, data, undefined, componentName);
-      const fresh = (await trpc.get.query({ path, watch: true, ...tabTokenInput })) as NodeData | undefined;
-      if (fresh) cache.put(fresh);
+      // Door-routed refresh with transient hold accounting (ns6p.4 F1/F5) —
+      // the raw watch-get + cache.put here used to clobber overlays and leak
+      // its registration.
+      await refreshWatchedNode(path);
       onActionComplete?.();
       setResults((prev) => ({ ...prev, [a]: { ok: true, value: result } }));
       setExpanded(a);

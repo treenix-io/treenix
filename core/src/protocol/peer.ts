@@ -52,6 +52,10 @@ export type ServeHooks = {
   watchList?(path: string, itemWatch: boolean, token?: string, plan?: ResolvedReadPlan): void | ListRegistration | Promise<void | ListRegistration>;
   /** Request-scoped provisional prefix (inv.27): unique per-request holder; returns the release. */
   holdPrefix?(path: string): () => void;
+  /** Bracket-open of one tokened request (inv.25 F3): pairs with the
+   *  armUnboundTtl call in the peer's finally so the TTL arms only when the
+   *  LAST overlapping same-token request completes. */
+  beginTokenRequest?(token: string): void;
   /** Unbound-token TTL arm (inv.25/F7): the peer calls it when a tokened
    *  request completes — the countdown must not start mid-read. */
   armUnboundTtl?(token: string): void;
@@ -207,8 +211,19 @@ export function createPeer(serve?: ServeFactory) {
 
   async function handleUnary(frame: ReqFrame, ctx?: unknown): Promise<ResFrame> {
     let served: PeerServe | undefined;
+    // Raw (pre-vToken) on purpose: the finally arms with the same raw value,
+    // so begin/arm pair exactly even for requests that fail validation.
+    const reqToken = 'token' in frame && typeof frame.token === 'string' && frame.token.length > 0
+      ? frame.token : undefined;
     try {
       const s = served = await resolveServe();
+      // F3/inv.25: open the request bracket only when the boundary arm exists
+      // too — an unpaired begin would leave the in-flight count high forever
+      // and the TTL would never arm.
+      if (reqToken !== undefined && s.hooks?.armUnboundTtl && s.hooks.beginTokenRequest) {
+        try { s.hooks.beginTokenRequest(reqToken); }
+        catch (e) { console.error('[twp] token request bracket failed:', e); }
+      }
       const ok = (v: unknown): OkFrame => (s.at ? { id: frame.id, ok: v, at: s.at() } : { id: frame.id, ok: v });
 
       switch (frame.op) {
@@ -449,10 +464,10 @@ export function createPeer(serve?: ServeFactory) {
     } finally {
       // inv.25/F7: start the unbound-token TTL countdown only once the request
       // is DONE — a mid-read expiry would strip coverage the response still
-      // relies on. The manager no-ops unless this token registered lanelessly.
-      const t = 'token' in frame ? frame.token : undefined;
-      if (served?.hooks?.armUnboundTtl && typeof t === 'string' && t.length > 0) {
-        try { served.hooks.armUnboundTtl(t); }
+      // relies on. Closes the F3 bracket: the manager decrements the in-flight
+      // count and arms only at zero (and only if the token registered lanelessly).
+      if (served?.hooks?.armUnboundTtl && reqToken !== undefined) {
+        try { served.hooks.armUnboundTtl(reqToken); }
         catch (e) { console.error('[twp] unbound-token TTL arm failed:', e); }
       }
     }

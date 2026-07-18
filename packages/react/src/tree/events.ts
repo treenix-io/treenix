@@ -4,7 +4,8 @@
 import type { NodeData } from '@treenx/core';
 import { applyOps, type PatchOp } from '@treenx/core/tree';
 import * as cache from './cache';
-import { applyServerPatch, applyServerRemove, applyServerSet, clear as clearRebase, consumeAckOnly, ingestNode } from './rebase';
+import { cancelReadReconverges, DIRTY_COALESCE_MS, evictTracked, trackedGet } from '#tree/read-track';
+import { applyServerPatch, applyServerRemove, applyServerSet, clear as clearRebase, consumeAckOnly } from './rebase';
 import { AUTH_EXPIRED_EVENT, clearToken, getToken, tabTokenInput, trpc } from './trpc';
 
 type LoadChildren = (path: string) => Promise<void>;
@@ -52,7 +53,6 @@ function seqOf(event: object): number | undefined {
 
 // Coalesce dirty refetches per vp (gk8.12): a burst of writes into one query
 // view triggers ONE listing refetch, not one per event.
-export const DIRTY_COALESCE_MS = 75;
 const dirtyTimers = new Map<string, ReturnType<typeof setTimeout>>();
 function refetchDirtyVp(vp: string, loadChildren: LoadChildren) {
   if (dirtyTimers.has(vp)) return;
@@ -77,18 +77,27 @@ type FetchNode = (path: string) => Promise<NodeData | null | undefined>;
 // we hold — refetch through the normal read path; a denied/gone refetch must
 // EVICT or the known-stale entry freezes forever. Coalesced like vp refetches;
 // `fetchNode` is injected so tests can stub it.
+// F2: runs THROUGH the door — generations + overlap participation, so the
+// eviction re-routes an in-flight mounted read of the same path (it refetches
+// instead of resurrecting the node from its stale response).
 const invalidatedTimers = new Map<string, ReturnType<typeof setTimeout>>();
 export function refetchInvalidatedPath(path: string, fetchNode: FetchNode) {
   if (invalidatedTimers.has(path)) return;
   invalidatedTimers.set(path, setTimeout(() => {
     invalidatedTimers.delete(path);
-    fetchNode(path).then(
-      (n) => { if (n) cache.put(ingestNode(n)); else cache.remove(path); },
-      (err: unknown) => {
-        console.error('[sse] refetch of invalidated %s failed — evicting:', path, err);
-        cache.remove(path);
-      },
-    );
+    void trackedGet(path, () => fetchNode(path)).then((o) => {
+      if (o.error === undefined) return;
+      // Evict even when a newer read superseded this lane: no further event
+      // will name the path (ACL-filtered), so skipping would freeze the stale
+      // entry; the evict's overlap flag re-routes that in-flight read into a
+      // reconverge instead of applying its pre-revocation payload.
+      console.error('[sse] refetch of invalidated %s failed — evicting:', path, o.error);
+      evictTracked(path);
+      // Settle presentation too — a mounted consumer superseded by this lane
+      // would otherwise strand at 'loading'.
+      cache.setPathError(path, o.error instanceof Error ? o.error : new Error(String(o.error)));
+      cache.setPathStatus(path, 'error');
+    });
   }, DIRTY_COALESCE_MS));
 }
 
@@ -344,9 +353,14 @@ export function startEvents(config: EventsConfig = {}, resume = false) {
           if (sel) {
             // Re-registration after a continuity break must carry the tab token
             // too — a tokenless re-watch would land on the shared LEGACY hold.
-            trpc.get.query({ path: sel, watch: true, ...tabTokenInput }).then(n => {
-              if (n) cache.put(ingestNode(n));
-            });
+            // Through the door (F1): the re-get competes in the path's
+            // generation lane and honors overlap like every other read.
+            void trackedGet(sel, () => trpc.get.query({ path: sel, watch: true, ...tabTokenInput }))
+              .then((o) => {
+                if (o.error !== undefined && o.current) {
+                  console.error('[sse] selected re-watch failed:', sel, o.error);
+                }
+              });
           }
         }
         return;
@@ -399,6 +413,7 @@ export function stopEvents() {
   dirtyTimers.clear();
   for (const t of invalidatedTimers.values()) clearTimeout(t);
   invalidatedTimers.clear();
+  cancelReadReconverges();
   if (unsub) { unsub(); unsub = null; }
   if (tokenWaitTimer) { clearInterval(tokenWaitTimer); tokenWaitTimer = null; }
   if (tokenWaitListener && typeof window !== 'undefined') {
