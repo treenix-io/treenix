@@ -16,8 +16,8 @@ import { TypePicker } from '#mods/editor-ui/type-picker';
 import type { NavigateFn } from '#navigate';
 import * as cache from '#tree/cache';
 import { tree } from '#tree/client';
-import { loadWatchedListing, refreshWatchedNode, trackedWatchGet } from '#tree/client-tree-source';
-import { acquireHold, releaseChildrenHold, releaseHold, releaseHolds, releaseUnheld } from '#tree/holds';
+import { acquireResponseHold, loadWatchedListing, refreshWatchedNode, releaseWatchedListings, trackedWatchGet } from '#tree/client-tree-source';
+import { releaseChildrenHold, releaseHold, releaseHolds } from '#tree/holds';
 import { ChevronDown, Eye, EyeOff, LogIn, LogOut, RotateCcw } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { flushSync } from 'react-dom';
@@ -92,6 +92,9 @@ export function EditorSidebar({
   // Mirror of `loaded` updated synchronously inside loadChildren so concurrent
   // calls within one async sequence don't refetch the same path.
   const loadedRef = useRef(loaded);
+  // r4-F2: bumped by the root-effect cleanup sweep — a listing resolving after
+  // the sweep must release its holds instead of re-entering the ledger.
+  const sweepEpoch = useRef(0);
 
   selectedRef.current = selected;
   phaseRef.current = phase;
@@ -101,7 +104,13 @@ export function EditorSidebar({
 
   const loadChildren = useCallback(async (path: string) => {
     if (loadedRef.current.has(path)) return;
+    const epoch = sweepEpoch.current;
     const acquired = await loadWatchedListing(path);
+    if (epoch !== sweepEpoch.current) {
+      releaseChildrenHold(path);
+      releaseHolds(acquired);
+      return;
+    }
     watchedItems.set(path, acquired);
     const next = new Set(loadedRef.current).add(path);
     loadedRef.current = next;
@@ -151,7 +160,9 @@ export function EditorSidebar({
     (async () => {
       const rootNode = await trackedWatchGet(root);
       if (rootNode) {
-        acquireHold(root);
+        // Response-derived acquire (r4-F1): re-registers if a co-holder's last
+        // release rode the wire during the get.
+        acquireResponseHold(root);
         // Fast root switch: cleanup already ran — release right here (C46).
         if (cancelled) { releaseHold(root); return; }
         rootHeld = true;
@@ -165,8 +176,12 @@ export function EditorSidebar({
     return () => {
       cancelled = true;
       if (rootHeld) releaseHold(root);
+      // r4-F2: unmount/root-switch sweeps every live expanded listing —
+      // collapse-only release leaked children+item holds for the tab lifetime.
+      sweepEpoch.current++;
+      releaseWatchedListings(watchedItems);
     };
-  }, [root, loadChildren, ensurePathVisible]);
+  }, [root, loadChildren, ensurePathVisible, watchedItems]);
 
   // Selected change (e.g. browser back/forward, deep link inside same root):
   // merge ancestors of the new selection into `expanded` without disturbing user-expanded nodes.
@@ -236,16 +251,11 @@ export function EditorSidebar({
         // F5: release through the tab-global registry — a child co-held by
         // another consumer (Inspector usePath on the selected node) keeps its
         // server hold; only tab-wide-last releases fire unwatch mutations.
+        // Stray sweep (autoWatch promotions) lives in releaseWatchedListings.
         const acquired = watchedItems.get(path);
         if (acquired) {
           watchedItems.delete(path);
-          // Strays: children born while expanded got server-side autoWatch
-          // promotions nobody counted — sweep only the unheld ones.
-          const strays = cache.getChildren(path).map((n) => n.$path)
-            .filter((p) => p !== path && !acquired.includes(p));
-          releaseChildrenHold(path);
-          releaseHolds(acquired);
-          releaseUnheld(strays);
+          releaseWatchedListings(new Map([[path, acquired]]));
         }
       }
     },

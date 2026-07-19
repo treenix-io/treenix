@@ -15,7 +15,21 @@ import type { NodeData } from '@treenx/core';
 // produce two ESM module instances, two cache singletons, broken reactivity.
 import * as cache from '#tree/cache';
 import { tree as clientTree } from '#tree/client';
-import { acquireChildrenHold, acquireChildrenHoldForRegistration, acquireHold, acquireHolds, releaseChildrenHold, releaseHold } from '#tree/holds';
+import {
+  acquireChildrenHold,
+  acquireChildrenHoldForRegistration,
+  acquireHold,
+  acquireHoldForRegistration,
+  acquireHolds,
+  inflightChildrenUnwatch,
+  inflightUnwatch,
+  isHeld,
+  releaseChildrenHold,
+  releaseChildrenHolds,
+  releaseHold,
+  releaseHolds,
+  releaseUnheld,
+} from '#tree/holds';
 import { applyListingWindow, DIRTY_COALESCE_MS, resourceKey, trackedGet, trackedList } from '#tree/read-track';
 import { ingestNode } from '#tree/rebase';
 // tabTokenInput spreads into every watch-registering input so the server keys
@@ -53,6 +67,57 @@ export async function trackedWatchGet(path: string): Promise<NodeData | null> {
 export async function refreshWatchedNode(path: string): Promise<void> {
   const node = await trackedWatchGet(path);
   if (node) { acquireHold(path); releaseHold(path); }
+}
+
+/** Count a hold whose path arrived IN a registering response (RoutedPage
+ *  resolve target, sidebar root): the registration couldn't ride the r3-F2
+ *  gate — the hold is only counted once the response names/confirms it. If a
+ *  co-holder's last release is still on the wire, it can land server-side
+ *  AFTER the response's registration and delete it; the consumer would keep a
+ *  positive count and never observe again (no event heals it). Detect the
+ *  in-flight unwatch via the gate and re-register through the door once it
+ *  settles, under a transient guard count (r4-F1). */
+export function acquireResponseHold(path: string): void {
+  acquireHold(path);
+  const gate = inflightUnwatch(path);
+  if (!gate) return;
+  void gate.then(async () => {
+    if (!isHeld(path)) return; // every consumer left — that zero-release fired the correct unwatch
+    await acquireHoldForRegistration(path); // guard count + any NEWER in-flight unwatch
+    try {
+      await trackedWatchGet(path);
+    } finally {
+      // Transient: co-held → count survives; abandoned mid-re-get → this
+      // zero-release is issued after the registration settled, so it wins.
+      releaseHold(path);
+    }
+  }).catch((e: unknown) => {
+    console.error('[tree-source] hold re-register after in-flight unwatch failed:', path, e);
+  });
+}
+
+/** Release every live expanded-listing hold set the sidebar accumulated
+ *  (r4-F2): unmount/root-switch must sweep what per-dir collapse would have
+ *  released — the children hold plus the item holds of each dir, batched, and
+ *  the unheld strays (autoWatch promotions of children born while the listing
+ *  was live). Co-held paths survive via the registry counts. Clears the map. */
+export function releaseWatchedListings(listings: Map<string, string[]>): void {
+  if (!listings.size) return;
+  const dirs: string[] = [];
+  const items: string[] = [];
+  const strays: string[] = [];
+  for (const [dir, acquired] of listings) {
+    dirs.push(dir);
+    items.push(...acquired);
+    for (const child of cache.getChildren(dir)) {
+      const p = child.$path;
+      if (p !== dir && !acquired.includes(p)) strays.push(p);
+    }
+  }
+  listings.clear();
+  releaseChildrenHolds(dirs);
+  releaseHolds(items);
+  releaseUnheld(strays);
 }
 
 /** Tracked watch-registering listing (sidebar dirs). Registers the children
@@ -187,23 +252,40 @@ export class ClientTreeSource implements TreeSource {
       }, DIRTY_COALESCE_MS);
     };
 
+    // r4-F1: eager count + gate. Rapid dispose→remount used to issue the
+    // registering get while the prior unwatch rode the wire — the late unwatch
+    // deleted the NEW server hold and the mount's positive local count kept
+    // every later release from healing it. The count is taken NOW (co-consumer
+    // releases can't zero it mid-request; dispose owns the release, including
+    // on fetch failure) and registering fetches defer until the unwatch
+    // settles. Deliberately NOT acquireHoldForRegistration: its unconditional
+    // await would delay beginPathRead a microtask even with no unwatch in
+    // flight, breaking exact-read overlap ordering (inv. 17/18).
+    if (watching) acquireHold(path);
+    let regGate = watching ? inflightUnwatch(path) : undefined;
+    void regGate?.then(() => { regGate = undefined; });
+
     const fetchOnce = () => {
       if (cancelled) return;
       cache.setPathStatus(path, 'loading');
-      void trackedGet(
-        path,
-        () => trpc.get.query({ path, watch: watching, ...(watching ? tabTokenInput : {}) }),
-        { isCancelled: () => cancelled, onOverlap: scheduleOverlapRefetch },
-      ).then((o) => {
-        // A superseded read's failure must not clobber the fresher read's state.
-        if (o.error === undefined || cancelled || !o.current) return;
-        cache.setPathError(path, o.error instanceof Error ? o.error : new Error(String(o.error)));
-        cache.setPathStatus(path, 'error');
-      });
+      const issue = () => {
+        if (cancelled) return;
+        void trackedGet(
+          path,
+          () => trpc.get.query({ path, watch: watching, ...(watching ? tabTokenInput : {}) }),
+          { isCancelled: () => cancelled, onOverlap: scheduleOverlapRefetch },
+        ).then((o) => {
+          // A superseded read's failure must not clobber the fresher read's state.
+          if (o.error === undefined || cancelled || !o.current) return;
+          cache.setPathError(path, o.error instanceof Error ? o.error : new Error(String(o.error)));
+          cache.setPathStatus(path, 'error');
+        });
+      };
+      if (regGate) void regGate.then(issue);
+      else issue();
     };
 
     fetchOnce();
-    if (watching) acquireHold(path);
     // SSE reconnect → re-fetch (preserved=false means generation bumped).
     const unsubReset = cache.subscribeSSEGen(fetchOnce);
 
@@ -251,7 +333,13 @@ export class ClientTreeSource implements TreeSource {
     cache.retainChildSubscriber(path);
 
     const watching = !!(opts?.watch || opts?.watchNew);
+    // r4-F1 (children twin of the mountPath gate): eager count now, registering
+    // window fetches defer until any in-flight unwatchChildren settles; the
+    // conditional gate keeps beginChildrenRead synchronous when nothing is on
+    // the wire (membership overlap ordering, inv. 19).
     if (watching) acquireChildrenHold(path);
+    let regGate = watching ? inflightChildrenUnwatch(path) : undefined;
+    void regGate?.then(() => { regGate = undefined; });
 
     // Coalesced reconverge after an event overlapped an in-flight page
     // (invariant 19): membership isn't rev-ordered, refetch decides.
@@ -273,17 +361,22 @@ export class ClientTreeSource implements TreeSource {
     // nextCursor as its only "more available" signal.
     const fetchWindow = (limit: number, phase: 'initial' | 'refetch') => {
       cache.setChildrenPhase(path, phase);
-      void trackedList(
-        path,
-        opts?.query,
-        (): Promise<WirePage> => trpc.getChildren
-          .query({ path, limit, query: opts?.query, ...(watching ? { watch: opts?.watch, watchNew: opts?.watchNew, ...tabTokenInput } : {}) }),
-        (result) => applyListingWindow(path, result),
-        { isCancelled: () => cancelled, onOverlap: scheduleOverlapRefetch },
-      ).then((o) => {
-        if (o.error === undefined || cancelled || !o.current) return;
-        settleError(o.error);
-      });
+      const issue = () => {
+        if (cancelled) return;
+        void trackedList(
+          path,
+          opts?.query,
+          (): Promise<WirePage> => trpc.getChildren
+            .query({ path, limit, query: opts?.query, ...(watching ? { watch: opts?.watch, watchNew: opts?.watchNew, ...tabTokenInput } : {}) }),
+          (result) => applyListingWindow(path, result),
+          { isCancelled: () => cancelled, onOverlap: scheduleOverlapRefetch },
+        ).then((o) => {
+          if (o.error === undefined || cancelled || !o.current) return;
+          settleError(o.error);
+        });
+      };
+      if (regGate) void regGate.then(issue);
+      else issue();
     };
 
     const initialFetch = () => {

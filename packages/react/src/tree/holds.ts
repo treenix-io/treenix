@@ -75,6 +75,26 @@ export function acquireChildrenHoldForRegistration(path: string): Promise<void> 
   return childrenUnwatchInflight.get(path) ?? Promise.resolve();
 }
 
+// r4-F1: gate visibility for registering sites that must NOT pay an
+// unconditional microtask (source mounts — their synchronous begin*Read is
+// load-bearing for overlap ordering) and for response-derived acquires
+// (resolve target — the path is only known when the response arrives).
+// undefined = no unwatch on the wire, the registration may issue NOW.
+
+export function inflightUnwatch(path: string): Promise<void> | undefined {
+  return exactUnwatchInflight.get(path);
+}
+
+export function inflightChildrenUnwatch(path: string): Promise<void> | undefined {
+  return childrenUnwatchInflight.get(path);
+}
+
+/** True while any consumer counts an exact hold on the path (r4-F1: the
+ *  response-derived re-register lane skips paths every consumer abandoned). */
+export function isHeld(path: string): boolean {
+  return exactHolds.has(path);
+}
+
 export function acquireHolds(paths: string[]): void {
   for (const p of paths) acquire(exactHolds, p);
 }
@@ -93,10 +113,16 @@ export function acquireChildrenHold(path: string): void {
 }
 
 export function releaseChildrenHold(path: string): void {
-  if (!release(childrenHolds, path)) return;
-  const mutation = trpc.unwatchChildren.mutate({ paths: [path], ...tabTokenInput });
-  mutation.catch((e: unknown) => console.error('[holds] unwatchChildren failed:', path, e));
-  trackUnwatch(childrenUnwatchInflight, [path], mutation);
+  releaseChildrenHolds([path]);
+}
+
+/** Batched children twin of releaseHolds (r4-F2: sidebar unmount sweep). */
+export function releaseChildrenHolds(paths: string[]): void {
+  const last = paths.filter((p) => release(childrenHolds, p));
+  if (!last.length) return;
+  const mutation = trpc.unwatchChildren.mutate({ paths: last, ...tabTokenInput });
+  mutation.catch((e: unknown) => console.error('[holds] unwatchChildren failed:', last, e));
+  trackUnwatch(childrenUnwatchInflight, last, mutation);
 }
 
 /** Sweep server-side strays this tab never counted (autoWatch promotions of

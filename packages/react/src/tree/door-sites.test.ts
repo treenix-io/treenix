@@ -78,7 +78,15 @@ const { cancelReadReconverges } = await import('#tree/read-track');
 // EditorSidebar/ActionCards consume these shared one-shot helpers — their
 // component modules pull .tsx-only '#' specifiers node cannot resolve, so the
 // pins land on the helpers themselves (mock-level per the audit).
-const { loadListingOnce, loadWatchedListing, refreshWatchedNode, trackedWatchGet } = await import('./client-tree-source');
+const {
+  acquireResponseHold,
+  createClientTreeSource,
+  loadListingOnce,
+  loadWatchedListing,
+  refreshWatchedNode,
+  releaseWatchedListings,
+  trackedWatchGet,
+} = await import('./client-tree-source');
 const { resolveRouteTracked } = await import('../app/RoutedPage');
 const { watch } = await import('#hooks');
 
@@ -86,6 +94,24 @@ const node = (path: string, rev?: number, v?: string): NodeData =>
   rev === undefined ? { $path: path, $type: 'doc', v } : { $path: path, $type: 'doc', $rev: rev, v };
 
 const flush = () => new Promise<void>((r) => setImmediate(r));
+
+/** Event-driven wait on a single path's cache state. */
+function waitPath(path: string, pred: () => boolean): Promise<void> {
+  return new Promise((res) => {
+    const check = () => { if (pred()) { unsub(); res(); } };
+    const unsub = cache.subscribePath(path, check);
+    check();
+  });
+}
+
+/** Event-driven wait on a parent's children state. */
+function waitChildren(parent: string, pred: () => boolean): Promise<void> {
+  return new Promise((res) => {
+    const check = () => { if (pred()) { unsub(); res(); } };
+    const unsub = cache.subscribeChildren(parent, check);
+    check();
+  });
+}
 
 beforeEach(() => {
   cache.clear();
@@ -340,5 +366,182 @@ describe('holds acquire before the awaited registration (r3-F2)', () => {
     assert.equal(unwatchCalls.length, 0, 'failure release must not strip the co-consumer');
     holds.releaseHold('/f2e');
     assert.deepEqual(unwatchCalls, [{ paths: ['/f2e'], token: 'test-tab' }]);
+  });
+});
+
+describe('mount registrations ride the gate (r4-F1)', () => {
+  it('mountPath: dispose→immediate remount serializes the registering get after the in-flight unwatch; the remount stays live', async () => {
+    const source = createClientTreeSource();
+    getResults.push(node('/m1', 1));
+    const h1 = source.mountPath('/m1');
+    await waitPath('/m1', () => cache.get('/m1')?.$rev === 1);
+    assert.deepEqual(getCalls[0], { path: '/m1', watch: true, token: 'test-tab' });
+
+    // Dispose: the unwatch fires and is held open on the wire.
+    const wire = deferred<void>();
+    unwatchMutate.mock.mockImplementationOnce(async (i: Record<string, unknown>) => {
+      unwatchCalls.push(i);
+      await wire.promise;
+    });
+    h1.dispose();
+    assert.deepEqual(unwatchCalls, [{ paths: ['/m1'], token: 'test-tab' }]);
+
+    // Immediate remount: the registering get must NOT race the unwatch —
+    // landing after it server-side would delete the NEW hold while the local
+    // count stays positive (never observes again).
+    getResults.push(node('/m1', 2));
+    const h2 = source.mountPath('/m1');
+    await flush();
+    assert.equal(getCalls.length, 1, 'registration must wait for the in-flight unwatch');
+
+    wire.resolve();
+    await waitPath('/m1', () => cache.get('/m1')?.$rev === 2);
+    assert.deepEqual(getCalls[1], { path: '/m1', watch: true, token: 'test-tab' },
+      'unwatch settled first, then the re-registration');
+
+    // The mounted consumer still observes events on the re-established hold.
+    let notified = false;
+    const unsub = cache.subscribePath('/m1', () => { notified = true; });
+    cache.put(node('/m1', 3));
+    assert.ok(notified, 'consumer receives a subsequent event');
+    unsub();
+
+    h2.dispose();
+    assert.equal(unwatchCalls.length, 2, 'the remount held exactly one count — released exactly once');
+  });
+
+  it('mountChildren: dispose→immediate remount serializes the registering listing after the in-flight unwatchChildren', async () => {
+    const source = createClientTreeSource();
+    childrenPages.push({ items: [node('/m2/a')], total: 1 });
+    const h1 = source.mountChildren('/m2', { watch: true, watchNew: true });
+    await waitChildren('/m2', () => cache.getChildrenPhase('/m2') === 'ready');
+    assert.equal(getChildrenCalls[0].token, 'test-tab');
+
+    const wire = deferred<void>();
+    unwatchChildrenMutate.mock.mockImplementationOnce(async (i: Record<string, unknown>) => {
+      unwatchChildrenCalls.push(i);
+      await wire.promise;
+    });
+    h1.dispose();
+    assert.deepEqual(unwatchChildrenCalls, [{ paths: ['/m2'], token: 'test-tab' }]);
+
+    childrenPages.push({ items: [node('/m2/a'), node('/m2/b')], total: 2 });
+    const h2 = source.mountChildren('/m2', { watch: true, watchNew: true });
+    await flush();
+    assert.equal(getChildrenCalls.length, 1, 'registering listing must wait for the in-flight unwatchChildren');
+
+    wire.resolve();
+    await waitChildren('/m2', () => getChildrenCalls.length === 2
+      && cache.getChildren('/m2').some((n) => n.$path === '/m2/b'));
+    assert.equal(getChildrenCalls[1].watchNew, true, 'unwatchChildren settled first, then the re-registration');
+
+    h2.dispose();
+    assert.equal(unwatchChildrenCalls.length, 2, 'the remount held exactly one children count');
+  });
+});
+
+describe('response-derived holds re-register over an in-flight unwatch (r4-F1)', () => {
+  it("co-holder's last release during the resolve → the target hold is re-established once the unwatch settles", async () => {
+    // Co-holder (usePath-style) held the target when the resolve was issued…
+    holds.acquireHold('/pg/t');
+    // …and released while it rode the wire: the unwatch may land server-side
+    // AFTER the resolve registered the target — deleting the fresh hold.
+    const wire = deferred<void>();
+    unwatchMutate.mock.mockImplementationOnce(async (i: Record<string, unknown>) => {
+      unwatchCalls.push(i);
+      await wire.promise;
+    });
+    holds.releaseHold('/pg/t');
+    assert.equal(unwatchCalls.length, 1);
+
+    // Response arrives: RoutedPage counts the response-derived target.
+    acquireResponseHold('/pg/t');
+    await flush();
+    assert.equal(getCalls.length, 0, 'the re-register is serialized after the unwatch, never concurrent');
+
+    getResults.push(node('/pg/t', 2));
+    wire.resolve();
+    await flush();
+    await flush();
+    assert.deepEqual(getCalls, [{ path: '/pg/t', watch: true, token: 'test-tab' }],
+      'the acquire detected the in-flight unwatch and re-registered through the door');
+    assert.equal(cache.get('/pg/t')?.$rev, 2, 'the re-get landed through the door');
+    assert.equal(unwatchCalls.length, 1, 'the transient guard count released without stripping the consumer');
+
+    // The consumer (RoutedPage) is still the sole holder — its release fires.
+    holds.releaseHold('/pg/t');
+    assert.deepEqual(unwatchCalls[1], { paths: ['/pg/t'], token: 'test-tab' });
+  });
+
+  it('no in-flight unwatch → the acquire issues no extra request', async () => {
+    acquireResponseHold('/pg/q');
+    await flush();
+    assert.equal(getCalls.length, 0, 'a clean acquire must not re-register (wasted round trip)');
+    holds.releaseHold('/pg/q');
+    assert.deepEqual(unwatchCalls, [{ paths: ['/pg/q'], token: 'test-tab' }]);
+  });
+
+  it('every consumer left while the unwatch was in flight → no re-register (their release IS the truth)', async () => {
+    holds.acquireHold('/pg/x');
+    const wire = deferred<void>();
+    unwatchMutate.mock.mockImplementationOnce(async (i: Record<string, unknown>) => {
+      unwatchCalls.push(i);
+      await wire.promise;
+    });
+    holds.releaseHold('/pg/x');
+
+    acquireResponseHold('/pg/x');
+    holds.releaseHold('/pg/x'); // fast navigation: RoutedPage cancelled → released
+    assert.equal(unwatchCalls.length, 2, 'the abandoning release fired its own unwatch');
+
+    wire.resolve();
+    await flush();
+    assert.equal(getCalls.length, 0, 're-registering an abandoned path would leak a server hold');
+  });
+});
+
+describe('releaseWatchedListings — sidebar sweep on unmount/root switch (r4-F2)', () => {
+  it('releases children + item holds of every live listing, batched; a co-held item survives', async () => {
+    childrenPages.push({ items: [node('/sw/a/x'), node('/sw/a/y')], total: 2 });
+    childrenPages.push({ items: [node('/sw/b/z')], total: 1 });
+    const ledger = new Map<string, string[]>();
+    ledger.set('/sw/a', await loadWatchedListing('/sw/a'));
+    ledger.set('/sw/b', await loadWatchedListing('/sw/b'));
+    holds.acquireHold('/sw/a/x'); // Inspector-style co-hold (usePath)
+
+    releaseWatchedListings(ledger);
+
+    assert.equal(ledger.size, 0, 'the ledger is cleared');
+    assert.deepEqual(unwatchChildrenCalls, [{ paths: ['/sw/a', '/sw/b'], token: 'test-tab' }],
+      'one batched unwatchChildren for all swept dirs');
+    assert.deepEqual(unwatchCalls, [{ paths: ['/sw/a/y', '/sw/b/z'], token: 'test-tab' }],
+      "the sweep must not strip the Inspector's hold on /sw/a/x");
+
+    holds.releaseHold('/sw/a/x');
+    assert.deepEqual(unwatchCalls[1], { paths: ['/sw/a/x'], token: 'test-tab' });
+  });
+
+  it('sweeps unheld strays (autoWatch promotions born while live); held strays survive', async () => {
+    childrenPages.push({ items: [node('/sw2/d/i')], total: 1 });
+    const ledger = new Map([['/sw2/d', await loadWatchedListing('/sw2/d')]]);
+    // SSE-born children the listing never counted; one is held by an Inspector.
+    cache.appendChildren('/sw2/d', [node('/sw2/d/born'), node('/sw2/d/held')]);
+    holds.acquireHold('/sw2/d/held');
+
+    releaseWatchedListings(ledger);
+
+    assert.deepEqual(unwatchChildrenCalls, [{ paths: ['/sw2/d'], token: 'test-tab' }]);
+    assert.deepEqual(unwatchCalls[0], { paths: ['/sw2/d/i'], token: 'test-tab' });
+    assert.deepEqual(unwatchCalls[1], { paths: ['/sw2/d/born'], token: 'test-tab' },
+      'unheld stray swept; the held one survives');
+
+    holds.releaseHold('/sw2/d/held');
+    assert.deepEqual(unwatchCalls[2], { paths: ['/sw2/d/held'], token: 'test-tab' });
+  });
+
+  it('empty ledger is a no-op', () => {
+    releaseWatchedListings(new Map());
+    assert.equal(unwatchCalls.length, 0);
+    assert.equal(unwatchChildrenCalls.length, 0);
   });
 });

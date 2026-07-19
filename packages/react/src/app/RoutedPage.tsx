@@ -5,7 +5,8 @@ import { isRef, type NodeData } from '@treenx/core';
 import { Render, RenderContext } from '#context';
 import { useEffect, useState } from 'react';
 import * as cache from '#tree/cache';
-import { acquireHold, acquireHoldForRegistration, releaseHold, releaseHolds } from '#tree/holds';
+import { acquireResponseHold } from '#tree/client-tree-source';
+import { acquireHoldForRegistration, releaseHold, releaseHolds } from '#tree/holds';
 import { trackedGet } from '#tree/read-track';
 import { ingestNode } from '#tree/rebase';
 import { usePath } from '#hooks';
@@ -52,8 +53,10 @@ export function RoutedPage({ path }: { path: string }) {
     gate.then(() => resolveRouteTracked(routePath)).then((arr) => {
       // F5: the resolve registered server watches — count them tab-wide; the
       // release below fires unwatch only when no co-consumer holds the path.
+      // The target is response-derived (r4-F1): the acquire re-registers if a
+      // co-holder's last release was on the wire during the resolve.
       const target = arr.length > 1 ? arr[1].$path : null;
-      if (target) acquireHold(target);
+      if (target) acquireResponseHold(target);
       // Fast navigation: cleanup ran before resolve settled — the server watch
       // was still registered, release it right here (core-m77/C46). Releasing
       // the eager route count at cleanup instead could fire the unwatch BEFORE
