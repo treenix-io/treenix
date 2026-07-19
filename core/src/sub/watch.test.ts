@@ -1810,6 +1810,76 @@ describe('WatchManager — unbound-token TTL (ns6p.4 slice 2)', () => {
     t.mock.timers.tick(100); // user-grace → removeUser wipes the entry (tombstones die with it)
     assert.deepEqual(removed, ['u1']);
   });
+
+  it('armed TTL defers while a bracketed same-token request reads; releases after its boundary (r3-F3, inv.25)', (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const wm = createWatchManager({ unboundTokenTtlMs: 1000 });
+    const other: NodeEvent[] = [];
+    wm.connect('cOther', 'u1', (e) => other.push(e.event), undefined, 'tOther');
+
+    // Request A registers and completes — its boundary arms the TTL.
+    wm.beginTokenRequest('u1', 'tGhost');
+    wm.watch('u1', ['/doc'], { token: 'tGhost' });
+    wm.armUnboundTtl('u1', 'tGhost');
+
+    t.mock.timers.tick(500);
+    wm.beginTokenRequest('u1', 'tGhost'); // request B begins just before expiry
+    t.mock.timers.tick(500); // the armed deadline elapses MID-B
+
+    wm.notify(setEvent('/doc'));
+    assert.equal(other.length, 1, "B's register-first coverage must survive the armed deadline");
+
+    wm.armUnboundTtl('u1', 'tGhost'); // B's boundary — still no lane
+    t.mock.timers.tick(1000); // the deferred fresh window elapses with nothing in flight
+
+    wm.notify(setEvent('/doc'));
+    assert.equal(other.length, 1, 'released after the deferred window');
+    assert.equal(wm.connect('cG', 'u1', () => {}, undefined, 'tGhost').preserved, false, 'tombstoned');
+  });
+
+  it('tombstone-cap eviction proof survives a live-tab reconnect — evicted never-connected token still fails closed (r3-F4, inv.25)', (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const wm = createWatchManager({ unboundTokenTtlMs: 1000, tokenTombstoneCap: 1, gracePeriodMs: 60_000 });
+    wm.connect('cLive', 'u1', () => {}, undefined, 'tLive');
+    wm.watch('u1', ['/a'], { token: 'g1' }); // never connects → no cursor exists
+    wm.armUnboundTtl('u1', 'g1');
+    wm.watch('u1', ['/b'], { token: 'g2' });
+    wm.armUnboundTtl('u1', 'g2');
+
+    t.mock.timers.tick(1000); // both expire; g2's tombstone evicts g1 over the cap
+
+    // A live-tab bounce consumes missedOffline — the volatile half of the proof.
+    wm.disconnect('cLive');
+    wm.connect('cLive2', 'u1', () => {}, undefined, 'tLive');
+    wm.disconnect('cLive2');
+
+    // g1 connects alone, cursorless: the durable proof must still refuse.
+    const verdict = wm.connect('cG1', 'u1', () => {}, undefined, 'g1');
+    assert.equal(verdict.preserved, false, 'one live reconnect must not launder the eviction');
+  });
+
+  it('cursor-bearing connect after tombstone overflow keeps its epoch/ring proof (r3-F4 — no over-breaking)', (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const wm = createWatchManager({ unboundTokenTtlMs: 1000, tokenTombstoneCap: 1, gracePeriodMs: 60_000 });
+    const live: StampedEvent[] = [];
+    wm.connect('cLive', 'u1', (e) => live.push(e.event), undefined, 'tLive');
+    wm.watch('u1', ['/c'], { token: 'tLive' });
+    wm.watch('u1', ['/a'], { token: 'g1' });
+    wm.armUnboundTtl('u1', 'g1');
+    wm.watch('u1', ['/b'], { token: 'g2' });
+    wm.armUnboundTtl('u1', 'g2');
+
+    t.mock.timers.tick(1000); // overflow: eviction + continuity break (new epoch)
+
+    wm.notify(setEvent('/c')); // stamped under the NEW epoch
+    const head = cursorOf(live[live.length - 1]);
+
+    wm.disconnect('cLive');
+    wm.notify(setEvent('/c')); // lands in the ring while offline
+
+    const verdict = wm.connect('cLive2', 'u1', (e) => live.push(e.event), head, 'tLive');
+    assert.equal(verdict.preserved, true, 'explicit epoch+ring proof stays valid under the durable overflow flag');
+  });
 });
 
 // ── ns6p.4 slice 4: provisional prefix hold (invariant 27) ──

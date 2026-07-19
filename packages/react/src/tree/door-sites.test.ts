@@ -46,6 +46,8 @@ const resolveQuery = mock.fn(async (input: Record<string, unknown>) => {
   if (!r) throw new Error('resolve called with no scripted result');
   return r;
 });
+const unwatchMutate = mock.fn(async (i: Record<string, unknown>) => { unwatchCalls.push(i); });
+const unwatchChildrenMutate = mock.fn(async (i: Record<string, unknown>) => { unwatchChildrenCalls.push(i); });
 
 mock.module('#tree/trpc', {
   namedExports: {
@@ -57,8 +59,8 @@ mock.module('#tree/trpc', {
       set: { mutate: async () => {} },
       remove: { mutate: async () => {} },
       execute: { mutate: async () => undefined },
-      unwatch: { mutate: async (i: Record<string, unknown>) => { unwatchCalls.push(i); } },
-      unwatchChildren: { mutate: async (i: Record<string, unknown>) => { unwatchChildrenCalls.push(i); } },
+      unwatch: { mutate: unwatchMutate },
+      unwatchChildren: { mutate: unwatchChildrenMutate },
       getPerm: { query: async () => 0 },
     },
     getToken: () => null,
@@ -76,8 +78,9 @@ const { cancelReadReconverges } = await import('#tree/read-track');
 // EditorSidebar/ActionCards consume these shared one-shot helpers — their
 // component modules pull .tsx-only '#' specifiers node cannot resolve, so the
 // pins land on the helpers themselves (mock-level per the audit).
-const { loadWatchedListing, refreshWatchedNode, trackedWatchGet } = await import('./client-tree-source');
+const { loadListingOnce, loadWatchedListing, refreshWatchedNode, trackedWatchGet } = await import('./client-tree-source');
 const { resolveRouteTracked } = await import('../app/RoutedPage');
+const { watch } = await import('#hooks');
 
 const node = (path: string, rev?: number, v?: string): NodeData =>
   rev === undefined ? { $path: path, $type: 'doc', v } : { $path: path, $type: 'doc', $rev: rev, v };
@@ -226,5 +229,116 @@ describe('refreshWatchedNode (ActionCards site) — door + transient hold (r2-F1
     await refreshWatchedNode('/act3');
 
     assert.equal(cache.get('/act3')?.$rev, 5, 'raw put would have regressed the node');
+  });
+});
+
+describe('loadListingOnce (MiniTree site) — unwatched door listing (r3-F1b)', () => {
+  it('an old page cannot erase a create applied mid-flight — the door reconverges', async () => {
+    // Co-mounted live listing's authoritative pre-create window.
+    cache.replaceChildren('/mt', [node('/mt/a')]);
+    const d = deferred<WirePage>();
+    childrenPages.push(d.promise, { items: [node('/mt/a'), node('/mt/new')], total: 2 });
+
+    const p = loadListingOnce('/mt');
+    await flush(); // MiniTree page in flight
+
+    // Create event lands (what applyDataEvent does): membership overlap + node.
+    cache.flagChildrenReadOverlap('/mt');
+    cache.put(node('/mt/new'));
+
+    d.resolve({ items: [node('/mt/a')], total: 1 }); // page fetched pre-create
+    await p;
+    assert.ok(!cache.getChildren('/mt').some((n) => n.$path === '/mt/new'),
+      'stale page authoritative for the moment');
+
+    // The raw replaceChildren path erased the create FOREVER; the door heals.
+    await new Promise<void>((res) => {
+      const healed = () => getChildrenCalls.length === 2
+        && cache.getChildren('/mt').some((n) => n.$path === '/mt/new');
+      const unsub = cache.subscribeChildren('/mt', () => { if (healed()) { unsub(); res(); } });
+      if (healed()) { unsub(); res(); }
+    });
+  });
+
+  it('registers nothing: no watch flags, no tab token, no holds', async () => {
+    childrenPages.push({ items: [node('/mp/x')], total: 1 });
+
+    await loadListingOnce('/mp');
+
+    assert.deepEqual(getChildrenCalls[0], { path: '/mp' }, 'unwatched read must not carry live-registration inputs');
+    assert.deepEqual(cache.getChildren('/mp').map((n) => n.$path), ['/mp/x']);
+    assert.equal(cache.getChildrenPhase('/mp'), 'ready', 'full window settle — no stranded phase');
+  });
+});
+
+describe('holds acquire before the awaited registration (r3-F2)', () => {
+  it('watch(): co-consumer release during the registering get sends no unwatch', async () => {
+    holds.acquireHold('/f2w'); // Inspector-style co-consumer
+    const d = deferred<NodeData | null>();
+    getResults.push(d.promise);
+
+    const gen = watch('/f2w');
+    const first = gen.next(); // issues the registering get (eager count taken)
+    await flush();
+
+    holds.releaseHold('/f2w'); // co-consumer leaves mid-flight
+    assert.equal(unwatchCalls.length, 0, 'the eager count must keep the server hold alive');
+
+    d.resolve(node('/f2w', 1));
+    await first;
+    await gen.return(undefined);
+    assert.deepEqual(unwatchCalls, [{ paths: ['/f2w'], token: 'test-tab' }], 'last consumer releases exactly once');
+  });
+
+  it('loadWatchedListing: co-consumer children release during the registering listing sends no unwatchChildren', async () => {
+    holds.acquireChildrenHold('/f2l'); // e.g. a useChildren({watch}) mount
+    const d = deferred<WirePage>();
+    childrenPages.push(d.promise);
+
+    const p = loadWatchedListing('/f2l');
+    await flush();
+
+    holds.releaseChildrenHold('/f2l'); // mount unmounts mid-flight
+    assert.equal(unwatchChildrenCalls.length, 0, 'the eager count must keep the prefix hold alive');
+
+    d.resolve({ items: [], total: 0 });
+    await p;
+    holds.releaseChildrenHold('/f2l'); // listing consumer leaves — now zero
+    assert.deepEqual(unwatchChildrenCalls, [{ paths: ['/f2l'], token: 'test-tab' }]);
+  });
+
+  it('release-to-zero then immediate re-register: the get is issued only after the in-flight unwatch settles', async () => {
+    const wire = deferred<void>();
+    unwatchMutate.mock.mockImplementationOnce(async (i: Record<string, unknown>) => {
+      unwatchCalls.push(i);
+      await wire.promise;
+    });
+    holds.acquireHold('/rz');
+    holds.releaseHold('/rz'); // → zero → unwatch fired, held open on the wire
+    assert.equal(unwatchCalls.length, 1);
+
+    getResults.push(node('/rz', 1));
+    const gen = watch('/rz'); // immediate re-acquire + re-register
+    const first = gen.next();
+    await flush();
+    assert.equal(getCalls.length, 0, 'registration must be serialized after the in-flight unwatch');
+
+    wire.resolve();
+    await first;
+    assert.deepEqual(getCalls[0], { path: '/rz', watch: true, token: 'test-tab' },
+      'unwatch settled first, then the re-registration');
+    await gen.return(undefined);
+  });
+
+  it('registration failure under a co-consumer releases only the eager count — the co-held hold survives', async () => {
+    holds.acquireHold('/f2e'); // co-consumer
+    getQuery.mock.mockImplementationOnce(async () => { throw new Error('FORBIDDEN'); });
+
+    const gen = watch('/f2e');
+    await assert.rejects(() => gen.next(), /FORBIDDEN/);
+
+    assert.equal(unwatchCalls.length, 0, 'failure release must not strip the co-consumer');
+    holds.releaseHold('/f2e');
+    assert.deepEqual(unwatchCalls, [{ paths: ['/f2e'], token: 'test-tab' }]);
   });
 });

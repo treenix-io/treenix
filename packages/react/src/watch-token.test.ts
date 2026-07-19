@@ -83,11 +83,16 @@ describe('universal watch() — server-hold lifecycle (anz4.28)', () => {
     assert.deepEqual(unwatchCalls, [{ paths: ['/w2'], token: 'test-tab' }]);
   });
 
-  it('failed registration releases nothing — no phantom unwatch', async () => {
+  it('failed solo registration releases its eager count — one compensating unwatch (r3-F2 pin update)', async () => {
     getQuery.mock.mockImplementationOnce(async () => { throw new Error('FORBIDDEN'); });
     const gen = watch('/w3');
     await assert.rejects(() => gen.next(), /FORBIDDEN/);
-    assert.equal(unwatchMutate.mock.callCount(), 0);
+    // Pre-r3 this pinned "no phantom unwatch" — valid while the count was
+    // acquired only AFTER a successful get. With the eager acquire (r3-F2)
+    // the failure release MUST flush at zero: a co-consumer release absorbed
+    // during the in-flight window would otherwise leak the server hold for
+    // the tab's lifetime. Solo failure = one idempotent compensating unwatch.
+    assert.deepEqual(unwatchCalls, [{ paths: ['/w3'], token: 'test-tab' }]);
   });
 
   it('initial get ingests through rebase — an older wire image cannot regress a newer cached one (ns6p.4 F2, inv.18)', async () => {

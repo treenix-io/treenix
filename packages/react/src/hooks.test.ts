@@ -4,18 +4,20 @@
 //
 // Run: npm test (tsx --import test/register-dom.mjs --experimental-test-module-mocks)
 
-import { describe, it, beforeEach, mock } from 'node:test';
+import { describe, it, afterEach, beforeEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
+import type { NodeData } from '@treenx/core';
 
 // Mock the trpc singleton before importing hooks — same resolved URL serves
 // '#tree/trpc', './trpc' (remote-tree, schema-loader), so one mock covers all.
 const patchMutate = mock.fn(async (_: { path: string; ops: unknown[] }) => {});
 const setMutate = mock.fn(async (_: { node: Record<string, unknown> }) => {});
 const removeMutate = mock.fn(async (_: { path: string }) => {});
+const getQuery = mock.fn(async (_: { path: string }): Promise<NodeData | null | undefined> => undefined);
 mock.module('#tree/trpc', {
   namedExports: {
     trpc: {
-      get: { query: async () => undefined },
+      get: { query: getQuery },
       getChildren: { query: async () => ({ items: [], total: 0 }) },
       patch: { mutate: patchMutate },
       set: { mutate: setMutate },
@@ -33,8 +35,9 @@ mock.module('#tree/trpc', {
   },
 });
 
-const { addComponent, removeComponent, moveNode } = await import('#hooks');
+const { addComponent, removeComponent, moveNode, set } = await import('#hooks');
 const cache = await import('#tree/cache');
+const { cancelReadReconverges } = await import('#tree/read-track');
 const { tree } = await import('#tree/client');
 const { makeNode } = await import('@treenx/core');
 
@@ -42,8 +45,11 @@ beforeEach(() => {
   patchMutate.mock.resetCalls();
   setMutate.mock.resetCalls();
   removeMutate.mock.resetCalls();
+  getQuery.mock.resetCalls();
   cache.clear();
 });
+
+afterEach(() => cancelReadReconverges());
 
 describe('addComponent / removeComponent — rollback on server reject (C42)', () => {
   it('addComponent rolls the optimistic component back when patch rejects', async () => {
@@ -72,6 +78,48 @@ describe('addComponent / removeComponent — rollback on server reject (C42)', (
 
     const meta = cache.get('/n')!['#meta'] as { v: number };
     assert.equal(meta.v, 1, 'component restored after reject');
+  });
+});
+
+describe('set — split failure domains + door-routed refresh (ns6p.4 r3-F1a)', () => {
+  it('write failure still rolls back the optimistic image', async () => {
+    cache.put({ $path: '/s1', $type: 'doc', v: 'old' });
+    setMutate.mock.mockImplementationOnce(async () => { throw new Error('CONFLICT'); });
+
+    await assert.rejects(() => set({ $path: '/s1', $type: 'doc', v: 'new' }));
+
+    assert.equal((cache.get('/s1') as { v?: string })?.v, 'old', 'write reject rolls back');
+  });
+
+  it('refresh failure after a successful write does NOT roll back — loud, non-rolling', async (t) => {
+    const logged = t.mock.method(console, 'error', () => {});
+    cache.put({ $path: '/s2', $type: 'doc', v: 'old' });
+    getQuery.mock.mockImplementationOnce(async () => { throw new Error('network'); });
+
+    const returned = await set({ $path: '/s2', $type: 'doc', v: 'new' });
+
+    assert.equal((cache.get('/s2') as { v?: string })?.v, 'new',
+      'the commit stands — a refresh-only failure must not restore the pre-write image');
+    assert.equal((returned as { v?: string }).v, 'new');
+    assert.ok(logged.mock.callCount() >= 1, 'refresh failure is loud');
+  });
+
+  it('a remove event landing before the refresh response wins — the door does not resurrect', async () => {
+    cache.put({ $path: '/s3', $type: 'doc', $rev: 1, v: 'old' });
+    let settle!: (n: NodeData) => void;
+    getQuery.mock.mockImplementationOnce((_: { path: string }) => new Promise<NodeData>((res) => { settle = res; }));
+
+    const p = set({ $path: '/s3', $type: 'doc', $rev: 1, v: 'new' });
+    await new Promise<void>((r) => setImmediate(r)); // write acked; refresh in flight
+
+    // Newer remove event (what applyDataEvent's remove branch does).
+    cache.flagPathReadOverlap('/s3');
+    cache.remove('/s3');
+
+    settle({ $path: '/s3', $type: 'doc', $rev: 2, v: 'new' });
+    await p;
+
+    assert.equal(cache.get('/s3'), undefined, 'a raw put would have resurrected the removed node');
   });
 });
 

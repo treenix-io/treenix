@@ -11,6 +11,7 @@ import { DraftTextarea } from '#mods/editor-ui/DraftTextarea';
 import { useSchema } from '#schema-loader';
 import * as cache from '#tree/cache';
 import { tree as clientStore } from '#tree/client';
+import { loadListingOnce } from '#tree/client-tree-source';
 import { register, resolve as resolveHandler } from '@treenx/core';
 import dayjs from 'dayjs';
 import { X } from 'lucide-react';
@@ -876,8 +877,9 @@ export function MiniTree({ onSelect }: { onSelect: (path: string) => void }) {
 
   async function fetchChildren(path: string) {
     if (loaded.has(path)) return;
-    const { items } = await clientStore.getChildren(path);
-    cache.replaceChildren(path, items);
+    // r3-F1b: through the door — a raw replaceChildren of an old page could
+    // erase a create already applied to a co-mounted live listing.
+    await loadListingOnce(path);
     setLoaded((prev) => new Set(prev).add(path));
   }
 

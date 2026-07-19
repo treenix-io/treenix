@@ -15,7 +15,7 @@ import type { NodeData } from '@treenx/core';
 // produce two ESM module instances, two cache singletons, broken reactivity.
 import * as cache from '#tree/cache';
 import { tree as clientTree } from '#tree/client';
-import { acquireChildrenHold, acquireHold, acquireHolds, releaseChildrenHold, releaseHold } from '#tree/holds';
+import { acquireChildrenHold, acquireChildrenHoldForRegistration, acquireHold, acquireHolds, releaseChildrenHold, releaseHold } from '#tree/holds';
 import { applyListingWindow, DIRTY_COALESCE_MS, resourceKey, trackedGet, trackedList } from '#tree/read-track';
 import { ingestNode } from '#tree/rebase';
 // tabTokenInput spreads into every watch-registering input so the server keys
@@ -59,6 +59,12 @@ export async function refreshWatchedNode(path: string): Promise<void> {
  *  hold + one exact hold per loaded item; returns the item paths so collapse
  *  releases exactly what this load acquired. */
 export async function loadWatchedListing(parent: string): Promise<string[]> {
+  // r3-F2: count the children hold BEFORE the registering listing — a
+  // co-consumer's release-to-zero mid-flight would strip the registration
+  // this request creates; the gate serializes the re-registration after an
+  // in-flight unwatchChildren (rapid collapse→expand). Item holds are
+  // response-derived — counted on arrival below.
+  await acquireChildrenHoldForRegistration(parent);
   let loaded: string[] = [];
   const o = await trackedList(
     parent,
@@ -75,15 +81,31 @@ export async function loadWatchedListing(parent: string): Promise<string[]> {
     },
   );
   if (o.error !== undefined) {
+    releaseChildrenHold(parent); // registration failed with the request (r3-F2)
     if (o.current) {
       cache.setChildrenError(parent, o.error instanceof Error ? o.error : new Error(String(o.error)));
       cache.setChildrenPhase(parent, 'error');
     }
     throw o.error;
   }
-  acquireChildrenHold(parent);
   acquireHolds(loaded);
   return loaded;
+}
+
+/** One-shot UNWATCHED listing through the door (r3-F1b, MiniTree): the raw
+ *  clientStore.getChildren + cache.replaceChildren path let an old page erase
+ *  a create already applied to a co-mounted live listing. Generations,
+ *  membership overlap and ingest mapping still apply; no watch registration,
+ *  no holds. Fetches via the client FilterTree so /local children stay
+ *  visible in pickers. */
+export async function loadListingOnce(parent: string): Promise<void> {
+  const o = await trackedList(
+    parent,
+    undefined,
+    () => clientTree.getChildren(parent),
+    (result) => applyListingWindow(parent, result),
+  );
+  if (o.error !== undefined) throw o.error;
 }
 
 export class ClientTreeSource implements TreeSource {

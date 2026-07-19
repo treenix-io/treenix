@@ -5,7 +5,7 @@ import { isRef, type NodeData } from '@treenx/core';
 import { Render, RenderContext } from '#context';
 import { useEffect, useState } from 'react';
 import * as cache from '#tree/cache';
-import { acquireHolds, releaseHolds } from '#tree/holds';
+import { acquireHold, acquireHoldForRegistration, releaseHold, releaseHolds } from '#tree/holds';
 import { trackedGet } from '#tree/read-track';
 import { ingestNode } from '#tree/rebase';
 import { usePath } from '#hooks';
@@ -42,20 +42,38 @@ export function RoutedPage({ path }: { path: string }) {
     let cancelled = false;
     let watched: string[] | null = null;
 
-    resolveRouteTracked(routePath).then((arr) => {
-      const paths = arr.length ? [routePath, ...(arr[1] ? [arr[1].$path] : [])] : null;
+    // r3-F2: count the route hold BEFORE the registering resolve — a
+    // co-consumer's release-to-zero mid-flight would strip the registration
+    // this resolve creates; the gate serializes it after any in-flight
+    // unwatch of the path. The target path is response-derived — counted on
+    // arrival. Every non-success branch below releases the eager count.
+    const gate = acquireHoldForRegistration(routePath);
+
+    gate.then(() => resolveRouteTracked(routePath)).then((arr) => {
       // F5: the resolve registered server watches — count them tab-wide; the
       // release below fires unwatch only when no co-consumer holds the path.
-      if (paths) acquireHolds(paths);
+      const target = arr.length > 1 ? arr[1].$path : null;
+      if (target) acquireHold(target);
       // Fast navigation: cleanup ran before resolve settled — the server watch
-      // was still registered, release it right here (core-m77/C46).
-      if (cancelled) { if (paths) releaseHolds(paths); return; }
-      watched = paths;
-      if (!arr.length) { setNotFound(true); return; }
+      // was still registered, release it right here (core-m77/C46). Releasing
+      // the eager route count at cleanup instead could fire the unwatch BEFORE
+      // the in-flight resolve registers server-side — a leak.
+      if (cancelled) {
+        releaseHold(routePath);
+        if (target) releaseHold(target);
+        return;
+      }
+      if (!arr.length) {
+        releaseHold(routePath); // absent route registered no server watch
+        setNotFound(true);
+        return;
+      }
+      watched = [routePath, ...(target ? [target] : [])];
 
       const route = arr[0];
-      setTargetPath(isRef(route) && arr[1] ? arr[1].$path : route.$path);
+      setTargetPath(isRef(route) && target ? target : route.$path);
     }).catch((e: unknown) => {
+      releaseHold(routePath); // request failure → release the eager count (r3-F2)
       if (cancelled) return;
       console.error('[routed-page] resolve failed:', routePath, e);
       setNotFound(true);

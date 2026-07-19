@@ -8,7 +8,7 @@
 import { compKey, getComponent, getComponentByName, getMeta, type NodeData, normalizeType, resolve } from '@treenx/core';
 import { type Class, getDefaults, type TypeProxy } from '@treenx/core/comp';
 import { deriveURI, parseURI } from '@treenx/core/uri';
-import { acquireHold, releaseHold } from '#tree/holds';
+import { acquireHoldForRegistration, releaseHold } from '#tree/holds';
 import { mergeIntoNode, type OnChange } from '#tree/on-change';
 import { trackedGet } from '#tree/read-track';
 import { confirmFromResponse, hasPending, pushOptimistic, rollback } from '#tree/rebase';
@@ -230,14 +230,29 @@ export async function set(next: NodeData): Promise<NodeData> {
   cache.put(next);
   try {
     await tree.set(next);
-    const fresh = await tree.get(next.$path);
-    if (fresh) cache.put(fresh);
-    return fresh ?? next;
   } catch (err) {
     // F15: rollback optimistic cache on server reject (validation, ACL, OCC)
     if (prev) cache.put(prev); else cache.remove(next.$path);
     throw err;
   }
+  // r3-F1a: post-commit refresh through the door — a newer set/remove event
+  // landing first must win (a raw cache.put overwrote fresher images and
+  // resurrected removes). Server paths refetch via trpc directly: the remote
+  // withCache layer never sees SSE invalidations, so a cached hit could feed
+  // the door a stale image; /local stays on the FilterTree (memory).
+  const o = await trackedGet(
+    next.$path,
+    next.$path.startsWith('/local')
+      ? () => tree.get(next.$path)
+      : () => trpc.get.query({ path: next.$path }),
+  );
+  if (o.error !== undefined) {
+    // Refresh failure is NOT a write failure — the commit stands; rolling back
+    // here would diverge from the server permanently once the commit event
+    // lands. Loud, non-rolling; the event/door lane owns convergence now.
+    console.error('[treenix] set: post-commit refresh failed for', next.$path, o.error);
+  }
+  return o.node ?? cache.get(next.$path) ?? next;
 }
 
 // ── createNode: optimistic create + server persist ──
@@ -505,14 +520,20 @@ export async function* watch<T = unknown>(uri: string): AsyncGenerator<T> {
   }
 
   const { path } = parsed;
+  // Server holds are per (user, tab-token, path) — count in the tab-global
+  // registry (F5) so no co-consumer's release strips this generator's hold.
+  // r3-F2: count BEFORE the registering get — a co-consumer releasing to zero
+  // mid-flight would unwatch the hold this get is creating; the gate issues
+  // the registration strictly after any in-flight unwatch of the path.
+  await acquireHoldForRegistration(path);
   // Through the door (ns6p.4 F1): generation + overlap ordering — the initial
   // get can neither regress a mid-flight event image nor resurrect a node a
   // concurrent remove just evicted.
   const initial = await trackedGet(path, () => trpc.get.query({ path, watch: true, ...tabTokenInput }));
-  if (initial.error !== undefined) throw initial.error;
-  // Server holds are per (user, tab-token, path) — count in the tab-global
-  // registry (F5) so no co-consumer's release strips this generator's hold.
-  acquireHold(path);
+  if (initial.error !== undefined) {
+    releaseHold(path); // registration failed with the request (r3-F2)
+    throw initial.error;
+  }
 
   let resolve: (() => void) | null = null;
   const unsub = cache.subscribePath(path, () => { resolve?.(); resolve = null; });

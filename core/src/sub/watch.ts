@@ -205,6 +205,11 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
     /** Full envelopes (F6-r3): resume replays what was ROUTED under the holds of that moment. */
     ring: { seq: number; envelope: RouteEnvelope }[];
     missedOffline: boolean;
+    /** r3-F4: durable tombstone-cap eviction proof. missedOffline dies at the
+     *  FIRST reconnect of ANY lane, but the evicted token may NEVER have
+     *  connected (no cursor for the epoch re-mint to refuse) — this flag
+     *  refuses cursorless coverage for the entry's lifetime (dies in removeUser). */
+    tombstoneOverflowed: boolean;
   };
   const users = new Map<string, UserEntry>();
   const graceTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -333,6 +338,7 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
         epoch: mintEpoch(),
         ring: [],
         missedOffline: false,
+        tombstoneOverflowed: false,
       };
       users.set(userId, user);
     }
@@ -371,6 +377,50 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
 
   function breakAll() {
     for (const [uid, user] of users) breakUser(uid, user);
+  }
+
+  /** Arm one unbound-token TTL window (inv.25). Fire checks the request
+   *  bracket (r3-F3): a same-token request that began after arming still reads
+   *  under the token's register-first coverage — releasing mid-read would
+   *  strip holds its response relies on. Defer a full fresh window instead;
+   *  the fire after the last boundary (bracket at zero, no lane) releases. */
+  function armTokenTtl(userId: string, token: string) {
+    const user = users.get(userId);
+    if (!user) return;
+    const ttlTimer = setTimeout(() => {
+      const u = users.get(userId);
+      if (!u || u.tokenTtl.get(token) !== ttlTimer) return;
+      u.tokenTtl.delete(token);
+      if ((tokenInflight.get(inflightKey(userId, token)) ?? 0) > 0) {
+        armTokenTtl(userId, token);
+        return;
+      }
+      u.ttlPending.delete(token);
+      releaseTokenHoldings(userId, token);
+      // Fail-closed tombstone: a later connect() must answer preserved:false.
+      u.tokenTombstones.delete(token);
+      u.tokenTombstones.add(token);
+      if (u.tokenTombstones.size > tombstoneCap) {
+        // F7/inv.25: eviction must not FORGET the proof — breaking this
+        // user's continuity re-mints the epoch, so every pre-break cursor
+        // (the evicted token's included) fails closed anyway.
+        const oldest = u.tokenTombstones.values().next().value;
+        if (oldest !== undefined) u.tokenTombstones.delete(oldest);
+        breakUser(userId, u);
+        // F4: the evicted token may NEVER have connected — it has no cursor
+        // for the epoch re-mint to refuse, and the cursorless-alone rule
+        // reads missedOffline. Leave the proof there, or a later lone
+        // connect of the evicted token would judge preserved:true over
+        // registrations that died at expiry.
+        u.missedOffline = true;
+        // r3-F4: durable twin of the line above — missedOffline is consumed
+        // by the next connect of ANY lane; this one dies only with the entry.
+        u.tombstoneOverflowed = true;
+      }
+    }, unboundTokenTtlMs);
+    // Never hold the process open (mock timers / non-Node may lack unref).
+    if (typeof ttlTimer.unref === 'function') ttlTimer.unref();
+    user.tokenTtl.set(token, ttlTimer);
   }
 
   const manager: WatchManager = {
@@ -433,7 +483,11 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
         // events between this tab's initial fetch and this connect went to the
         // other tab and left no trace, so "covered" would silently skip them.
         // Alone + nothing missed is the only honest yes (core-anz4.11 review).
-        covered = !user.missedOffline && user.pushes.size === 1;
+        // r3-F4: tombstoneOverflowed adds the durable eviction proof — an
+        // earlier reconnect consumed missedOffline, but an evicted
+        // never-connected token still judges here; cursor-bearing connects
+        // below keep their explicit epoch/ring proof.
+        covered = !user.missedOffline && !user.tombstoneOverflowed && user.pushes.size === 1;
       } else {
         const cSeq = typeof since === 'number' ? since : since.seq;
         const cEpoch = typeof since === 'number' ? undefined : since.epoch;
@@ -639,33 +693,7 @@ export function createWatchManager(opts?: WatchManagerOpts): WatchManager {
       // request (watch() sets it); anything else is a no-op.
       if (!user || !user.ttlPending.delete(token)) return;
       if (user.tokenLanes.has(token) || user.tokenTtl.has(token)) return;
-      const ttlTimer = setTimeout(() => {
-        const u = users.get(userId);
-        if (!u || u.tokenTtl.get(token) !== ttlTimer) return;
-        u.tokenTtl.delete(token);
-        u.ttlPending.delete(token);
-        releaseTokenHoldings(userId, token);
-        // Fail-closed tombstone: a later connect() must answer preserved:false.
-        u.tokenTombstones.delete(token);
-        u.tokenTombstones.add(token);
-        if (u.tokenTombstones.size > tombstoneCap) {
-          // F7/inv.25: eviction must not FORGET the proof — breaking this
-          // user's continuity re-mints the epoch, so every pre-break cursor
-          // (the evicted token's included) fails closed anyway.
-          const oldest = u.tokenTombstones.values().next().value;
-          if (oldest !== undefined) u.tokenTombstones.delete(oldest);
-          breakUser(userId, u);
-          // F4: the evicted token may NEVER have connected — it has no cursor
-          // for the epoch re-mint to refuse, and the cursorless-alone rule
-          // reads missedOffline. Leave the proof there, or a later lone
-          // connect of the evicted token would judge preserved:true over
-          // registrations that died at expiry.
-          u.missedOffline = true;
-        }
-      }, unboundTokenTtlMs);
-      // Never hold the process open (mock timers / non-Node may lack unref).
-      if (typeof ttlTimer.unref === 'function') ttlTimer.unref();
-      user.tokenTtl.set(token, ttlTimer);
+      armTokenTtl(userId, token);
     },
 
     unwatch(userId, paths, unwatchOpts) {
