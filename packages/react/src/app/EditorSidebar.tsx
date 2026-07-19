@@ -17,7 +17,7 @@ import type { NavigateFn } from '#navigate';
 import * as cache from '#tree/cache';
 import { tree } from '#tree/client';
 import { acquireResponseHold, loadWatchedListing, refreshWatchedNode, releaseWatchedListings, trackedWatchGet } from '#tree/client-tree-source';
-import { releaseChildrenHold, releaseHold, releaseHolds } from '#tree/holds';
+import { releaseHold } from '#tree/holds';
 import { ChevronDown, Eye, EyeOff, LogIn, LogOut, RotateCcw } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { flushSync } from 'react-dom';
@@ -107,8 +107,9 @@ export function EditorSidebar({
     const epoch = sweepEpoch.current;
     const acquired = await loadWatchedListing(path);
     if (epoch !== sweepEpoch.current) {
-      releaseChildrenHold(path);
-      releaseHolds(acquired);
+      // Same shape as collapse: releaseWatchedListings also sweeps autoWatch
+      // strays promoted while the listing was in flight (final-audit F2').
+      releaseWatchedListings(new Map([[path, acquired]]));
       return;
     }
     watchedItems.set(path, acquired);
