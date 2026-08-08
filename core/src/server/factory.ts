@@ -90,6 +90,15 @@ export async function treenix(config: TreenixConfig): Promise<TreenixServer> {
     }
   }
 
+  // 1a. Optional storage backends self-register their mount types (mongo.collection
+  // lives in @treenx/mongo/mount — core stays mongo-agnostic). Missing package =
+  // backend not installed, fine; any other load error must fail the boot loudly.
+  try {
+    await import('@treenx/mongo/mount');
+  } catch (e) {
+    if ((e as { code?: string }).code !== 'ERR_MODULE_NOT_FOUND') throw e;
+  }
+
   // 2. Bootstrap: root node from config (root.json)
   const bootstrap = createMemoryTree();
   await bootstrap.set(rootNode);

@@ -1,0 +1,55 @@
+{
+  "$id": "mongo.collection",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Read-only mount of a FOREIGN Mongo collection (arbitrary schema, not treenix-shaped).",
+  "description": "Docs surface as nodes with $path/$type synthesized in memory — the DB is never written (no _path index, no version marker — that's what separates it from t.mount.mongo).",
+  "properties": {
+    "uri": {
+      "type": "string",
+      "title": "Explicit connection string. Prefer uriEnv — secrets stay out of the tree.",
+      "default": ""
+    },
+    "uriEnv": {
+      "type": "string",
+      "title": "Name of the env var holding the connection string (e.g. 'POLYMAX_MONGO_URI').",
+      "default": ""
+    },
+    "db": {
+      "type": "string",
+      "default": ""
+    },
+    "collection": {
+      "type": "string",
+      "default": ""
+    },
+    "keyField": {
+      "type": "string",
+      "title": "Doc field whose value becomes the node name ('slug' | 'wallet' | '_id').",
+      "default": ""
+    },
+    "type": {
+      "type": "string",
+      "title": "Constant $type stamped on every synthesized node.",
+      "default": ""
+    },
+    "sort": {
+      "type": "object",
+      "title": "Children order, single key only (e.g. { closeTs: -1 }); _id tiebreak appended.",
+      "default": {}
+    },
+    "baseQuery": {
+      "type": "object",
+      "title": "Server-side pre-filter merged into every read."
+    }
+  },
+  "required": [
+    "uri",
+    "uriEnv",
+    "db",
+    "collection",
+    "keyField",
+    "type",
+    "sort"
+  ]
+}

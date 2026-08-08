@@ -28,7 +28,7 @@ const fromStorage = (doc: Record<string, unknown>) => fromStorageKeys(doc) as No
 // Shared MongoClient pool — one client per URI, reused across mounts
 const clientPool = new Map<string, { client: MongoClient; refCount: number; ready: Promise<MongoClient> }>();
 
-function getSharedClient(uri: string): { client: MongoClient; ready: Promise<MongoClient>; release: () => Promise<void> } {
+export function getSharedClient(uri: string): { client: MongoClient; ready: Promise<MongoClient>; release: () => Promise<void> } {
   let entry = clientPool.get(uri);
   if (!entry) {
     const client = new MongoClient(uri);
