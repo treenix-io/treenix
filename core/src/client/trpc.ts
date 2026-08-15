@@ -33,6 +33,71 @@ export function mintWatchToken(): string {
     : Date.now().toString(36) + '.' + Math.random().toString(36).slice(2, 10);
 }
 
+/** EventSource with reconnect backoff. Native ES has no throttle: a dead
+ *  server means a refused connect + console error every ~1s forever (and tRPC's
+ *  sseStreamConsumer never recreates the ES itself, it rides the native retry).
+ *  Network failures (underlying readyState CONNECTING) retry at 1s→30s
+ *  exponential with jitter; HTTP-level rejections (underlying CLOSED: auth,
+ *  bad content-type) stay fatal and propagate to tRPC unchanged. */
+export class ThrottledEventSource {
+  readonly CONNECTING = 0;
+  readonly OPEN = 1;
+  readonly CLOSED = 2;
+  readyState = 0;
+
+  private es: EventSource | null = null;
+  private listeners = new Map<string, Set<(event: Event) => void>>();
+  private attempt = 0;
+  private timer: ReturnType<typeof setTimeout> | undefined;
+
+  constructor(private url: string, private init?: EventSourceInit) {
+    this.connect();
+  }
+
+  private connect() {
+    const es = this.es = new EventSource(this.url, this.init);
+
+    // Internal handlers attach FIRST: wrapper readyState must be settled before
+    // tRPC's own error listener inspects it (CLOSED → fatal, else reconnecting).
+    es.addEventListener('open', () => {
+      this.attempt = 0;
+      this.readyState = this.OPEN;
+    });
+    es.addEventListener('error', () => {
+      if (this.readyState === this.CLOSED) return;
+      if (es.readyState === es.CLOSED) { this.readyState = this.CLOSED; return; }
+
+      es.close(); // cancel the native ~1s retry — backoff owns the cadence
+      this.es = null;
+      this.readyState = this.CONNECTING;
+      const delay = Math.min(1000 * 2 ** this.attempt++, 30_000);
+      this.timer = setTimeout(() => this.connect(), delay * (0.75 + Math.random() * 0.5));
+    });
+
+    for (const [type, set] of this.listeners)
+      for (const cb of set) es.addEventListener(type, cb);
+  }
+
+  addEventListener(type: string, listener: (event: Event) => void) {
+    let set = this.listeners.get(type);
+    if (!set) this.listeners.set(type, set = new Set());
+    set.add(listener);
+    this.es?.addEventListener(type, listener);
+  }
+
+  removeEventListener(type: string, listener: (event: Event) => void) {
+    this.listeners.get(type)?.delete(listener);
+    this.es?.removeEventListener(type, listener);
+  }
+
+  close() {
+    this.readyState = this.CLOSED;
+    clearTimeout(this.timer);
+    this.es?.close();
+    this.es = null;
+  }
+}
+
 export function createTrpcTransport(opts: TrpcTransportOpts): TreenixClient & { trpc: ReturnType<typeof createTRPCClient<TreeRouter>> } {
   const getToken = opts.getToken ?? (() => opts.token ?? null);
   const watchToken = mintWatchToken();
@@ -49,6 +114,7 @@ export function createTrpcTransport(opts: TrpcTransportOpts): TreenixClient & { 
         condition: (op) => op.type === 'subscription',
         true: httpSubscriptionLink({
           url: `${opts.url}/trpc/`,
+          EventSource: ThrottledEventSource,
           eventSourceOptions: { withCredentials: true },
         }),
         false: httpBatchLink({
