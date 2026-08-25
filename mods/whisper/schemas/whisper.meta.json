@@ -23,6 +23,11 @@
     "transcribedAt": {
       "type": "number",
       "default": 0
+    },
+    "error": {
+      "type": "string",
+      "title": "Transcription failure — visible instead of a forever-'...' text",
+      "default": ""
     }
   },
   "required": [
@@ -30,6 +35,7 @@
     "language",
     "duration",
     "segments",
-    "transcribedAt"
+    "transcribedAt",
+    "error"
   ]
 }

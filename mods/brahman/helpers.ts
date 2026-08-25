@@ -4,7 +4,7 @@
 import { getComponent, type NodeData, resolve as resolveCtx } from '@treenx/core';
 import type { Tree } from '@treenx/core/tree';
 import { type Context, InlineKeyboard, Keyboard } from 'grammy';
-import { BrahmanUser, type MenuRow, type MenuType, PageConfig, type TString, type WaitState } from './types';
+import { BotConfig, BrahmanUser, type MenuRow, type MenuType, PageConfig, type TString, type WaitState } from './types';
 
 // ── TString formatting ──
 
@@ -381,4 +381,32 @@ export async function resolveWait(bCtx: BrahmanCtx, gCtx: Context): Promise<bool
   }
 
   return true;
+}
+
+// ── Telegram file download (voice/audio capture) ──
+
+export type TgMedia = { buf: Buffer; mime: string; fileId: string; duration: number };
+
+/** Download voice/audio of the current message via Bot API (token read from the bot node) */
+export async function downloadTgMedia(bCtx: BrahmanCtx): Promise<TgMedia> {
+  const msg = bCtx.ctx.message;
+  const media = msg?.voice ?? msg?.audio;
+  if (!media) throw new Error('brahman: current message has no voice/audio');
+
+  const botNode = await bCtx.tree.get(bCtx.botPath);
+  if (!botNode) throw new Error(`brahman: bot node missing at ${bCtx.botPath}`);
+  const cfg = getComponent(botNode, BotConfig);
+  if (!cfg?.token) throw new Error(`brahman: no token on ${bCtx.botPath}`);
+
+  const file = await bCtx.ctx.api.getFile(media.file_id);
+  if (!file.file_path) throw new Error(`brahman: getFile returned no file_path for ${media.file_id}`);
+  const res = await fetch(`https://api.telegram.org/file/bot${cfg.token}/${file.file_path}`);
+  if (!res.ok) throw new Error(`brahman: file download failed: ${res.status}`);
+
+  return {
+    buf: Buffer.from(await res.arrayBuffer()),
+    mime: media.mime_type ?? 'audio/ogg',
+    fileId: media.file_id,
+    duration: media.duration,
+  };
 }

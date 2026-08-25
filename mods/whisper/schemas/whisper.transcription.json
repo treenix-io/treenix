@@ -1,0 +1,7 @@
+{
+  "$id": "whisper.transcription",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Transcription node — content lives in #audio/#text/#meta components",
+  "properties": {}
+}

@@ -19,12 +19,24 @@
     "url": {
       "type": "string",
       "default": ""
+    },
+    "channels": {
+      "type": "object",
+      "title": "Channel id → target dir for transcription nodes. Route rejects ids not listed here (fail closed)",
+      "default": {}
+    },
+    "keepDays": {
+      "type": "number",
+      "title": "Delete raw audio files older than this many days (0 = keep forever); transcript text stays",
+      "default": 0
     }
   },
   "required": [
     "model",
     "language",
     "audioDir",
-    "url"
+    "url",
+    "channels",
+    "keepDays"
   ]
 }

@@ -282,6 +282,15 @@ register('brahman.bot', 'service', async (node: NodeData, svcCtx: ServiceCtx): P
     }
   });
 
+  // ── Voice/audio: route to /start page — capture-style actions read gCtx.message.voice/audio.
+  // Without this handler such updates passed middleware and were dropped silently.
+  bot.on(['message:voice', 'message:audio'], async (gCtx) => {
+    const bCtx = (gCtx as any)._brahman as BrahmanCtx;
+    if (!bCtx) return;
+    const startPage = await findStartPage();
+    if (startPage) await executePage(startPage.$path, bCtx);
+  });
+
   bot.catch(err => console.error(`[brahman:${config.alias || botPath}]`, err.message ?? err));
 
   // Init bot (getMe) and fill node with bot info

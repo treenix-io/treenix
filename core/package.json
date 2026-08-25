@@ -161,6 +161,11 @@
       "types": "./dist/contexts/service.d.ts",
       "default": "./dist/contexts/service.js"
     },
+    "./contexts/text": {
+      "development": "./src/contexts/text.ts",
+      "types": "./dist/contexts/text.d.ts",
+      "default": "./dist/contexts/text.js"
+    },
     "./server/actions": {
       "development": "./src/server/actions.ts",
       "types": "./dist/server/actions.d.ts",

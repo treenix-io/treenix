@@ -1,0 +1,42 @@
+{
+  "$id": "brahman.message",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Incoming Telegram message persisted as a node (id = tg-<chatId>-<messageId> for idempotency)",
+  "properties": {
+    "tid": {
+      "type": "number",
+      "default": 0
+    },
+    "chatId": {
+      "type": "number",
+      "default": 0
+    },
+    "messageId": {
+      "type": "number",
+      "default": 0
+    },
+    "from": {
+      "type": "string",
+      "title": "Sender display: @username or first name",
+      "default": ""
+    },
+    "text": {
+      "type": "string",
+      "format": "textarea",
+      "default": ""
+    },
+    "createdAt": {
+      "type": "number",
+      "default": 0
+    }
+  },
+  "required": [
+    "tid",
+    "chatId",
+    "messageId",
+    "from",
+    "text",
+    "createdAt"
+  ]
+}

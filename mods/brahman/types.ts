@@ -1,7 +1,8 @@
 // Brahman — Telegram bot constructor
 // Component types for bot config, pages, actions, users, sessions
 
-import { getComponent } from '@treenx/core';
+import { getComponent, type NodeData, register } from '@treenx/core';
+import '@treenx/core/contexts/text';
 import { getCtx, registerType } from '@treenx/core/comp';
 import { OpError } from '@treenx/core/errors';
 import type { BrahmanCtx } from './helpers';
@@ -746,3 +747,25 @@ export class BrahmanSession {
   callbacks: Record<string, string> = {};
 }
 registerType('brahman.session', BrahmanSession);
+
+/** Incoming Telegram message persisted as a node (id = tg-<chatId>-<messageId> for idempotency) */
+export class BrahmanMessage {
+  tid = 0;
+  chatId = 0;
+  messageId = 0;
+  /** Sender display: @username or first name */
+  from = '';
+  /** @format textarea */
+  text = '';
+  createdAt = 0;
+}
+registerType('brahman.message', BrahmanMessage);
+
+// 'text' context = readable content extractor; consumers resolve(type, 'text') without importing this mod.
+// Registry erases types (system boundary) — data is the node.
+register('brahman.message', 'text', (data) => {
+  const node = data as NodeData;
+  const msg = getComponent(node, BrahmanMessage);
+  if (!msg) throw new Error(`brahman.message without message data: ${node.$path}`);
+  return msg.text;
+});

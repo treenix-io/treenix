@@ -5,10 +5,8 @@ registerPrefab('whisper', 'seed', [
     '#config': {
       $type: 'whisper.config', model: 'small', language: 'ru',
       audioDir: './data/audio', url: '/api/notice/audio',
+      channels: { default: '/whisper/default' }, keepDays: 0,
     },
   },
   { $path: '/sys/autostart/whisper', $type: 'ref', $ref: '/whisper' },
-  { $path: 'whisper/inbox', $type: 'whisper.inbox',
-    source: '/whisper/default', target: '/agent' },
-  { $path: '/sys/autostart/whisper-inbox', $type: 'ref', $ref: '/whisper/inbox' },
 ]);
