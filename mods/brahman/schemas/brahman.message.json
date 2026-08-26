@@ -38,5 +38,55 @@
     "from",
     "text",
     "createdAt"
-  ]
+  ],
+  "methods": {
+    "apply-all": {
+      "arguments": []
+    },
+    "apply-entry": {
+      "arguments": [
+        {
+          "name": "data"
+        }
+      ]
+    },
+    "reject-entry": {
+      "arguments": [
+        {
+          "name": "data",
+          "type": "object",
+          "properties": {
+            "entryId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "entryId"
+          ]
+        }
+      ]
+    },
+    "retry-classify": {
+      "arguments": []
+    },
+    "trash": {
+      "arguments": []
+    },
+    "undo-entry": {
+      "arguments": [
+        {
+          "name": "data",
+          "type": "object",
+          "properties": {
+            "entryId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "entryId"
+          ]
+        }
+      ]
+    }
+  }
 }

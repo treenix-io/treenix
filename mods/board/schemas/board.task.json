@@ -56,6 +56,17 @@
     "updatedAt"
   ],
   "methods": {
+    "add-subtask": {
+      "arguments": [
+        {
+          "name": "data"
+        }
+      ]
+    },
+    "approve": {
+      "description": "Approve task — mark as done",
+      "arguments": []
+    },
     "assign": {
       "description": "Assign task to a person or AI, moves to todo",
       "arguments": [
@@ -71,44 +82,6 @@
           "required": [
             "to"
           ]
-        }
-      ]
-    },
-    "start": {
-      "description": "Start working on this task",
-      "arguments": []
-    },
-    "submit": {
-      "description": "Submit task for review",
-      "arguments": [
-        {
-          "name": "data",
-          "type": "object",
-          "properties": {
-            "result": {
-              "type": "string",
-              "title": "Result notes"
-            }
-          }
-        }
-      ]
-    },
-    "approve": {
-      "description": "Approve task — mark as done",
-      "arguments": []
-    },
-    "reject": {
-      "description": "Reject task — send back to doing",
-      "arguments": [
-        {
-          "name": "data",
-          "type": "object",
-          "properties": {
-            "reason": {
-              "type": "string",
-              "title": "Reason for rejection"
-            }
-          }
         }
       ]
     },
@@ -130,9 +103,50 @@
         }
       ]
     },
+    "reject": {
+      "description": "Reject task — send back to doing",
+      "arguments": [
+        {
+          "name": "data",
+          "type": "object",
+          "properties": {
+            "reason": {
+              "type": "string",
+              "title": "Reason for rejection"
+            }
+          }
+        }
+      ]
+    },
     "reopen": {
       "description": "Reopen task — reset to backlog",
       "arguments": []
+    },
+    "schedule": {
+      "arguments": [
+        {
+          "name": "data"
+        }
+      ]
+    },
+    "start": {
+      "description": "Start working on this task",
+      "arguments": []
+    },
+    "submit": {
+      "description": "Submit task for review",
+      "arguments": [
+        {
+          "name": "data",
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string",
+              "title": "Result notes"
+            }
+          }
+        }
+      ]
     }
   }
 }
