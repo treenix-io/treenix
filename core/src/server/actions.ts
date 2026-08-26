@@ -16,7 +16,7 @@ import { randomUUID } from 'node:crypto';
 import { createBoundedCache } from '#util/bounded-cache';
 import { OpError } from '#errors';
 import { commit, mutationLock } from './commit';
-import { readonlyProxy, wrapReadOnlyTree } from './readonly-tree';
+import { readonlyProxy, wrapAbortGuardTree, wrapReadOnlyTree } from './readonly-tree';
 import { assertCanCall, runWithFrame, type KindFrame } from './kind-stack';
 
 // Schema arrives pre-resolved (registry for static types, freshly-read stored schema for
@@ -191,12 +191,14 @@ enablePatches();
 
 // Action timeout: env-configurable, default 10s.
 const ACTION_TIMEOUT = Number(process.env.ACTION_TIMEOUT) || 10_000;
+// @io actions declare an external call (LLM, HTTP) — 10s starves real inference.
+const IO_ACTION_TIMEOUT = Number(process.env.IO_ACTION_TIMEOUT) || 120_000;
 const STREAM_TIMEOUT = Number(process.env.STREAM_TIMEOUT) || 600_000;
 
-function withActionTimeout<T>(label: string, signal: AbortSignal, promise: Promise<T>): Promise<T> {
-  if (signal.aborted) return Promise.reject(new Error(`${label} timed out after ${ACTION_TIMEOUT}ms`));
+function withActionTimeout<T>(label: string, signal: AbortSignal, promise: Promise<T>, ms = ACTION_TIMEOUT): Promise<T> {
+  if (signal.aborted) return Promise.reject(new Error(`${label} timed out after ${ms}ms`));
   return new Promise<T>((resolve, reject) => {
-    const onAbort = () => reject(new Error(`${label} timed out after ${ACTION_TIMEOUT}ms`));
+    const onAbort = () => reject(new Error(`${label} timed out after ${ms}ms`));
     signal.addEventListener('abort', onAbort, { once: true });
     promise.then(resolve, reject).finally(() => {
       signal.removeEventListener('abort', onAbort);
@@ -715,12 +717,12 @@ async function runAction<T = unknown>(
   // this action's rich actor — without the bind, withAcl default-stamps a bare
   // {id} and audit loses action/requestId on every foreign-path write.
   const actorTree = opts?.actor ? withActor(tree, opts.actor) : tree;
-  const treeForCtx = kind === 'read' ? wrapReadOnlyTree(actorTree) : actorTree;
+  const signal = AbortSignal.timeout(io ? IO_ACTION_TIMEOUT : ACTION_TIMEOUT);
+  const treeForCtx = kind === 'read' ? wrapReadOnlyTree(actorTree) : wrapAbortGuardTree(actorTree, signal);
   const nc = serverNodeHandle(treeForCtx);
-  const signal = AbortSignal.timeout(ACTION_TIMEOUT);
   const actx: ActionCtx = { node: nodeForCtx, comp: compForCtx, deps, tree: treeForCtx, signal, nc, userId: opts?.userId, claims: opts?.claims, actor: opts?.actor };
   const result = await runWithFrame(frame, () =>
-    withActionTimeout(`${type}.${action}`, signal, Promise.resolve(handler(actx, data ?? {}))),
+    withActionTimeout(`${type}.${action}`, signal, Promise.resolve(handler(actx, data ?? {})), io ? IO_ACTION_TIMEOUT : ACTION_TIMEOUT),
   );
 
   let patches: Patch[] = [];
