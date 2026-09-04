@@ -2,8 +2,8 @@ import { Button } from '#components/ui/button';
 import { Dialog, DialogContent } from '#components/ui/dialog';
 import { Input } from '#components/ui/input';
 import { Label } from '#components/ui/label';
-import { useState } from 'react';
 import { setToken, trpc } from '#tree/trpc';
+import { useState } from 'react';
 
 function LoginForm({ onLogin }: { onLogin: (userId: string) => void }) {
   const [mode, setMode] = useState<'login' | 'register'>('login');
@@ -115,7 +115,7 @@ export function LoginScreen({ onLogin }: { onLogin: (userId: string) => void }) 
 export function LoginModal({ onLogin, onClose }: { onLogin: (userId: string) => void; onClose?: () => void }) {
   return (
     <Dialog open onOpenChange={(open) => { if (!open && onClose) onClose(); }}>
-      <DialogContent className="p-0 border-none bg-transparent shadow-none max-w-fit" showCloseButton={!!onClose}>
+      <DialogContent className="w-fit max-w-fit p-0 border-none bg-transparent shadow-none" showCloseButton={!!onClose}>
         <LoginForm onLogin={onLogin} />
       </DialogContent>
     </Dialog>
