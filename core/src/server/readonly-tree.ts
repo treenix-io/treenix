@@ -36,6 +36,29 @@ export function wrapReadOnlyTree(tree: Tree): Tree {
   };
 }
 
+/** Abort guard for a mutating action's ctx.tree. When the action timeout fires, the executor
+ *  rejects the caller and the path lock is released — but the handler promise keeps running and
+ *  cannot be killed. A resumed handler would then write against state a later action has already
+ *  replaced, which silently breaks the per-path serialization other code relies on (core-gk8.15).
+ *  Writes are denied from the moment the signal aborts; reads stay open so the handler can unwind. */
+export function wrapAbortGuardTree(tree: Tree, signal: AbortSignal): Tree {
+  const gate = (verb: string) => {
+    if (signal.aborted) {
+      throw new OpError('CONFLICT', `action aborted: ${verb} after timeout is forbidden — the path lock is no longer held`);
+    }
+  };
+  return {
+    ...tree,
+    set: (node, ctx) => { gate('tree.set()'); return tree.set(node, ctx); },
+    patch: (path, ops, ctx) => { gate('tree.patch()'); return tree.patch(path, ops, ctx); },
+    remove: (path, ctx) => { gate('tree.remove()'); return tree.remove(path, ctx); },
+    // Conditional for the same reason as the read facade: an unconditional stub would make
+    // every guarded tree LOOK batch/exec-capable to wrappers that probe for the capability.
+    ...(tree.patchMany ? { patchMany: (a, e, ctx) => { gate('tree.patchMany()'); return tree.patchMany!(a, e, ctx); } } : {}),
+    ...(tree.execute ? { execute: (p, a, d, o, ctx) => { gate('tree.execute()'); return tree.execute!(p, a, d, o, ctx); } } : {}),
+  };
+}
+
 export function readonlyProxy<T extends object>(target: T): T {
   return new Proxy(target, {
     set: (_t, prop) => deny(`assign ${String(prop)}`),
