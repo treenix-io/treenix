@@ -13,6 +13,7 @@ const PUBLIC_DOORS = [
   './comp',
   './comp/validate',
   './contexts/service',
+  './contexts/text',
   './errors',
   './glob',
   './log',
