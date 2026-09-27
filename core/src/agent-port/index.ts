@@ -49,16 +49,20 @@ export class AgentPort {
     });
   }
 
-  /** Revoke agent access — clears key, removes ACL entry */
-  revoke() {
+  /** Revoke agent access — clears key, removes ACL entry, blocks the agent user */
+  async revoke() {
     if (this.status !== 'approved') throw new Error('Can only revoke approved agents');
 
-    const { node } = getCtx();
+    const { tree, node } = getCtx();
     this.approvedKey = undefined;
     this.status = 'revoked';
     this.connected = false;
 
     node.$acl = updatePerm(node.$acl, `u:agent:${node.$path}`, null);
+
+    // Live sessions die with the account (resolveToken checks user status);
+    // they kept `authenticated` read access for their 7-day TTL otherwise.
+    await tree.patch(`/auth/users/agent:${node.$path}`, [['r', 'status', 'blocked']]);
   }
 
   /** Reset to idle — allows re-pairing with a different agent */

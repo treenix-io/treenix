@@ -823,14 +823,43 @@ describe('withAcl', () => {
 
 describe('sessions', () => {
   let ss: Tree;
-  beforeEach(() => {
+  beforeEach(async () => {
     ss = createMemoryTree();
+    for (const id of ['alice', 'bob']) await ss.set(createNode(`/auth/users/${id}`, 'user', { status: 'active' }));
   });
 
   it('create and resolve', async () => {
     const token = await createSession(ss, 'alice');
     const session = await resolveToken(ss, token);
     assert.equal(session?.userId, 'alice');
+  });
+
+  // A session is only as alive as its account.
+  it('a blocked, pending or deleted account kills its live sessions', async () => {
+    const token = await createSession(ss, 'alice');
+    for (const status of ['blocked', 'pending']) {
+      await ss.patch('/auth/users/alice', [['r', 'status', status]]);
+      assert.equal(await resolveToken(ss, token), null, status);
+    }
+    await ss.patch('/auth/users/alice', [['r', 'status', 'active']]);
+    assert.equal((await resolveToken(ss, token))?.userId, 'alice', 'reactivation restores it');
+    await ss.remove('/auth/users/alice');
+    assert.equal(await resolveToken(ss, token), null, 'deleted');
+  });
+
+  it('the owner can neither read nor rewrite their password hash', async () => {
+    register('credentials', 'acl', () => [{ g: 'system', p: R | W }, { g: 'admins', p: R | W }]);
+    await ss.set({
+      ...createNode('/auth/users/carol', 'user', { status: 'active' }, { credentials: { $type: 'credentials', hash: 'h' } }),
+      $owner: 'carol',
+      $acl: [{ g: 'owner', p: R | W }],
+    });
+    const carol = withAcl(ss, 'carol', ['u:carol', 'authenticated']);
+    assert.equal((await carol.get('/auth/users/carol'))?.['#credentials'], undefined);
+    await assert.rejects(
+      () => carol.patch('/auth/users/carol', [['r', '#credentials', { $type: 'credentials', hash: 'mine' }]]),
+      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+    );
   });
 
   it('default session and cookie last several days', async () => {

@@ -96,6 +96,12 @@ export async function resolveToken(tree: Tree, token: string): Promise<Session |
     await tree.remove(sessionPath(token));
     return null;
   }
+  // A session is only as alive as its account: a deleted, blocked or pending
+  // user (or a revoked agent) must lose access at once, not at token expiry.
+  // Absent status = legacy agent user nodes, created without one.
+  const user = await tree.get(`/auth/users/${node.userId}`);
+  if (!user || (user.status !== undefined && user.status !== 'active')) return null;
+
   // Mods write custom session metadata (taskPath, runPath, ...) as plain
   // fields; consumers read them via `session.<field>`.
   const session: Session = { userId: node.userId };

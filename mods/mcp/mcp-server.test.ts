@@ -1224,6 +1224,7 @@ describe('resolveMcpAuth', { concurrency: 1 }, () => {
   it('valid token → ok with auth.kind=token', async () => {
     const store = createMemoryTree();
     await store.set({ ...createNode('/', 'root'), $acl: [{ g: 'admins', p: R | W | S }] });
+    await store.set(createNode('/auth/users/alice', 'user', { status: 'active' }));
     const token = await createSession(store, 'alice');
     const r = await resolveMcpAuth(store, token, '127.0.0.1', '127.0.0.1');
     assert.ok(r.ok);
@@ -1307,9 +1308,10 @@ describe('revalidateSessionAuth', { concurrency: 1 }, () => {
   it('token-bound: matching token + still resolvable → ok', async () => {
     const store = createMemoryTree();
     await store.set({ ...createNode('/', 'root'), $acl: [{ g: 'admins', p: R | W | S }] });
+    await store.set(createNode('/auth/users/alice', 'user', { status: 'active' }));
     const token = await createSession(store, 'alice');
     // Match what buildClaims would yield for alice (session has no explicit claims):
-    //   ['u:alice', 'authenticated']  (no extra groups since /auth/users/alice doesn't exist)
+    //   ['u:alice', 'authenticated']  (her user node carries no groups)
     const cached: SessionAuth = { kind: 'token', userId: 'alice', token, claims: ['u:alice', 'authenticated'] };
     const r = await revalidateSessionAuth(store, cached, token, '127.0.0.1', '127.0.0.1');
     assert.ok(r.ok);
@@ -1485,6 +1487,7 @@ describe('mcp http server integration', { concurrency: 1 }, () => {
     process.env.NODE_ENV = 'production';
     const store = createMemoryTree();
     await store.set({ ...createNode('/', 'root'), $acl: [{ g: 'admins', p: R | W | S }] });
+    await store.set(createNode('/auth/users/alice', 'user', { status: 'active' }));
     const token = await createSession(store, 'alice', { claims: ['u:alice', 'admins'] });
     const srv = await listen(store);
     try {
@@ -1568,6 +1571,7 @@ describe('mcp http server integration', { concurrency: 1 }, () => {
     process.env.NODE_ENV = 'production';
     const store = createMemoryTree();
     await store.set({ ...createNode('/', 'root'), $acl: [{ g: 'admins', p: R | W | S }] });
+    for (const id of ['alice', 'bob']) await store.set(createNode(`/auth/users/${id}`, 'user', { status: 'active' }));
     const token1 = await createSession(store, 'alice', { claims: ['u:alice', 'admins'] });
     const token2 = await createSession(store, 'bob', { claims: ['u:bob', 'admins'] });
     const srv = await listen(store);

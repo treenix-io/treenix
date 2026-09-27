@@ -6,6 +6,12 @@ import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 import { AGENT_SESSION_TTL, hashAgentKey, timingSafeCompare } from './agent';
 import { agentConnect, agentInitPair } from '#agent-port/ops';
+import { AgentPort } from '#agent-port/index';
+import { registerType } from '#comp';
+import { loadSchemasFromDir } from '#schema/load';
+import { withExecute } from '#server/actions';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { withAcl } from './acl-tree';
 import { buildClaims } from './claims';
 import { createSession, resolveToken } from './sessions';
@@ -64,6 +70,13 @@ describe('timingSafeCompare', () => {
 });
 
 describe('agent session', () => {
+  // A session resolves only while its account exists (legacy agent user nodes
+  // carry no status).
+  beforeEach(async () => {
+    await tree.set(createNode('/auth/users/agent:/agents/bot', 'user'));
+    await tree.set(createNode('/auth/users/alice', 'user', { status: 'active' }));
+  });
+
   it('createSession with custom TTL', async () => {
     const token = await createSession(tree, 'agent:/agents/bot', { ttlMs: AGENT_SESSION_TTL });
     assert.ok(token);
@@ -291,6 +304,20 @@ describe('agent TOFU flow', () => {
     assert.equal((revoked as any).status, 'revoked');
     assert.equal((revoked as any).approvedKey, undefined);
     assert.ok(!revoked!.$acl?.some(e => e.g === `u:${agentUserId}`));
+  });
+
+  it('the revoke action kills the agent\'s live sessions', async () => {
+    registerType('t.agent.port', AgentPort);
+    loadSchemasFromDir(join(dirname(fileURLToPath(import.meta.url)), '../agent-port/schemas'));
+    const agentUserId = `agent:${PORT_PATH}`;
+    await tree.set({ ...(await tree.get(PORT_PATH))!, status: 'approved', approvedKey: hashAgentKey(AGENT_KEY) });
+    await tree.set(createNode(`/auth/users/${agentUserId}`, 'user'));
+    const r = await agentConnect(tree, PORT_PATH, AGENT_KEY, '1.2.3.4');
+    if (r.status !== 'approved') throw new Error(`expected approved, got ${r.status}`);
+    assert.ok(await resolveToken(tree, r.token));
+
+    await withExecute(tree).execute(PORT_PATH, 'revoke');
+    assert.equal(await resolveToken(tree, r.token), null);
   });
 
   it('R4-AUTH-1: agentConnect REJECTS idle ports — no unauth self-claim', async () => {
