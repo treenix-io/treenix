@@ -181,7 +181,7 @@ export type AclChildrenOpts = ChildrenOpts & { plan?: ResolvedReadPlan };
 export type PlanChildrenOpts = Pick<ChildrenOpts, 'query' | 'depth'>;
 
 export type AclStore = Tree & {
-  /** Cached after get/getChildren — O(1) for already-resolved paths */
+  /** Effective permission on `path` (ancestor walk memoized for ≤1s). */
   getPerm(path: string): Promise<number>;
   /** Frozen-plan pre-step (ns6p.4 §3.2.2): pure config read, no ACL gate —
    *  the plan never leaves the server, and the read executing it carries the
@@ -194,12 +194,9 @@ export type AclStore = Tree & {
 const PUBLIC_LIMIT_MAX = 200;
 const PUBLIC_LIMIT_DEFAULT = 100;
 
-export function withAcl(rawStore: Tree, userId: string | null, claims: string[]): AclStore {
-  const cache = new Map<string, number>();
-  // stateCache: accumulated ACL state per tree level — avoids re-walking shared ancestors
-  // within a single request. nodeCache is handled by withCache in the tree pipeline.
-  const stateCache = new Map<string, AclState>();
+const ACL_MEMO_MS = 1000;
 
+export function withAcl(rawStore: Tree, userId: string | null, claims: string[]): AclStore {
   // Actor stamping (core-3j54): this wrap is where principal identity binds, so
   // every mutation forwarded below carries WHO — direct verbs (tRPC/TWP set,
   // patch, rm, setComponent, deployPrefab) were anonymous in the audit journal
@@ -219,8 +216,22 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
     return { ...c, actor: { id: userId, ...(opId ? { requestId: opId } : {}) } };
   }
 
+  // Ancestor-walk memo with an epoch reset: several wrappers live for the
+  // process (systemTree: every log line, every session resolve) or a whole MCP
+  // session. A lifetime memo served revoked grants forever and grew with every
+  // path touched; no memo re-reads the ancestor chain from storage per call.
+  // A revocation lands within ACL_MEMO_MS; memory holds one window of paths.
+  let memoEpoch = 0;
+  let permMemo = new Map<string, number>();
+  let stateMemo = new Map<string, AclState>();
   async function getPerm(path: string): Promise<number> {
-    return resolvePermission(rawStore, path, userId, claims, cache, undefined, stateCache);
+    const now = Date.now();
+    if (now - memoEpoch > ACL_MEMO_MS) {
+      memoEpoch = now;
+      permMemo = new Map();
+      stateMemo = new Map();
+    }
+    return resolvePermission(rawStore, path, userId, claims, permMemo, undefined, stateMemo);
   }
 
   // Receipts cross this trust boundary too (core-ns6p.2): action handlers can

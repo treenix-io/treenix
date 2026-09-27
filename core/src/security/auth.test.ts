@@ -3,7 +3,7 @@ import { clearRegistry } from '#testing';
 import { createMemoryTree, isSetEntry, type PatchManyEntry, type Tree } from '#tree';
 import { DEFAULT_BUDGET } from '#tree/read-runtime';
 import assert from 'node:assert/strict';
-import { beforeEach, describe, it } from 'node:test';
+import { afterEach, beforeEach, describe, it, mock } from 'node:test';
 import { ancestorPaths, componentPerm, resolvePermission, stripComponents, typeAclRule } from './acl';
 import { withAcl } from './acl-tree';
 import { assertNotSystem, buildClaims, SYSTEM_CLAIM } from './claims';
@@ -427,6 +427,28 @@ describe('mount authoring (F4)', () => {
     assert.equal(typeAclRule('dir'), undefined);
     assert.ok(typeAclRule('test.mount.disk'));
     assert.equal(typeAclRule('test.mount.view'), undefined);
+  });
+});
+
+// Long-lived wrappers (systemTree, an MCP session) must see revocations: the
+// ancestor memo resets every second instead of living as long as the wrapper.
+describe('withAcl revocation', () => {
+  afterEach(() => mock.timers.reset());
+
+  it('a revoked ancestor grant reaches a long-lived wrapper within the memo window', async () => {
+    mock.timers.enable({ apis: ['Date'], now: 1_000_000 });
+    await tree.set({ ...createNode('/proj', 'dir'), $acl: [{ g: 'agents', p: R | W }] });
+    await tree.set(createNode('/proj/a', 'doc'));
+    await tree.set(createNode('/proj/b', 'doc'));
+    const agent = withAcl(tree, 'ag', ['u:ag', 'agents']);
+    assert.ok(await agent.get('/proj/a'));
+
+    await tree.patch('/proj', [['r', '$acl', [{ g: 'agents', p: 0 }]]]);
+    mock.timers.tick(1001);
+    const forbidden = (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN';
+    await assert.rejects(() => agent.get('/proj/a'), forbidden);
+    await assert.rejects(() => agent.get('/proj/b'), forbidden);
+    await assert.rejects(() => agent.set(createNode('/proj/b', 'doc')), forbidden);
   });
 });
 
