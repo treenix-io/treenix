@@ -1,11 +1,12 @@
 import { createNode } from '#core';
 import { OpError } from '#errors';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 import { createFsTree } from './fs';
+import { assertPathSafe } from './path-safety';
 import { mapSiftQuery } from './query';
 
 describe('FsStore', () => {
@@ -23,6 +24,22 @@ describe('FsStore', () => {
   function exists(path: string) {
     return stat(join(dir, path)).then(() => true, () => false);
   }
+
+  it('assertPathSafe judges a missing path by its nearest existing ancestor', async () => {
+    dir = await mkdtemp(join(tmpdir(), 'treenix-fs-test-'));
+    const root = await realpath(dir); // adapters realpath their root
+    const outside = await mkdtemp(join(tmpdir(), 'treenix-outside-'));
+    try {
+      await symlink(outside, join(root, 'link'));
+      await assert.rejects(
+        () => assertPathSafe(root, join(root, 'link', 'newdir', 'file.txt')),
+        (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+      );
+      await assertPathSafe(root, join(root, 'fresh', 'deeper', 'file.txt'));
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
 
   // '<path>/$.json' is the dir-form file: a '$' segment aliased it — /a/$
   // overwrote /a, /a/$/c moved /a's file (and its $acl) away.

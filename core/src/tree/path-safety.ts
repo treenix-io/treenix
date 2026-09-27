@@ -7,27 +7,25 @@ import { realpath } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 
 /** Verify `file` (resolved absolute) is inside `rootDir`, and that symlinks
- *  along the path don't escape root. ENOENT for the file itself is allowed
- *  — checks parent dir instead so writes to not-yet-existing paths are
- *  still gated. */
+ *  along the path don't escape root. A not-yet-existing path is judged by its
+ *  nearest EXISTING ancestor: checking only the parent let a symlinked dir two
+ *  levels up pass when both the file and its parent were missing — mkdir -p
+ *  and the write then landed outside the root. */
 export async function assertPathSafe(rootDir: string, file: string): Promise<void> {
-  if (!isInsideRoot(rootDir, resolve(file))) {
+  const target = resolve(file);
+  if (!isInsideRoot(rootDir, target)) {
     throw new OpError('FORBIDDEN', 'Path traversal blocked');
   }
-  try {
-    const real = await realpath(file);
-    if (!isInsideRoot(rootDir, real)) {
-      throw new OpError('FORBIDDEN', 'Path escaped root via symlink');
-    }
-  } catch (e: any) {
-    if (e.code !== 'ENOENT') throw e;
+  for (let p = target; ; p = dirname(p)) {
+    let real: string;
     try {
-      const parentReal = await realpath(dirname(file));
-      if (!isInsideRoot(rootDir, parentReal)) {
-        throw new OpError('FORBIDDEN', 'Path escaped root via symlink');
-      }
-    } catch (e2: any) {
-      if (e2.code !== 'ENOENT') throw e2;
+      real = await realpath(p);
+    } catch (e) {
+      const missing = typeof e === 'object' && e !== null && 'code' in e && e.code === 'ENOENT';
+      if (missing && p !== dirname(p)) continue;
+      throw e;
     }
+    if (!isInsideRoot(rootDir, real)) throw new OpError('FORBIDDEN', 'Path escaped root via symlink');
+    return;
   }
 }
