@@ -25,15 +25,16 @@ export async function evalExpr(expr: string, vars: Record<string, unknown> = {})
   const runtime = QuickJS.newRuntime();
   runtime.setMemoryLimit(EVAL_MEMORY_BYTES);
   runtime.setMaxStackSize(EVAL_STACK_BYTES);
-  runtime.setInterruptHandler(shouldInterruptAfterDeadline(Date.now() + EVAL_TIMEOUT_MS));
   const vm = runtime.newContext();
   try {
     for (const [k, v] of Object.entries(vars)) {
-      let json: string;
-      try { json = JSON.stringify(v ?? null); } catch { json = 'null'; }
-      const handle = vm.evalCode(`(${json})`);
+      // Host data only: a non-serializable var is a caller bug — fail loud.
+      const handle = vm.evalCode(`(${JSON.stringify(v ?? null)})`);
       if ('value' in handle) { vm.setProp(vm.global, k, handle.value); handle.value.dispose(); }
     }
+    // Deadline covers the expression only: armed before context creation and
+    // var injection, the 50ms budget was eaten by setup under CPU load.
+    runtime.setInterruptHandler(shouldInterruptAfterDeadline(Date.now() + EVAL_TIMEOUT_MS));
     // Wrap as IIFE so the expression itself can use commas, sequence ops, etc.
     const wrapped = `(function() { return (${expr}) })()`;
     const result = vm.evalCode(wrapped);
