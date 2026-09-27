@@ -4,7 +4,7 @@
 
 import { A, isCompKey, isComponent, type NodeData, R } from '#core';
 import type { PatchOp, Tree } from '#tree';
-import { componentPerm, resolvePermission, stripComponents } from '#security/acl';
+import { componentPerm, projectNode, resolvePermission } from '#security/acl';
 import { buildClaims } from '#security/claims';
 import type { RouteEnvelope } from './watch';
 import type { WireEvent } from './index';
@@ -157,8 +157,7 @@ async function filterEvent(
     // Vanished mid-emit (race with remove): payload undeliverable, but the
     // routed drop must still signal (inv.16) — the refetch sees the node gone.
     if (!stored) { invalidateFallback(envelope, push); return; }
-    const stripped = stripComponents(stored, userId, claims);
-    const { $path, ...body } = stripped;
+    const { $path, ...body } = projectNode(stored, perm, userId, claims);
     push({ ...event, node: body });
   } else if (event.type === 'patch' && event.patches.length > 0) {
     // Fail closed if stored node disappeared mid-emit — never push raw writer-supplied patches without filtering.

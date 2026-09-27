@@ -238,6 +238,21 @@ describe('F10 — set event uses stored node for ACL, not event payload', () => 
     assert.equal(evt.node['#secret'], undefined, 'secret stripped — bob is not real owner of stored node');
   });
 
+  it('set event hides $acl/$owner from a reader without A (same projection as get)', async () => {
+    const tree = createMemoryTree();
+    await tree.set({ $path: '/doc', $type: 't', $owner: 'alice', $acl: [{ g: 'authenticated', p: R }, { g: 'hr', p: R }] });
+
+    const events: WireEvent[] = [];
+    const filtered = createFilteredPush(tree, 'bob', ['u:bob', 'authenticated'], (e) => { events.push(e); });
+    filtered(env({ type: 'set', path: '/doc', node: { $type: 't' } }));
+    await new Promise(r => setImmediate(r));
+
+    const evt = events[0];
+    if (evt?.type !== 'set') throw new Error(`expected set event, got ${evt?.type}`);
+    assert.equal(evt.node.$acl, undefined);
+    assert.equal(evt.node.$owner, undefined);
+  });
+
   it('set event whose stored node is gone (race with remove) → payload dropped, invalidate signals the holder', async () => {
     // ns6p.4 invariant 16: the payload stays dropped (never push writer-supplied
     // body unverified), but the routed drop must SIGNAL — the exact holder

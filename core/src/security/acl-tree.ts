@@ -7,7 +7,7 @@ import { OpError } from '#errors';
 import { asTreeSource, assertSafePatchPath, type ChildrenOpts, type CommitChange, type CommitReceipt, isSetEntry, type Page, type PatchManyEntry, type PatchOp, type Tree } from '#tree';
 import { executeList } from '#tree/read-runtime';
 import { type ResolvedReadPlan, resolveReadPlan } from '#mount/resolve-plan';
-import { type AclState, componentPerm, resolvePermission, stripComponents } from './acl';
+import { type AclState, componentPerm, projectNode, resolvePermission } from './acl';
 import { type Actor, assertSourceReadable, createProjector } from './projector';
 
 // ── Patch op rules ──
@@ -214,13 +214,7 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
   // member the caller cannot READ opaques the whole receipt (fail closed:
   // W-without-R commits but sees no images — parity with reads throwing).
   function projectImage(node: NodeData | null, perm: number): NodeData | null {
-    if (!node) return null;
-    const out = stripComponents(node, userId, claims);
-    if (!(perm & A)) {
-      delete out.$acl;
-      delete out.$owner;
-    }
-    return out;
+    return node ? projectNode(node, perm, userId, claims) : null;
   }
 
   async function projectReceipt(receipt: CommitReceipt): Promise<CommitReceipt> {
@@ -260,13 +254,7 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
       const perm = await getPerm(path);
       if (!(perm & R)) throw new OpError('FORBIDDEN', `Access denied: ${path}`);
       const node = await rawStore.get(path, ctx);
-      if (!node) return undefined;
-      const out = stripComponents(node, userId, claims);
-      if (!(perm & A)) {
-        delete out.$acl;
-        delete out.$owner;
-      }
-      return out;
+      return node ? projectNode(node, perm, userId, claims) : undefined;
     },
 
     async getChildren(path: string, opts?: AclChildrenOpts, ctx?: unknown) {

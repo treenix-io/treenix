@@ -7,12 +7,12 @@
 // Mirrors withAcl.get's stripping logic but takes an already-fetched node so
 // callers (scanChildren loops) don't pay a second tree.get round-trip.
 
-import { A, R, type NodeData } from '#core';
+import { R, type NodeData } from '#core';
 import { OpError } from '#errors';
 import type { MembershipProjector } from '#sub';
 import type { Tree } from '#tree';
 import type { Projector } from '#tree/read-runtime';
-import { resolvePermission, stripComponents } from './acl';
+import { projectNode, resolvePermission } from './acl';
 import { buildClaims } from './claims';
 
 export type Actor = {
@@ -28,13 +28,7 @@ export function createProjector(tree: Tree, actor: Actor): Projector {
   const cache = new Map<string, number>();
   return async (node: NodeData): Promise<NodeData | null> => {
     const perm = await resolvePermission(tree, node.$path, actor.userId, actor.claims, cache);
-    if (!(perm & R)) return null;
-    const out = stripComponents(node, actor.userId, actor.claims);
-    if (!(perm & A)) {
-      delete out.$acl;
-      delete out.$owner;
-    }
-    return out;
+    return perm & R ? projectNode(node, perm, actor.userId, actor.claims) : null;
   };
 }
 

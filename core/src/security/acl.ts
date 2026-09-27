@@ -208,6 +208,19 @@ export function componentPerm(
   return effective;
 }
 
+/** The node as an actor holding `perm` on its path may see it: components they
+ *  cannot read stripped, $acl/$owner only with A. THE one projection for reads,
+ *  receipts, list scans and pushed events — a copy that skipped the A gate
+ *  leaked owners and group names on the event lane. */
+export function projectNode(node: NodeData, perm: number, userId: string | null, claims: string[]): NodeData {
+  const out = stripComponents(node, userId, claims);
+  if (!(perm & A)) {
+    delete out.$acl;
+    delete out.$owner;
+  }
+  return out;
+}
+
 export function stripComponents(node: NodeData, userId: string | null, claims: string[]): NodeData {
   const out: NodeData = { $path: node.$path, $type: node.$type };
   if (node.$acl) out.$acl = node.$acl;
