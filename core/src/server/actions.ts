@@ -801,7 +801,10 @@ export async function* executeStream(
   const treeForCtx = kind === 'read' ? wrapReadOnlyTree(actorTree) : actorTree;
   const nc = serverNodeHandle(treeForCtx);
   for (const key of Object.keys(deps)) deps[key] = readonlyDep(deps[key]);
-  const actx: ActionCtx = { node: readonlyProxy(node), comp: comp && readonlyProxy(comp), deps, tree: treeForCtx, signal: signal ?? AbortSignal.timeout(STREAM_TIMEOUT), nc, userId: opts?.userId, claims: opts?.claims, actor: opts?.actor };
+  // The cap applies WITH a caller signal too: the wire always passes its
+  // cancel signal, so `signal ?? timeout` let a stuck generator run forever.
+  const timeout = AbortSignal.timeout(STREAM_TIMEOUT);
+  const actx: ActionCtx = { node: readonlyProxy(node), comp: comp && readonlyProxy(comp), deps, tree: treeForCtx, signal: signal ? AbortSignal.any([signal, timeout]) : timeout, nc, userId: opts?.userId, claims: opts?.claims, actor: opts?.actor };
 
   const result = await runWithFrame(frame, async () => handler(actx, data ?? {}));
   if (!isAsyncIterable(result))

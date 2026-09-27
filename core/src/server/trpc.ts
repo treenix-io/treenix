@@ -66,6 +66,8 @@ export type TreeRouterOpts = {
   exec?: WireDeps['exec'];
 };
 
+const MAX_TIMER_MS = 2 ** 31 - 1;
+
 export const SSE_PING_INTERVAL_MS = 15_000;
 export const SSE_RECONNECT_AFTER_INACTIVITY_MS = 60_000;
 
@@ -361,12 +363,17 @@ export function createTreeRouter(tree: Tree, systemTree: Tree, watcher: WatchMan
         if (!userId) return () => {};
         const expiresAt = typeof ctx.session?.expiresAt === 'number' ? ctx.session.expiresAt : null;
 
+        // setTimeout caps at 2^31-1 ms and fires at once beyond it: a 10-year
+        // API-token lane was killed right after connect. Re-arm until due.
         let expiryTimer: ReturnType<typeof setTimeout> | null = null;
-        if (expiresAt) {
-          expiryTimer = setTimeout(() => {
-            emit.error(new TRPCError({ code: 'UNAUTHORIZED', message: 'Session expired' }));
-          }, Math.max(0, expiresAt - Date.now()));
-        }
+        const armExpiry = (at: number) => {
+          const left = Math.max(0, at - Date.now());
+          expiryTimer = setTimeout(left > MAX_TIMER_MS
+            ? () => armExpiry(at)
+            : () => emit.error(new TRPCError({ code: 'UNAUTHORIZED', message: 'Session expired' })),
+          Math.min(left, MAX_TIMER_MS));
+        };
+        if (expiresAt) armExpiry(expiresAt);
 
         const resume = input?.epoch !== undefined && input?.since !== undefined
           ? { seq: input.since, epoch: input.epoch }
