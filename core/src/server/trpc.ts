@@ -38,7 +38,8 @@ export type TrpcContext = {
 const safePath = z.string().superRefine((p, ctx) => {
   try { assertSafePath(p); }
   catch (e) {
-    console.error(`[trpc] bad path rejected: ${JSON.stringify(p)}`);
+    // No server log: the rejection goes back to the caller, and every console
+    // line persists as a /sys/logs node — an anon client could append one per request.
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: (e as Error).message });
   }
 });

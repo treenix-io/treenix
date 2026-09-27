@@ -6,10 +6,13 @@ import { createLogger } from '#log';
 import type { ExecTree, Tree } from '#tree';
 import { withStoragePolicy } from '#tree/policy';
 import { nodeHTTPRequestHandler } from '@trpc/server/adapters/node-http';
+import { getHTTPStatusCodeFromError } from '@trpc/server/http';
 import { TRPCError } from '@trpc/server';
+import { TRPC_MAX_BATCH } from '#client/trpc';
 import { createReadStream, existsSync, statSync } from 'node:fs';
-import { createServer, type Server } from 'node:http';
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { extname, join, resolve, sep } from 'node:path';
+import { pipeline as pipeStreams } from 'node:stream';
 import { withAcl } from '#security/acl-tree';
 import { userIdFromAuthPath } from '#security/claims';
 import { createMembershipProjector } from '#security/projector';
@@ -33,6 +36,10 @@ import { createTreeRouter, type TreeRouter, type TreeRouterOpts, type TrpcContex
 import { createWatchManager, type WatchManager } from '#sub/watch';
 
 const log = createLogger('http');
+
+// tRPC defaults both to unlimited: an anon client could POST a multi-GB body
+// or a 10k-call batch. 16 MiB matches the largest storable document (Mongo).
+const TRPC_MAX_BODY = 16 * 1024 * 1024;
 
 export type RouteHandler = (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse, tree: Tree) => Promise<void>;
 
@@ -209,7 +216,17 @@ export function createHttpServer(pipeline: Pipeline, opts?: HttpServerOpts): Ser
     '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.woff': 'font/woff',
   };
 
-  function serveStatic(pathname: string, res: import('node:http').ServerResponse): boolean {
+  // pipeline, not pipe: a read error (EACCES, file vanished mid-deploy) on a
+  // bare pipe() is an uncaught 'error' event that kills the process.
+  function sendFile(res: ServerResponse, file: string, headers: Record<string, string>): void {
+    res.writeHead(200, headers);
+    pipeStreams(createReadStream(file), res, (err) => {
+      // A client aborting the download is not a server event.
+      if (err && err.code !== 'ERR_STREAM_PREMATURE_CLOSE') log.warn(`static ${file}: ${err.message}`);
+    });
+  }
+
+  function serveStatic(pathname: string, res: ServerResponse): boolean {
     if (!staticDir) return false;
 
     const file = resolve(join(staticDir, pathname === '/' ? 'index.html' : pathname));
@@ -220,20 +237,18 @@ export function createHttpServer(pipeline: Pipeline, opts?: HttpServerOpts): Ser
       // SPA fallback: non-file paths → index.html
       const index = join(staticDir, 'index.html');
       if (!existsSync(index)) return false;
-      res.writeHead(200, { 'Content-Type': 'text/html', 'Cache-Control': 'no-cache' });
-      createReadStream(index).pipe(res);
+      sendFile(res, index, { 'Content-Type': 'text/html', 'Cache-Control': 'no-cache' });
       return true;
     }
 
     const ext = extname(file);
     const ct = MIME[ext] || 'application/octet-stream';
     const cache = ext === '.html' ? 'no-cache' : 'public, max-age=31536000, immutable';
-    res.writeHead(200, { 'Content-Type': ct, 'Cache-Control': cache });
-    createReadStream(file).pipe(res);
+    sendFile(res, file, { 'Content-Type': ct, 'Cache-Control': cache });
     return true;
   }
 
-  return createServer(async (req, res) => {
+  async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const origin = req.headers.origin;
     if (origin && allowedOrigins.includes(origin)) {
       res.setHeader('Access-Control-Allow-Origin', origin);
@@ -332,10 +347,14 @@ export function createHttpServer(pipeline: Pipeline, opts?: HttpServerOpts): Ser
       const path = pathname.replace(/^\/trpc/, '').replace(/^\//, '');
       await nodeHTTPRequestHandler({
         req, res, router, path, createContext,
+        maxBodySize: TRPC_MAX_BODY,
+        maxBatchSize: TRPC_MAX_BATCH,
         onError: ({ error, path: p }) => {
-          // UNAUTHORIZED is the expected response when a logged-out client probes — don't spam error log.
-          if (error.code === 'UNAUTHORIZED') log.warn(`trpc ${p}: ${error.message}`);
-          else log.error(`trpc ${p}: ${error.message}`);
+          // Client-caused (4xx) failures are answered to the caller, not server
+          // state: every warn/error line persists as a /sys/logs node, so logging
+          // them let any anonymous client append one node per request.
+          if (getHTTPStatusCodeFromError(error) >= 500) log.error(`trpc ${p}: ${error.message}`);
+          else log.debug(`trpc ${p}: ${error.code} ${error.message}`);
         },
       });
       return;
@@ -346,5 +365,15 @@ export function createHttpServer(pipeline: Pipeline, opts?: HttpServerOpts): Ser
 
     res.writeHead(404, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'not_found' }));
+  }
+
+  // An async listener's rejection is unhandled by node:http — the request
+  // would hang until timeout (session store throw, route handler, healthCheck).
+  return createServer((req, res) => {
+    handle(req, res).catch((err: unknown) => {
+      log.error(`http ${req.method} ${(req.url ?? '/').split('?')[0]}:`, err);
+      if (!res.headersSent) res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'internal' }));
+    });
   });
 }

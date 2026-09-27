@@ -23,6 +23,10 @@ export type TrpcTransportOpts = {
   fetch?: (input: any, init?: any) => Promise<Response>;
 };
 
+/** Max calls per HTTP batch. The server rejects larger batches with 400
+ *  (server.ts) — every client batch link must split at this size. */
+export const TRPC_MAX_BATCH = 100;
+
 /** Client-minted watch-ownership id (core-anz4.28): the AUTH token is shared
  *  across consumers — only this id tells the server WHICH consumer holds a
  *  watch, so one consumer's release cannot strip the others' (React tabs mint
@@ -120,6 +124,7 @@ export function createTrpcTransport(opts: TrpcTransportOpts): TreenixClient & { 
         false: httpBatchLink({
           url: `${opts.url}/trpc/`,
           maxURLLength: 2048,
+          maxItems: TRPC_MAX_BATCH,
           headers: () => {
             const t = getToken();
             return t ? { Authorization: `Bearer ${t}` } : {};

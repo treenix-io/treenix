@@ -12,6 +12,7 @@ import { createTRPCClient, httpBatchLink, httpSubscriptionLink, splitLink, type 
 import { EventSource as BaseEventSource } from 'eventsource';
 import http from 'node:http';
 import { Readable } from 'node:stream';
+import { TRPC_MAX_BATCH } from '#client/trpc';
 import type { TreeRouter } from './trpc';
 
 /** Token may be a string, null, or a getter — getter is re-evaluated per request so the
@@ -104,7 +105,7 @@ export function createClient(url: string, token?: TokenSource): TRPCClient<TreeR
           url,
           EventSource: makeEventSource() as any,
         }),
-        false: httpBatchLink({ url, maxURLLength: 2048, fetch: jarFetch as any }),
+        false: httpBatchLink({ url, maxURLLength: 2048, maxItems: TRPC_MAX_BATCH, fetch: jarFetch as any }),
       }),
     ],
   });
