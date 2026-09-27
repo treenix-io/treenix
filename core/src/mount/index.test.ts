@@ -812,6 +812,26 @@ describe('Types mount adapter', () => {
     assert.deepEqual(paths, ['/types/custom/card', '/types/custom/list']);
   });
 
+  it('getChildren honors depth: -1 lists everything, 2 stops at level 2', async () => {
+    register('test.block.hero', 'schema', () => ({ title: 'Hero', type: 'object' as const, properties: {} }));
+    await backingStore.set(createNode('/types/custom/card', 'type'));
+    const ts = createTypesTree(backingStore, '/types');
+
+    const all = (await ts.getChildren('/types', { depth: -1 })).items.map((n) => n.$path);
+    for (const p of ['/types/test', '/types/test/block', '/types/test/block/hero', '/types/custom', '/types/custom/card']) {
+      assert.ok(all.includes(p), `${p} listed at depth -1`);
+    }
+    const two = (await ts.getChildren('/types', { depth: 2 })).items.map((n) => n.$path);
+    assert.ok(two.includes('/types/test/block'));
+    assert.ok(!two.includes('/types/test/block/hero'), 'level-3 type is beyond depth 2');
+  });
+
+  it('remove of a registry type is FORBIDDEN', async () => {
+    register('test.block.hero', 'schema', () => ({ title: 'Hero', type: 'object' as const, properties: {} }));
+    const ts = createTypesTree(backingStore, '/types');
+    await assert.rejects(() => ts.remove('/types/test/block/hero'), (e) => e instanceof OpError && e.code === 'FORBIDDEN');
+  });
+
   it('getChildren merges dynamic and registry in same category', async () => {
     register('test.block.hero', 'schema', () => ({ title: 'Hero', type: 'object' as const, properties: {} }));
     await backingStore.set(createNode('/types/test/block/custom-block', 'type'));

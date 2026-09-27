@@ -2,6 +2,7 @@
 // Union of registry (code-defined types) + backing tree (dynamic types)
 
 import { type ComponentData, createNode, getContextsForType, getRegisteredTypes, type NodeData, resolve } from '#core';
+import { OpError } from '#errors';
 import { paginate, type Tree } from '#tree';
 import { scanFromCollected } from '#tree/fs-common';
 
@@ -36,102 +37,46 @@ export function createTypesTree(backingStore: Tree, typesPath = '/sys/types'): T
   // /types/block/hero → block.hero
   const toType = (path: string) => path.slice(typesPath.length + 1).replace(/\//g, '.');
 
-  function isRegistryType(path: string): boolean {
-    const typeName = toType(path);
-    return getContextsForType(typeName).length > 0;
-  }
-
-  const typeNode = (typeName: string) => buildTypeNode(typeName, toPath(typeName));
-
-  // Merge registry node with backing tree node — registry wins for code-defined
-  // components, backing tree adds dynamic components (view, actions from AI agent)
-  async function mergedTypeNode(typeName: string): Promise<NodeData | undefined> {
-    const fromRegistry = typeNode(typeName);
-    if (!fromRegistry) return undefined;
-    const fromStore = await backingStore.get(fromRegistry.$path);
-    if (!fromStore) return fromRegistry;
-    // Backing tree fields first, registry overwrites (code-defined always wins)
-    return { ...fromStore, ...fromRegistry };
-  }
+  // Registry wins for code-defined components; the backing tree adds dynamic
+  // ones (view, actions from an AI agent).
+  const merge = (stored: NodeData | undefined, reg: NodeData): NodeData => (stored ? { ...stored, ...reg } : reg);
 
   return {
     async get(path) {
       const typeName = toType(path);
-      const merged = await mergedTypeNode(typeName);
-      if (merged) return merged;
-      // Check if it's a category folder (e.g. /types/block)
-      const prefix = typeName + '.';
-      if (getRegisteredTypes('schema').some((t) => t.startsWith(prefix))) {
-        return createNode(path, 'dir');
-      }
+      const reg = buildTypeNode(typeName, toPath(typeName));
+      if (reg) return merge(await backingStore.get(reg.$path), reg);
+      // Category folder (e.g. /types/block)
+      if (getRegisteredTypes().some((t) => t.startsWith(typeName + '.'))) return createNode(path, 'dir');
       return backingStore.get(path);
     },
 
     async getChildren(path, opts) {
       const depth = opts?.depth ?? 1;
-      const prefix = path === typesPath ? '' : toType(path) + '.';
-      const types = getRegisteredTypes();
+      const maxDepth = depth < 0 ? Infinity : depth;
       const byPath = new Map<string, NodeData>();
-      // Backing tree — scan deep to discover category folders, synthesize intermediate dirs
-      const backingItems = (await backingStore.getChildren(path, { depth: -1 })).items;
-      for (const n of backingItems) {
-        const rel = path === '/' ? n.$path.slice(1) : n.$path.slice(path.length + 1);
-        const parts = rel.split('/');
-        if (parts.length <= depth) byPath.set(n.$path, n);
-        // Synthesize dir nodes for intermediate paths (like registry does for categories)
-        for (let i = 0; i < parts.length - 1; i++) {
-          if (i + 1 > depth) break;
-          const dirPath = `${path}/${parts.slice(0, i + 1).join('/')}`;
+      // Synthesize folders for the leading segments of a relative path.
+      const addDirs = (rel: string[]) => {
+        for (let i = 1; i < rel.length && i <= maxDepth; i++) {
+          const dirPath = `${path}/${rel.slice(0, i).join('/')}`;
           if (!byPath.has(dirPath)) byPath.set(dirPath, createNode(dirPath, 'dir'));
         }
+      };
+
+      for (const n of (await backingStore.getChildren(path, { depth: -1 })).items) {
+        const rel = n.$path.slice(path.length + 1).split('/');
+        if (rel.length <= maxDepth) byPath.set(n.$path, n);
+        addDirs(rel);
       }
-      // Registry types — merge with backing tree data (dynamic views, actions)
-      const seenDirs = new Set<string>();
-      for (const t of types) {
-        if (prefix && !t.startsWith(prefix)) continue;
-        if (!prefix && !t.includes('.')) {
-          const reg = typeNode(t);
-          if (reg) {
-            const stored = byPath.get(reg.$path);
-            byPath.set(reg.$path, stored ? { ...stored, ...reg } : reg);
-          }
-          continue;
-        }
-        const rest = prefix ? t.slice(prefix.length) : t;
-        const parts = rest.split('.');
-        if (parts.length === 1) {
-          // Direct child leaf type — merge with any backing tree data
-          const reg = typeNode(t);
-          if (reg) {
-            const stored = byPath.get(reg.$path);
-            byPath.set(reg.$path, stored ? { ...stored, ...reg } : reg);
-          }
-        } else {
-          // Category folder (always emit)
-          const cat = parts[0];
-          if (!seenDirs.has(cat)) {
-            seenDirs.add(cat);
-            const folderPath = `${path}/${cat}`;
-            byPath.set(folderPath, createNode(folderPath, 'dir'));
-          }
-          // Deep types — emit when depth allows, merge with backing tree
-          if (depth > 1) {
-            const reg = typeNode(t);
-            if (reg) {
-              const stored = byPath.get(reg.$path);
-              byPath.set(reg.$path, stored ? { ...stored, ...reg } : reg);
-            }
-            // Intermediate dirs
-            for (let i = 1; i < parts.length - 1; i++) {
-              const dirKey = parts.slice(0, i + 1).join('.');
-              if (!seenDirs.has(dirKey)) {
-                seenDirs.add(dirKey);
-                const dirPath = `${path}/${parts.slice(0, i + 1).join('/')}`;
-                byPath.set(dirPath, createNode(dirPath, 'dir'));
-              }
-            }
-          }
-        }
+
+      const prefix = path === typesPath ? '' : toType(path) + '.';
+      for (const t of getRegisteredTypes()) {
+        if (!t.startsWith(prefix)) continue;
+        const rel = t.slice(prefix.length).split('.');
+        addDirs(rel);
+        if (rel.length > maxDepth) continue;
+        const reg = buildTypeNode(t, toPath(t));
+        if (reg) byPath.set(reg.$path, merge(byPath.get(reg.$path), reg));
       }
       return paginate([...byPath.values()], opts);
     },
@@ -149,8 +94,9 @@ export function createTypesTree(backingStore: Tree, typesPath = '/sys/types'): T
     },
 
     async remove(path) {
-      // Never remove code-registered types
-      if (isRegistryType(path)) throw new Error(`Cannot remove registry type: ${toType(path)}`);
+      if (getContextsForType(toType(path)).length > 0) {
+        throw new OpError('FORBIDDEN', `Cannot remove registry type: ${toType(path)}`);
+      }
       return backingStore.remove(path);
     },
 
