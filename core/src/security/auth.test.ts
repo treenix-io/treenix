@@ -678,7 +678,7 @@ describe('withAcl', () => {
     // The predicate evaluates on alice's projection, where #secret is absent: a
     // right and a wrong guess answer identically. (An earlier FORBIDDEN-when-raw-
     // matches rule WAS the oracle — it extracted hidden values char by char.)
-    for (const guess of ['alpha', 'zeta', { $regex: '^a' }, { $regex: '^z' }]) {
+    for (const guess of ['alpha', 'zeta', { $gte: 'a' }, { $gte: 'z' }]) {
       const page = await s.getChildren('/docs', { query: { '#secret.value': guess } });
       assert.deepEqual(page.items, [], `guess ${JSON.stringify(guess)}`);
     }

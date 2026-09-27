@@ -1,4 +1,5 @@
 import { createNode, type NodeData } from '#core';
+import { OpError } from '#errors';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { createMemoryTree } from './index';
@@ -142,25 +143,19 @@ describe('QueryStore', () => {
     assert.doesNotThrow(() => assertSafeSiftQuery({ $and: [{ a: 1 }, { b: 2 }] }));
   });
 
-  it('R5-MCP-4: rejects $regex with nested quantifiers (ReDoS shape)', () => {
-    assert.throws(() => assertSafeSiftQuery({ name: { $regex: '(a+)+$' } }), /nested quantifiers/);
-    assert.throws(() => assertSafeSiftQuery({ name: { $regex: '(a*)*' } }), /nested quantifiers/);
-    assert.throws(() => assertSafeSiftQuery({ name: { $regex: '(?:.*)+' } }), /nested quantifiers/);
-  });
-
-  it('R5-MCP-4: rejects $regex pattern longer than 256 chars', () => {
-    const long = 'a'.repeat(300);
-    assert.throws(() => assertSafeSiftQuery({ name: { $regex: long } }), /too long/);
-  });
-
-  it('R5-MCP-4: rejects RegExp literal with nested quantifiers', () => {
-    assert.throws(() => assertSafeSiftQuery({ name: /(a+)+$/ }), /nested quantifiers/);
-  });
-
-  it('R5-MCP-4: allows safe $regex patterns', () => {
-    assert.doesNotThrow(() => assertSafeSiftQuery({ name: { $regex: '^prefix' } }));
-    assert.doesNotThrow(() => assertSafeSiftQuery({ name: { $regex: 'simple.*case$' } }));
-    assert.doesNotThrow(() => assertSafeSiftQuery({ name: /^prefix/ }));
+  // R5-MCP-4: a shape heuristic let ^(.|.)*$ and ^(a+){2,}$ through at seconds
+  // per node — user regexes are refused outright, at any depth.
+  it('rejects $regex and RegExp values wherever they appear', () => {
+    const badRequest = (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST';
+    for (const q of [
+      { name: { $regex: '^prefix' } },
+      { name: { $regex: '^(.|.)*\u0000$' } },
+      { $or: [{ a: 1 }, { name: { $not: { $regex: 'x' } } }] },
+      { name: /^prefix/ },
+      { tags: { $in: [/a/] } },
+    ]) {
+      assert.throws(() => assertSafeSiftQuery(q), badRequest, JSON.stringify(q));
+    }
   });
 
   it('excludes non-matching nodes like mount configs', async () => {

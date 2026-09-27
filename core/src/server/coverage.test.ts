@@ -795,10 +795,9 @@ describe('QueryStore advanced', () => {
 // ── matchesFilter edge cases ──
 
 describe('matchesFilter advanced', () => {
-  it('$regex matching', () => {
+  it('$regex is refused (ReDoS)', () => {
     const node = { $path: '/a', $type: 'x', name: 'hello-world' } as NodeData;
-    assert.equal(matchesFilter(node, { name: { $regex: 'hello' } }), true);
-    assert.equal(matchesFilter(node, { name: { $regex: '^nope' } }), false);
+    assert.throws(() => matchesFilter(node, { name: { $regex: 'hello' } }), (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST');
   });
 
   it('$path in match maps correctly', () => {
