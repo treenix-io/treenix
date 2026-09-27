@@ -4,7 +4,7 @@ import { createMemoryTree, isSetEntry, type PatchManyEntry, type Tree } from '#t
 import { DEFAULT_BUDGET } from '#tree/read-runtime';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
-import { ancestorPaths, componentPerm, resolvePermission, stripComponents } from './acl';
+import { ancestorPaths, componentPerm, resolvePermission, stripComponents, typeAclRule } from './acl';
 import { withAcl } from './acl-tree';
 import { assertNotSystem, buildClaims, SYSTEM_CLAIM } from './claims';
 import { buildSessionCookie } from './cookies';
@@ -378,6 +378,55 @@ describe('system identity — groups component access (F15)', () => {
     });
     const claims = await buildClaims(systemTree, 'bob');
     assert.ok(claims.includes('admins'), `expected admins after write, got ${JSON.stringify(claims)}`);
+  });
+});
+
+// F4: mount adapters reach outside the tree (disk, network, DB). Authoring or
+// reading their config is a server capability — even an owner with A on their
+// subtree must not mount the server's filesystem there.
+describe('mount authoring (F4)', () => {
+  const alice = () => withAcl(tree, 'alice', ['u:alice', 'authenticated']);
+  const forbidden = (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN';
+
+  beforeEach(() => {
+    register('test.mount.disk', 'mount', () => createMemoryTree());
+    register('test.mount.view', 'mount', () => createMemoryTree(), { userAuthorable: true });
+  });
+
+  it('owner cannot author a server mount on their own subtree (set, patch, any key)', async () => {
+    const disk = { $type: 'test.mount.disk', root: '/' };
+    await assert.rejects(() => alice().set(createNode('/users/alice/x', 'dir', {}, { mount: disk })), forbidden);
+    await assert.rejects(() => alice().set(createNode('/users/alice/x', 'dir', {}, { layer: disk })), forbidden);
+    await assert.rejects(() => alice().patch('/users/alice/page', [['r', '#mount', disk]]), forbidden);
+    assert.equal(await tree.get('/users/alice/x'), undefined);
+  });
+
+  it('admins and system author server mounts', async () => {
+    await tree.set({ ...createNode('/', 'root'), $acl: [{ g: 'admins', p: R | W | A }, { g: 'system', p: R | W | A }] });
+    const disk = { $type: 'test.mount.disk', root: '/data' };
+    await withAcl(tree, 'root', ['u:root', 'admins']).set(createNode('/a', 'dir', {}, { mount: disk }));
+    await withAcl(tree, 'system', ['system']).set(createNode('/s', 'dir', {}, { mount: disk }));
+    assert.ok(await tree.get('/a'));
+    assert.ok(await tree.get('/s'));
+  });
+
+  it('server mount config is hidden from non-admin readers', () => {
+    const node = createNode('/users/alice/m', 'dir', {}, { mount: { $type: 'test.mount.disk', token: 'secret' } });
+    assert.equal(stripComponents(node, 'alice', ['u:alice', 'authenticated'])['#mount'], undefined);
+    assert.ok(stripComponents(node, 'root', ['u:root', 'admins'])['#mount']);
+  });
+
+  it('a userAuthorable adapter (in-tree view) stays open to the node writer', async () => {
+    await alice().set(createNode('/users/alice/col', 'dir', {}, {
+      mount: { $type: 'test.mount.view' },
+    }));
+    assert.ok((await tree.get('/users/alice/col'))?.['#mount']);
+  });
+
+  it('plain component types carry no type rule', () => {
+    assert.equal(typeAclRule('dir'), undefined);
+    assert.ok(typeAclRule('test.mount.disk'));
+    assert.equal(typeAclRule('test.mount.view'), undefined);
   });
 });
 

@@ -11,6 +11,7 @@ import {
   type NodeData,
   R,
   resolve as resolveHandler,
+  resolveEntry,
   W,
 } from '#core';
 import type { Tree } from '#tree';
@@ -151,15 +152,35 @@ export async function resolvePermission(
 
 // ── Component ACL ──
 
+// F4 (docs/backlog/f4-mount-authorization.md): a mount adapter reaches outside
+// the tree — disk, network, databases — and its config carries credentials.
+// Authoring or reading it is a server capability, never a subtree grant (an
+// owner with A on their home must not mount the server's filesystem there).
+// Fail closed: every type with a 'mount' handler gets this rule unless it
+// declares its own 'acl' or registers with meta { userAuthorable: true }
+// (in-tree views such as t.mount.query).
+const MOUNT_ACL: GroupPerm[] = [
+  { g: 'admins', p: R | W },
+  { g: 'system', p: R | W },
+];
+
+/** Type-level ACL rule of a component type; undefined = no type rule. */
+export function typeAclRule(type: string): GroupPerm[] | undefined {
+  const acl = resolveHandler(type, 'acl');
+  if (acl) return acl();
+  const mount = resolveEntry(type, 'mount');
+  return mount && mount.meta?.userAuthorable !== true ? MOUNT_ACL : undefined;
+}
+
 export function componentPerm(
   comp: ComponentData,
   userId: string | null,
   claims: string[],
   owner: string | undefined,
 ): number {
-  const typeAcl = resolveHandler(comp.$type, 'acl');
+  const typeAcl = typeAclRule(comp.$type);
   const acls: GroupPerm[][] = [];
-  if (typeAcl) acls.push(typeAcl());
+  if (typeAcl) acls.push(typeAcl);
   if (comp.$acl) acls.push(comp.$acl);
   if (acls.length === 0) return R | W | A; // no ACL = full access
 

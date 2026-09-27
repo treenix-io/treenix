@@ -125,10 +125,13 @@ register(MountMods, 'mount', () => createModsTree());
 
 register(MountMemory, 'mount', () => createMemoryTree());
 
+// userAuthorable (F4, security/acl.ts): a read-only view over in-tree data —
+// the ACL read path plans it with source-R + projection (resolve-plan.ts), so
+// node writers (board columns) may author it.
 register(MountQuery, 'mount', (mount, ctx) => {
   if (!mount.source || !mount.match) throw new Error('t.mount.query: source and match required');
   return createQueryTree(mount, ctx.globalStore || ctx.parentStore);
-});
+}, { userAuthorable: true });
 
 register(MountFs, 'mount', async (mount, ctx) => {
   if (!mount.root) throw new Error('t.mount.fs: root required');

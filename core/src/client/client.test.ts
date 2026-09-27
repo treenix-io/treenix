@@ -246,9 +246,9 @@ describe('Treenix Client SDK', () => {
       });
       await clientB.tree.set(createNode('/w', 'fedtest.widget', { n: 0 }));
 
-      // A mounts B's root at /fed.
-      const clientA = createTrpcTransport({ url });
-      await clientA.tree.set({
+      // A mounts B's root at /fed — server-side: mount authoring is an
+      // admin/system capability (F4), never a wire write by an anon client.
+      await ts.systemTree.set({
         $path: '/fed',
         $type: 'dir',
         '#mount': { $type: 't.mount.tree.trpc', url: urlB, path: '/' },
@@ -273,6 +273,14 @@ describe('Treenix Client SDK', () => {
       assert.ok(onB);
       assert.equal((onB as { n?: number }).n, 1);
       assert.ok(onB.$rev && onB.$rev >= 2, 'commit happened on B ($rev bumped there)');
+    });
+
+    it('an anonymous wire client cannot author a federation mount (F4)', async () => {
+      const clientA = createTrpcTransport({ url });
+      await assert.rejects(
+        () => clientA.tree.set({ $path: '/evil', $type: 'dir', '#mount': { $type: 't.mount.tree.trpc', url: urlB, path: '/' } }),
+        (e: { data?: { code?: string } }) => e.data?.code === 'FORBIDDEN',
+      );
     });
 
     it('dynamic type is NOT resolvable in A itself (delegation is the only path)', async () => {
@@ -361,7 +369,7 @@ describe('Treenix Client SDK', () => {
       const clientH = createTrpcTransport({ url: `http://127.0.0.1:${port}` });
 
       try {
-        await clientH.tree.set({
+        await pipeline.systemTree.set({
           $path: '/fed',
           $type: 'dir',
           '#mount': { $type: 't.mount.tree.trpc', url: urlB, path: '/' },

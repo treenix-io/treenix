@@ -20,7 +20,8 @@ import {
   parseSessionCookie,
 } from '#security/cookies';
 import { resolveOrIssueSession } from '#security/sessions';
-import { getComponentByName, resolve as resolveHandler } from '#core';
+import { getComponentByName } from '#core';
+import { typeAclRule } from '#security/acl';
 import { withMounts } from '#mount';
 import { type CdcRegistry, type OnSelfWrite, withSubscriptions } from '#sub';
 import type { TreeEvent } from '#tree';
@@ -106,7 +107,7 @@ export function createPipeline(bootstrap: Tree, opts?: TreeRouterOpts, wrapTree?
   const { tree: subscribed, cdc, onSelfWrite, injectExternalEvent } = withSubscriptions(policy.tree, (e) => watcher.notify(e), {
     claimsUserOf: userIdFromAuthPath,
     isConfigNode: (node) => !!node && getComponentByName(node, 'mount') !== undefined,
-    componentHasAclRule: (type) => resolveHandler(type, 'acl') !== undefined,
+    componentHasAclRule: (type) => typeAclRule(type) !== undefined,
     // F4 (core-anz4.3): query-watch membership judges each subscriber on
     // their OWN ACL projection — perms via the pre-ACL pipeline, claims via
     // the system tree (same sources the read path uses).

@@ -179,4 +179,6 @@ register(MountBranch, 'mount', async (_mount, ctx: MountCtx) => {
   const lower = createRepathTree(wrapReadOnlyTree(guardSubtree(projected, branchesRoot)), ctx.path, base);
   const upper = createRepathTree(store, ctx.path, `${branchPath}/delta`);
   return withControlWindow(createBranchTree(upper, lower), store, branchPath, ctx.path);
-});
+// userAuthorable (F4, security/acl.ts): agents create branches through
+// t.branches.create under their own identity. Reads stay owner-projected.
+}, { userAuthorable: true });
