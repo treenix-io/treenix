@@ -8,8 +8,9 @@ import { createNode, R, S, W } from '#core';
 import { OpError } from '#errors';
 import type { ResolvedReadPlan } from '#mount/resolve-plan';
 import { createPortConn } from '#protocol/port';
+import { withAcl } from '#security/acl-tree';
 import type { Session } from '#security/sessions';
-import { withSubscriptions, type NodeEvent } from '#sub';
+import { withSubscriptions, type NodeEvent, type WireEvent } from '#sub';
 import { createWatchManager, type WatchCursor } from '#sub/watch';
 import { createMemoryTree, type Tree } from '#tree';
 import assert from 'node:assert/strict';
@@ -435,6 +436,30 @@ describe('toEventFrames — pathless invalidate (core-dm1)', () => {
       { seq: 9, ev: 'dirty', path: '/views/a' },
       { seq: 9, ev: 'dirty', path: '/views/b' },
     ]);
+  });
+
+  // Prod shape: deps.systemTree is itself ACL-wrapped as `system`. The event
+  // filter must project the RAW node for the user — through the system tree a
+  // component granted to the user but not to `system` dropped out of events.
+  it('event lane projects once: a component granted to the user but not to system reaches them', async () => {
+    const memory = createMemoryTree();
+    await memory.set({ ...createNode('/', 'root'), $acl: [{ g: 'public', p: R | S }, { g: 'system', p: R | W | S }] });
+    const note = (text: string) => ({ $type: 'note', text, $acl: [{ g: 'u:bob', p: R }] });
+    await memory.set({ ...createNode('/doc', 'dir'), '#note': note('hi') });
+    const watcher = createWatchManager();
+    const { tree } = withSubscriptions(memory, (e) => watcher.notify(e));
+    const deps: WireDeps = { tree, systemTree: withAcl(tree, 'system', ['system']), watcher };
+    const wire = createWireSession(deps, { userId: 'bob', claims: ['u:bob', 'public'] });
+
+    let got!: (e: WireEvent) => void;
+    const firstData = new Promise<WireEvent>((r) => { got = r; });
+    wire.connectEvents((e) => { if (e.type !== 'reconnect') got(e); });
+    watcher.watch('bob', ['/doc']);
+
+    await tree.set({ ...(await memory.get('/doc'))!, '#note': note('hey') });
+    const ev = await firstData;
+    assert.equal(ev.type, 'patch', `got ${ev.type}`);
+    assert.ok(ev.type === 'patch' && ev.patches.some(p => p[1].startsWith('#note')), 'the note op survived');
   });
 
   it('omits seq when unstamped (wire parity across transports)', () => {

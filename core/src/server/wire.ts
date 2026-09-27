@@ -217,7 +217,10 @@ export function createWireSession(deps: WireDeps, session: Session) {
   function connectEvents(push: (e: WireEvent) => void, since?: number | WatchCursor, token?: string): { connId: string } & ConnectVerdict {
     const sessionClaims = session.claims?.length ? session.claims : null;
     const claimsTtlMs = deps.opts?.claimsTtlMs ?? DEFAULT_CLAIMS_TTL_MS;
-    const filtered = createFilteredPush(deps.systemTree, userId, sessionClaims, push, { claimsTtlMs });
+    // The pre-ACL tree: the filter projects for the user itself. Reading
+    // through the system-identity ACL tree projected twice — a component
+    // whose $acl grants the user but not `system` vanished from their events.
+    const filtered = createFilteredPush(deps.tree, userId, sessionClaims, push, { claimsTtlMs });
     const connId = `${userId}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
     const verdict = deps.watcher.connect(connId, userId, filtered, since, token);
     return { connId, ...verdict };
