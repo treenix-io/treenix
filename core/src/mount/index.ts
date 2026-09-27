@@ -2,11 +2,10 @@
 // Mount = component on node. Adapter resolved via context system.
 // Core untouched. Tree interface preserved.
 
-import { type ComponentData, getComponentByName, isComponent, isRef, type NodeData, resolve } from '#core';
+import { type ComponentData, getComponentByName, type NodeData, resolve } from '#core';
 import { OpError } from '#errors';
 import { assertPatchManyBatch, isSetEntry, type Tree } from '#tree';
 import { TRASH_ROOT } from '#tree/policy';
-import { createBoundedCache } from '#util/bounded-cache';
 
 // core-anz4.8: /sys/trash/** is mount-INERT. A trashed node keeps its mount
 // component, but under the trash prefix it is plain stored data — resolving it
@@ -28,8 +27,8 @@ export function activeMount(node: NodeData): ComponentData | undefined {
 }
 
 // ── Adapter contract ──
-// Lives here (not in mount-adapters.ts) so that mount.ts and adapters share
-// one definition. mount-adapters.ts handles registrations only.
+// Lives here so withMounts and adapters.ts share one definition; adapters.ts
+// only registers.
 
 export type MountCtx = {
   node: NodeData;
@@ -41,8 +40,8 @@ export type MountCtx = {
    *  only when the host pipeline supplied a `startExternalWatch` to
    *  `withMounts`. The adapter is responsible for computing `pathPrefix`
    *  (mount root for non-shared mounts, '/' for shared). Returns an abort
-   *  function — withMounts tracks it per mount cache key and calls it
-   *  on mount invalidation. */
+   *  function — withMounts tracks it per mount and calls it when the mount
+   *  is invalidated. */
   startExternalWatch?: ExternalWatchStarter;
 };
 
@@ -53,11 +52,6 @@ export type ExternalWatchStarter = (
 
 export type WithMountsOpts = {
   startExternalWatch?: ExternalWatchStarter;
-  /** Max entries in the per-user mount resolution cache. FIFO eviction.
-   *  Default 1000 — generous for typical multi-tenant deployments where
-   *  the same handful of mount points are accessed by many users. Raise
-   *  if you observe high cache miss rate on a hot mount. */
-  cacheMax?: number;
 };
 
 /** withMounts return type — exposes `invalidateMount` so external-watch
@@ -70,10 +64,8 @@ export type MountableTree = Tree & {
    *  t.mount.tree.trpc, future t.mount.peer). Storage mounts (memory/fs/mongo/
    *  query) and unmounted paths return undefined → the action runs in the
    *  LOCAL executor. Strict ancestors only (an action addressed at the mount
-   *  node itself targets the local config node). ctx carries `{userId}` bound
-   *  by withExecute — never from request data — so the per-user mount cache
-   *  keys correctly (core-pxlu). */
-  resolveActionTree(path: string, ctx?: unknown): Promise<Tree | undefined>;
+   *  node itself targets the local config node). */
+  resolveActionTree(path: string): Promise<Tree | undefined>;
 };
 
 export type MountAdapter<T = unknown> = (mount: T, ctx: MountCtx) => Tree | Promise<Tree>;
@@ -86,64 +78,112 @@ declare module '#core/context' {
 
 export async function resolveAdapter(mount: ComponentData, mountCtx: MountCtx): Promise<Tree> {
   const adapter = resolve(mount.$type, 'mount');
-  if (!adapter) throw new Error(`No mount adapter for "${mount.$type}"`);
-  return await adapter(mount, mountCtx);
+  if (!adapter) throw new OpError('BAD_REQUEST', `No mount adapter for "${mount.$type}" at ${mountCtx.path}`);
+  return adapter(mount, mountCtx);
+}
+
+/** Paths whose mounts can own `path`: '/' and every strict ancestor, plus
+ *  `path` itself when `withSelf` (a mount point's CHILDREN live in its
+ *  adapter; the node itself lives in the store holding its config). */
+function mountCandidates(path: string, withSelf: boolean): string[] {
+  if (path === '/') return withSelf ? ['/'] : [];
+  const out = ['/'];
+  for (let i = path.indexOf('/', 1); i !== -1; i = path.indexOf('/', i + 1)) out.push(path.slice(0, i));
+  if (withSelf) out.push(path);
+  return out;
 }
 
 // ── Mountable Tree ──
 
-const DEFAULT_MOUNT_CACHE = 1000;
-
-type MountCacheEntry = { tree: Tree; refTarget?: string; externalAbort?: () => void };
+type MountEntry = { tree: Promise<Tree>; release(): void };
 
 export function withMounts(rootStore: Tree, opts?: WithMountsOpts): MountableTree {
-  // onEvict aborts any external-watch consumer attached to the cache entry
-  // — covers both explicit invalidation AND FIFO eviction (otherwise leaks
-  // change-stream cursors, dedup timers, onSelfWrite subscriptions).
-  const cache = createBoundedCache<string, MountCacheEntry>(
-    opts?.cacheMax ?? DEFAULT_MOUNT_CACHE,
-    {
-      onEvict: (entry) => {
-        if (entry.externalAbort) entry.externalAbort();
-      },
-    },
-  );
+  // One entry per mount-point path. Adapters are caller-blind (they never see
+  // the requester), so the path alone is the key. The PROMISE is cached:
+  // concurrent first accesses share one instance — two instances of a stateful
+  // adapter (memory, external watch) would split writes or leak watches.
+  const mounts = new Map<string, MountEntry>();
 
-  /** Invalidate cache for path and all descendants (nested mounts under it).
-   *  bounded-cache onEvict fires per entry, releasing any external-watch
-   *  consumer the adapter started — no parallel bookkeeping needed. */
+  /** Drop the mount at `path` and every mount below it (their configs were
+   *  read through it). Release aborts the external watches they started. */
   function invalidateMount(path: string): void {
-    if (cache.size === 0) return;
-    cache.deleteWhere((entry, key) => {
-      // key may have ?uid= suffix — extract the path part
-      const keyPath = key.split('?')[0];
-      return isSameOrDescendant(keyPath, path)
-        || (!!entry.refTarget && isSameOrDescendant(entry.refTarget, path));
+    for (const [key, entry] of mounts) {
+      if (path !== '/' && key !== path && !key.startsWith(path + '/')) continue;
+      mounts.delete(key);
+      entry.release();
+    }
+  }
+
+  function open(path: string, node: NodeData, mount: ComponentData, parentStore: Tree): MountEntry {
+    const aborts: (() => void)[] = [];
+    let released = false;
+    const release = () => {
+      released = true;
+      for (const abort of aborts.splice(0)) abort();
+    };
+
+    const start = opts?.startExternalWatch;
+    const startExternalWatch: ExternalWatchStarter | undefined = start && ((tree, watchOpts) => {
+      const abort = start(tree, watchOpts);
+      // Invalidated while the adapter was still resolving — nothing will
+      // release this entry again.
+      if (released) abort();
+      else aborts.push(abort);
+      return abort;
     });
+
+    const entry: MountEntry = {
+      tree: resolveAdapter(mount, { node, path, parentStore, globalStore: self, startExternalWatch }),
+      release,
+    };
+    mounts.set(path, entry);
+    // A failed adapter must not stay cached: the config stays editable and the
+    // next access retries. Callers still get the rejection through entry.tree.
+    entry.tree.catch(() => {
+      if (mounts.get(path) === entry) mounts.delete(path);
+      release();
+    });
+    return entry;
   }
 
-  function isSameOrDescendant(candidate: string, path: string): boolean {
-    if (path === '/') return true;
-    return candidate === path || candidate.startsWith(path + '/');
+  async function resolveTree(path: string, withSelf: boolean, ctx?: unknown): Promise<Tree> {
+    let store = rootStore;
+    for (const p of mountCandidates(path, withSelf)) {
+      // Mounts at/under /sys/trash are inert (core-anz4.8) — their copied
+      // subtree is plain data of the store that owns /sys/trash.
+      if (isTrashInert(p)) break;
+
+      let entry = mounts.get(p);
+      if (!entry) {
+        const node = await store.get(p, ctx);
+        if (!node) continue;
+        const mount = activeMount(node);
+        if (!mount) continue;
+        // Re-check: a concurrent walker may have opened it during the await.
+        entry = mounts.get(p) ?? open(p, node, mount, store);
+      }
+      store = await entry.tree;
+    }
+    return store;
   }
 
+  // Writes invalidate AFTER the commit: a read re-resolving mid-write must not
+  // re-cache the old config past the write.
   const self: MountableTree = {
     invalidateMount,
 
-    async resolveActionTree(path, ctx) {
-      const tree = await resolveNodeTree(path, ctx);
+    async resolveActionTree(path) {
+      const tree = await resolveTree(path, false);
       // Capability presence = authority marker. No exceptions as control flow.
       return tree.execute ? tree : undefined;
     },
 
     async get(path, ctx) {
-      const tree = await resolveNodeTree(path, ctx);
-      return tree.get(path, ctx);
+      return (await resolveTree(path, false, ctx)).get(path, ctx);
     },
 
     async getChildren(path, opts, ctx) {
-      const tree = await resolveContentTree(path, ctx);
-      return tree.getChildren(path, opts, ctx);
+      return (await resolveTree(path, true, ctx)).getChildren(path, opts, ctx);
     },
 
     // scanChildren dispatch — same per-path resolution as getChildren, but
@@ -154,7 +194,7 @@ export function withMounts(rootStore: Tree, opts?: WithMountsOpts): MountableTre
     // the first page, so a cursor-paginating caller would silently get
     // duplicated/restarted pages (C13) — fail loud instead.
     async *scanChildren(path, opts, ctx) {
-      const tree = await resolveContentTree(path, ctx);
+      const tree = await resolveTree(path, true, ctx);
       if (tree.scanChildren) {
         yield* tree.scanChildren(path, opts, ctx);
         return;
@@ -187,21 +227,21 @@ export function withMounts(rootStore: Tree, opts?: WithMountsOpts): MountableTre
     },
 
     async set(node, ctx) {
-      const tree = await resolveNodeTree(node.$path, ctx);
+      const receipt = await (await resolveTree(node.$path, false, ctx)).set(node, ctx);
       invalidateMount(node.$path);
-      return tree.set(node, ctx);
+      return receipt;
     },
 
     async remove(path, ctx) {
-      const tree = await resolveNodeTree(path, ctx);
+      const receipt = await (await resolveTree(path, false, ctx)).remove(path, ctx);
       invalidateMount(path);
-      return tree.remove(path, ctx);
+      return receipt;
     },
 
     async patch(path, ops, ctx) {
-      const tree = await resolveNodeTree(path, ctx);
+      const receipt = await (await resolveTree(path, false, ctx)).patch(path, ops, ctx);
       invalidateMount(path);
-      return tree.patch(path, ops, ctx);
+      return receipt;
     },
 
     // patchMany (core-gk8.15): batch containment (asserted BEFORE resolution —
@@ -211,7 +251,7 @@ export function withMounts(rootStore: Tree, opts?: WithMountsOpts): MountableTre
     // silent per-member fallback loop would break atomicity.
     async patchMany(ancestor, entries, ctx) {
       assertPatchManyBatch(ancestor, entries);
-      const tree = await resolveNodeTree(ancestor, ctx);
+      const tree = await resolveTree(ancestor, false, ctx);
       if (!tree.patchMany) {
         throw new OpError('BAD_REQUEST', `patchMany: target tree at ${ancestor} does not support patchMany`);
       }
@@ -220,139 +260,15 @@ export function withMounts(rootStore: Tree, opts?: WithMountsOpts): MountableTre
       // shadowed node in the outer store (an ops-member merely fails NOT_FOUND
       // there). Only set-members pay the extra per-path resolution.
       for (const e of entries) {
-        if (isSetEntry(e) && await resolveNodeTree(e.path, ctx) !== tree) {
+        if (isSetEntry(e) && await resolveTree(e.path, false, ctx) !== tree) {
           throw new OpError('BAD_REQUEST', `patchMany: set-member ${e.path} crosses a mount boundary under ${ancestor}`);
         }
       }
+      const receipt = await tree.patchMany(ancestor, entries, ctx);
       for (const e of entries) invalidateMount(e.path);
-      return tree.patchMany(ancestor, entries, ctx);
+      return receipt;
     },
   };
-
-  /** Check if node's mount component resolves to a known adapter */
-  function isMountPoint(node: NodeData): boolean {
-    const mount = activeMount(node);
-    if (!mount) return false;
-    // Refs need resolution — treat as mount-point optimistically
-    if (isRef(mount)) return true;
-    const adapter = resolve(mount.$type, 'mount');
-    if (!adapter) throw new Error(`No adapter for type "${mount.$type}"`);
-    return true;
-  }
-
-  function mountRefTarget(node: NodeData): string | undefined {
-    const mount = getComponentByName(node, 'mount');
-    return isRef(mount) ? mount.$ref : undefined;
-  }
-
-  // Per-user keying — different users may see different mount targets due
-  // to per-user ACL on the mount node's ref.
-  function mountCacheKey(path: string, ctx?: unknown): string {
-    const userId = (ctx as { userId?: string } | undefined)?.userId;
-    return userId ? `${path}?uid=${userId}` : path;
-  }
-
-  function cacheMount(
-    path: string,
-    node: NodeData,
-    tree: Tree,
-    externalAbort: (() => void) | undefined,
-    ctx?: unknown,
-  ): void {
-    cache.set(mountCacheKey(path, ctx), { tree, refTarget: mountRefTarget(node), externalAbort });
-  }
-
-  async function resolveMount(
-    node: NodeData,
-    currentStore: Tree,
-    ctx?: unknown,
-  ): Promise<{ tree: Tree; externalAbort?: () => void }> {
-    let mount = getComponentByName(node, 'mount');
-    if (!mount) throw new Error(`Mount component missing on ${node.$path}`);
-    let configNode: NodeData = node;
-    if (isRef(mount)) {
-      const fetched = await currentStore.get(mount.$ref, ctx);
-      if (!fetched) throw new Error(`Mount ref not found: ${mount.$ref}`);
-      configNode = fetched;
-      mount = getComponentByName(configNode, 'mount');
-      if (!mount) throw new Error(`Mount component missing on ref target ${configNode.$path}`);
-    }
-
-    let externalAbort: (() => void) | undefined;
-    let startExternalWatch: ExternalWatchStarter | undefined;
-    if (opts?.startExternalWatch) {
-      const wrapped = opts.startExternalWatch;
-      startExternalWatch = (tree, starterOpts) => {
-        if (externalAbort) externalAbort(); // re-resolve race: abort previous
-        const abort = wrapped(tree, starterOpts);
-        externalAbort = abort;
-        return abort;
-      };
-    }
-
-    const tree = await resolveAdapter(mount, {
-      node: configNode,
-      path: node.$path,
-      parentStore: currentStore,
-      globalStore: self,
-      startExternalWatch,
-    });
-    return { tree, externalAbort };
-  }
-
-
-  function strictAncestorPaths(path: string): string[] {
-    if (path === '/') return [];
-    const segments = path.split('/').filter(Boolean);
-    const checks = ['/'];
-    for (let i = 0; i < segments.length - 1; i++) checks.push('/' + segments.slice(0, i + 1).join('/'));
-    return checks;
-  }
-
-  async function resolveNodeTree(path: string, ctx?: unknown): Promise<Tree> {
-    // Walk strict ancestors only. The target node itself belongs to the tree
-    // that contains its config, even when the target is a mount point.
-    const checks = strictAncestorPaths(path);
-    let nodeStore = rootStore;
-
-    for (const check of checks) {
-      // Mounts at/under /sys/trash are inert (core-anz4.8) — their copied
-      // subtree is plain data of the store that owns /sys/trash.
-      if (isTrashInert(check)) break;
-      const cacheKey = mountCacheKey(check, ctx);
-      const cached = cache.get(cacheKey);
-      if (cached) {
-        nodeStore = cached.tree;
-        continue;
-      }
-
-      const node = await nodeStore.get(check, ctx);
-      // TODO: parametrized mounts (:param paths) — need explicit registry, not runtime scan
-      if (!node || !isMountPoint(node)) continue;
-
-      const { tree, externalAbort } = await resolveMount(node, nodeStore, ctx);
-      cacheMount(check, node, tree, externalAbort, ctx);
-      nodeStore = tree;
-    }
-
-    return nodeStore;
-  }
-
-  async function resolveContentTree(path: string, ctx?: unknown): Promise<Tree> {
-    const nodeStore = await resolveNodeTree(path, ctx);
-    // Trash is inert — never activate the node's own mount to enumerate its
-    // children; the copied subtree lives as plain data in rootStore (anz4.8).
-    if (isTrashInert(path)) return nodeStore;
-
-    const cached = cache.get(mountCacheKey(path, ctx));
-    if (cached) return cached.tree;
-
-    const node = await nodeStore.get(path, ctx);
-    if (!node || !isMountPoint(node)) return nodeStore;
-    const { tree, externalAbort } = await resolveMount(node, nodeStore, ctx);
-    cacheMount(path, node, tree, externalAbort, ctx);
-    return tree;
-  }
 
   return self;
 }

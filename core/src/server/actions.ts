@@ -555,7 +555,7 @@ export type DelegationHooks = Pick<WithExecuteOpts, 'onDelegating' | 'onDelegate
 
 export type WithExecuteOpts = {
   /** Authority probe (MountableTree.resolveActionTree). Absent = everything local. */
-  delegate?: (path: string, ctx?: unknown) => Promise<Tree | undefined>;
+  delegate?: (path: string) => Promise<Tree | undefined>;
   /** Identity bound at wrap time — NEVER taken from ExecOpts (a nested handler
    *  could spoof another principal via ctx.tree.execute otherwise). opId is
    *  per-call, not identity — it arrives via ExecOpts. */
@@ -575,7 +575,6 @@ export type WithExecuteOpts = {
 
 export function withExecute<T extends Tree>(inner: T, opts?: WithExecuteOpts): T & Required<Pick<Tree, 'execute'>> {
   const identity = opts?.identity;
-  const delegateCtx = identity?.userId ? { userId: identity.userId } : undefined;
 
   async function delegateRun(target: Tree, path: string, action: string, data: unknown, execOpts: ExecOpts | undefined): Promise<unknown> {
     // Local check is ONLY path visibility (R) — same FORBIDDEN→NOT_FOUND mask
@@ -621,7 +620,7 @@ export function withExecute<T extends Tree>(inner: T, opts?: WithExecuteOpts): T
   const self: T & Required<Pick<Tree, 'execute'>> = {
     ...inner,
     async execute(path, action, data, execOpts, _ctx) {
-      const target = opts?.delegate ? await opts.delegate(path, delegateCtx) : undefined;
+      const target = opts?.delegate ? await opts.delegate(path) : undefined;
       if (!target) {
         // Local authority — full executor semantics (opId dedupe inside).
         return executeAction(self, path, execOpts?.type, execOpts?.key, action, data, { ...identity, opId: execOpts?.opId });

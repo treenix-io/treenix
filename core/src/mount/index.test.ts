@@ -1,4 +1,4 @@
-import { createNode, ref, register } from '#core';
+import { createNode, isComponent, ref, register } from '#core';
 import { OpError } from '#errors';
 import { clearRegistry } from '#testing';
 import { createMemoryTree, paginate, type Tree } from '#tree';
@@ -235,53 +235,61 @@ describe('Mounts', () => {
     assert.equal(callCount, 1);
   });
 
-  // TODO: ref-mount where ref-target $type IS the adapter — needs rethink after MountAdapter<T> refactor
-  it('resolves mount via $ref to config node', async () => {
+  // Mount refs were an ACL bypass (F4): the ref target was read from the raw
+  // store, so a W-holder could borrow an admin's mount config. Config is inline.
+  it('never follows a ref-typed mount component', async () => {
     register('test.ref.store', 'mount', () => usersStore);
-    await rootStore.set({
-      ...createNode('/mnt/users', 'mount-point'),
-      '#mount': { $type: 'test.ref.store' },
-    });
-    await rootStore.set(
-      createNode('/users', 'collection', {}, {
-        mount: ref('/mnt/users'),
-      }),
-    );
-    await usersStore.set(createNode('/users/alice', 'user'));
+    await rootStore.set(createNode('/mnt/users', 'mount-point', {}, { mount: { $type: 'test.ref.store' } }));
+    await rootStore.set(createNode('/users', 'collection', {}, { mount: ref('/mnt/users') }));
 
-    const ms = withMounts(rootStore);
-    const alice = await ms.get('/users/alice');
-    assert.equal(alice?.$path, '/users/alice');
-    assert.equal(alice?.$type, 't.user');
-  });
-
-  it('ref mount delegates set and getChildren', async () => {
-    register('test.ref.store', 'mount', () => usersStore);
-    await rootStore.set({
-      ...createNode('/mnt/users', 'mount-point'),
-      '#mount': { $type: 'test.ref.store' },
-    });
-    await rootStore.set(
-      createNode('/users', 'collection', {}, {
-        mount: ref('/mnt/users'),
-      }),
-    );
-
-    const ms = withMounts(rootStore);
-    await ms.set(createNode('/users/bob', 'user'));
-    const children = await ms.getChildren('/users');
-    assert.equal(children.items.length, 1);
-    assert.equal(children.items[0].$path, '/users/bob');
-  });
-
-  it('throws on broken $ref', async () => {
-    await rootStore.set(
-      createNode('/users', 'collection', {}, {
-        mount: ref('/mnt/nonexistent'),
-      }),
-    );
     const ms = withMounts(rootStore);
     await assert.rejects(() => ms.get('/users/alice'));
+  });
+
+  // Adapters are caller-blind: one instance per mount point, whoever asks.
+  it('one adapter instance per mount point across identities', async () => {
+    let created = 0;
+    register('test.mount.counting', 'mount', () => { created++; return usersStore; });
+    await rootStore.set(createNode('/users', 'collection', {}, { mount: { $type: 'test.mount.counting' } }));
+
+    const ms = withMounts(rootStore);
+    await ms.get('/users/alice', { userId: 'alice' });
+    await ms.get('/users/alice', { userId: 'bob' });
+    await ms.resolveActionTree('/users/alice');
+    assert.equal(created, 1);
+  });
+
+  it('concurrent first access shares one adapter instance', async () => {
+    let created = 0;
+    register('test.mount.counting', 'mount', async () => { created++; return createMemoryTree(); });
+    await rootStore.set(createNode('/proc', 'dir', {}, { mount: { $type: 'test.mount.counting' } }));
+
+    const ms = withMounts(rootStore);
+    await Promise.all([ms.set(createNode('/proc/a', 'item')), ms.set(createNode('/proc/b', 'item'))]);
+    assert.equal(created, 1);
+    assert.equal((await ms.getChildren('/proc')).items.length, 2);
+  });
+
+  it('a config rewrite takes effect even when a read re-resolves mid-write', async () => {
+    register('test.mount.tag', 'mount', (mount) => {
+      const tag = isComponent(mount) ? mount.tag : undefined;
+      return { ...createMemoryTree(), async get(p: string) { return createNode(p, 'probe', { tag }); } };
+    });
+    await rootStore.set(createNode('/m', 'dir', {}, { mount: { $type: 'test.mount.tag', tag: 'v1' } }));
+
+    let entered!: () => void;
+    let release!: () => void;
+    const inWrite = new Promise<void>((r) => { entered = r; });
+    const gate = new Promise<void>((r) => { release = r; });
+    const slow: Tree = { ...rootStore, async set(node, ctx) { entered(); await gate; return rootStore.set(node, ctx); } };
+
+    const ms = withMounts(slow);
+    const write = ms.set(createNode('/m', 'dir', {}, { mount: { $type: 'test.mount.tag', tag: 'v2' } }));
+    await inWrite;
+    assert.equal((await ms.get('/m/x'))?.tag, 'v1', 'uncommitted config is not visible');
+    release();
+    await write;
+    assert.equal((await ms.get('/m/x'))?.tag, 'v2');
   });
 
   // ── Root mount ──
@@ -579,33 +587,6 @@ describe('Mounts', () => {
     assert.equal((await ms.get('/special/item'))?.$type, 't.new');
   });
 
-  it('invalidates $ref mount cache when ref target changes', async () => {
-    const storeA = createMemoryTree();
-    const storeB = createMemoryTree();
-    register('test.mount.a', 'mount', () => storeA);
-    register('test.mount.b', 'mount', () => storeB);
-
-    await rootStore.set(
-      createNode('/configs/users', 'mount-point', {}, {
-        mount: { $type: 'test.mount.a' },
-      }),
-    );
-    await rootStore.set(
-      createNode('/users', 'collection', {}, {
-        mount: ref('/configs/users'),
-      }),
-    );
-    await storeA.set(createNode('/users/item', 'old'));
-    await storeB.set(createNode('/users/item', 'new'));
-
-    const ms = withMounts(rootStore);
-    assert.equal((await ms.get('/users/item'))?.$type, 't.old');
-
-    await ms.patch('/configs/users', [['r', '#mount', { $type: 'test.mount.b' }]]);
-
-    assert.equal((await ms.get('/users/item'))?.$type, 't.new');
-  });
-
   it('throws on mount component with unknown adapter type', async () => {
     await rootStore.set(
       createNode('/bad', 'mount-point', {}, {
@@ -614,8 +595,9 @@ describe('Mounts', () => {
     );
 
     const ms = withMounts(rootStore);
-    await assert.rejects(() => ms.get('/bad/item'), /No adapter for type "test.mount.missing"/);
-    await assert.rejects(() => ms.getChildren('/bad'), /No adapter for type "test.mount.missing"/);
+    const badRequest = (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST';
+    await assert.rejects(() => ms.get('/bad/item'), badRequest);
+    await assert.rejects(() => ms.getChildren('/bad'), badRequest);
   });
 });
 
@@ -904,48 +886,36 @@ describe('FS mount repath (dedicated)', () => {
     assert.deepEqual(paths, ['/data/files/a', '/data/files/b']);
   });
 
-  // Lifecycle: external-watch consumers MUST be aborted whenever their
-  // mount cache entry leaves the cache — by explicit invalidation OR by
-  // FIFO eviction when cacheMax fills up. The bounded-cache onEvict path
-  // is what makes FIFO-safe; before that, FIFO drops silently leaked
-  // change-stream cursors + timers + onSelfWrite subscriptions.
+  // Lifecycle: external-watch consumers MUST be aborted whenever their mount
+  // leaves the cache — invalidation, or an adapter that fails after starting
+  // one (leaked change-stream cursors, timers, onSelfWrite subscriptions).
 
   describe('external-watch lifecycle', () => {
-    it('FIFO eviction aborts the external-watch consumer (no leak)', async () => {
+    it('an adapter failing after starting a watch releases it and retries next access', async () => {
       const root = createMemoryTree();
-      await root.set(createNode('/m1', 'mount-point', {}, {
-        mount: { $type: 'test.mount.lifecycle' },
-      }));
-      await root.set(createNode('/m2', 'mount-point', {}, {
-        mount: { $type: 'test.mount.lifecycle' },
-      }));
+      await root.set(createNode('/m', 'mount-point', {}, { mount: { $type: 'test.mount.flaky' } }));
 
       const aborts: string[] = [];
-      register('test.mount.lifecycle', 'mount', (_m, ctx) => {
+      let attempts = 0;
+      register('test.mount.flaky', 'mount', (_m, ctx) => {
         const fake: Tree = createMemoryTree();
-        if (ctx.startExternalWatch) {
-          ctx.startExternalWatch(fake, { pathPrefix: ctx.path, source: `at:${ctx.path}` });
-        }
+        ctx.startExternalWatch!(fake, { pathPrefix: ctx.path, source: `try${++attempts}` });
+        if (attempts === 1) throw new Error('boom');
         return fake;
       });
 
       const ms = withMounts(root, {
-        cacheMax: 1,
         startExternalWatch: (_tree, opts) => () => aborts.push(opts.source),
       });
 
-      // getChildren on the mount path runs resolveContentTree which caches
-      // the resolved mount entry (and starts the external watch).
-      await ms.getChildren('/m1');
-      assert.equal(aborts.length, 0);
-
-      // Resolving /m2 forces FIFO eviction of /m1 — onEvict on bounded-cache
-      // fires the abort attached to /m1's entry.
-      await ms.getChildren('/m2');
-      assert.deepEqual(aborts, ['at:/m1']);
+      await assert.rejects(() => ms.getChildren('/m'));
+      assert.deepEqual(aborts, ['try1']);
+      await ms.getChildren('/m');
+      assert.equal(attempts, 2);
+      assert.deepEqual(aborts, ['try1']);
     });
 
-    it('mount config rewrite invalidates cache → onEvict aborts external-watch', async () => {
+    it('mount config rewrite invalidates cache → aborts external-watch', async () => {
       const root = createMemoryTree();
       await root.set(createNode('/m', 'mount-point', {}, {
         mount: { $type: 'test.mount.invalidate' },
@@ -968,8 +938,8 @@ describe('FS mount repath (dedicated)', () => {
       await ms.getChildren('/m');
       assert.equal(aborts.length, 0);
 
-      // Rewrite the mount node itself — the cache key '/m' is invalidated
-      // (write touches the mount path), onEvict fires the abort.
+      // Rewrite the mount node itself — the '/m' entry is invalidated
+      // (write touches the mount path) and its watch aborted.
       await ms.set(createNode('/m', 'mount-point', {}, {
         mount: { $type: 'test.mount.invalidate' },
       }));
