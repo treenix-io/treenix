@@ -59,10 +59,27 @@ export function wrapAbortGuardTree(tree: Tree, signal: AbortSignal): Tree {
   };
 }
 
+// Deep: nodes handed to handlers are the node cache's live objects, so a
+// shallow guard let `ctx.node.box.list.push(x)` rewrite cached data that other
+// readers then saw, unpersisted. One proxy per object keeps identity stable.
+const proxies = new WeakMap<object, object>();
+
 export function readonlyProxy<T extends object>(target: T): T {
-  return new Proxy(target, {
+  const hit = proxies.get(target);
+  if (hit) return hit as T;
+  const proxy = new Proxy(target, {
+    get: (t, prop, receiver) => {
+      const v: unknown = Reflect.get(t, prop, receiver);
+      if (v === null || typeof v !== 'object') return v;
+      // Proxy invariant: a non-configurable, non-writable slot (frozen
+      // parent) must return its exact value — it is immutable anyway.
+      const d = Reflect.getOwnPropertyDescriptor(t, prop);
+      return d && !d.configurable && !d.writable ? v : readonlyProxy(v);
+    },
     set: (_t, prop) => deny(`assign ${String(prop)}`),
     deleteProperty: (_t, prop) => deny(`delete ${String(prop)}`),
     defineProperty: (_t, prop) => deny(`defineProperty ${String(prop)}`),
   });
+  proxies.set(target, proxy);
+  return proxy;
 }
