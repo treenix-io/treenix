@@ -13,12 +13,6 @@ export type PatchOp =
   | readonly ['a', string, unknown]     // add (field or array push via path.-)
   | readonly ['d', string]              // delete
 
-export type Rfc6902Op =
-  | { op: 'test'; path: string; value: unknown }
-  | { op: 'replace'; path: string; value: unknown }
-  | { op: 'add'; path: string; value: unknown }
-  | { op: 'remove'; path: string }
-
 export class PatchTestError extends Error {
   code = 'TEST_FAILED' as const;
   constructor(public field: string, public expected: unknown, public actual: unknown) {
@@ -105,18 +99,36 @@ function getByPath(obj: any, path: string): unknown {
   return cur;
 }
 
+// Arrays take integer indices within bounds: an unbounded one made a sparse
+// array (['a','list.99999999',1] → length 1e8, ~500 MB per serialization and
+// one validation error object per hole).
+function arrayIndex(arr: unknown[], key: string, max: number, path: string): number {
+  const idx = Number(key);
+  if (!Number.isInteger(idx) || idx < 0 || idx > max) {
+    throw new OpError('BAD_REQUEST', `patch: array index "${key}" out of range (length ${arr.length}) in ${path}`);
+  }
+  return idx;
+}
+
 function setByPath(obj: any, path: string, value: unknown, strict = false): void {
   const parts = path.split('.');
   let cur = obj;
   for (let i = 0; i < parts.length - 1; i++) {
-    const next = cur[parts[i]];
+    const key = Array.isArray(cur) ? arrayIndex(cur, parts[i], cur.length - 1, path) : parts[i];
+    const next = cur[key];
     if (next == null || typeof next !== 'object') {
-      if (strict) throw new OpError('NOT_FOUND', `replace: missing parent at "${parts.slice(0, i + 1).join('.')}" in ${path}`);
-      cur[parts[i]] = {};
+      const at = parts.slice(0, i + 1).join('.');
+      if (strict) throw new OpError('NOT_FOUND', `replace: missing parent at "${at}" in ${path}`);
+      // Creating a missing parent is add's job; clobbering a value is not.
+      if (next != null) throw new OpError('BAD_REQUEST', `add: "${at}" is not an object in ${path}`);
+      cur[key] = {};
     }
-    cur = cur[parts[i]];
+    cur = cur[key];
   }
-  cur[parts[parts.length - 1]] = value;
+  const last = parts[parts.length - 1];
+  // replace targets an existing element; add may also append at length.
+  if (Array.isArray(cur)) cur[arrayIndex(cur, last, strict ? cur.length - 1 : cur.length, path)] = value;
+  else cur[last] = value;
 }
 
 function deleteByPath(obj: any, path: string): void {
@@ -139,56 +151,9 @@ function deleteByPath(obj: any, path: string): void {
   delete cur[key];
 }
 
-// ── RFC 6902 conversion ──
-
-function dotToSlash(p: string): string { return '/' + p.replace(/\./g, '/'); }
-function slashToDot(p: string): string { return p.slice(1).replace(/\//g, '.'); }
-
-export function toRfc6902(ops: readonly PatchOp[]): Rfc6902Op[] {
-  return ops.map(op => {
-    const path = dotToSlash(op[1]);
-    switch (op[0]) {
-      case 't': return { op: 'test', path, value: op[2] };
-      case 'r': return { op: 'replace', path, value: op[2] };
-      case 'a': return { op: 'add', path, value: op[2] };
-      case 'd': return { op: 'remove', path };
-    }
-  });
-}
-
-export function fromRfc6902(ops: readonly Rfc6902Op[]): PatchOp[] {
-  return ops.map(op => {
-    const path = slashToDot(op.path);
-    switch (op.op) {
-      case 'test': return ['t', path, op.value] as const;
-      case 'replace': return ['r', path, op.value] as const;
-      case 'add': return ['a', path, op.value] as const;
-      case 'remove': return ['d', path] as const;
-    }
-  });
-}
-
-// ── Default patch: get → apply → set (fallback for adapters without native patch) ──
-
-export async function defaultPatch(
-  get: (path: string, ctx?: unknown) => Promise<NodeData | undefined>,
-  set: (node: NodeData, ctx?: unknown) => Promise<CommitReceipt>,
-  path: string,
-  ops: readonly PatchOp[],
-  ctx?: unknown,
-): Promise<CommitReceipt> {
-  const node = await get(path, ctx);
-  if (!node) throw new OpError('NOT_FOUND', `Node not found: ${path}`);
-  const copy = structuredClone(node);
-  applyOps(copy, ops);
-  // Test-only: nothing written — report the guarded member (copy is the
-  // ops-validated clone, content-equal to stored; exclusive by construction).
-  if (!hasMutationOps(ops)) return { changes: [{ path, before: copy, after: copy }] };
-  return set(copy, ctx);
-}
-
-/** Patch via get→apply→set on the combinator itself.
- *  Ensures patch goes through the same set() pipeline (validation, refs, cache, etc.) */
+/** Patch via get→apply→set on the tree itself — adapters without a native
+ *  patch, and combinators that must route patch through their own set()
+ *  pipeline (validation, refs, cache). */
 export async function patchViaSet(
   self: { get(path: string, ctx?: unknown): Promise<NodeData | undefined>; set(node: NodeData, ctx?: unknown): Promise<CommitReceipt> },
   path: string,
@@ -199,6 +164,8 @@ export async function patchViaSet(
   if (!node) throw new OpError('NOT_FOUND', `Node not found: ${path}`);
   const copy = structuredClone(node);
   applyOps(copy, ops);
+  // Test-only: nothing written — report the guarded member (copy is the
+  // ops-validated clone, content-equal to stored; exclusive by construction).
   if (!hasMutationOps(ops)) return { changes: [{ path, before: copy, after: copy }] };
   return self.set(copy, ctx);
 }

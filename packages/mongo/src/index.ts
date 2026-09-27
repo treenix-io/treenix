@@ -19,7 +19,7 @@ import {
   subscriptionToAsyncIterable,
   toStorageKeys,
 } from '@treenx/core/tree';
-import { defaultPatch } from '@treenx/core/tree/patch';
+import { patchViaSet } from '@treenx/core/tree/patch';
 import { ensureMigratedMongo, type NsMigratePolicy } from './migrate';
 
 const toStorage = (node: NodeData) => toStorageKeys(node);
@@ -119,7 +119,7 @@ export async function createMongoTree(
 
     // Server-internal streaming for read-runtime (executeList). Honors `after`
     // via $gt on the same _path index used by getChildren — no extra cost.
-    // `signal` closes the cursor; `limitHint` caps server-side fetch.
+    // `signal` closes the cursor; `limitHint` sizes server-side batches.
     async *scanChildren(parent, opts) {
       const depth = opts?.depth ?? 1;
       const pattern = buildPattern(parent, depth);
@@ -130,7 +130,10 @@ export async function createMongoTree(
       if (opts?.signal?.aborted) throw opts.signal.reason;
 
       const cursor = col.find(filter).sort({ _path: 1 });
-      if (opts?.limitHint) cursor.limit(opts.limitHint);
+      // limitHint is a batching hint, NOT a cap (ScanChildrenOpts): the read
+      // runtime drops ACL/query-filtered rows after us, so a cap lost every
+      // row past the first limit+1 raw ones — no nextCursor, silent gaps.
+      if (opts?.limitHint) cursor.batchSize(Math.min(opts.limitHint, 1000));
 
       const onAbort = () => { cursor.close().catch(() => {}); };
       opts?.signal?.addEventListener('abort', onAbort);
@@ -157,7 +160,7 @@ export async function createMongoTree(
 
     // TODO: native Mongo $set — for now, fallback via get+apply+set
     async patch(path, ops, ctx) {
-      return defaultPatch(tree.get, tree.set, path, ops, ctx);
+      return patchViaSet(tree, path, ops, ctx);
     },
 
     /** Observe out-of-band Mongo writes via change streams. Opt-in via

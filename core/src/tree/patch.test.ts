@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { OpError } from '#errors';
 import { createMemoryTree } from './index';
-import { applyOps, fromRfc6902, type PatchOp, PatchTestError, toRfc6902 } from './patch';
+import { applyOps, type PatchOp, PatchTestError } from './patch';
 
 describe('applyOps', () => {
   it('replace shallow field', () => {
@@ -248,24 +248,26 @@ describe('prototype pollution guard (assertSafePatchPath)', () => {
   });
 });
 
-describe('RFC 6902 conversion', () => {
-  it('toRfc6902 round-trips', () => {
-    const ops: PatchOp[] = [
-      ['t', '$rev', 5],
-      ['r', 'mesh.width', 20],
-      ['a', 'tags.-', 'x'],
-      ['d', 'obsolete'],
-    ];
-    const rfc = toRfc6902(ops);
-    assert.deepEqual(rfc, [
-      { op: 'test', path: '/$rev', value: 5 },
-      { op: 'replace', path: '/mesh/width', value: 20 },
-      { op: 'add', path: '/tags/-', value: 'x' },
-      { op: 'remove', path: '/obsolete' },
-    ]);
+describe('array indices and parents', () => {
+  const badRequest = (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST';
 
-    const back = fromRfc6902(rfc);
-    assert.deepEqual(back, ops);
+  // A single op used to allocate a 1e8-length sparse array on the writer's node.
+  it('rejects out-of-range and non-integer array indices', () => {
+    for (const op of [
+      ['a', 'list.99999999', 1], ['r', 'list.2', 1], ['a', 'list.-1', 1], ['a', 'list.x', 1], ['a', 'list.9.name', 1],
+    ] as PatchOp[]) {
+      assert.throws(() => applyOps({ list: ['a', 'b'] }, [op]), badRequest, JSON.stringify(op));
+    }
+  });
+
+  it('add appends at length, replace targets an existing element', () => {
+    const doc = { list: ['a', 'b'] };
+    applyOps(doc, [['a', 'list.2', 'c'], ['r', 'list.0', 'z']]);
+    assert.deepEqual(doc.list, ['z', 'b', 'c']);
+  });
+
+  it('add never clobbers a primitive parent', () => {
+    assert.throws(() => applyOps({ title: 'keep' }, [['a', 'title.x', 1]]), badRequest);
   });
 });
 
