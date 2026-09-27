@@ -14,8 +14,10 @@ export type NotifyScope = 'exact' | 'children' | 'subtree';
 
 export type PathNotifier<E> = {
   register(path: string, scope: NotifyScope, consumer: (event: E) => void): () => void;
-  /** Fan an event routed at `path` to every matching consumer. Consumer errors
-   *  propagate to the emitter — parity with the dispatch this replaced. */
+  /** Fan an event routed at `path` to every matching consumer. A consumer
+   *  error is logged and isolated: notify runs AFTER the commit, so letting
+   *  it propagate reported a committed write as failed (callers retried
+   *  non-idempotent ops) and starved every later consumer of the event. */
   notify(path: string, event: E): void;
 };
 
@@ -42,20 +44,21 @@ export function createPathNotifier<E>(): PathNotifier<E> {
     },
 
     notify(path, event) {
-      const exact = byScope.exact.get(path);
-      if (exact) for (const fn of exact) fn(event);
+      const deliver = (set: Set<Consumer> | undefined) => {
+        if (!set) return;
+        for (const fn of set) {
+          try { fn(event); }
+          catch (err) { console.error(`[notifier] consumer failed on ${path}:`, err); }
+        }
+      };
+
+      deliver(byScope.exact.get(path));
 
       const parent = dirname(path);
-      if (parent !== null) {
-        const children = byScope.children.get(parent);
-        if (children) for (const fn of children) fn(event);
-      }
+      if (parent !== null) deliver(byScope.children.get(parent));
 
       // subtree: ancestor walk (self first) — O(depth), not O(#registrations).
-      for (let p: string | null = path; p !== null; p = dirname(p)) {
-        const subtree = byScope.subtree.get(p);
-        if (subtree) for (const fn of subtree) fn(event);
-      }
+      for (let p: string | null = path; p !== null; p = dirname(p)) deliver(byScope.subtree.get(p));
     },
   };
 }

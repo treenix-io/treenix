@@ -44,6 +44,27 @@ describe('Subscriptions', () => {
     assert.ok(ev.patches.some(p => p[1] === '$rev' && p[2] === 2), 'diff includes the $rev bump op');
   });
 
+  // Notify runs after the commit: a failing consumer must neither report the
+  // committed write as failed nor starve the other consumers.
+  it('a throwing consumer is isolated: the write resolves, others still get the event', async () => {
+    const seen: NodeEvent[] = [];
+    const { tree, cdc } = withSubs(createMemoryTree(), e => seen.push(e));
+    const other: NodeEvent[] = [];
+    cdc.subscribe('/bot', () => { throw new Error('buggy service'); }, { children: true });
+    cdc.subscribe('/bot', (e) => other.push(e), { children: true });
+
+    const savedError = console.error;
+    console.error = () => {};
+    try {
+      await tree.set(createNode('/bot/x', 'page'));
+    } finally {
+      console.error = savedError;
+    }
+    assert.ok(await tree.get('/bot/x'), 'committed');
+    assert.equal(other.length, 1);
+    assert.equal(seen.length, 1, 'the user lane still gets the event');
+  });
+
   it('emits on set (children)', async () => {
     const { tree, cdc } = withSubs(createMemoryTree());
     const events: NodeEvent[] = [];
