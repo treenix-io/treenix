@@ -6,9 +6,9 @@
 // non-mount paths the source IS the path; mountDeps stays empty since no
 // mount/config write can invalidate this read.
 
-import { getComponentByName, isComponent } from '#core';
 import type { Tree } from '#tree';
 import type { ReadPlan } from '#tree/read-runtime';
+import { activeMount } from './index';
 
 export type ResolvedReadPlan = {
   plan: ReadPlan;
@@ -29,7 +29,7 @@ export async function resolveReadPlan(
   const node = await rawStore.get(path, ctx);
   mountDeps.add(path);
 
-  const mountComp = node ? getComponentByName(node, 'mount') : undefined;
+  const mountComp = node ? activeMount(node) : undefined;
   if (mountComp && mountComp.$type === 't.mount.query') {
     const mount = mountComp as { $type: string; source: string; match: Record<string, unknown> };
     if (typeof mount.source !== 'string' || !mount.source) {

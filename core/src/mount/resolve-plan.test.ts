@@ -67,6 +67,16 @@ describe('resolveReadPlan', () => {
     );
   });
 
+  it('disabled query mount plans the node own children (same rule as withMounts)', async () => {
+    await tree.set({
+      $path: '/orders/incoming',
+      $type: 'folder',
+      '#mount': { $type: 't.mount.query', source: '/orders', match: {}, disabled: true },
+    });
+    const { plan } = await resolveReadPlan(tree, '/orders/incoming');
+    assert.deepEqual(plan, { source: '/orders/incoming' });
+  });
+
   it('non-query mount type ignored (e.g. t.mount.fs)', async () => {
     await tree.set({
       $path: '/fsmount',

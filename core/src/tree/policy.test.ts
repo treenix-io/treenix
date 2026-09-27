@@ -877,6 +877,26 @@ describe('policy: trash GC is mount-inert (core-anz4.8)', () => {
     assert.equal(spy.getChildren, 0, 'GC never enumerated the external adapter');
     assert.equal(spy.remove, 0, 'GC never deleted external adapter data');
   });
+
+  // The ACL read path plans query mounts itself (resolveReadPlan). A trashed
+  // query column must list its own copied subtree — never the live source
+  // view, or GC recurses into LIVE nodes and hard-deletes them.
+  it('GC through the ACL tree never follows a trashed query mount into live data', async () => {
+    const bootstrap = createMemoryTree();
+    const root = createNode('/', 'root', {});
+    root.$acl = [{ g: 'system', p: R | W | A | S }];
+    await bootstrap.set(root);
+    const { tree, systemTree } = createPipeline(bootstrap);
+
+    await tree.set(createNode('/board/data/t1', 'task', { status: 'todo' }));
+    await tree.set(createNode('/board/todo', 'dir', {}, {
+      mount: { $type: 't.mount.query', source: '/board/data', match: { status: 'todo' } },
+    }));
+    await tree.remove('/board/todo');
+
+    assert.equal(await sweepTrash(systemTree, -1), 1);
+    assert.ok(await systemTree.get('/board/data/t1'), 'live task survives GC');
+  });
 });
 
 describe('policy: trash through the pipeline (e2e)', () => {

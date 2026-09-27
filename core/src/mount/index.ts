@@ -17,6 +17,16 @@ function isTrashInert(path: string): boolean {
   return path === TRASH_ROOT || path.startsWith(TRASH_ROOT + '/');
 }
 
+/** The node's mount config when ACTIVE: present, not disabled, not trash-inert.
+ *  The one activation rule for withMounts and the ACL read planner
+ *  (resolve-plan.ts) — two diverging copies let a disabled or trashed query
+ *  mount still drive reads, and trash GC hard-deleted the live view. */
+export function activeMount(node: NodeData): ComponentData | undefined {
+  if (isTrashInert(node.$path)) return undefined;
+  const mount = getComponentByName(node, 'mount');
+  return mount && !mount.disabled ? mount : undefined;
+}
+
 // ── Adapter contract ──
 // Lives here (not in mount-adapters.ts) so that mount.ts and adapters share
 // one definition. mount-adapters.ts handles registrations only.
@@ -221,9 +231,8 @@ export function withMounts(rootStore: Tree, opts?: WithMountsOpts): MountableTre
 
   /** Check if node's mount component resolves to a known adapter */
   function isMountPoint(node: NodeData): boolean {
-    const mount = getComponentByName(node, 'mount');
+    const mount = activeMount(node);
     if (!mount) return false;
-    if (mount.disabled) return false;
     // Refs need resolution — treat as mount-point optimistically
     if (isRef(mount)) return true;
     const adapter = resolve(mount.$type, 'mount');
@@ -301,16 +310,15 @@ export function withMounts(rootStore: Tree, opts?: WithMountsOpts): MountableTre
   }
 
   async function resolveNodeTree(path: string, ctx?: unknown): Promise<Tree> {
-    // Trash is inert: a mount component under /sys/trash is never resolved, so
-    // the node (and its subtree) is plain rootStore data (core-anz4.8).
-    if (isTrashInert(path)) return rootStore;
-
     // Walk strict ancestors only. The target node itself belongs to the tree
     // that contains its config, even when the target is a mount point.
     const checks = strictAncestorPaths(path);
     let nodeStore = rootStore;
 
     for (const check of checks) {
+      // Mounts at/under /sys/trash are inert (core-anz4.8) — their copied
+      // subtree is plain data of the store that owns /sys/trash.
+      if (isTrashInert(check)) break;
       const cacheKey = mountCacheKey(check, ctx);
       const cached = cache.get(cacheKey);
       if (cached) {

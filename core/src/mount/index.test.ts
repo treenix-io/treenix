@@ -342,6 +342,32 @@ describe('Mounts', () => {
     assert.equal((await dataStore.get('/new'))?.$type, 't.item');
   });
 
+  // Only mounts AT or UNDER /sys/trash are inert (core-anz4.8). Ancestors above
+  // it resolve as usual: a mounted root owns the trash, or soft-deleted nodes
+  // land in the bootstrap memory tree and die on restart.
+  it('root mount: trash lands in the mounted root, not in bootstrap', async () => {
+    const dataStore = createMemoryTree();
+    register('test.mount.data', 'mount', () => dataStore);
+    await rootStore.set(createNode('/', 'root', {}, { mount: { $type: 'test.mount.data' } }));
+    const ms = withMounts(rootStore);
+
+    await ms.set(createNode('/sys/trash/e1', 'dir'));
+    assert.ok(await dataStore.get('/sys/trash/e1'));
+    assert.equal(await rootStore.get('/sys/trash/e1'), undefined);
+    assert.equal((await ms.getChildren('/sys/trash')).items.length, 1);
+  });
+
+  it('a mount point inside trash stays inert', async () => {
+    let resolved = 0;
+    register('test.mount.spy', 'mount', () => { resolved++; return createMemoryTree(); });
+    await rootStore.set(createNode('/sys/trash/e1/ext', 'dir', {}, { mount: { $type: 'test.mount.spy' } }));
+    const ms = withMounts(rootStore);
+
+    await ms.get('/sys/trash/e1/ext/child');
+    await ms.getChildren('/sys/trash/e1/ext');
+    assert.equal(resolved, 0);
+  });
+
   // ── Nested mounts ──
 
   it('nested mount: root + child mount', async () => {
