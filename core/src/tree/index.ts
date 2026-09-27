@@ -4,9 +4,10 @@
 
 import { comparePaths, isMoved, isRef, type NodeData, type Ref } from '#core';
 import { OpError } from '#errors';
-import sift from 'sift';
 import { scanFromCollected } from './fs-common';
 import { applyOps, type CommitChange, type CommitReceipt, hasMutationOps, type PatchOp, PatchTestError } from './patch';
+// Cycle-safe: query.ts reads index exports only inside functions.
+import { createSiftTest } from './query';
 import type { TreeEvent, TreeWatchOpts, TreeWatchScope } from './watch';
 
 // ── Pagination ──
@@ -632,8 +633,8 @@ export function createMemoryTree(): TreeSource {
       const depth = opts?.depth ?? 1;
       let result = collectChildren(node, parent, depth);
       if (opts?.query) {
-         const test = sift(opts.query);
-         result = result.filter(n => test(mapNodeForSift(n)));
+        const test = createSiftTest(opts.query);
+        result = result.filter(n => test(mapNodeForSift(n)));
       }
       return paginate(result, opts);
     },
@@ -732,7 +733,7 @@ export function createMemoryTree(): TreeSource {
   };
 }
 
-export { type CommitChange, type CommitReceipt, type PatchOp, type Rfc6902Op, PatchTestError, applyOps, assertSafePatchPath, toRfc6902, fromRfc6902, defaultPatch, hasMutationOps, patchViaSet } from './patch';
+export { type CommitChange, type CommitReceipt, type PatchOp, PatchTestError, applyOps, assertSafePatchPath, hasMutationOps, patchViaSet } from './patch';
 // Curated door for trusted in-process relocation (core-anz4.2): mods that
 // legitimately carry $id to a new path (branch merge) import it here — the
 // policy module itself stays private.

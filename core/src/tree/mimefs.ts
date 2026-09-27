@@ -11,8 +11,8 @@ import { scanFromCollected } from './fs-common';
 import { assertPathSafe } from './path-safety';
 import { mapNodeForSift, paginate, type TreeSource } from './index';
 import './json-codec'; // register JSON decode handler
-import { defaultPatch } from './patch';
-import sift from 'sift';
+import { patchViaSet } from './patch';
+import { createSiftTest } from './query';
 
 const MIME: Record<string, string> = {
   '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
@@ -130,7 +130,7 @@ export async function createRawFsTree(rootDir: string, mountPath: string = ''): 
       const depth = opts?.depth ?? 1;
       let filtered = await collectDescendants(parent, depth);
       if (opts?.query) {
-        const test = sift(opts.query);
+        const test = createSiftTest(opts.query);
         filtered = filtered.filter(n => test(mapNodeForSift(n)));
       }
       return paginate(filtered, opts);
@@ -175,7 +175,7 @@ export async function createRawFsTree(rootDir: string, mountPath: string = ''): 
     },
 
     async patch(path, ops, ctx) {
-      return defaultPatch(tree.get, tree.set, path, ops, ctx);
+      return patchViaSet(tree, path, ops, ctx);
     },
   };
 

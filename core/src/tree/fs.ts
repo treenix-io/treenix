@@ -9,13 +9,20 @@ import { dirname as treeDirname } from '#core/path';
 import { OpError } from '#errors';
 import { mkdir, readdir, readFile, realpath, rmdir, unlink } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
-import sift from 'sift';
 import { atomicWrite } from './fs-atomic';
 import { scanFromCollected } from './fs-common';
 import { ensureMigrated } from './migrate-component-namespace';
 import { assertPathSafe } from './path-safety';
 import { applyPatchManyEntry, assertPatchManyBatch, assertSetEntryOcc, isSetEntry, mapNodeForSift, paginate, type TreeSource } from './index';
-import { type CommitChange, type CommitReceipt, defaultPatch, hasMutationOps } from './patch';
+import { type CommitChange, type CommitReceipt, hasMutationOps, patchViaSet } from './patch';
+import { createSiftTest } from './query';
+
+// A dir-form node lives at <path>/$.json, so a '$' path segment aliases that
+// file: set('/a/$') overwrote node /a, and set('/a/$/c') moved /a's file away —
+// a writer on /a's subtree could strip /a's $acl.
+function assertFsPath(path: string): void {
+  if (path.split('/').includes('$')) throw new OpError('BAD_REQUEST', `fs: path segment "$" is reserved: ${path}`);
+}
 
 export async function createFsTree(rootDir: string): Promise<TreeSource> {
   await mkdir(resolve(rootDir), { recursive: true });
@@ -44,6 +51,7 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
 
   // Read node from whichever form exists: dir (path/$.json) or leaf (path.json)
   async function readNode(path: string): Promise<NodeData | undefined> {
+    assertFsPath(path);
     const dirFile = resolve(join(rootDir, path, '$.json'));
     await assertPathSafe(rootDir, dirFile);
     try {
@@ -152,6 +160,7 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
 
   // Collect children of a tree path up to given depth by walking only the relevant FS subtree
   async function collectChildren(parent: string, depth: number): Promise<NodeData[]> {
+    assertFsPath(parent);
     const results: NodeData[] = [];
     const deep = depth < 0; // -1 (any negative) = all descendants
     const fsDir = resolve(join(rootDir, parent));
@@ -196,6 +205,7 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
   // path and one page-cached read on blind upserts.
   async function writeNode(node: NodeData): Promise<CommitChange> {
     const path = node.$path;
+    assertFsPath(path);
 
     await promoteAncestors(path);
 
@@ -258,7 +268,7 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
       const depth = opts?.depth ?? 1;
       let filtered = await collectChildren(parent, depth);
       if (opts?.query) {
-        const test = sift(opts.query);
+        const test = createSiftTest(opts.query);
         filtered = filtered.filter(n => test(mapNodeForSift(n)));
       }
       return paginate(filtered, opts);
@@ -310,7 +320,7 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
     },
 
     async patch(path, ops, ctx) {
-      return defaultPatch(readNode, (n) => tree.set(n, ctx), path, ops, ctx);
+      return patchViaSet(tree, path, ops, ctx);
     },
 
     // ALL-OR-NOTHING under the global write chain (core-gk8.15): phase 1 reads
@@ -343,7 +353,7 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
         }
 
         // writeNode re-checks OCC against each copy's own (unbumped) $rev and
-        // bumps it — same semantics as single patch (defaultPatch → set).
+        // bumps it — same semantics as single patch (patchViaSet → set).
         const changes: CommitChange[] = [];
         for (const n of staged) changes.push(await writeNode(n));
         return { changes: [...changes, ...guarded] };

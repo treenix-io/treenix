@@ -24,6 +24,34 @@ describe('FsStore', () => {
     return stat(join(dir, path)).then(() => true, () => false);
   }
 
+  // '<path>/$.json' is the dir-form file: a '$' segment aliased it — /a/$
+  // overwrote /a, /a/$/c moved /a's file (and its $acl) away.
+  it('refuses a "$" path segment on every verb, leaving the aliased node intact', async () => {
+    const tree = await setup();
+    await tree.set({ ...createNode('/a', 'dir'), $acl: [{ g: 'admins', p: 15 }] });
+    await tree.set(createNode('/a/child', 'doc'));
+    const badRequest = (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST';
+
+    await assert.rejects(() => tree.set(createNode('/a/$', 'doc')), badRequest);
+    await assert.rejects(() => tree.set(createNode('/a/$/c', 'doc')), badRequest);
+    await assert.rejects(() => tree.get('/a/$'), badRequest);
+    await assert.rejects(() => tree.remove('/a/$'), badRequest);
+    await assert.rejects(() => tree.getChildren('/a/$'), badRequest);
+    assert.deepEqual((await tree.get('/a'))?.$acl, [{ g: 'admins', p: 15 }]);
+  });
+
+  it('getChildren query refuses code-eval operators and matches $-keys', async () => {
+    const tree = await setup();
+    await tree.set(createNode('/q/a', 'doc'));
+    await tree.set(createNode('/q/b', 'note'));
+    await assert.rejects(
+      () => tree.getChildren('/q', { query: { $where: 'true' } }),
+      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+    );
+    const { items } = await tree.getChildren('/q', { query: { $type: 't.doc' } });
+    assert.deepEqual(items.map(n => n.$path), ['/q/a']);
+  });
+
   it('keeps on-disk form consistent under concurrent set/remove on related paths', async () => {
     const tree = await setup();
     for (let i = 0; i < 30; i++) {
