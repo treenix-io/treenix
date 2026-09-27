@@ -1,10 +1,20 @@
 // t.logs — unified log buffer, queryable via actions + MCP
 
-import { registerType } from '#comp';
+import { getCtx, registerType } from '#comp';
+import { OpError } from '#errors';
 import { interceptConsole, logStats, queryLogs, type LogLevel } from '#log';
 import { loadSchemasFromDir } from '#schema/load';
 
 interceptConsole();
+
+// The buffer is process-wide, not the node's data: any user could create a
+// t.logs node in their own subtree and read every server log through it.
+function assertLogReader(): void {
+  const { claims } = getCtx();
+  if (!Array.isArray(claims) || (!claims.includes('admins') && !claims.includes('system'))) {
+    throw new OpError('FORBIDDEN', 't.logs: admin only');
+  }
+}
 
 /** @description Server log buffer — query, literal grep, filter by level */
 export class Logs {
@@ -15,11 +25,13 @@ export class Logs {
     /** Return first N entries */ head?: number;
     /** Return last N entries */ tail?: number;
   }) {
+    assertLogReader();
     return queryLogs(data);
   }
 
   /** @read @description Buffer stats: buffered count, total ever, max capacity */
   async stats() {
+    assertLogReader();
     return logStats();
   }
 }

@@ -9,7 +9,9 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
 import { A, createNode, R, S, W } from '#core';
+import { OpError } from '#errors';
 import { interceptConsole, queryLogs } from '#log';
+import { withAcl } from '#security/acl-tree';
 import type { Tree } from '#tree';
 import { treenix } from './factory';
 
@@ -171,6 +173,27 @@ describe('log flood (jre7)', () => {
       if (total < 20) await new Promise<void>(r => setImmediate(r));
     }
     assert.ok(total >= 20, `expected >= 20 /sys/logs nodes, saw ${total}`);
+
+    await app.stop();
+  });
+
+  // Logs carry tokens and errors. A pre-existing ACL-less /sys/logs (seeds
+  // skip existing nodes) inherited /sys public R.
+  it('a stored ACL-less /sys/logs converges to admin-only at boot', async () => {
+    const app = await treenix({
+      modsDir: false,
+      autostart: false,
+      seed: async (t) => {
+        await t.set({ $path: '/sys', $type: 'dir', $acl: [{ g: 'public', p: R }] });
+        await t.set({ $path: '/sys/logs', $type: 't.logs' });
+      },
+      rootNode: rootNode(tmp),
+    });
+    const bob = withAcl(app.tree, 'bob', ['u:bob', 'authenticated']);
+    const forbidden = (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN';
+
+    await assert.rejects(() => bob.get('/sys/logs'), forbidden);
+    await assert.rejects(() => bob.getChildren('/sys/logs'), forbidden);
 
     await app.stop();
   });

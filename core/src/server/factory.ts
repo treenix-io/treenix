@@ -6,7 +6,7 @@ import '#schema/action';
 import '#mount/adapters';
 
 import { type ServiceHandle, startServices } from '#contexts/service/index';
-import { type NodeData } from '#core';
+import { A, type GroupPerm, type NodeData, R, S, W } from '#core';
 import { addOnLog, createLogger, makeLogPath } from '#log';
 import { loadAllMods } from '#mod';
 import { getAnonKey } from '#security/anon';
@@ -18,6 +18,23 @@ import { applyDevDefaults } from './dev-defaults';
 import { deploySeedPrefabs } from './prefab';
 import { createHttpServer, createPipeline, type Pipeline } from './server';
 import type { SessionExecutor } from './trpc';
+
+// Log lines carry tokens, error payloads and user ids. Same shape as the
+// /sys/trash seed: admins only, the system identity inherits its root grant.
+const LOGS_ACL: GroupPerm[] = [
+  { g: 'admins', p: R | W | A | S },
+  { g: 'authenticated', p: 0 },
+  { g: 'public', p: 0 },
+];
+
+/** Converge /sys/logs to admin-only before the log writer persists entries
+ *  there — it otherwise inherits /sys public R, and seeds skip an existing
+ *  node, so an ACL-less container stayed world-readable. */
+async function ensureLogsContainer(tree: Tree): Promise<void> {
+  const node = await tree.get('/sys/logs');
+  if (!node) await tree.set({ $path: '/sys/logs', $type: 't.logs', $acl: LOGS_ACL });
+  else if (JSON.stringify(node.$acl) !== JSON.stringify(LOGS_ACL)) await tree.patch('/sys/logs', [['r', '$acl', LOGS_ACL]]);
+}
 
 export type TreenixConfig = {
   rootNode: NodeData;
@@ -130,6 +147,7 @@ export async function treenix(config: TreenixConfig): Promise<TreenixServer> {
   // 5. Wire log → tree: every entry becomes a /sys/logs/<ts> node — the full,
   // ever-growing log history (owner decision 2026-07-03), browsable via tree/MCP.
   // The ring buffer keeps filling in parallel (log.ts push) for t.logs.query.
+  await ensureLogsContainer(systemTree);
   addOnLog(entry => {
     systemTree.set({ $path: makeLogPath(), $type: 't.log', ...entry })
       .catch(e => process.stderr.write(`[log write err] ${e.message}\n`))
