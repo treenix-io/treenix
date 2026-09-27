@@ -2,7 +2,8 @@
 // Walks children at boot, tracks handles, exposes start/stop actions
 // Tree = truth: ref child exists ↔ service is running
 
-import { registerType } from '#comp';
+import { getCtx, registerType } from '#comp';
+import { OpError } from '#errors';
 import { type ServiceCtx, type ServiceHandle } from '#contexts/service/index';
 import { isRef, type NodeData, register, resolve as coreResolve } from '#core';
 import { withActor } from '#server/actions';
@@ -69,12 +70,36 @@ export async function stopService(path: string): Promise<void> {
   if (ref) await _svcCtx.tree.remove(ref.$path);
 }
 
-/** Service lifecycle manager — start/stop services via ref children */
+/** Service lifecycle manager — start/stop services via ref children.
+ *  A service runs on the supervisor's system tree while actions need only R
+ *  here, so both actions first change the ref registry through the CALLER's
+ *  tree: a principal without W on the registry is refused before anything
+ *  starts or stops (an anonymous caller used to start system services). */
 export class Autostart {
   /** @description Start a service at given path */
-  async start(data: { /** service to start */ path: string }) { await startService(data.path); }
+  async start(data: { /** service to start */ path: string }) {
+    const caller = getCtx().tree;
+    const refPath = `${_autostartPath}/${data.path.split('/').filter(Boolean).join('-')}`;
+    const existed = !!(await caller.get(refPath));
+    await caller.set({ $path: refPath, $type: 'ref', $ref: data.path } as NodeData);
+    try {
+      await _startService(data.path);
+    } catch (e) {
+      // A failed start must not leave a ref claiming the service runs.
+      if (!existed) await caller.remove(refPath);
+      throw e;
+    }
+  }
+
   /** @description Stop a service at given path */
-  async stop(data: { path: string }) { await stopService(data.path); }
+  async stop(data: { path: string }) {
+    const caller = getCtx().tree;
+    const { items } = await caller.getChildren(_autostartPath);
+    const ref = items.find(n => isRef(n) && n.$ref === data.path);
+    if (!ref) throw new OpError('NOT_FOUND', `autostart: ${data.path} is not registered`);
+    await caller.remove(ref.$path);
+    await _stopService(data.path);
+  }
 }
 registerType('autostart', Autostart);
 

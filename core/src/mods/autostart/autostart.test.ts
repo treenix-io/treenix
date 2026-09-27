@@ -3,14 +3,21 @@
 
 import { startServices } from '#contexts/service/index';
 import type { NodeData } from '#core';
-import { createNode, register } from '#core';
+import { A, createNode, R, register, W } from '#core';
+import { OpError } from '#errors';
+import { withAcl } from '#security/acl-tree';
 import { createMemoryTree } from '#tree';
 import { withExecute } from '#server/actions';
+import { loadSchemasFromDir } from '#schema/load';
 import assert from 'node:assert/strict';
+import { dirname, join } from 'node:path';
 import { describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 // Import real autostart module — registers 'autostart' type + service handler
 import { startService, stopService } from './service';
+
+loadSchemasFromDir(join(dirname(fileURLToPath(import.meta.url)), 'schemas'));
 
 // Register test service types once (sealed registry)
 const svcLog: string[] = [];
@@ -83,6 +90,28 @@ describe('autostart dynamic start/stop', () => {
     await startService('/srv/c');
 
     assert.deepEqual(svcLog, ['start:/srv/c'], 'started only once');
+    await handle.stop();
+  });
+
+  // Services run on the supervisor's system tree; the actions need only R on
+  // /sys/autostart. The caller must hold W on the registry or nothing runs.
+  it('start/stop actions are refused for a caller without W on the registry', async () => {
+    const { tree, handle } = await boot();
+    await tree.set({ ...createNode('/', 'root'), $acl: [{ g: 'public', p: R }, { g: 'admins', p: R | W | A }] });
+    await tree.set({ $path: '/srv/e', $type: 'test.autosvc' } as NodeData);
+    const as = (userId: string, claims: string[]) =>
+      withExecute(withAcl(tree, userId, claims), { identity: { userId, claims } });
+    const forbidden = (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN';
+
+    await assert.rejects(() => as('anon:x', ['public']).execute('/sys/autostart', 'start', { path: '/srv/e' }), forbidden);
+    assert.deepEqual(svcLog, [], 'nothing started');
+    assert.equal((await tree.getChildren('/sys/autostart')).items.length, 0, 'no ref planted');
+
+    await as('root', ['u:root', 'admins']).execute('/sys/autostart', 'start', { path: '/srv/e' });
+    assert.deepEqual(svcLog, ['start:/srv/e']);
+    await assert.rejects(() => as('anon:x', ['public']).execute('/sys/autostart', 'stop', { path: '/srv/e' }), forbidden);
+    assert.deepEqual(svcLog, ['start:/srv/e'], 'still running');
+
     await handle.stop();
   });
 
