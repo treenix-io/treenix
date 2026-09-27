@@ -444,6 +444,11 @@ export function withSubscriptions(
       return p;
     };
 
+    // Start every subscriber's projection before awaiting any: this runs inside
+    // the writer's lock span, so sequential awaits cost U × (claims + ancestor
+    // walk) per write; concurrent ones cost the slowest.
+    for (const g of matching) for (const h of g.handles) projectFor(h.userId);
+
     for (const g of matching) {
       for (const h of g.handles) {
         const pair = await projectFor(h.userId);
