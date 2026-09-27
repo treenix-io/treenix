@@ -430,6 +430,31 @@ describe('mount authoring (F4)', () => {
   });
 });
 
+// A component's $acl is permission data: W without A must not plant or change it.
+describe('component $acl needs A', () => {
+  const forbidden = (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN';
+
+  it('writer without A cannot plant a component $acl — by patch or set', async () => {
+    await tree.set({ ...createNode('/shared', 'dir'), $acl: [{ g: 'u:bob', p: R | W }] });
+    await tree.set(createNode('/shared/doc', 'doc'));
+    const bob = withAcl(tree, 'bob', ['u:bob', 'authenticated']);
+    const stash = { $type: 'stash', $acl: [{ g: 'u:bob', p: R | W }] };
+
+    await assert.rejects(() => bob.patch('/shared/doc', [['r', '#stash', stash]]), forbidden);
+    await assert.rejects(() => bob.set(createNode('/shared/doc', 'doc', {}, { stash })), forbidden);
+    assert.equal((await tree.get('/shared/doc'))?.['#stash'], undefined);
+
+    await bob.patch('/shared/doc', [['r', '#note', { $type: 'note', text: 'ok' }]]);
+    assert.ok((await tree.get('/shared/doc'))?.['#note'], 'components without $acl stay writable');
+  });
+
+  it('owner with A sets a component $acl', async () => {
+    const alice = withAcl(tree, 'alice', ['u:alice', 'authenticated']);
+    await alice.patch('/users/alice/page', [['r', '#priv', { $type: 'priv', $acl: [{ g: 'u:alice', p: R | W }] }]]);
+    assert.ok((await tree.get('/users/alice/page'))?.['#priv']);
+  });
+});
+
 describe('granular sticky deny', () => {
   it('parent denies W (sticky), child cannot grant W', async () => {
     // /docs: editors can R, deny W sticky

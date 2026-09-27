@@ -54,6 +54,19 @@ function assertComponentPerm(
   }
 }
 
+// A component's own $acl is permission data: changing it needs A whether it
+// arrives by nested path (#c.$acl, gated per segment) or inside a whole
+// component value. W alone let a writer plant a component that admins and
+// the system identity could no longer read or delete.
+function assertComponentAclKept(key: string, next: unknown, prev: unknown, isAdmin: boolean): void {
+  if (isAdmin) return;
+  const nextAcl = isComponent(next) ? next.$acl : undefined;
+  const prevAcl = isComponent(prev) ? prev.$acl : undefined;
+  if (!sameValue(nextAcl, prevAcl)) {
+    throw new OpError('FORBIDDEN', `Access denied: ${key}.$acl requires A permission`);
+  }
+}
+
 function sameValue(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   try { return JSON.stringify(a) === JSON.stringify(b); } catch { return false; }
@@ -96,6 +109,7 @@ function assertPatchOps(
       if (isComponent(newVal) && !(componentPerm(newVal, userId, claims, currentOwner) & W)) {
         throw new OpError('FORBIDDEN', `Access denied: cannot write component ${firstSeg}`);
       }
+      assertComponentAclKept(firstSeg, newVal, existing?.[firstSeg], isAdmin);
     }
 
     // Update tracked $owner for subsequent component checks in this batch.
@@ -150,6 +164,7 @@ function rewriteFullNodeWrite(
     if (!canWriteComponent(val)) {
       throw new OpError('FORBIDDEN', `Access denied: component ${key}`);
     }
+    assertComponentAclKept(key, val, oldVal, !!(perm & A));
   }
 
   return safe;
