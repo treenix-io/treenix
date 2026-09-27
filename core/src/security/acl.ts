@@ -10,8 +10,8 @@ import {
   isComponent,
   type NodeData,
   R,
-  resolve as resolveHandler,
-  resolveEntry,
+  resolveExact,
+  resolveExactEntry,
   W,
 } from '#core';
 import type { Tree } from '#tree';
@@ -164,11 +164,13 @@ const MOUNT_ACL: GroupPerm[] = [
   { g: 'system', p: R | W },
 ];
 
-/** Type-level ACL rule of a component type; undefined = no type rule. */
+/** Type-level ACL rule of a component type; undefined = no type rule. Exact
+ *  lookups only: a registry fallback (the `default` type, miss loaders) must
+ *  never decide a permission. */
 export function typeAclRule(type: string): GroupPerm[] | undefined {
-  const acl = resolveHandler(type, 'acl');
+  const acl = resolveExact(type, 'acl');
   if (acl) return acl();
-  const mount = resolveEntry(type, 'mount');
+  const mount = resolveExactEntry(type, 'mount');
   return mount && mount.meta?.userAuthorable !== true ? MOUNT_ACL : undefined;
 }
 

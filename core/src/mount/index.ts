@@ -2,7 +2,7 @@
 // Mount = component on node. Adapter resolved via context system.
 // Core untouched. Tree interface preserved.
 
-import { type ComponentData, getComponentByName, type NodeData, resolve } from '#core';
+import { type ComponentData, getComponentByName, type NodeData, resolveExact } from '#core';
 import { OpError } from '#errors';
 import { assertPatchManyBatch, isSetEntry, type Tree } from '#tree';
 import { TRASH_ROOT } from '#tree/policy';
@@ -77,7 +77,9 @@ declare module '#core/context' {
 }
 
 export async function resolveAdapter(mount: ComponentData, mountCtx: MountCtx): Promise<Tree> {
-  const adapter = resolve(mount.$type, 'mount');
+  // Exact: the adapter set must equal what the F4 authoring gate sees
+  // (security/acl.ts typeAclRule) — no registry fallback.
+  const adapter = resolveExact(mount.$type, 'mount');
   if (!adapter) throw new OpError('BAD_REQUEST', `No mount adapter for "${mount.$type}" at ${mountCtx.path}`);
   return adapter(mount, mountCtx);
 }
