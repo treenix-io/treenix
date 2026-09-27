@@ -14,6 +14,7 @@ import { type ExecOpts, type PatchManyEntry, type PatchOp, type Tree } from '#tr
 import { createDraft, enablePatches, finishDraft, type Patch } from 'immer';
 import { randomUUID } from 'node:crypto';
 import { createBoundedCache } from '#util/bounded-cache';
+import { isRecord } from '#util/is-record';
 import { OpError } from '#errors';
 import { commit, mutationLock } from './commit';
 import { readonlyProxy, wrapAbortGuardTree, wrapReadOnlyTree } from './readonly-tree';
@@ -231,10 +232,6 @@ type ResolvedAction = {
 
 const DYNAMIC_ACTION_TIMEOUT = 5_000;
 const DYNAMIC_ACTION_MEM = 8 * 1024 * 1024;
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v);
-}
 
 // Sandbox writes arrive as parsed JSON — a NodeData needs at least string $path/$type.
 function isSandboxNodeWrite(v: Record<string, unknown>): v is NodeData {

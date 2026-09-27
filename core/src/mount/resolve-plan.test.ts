@@ -1,4 +1,5 @@
 import { createNode } from '#core';
+import { OpError } from '#errors';
 import { createMemoryTree } from '#tree';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
@@ -63,7 +64,19 @@ describe('resolveReadPlan', () => {
     });
     await assert.rejects(
       () => resolveReadPlan(tree, '/bad'),
-      /Query mount.*missing source/,
+      (e) => e instanceof OpError && e.code === 'BAD_REQUEST',
+    );
+  });
+
+  it('query mount missing match: throws (same rule as the adapter)', async () => {
+    await tree.set({
+      $path: '/bad',
+      $type: 'folder',
+      '#mount': { $type: 't.mount.query', source: '/orders' },
+    });
+    await assert.rejects(
+      () => resolveReadPlan(tree, '/bad'),
+      (e) => e instanceof OpError && e.code === 'BAD_REQUEST',
     );
   });
 

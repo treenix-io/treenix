@@ -4,21 +4,21 @@
 
 import { createTrpcTransport } from '#client';
 import { registerType } from '#comp';
-import { getComponentByName, isComponent, register } from '#core';
+import { getComponentByName, register } from '#core';
+import { OpError } from '#errors';
 import { createMemoryTree, createOverlayTree, type Tree } from '#tree';
 import { createFsTree } from '#tree/fs';
 import { createRawFsTree } from '#tree/mimefs';
-import { createQueryTree, type QueryConfig } from '#tree/query';
+import { createQueryTree, type QueryConfig, queryConfigOf } from '#tree/query';
 import { createRepathTree } from '#tree/repath';
 import { createModsTree } from './mods';
-import { type MountCtx, resolveAdapter } from './index';
+import { resolveAdapter } from './index';
 import { createTypesTree } from './types';
 
 // ── Mount type classes ──
 
-export class MountPoint {
-  disabled = false;
-}
+/** Marker type of a node that carries a `#mount` component. */
+export class MountPoint {}
 registerType('mount-point', MountPoint);
 
 export class MountMongo {
@@ -94,14 +94,21 @@ export class MountTreeTrpc {
   url = '';
   path = '/';
   token = '';
+  /** Allow a loopback/private/link-local host (local peers, tests). Off by
+   *  default: guards admin typos against internal endpoints (F3). */
+  allowPrivate = false;
 }
 registerType('t.mount.tree.trpc', MountTreeTrpc);
 
 // ── Adapters ──
 
+function required(type: string, field: string, at: string): never {
+  throw new OpError('BAD_REQUEST', `${type} at ${at}: ${field} required`);
+}
+
 register(MountMongo, 'mount', async (mount, ctx) => {
   const uri = mount.uri || process.env.MONGO_URI;
-  if (!uri) throw new Error('t.mount.mongo: no uri and MONGO_URI not set');
+  if (!uri) required('t.mount.mongo', 'uri (or MONGO_URI env)', ctx.path);
   const { createMongoTree } = await import('@treenx/mongo');
   const tree = await createMongoTree(uri, mount.db, mount.collection, { watch: mount.watch, nsMigrate: mount.nsMigrate });
   const wrapped = mount.shared ? tree : createRepathTree(tree, ctx.path, '/');
@@ -129,68 +136,63 @@ register(MountMemory, 'mount', () => createMemoryTree());
 // the ACL read path plans it with source-R + projection (resolve-plan.ts), so
 // node writers (board columns) may author it.
 register(MountQuery, 'mount', (mount, ctx) => {
-  if (!mount.source || !mount.match) throw new Error('t.mount.query: source and match required');
-  return createQueryTree(mount, ctx.globalStore || ctx.parentStore);
+  return createQueryTree(queryConfigOf({ ...mount }, ctx.path), ctx.globalStore || ctx.parentStore);
 }, { userAuthorable: true });
 
 register(MountFs, 'mount', async (mount, ctx) => {
-  if (!mount.root) throw new Error('t.mount.fs: root required');
+  if (!mount.root) required('t.mount.fs', 'root', ctx.path);
   const tree = await createFsTree(mount.root);
   return mount.shared ? tree : createRepathTree(tree, ctx.path, '/');
 });
 
 register(MountRawFs, 'mount', async (mount, ctx) => {
-  if (!mount.root) throw new Error('t.mount.rawfs: root required');
+  if (!mount.root) required('t.mount.rawfs', 'root', ctx.path);
   // Pass mount path so decoders can resolve self-referential paths in file content
   // (e.g. relative markdown links → absolute outer tree paths).
   const tree = await createRawFsTree(mount.root, mount.shared ? '' : ctx.path);
   return mount.shared ? tree : createRepathTree(tree, ctx.path, '/');
 });
 
-// Federation: mount a remote Treenix instance's tree via tRPC.
-// F18: reject private/internal IP ranges to prevent SSRF via mount creation.
-const PRIVATE_HOST_RE = /^(?:localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+|169\.254\.\d+\.\d+|0\.0\.0\.0|\[::1?\])(?::\d+)?$/i;
-
-// Test-only: allow private URLs for integration tests. NEVER set in production.
-let _allowPrivateUrls = false;
-export function setAllowPrivateUrls(v: boolean) { _allowPrivateUrls = v; }
-
-// R4-MOUNT-2: scrub userinfo (and querystring) from URLs before they appear in error messages or logs.
-// Operators commonly paste credentials as `https://user:TOKEN@host/`; without scrubbing, the token
-// reaches downstream callers via tRPC error propagation.
-export function safeUrlForLog(raw: string): string {
-  try {
-    const u = new URL(raw);
-    return `${u.protocol}//${u.host}${u.pathname}`;
-  } catch {
-    return '<invalid-url>';
+// F3: WHATWG URL normalizes every IPv4 spelling (0x7f000001, 2130706433, 127.1
+// → 127.0.0.1) and IPv6 literals, so the check runs on `hostname`, never on the
+// raw string. DNS names resolving to private addresses stay out of scope —
+// authoring is admin-only (F4); this only catches typos.
+function isPrivateHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/\.$/, '');
+  if (host.startsWith('[')) {
+    const v6 = host.slice(1, -1);
+    return v6 === '::' || v6 === '::1' || v6.startsWith('::ffff:') || /^(f[cd]|fe[89ab])/.test(v6);
   }
+  if (host === 'localhost' || host.endsWith('.localhost')) return true;
+  const v4 = /^(\d+)\.(\d+)\.\d+\.\d+$/.exec(host);
+  if (!v4) return false;
+  const a = Number(v4[1]);
+  const b = Number(v4[2]);
+  return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254)
+    || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
 }
 
+// Federation: mount a remote Treenix instance's tree via tRPC.
 register(MountTreeTrpc, 'mount', async (mount, ctx) => {
-  if (!mount.url) throw new Error('t.mount.trpc: url required');
-  try {
-    const host = new URL(mount.url).host;
-    if (!_allowPrivateUrls && PRIVATE_HOST_RE.test(host)) throw new Error(`t.mount.trpc: private/internal URL denied: ${host}`);
-  } catch (e) {
-    if (e instanceof TypeError) throw new Error(`t.mount.trpc: invalid URL: ${safeUrlForLog(mount.url)}`);
-    throw e;
+  if (!mount.url) required('t.mount.tree.trpc', 'url', ctx.path);
+  // The URL may carry credentials — never echo it into errors.
+  if (!URL.canParse(mount.url)) throw new OpError('BAD_REQUEST', `t.mount.tree.trpc at ${ctx.path}: invalid url`);
+  const { hostname } = new URL(mount.url);
+  if (!mount.allowPrivate && isPrivateHost(hostname)) {
+    throw new OpError('BAD_REQUEST', `t.mount.tree.trpc at ${ctx.path}: private host ${hostname} needs allowPrivate`);
   }
   const { tree } = createTrpcTransport({ url: mount.url, token: mount.token || undefined });
   return createRepathTree(tree, ctx.path, mount.path || '/');
 });
 
 register(MountOverlay, 'mount', async (mount, ctx) => {
-  if (!mount.layers?.length) throw new Error('t.mount.overlay: layers required');
+  if (!mount.layers?.length) required('t.mount.overlay', 'layers', ctx.path);
   const stores: Tree[] = [];
   for (const name of mount.layers) {
-    // Layer names are stored in data — resolve through the accessor so both
-    // '#'-prefixed and legacy storage forms work.
     const comp = getComponentByName(ctx.node, name);
-    if (!comp) throw new Error(`t.mount.overlay: component "${name}" not found`);
-    // Each subsequent layer sees the previously-built one as its parent.
-    const subCtx: MountCtx = { node: ctx.node, path: ctx.path, parentStore: stores[0] ?? ctx.parentStore, globalStore: ctx.globalStore };
-    stores.push(await resolveAdapter(comp, subCtx));
+    if (!comp) throw new OpError('BAD_REQUEST', `t.mount.overlay at ${ctx.path}: layer component "${name}" not found`);
+    // Later layers see the base layer as their parent store.
+    stores.push(await resolveAdapter(comp, { ...ctx, parentStore: stores[0] ?? ctx.parentStore }));
   }
   // layers[0] is the base; later layers stack on top (last layer = writes).
   let result = stores[0];

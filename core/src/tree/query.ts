@@ -4,6 +4,7 @@
 
 import { type NodeData } from '#core';
 import { OpError } from '#errors';
+import { isRecord } from '#util/is-record';
 import sift from 'sift';
 import { mapNodeForSift, type Tree } from './index';
 
@@ -11,6 +12,18 @@ export type QueryConfig = {
   source: string;
   match: Record<string, unknown>;
 };
+
+/** Validate a t.mount.query component — shared by the mount adapter and the
+ *  ACL read planner (resolve-plan.ts) so both accept and reject the same
+ *  configs. An empty `match` is a legitimate match-all; a missing one is not. */
+export function queryConfigOf(comp: Record<string, unknown>, at: string): QueryConfig {
+  const { source, match } = comp;
+  if (typeof source !== 'string' || !source.startsWith('/')) {
+    throw new OpError('BAD_REQUEST', `query mount at ${at}: source must be an absolute path`);
+  }
+  if (!isRecord(match)) throw new OpError('BAD_REQUEST', `query mount at ${at}: match must be an object`);
+  return { source, match };
+}
 
 // sift operators that compile/eval code → server-side RCE if exposed to user-influenced queries.
 // Mount config (`t.mount.query.match`) is user-writable wherever a user has W on the mount node;

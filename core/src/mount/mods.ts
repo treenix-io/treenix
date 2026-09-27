@@ -11,7 +11,8 @@
 //   /sys/mods/{mod}/prefabs/{name}/      → t.prefab node (mod, name, deploy action)
 //   /sys/mods/{mod}/prefabs/{name}/{...} → prefab nodes
 
-import { AnyType, createNode, getComponentField, isComponent, type NodeData } from '#core';
+import { compKey, createNode, getComponentByName, type NodeData } from '#core';
+import { OpError } from '#errors';
 import { getLoadedMods } from '#mod/loader';
 import { getModPrefabs, getPrefab, getRegisteredMods } from '#mod/prefab';
 import { Prefab } from '#mod/prefab-type';
@@ -25,13 +26,8 @@ import { buildTypeNode } from './types';
 // FS roots when deployed). For the catalog view we disable any present mount —
 // browsing the catalog must not trigger live mount resolution. Absent mount = pass through.
 function disableMountIfPresent(node: NodeData): NodeData {
-  // Keyed rebuild: write the disabled copy back to the key the component
-  // actually lives under ('#mount' or legacy 'mount') — a bare-key write would
-  // be shadowed by an existing # twin.
-  const entry = getComponentField(node, AnyType, 'mount');
-  if (!entry) return node;
-  const [mount, key] = entry;
-  return { ...node, [key]: { ...mount, disabled: true } };
+  const mount = getComponentByName(node, 'mount');
+  return mount ? { ...node, [compKey('mount')]: { ...mount, disabled: true } } : node;
 }
 
 type ParsedPath = {
@@ -172,15 +168,15 @@ export function createModsTree(modsPath = '/sys/mods'): Tree {
     },
 
     async set() {
-      throw new Error('Mods mount is read-only');
+      throw new OpError('FORBIDDEN', 'Mods mount is read-only');
     },
 
     async remove() {
-      throw new Error('Mods mount is read-only');
+      throw new OpError('FORBIDDEN', 'Mods mount is read-only');
     },
 
     async patch() {
-      throw new Error('Mods mount is read-only');
+      throw new OpError('FORBIDDEN', 'Mods mount is read-only');
     },
   };
 }

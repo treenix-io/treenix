@@ -4,13 +4,13 @@
 import { registerType } from '#comp';
 import { A, createNode, R, register, S, W } from '#core';
 import { withMounts } from '#mount';
-import { setAllowPrivateUrls } from '#mount/adapters';
+import '#mount/adapters';
 import { createHttpServer, createPipeline, type Pipeline } from '#server/server';
 import { createMemoryTree, type Tree } from '#tree';
 import { createRepathTree } from '#tree/repath';
 import assert from 'node:assert/strict';
 import type { Socket } from 'node:net';
-import { after, afterEach, before, beforeEach, describe, it } from 'node:test';
+import { afterEach, before, beforeEach, describe, it } from 'node:test';
 import { createTrpcTransport } from './trpc';
 
 // ── Helpers ──
@@ -151,9 +151,6 @@ describe('Treenix Client SDK', () => {
   // ── t.mount.tree.trpc ──
 
   describe('t.mount.tree.trpc', () => {
-    before(() => setAllowPrivateUrls(true));
-    after(() => setAllowPrivateUrls(false));
-
     it('mounts remote tree with path translation', async () => {
       // Set up content on the remote server
       const { tree: remote } = createTrpcTransport({ url });
@@ -168,7 +165,7 @@ describe('Treenix Client SDK', () => {
       await local.set({
         $path: '/remote',
         $type: 'dir',
-        '#mount': { $type: 't.mount.tree.trpc', url, path: '/strategies' },
+        '#mount': { $type: 't.mount.tree.trpc', url, path: '/strategies', allowPrivate: true },
       });
 
       const tree = withMounts(local);
@@ -193,7 +190,7 @@ describe('Treenix Client SDK', () => {
       await local.set({
         $path: '/fed',
         $type: 'dir',
-        '#mount': { $type: 't.mount.tree.trpc', url, path: '/items' },
+        '#mount': { $type: 't.mount.tree.trpc', url, path: '/items', allowPrivate: true },
       });
 
       const tree = withMounts(local);
@@ -216,9 +213,6 @@ describe('Treenix Client SDK', () => {
     let tsB: TestServer;
     let urlB: string;
     const socketsB = new Set<Socket>();
-
-    before(() => setAllowPrivateUrls(true));
-    after(() => setAllowPrivateUrls(false));
 
     beforeEach(async () => {
       const bootstrapB = createMemoryTree();
@@ -251,7 +245,7 @@ describe('Treenix Client SDK', () => {
       await ts.systemTree.set({
         $path: '/fed',
         $type: 'dir',
-        '#mount': { $type: 't.mount.tree.trpc', url: urlB, path: '/' },
+        '#mount': { $type: 't.mount.tree.trpc', url: urlB, path: '/', allowPrivate: true },
       });
     });
 
@@ -278,7 +272,7 @@ describe('Treenix Client SDK', () => {
     it('an anonymous wire client cannot author a federation mount (F4)', async () => {
       const clientA = createTrpcTransport({ url });
       await assert.rejects(
-        () => clientA.tree.set({ $path: '/evil', $type: 'dir', '#mount': { $type: 't.mount.tree.trpc', url: urlB, path: '/' } }),
+        () => clientA.tree.set({ $path: '/evil', $type: 'dir', '#mount': { $type: 't.mount.tree.trpc', url: urlB, path: '/', allowPrivate: true } }),
         (e: { data?: { code?: string } }) => e.data?.code === 'FORBIDDEN',
       );
     });
@@ -372,7 +366,7 @@ describe('Treenix Client SDK', () => {
         await pipeline.systemTree.set({
           $path: '/fed',
           $type: 'dir',
-          '#mount': { $type: 't.mount.tree.trpc', url: urlB, path: '/' },
+          '#mount': { $type: 't.mount.tree.trpc', url: urlB, path: '/', allowPrivate: true },
         });
 
         assert.equal(await clientH.execute('/fed/w', 'bump'), 1);

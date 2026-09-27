@@ -14,11 +14,18 @@
     "token": {
       "type": "string",
       "default": ""
+    },
+    "allowPrivate": {
+      "type": "boolean",
+      "title": "Allow a loopback/private/link-local host (local peers, tests). Off by",
+      "description": "default: guards admin typos against internal endpoints (F3).",
+      "default": false
     }
   },
   "required": [
     "url",
     "path",
-    "token"
+    "token",
+    "allowPrivate"
   ]
 }

@@ -3,10 +3,10 @@
 // ReadPlan consumed by `executeList`. When the requested path is a query
 // mount, the mount's trusted `{source, match}` config becomes
 // `{source, viewWhere}` and the caller query becomes `callerWhere`. For
-// non-mount paths the source IS the path; mountDeps stays empty since no
-// mount/config write can invalidate this read.
+// non-mount paths the source IS the path.
 
 import type { Tree } from '#tree';
+import { queryConfigOf } from '#tree/query';
 import type { ReadPlan } from '#tree/read-runtime';
 import { activeMount } from './index';
 
@@ -25,32 +25,14 @@ export async function resolveReadPlan(
   callerWhere?: Record<string, unknown>,
   ctx?: unknown,
 ): Promise<ResolvedReadPlan> {
-  const mountDeps = new Set<string>();
+  const mountDeps = new Set<string>([path]);
   const node = await rawStore.get(path, ctx);
-  mountDeps.add(path);
+  const mount = node && activeMount(node);
+  const caller = callerWhere ? { callerWhere } : {};
 
-  const mountComp = node ? activeMount(node) : undefined;
-  if (mountComp && mountComp.$type === 't.mount.query') {
-    const mount = mountComp as { $type: string; source: string; match: Record<string, unknown> };
-    if (typeof mount.source !== 'string' || !mount.source) {
-      throw new Error(`Query mount at ${path} missing source`);
-    }
-    const match = mount.match ?? {};
-    return {
-      plan: {
-        source: mount.source,
-        viewWhere: match,
-        ...(callerWhere ? { callerWhere } : {}),
-      },
-      mountDeps,
-    };
+  if (mount?.$type === 't.mount.query') {
+    const { source, match } = queryConfigOf(mount, path);
+    return { plan: { source, viewWhere: match, ...caller }, mountDeps };
   }
-
-  return {
-    plan: {
-      source: path,
-      ...(callerWhere ? { callerWhere } : {}),
-    },
-    mountDeps,
-  };
+  return { plan: { source: path, ...caller }, mountDeps };
 }

@@ -1,28 +1,32 @@
+import { createMemoryTree } from '#tree';
+import { OpError } from '#errors';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { safeUrlForLog } from './adapters';
+import './adapters';
+import { type MountCtx, resolveAdapter } from './index';
 
-describe('R4-MOUNT-2 — safeUrlForLog scrubs credentials', () => {
-  it('strips userinfo (basic auth)', () => {
-    assert.equal(safeUrlForLog('https://user:secret@api.example.com/v1/x'), 'https://api.example.com/v1/x');
+const ctx: MountCtx = { node: { $path: '/fed', $type: 'dir' }, path: '/fed', parentStore: createMemoryTree() };
+const trpc = (url: string, allowPrivate = false) => resolveAdapter({ $type: 't.mount.tree.trpc', url, path: '/', allowPrivate }, ctx);
+const badRequest = (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST';
+
+describe('t.mount.tree.trpc host guard (F3)', () => {
+  it('rejects every spelling of a private host', async () => {
+    for (const url of [
+      'http://127.0.0.1/', 'http://0x7f000001/', 'http://2130706433/', 'http://127.1/',
+      'http://localhost./', 'http://api.localhost/', 'http://[::1]/', 'http://[::ffff:127.0.0.1]/',
+      'http://[fd00::1]/', 'http://[fe80::1]/', 'http://169.254.169.254/', 'http://10.0.0.1/',
+      'http://172.16.0.1/', 'http://192.168.1.1/', 'http://0.0.0.0/',
+    ]) {
+      await assert.rejects(() => trpc(url), badRequest, url);
+    }
   });
 
-  it('strips bearer-style userinfo', () => {
-    const out = safeUrlForLog('https://VERY_SECRET_TOKEN@api.example.com/v1/x');
-    assert.ok(!out.includes('VERY_SECRET_TOKEN'), `token leaked: ${out}`);
-    assert.ok(out.includes('api.example.com'), `host missing: ${out}`);
+  it('accepts a public host, and a private one with allowPrivate', async () => {
+    assert.ok(await trpc('https://peer.example.com/trpc'));
+    assert.ok(await trpc('http://127.0.0.1:3211/trpc', true));
   });
 
-  it('strips querystring (which may contain tokens)', () => {
-    const out = safeUrlForLog('https://api.example.com/x?token=SECRET&other=1');
-    assert.ok(!out.includes('SECRET'), `query token leaked: ${out}`);
-  });
-
-  it('handles invalid URL safely', () => {
-    assert.equal(safeUrlForLog('not-a-url'), '<invalid-url>');
-  });
-
-  it('preserves protocol/host/path for diagnostics', () => {
-    assert.equal(safeUrlForLog('https://api.example.com:8443/v1/foo'), 'https://api.example.com:8443/v1/foo');
+  it('rejects an unparseable url without echoing it', async () => {
+    await assert.rejects(() => trpc('https://user:TOKEN@'), (e) => badRequest(e) && e instanceof OpError && !e.message.includes('TOKEN'));
   });
 });
