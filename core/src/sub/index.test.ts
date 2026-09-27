@@ -932,14 +932,13 @@ describe('actor-projected membership (F4, core-anz4.3)', () => {
 
     // Registration is reachable ONLY through a successful read of the same
     // frozen plan (the wire threads ONE planChildren object to both — ns6p.4
-    // invariant 21). Non-privileged caller: the read of that plan dies with
-    // FORBIDDEN ⇒ no page ⇒ nothing to register.
+    // invariant 21). Non-privileged caller: the predicate evaluates on u1's
+    // projection, where #secret is absent — an empty page, exactly what a
+    // wrong guess gets (no oracle on the hidden value).
     const u1Tree = withAcl(store, 'u1', ['users']);
     const u1Plan = await u1Tree.planChildren('/board', { query: { '#secret.level': 7 } });
-    await assert.rejects(
-      () => u1Tree.getChildren('/board', { query: { '#secret.level': 7 }, plan: u1Plan }),
-      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
-    );
+    const u1Page = await u1Tree.getChildren('/board', { query: { '#secret.level': 7 }, plan: u1Plan });
+    assert.deepEqual(u1Page.items, []);
 
     // Privileged caller: the SAME frozen object drives read and registration.
     const adminTree = withAcl(store, 'admin', ['admins']);

@@ -675,13 +675,13 @@ describe('withAcl', () => {
     assert.deepEqual(all.items.map(c => c.$path), ['/docs/a', '/docs/b']);
     assert.ok(all.items.every(c => !('#secret' in c)));
 
-    // The probe now fails LOUD (core-fnv): #secret.value='alpha' matches a raw
-    // node whose component is stripped for alice → hidden-field oracle → FORBIDDEN,
-    // not a silent empty page that confirms the value's existence by omission.
-    await assert.rejects(
-      () => s.getChildren('/docs', { query: { '#secret.value': 'alpha' } }),
-      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
-    );
+    // The predicate evaluates on alice's projection, where #secret is absent: a
+    // right and a wrong guess answer identically. (An earlier FORBIDDEN-when-raw-
+    // matches rule WAS the oracle — it extracted hidden values char by char.)
+    for (const guess of ['alpha', 'zeta', { $regex: '^a' }, { $regex: '^z' }]) {
+      const page = await s.getChildren('/docs', { query: { '#secret.value': guess } });
+      assert.deepEqual(page.items, [], `guess ${JSON.stringify(guess)}`);
+    }
   });
 
   it('does not let query probe stripped $owner or $acl fields', async () => {

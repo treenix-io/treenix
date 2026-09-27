@@ -174,14 +174,29 @@ describe('executeList', () => {
     );
   });
 
-  it('callerWhere on a hidden field throws FORBIDDEN (raw matches, projected does not)', async () => {
+  // A data-dependent refusal is an oracle: "FORBIDDEN iff hidden raw matches"
+  // leaked hidden values bit by bit. Right and wrong guesses must look alike.
+  it('callerWhere on a hidden field answers the same for right and wrong guesses', async () => {
     const source = createMemoryTree();
     await source.set({ $path: '/x/a', $type: 'item', secret: 'top' } as NodeData);
-    const plan: ReadPlan = { source: '/x', callerWhere: { secret: 'top' } };
-    await assert.rejects(
-      () => executeList(source, plan, { limit: 10 }, stripSecret),
-      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
-    );
+    for (const guess of ['top', 'nope']) {
+      const res = await executeList(source, { source: '/x', callerWhere: { secret: guess } }, { limit: 10 }, stripSecret);
+      assert.deepEqual(res.items, [], `guess ${guess}`);
+    }
+  });
+
+  it('predicates on hidden system fields are refused statically, whatever the data', async () => {
+    const source = await seed(['/x/a']);
+    for (const q of [{ $owner: 'alice' }, { _acl: { $exists: true } }, { $or: [{ kind: 'A' }, { $refs: 'x' }] }]) {
+      await assert.rejects(
+        () => executeList(source, { source: '/x', callerWhere: q }, { limit: 10 }, identityProject),
+        (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+      );
+      await assert.rejects(
+        () => executeList(source, { source: '/x', viewWhere: q }, { limit: 10 }, identityProject),
+        (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+      );
+    }
   });
 
   it('callerWhere on a visible field still works when a projector strips other fields', async () => {
@@ -191,14 +206,6 @@ describe('executeList', () => {
     const plan: ReadPlan = { source: '/x', callerWhere: { kind: 'A' } };
     const res = await executeList(source, plan, { limit: 10 }, stripSecret);
     assert.deepEqual(res.items.map(n => n.$path), ['/x/a'], 'matched on the visible field, no false FORBIDDEN');
-  });
-
-  it('callerWhere on a hidden field ABSENT for every row passes silently (documented limitation)', async () => {
-    const source = createMemoryTree();
-    await source.set({ $path: '/x/a', $type: 'item' } as NodeData); // no secret at all
-    const plan: ReadPlan = { source: '/x', callerWhere: { secret: 'top' } };
-    const res = await executeList(source, plan, { limit: 10 }, stripSecret);
-    assert.deepEqual(res.items, [], 'no rawMatch → no oracle → silent empty, per MVP known limitation');
   });
 
   it('aborts scanning when signal triggers', async () => {

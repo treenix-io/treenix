@@ -78,6 +78,46 @@ export function mapSiftQuery(q: unknown): unknown {
   return q;
 }
 
+// core-anz4.3: read/watch predicates are validated up front and rejected if
+// they reference a hidden field — THE rule for executeList and query watches.
+// Predicates evaluate on the ACTOR-PROJECTED, storage-shaped node, but
+// projection keeps $acl/$owner for A-holders and mapNodeForSift maps
+// $acl→_acl, $owner→_owner, $refs→_refs, so predicates over those (or their
+// storage aliases) stay statically rejected. viewWhere is guarded too: a
+// query mount can be user-authored. Visible system fields, plain data fields
+// and #-component predicates pass — a #-component the actor cannot read is
+// stripped before evaluation, so it can never gate their membership.
+// Both namespaces are allowlists: toStorageKeys maps EVERY top-level
+// $foo→_foo, so any unknown _-field is a storage alias for a hidden system
+// field and must fail closed too.
+// The rejection is STATIC (depends only on the predicate, never on data): an
+// earlier raw-node re-check threw only when hidden data matched — a 1-bit
+// oracle that extracted hidden components character by character.
+const VISIBLE_SYSTEM_FIELDS = new Set(['$path', '$type', '$rev', '$id', '$ref', '$refId']);
+const VISIBLE_STORAGE_FIELDS = new Set(['_path', '_type', '_rev', '_tid', '_ref', '_refId']);
+const LOGICAL_OPS = new Set(['$and', '$or', '$nor']);
+
+/** Throw FORBIDDEN if a sift predicate references a hidden field (system field
+ *  or its storage alias). Walks $and/$or/$nor branches; checks the head segment
+ *  of dotted paths. Value-level operators ($exists/$gt/…) live under a field key
+ *  and are not re-examined. */
+export function assertVisiblePredicate(q: unknown, where: 'callerWhere' | 'viewWhere'): void {
+  if (!q || typeof q !== 'object' || q.constructor !== Object) return;
+  for (const [k, v] of Object.entries(q)) {
+    if (LOGICAL_OPS.has(k)) {
+      const branches = Array.isArray(v) ? v : [v];
+      for (const b of branches) assertVisiblePredicate(b, where);
+      continue;
+    }
+    const head = k.split('.')[0];
+    const hiddenSystem = head.startsWith('$') && !VISIBLE_SYSTEM_FIELDS.has(head);
+    const hiddenStorage = head.startsWith('_') && !VISIBLE_STORAGE_FIELDS.has(head);
+    if (hiddenSystem || hiddenStorage) {
+      throw new OpError('FORBIDDEN', `${where} references a hidden field: ${k}`);
+    }
+  }
+}
+
 export function createSiftTest(match: Record<string, unknown>): (node: Record<string, unknown>) => boolean {
   return sift(mapSiftQuery(match) as Record<string, unknown>);
 }

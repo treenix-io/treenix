@@ -17,7 +17,7 @@ import {
   type TreeWatchScope,
 } from '#tree';
 import { planHash } from '#tree/plan-hash';
-import { createSiftTest } from '#tree/query';
+import { assertVisiblePredicate, createSiftTest } from '#tree/query';
 import type { ReadPlan } from '#tree/read-runtime';
 import { stableJson } from '#util/stable-json';
 import fjp from 'fast-json-patch';
@@ -131,46 +131,6 @@ function isAclOp(op: PatchOp): boolean {
     || path.startsWith('$acl.') || path.startsWith('$owner.');
 }
 
-// core-anz4.3: query-watch predicates are VALIDATED at registration and
-// rejected if they reference a hidden field. membershipVps (below) evaluates
-// viewWhere/callerWhere on the write path against ACTOR-PROJECTED,
-// storage-shaped nodes (F4) — but projection keeps $acl/$owner for A-holders,
-// and mapNodeForSift maps $acl→_acl, $owner→_owner, $refs→_refs
-// (tree/index.ts toStorageKeys), so a predicate over $acl/$owner/$refs (or
-// their storage aliases _acl/_owner/_refs) stays statically rejected. Fail
-// closed on those and on any other unknown $-field; keeps executeList parity
-// (core-fnv), and viewWhere is guarded too (NOT trusted: a mount can be
-// user-authored). Visible system fields, plain data fields, and #-component
-// predicates are allowed — a #-component the actor cannot read is stripped
-// by projection before evaluation, so it can never gate their membership.
-// Both namespaces are allowlists, not denylists: toStorageKeys maps EVERY
-// top-level $foo→_foo, so any unknown _-field (e.g. _v for $v, _secret for a
-// hidden $secret) is a storage alias for a hidden system field and must fail
-// closed too — enumerating only _acl/_owner/_refs would leak the rest.
-const VISIBLE_SYSTEM_FIELDS = new Set(['$path', '$type', '$rev', '$id', '$ref', '$refId']);
-const VISIBLE_STORAGE_FIELDS = new Set(['_path', '_type', '_rev', '_tid', '_ref', '_refId']);
-const LOGICAL_OPS = new Set(['$and', '$or', '$nor']);
-
-/** Throw FORBIDDEN if a sift predicate references a hidden field (system field
- *  or its storage alias). Walks $and/$or/$nor branches; checks the head segment
- *  of dotted paths. Value-level operators ($exists/$gt/…) live under a field key
- *  and are not re-examined. */
-function assertVisiblePredicate(q: unknown, where: 'callerWhere' | 'viewWhere'): void {
-  if (!q || typeof q !== 'object' || q.constructor !== Object) return;
-  for (const [k, v] of Object.entries(q)) {
-    if (LOGICAL_OPS.has(k)) {
-      const branches = Array.isArray(v) ? v : [v];
-      for (const b of branches) assertVisiblePredicate(b, where);
-      continue;
-    }
-    const head = k.split('.')[0];
-    const hiddenSystem = head.startsWith('$') && !VISIBLE_SYSTEM_FIELDS.has(head);
-    const hiddenStorage = head.startsWith('_') && !VISIBLE_STORAGE_FIELDS.has(head);
-    if (hiddenSystem || hiddenStorage) {
-      throw new OpError('FORBIDDEN', `${where} references a hidden field: ${k}`);
-    }
-  }
-}
 
 export type Listener = (event: NodeEvent) => void;
 
