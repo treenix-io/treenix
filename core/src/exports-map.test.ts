@@ -6,6 +6,8 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { describe, it } from 'node:test';
+// Unused on purpose: tsc fails if the kernel door stops carrying the normative types.
+import type { Session, Store } from '@treenx/core/kernel';
 
 const PUBLIC_DOORS = [
   '.',
@@ -16,6 +18,7 @@ const PUBLIC_DOORS = [
   './contexts/text',
   './errors',
   './glob',
+  './kernel',
   './log',
   './mod',
   './mods/autostart/service',
@@ -60,9 +63,15 @@ describe('exports map (qvrt)', () => {
     await import('@treenx/core/comp');
     await import('@treenx/core/tree');
     await import('@treenx/core/errors');
+    await import('@treenx/core/kernel');
     await import('@treenx/core/testing');
     await import('@treenx/core/server/actions');
     await import('@treenx/core/security');
+  });
+
+  it('the kernel door is types only, except the default limits and the right bits', async () => {
+    const kernel = await import('@treenx/core/kernel');
+    assert.deepEqual(Object.keys(kernel).sort(), ['A', 'DEFAULT_LIMITS', 'R', 'W']);
   });
 
   it('internals do not resolve — pipeline wrappers and infra are private', async () => {
@@ -74,6 +83,7 @@ describe('exports map (qvrt)', () => {
       '@treenx/core/security/seed',
       '@treenx/core/core/index.test',
       '@treenx/core/observability/logs',
+      '@treenx/core/kernel/types',
     ];
     for (const spec of internals) {
       await assert.rejects(
