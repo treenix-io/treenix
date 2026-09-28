@@ -1,0 +1,62 @@
+// Every normative item of docs/engine/axioms.md and every incident of its Appendix A, mapped to the
+// contract test in this directory that proves it.
+
+/** A test file in this directory, or 'pending' while no contract test proves the item. */
+export type Coverage = 'pending' | `${string}.test.ts`
+
+export const coverage: { readonly [item: string]: Coverage } = {
+  D2: 'pending',
+  D3: 'pending',
+  D4: 'pending',
+  D5: 'pending',
+  D6: 'pending',
+  D7: 'pending',
+  D8: 'pending',
+  D9: 'pending',
+  D10: 'pending',
+  D11: 'pending',
+  D12: 'pending',
+  D13: 'pending',
+
+  A0: 'pending',
+  A1: 'pending',
+  A2: 'pending',
+  A3: 'pending',
+  A4: 'pending',
+  A5: 'pending',
+  A6: 'pending',
+  A7: 'pending',
+  A8: 'pending',
+  A9: 'pending',
+  A10: 'pending',
+
+  T1: 'pending',
+  T2: 'pending',
+  T3: 'pending',
+  T4: 'pending',
+  T5: 'pending',
+  T6: 'pending',
+  T7: 'pending',
+  T8: 'pending',
+  T9: 'pending',
+  T10: 'pending',
+  T11: 'pending',
+  T12: 'pending',
+  T13: 'pending',
+  T14: 'pending',
+
+  'incident: a user mount of fs, mongo or trpc read the server disk and opened SSRF': 'pending',
+  'incident: a list filter was an oracle over hidden fields': 'pending',
+  'incident: $acl and $owner reached readers without A in events': 'pending',
+  'incident: a hidden node answered forbidden, an absent one not found': 'pending',
+  'incident: the account owner saw the password hash': 'pending',
+  'incident: with / mounted, deletions went to an in-memory trash and were lost on restart': 'pending',
+  'incident: trash collection deleted live tasks through a query mount': 'pending',
+  'incident: an anonymous call started a service with system rights': 'pending',
+  'incident: MCP ignored the narrowed agent scope': 'pending',
+  'incident: sessions kept working after the account was blocked': 'pending',
+  'incident: snapshot and event races — registration inside the read, ordering on the client': 'pending',
+  "incident: a public form's anonymous W on the subscriber folder deleted others' entries": 'pending',
+  'incident: a client chose the $id of a new node': 'pending',
+  "incident: the type ACL skipped the node's main type": 'pending',
+}
