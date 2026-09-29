@@ -146,7 +146,7 @@ describe('subscriptionToAsyncIterable — lifecycle', () => {
     assert.equal(reg.listenerCount(), 0, 'overflow runs unregister');
   });
 
-  it('a push and an end inside register are served, then unregister runs', async () => {
+  it('a push and an end inside register are served, then unregister runs', { timeout: 5_000 }, async () => {
     let unregistered = false;
     const iter = subscriptionToAsyncIterable<TreeEvent>((push, end) => {
       push({ type: 'remove', path: '/early' });
