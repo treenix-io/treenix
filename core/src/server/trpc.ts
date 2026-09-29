@@ -111,6 +111,12 @@ function frameError(err: ErrFrame['err']): TRPCError {
     : toTrpcError(err.code, err.msg);
 }
 
+// The SSE client reconnects on a 5xx and so runs the action again; after an internal failure the stream's
+// outcome is unknown (earlier steps may have committed), so it travels as UNKNOWN_OUTCOME does.
+function streamError(err: ErrFrame['err']): TRPCError {
+  return toTrpcError(err.code === 'INTERNAL' ? 'UNKNOWN_OUTCOME' : err.code, err.msg);
+}
+
 /** Frame → procedure result. T states the procedure's contract; the frame
  *  payload is untrusted wire data, so this is the decode boundary. */
 async function unwrap<T>(r: Promise<ResFrame> | AsyncIterable<ResFrame>): Promise<T> {
@@ -344,7 +350,7 @@ export function createTreeRouter(tree: Tree, systemTree: Tree, watcher: WatchMan
             type: input.type, key: input.key, action: input.action, data: input.data,
           });
           if (!(Symbol.asyncIterator in r)) {
-            emit.error(new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'twp: expected stream' }));
+            emit.error(streamError({ code: 'INTERNAL', msg: 'twp: expected stream' }));
             return () => {};
           }
           const it = r[Symbol.asyncIterator]();
@@ -354,10 +360,11 @@ export function createTreeRouter(tree: Tree, systemTree: Tree, watcher: WatchMan
               if (done || !f) { emit.complete(); return; }
               if ('ch' in f) emit.next(f.ch);
               else if ('end' in f) { emit.complete(); return; }
-              else if ('err' in f) { emit.error(frameError(f.err)); return; }
+              else if ('err' in f) { emit.error(streamError(f.err)); return; }
             }
           })().catch((err) => {
-            emit.error(err instanceof Error ? err : new Error(String(err)));
+            console.error('[trpc] streamAction frame stream failed:', err);
+            emit.error(streamError({ code: 'INTERNAL', msg: err instanceof Error ? err.message : String(err) }));
           });
           // Teardown closes the frame stream, which aborts the handler's signal (peer finally).
           return () => { void it.return?.(); };

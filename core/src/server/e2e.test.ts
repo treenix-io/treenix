@@ -30,9 +30,16 @@ class Returner {
   getNumber() { return 42; }
 }
 
+let brokenStreamRuns = 0;
+
 class Streamer {
   async *count(data: { n: number }) {
     for (let i = 1; i <= data.n; i++) yield { i, total: data.n };
+  }
+  async *broken() {
+    brokenStreamRuns++;
+    yield { step: 1 };
+    throw new Error('handler bug');
   }
   async *objects() {
     yield { type: 'start' };
@@ -156,6 +163,7 @@ describe('e2e: tRPC over HTTP', () => {
       methods: {
         count: { arguments: [{ name: 'data', type: 'object', properties: { n: { type: 'number' } }, required: ['n'] }], streaming: true },
         objects: { arguments: [], streaming: true },
+        broken: { arguments: [], streaming: true },
       },
     }));
 
@@ -426,6 +434,25 @@ describe('e2e: tRPC over HTTP', () => {
 
       assert.ok(err instanceof TRPCClientError);
       assert.equal(err.data?.code, 'BAD_REQUEST');
+    });
+
+    it('a handler throwing a plain error ends the stream once, with an outcome the client does not retry', { timeout: 5000 }, async () => {
+      const pub = createClient(url);
+      const reg = await pub.register.mutate({ userId: 'streamer4', password: 'pass' });
+      const client = createClient(url, reg.token);
+
+      await pub.set.mutate({ node: { $path: '/s4', $type: 'page', '#str': { $type: 'streamer' } } });
+      brokenStreamRuns = 0;
+
+      const err = await new Promise<unknown>((resolve) => {
+        const sub = client.streamAction.subscribe({ path: '/s4', key: 'str', action: 'broken' }, {
+          onError: (e) => { sub.unsubscribe(); resolve(e); },
+        });
+      });
+
+      assert.ok(err instanceof TRPCClientError);
+      assert.equal(err.data?.code, 'PRECONDITION_FAILED');
+      assert.equal(brokenStreamRuns, 1);
     });
 
   });
