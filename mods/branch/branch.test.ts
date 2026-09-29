@@ -82,6 +82,27 @@ async function setup(): Promise<Env> {
   return { root, tree, branchPath: res.path, view: `${res.path}/tree` };
 }
 
+// The production pipeline: every write, the merge batch included, passes the storage policy.
+async function setupPipeline(): Promise<Omit<Env, 'root'>> {
+  const bootstrap = createMemoryTree();
+  const rootNode = makeNode('/', 'root');
+  rootNode.$acl = [
+    { g: 'system', p: R | W | A | S },
+    { g: 'agents', p: R | S },
+  ];
+  await bootstrap.set(rootNode);
+  const { tree } = createPipeline(bootstrap);
+
+  await tree.set(makeNode(`/auth/users/${OWNER}`, 'user', { status: 'active' }, {
+    groups: { $type: 'groups', list: ['agents'] },
+  }));
+  await tree.set(makeNode('/branches', 't.branches'));
+  const created = await executeAction<{ path: string }>(
+    tree, '/branches', undefined, undefined, 'create', { title: 'pipeline branch' }, ACTOR,
+  );
+  return { tree, branchPath: created.path, view: `${created.path}/tree` };
+}
+
 describe('branch mod: create + mounted view', () => {
   it('create stamps owner, ACL, delta dir and mounted tree node', async () => {
     const { tree, branchPath } = await setup();
@@ -333,24 +354,7 @@ describe('branch mod: requestMerge + merge', () => {
   // relocate that identity to live (relocateCtx) and flip status in the SAME
   // batch. This is the production pipeline the earlier tests bypassed.
   it('full-pipeline merge: policy-minted $id relocates to live, status flips atomically', async () => {
-    const bootstrap = createMemoryTree();
-    const rootNode = makeNode('/', 'root');
-    rootNode.$acl = [
-      { g: 'system', p: R | W | A | S },
-      { g: 'agents', p: R | S },
-    ];
-    await bootstrap.set(rootNode);
-    const { tree } = createPipeline(bootstrap);
-
-    await tree.set(makeNode(`/auth/users/${OWNER}`, 'user', { status: 'active' }, {
-      groups: { $type: 'groups', list: ['agents'] },
-    }));
-    await tree.set(makeNode('/branches', 't.branches'));
-    const created = await executeAction<{ path: string }>(
-      tree, '/branches', undefined, undefined, 'create', { title: 'pipeline branch' }, ACTOR,
-    );
-    const branchPath = created.path;
-    const view = `${branchPath}/tree`;
+    const { tree, branchPath, view } = await setupPipeline();
 
     await tree.set(makeNode(`${view}/fresh`, 'branchtest.doc', { title: 'born', count: 0 }));
     const minted = await tree.get(`${view}/fresh`);
@@ -409,6 +413,27 @@ describe('branch mod: requestMerge + merge', () => {
     const branch = await tree.get(branchPath);
     assert.equal(branch?.status, 'conflict');
     assert.equal((branch?.conflicts as unknown[])?.length, 2);
+  });
+
+  // A create-vs-live conflict records expectedRev: null — the conflict report
+  // must pass the storage policy's schema check on the branch node.
+  it('full-pipeline create-vs-live conflict: reported and stored with a null expectedRev', async () => {
+    const { tree, branchPath, view } = await setupPipeline();
+
+    await tree.set(makeNode(`${view}/fresh`, 'branchtest.doc', { title: 'branch-born', count: 0 }));
+    await tree.set(makeNode('/fresh', 'branchtest.doc', { title: 'live-born-first', count: 0 }));
+
+    const res = await executeAction<MergeResult>(
+      tree, branchPath, undefined, undefined, 'merge', undefined, ACTOR,
+    );
+
+    const expected = [{ path: '/fresh', expectedRev: null, actualRev: 1 }];
+    assert.deepEqual(res.conflicts, expected);
+    assert.equal((await tree.get('/fresh'))?.title, 'live-born-first');
+
+    const branch = await tree.get(branchPath);
+    assert.equal(branch?.status, 'conflict');
+    assert.deepEqual(branch?.conflicts, expected);
   });
 
   // core-anz4.6 regression: a writer slipping in between preflight and apply

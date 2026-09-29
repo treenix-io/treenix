@@ -159,7 +159,11 @@ const anyKey = (_key: string) => true;
 // A component's own fields: `$` keys are system, `#` keys are the node's named components (D3).
 const isOwnField = (key: string) => !key.startsWith('$') && !isCompKey(key);
 
-// null counts as absent: an optional field may hold null, a required one may not.
+const admitsNull = (properties: Record<string, PropertySchema>, key: string, path: string) =>
+  Object.hasOwn(properties, key) && matches(null, properties[key], path);
+
+// null counts as absent in an optional field. A required field may hold null only when its own
+// schema admits null — the extractor lists `T | null` fields as required with anyOf [T, {}].
 function validateFields(
   obj: Record<string, unknown>,
   def: ObjectSchema,
@@ -168,12 +172,14 @@ function validateFields(
   ownField: (key: string) => boolean,
 ): void {
   const at = (key: string) => basePath ? `${basePath}.${key}` : key;
+  const properties = def.properties ?? {};
 
   for (const key of def.required ?? []) {
-    if (obj[key] === undefined || obj[key] === null) errors.push({ path: at(key), message: `required field missing` });
+    const val = obj[key];
+    if (val === undefined || (val === null && !admitsNull(properties, key, at(key))))
+      errors.push({ path: at(key), message: `required field missing` });
   }
 
-  const properties = def.properties ?? {};
   for (const [prop, propDef] of Object.entries(properties)) {
     const val = obj[prop];
     if (val === undefined || val === null) continue;
@@ -196,8 +202,9 @@ export function validateComponent(comp: ComponentData, schema: TypeSchema, field
   return errors;
 }
 
-// Strict takes the type's own registered schema: neither the `default` fallback nor a lazy
-// miss resolver counts as registration (D4).
+// Strict takes the type's own registered schema: it never falls back to `default` and never fires
+// a miss resolver (D4). A schema a miss resolver already registered on an earlier non-strict lookup
+// does count, so a lazily registered pack must publish eagerly before strict can guard its types.
 export function validateNode(node: NodeData, opts?: ValidateOptions): ValidationError[] {
   const errors: ValidationError[] = [];
 

@@ -258,6 +258,40 @@ describe('validateValue', () => {
       assert.equal(e.length, 1);
       assert.equal(e[0].path, 'obj.x');
     });
+
+    // The extractor's shape for `{ path: string; expectedRev: number | null; actualRev: number | null }[]`.
+    const conflicts: PropertySchema = {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          path: { type: 'string' },
+          expectedRev: { anyOf: [{ type: 'number' }, {}] },
+          actualRev: { anyOf: [{ type: 'number' }, {}] },
+        },
+        required: ['path', 'expectedRev', 'actualRev'],
+      },
+    };
+
+    it('a required field whose schema admits null accepts null, in array items too', () => {
+      assert.equal(check([{ path: '/a', expectedRev: null, actualRev: 3 }], conflicts).length, 0);
+      assert.equal(check([{ path: '/a', expectedRev: 1, actualRev: null }], conflicts).length, 0);
+    });
+
+    it('a required field whose schema rejects null still counts null as missing', () => {
+      const e = check([{ path: null, expectedRev: null, actualRev: 3 }], conflicts);
+      assert.deepEqual(e.map(x => x.path), ['x[0].path']);
+    });
+
+    it('a required field absent from properties counts null as missing', () => {
+      const e = check({ x: null }, { type: 'object', required: ['x'] }, 'obj');
+      assert.deepEqual(e.map(x => x.path), ['obj.x']);
+    });
+
+    it('a required nullable field still has to be present', () => {
+      const e = check([{ path: '/a', actualRev: 3 }], conflicts);
+      assert.deepEqual(e.map(x => x.path), ['x[0].expectedRev']);
+    });
   });
 
   // ── Edge cases ──
@@ -374,6 +408,15 @@ describe('validateComponent', () => {
     const e = validateComponent(comp, schema, 'test');
     assert.equal(e.length, 1);
     assert.equal(e[0].path, 'test.name');
+  });
+
+  it('accepts null on a required field whose schema admits null', () => {
+    const schema: TypeSchema = {
+      type: 'object',
+      properties: { rev: { anyOf: [{ type: 'number' }, {}] } },
+      required: ['rev'],
+    };
+    assert.equal(validateComponent({ $type: 'test', rev: null }, schema, 'test').length, 0);
   });
 
   it('allows null on an optional field (null = absent)', () => {
