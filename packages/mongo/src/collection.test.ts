@@ -171,9 +171,9 @@ describe('createCollectionTree', () => {
     await assert.rejects(() => tree.getChildren('/', { query: { $path: '/x' } }), isCode('INVALID'));
   });
 
-  it('a doc without a usable key fails the read with INVALID', async () => {
+  it('a doc without a usable key decodes as INVALID', async () => {
     const tree = makeTree([...DOCS, { _id: oid(5), asset: 'sol', closeTs: 400 }]);
-    await assert.rejects(() => tree.getChildren('/'), isCode('INVALID'));
+    await assert.rejects(() => tree.getChildren('/', { query: { asset: 'sol' } }), isCode('INVALID'));
   });
 
   it('is read-only: set/remove/patch deny, docs stay untouched', async () => {
