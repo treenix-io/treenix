@@ -62,6 +62,17 @@ export type ExecuteListResult = {
  *  truncated:true on the result, with no nextCursor. */
 export const DEFAULT_BUDGET = { maxRawScanned: 10_000 };
 
+/** Both predicates may be user-authored (callerWhere always, viewWhere via a
+ *  user-authored query mount): within the expression limits, no code-eval
+ *  operators, no hidden fields. Judged before any node is read. */
+export function assertPlanPredicates(plan: ReadPlan): void {
+  for (const [where, q] of [['callerWhere', plan.callerWhere], ['viewWhere', plan.viewWhere]] as const) {
+    if (!q) continue;
+    assertSafeSiftQuery(q, DEFAULT_LIMITS);
+    assertVisiblePredicate(q, where);
+  }
+}
+
 export async function executeList(
   source: TreeSource,
   plan: ReadPlan,
@@ -79,13 +90,7 @@ export async function executeList(
   }
   const budget = opts.budget ?? DEFAULT_BUDGET;
 
-  // Both predicates may be user-authored (callerWhere always, viewWhere via a
-  // user-authored query mount): no code-eval operators, no hidden fields.
-  for (const [where, q] of [['callerWhere', plan.callerWhere], ['viewWhere', plan.viewWhere]] as const) {
-    if (!q) continue;
-    assertSafeSiftQuery(q, DEFAULT_LIMITS);
-    assertVisiblePredicate(q, where);
-  }
+  assertPlanPredicates(plan);
 
   const viewTest = plan.viewWhere ? createSiftTest(plan.viewWhere, DEFAULT_LIMITS) : null;
   const callerTest = plan.callerWhere ? createSiftTest(plan.callerWhere, DEFAULT_LIMITS) : null;

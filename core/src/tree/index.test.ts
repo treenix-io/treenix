@@ -62,6 +62,16 @@ describe('MemoryStore', () => {
     assert.deepEqual(result.items.map((n) => n.$path).sort(), ['/r/a', '/r/a/b', '/r/a/b/c']);
   });
 
+  it('getChildren refuses an oversized query whatever the data, a missing parent included', async () => {
+    const tree = createMemoryTree();
+    await tree.set(createNode('/r/a', 'item'));
+    const query = { name: 'x'.repeat(17 * 1024) };
+    const isBudget = (e: unknown) => e instanceof KernelError && e.code === 'BUDGET';
+
+    await assert.rejects(() => tree.getChildren('/r', { query }), isBudget);
+    await assert.rejects(() => tree.getChildren('/missing', { query }), isBudget);
+  });
+
   it('remove', async () => {
     const tree = createMemoryTree();
     await tree.set(createNode('/x', 'x'));

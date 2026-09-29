@@ -629,14 +629,13 @@ export function createMemoryTree(): TreeSource {
     },
 
     async getChildren(parent, opts, _ctx) {
+      const test = opts?.query ? createSiftTest(opts.query, DEFAULT_LIMITS) : null;
       const node = navigate(parent);
       if (!node) return { items: [], total: 0 };
+
       const depth = opts?.depth ?? 1;
       let result = collectChildren(node, parent, depth);
-      if (opts?.query) {
-        const test = createSiftTest(opts.query, DEFAULT_LIMITS);
-        result = result.filter(n => test(mapNodeForSift(n)));
-      }
+      if (test) result = result.filter(n => test(mapNodeForSift(n)));
       return paginate(result, opts);
     },
 

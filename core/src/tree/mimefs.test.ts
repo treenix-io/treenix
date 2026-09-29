@@ -92,6 +92,16 @@ describe('RawFsStore', () => {
     assert.deepEqual(page.items.map(n => n.$path), ['/a.txt']);
   });
 
+  it('getChildren refuses an oversized query whatever the data, a missing folder included', async () => {
+    const tree = await setup();
+    await writeFile(join(dir, 'a.txt'), 'text');
+    const query = { name: 'x'.repeat(17 * 1024) };
+    const isBudget = (e: unknown) => e instanceof KernelError && e.code === 'BUDGET';
+
+    await assert.rejects(() => tree.getChildren('/', { query }), isBudget);
+    await assert.rejects(() => tree.getChildren('/missing', { query }), isBudget);
+  });
+
   it('getChildren respects depth', async () => {
     const tree = await setup();
     await mkdir(join(dir, 'a'));

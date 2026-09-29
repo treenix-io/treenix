@@ -69,6 +69,16 @@ describe('FsStore', () => {
     assert.deepEqual(items.map(n => n.$path), ['/q/a']);
   });
 
+  it('getChildren refuses an oversized query whatever the data, a missing folder included', async () => {
+    const tree = await setup();
+    await tree.set(createNode('/q/a', 'doc'));
+    const query = { name: 'x'.repeat(17 * 1024) };
+    const isBudget = (e: unknown) => e instanceof KernelError && e.code === 'BUDGET';
+
+    await assert.rejects(() => tree.getChildren('/q', { query }), isBudget);
+    await assert.rejects(() => tree.getChildren('/missing', { query }), isBudget);
+  });
+
   it('keeps on-disk form consistent under concurrent set/remove on related paths', async () => {
     const tree = await setup();
     for (let i = 0; i < 30; i++) {

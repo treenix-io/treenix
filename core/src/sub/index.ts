@@ -5,7 +5,7 @@
 import { type SubscribeOpts } from '#contexts/service/index';
 import { isComponent, isCompKey, type NodeData } from '#core';
 import { KernelError } from '#errors';
-import { assertVisiblePredicate, createSiftTest } from '#kernel/expr';
+import { createSiftTest } from '#kernel/expr';
 import { DEFAULT_LIMITS } from '#kernel/types';
 import {
   isSetEntry,
@@ -19,7 +19,7 @@ import {
   type TreeWatchScope,
 } from '#tree';
 import { planHash } from '#tree/plan-hash';
-import type { ReadPlan } from '#tree/read-runtime';
+import { assertPlanPredicates, type ReadPlan } from '#tree/read-runtime';
 import { stableJson } from '#util/stable-json';
 import fjp from 'fast-json-patch';
 import { createPathNotifier } from './notifier';
@@ -724,8 +724,7 @@ export function withSubscriptions(
       // projector strips, matching the oracle executeList closes with
       // FORBIDDEN (core-fnv). viewWhere is guarded too (NOT trusted at HEAD: a
       // mount can be user-authored until F4).
-      if (reg.plan.callerWhere) assertVisiblePredicate(reg.plan.callerWhere, 'callerWhere');
-      if (reg.plan.viewWhere) assertVisiblePredicate(reg.plan.viewWhere, 'viewWhere');
+      assertPlanPredicates(reg.plan);
       // F4 fail closed (core-anz4.3): membership must evaluate on the actor's
       // projection; raw-node eval re-opens the hidden-field oracle. No
       // projector configured = no query watch.

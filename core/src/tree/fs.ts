@@ -266,12 +266,10 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
     },
 
     async getChildren(parent, opts) {
+      const test = opts?.query ? createSiftTest(opts.query, DEFAULT_LIMITS) : null;
       const depth = opts?.depth ?? 1;
       let filtered = await collectChildren(parent, depth);
-      if (opts?.query) {
-        const test = createSiftTest(opts.query, DEFAULT_LIMITS);
-        filtered = filtered.filter(n => test(mapNodeForSift(n)));
-      }
+      if (test) filtered = filtered.filter(n => test(mapNodeForSift(n)));
       return paginate(filtered, opts);
     },
 
