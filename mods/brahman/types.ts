@@ -4,7 +4,7 @@
 import { getComponent, type NodeData, register } from '@treenx/core';
 import '@treenx/core/contexts/text';
 import { getCtx, registerType } from '@treenx/core/comp';
-import { OpError } from '@treenx/core/errors';
+import { KernelError } from '@treenx/core/errors';
 import type { BrahmanCtx } from './helpers';
 import { evalBool, evalExpr } from './sandbox';
 
@@ -303,7 +303,7 @@ export class TagAction {
         bCtx.userTags = tags;
         return;
       } catch (err) {
-        if (err instanceof OpError && err.code === 'CONFLICT' && attempt < 2) continue;
+        if (err instanceof KernelError && err.code === 'CONFLICT' && attempt < 2) continue;
         throw err;
       }
     }

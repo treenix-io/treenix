@@ -6,7 +6,7 @@
 
 import { isRef, type NodeData, R, S } from '#core';
 import { assertSafePath } from '#core/path';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import { followMoved, type ChildrenOpts, type Page, type Tree } from '#tree';
 import type { ResolvedReadPlan } from '#mount/resolve-plan';
 import type { PatchOp } from '#tree/patch';
@@ -103,7 +103,7 @@ export function extractPaths(result: unknown): string[] {
     for (let i = 0; i < items.length; i++) {
       const n = items[i];
       if (!n || typeof n !== 'object' || typeof (n as { $path?: unknown }).$path !== 'string') {
-        throw new OpError('BAD_REQUEST', `extractPaths: items[${i}] missing string $path`);
+        throw new KernelError('INVALID', `extractPaths: items[${i}] missing string $path`);
       }
       paths.push((n as { $path: string }).$path);
     }
@@ -118,17 +118,17 @@ function isAsyncIterable(v: unknown): v is AsyncIterable<ResFrame> {
 }
 
 function vPath(p: unknown): string {
-  if (typeof p !== 'string') throw new OpError('BAD_REQUEST', 'path must be a string');
-  // assertSafePath throws plain Error — wire-facing paths map to BAD_REQUEST
+  if (typeof p !== 'string') throw new KernelError('INVALID', 'path must be a string');
+  // assertSafePath throws plain Error — wire-facing paths map to INVALID
   // (the act result-path assert below stays loud-INTERNAL: handler bug, not caller's).
   try { assertSafePath(p); }
-  catch (e) { throw new OpError('BAD_REQUEST', e instanceof Error ? e.message : String(e)); }
+  catch (e) { throw new KernelError('INVALID', e instanceof Error ? e.message : String(e)); }
   return p;
 }
 
 function vPaths(v: unknown): string[] {
   if (v === undefined) return [];
-  if (!Array.isArray(v)) throw new OpError('BAD_REQUEST', 'paths must be an array');
+  if (!Array.isArray(v)) throw new KernelError('INVALID', 'paths must be an array');
   return v.map(vPath);
 }
 
@@ -138,19 +138,23 @@ function vPaths(v: unknown): string[] {
 function vToken(v: unknown): string | undefined {
   if (v === undefined) return undefined;
   if (typeof v !== 'string' || v.length === 0 || v.length > 256 || v.includes('\0')) {
-    throw new OpError('BAD_REQUEST', 'token must be a non-empty string (max 256)');
+    throw new KernelError('INVALID', 'token must be a non-empty string (max 256)');
   }
   return v;
 }
 
 function toErrFrame(id: number, e: unknown): ErrFrame {
-  if (e instanceof OpError) return { id, err: { code: e.code, msg: e.message } };
+  if (e instanceof KernelError) return { id, err: { code: e.code, msg: e.message } };
   console.error('[twp] handler error:', e);
   return { id, err: { code: 'INTERNAL', msg: e instanceof Error ? e.message : String(e) } };
 }
 
+function cancelledFrame(id: number): ErrFrame {
+  return { id, err: { code: 'CANCELLED', msg: 'twp: request cancelled' } };
+}
+
 function toError(err: ErrFrame['err']): Error {
-  return err.code === 'INTERNAL' ? new Error(err.msg) : new OpError(err.code, err.msg);
+  return err.code === 'INTERNAL' ? new Error(err.msg) : new KernelError(err.code, err.msg);
 }
 
 /** Write ctx carrying the client mutation id — events echo it as `by` (gk8.1). */
@@ -189,7 +193,7 @@ export function createPeer(serve?: ServeFactory) {
   function watchCaps(s: PeerServe, token: string | undefined) {
     const getPerm = s.tree.getPerm?.bind(s.tree);
     const hooks = s.hooks;
-    if (!getPerm || !hooks) throw new OpError('BAD_REQUEST', 'watch unsupported by this peer');
+    if (!getPerm || !hooks) throw new KernelError('INVALID', 'watch unsupported by this peer');
     return {
       getPerm,
       watch: (paths: string[], opts?: { children?: boolean; autoWatch?: boolean }) =>
@@ -200,7 +204,7 @@ export function createPeer(serve?: ServeFactory) {
   }
 
   async function resolveServe(): Promise<PeerServe> {
-    if (!serve) throw new OpError('FORBIDDEN', 'peer does not serve (no export policy)');
+    if (!serve) throw new KernelError('FORBIDDEN', 'peer does not serve (no export policy)');
     return serve();
   }
 
@@ -276,7 +280,7 @@ export function createPeer(serve?: ServeFactory) {
               try {
                 ({ target } = await followMoved(s.tree, node.$ref, node.$refId));
               } catch (e) {
-                if (!(e instanceof OpError)) throw e;
+                if (!(e instanceof KernelError)) throw e;
                 console.error(`[twp] resolve: broken ref chain from ${node.$ref}:`, e);
               }
               if (target && cap && ((await cap.getPerm(target.$path)) & S)) {
@@ -302,13 +306,13 @@ export function createPeer(serve?: ServeFactory) {
           const path = vPath(frame.path);
           if (frame.query !== undefined) {
             if (typeof frame.query !== 'object' || frame.query === null || Array.isArray(frame.query)) {
-              throw new OpError('BAD_REQUEST', 'ls.query must be an object');
+              throw new KernelError('INVALID', 'ls.query must be an object');
             }
             // Query-watch membership eval fires for DIRECT children of the
             // source only — a deep query watch would silently miss deeper
             // flips. Reject rather than half-work (watch stays depth-1, MVP).
             if (frame.watch && frame.depth !== undefined && frame.depth !== 1) {
-              throw new OpError('BAD_REQUEST', 'query watch is depth-1 only');
+              throw new KernelError('INVALID', 'query watch is depth-1 only');
             }
           }
           // List-watch notify is direct-parent-only (sub/watch.ts) regardless of
@@ -316,23 +320,23 @@ export function createPeer(serve?: ServeFactory) {
           // miss their changes (core-karx). Exact-path item watches (frame.watch
           // without query) work at any depth and stay allowed.
           if (frame.watchList && frame.depth !== undefined && frame.depth !== 1) {
-            throw new OpError('BAD_REQUEST', 'watchList is depth-1 only');
+            throw new KernelError('INVALID', 'watchList is depth-1 only');
           }
           if (frame.cursor !== undefined && typeof frame.cursor !== 'string') {
-            throw new OpError('BAD_REQUEST', 'ls.cursor must be a string');
+            throw new KernelError('INVALID', 'ls.cursor must be a string');
           }
           const token = vToken(frame.token);
           const cap = frame.watch ? watchCaps(s, token) : undefined;
           const watchList = frame.watchList ? s.hooks?.watchList?.bind(s.hooks) : undefined;
-          if (frame.watchList && !watchList) throw new OpError('BAD_REQUEST', 'watchList unsupported by this peer');
+          if (frame.watchList && !watchList) throw new KernelError('INVALID', 'watchList unsupported by this peer');
           let frozen: ResolvedReadPlan | undefined;
           let listReg: ListRegistration | undefined;
           if (watchList) {
             // S-gate on the PARENT (inv.22), same permission as the sub prefix
-            // gate. Fail closed: no perm surface = BAD_REQUEST, no S = FORBIDDEN.
+            // gate. Fail closed: no perm surface = INVALID, no S = FORBIDDEN.
             const getPerm = s.tree.getPerm?.bind(s.tree);
-            if (!getPerm) throw new OpError('BAD_REQUEST', 'watchList unsupported by this peer');
-            if (!((await getPerm(path)) & S)) throw new OpError('FORBIDDEN', `watchList denied: ${path}`);
+            if (!getPerm) throw new KernelError('INVALID', 'watchList unsupported by this peer');
+            if (!((await getPerm(path)) & S)) throw new KernelError('FORBIDDEN', `watchList denied: ${path}`);
             // Freeze the plan ONCE (inv.21): registration takes it, the read executes what it settles on.
             frozen = await s.tree.planChildren?.(path, { query: frame.query, depth: frame.depth }, ctx);
             // Register BEFORE the read (§3.2, closes W2): a membership flip
@@ -377,8 +381,8 @@ export function createPeer(serve?: ServeFactory) {
 
         case 'set': {
           const path = vPath(frame.path);
-          if (typeof frame.node !== 'object' || frame.node === null) throw new OpError('BAD_REQUEST', 'node must be an object');
-          if (typeof frame.node.$type !== 'string') throw new OpError('BAD_REQUEST', 'node.$type required');
+          if (typeof frame.node !== 'object' || frame.node === null) throw new KernelError('INVALID', 'node must be an object');
+          if (typeof frame.node.$type !== 'string') throw new KernelError('INVALID', 'node.$type required');
           // path field is authoritative; wire payload never carries $path/$patches (spec §6).
           // $id is the node's OWN server-minted identity (bd core-anz4.2): a client-supplied $id
           // on a fresh path would store a foreign ULID verbatim — strip; policy re-echoes/mints.
@@ -391,7 +395,7 @@ export function createPeer(serve?: ServeFactory) {
 
         case 'patch': {
           const path = vPath(frame.path);
-          if (!Array.isArray(frame.ops)) throw new OpError('BAD_REQUEST', 'ops must be an array');
+          if (!Array.isArray(frame.ops)) throw new KernelError('INVALID', 'ops must be an array');
           await s.tree.patch(path, frame.ops, writeCtx(frame.opId));
           return ok(undefined);
         }
@@ -408,8 +412,8 @@ export function createPeer(serve?: ServeFactory) {
 
         case 'act': {
           const path = vPath(frame.path);
-          if (typeof frame.action !== 'string' || !frame.action) throw new OpError('BAD_REQUEST', 'action must be a string');
-          if (!s.execute) throw new OpError('BAD_REQUEST', 'peer does not execute actions');
+          if (typeof frame.action !== 'string' || !frame.action) throw new KernelError('INVALID', 'action must be a string');
+          if (!s.execute) throw new KernelError('INVALID', 'peer does not execute actions');
           const token = vToken(frame.token);
           const cap = frame.watch ? watchCaps(s, token) : undefined;
           const result = await s.execute({
@@ -432,7 +436,7 @@ export function createPeer(serve?: ServeFactory) {
         case 'perm': {
           const path = vPath(frame.path);
           const getPerm = s.tree.getPerm;
-          if (!getPerm) throw new OpError('BAD_REQUEST', 'perm unsupported by this peer');
+          if (!getPerm) throw new KernelError('INVALID', 'perm unsupported by this peer');
           return ok(await getPerm.call(s.tree, path));
         }
 
@@ -458,7 +462,7 @@ export function createPeer(serve?: ServeFactory) {
         }
       }
       // isReqFrame admitted the op set above — reaching here is a routing bug.
-      throw new OpError('BAD_REQUEST', 'unknown op');
+      throw new KernelError('INVALID', 'unknown op');
     } catch (e) {
       return toErrFrame(frame.id, e);
     } finally {
@@ -478,9 +482,9 @@ export function createPeer(serve?: ServeFactory) {
     let req: ActReq;
     try {
       s = await resolveServe();
-      if (!s.executeStream) throw new OpError('BAD_REQUEST', 'peer does not stream actions');
+      if (!s.executeStream) throw new KernelError('INVALID', 'peer does not stream actions');
       const path = vPath(frame.path);
-      if (typeof frame.action !== 'string' || !frame.action) throw new OpError('BAD_REQUEST', 'action must be a string');
+      if (typeof frame.action !== 'string' || !frame.action) throw new KernelError('INVALID', 'action must be a string');
       req = { path, type: frame.type, key: frame.key, action: frame.action, data: frame.data, opId: frame.opId };
     } catch (e) {
       yield toErrFrame(frame.id, e);
@@ -498,10 +502,10 @@ export function createPeer(serve?: ServeFactory) {
         if (ac.signal.aborted) break;
         yield { id: frame.id, ch: item };
       }
-      yield { id: frame.id, end: true };
+      // A handler that honours the signal returns early — the stream still ended by cancel, not by completion.
+      yield ac.signal.aborted ? cancelledFrame(frame.id) : { id: frame.id, end: true };
     } catch (e) {
-      if (ac.signal.aborted) yield { id: frame.id, end: true };
-      else yield toErrFrame(frame.id, e);
+      yield ac.signal.aborted ? cancelledFrame(frame.id) : toErrFrame(frame.id, e);
     } finally {
       // Consumer teardown (iterator.return) must abort the handler's signal too.
       ac.abort();
@@ -527,7 +531,7 @@ export function createPeer(serve?: ServeFactory) {
       (push, endStream) => {
         const c = conn;
         if (!c) {
-          push({ id, err: { code: 'CONFLICT', msg: 'twp: peer not attached' } });
+          push({ id, err: { code: 'UNAVAILABLE', msg: 'twp: peer not attached' } });
           endStream();
           return () => {};
         }
@@ -537,7 +541,7 @@ export function createPeer(serve?: ServeFactory) {
           if (streams.delete(id)) conn?.send({ op: 'cancel', id });
         };
       },
-      { id, err: { code: 'RESOURCE_EXHAUSTED', msg: 'twp: stream overflow' } },
+      { id, err: { code: 'BUDGET', msg: 'twp: stream overflow' } },
     );
 
     return (async function* () {

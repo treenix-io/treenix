@@ -3,7 +3,7 @@
 // combinator/policy/pipeline semantics follow in their own describes.
 
 import { A, createNode, R, register, S, unregister, W } from '#core';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import { withMounts } from '#mount';
 import { withAcl } from '#security/acl-tree';
 import { createPipeline } from '#server/server';
@@ -19,7 +19,7 @@ import { withStoragePolicy } from './policy';
 import { createRepathTree } from './repath';
 
 const code = (expected: string) => (e: unknown) =>
-  e instanceof OpError && e.code === expected;
+  e instanceof KernelError && e.code === expected;
 
 // ── adapter contract: memory + fs ──
 
@@ -73,7 +73,7 @@ function suite(factory: Factory) {
 
     it('empty batch is rejected', async () => {
       tree = await seed();
-      await assert.rejects(tree.patchMany!('/p', []), code('BAD_REQUEST'));
+      await assert.rejects(tree.patchMany!('/p', []), code('INVALID'));
     });
 
     it('entry outside the ancestor is rejected, nothing written', async () => {
@@ -83,7 +83,7 @@ function suite(factory: Factory) {
           { path: '/p/a', ops: [['r', 'n', 10]] },
           { path: '/px/evil', ops: [['r', 'n', 1]] },
         ]),
-        code('BAD_REQUEST'),
+        code('INVALID'),
       );
       assert.equal((await tree.get('/p/a'))?.n, 1);
     });
@@ -95,7 +95,7 @@ function suite(factory: Factory) {
           { path: '/p/a', ops: [['r', 'n', 10]] },
           { path: '/p/a', ops: [['r', 'n', 99]] },
         ]),
-        code('BAD_REQUEST'),
+        code('INVALID'),
       );
       assert.equal((await tree.get('/p/a'))?.n, 1);
     });
@@ -228,7 +228,7 @@ function suite(factory: Factory) {
         tree.patchMany!('/p', [
           { path: '/p/x', node: createNode('/p/y', 'item', { n: 1 }) },
         ]),
-        code('BAD_REQUEST'),
+        code('INVALID'),
       );
       assert.equal(await tree.get('/p/x'), undefined);
       assert.equal(await tree.get('/p/y'), undefined);
@@ -274,7 +274,7 @@ describe('patchMany: filter/overlay layers', () => {
         { path: '/p/a', ops: [['r', 'n', 10]] },
         { path: '/p/b', ops: [['r', 'n', 20]] },
       ]),
-      code('BAD_REQUEST'),
+      code('INVALID'),
     );
     assert.equal((await upper.get('/p/a'))?.n, 1);
     assert.equal((await lower.get('/p/b'))?.n, 2);
@@ -310,7 +310,7 @@ describe('patchMany: filter/overlay layers', () => {
 
     await assert.rejects(
       tree.patchMany!('/p', [{ path: '/p/a', ops: [['r', 'n', 10]] }]),
-      code('BAD_REQUEST'),
+      code('INVALID'),
     );
     assert.equal((await bare.get('/p/a'))?.n, 1);
   });
@@ -366,7 +366,7 @@ describe('patchMany: filter/overlay layers', () => {
         { path: '/p/new', node: createNode('/p/new', 'item', { up: true }) },
         { path: '/p/b', ops: [['r', 'n', 20]] },
       ]),
-      code('BAD_REQUEST'),
+      code('INVALID'),
     );
     assert.equal(await upper.get('/p/new'), undefined);
     assert.equal((await lower.get('/p/b'))?.n, 2);
@@ -430,7 +430,7 @@ describe('patchMany: mounts', () => {
       ms.patchMany!('/p', [
         { path: '/p/m/x', node: createNode('/p/m/x', 'item', { n: 1 }) },
       ]),
-      code('BAD_REQUEST'),
+      code('INVALID'),
     );
     assert.equal(await outer.get('/p/m/x'), undefined, 'no shadow node in the outer store');
     assert.equal(await nested.get('/p/m/x'), undefined);
@@ -472,7 +472,7 @@ describe('patchMany: storage policy', () => {
     return { inner, tree };
   }
 
-  it('one invalid member denies the whole batch with BAD_REQUEST, nothing written', async () => {
+  it('one invalid member denies the whole batch with INVALID, nothing written', async () => {
     const { inner, tree } = setupValidated();
     await tree.set({ $path: '/v', $type: 'dir' });
     await tree.set({ $path: '/v/a', $type: 'item', '#meta': { $type: META, count: 1 } });
@@ -483,7 +483,7 @@ describe('patchMany: storage policy', () => {
         { path: '/v/a', ops: [['r', '#meta.count', 10]] },
         { path: '/v/b', ops: [['r', '#meta.count', 'not-a-number']] },
       ]),
-      code('BAD_REQUEST'),
+      code('INVALID'),
     );
 
     assert.deepEqual((await inner.get('/v/a'))?.['#meta'], { $type: META, count: 1 });
@@ -501,7 +501,7 @@ describe('patchMany: storage policy', () => {
         { path: '/v/a', ops: [['r', '#meta.count', 'bad-a']] },
         { path: '/v/b', ops: [['r', '#meta.count', 'bad-b']] },
       ]),
-      code('BAD_REQUEST'),
+      code('INVALID'),
     );
     assert.equal((await inner.get('/v/a'))?.$rev, 1);
     assert.equal((await inner.get('/v/b'))?.$rev, 1);

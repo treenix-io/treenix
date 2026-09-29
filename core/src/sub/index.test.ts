@@ -1,5 +1,5 @@
 import { A, createNode, getComponentByName, R, type NodeData } from '#core';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import { withAcl } from '#security/acl-tree';
 import { userIdFromAuthPath } from '#security/claims';
 import { createProjector } from '#security/projector';
@@ -622,7 +622,7 @@ describe('patchMany emission with set-members', () => {
         { path: '/data/a', ops: [['t', 'v', 999]] },
         { path: '/data/new', node: createNode('/data/new', 'thing') },
       ]),
-      (e: unknown) => e instanceof OpError && e.code === 'CONFLICT',
+      (e: unknown) => e instanceof KernelError && e.code === 'CONFLICT',
     );
 
     assert.equal(events.length, 0, 'failed batch emits nothing');
@@ -702,7 +702,7 @@ describe('watch registration (Stage 6d, core-9yd)', () => {
         plan: { source: '/items', viewWhere: { kind: 'task' }, callerWhere: { $owner: 'u2' } },
         mountDeps: new Set(['/views/x']),
       }),
-      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
     assert.equal(cdc.getActiveQueryCount(), 0, 'rejected registration leaves no group');
   });
@@ -715,7 +715,7 @@ describe('watch registration (Stage 6d, core-9yd)', () => {
         plan: { source: '/items', callerWhere: { $and: [{ status: 'open' }, { $acl: { $exists: true } }] } },
         mountDeps: new Set(['/views/y']),
       }),
-      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 
@@ -724,7 +724,7 @@ describe('watch registration (Stage 6d, core-9yd)', () => {
     // predicate keyed on the alias probes the same hidden data the projector
     // strips. Guard both predicate positions.
     const { cdc } = withSubs(createMemoryTree());
-    const forbidden = (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN';
+    const forbidden = (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN';
     assert.throws(() => cdc.watchQuery({
       vp: '/views/a', userId: 'u1',
       plan: { source: '/items', callerWhere: { _owner: 'u2' } },
@@ -775,7 +775,7 @@ describe('watch registration (Stage 6d, core-9yd)', () => {
         plan: { source: '/items', viewWhere: { $acl: { $exists: true } } },
         mountDeps: new Set(['/views/acl']),
       }),
-      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
     assert.equal(cdc.getActiveQueryCount(), 0, 'no group left behind by rejected registration');
   });
@@ -796,7 +796,7 @@ describe('watch registration (Stage 6d, core-9yd)', () => {
     const stripOwner: Projector = async (node) => { const { $owner, ...rest } = node; return rest as NodeData; };
     await assert.rejects(
       () => executeList(source, { source: '/items', callerWhere: { $owner: 'u2' } }, { limit: 10 }, stripOwner),
-      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 
@@ -804,11 +804,11 @@ describe('watch registration (Stage 6d, core-9yd)', () => {
     const { cdc } = withSubs(createMemoryTree());
     assert.throws(
       () => cdc.watchQuery({ vp: '/views/deep', userId: 'u1', plan: { source: '/items', depth: 2, viewWhere: {} }, mountDeps: new Set(['/views/deep']) }),
-      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
     );
     assert.throws(
       () => cdc.watchQuery({ vp: '/views/all', userId: 'u1', plan: { source: '/items', depth: -1, viewWhere: {} }, mountDeps: new Set(['/views/all']) }),
-      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
     );
     assert.equal(cdc.getActiveQueryCount(), 0, 'no group left behind by rejected deep watches');
   });
@@ -938,7 +938,7 @@ describe('actor-projected membership (F4, core-anz4.3)', () => {
     const { cdc } = withSubscriptions(createMemoryTree());
     assert.throws(
       () => cdc.watchQuery({ vp: '/views/x', userId: 'u1', plan: { source: '/items', viewWhere: { status: 'open' } }, mountDeps: new Set(['/views/x']) }),
-      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
     assert.equal(cdc.getActiveQueryCount(), 0, 'refused registration leaves no group');
   });

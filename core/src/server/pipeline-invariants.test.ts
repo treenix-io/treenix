@@ -13,7 +13,7 @@
 // fail-closed, external-watch wiring (inject + cache invalidation).
 
 import { A, createNode, R, register, S, unregister, W, type NodeData } from '#core';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import type { MountCtx } from '#mount';
 import { withAcl } from '#security/acl-tree';
 import { type NodeEvent, withSubscriptions } from '#sub';
@@ -25,7 +25,7 @@ import { createPipeline } from './server';
 // ── helpers ──
 
 const code = (expected: string) => (e: unknown) =>
-  e instanceof OpError && e.code === expected;
+  e instanceof KernelError && e.code === expected;
 
 /** Memory bootstrap with the standard root system grant (same shape the seed
  *  deploys) — the ONLY thing that opens the systemTree identity. */
@@ -164,13 +164,13 @@ describe('invariant: invalid writes are rejected whole, nothing lands', () => {
     unregister('inv.strict', 'schema');
   });
 
-  it('invalid set rejects BAD_REQUEST; neither store nor cache holds the node', async () => {
+  it('invalid set rejects INVALID; neither store nor cache holds the node', async () => {
     const bootstrap = await grantedBootstrap();
     const { tree } = createPipeline(bootstrap);
 
     await assert.rejects(
       () => tree.set(createNode('/biz/bad', 'inv.strict', { n: 'oops' })),
-      code('BAD_REQUEST'),
+      code('INVALID'),
     );
 
     assert.equal(await bootstrap.get('/biz/bad'), undefined);
@@ -178,7 +178,7 @@ describe('invariant: invalid writes are rejected whole, nothing lands', () => {
 
     await assert.rejects(
       () => tree.set(createNode('/biz/empty', 'inv.strict', {})),
-      code('BAD_REQUEST'),
+      code('INVALID'),
     );
   });
 
@@ -189,7 +189,7 @@ describe('invariant: invalid writes are rejected whole, nothing lands', () => {
     await tree.set(createNode('/biz/good', 'inv.strict', { n: 1 }));
     const before = await tree.get('/biz/good');
 
-    await assert.rejects(() => tree.patch('/biz/good', [['r', 'n', 'oops']]), code('BAD_REQUEST'));
+    await assert.rejects(() => tree.patch('/biz/good', [['r', 'n', 'oops']]), code('INVALID'));
 
     const got = await tree.get('/biz/good');
     assert.equal(got?.n, 1);

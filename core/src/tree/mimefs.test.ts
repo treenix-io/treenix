@@ -1,7 +1,7 @@
 import type { NodeData } from '#core';
 import { register } from '#core';
 import { clearRegistry } from '#testing';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -165,7 +165,7 @@ describe('RawFsStore', () => {
     try {
       await assert.rejects(
         () => tree.get(`/../${outsideDir.split('/').pop()}`),
-        (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+        (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
       );
     } finally {
       await rm(outsideDir, { recursive: true, force: true });

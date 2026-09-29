@@ -7,7 +7,7 @@ import { type PermissionRule } from '#metatron/permissions';
 import type { PermissionResult } from '@anthropic-ai/claude-agent-sdk';
 import { createNode, getComponent, type NodeData } from '@treenx/core';
 import { setComponent } from '@treenx/core/comp';
-import { OpError } from '@treenx/core/errors';
+import { KernelError } from '@treenx/core/errors';
 import { globMatch, matchesAny } from '@treenx/core/glob';
 import type { Tree } from '@treenx/core/tree';
 import { AiAgent, AiChat, AiPolicy, AiRunStatus } from './types';
@@ -373,7 +373,7 @@ export async function requestApproval(
         await store.set({ ...node, status: 'denied' as const, reason: 'timeout', resolvedAt: Date.now() });
       } catch (err) {
         // OCC conflict = a human resolved it concurrently — loop re-reads and honors that.
-        if (err instanceof OpError && err.code === 'CONFLICT') continue;
+        if (err instanceof KernelError && err.code === 'CONFLICT') continue;
         throw err;
       }
       console.log(`[guardian] escalation timed out: ${path}`);
@@ -411,7 +411,7 @@ export async function rememberRule(store: Tree, tool: string, _input: string, al
       console.log(`[guardian] remembered: ${allow ? 'allow' : 'deny'} ${tool} → ${targetPath}`);
       return;
     } catch (err) {
-      if (err instanceof OpError && err.code === 'CONFLICT' && attempt < MAX_RETRIES - 1) {
+      if (err instanceof KernelError && err.code === 'CONFLICT' && attempt < MAX_RETRIES - 1) {
         console.warn(`[guardian] OCC conflict on ${targetPath}, retry ${attempt + 1}`);
         continue;
       }

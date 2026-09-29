@@ -5,7 +5,7 @@
 // guard. Kind frames and actor identity are the CALLER's concern (they are
 // request-scoped, not commit-scoped).
 
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import { type CommitReceipt, isSetEntry, type PatchManyEntry, type Tree } from '#tree';
 import { PatchTestError } from '#tree/patch';
 import { createPathLock } from '#util/path-lock';
@@ -19,7 +19,7 @@ export const mutationLock = createPathLock();
  *  tree.patch (what executeAction's commit block always was); N>1 dispatches
  *  tree.patchMany under `ancestor` (all-or-nothing, stage A). */
 export async function commit(tree: Tree, ancestor: string, entries: PatchManyEntry[], ctx?: unknown): Promise<CommitReceipt> {
-  if (!entries.length) throw new OpError('BAD_REQUEST', 'commit: empty batch');
+  if (!entries.length) throw new KernelError('INVALID', 'commit: empty batch');
 
   const apply = async (): Promise<CommitReceipt> => {
     try {
@@ -29,14 +29,14 @@ export async function commit(tree: Tree, ancestor: string, entries: PatchManyEnt
         return await tree.patch(only.path, only.ops, ctx);
       }
       if (!tree.patchMany) {
-        throw new OpError('BAD_REQUEST', 'commit: tree does not support patchMany');
+        throw new KernelError('INVALID', 'commit: tree does not support patchMany');
       }
       return await tree.patchMany(ancestor, entries, ctx);
     } catch (e) {
       // Single-patch path propagates raw PatchTestError (pipeline contract);
       // inside the envelope a failed test op IS a concurrency loss.
       if (e instanceof PatchTestError) {
-        throw new OpError('CONFLICT', `commit: ${entries[0].path} changed concurrently (test op failed)`);
+        throw new KernelError('CONFLICT', `commit: ${entries[0].path} changed concurrently (test op failed)`);
       }
       throw e;
     }

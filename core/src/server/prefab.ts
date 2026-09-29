@@ -5,7 +5,7 @@
 import { type NodeData } from '#core';
 import { getPrefab, getSeedPrefabs, type PrefabEntry } from '#mod/prefab';
 import { type Tree } from '#tree';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import { assertSafePath } from '#core/path';
 
 export type DeployOpts = {
@@ -29,7 +29,7 @@ function assertDeployPath(label: string, path: string): void {
   try {
     assertSafePath(path);
   } catch (e) {
-    throw new OpError('BAD_REQUEST', `${label}: ${(e as Error).message}`);
+    throw new KernelError('INVALID', `${label}: ${(e as Error).message}`);
   }
 }
 
@@ -54,7 +54,7 @@ async function deployNodes(
     const isAbsolute = node.$path.startsWith('/');
 
     if (isAbsolute && !opts?.allowAbsolute) {
-      throw new OpError('BAD_REQUEST', `Absolute path "${node.$path}" not allowed without allowAbsolute`);
+      throw new KernelError('INVALID', `Absolute path "${node.$path}" not allowed without allowAbsolute`);
     }
 
     const resolvedPath = resolvePath(node.$path, target);
@@ -87,10 +87,10 @@ export async function deployPrefab(
 ): Promise<{ deployed: string[]; skipped: string[] }> {
   assertDeployPath('Invalid prefab source', source);
   const parsed = parseSourcePath(source);
-  if (!parsed) throw new OpError('BAD_REQUEST', `Invalid prefab path: ${source}`);
+  if (!parsed) throw new KernelError('INVALID', `Invalid prefab path: ${source}`);
 
   const prefab = getPrefab(parsed[0], parsed[1]);
-  if (!prefab) throw new OpError('NOT_FOUND', `Prefab not found: ${source}`);
+  if (!prefab) throw new KernelError('NOT_FOUND', `Prefab not found: ${source}`);
 
   return deployNodes(tree, prefab, target, opts);
 }
@@ -104,7 +104,7 @@ export async function deployByKey(
   opts?: DeployOpts,
 ): Promise<{ deployed: string[]; skipped: string[] }> {
   const prefab = getPrefab(mod, name);
-  if (!prefab) throw new OpError('NOT_FOUND', `Prefab not found: ${mod}/${name}`);
+  if (!prefab) throw new KernelError('NOT_FOUND', `Prefab not found: ${mod}/${name}`);
 
   return deployNodes(tree, prefab, target, opts);
 }

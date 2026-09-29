@@ -7,7 +7,7 @@
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import { subscriptionToAsyncIterable, type TreeEvent } from './watch';
 
 function makeListenerRegistry() {
@@ -160,10 +160,10 @@ describe('subscriptionToAsyncIterable — lifecycle', () => {
     assert.equal(unregistered, true);
   });
 
-  it('buffer <= 0 throws BAD_REQUEST at first .next()', () => {
+  it('buffer <= 0 throws INVALID at first .next()', () => {
     const reg = makeListenerRegistry();
     const iter = subscriptionToAsyncIterable<TreeEvent>(reg.register, overflow, { buffer: 0 });
-    assert.throws(() => iter[Symbol.asyncIterator](), (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST');
+    assert.throws(() => iter[Symbol.asyncIterator](), (e: unknown) => e instanceof KernelError && e.code === 'INVALID');
   });
 
   it('for-await syntax: terminates cleanly via return', async () => {

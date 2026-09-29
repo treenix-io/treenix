@@ -2,7 +2,7 @@
 // Union of registry (code-defined types) + backing tree (dynamic types)
 
 import { type ComponentData, createNode, getContextsForType, getRegisteredTypes, type NodeData, resolve } from '#core';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import { paginate, type Tree } from '#tree';
 import { scanFromCollected } from '#tree/fs-common';
 
@@ -95,7 +95,7 @@ export function createTypesTree(backingStore: Tree, typesPath = '/sys/types'): T
 
     async remove(path) {
       if (getContextsForType(toType(path)).length > 0) {
-        throw new OpError('FORBIDDEN', `Cannot remove registry type: ${toType(path)}`);
+        throw new KernelError('FORBIDDEN', `Cannot remove registry type: ${toType(path)}`);
       }
       return backingStore.remove(path);
     },

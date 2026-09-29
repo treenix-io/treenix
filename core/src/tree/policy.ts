@@ -11,7 +11,7 @@ import {
   getRegistryVersion, isCompKey, isComponent, isMoved, isRef,
   type NodeData, type RefEntry, resolveExact,
 } from '#core';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import { ulid } from '#util/ulid';
 import { applyPatchManyEntry, assertPatchManyBatch, type CommitReceipt, hasMutationOps, isSetEntry, type PatchManyEntry, type PatchOp, type Tree } from './index';
 import { patchViaSet } from './patch';
@@ -283,18 +283,18 @@ function prepareForStore(node: NodeData, existing: NodeData | undefined, ctx?: u
     if (isMoved(existing) && !isMoved(node)) {
       if (node.$id === undefined) { node.$id = ulid(); return; }
       if (!isRelocate(ctx)) {
-        throw new OpError('BAD_REQUEST', `$id carried onto tombstone path ${node.$path} without a trusted relocation`);
+        throw new KernelError('INVALID', `$id carried onto tombstone path ${node.$path} without a trusted relocation`);
       }
       return;
     }
     if (node.$id !== undefined && node.$id !== existing.$id) {
-      throw new OpError('BAD_REQUEST', `$id is immutable: ${node.$path} already carries an identity`);
+      throw new KernelError('INVALID', `$id is immutable: ${node.$path} already carries an identity`);
     }
     node.$id = existing.$id;
   } else if (node.$id === undefined) {
     node.$id = ulid();
   } else if (!isRelocate(ctx)) {
-    throw new OpError('BAD_REQUEST', `$id carried onto ${node.$path} without a trusted relocation`);
+    throw new KernelError('INVALID', `$id carried onto ${node.$path} without a trusted relocation`);
   }
 }
 
@@ -417,7 +417,7 @@ export function withStoragePolicy(backing: Tree): StoragePolicy {
       const errors = validateNode(node);
       if (errors.length) {
         const msg = errors.map(e => `${e.path}: ${e.message}`).join('; ');
-        throw new OpError('BAD_REQUEST', `Validation: ${msg}`);
+        throw new KernelError('INVALID', `Validation: ${msg}`);
       }
 
       return base.set(node, ctx);
@@ -425,7 +425,7 @@ export function withStoragePolicy(backing: Tree): StoragePolicy {
 
     // patchMany (core-gk8.15): the write policy applies per member BEFORE the
     // batch reaches storage — post-apply clones are validated (ALL errors
-    // collected → one BAD_REQUEST, nothing written) and $refs re-derived, with
+    // collected → one INVALID, nothing written) and $refs re-derived, with
     // the recomputed index appended as a derived op so the adapter's atomic
     // phase 2 commits it with the member's own ops (mirror of set() above).
     ...(backing.patchMany ? {
@@ -453,7 +453,7 @@ export function withStoragePolicy(backing: Tree): StoragePolicy {
           }
 
           const raw = await backing.get(entry.path, ctx);
-          if (!raw) throw new OpError('NOT_FOUND', `Node not found: ${entry.path}`);
+          if (!raw) throw new KernelError('NOT_FOUND', `Node not found: ${entry.path}`);
           const node = migrateNode(raw);
           const copy = applyPatchManyEntry(node, entry);
 
@@ -498,7 +498,7 @@ export function withStoragePolicy(backing: Tree): StoragePolicy {
         }
 
         if (errors.length) {
-          throw new OpError('BAD_REQUEST', `Validation: ${errors.join('; ')}`);
+          throw new KernelError('INVALID', `Validation: ${errors.join('; ')}`);
         }
 
         // Straight to the backing: base.patchMany's migration conversion

@@ -3,7 +3,7 @@
 // binding (tRPC today; postMessage/WS/HTTP next, core-nin.3+) wraps this.
 // Extracted from the tRPC withSession middleware + events subscription body.
 
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import type { ResolvedReadPlan } from '#mount/resolve-plan';
 import type { EventFrame } from '#protocol/frames';
 import { createPeer, type ActReq, type Conn, type ListRegistration, type PeerServe, type ServeHooks } from '#protocol/peer';
@@ -92,7 +92,7 @@ export async function registerWatchList(
       if (samePlan(fresh, active)) return { undo: lease.undo, plan: active };
       lease.undo();
       if (attempt === 2) {
-        throw new OpError('CONFLICT', `read plan for ${path} kept changing during watch registration`);
+        throw new KernelError('CONFLICT', `read plan for ${path} kept changing during watch registration`);
       }
       active = fresh;
       lease = register(active);
@@ -169,7 +169,7 @@ export function createWireSession(deps: WireDeps, session: Session) {
     // closed — a silent fallback would let a workload escape narrowing.
     const isWorkload = !!session.scopeRef;
     if (isWorkload && !deps.opts?.executor) {
-      throw new OpError('FORBIDDEN', 'workload session present but no executor configured');
+      throw new KernelError('FORBIDDEN', 'workload session present but no executor configured');
     }
 
     // `type` dropped on the promise path — parity with the pre-TWP dispatch

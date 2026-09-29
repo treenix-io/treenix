@@ -2,7 +2,7 @@
 // Drop-in replacement for MemoryStore.
 
 import { type NodeData } from '@treenx/core';
-import { OpError } from '@treenx/core/errors';
+import { KernelError } from '@treenx/core/errors';
 import {
   type ChangeStream,
   type ChangeStreamDocument,
@@ -218,7 +218,7 @@ export async function mongoSet(col: Collection, node: NodeData): Promise<{ chang
   // before-image in one roundtrip (core-ns6p.2).
   const prev = await col.findOneAndReplace({ _path: doc._path, _rev: prevRev }, doc, { returnDocument: 'before' });
   if (!prev) {
-    throw new OpError('CONFLICT', `OptimisticConcurrencyError: node ${node.$path} modified by another transaction`);
+    throw new KernelError('CONFLICT', `OptimisticConcurrencyError: node ${node.$path} modified by another transaction`);
   }
   node.$rev = doc._rev as number;
   return { changes: [{ path: node.$path, before: fromStorage(prev as Record<string, unknown>), after: { ...node } }] };

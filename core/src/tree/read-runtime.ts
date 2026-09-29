@@ -17,7 +17,7 @@
 // scanChildren; $path ASC total order keeps cursors stable at any depth.
 
 import type { NodeData } from '#core';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import { mapNodeForSift, type TreeSource } from './index';
 import { decodeReadCursor, encodeReadCursor, planHash } from './plan-hash';
 import { assertSafeSiftQuery, assertVisiblePredicate, createSiftTest } from './query';
@@ -70,11 +70,11 @@ export async function executeList(
 ): Promise<ExecuteListResult> {
   const { limit } = opts;
   if (!Number.isInteger(limit) || limit <= 0) {
-    throw new OpError('BAD_REQUEST', `executeList: limit must be positive integer, got ${limit}`);
+    throw new KernelError('INVALID', `executeList: limit must be positive integer, got ${limit}`);
   }
   const depth = plan.depth ?? 1;
   if (!Number.isInteger(depth) || (depth < 1 && depth !== -1)) {
-    throw new OpError('BAD_REQUEST', `executeList: depth must be a positive integer or -1, got ${depth}`);
+    throw new KernelError('INVALID', `executeList: depth must be a positive integer or -1, got ${depth}`);
   }
   const budget = opts.budget ?? DEFAULT_BUDGET;
 

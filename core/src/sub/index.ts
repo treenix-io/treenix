@@ -4,7 +4,7 @@
 
 import { type SubscribeOpts } from '#contexts/service/index';
 import { isComponent, isCompKey, type NodeData } from '#core';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import {
   isSetEntry,
   mapNodeForSift,
@@ -717,7 +717,7 @@ export function withSubscriptions(
       // mutations at deeper levels. executeList READ walks descendants, the
       // watch does not; refuse registration until deep membership lands.
       if ((reg.plan.depth ?? 1) !== 1) {
-        throw new OpError('BAD_REQUEST', `query watch supports depth 1 only, got ${reg.plan.depth}`);
+        throw new KernelError('INVALID', `query watch supports depth 1 only, got ${reg.plan.depth}`);
       }
       // core-anz4.3: validate both predicates — reject hidden fields the
       // projector strips, matching the oracle executeList closes with
@@ -729,7 +729,7 @@ export function withSubscriptions(
       // projection; raw-node eval re-opens the hidden-field oracle. No
       // projector configured = no query watch.
       if (!projectMembership) {
-        throw new OpError('FORBIDDEN', 'query watch requires a membership projector (SubscriptionOpts.projectMembership)');
+        throw new KernelError('FORBIDDEN', 'query watch requires a membership projector (SubscriptionOpts.projectMembership)');
       }
       // E03 → coexistence (§4.2, owner sign-off 2026-07-18): planHash is part of
       // the handle identity — a DIFFERENT plan on the same (userId, vp) coexists.

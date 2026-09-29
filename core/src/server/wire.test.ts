@@ -5,7 +5,7 @@
 
 import { createClient } from '#client/wire';
 import { createNode, R, S, W } from '#core';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import type { ResolvedReadPlan } from '#mount/resolve-plan';
 import { createPortConn } from '#protocol/port';
 import { withAcl } from '#security/acl-tree';
@@ -52,7 +52,7 @@ function assertStampedReset(f: { ev?: string; reason?: string; seq?: number; epo
   assert.equal(typeof f?.epoch, 'string', 'reset must carry the stream epoch');
 }
 
-const isCode = (code: string) => (e: unknown) => e instanceof OpError && e.code === code;
+const isCode = (code: string) => (e: unknown) => e instanceof KernelError && e.code === code;
 
 describe('wire session over MessageChannel', () => {
   it('reads pass, writes FORBIDDEN for read-only session — ACL fail closed over postMessage', async (t) => {

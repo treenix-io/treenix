@@ -1,5 +1,5 @@
 import { createNode, isComponent, ref, register } from '#core';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import { clearRegistry } from '#testing';
 import { createMemoryTree, paginate, type Tree } from '#tree';
 import { createFsTree } from '#tree/fs';
@@ -118,7 +118,7 @@ describe('Mounts', () => {
     const ms = withMounts(rootStore);
     await assert.rejects(
       async () => { for await (const _ of ms.scanChildren!('/users', { after: '/users/alice' })) { /* drain */ } },
-      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
     );
   });
 
@@ -595,9 +595,9 @@ describe('Mounts', () => {
     );
 
     const ms = withMounts(rootStore);
-    const badRequest = (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST';
-    await assert.rejects(() => ms.get('/bad/item'), badRequest);
-    await assert.rejects(() => ms.getChildren('/bad'), badRequest);
+    const isInvalid = (e: unknown) => e instanceof KernelError && e.code === 'INVALID';
+    await assert.rejects(() => ms.get('/bad/item'), isInvalid);
+    await assert.rejects(() => ms.getChildren('/bad'), isInvalid);
   });
 });
 
@@ -829,7 +829,7 @@ describe('Types mount adapter', () => {
   it('remove of a registry type is FORBIDDEN', async () => {
     register('test.block.hero', 'schema', () => ({ title: 'Hero', type: 'object' as const, properties: {} }));
     const ts = createTypesTree(backingStore, '/types');
-    await assert.rejects(() => ts.remove('/types/test/block/hero'), (e) => e instanceof OpError && e.code === 'FORBIDDEN');
+    await assert.rejects(() => ts.remove('/types/test/block/hero'), (e) => e instanceof KernelError && e.code === 'FORBIDDEN');
   });
 
   it('getChildren merges dynamic and registry in same category', async () => {

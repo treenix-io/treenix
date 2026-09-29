@@ -4,7 +4,7 @@
 // never exercised. Contracts are unchanged; only the composition surface is.
 
 import { A, createNode, type NodeData, R, register, S, unregister, W } from '#core';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import { createPipeline } from '#server/server';
 import { clearRegistry } from '#testing';
 import { withMounts } from '#mount';
@@ -286,7 +286,7 @@ describe('policy: migration step', () => {
 
     await assert.rejects(
       () => tree.patchMany!('/p', [{ path: '/p/a', ops: [['t', 'body', 'nope']] }]),
-      (e: OpError) => e.code === 'CONFLICT',
+      (e: KernelError) => e.code === 'CONFLICT',
     );
   });
 
@@ -321,7 +321,7 @@ describe('policy: migration step', () => {
     inject = '/p/a';
     await assert.rejects(
       () => tree.patchMany!('/p', [{ path: '/p/a', ops: [['r', 'count', 2]] }]),
-      (e: OpError) => e.code === 'CONFLICT',
+      (e: KernelError) => e.code === 'CONFLICT',
     );
     const a = await mem.get('/p/a');
     assert.equal(a?.note, 'concurrent', 'concurrent write preserved');
@@ -493,7 +493,7 @@ describe('policy: validation step (Write-Barrier)', () => {
     // Patch count to a string — violates schema (number expected)
     await assert.rejects(
       () => tree.patch('/a', [['r', '#metadata.count', 'not-a-number']]),
-      (e: Error) => e.name === 'OpError' && e.message.includes('Validation'),
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
     );
   });
 
@@ -971,7 +971,7 @@ describe('policy: $id identity (gk8.10)', () => {
 
     await assert.rejects(
       () => tree.set({ ...stored, $id: ulid(), $rev: undefined }),
-      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
     );
   });
 
@@ -983,7 +983,7 @@ describe('policy: $id identity (gk8.10)', () => {
 
     await assert.rejects(
       () => tree.set({ ...createNode('/dupe', 'doc', {}), $id: ulid() }),
-      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
     );
   });
 
@@ -995,7 +995,7 @@ describe('policy: $id identity (gk8.10)', () => {
         { path: '/x/a', node: { ...createNode('/x/a', 'doc', {}), $id: ulid() } },
         { path: '/x/b', node: createNode('/x/b', 'doc', {}) },
       ]),
-      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
     );
   });
 
@@ -1007,7 +1007,7 @@ describe('policy: $id identity (gk8.10)', () => {
 
     await assert.rejects(
       () => tree.set({ ...createNode('/b', 'doc', {}), $id: victim }),
-      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
     );
     assert.equal(await inner.get('/b'), undefined, 'nothing stored');
   });
@@ -1028,7 +1028,7 @@ describe('policy: $id identity (gk8.10)', () => {
 
     await assert.rejects(
       () => tree.set({ ...createNode('/forged', 'doc', {}), $id: ulid() }, laundered),
-      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
     );
   });
 

@@ -5,7 +5,7 @@
 // from `keyField`, $type is the constant `type` from config.
 
 import { type NodeData } from '@treenx/core';
-import { OpError } from '@treenx/core/errors';
+import { KernelError } from '@treenx/core/errors';
 import { type Page, type TreeSource } from '@treenx/core/tree';
 import { type Collection, type Document, ObjectId } from 'mongodb';
 import { getSharedClient } from './index';
@@ -33,8 +33,8 @@ function assertSafeQuery(q: unknown): void {
   }
   if (!q || typeof q !== 'object' || q.constructor !== Object) return;
   for (const [k, v] of Object.entries(q)) {
-    if (FORBIDDEN_QUERY_KEYS.has(k)) throw new OpError('BAD_REQUEST', `Forbidden query operator: ${k}`);
-    if (SYSTEM_FIELD_KEYS.has(k)) throw new OpError('BAD_REQUEST', `System field ${k} is not queryable on a foreign collection`);
+    if (FORBIDDEN_QUERY_KEYS.has(k)) throw new KernelError('INVALID', `Forbidden query operator: ${k}`);
+    if (SYSTEM_FIELD_KEYS.has(k)) throw new KernelError('INVALID', `System field ${k} is not queryable on a foreign collection`);
     assertSafeQuery(v);
   }
 }
@@ -60,7 +60,7 @@ function decodeCursor(token: string): { sortValue: unknown; idHex: string } {
     if (typeof idHex !== 'string') throw new Error('bad cursor');
     return { sortValue, idHex };
   } catch {
-    throw new OpError('BAD_REQUEST', 'collection mount: malformed pagination cursor');
+    throw new KernelError('INVALID', 'collection mount: malformed pagination cursor');
   }
 }
 
@@ -83,7 +83,7 @@ export function createCollectionTree(col: Collection, config: CollectionTreeConf
   const { keyField, type } = config;
 
   const sortEntries = Object.entries(config.sort ?? {});
-  if (sortEntries.length > 1) throw new OpError('BAD_REQUEST', 'collection mount: single-key sort only');
+  if (sortEntries.length > 1) throw new KernelError('INVALID', 'collection mount: single-key sort only');
   const [sortField, sortDir] = sortEntries[0] ?? ['_id', -1 as const];
   const mongoSort: Record<string, 1 | -1> = sortField === '_id' ? { _id: sortDir } : { [sortField]: sortDir, _id: sortDir };
   const strictOp = sortDir === 1 ? '$gt' : '$lt';
@@ -92,7 +92,7 @@ export function createCollectionTree(col: Collection, config: CollectionTreeConf
     const { _id, ...fields } = doc;
     const key = keyField === '_id' ? String(_id) : doc[keyField];
     if (typeof key !== 'string' || key === '' || key.includes('/')) {
-      throw new OpError('KIND_VIOLATION', `collection mount: doc ${String(_id)} has no usable key in field "${keyField}"`);
+      throw new KernelError('INVALID', `collection mount: doc ${String(_id)} has no usable key in field "${keyField}"`);
     }
     return { ...fields, $path: `/${key}`, $type: type };
   }
@@ -109,7 +109,7 @@ export function createCollectionTree(col: Collection, config: CollectionTreeConf
     try {
       oid = new ObjectId(idHex);
     } catch {
-      throw new OpError('BAD_REQUEST', 'collection mount: malformed pagination cursor');
+      throw new KernelError('INVALID', 'collection mount: malformed pagination cursor');
     }
     if (sortField === '_id') return { _id: { [strictOp]: oid } };
     return {
@@ -144,7 +144,7 @@ export function createCollectionTree(col: Collection, config: CollectionTreeConf
   }
 
   const readOnly = async (): Promise<never> => {
-    throw new OpError('FORBIDDEN', 'collection mount is read-only: the external DB is never written');
+    throw new KernelError('FORBIDDEN', 'collection mount is read-only: the external DB is never written');
   };
 
   const tree: TreeSource = {

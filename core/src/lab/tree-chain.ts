@@ -8,7 +8,7 @@
 
 import { type Class, type Raw, type TypeClass } from '#comp';
 import { getComponent, getComponentByName, isRef, type NodeData, normalizeType, resolve } from '#core';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import type { Tree } from '#tree';
 import type { Chain } from '#chain';
 
@@ -40,7 +40,7 @@ const NO_OPS: Op[] = []
 
 async function exec(tree: Tree, path: string, spec: Spec | null, ops: Op[]): Promise<any> {
   const node = await tree.get(path)
-  if (!node) throw new OpError('NOT_FOUND', `Node not found: ${path}`)
+  if (!node) throw new KernelError('NOT_FOUND', `Node not found: ${path}`)
 
   let cur: any = node
   let curType = node.$type

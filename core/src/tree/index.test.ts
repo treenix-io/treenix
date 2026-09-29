@@ -1,7 +1,7 @@
 import { createNode } from '#core';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import { createFilterTree, createMemoryTree, createOverlayTree, fromStorageKeys, PatchTestError, toStorageKeys } from './index';
 
 describe('MemoryStore', () => {
@@ -297,8 +297,8 @@ describe('OverlayStore', () => {
   });
 });
 
-describe('MemoryStore OCC — typed OpError', () => {
-  it('set with stale $rev throws OpError with code CONFLICT', async () => {
+describe('MemoryStore OCC — typed KernelError', () => {
+  it('set with stale $rev throws KernelError with code CONFLICT', async () => {
     const tree = createMemoryTree();
     await tree.set(createNode('/n', 'doc', { title: 'a' }));
     const stored = (await tree.get('/n'))!;
@@ -306,15 +306,15 @@ describe('MemoryStore OCC — typed OpError', () => {
     await tree.set({ ...stored, title: 'b' }); // advances rev
     await assert.rejects(
       () => tree.set({ ...stored, title: 'c' }), // stale rev
-      (e: unknown) => e instanceof OpError && e.code === 'CONFLICT',
+      (e: unknown) => e instanceof KernelError && e.code === 'CONFLICT',
     );
   });
 
-  it('patch on missing node throws OpError with code NOT_FOUND', async () => {
+  it('patch on missing node throws KernelError with code NOT_FOUND', async () => {
     const tree = createMemoryTree();
     await assert.rejects(
       () => tree.patch('/nope', [['r', 'x', 1]]),
-      (e: unknown) => e instanceof OpError && e.code === 'NOT_FOUND',
+      (e: unknown) => e instanceof KernelError && e.code === 'NOT_FOUND',
     );
   });
 });

@@ -9,7 +9,7 @@ import { getComponent, resolve } from '@treenx/core';
 import { matchesAny } from '@treenx/core/glob';
 import type { CatalogActionDoc, CatalogEntry, CatalogPropertyDoc } from '@treenx/core/schema/catalog';
 import type { MethodSchema, PropertySchema, TypeSchema } from '@treenx/core/schema/types';
-import { OpError } from '@treenx/core/errors';
+import { KernelError } from '@treenx/core/errors';
 import { buildActor, executeAction } from '@treenx/core/server/actions';
 import { buildClaims, resolveToken, type Session, withAcl } from '@treenx/core/security';
 import { resolveRef, type Tree } from '@treenx/core/tree';
@@ -529,8 +529,8 @@ export async function buildMcpServer(store: Tree, session: Session, claims?: str
         // Teaching error: a live-write denial should point the agent at the
         // branch workflow. Branch-rooted sessions never need it (their writes
         // are already confined), so the hint fires only for plain sessions.
-        if (!branch && MUTATING_TOOLS.has(action) && err instanceof OpError && err.code === 'FORBIDDEN') {
-          throw new OpError('FORBIDDEN', `${err.message}\n\n${BRANCH_HINT}`);
+        if (!branch && MUTATING_TOOLS.has(action) && err instanceof KernelError && err.code === 'FORBIDDEN') {
+          throw new KernelError('FORBIDDEN', `${err.message}\n\n${BRANCH_HINT}`);
         }
         throw err;
       }

@@ -10,7 +10,7 @@
 // added here on purpose.
 
 import { createHash } from 'node:crypto';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import { stableJson } from '#util/stable-json';
 import type { ReadPlan } from './read-runtime';
 
@@ -55,10 +55,10 @@ export function encodeReadCursor(hash: string, storageCursor: string): string {
 export function decodeReadCursor(cursor: string, expectedHash: string): string {
   const [hash, sc, ...extra] = cursor.split('.');
   if (sc === undefined || extra.length > 0 || !/^[A-Za-z0-9_-]*$/.test(sc)) {
-    throw new OpError('BAD_REQUEST', 'malformed read cursor');
+    throw new KernelError('INVALID', 'malformed read cursor');
   }
   if (hash !== expectedHash) {
-    throw new OpError('BAD_REQUEST', 'cursor was issued for a different read plan — restart pagination');
+    throw new KernelError('INVALID', 'cursor was issued for a different read plan — restart pagination');
   }
   return Buffer.from(sc, 'base64url').toString('utf8');
 }

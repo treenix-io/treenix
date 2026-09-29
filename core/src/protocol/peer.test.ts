@@ -1,7 +1,7 @@
 // TWP peer over loopback — protocol-core contract tests (docs/research/twp-spec.md §5).
 
 import { createNode, R, S } from '#core';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import type { ResolvedReadPlan } from '#mount/resolve-plan';
 import { withAcl, type AclChildrenOpts, type PlanChildrenOpts } from '#security/acl-tree';
 import { registerWatchList } from '#server/wire';
@@ -11,6 +11,7 @@ import { createMemoryTree } from '#tree';
 import { relocateCtx, withStoragePolicy } from '#tree/policy';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { isReqFrame, isResFrame, type ResFrame } from './frames';
 import { createLoopback } from './loopback';
 import { createPeer, type PeerServe, type ServeFactory, type ServeHooks } from './peer';
 
@@ -32,7 +33,7 @@ async function seededTree() {
   return tree;
 }
 
-const isCode = (code: string) => (e: unknown) => e instanceof OpError && e.code === code;
+const isCode = (code: string) => (e: unknown) => e instanceof KernelError && e.code === code;
 
 describe('TWP peer over loopback', () => {
   it('fail closed: peer without serve answers FORBIDDEN', async () => {
@@ -109,10 +110,10 @@ describe('TWP peer over loopback', () => {
     assert.equal((await policy.tree.get('/restored'))?.$id, CARRIED, 'move/restore path keeps identity');
   });
 
-  it('set without $type → BAD_REQUEST', async () => {
+  it('set without $type → INVALID', async () => {
     const tree = await seededTree();
     const { client } = pair(() => ({ tree }));
-    await assert.rejects(client.req.set('/c', { v: 1 }), isCode('BAD_REQUEST'));
+    await assert.rejects(client.req.set('/c', { v: 1 }), isCode('INVALID'));
   });
 
   it('resolve follows refs: [requested, ...resolved]', async () => {
@@ -165,13 +166,13 @@ describe('TWP peer over loopback', () => {
     assert.deepEqual(page.items.map((n) => n.$path), ['/a']);
 
     // wire-shape guards
-    await assert.rejects(client.req.ls('/', { query: 5 as unknown as Record<string, unknown> }), isCode('BAD_REQUEST'));
-    await assert.rejects(client.req.ls('/', { cursor: 7 as unknown as string }), isCode('BAD_REQUEST'));
+    await assert.rejects(client.req.ls('/', { query: 5 as unknown as Record<string, unknown> }), isCode('INVALID'));
+    await assert.rejects(client.req.ls('/', { cursor: 7 as unknown as string }), isCode('INVALID'));
 
     // Stage 6d (core-9yd): query+watch is allowed at depth-1; a DEEP query
     // watch would silently miss flips below the first level — rejected.
-    await assert.rejects(client.req.ls('/', { query: { title: 'A' }, watchList: true, depth: 2 }), isCode('BAD_REQUEST'));
-    await assert.rejects(client.req.ls('/', { query: { title: 'A' }, watch: true, depth: -1 }), isCode('BAD_REQUEST'));
+    await assert.rejects(client.req.ls('/', { query: { title: 'A' }, watchList: true, depth: 2 }), isCode('INVALID'));
+    await assert.rejects(client.req.ls('/', { query: { title: 'A' }, watch: true, depth: -1 }), isCode('INVALID'));
   });
 
   it('deep ls+watchList WITHOUT query is rejected — list-watch notify is direct-parent-only (core-karx)', async () => {
@@ -189,15 +190,15 @@ describe('TWP peer over loopback', () => {
     };
     const { client } = pair(() => serve);
 
-    await assert.rejects(client.req.ls('/', { watchList: true, depth: 2 }), isCode('BAD_REQUEST'));
-    await assert.rejects(client.req.ls('/', { watchList: true, depth: -1 }), isCode('BAD_REQUEST'));
+    await assert.rejects(client.req.ls('/', { watchList: true, depth: 2 }), isCode('INVALID'));
+    await assert.rejects(client.req.ls('/', { watchList: true, depth: -1 }), isCode('INVALID'));
     assert.deepEqual(pages, [], 'rejected registration must not reach the watchList hook');
 
     await client.req.ls('/', { watchList: true });
     assert.deepEqual(pages, ['/'], 'depth-1 (default) list watch stays allowed');
   });
 
-  it('act dispatches structured fields; act without execute → BAD_REQUEST', async () => {
+  it('act dispatches structured fields; act without execute → INVALID', async () => {
     const tree = await seededTree();
     const seen: unknown[] = [];
     const serve: PeerServe = {
@@ -211,7 +212,7 @@ describe('TWP peer over loopback', () => {
     assert.deepEqual(seen, [{ path: '/a', type: undefined, key: 'k', action: 'ship', data: { x: 1 }, opId: 'op-1' }]);
 
     const bare = pair(() => ({ tree }));
-    await assert.rejects(bare.client.req.act({ path: '/a', action: 'x' }), isCode('BAD_REQUEST'));
+    await assert.rejects(bare.client.req.act({ path: '/a', action: 'x' }), isCode('INVALID'));
   });
 
   it('act stream yields chunks and end; consumer break cancels the handler', async () => {
@@ -247,13 +248,13 @@ describe('TWP peer over loopback', () => {
     assert.equal(sawAbort, true);
   });
 
-  it('act stream propagates handler errors as OpError', async () => {
+  it('act stream propagates handler errors as KernelError', async () => {
     const tree = await seededTree();
     const serve: PeerServe = {
       tree,
       executeStream: async function* () {
         yield 1;
-        throw new OpError('NOT_FOUND', 'gone');
+        throw new KernelError('NOT_FOUND', 'gone');
       },
     };
     const { client } = pair(() => serve);
@@ -262,7 +263,58 @@ describe('TWP peer over loopback', () => {
     }, isCode('NOT_FOUND'));
   });
 
-  it('watch flags: S-gated registration through hooks; unsupported → BAD_REQUEST', async () => {
+  it('a cancelled act stream ends with CANCELLED, not with a completed end', async () => {
+    const tree = await seededTree();
+    const serve: PeerServe = {
+      tree,
+      executeStream: async function* (_req, signal) {
+        for (let i = 0; !signal.aborted; i++) {
+          yield i;
+          await Promise.resolve();
+        }
+      },
+    };
+    const [ca, cb] = createLoopback();
+    createPeer(() => serve).attach(cb);
+
+    let cancelSent = false;
+    const terminal = new Promise<ResFrame>((resolve) => {
+      ca.onFrame((f) => {
+        if (!isResFrame(f)) return;
+        if (!('ch' in f)) { resolve(f); return; }
+        if (cancelSent) return;
+        cancelSent = true;
+        ca.send({ op: 'cancel', id: f.id });
+      });
+    });
+    ca.send({ id: 1, op: 'act', stream: true, path: '/a', action: 'tick' });
+
+    const f = await terminal;
+    assert.ok('err' in f);
+    assert.equal(f.err.code, 'CANCELLED');
+  });
+
+  it('act stream on an unattached peer fails UNAVAILABLE', async () => {
+    const stream = createPeer().req.actStream({ path: '/a', action: 'x' });
+    await assert.rejects(stream[Symbol.asyncIterator]().next(), isCode('UNAVAILABLE'));
+  });
+
+  it('act stream past the requester buffer fails BUDGET', async () => {
+    const [ca, cb] = createLoopback();
+    const client = createPeer();
+    client.attach(ca);
+    // Every chunk lands before the consumer resumes, so the buffer overflows.
+    cb.onFrame((f) => {
+      if (!isReqFrame(f)) return;
+      for (let i = 0; i < 2000; i++) cb.send({ id: f.id, ch: i });
+    });
+
+    const it = client.req.actStream({ path: '/a', action: 'flood' })[Symbol.asyncIterator]();
+    assert.equal((await it.next()).value, 0);
+    await assert.rejects(it.next(), isCode('BUDGET'));
+  });
+
+  it('watch flags: S-gated registration through hooks; unsupported → INVALID', async () => {
     const tree = await seededTree();
     const watched: string[][] = [];
     const serve: PeerServe = {
@@ -281,7 +333,7 @@ describe('TWP peer over loopback', () => {
     assert.deepEqual(watched, [['/a']]);
 
     const bare = pair(async () => ({ tree }));
-    await assert.rejects(bare.client.req.get('/a', true), isCode('BAD_REQUEST'));
+    await assert.rejects(bare.client.req.get('/a', true), isCode('INVALID'));
   });
 
   it('sub/unsub manage watch-sets; perm returns bits', async () => {
@@ -345,7 +397,7 @@ describe('TWP peer over loopback', () => {
   it('bad paths are rejected at the dispatcher', async () => {
     const tree = await seededTree();
     const { client } = pair(() => ({ tree }));
-    await assert.rejects(client.req.get('/a/../b'), isCode('BAD_REQUEST'));
+    await assert.rejects(client.req.get('/a/../b'), isCode('INVALID'));
   });
 
   // ── token threading (core-anz4.28, ns6p.4 slice 0) ──
@@ -412,13 +464,13 @@ describe('TWP peer over loopback', () => {
     assert.deepEqual(calls, [{ op: 'watch', paths: ['/a'], token: undefined, children: undefined }]);
 
     // '' would alias the server-internal shared LEGACY hold — protocol error.
-    await assert.rejects(client.req.get('/a', true, ''), isCode('BAD_REQUEST'));
-    await assert.rejects(client.req.sub({ paths: ['/a'], token: '' }), isCode('BAD_REQUEST'));
-    await assert.rejects(client.req.ls('/a', { watch: true, token: '' }), isCode('BAD_REQUEST'));
+    await assert.rejects(client.req.get('/a', true, ''), isCode('INVALID'));
+    await assert.rejects(client.req.sub({ paths: ['/a'], token: '' }), isCode('INVALID'));
+    await assert.rejects(client.req.ls('/a', { watch: true, token: '' }), isCode('INVALID'));
 
     // \0 would reach into the internal provisional-holder namespace (ns6p.4
     // invariant 27) — a guessed holder id could strip a request's coverage.
-    await assert.rejects(client.req.get('/a', true, 'x\0y'), isCode('BAD_REQUEST'));
+    await assert.rejects(client.req.get('/a', true, 'x\0y'), isCode('INVALID'));
   });
 
   // ── ns6p.4 slice 2: watchList S-gate (invariant 22) + frozen plan (invariant 21) ──
@@ -509,7 +561,7 @@ describe('TWP peer over loopback', () => {
 // client's event channel receives, the journal records hook call order.
 
 describe('register-first observe (ns6p.4 slice 4)', () => {
-  const isCode = (code: string) => (e: unknown) => e instanceof OpError && e.code === code;
+  const isCode = (code: string) => (e: unknown) => e instanceof KernelError && e.code === code;
 
   async function observed(opts?: { maxWatchesPerUser?: number }) {
     const memory = createMemoryTree();
@@ -683,7 +735,7 @@ describe('register-first observe (ns6p.4 slice 4)', () => {
         plan: { source: p, ...(o?.query ? { callerWhere: o.query } : {}) },
         mountDeps: new Set([p]),
       }),
-      getChildren: async (): Promise<never> => { throw new OpError('NOT_FOUND', 'scan failed'); },
+      getChildren: async (): Promise<never> => { throw new KernelError('NOT_FOUND', 'scan failed'); },
     });
     const { client } = pair(() => ({ tree: serveTree, hooks: h.hooks }));
 
@@ -703,7 +755,7 @@ describe('register-first observe (ns6p.4 slice 4)', () => {
   it('undo failure is loud and never masks the read error', async () => {
     const h = await observed();
     const serveTree = Object.assign(Object.create(h.base) as typeof h.base, {
-      getChildren: async (): Promise<never> => { throw new OpError('NOT_FOUND', 'scan failed'); },
+      getChildren: async (): Promise<never> => { throw new KernelError('NOT_FOUND', 'scan failed'); },
     });
     const hooks: ServeHooks = {
       ...h.hooks,
@@ -779,7 +831,7 @@ describe('register-first observe (ns6p.4 slice 4)', () => {
     const h = await observed();
     h.watcher.watch('u1', ['/dir/a'], { token: 'tab' }); // pre-existing
     const serveTree = Object.assign(Object.create(h.base) as typeof h.base, {
-      get: async (): Promise<never> => { throw new OpError('NOT_FOUND', 'read failed'); },
+      get: async (): Promise<never> => { throw new KernelError('NOT_FOUND', 'read failed'); },
     });
     const { client } = pair(() => ({ tree: serveTree, hooks: h.hooks }));
 
@@ -835,7 +887,7 @@ describe('request-boundary TTL arm (ns6p.4 F7)', () => {
   it('arms even when the request fails — a lease undone mid-request must still not outlive its token silently', async () => {
     const h = armHarness();
     const failing = Object.assign(Object.create(h.base) as typeof h.base, {
-      get: async (): Promise<never> => { throw new OpError('NOT_FOUND', 'read failed'); },
+      get: async (): Promise<never> => { throw new KernelError('NOT_FOUND', 'read failed'); },
     });
     const { client } = pair(() => ({ tree: failing, hooks: h.hooks }));
 

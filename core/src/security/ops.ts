@@ -1,11 +1,11 @@
 // Auth operations — transport-agnostic.
-// Throws OpError, never TRPCError. Transport layer maps errors.
+// Throws KernelError, never TRPCError. Transport layer maps errors.
 
 import { getComponentByName, makeNode, R, W } from '#core';
 import type { Tree } from '#tree';
 import { assertNotSystem } from './claims';
 import { createSession, DUMMY_HASH, hashPassword, revokeSession, verifyPassword } from './sessions';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import { checkRate } from './rate-limit';
 
 // userId becomes a path segment under /auth/users/. Original check (slash/backslash/NUL) missed
@@ -17,7 +17,7 @@ function assertUserId(userId: string): void {
   if (typeof userId !== 'string' || userId.length === 0 || userId.length > 64
       || !/^[A-Za-z0-9._@+-]+$/.test(userId)
       || /^\.+$/.test(userId))
-    throw new OpError('BAD_REQUEST', 'Invalid userId');
+    throw new KernelError('INVALID', 'Invalid userId');
   assertNotSystem(userId);
 }
 
@@ -40,7 +40,7 @@ export function registerUser(store: Tree, userId: string, password: string, clie
 
     const userPath = `/auth/users/${userId}`;
     const existing = await store.get(userPath);
-    if (existing) throw new OpError('CONFLICT', 'User already exists');
+    if (existing) throw new KernelError('CONFLICT', 'User already exists');
 
     const { items } = await store.getChildren('/auth/users', { limit: 1 });
     const isFirstUser = items.length === 0;
@@ -77,11 +77,11 @@ export async function loginUser(store: Tree, userId: string, password: string, c
   const hash = typeof creds?.['hash'] === 'string' ? creds['hash'] : undefined;
   // Always run scrypt to prevent timing-based user enumeration
   const ok = await verifyPassword(password, hash ?? DUMMY_HASH);
-  // R4-AUTH-6: collapse pending-status differential into UNAUTHORIZED. Distinct FORBIDDEN
+  // R4-AUTH-6: collapse pending-status differential into UNAUTHENTICATED. Distinct FORBIDDEN
   // for pending users let credential-stuffing oracles confirm a valid (userId, password) pair
   // before the account was even activated. Same response shape as wrong-credentials.
   if (!user || !hash || !ok || user.status !== 'active')
-    throw new OpError('UNAUTHORIZED', 'Invalid credentials');
+    throw new KernelError('UNAUTHENTICATED', 'Invalid credentials');
 
   const token = await createSession(store, userId);
   return { token, userId };
@@ -96,7 +96,7 @@ export async function devLogin(store: Tree) {
   // Require BOTH signals — single env-var typo in prod must not grant admin.
   // Boot-time assertion in main.ts also crashes if VITE_DEV_LOGIN is set in non-dev.
   if (process.env.NODE_ENV !== 'development' || !process.env.VITE_DEV_LOGIN) {
-    throw new OpError('FORBIDDEN', 'Dev-only');
+    throw new KernelError('FORBIDDEN', 'Dev-only');
   }
   const userId = 'dev';
   const userPath = `/auth/users/${userId}`;

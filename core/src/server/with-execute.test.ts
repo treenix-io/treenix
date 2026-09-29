@@ -325,7 +325,7 @@ describe('withExecute', () => {
       assert.deepEqual(order, ['settled:true:op-9', 'returned'], 'hook (with opId in info) completed before return');
     });
 
-    it('read-kind frame cannot delegate (KIND_VIOLATION, conservative write+io)', async () => {
+    it('read-kind frame cannot delegate (FORBIDDEN, conservative write+io)', async () => {
       setupCounter();
       const { tree: remote, calls } = execRecorder();
       const inner = createMemoryTree();
@@ -341,7 +341,7 @@ describe('withExecute', () => {
 
       await assert.rejects(
         () => tree.execute('/w', 'peek'),
-        (e: { code?: string }) => e.code === 'KIND_VIOLATION',
+        (e: { code?: string }) => e.code === 'FORBIDDEN',
       );
       assert.equal(calls.length, 0);
     });

@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
 import { A, createNode, R, S, W } from '#core';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import { interceptConsole, queryLogs } from '#log';
 import { withAcl } from '#security/acl-tree';
 import type { Tree } from '#tree';
@@ -190,7 +190,7 @@ describe('log flood (jre7)', () => {
       rootNode: rootNode(tmp),
     });
     const bob = withAcl(app.tree, 'bob', ['u:bob', 'authenticated']);
-    const forbidden = (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN';
+    const forbidden = (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN';
 
     await assert.rejects(() => bob.get('/sys/logs'), forbidden);
     await assert.rejects(() => bob.getChildren('/sys/logs'), forbidden);

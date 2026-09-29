@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import { canonicalReadPlan, decodeReadCursor, encodeReadCursor, planHash } from './plan-hash';
 
 describe('planHash (core-hp7)', () => {
@@ -61,7 +61,7 @@ describe('ReadCursor (core-8an)', () => {
     const other = planHash({ source: '/y' });
     assert.throws(
       () => decodeReadCursor(encodeReadCursor(other, '/y/a'), hash),
-      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
     );
   });
 
@@ -69,7 +69,7 @@ describe('ReadCursor (core-8an)', () => {
     for (const bad of ['', '/raw/path', `${hash}.not!base64url`, `${hash}.a.b`]) {
       assert.throws(
         () => decodeReadCursor(bad, hash),
-        (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+        (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
         `cursor ${JSON.stringify(bad)} must be rejected`,
       );
     }

@@ -20,7 +20,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { executeAction, executeStream, setComponent } from './actions';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import { withMounts } from '#mount';
 import { MountMemory, MountOverlay, MountQuery, MountTypes } from '#mount/adapters';
 import { type CdcRegistry, withSubscriptions } from '#sub';
@@ -445,7 +445,7 @@ describe('actions.ts operations', () => {
     );
   });
 
-  it('executeAction throws BAD_REQUEST for missing action', async () => {
+  it('executeAction throws INVALID for missing action', async () => {
     class Dummy { x = 1; }
     registerType('dummy', Dummy);
 
@@ -456,7 +456,7 @@ describe('actions.ts operations', () => {
 
     await assert.rejects(
       () => executeAction(tree, '/n', 'dummy', undefined, 'nonexistent'),
-      (e: any) => { assert.equal(e.code, 'BAD_REQUEST'); return true; },
+      (e: any) => { assert.equal(e.code, 'INVALID'); return true; },
     );
   });
 
@@ -511,7 +511,7 @@ describe('actions.ts operations', () => {
     assert.deepEqual(collected, [0, 1, 2]);
   });
 
-  it('executeStream: BAD_REQUEST for non-generator action', async () => {
+  it('executeStream: INVALID for non-generator action', async () => {
     class Plain { run() { return 42; } }
     registerType('plain', Plain);
     register('plain', 'schema', () => ({
@@ -526,7 +526,7 @@ describe('actions.ts operations', () => {
       async () => {
         for await (const _ of executeStream(tree, '/p', 'plain', undefined, 'run')) { /* */ }
       },
-      (e: any) => { assert.equal(e.code, 'BAD_REQUEST'); return true; },
+      (e: any) => { assert.equal(e.code, 'INVALID'); return true; },
     );
   });
 
@@ -697,21 +697,21 @@ describe('extractPaths', () => {
   it('throws on item missing $path', () => {
     assert.throws(
       () => extractPaths({ items: [{ $path: '/a' }, { name: 'no path' }, { $path: '/b' }] }),
-      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
     );
   });
 
   it('throws on item with non-string $path', () => {
     assert.throws(
       () => extractPaths({ items: [{ $path: 123 }], total: 1 }),
-      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
     );
   });
 
   it('throws on null item inside items array', () => {
     assert.throws(
       () => extractPaths({ items: [{ $path: '/a' }, null], total: 2 }),
-      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
     );
   });
 
@@ -720,12 +720,12 @@ describe('extractPaths', () => {
   });
 });
 
-// ── OpError ──
+// ── KernelError ──
 
-describe('OpError', () => {
+describe('KernelError', () => {
   it('has correct name and code', () => {
-    const err = new OpError('NOT_FOUND', 'thing not found');
-    assert.equal(err.name, 'OpError');
+    const err = new KernelError('NOT_FOUND', 'thing not found');
+    assert.equal(err.name, 'KernelError');
     assert.equal(err.code, 'NOT_FOUND');
     assert.equal(err.message, 'thing not found');
     assert.ok(err instanceof Error);
@@ -797,7 +797,7 @@ describe('QueryStore advanced', () => {
 describe('matchesFilter advanced', () => {
   it('$regex is refused (ReDoS)', () => {
     const node = { $path: '/a', $type: 'x', name: 'hello-world' } as NodeData;
-    assert.throws(() => matchesFilter(node, { name: { $regex: 'hello' } }), (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST');
+    assert.throws(() => matchesFilter(node, { name: { $regex: 'hello' } }), (e: unknown) => e instanceof KernelError && e.code === 'INVALID');
   });
 
   it('$path in match maps correctly', () => {

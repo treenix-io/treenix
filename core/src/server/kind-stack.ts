@@ -4,8 +4,8 @@
 //
 // Rules (caller × target):
 //   read         → read    OK
-//   read         → write   throw KIND_VIOLATION (read cannot trigger writes)
-//   read         → io      throw KIND_VIOLATION (read cannot leak side effects)
+//   read         → write   throw FORBIDDEN (read cannot trigger writes)
+//   read         → io      throw FORBIDDEN (read cannot leak side effects)
 //   read+io      → read    OK
 //   read+io      → write   throw
 //   read+io      → io      OK
@@ -14,7 +14,7 @@
 // Empty stack (out-of-band: bootstrap, seeds, migrations) → all targets allowed.
 
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 
 export type KindFrame = {
   kind: 'read' | 'write';
@@ -35,14 +35,14 @@ export function assertCanCall(target: { kind: 'read' | 'write'; io: boolean }): 
   if (!caller) return; // out-of-band entry: allow
 
   if (caller.kind === 'read' && target.kind === 'write') {
-    throw new OpError(
-      'KIND_VIOLATION',
+    throw new KernelError(
+      'FORBIDDEN',
       `read action ${caller.action} cannot invoke write target (${target.kind}${target.io ? '+io' : ''})`,
     );
   }
   if (caller.kind === 'read' && target.io && !caller.io) {
-    throw new OpError(
-      'KIND_VIOLATION',
+    throw new KernelError(
+      'FORBIDDEN',
       `read action ${caller.action} (no io) cannot invoke io target`,
     );
   }
@@ -62,8 +62,8 @@ export function runWithFrame<T>(frame: KindFrame, fn: () => Promise<T>): Promise
 export function runDetached<T>(frame: KindFrame, fn: () => Promise<T>): Promise<T> {
   const caller = currentFrame();
   if (caller?.kind === 'read') {
-    throw new OpError(
-      'KIND_VIOLATION',
+    throw new KernelError(
+      'FORBIDDEN',
       `read action ${caller.action} cannot detach ${frame.action} (${frame.kind}${frame.io ? '+io' : ''})`,
     );
   }

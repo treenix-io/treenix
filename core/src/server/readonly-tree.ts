@@ -1,6 +1,6 @@
 // Read-only facades used by executeAction when method kind === 'read'.
 // Handler may read state but any write (`tree.set`, assignment on `ctx.node`,
-// `this.x = …`) throws KIND_VIOLATION.
+// `this.x = …`) throws FORBIDDEN.
 //
 // `wrapReadOnlyTree`   — blocks tree-level mutation methods.
 // `readonlyProxy`      — shallow Proxy that throws on assignment/delete.
@@ -8,11 +8,11 @@
 //                        mutation through returned objects falls outside this
 //                        layer (handlers shouldn't reach for it from a read).
 
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import type { Tree } from '#tree';
 
 function deny(action: string): never {
-  throw new OpError('KIND_VIOLATION', `read-only context: ${action} is forbidden`);
+  throw new KernelError('FORBIDDEN',`read-only context: ${action} is forbidden`);
 }
 
 export function wrapReadOnlyTree(tree: Tree): Tree {
@@ -44,7 +44,7 @@ export function wrapReadOnlyTree(tree: Tree): Tree {
 export function wrapAbortGuardTree(tree: Tree, signal: AbortSignal): Tree {
   const gate = (verb: string) => {
     if (signal.aborted) {
-      throw new OpError('CONFLICT', `action aborted: ${verb} after timeout is forbidden — the path lock is no longer held`);
+      throw new KernelError('CONFLICT', `action aborted: ${verb} after timeout is forbidden — the path lock is no longer held`);
     }
   };
   return {

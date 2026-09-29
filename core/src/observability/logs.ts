@@ -1,7 +1,7 @@
 // t.logs — unified log buffer, queryable via actions + MCP
 
 import { getCtx, registerType } from '#comp';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import { interceptConsole, logStats, queryLogs, type LogLevel } from '#log';
 import { loadSchemasFromDir } from '#schema/load';
 
@@ -12,7 +12,7 @@ interceptConsole();
 function assertLogReader(): void {
   const { claims } = getCtx();
   if (!Array.isArray(claims) || (!claims.includes('admins') && !claims.includes('system'))) {
-    throw new OpError('FORBIDDEN', 't.logs: admin only');
+    throw new KernelError('FORBIDDEN', 't.logs: admin only');
   }
 }
 

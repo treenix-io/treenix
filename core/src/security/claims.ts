@@ -2,7 +2,7 @@
 // SYSTEM_CLAIM gate + buildClaims (user node groups) + auth-path detector.
 
 import { getComponent, type NodeData } from '#core';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import type { Tree } from '#tree';
 
 /** Reserved claim/userId for bootstrap-only ACL bypass via root grant.
@@ -11,8 +11,8 @@ import type { Tree } from '#tree';
 export const SYSTEM_CLAIM = 'system';
 
 export function assertNotSystem(userId: string, claims?: readonly string[]): void {
-  if (userId === SYSTEM_CLAIM) throw new OpError('FORBIDDEN', 'reserved userId');
-  if (claims && claims.includes(SYSTEM_CLAIM)) throw new OpError('FORBIDDEN', 'reserved claim');
+  if (userId === SYSTEM_CLAIM) throw new KernelError('FORBIDDEN', 'reserved userId');
+  if (claims && claims.includes(SYSTEM_CLAIM)) throw new KernelError('FORBIDDEN', 'reserved claim');
 }
 
 // ── Build claims ──

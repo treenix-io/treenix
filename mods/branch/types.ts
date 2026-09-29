@@ -8,7 +8,7 @@
 
 import { A, isRef, makeNode, type NodeData, R, S, W } from '@treenx/core';
 import { getCtx, registerType } from '@treenx/core/comp';
-import { OpError } from '@treenx/core/errors';
+import { KernelError } from '@treenx/core/errors';
 import type { ActorContext } from '@treenx/core/server/actions';
 import { type PatchManyEntry, relocateCtx, type Tree } from '@treenx/core/tree';
 import { isBranchDelta, isBranchWhiteout } from '@treenx/core/tree/branch';
@@ -97,7 +97,7 @@ async function collectDiff(tree: Tree, branchPath: string, base: string): Promis
   const deltaRoot = `${branchPath}/delta`;
   const viewRoot = `${branchPath}/tree`;
   if (!tree.scanChildren) {
-    throw new OpError('BAD_REQUEST', 'branch.diff requires a tree with scanChildren');
+    throw new KernelError('INVALID', 'branch.diff requires a tree with scanChildren');
   }
 
   const entries: DiffEntry[] = [];
@@ -114,7 +114,7 @@ async function collectDiff(tree: Tree, branchPath: string, base: string): Promis
         node: { ...rewriteViewRefs(w.node, viewRoot, base), $path: livePath },
       });
     } else {
-      throw new OpError('CONFLICT', `branch: foreign node in delta subtree at ${w.$path} ($type=${w.$type})`);
+      throw new KernelError('CONFLICT', `branch: foreign node in delta subtree at ${w.$path} ($type=${w.$type})`);
     }
   }
   return entries;
@@ -127,7 +127,7 @@ export class Branches {
     const ctx = getCtx();
     const callerUserId = typeof ctx.userId === 'string' ? ctx.userId : undefined;
     const owner = data?.owner ?? callerUserId;
-    if (!owner) throw new OpError('BAD_REQUEST', 'branch owner required (no session user and no explicit owner)');
+    if (!owner) throw new KernelError('INVALID', 'branch owner required (no session user and no explicit owner)');
 
     const id = `b-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
     const path = `${ctx.node.$path}/${id}`;
@@ -173,7 +173,7 @@ export class Branch {
 
   /** @description Close the branch without merging. Delta stays as the record. */
   abandon() {
-    if (this.status === 'merged') throw new OpError('CONFLICT', 'cannot abandon a merged branch');
+    if (this.status === 'merged') throw new KernelError('CONFLICT', 'cannot abandon a merged branch');
     this.status = 'abandoned';
   }
 
@@ -184,7 +184,7 @@ export class Branch {
    *  through a branch-rooted session (/.branch). */
   requestMerge(data?: { note?: string }) {
     if (this.status !== 'open') {
-      throw new OpError('CONFLICT', `cannot request merge in status "${this.status}"`);
+      throw new KernelError('CONFLICT', `cannot request merge in status "${this.status}"`);
     }
     if (data?.note) this.title = this.title ? `${this.title} — ${data.note}` : data.note;
     this.status = 'review';
@@ -202,7 +202,7 @@ export class Branch {
    *  batch would reopen the partial-merge hole (remove-merge parked). */
   async merge() {
     if (this.status !== 'open' && this.status !== 'review') {
-      throw new OpError('CONFLICT', `cannot merge branch in status "${this.status}"`);
+      throw new KernelError('CONFLICT', `cannot merge branch in status "${this.status}"`);
     }
     const ctx = getCtx();
     const tree = ctx.tree;
@@ -211,11 +211,11 @@ export class Branch {
     // Loud refusals BEFORE any write and before any status change.
     const removes = entries.filter(e => e.op === 'remove').map(e => e.path);
     if (removes.length) {
-      throw new OpError('BAD_REQUEST',
+      throw new KernelError('INVALID',
         `branch merge with remove entries is not supported yet (remove-merge parked): ${removes.join(', ')}`);
     }
     if (!tree.patchMany) {
-      throw new OpError('BAD_REQUEST', 'branch merge requires a tree with patchMany (atomic batch)');
+      throw new KernelError('INVALID', 'branch merge requires a tree with patchMany (atomic batch)');
     }
 
     const findConflicts = async (): Promise<ConflictEntry[]> => {
@@ -246,7 +246,7 @@ export class Branch {
     for (const e of entries) {
       if (e.op === 'noop') continue;
       const future = e.node;
-      if (!future) throw new OpError('CONFLICT', `merge: entry ${e.path} is missing its node`);
+      if (!future) throw new KernelError('CONFLICT', `merge: entry ${e.path} is missing its node`);
       const node: NodeData = { ...future, $path: e.path };
       if (e.baseRev !== null) node.$rev = e.baseRev;
       members.push({ path: e.path, node });
@@ -263,7 +263,7 @@ export class Branch {
     const branchRev = ctx.node.$rev;
     const mergedAt = Date.now();
     if (typeof branchRev !== 'number') {
-      throw new OpError('CONFLICT', `merge: branch node ${branchPath} has no $rev to guard the status flip`);
+      throw new KernelError('CONFLICT', `merge: branch node ${branchPath} has no $rev to guard the status flip`);
     }
     members.push({
       path: branchPath,
@@ -285,7 +285,7 @@ export class Branch {
       // OCC slip after preflight is the expected race — the batch was denied
       // whole, so re-read live and report the drift. Anything else (layer
       // without patchMany, cross-mount member, validation) rethrows loud.
-      if (err instanceof OpError && err.code === 'CONFLICT') {
+      if (err instanceof KernelError && err.code === 'CONFLICT') {
         const raced = await findConflicts();
         if (raced.length) {
           this.status = 'conflict';

@@ -32,7 +32,7 @@
 // Hot path pays one `prefixes.size` integer check while no span is active.
 
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 
 export type PathLock = {
   <T>(path: string, fn: () => Promise<T>): Promise<T>;
@@ -85,7 +85,7 @@ export function createPathLock(): PathLock {
     if (current?.size && (spanGates || locks.has(path))) {
       for (const h of current.keys()) {
         if (waitFloor < h) {
-          return Promise.reject(new OpError('CONFLICT',
+          return Promise.reject(new KernelError('CONFLICT',
             `lock order: ${waitFloor} is contended while holding ${[...current.keys()].sort().join(', ')} — descending wait risks deadlock, retry`));
         }
       }
@@ -133,7 +133,7 @@ export function createPathLock(): PathLock {
           for (const h of current.keys()) {
             // Drain waits obey the ordered-wait rule too — fail loud, no park.
             if (p < h) {
-              throw new OpError('CONFLICT',
+              throw new KernelError('CONFLICT',
                 `lock order: subtree ${path} must drain ${p} while holding ${h} — descending wait risks deadlock, retry`);
             }
           }

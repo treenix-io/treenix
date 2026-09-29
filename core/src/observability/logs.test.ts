@@ -1,6 +1,6 @@
 // The t.logs buffer is process-wide, not node data: a node's R must not open it.
 
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import { R, W } from '#core';
 import { withAcl } from '#security/acl-tree';
 import { withExecute } from '#server/actions';
@@ -19,7 +19,7 @@ describe('t.logs', () => {
 
     await assert.rejects(
       () => as('bob', ['u:bob', 'authenticated']).execute('/bob-logs', 'query', {}),
-      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
     assert.ok(Array.isArray(await as('root', ['u:root', 'admins']).execute('/bob-logs', 'query', {})));
   });

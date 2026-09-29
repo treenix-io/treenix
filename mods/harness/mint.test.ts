@@ -5,7 +5,7 @@
 
 import { createMemoryTree, type Tree } from '@treenx/core/tree';
 import { resolveToken } from '@treenx/core/security';
-import { OpError } from '@treenx/core/errors';
+import { KernelError } from '@treenx/core/errors';
 import { createNode, getComponentByName, R, W, A, S } from '@treenx/core';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
@@ -67,7 +67,7 @@ describe('mintWorkloadToken', () => {
         taskPath: '/board/tasks/1',
         runPath: '/agents/no-scope/runs/r-3',
       }),
-      (e: any) => e instanceof OpError && e.code === 'BAD_REQUEST',
+      (e: any) => e instanceof KernelError && e.code === 'INVALID',
     );
   });
 
@@ -78,7 +78,7 @@ describe('mintWorkloadToken', () => {
         taskPath: '/board/tasks/1',
         runPath: '/agents/missing/runs/r-4',
       }),
-      (e: any) => e instanceof OpError && e.code === 'NOT_FOUND',
+      (e: any) => e instanceof KernelError && e.code === 'NOT_FOUND',
     );
   });
 
@@ -111,7 +111,7 @@ describe('mintWorkloadToken', () => {
         taskPath: '/board/tasks/1',
         runPath: '/agents/scopeless/runs/r-8',
       }),
-      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
     );
   });
 

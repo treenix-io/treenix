@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import { createPathLock } from './path-lock';
 
 const delay = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
@@ -163,7 +163,7 @@ describe('createPathLock', () => {
       // /a/b would close a wait cycle — the ordered-wait rule rejects instead.
       await assert.rejects(
         lock('/a/c', async () => {}),
-        (e: unknown) => e instanceof OpError && e.code === 'CONFLICT',
+        (e: unknown) => e instanceof KernelError && e.code === 'CONFLICT',
       );
     });
     await drainMicrotasks();

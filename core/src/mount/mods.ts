@@ -12,7 +12,7 @@
 //   /sys/mods/{mod}/prefabs/{name}/{...} → prefab nodes
 
 import { compKey, createNode, getComponentByName, type NodeData } from '#core';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import { getLoadedMods } from '#mod/loader';
 import { getModPrefabs, getPrefab, getRegisteredMods } from '#mod/prefab';
 import { Prefab } from '#mod/prefab-type';
@@ -168,15 +168,15 @@ export function createModsTree(modsPath = '/sys/mods'): Tree {
     },
 
     async set() {
-      throw new OpError('FORBIDDEN', 'Mods mount is read-only');
+      throw new KernelError('FORBIDDEN', 'Mods mount is read-only');
     },
 
     async remove() {
-      throw new OpError('FORBIDDEN', 'Mods mount is read-only');
+      throw new KernelError('FORBIDDEN', 'Mods mount is read-only');
     },
 
     async patch() {
-      throw new OpError('FORBIDDEN', 'Mods mount is read-only');
+      throw new KernelError('FORBIDDEN', 'Mods mount is read-only');
     },
   };
 }

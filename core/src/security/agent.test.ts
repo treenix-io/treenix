@@ -1,6 +1,6 @@
 import { createNode, R, S, W } from '#core';
 import { clearRegistry } from '#testing';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import { createMemoryTree, type Tree } from '#tree';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
@@ -271,7 +271,7 @@ describe('agent TOFU flow', () => {
     // Agent cannot write to root-level paths (root ACL: public R only)
     await assert.rejects(
       () => aclStore.set(createNode('/something-else', 'dir')),
-      (err: unknown) => err instanceof OpError && err.code === 'FORBIDDEN',
+      (err: unknown) => err instanceof KernelError && err.code === 'FORBIDDEN',
     );
   });
 
@@ -325,7 +325,7 @@ describe('agent TOFU flow', () => {
     // must NOT plant pendingKey from caller input — that was the unauth bearer-acquisition vector.
     await assert.rejects(
       agentConnect(tree, PORT_PATH, AGENT_KEY, '1.2.3.4'),
-      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
     );
     // Port state untouched.
     const after = await tree.get(PORT_PATH);
@@ -350,7 +350,7 @@ describe('agent TOFU flow', () => {
     });
     await assert.rejects(
       agentInitPair(tree, PORT_PATH, 'attacker-replacement-key'),
-      (e: unknown) => e instanceof OpError && e.code === 'CONFLICT',
+      (e: unknown) => e instanceof KernelError && e.code === 'CONFLICT',
     );
   });
 
@@ -363,7 +363,7 @@ describe('agent TOFU flow', () => {
     // Wrong key — rejected
     await assert.rejects(
       agentConnect(tree, PORT_PATH, 'wrong-key', '1.2.3.4'),
-      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 

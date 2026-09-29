@@ -3,7 +3,7 @@
 // Maps 1:1 to RFC 6902 JSON Patch.
 
 import { assertSafeKey, type NodeData } from '#core';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 
 // ── Types ──
 
@@ -42,12 +42,12 @@ export type CommitReceipt = { changes: CommitChange[] | null };
 
 export function assertSafePatchPath(path: string): void {
   if (typeof path !== 'string' || path.length === 0 || path.includes('\0')) {
-    throw new OpError('FORBIDDEN', `Invalid patch path: ${JSON.stringify(path)}`);
+    throw new KernelError('FORBIDDEN', `Invalid patch path: ${JSON.stringify(path)}`);
   }
   for (const part of path.split('.')) {
-    if (part === '') throw new OpError('FORBIDDEN', `Empty patch segment in ${path}`);
+    if (part === '') throw new KernelError('FORBIDDEN', `Empty patch segment in ${path}`);
     try { assertSafeKey(part); }
-    catch { throw new OpError('FORBIDDEN', `Forbidden patch segment: ${JSON.stringify(part)} in ${path}`); }
+    catch { throw new KernelError('FORBIDDEN', `Forbidden patch segment: ${JSON.stringify(part)} in ${path}`); }
   }
 }
 
@@ -105,7 +105,7 @@ function getByPath(obj: any, path: string): unknown {
 function arrayIndex(arr: unknown[], key: string, max: number, path: string): number {
   const idx = Number(key);
   if (!Number.isInteger(idx) || idx < 0 || idx > max) {
-    throw new OpError('BAD_REQUEST', `patch: array index "${key}" out of range (length ${arr.length}) in ${path}`);
+    throw new KernelError('INVALID', `patch: array index "${key}" out of range (length ${arr.length}) in ${path}`);
   }
   return idx;
 }
@@ -118,9 +118,9 @@ function setByPath(obj: any, path: string, value: unknown, strict = false): void
     const next = cur[key];
     if (next == null || typeof next !== 'object') {
       const at = parts.slice(0, i + 1).join('.');
-      if (strict) throw new OpError('NOT_FOUND', `replace: missing parent at "${at}" in ${path}`);
+      if (strict) throw new KernelError('NOT_FOUND', `replace: missing parent at "${at}" in ${path}`);
       // Creating a missing parent is add's job; clobbering a value is not.
-      if (next != null) throw new OpError('BAD_REQUEST', `add: "${at}" is not an object in ${path}`);
+      if (next != null) throw new KernelError('INVALID', `add: "${at}" is not an object in ${path}`);
       cur[key] = {};
     }
     cur = cur[key];
@@ -135,19 +135,19 @@ function deleteByPath(obj: any, path: string): void {
   const parts = path.split('.');
   let cur = obj;
   for (let i = 0; i < parts.length - 1; i++) {
-    if (cur[parts[i]] == null) throw new OpError('NOT_FOUND', `delete: missing parent at "${parts.slice(0, i + 1).join('.')}" in ${path}`);
+    if (cur[parts[i]] == null) throw new KernelError('NOT_FOUND', `delete: missing parent at "${parts.slice(0, i + 1).join('.')}" in ${path}`);
     cur = cur[parts[i]];
   }
   const key = parts[parts.length - 1];
   if (Array.isArray(cur)) {
     const idx = Number(key);
     if (Number.isInteger(idx)) {
-      if (idx < 0 || idx >= cur.length) throw new OpError('NOT_FOUND', `delete: array index ${idx} out of range (length ${cur.length}) in ${path}`);
+      if (idx < 0 || idx >= cur.length) throw new KernelError('NOT_FOUND', `delete: array index ${idx} out of range (length ${cur.length}) in ${path}`);
       cur.splice(idx, 1);
       return;
     }
   }
-  if (!(key in cur)) throw new OpError('NOT_FOUND', `delete: missing key "${key}" in ${path}`);
+  if (!(key in cur)) throw new KernelError('NOT_FOUND', `delete: missing key "${key}" in ${path}`);
   delete cur[key];
 }
 
@@ -161,7 +161,7 @@ export async function patchViaSet(
   ctx?: unknown,
 ): Promise<CommitReceipt> {
   const node = await self.get(path, ctx);
-  if (!node) throw new OpError('NOT_FOUND', `Node not found: ${path}`);
+  if (!node) throw new KernelError('NOT_FOUND', `Node not found: ${path}`);
   const copy = structuredClone(node);
   applyOps(copy, ops);
   // Test-only: nothing written — report the guarded member (copy is the

@@ -6,7 +6,7 @@
 import type { NodeData } from '#core';
 import { assertValidType, safeJsonParse } from '#core';
 import { dirname as treeDirname } from '#core/path';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import { mkdir, readdir, readFile, realpath, rmdir, unlink } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { atomicWrite } from './fs-atomic';
@@ -21,7 +21,7 @@ import { createSiftTest } from './query';
 // file: set('/a/$') overwrote node /a, and set('/a/$/c') moved /a's file away —
 // a writer on /a's subtree could strip /a's $acl.
 function assertFsPath(path: string): void {
-  if (path.split('/').includes('$')) throw new OpError('BAD_REQUEST', `fs: path segment "$" is reserved: ${path}`);
+  if (path.split('/').includes('$')) throw new KernelError('INVALID', `fs: path segment "$" is reserved: ${path}`);
 }
 
 export async function createFsTree(rootDir: string): Promise<TreeSource> {
@@ -214,10 +214,10 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
     // OCC check
     if (node.$rev != null) {
       if (!existing) {
-        throw new OpError('CONFLICT', `OptimisticConcurrencyError: node ${path} does not exist but $rev was provided`);
+        throw new KernelError('CONFLICT', `OptimisticConcurrencyError: node ${path} does not exist but $rev was provided`);
       }
       if (existing.$rev !== node.$rev) {
-        throw new OpError('CONFLICT', `OptimisticConcurrencyError: node ${path} modified by another transaction. Expected $rev ${existing.$rev}, got ${node.$rev}`);
+        throw new KernelError('CONFLICT', `OptimisticConcurrencyError: node ${path} modified by another transaction. Expected $rev ${existing.$rev}, got ${node.$rev}`);
       }
     }
 
@@ -344,7 +344,7 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
             continue;
           }
           const node = await readNode(entry.path);
-          if (!node) throw new OpError('NOT_FOUND', `Node not found: ${entry.path}`);
+          if (!node) throw new KernelError('NOT_FOUND', `Node not found: ${entry.path}`);
           const copy = applyPatchManyEntry(node, entry);
           // Test-only member: evaluated, not written, no $rev bump — reported
           // as a guarded no-op member.

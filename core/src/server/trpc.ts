@@ -6,7 +6,7 @@
 import type { NodeData } from '#core';
 import { assertSafePath } from '#core/path';
 import type { Page, Tree } from '#tree';
-import { initTRPC, TRPCError } from '@trpc/server';
+import { initTRPC, TRPCError, type TRPC_ERROR_CODE_KEY } from '@trpc/server';
 import { observable } from '@trpc/server/observable';
 // Pin @trpc/server internal types to a public subpath so declaration emit stays portable (TS2742).
 import type {} from '@trpc/server/unstable-core-do-not-import';
@@ -15,7 +15,8 @@ import { agentConnect, agentInitPair } from '#agent-port/ops';
 import { buildClearSessionCookie, buildSessionCookie } from '#security/cookies';
 import type { Session } from '#security/sessions';
 import { devLogin, loginUser, logoutUser, registerUser } from '#security/ops';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
+import type { ErrorCode } from '#kernel/types';
 import type { ErrFrame, ResFrame } from '#protocol/frames';
 import { type WireEvent } from '#sub';
 import { type StampedEvent, type WatchManager } from '#sub/watch';
@@ -78,10 +79,36 @@ function expectUnary(r: Promise<ResFrame> | AsyncIterable<ResFrame>): Promise<Re
   return r;
 }
 
-function frameError(err: ErrFrame['err']): Error {
+// UNAUTHENTICATED rides UNAUTHORIZED: the React client signs in again on it.
+// UNKNOWN_OUTCOME stays off CONFLICT and off the 5xx codes the tRPC client
+// retries: re-executing a request whose outcome is unknown is forbidden.
+const TRPC_CODE: Record<ErrorCode, TRPC_ERROR_CODE_KEY> = {
+  NOT_FOUND: 'NOT_FOUND',
+  FORBIDDEN: 'FORBIDDEN',
+  CONFLICT: 'CONFLICT',
+  INVALID: 'BAD_REQUEST',
+  UNKNOWN_TYPE: 'BAD_REQUEST',
+  CROSS_DOMAIN: 'BAD_REQUEST',
+  READ_ONLY: 'METHOD_NOT_SUPPORTED',
+  BUDGET: 'TOO_MANY_REQUESTS',
+  REFUSED: 'TOO_MANY_REQUESTS',
+  UNKNOWN_OUTCOME: 'PRECONDITION_FAILED',
+  EXPIRED: 'PRECONDITION_FAILED',
+  KEY_REUSED: 'UNPROCESSABLE_CONTENT',
+  UNAVAILABLE: 'SERVICE_UNAVAILABLE',
+  GENERATION: 'PRECONDITION_FAILED',
+  CANCELLED: 'CLIENT_CLOSED_REQUEST',
+  UNAUTHENTICATED: 'UNAUTHORIZED',
+};
+
+function toTrpcError(code: ErrorCode, message: string): TRPCError {
+  return new TRPCError({ code: TRPC_CODE[code], message });
+}
+
+function frameError(err: ErrFrame['err']): TRPCError {
   return err.code === 'INTERNAL'
     ? new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: err.msg })
-    : new OpError(err.code, err.msg);
+    : toTrpcError(err.code, err.msg);
 }
 
 /** Frame → procedure result. T states the procedure's contract; the frame
@@ -111,13 +138,7 @@ export function createTreeRouter(tree: Tree, systemTree: Tree, watcher: WatchMan
   function mapErrors(result: { ok: boolean; error?: { cause?: unknown } }) {
     if (result.ok) return;
     const cause = result.error?.cause;
-    if (cause instanceof OpError) {
-      // Domain code → TRPCError code. Codes not in tRPC's enum map onto closest peer.
-      const code = cause.code === 'KIND_VIOLATION' ? 'FORBIDDEN'
-        : cause.code === 'RESOURCE_EXHAUSTED' ? 'TOO_MANY_REQUESTS'
-        : cause.code;
-      throw new TRPCError({ code, message: cause.message });
-    }
+    if (cause instanceof KernelError) throw toTrpcError(cause.code, cause.message);
   }
 
   const base = t.procedure.use(async ({ next }) => {
@@ -190,7 +211,7 @@ export function createTreeRouter(tree: Tree, systemTree: Tree, watcher: WatchMan
       }))
       .mutation(({ input, ctx }) => {
         const path = input.node.$path;
-        if (typeof path !== 'string') throw new OpError('BAD_REQUEST', '$path required');
+        if (typeof path !== 'string') throw new KernelError('INVALID', '$path required');
         return unwrap<void>(ctx.wire.handle({ id: 0, op: 'set', path, node: input.node, opId: input.opId }));
       }),
 

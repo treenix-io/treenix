@@ -15,7 +15,7 @@ import { createDraft, enablePatches, finishDraft, type Patch } from 'immer';
 import { randomUUID } from 'node:crypto';
 import { createBoundedCache } from '#util/bounded-cache';
 import { isRecord } from '#util/is-record';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import { commit, mutationLock } from './commit';
 import { readonlyProxy, wrapAbortGuardTree, wrapReadOnlyTree } from './readonly-tree';
 import { assertCanCall, runWithFrame, type KindFrame } from './kind-stack';
@@ -26,7 +26,7 @@ function validateActionArgs(type: string, action: string, data: unknown, schema:
   const methodSchema = schema?.methods?.[action];
 
   if (!methodSchema) {
-    throw new OpError('BAD_REQUEST', `[SECURITY] No schema for ${type}.${action} — action args not validated`);
+    throw new KernelError('INVALID', `[SECURITY] No schema for ${type}.${action} — action args not validated`);
   }
 
   const argSchema = methodSchema.arguments?.[0];
@@ -36,7 +36,7 @@ function validateActionArgs(type: string, action: string, data: unknown, schema:
   const errors: ValidationError[] = [];
   validateValue(actual, argSchema, `${type}.${action}`, errors);
   if (errors.length) {
-    throw new OpError('BAD_REQUEST', `Invalid action args: ${errors.map(e => `${e.path}: ${e.message}`).join('; ')}`);
+    throw new KernelError('INVALID', `Invalid action args: ${errors.map(e => `${e.path}: ${e.message}`).join('; ')}`);
   }
 }
 
@@ -47,13 +47,13 @@ const SCHEMA_PATTERN_MAX = 256;
 const SCHEMA_DEPTH_MAX = 16;
 function assertSafeSchema(schema: unknown, ctx: string, depth = 0): void {
   if (!schema || typeof schema !== 'object') return;
-  if (depth > SCHEMA_DEPTH_MAX) throw new OpError('BAD_REQUEST', `${ctx}: schema too deep (max ${SCHEMA_DEPTH_MAX})`);
+  if (depth > SCHEMA_DEPTH_MAX) throw new KernelError('INVALID', `${ctx}: schema too deep (max ${SCHEMA_DEPTH_MAX})`);
   if (Array.isArray(schema)) { for (const v of schema) assertSafeSchema(v, ctx, depth + 1); return; }
   for (const [k, v] of Object.entries(schema as Record<string, unknown>)) {
     if (k === 'pattern' && typeof v === 'string') {
-      if (v.length > SCHEMA_PATTERN_MAX) throw new OpError('BAD_REQUEST', `${ctx}: schema.pattern too long (>${SCHEMA_PATTERN_MAX})`);
+      if (v.length > SCHEMA_PATTERN_MAX) throw new KernelError('INVALID', `${ctx}: schema.pattern too long (>${SCHEMA_PATTERN_MAX})`);
       // Reject the classic catastrophic-backtracking shape: nested quantifiers like (a+)+ / (a*)*.
-      if (/\([^)]*[+*][^)]*\)[+*]/.test(v)) throw new OpError('BAD_REQUEST', `${ctx}: schema.pattern has nested quantifiers (ReDoS risk)`);
+      if (/\([^)]*[+*][^)]*\)[+*]/.test(v)) throw new KernelError('INVALID', `${ctx}: schema.pattern has nested quantifiers (ReDoS risk)`);
     }
     assertSafeSchema(v, ctx, depth + 1);
   }
@@ -61,7 +61,7 @@ function assertSafeSchema(schema: unknown, ctx: string, depth = 0): void {
 
 // Deps that live outside the Immer draft (cross-node fetches, read-kind, streams) are
 // plain copies — writes to them would be silently dropped. readonlyProxy turns such a
-// write into KIND_VIOLATION while leaving deep reads untouched (proxy traps writes only).
+// write into FORBIDDEN while leaving deep reads untouched (proxy traps writes only).
 function readonlyDep(dep: ResolvedDeps[string]): ResolvedDeps[string] {
   return Array.isArray(dep) ? readonlyProxy(dep.map(n => readonlyProxy(n))) : readonlyProxy(dep);
 }
@@ -187,7 +187,7 @@ export { collectDeps } from '#comp/needs';
 
 // ── Server-side operations ──
 // Single entry point for tRPC, MCP, cook-bot, services — no boilerplate.
-// All ops throw OpError for domain errors (NOT_FOUND, BAD_REQUEST, CONFLICT).
+// All ops throw KernelError for domain errors (NOT_FOUND, INVALID, CONFLICT).
 enablePatches();
 
 // Action timeout: env-configurable, default 10s.
@@ -279,7 +279,7 @@ async function loadDynamicAction(
   // Build a sandboxed action handler — compiled once, called per invocation
   const fn = async (ctx: ActionCtx, data: unknown): Promise<unknown> => {
     if (/\bawait\b/.test(actionCode)) {
-      throw new OpError('BAD_REQUEST', `Dynamic action ${type}.${action} uses await, but async bridge is not implemented`);
+      throw new KernelError('INVALID', `Dynamic action ${type}.${action} uses await, but async bridge is not implemented`);
     }
 
     // Optional peer, resolved only when a stored dynamic action actually runs —
@@ -372,16 +372,16 @@ async function loadDynamicAction(
         const err = vm.dump(result.error);
         result.error.dispose();
         // Bridge failures keep their precise error — the generic wrap below would mask them.
-        if (treeReadError) throw new OpError('BAD_REQUEST', treeReadError);
+        if (treeReadError) throw new KernelError('INVALID', treeReadError);
         throw new Error(`Dynamic action ${type}.${action} failed: ${typeof err === 'object' && err ? err.message ?? JSON.stringify(err) : err}`);
       }
 
       const treeOpsResult = vm.dump(result.value);
       result.value.dispose();
 
-      if (treeReadError) throw new OpError('BAD_REQUEST', treeReadError);
+      if (treeReadError) throw new KernelError('INVALID', treeReadError);
       if (treeWriteError) {
-        throw new OpError('BAD_REQUEST', `Dynamic action ${type}.${action} invalid ctx.tree.set: ${treeWriteError}`);
+        throw new KernelError('INVALID', `Dynamic action ${type}.${action} invalid ctx.tree.set: ${treeWriteError}`);
       }
 
       // Validate ALL writes before applying ANY — the sandbox has no transaction, so a
@@ -389,10 +389,10 @@ async function loadDynamicAction(
       const validWrites: NodeData[] = [];
       for (const n of treeWrites) {
         if (!isSandboxNodeWrite(n)) {
-          throw new OpError('BAD_REQUEST', `Dynamic action ${type}.${action} invalid ctx.tree.set: node must include string $path and $type`);
+          throw new KernelError('INVALID', `Dynamic action ${type}.${action} invalid ctx.tree.set: node must include string $path and $type`);
         }
         if (n.$path !== nodePath && !n.$path.startsWith(nodePath + '/')) {
-          throw new OpError('FORBIDDEN', `Dynamic action ${type}.${action} cannot write outside ${nodePath}: ${n.$path}`);
+          throw new KernelError('FORBIDDEN', `Dynamic action ${type}.${action} cannot write outside ${nodePath}: ${n.$path}`);
         }
         // Strip security-sensitive fields from sandbox writes.
         delete n.$acl;
@@ -404,7 +404,7 @@ async function loadDynamicAction(
       // tree.set/patch are atomic per path only — >1 distinct target cannot commit as one unit.
       const distinctPaths = new Set(validWrites.map(n => n.$path));
       if (distinctPaths.size > 1) {
-        throw new OpError('BAD_REQUEST', `Dynamic action ${type}.${action} wrote ${distinctPaths.size} distinct paths (${[...distinctPaths].join(', ')}) — sandbox writes commit as one atomic unit; write a single node per invocation`);
+        throw new KernelError('INVALID', `Dynamic action ${type}.${action} wrote ${distinctPaths.size} distinct paths (${[...distinctPaths].join(', ')}) — sandbox writes commit as one atomic unit; write a single node per invocation`);
       }
 
       // set() replaces the whole node, so sequential writes to one path collapse to the last —
@@ -436,13 +436,13 @@ async function resolveActionHandler(
   // Mask FORBIDDEN as NOT_FOUND on execute — security: don't leak existence
   // of paths the caller can't read. (tree.get throws FORBIDDEN on no read perm.)
   const node = await tree.get(path).catch((e: any) => {
-    if (e?.code === 'FORBIDDEN') throw new OpError('NOT_FOUND', `Node not found: ${path}`);
+    if (e?.code === 'FORBIDDEN') throw new KernelError('NOT_FOUND', `Node not found: ${path}`);
     throw e;
   });
-  if (!node) throw new OpError('NOT_FOUND', `Node not found: ${path}`);
+  if (!node) throw new KernelError('NOT_FOUND', `Node not found: ${path}`);
 
   const [comp, fieldKey] = getComponentField(node, componentType ?? 't.any', componentKey) ?? [];
-  if (!isComponent(comp)) throw new OpError('NOT_FOUND', `Component "${componentKey ?? componentType}" not found on ${path}`);
+  if (!isComponent(comp)) throw new KernelError('NOT_FOUND', `Component "${componentKey ?? componentType}" not found on ${path}`);
 
   const type = comp.$type;
 
@@ -466,11 +466,11 @@ async function resolveActionHandler(
       handler = resolve(type, `action:${action}`);
     }
   }
-  if (!handler) throw new OpError('BAD_REQUEST', `No action "${action}" for type "${type}"`);
+  if (!handler) throw new KernelError('INVALID', `No action "${action}" for type "${type}"`);
 
   // Default-schema fallback ONLY for the inherited built-in handler (identity check): an
   // exact custom or dynamic handler without a matching schema entry stays fail-closed
-  // BAD_REQUEST even when named 'patch'/'$schema'.
+  // INVALID even when named 'patch'/'$schema'.
   if (!schema?.methods?.[action] && handler === resolveExact('default', `action:${action}`)) {
     const def = resolveExact('default', 'schema')?.();
     if (def?.methods?.[action]) schema = def;
@@ -577,10 +577,10 @@ export function withExecute<T extends Tree>(inner: T, opts?: WithExecuteOpts): T
     // Local check is ONLY path visibility (R) — same FORBIDDEN→NOT_FOUND mask
     // as resolveActionHandler. Everything else is the remote authority's job.
     const node = await self.get(path).catch((e: unknown) => {
-      if ((e as { code?: string })?.code === 'FORBIDDEN') throw new OpError('NOT_FOUND', `Node not found: ${path}`);
+      if ((e as { code?: string })?.code === 'FORBIDDEN') throw new KernelError('NOT_FOUND', `Node not found: ${path}`);
       throw e;
     });
-    if (!node) throw new OpError('NOT_FOUND', `Node not found: ${path}`);
+    if (!node) throw new KernelError('NOT_FOUND', `Node not found: ${path}`);
 
     // Kind-stack does not cross the wire — classify conservatively as write+io.
     // Read-kind frames therefore never delegate (fail closed).
@@ -669,7 +669,7 @@ async function runAction<T = unknown>(
   // Lookup: registry-meta (programmatic register opts) → schema (JSDoc) → fallback 'write'.
   // 'read' skips Immer draft entirely and gives the handler a readonly proxy of
   // node/comp + a read-only tree facade. Any assignment (`ctx.node.x = …`,
-  // `this.x = …`, `ctx.tree.set(…)`) throws KIND_VIOLATION immediately.
+  // `this.x = …`, `ctx.tree.set(…)`) throws FORBIDDEN immediately.
   const actionMeta = getMeta(type, `action:${action}`);
   const metaKind = actionMeta?.kind as 'read' | 'write' | undefined;
   const metaIo = actionMeta?.io as boolean | undefined;
@@ -749,8 +749,8 @@ async function runAction<T = unknown>(
         await commit(tree, node.$path, [{ path: node.$path, ops }], writeCtx);
       } catch (e) {
         // Re-wrap with action context — commit's CONFLICT names only the path.
-        if (e instanceof OpError && e.code === 'CONFLICT') {
-          throw new OpError('CONFLICT', `OptimisticConcurrencyError: ${type}.${action} on ${node.$path} — node changed during the action (expected $rev ${node.$rev})`);
+        if (e instanceof KernelError && e.code === 'CONFLICT') {
+          throw new KernelError('CONFLICT', `OptimisticConcurrencyError: ${type}.${action} on ${node.$path} — node changed during the action (expected $rev ${node.$rev})`);
         }
         throw e;
       }
@@ -793,7 +793,7 @@ export async function* executeStream(
 
   // No Immer draft for generators — they persist via ctx.tree.set. A mutation through
   // ctx.node/ctx.comp/ctx.deps would therefore be silently dropped; mirror runAction's
-  // read branch so it throws KIND_VIOLATION instead. ctx.tree stays live for writes —
+  // read branch so it throws FORBIDDEN instead. ctx.tree stays live for writes —
   // unless the stream is read-kind: then the tree facade denies them too.
   // Streams persist via ctx.tree.set directly — the actor bind (core-anz4.14)
   // is what attributes every one of those writes.
@@ -808,7 +808,7 @@ export async function* executeStream(
 
   const result = await runWithFrame(frame, async () => handler(actx, data ?? {}));
   if (!isAsyncIterable(result))
-    throw new OpError('BAD_REQUEST', `Action "${action}" is not a generator`);
+    throw new KernelError('INVALID', `Action "${action}" is not a generator`);
 
   // The frame must wrap EVERY resumption: an async generator body runs in the
   // AWAITER's ALS context, so wrapping only the call above would drop the
@@ -847,10 +847,10 @@ export async function setComponent(
   rev?: number,
 ): Promise<void> {
   const node = await tree.get(path);
-  if (!node) throw new OpError('NOT_FOUND', `Node not found: ${path}`);
+  if (!node) throw new KernelError('NOT_FOUND', `Node not found: ${path}`);
 
   if (rev != null && node.$rev != null && rev !== node.$rev)
-    throw new OpError('CONFLICT', `Stale revision: expected ${rev}, got ${node.$rev}`);
+    throw new KernelError('CONFLICT', `Stale revision: expected ${rev}, got ${node.$rev}`);
 
   await tree.set({ ...node, [compKey(name)]: data });
 }
@@ -888,7 +888,7 @@ const DEFAULT_SCHEMA: TypeSchema = {
 export function registerBuiltinActions() {
   register('default', 'schema', () => DEFAULT_SCHEMA);
   register('default', 'action:patch', (ctx: ActionCtx, data: unknown) => {
-    if (!data || typeof data !== 'object') throw new OpError('BAD_REQUEST', 'patch: data must be an object');
+    if (!data || typeof data !== 'object') throw new KernelError('INVALID', 'patch: data must be an object');
     deepAssign(ctx.node, data as Record<string, unknown>);
   });
 }

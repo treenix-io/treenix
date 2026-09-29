@@ -4,7 +4,7 @@
 
 import { createMemoryTree, type Tree } from '@treenx/core/tree';
 import { withAcl } from '@treenx/core/security';
-import { OpError } from '@treenx/core/errors';
+import { KernelError } from '@treenx/core/errors';
 import { createNode, register, R, W } from '@treenx/core';
 import { clearRegistry } from '@treenx/core/testing';
 import type { ActionCtx } from '@treenx/core/server/actions';
@@ -150,7 +150,7 @@ describe('executeForSession — scoped (workload)', () => {
     };
     await assert.rejects(
       executeForSession(aclWrap(tree), session, { path: '/work/n', action: 'denied' }),
-      (e: any) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: any) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 
@@ -164,7 +164,7 @@ describe('executeForSession — scoped (workload)', () => {
     };
     await assert.rejects(
       executeForSession(aclWrap(tree), session, { path: '/work/n', action: 'allowed' }),
-      (e: any) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: any) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 
@@ -177,7 +177,7 @@ describe('executeForSession — scoped (workload)', () => {
     };
     await assert.rejects(
       executeForSession(aclWrap(tree), session, { path: '/work/n', action: 'allowed' }),
-      (e: any) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: any) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 });

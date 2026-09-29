@@ -3,7 +3,7 @@
 // Tree = truth: ref child exists ↔ service is running
 
 import { getCtx, registerType } from '#comp';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import { type ServiceCtx, type ServiceHandle } from '#contexts/service/index';
 import { isRef, type NodeData, register, resolve as coreResolve } from '#core';
 import { withActor } from '#server/actions';
@@ -96,7 +96,7 @@ export class Autostart {
     const caller = getCtx().tree;
     const { items } = await caller.getChildren(_autostartPath);
     const ref = items.find(n => isRef(n) && n.$ref === data.path);
-    if (!ref) throw new OpError('NOT_FOUND', `autostart: ${data.path} is not registered`);
+    if (!ref) throw new KernelError('NOT_FOUND', `autostart: ${data.path} is not registered`);
     await caller.remove(ref.$path);
     await _stopService(data.path);
   }

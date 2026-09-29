@@ -1,5 +1,5 @@
 import { createNode } from '#core';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import { type NodeEvent, withSubscriptions } from '#sub';
 import { createMemoryTree, type Tree } from '#tree';
 import assert from 'node:assert/strict';
@@ -22,7 +22,7 @@ describe('commit envelope (core-gk8.15)', () => {
 
     await assert.rejects(
       () => commit(tree, '/a', [{ path: '/a', ops: [['t', '$rev', 999], ['r', 'n', 2]] }]),
-      (e: unknown) => e instanceof OpError && e.code === 'CONFLICT',
+      (e: unknown) => e instanceof KernelError && e.code === 'CONFLICT',
     );
     assert.equal((await tree.get('/a'))?.n, 1, 'nothing applied');
   });
@@ -44,12 +44,12 @@ describe('commit envelope (core-gk8.15)', () => {
         { path: '/x/a', ops: [['r', 'n', 3]] },
         { path: '/x/b', ops: [['t', '$rev', 999], ['r', 'n', 3]] },
       ]),
-      (e: unknown) => e instanceof OpError && e.code === 'CONFLICT',
+      (e: unknown) => e instanceof KernelError && e.code === 'CONFLICT',
     );
     assert.equal((await tree.get('/x/a'))?.n, 2, 'member #1 untouched after batch denial');
   });
 
-  it('N>1 without patchMany capability rejects BAD_REQUEST', async () => {
+  it('N>1 without patchMany capability rejects INVALID', async () => {
     const mem = createMemoryTree();
     await mem.set(createNode('/x/a', 'doc', {}));
     const { patchMany, ...noBatch } = mem;
@@ -59,14 +59,14 @@ describe('commit envelope (core-gk8.15)', () => {
         { path: '/x/a', ops: [['r', 'n', 1]] },
         { path: '/x/b', ops: [['r', 'n', 1]] },
       ]),
-      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
     );
   });
 
-  it('empty batch rejects BAD_REQUEST', async () => {
+  it('empty batch rejects INVALID', async () => {
     await assert.rejects(
       () => commit(createMemoryTree(), '/x', []),
-      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
     );
   });
 
@@ -306,7 +306,7 @@ describe('withCommitEnvelope (core-anz4.4)', () => {
 
     const [ra, rb] = await Promise.allSettled([spanA, spanB]);
     assert.equal(ra.status, 'fulfilled', 'ascending waiter completes');
-    assert.ok(rb.status === 'rejected' && rb.reason instanceof OpError && rb.reason.code === 'CONFLICT',
+    assert.ok(rb.status === 'rejected' && rb.reason instanceof KernelError && rb.reason.code === 'CONFLICT',
       'descending contender rejects CONFLICT instead of deadlocking');
     assert.equal((await mem.get('/b'))?.from, 'A');
   });

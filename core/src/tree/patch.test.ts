@@ -1,7 +1,7 @@
 import { createNode } from '#core';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import { createMemoryTree } from './index';
 import { applyOps, type PatchOp, PatchTestError } from './patch';
 
@@ -96,7 +96,7 @@ describe('applyOps', () => {
     const obj = {} as any;
     assert.throws(
       () => applyOps(obj, [['r', 'missing.field', 'x']]),
-      (e: any) => e instanceof OpError && e.code === 'NOT_FOUND',
+      (e: any) => e instanceof KernelError && e.code === 'NOT_FOUND',
     );
   });
 
@@ -111,7 +111,7 @@ describe('prototype pollution guard (assertSafePatchPath)', () => {
   it('rejects __proto__ at root and does not pollute Object.prototype', () => {
     assert.throws(
       () => applyOps({} as any, [['r', '__proto__.polluted', 'bad']]),
-      (e: any) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: any) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
     assert.equal(({} as any).polluted, undefined);
   });
@@ -119,7 +119,7 @@ describe('prototype pollution guard (assertSafePatchPath)', () => {
   it('rejects __proto__ at any depth', () => {
     assert.throws(
       () => applyOps({ a: { b: {} } } as any, [['r', 'a.b.__proto__.polluted', 'bad']]),
-      (e: any) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: any) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
     assert.equal(({} as any).polluted, undefined);
   });
@@ -127,7 +127,7 @@ describe('prototype pollution guard (assertSafePatchPath)', () => {
   it('rejects constructor segment', () => {
     assert.throws(
       () => applyOps({} as any, [['r', 'constructor.prototype.polluted', 1]]),
-      (e: any) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: any) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
     assert.equal(({} as any).polluted, undefined);
   });
@@ -135,7 +135,7 @@ describe('prototype pollution guard (assertSafePatchPath)', () => {
   it('rejects prototype segment', () => {
     assert.throws(
       () => applyOps({} as any, [['a', 'foo.prototype.x', 1]]),
-      (e: any) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: any) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 
@@ -144,7 +144,7 @@ describe('prototype pollution guard (assertSafePatchPath)', () => {
       for (const op of [['t', key, 1], ['r', key, 1], ['a', key, 1], ['d', key]] as PatchOp[]) {
         assert.throws(
           () => applyOps({} as any, [op]),
-          (e: any) => e instanceof OpError && e.code === 'FORBIDDEN',
+          (e: any) => e instanceof KernelError && e.code === 'FORBIDDEN',
           `should reject op=${op[0]} key=${key}`,
         );
       }
@@ -154,7 +154,7 @@ describe('prototype pollution guard (assertSafePatchPath)', () => {
   it('rejects empty path', () => {
     assert.throws(
       () => applyOps({} as any, [['d', '']]),
-      (e: any) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: any) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 
@@ -162,7 +162,7 @@ describe('prototype pollution guard (assertSafePatchPath)', () => {
     for (const p of ['.foo', 'foo.', 'a..b']) {
       assert.throws(
         () => applyOps({} as any, [['r', p, 1]]),
-        (e: any) => e instanceof OpError && e.code === 'FORBIDDEN',
+        (e: any) => e instanceof KernelError && e.code === 'FORBIDDEN',
         `should reject ${p}`,
       );
     }
@@ -171,7 +171,7 @@ describe('prototype pollution guard (assertSafePatchPath)', () => {
   it('rejects null byte in path', () => {
     assert.throws(
       () => applyOps({} as any, [['r', 'foo\0bar', 1]]),
-      (e: any) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: any) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 
@@ -179,7 +179,7 @@ describe('prototype pollution guard (assertSafePatchPath)', () => {
     for (const bad of [undefined, null, 42, {}]) {
       assert.throws(
         () => applyOps({} as any, [['r', bad as any, 1]]),
-        (e: any) => e instanceof OpError && e.code === 'FORBIDDEN',
+        (e: any) => e instanceof KernelError && e.code === 'FORBIDDEN',
         `should reject ${JSON.stringify(bad)}`,
       );
     }
@@ -197,7 +197,7 @@ describe('prototype pollution guard (assertSafePatchPath)', () => {
     const obj = { title: 'old' } as any;
     assert.throws(
       () => applyOps(obj, [['r', 'title', 'new'], ['r', '__proto__.x', 1]]),
-      (e: any) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: any) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
     // First op applied (no transactional rollback at applyOps level — that's up to caller).
     assert.equal(obj.title, 'new');
@@ -229,34 +229,34 @@ describe('prototype pollution guard (assertSafePatchPath)', () => {
   it('delete throws NOT_FOUND on missing key', () => {
     assert.throws(
       () => applyOps({ mesh: { width: 5 } } as any, [['d', 'mesh.height']]),
-      (e: any) => e instanceof OpError && e.code === 'NOT_FOUND',
+      (e: any) => e instanceof KernelError && e.code === 'NOT_FOUND',
     );
   });
 
   it('delete throws NOT_FOUND on missing parent path', () => {
     assert.throws(
       () => applyOps({} as any, [['d', 'a.b.c']]),
-      (e: any) => e instanceof OpError && e.code === 'NOT_FOUND',
+      (e: any) => e instanceof KernelError && e.code === 'NOT_FOUND',
     );
   });
 
   it('delete throws NOT_FOUND on array index out of range', () => {
     assert.throws(
       () => applyOps({ items: ['x'] } as any, [['d', 'items.5']]),
-      (e: any) => e instanceof OpError && e.code === 'NOT_FOUND',
+      (e: any) => e instanceof KernelError && e.code === 'NOT_FOUND',
     );
   });
 });
 
 describe('array indices and parents', () => {
-  const badRequest = (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST';
+  const isInvalid = (e: unknown) => e instanceof KernelError && e.code === 'INVALID';
 
   // A single op used to allocate a 1e8-length sparse array on the writer's node.
   it('rejects out-of-range and non-integer array indices', () => {
     for (const op of [
       ['a', 'list.99999999', 1], ['r', 'list.2', 1], ['a', 'list.-1', 1], ['a', 'list.x', 1], ['a', 'list.9.name', 1],
     ] as PatchOp[]) {
-      assert.throws(() => applyOps({ list: ['a', 'b'] }, [op]), badRequest, JSON.stringify(op));
+      assert.throws(() => applyOps({ list: ['a', 'b'] }, [op]), isInvalid, JSON.stringify(op));
     }
   });
 
@@ -267,7 +267,7 @@ describe('array indices and parents', () => {
   });
 
   it('add never clobbers a primitive parent', () => {
-    assert.throws(() => applyOps({ title: 'keep' }, [['a', 'title.x', 1]]), badRequest);
+    assert.throws(() => applyOps({ title: 'keep' }, [['a', 'title.x', 1]]), isInvalid);
   });
 });
 
@@ -311,11 +311,11 @@ describe('Tree.patch', () => {
     assert.equal((await tree.get('/n'))!.title, 'y');
   });
 
-  it('throws OpError NOT_FOUND on missing node', async () => {
+  it('throws KernelError NOT_FOUND on missing node', async () => {
     const tree = createMemoryTree();
     await assert.rejects(
       () => tree.patch('/nonexistent', [['r', 'x', 1]]),
-      (e: unknown) => e instanceof OpError && e.code === 'NOT_FOUND',
+      (e: unknown) => e instanceof KernelError && e.code === 'NOT_FOUND',
     );
   });
 
@@ -372,7 +372,7 @@ describe('Tree.patch', () => {
 
     await assert.rejects(
       () => tree.patch('/n', [['r', '__proto__.polluted', 'bad']]),
-      (e: any) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: any) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
 
     // Prototype clean
@@ -389,7 +389,7 @@ describe('Tree.patch', () => {
 
     await assert.rejects(
       () => tree.patch('/n', [['r', 'title', 'y'], ['r', 'constructor.prototype.x', 1]]),
-      (e: any) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: any) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
 
     // Memory adapter applies ops to a copy, then bumps $rev and assigns; throw aborts assignment.

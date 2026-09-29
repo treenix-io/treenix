@@ -77,7 +77,7 @@ describe('startJob', () => {
     );
   });
 
-  it('read action cannot detach a job (KIND_VIOLATION, fail closed)', async () => {
+  it('read action cannot detach a job (FORBIDDEN, fail closed)', async () => {
     register('test.job.reader', 'schema', () => ({
       $id: 'test.job.reader', title: 'Reader', type: 'object' as const,
       properties: {},
@@ -91,7 +91,7 @@ describe('startJob', () => {
 
     await assert.rejects(
       () => executeAction(tree, '/r', undefined, undefined, 'peek'),
-      (e: { code?: string }) => e.code === 'KIND_VIOLATION',
+      (e: { code?: string }) => e.code === 'FORBIDDEN',
     );
     assert.equal(runningJobs().length, 0, 'nothing was detached');
   });

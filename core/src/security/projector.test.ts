@@ -1,6 +1,6 @@
 import { A, R, W, createNode, register, type ComponentData } from '#core';
 import { clearRegistry } from '#testing';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import { createMemoryTree, type Tree } from '#tree';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
@@ -114,7 +114,7 @@ describe('assertSourceReadable', () => {
     });
     await assert.rejects(
       () => assertSourceReadable(tree, PUBLIC_ACTOR, '/x'),
-      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 

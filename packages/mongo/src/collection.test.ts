@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { Collection, Document } from 'mongodb';
 import { ObjectId } from 'mongodb';
-import type { OpError } from '@treenx/core/errors';
+import { KernelError } from '@treenx/core/errors';
 
 import { createCollectionTree } from './collection';
 
@@ -97,7 +97,7 @@ function makeTree(docs = DOCS) {
   return createCollectionTree(mockCollection(docs), { keyField: 'slug', type: TYPE, sort: { closeTs: -1 } });
 }
 
-const isCode = (code: string) => (e: unknown) => (e as OpError).code === code;
+const isCode = (code: string) => (e: unknown) => e instanceof KernelError && e.code === code;
 
 describe('createCollectionTree', () => {
   it('get("/") returns a dir node', async () => {
@@ -166,9 +166,14 @@ describe('createCollectionTree', () => {
 
   it('rejects forbidden operators and system-field queries', async () => {
     const tree = makeTree();
-    await assert.rejects(() => tree.getChildren('/', { query: { $where: '1' } }), isCode('BAD_REQUEST'));
-    await assert.rejects(() => tree.getChildren('/', { query: { flip: { $where: '1' } } }), isCode('BAD_REQUEST'));
-    await assert.rejects(() => tree.getChildren('/', { query: { $path: '/x' } }), isCode('BAD_REQUEST'));
+    await assert.rejects(() => tree.getChildren('/', { query: { $where: '1' } }), isCode('INVALID'));
+    await assert.rejects(() => tree.getChildren('/', { query: { flip: { $where: '1' } } }), isCode('INVALID'));
+    await assert.rejects(() => tree.getChildren('/', { query: { $path: '/x' } }), isCode('INVALID'));
+  });
+
+  it('a doc without a usable key fails the read with INVALID', async () => {
+    const tree = makeTree([...DOCS, { _id: oid(5), asset: 'sol', closeTs: 400 }]);
+    await assert.rejects(() => tree.getChildren('/'), isCode('INVALID'));
   });
 
   it('is read-only: set/remove/patch deny, docs stay untouched', async () => {

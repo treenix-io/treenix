@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 
-const EXPECTED_SHA256 = '8ec3e91050ab0e1f54886669be903a62a2dba1a30e1f6d17af6d372f119a783d';
+const EXPECTED_SHA256 = '18b333bcb453fcb63b7f79ce6e2f47eda650d4ee78e96bcda8de13c7ca2f6064';
 
 test('lab/tree-chain.ts remains outside the core simplification', async () => {
   const source = await readFile(new URL('./tree-chain.ts', import.meta.url));

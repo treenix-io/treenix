@@ -5,7 +5,7 @@
 import { createTrpcTransport } from '#client';
 import { registerType } from '#comp';
 import { getComponentByName, register } from '#core';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import { createMemoryTree, createOverlayTree, type Tree } from '#tree';
 import { createFsTree } from '#tree/fs';
 import { createRawFsTree } from '#tree/mimefs';
@@ -103,7 +103,7 @@ registerType('t.mount.tree.trpc', MountTreeTrpc);
 // ── Adapters ──
 
 function required(type: string, field: string, at: string): never {
-  throw new OpError('BAD_REQUEST', `${type} at ${at}: ${field} required`);
+  throw new KernelError('INVALID', `${type} at ${at}: ${field} required`);
 }
 
 register(MountMongo, 'mount', async (mount, ctx) => {
@@ -176,10 +176,10 @@ function isPrivateHost(hostname: string): boolean {
 register(MountTreeTrpc, 'mount', async (mount, ctx) => {
   if (!mount.url) required('t.mount.tree.trpc', 'url', ctx.path);
   // The URL may carry credentials — never echo it into errors.
-  if (!URL.canParse(mount.url)) throw new OpError('BAD_REQUEST', `t.mount.tree.trpc at ${ctx.path}: invalid url`);
+  if (!URL.canParse(mount.url)) throw new KernelError('INVALID', `t.mount.tree.trpc at ${ctx.path}: invalid url`);
   const { hostname } = new URL(mount.url);
   if (!mount.allowPrivate && isPrivateHost(hostname)) {
-    throw new OpError('BAD_REQUEST', `t.mount.tree.trpc at ${ctx.path}: private host ${hostname} needs allowPrivate`);
+    throw new KernelError('INVALID', `t.mount.tree.trpc at ${ctx.path}: private host ${hostname} needs allowPrivate`);
   }
   const { tree } = createTrpcTransport({ url: mount.url, token: mount.token || undefined });
   return createRepathTree(tree, ctx.path, mount.path || '/');
@@ -190,7 +190,7 @@ register(MountOverlay, 'mount', async (mount, ctx) => {
   const stores: Tree[] = [];
   for (const name of mount.layers) {
     const comp = getComponentByName(ctx.node, name);
-    if (!comp) throw new OpError('BAD_REQUEST', `t.mount.overlay at ${ctx.path}: layer component "${name}" not found`);
+    if (!comp) throw new KernelError('INVALID', `t.mount.overlay at ${ctx.path}: layer component "${name}" not found`);
     // Later layers see the base layer as their parent store.
     stores.push(await resolveAdapter(comp, { ...ctx, parentStore: stores[0] ?? ctx.parentStore }));
   }

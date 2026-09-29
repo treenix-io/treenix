@@ -3,7 +3,7 @@
 // Depends only on core types.
 
 import { comparePaths, isMoved, isRef, type NodeData, type Ref } from '#core';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import { scanFromCollected } from './fs-common';
 import { applyOps, type CommitChange, type CommitReceipt, hasMutationOps, type PatchOp, PatchTestError } from './patch';
 // Cycle-safe: query.ts reads index exports only inside functions.
@@ -62,19 +62,19 @@ export function isSetEntry(e: PatchManyEntry): e is { path: string; node: NodeDa
  *  Wrappers that RESOLVE by ancestor (mounts) must call this before resolving —
  *  a non-contained entry would otherwise silently misroute to ancestor's tree. */
 export function assertPatchManyBatch(ancestor: string, entries: PatchManyEntry[]): void {
-  if (!entries.length) throw new OpError('BAD_REQUEST', 'patchMany: empty batch');
+  if (!entries.length) throw new KernelError('INVALID', 'patchMany: empty batch');
 
   const prefix = ancestor === '/' ? '/' : ancestor + '/';
   const seen = new Set<string>();
   for (const entry of entries) {
     const { path } = entry;
     if (path !== ancestor && !path.startsWith(prefix)) {
-      throw new OpError('BAD_REQUEST', `patchMany: entry ${path} is outside ancestor ${ancestor}`);
+      throw new KernelError('INVALID', `patchMany: entry ${path} is outside ancestor ${ancestor}`);
     }
-    if (seen.has(path)) throw new OpError('BAD_REQUEST', `patchMany: duplicate entry path ${path}`);
+    if (seen.has(path)) throw new KernelError('INVALID', `patchMany: duplicate entry path ${path}`);
     seen.add(path);
     if (isSetEntry(entry) && entry.node.$path !== path) {
-      throw new OpError('BAD_REQUEST', `patchMany: set-member node.$path ${entry.node.$path} does not match entry path ${path}`);
+      throw new KernelError('INVALID', `patchMany: set-member node.$path ${entry.node.$path} does not match entry path ${path}`);
     }
   }
 }
@@ -88,7 +88,7 @@ export function applyPatchManyEntry(node: NodeData, entry: { path: string; ops: 
     applyOps(copy, entry.ops);
   } catch (e) {
     if (e instanceof PatchTestError) {
-      throw new OpError('CONFLICT', `patchMany: test failed for ${entry.path} (${e.field})`);
+      throw new KernelError('CONFLICT', `patchMany: test failed for ${entry.path} (${e.field})`);
     }
     throw e;
   }
@@ -101,7 +101,7 @@ export function applyPatchManyEntry(node: NodeData, entry: { path: string; ops: 
  *  commits (fs would otherwise hit its write-time OCC mid-batch). */
 export function assertSetEntryOcc(stored: NodeData | undefined, entry: { path: string; node: NodeData }): void {
   if (entry.node.$rev != null && entry.node.$rev !== stored?.$rev) {
-    throw new OpError('CONFLICT', `patchMany: set-member ${entry.path} OCC failed — expected $rev ${stored?.$rev}, got ${entry.node.$rev}`);
+    throw new KernelError('CONFLICT', `patchMany: set-member ${entry.path} OCC failed — expected $rev ${stored?.$rev}, got ${entry.node.$rev}`);
   }
 }
 
@@ -142,13 +142,13 @@ export interface Tree {
    *  clone, test ops evaluated) BEFORE anything commits — one failing member
    *  denies the whole batch. Optional capability (same precedent as
    *  scanChildren/execute): adapters implement natively, wrappers forward;
-   *  absence throws BAD_REQUEST at the forwarding layer — never a silent
+   *  absence throws INVALID at the forwarding layer — never a silent
    *  per-member fallback loop, which would break atomicity. */
   patchMany?(ancestor: string, entries: PatchManyEntry[], ctx?: unknown): Promise<CommitReceipt>;
   /** Server-internal traversal primitive. Optional on the public Tree
    *  interface: the wire-facing tRPC remote tree cannot implement it
    *  (no streaming over RPC), but every server-side adapter and wrapper
-   *  exposes it. `executeList` throws RESOURCE_EXHAUSTED-style at runtime
+   *  exposes it. `executeList` throws INVALID at runtime
    *  if a non-source Tree slips into a server read path. */
   scanChildren?(
     path: string,
@@ -222,7 +222,7 @@ export type TreeSource = Tree & Required<Pick<Tree, 'scanChildren'>>;
  *  silently break the no-fallback contract otherwise. */
 export function asTreeSource(tree: Tree): TreeSource {
   if (!tree.scanChildren) {
-    throw new OpError('BAD_REQUEST', 'Tree does not expose scanChildren — not usable as a source for the read runtime');
+    throw new KernelError('INVALID', 'Tree does not expose scanChildren — not usable as a source for the read runtime');
   }
   return tree as TreeSource;
 }
@@ -251,13 +251,13 @@ export async function followMoved(
 
   while (target && isMoved(target)) {
     if (expectId && target.$id && target.$id !== expectId) {
-      throw new OpError('NOT_FOUND', `Ref identity mismatch at ${path}: tombstone for ${target.$id}, expected ${expectId}`);
+      throw new KernelError('NOT_FOUND', `Ref identity mismatch at ${path}: tombstone for ${target.$id}, expected ${expectId}`);
     }
     if (++hops > MAX_MOVED_HOPS) {
-      throw new OpError('BAD_REQUEST', `Tombstone chain from ${path} exceeds ${MAX_MOVED_HOPS} hops`);
+      throw new KernelError('INVALID', `Tombstone chain from ${path} exceeds ${MAX_MOVED_HOPS} hops`);
     }
     const next = target.$ref;
-    if (seen.has(next)) throw new OpError('BAD_REQUEST', `Tombstone cycle at ${next}`);
+    if (seen.has(next)) throw new KernelError('INVALID', `Tombstone cycle at ${next}`);
     seen.add(next);
     target = await tree.get(next, ctx);
   }
@@ -275,9 +275,9 @@ export async function resolveRef(tree: Tree, node: NodeData | Ref): Promise<Node
 
   const expectId = node.$refId;
   const { target, hops } = await followMoved(tree, node.$ref, expectId);
-  if (!target) throw new OpError('NOT_FOUND', `Ref target not found: ${node.$ref}`);
+  if (!target) throw new KernelError('NOT_FOUND', `Ref target not found: ${node.$ref}`);
   if (expectId && target.$id && target.$id !== expectId) {
-    throw new OpError('NOT_FOUND', `Ref identity mismatch: ${node.$ref} → ${target.$path} carries ${target.$id}, expected ${expectId}`);
+    throw new KernelError('NOT_FOUND', `Ref identity mismatch: ${node.$ref} → ${target.$path} carries ${target.$id}, expected ${expectId}`);
   }
 
   // Self-repair: collapse a followed chain into $ref, adopt the target's id
@@ -355,7 +355,7 @@ export function createFilterTree(
     // re-introduce the legacy-getChildren mixed-responsibilities path.
     async *scanChildren(parent, opts, ctx) {
       if (!upper.scanChildren || !lower.scanChildren) {
-        throw new OpError('BAD_REQUEST', 'createFilterTree: scanChildren requires both layers to expose it');
+        throw new KernelError('INVALID', 'createFilterTree: scanChildren requires both layers to expose it');
       }
       const uIter = upper.scanChildren(parent, opts, ctx)[Symbol.asyncIterator]();
       const lIter = lower.scanChildren(parent, opts, ctx)[Symbol.asyncIterator]();
@@ -410,7 +410,7 @@ export function createFilterTree(
     },
     async patch(path, ops, ctx) {
       const node = await upper.get(path, ctx) ?? await lower.get(path, ctx);
-      if (!node) throw new OpError('NOT_FOUND', `Node not found: ${path}`);
+      if (!node) throw new KernelError('NOT_FOUND', `Node not found: ${path}`);
       const wasUpper = toUpper(node);
 
       // Apply ops to a copy to check if routing changes
@@ -458,18 +458,18 @@ export function createFilterTree(
           target = toUpper(entry.node) ? upper : lower;
         } else {
           const node = await upper.get(entry.path, ctx) ?? await lower.get(entry.path, ctx);
-          if (!node) throw new OpError('NOT_FOUND', `Node not found: ${entry.path}`);
+          if (!node) throw new KernelError('NOT_FOUND', `Node not found: ${entry.path}`);
           target = toUpper(node) ? upper : lower;
         }
         if (layer && target !== layer) {
-          throw new OpError('BAD_REQUEST', 'patchMany cannot span layers');
+          throw new KernelError('INVALID', 'patchMany cannot span layers');
         }
         layer = target;
       }
 
       // layer is set: assertPatchManyBatch guarantees a non-empty batch.
       if (!layer!.patchMany) {
-        throw new OpError('BAD_REQUEST', 'patchMany: layer does not support patchMany');
+        throw new KernelError('INVALID', 'patchMany: layer does not support patchMany');
       }
       const receipt = await layer!.patchMany(ancestor, entries, ctx);
       // Same shadowed-write rule as set(): a lower-routed member the upper
@@ -500,7 +500,7 @@ export function createFilterTree(
     ...(upper.execute && lower.execute ? {
       execute: async (path: string, action: string, data?: unknown, opts?: ExecOpts, ctx?: unknown) => {
         const node = await upper.get(path, ctx) ?? await lower.get(path, ctx);
-        if (!node) throw new OpError('NOT_FOUND', `Node not found: ${path}`);
+        if (!node) throw new KernelError('NOT_FOUND', `Node not found: ${path}`);
         return toUpper(node)
           ? upper.execute!(path, action, data, opts, ctx)
           : lower.execute!(path, action, data, opts, ctx);
@@ -655,7 +655,7 @@ export function createMemoryTree(): TreeSource {
         // OCC: caller knows about rev — must match stored
         const prevRev = treeNode.data?.$rev;
         if (node.$rev !== prevRev) {
-          throw new OpError('CONFLICT', `OptimisticConcurrencyError: node ${node.$path} modified by another transaction. Expected $rev ${prevRev}, got ${node.$rev}`);
+          throw new KernelError('CONFLICT', `OptimisticConcurrencyError: node ${node.$path} modified by another transaction. Expected $rev ${prevRev}, got ${node.$rev}`);
         }
       }
 
@@ -681,7 +681,7 @@ export function createMemoryTree(): TreeSource {
 
     async patch(path, ops, _ctx) {
       const treeNode = navigate(path);
-      if (!treeNode?.data) throw new OpError('NOT_FOUND', `Node not found: ${path}`);
+      if (!treeNode?.data) throw new KernelError('NOT_FOUND', `Node not found: ${path}`);
       const copy = structuredClone(treeNode.data);
       applyOps(copy, ops);
       if (!hasMutationOps(ops)) {
@@ -714,7 +714,7 @@ export function createMemoryTree(): TreeSource {
           continue;
         }
         const treeNode = navigate(entry.path);
-        if (!treeNode?.data) throw new OpError('NOT_FOUND', `Node not found: ${entry.path}`);
+        if (!treeNode?.data) throw new KernelError('NOT_FOUND', `Node not found: ${entry.path}`);
         const copy = applyPatchManyEntry(treeNode.data, entry);
         // Test-only member: evaluated above, never written, no $rev bump —
         // same per-node rule as patch. Reported as a guarded no-op member.

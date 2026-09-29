@@ -1,6 +1,6 @@
 import { A, getComponentByName, isRef, makeNode, R, register, S, W, type NodeData } from '@treenx/core';
 import { registerType } from '@treenx/core/comp';
-import { OpError } from '@treenx/core/errors';
+import { KernelError } from '@treenx/core/errors';
 import { withMounts } from '@treenx/core/mount';
 import { loadSchemasFromDir } from '@treenx/core/schema/load';
 import { executeAction } from '@treenx/core/server/actions';
@@ -18,7 +18,7 @@ import './service'; // types + the t.mount.branch adapter (server split)
 // the way the mod loader does at boot.
 loadSchemasFromDir(new URL('./schemas', import.meta.url).pathname);
 
-const isCode = (code: string) => (e: unknown) => e instanceof OpError && e.code === code;
+const isCode = (code: string) => (e: unknown) => e instanceof KernelError && e.code === code;
 
 const OWNER = 'u-build';
 const ACTOR = { userId: OWNER, claims: [`u:${OWNER}`, 'agents', 'authenticated'] };
@@ -101,7 +101,7 @@ describe('branch mod: create + mounted view', () => {
     const { tree } = await setup();
     await assert.rejects(
       executeAction(tree, '/branches', undefined, undefined, 'create', {}),
-      isCode('BAD_REQUEST'),
+      isCode('INVALID'),
     );
   });
 
@@ -374,7 +374,7 @@ describe('branch mod: requestMerge + merge', () => {
 
     await assert.rejects(
       executeAction(tree, branchPath, undefined, undefined, 'merge', undefined, ACTOR),
-      isCode('BAD_REQUEST'),
+      isCode('INVALID'),
     );
 
     assert.equal((await root.get('/company/doc'))?.title, 'live', 'set entry not applied');

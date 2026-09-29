@@ -1,6 +1,6 @@
 // Agent-port pairing operations — transport-agnostic.
 
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import { AGENT_SESSION_TTL, hashAgentKey, timingSafeCompare } from '#security/agent';
 import { createSession } from '#security/sessions';
 import { checkRate } from '#security/rate-limit';
@@ -12,10 +12,10 @@ import type { Tree } from '#tree';
 // The caller's tree is the auth-wrapped tree → W on the port path is enforced by withAcl.set.
 export async function agentInitPair(authedTree: Tree, path: string, key: string) {
   const node = await authedTree.get(path);
-  if (!node) throw new OpError('NOT_FOUND', 'Agent port not found');
-  if (node.$type !== 't.agent.port') throw new OpError('BAD_REQUEST', 'Not an agent port');
+  if (!node) throw new KernelError('NOT_FOUND', 'Agent port not found');
+  if (node.$type !== 't.agent.port') throw new KernelError('INVALID', 'Not an agent port');
   const status = (node as Record<string, unknown>).status as string ?? 'idle';
-  if (status !== 'idle') throw new OpError('CONFLICT', `Port already in status: ${status}`);
+  if (status !== 'idle') throw new KernelError('CONFLICT', `Port already in status: ${status}`);
   const keyHash = hashAgentKey(key);
   // withAcl.set on authedTree enforces W permission on the port path.
   await authedTree.set({ ...node, status: 'pending', pendingKey: keyHash });
@@ -26,28 +26,28 @@ export async function agentConnect(store: Tree, path: string, key: string, clien
   if (clientIp) checkRate(`agent:ip:${clientIp}`, 20);
   checkRate(`agent:path:${path}`, 10);
   const node = await store.get(path);
-  if (!node) throw new OpError('NOT_FOUND', 'Agent port not found');
-  if (node.$type !== 't.agent.port') throw new OpError('BAD_REQUEST', 'Not an agent port');
+  if (!node) throw new KernelError('NOT_FOUND', 'Agent port not found');
+  if (node.$type !== 't.agent.port') throw new KernelError('INVALID', 'Not an agent port');
 
   const keyHash = hashAgentKey(key);
   const status = (node as Record<string, unknown>).status as string ?? 'idle';
 
-  if (status === 'revoked') throw new OpError('FORBIDDEN', 'Agent access revoked');
+  if (status === 'revoked') throw new KernelError('FORBIDDEN', 'Agent access revoked');
 
   // R4-AUTH-1: idle → pending self-claim removed. Operator must call agentInitPair (authed)
   // first; agentConnect only validates against an existing pendingKey/approvedKey.
   if (status === 'idle')
-    throw new OpError('BAD_REQUEST', 'Port not initialized — operator must call agentInitPair first');
+    throw new KernelError('INVALID', 'Port not initialized — operator must call agentInitPair first');
 
   if (status === 'pending') {
     if (!timingSafeCompare(keyHash, (node as Record<string, unknown>).pendingKey as string))
-      throw new OpError('FORBIDDEN', 'Key mismatch');
+      throw new KernelError('FORBIDDEN', 'Key mismatch');
     return { status: 'pending' as const };
   }
 
   if (status === 'approved') {
     if (!timingSafeCompare(keyHash, (node as Record<string, unknown>).approvedKey as string))
-      throw new OpError('FORBIDDEN', 'Key mismatch');
+      throw new KernelError('FORBIDDEN', 'Key mismatch');
 
     const agentUserId = `agent:${path}`;
     const token = await createSession(store, agentUserId, { ttlMs: AGENT_SESSION_TTL });
@@ -55,5 +55,5 @@ export async function agentConnect(store: Tree, path: string, key: string, clien
     return { status: 'approved' as const, token, userId: agentUserId };
   }
 
-  throw new OpError('BAD_REQUEST', `Unknown agent status: ${status}`);
+  throw new KernelError('INVALID', `Unknown agent status: ${status}`);
 }

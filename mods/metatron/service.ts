@@ -2,7 +2,7 @@
 // Uses ACL-wrapped tree scoped to the task creator's permissions.
 // withAcl.get() returns undefined for denied paths — no existence leakage.
 
-import { OpError } from '@treenx/core/errors';
+import { KernelError } from '@treenx/core/errors';
 import { buildClaims, withAcl } from '@treenx/core/security';
 import { uniqueMentionPaths } from './mentions';
 
@@ -35,7 +35,7 @@ export async function resolveContext(
     } catch (e) {
       // withAcl.get throws FORBIDDEN on no-read-perm (since b2ffd6f). Treat denied and
       // missing identically — never leak existence to the caller.
-      if (e instanceof OpError && e.code === 'FORBIDDEN') {
+      if (e instanceof KernelError && e.code === 'FORBIDDEN') {
         sections.push(`### ${path}\n(not found or access denied)`);
         continue;
       }

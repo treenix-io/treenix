@@ -5,6 +5,7 @@
 import { registerType } from '#comp';
 import { A, createNode, R, register, S, W } from '#core';
 import { createMemoryTree } from '#tree';
+import { TRPCClientError } from '@trpc/client';
 import assert from 'node:assert/strict';
 import type { Socket } from 'node:net';
 import '#mount/adapters';
@@ -407,6 +408,24 @@ describe('e2e: tRPC over HTTP', () => {
       assert.deepEqual(items[0], { type: 'start' });
       assert.deepEqual(items[1], { items: [1, 2, 3] });
       assert.deepEqual(items[2], { type: 'end', summary: 'done' });
+    });
+
+    // A failing stream mapped to a retryable 5xx makes the SSE client reconnect and run the action again.
+    it('streamAction failure arrives with its mapped code, not as a retryable server error', { timeout: 5000 }, async () => {
+      const pub = createClient(url);
+      const reg = await pub.register.mutate({ userId: 'streamer3', password: 'pass' });
+      const client = createClient(url, reg.token);
+
+      await pub.set.mutate({ node: { $path: '/s3', $type: 'page', '#str': { $type: 'streamer' } } });
+
+      const err = await new Promise<unknown>((resolve) => {
+        const sub = client.streamAction.subscribe({ path: '/s3', key: 'str', action: 'missing' }, {
+          onError: (e) => { sub.unsubscribe(); resolve(e); },
+        });
+      });
+
+      assert.ok(err instanceof TRPCClientError);
+      assert.equal(err.data?.code, 'BAD_REQUEST');
     });
 
   });

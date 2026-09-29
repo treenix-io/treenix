@@ -1,5 +1,5 @@
 import { createNode } from '#core';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, realpath, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -33,7 +33,7 @@ describe('FsStore', () => {
       await symlink(outside, join(root, 'link'));
       await assert.rejects(
         () => assertPathSafe(root, join(root, 'link', 'newdir', 'file.txt')),
-        (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+        (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
       );
       await assertPathSafe(root, join(root, 'fresh', 'deeper', 'file.txt'));
     } finally {
@@ -47,13 +47,13 @@ describe('FsStore', () => {
     const tree = await setup();
     await tree.set({ ...createNode('/a', 'dir'), $acl: [{ g: 'admins', p: 15 }] });
     await tree.set(createNode('/a/child', 'doc'));
-    const badRequest = (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST';
+    const isInvalid = (e: unknown) => e instanceof KernelError && e.code === 'INVALID';
 
-    await assert.rejects(() => tree.set(createNode('/a/$', 'doc')), badRequest);
-    await assert.rejects(() => tree.set(createNode('/a/$/c', 'doc')), badRequest);
-    await assert.rejects(() => tree.get('/a/$'), badRequest);
-    await assert.rejects(() => tree.remove('/a/$'), badRequest);
-    await assert.rejects(() => tree.getChildren('/a/$'), badRequest);
+    await assert.rejects(() => tree.set(createNode('/a/$', 'doc')), isInvalid);
+    await assert.rejects(() => tree.set(createNode('/a/$/c', 'doc')), isInvalid);
+    await assert.rejects(() => tree.get('/a/$'), isInvalid);
+    await assert.rejects(() => tree.remove('/a/$'), isInvalid);
+    await assert.rejects(() => tree.getChildren('/a/$'), isInvalid);
     assert.deepEqual((await tree.get('/a'))?.$acl, [{ g: 'admins', p: 15 }]);
   });
 
@@ -63,7 +63,7 @@ describe('FsStore', () => {
     await tree.set(createNode('/q/b', 'note'));
     await assert.rejects(
       () => tree.getChildren('/q', { query: { $where: 'true' } }),
-      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
     );
     const { items } = await tree.getChildren('/q', { query: { $type: 't.doc' } });
     assert.deepEqual(items.map(n => n.$path), ['/q/a']);
@@ -321,7 +321,7 @@ describe('FsStore', () => {
       // Trying to set a node under the symlinked path should fail
       await assert.rejects(
         () => tree.set({ $path: '/escape/secret', $type: 't.test' }),
-        (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+        (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
       );
     } finally {
       await rm(outsideDir, { recursive: true, force: true });
@@ -336,7 +336,7 @@ describe('FsStore', () => {
 
       await assert.rejects(
         () => tree.getChildren(`/../${basename(outsideDir)}`),
-        (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+        (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
       );
     } finally {
       await rm(outsideDir, { recursive: true, force: true });
@@ -352,7 +352,7 @@ describe('FsStore', () => {
 
       await assert.rejects(
         () => tree.getChildren('/escape'),
-        (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+        (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
       );
     } finally {
       await rm(outsideDir, { recursive: true, force: true });

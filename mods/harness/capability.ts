@@ -4,7 +4,7 @@
 // Tree methods don't know about actions, so action checks happen one layer up.
 
 import { matchesAny } from '@treenx/core/glob';
-import { OpError } from '@treenx/core/errors';
+import { KernelError } from '@treenx/core/errors';
 import type { NodeData } from '@treenx/core';
 import type { Tree, Page, PatchOp } from '@treenx/core/tree';
 import { executeAction, type ActorContext } from '@treenx/core/server/actions';
@@ -45,7 +45,7 @@ export function defineAgentScope(spec: { plan: ScopeSpec; work: ScopeSpec }): Ag
 }
 
 function denyOutOfScope(op: 'read' | 'write', path: string): never {
-  throw new OpError('FORBIDDEN', `Capability: ${op} not allowed on ${path}`);
+  throw new KernelError('FORBIDDEN', `Capability: ${op} not allowed on ${path}`);
 }
 
 /** Wrap a Tree so all reads/writes are intersected with capability paths.
@@ -101,10 +101,10 @@ export async function executeWithCapability<T = unknown>(
   actor: ActorContext,
 ): Promise<T> {
   if (!matchesAny(cap.allowedExec, input.action)) {
-    throw new OpError('FORBIDDEN', `Capability: action "${input.action}" not allowed`);
+    throw new KernelError('FORBIDDEN', `Capability: action "${input.action}" not allowed`);
   }
   if (!matchesAny(cap.writePaths, input.path)) {
-    throw new OpError('FORBIDDEN', `Capability: write not allowed on ${input.path}`);
+    throw new KernelError('FORBIDDEN', `Capability: write not allowed on ${input.path}`);
   }
   // Wrap tree so internal ctx.tree.set/remove/patch inside the action handler
   // pass through capability filtering — closes confused-deputy hole where a

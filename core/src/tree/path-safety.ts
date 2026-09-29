@@ -2,7 +2,7 @@
 // top, so this file MUST NOT be reachable from React/browser bundles.
 
 import { isInsideRoot } from '#core/path';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import { realpath } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 
@@ -14,7 +14,7 @@ import { dirname, resolve } from 'node:path';
 export async function assertPathSafe(rootDir: string, file: string): Promise<void> {
   const target = resolve(file);
   if (!isInsideRoot(rootDir, target)) {
-    throw new OpError('FORBIDDEN', 'Path traversal blocked');
+    throw new KernelError('FORBIDDEN', 'Path traversal blocked');
   }
   for (let p = target; ; p = dirname(p)) {
     let real: string;
@@ -25,7 +25,7 @@ export async function assertPathSafe(rootDir: string, file: string): Promise<voi
       if (missing && p !== dirname(p)) continue;
       throw e;
     }
-    if (!isInsideRoot(rootDir, real)) throw new OpError('FORBIDDEN', 'Path escaped root via symlink');
+    if (!isInsideRoot(rootDir, real)) throw new KernelError('FORBIDDEN', 'Path escaped root via symlink');
     return;
   }
 }

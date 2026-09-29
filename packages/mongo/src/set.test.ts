@@ -9,7 +9,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { Collection } from 'mongodb';
-import { OpError } from '@treenx/core/errors';
+import { KernelError } from '@treenx/core/errors';
 import { mongoSet } from './index';
 
 type Captured = { filter: Record<string, unknown>; update: unknown; options: Record<string, unknown> };
@@ -109,7 +109,7 @@ describe('mongoSet — rev contract (ns6p.4 invariant 24)', () => {
 
     await assert.rejects(
       mongoSet(col, { $path: '/p', $type: 'item', $rev: 40 }),
-      (e: unknown) => e instanceof OpError && e.code === 'CONFLICT',
+      (e: unknown) => e instanceof KernelError && e.code === 'CONFLICT',
     );
   });
 });

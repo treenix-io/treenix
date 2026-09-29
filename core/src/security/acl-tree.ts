@@ -3,7 +3,7 @@
 // The read path (any depth) routes through the executeList read runtime.
 
 import { A, type ComponentData, isComponent, type NodeData, R, W } from '#core';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import { asTreeSource, assertSafePatchPath, type ChildrenOpts, type CommitChange, type CommitReceipt, isSetEntry, type Page, type PatchManyEntry, type PatchOp, type Tree } from '#tree';
 import { executeList } from '#tree/read-runtime';
 import { type ResolvedReadPlan, resolveReadPlan } from '#mount/resolve-plan';
@@ -24,9 +24,9 @@ function assertMutationSystemField(firstSeg: string, isAdmin: boolean): void {
   if (firstSeg === '$ref' || firstSeg === '$refId') return;
   if (firstSeg === '$acl' || firstSeg === '$owner') {
     if (isAdmin) return;
-    throw new OpError('FORBIDDEN', `Access denied: ${firstSeg} requires A permission`);
+    throw new KernelError('FORBIDDEN', `Access denied: ${firstSeg} requires A permission`);
   }
-  throw new OpError('FORBIDDEN', `Access denied: ${firstSeg} is system-managed`);
+  throw new KernelError('FORBIDDEN', `Access denied: ${firstSeg} is system-managed`);
 }
 
 function assertTestSystemField(firstSeg: string, isAdmin: boolean): void {
@@ -34,9 +34,9 @@ function assertTestSystemField(firstSeg: string, isAdmin: boolean): void {
   if (firstSeg === '$path' || firstSeg === '$type' || firstSeg === '$rev' || firstSeg === '$ref' || firstSeg === '$refId' || firstSeg === '$id') return;
   if (firstSeg === '$acl' || firstSeg === '$owner') {
     if (isAdmin) return;
-    throw new OpError('FORBIDDEN', `Access denied: ${firstSeg} requires A permission`);
+    throw new KernelError('FORBIDDEN', `Access denied: ${firstSeg} requires A permission`);
   }
-  throw new OpError('FORBIDDEN', `Access denied: ${firstSeg} is hidden from reads`);
+  throw new KernelError('FORBIDDEN', `Access denied: ${firstSeg} is hidden from reads`);
 }
 
 function assertComponentPerm(
@@ -50,7 +50,7 @@ function assertComponentPerm(
   if (firstSeg.startsWith('$')) return;
   const existingVal = existing?.[firstSeg];
   if (isComponent(existingVal) && !(componentPerm(existingVal, userId, claims, owner) & bit)) {
-    throw new OpError('FORBIDDEN', `Access denied: component ${firstSeg}`);
+    throw new KernelError('FORBIDDEN', `Access denied: component ${firstSeg}`);
   }
 }
 
@@ -63,7 +63,7 @@ function assertComponentAclKept(key: string, next: unknown, prev: unknown, isAdm
   const nextAcl = isComponent(next) ? next.$acl : undefined;
   const prevAcl = isComponent(prev) ? prev.$acl : undefined;
   if (!sameValue(nextAcl, prevAcl)) {
-    throw new OpError('FORBIDDEN', `Access denied: ${key}.$acl requires A permission`);
+    throw new KernelError('FORBIDDEN', `Access denied: ${key}.$acl requires A permission`);
   }
 }
 
@@ -107,7 +107,7 @@ function assertPatchOps(
     if ((op[0] === 'r' || op[0] === 'a') && op[1] === firstSeg) {
       const newVal = (op as readonly ['r' | 'a', string, unknown])[2];
       if (isComponent(newVal) && !(componentPerm(newVal, userId, claims, currentOwner) & W)) {
-        throw new OpError('FORBIDDEN', `Access denied: cannot write component ${firstSeg}`);
+        throw new KernelError('FORBIDDEN', `Access denied: cannot write component ${firstSeg}`);
       }
       assertComponentAclKept(firstSeg, newVal, existing?.[firstSeg], isAdmin);
     }
@@ -138,7 +138,7 @@ function rewriteFullNodeWrite(
   const preserveField = (field: string) => {
     const kept = existing?.[field];
     if (field in safe && !sameValue(safe[field], kept)) {
-      throw new OpError('FORBIDDEN', `Access denied: ${field}`);
+      throw new KernelError('FORBIDDEN', `Access denied: ${field}`);
     }
     if (kept !== undefined) safe[field] = kept;
     else delete safe[field];
@@ -152,7 +152,7 @@ function rewriteFullNodeWrite(
   for (const [key, oldVal] of Object.entries(existing ?? {})) {
     if (key.startsWith('$') || !isComponent(oldVal) || canWriteComponent(oldVal)) continue;
     if (key in safe && !sameValue(safe[key], oldVal)) {
-      throw new OpError('FORBIDDEN', `Access denied: component ${key}`);
+      throw new KernelError('FORBIDDEN', `Access denied: component ${key}`);
     }
     safe[key] = oldVal;
   }
@@ -162,7 +162,7 @@ function rewriteFullNodeWrite(
     const oldVal = existing?.[key];
     if (isComponent(oldVal) && !canWriteComponent(oldVal) && sameValue(val, oldVal)) continue;
     if (!canWriteComponent(val)) {
-      throw new OpError('FORBIDDEN', `Access denied: component ${key}`);
+      throw new KernelError('FORBIDDEN', `Access denied: component ${key}`);
     }
     assertComponentAclKept(key, val, oldVal, !!(perm & A));
   }
@@ -278,7 +278,7 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
       // for a forbidden path makes routers (and SSR) treat it as 404 instead
       // of "auth required", which leads to wrong rendering decisions.
       const perm = await getPerm(path);
-      if (!(perm & R)) throw new OpError('FORBIDDEN', `Access denied: ${path}`);
+      if (!(perm & R)) throw new KernelError('FORBIDDEN', `Access denied: ${path}`);
       const node = await rawStore.get(path, ctx);
       return node ? projectNode(node, perm, userId, claims) : undefined;
     },
@@ -288,7 +288,7 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
       // "no readable children". Returning [] for a forbidden parent makes
       // routers happily render NotFound instead of LoginScreen.
       const parentPerm = await getPerm(path);
-      if (!(parentPerm & R)) throw new OpError('FORBIDDEN', `Access denied: ${path}`);
+      if (!(parentPerm & R)) throw new KernelError('FORBIDDEN', `Access denied: ${path}`);
 
       const source = asTreeSource(rawStore);
       // Frozen plan wins (inv.21): execute the caller's pre-resolved object
@@ -318,7 +318,7 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
     async set(node, ctx) {
       const wctx = stampActor(ctx);
       const perm = await getPerm(node.$path);
-      if (!(perm & W)) throw new OpError('FORBIDDEN', `Access denied: ${node.$path}`);
+      if (!(perm & W)) throw new KernelError('FORBIDDEN', `Access denied: ${node.$path}`);
       const existing = await rawStore.get(node.$path, wctx);
       return projectReceipt(await rawStore.set(rewriteFullNodeWrite(node, existing, perm, userId, claims), wctx));
     },
@@ -326,7 +326,7 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
     async remove(path, ctx) {
       const wctx = stampActor(ctx);
       const perm = await getPerm(path);
-      if (!(perm & W)) throw new OpError('FORBIDDEN', `Access denied: ${path}`);
+      if (!(perm & W)) throw new KernelError('FORBIDDEN', `Access denied: ${path}`);
       return projectReceipt(await rawStore.remove(path, wctx));
     },
 
@@ -337,7 +337,7 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
       // no probing via [t, $field, guess]). Per-op checks below cover hidden
       // $-fields, hidden components, and $owner mutation in the same batch.
       if (!((perm & R) && (perm & W))) {
-        throw new OpError('FORBIDDEN', `Access denied: ${path}`);
+        throw new KernelError('FORBIDDEN', `Access denied: ${path}`);
       }
 
       const existing = await rawStore.get(path, wctx);   // may be undefined
@@ -355,7 +355,7 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
     // written (the inner adapter is all-or-nothing).
     async patchMany(ancestor, entries, ctx) {
       if (!rawStore.patchMany) {
-        throw new OpError('BAD_REQUEST', 'patchMany: store does not support patchMany');
+        throw new KernelError('INVALID', 'patchMany: store does not support patchMany');
       }
       const wctx = stampActor(ctx);
 
@@ -363,7 +363,7 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
       for (const entry of entries) {
         const perm = await getPerm(entry.path);
         if (!((perm & R) && (perm & W))) {
-          throw new OpError('FORBIDDEN', `Access denied: ${entry.path}`);
+          throw new KernelError('FORBIDDEN', `Access denied: ${entry.path}`);
         }
         const existing = await rawStore.get(entry.path, wctx);
         if (isSetEntry(entry)) {

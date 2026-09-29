@@ -8,7 +8,7 @@
 // callers (scanChildren loops) don't pay a second tree.get round-trip.
 
 import { R, type NodeData } from '#core';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import type { MembershipProjector } from '#sub';
 import type { Tree } from '#tree';
 import type { Projector } from '#tree/read-runtime';
@@ -73,5 +73,5 @@ export function createMembershipProjector(
  *  for what is actually "auth required". */
 export async function assertSourceReadable(tree: Tree, actor: Actor, path: string): Promise<void> {
   const perm = await resolvePermission(tree, path, actor.userId, actor.claims);
-  if (!(perm & R)) throw new OpError('FORBIDDEN', `Source not readable: ${path}`);
+  if (!(perm & R)) throw new KernelError('FORBIDDEN', `Source not readable: ${path}`);
 }

@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { describe, it } from 'node:test';
 import { createMemoryTree } from '#tree';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import { registerUser, loginUser } from './ops';
 
 function uniqueIp(): string {
@@ -27,7 +27,7 @@ describe('F5 — IP bucket rate-limit', () => {
     // 6th attempt from same IP with a fresh userId — IP bucket (limit 5) trips.
     await assert.rejects(
       registerUser(tree, `u${randomBytes(4).toString('hex')}`, 'pw', ip),
-      (e: unknown) => e instanceof OpError && e.code === 'TOO_MANY_REQUESTS',
+      (e: unknown) => e instanceof KernelError && e.code === 'REFUSED',
     );
   });
 
@@ -38,12 +38,12 @@ describe('F5 — IP bucket rate-limit', () => {
     // First registration succeeds.
     await registerUser(tree, userId, 'pw', uniqueIp());
     // 2nd & 3rd attempts to same userId — CONFLICT (already exists), still consume bucket slots.
-    await assert.rejects(registerUser(tree, userId, 'pw', uniqueIp()), (e: unknown) => e instanceof OpError);
-    await assert.rejects(registerUser(tree, userId, 'pw', uniqueIp()), (e: unknown) => e instanceof OpError);
-    // 4th — user bucket (limit 3) trips with TOO_MANY_REQUESTS even from a fresh IP.
+    await assert.rejects(registerUser(tree, userId, 'pw', uniqueIp()), (e: unknown) => e instanceof KernelError);
+    await assert.rejects(registerUser(tree, userId, 'pw', uniqueIp()), (e: unknown) => e instanceof KernelError);
+    // 4th — user bucket (limit 3) trips with REFUSED even from a fresh IP.
     await assert.rejects(
       registerUser(tree, userId, 'pw', uniqueIp()),
-      (e: unknown) => e instanceof OpError && e.code === 'TOO_MANY_REQUESTS',
+      (e: unknown) => e instanceof KernelError && e.code === 'REFUSED',
     );
   });
 
@@ -86,17 +86,17 @@ describe('F5 — IP bucket rate-limit', () => {
     const tree = createMemoryTree();
     const ip = uniqueIp();
 
-    // 10 failed logins with rotating userIds — all reject UNAUTHORIZED, but each consumes IP bucket.
+    // 10 failed logins with rotating userIds — all reject UNAUTHENTICATED, but each consumes IP bucket.
     for (let i = 0; i < 10; i++) {
       await assert.rejects(
         loginUser(tree, `u${randomBytes(4).toString('hex')}`, 'pw', ip),
-        (e: unknown) => e instanceof OpError && e.code === 'UNAUTHORIZED',
+        (e: unknown) => e instanceof KernelError && e.code === 'UNAUTHENTICATED',
       );
     }
     // 11th — IP bucket (limit 10) trips.
     await assert.rejects(
       loginUser(tree, `u${randomBytes(4).toString('hex')}`, 'pw', ip),
-      (e: unknown) => e instanceof OpError && e.code === 'TOO_MANY_REQUESTS',
+      (e: unknown) => e instanceof KernelError && e.code === 'REFUSED',
     );
   });
 });
@@ -106,7 +106,7 @@ describe('R4-AUTH-8 — assertUserId path-traversal hardening', () => {
     const tree = createMemoryTree();
     await assert.rejects(
       registerUser(tree, userId, 'pw', uniqueIp()),
-      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
     );
   };
 
@@ -138,7 +138,7 @@ describe('R4-AUTH-8 — assertUserId path-traversal hardening', () => {
 });
 
 describe('R4-AUTH-6 — pending-status credential oracle closed', () => {
-  it('login on pending account returns UNAUTHORIZED, not FORBIDDEN', async () => {
+  it('login on pending account returns UNAUTHENTICATED, not FORBIDDEN', async () => {
     const tree = createMemoryTree();
     // First user becomes admin/active automatically. Register a second to get a pending user.
     await registerUser(tree, 'admin1', 'adminpw', uniqueIp());
@@ -147,16 +147,16 @@ describe('R4-AUTH-6 — pending-status credential oracle closed', () => {
     // Bob's status is pending. Correct password → must NOT leak that.
     await assert.rejects(
       loginUser(tree, 'bob', 'bobpw', uniqueIp()),
-      (e: unknown) => e instanceof OpError
-        && e.code === 'UNAUTHORIZED'
+      (e: unknown) => e instanceof KernelError
+        && e.code === 'UNAUTHENTICATED'
         && e.message === 'Invalid credentials',
     );
 
     // Wrong password must produce identical shape — same code, same message.
     await assert.rejects(
       loginUser(tree, 'bob', 'wrongpw', uniqueIp()),
-      (e: unknown) => e instanceof OpError
-        && e.code === 'UNAUTHORIZED'
+      (e: unknown) => e instanceof KernelError
+        && e.code === 'UNAUTHENTICATED'
         && e.message === 'Invalid credentials',
     );
   });

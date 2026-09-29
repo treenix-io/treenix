@@ -1,6 +1,6 @@
 // Integration tests — full tRPC API from client perspective.
 // Builds the real tree pipeline (memory → mountable → storage policy → subscriptions),
-// exercises every operation, verifies ACL, events, CDC Matrix, and OpError mapping.
+// exercises every operation, verifies ACL, events, CDC Matrix, and KernelError mapping.
 
 import { registerType } from '#comp';
 import { createNode, R, register, resolve as resolveHandler, S, W } from '#core';

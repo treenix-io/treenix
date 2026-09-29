@@ -3,7 +3,7 @@
 // Core untouched. Tree interface preserved.
 
 import { type ComponentData, getComponentByName, type NodeData, resolveExact } from '#core';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import { assertPatchManyBatch, isSetEntry, type Tree } from '#tree';
 import { TRASH_ROOT } from '#tree/policy';
 
@@ -80,7 +80,7 @@ export async function resolveAdapter(mount: ComponentData, mountCtx: MountCtx): 
   // Exact: the adapter set must equal what the F4 authoring gate sees
   // (security/acl.ts typeAclRule) — no registry fallback.
   const adapter = resolveExact(mount.$type, 'mount');
-  if (!adapter) throw new OpError('BAD_REQUEST', `No mount adapter for "${mount.$type}" at ${mountCtx.path}`);
+  if (!adapter) throw new KernelError('INVALID', `No mount adapter for "${mount.$type}" at ${mountCtx.path}`);
   return adapter(mount, mountCtx);
 }
 
@@ -202,7 +202,7 @@ export function withMounts(rootStore: Tree, opts?: WithMountsOpts): MountableTre
         return;
       }
       if (opts?.after !== undefined) {
-        throw new OpError('BAD_REQUEST', `scanChildren: mount at ${path} is a Tree-only adapter without cursor support — 'after' pagination unavailable; migrate the adapter to native scanChildren`);
+        throw new KernelError('INVALID', `scanChildren: mount at ${path} is a Tree-only adapter without cursor support — 'after' pagination unavailable; migrate the adapter to native scanChildren`);
       }
       // limitHint is a batching hint only — it MUST NOT truncate the stream
       // (core-anz4.16: downstream ACL/query filters drop rows, so a single
@@ -222,7 +222,7 @@ export function withMounts(rootStore: Tree, opts?: WithMountsOpts): MountableTre
         // core-anz4.16: a legacy adapter returning a repeating/cyclic nextCursor
         // would loop forever — fail loud on the adapter-contract violation.
         if (next !== undefined && seen.has(next)) {
-          throw new OpError('BAD_REQUEST', `scanChildren: mount at ${path} returned a repeating nextCursor "${next}" — cyclic pagination from a Tree-only adapter`);
+          throw new KernelError('INVALID', `scanChildren: mount at ${path} returned a repeating nextCursor "${next}" — cyclic pagination from a Tree-only adapter`);
         }
         cursor = next;
       } while (cursor !== undefined);
@@ -255,7 +255,7 @@ export function withMounts(rootStore: Tree, opts?: WithMountsOpts): MountableTre
       assertPatchManyBatch(ancestor, entries);
       const tree = await resolveTree(ancestor, false, ctx);
       if (!tree.patchMany) {
-        throw new OpError('BAD_REQUEST', `patchMany: target tree at ${ancestor} does not support patchMany`);
+        throw new KernelError('INVALID', `patchMany: target tree at ${ancestor} does not support patchMany`);
       }
       // A set-member may CREATE: if its path lives under a nested mount below
       // `ancestor`, forwarding to the ancestor's tree would silently create a
@@ -263,7 +263,7 @@ export function withMounts(rootStore: Tree, opts?: WithMountsOpts): MountableTre
       // there). Only set-members pay the extra per-path resolution.
       for (const e of entries) {
         if (isSetEntry(e) && await resolveTree(e.path, false, ctx) !== tree) {
-          throw new OpError('BAD_REQUEST', `patchMany: set-member ${e.path} crosses a mount boundary under ${ancestor}`);
+          throw new KernelError('INVALID', `patchMany: set-member ${e.path} crosses a mount boundary under ${ancestor}`);
         }
       }
       const receipt = await tree.patchMany(ancestor, entries, ctx);

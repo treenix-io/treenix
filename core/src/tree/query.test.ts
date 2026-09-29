@@ -1,5 +1,5 @@
 import { createNode, type NodeData } from '#core';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { createMemoryTree } from './index';
@@ -146,7 +146,7 @@ describe('QueryStore', () => {
   // R5-MCP-4: a shape heuristic let ^(.|.)*$ and ^(a+){2,}$ through at seconds
   // per node — user regexes are refused outright, at any depth.
   it('rejects $regex and RegExp values wherever they appear', () => {
-    const badRequest = (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST';
+    const isInvalid = (e: unknown) => e instanceof KernelError && e.code === 'INVALID';
     for (const q of [
       { name: { $regex: '^prefix' } },
       { name: { $regex: '^(.|.)*\u0000$' } },
@@ -154,7 +154,7 @@ describe('QueryStore', () => {
       { name: /^prefix/ },
       { tags: { $in: [/a/] } },
     ]) {
-      assert.throws(() => assertSafeSiftQuery(q), badRequest, JSON.stringify(q));
+      assert.throws(() => assertSafeSiftQuery(q), isInvalid, JSON.stringify(q));
     }
   });
 

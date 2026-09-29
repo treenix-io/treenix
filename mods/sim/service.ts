@@ -15,7 +15,7 @@ import {
 } from '@treenx/core';
 import '@treenx/core/contexts/service';
 import { newComponent, setComponent } from '@treenx/core/comp';
-import { OpError } from '@treenx/core/errors';
+import { KernelError } from '@treenx/core/errors';
 import { type ActionCtx, serverNodeHandle } from '@treenx/core/server/actions';
 import {
   type AgentEvent,
@@ -627,7 +627,7 @@ register('sim.world', 'service', async (node, ctx) => {
         if (stopped) break;
         await sleep(cfg?.roundDelay ?? 5000);
       } catch (e) {
-        if (e instanceof OpError && e.code === 'CONFLICT') {
+        if (e instanceof KernelError && e.code === 'CONFLICT') {
           continue;
         }
         if (stopped) break;

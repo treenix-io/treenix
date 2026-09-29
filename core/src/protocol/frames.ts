@@ -6,7 +6,7 @@
 // until responder-side handler introspection is decided (spec §11).
 
 import type { PatchOp } from '#tree/patch';
-import type { ErrorCode } from '#errors';
+import type { ErrorCode } from '#kernel/types';
 
 // ── handshake (implemented by bindings, core-nin.3) ──
 
@@ -64,7 +64,7 @@ export type ReqFrame =
 
 // ── responses ──
 
-/** Domain codes cross the wire as-is; INTERNAL covers non-OpError failures. */
+/** Domain codes cross the wire as-is; INTERNAL covers non-KernelError failures. */
 export type WireErrorCode = ErrorCode | 'INTERNAL';
 
 export type OkFrame  = { id: number; ok: unknown; at?: number };
@@ -99,7 +99,7 @@ export type CtlFrame = CancelFrame | PingFrame | PongFrame | ByeFrame | HiFrame 
 export type Frame = ReqFrame | ResFrame | EventFrame | CtlFrame;
 
 // ── wire guards (frames arrive as unknown — shallow shape only; per-op field
-//    validation happens in the dispatcher, which throws BAD_REQUEST loudly) ──
+//    validation happens in the dispatcher, which throws INVALID loudly) ──
 
 const REQ_OPS: ReadonlySet<string> = new Set(['get', 'resolve', 'ls', 'set', 'patch', 'rm', 'act', 'perm', 'sub', 'unsub']);
 

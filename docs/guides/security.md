@@ -109,7 +109,7 @@ Actions run on the server with full tree access. The engine provides safety mech
 
 JSON Schema validation runs on every `tree.set()` in the server pipeline. Components with registered schemas are validated before persistence.
 
-Action arguments are validated at runtime against JSON Schemas generated from TypeScript method signatures. The engine validates `data` before calling the handler — invalid arguments throw `BAD_REQUEST`.
+Action arguments are validated at runtime against JSON Schemas generated from TypeScript method signatures. The engine validates `data` before calling the handler — invalid arguments throw `INVALID` (over tRPC: `BAD_REQUEST`).
 
 If a type has no registered schema, the action is rejected in test/production (console.error in development). Schemas auto-generate on dev server startup; in CI, boot the server once against a throwaway store before running schema-dependent checks.
 

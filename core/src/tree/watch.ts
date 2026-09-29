@@ -3,7 +3,7 @@
 // No VPs, no CDC: those live in #sub (L3) on NodeEvent = TreeEvent & Partial<VpDelta>.
 
 import type { NodeData } from '#core';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import type { PatchOp } from './patch';
 
 // seq/by — wire protocol revision (core-gk8.1, twp-spec §5.1):
@@ -49,7 +49,7 @@ const DEFAULT_BUFFER = 1024;
  *   iterator yields any pending events and THEN returns `done`. Used by
  *   sources that get an "end-of-stream" signal (e.g. Mongo `invalidate`)
  *   and want the consumer to terminate the for-await loop naturally.
- * - `buffer <= 0` throws `BAD_REQUEST` at iteration start.
+ * - `buffer <= 0` throws `INVALID` at iteration start.
  *
  * Generic `E` lets callers narrow the event type (e.g. NodeEvent in #sub).
  * The `overflowEvent` factory supplies a typed reconnect for the caller's E,
@@ -66,7 +66,7 @@ export function subscriptionToAsyncIterable<E>(
   return {
     [Symbol.asyncIterator](): AsyncIterableIterator<E> {
       if (buffer <= 0) {
-        throw new OpError('BAD_REQUEST', `subscriptionToAsyncIterable: buffer must be > 0, got ${buffer}`);
+        throw new KernelError('INVALID', `subscriptionToAsyncIterable: buffer must be > 0, got ${buffer}`);
       }
 
       let registered = false;

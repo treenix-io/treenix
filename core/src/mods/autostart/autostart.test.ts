@@ -4,7 +4,7 @@
 import { startServices } from '#contexts/service/index';
 import type { NodeData } from '#core';
 import { A, createNode, R, register, W } from '#core';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import { withAcl } from '#security/acl-tree';
 import { createMemoryTree } from '#tree';
 import { withExecute } from '#server/actions';
@@ -101,7 +101,7 @@ describe('autostart dynamic start/stop', () => {
     await tree.set({ $path: '/srv/e', $type: 'test.autosvc' } as NodeData);
     const as = (userId: string, claims: string[]) =>
       withExecute(withAcl(tree, userId, claims), { identity: { userId, claims } });
-    const forbidden = (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN';
+    const forbidden = (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN';
 
     await assert.rejects(() => as('anon:x', ['public']).execute('/sys/autostart', 'start', { path: '/srv/e' }), forbidden);
     assert.deepEqual(svcLog, [], 'nothing started');

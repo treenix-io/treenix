@@ -1,7 +1,7 @@
 import { registerType } from '#comp';
 import { registerSchemaAction } from '#schema/action';
 import { createNode, isComponent, type NodeData, normalizeType, register, resolve, resolveExact } from '#core';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import { clearRegistry } from '#testing';
 import { createMemoryTree } from '#tree';
 import { withCache } from '#tree/cache';
@@ -378,7 +378,7 @@ describe('defineComponent', () => {
 
     await assert.rejects(
       () => executeAction(tree, '/xread1', undefined, undefined, 'probe', {}),
-      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
     );
   });
 
@@ -404,7 +404,7 @@ describe('defineComponent', () => {
 
     await assert.rejects(
       () => executeAction(tree, '/mut1', undefined, undefined, 'go', { n: 'oops' }),
-      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
     );
   });
 
@@ -425,7 +425,7 @@ describe('defineComponent', () => {
 
     await assert.rejects(
       () => executeAction(tree, '/esc1', undefined, undefined, 'steal', {}),
-      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
 
     const evil = await tree.get('/auth/sessions/evil');
@@ -448,7 +448,7 @@ describe('defineComponent', () => {
 
     await assert.rejects(
       () => executeAction(tree, '/badwrite1', undefined, undefined, 'bad', {}),
-      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
     );
   });
 
@@ -468,7 +468,7 @@ describe('defineComponent', () => {
 
     await assert.rejects(
       () => executeAction(tree, '/async1', undefined, undefined, 'wait', {}),
-      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
     );
   });
 
@@ -539,7 +539,7 @@ describe('defineComponent', () => {
 
     await assert.rejects(
       executeAction(tree, '/p1', undefined, undefined, 'evil', {}),
-      (e: any) => e.code === 'BAD_REQUEST',
+      (e: any) => e.code === 'INVALID',
       'poisoned type node must not contribute action handler',
     );
   });
@@ -584,7 +584,7 @@ describe('defineComponent', () => {
 
     await assert.rejects(
       () => executeAction(tree, '/reader1', undefined, undefined, 'readOther', {}),
-      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
     );
   });
 
@@ -604,7 +604,7 @@ describe('defineComponent', () => {
 
     await assert.rejects(
       () => executeAction(tree, '/swallow1', undefined, undefined, 'swallow', {}),
-      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
     );
   });
 
@@ -625,7 +625,7 @@ describe('defineComponent', () => {
 
     await assert.rejects(
       () => executeAction(tree, '/partial1', undefined, undefined, 'breakout', {}),
-      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
 
     const own = (await tree.get('/partial1'))!;
@@ -649,7 +649,7 @@ describe('defineComponent', () => {
 
     await assert.rejects(
       () => executeAction(tree, '/multi1', undefined, undefined, 'twoPaths', {}),
-      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
     );
 
     assert.equal((await tree.get('/multi1'))!.a, undefined, 'no write applied');
@@ -698,7 +698,7 @@ describe('defineComponent', () => {
 
     await assert.rejects(
       () => executeAction(tree, '/rs1', undefined, undefined, 'go', {}),
-      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
       'new stored schema must validate immediately (old code froze the first-seen schema)',
     );
     assert.equal(await executeAction(tree, '/rs1', undefined, undefined, 'go', { x: 1 }), 'ran');
@@ -714,7 +714,7 @@ describe('defineComponent', () => {
 
     await assert.rejects(
       () => executeAction(tree, '/v', 'metadata', 'metadata', 'rename', { title: 123 }),
-      (err: any) => err.code === 'BAD_REQUEST',
+      (err: any) => err.code === 'INVALID',
     );
   });
 
@@ -728,7 +728,7 @@ describe('defineComponent', () => {
 
     await assert.rejects(
       () => executeAction(tree, '/v2', 'metadata', 'metadata', 'rename', {}),
-      (err: any) => err.code === 'BAD_REQUEST',
+      (err: any) => err.code === 'INVALID',
     );
   });
 
@@ -739,7 +739,7 @@ describe('defineComponent', () => {
 
     await assert.rejects(
       () => executeAction(tree, '/noschema1', undefined, undefined, 'run', {}),
-      (err: any) => err.code === 'BAD_REQUEST',
+      (err: any) => err.code === 'INVALID',
     );
   });
 
@@ -779,7 +779,7 @@ describe('defineComponent', () => {
       (async () => {
         for await (const _ of executeStream(tree, '/sx', undefined, 'str', 'count', { n: 'not-a-number' })) { /* drain */ }
       })(),
-      (err: any) => err.code === 'BAD_REQUEST',
+      (err: any) => err.code === 'INVALID',
     );
   });
 });
@@ -841,7 +841,7 @@ describe('R4-MOUNT-4 — dynamic type schema meta-validation', () => {
     const tree = await setup('test.redos', { properties: { x: { pattern: '(a+)+$' } } });
     await assert.rejects(
       executeAction(tree, '/data/x', 'test.redos', undefined, 'go', { x: 'aaaa' }),
-      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST' && /nested quantifiers/i.test(e.message),
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID' && /nested quantifiers/i.test(e.message),
     );
   });
 
@@ -849,7 +849,7 @@ describe('R4-MOUNT-4 — dynamic type schema meta-validation', () => {
     const tree = await setup('test.long', { properties: { x: { pattern: 'a'.repeat(300) } } });
     await assert.rejects(
       executeAction(tree, '/data/x', 'test.long', undefined, 'go', { x: 'a' }),
-      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST' && /pattern too long/i.test(e.message),
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID' && /pattern too long/i.test(e.message),
     );
   });
 
@@ -859,7 +859,7 @@ describe('R4-MOUNT-4 — dynamic type schema meta-validation', () => {
     const tree = await setup('test.deep', nested);
     await assert.rejects(
       executeAction(tree, '/data/x', 'test.deep', undefined, 'go', {}),
-      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST' && /too deep/i.test(e.message),
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID' && /too deep/i.test(e.message),
     );
   });
 });
@@ -955,7 +955,7 @@ describe('default schema — built-in $schema/patch (core-anz4.23)', () => {
     // Rejection proves args were validated against the own schema's types.
     await assert.rejects(
       () => executeAction(tree, '/s', undefined, undefined, 'setTitle', { title: 123 }),
-      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
     );
   });
 
@@ -971,7 +971,7 @@ describe('default schema — built-in $schema/patch (core-anz4.23)', () => {
     assert.equal(await executeAction(tree, '/i', undefined, undefined, 'go', { n: 1 }), 'ok');
     await assert.rejects(
       () => executeAction(tree, '/i', undefined, undefined, 'go', { n: 'oops' }),
-      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
     );
   });
 
@@ -991,7 +991,7 @@ describe('default schema — built-in $schema/patch (core-anz4.23)', () => {
 
     await assert.rejects(
       () => executeAction(tree, '/h', undefined, undefined, 'go', { n: 'oops' }),
-      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
     );
     assert.equal(await executeAction(tree, '/h', undefined, undefined, 'go', { n: 1 }), 'ok');
   });
@@ -1003,7 +1003,7 @@ describe('default schema — built-in $schema/patch (core-anz4.23)', () => {
 
     await assert.rejects(
       () => executeAction(tree, '/b', undefined, undefined, 'doit'),
-      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
     );
   });
 
@@ -1015,7 +1015,7 @@ describe('default schema — built-in $schema/patch (core-anz4.23)', () => {
     // The default patch schema must NOT validate a type's own handler.
     await assert.rejects(
       () => executeAction(tree, '/cp', undefined, undefined, 'patch', { title: 'b' }),
-      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
     );
     assert.equal((await tree.get('/cp'))!.title, 'a');
   });
@@ -1034,7 +1034,7 @@ describe('default schema — built-in $schema/patch (core-anz4.23)', () => {
     // …and its stored schema governs (the default patch schema would accept anything).
     await assert.rejects(
       () => executeAction(tree, '/dp', undefined, undefined, 'patch', { n: 'oops' }),
-      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
     );
   });
 

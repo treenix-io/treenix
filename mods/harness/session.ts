@@ -7,7 +7,7 @@ import { getComponentByName } from '@treenx/core';
 // session→actor mapping and core cannot import mods.
 import { buildActor, executeAction } from '@treenx/core/server/actions';
 import type { Session } from '@treenx/core/security';
-import { OpError } from '@treenx/core/errors';
+import { KernelError } from '@treenx/core/errors';
 import type { Tree } from '@treenx/core/tree';
 import { type AgentScope, type Capability, executeWithCapability } from './capability';
 
@@ -19,14 +19,14 @@ async function resolveScope(tree: Tree, session: Session): Promise<Capability | 
   const key = typeof session.scopeKey === 'string' ? session.scopeKey : 'scope';
   const mode = session.scopeMode === 'work' ? 'work' : 'plan';
   const node = await tree.get(ref);
-  if (!node) throw new OpError('FORBIDDEN', `session scopeRef invalid: ${ref}`);
+  if (!node) throw new KernelError('FORBIDDEN', `session scopeRef invalid: ${ref}`);
   const scopeRaw = getComponentByName(node, key);
   if (!scopeRaw) {
-    throw new OpError('FORBIDDEN', `session scope not found at ${ref}.${key}`);
+    throw new KernelError('FORBIDDEN', `session scope not found at ${ref}.${key}`);
   }
   const scope = scopeRaw as Partial<AgentScope>;
   const cap = scope[mode];
-  if (!cap) throw new OpError('FORBIDDEN', `session scope mode "${mode}" not configured`);
+  if (!cap) throw new KernelError('FORBIDDEN', `session scope mode "${mode}" not configured`);
   return cap;
 }
 

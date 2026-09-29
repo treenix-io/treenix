@@ -4,7 +4,7 @@
 
 import { createMemoryTree, type Tree } from '@treenx/core/tree';
 import { withAcl } from '@treenx/core/security';
-import { OpError } from '@treenx/core/errors';
+import { KernelError } from '@treenx/core/errors';
 import { register, R, W } from '@treenx/core';
 import { clearRegistry } from '@treenx/core/testing';
 import assert from 'node:assert/strict';
@@ -66,7 +66,7 @@ describe('executeWithCapability — exec whitelist', () => {
         { path: '/work/n', action: 'forbidden' },
         { id: 'agent-workload:r-1' },
       ),
-      (e: any) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: any) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 
@@ -79,7 +79,7 @@ describe('executeWithCapability — exec whitelist', () => {
         { path: '/work/n', action: 'forbidden' },
         { id: 'agent-workload:r-1' },
       ),
-      (e: any) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: any) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 });
@@ -100,7 +100,7 @@ describe('executeWithCapability — internal tree wrap', () => {
         { path: '/work/n', action: 'escape' },
         { id: 'agent-workload:r-1' },
       ),
-      (e: any) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: any) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
     // Verify nothing actually written
     const escaped = await tree.get('/escape');
@@ -119,7 +119,7 @@ describe('executeWithCapability — input validation', () => {
         { path: '/other', action: 'allowed' },
         { id: 'agent-workload:r-1' },
       ),
-      (e: any) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: any) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 });

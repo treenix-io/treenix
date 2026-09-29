@@ -1,5 +1,5 @@
 import { createNode, type NodeData } from '#core';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -10,7 +10,7 @@ import { createFsTree } from './fs';
 import { createMemoryTree, type Tree } from './index';
 import { PatchTestError } from './patch';
 
-const isCode = (code: string) => (e: unknown) => e instanceof OpError && e.code === code;
+const isCode = (code: string) => (e: unknown) => e instanceof KernelError && e.code === code;
 
 async function collect(iter: AsyncIterable<{ node: NodeData; cursor: string }>): Promise<NodeData[]> {
   const out: NodeData[] = [];
@@ -170,7 +170,7 @@ describe('createBranchTree (memory)', () => {
 
   it('scanChildren: cursor resume fails loud', async () => {
     const iter = branch.scanChildren!('/', { after: '/a' })[Symbol.asyncIterator]();
-    await assert.rejects(iter.next(), isCode('BAD_REQUEST'));
+    await assert.rejects(iter.next(), isCode('INVALID'));
   });
 
   it('scanChildren: early break closes both layer iterators', async () => {

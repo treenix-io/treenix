@@ -3,7 +3,7 @@
 // Used by t.mount.query to create virtual folders (e.g., /orders/incoming shows orders where status.value === 'incoming').
 
 import { type NodeData } from '#core';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import { isRecord } from '#util/is-record';
 import sift from 'sift';
 import { mapNodeForSift, type Tree } from './index';
@@ -19,9 +19,9 @@ export type QueryConfig = {
 export function queryConfigOf(comp: Record<string, unknown>, at: string): QueryConfig {
   const { source, match } = comp;
   if (typeof source !== 'string' || !source.startsWith('/')) {
-    throw new OpError('BAD_REQUEST', `query mount at ${at}: source must be an absolute path`);
+    throw new KernelError('INVALID', `query mount at ${at}: source must be an absolute path`);
   }
-  if (!isRecord(match)) throw new OpError('BAD_REQUEST', `query mount at ${at}: match must be an object`);
+  if (!isRecord(match)) throw new KernelError('INVALID', `query mount at ${at}: match must be an object`);
   return { source, match };
 }
 
@@ -33,7 +33,7 @@ export function queryConfigOf(comp: Record<string, unknown>, at: string): QueryC
 // platform needs user regexes.
 const SIFT_FORBIDDEN = new Set(['$where', '$function', '$accumulator', '$expr', '$regex']);
 
-/** Validate a sift query (throws BAD_REQUEST on a forbidden operator). */
+/** Validate a sift query (throws INVALID on a forbidden operator). */
 export function assertSafeSiftQuery(q: unknown): void {
   mapSiftQuery(q);
 }
@@ -41,11 +41,11 @@ export function assertSafeSiftQuery(q: unknown): void {
 /** Validate and map a sift query to storage keys. */
 export function mapSiftQuery(q: unknown): unknown {
   if (Array.isArray(q)) return q.map(mapSiftQuery);
-  if (q instanceof RegExp) throw new OpError('BAD_REQUEST', 'Forbidden sift value: RegExp');
+  if (q instanceof RegExp) throw new KernelError('INVALID', 'Forbidden sift value: RegExp');
   if (q && typeof q === 'object' && q.constructor === Object) {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(q)) {
-      if (SIFT_FORBIDDEN.has(k)) throw new OpError('BAD_REQUEST', `Forbidden sift operator: ${k}`);
+      if (SIFT_FORBIDDEN.has(k)) throw new KernelError('INVALID', `Forbidden sift operator: ${k}`);
       let newKey = k;
       if (k === '$type') newKey = '_type';
       else if (k === '$path') newKey = '_path';
@@ -96,7 +96,7 @@ export function assertVisiblePredicate(q: unknown, where: 'callerWhere' | 'viewW
     const hiddenSystem = head.startsWith('$') && !VISIBLE_SYSTEM_FIELDS.has(head);
     const hiddenStorage = head.startsWith('_') && !VISIBLE_STORAGE_FIELDS.has(head);
     if (hiddenSystem || hiddenStorage) {
-      throw new OpError('FORBIDDEN', `${where} references a hidden field: ${k}`);
+      throw new KernelError('FORBIDDEN', `${where} references a hidden field: ${k}`);
     }
   }
 }
@@ -126,15 +126,15 @@ export function createQueryTree(config: QueryConfig, parentStore: Tree): Tree {
     },
 
     async set() {
-      throw new OpError('FORBIDDEN', 'Query mount is read-only: writes not supported');
+      throw new KernelError('FORBIDDEN', 'Query mount is read-only: writes not supported');
     },
 
     async remove() {
-      throw new OpError('FORBIDDEN', 'Query mount is read-only: removes not supported');
+      throw new KernelError('FORBIDDEN', 'Query mount is read-only: removes not supported');
     },
 
     async patch() {
-      throw new OpError('FORBIDDEN', 'Query mount is read-only: patches not supported');
+      throw new KernelError('FORBIDDEN', 'Query mount is read-only: patches not supported');
     },
   };
 }

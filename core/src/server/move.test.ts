@@ -4,7 +4,7 @@
 // destination members carry it.
 
 import { createNode, isMoved } from '#core';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import { createMemoryTree, resolveRef, type Tree } from '#tree';
 import { withStoragePolicy } from '#tree/policy';
 import assert from 'node:assert/strict';
@@ -12,7 +12,7 @@ import { describe, it } from 'node:test';
 import { mutationLock, withCommitEnvelope } from './commit';
 import { move } from './move';
 
-const isCode = (code: string) => (e: unknown) => e instanceof OpError && e.code === code;
+const isCode = (code: string) => (e: unknown) => e instanceof KernelError && e.code === code;
 
 function pipeline(): Tree {
   return withStoragePolicy(createMemoryTree()).tree;
@@ -137,9 +137,9 @@ describe('move (core-gk8.10 stage 2)', () => {
   it('rejects moving the root, into itself, and onto itself', async () => {
     const tree = pipeline();
     await tree.set(createNode('/a', 'dir', {}));
-    await assert.rejects(() => move(tree, '/', '/b'), isCode('BAD_REQUEST'));
-    await assert.rejects(() => move(tree, '/a', '/a'), isCode('BAD_REQUEST'));
-    await assert.rejects(() => move(tree, '/a', '/a/sub'), isCode('BAD_REQUEST'));
+    await assert.rejects(() => move(tree, '/', '/b'), isCode('INVALID'));
+    await assert.rejects(() => move(tree, '/a', '/a'), isCode('INVALID'));
+    await assert.rejects(() => move(tree, '/a', '/a/sub'), isCode('INVALID'));
   });
 
   it('rejects a missing source and a tombstone source', async () => {
@@ -148,7 +148,7 @@ describe('move (core-gk8.10 stage 2)', () => {
 
     await tree.set(createNode('/a', 'doc', {}));
     await move(tree, '/a', '/b');
-    await assert.rejects(() => move(tree, '/a', '/c'), isCode('BAD_REQUEST'));
+    await assert.rejects(() => move(tree, '/a', '/c'), isCode('INVALID'));
   });
 
   it('carries $acl and $owner onto the tombstone', async () => {
@@ -193,7 +193,7 @@ describe('move (core-gk8.10 stage 2)', () => {
     // victim's identity — must fail loud, not store a duplicate ULID.
     await assert.rejects(
       () => tree.set({ ...createNode('/a', 'doc', {}), $id: victimId }),
-      isCode('BAD_REQUEST'),
+      isCode('INVALID'),
     );
   });
 

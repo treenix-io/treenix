@@ -11,7 +11,7 @@ import { buildSessionCookie } from './cookies';
 import { createSession, resolveToken, revokeSession, SESSION_TTL_MS, sessionPath } from './sessions';
 import { devLogin, loginUser, registerUser } from './ops';
 import { GROUPS_ACL } from './groups';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 
 const withEnv = async (env: Record<string, string | undefined>, fn: () => Promise<void>) => {
   const prev: Record<string, string | undefined> = {};
@@ -386,7 +386,7 @@ describe('system identity — groups component access (F15)', () => {
 // subtree must not mount the server's filesystem there.
 describe('mount authoring (F4)', () => {
   const alice = () => withAcl(tree, 'alice', ['u:alice', 'authenticated']);
-  const forbidden = (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN';
+  const forbidden = (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN';
 
   beforeEach(() => {
     register('test.mount.disk', 'mount', () => createMemoryTree());
@@ -445,7 +445,7 @@ describe('withAcl revocation', () => {
 
     await tree.patch('/proj', [['r', '$acl', [{ g: 'agents', p: 0 }]]]);
     mock.timers.tick(1001);
-    const forbidden = (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN';
+    const forbidden = (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN';
     await assert.rejects(() => agent.get('/proj/a'), forbidden);
     await assert.rejects(() => agent.get('/proj/b'), forbidden);
     await assert.rejects(() => agent.set(createNode('/proj/b', 'doc')), forbidden);
@@ -454,7 +454,7 @@ describe('withAcl revocation', () => {
 
 // A component's $acl is permission data: W without A must not plant or change it.
 describe('component $acl needs A', () => {
-  const forbidden = (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN';
+  const forbidden = (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN';
 
   it('writer without A cannot plant a component $acl — by patch or set', async () => {
     await tree.set({ ...createNode('/shared', 'dir'), $acl: [{ g: 'u:bob', p: R | W }] });
@@ -694,7 +694,7 @@ describe('withAcl', () => {
     // depth-1 read — depth is part of plan identity.
     await assert.rejects(
       () => s.getChildren('/wiki', { query: { status: 'open' }, limit: 2, cursor: page1.nextCursor }),
-      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
     );
   });
 
@@ -749,11 +749,11 @@ describe('withAcl', () => {
     // querying them is a hidden-field oracle → FORBIDDEN (core-fnv).
     await assert.rejects(
       () => s.getChildren('/owned', { query: { $owner: 'alice' } }),
-      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
     await assert.rejects(
       () => s.getChildren('/owned', { query: { $acl: { $exists: true } } }),
-      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 
@@ -816,7 +816,7 @@ describe('withAcl', () => {
     const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);
     await assert.rejects(
       () => s.getChildren('/virtual'),
-      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 });
@@ -858,7 +858,7 @@ describe('sessions', () => {
     assert.equal((await carol.get('/auth/users/carol'))?.['#credentials'], undefined);
     await assert.rejects(
       () => carol.patch('/auth/users/carol', [['r', '#credentials', { $type: 'credentials', hash: 'mine' }]]),
-      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 
@@ -959,13 +959,13 @@ describe('system identity guards (F15)', () => {
   });
 
   it('assertNotSystem rejects userId "system"', () => {
-    assert.throws(() => assertNotSystem('system'), (e: any) => e instanceof OpError && e.code === 'FORBIDDEN');
+    assert.throws(() => assertNotSystem('system'), (e: any) => e instanceof KernelError && e.code === 'FORBIDDEN');
   });
 
   it('assertNotSystem rejects claims containing "system"', () => {
     assert.throws(
       () => assertNotSystem('alice', ['authenticated', 'system']),
-      (e: any) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: any) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 
@@ -978,7 +978,7 @@ describe('system identity guards (F15)', () => {
     const ss = createMemoryTree();
     await assert.rejects(
       createSession(ss, 'system'),
-      (e: any) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: any) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 
@@ -986,7 +986,7 @@ describe('system identity guards (F15)', () => {
     const ss = createMemoryTree();
     await assert.rejects(
       createSession(ss, 'alice', { claims: ['authenticated', 'system'] }),
-      (e: any) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: any) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 
@@ -994,7 +994,7 @@ describe('system identity guards (F15)', () => {
     const ss = createMemoryTree();
     await assert.rejects(
       buildClaims(ss, 'system'),
-      (e: any) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: any) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 
@@ -1043,7 +1043,7 @@ describe('system identity guards (F15)', () => {
     const ss = createMemoryTree();
     await assert.rejects(
       registerUser(ss, 'system', 'pw'),
-      (e: any) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: any) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 
@@ -1051,7 +1051,7 @@ describe('system identity guards (F15)', () => {
     const ss = createMemoryTree();
     await assert.rejects(
       loginUser(ss, 'system', 'pw'),
-      (e: any) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: any) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 });
@@ -1091,7 +1091,7 @@ describe('getChildren truncation', () => {
   });
 
   // e47f8e2 changed executeList to return {items, truncated:true} on budget
-  // exhaustion (was: throw RESOURCE_EXHAUSTED). Verify withAcl.getChildren
+  // exhaustion instead of throwing. Verify withAcl.getChildren
   // propagates that flag — the consumer must see "incomplete", not partial
   // success dressed as success. Default budget is 10_000 raw items; we seed
   // > budget with a never-matching query so the scan exhausts before
@@ -1138,28 +1138,28 @@ describe('buildClaims — groups from user record', () => {
   });
 });
 
-describe('withAcl denial — typed OpError', () => {
-  it('set without W throws OpError with code FORBIDDEN', async () => {
+describe('withAcl denial — typed KernelError', () => {
+  it('set without W throws KernelError with code FORBIDDEN', async () => {
     const s = withAcl(tree, 'bob', ['u:bob', 'authenticated']);
     await assert.rejects(
       () => s.set(createNode('/users/alice/page', 'page', { title: 'hijacked' })),
-      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 
-  it('remove without W throws OpError with code FORBIDDEN', async () => {
+  it('remove without W throws KernelError with code FORBIDDEN', async () => {
     const s = withAcl(tree, 'bob', ['u:bob', 'authenticated']);
     await assert.rejects(
       () => s.remove('/users/alice/page'),
-      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 
-  it('patch without W throws OpError with code FORBIDDEN', async () => {
+  it('patch without W throws KernelError with code FORBIDDEN', async () => {
     const s = withAcl(tree, 'bob', ['u:bob', 'authenticated']);
     await assert.rejects(
       () => s.patch('/users/alice/page', [['r', 'title', 'hijacked']]),
-      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 });
@@ -1260,7 +1260,7 @@ describe('withAcl.patch — C1 ACL enforcement', () => {
     await tree.set({ ...createNode('/r', 'dir'), $acl: [{ g: 'authenticated', p: R | W }] });
     await assert.rejects(
       () => s.patch('/r/missing', [['r', 'x', 1]]),
-      (e: unknown) => e instanceof OpError && e.code === 'NOT_FOUND',
+      (e: unknown) => e instanceof KernelError && e.code === 'NOT_FOUND',
     );
   });
 
@@ -1269,7 +1269,7 @@ describe('withAcl.patch — C1 ACL enforcement', () => {
     const s = withAcl(tree, 'bob', ['u:bob', 'authenticated']);
     await assert.rejects(
       () => s.patch('/users/alice/page', [['r', 'title', 'hijacked']]),
-      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 
@@ -1286,7 +1286,7 @@ describe('withAcl.patch — C1 ACL enforcement', () => {
     const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);
     await assert.rejects(
       () => s.patch('/n', [['t', '$rev', 1]]),
-      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 
@@ -1320,7 +1320,7 @@ describe('withAcl.patch — C1 ACL enforcement', () => {
     const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);
     await assert.rejects(
       () => s.patch('/probe', [['t', '$refs', [{ t: '/some/target' }]]]),
-      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 
@@ -1334,11 +1334,11 @@ describe('withAcl.patch — C1 ACL enforcement', () => {
     const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);
     await assert.rejects(
       () => s.patch('/n', [['t', '$acl', [{ g: 'authenticated', p: R | W }]]]),
-      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
     await assert.rejects(
       () => s.patch('/n', [['t', '$owner', 'someone']]),
-      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 
@@ -1354,7 +1354,7 @@ describe('withAcl.patch — C1 ACL enforcement', () => {
     const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);   // alice not owner
     await assert.rejects(
       () => s.patch('/n', [['t', 'secret.x', 'guess']]),
-      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 
@@ -1369,7 +1369,7 @@ describe('withAcl.patch — C1 ACL enforcement', () => {
     const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);
     await assert.rejects(
       () => s.patch('/n', [['r', '$acl', [{ g: 'public', p: R | W | A }]]]),
-      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 
@@ -1383,7 +1383,7 @@ describe('withAcl.patch — C1 ACL enforcement', () => {
     const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);
     await assert.rejects(
       () => s.patch('/n', [['r', '$owner', 'alice']]),
-      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 
@@ -1417,7 +1417,7 @@ describe('withAcl.patch — C1 ACL enforcement', () => {
     ]) {
       await assert.rejects(
         () => admin.patch('/n', [op]),
-        (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+        (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
         `should FORBIDDEN ${op[0]} ${op[1]}`,
       );
     }
@@ -1482,7 +1482,7 @@ describe('withAcl.patch — C1 ACL enforcement', () => {
     const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);
     await assert.rejects(
       () => s.patch('/n', [['r', 'secret.x', 'hacked']]),
-      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 
@@ -1498,7 +1498,7 @@ describe('withAcl.patch — C1 ACL enforcement', () => {
     const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);
     await assert.rejects(
       () => s.patch('/n', [['r', 'secret', { $type: 'secret', x: 'new' }]]),
-      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 
@@ -1514,7 +1514,7 @@ describe('withAcl.patch — C1 ACL enforcement', () => {
     const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);
     await assert.rejects(
       () => s.patch('/n', [['d', 'secret']]),
-      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 
@@ -1529,7 +1529,7 @@ describe('withAcl.patch — C1 ACL enforcement', () => {
     const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);   // not in 'staff'
     await assert.rejects(
       () => s.patch('/n', [['a', 'newComp', { $type: 'restricted', data: 'x' }]]),
-      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 
@@ -1551,7 +1551,7 @@ describe('withAcl.patch — C1 ACL enforcement', () => {
     };
     await assert.rejects(
       () => s.set(badNode),
-      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
 
     const after = await tree.get('/set-protected') as NodeData;
@@ -1594,7 +1594,7 @@ describe('withAcl.patch — C1 ACL enforcement', () => {
         $acl: [{ g: 'authenticated', p: R | W }],
         newComp: { $type: 'restricted', data: 'x' },
       } as NodeData),
-      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
 
     const after = await tree.get('/set-new-protected') as NodeData;
@@ -1634,7 +1634,7 @@ describe('withAcl.patch — C1 ACL enforcement', () => {
     //   { $owner: 'evil' }) — handler deep-merges $owner; immerToPatchOps emits this op.
     await assert.rejects(
       () => s.patch('/target', [['r', '$owner', 'evil']]),
-      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
     assert.equal(((await tree.get('/target')) as any).$owner, 'bob');
   });
@@ -1655,7 +1655,7 @@ describe('withAcl.patch — C1 ACL enforcement', () => {
     const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);
     await assert.rejects(
       () => s.patch('/n', [['r', 'secret.$acl', [{ g: 'others', p: W }]]]),
-      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 
@@ -1670,7 +1670,7 @@ describe('withAcl.patch — C1 ACL enforcement', () => {
     const s = withAcl(tree, 'adm', ['u:adm', 'admins', 'authenticated']);
     await assert.rejects(
       () => s.patch('/n', [['r', 'secret.$type', 'evil']]),
-      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 
@@ -1729,7 +1729,7 @@ describe('withAcl.patchMany — set-members', () => {
     const s = withAcl(tree, 'alice', ['u:alice', 'authenticated']);
     await assert.rejects(
       () => s.patchMany!('/dir', [{ path: '/dir/n', node: createNode('/dir/n', 'doc', { title: 'hacked' }) }]),
-      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
     assert.equal((await tree.get('/dir/n'))!.title, 'orig');
   });
@@ -1742,7 +1742,7 @@ describe('withAcl.patchMany — set-members', () => {
     assert.equal((await tree.get('/dir/plain'))!.n, 1);
     await assert.rejects(
       () => s.patchMany!('/dir', [{ path: '/dir/created', node: createNode('/dir/created', 'doc', { n: 2 }) }]),
-      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
     assert.equal(await tree.get('/dir/created'), undefined);
   });
@@ -1768,7 +1768,7 @@ describe('withAcl.patchMany — set-members', () => {
         path: '/dir/n',
         node: { ...createNode('/dir/n', 'doc', { title: 'x' }), $acl: [{ g: 'authenticated', p: R | W | A }] },
       }]),
-      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
     assert.equal((await tree.get('/dir/n'))!.title, 'orig');
   });
@@ -1822,7 +1822,7 @@ describe('F6 — /sys admin-only writes via ACL inheritance', () => {
     const alice = withAcl(t, 'alice', ['u:alice', 'authenticated']);
     await assert.rejects(
       () => alice.set(createNode('/sys/autostart/evil', 'foo')),
-      (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 
@@ -1847,7 +1847,7 @@ describe('devLogin — env gate', () => {
     await withEnv({ NODE_ENV: 'production', VITE_DEV_LOGIN: '1' }, async () => {
       await assert.rejects(
         () => devLogin(tree),
-        (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+        (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
       );
     });
   });
@@ -1856,7 +1856,7 @@ describe('devLogin — env gate', () => {
     await withEnv({ NODE_ENV: 'development', VITE_DEV_LOGIN: undefined }, async () => {
       await assert.rejects(
         () => devLogin(tree),
-        (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+        (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
       );
     });
   });

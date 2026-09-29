@@ -3,12 +3,12 @@
 // semantics are covered in policy.test.ts / move.test.ts.
 
 import { createNode, type NodeData } from '#core';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { createMemoryTree, followMoved, resolveRef, type Tree } from './index';
 
-const isCode = (code: string) => (e: unknown) => e instanceof OpError && e.code === code;
+const isCode = (code: string) => (e: unknown) => e instanceof KernelError && e.code === code;
 
 function stone(path: string, to: string, id?: string): NodeData {
   const s: NodeData = { $path: path, $type: 'moved', $ref: to };
@@ -61,18 +61,18 @@ describe('resolveRef (id-first, core-gk8.10)', () => {
     assert.equal(target.$path, '/c');
   });
 
-  it('tombstone cycle throws BAD_REQUEST', async () => {
+  it('tombstone cycle throws INVALID', async () => {
     const tree = createMemoryTree();
     await tree.set(stone('/a', '/b'));
     await tree.set(stone('/b', '/a'));
-    await assert.rejects(() => resolveRef(tree, refNode('/r', '/a')), isCode('BAD_REQUEST'));
+    await assert.rejects(() => resolveRef(tree, refNode('/r', '/a')), isCode('INVALID'));
   });
 
-  it('chain beyond the hop limit throws BAD_REQUEST', async () => {
+  it('chain beyond the hop limit throws INVALID', async () => {
     const tree = createMemoryTree();
     for (let i = 0; i < 10; i++) await tree.set(stone(`/n${i}`, `/n${i + 1}`));
     await tree.set(createNode('/n10', 'doc', {}));
-    await assert.rejects(() => resolveRef(tree, refNode('/r', '/n0')), isCode('BAD_REQUEST'));
+    await assert.rejects(() => resolveRef(tree, refNode('/r', '/n0')), isCode('INVALID'));
   });
 
   it('identity mismatch at the target throws NOT_FOUND (path reused)', async () => {
@@ -144,7 +144,7 @@ describe('resolveRef (id-first, core-gk8.10)', () => {
     await tree.set({ ...createNode('/b', 'doc', {}), $id: 'X' });
     await tree.set(refNode('/r', '/a'));
 
-    const readonly: Tree = { ...tree, patch: async () => { throw new OpError('FORBIDDEN', 'read-only'); } };
+    const readonly: Tree = { ...tree, patch: async () => { throw new KernelError('FORBIDDEN', 'read-only'); } };
     const stored = await tree.get('/r');
     const target = await resolveRef(readonly, stored!);
     assert.equal(target.$path, '/b');

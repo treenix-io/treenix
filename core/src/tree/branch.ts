@@ -11,7 +11,7 @@
 // so storage OCC detects live drift.
 
 import type { NodeData } from '#core';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import { mapNodeForSift, type Page, paginate, type Tree } from '#tree';
 import sift from 'sift';
 import { patchViaSet } from './patch';
@@ -37,7 +37,7 @@ export function isBranchWhiteout(n: NodeData): n is BranchWhiteout {
 // — any other shape there is a bug, not user data. Throw, never skip.
 function asWrapper(n: NodeData): BranchDelta | BranchWhiteout {
   if (isBranchDelta(n) || isBranchWhiteout(n)) return n;
-  throw new OpError('CONFLICT', `branch: foreign node in delta subtree at ${n.$path} ($type=${n.$type})`);
+  throw new KernelError('CONFLICT', `branch: foreign node in delta subtree at ${n.$path} ($type=${n.$type})`);
 }
 
 function unwrap(d: BranchDelta): NodeData {
@@ -45,7 +45,7 @@ function unwrap(d: BranchDelta): NodeData {
   // Decode check at the storage boundary — wrapper content round-tripped
   // through an adapter, the type alone proves nothing.
   if (!inner || typeof inner !== 'object' || typeof inner.$type !== 'string') {
-    throw new OpError('CONFLICT', `branch: corrupt delta wrapper at ${d.$path}`);
+    throw new KernelError('CONFLICT', `branch: corrupt delta wrapper at ${d.$path}`);
   }
   // View identity: wrapper's path (already in view coordinates via repath)
   // and wrapper's storage $rev — gives clients a consistent OCC handle.
@@ -95,10 +95,10 @@ export function createBranchTree(upper: Tree, lower: Tree): Tree {
     // Fail loud until cursor layering lands (core-8an).
     async *scanChildren(parent, opts, ctx) {
       if (!upper.scanChildren || !lower.scanChildren) {
-        throw new OpError('BAD_REQUEST', 'createBranchTree: scanChildren requires both layers to expose it');
+        throw new KernelError('INVALID', 'createBranchTree: scanChildren requires both layers to expose it');
       }
       if (opts?.after !== undefined) {
-        throw new OpError('BAD_REQUEST', 'createBranchTree: cursor resume over a branch view is not supported (core-8an)');
+        throw new KernelError('INVALID', 'createBranchTree: cursor resume over a branch view is not supported (core-8an)');
       }
       const uIter = upper.scanChildren(parent, opts, ctx)[Symbol.asyncIterator]();
       const lIter = lower.scanChildren(parent, opts, ctx)[Symbol.asyncIterator]();
@@ -144,7 +144,7 @@ export function createBranchTree(upper: Tree, lower: Tree): Tree {
           ? (isBranchWhiteout(existing) ? undefined : existing.$rev)
           : lowerNode?.$rev;
         if (visibleRev !== node.$rev) {
-          throw new OpError('CONFLICT', `branch: node ${node.$path} changed. Expected $rev ${visibleRev}, got ${node.$rev}`);
+          throw new KernelError('CONFLICT', `branch: node ${node.$path} changed. Expected $rev ${visibleRev}, got ${node.$rev}`);
         }
       }
 
@@ -166,7 +166,7 @@ export function createBranchTree(upper: Tree, lower: Tree): Tree {
       // future node under the view's OCC identity (wrapper's new $rev).
       if (upperReceipt.changes === null) return { changes: null };
       const wrapperAfter = upperReceipt.changes[0]?.after;
-      if (!wrapperAfter) throw new OpError('CONFLICT', `branch: delta store returned no after image for ${node.$path}`);
+      if (!wrapperAfter) throw new KernelError('CONFLICT', `branch: delta store returned no after image for ${node.$path}`);
       const before = existing
         ? (isBranchWhiteout(existing) ? null : unwrap(existing))
         : (lowerNode ?? null);

@@ -1,5 +1,5 @@
 import { createNode, type NodeData } from '#core';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { createMemoryTree } from './index';
@@ -91,15 +91,15 @@ describe('executeList', () => {
     const plan: ReadPlan = { source: '/x' };
     await assert.rejects(
       () => executeList(source, plan, { limit: 0 }, identityProject),
-      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
     );
     await assert.rejects(
       () => executeList(source, plan, { limit: -1 }, identityProject),
-      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
     );
     await assert.rejects(
       () => executeList(source, plan, { limit: 1.5 }, identityProject),
-      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
     );
   });
 
@@ -165,12 +165,12 @@ describe('executeList', () => {
     return rest as NodeData;
   };
 
-  it('malformed callerWhere throws BAD_REQUEST (not a generic error)', async () => {
+  it('malformed callerWhere throws INVALID (not a generic error)', async () => {
     const source = await seed(['/x/a']);
     const plan: ReadPlan = { source: '/x', callerWhere: { $where: 'true' } };
     await assert.rejects(
       () => executeList(source, plan, { limit: 10 }, identityProject),
-      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
     );
   });
 
@@ -190,11 +190,11 @@ describe('executeList', () => {
     for (const q of [{ $owner: 'alice' }, { _acl: { $exists: true } }, { $or: [{ kind: 'A' }, { $refs: 'x' }] }]) {
       await assert.rejects(
         () => executeList(source, { source: '/x', callerWhere: q }, { limit: 10 }, identityProject),
-        (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+        (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
       );
       await assert.rejects(
         () => executeList(source, { source: '/x', viewWhere: q }, { limit: 10 }, identityProject),
-        (e: unknown) => e instanceof OpError && e.code === 'FORBIDDEN',
+        (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
       );
     }
   });
@@ -250,7 +250,7 @@ describe('executeList', () => {
     const other: ReadPlan = { source: '/x', callerWhere: { kind: 'A' } };
     await assert.rejects(
       () => executeList(source, other, { limit: 1, cursor: page1.nextCursor }, identityProject),
-      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
     );
   });
 
@@ -274,7 +274,7 @@ describe('executeList', () => {
     for (const bad of ['/x/a', 'zzz', 'deadbeef.###', 'a.b.c']) {
       await assert.rejects(
         () => executeList(source, plan, { limit: 1, cursor: bad }, identityProject),
-        (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+        (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
         `cursor ${JSON.stringify(bad)} must be rejected`,
       );
     }
@@ -321,7 +321,7 @@ describe('executeList', () => {
 
     await assert.rejects(
       () => executeList(source, { source: '/x' }, { limit: 1, cursor: page1.nextCursor }, identityProject),
-      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
     );
   });
 
@@ -330,7 +330,7 @@ describe('executeList', () => {
     for (const depth of [0, 1.5, -2]) {
       await assert.rejects(
         () => executeList(source, { source: '/x', depth }, { limit: 1 }, identityProject),
-        (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+        (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
         `depth ${depth} must be rejected`,
       );
     }

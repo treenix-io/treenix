@@ -9,7 +9,7 @@ import { invokeClaude } from '#metatron/claude';
 import { type Class, type ComponentData, createNode, getComponent, getComponentByName, type NodeData, register } from '@treenx/core';
 import { setComponent } from '@treenx/core/comp';
 import type { ServiceCtx } from '@treenx/core/contexts/service';
-import { OpError } from '@treenx/core/errors';
+import { KernelError } from '@treenx/core/errors';
 import { createLogger } from '@treenx/core/log';
 import type { ActionCtx } from '@treenx/core/server/actions';
 import { debouncedWrite } from '@treenx/core/util/debounced-write';
@@ -49,7 +49,7 @@ async function updateNode(
       await store.set(node);
       return node;
     } catch (err) {
-      if (err instanceof OpError && err.code === 'CONFLICT' && attempt < MAX_OCC_RETRIES - 1) {
+      if (err instanceof KernelError && err.code === 'CONFLICT' && attempt < MAX_OCC_RETRIES - 1) {
         log.warn(`OCC conflict on ${path}, retry ${attempt + 1}`);
         continue;
       }
@@ -736,7 +736,7 @@ register('ai.pool', 'service', async (node: NodeData, ctx: ServiceCtx) => {
           try {
             postNode = await ctx.tree.get(orgRun.postRef);
           } catch (e) {
-            if (e instanceof OpError && e.code === 'FORBIDDEN') {
+            if (e instanceof KernelError && e.code === 'FORBIDDEN') {
               log.warn(`postRef ${orgRun.postRef} not readable by agent — falling through to assignee`);
             } else {
               throw e;

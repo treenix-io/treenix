@@ -11,7 +11,7 @@
 // semantics (POSIX rename EXDEV precedent), not a move.
 
 import { assertSafePath, commonAncestor, isChildPath, isMoved, type NodeData } from '#core';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import { asTreeSource, type PatchManyEntry, type Tree } from '#tree';
 import { relocateCtx } from '#tree/policy';
 import { commit, mutationLock } from './commit';
@@ -26,10 +26,10 @@ export type MoveResult = { moved: number; from: string; to: string };
 export async function move(tree: Tree, from: string, to: string, ctx?: unknown): Promise<MoveResult> {
   assertSafePath(from);
   assertSafePath(to);
-  if (from === '/') throw new OpError('BAD_REQUEST', 'move: cannot move the root');
-  if (to === '/') throw new OpError('BAD_REQUEST', 'move: destination cannot be the root');
-  if (to === from) throw new OpError('BAD_REQUEST', 'move: destination equals source');
-  if (isChildPath(from, to, false)) throw new OpError('BAD_REQUEST', `move: destination ${to} is inside the moved subtree ${from}`);
+  if (from === '/') throw new KernelError('INVALID', 'move: cannot move the root');
+  if (to === '/') throw new KernelError('INVALID', 'move: destination cannot be the root');
+  if (to === from) throw new KernelError('INVALID', 'move: destination equals source');
+  if (isChildPath(from, to, false)) throw new KernelError('INVALID', `move: destination ${to} is inside the moved subtree ${from}`);
 
   // Subtree spans over source AND destination, sorted, held from the first
   // scan through the commit (core-anz4.5): a concurrent in-process write under
@@ -44,15 +44,15 @@ async function moveLocked(tree: Tree, from: string, to: string, ctx?: unknown): 
   const src = asTreeSource(tree);
 
   const root = await tree.get(from, ctx);
-  if (!root) throw new OpError('NOT_FOUND', `move: ${from} not found`);
-  if (isMoved(root)) throw new OpError('BAD_REQUEST', `move: ${from} is a tombstone`);
+  if (!root) throw new KernelError('NOT_FOUND', `move: ${from} not found`);
+  if (isMoved(root)) throw new KernelError('INVALID', `move: ${from} is a tombstone`);
 
   // scanChildren yields descendants only — the root travels separately.
   const nodes: NodeData[] = [root];
   for await (const e of src.scanChildren(from, { depth: -1 }, ctx)) {
     nodes.push(e.node);
     if (nodes.length > MOVE_MAX_NODES) {
-      throw new OpError('BAD_REQUEST', `move: subtree exceeds ${MOVE_MAX_NODES} nodes — relocate offline`);
+      throw new KernelError('INVALID', `move: subtree exceeds ${MOVE_MAX_NODES} nodes — relocate offline`);
     }
   }
 
@@ -64,7 +64,7 @@ async function moveLocked(tree: Tree, from: string, to: string, ctx?: unknown): 
   const idByDest = new Map(nodes.map(n => [to + n.$path.slice(from.length), n.$id]));
   const assertVacant = (taken: NodeData) => {
     if (isMoved(taken) && taken.$id !== undefined && taken.$id === idByDest.get(taken.$path)) return;
-    throw new OpError('CONFLICT', `move: destination is not empty (${taken.$path})`);
+    throw new KernelError('CONFLICT', `move: destination is not empty (${taken.$path})`);
   };
   const destRoot = await tree.get(to, ctx);
   if (destRoot) assertVacant(destRoot);

@@ -18,7 +18,7 @@ export function devBannerLines(port: number): string[] | null {
   const tty = process.stdout.isTTY;
   return [
     '',
-    `${tty ? '\x1b[33m' : ''}⚠️  DEV MODE — UNAUTHORIZED ADMIN ACCESS ENABLED`,
+    `${tty ? '\x1b[33m' : ''}⚠️  DEV MODE — UNAUTHENTICATED ADMIN ACCESS ENABLED`,
     `   MCP: http://localhost:${port}/mcp`,
     '   Loopback only. Do not expose this port externally.',
     `   Disable: NODE_ENV=production (or MCP_DEV_ADMIN=0 / VITE_DEV_LOGIN=0)${tty ? '\x1b[0m' : ''}`,

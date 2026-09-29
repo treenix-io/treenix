@@ -1,4 +1,7 @@
-import { createMemoryTree } from '#tree';
+import { KernelError } from '#errors';
+import type { ErrorCode } from '#kernel/types';
+import { createMemoryTree, type Tree } from '#tree';
+import { TRPCError, type TRPC_ERROR_CODE_KEY } from '@trpc/server';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
@@ -32,6 +35,53 @@ describe('createTreeRouter SSE config', () => {
     for (const path of ['/../x', '/x/', '/x//y', '/x\0y', '/x\\y', '/x%2fy']) {
       await assert.rejects(() => caller.unwatch({ paths: [path] }));
       await assert.rejects(() => caller.unwatchChildren({ paths: [path] }));
+    }
+  });
+});
+
+// The binding's public translation. Clients branch on these names: the React client signs in again on UNAUTHORIZED.
+const TRPC_CODES: Record<ErrorCode, TRPC_ERROR_CODE_KEY> = {
+  NOT_FOUND: 'NOT_FOUND',
+  FORBIDDEN: 'FORBIDDEN',
+  CONFLICT: 'CONFLICT',
+  INVALID: 'BAD_REQUEST',
+  UNKNOWN_TYPE: 'BAD_REQUEST',
+  CROSS_DOMAIN: 'BAD_REQUEST',
+  READ_ONLY: 'METHOD_NOT_SUPPORTED',
+  BUDGET: 'TOO_MANY_REQUESTS',
+  REFUSED: 'TOO_MANY_REQUESTS',
+  UNKNOWN_OUTCOME: 'PRECONDITION_FAILED',
+  EXPIRED: 'PRECONDITION_FAILED',
+  KEY_REUSED: 'UNPROCESSABLE_CONTENT',
+  UNAVAILABLE: 'SERVICE_UNAVAILABLE',
+  GENERATION: 'PRECONDITION_FAILED',
+  CANCELLED: 'CLIENT_CLOSED_REQUEST',
+  UNAUTHENTICATED: 'UNAUTHORIZED',
+};
+
+function isErrorCode(key: string): key is ErrorCode {
+  return Object.hasOwn(TRPC_CODES, key);
+}
+
+describe('KernelError over tRPC', () => {
+  it('a procedure failing with each kernel code answers its tRPC code', async () => {
+    let failWith: ErrorCode = 'NOT_FOUND';
+    const memTree = createMemoryTree();
+    const failingSystemTree: Tree = { ...memTree, get: async () => { throw new KernelError(failWith, 'store failed'); } };
+    const caller = createTreeRouter(memTree, failingSystemTree, createWatchManager()).createCaller({
+      session: { userId: 'u1', claims: ['authenticated'] },
+      token: 'token',
+      clientIp: null,
+    });
+
+    for (const [code, trpcCode] of Object.entries(TRPC_CODES)) {
+      assert.ok(isErrorCode(code));
+      failWith = code;
+      await assert.rejects(
+        () => caller.login({ userId: `u.${code}`, password: 'pw' }),
+        (e: unknown) => e instanceof TRPCError && e.code === trpcCode,
+        code,
+      );
     }
   });
 });

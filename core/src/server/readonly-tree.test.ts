@@ -3,13 +3,13 @@
 // dropped scanChildren, which would break the read runtime if this facade
 // ever fed an asTreeSource.
 
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import { createMemoryTree, type Tree } from '#tree';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { readonlyProxy, wrapReadOnlyTree } from './readonly-tree';
 
-const isKindViolation = (e: unknown): e is OpError => e instanceof OpError && e.code === 'KIND_VIOLATION';
+const isKindViolation = (e: unknown): e is KernelError => e instanceof KernelError && e.code === 'FORBIDDEN';
 
 describe('wrapReadOnlyTree', () => {
   it('forwards scanChildren so a read-only context can still traverse', async () => {
@@ -40,7 +40,7 @@ describe('wrapReadOnlyTree', () => {
 // Handlers receive the node cache's live objects: a nested mutation through a
 // shallow guard rewrote cached data other readers then saw, unpersisted.
 describe('readonlyProxy', () => {
-  const isKindViolation = (e: unknown) => e instanceof OpError && e.code === 'KIND_VIOLATION';
+  const isKindViolation = (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN';
 
   it('guards nested objects and arrays, keeps reads and identity', () => {
     const live = { box: { list: ['a'], meta: { n: 1 } } };

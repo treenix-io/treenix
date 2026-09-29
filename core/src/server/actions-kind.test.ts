@@ -1,6 +1,6 @@
 import { registerType } from '#comp';
 import { type ComponentData, createNode, type NodeData, register } from '#core';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import { clearRegistry } from '#testing';
 import { createMemoryTree } from '#tree';
 import assert from 'node:assert/strict';
@@ -13,7 +13,7 @@ describe('executeAction — kind enforcement', () => {
     clearRegistry();
   });
 
-  it('@read action: ctx.tree.set throws KIND_VIOLATION', async () => {
+  it('@read action: ctx.tree.set throws FORBIDDEN', async () => {
     register('test.kind.read', 'schema', () => ({
       $id: 'test.kind.read',
       type: 'object',
@@ -32,7 +32,7 @@ describe('executeAction — kind enforcement', () => {
 
     await assert.rejects(
       () => executeAction(tree, '/n', undefined, undefined, 'readAction'),
-      (err: any) => err?.code === 'KIND_VIOLATION' || err?.name === 'KindViolationError',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 
@@ -68,13 +68,13 @@ describe('executeAction — kind enforcement', () => {
 
     await assert.rejects(
       () => executeAction(tree, '/rn', undefined, undefined, 'readCallsWrite'),
-      (err: any) => err?.code === 'KIND_VIOLATION' && /write target/.test(err.message),
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
 
     assert.equal(writeHandlerRan, false, 'write handler must not run when caller is @read');
   });
 
-  it('@read action calling @write via ctx.nc().execute throws KIND_VIOLATION', async () => {
+  it('@read action calling @write via ctx.nc().execute throws FORBIDDEN', async () => {
     register('test.kind.r', 'schema', () => ({
       $id: 'test.kind.r',
       type: 'object',
@@ -108,7 +108,7 @@ describe('executeAction — kind enforcement', () => {
 
     await assert.rejects(
       () => executeAction(tree, '/caller', undefined, undefined, 'readCallsWrite'),
-      (err: any) => err?.code === 'KIND_VIOLATION' || err?.name === 'KindViolationError',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 
@@ -158,11 +158,11 @@ describe('executeAction — kind enforcement', () => {
 
     await assert.rejects(
       () => executeAction(tree, '/r', undefined, undefined, 'readish'),
-      (err: any) => err?.code === 'KIND_VIOLATION',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 
-  it('@read action: this.x = ... throws KIND_VIOLATION (via readonly proxy on node)', async () => {
+  it('@read action: this.x = ... throws FORBIDDEN (via readonly proxy on node)', async () => {
     register('test.kind.this', 'schema', () => ({
       $id: 'test.kind.this',
       type: 'object',
@@ -179,7 +179,7 @@ describe('executeAction — kind enforcement', () => {
 
     await assert.rejects(
       () => executeAction(tree, '/t', undefined, undefined, 'tryWrite'),
-      (err: any) => err?.code === 'KIND_VIOLATION' || err?.name === 'KindViolationError',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 
@@ -192,7 +192,7 @@ describe('executeAction — kind enforcement', () => {
     assert.equal((got as any)?.$type, 'whatever');
   });
 
-  it('generator action: ctx.node mutation throws KIND_VIOLATION (no draft — write would vanish)', async () => {
+  it('generator action: ctx.node mutation throws FORBIDDEN (no draft — write would vanish)', async () => {
     register('test.kind.gen', 'schema', () => ({
       $id: 'test.kind.gen',
       type: 'object',
@@ -212,11 +212,11 @@ describe('executeAction — kind enforcement', () => {
       (async () => {
         for await (const _ of executeStream(tree, '/g', undefined, undefined, 'run')) { /* drain */ }
       })(),
-      (err: any) => err?.code === 'KIND_VIOLATION',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 
-  it('@read action: dep mutation throws KIND_VIOLATION', async () => {
+  it('@read action: dep mutation throws FORBIDDEN', async () => {
     class ReadPeek {
       peek(_d: unknown, deps: { status: ComponentData }) {
         deps.status.value = 'mutated';
@@ -239,11 +239,11 @@ describe('executeAction — kind enforcement', () => {
 
     await assert.rejects(
       () => executeAction(tree, '/rd', 'test.kind.readdep', undefined, 'peek'),
-      (err: any) => err?.code === 'KIND_VIOLATION',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 
-  it('@write action: cross-node dep mutation throws KIND_VIOLATION (was silently dropped)', async () => {
+  it('@write action: cross-node dep mutation throws FORBIDDEN (was silently dropped)', async () => {
     class CrossPoke {
       poke(_d: unknown, deps: { target: NodeData }) {
         deps.target.value = 'mutated';
@@ -264,7 +264,7 @@ describe('executeAction — kind enforcement', () => {
 
     await assert.rejects(
       () => executeAction(tree, '/w', 'test.kind.crossdep', undefined, 'poke'),
-      (err: any) => err?.code === 'KIND_VIOLATION',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
 
     assert.equal((await tree.get('/cfg/target'))!.value, 'original', 'dep target untouched');
@@ -322,7 +322,7 @@ describe('executeStream — kind envelope', () => {
         // The generator body (and its entry gate) runs on first next().
         await executeStream(tree, '/n', undefined, undefined, 'gen')[Symbol.asyncIterator]().next();
       }),
-      (e: unknown) => e instanceof OpError && e.code === 'KIND_VIOLATION',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 
@@ -346,7 +346,7 @@ describe('executeStream — kind envelope', () => {
     assert.equal((await it.next()).value, 'first');
     await assert.rejects(
       () => it.next(),
-      (e: unknown) => e instanceof OpError && e.code === 'KIND_VIOLATION',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
     assert.equal(await tree.get('/should-not-write'), undefined, 'nothing written');
   });
@@ -379,7 +379,7 @@ describe('executeStream — kind envelope', () => {
     await it.next();
     await assert.rejects(
       () => it.next(),
-      (e: unknown) => e instanceof OpError && e.code === 'KIND_VIOLATION',
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
     assert.equal(ran, false, 'nested write handler never invoked');
   });

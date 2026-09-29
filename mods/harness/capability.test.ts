@@ -4,7 +4,7 @@
 
 import { createMemoryTree, type Tree } from '@treenx/core/tree';
 import { withAcl } from '@treenx/core/security';
-import { OpError } from '@treenx/core/errors';
+import { KernelError } from '@treenx/core/errors';
 import { R, W } from '@treenx/core';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
@@ -40,7 +40,7 @@ describe('withCapability — read', () => {
     const wrapped = withCapability(aclTree(), cap);
     await assert.rejects(
       wrapped.get('/forbidden/x'),
-      (e: any) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: any) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 });
@@ -58,7 +58,7 @@ describe('withCapability — write', () => {
     // /allowed is in readPaths but NOT in writePaths
     await assert.rejects(
       wrapped.set({ $path: '/allowed', $type: 'dir', extra: 'mutation' }),
-      (e: any) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: any) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 
@@ -66,7 +66,7 @@ describe('withCapability — write', () => {
     const wrapped = withCapability(aclTree(), cap);
     await assert.rejects(
       wrapped.remove('/forbidden/x'),
-      (e: any) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: any) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 
@@ -82,7 +82,7 @@ describe('withCapability — empty caps', () => {
     const wrapped = withCapability(aclTree(), { readPaths: [], writePaths: [], allowedExec: [] });
     await assert.rejects(
       wrapped.get('/allowed/a'),
-      (e: any) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: any) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 
@@ -90,7 +90,7 @@ describe('withCapability — empty caps', () => {
     const wrapped = withCapability(aclTree(), { readPaths: ['/*', '/**'], writePaths: [], allowedExec: [] });
     await assert.rejects(
       wrapped.set({ $path: '/allowed/c', $type: 'leaf' }),
-      (e: any) => e instanceof OpError && e.code === 'FORBIDDEN',
+      (e: any) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
   });
 });

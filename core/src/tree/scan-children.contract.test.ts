@@ -4,7 +4,7 @@
 // scanChildren contract that every adapter MUST satisfy.
 
 import { createNode, register } from '#core';
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 import { clearRegistry } from '#testing';
 import { withMounts } from '#mount';
 import assert from 'node:assert/strict';
@@ -201,7 +201,7 @@ describe('scanChildren mount fallback: cyclic nextCursor', () => {
     const ms = withMounts(rootStore);
     await assert.rejects(
       async () => { for await (const _ of ms.scanChildren!('/users')) { /* drain */ } },
-      (e: unknown) => e instanceof OpError && e.code === 'BAD_REQUEST',
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
     );
   });
 });

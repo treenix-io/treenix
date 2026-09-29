@@ -5,7 +5,7 @@
 
 import { createNode, getComponentByName, R, W, A, S } from '@treenx/core';
 import { createSession, sessionPath } from '@treenx/core/security';
-import { OpError } from '@treenx/core/errors';
+import { KernelError } from '@treenx/core/errors';
 import type { Tree } from '@treenx/core/tree';
 
 const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
@@ -46,11 +46,11 @@ export async function mintWorkloadToken(tree: Tree, opts: MintOpts): Promise<Min
   const mode = opts.mode ?? 'plan';
 
   const port = await tree.get(opts.agentPath);
-  if (!port) throw new OpError('NOT_FOUND', `agent-port not found: ${opts.agentPath}`);
+  if (!port) throw new KernelError('NOT_FOUND', `agent-port not found: ${opts.agentPath}`);
   // A workload session must carry SOME boundary: a capability scope or a branch.
   const scope = getComponentByName(port, scopeKey);
   if (!scope && !opts.branch) {
-    throw new OpError('BAD_REQUEST', `agent-port has no ${scopeKey} component (and no branch given): ${opts.agentPath}`);
+    throw new KernelError('INVALID', `agent-port has no ${scopeKey} component (and no branch given): ${opts.agentPath}`);
   }
 
   const runId = lastSegment(opts.runPath);
@@ -69,7 +69,7 @@ export async function mintWorkloadToken(tree: Tree, opts: MintOpts): Promise<Min
   // Patch session-node with workload metadata. Single set-after-create writes
   // taskPath, runPath, scopeRef, scopeKey, scopeMode atomically into the node.
   const sessionNode = await tree.get(sPath);
-  if (!sessionNode) throw new OpError('CONFLICT', 'session disappeared after createSession');
+  if (!sessionNode) throw new KernelError('CONFLICT', 'session disappeared after createSession');
   await tree.set({
     ...sessionNode,
     taskPath: opts.taskPath,

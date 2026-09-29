@@ -4,7 +4,7 @@
 // client convention entries and stay isomorphic.
 
 import { register, type NodeData } from '@treenx/core';
-import { OpError } from '@treenx/core/errors';
+import { KernelError } from '@treenx/core/errors';
 import type { MountCtx } from '@treenx/core/mount';
 import { buildClaims, withAcl } from '@treenx/core/security';
 import { createProjector } from '@treenx/core/security/projector';
@@ -44,7 +44,7 @@ export function branchScope(branchPath: string): AgentScope {
 function guardSubtree(inner: Tree, deniedRoot: string): Tree {
   const denied = (p: string) => p === deniedRoot || p.startsWith(deniedRoot + '/');
   const deny = (p: string): never => {
-    throw new OpError('FORBIDDEN', `branch view: ${p} is outside the branch namespace`);
+    throw new KernelError('FORBIDDEN', `branch view: ${p} is outside the branch namespace`);
   };
   return {
     ...inner,
@@ -133,7 +133,7 @@ function withControlWindow(view: Tree, store: Tree, branchPath: string, mountPat
       return view.patch(path, ops, c);
     },
     async remove(path, c) {
-      if (path === SELF) throw new OpError('FORBIDDEN', 'the branch control node cannot be removed from inside the view');
+      if (path === SELF) throw new KernelError('FORBIDDEN', 'the branch control node cannot be removed from inside the view');
       return view.remove(path, c);
     },
   };
@@ -145,13 +145,13 @@ register(MountBranch, 'mount', async (_mount, ctx: MountCtx) => {
   const store = ctx.globalStore ?? ctx.parentStore;
 
   const branchNode = await store.get(branchPath);
-  if (!branchNode) throw new OpError('NOT_FOUND', `t.mount.branch: no t.branch node at ${branchPath}`);
+  if (!branchNode) throw new KernelError('NOT_FOUND', `t.mount.branch: no t.branch node at ${branchPath}`);
   const { owner, base } = branchNode;
   if (typeof owner !== 'string' || !owner) {
-    throw new OpError('BAD_REQUEST', `t.mount.branch: ${branchPath} has no owner`);
+    throw new KernelError('INVALID', `t.mount.branch: ${branchPath} has no owner`);
   }
   if (typeof base !== 'string' || !base.startsWith('/')) {
-    throw new OpError('BAD_REQUEST', `t.mount.branch: ${branchPath} has invalid base`);
+    throw new KernelError('INVALID', `t.mount.branch: ${branchPath} has invalid base`);
   }
 
   // Owner-projected lower — load-bearing: mount adapters are caller-blind and
@@ -167,7 +167,7 @@ register(MountBranch, 'mount', async (_mount, ctx: MountCtx) => {
     ...acl,
     async *scanChildren(path, opts, innerCtx) {
       if (!store.scanChildren) {
-        throw new OpError('BAD_REQUEST', 't.mount.branch: backing store lacks scanChildren');
+        throw new KernelError('INVALID', 't.mount.branch: backing store lacks scanChildren');
       }
       for await (const e of store.scanChildren(path, opts, innerCtx)) {
         const visible = await projector(e.node);

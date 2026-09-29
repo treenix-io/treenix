@@ -1,7 +1,7 @@
 // In-memory rate limiter (per key, sliding window).
-// Transport-agnostic — throws OpError, not TRPCError.
+// Transport-agnostic — throws KernelError, not TRPCError.
 
-import { OpError } from '#errors';
+import { KernelError } from '#errors';
 
 const buckets = new Map<string, { count: number; resetAt: number }>();
 const WINDOW_MS = 60_000;
@@ -14,7 +14,7 @@ export function checkRate(key: string, limit = DEFAULT_LIMIT): void {
     buckets.set(key, { count: 1, resetAt: now + WINDOW_MS });
     return;
   }
-  if (bucket.count >= limit) throw new OpError('TOO_MANY_REQUESTS', 'Too many requests');
+  if (bucket.count >= limit) throw new KernelError('REFUSED', 'Too many requests');
   bucket.count++;
 }
 
