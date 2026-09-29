@@ -12,7 +12,7 @@ import { KernelError } from '#errors';
 import type { Tree } from '#tree';
 
 function deny(action: string): never {
-  throw new KernelError('FORBIDDEN',`read-only context: ${action} is forbidden`);
+  throw new KernelError('FORBIDDEN', `read-only context: ${action} is forbidden`);
 }
 
 export function wrapReadOnlyTree(tree: Tree): Tree {
