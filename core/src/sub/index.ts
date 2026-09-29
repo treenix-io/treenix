@@ -6,6 +6,7 @@ import { type SubscribeOpts } from '#contexts/service/index';
 import { isComponent, isCompKey, type NodeData } from '#core';
 import { KernelError } from '#errors';
 import { assertVisiblePredicate, createSiftTest } from '#kernel/expr';
+import { DEFAULT_LIMITS } from '#kernel/types';
 import {
   isSetEntry,
   mapNodeForSift,
@@ -748,8 +749,8 @@ export function withSubscriptions(
 
       let group = groups.get(hash);
       if (!group) {
-        const viewTest = reg.plan.viewWhere ? createSiftTest(reg.plan.viewWhere) : null;
-        const callerTest = reg.plan.callerWhere ? createSiftTest(reg.plan.callerWhere) : null;
+        const viewTest = reg.plan.viewWhere ? createSiftTest(reg.plan.viewWhere, DEFAULT_LIMITS) : null;
+        const callerTest = reg.plan.callerWhere ? createSiftTest(reg.plan.callerWhere, DEFAULT_LIMITS) : null;
         group = {
           planHash: hash,
           source: reg.plan.source,

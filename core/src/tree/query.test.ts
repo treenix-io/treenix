@@ -1,6 +1,7 @@
 import { createNode, type NodeData } from '#core';
 import { KernelError } from '#errors';
 import { assertSafeSiftQuery } from '#kernel/expr';
+import { DEFAULT_LIMITS } from '#kernel/types';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { createMemoryTree } from './index';
@@ -132,16 +133,16 @@ describe('QueryStore', () => {
   });
 
   it('rejects $function, $accumulator, $expr — defense-in-depth (R4-TREE-3)', () => {
-    assert.throws(() => assertSafeSiftQuery({ $function: { body: 'x' } }), /\$function/);
-    assert.throws(() => assertSafeSiftQuery({ $accumulator: {} }), /\$accumulator/);
-    assert.throws(() => assertSafeSiftQuery({ $expr: {} }), /\$expr/);
+    assert.throws(() => assertSafeSiftQuery({ $function: { body: 'x' } }, DEFAULT_LIMITS), /\$function/);
+    assert.throws(() => assertSafeSiftQuery({ $accumulator: {} }, DEFAULT_LIMITS), /\$accumulator/);
+    assert.throws(() => assertSafeSiftQuery({ $expr: {} }, DEFAULT_LIMITS), /\$expr/);
   });
 
   it('allows safe operators ($eq, $gt, $in, $and)', () => {
-    assert.doesNotThrow(() => assertSafeSiftQuery({ name: { $eq: 'x' } }));
-    assert.doesNotThrow(() => assertSafeSiftQuery({ count: { $gt: 5, $lt: 100 } }));
-    assert.doesNotThrow(() => assertSafeSiftQuery({ tag: { $in: ['a', 'b'] } }));
-    assert.doesNotThrow(() => assertSafeSiftQuery({ $and: [{ a: 1 }, { b: 2 }] }));
+    assert.doesNotThrow(() => assertSafeSiftQuery({ name: { $eq: 'x' } }, DEFAULT_LIMITS));
+    assert.doesNotThrow(() => assertSafeSiftQuery({ count: { $gt: 5, $lt: 100 } }, DEFAULT_LIMITS));
+    assert.doesNotThrow(() => assertSafeSiftQuery({ tag: { $in: ['a', 'b'] } }, DEFAULT_LIMITS));
+    assert.doesNotThrow(() => assertSafeSiftQuery({ $and: [{ a: 1 }, { b: 2 }] }, DEFAULT_LIMITS));
   });
 
   // R5-MCP-4: a shape heuristic let ^(.|.)*$ and ^(a+){2,}$ through at seconds
@@ -155,7 +156,7 @@ describe('QueryStore', () => {
       { name: /^prefix/ },
       { tags: { $in: [/a/] } },
     ]) {
-      assert.throws(() => assertSafeSiftQuery(q), isInvalid, JSON.stringify(q));
+      assert.throws(() => assertSafeSiftQuery(q, DEFAULT_LIMITS), isInvalid, JSON.stringify(q));
     }
   });
 

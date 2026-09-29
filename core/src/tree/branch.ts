@@ -13,6 +13,7 @@
 import type { NodeData } from '#core';
 import { KernelError } from '#errors';
 import { createSiftTest } from '#kernel/expr';
+import { DEFAULT_LIMITS } from '#kernel/types';
 import { mapNodeForSift, type Page, paginate, type Tree } from '#tree';
 import { patchViaSet } from './patch';
 
@@ -68,7 +69,7 @@ export function createBranchTree(upper: Tree, lower: Tree): Tree {
     },
 
     async getChildren(parent, opts, ctx): Promise<Page<NodeData>> {
-      const test = opts?.query ? createSiftTest(opts.query) : null;
+      const test = opts?.query ? createSiftTest(opts.query, DEFAULT_LIMITS) : null;
       const depth = opts?.depth;
       const u = await upper.getChildren(parent, { depth }, ctx);
       const wrappers = u.items.map(asWrapper);

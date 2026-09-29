@@ -6,7 +6,7 @@ import sift from 'sift'
 
 import { KernelError } from '#errors'
 import { isRecord } from '#util/is-record'
-import { DEFAULT_LIMITS, type Limits } from './types'
+import type { Limits } from './types'
 
 // Refused in every sift query — predicates are user-authored (wire callerWhere,
 // user-authored query mounts). Code-eval operators are server-side RCE. $regex
@@ -42,7 +42,7 @@ function assertWithinBudget(q: unknown, limits: Limits): void {
 }
 
 /** Validate a sift query: BUDGET over the size or cost limit, INVALID on a forbidden operator. */
-export function assertSafeSiftQuery(q: unknown, limits: Limits = DEFAULT_LIMITS): void {
+export function assertSafeSiftQuery(q: unknown, limits: Limits): void {
   assertWithinBudget(q, limits)
   mapSiftQuery(q)
 }
@@ -113,7 +113,7 @@ export function assertVisiblePredicate(q: unknown, where: 'callerWhere' | 'viewW
 /** Compile a sift query over storage-shaped nodes; it is validated first, so a refused one evaluates nothing. */
 export function createSiftTest(
   match: Record<string, unknown>,
-  limits: Limits = DEFAULT_LIMITS,
+  limits: Limits,
 ): (node: Record<string, unknown>) => boolean {
   assertWithinBudget(match, limits)
   return sift(mapSiftQuery(match))

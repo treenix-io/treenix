@@ -5,6 +5,7 @@
 import { type NodeData } from '#core';
 import { KernelError } from '#errors';
 import { assertSafeSiftQuery, createSiftTest, mapSiftQuery } from '#kernel/expr';
+import { DEFAULT_LIMITS } from '#kernel/types';
 import { isRecord } from '#util/is-record';
 import { mapNodeForSift, type Tree } from './index';
 
@@ -26,7 +27,7 @@ export function queryConfigOf(comp: Record<string, unknown>, at: string): QueryC
 }
 
 export function matchesFilter(node: NodeData, match: Record<string, unknown>): boolean {
-  return createSiftTest(match)(mapNodeForSift(node));
+  return createSiftTest(match, DEFAULT_LIMITS)(mapNodeForSift(node));
 }
 
 export function createQueryTree(config: QueryConfig, parentStore: Tree): Tree {
@@ -39,7 +40,7 @@ export function createQueryTree(config: QueryConfig, parentStore: Tree): Tree {
     // read path resolves query mounts into ReadPlans BEFORE the raw tree is
     // consulted (resolveReadPlan), so this adapter never sees client traffic.
     async getChildren(_path, opts, ctx) {
-      if (opts?.query) assertSafeSiftQuery(opts.query);
+      if (opts?.query) assertSafeSiftQuery(opts.query, DEFAULT_LIMITS);
       const mappedQuery = mapSiftQuery(config.match) as Record<string, unknown>;
       const mergedQuery = opts?.query ? { $and: [opts.query, mappedQuery] } : mappedQuery;
       return parentStore.getChildren(config.source, { ...opts, depth: 1, query: mergedQuery }, ctx);

@@ -19,6 +19,7 @@
 import type { NodeData } from '#core';
 import { KernelError } from '#errors';
 import { assertSafeSiftQuery, assertVisiblePredicate, createSiftTest } from '#kernel/expr';
+import { DEFAULT_LIMITS } from '#kernel/types';
 import { mapNodeForSift, type TreeSource } from './index';
 import { decodeReadCursor, encodeReadCursor, planHash } from './plan-hash';
 
@@ -82,12 +83,12 @@ export async function executeList(
   // user-authored query mount): no code-eval operators, no hidden fields.
   for (const [where, q] of [['callerWhere', plan.callerWhere], ['viewWhere', plan.viewWhere]] as const) {
     if (!q) continue;
-    assertSafeSiftQuery(q);
+    assertSafeSiftQuery(q, DEFAULT_LIMITS);
     assertVisiblePredicate(q, where);
   }
 
-  const viewTest = plan.viewWhere ? createSiftTest(plan.viewWhere) : null;
-  const callerTest = plan.callerWhere ? createSiftTest(plan.callerWhere) : null;
+  const viewTest = plan.viewWhere ? createSiftTest(plan.viewWhere, DEFAULT_LIMITS) : null;
+  const callerTest = plan.callerWhere ? createSiftTest(plan.callerWhere, DEFAULT_LIMITS) : null;
 
   const collected: { node: NodeData; cursor: string }[] = [];
   let rawScanned = 0;
