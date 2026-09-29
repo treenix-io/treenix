@@ -9,7 +9,8 @@ const srcDir = dirname(kernelDir)
 
 // The kernel stands on Layer 0 and pure helpers only, so the old pipeline cannot leak into it.
 // Packages other than node built-ins are refused until one is admitted here with a reason.
-const ALLOWED = ['kernel', 'core', 'util', 'comp', 'schema/types']
+// errors is the KernelError class alone, built on the kernel's own ErrorCode.
+const ALLOWED = ['kernel', 'core', 'util', 'comp', 'schema/types', 'errors']
 
 type PackageImports = { readonly [key: string]: { readonly development: string } }
 const packageImports: PackageImports = JSON.parse(readFileSync(join(srcDir, '../package.json'), 'utf8')).imports
@@ -53,7 +54,7 @@ function kernelFiles(): string[] {
 }
 
 describe('kernel import boundary', () => {
-  it('kernel files import only the kernel, Layer 0, util, comp and schema types', () => {
+  it('kernel files import only the kernel, Layer 0, util, comp, schema types and errors', () => {
     const imports = kernelFiles().flatMap((file) =>
       specifiers(readFileSync(file, 'utf8')).map((spec) => ({ file, spec })))
 
@@ -83,7 +84,7 @@ describe('kernel import boundary', () => {
 
   it('admits the allowed areas and node built-ins', () => {
     const file = join(kernelDir, 'contract', 'x.ts')
-    for (const spec of ['../types', '#kernel/types', '#core', '#core/path', '#util/ulid', '#comp', '#comp/needs', '#schema/types', 'node:fs'])
+    for (const spec of ['../types', '#kernel/types', '#core', '#core/path', '#util/ulid', '#comp', '#comp/needs', '#schema/types', '#errors', 'node:fs'])
       assert.equal(allowed(file, spec), true, spec)
   })
 
