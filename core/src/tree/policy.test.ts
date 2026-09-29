@@ -472,6 +472,19 @@ describe('policy: validation step (Write-Barrier)', () => {
     assert.ok(await tree.get('/a'));
   });
 
+  it('rejects a union field mismatch as INVALID', async () => {
+    register('test.union.comp', 'schema', () => ({
+      type: 'object' as const,
+      properties: { rev: { anyOf: [{ type: 'number' }, { type: 'string' }] } },
+    }));
+
+    await tree.set({ $path: '/a', $type: 'item', '#u': { $type: 'test.union.comp', rev: 'r1' } });
+    await assert.rejects(
+      () => tree.set({ $path: '/b', $type: 'item', '#u': { $type: 'test.union.comp', rev: true } }),
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
+    );
+  });
+
   it('passes through nodes without schemas', async () => {
     await tree.set({
       $path: '/a', $type: 'item',

@@ -21,6 +21,9 @@ export type PropertySchema = {
   properties?: Record<string, PropertySchema>; // for nested object fields
   required?: string[]; // required fields within nested object
   // JSON Schema validation keywords — consumed by comp/validate.ts
+  oneOf?: PropertySchema[];
+  allOf?: PropertySchema[];
+  additionalProperties?: boolean | PropertySchema;
   minLength?: number;
   maxLength?: number;
   pattern?: string;
@@ -52,5 +55,6 @@ export type TypeSchema = {
   type: 'object';
   properties: Record<string, PropertySchema>;
   required?: string[];
+  additionalProperties?: boolean | PropertySchema;
   methods?: Record<string, MethodSchema>;
 };

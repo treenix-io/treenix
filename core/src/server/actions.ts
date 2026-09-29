@@ -7,7 +7,7 @@ import { Class, type TypeProxy } from '#comp';
 import { type ExecuteFn, makeTypedProxy, type StreamFn } from '#comp/handle';
 import { collectDeps as _collectDeps, type ResolvedDeps } from '#comp/needs';
 import { assertSafeKey, COMP_PREFIX, type ComponentData, compKey, getComponentField, getMeta, isComponent, type NodeData, normalizeType, register, resolve, resolveExact, safeJsonParse } from '#core';
-import { validateValue, type ValidationError } from '#comp/validate';
+import { assertSafeSchema, validateValue, type ValidationError } from '#comp/validate';
 import { type TypeSchema } from '#schema/types';
 import type { Session } from '#security/sessions';
 import { type ExecOpts, type PatchManyEntry, type PatchOp, type Tree } from '#tree';
@@ -29,33 +29,15 @@ function validateActionArgs(type: string, action: string, data: unknown, schema:
     throw new KernelError('INVALID', `[SECURITY] No schema for ${type}.${action} — action args not validated`);
   }
 
+  // The caller's args are the handler's one parameter (a class method's second is the injected
+  // needs), so arguments[0] is the whole args schema — unions and typeless schemas included.
   const argSchema = methodSchema.arguments?.[0];
-  if (!argSchema?.type) return;
+  if (!argSchema) return;
 
-  const actual = data ?? {};
   const errors: ValidationError[] = [];
-  validateValue(actual, argSchema, `${type}.${action}`, errors);
+  validateValue(data ?? {}, argSchema, `${type}.${action}`, errors);
   if (errors.length) {
     throw new KernelError('INVALID', `Invalid action args: ${errors.map(e => `${e.path}: ${e.message}`).join('; ')}`);
-  }
-}
-
-// R4-MOUNT-4: shallow walk over a stored type's `schema` field to reject patterns that
-// would DoS the validator. Caps cover the worst-case offenders: catastrophic-backtracking
-// regex (length + nested-quantifier shape), oversized enums, deeply-nested anyOf/allOf.
-const SCHEMA_PATTERN_MAX = 256;
-const SCHEMA_DEPTH_MAX = 16;
-function assertSafeSchema(schema: unknown, ctx: string, depth = 0): void {
-  if (!schema || typeof schema !== 'object') return;
-  if (depth > SCHEMA_DEPTH_MAX) throw new KernelError('INVALID', `${ctx}: schema too deep (max ${SCHEMA_DEPTH_MAX})`);
-  if (Array.isArray(schema)) { for (const v of schema) assertSafeSchema(v, ctx, depth + 1); return; }
-  for (const [k, v] of Object.entries(schema as Record<string, unknown>)) {
-    if (k === 'pattern' && typeof v === 'string') {
-      if (v.length > SCHEMA_PATTERN_MAX) throw new KernelError('INVALID', `${ctx}: schema.pattern too long (>${SCHEMA_PATTERN_MAX})`);
-      // Reject the classic catastrophic-backtracking shape: nested quantifiers like (a+)+ / (a*)*.
-      if (/\([^)]*[+*][^)]*\)[+*]/.test(v)) throw new KernelError('INVALID', `${ctx}: schema.pattern has nested quantifiers (ReDoS risk)`);
-    }
-    assertSafeSchema(v, ctx, depth + 1);
   }
 }
 

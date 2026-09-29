@@ -1,8 +1,11 @@
-import type { ComponentData } from '#core';
+import { type ComponentData, type NodeData, register, resolveExact, unregister } from '#core';
+import { KernelError } from '#errors';
 import type { PropertySchema, TypeSchema } from '#schema/types';
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
-import { addTypeValidator, validateComponent, validateValue, type ValidationError } from './validate';
+import { afterEach, beforeEach, describe, it } from 'node:test';
+import {
+  addTypeValidator, assertSafeSchema, validateComponent, validateNode, validateValue, type ValidationError,
+} from './validate';
 
 // Helper: collect errors from validateValue
 function check(value: unknown, def: Partial<PropertySchema>, path = 'x'): ValidationError[] {
@@ -399,5 +402,181 @@ describe('addTypeValidator', () => {
     const e = check('not-email', { type: 'email' });
     assert.equal(e.length, 1);
     assert.match(e[0].message, /invalid email/);
+  });
+});
+
+// ── Composition keywords ──
+
+const isCode = (code: string) => (e: unknown) => e instanceof KernelError && e.code === code;
+
+describe('anyOf / oneOf / allOf', () => {
+  const numOrStr: PropertySchema = { anyOf: [{ type: 'number' }, { type: 'string' }] };
+
+  it('anyOf passes when any branch matches', () => {
+    assert.equal(check(1, numOrStr).length, 0);
+    assert.equal(check('a', numOrStr).length, 0);
+  });
+
+  it('an anyOf mismatch is one error at the value path', () => {
+    const e = check(true, numOrStr);
+    assert.equal(e.length, 1);
+    assert.equal(e[0].path, 'x');
+  });
+
+  it('an empty anyOf branch accepts any value', () => {
+    assert.equal(check(true, { anyOf: [{ type: 'number' }, {}] }).length, 0);
+  });
+
+  it('anyOf applies to object fields and array items', () => {
+    const levels: PropertySchema = {
+      type: 'object',
+      properties: {
+        level: { anyOf: [{ type: 'string', enum: ['info', 'warn'] }, { type: 'array', items: { type: 'string', enum: ['info', 'warn'] } }] },
+      },
+    };
+    assert.equal(check({ level: ['warn'] }, levels).length, 0);
+    assert.deepEqual(check({ level: 'debug' }, levels).map(e => e.path), ['x.level']);
+    assert.deepEqual(check([1, true, 'a'], { type: 'array', items: numOrStr }).map(e => e.path), ['x[1]']);
+  });
+
+  it('type and anyOf both apply', () => {
+    const def: PropertySchema = { type: 'string', anyOf: [{ type: 'string', minLength: 3 }, { type: 'string', enum: ['a'] }] };
+    assert.equal(check('a', def).length, 0);
+    assert.equal(check('ab', def).length, 1);
+    assert.equal(check(5, def).length, 2);
+  });
+
+  it('oneOf needs exactly one matching branch', () => {
+    const def: PropertySchema = { oneOf: [{ type: 'number', minimum: 0 }, { type: 'number', maximum: 10 }] };
+    assert.equal(check(-5, def).length, 0);
+    assert.equal(check(50, def).length, 0);
+    assert.deepEqual(check(5, def).map(e => e.path), ['x']);
+    assert.deepEqual(check('a', def).map(e => e.path), ['x']);
+  });
+
+  it('allOf reports every failing branch', () => {
+    const def: PropertySchema = { allOf: [{ type: 'string', minLength: 5 }, { type: 'string', pattern: '^\\d+$' }] };
+    assert.equal(check('12345', def).length, 0);
+    assert.equal(check('abc', def).length, 2);
+  });
+});
+
+// ── additionalProperties ──
+
+describe('additionalProperties', () => {
+  const closed: PropertySchema = { type: 'object', properties: { a: { type: 'number' } }, additionalProperties: false };
+
+  it('false rejects an undeclared field', () => {
+    assert.equal(check({ a: 1 }, closed).length, 0);
+    assert.deepEqual(check({ a: 1, b: 2 }, closed).map(e => e.path), ['x.b']);
+  });
+
+  it('a schema validates every undeclared field', () => {
+    const def: PropertySchema = { type: 'object', properties: { a: { type: 'string' } }, additionalProperties: { type: 'number' } };
+    assert.deepEqual(check({ a: 's', b: 'no', c: 3 }, def).map(e => e.path), ['x.b']);
+  });
+
+  it('true or absent leaves undeclared fields open', () => {
+    assert.equal(check({ a: 1, b: 2 }, { ...closed, additionalProperties: true }).length, 0);
+    assert.equal(check({ a: 1, b: 2 }, { type: 'object', properties: { a: { type: 'number' } } }).length, 0);
+  });
+
+  it('applies to array items', () => {
+    const def: PropertySchema = { type: 'array', items: closed };
+    assert.deepEqual(check([{ a: 1 }, { a: 2, z: 0 }], def).map(e => e.path), ['x[1].z']);
+  });
+
+  it('a component keeps its $ fields and the node\'s # components out of it', () => {
+    const schema: TypeSchema = { type: 'object', properties: { a: { type: 'number' } }, additionalProperties: false };
+    const node: ComponentData = { $type: 'test.closed', $v: 1, $order: 'a0', a: 1, '#named': { $type: 'test.other' } };
+    assert.equal(validateComponent(node, schema, '').length, 0);
+    assert.deepEqual(validateComponent({ ...node, b: 2 }, schema, '').map(e => e.path), ['test.closed.b']);
+  });
+});
+
+// ── Pattern cost ──
+
+describe('pattern guard', () => {
+  it('a nested-quantifier pattern in a code-registered schema is INVALID', () => {
+    assert.throws(() => check('aaaa', { type: 'string', pattern: '(a+)+$' }), isCode('INVALID'));
+  });
+
+  it('an oversize pattern in a code-registered schema is INVALID', () => {
+    assert.throws(() => check('a', { type: 'string', pattern: 'a'.repeat(300) }), isCode('INVALID'));
+  });
+
+  it('a safe pattern keeps validating on repeated use', () => {
+    const def: PropertySchema = { type: 'string', pattern: '^[a-z]+$' };
+    assert.equal(check('abc', def).length, 0);
+    assert.equal(check('ABC', def).length, 1);
+    assert.equal(check('xyz', def).length, 0);
+  });
+});
+
+describe('assertSafeSchema', () => {
+  it('rejects nested quantifiers anywhere in the schema', () => {
+    assert.throws(() => assertSafeSchema({ properties: { x: { anyOf: [{ pattern: '(a*)*' }] } } }, 't'), isCode('INVALID'));
+  });
+
+  it('rejects a schema deeper than the cap', () => {
+    let nested: Record<string, unknown> = { type: 'string' };
+    for (let i = 0; i < 30; i++) nested = { properties: { x: nested } };
+    assert.throws(() => assertSafeSchema(nested, 't'), isCode('INVALID'));
+  });
+
+  it('accepts an ordinary schema', () => {
+    assert.doesNotThrow(() => assertSafeSchema({ properties: { x: { type: 'string', pattern: '^[a-z]+$' } } }, 't'));
+  });
+});
+
+// ── validateNode ──
+
+describe('validateNode', () => {
+  const KNOWN = 'test.validate.known';
+  const UNKNOWN = 'test.validate.unknown';
+  let registeredDefault = false;
+
+  beforeEach(() => {
+    register(KNOWN, 'schema', () => ({
+      type: 'object',
+      properties: { level: { anyOf: [{ type: 'string' }, { type: 'number' }] } },
+    }));
+    // The fallback schema is registered by the server; its presence must not change strict mode.
+    if (!resolveExact('default', 'schema')) {
+      register('default', 'schema', () => ({ type: 'object', properties: {} }));
+      registeredDefault = true;
+    }
+  });
+
+  afterEach(() => {
+    unregister(KNOWN, 'schema');
+    if (registeredDefault) unregister('default', 'schema');
+    registeredDefault = false;
+  });
+
+  const node = (extra: Record<string, unknown> = {}): NodeData => ({ $path: '/n', $type: KNOWN, level: 1, ...extra });
+
+  it('reports an anyOf mismatch on any component', () => {
+    assert.equal(validateNode(node()).length, 0);
+    assert.deepEqual(validateNode(node({ level: true })).map(e => e.path), [`${KNOWN}.level`]);
+    assert.deepEqual(validateNode(node({ '#c': { $type: KNOWN, level: {} } })).map(e => e.path), ['#c.level']);
+  });
+
+  it('non-strict skips a component whose type has no schema', () => {
+    assert.equal(validateNode({ $path: '/n', $type: UNKNOWN, anything: true }).length, 0);
+    assert.equal(validateNode(node({ '#c': { $type: UNKNOWN, anything: true } })).length, 0);
+  });
+
+  it('strict rejects an unregistered main type with UNKNOWN_TYPE', () => {
+    assert.throws(() => validateNode({ $path: '/n', $type: UNKNOWN }, { strict: true }), isCode('UNKNOWN_TYPE'));
+  });
+
+  it('strict rejects an unregistered named component type with UNKNOWN_TYPE', () => {
+    assert.throws(() => validateNode(node({ '#c': { $type: UNKNOWN } }), { strict: true }), isCode('UNKNOWN_TYPE'));
+  });
+
+  it('strict validates registered types as usual', () => {
+    assert.equal(validateNode(node(), { strict: true }).length, 0);
+    assert.deepEqual(validateNode(node({ level: true }), { strict: true }).map(e => e.path), [`${KNOWN}.level`]);
   });
 });

@@ -2,14 +2,61 @@
 // Type-dispatched validator tree: type check → dispatch → type-specific constraints + recurse
 // kriz: this should be somewhere near schema!! not in comp!
 
-import { AnyType, type ComponentData, getComponents, type NodeData } from '#core';
-import { resolve } from '#core/registry';
+import { AnyType, type ComponentData, getComponents, isCompKey, type NodeData } from '#core';
+import { resolve, resolveExact } from '#core/registry';
+import { KernelError } from '#errors';
 import type { PropertySchema, TypeSchema } from '#schema/types';
+import { createBoundedCache } from '#util/bounded-cache';
+import { isRecord } from '#util/is-record';
 
 export type ValidationError = {
   path: string;
   message: string;
 };
+
+export type ValidateOptions = {
+  /** A component whose type has no schema registered for it throws UNKNOWN_TYPE instead of being skipped. */
+  strict?: boolean;
+};
+
+// ── Schema cost guard ──
+
+// Caps the worst offenders against the validator: catastrophic-backtracking regex
+// (length + nested-quantifier shape) and deeply nested schemas.
+const SCHEMA_PATTERN_MAX = 256;
+const SCHEMA_DEPTH_MAX = 16;
+const NESTED_QUANTIFIER = /\([^)]*[+*][^)]*\)[+*]/;
+
+function assertSafePattern(pattern: string, ctx: string): void {
+  if (pattern.length > SCHEMA_PATTERN_MAX) throw new KernelError('INVALID', `${ctx}: schema.pattern too long (>${SCHEMA_PATTERN_MAX})`);
+  // The classic catastrophic-backtracking shape: nested quantifiers like (a+)+ / (a*)*.
+  if (NESTED_QUANTIFIER.test(pattern)) throw new KernelError('INVALID', `${ctx}: schema.pattern has nested quantifiers (ReDoS risk)`);
+}
+
+/** Walks a schema that arrives as data (a stored type node) before anything validates against it. */
+export function assertSafeSchema(schema: unknown, ctx: string, depth = 0): void {
+  if (!schema || typeof schema !== 'object') return;
+  if (depth > SCHEMA_DEPTH_MAX) throw new KernelError('INVALID', `${ctx}: schema too deep (max ${SCHEMA_DEPTH_MAX})`);
+  if (Array.isArray(schema)) { for (const v of schema) assertSafeSchema(v, ctx, depth + 1); return; }
+  for (const [k, v] of Object.entries(schema)) {
+    if (k === 'pattern' && typeof v === 'string') assertSafePattern(v, ctx);
+    assertSafeSchema(v, ctx, depth + 1);
+  }
+}
+
+// Code-registered schemas never pass assertSafeSchema, so every pattern is checked on its first
+// compile. Patterns come from schemas and are few; the bound only stops edited stored schemas from piling up.
+const compiledPatterns = createBoundedCache<string, RegExp>(1024);
+
+function compiledPattern(pattern: string, path: string): RegExp {
+  const cached = compiledPatterns.get(pattern);
+  if (cached) return cached;
+
+  assertSafePattern(pattern, path);
+  const re = new RegExp(pattern);
+  compiledPatterns.set(pattern, re);
+  return re;
+}
 
 // ── Type-dispatched validator tree ──
 
@@ -22,7 +69,7 @@ const typeValidators: Record<string, TypeValidator> = {
       errors.push({ path, message: `min length ${def.minLength}, got ${value.length}` });
     if (typeof def.maxLength === 'number' && value.length > def.maxLength)
       errors.push({ path, message: `max length ${def.maxLength}, got ${value.length}` });
-    if (typeof def.pattern === 'string' && !new RegExp(def.pattern).test(value))
+    if (typeof def.pattern === 'string' && !compiledPattern(def.pattern, path).test(value))
       errors.push({ path, message: `must match /${def.pattern}/` });
     if (def.enum && !def.enum.includes(value))
       errors.push({ path, message: `must be one of: ${def.enum.join(', ')}` });
@@ -48,7 +95,10 @@ const typeValidators: Record<string, TypeValidator> = {
       errors.push({ path, message: `max items ${def.maxItems}, got ${value.length}` });
 
     if (!def.items) return;
-    const items = def.items;
+    // Typeless items with properties are object items.
+    const items: PropertySchema = def.items.type === undefined && def.items.properties
+      ? { ...def.items, type: 'object' }
+      : def.items;
 
     for (let i = 0; i < value.length; i++) {
       const ip = `${path}[${i}]`;
@@ -60,32 +110,16 @@ const typeValidators: Record<string, TypeValidator> = {
         continue;
       }
 
-      if (items.properties) {
-        if (typeof value[i] !== 'object') {
-          errors.push({ path: ip, message: `expected object, got ${typeof value[i]}` });
-        } else {
-          validateObject(value[i] as Record<string, unknown>, items.properties, ip, errors);
-        }
-      } else if (items.type) {
-        validateValue(value[i], items, ip, errors);
-      }
+      validateValue(value[i], items, ip, errors);
     }
   },
 
   object(value, def, path, errors) {
-    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    if (!isRecord(value)) {
       errors.push({ path, message: `expected object, got ${Array.isArray(value) ? 'array' : typeof value}` });
       return;
     }
-    if (def.required) {
-      const obj = value as Record<string, unknown>;
-      for (const key of def.required) {
-        if (obj[key] === undefined || obj[key] === null) {
-          errors.push({ path: path ? `${path}.${key}` : key, message: `required field missing` });
-        }
-      }
-    }
-    if (def.properties) validateObject(value as Record<string, unknown>, def.properties, path, errors);
+    validateFields(value, def, path, errors, anyKey);
   },
 };
 
@@ -97,46 +131,83 @@ export function addTypeValidator(type: string, fn: TypeValidator): void {
 
 // ── Core ──
 
+// Every keyword present applies: `type` dispatches, anyOf/oneOf/allOf compose over the same value.
 export function validateValue(value: unknown, def: PropertySchema, path: string, errors: ValidationError[]): void {
-  if (!def.type) return;
-  const validator = typeValidators[def.type];
-  if (validator) validator(value, def, path, errors);
+  if (def.type) typeValidators[def.type]?.(value, def, path, errors);
+
+  if (def.anyOf && !def.anyOf.some(branch => matches(value, branch, path)))
+    errors.push({ path, message: `must match at least one of ${def.anyOf.length} anyOf schemas` });
+
+  if (def.oneOf) {
+    const matched = def.oneOf.filter(branch => matches(value, branch, path)).length;
+    if (matched !== 1) errors.push({ path, message: `must match exactly one of ${def.oneOf.length} oneOf schemas, matched ${matched}` });
+  }
+
+  if (def.allOf) for (const branch of def.allOf) validateValue(value, branch, path, errors);
 }
 
-function validateObject(obj: Record<string, unknown>, properties: Record<string, PropertySchema>, basePath: string, errors: ValidationError[]): void {
+function matches(value: unknown, def: PropertySchema, path: string): boolean {
+  const errors: ValidationError[] = [];
+  validateValue(value, def, path, errors);
+  return errors.length === 0;
+}
+
+type ObjectSchema = Pick<PropertySchema, 'properties' | 'required' | 'additionalProperties'>;
+
+const anyKey = (_key: string) => true;
+
+// A component's own fields: `$` keys are system, `#` keys are the node's named components (D3).
+const isOwnField = (key: string) => !key.startsWith('$') && !isCompKey(key);
+
+// null counts as absent: an optional field may hold null, a required one may not.
+function validateFields(
+  obj: Record<string, unknown>,
+  def: ObjectSchema,
+  basePath: string,
+  errors: ValidationError[],
+  ownField: (key: string) => boolean,
+): void {
+  const at = (key: string) => basePath ? `${basePath}.${key}` : key;
+
+  for (const key of def.required ?? []) {
+    if (obj[key] === undefined || obj[key] === null) errors.push({ path: at(key), message: `required field missing` });
+  }
+
+  const properties = def.properties ?? {};
   for (const [prop, propDef] of Object.entries(properties)) {
     const val = obj[prop];
     if (val === undefined || val === null) continue;
-    validateValue(val, propDef, basePath ? `${basePath}.${prop}` : prop, errors);
+    validateValue(val, propDef, at(prop), errors);
+  }
+
+  const extra = def.additionalProperties;
+  if (extra === undefined || extra === true) return;
+
+  for (const [key, val] of Object.entries(obj)) {
+    if (Object.hasOwn(properties, key) || !ownField(key) || val === undefined || val === null) continue;
+    if (extra === false) errors.push({ path: at(key), message: `unexpected field` });
+    else validateValue(val, extra, at(key), errors);
   }
 }
 
 export function validateComponent(comp: ComponentData, schema: TypeSchema, field: string): ValidationError[] {
-  if (!schema.properties) return [];
   const errors: ValidationError[] = [];
-  const basePath = field || comp.$type;
-
-  if (schema.required) {
-    for (const key of schema.required) {
-      if (comp[key] === undefined || comp[key] === null) {
-        errors.push({ path: basePath ? `${basePath}.${key}` : key, message: `required field missing` });
-      }
-    }
-  }
-
-  validateObject(comp, schema.properties, basePath, errors);
+  validateFields(comp, schema, field || comp.$type, errors, isOwnField);
   return errors;
 }
 
-export function validateNode(node: NodeData): ValidationError[] {
+// Strict takes the type's own registered schema: neither the `default` fallback nor a lazy
+// miss resolver counts as registration (D4).
+export function validateNode(node: NodeData, opts?: ValidateOptions): ValidationError[] {
   const errors: ValidationError[] = [];
 
   for (const [name, comp] of getComponents(node, AnyType)) {
-    const schemaHandler = resolve(comp.$type, 'schema');
-    if (!schemaHandler) continue;
+    const schema = opts?.strict ? resolveExact(comp.$type, 'schema')?.() : resolve(comp.$type, 'schema')?.();
 
-    const schema = (schemaHandler as () => TypeSchema)();
-    if (!schema?.properties) continue;
+    if (!schema) {
+      if (opts?.strict) throw new KernelError('UNKNOWN_TYPE', `${node.$path} ${name || 'main component'}: no schema for type "${comp.$type}"`);
+      continue;
+    }
 
     errors.push(...validateComponent(comp, schema, name));
   }

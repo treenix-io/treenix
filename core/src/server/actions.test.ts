@@ -756,6 +756,47 @@ describe('defineComponent', () => {
     assert.equal((result['#metadata'] as any).title, 'new');
   });
 
+  it('a union args schema is validated before the handler', async () => {
+    let calls = 0;
+    register('test.union', 'schema', () => ({
+      $id: 'test.union', type: 'object' as const, properties: {},
+      methods: { pick: { arguments: [{ name: 'data', anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }] }] } },
+    }));
+    register('test.union', 'action:pick', () => { calls++; });
+    const tree = createMemoryTree();
+    await tree.set(createNode('/u', 'test.union'));
+
+    await executeAction(tree, '/u', undefined, undefined, 'pick', ['a', 'b']);
+    await assert.rejects(
+      () => executeAction(tree, '/u', undefined, undefined, 'pick', 42),
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
+    );
+    assert.equal(calls, 1);
+  });
+
+  it('a union field inside object args is validated', async () => {
+    register('test.union.field', 'schema', () => ({
+      $id: 'test.union.field', type: 'object' as const, properties: {},
+      methods: {
+        query: {
+          arguments: [{
+            name: 'data', type: 'object',
+            properties: { level: { anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }] } },
+          }],
+        },
+      },
+    }));
+    register('test.union.field', 'action:query', () => 'ok');
+    const tree = createMemoryTree();
+    await tree.set(createNode('/uf', 'test.union.field'));
+
+    assert.equal(await executeAction(tree, '/uf', undefined, undefined, 'query', { level: ['warn'] }), 'ok');
+    await assert.rejects(
+      () => executeAction(tree, '/uf', undefined, undefined, 'query', { level: 3 }),
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
+    );
+  });
+
   // Codex round 3 #5 regression: streamAction in trpc.ts previously bypassed validateActionArgs.
   // Refactored to delegate to executeStream — verify executeStream applies the same schema gate.
   it('executeStream rejects invalid args via validateActionArgs', async () => {
