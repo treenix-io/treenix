@@ -62,7 +62,15 @@ function compiledPattern(pattern: string, path: string): RegExp {
 
 export type TypeValidator = (value: unknown, def: PropertySchema, path: string, errors: ValidationError[]) => void;
 
-const typeValidators: Record<string, TypeValidator> = {
+const validateNumber: TypeValidator = (value, def, path, errors) => {
+  if (typeof value !== 'number') { errors.push({ path, message: `expected number, got ${typeof value}` }); return; }
+  if (typeof def.minimum === 'number' && value < def.minimum)
+    errors.push({ path, message: `minimum ${def.minimum}, got ${value}` });
+  if (typeof def.maximum === 'number' && value > def.maximum)
+    errors.push({ path, message: `maximum ${def.maximum}, got ${value}` });
+};
+
+const builtinValidators: Record<string, TypeValidator> = {
   string(value, def, path, errors) {
     if (typeof value !== 'string') { errors.push({ path, message: `expected string, got ${typeof value}` }); return; }
     if (typeof def.minLength === 'number' && value.length < def.minLength)
@@ -75,16 +83,19 @@ const typeValidators: Record<string, TypeValidator> = {
       errors.push({ path, message: `must be one of: ${def.enum.join(', ')}` });
   },
 
-  number(value, def, path, errors) {
-    if (typeof value !== 'number') { errors.push({ path, message: `expected number, got ${typeof value}` }); return; }
-    if (typeof def.minimum === 'number' && value < def.minimum)
-      errors.push({ path, message: `minimum ${def.minimum}, got ${value}` });
-    if (typeof def.maximum === 'number' && value > def.maximum)
-      errors.push({ path, message: `maximum ${def.maximum}, got ${value}` });
+  number: validateNumber,
+
+  integer(value, def, path, errors) {
+    validateNumber(value, def, path, errors);
+    if (typeof value === 'number' && !Number.isInteger(value)) errors.push({ path, message: `expected integer, got ${value}` });
   },
 
   boolean(value, _def, path, errors) {
     if (typeof value !== 'boolean') errors.push({ path, message: `expected boolean, got ${typeof value}` });
+  },
+
+  null(value, _def, path, errors) {
+    if (value !== null) errors.push({ path, message: `expected null, got ${typeof value}` });
   },
 
   array(value, def, path, errors) {
@@ -123,17 +134,20 @@ const typeValidators: Record<string, TypeValidator> = {
   },
 };
 
+// A Map, so a schema `type` naming an Object.prototype member ('toString', '__proto__') finds no validator.
+const typeValidators = new Map(Object.entries(builtinValidators));
+
 // ── Extension point ──
 
 export function addTypeValidator(type: string, fn: TypeValidator): void {
-  typeValidators[type] = fn;
+  typeValidators.set(type, fn);
 }
 
 // ── Core ──
 
 // Every keyword present applies: `type` dispatches, anyOf/oneOf/allOf compose over the same value.
 export function validateValue(value: unknown, def: PropertySchema, path: string, errors: ValidationError[]): void {
-  if (def.type) typeValidators[def.type]?.(value, def, path, errors);
+  if (def.type) typeValidators.get(def.type)?.(value, def, path, errors);
 
   if (def.anyOf && !def.anyOf.some(branch => matches(value, branch, path)))
     errors.push({ path, message: `must match at least one of ${def.anyOf.length} anyOf schemas` });

@@ -100,6 +100,35 @@ describe('validateValue', () => {
     });
   });
 
+  // ── Integer ──
+
+  describe('integer', () => {
+    it('accepts a whole number', () => {
+      assert.equal(check(5, { type: 'integer' }).length, 0);
+      assert.equal(check(-3, { type: 'integer' }).length, 0);
+    });
+
+    it('rejects a fraction and a non-number', () => {
+      assert.deepEqual(check(1.5, { type: 'integer' }).map(e => e.path), ['x']);
+      assert.deepEqual(check('5', { type: 'integer' }).map(e => e.path), ['x']);
+    });
+
+    it('keeps the number bounds', () => {
+      assert.equal(check(3, { type: 'integer', minimum: 5 }).length, 1);
+      assert.equal(check(15, { type: 'integer', maximum: 10 }).length, 1);
+    });
+  });
+
+  // ── Null ──
+
+  describe('null', () => {
+    it('accepts only null', () => {
+      assert.equal(check(null, { type: 'null' }).length, 0);
+      assert.equal(check(0, { type: 'null' }).length, 1);
+      assert.equal(check(undefined, { type: 'null' }).length, 1);
+    });
+  });
+
   // ── Array ──
 
   describe('array', () => {
@@ -304,6 +333,11 @@ describe('validateValue', () => {
     assert.equal(check('anything', { type: 'custom-widget' }).length, 0);
   });
 
+  it('a type named like an Object.prototype member is an unknown type', () => {
+    assert.equal(check('anything', { type: '__proto__' }).length, 0);
+    assert.equal(check('anything', { type: 'hasOwnProperty' }).length, 0);
+  });
+
   it('preserves path through nesting', () => {
     const def = {
       type: 'object',
@@ -419,6 +453,17 @@ describe('validateComponent', () => {
     assert.equal(validateComponent({ $type: 'test', rev: null }, schema, 'test').length, 0);
   });
 
+  it('a required number-or-null field accepts null and rejects other types', () => {
+    const schema: TypeSchema = {
+      type: 'object',
+      properties: { rev: { anyOf: [{ type: 'number' }, { type: 'null' }] } },
+      required: ['rev'],
+    };
+    assert.equal(validateComponent({ $type: 'test', rev: null }, schema, 'test').length, 0);
+    assert.equal(validateComponent({ $type: 'test', rev: 2 }, schema, 'test').length, 0);
+    assert.deepEqual(validateComponent({ $type: 'test', rev: 'a' }, schema, 'test').map(e => e.path), ['test.rev']);
+  });
+
   it('allows null on an optional field (null = absent)', () => {
     const schema: TypeSchema = {
       title: 'Test',
@@ -468,6 +513,21 @@ describe('anyOf / oneOf / allOf', () => {
 
   it('an empty anyOf branch accepts any value', () => {
     assert.equal(check(true, { anyOf: [{ type: 'number' }, {}] }).length, 0);
+  });
+
+  it('an integer branch rejects booleans and fractions', () => {
+    const intOrStr: PropertySchema = { anyOf: [{ type: 'integer' }, { type: 'string' }] };
+    assert.equal(check(2, intOrStr).length, 0);
+    assert.equal(check('a', intOrStr).length, 0);
+    assert.deepEqual(check(true, intOrStr).map(e => e.path), ['x']);
+    assert.deepEqual(check(1.5, intOrStr).map(e => e.path), ['x']);
+  });
+
+  it('oneOf integer-or-null matches exactly one branch for each admitted value', () => {
+    const intOrNull: PropertySchema = { oneOf: [{ type: 'integer' }, { type: 'null' }] };
+    assert.equal(check(5, intOrNull).length, 0);
+    assert.equal(check(null, intOrNull).length, 0);
+    assert.deepEqual(check('a', intOrNull).map(e => e.path), ['x']);
   });
 
   it('anyOf applies to object fields and array items', () => {
