@@ -174,14 +174,14 @@ describe('executeList', () => {
     );
   });
 
-  it('an expensive or oversized predicate is refused with BUDGET before any node is projected', async () => {
+  it('a predicate over the size limit — a long $in or a long literal — is refused with BUDGET before any node is projected', async () => {
     const source = await seed(['/x/a', '/x/b']);
     let projected = 0;
     const counting: Projector = async (node) => { projected++; return node; };
 
-    const expensive = { tag: { $in: Array.from({ length: 20_000 }, (_, i) => i) } };
-    const oversized = { name: 'x'.repeat(17 * 1024) };
-    for (const plan of [{ source: '/x', callerWhere: expensive }, { source: '/x', viewWhere: oversized }]) {
+    const longIn = { tag: { $in: Array.from({ length: 20_000 }, (_, i) => i) } };
+    const longLiteral = { name: 'x'.repeat(17 * 1024) };
+    for (const plan of [{ source: '/x', callerWhere: longIn }, { source: '/x', viewWhere: longLiteral }]) {
       await assert.rejects(
         () => executeList(source, plan, { limit: 10 }, counting),
         (e: unknown) => e instanceof KernelError && e.code === 'BUDGET',

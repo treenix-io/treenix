@@ -813,11 +813,11 @@ describe('watch registration (Stage 6d, core-9yd)', () => {
     assert.equal(cdc.getActiveQueryCount(), 0, 'no group left behind by rejected deep watches');
   });
 
-  it('rejects an over-budget query watch with BUDGET and leaves no group', () => {
+  it('rejects a query watch whose predicate is over the size limit with BUDGET and leaves no group', () => {
     const { cdc } = withSubs(createMemoryTree());
-    const expensive = { tag: { $in: Array.from({ length: 20_000 }, (_, i) => i) } };
+    const longIn = { tag: { $in: Array.from({ length: 20_000 }, (_, i) => i) } };
     assert.throws(
-      () => cdc.watchQuery({ vp: '/views/big', userId: 'u1', plan: { source: '/items', callerWhere: expensive }, mountDeps: new Set(['/views/big']) }),
+      () => cdc.watchQuery({ vp: '/views/big', userId: 'u1', plan: { source: '/items', callerWhere: longIn }, mountDeps: new Set(['/views/big']) }),
       (e: unknown) => e instanceof KernelError && e.code === 'BUDGET',
     );
     assert.equal(cdc.getActiveQueryCount(), 0);
