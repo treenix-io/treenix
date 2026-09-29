@@ -72,6 +72,16 @@ describe('MemoryStore', () => {
     await assert.rejects(() => tree.getChildren('/missing', { query }), isBudget);
   });
 
+  it('getChildren counts the expression work of one call over all its children', async () => {
+    const tree = createMemoryTree();
+    for (let i = 0; i < 3; i++) await tree.set(createNode(`/r/${i}`, 'item', { arr: new Array(40_000).fill(0) }));
+    const query = { $or: Array.from({ length: 100 }, (_, i) => ({ arr: i + 1 })) };
+    const isBudget = (e: unknown) => e instanceof KernelError && e.code === 'BUDGET';
+
+    await assert.rejects(() => tree.getChildren('/r', { query }), isBudget);
+    assert.deepEqual((await tree.getChildren('/r', { query: { arr: 1 } })).items, [], 'a light query over the same nodes runs');
+  });
+
   it('remove', async () => {
     const tree = createMemoryTree();
     await tree.set(createNode('/x', 'x'));

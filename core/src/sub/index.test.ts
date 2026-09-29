@@ -953,6 +953,18 @@ describe('actor-projected membership (F4, core-anz4.3)', () => {
     assert.ok(adminGot.some(e => e !== flip && e.invalidateVps?.includes('/views/shared')), 'and the flipped one');
   });
 
+  it('a change whose membership evaluation exceeds the expression work dirties the watch and keeps the write', async () => {
+    const events: NodeEvent[] = [];
+    const { tree, cdc } = withSubs(createMemoryTree(), e => events.push(e));
+    const viewWhere = { $or: Array.from({ length: 200 }, (_, i) => ({ arr: i + 1 })) };
+    cdc.watchQuery({ vp: '/views/heavy', userId: 'u1', plan: { source: '/items', viewWhere }, mountDeps: new Set(['/views/heavy']) });
+
+    await tree.set({ $path: '/items/big', $type: 'item', arr: new Array(100_000).fill(0) });
+
+    const ev = events.find(e => e.type === 'set' && e.path === '/items/big');
+    assert.deepEqual(ev?.invalidateVps, ['/views/heavy'], 'an unknown flip counts as one: the refetch meets BUDGET');
+  });
+
   it('query watch registration fails closed without a membership projector', () => {
     const { cdc } = withSubscriptions(createMemoryTree());
     assert.throws(

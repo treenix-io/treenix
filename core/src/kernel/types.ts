@@ -742,13 +742,15 @@ export type ScanRange =
   | { readonly subtree: Path }
 
 /**
- * Kernel work is counted, not timed: expression cost is checked once at parse, so scanned nodes and
- * loaded bytes bound the rest.
+ * Kernel work is counted, not timed: expression size is judged at parse; scanned nodes, loaded bytes and
+ * expression work are counted at run time.
  */
 export interface Budget {
   readonly nodes: number
   /** Bytes of loaded nodes. */
   readonly bytes: number
+  /** Expression work of `where`, counted by in-process Stores before each node is tested. */
+  readonly exprWork: number
   /** Absolute time, ms, for work the storage engine does itself (filters, sorts, aggregations). */
   readonly deadline: number
 }
@@ -981,10 +983,13 @@ export interface Limits {
   readonly nodeBytes: number
   /** Size of one structured request — selector, ChangeSet, action args; a larger one is rejected before parsing. */
   readonly requestBytes: number
-  /** Size of one `sift` expression. */
+  /** Size of one `sift` expression, judged at parse. */
   readonly exprBytes: number
-  /** Static cost estimate of an expression — operator weights with operand sizes; above it the query is rejected. */
-  readonly exprCost: number
+  /**
+   * Expression work per operation, counted before each node is tested: every condition's weight times the
+   * number of values at its path in that node. The node that would cross it is refused untested.
+   */
+  readonly exprWork: number
   /** Size of one blob. */
   readonly blobBytes: number
   /** A blob referenced by no node and no journal record within retention is deleted after this. */
@@ -993,6 +998,8 @@ export interface Limits {
   readonly queryMs: number
   /** Wall time of an action, including `io` waits and its stream. */
   readonly actionMs: number
+  /** Nesting of action calls made through an action context; a deeper call is refused. */
+  readonly actionDepth: number
   /** Actual node transitions per ChangeSet, descendants of `remove` and `move` included. */
   readonly changeSet: number
   readonly subsPerLane: number
@@ -1024,11 +1031,12 @@ export const DEFAULT_LIMITS: Limits = {
   nodeBytes: 256 * KIB,
   requestBytes: 512 * KIB,
   exprBytes: 16 * KIB,
-  exprCost: 10_000,
+  exprWork: 10_000_000,
   blobBytes: 100 * MIB,
   blobOrphanMs: 24 * HOUR,
   queryMs: 1_000,
   actionMs: 600_000,
+  actionDepth: 8,
   changeSet: 100,
   subsPerLane: 100,
   recomputeIntervalMs: 100,

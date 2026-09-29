@@ -8,6 +8,7 @@ import { assertValidType, safeJsonParse } from '#core';
 import { dirname as treeDirname } from '#core/path';
 import { KernelError } from '#errors';
 import { createSiftTest } from '#kernel/expr';
+import { exprWork } from '#kernel/expr-work';
 import { DEFAULT_LIMITS } from '#kernel/types';
 import { mkdir, readdir, readFile, realpath, rmdir, unlink } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
@@ -269,7 +270,10 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
       const test = opts?.query ? createSiftTest(opts.query, DEFAULT_LIMITS) : null;
       const depth = opts?.depth ?? 1;
       let filtered = await collectChildren(parent, depth);
-      if (test) filtered = filtered.filter(n => test(mapNodeForSift(n)));
+      if (test) {
+        const work = exprWork(DEFAULT_LIMITS);
+        filtered = filtered.filter(n => test(mapNodeForSift(n), work));
+      }
       return paginate(filtered, opts);
     },
 

@@ -79,6 +79,17 @@ describe('FsStore', () => {
     await assert.rejects(() => tree.getChildren('/missing', { query }), isBudget);
   });
 
+  it('getChildren refuses a query whose work over the stored children exceeds the limit', async () => {
+    const tree = await setup();
+    await tree.set(createNode('/q/a', 'doc', { arr: new Array(100_000).fill(0) }));
+    const query = { $or: Array.from({ length: 200 }, (_, i) => ({ arr: i + 1 })) };
+
+    await assert.rejects(
+      () => tree.getChildren('/q', { query }),
+      (e: unknown) => e instanceof KernelError && e.code === 'BUDGET',
+    );
+  });
+
   it('keeps on-disk form consistent under concurrent set/remove on related paths', async () => {
     const tree = await setup();
     for (let i = 0; i < 30; i++) {

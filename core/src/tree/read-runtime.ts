@@ -19,6 +19,7 @@
 import type { NodeData } from '#core';
 import { KernelError } from '#errors';
 import { assertSafeSiftQuery, assertVisiblePredicate, createSiftTest } from '#kernel/expr';
+import { exprWork } from '#kernel/expr-work';
 import { DEFAULT_LIMITS } from '#kernel/types';
 import { mapNodeForSift, type TreeSource } from './index';
 import { decodeReadCursor, encodeReadCursor, planHash } from './plan-hash';
@@ -94,6 +95,7 @@ export async function executeList(
 
   const viewTest = plan.viewWhere ? createSiftTest(plan.viewWhere, DEFAULT_LIMITS) : null;
   const callerTest = plan.callerWhere ? createSiftTest(plan.callerWhere, DEFAULT_LIMITS) : null;
+  const work = exprWork(DEFAULT_LIMITS);
 
   const collected: { node: NodeData; cursor: string }[] = [];
   let rawScanned = 0;
@@ -123,8 +125,8 @@ export async function executeList(
     // Both viewWhere and callerWhere run against the projected node so
     // hidden fields can't be probed via membership (see file header).
     const siftView = mapNodeForSift(visible);
-    if (viewTest && !viewTest(siftView)) continue;
-    if (callerTest && !callerTest(siftView)) continue;
+    if (viewTest && !viewTest(siftView, work)) continue;
+    if (callerTest && !callerTest(siftView, work)) continue;
 
     collected.push({ node: visible, cursor: entry.cursor });
     if (collected.length === limit + 1) break;

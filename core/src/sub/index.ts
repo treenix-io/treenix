@@ -6,6 +6,7 @@ import { type SubscribeOpts } from '#contexts/service/index';
 import { isComponent, isCompKey, type NodeData } from '#core';
 import { KernelError } from '#errors';
 import { createSiftTest } from '#kernel/expr';
+import { type ExprWork, exprWork } from '#kernel/expr-work';
 import { DEFAULT_LIMITS } from '#kernel/types';
 import {
   isSetEntry,
@@ -160,7 +161,7 @@ type WatchGroup = {
   /** Combined viewWhere ∧ callerWhere test — callerWhere participating is
    *  the 6d fix: a watch registered without it silently missed flips on
    *  caller-filtered views (core-92z guard, now lifted). */
-  test: (node: Record<string, unknown>) => boolean;
+  test: (node: Record<string, unknown>, work: ExprWork) => boolean;
   handles: Set<QueryHandle>;
 };
 
@@ -413,6 +414,22 @@ export function withSubscriptions(
    *  vp → flipped userIds (anz4.27); a flip is per PLAN (§4.2). Projection
    *  runs once per userId per commit, shared across groups; a failed
    *  projection over-invalidates THAT user only — raw eval is never a fallback. */
+  type SiftPair = { o: Record<string, unknown> | null; n: Record<string, unknown> | null };
+
+  /** One change is one operation of each watch it reaches: the old and new node share its work counter. Past
+   *  the limit the flip is unknown, so it counts as one — the write is already committed, and the subscriber's
+   *  refetch meets the same BUDGET. */
+  function membershipFlipped(g: WatchGroup, pair: SiftPair, path: string, userId: string): boolean {
+    const work = exprWork(DEFAULT_LIMITS);
+    try {
+      return (pair.o ? g.test(pair.o, work) : false) !== (pair.n ? g.test(pair.n, work) : false);
+    } catch (err) {
+      if (!(err instanceof KernelError) || err.code !== 'BUDGET') throw err;
+      console.error('[withSubscriptions] membership evaluation over the work limit for user=%s path=%s:', userId, path, err);
+      return true;
+    }
+  }
+
   async function membershipVps(path: string, oldNode: NodeData | null, newNode: NodeData | null): Promise<Map<string, Set<string>>> {
     const flips = new Map<string, Set<string>>();
     if (groups.size === 0) return flips;
@@ -428,7 +445,6 @@ export function withSubscriptions(
     // projector) — kept loud against future registration bypasses.
     if (!project) throw new Error('membershipVps: query watches active without projectMembership');
 
-    type SiftPair = { o: Record<string, unknown> | null; n: Record<string, unknown> | null };
     const perUser = new Map<string, Promise<SiftPair | 'error'>>();
     const projectFor = (userId: string) => {
       let p = perUser.get(userId);
@@ -453,8 +469,7 @@ export function withSubscriptions(
     for (const g of matching) {
       for (const h of g.handles) {
         const pair = await projectFor(h.userId);
-        const flipped = pair === 'error'
-          || (pair.o ? g.test(pair.o) : false) !== (pair.n ? g.test(pair.n) : false);
+        const flipped = pair === 'error' || membershipFlipped(g, pair, path, h.userId);
         if (!flipped) continue;
         let uids = flips.get(h.vp);
         if (!uids) flips.set(h.vp, uids = new Set());
@@ -753,7 +768,7 @@ export function withSubscriptions(
         group = {
           planHash: hash,
           source: reg.plan.source,
-          test: (n) => (!viewTest || viewTest(n)) && (!callerTest || callerTest(n)),
+          test: (n, work) => (!viewTest || viewTest(n, work)) && (!callerTest || callerTest(n, work)),
           handles: new Set(),
         };
         groups.set(hash, group);

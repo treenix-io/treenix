@@ -190,6 +190,21 @@ describe('executeList', () => {
     assert.equal(projected, 0);
   });
 
+  it('one list counts the work of both predicates over every node it tests', async () => {
+    const source = createMemoryTree();
+    for (const name of ['a', 'b']) await source.set(createNode(`/x/${name}`, 'item', { arr: new Array(30_000).fill(0) }));
+    // 100 conditions over 30 000 values: 3e6 per node, 6e6 per predicate over both nodes, 1.2e7 for the two.
+    const viewWhere = { $or: Array.from({ length: 100 }, (_, i) => ({ arr: i })) };
+    const callerWhere = { $or: Array.from({ length: 100 }, (_, i) => ({ arr: i + 1 })) };
+
+    assert.equal((await executeList(source, { source: '/x', viewWhere }, { limit: 10 }, identityProject)).items.length, 2);
+    assert.equal((await executeList(source, { source: '/x', callerWhere }, { limit: 10 }, identityProject)).items.length, 0);
+    await assert.rejects(
+      () => executeList(source, { source: '/x', viewWhere, callerWhere }, { limit: 10 }, identityProject),
+      (e: unknown) => e instanceof KernelError && e.code === 'BUDGET',
+    );
+  });
+
   // A data-dependent refusal is an oracle: "FORBIDDEN iff hidden raw matches"
   // leaked hidden values bit by bit. Right and wrong guesses must look alike.
   it('callerWhere on a hidden field answers the same for right and wrong guesses', async () => {

@@ -16,9 +16,14 @@ describe('readLimits', () => {
   })
 
   it('present fields override their defaults, absent ones keep them', () => {
-    const limits = readLimits(limitsNode({ readNodes: 500, exprCost: 0 }))
+    const limits = readLimits(limitsNode({ readNodes: 500, exprWork: 0, actionDepth: 2 }))
 
-    assert.deepEqual(limits, { ...DEFAULT_LIMITS, readNodes: 500, exprCost: 0 })
+    assert.deepEqual(limits, { ...DEFAULT_LIMITS, readNodes: 500, exprWork: 0, actionDepth: 2 })
+  })
+
+  it('the expression work and nested-call depth defaults are the spec parameters', () => {
+    assert.equal(DEFAULT_LIMITS.exprWork, 10_000_000)
+    assert.equal(DEFAULT_LIMITS.actionDepth, 8)
   })
 
   it('system fields and named components are not limits', () => {

@@ -6,6 +6,7 @@
 import type { NodeData } from '#core';
 import { resolve as ctxResolve } from '#core/registry';
 import { createSiftTest } from '#kernel/expr';
+import { exprWork } from '#kernel/expr-work';
 import { DEFAULT_LIMITS } from '#kernel/types';
 import { mkdir, readdir, realpath, rmdir, stat, unlink } from 'node:fs/promises';
 import { dirname, extname, join, resolve } from 'node:path';
@@ -131,7 +132,10 @@ export async function createRawFsTree(rootDir: string, mountPath: string = ''): 
       const test = opts?.query ? createSiftTest(opts.query, DEFAULT_LIMITS) : null;
       const depth = opts?.depth ?? 1;
       let filtered = await collectDescendants(parent, depth);
-      if (test) filtered = filtered.filter(n => test(mapNodeForSift(n)));
+      if (test) {
+        const work = exprWork(DEFAULT_LIMITS);
+        filtered = filtered.filter(n => test(mapNodeForSift(n), work));
+      }
       return paginate(filtered, opts);
     },
 

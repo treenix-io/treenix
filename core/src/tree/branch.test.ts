@@ -76,6 +76,13 @@ describe('createBranchTree (memory)', () => {
     assert.equal(ys.items[0].title, 'branch-a');
   });
 
+  it('a query whose work over a branch-rewritten node exceeds the limit is refused with BUDGET', async () => {
+    await branch.set(createNode('/a', 'doc', { arr: new Array(100_000).fill(0) }));
+    const query = { $or: Array.from({ length: 200 }, (_, i) => ({ arr: i + 1 })) };
+
+    await assert.rejects(() => branch.getChildren('/', { query }), isCode('BUDGET'));
+  });
+
   it('a query on a system field matches branch-rewritten nodes as it matches live ones', async () => {
     await branch.set(createNode('/a', 'doc', { title: 'branch-a' }));
 

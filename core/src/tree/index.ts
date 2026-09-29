@@ -5,6 +5,7 @@
 import { comparePaths, isRef, type NodeData, type Ref } from '#core';
 import { KernelError } from '#errors';
 import { createSiftTest } from '#kernel/expr';
+import { exprWork } from '#kernel/expr-work';
 import { DEFAULT_LIMITS } from '#kernel/types';
 import { scanFromCollected } from './fs-common';
 import { applyOps, type CommitChange, type CommitReceipt, hasMutationOps, type PatchOp, PatchTestError } from './patch';
@@ -635,7 +636,10 @@ export function createMemoryTree(): TreeSource {
 
       const depth = opts?.depth ?? 1;
       let result = collectChildren(node, parent, depth);
-      if (test) result = result.filter(n => test(mapNodeForSift(n)));
+      if (test) {
+        const work = exprWork(DEFAULT_LIMITS);
+        result = result.filter(n => test(mapNodeForSift(n), work));
+      }
       return paginate(result, opts);
     },
 

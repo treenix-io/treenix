@@ -5,6 +5,7 @@
 import { type NodeData } from '#core';
 import { KernelError } from '#errors';
 import { assertSafeSiftQuery, createSiftTest, mapSiftQuery } from '#kernel/expr';
+import { exprWork } from '#kernel/expr-work';
 import { DEFAULT_LIMITS } from '#kernel/types';
 import { isRecord } from '#util/is-record';
 import { mapNodeForSift, type Tree } from './index';
@@ -27,7 +28,7 @@ export function queryConfigOf(comp: Record<string, unknown>, at: string): QueryC
 }
 
 export function matchesFilter(node: NodeData, match: Record<string, unknown>): boolean {
-  return createSiftTest(match, DEFAULT_LIMITS)(mapNodeForSift(node));
+  return createSiftTest(match, DEFAULT_LIMITS)(mapNodeForSift(node), exprWork(DEFAULT_LIMITS));
 }
 
 export function createQueryTree(config: QueryConfig, parentStore: Tree): Tree {

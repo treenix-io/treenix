@@ -1,11 +1,12 @@
-// The expression language of `where` and `pre`: sift without $regex and without code. Its cost is linear, so an
-// expression is judged once, whole, before sift compiles it — size, static cost, forbidden operators — and its
-// evaluation needs no counter beyond the nodes and bytes a read already counts.
+// The expression language of `where` and `pre`: sift without $regex and without code. Its size is judged at
+// parse, before sift compiles it; its work is counted at run time with the nodes and bytes of the operation —
+// each node is charged before it is tested (expr-work).
 
 import sift from 'sift'
 
 import { KernelError } from '#errors'
-import { isRecord } from '#util/is-record'
+import { chargeWork, type ExprWork, parseWork } from './expr-work'
+import { SIFT_OPERATIONS } from './sift-ops'
 import type { Limits } from './types'
 
 // Refused in every sift query — predicates are user-authored (wire callerWhere,
@@ -18,32 +19,14 @@ const SIFT_FORBIDDEN = new Set(['$where', '$function', '$accumulator', '$expr', 
 
 const encoder = new TextEncoder()
 
-/**
- * Rough per-node work of an expression, compared with `exprCost`: one unit per field condition and per
- * operator, plus one per operand value, so `$in`, `$nin` and `$all` weigh their number of values. A literal
- * object counts its fields, because deep equality compares every one of them.
- */
-export function estimateCost(q: unknown): number {
-  if (Array.isArray(q)) return q.reduce((sum: number, item) => sum + Math.max(1, estimateCost(item)), 0)
-  if (!isRecord(q)) return 0
-
-  let cost = 0
-  for (const value of Object.values(q)) cost += 1 + estimateCost(value)
-  return cost
-}
-
-// A 1e6-value $in fits every counter of scanned nodes and bytes, so size and cost are refused up front.
-function assertWithinBudget(q: unknown, limits: Limits): void {
+function assertSize(q: unknown, limits: Limits): void {
   const bytes = encoder.encode(JSON.stringify(q)).byteLength
   if (bytes > limits.exprBytes) throw new KernelError('BUDGET', `Expression is ${bytes} bytes, limit ${limits.exprBytes}`)
-
-  const cost = estimateCost(q)
-  if (cost > limits.exprCost) throw new KernelError('BUDGET', `Expression costs ${cost}, limit ${limits.exprCost}`)
 }
 
-/** Validate a sift query: BUDGET over the size or cost limit, INVALID on a forbidden operator. */
+/** Validate a sift query: BUDGET over the size limit, INVALID on a forbidden operator. */
 export function assertSafeSiftQuery(q: unknown, limits: Limits): void {
-  assertWithinBudget(q, limits)
+  assertSize(q, limits)
   mapSiftQuery(q)
 }
 
@@ -110,11 +93,18 @@ export function assertVisiblePredicate(q: unknown, where: 'callerWhere' | 'viewW
   }
 }
 
-/** Compile a sift query over storage-shaped nodes; it is validated first, so a refused one evaluates nothing. */
-export function createSiftTest(
-  match: Record<string, unknown>,
-  limits: Limits,
-): (node: Record<string, unknown>) => boolean {
-  assertWithinBudget(match, limits)
-  return sift(mapSiftQuery(match))
+/** A compiled expression; each test charges the node's work to the operation's counter first. */
+export type SiftTest = (node: Record<string, unknown>, work: ExprWork) => boolean
+
+/** Compile a sift query over storage-shaped nodes; it is judged whole first, so a refused one evaluates nothing. */
+export function createSiftTest(match: Record<string, unknown>, limits: Limits): SiftTest {
+  assertSize(match, limits)
+  const mapped = mapSiftQuery(match)
+  const paths = parseWork(mapped)
+  const test = sift(mapped, { operations: SIFT_OPERATIONS })
+
+  return (node, work) => {
+    chargeWork(node, paths, work)
+    return test(node)
+  }
 }
