@@ -7,9 +7,9 @@ import { fileURLToPath } from 'node:url'
 const kernelDir = dirname(fileURLToPath(import.meta.url))
 const srcDir = dirname(kernelDir)
 
-// The kernel stands on Layer 0 and pure helpers only, so the old pipeline cannot leak into it.
-// Packages other than node built-ins are refused until one is admitted here with a reason.
-// errors is the KernelError class alone, built on the kernel's own ErrorCode.
+// Direct imports only: a kernel file may import the kernel, Layer 0, pure helpers and errors; what those
+// areas import in turn is not checked here. Packages other than node built-ins are refused until one is
+// admitted here with a reason. errors is the KernelError class alone, built on the kernel's own ErrorCode.
 const ALLOWED = ['kernel', 'core', 'util', 'comp', 'schema/types', 'errors']
 
 // sift is the expression language of `where` and `pre`.
