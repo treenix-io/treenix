@@ -76,6 +76,16 @@ describe('createBranchTree (memory)', () => {
     assert.equal(ys.items[0].title, 'branch-a');
   });
 
+  it('a query on a system field matches branch-rewritten nodes as it matches live ones', async () => {
+    await branch.set(createNode('/a', 'doc', { title: 'branch-a' }));
+
+    const rewritten = await branch.getChildren('/', { query: { $path: '/a' } });
+    assert.deepEqual(rewritten.items.map(n => n.title), ['branch-a']);
+
+    const live = await branch.getChildren('/', { query: { $path: '/b' } });
+    assert.deepEqual(live.items.map(n => n.title), ['live-b']);
+  });
+
   it('remove writes a whiteout: invisible in branch, intact in lower', async () => {
     assert.ok((await branch.remove('/a')).changes?.length);
     assert.equal(await branch.get('/a'), undefined);

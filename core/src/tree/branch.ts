@@ -12,8 +12,8 @@
 
 import type { NodeData } from '#core';
 import { KernelError } from '#errors';
+import { createSiftTest } from '#kernel/expr';
 import { mapNodeForSift, type Page, paginate, type Tree } from '#tree';
-import sift from 'sift';
 import { patchViaSet } from './patch';
 
 export const BRANCH_DELTA_TYPE = 't.branch.delta';
@@ -68,6 +68,7 @@ export function createBranchTree(upper: Tree, lower: Tree): Tree {
     },
 
     async getChildren(parent, opts, ctx): Promise<Page<NodeData>> {
+      const test = opts?.query ? createSiftTest(opts.query) : null;
       const depth = opts?.depth;
       const u = await upper.getChildren(parent, { depth }, ctx);
       const wrappers = u.items.map(asWrapper);
@@ -76,7 +77,6 @@ export function createBranchTree(upper: Tree, lower: Tree): Tree {
       // Query pushes down to lower untouched; upper wrappers can't match the
       // caller's query (future node is nested) — filter after unwrap instead.
       const l = await lower.getChildren(parent, { depth, query: opts?.query }, ctx);
-      const test = opts?.query ? sift(opts.query) : null;
       const items = [
         ...l.items.filter(n => !shadowed.has(n.$path)),
         ...wrappers.filter(isBranchDelta).map(unwrap)
