@@ -29,7 +29,10 @@ export type InstanceId = string
  */
 export type Rev = string
 
-/** Fractional index: sorts as a string, allows insertion between neighbours without renumbering. */
+/**
+ * Fractional index: allows insertion between neighbours without renumbering. Keys compare bytewise — Mongo sorts
+ * `$order` under the simple collation, Postgres under COLLATE "C"; a locale collation breaks the order.
+ */
 export type OrderKey = string
 
 /** Total order of commits inside one instance; positions of different instances are incomparable. */

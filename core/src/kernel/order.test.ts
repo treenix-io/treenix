@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
 import { KernelError } from '#errors'
-import { between } from './order'
+import { between, isOrderKey } from './order'
 
 // Deterministic, so a failing sequence replays.
 function prng(seed: number): () => number {
@@ -60,15 +60,26 @@ describe('order keys', () => {
     assertAscending(beforeLast)
   })
 
-  it('appending and prepending keep keys short', () => {
+  it('10 000 appends keep keys within 8 characters', () => {
     const list = [between()]
-    for (let n = 0; n < 500; n++) {
-      insertAt(list, list.length)
-      insertAt(list, 0)
-    }
+    for (let n = 0; n < 10_000; n++) insertAt(list, list.length)
 
-    assertAscending(list)
-    assert.ok(Math.max(...list.map((key) => key.length)) <= 20)
+    assert.ok(Math.max(...list.map((key) => key.length)) <= 8)
+  })
+
+  it('10 000 prepends keep keys within 8 characters', () => {
+    const list = [between()]
+    for (let n = 0; n < 10_000; n++) insertAt(list, 0)
+
+    assert.ok(Math.max(...list.map((key) => key.length)) <= 8)
+  })
+
+  it('keys from any earlier scheme stay valid bounds at both ends', () => {
+    for (const key of ['zzzzV', 'zzzzzzzzzz', '0000V', '00001', 'z', '1', 'V5x']) {
+      assert.ok(key < between(key), `after ${key}`)
+      assert.ok(between(undefined, key) < key, `before ${key}`)
+      assert.ok(isOrderKey(between(key)) && isOrderKey(between(undefined, key)), key)
+    }
   })
 
   it('rejects bounds out of order and malformed keys', () => {

@@ -5,15 +5,20 @@ import { KernelError } from '#errors'
 import type { OrderKey } from './types'
 
 const DIGITS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
+const ZERO = DIGITS[0]
+const TOP = DIGITS[DIGITS.length - 1]
 const MID = DIGITS[DIGITS.length >> 1]
 const KEY = /^[0-9A-Za-z]*[1-9A-Za-z]$/
 
 const digitAt = (key: string, i: number): number => DIGITS.indexOf(key[i])
 
+/** A well-formed order key: base-62 digits, not ending in the zero digit. */
+export const isOrderKey = (key: unknown): key is OrderKey => typeof key === 'string' && KEY.test(key)
+
 /** A key strictly between `a` and `b`; an absent bound is that open end of the list. */
 export function between(a?: OrderKey, b?: OrderKey): OrderKey {
   for (const key of [a, b])
-    if (key !== undefined && !KEY.test(key)) throw new KernelError('INVALID', `Malformed order key: ${JSON.stringify(key)}`)
+    if (key !== undefined && !isOrderKey(key)) throw new KernelError('INVALID', `Malformed order key: ${JSON.stringify(key)}`)
   if (a !== undefined && b !== undefined && a >= b) throw new KernelError('INVALID', `Order keys out of order: ${a} >= ${b}`)
 
   if (b === undefined) return a === undefined ? MID : after(a)
@@ -21,22 +26,41 @@ export function between(a?: OrderKey, b?: OrderKey): OrderKey {
   return midpoint(a, b)
 }
 
-// The open ends step one digit instead of halving the gap: appending at one end lengthens keys by one
-// character per ~30 inserts, not per ~6.
+// The open ends count on levels: level k is k extreme digits (the top one after the list, zero before it) and a
+// (k + 1)-digit counter stepped by one with carry. A level holds 61 * 62^k keys, so keys grow logarithmically
+// with appends or prepends. Trailing zeros are trimmed: they do not change a key's value.
 function after(a: string): string {
-  for (let i = 0; i < a.length; i++) {
-    const d = digitAt(a, i)
-    if (d < DIGITS.length - 1) return a.slice(0, i) + DIGITS[d + 1]
-  }
-  return a + MID
+  const k = leading(a, TOP)
+  return trimZeros(a.slice(0, k) + step(counterAt(a, k), 1))
 }
 
 function before(b: string): string {
-  let i = 0
-  while (b[i] === '0') i++
+  const k = leading(b, ZERO)
+  const counter = step(counterAt(b, k), -1)
+  // The level below starts at its largest counter.
+  if (counter[0] === ZERO) return ZERO.repeat(k + 1) + TOP.repeat(k + 2)
+  return trimZeros(b.slice(0, k) + counter)
+}
 
-  const d = digitAt(b, i)
-  return d > 1 ? b.slice(0, i) + DIGITS[d - 1] : b.slice(0, i) + DIGITS[0] + MID
+function leading(key: string, digit: string): number {
+  let k = 0
+  while (key[k] === digit) k++
+  return k
+}
+
+const counterAt = (key: string, k: number): string => key.slice(k, 2 * k + 1).padEnd(k + 1, ZERO)
+
+const trimZeros = (key: string): string => key.replace(/0+$/, '')
+
+// The counter's first digit is never the extreme one the level is made of, so the step never leaves its width.
+function step(counter: string, by: 1 | -1): string {
+  const digits = [...counter].map((digit) => DIGITS.indexOf(digit))
+  for (let i = digits.length - 1; i >= 0; i--) {
+    digits[i] += by
+    if (digits[i] >= 0 && digits[i] < DIGITS.length) break
+    digits[i] = by > 0 ? 0 : DIGITS.length - 1
+  }
+  return digits.map((d) => DIGITS[d]).join('')
 }
 
 // a < b. Inside the recursion a may be '' (zero) and b absent (one).
