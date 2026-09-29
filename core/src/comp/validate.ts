@@ -180,7 +180,7 @@ type ObjectSchema = Pick<PropertySchema, 'properties' | 'required' | 'additional
 const anyKey = (_key: string) => true;
 
 // A component's own fields: `$` keys are system, `#` keys are the node's named components (D3).
-const isOwnField = (key: string) => !key.startsWith('$') && !isCompKey(key);
+export const isOwnField = (key: string) => !key.startsWith('$') && !isCompKey(key);
 
 const admitsNull = (properties: Record<string, PropertySchema>, key: string, path: string) =>
   Object.hasOwn(properties, key) && matches(null, properties[key], path);
