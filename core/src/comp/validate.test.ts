@@ -214,6 +214,19 @@ describe('validateValue', () => {
       assert.match(e[0].message, /null/);
     });
 
+    it('accepts null items when the item schema admits null', () => {
+      assert.equal(check([1, null], { type: 'array', items: { anyOf: [{ type: 'number' }, {}] } }).length, 0);
+
+      const numOrNull: PropertySchema = { type: 'array', items: { anyOf: [{ type: 'number' }, { type: 'null' }] } };
+      assert.equal(check([null, 2], numOrNull).length, 0);
+      assert.deepEqual(check([null, 'a'], numOrNull).map(e => e.path), ['x[1]']);
+    });
+
+    it('rejects null items against an object item schema', () => {
+      const e = check([null], { type: 'array', items: { type: 'object', properties: {} } });
+      assert.deepEqual(e.map(x => x.path), ['x[0]']);
+    });
+
     it('rejects non-object when properties expected', () => {
       const def = {
         type: 'array',

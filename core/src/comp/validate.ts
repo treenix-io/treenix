@@ -117,15 +117,17 @@ const builtinValidators: Record<string, TypeValidator> = {
 
     for (let i = 0; i < value.length; i++) {
       const ip = `${path}[${i}]`;
+      const item = value[i];
 
       // Fix K: null/undefined in array fails against item type — not silently skipped.
       // (Was: continue on null. Hid malformed arrays like [null, null] passing object schema.)
-      if (value[i] === undefined || value[i] === null) {
-        errors.push({ path: ip, message: `expected ${items.type ?? 'value'}, got ${value[i] === null ? 'null' : 'undefined'}` });
+      // A null item passes only when the item schema itself admits null, as a required field's does.
+      if (item === undefined || (item === null && !matches(null, items, ip))) {
+        errors.push({ path: ip, message: `expected ${items.type ?? 'value'}, got ${item === null ? 'null' : 'undefined'}` });
         continue;
       }
 
-      validateValue(value[i], items, ip, errors);
+      validateValue(item, items, ip, errors);
     }
   },
 
