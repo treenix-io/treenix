@@ -84,6 +84,16 @@ describe('validateValue', () => {
       assert.equal(e.length, 1);
       assert.match(e[0].message, /maximum 10/);
     });
+
+    it('enum', () => {
+      assert.equal(check(2, { type: 'number', enum: [1, 2] }).length, 0);
+      assert.deepEqual(check(3, { type: 'number', enum: [1, 2] }).map(e => e.path), ['x']);
+    });
+  });
+
+  it('enum without a type admits exactly its members', () => {
+    assert.equal(check(1, { enum: ['a', 1] }).length, 0);
+    assert.equal(check('1', { enum: ['a', 1] }).length, 1);
   });
 
   // ── Boolean ──
@@ -521,6 +531,14 @@ describe('anyOf / oneOf / allOf', () => {
     assert.equal(check('a', intOrStr).length, 0);
     assert.deepEqual(check(true, intOrStr).map(e => e.path), ['x']);
     assert.deepEqual(check(1.5, intOrStr).map(e => e.path), ['x']);
+  });
+
+  it('a literal union admits only its literals', () => {
+    const oneOrA: PropertySchema = { anyOf: [{ type: 'number', enum: [1] }, { type: 'string', enum: ['a'] }] };
+    assert.equal(check(1, oneOrA).length, 0);
+    assert.equal(check('a', oneOrA).length, 0);
+    assert.deepEqual(check(7, oneOrA).map(e => e.path), ['x']);
+    assert.deepEqual(check('b', oneOrA).map(e => e.path), ['x']);
   });
 
   it('oneOf integer-or-null matches exactly one branch for each admitted value', () => {

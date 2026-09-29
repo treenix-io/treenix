@@ -79,8 +79,6 @@ const builtinValidators: Record<string, TypeValidator> = {
       errors.push({ path, message: `max length ${def.maxLength}, got ${value.length}` });
     if (typeof def.pattern === 'string' && !compiledPattern(def.pattern, path).test(value))
       errors.push({ path, message: `must match /${def.pattern}/` });
-    if (def.enum && !def.enum.includes(value))
-      errors.push({ path, message: `must be one of: ${def.enum.join(', ')}` });
   },
 
   number: validateNumber,
@@ -148,6 +146,9 @@ export function addTypeValidator(type: string, fn: TypeValidator): void {
 // Every keyword present applies: `type` dispatches, anyOf/oneOf/allOf compose over the same value.
 export function validateValue(value: unknown, def: PropertySchema, path: string, errors: ValidationError[]): void {
   if (def.type) typeValidators.get(def.type)?.(value, def, path, errors);
+
+  if (def.enum && !def.enum.some(allowed => allowed === value))
+    errors.push({ path, message: `must be one of: ${def.enum.join(', ')}` });
 
   if (def.anyOf && !def.anyOf.some(branch => matches(value, branch, path)))
     errors.push({ path, message: `must match at least one of ${def.anyOf.length} anyOf schemas` });
