@@ -1,7 +1,8 @@
 // Core built-in types — registered so validation (Write-Barrier) accepts them.
 // Convention: no dot = core built-in (see Type Naming Convention in CLAUDE.md)
 
-import { normalizeType, register } from '#core';
+import { normalizeType } from './component';
+import { register } from './registry';
 
 // kriz: should be 't.dir', 't.root', and so on
 // kriz: should be revised and reviewed

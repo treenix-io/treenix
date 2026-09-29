@@ -13,6 +13,8 @@ export type ComponentData<T = Record<string, unknown>> = T & {
   $acl?: GroupPerm[];
   /** Schema version stamped by migrations (tree/migration.ts). Absent = 0. */
   $v?: number;
+  /** Fractional key (kernel/order.ts): a node's place among its siblings, a component's among the node's. */
+  $order?: string;
 };
 
 export type NodeData<T = Record<string, unknown>> = ComponentData<T> & {
@@ -38,7 +40,7 @@ export type TypeId<T = unknown> = string | Class<T>;
 // Types with dots are already namespaced and returned as-is
 export function normalizeType(type: TypeId): string {
   if (typeof type === 'string') return type.includes('.') ? type : `t.${type}`;
-  if (typeof (type as any).$type === 'string') return normalizeType((type as any).$type);
+  if ('$type' in type && typeof type.$type === 'string') return normalizeType(type.$type);
   throw new Error('TypeId: class not registered (missing $type)');
 }
 
@@ -195,18 +197,26 @@ export function getComponent<T = unknown>(
   return getComponentField(node, type, field)?.[0];
 }
 
+// An absent $order is the empty key: it sorts before every generated key, as a missing field does in a Mongo sort.
+function byOrderThenName<C extends { $order?: string }>([ak, a]: [string, C], [bk, b]: [string, C]): number {
+  const ao = a.$order ?? '', bo = b.$order ?? '';
+  if (ao !== bo) return ao < bo ? -1 : 1;
+  return ak < bk ? -1 : ak > bk ? 1 : 0;
+}
+
+/** The main component '' first, then the named ones by ($order, name). */
 export function getComponents<T = unknown>(
   node: NodeData,
   type: TypeId<T> = AnyType,
 ): [string, ComponentData<T>][] {
-  const result: [string, ComponentData<T>][] = [];
-  if (isOfType<T>(node, type)) result.push(['', node]);
+  const named: [string, ComponentData<T>][] = [];
   for (const [k, v] of Object.entries(node)) {
     if (!isCompKey(k)) continue; // bare keys are data, $ keys are system
     assertWellFormedCompEntry(node, k, v);
-    if (isOfType<T>(v, type)) result.push([k, v]);
+    if (isOfType<T>(v, type)) named.push([k, v]);
   }
-  return result;
+  named.sort(byOrderThenName);
+  return isOfType<T>(node, type) ? [['', node], ...named] : named;
 }
 
 export function removeComponent(node: NodeData, name: string): boolean {

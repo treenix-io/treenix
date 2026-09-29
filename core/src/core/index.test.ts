@@ -93,6 +93,29 @@ describe('Component access', () => {
     assert.ok(!isComponent(null));
   });
 
+  it('iterates the main component first, then ($order, name), whatever the key order', () => {
+    const n = createNode('/x', 'x', {}, {
+      c: { $type: 'money', $order: 'a' },
+      b: { $type: 'tag', $order: 'V' },
+      a: { $type: 'money', $order: 'a' },
+      d: { $type: 'tag', $order: 'U' },
+    });
+
+    assert.deepEqual(getComponents(n).map(([name]) => name), ['', '#d', '#b', '#a', '#c']);
+    assert.deepEqual(getComponents(n, 'money').map(([name]) => name), ['#a', '#c']);
+  });
+
+  it('components without $order come before ordered ones, by name', () => {
+    const n = createNode('/x', 'x', {}, {
+      ordered: { $type: 'tag', $order: '1' },
+      zeta: { $type: 'tag' },
+      alpha: { $type: 'tag' },
+    });
+    n.$order = 'z';
+
+    assert.deepEqual(getComponents(n).map(([name]) => name), ['', '#alpha', '#zeta', '#ordered']);
+  });
+
   it('set and remove', () => {
     const n = createNode('/x', 'x');
     (n as any)['#tag'] = { $type: 'tag', value: 'urgent' };
