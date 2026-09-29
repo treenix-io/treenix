@@ -155,6 +155,9 @@ export function subscriptionToAsyncIterable<E>(
               abortListener = () => shutdown();
               signal.addEventListener('abort', abortListener);
             }
+            // register() may push, end or overflow synchronously: waiting now would miss it forever.
+            if (closed) detach();
+            if (queue.length > 0 || endRequested || closed) return iterator.next();
           }
           return new Promise<IteratorResult<E>>(resolve => {
             waiter = resolve;

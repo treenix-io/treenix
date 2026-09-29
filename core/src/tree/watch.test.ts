@@ -146,6 +146,20 @@ describe('subscriptionToAsyncIterable — lifecycle', () => {
     assert.equal(reg.listenerCount(), 0, 'overflow runs unregister');
   });
 
+  it('a push and an end inside register are served, then unregister runs', async () => {
+    let unregistered = false;
+    const iter = subscriptionToAsyncIterable<TreeEvent>((push, end) => {
+      push({ type: 'remove', path: '/early' });
+      end();
+      return () => { unregistered = true; };
+    }, overflow);
+    const it = iter[Symbol.asyncIterator]();
+
+    assert.deepEqual(await it.next(), { value: { type: 'remove', path: '/early' }, done: false });
+    assert.equal((await it.next()).done, true);
+    assert.equal(unregistered, true);
+  });
+
   it('buffer <= 0 throws BAD_REQUEST at first .next()', () => {
     const reg = makeListenerRegistry();
     const iter = subscriptionToAsyncIterable<TreeEvent>(reg.register, overflow, { buffer: 0 });
