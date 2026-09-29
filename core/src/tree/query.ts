@@ -40,9 +40,10 @@ export function createQueryTree(config: QueryConfig, parentStore: Tree): Tree {
     // read path resolves query mounts into ReadPlans BEFORE the raw tree is
     // consulted (resolveReadPlan), so this adapter never sees client traffic.
     async getChildren(_path, opts, ctx) {
-      if (opts?.query) assertSafeSiftQuery(opts.query, DEFAULT_LIMITS);
       const mappedQuery = mapSiftQuery(config.match) as Record<string, unknown>;
       const mergedQuery = opts?.query ? { $and: [opts.query, mappedQuery] } : mappedQuery;
+      // Judged here, whole: a parent that hands the query to its database compiles no sift.
+      assertSafeSiftQuery(mergedQuery, DEFAULT_LIMITS);
       return parentStore.getChildren(config.source, { ...opts, depth: 1, query: mergedQuery }, ctx);
     },
 

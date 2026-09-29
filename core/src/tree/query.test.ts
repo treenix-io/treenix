@@ -4,7 +4,7 @@ import { assertSafeSiftQuery } from '#kernel/expr';
 import { DEFAULT_LIMITS } from '#kernel/types';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { createMemoryTree } from './index';
+import { createMemoryTree, type Tree } from './index';
 import { createQueryTree, matchesFilter } from './query';
 
 describe('matchesFilter', () => {
@@ -130,6 +130,23 @@ describe('QueryStore', () => {
       () => qs.getChildren('/x', { query: { $where: 'function(){return true}' } }),
       /Forbidden sift operator: \$where/,
     );
+  });
+
+  it('judges the merged expression before the parent is asked', async () => {
+    const memory = createMemoryTree();
+    let asked = 0;
+    // Stands for a parent that hands the query to its database and compiles no sift itself.
+    const parent: Tree = { ...memory, getChildren: async (...args) => { asked++; return memory.getChildren(...args); } };
+    const isBudget = (e: unknown) => e instanceof KernelError && e.code === 'BUDGET';
+    const half = 'x'.repeat(9 * 1024);
+
+    const oversizedMatch = createQueryTree({ source: '/items', match: { name: 'x'.repeat(17 * 1024) } }, parent);
+    await assert.rejects(() => oversizedMatch.getChildren('/x'), isBudget);
+
+    const qs = createQueryTree({ source: '/items', match: { name: half } }, parent);
+    await assert.rejects(() => qs.getChildren('/x', { query: { title: half } }), isBudget);
+
+    assert.equal(asked, 0);
   });
 
   it('rejects $function, $accumulator, $expr — defense-in-depth (R4-TREE-3)', () => {
