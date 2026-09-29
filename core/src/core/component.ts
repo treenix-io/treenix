@@ -15,8 +15,6 @@ export type ComponentData<T = Record<string, unknown>> = T & {
   $v?: number;
 };
 
-export type RefEntry = { t: string; f?: string; d?: ComponentData };
-
 export type NodeData<T = Record<string, unknown>> = ComponentData<T> & {
   $path: string;
   /** Stable identity (ULID), minted once at first persist and immutable —
@@ -27,7 +25,6 @@ export type NodeData<T = Record<string, unknown>> = ComponentData<T> & {
   $refId?: string;
   $owner?: string;
   $rev?: number;
-  $refs?: RefEntry[];
 };
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
@@ -73,20 +70,6 @@ export function isRef(value: unknown): value is Ref {
   if (!value || typeof value !== 'object') return false;
   const v = value as Record<string, unknown>;
   return typeof v.$ref === 'string' && (!v.$type || v.$type === 'ref' || v.$type === 't.ref');
-}
-
-// ── Moved tombstone ──
-// Left at the old path by move(): redirects reads/refs to the new location.
-// Deliberately NOT a ref (isRef is false) — nothing follows it by accident;
-// resolveRef follows chains explicitly. Carries the moved node's $id (echoed
-// by the write pipeline): the tombstone is a forwarding address for exactly
-// that identity, letting resolveRef verify it is following the right chain.
-export type Moved = { $type: 'moved' | 't.moved'; $ref: string };
-
-export function isMoved(value: unknown): value is Moved {
-  if (!value || typeof value !== 'object') return false;
-  const v = value as Record<string, unknown>;
-  return (v.$type === 'moved' || v.$type === 't.moved') && typeof v.$ref === 'string';
 }
 
 // ── Node ──

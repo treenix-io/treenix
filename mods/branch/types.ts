@@ -10,7 +10,7 @@ import { A, isRef, makeNode, type NodeData, R, S, W } from '@treenx/core';
 import { getCtx, registerType } from '@treenx/core/comp';
 import { KernelError } from '@treenx/core/errors';
 import type { ActorContext } from '@treenx/core/server/actions';
-import { type PatchManyEntry, relocateCtx, type Tree } from '@treenx/core/tree';
+import { type PatchManyEntry, refsOf, relocateCtx, type Tree } from '@treenx/core/tree';
 import { isBranchDelta, isBranchWhiteout } from '@treenx/core/tree/branch';
 
 export type BranchStatus = 'open' | 'review' | 'merged' | 'conflict' | 'abandoned';
@@ -83,7 +83,7 @@ function rewriteViewRefs(node: NodeData, viewRoot: string, base: string): NodeDa
   };
   walk(clone);
 
-  for (const entry of clone.$refs ?? []) {
+  for (const entry of refsOf(clone) ?? []) {
     const mapped = mapTarget(entry.t);
     if (mapped !== undefined) entry.t = mapped;
   }

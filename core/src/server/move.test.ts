@@ -3,10 +3,11 @@
 // semantics are the real ones: tombstones echo the moved node's id,
 // destination members carry it.
 
-import { createNode, isMoved } from '#core';
+import { createNode } from '#core';
 import { KernelError } from '#errors';
 import { createMemoryTree, resolveRef, type Tree } from '#tree';
 import { withStoragePolicy } from '#tree/policy';
+import { isMoved } from '#tree/refs';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { mutationLock, withCommitEnvelope } from './commit';

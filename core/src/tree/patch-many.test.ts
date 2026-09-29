@@ -16,6 +16,7 @@ import { afterEach, describe, it } from 'node:test';
 import { createFsTree } from './fs';
 import { createFilterTree, createMemoryTree, createOverlayTree, type Tree, type TreeSource } from './index';
 import { withStoragePolicy } from './policy';
+import { refsOf } from './refs';
 import { createRepathTree } from './repath';
 
 const code = (expected: string) => (e: unknown) =>
@@ -520,7 +521,7 @@ describe('patchMany: storage policy', () => {
     ]);
 
     const plain = await tree.get('/r/plain');
-    assert.ok(plain?.$refs?.some(r => r.t === '/r/linked' && r.f === 'friend'));
+    assert.ok(plain && refsOf(plain)?.some(r => r.t === '/r/linked' && r.f === 'friend'));
     const linked = await tree.get('/r/linked');
     assert.equal(linked?.$refs, undefined);
   });
@@ -624,6 +625,6 @@ describe('patchMany: full pipeline', () => {
     ]);
 
     const a = await tree.get('/dir/a');
-    assert.ok(a?.$refs?.some(r => r.t === '/dir/b' && r.f === 'link'));
+    assert.ok(a && refsOf(a)?.some(r => r.t === '/dir/b' && r.f === 'link'));
   });
 });

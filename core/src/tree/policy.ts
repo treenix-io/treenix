@@ -8,13 +8,14 @@
 
 import { validateNode } from '#comp/validate';
 import {
-  getRegistryVersion, isCompKey, isComponent, isMoved, isRef,
-  type NodeData, type RefEntry, resolveExact,
+  getRegistryVersion, isCompKey, isComponent, isRef,
+  type NodeData, resolveExact,
 } from '#core';
 import { KernelError } from '#errors';
 import { ulid } from '#util/ulid';
 import { applyPatchManyEntry, assertPatchManyBatch, type CommitReceipt, hasMutationOps, isSetEntry, type PatchManyEntry, type PatchOp, type Tree } from './index';
 import { patchViaSet } from './patch';
+import { isMoved, type RefEntry, refsOf } from './refs';
 import { withCache } from './cache';
 import { isTrashExempt } from './trash-exempt';
 
@@ -202,7 +203,7 @@ function extractRefs(node: NodeData): RefEntry[] {
 /** Merge derived refs with standalone refs (those without f:) */
 function buildRefs(node: NodeData): RefEntry[] | undefined {
   const derived = extractRefs(node);
-  const standalone = node.$refs?.filter(r => !r.f) ?? [];
+  const standalone = refsOf(node)?.filter(r => !r.f) ?? [];
   const merged = [...standalone, ...derived];
   return merged.length ? merged : undefined;
 }

@@ -5,7 +5,7 @@ import { withMounts } from '@treenx/core/mount';
 import { loadSchemasFromDir } from '@treenx/core/schema/load';
 import { executeAction } from '@treenx/core/server/actions';
 import { createPipeline } from '@treenx/core/server/server';
-import { createMemoryTree, type Tree } from '@treenx/core/tree';
+import { createMemoryTree, refsOf, type Tree } from '@treenx/core/tree';
 import { BRANCH_DELTA_TYPE, BRANCH_WHITEOUT_TYPE } from '@treenx/core/tree/branch';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
@@ -468,7 +468,7 @@ describe('branch mod: requestMerge + merge', () => {
     assert.equal(diffed.inside.$ref, '/company/doc');
     assert.equal(diffed.inside.$refId, 'id-doc', 'identity untouched by the path rewrite');
     assert.equal(diffed.outside.$ref, '/company/other');
-    assert.equal(diffed.$refs?.[0]?.t, '/company/doc', 'standalone $refs entry rewritten');
+    assert.equal(refsOf(diffed)?.[0]?.t, '/company/doc', 'standalone $refs entry rewritten');
 
     await executeAction(tree, branchPath, undefined, undefined, 'merge', undefined, ACTOR);
     const live = await root.get('/company/linked');

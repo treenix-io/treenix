@@ -10,10 +10,11 @@
 // mount boundaries — cross-mount relocation is a copy+delete with different
 // semantics (POSIX rename EXDEV precedent), not a move.
 
-import { assertSafePath, commonAncestor, isChildPath, isMoved, type NodeData } from '#core';
+import { assertSafePath, commonAncestor, isChildPath, type NodeData } from '#core';
 import { KernelError } from '#errors';
 import { asTreeSource, type PatchManyEntry, type Tree } from '#tree';
 import { relocateCtx } from '#tree/policy';
+import { isMoved } from '#tree/refs';
 import { commit, mutationLock } from './commit';
 
 /** Batch cap: the commit envelope acquires one lock per member path and both

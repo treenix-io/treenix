@@ -17,6 +17,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { relocateCtx, sweepTrash, TRASH_ENTRY_TYPE, TRASH_ROOT, withStoragePolicy } from './policy';
+import { refsOf } from './refs';
 import { addTrashExempt, isTrashExempt } from './trash-exempt';
 
 // ── migration step (base + client path) ──
@@ -557,10 +558,12 @@ describe('policy: $refs step', () => {
     });
 
     const node = await tree.get('/order/1');
-    assert.ok(node?.$refs);
-    assert.equal(node.$refs.length, 2);
-    assert.ok(node.$refs.some(r => r.t === '/customers/ivan' && r.f === '#customer'));
-    assert.ok(node.$refs.some(r => r.t === '/menu/latte' && r.f === 'items.0'));
+    assert.ok(node);
+    const refs = refsOf(node);
+    assert.ok(refs);
+    assert.equal(refs.length, 2);
+    assert.ok(refs.some(r => r.t === '/customers/ivan' && r.f === '#customer'));
+    assert.ok(refs.some(r => r.t === '/menu/latte' && r.f === 'items.0'));
   });
 
   it('preserves standalone refs (no f:)', async () => {
@@ -572,11 +575,24 @@ describe('policy: $refs step', () => {
     });
 
     const node = await tree.get('/factory');
-    assert.ok(node?.$refs);
-    assert.equal(node.$refs.length, 1);
-    assert.equal(node.$refs[0].t, '/suppliers/bob');
-    assert.equal(node.$refs[0].d?.$type, 'supplies');
-    assert.equal(node.$refs[0].f, undefined);
+    assert.ok(node);
+    const refs = refsOf(node);
+    assert.ok(refs);
+    assert.equal(refs.length, 1);
+    assert.equal(refs[0].t, '/suppliers/bob');
+    assert.equal(refs[0].d?.$type, 'supplies');
+    assert.equal(refs[0].f, undefined);
+  });
+
+  it('rejects a malformed $refs index as INVALID', async () => {
+    const tree = setup();
+    for (const $refs of ['/suppliers/bob', [{ f: 'x' }], [{ t: '/x', d: 'plain' }]]) {
+      await assert.rejects(
+        tree.set({ $path: '/factory', $type: 'mfg.factory', $refs }),
+        (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
+      );
+    }
+    assert.equal(await tree.get('/factory'), undefined);
   });
 
   it('merges standalone + derived refs', async () => {
@@ -589,11 +605,13 @@ describe('policy: $refs step', () => {
     });
 
     const node = await tree.get('/order/2');
-    assert.ok(node?.$refs);
-    assert.equal(node.$refs.length, 2);
+    assert.ok(node);
+    const refs = refsOf(node);
+    assert.ok(refs);
+    assert.equal(refs.length, 2);
     // standalone first, then derived
-    assert.equal(node.$refs[0].t, '/promos/summer');
-    assert.equal(node.$refs[1].t, '/customers/ivan');
+    assert.equal(refs[0].t, '/promos/summer');
+    assert.equal(refs[1].t, '/customers/ivan');
   });
 
   it('returns undefined $refs when no refs exist', async () => {
@@ -618,10 +636,12 @@ describe('policy: $refs step', () => {
     });
 
     const node = await tree.get('/node');
-    assert.ok(node?.$refs);
-    assert.equal(node.$refs.length, 2);
-    assert.ok(node.$refs.some(r => r.t === '/couriers/alex' && r.f === '#delivery.courier'));
-    assert.ok(node.$refs.some(r => r.t === '/warehouses/main' && r.f === '#delivery.warehouse'));
+    assert.ok(node);
+    const refs = refsOf(node);
+    assert.ok(refs);
+    assert.equal(refs.length, 2);
+    assert.ok(refs.some(r => r.t === '/couriers/alex' && r.f === '#delivery.courier'));
+    assert.ok(refs.some(r => r.t === '/warehouses/main' && r.f === '#delivery.warehouse'));
   });
 
   it('updates $refs after patch (single write)', async () => {
@@ -636,10 +656,12 @@ describe('policy: $refs step', () => {
     ]);
 
     const node = await tree.get('/order/3');
-    assert.ok(node?.$refs);
-    assert.equal(node.$refs.length, 1);
-    assert.equal(node.$refs[0].t, '/customers/bob');
-    assert.equal(node.$refs[0].f, '#customer');
+    assert.ok(node);
+    const refs = refsOf(node);
+    assert.ok(refs);
+    assert.equal(refs.length, 1);
+    assert.equal(refs[0].t, '/customers/bob');
+    assert.equal(refs[0].f, '#customer');
   });
 
   it('removes $refs when patch clears all refs', async () => {
