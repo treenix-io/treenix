@@ -294,9 +294,13 @@ describe('TWP peer over loopback', () => {
     assert.equal(f.err.code, 'CANCELLED');
   });
 
-  it('act stream on an unattached peer fails UNAVAILABLE', async () => {
+  it('act stream on an unattached peer fails UNAVAILABLE', { timeout: 5_000 }, async () => {
     const stream = createPeer().req.actStream({ path: '/a', action: 'x' });
     await assert.rejects(stream[Symbol.asyncIterator]().next(), isCode('UNAVAILABLE'));
+  });
+
+  it('a unary call on an unattached peer fails UNAVAILABLE', { timeout: 5_000 }, async () => {
+    await assert.rejects(createPeer().req.get('/a'), isCode('UNAVAILABLE'));
   });
 
   it('act stream past the requester buffer fails BUDGET', async () => {

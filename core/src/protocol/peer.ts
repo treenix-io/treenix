@@ -517,7 +517,7 @@ export function createPeer(serve?: ServeFactory) {
 
   function call(build: (id: number) => ReqFrame): Promise<unknown> {
     const c = conn;
-    if (!c) return Promise.reject(new Error('twp: peer not attached'));
+    if (!c) return Promise.reject(new KernelError('UNAVAILABLE', 'twp: peer not attached'));
     const id = nextId++;
     return new Promise((resolve, reject) => {
       pending.set(id, { resolve, reject });
