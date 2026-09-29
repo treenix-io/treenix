@@ -44,7 +44,7 @@ The Vite dev server serves the frontend on `3210`. The Treenix server runs on `3
 On boot you see a yellow banner:
 
 ```
-⚠️  DEV MODE — UNAUTHORIZED ADMIN ACCESS ENABLED
+⚠️  DEV MODE — UNAUTHENTICATED ADMIN ACCESS ENABLED
    MCP: http://localhost:3211/mcp
    Loopback only. Do not expose this port externally.
    Disable: NODE_ENV=production (or MCP_DEV_ADMIN=0 / VITE_DEV_LOGIN=0)
