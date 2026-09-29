@@ -894,6 +894,14 @@ describe('R4-MOUNT-4 — dynamic type schema meta-validation', () => {
     );
   });
 
+  it('rejects a malformed regex pattern as INVALID', async () => {
+    const tree = await setup('test.badre', { properties: { x: { type: 'string', pattern: '[' } } });
+    await assert.rejects(
+      executeAction(tree, '/data/x', 'test.badre', undefined, 'go', { x: 'a' }),
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
+    );
+  });
+
   it('rejects schema deeper than depth cap', async () => {
     let nested: Record<string, unknown> = { type: 'string' };
     for (let i = 0; i < 30; i++) nested = { properties: { x: nested } };

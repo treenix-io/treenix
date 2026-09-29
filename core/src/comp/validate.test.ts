@@ -626,6 +626,10 @@ describe('pattern guard', () => {
     assert.throws(() => check('a', { type: 'string', pattern: 'a'.repeat(300) }), isCode('INVALID'));
   });
 
+  it('a malformed pattern in a code-registered schema is INVALID', () => {
+    assert.throws(() => check('a', { type: 'string', pattern: '[' }), isCode('INVALID'));
+  });
+
   it('a safe pattern keeps validating on repeated use', () => {
     const def: PropertySchema = { type: 'string', pattern: '^[a-z]+$' };
     assert.equal(check('abc', def).length, 0);
@@ -637,6 +641,10 @@ describe('pattern guard', () => {
 describe('assertSafeSchema', () => {
   it('rejects nested quantifiers anywhere in the schema', () => {
     assert.throws(() => assertSafeSchema({ properties: { x: { anyOf: [{ pattern: '(a*)*' }] } } }, 't'), isCode('INVALID'));
+  });
+
+  it('rejects a malformed pattern before anything validates against it', () => {
+    assert.throws(() => assertSafeSchema({ properties: { x: { type: 'string', pattern: '[' } } }, 't'), isCode('INVALID'));
   });
 
   it('rejects a schema deeper than the cap', () => {

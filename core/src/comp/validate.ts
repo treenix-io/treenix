@@ -39,7 +39,7 @@ export function assertSafeSchema(schema: unknown, ctx: string, depth = 0): void 
   if (depth > SCHEMA_DEPTH_MAX) throw new KernelError('INVALID', `${ctx}: schema too deep (max ${SCHEMA_DEPTH_MAX})`);
   if (Array.isArray(schema)) { for (const v of schema) assertSafeSchema(v, ctx, depth + 1); return; }
   for (const [k, v] of Object.entries(schema)) {
-    if (k === 'pattern' && typeof v === 'string') assertSafePattern(v, ctx);
+    if (k === 'pattern' && typeof v === 'string') compiledPattern(v, ctx);
     assertSafeSchema(v, ctx, depth + 1);
   }
 }
@@ -53,7 +53,13 @@ function compiledPattern(pattern: string, path: string): RegExp {
   if (cached) return cached;
 
   assertSafePattern(pattern, path);
-  const re = new RegExp(pattern);
+  let re: RegExp;
+  try {
+    re = new RegExp(pattern);
+  } catch (e) {
+    throw new KernelError('INVALID', `${path}: schema.pattern is not a valid regex (${String(e)})`);
+  }
+
   compiledPatterns.set(pattern, re);
   return re;
 }
