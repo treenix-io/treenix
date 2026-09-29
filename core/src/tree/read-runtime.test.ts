@@ -174,6 +174,22 @@ describe('executeList', () => {
     );
   });
 
+  it('an expensive or oversized predicate is refused with BUDGET before any node is projected', async () => {
+    const source = await seed(['/x/a', '/x/b']);
+    let projected = 0;
+    const counting: Projector = async (node) => { projected++; return node; };
+
+    const expensive = { tag: { $in: Array.from({ length: 20_000 }, (_, i) => i) } };
+    const oversized = { name: 'x'.repeat(17 * 1024) };
+    for (const plan of [{ source: '/x', callerWhere: expensive }, { source: '/x', viewWhere: oversized }]) {
+      await assert.rejects(
+        () => executeList(source, plan, { limit: 10 }, counting),
+        (e: unknown) => e instanceof KernelError && e.code === 'BUDGET',
+      );
+    }
+    assert.equal(projected, 0);
+  });
+
   // A data-dependent refusal is an oracle: "FORBIDDEN iff hidden raw matches"
   // leaked hidden values bit by bit. Right and wrong guesses must look alike.
   it('callerWhere on a hidden field answers the same for right and wrong guesses', async () => {

@@ -1,5 +1,6 @@
 import { createNode } from '#core';
 import { KernelError } from '#errors';
+import { mapSiftQuery } from '#kernel/expr';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, realpath, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -7,7 +8,6 @@ import { basename, join } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 import { createFsTree } from './fs';
 import { assertPathSafe } from './path-safety';
-import { mapSiftQuery } from './query';
 
 describe('FsStore', () => {
   let dir: string;

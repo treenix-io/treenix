@@ -5,6 +5,7 @@
 import { type SubscribeOpts } from '#contexts/service/index';
 import { isComponent, isCompKey, type NodeData } from '#core';
 import { KernelError } from '#errors';
+import { assertVisiblePredicate, createSiftTest } from '#kernel/expr';
 import {
   isSetEntry,
   mapNodeForSift,
@@ -17,7 +18,6 @@ import {
   type TreeWatchScope,
 } from '#tree';
 import { planHash } from '#tree/plan-hash';
-import { assertVisiblePredicate, createSiftTest } from '#tree/query';
 import type { ReadPlan } from '#tree/read-runtime';
 import { stableJson } from '#util/stable-json';
 import fjp from 'fast-json-patch';

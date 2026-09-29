@@ -7,6 +7,7 @@ import type { NodeData } from '#core';
 import { assertValidType, safeJsonParse } from '#core';
 import { dirname as treeDirname } from '#core/path';
 import { KernelError } from '#errors';
+import { createSiftTest } from '#kernel/expr';
 import { mkdir, readdir, readFile, realpath, rmdir, unlink } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { atomicWrite } from './fs-atomic';
@@ -15,7 +16,6 @@ import { ensureMigrated } from './migrate-component-namespace';
 import { assertPathSafe } from './path-safety';
 import { applyPatchManyEntry, assertPatchManyBatch, assertSetEntryOcc, isSetEntry, mapNodeForSift, paginate, type TreeSource } from './index';
 import { type CommitChange, type CommitReceipt, hasMutationOps, patchViaSet } from './patch';
-import { createSiftTest } from './query';
 
 // A dir-form node lives at <path>/$.json, so a '$' path segment aliases that
 // file: set('/a/$') overwrote node /a, and set('/a/$/c') moved /a's file away —

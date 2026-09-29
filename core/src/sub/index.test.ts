@@ -813,6 +813,16 @@ describe('watch registration (Stage 6d, core-9yd)', () => {
     assert.equal(cdc.getActiveQueryCount(), 0, 'no group left behind by rejected deep watches');
   });
 
+  it('rejects an over-budget query watch with BUDGET and leaves no group', () => {
+    const { cdc } = withSubs(createMemoryTree());
+    const expensive = { tag: { $in: Array.from({ length: 20_000 }, (_, i) => i) } };
+    assert.throws(
+      () => cdc.watchQuery({ vp: '/views/big', userId: 'u1', plan: { source: '/items', callerWhere: expensive }, mountDeps: new Set(['/views/big']) }),
+      (e: unknown) => e instanceof KernelError && e.code === 'BUDGET',
+    );
+    assert.equal(cdc.getActiveQueryCount(), 0);
+  });
+
   it('depth:1 query watch works end-to-end (explicit depth)', async () => {
     const events: NodeEvent[] = [];
     const { tree, cdc } = withSubs(createMemoryTree(), e => events.push(e));

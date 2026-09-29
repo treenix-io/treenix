@@ -1,9 +1,10 @@
 import { createNode, type NodeData } from '#core';
 import { KernelError } from '#errors';
+import { assertSafeSiftQuery } from '#kernel/expr';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { createMemoryTree } from './index';
-import { assertSafeSiftQuery, createQueryTree, matchesFilter } from './query';
+import { createQueryTree, matchesFilter } from './query';
 
 describe('matchesFilter', () => {
   it('matches dot-path values', () => {

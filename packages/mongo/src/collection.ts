@@ -21,7 +21,7 @@ export type CollectionTreeConfig = {
   baseQuery?: Record<string, unknown>;
 };
 
-// Same operator blocklist as core's assertSafeSiftQuery (tree/query.ts, package-internal) —
+// Same operator blocklist as core's assertSafeSiftQuery (kernel/expr.ts, package-internal) —
 // here the query goes to a live Mongo server where $where is code-eval.
 const FORBIDDEN_QUERY_KEYS = new Set(['$where', '$function', '$accumulator', '$expr']);
 const SYSTEM_FIELD_KEYS = new Set(['$path', '$id', '$refId', '$rev', '$acl', '$owner', '$v']);

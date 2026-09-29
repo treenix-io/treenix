@@ -2,6 +2,7 @@ import type { NodeData } from '#core';
 import { register } from '#core';
 import { clearRegistry } from '#testing';
 import { KernelError } from '#errors';
+import { mapSiftQuery } from '#kernel/expr';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -9,7 +10,6 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { registerJsonCodec } from './json-codec';
 import { createRawFsTree } from './mimefs';
-import { mapSiftQuery } from './query';
 
 describe('RawFsStore', () => {
   let dir: string;

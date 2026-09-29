@@ -5,6 +5,7 @@
 
 import type { NodeData } from '#core';
 import { resolve as ctxResolve } from '#core/registry';
+import { createSiftTest } from '#kernel/expr';
 import { mkdir, readdir, realpath, rmdir, stat, unlink } from 'node:fs/promises';
 import { dirname, extname, join, resolve } from 'node:path';
 import { scanFromCollected } from './fs-common';
@@ -12,7 +13,6 @@ import { assertPathSafe } from './path-safety';
 import { mapNodeForSift, paginate, type TreeSource } from './index';
 import './json-codec'; // register JSON decode handler
 import { patchViaSet } from './patch';
-import { createSiftTest } from './query';
 
 const MIME: Record<string, string> = {
   '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',

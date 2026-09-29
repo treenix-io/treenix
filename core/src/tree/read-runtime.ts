@@ -18,9 +18,9 @@
 
 import type { NodeData } from '#core';
 import { KernelError } from '#errors';
+import { assertSafeSiftQuery, assertVisiblePredicate, createSiftTest } from '#kernel/expr';
 import { mapNodeForSift, type TreeSource } from './index';
 import { decodeReadCursor, encodeReadCursor, planHash } from './plan-hash';
-import { assertSafeSiftQuery, assertVisiblePredicate, createSiftTest } from './query';
 
 export type Projector = (node: NodeData) => Promise<NodeData | null>;
 

@@ -4,10 +4,9 @@
 
 import { comparePaths, isRef, type NodeData, type Ref } from '#core';
 import { KernelError } from '#errors';
+import { createSiftTest } from '#kernel/expr';
 import { scanFromCollected } from './fs-common';
 import { applyOps, type CommitChange, type CommitReceipt, hasMutationOps, type PatchOp, PatchTestError } from './patch';
-// Cycle-safe: query.ts reads index exports only inside functions.
-import { createSiftTest } from './query';
 import { isMoved } from './refs';
 import type { TreeEvent, TreeWatchOpts, TreeWatchScope } from './watch';
 

@@ -12,6 +12,9 @@ const srcDir = dirname(kernelDir)
 // errors is the KernelError class alone, built on the kernel's own ErrorCode.
 const ALLOWED = ['kernel', 'core', 'util', 'comp', 'schema/types', 'errors']
 
+// sift is the expression language of `where` and `pre`.
+const PACKAGES = ['sift']
+
 type PackageImports = { readonly [key: string]: { readonly development: string } }
 const packageImports: PackageImports = JSON.parse(readFileSync(join(srcDir, '../package.json'), 'utf8')).imports
 
@@ -36,7 +39,7 @@ function packageTarget(spec: string): string {
 }
 
 function allowed(file: string, spec: string): boolean {
-  if (spec.startsWith('node:')) return true
+  if (spec.startsWith('node:') || PACKAGES.includes(spec)) return true
 
   const local = spec.startsWith('.') ? resolve(dirname(file), spec)
     : spec.startsWith('#') ? resolve(srcDir, '..', packageTarget(spec))
@@ -54,7 +57,7 @@ function kernelFiles(): string[] {
 }
 
 describe('kernel import boundary', () => {
-  it('kernel files import only the kernel, Layer 0, util, comp, schema types and errors', () => {
+  it('kernel files import only the kernel, Layer 0, util, comp, schema types, errors and admitted packages', () => {
     const imports = kernelFiles().flatMap((file) =>
       specifiers(readFileSync(file, 'utf8')).map((spec) => ({ file, spec })))
 
@@ -82,9 +85,9 @@ describe('kernel import boundary', () => {
     assert.deepEqual(specifiers(source), ['#tree', '#server/actions', './types', '#sub', '#mount'])
   })
 
-  it('admits the allowed areas and node built-ins', () => {
+  it('admits the allowed areas, node built-ins and admitted packages', () => {
     const file = join(kernelDir, 'contract', 'x.ts')
-    for (const spec of ['../types', '#kernel/types', '#core', '#core/path', '#util/ulid', '#comp', '#comp/needs', '#schema/types', '#errors', 'node:fs'])
+    for (const spec of ['../types', '#kernel/types', '#core', '#core/path', '#util/ulid', '#comp', '#comp/needs', '#schema/types', '#errors', 'node:fs', 'sift'])
       assert.equal(allowed(file, spec), true, spec)
   })
 
