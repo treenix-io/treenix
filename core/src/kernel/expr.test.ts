@@ -244,8 +244,8 @@ describe('expression work', () => {
   })
 })
 
-// Repros of review findings against the work bound: each is refused with BUDGET or answered fast.
-describe('expression work: review repros', () => {
+// Shapes built to outrun the work bound: each is refused with BUDGET or answered fast.
+describe('expression work: adversarial shapes', () => {
   const fast = { timeout: 2_000 }
 
   it('a 3000-value $in over 100 000 elements is one set lookup per element', fast, () => {
