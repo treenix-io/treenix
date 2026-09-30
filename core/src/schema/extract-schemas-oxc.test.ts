@@ -594,16 +594,33 @@ describe('extract-schemas-oxc: action and type rules', () => {
     return JSON.parse(await fs.readFile(path.join(dir, 'schemas', 'test.sample.json'), 'utf-8'));
   }
 
-  const registered = (body: string, classDoc = '') =>
-    `${classDoc}\nclass Sample {\n${body}\n}\nregisterType('test.sample', Sample);\n`;
+  const registered = (body: string, classDoc = '', opts = '') =>
+    `${classDoc}\nclass Sample {\n${body}\n}\nregisterType('test.sample', Sample${opts && ', ' + opts});\n`;
 
-  it("a class method's second parameter is the injected needs, left out of the arguments", async () => {
+  it("a class method's second parameter is the needs registerType declares for it, left out of the arguments", async () => {
     const schema = await generated(registered(
-      `run(tag: string, deps: { order: { status: string } }) {}\nship = (tag: string, deps: unknown) => tag;`,
+      `run(tag: string, deps: { order: { status: string } }) {}\nstop(tag: string) {}`,
+      '',
+      `{ needs: { run: ['order'] } }`,
+    ));
+
+    assert.deepEqual(schema.methods?.run?.arguments, [{ name: 'tag', type: 'string' }]);
+  });
+
+  it('needs declared for every action admit a needs parameter on each method', async () => {
+    const schema = await generated(registered(
+      `run(tag: string, deps: unknown) {}\nship = (tag: string, deps: unknown) => tag;`,
+      '',
+      `{ needs: { '*': ['order'] } }`,
     ));
 
     assert.deepEqual(schema.methods?.run?.arguments, [{ name: 'tag', type: 'string' }]);
     assert.deepEqual(schema.methods?.ship?.arguments, [{ name: 'tag', type: 'string' }]);
+  });
+
+  it('a two-parameter method fails when registerType declares no needs for it', async () => {
+    await refused(registered(`run(tag: string, prio: number) {}`));
+    await refused(registered(`run(tag: string, prio: number) {}\nstop() {}`, '', `{ needs: { stop: ['order'] } }`));
   });
 
   it("a register()ed handler's args type is read through a default value", async () => {
@@ -621,16 +638,16 @@ describe('extract-schemas-oxc: action and type rules', () => {
   });
 
   it('a class method with a parameter after the needs fails', async () => {
-    await refused(registered(`run(tag: string, deps: unknown, prio: number) {}`));
+    await refused(registered(`run(tag: string, deps: unknown, prio: number) {}`, '', `{ needs: { run: ['order'] } }`));
   });
 
   it('an arrow-field method with a parameter after the needs fails', async () => {
-    await refused(registered(`run = (tag: string, deps: unknown, prio: number) => tag;`));
+    await refused(registered(`run = (tag: string, deps: unknown, prio: number) => tag;`, '', `{ needs: { '*': ['order'] } }`));
   });
 
   it('a rest parameter fails', async () => {
     await refused(registered(`run(...tags: string[]) {}`));
-    await refused(registered(`run(tag: string, ...deps: unknown[]) {}`));
+    await refused(registered(`run(tag: string, ...deps: unknown[]) {}`, '', `{ needs: { run: ['order'] } }`));
   });
 
   it('a register()ed action handler with two data parameters fails', async () => {

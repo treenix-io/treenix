@@ -14,6 +14,8 @@ interface ComponentEntry {
   typeName: string;
   className: string;
   fileName: string;
+  /** Actions the registration declares needs for; `*` stands for all of them. */
+  needs: ReadonlySet<string>;
 }
 interface ExternalAction {
   name: string;
@@ -624,16 +626,39 @@ function findRegistrations(ast: N, fileName: string): ComponentEntry[] {
       node.callee?.type === 'Identifier' &&
       REGISTER_FNS.has(node.callee.name)
     ) {
-      const [typeArg, classArg] = node.arguments ?? [];
+      const [typeArg, classArg, optsArg] = node.arguments ?? [];
       if (
         typeArg?.type === 'Literal' &&
         typeof typeArg.value === 'string' &&
         classArg?.type === 'Identifier'
       )
-        entries.push({ typeName: typeArg.value, className: classArg.name, fileName });
+        entries.push({ typeName: typeArg.value, className: classArg.name, fileName, needs: declaredNeeds(optsArg) });
     }
   });
   return entries;
+}
+
+function propertyName(prop: N): string | undefined {
+  if (prop.type !== 'Property' || prop.computed) return undefined;
+  if (prop.key?.type === 'Identifier') return prop.key.name;
+  if (prop.key?.type === 'Literal' && typeof prop.key.value === 'string') return prop.key.value;
+  return undefined;
+}
+
+// Only a literal `needs` option is visible here. Needs declared any other way count as none, so a needs
+// parameter they would feed fails generation rather than passing unchecked.
+function declaredNeeds(opts: N | undefined): Set<string> {
+  const names = new Set<string>();
+  if (opts?.type !== 'ObjectExpression') return names;
+
+  const needs = opts.properties.find((prop: N) => propertyName(prop) === 'needs')?.value;
+  if (needs?.type !== 'ObjectExpression') return names;
+
+  for (const prop of needs.properties) {
+    const name = propertyName(prop);
+    if (name) names.add(name);
+  }
+  return names;
 }
 
 function findClasses(ast: N): Map<string, N> {
@@ -854,8 +879,8 @@ function actionArguments(params: N[], injected: number, ctx: SchemaCtx, where: s
   }
   if (params.length > 1 + injected) {
     throw new SchemaParseError(
-      `[schema/oxc] ${file}: ${where} declares ${params.length} parameters; an action takes one args value` +
-        (injected ? ' and the injected needs' : ''),
+      `[schema/oxc] ${file}: ${where} declares ${params.length} parameters and takes ${1 + injected}: ` +
+        (injected ? 'the args value and its declared needs' : 'the args value'),
       file,
     );
   }
@@ -897,11 +922,12 @@ function generateClassSchema(
   classNode: N,
   docs: Map<number, ParsedJSDoc>,
   classTypesByFile: Map<string, Map<string, string>>,
-  currentFile: string,
+  entry: ComponentEntry,
   aliasesByFile: Map<string, Map<string, N>>,
   enumsByFile: Map<string, Map<string, N>>,
   importsByFile: Map<string, Map<string, ImportEntry>>,
 ): TypeSchema {
+  const { fileName: currentFile, needs } = entry;
   const fileDocs: FileDocs = { file: currentFile, at: docs };
   const ctx: SchemaCtx = {
     docs: fileDocs,
@@ -933,8 +959,10 @@ function generateClassSchema(
       throw new SchemaParseError(`[schema/oxc] ${currentFile}: ${where} is @read and writes nothing, so it declares no @post`, currentFile);
     }
 
-    // registerType calls a class method as (args, needs).
-    const args = actionArguments(fn.params ?? [], 1, ctx, where, currentFile);
+    // registerType calls a class method as (args, needs); without declared needs the second argument is an empty
+    // object, which a second parameter would take for caller data.
+    const injected = needs.has(name) || needs.has('*') ? 1 : 0;
+    const args = actionArguments(fn.params ?? [], injected, ctx, where, currentFile);
     const returnTa = fn.returnType?.typeAnnotation;
     let yieldsSchema: PropertySchema | undefined;
     if (isGenerator && returnTa?.type === 'TSTypeReference') {
@@ -1122,7 +1150,7 @@ export async function generateSchemas(dirs: string[]): Promise<void> {
       classInfo.node,
       classInfo.docs,
       classTypesByFile,
-      entry.fileName,
+      entry,
       aliasesByFile,
       enumsByFile,
       importsByFile,

@@ -240,7 +240,7 @@ See [Composition → Component](./composition.md#component) for the getComponent
 
 ```typescript
 registerType('report.summary', ReportSummary, {
-  needs: ['data'],
+  needs: { generate: ['data'] },
   ports: {
     generate: { pre: ['rawData'], post: ['summary'] }
   },
@@ -249,7 +249,7 @@ registerType('report.summary', ReportSummary, {
 
 ### `needs` — sibling dependencies
 
-Declare what other Components an action needs. Components never access siblings directly — dependencies are explicit.
+Declare what other Components an action needs, keyed by action name (`'*'` for every action without its own entry). The action receives them as its second parameter. Components never access siblings directly — dependencies are explicit.
 
 Patterns:
 

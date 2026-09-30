@@ -60,7 +60,7 @@ The first line of the class JSDoc becomes the type's title and description in th
 | `@actionsOnly` | Class | Nodes of the type change only through its actions; a direct write only from admin |
 | `@alias` | Class | Earlier type names that resolve to this type |
 
-An action takes one args value, so a method declares at most one args parameter; a class method may declare the injected `needs` after it. Any further parameter, or a rest parameter, fails schema generation.
+An action takes one args value, so a method declares at most one args parameter. A class method may add a second parameter for the needs its `registerType` declares for that action (or for `'*'`). Any other parameter, or a rest parameter, fails schema generation.
 
 ## Format Widgets
 

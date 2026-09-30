@@ -132,7 +132,7 @@ async confirm(data: { force?: boolean }, deps: { order: { status: string } }) {
 ```
 
 - `data` — first argument, the typed input from the client / visual editor. Omitted at the call site → `{}` at runtime, not `undefined`.
-- `deps` — second argument, populated by the `needs` resolver (see below).
+- `deps` — second argument, populated by the `needs` resolver (see below). Declare it only for an action whose `registerType` declares needs; otherwise it receives `{}` and schema generation fails.
 - For a deps-only action declare `(_data: unknown, deps: ...)` to match the runtime shape.
 
 **`getCtx()` inside actions** returns the execution context:
@@ -188,7 +188,7 @@ await tree.set(makeNode('/board/data/task-1', 'board.task', {
 }));
 ```
 
-**`needs` injection — siblings and cross-node deps.** Declared as `static needs` on the class. The resolver fetches dependencies before the action runs and passes them as the second method argument.
+**`needs` injection — siblings and cross-node deps.** Declared in the `needs` option of `registerType`, keyed by action name (`'*'` for every action without its own entry). The resolver fetches dependencies before the action runs and passes them as the second method argument.
 
 ```typescript
 import type { NodeData } from '@treenx/core';
@@ -199,18 +199,16 @@ class OrderLine {
   price = 0;
   confirmed = false;
 
-  static needs = {
-    // 'confirm' needs sibling 'order' component, and parent's 'invoice' child
-    confirm: ['order', '../invoice'],
-  };
-
   confirm(_data: unknown, deps: { order: { status: string }; invoice: NodeData }) {
     if (deps.order.status !== 'pending') throw new Error('Order not pending');
     this.confirmed = true;
   }
 }
 
-registerType('cafe.order.line', OrderLine);
+registerType('cafe.order.line', OrderLine, {
+  // 'confirm' needs sibling 'order' component, and parent's 'invoice' child
+  needs: { confirm: ['order', '../invoice'] },
+});
 ```
 
 Pattern syntax:
@@ -224,7 +222,7 @@ Pattern syntax:
 ```typescript
 registerType('tasks.task', Task, {
   override: true,                       // unregister existing handlers first
-  needs: ['parent'],                    // '*' fallback — used by actions without their own `static needs` entry
+  needs: { '*': ['parent'] },           // keyed by action; '*' covers actions without their own entry
   ports: {
     complete: { pre: ['status'], post: ['status', 'completedAt'] },
   },
