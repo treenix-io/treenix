@@ -911,6 +911,14 @@ describe('R4-MOUNT-4 — dynamic type schema meta-validation', () => {
     );
   });
 
+  it('rejects a keyword of the wrong shape as INVALID before validating against it', async () => {
+    const tree = await setup('test.badany', withMethod({ anyOf: 'a' }));
+    await assert.rejects(
+      executeAction(tree, '/data/x', 'test.badany', undefined, 'go', { x: 'a' }),
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
+    );
+  });
+
   it('rejects schema deeper than depth cap', async () => {
     let nested: Record<string, unknown> = { type: 'string' };
     for (let i = 0; i < 30; i++) nested = { properties: { x: nested } };

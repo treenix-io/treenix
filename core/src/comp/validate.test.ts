@@ -669,6 +669,45 @@ describe('assertSafeSchema', () => {
   it('accepts an ordinary schema', () => {
     assert.doesNotThrow(() => assertSafeSchema({ properties: { x: { type: 'string', pattern: '^[a-z]+$' } } }, 't'));
   });
+
+  it('rejects a keyword of the wrong shape as INVALID, at any depth and in methods', () => {
+    const wrong: Record<string, unknown>[] = [
+      { anyOf: 'a' }, { oneOf: {} }, { allOf: ['x'] }, { anyOf: [null] },
+      { enum: 'a' }, { required: 'a' }, { required: [1] },
+      { additionalProperties: 'no' }, { properties: [] }, { properties: { x: 'string' } }, { items: 'x' },
+      { type: 5 }, { pattern: 5 }, { maxLength: '5' },
+    ];
+
+    for (const shape of wrong) {
+      const label = JSON.stringify(shape);
+      assert.throws(() => assertSafeSchema(shape, 't'), isCode('INVALID'), label);
+      assert.throws(() => assertSafeSchema({ properties: { x: { items: shape } } }, 't'), isCode('INVALID'), label);
+      assert.throws(() => assertSafeSchema({ methods: { go: { arguments: [shape] } } }, 't'), isCode('INVALID'), label);
+    }
+
+    for (const methods of ['x', { go: 'x' }, { go: { arguments: {} } }, { go: { arguments: [], return: 'x' } }])
+      assert.throws(() => assertSafeSchema({ methods }, 't'), isCode('INVALID'), JSON.stringify(methods));
+  });
+
+  it('a pattern inside a method argument schema is checked', () => {
+    assert.throws(
+      () => assertSafeSchema({ methods: { go: { arguments: [{ properties: { x: { pattern: '(a+)+' } } }] } } }, 't'),
+      isCode('INVALID'),
+    );
+  });
+
+  it('accepts every keyword in its shape, and data under default and enum as data', () => {
+    const schema = {
+      type: 'object', required: ['a'], additionalProperties: false,
+      properties: {
+        a: { anyOf: [{ type: 'string', minLength: 1 }, { type: 'null' }] },
+        b: { type: 'array', items: { oneOf: [{ enum: [1, 'x', null] }] }, maxItems: 3 },
+        c: { allOf: [{ type: 'object', additionalProperties: { type: 'number' } }], default: { anyOf: 'data' } },
+      },
+      methods: { go: { arguments: [{ name: 'data', type: 'object', properties: {} }], return: { type: 'number' } } },
+    };
+    assert.doesNotThrow(() => assertSafeSchema(schema, 't'));
+  });
 });
 
 // ── validateNode ──

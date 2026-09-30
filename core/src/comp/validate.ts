@@ -34,14 +34,59 @@ function assertSafePattern(pattern: string, ctx: string): void {
   if (NESTED_QUANTIFIER.test(pattern)) throw new KernelError('INVALID', `${ctx}: schema.pattern has nested quantifiers (ReDoS risk)`);
 }
 
-/** Walks a schema that arrives as data (a stored type node) before anything validates against it. */
+const BRANCHES = ['anyOf', 'oneOf', 'allOf'] as const;
+const BOUNDS = ['minimum', 'maximum', 'minLength', 'maxLength', 'minItems', 'maxItems'] as const;
+
+const malformed = (ctx: string, what: string) => new KernelError('INVALID', `${ctx}: ${what}`);
+
+/**
+ * Walks a schema that arrives as data (a stored type node) before anything validates against it: every keyword
+ * the validator reads has the shape it expects, and every pattern is safe. Its `methods` carry the schemas of
+ * the actions' arguments, yields and returns.
+ */
 export function assertSafeSchema(schema: unknown, ctx: string, depth = 0): void {
-  if (!schema || typeof schema !== 'object') return;
-  if (depth > SCHEMA_DEPTH_MAX) throw new KernelError('INVALID', `${ctx}: schema too deep (max ${SCHEMA_DEPTH_MAX})`);
-  if (Array.isArray(schema)) { for (const v of schema) assertSafeSchema(v, ctx, depth + 1); return; }
-  for (const [k, v] of Object.entries(schema)) {
-    if (k === 'pattern' && typeof v === 'string') compiledPattern(v, ctx);
-    assertSafeSchema(v, ctx, depth + 1);
+  if (depth > SCHEMA_DEPTH_MAX) throw malformed(ctx, `schema too deep (max ${SCHEMA_DEPTH_MAX})`);
+  if (!isRecord(schema)) throw malformed(ctx, 'a schema must be an object');
+  const sub = (s: unknown) => assertSafeSchema(s, ctx, depth + 1);
+
+  if (schema.type !== undefined && typeof schema.type !== 'string') throw malformed(ctx, 'type must be a string');
+  if (schema.pattern !== undefined) {
+    if (typeof schema.pattern !== 'string') throw malformed(ctx, 'pattern must be a string');
+    compiledPattern(schema.pattern, ctx);
+  }
+  for (const key of BOUNDS)
+    if (schema[key] !== undefined && typeof schema[key] !== 'number') throw malformed(ctx, `${key} must be a number`);
+
+  if (schema.enum !== undefined && !Array.isArray(schema.enum)) throw malformed(ctx, 'enum must be an array');
+  const required = schema.required ?? [];
+  if (!Array.isArray(required) || !required.every((key) => typeof key === 'string'))
+    throw malformed(ctx, 'required must be an array of strings');
+
+  for (const key of BRANCHES) {
+    const branches = schema[key] ?? [];
+    if (!Array.isArray(branches)) throw malformed(ctx, `${key} must be an array of schemas`);
+    branches.forEach(sub);
+  }
+
+  const properties = schema.properties ?? {};
+  if (!isRecord(properties)) throw malformed(ctx, 'properties must be an object of schemas');
+  Object.values(properties).forEach(sub);
+
+  if (schema.items !== undefined) sub(schema.items);
+  if (schema.additionalProperties !== undefined && typeof schema.additionalProperties !== 'boolean') sub(schema.additionalProperties);
+  if (schema.methods !== undefined) assertSafeMethods(schema.methods, ctx, depth + 1);
+}
+
+function assertSafeMethods(methods: unknown, ctx: string, depth: number): void {
+  if (!isRecord(methods)) throw malformed(ctx, 'methods must be an object');
+
+  for (const [name, method] of Object.entries(methods)) {
+    if (!isRecord(method)) throw malformed(ctx, `method ${name} must be an object`);
+    const args = method.arguments ?? [];
+    if (!Array.isArray(args)) throw malformed(ctx, `method ${name}: arguments must be an array of schemas`);
+
+    for (const arg of args) assertSafeSchema(arg, ctx, depth);
+    for (const key of ['yields', 'return']) if (method[key] !== undefined) assertSafeSchema(method[key], ctx, depth);
   }
 }
 
