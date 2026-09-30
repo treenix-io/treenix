@@ -585,11 +585,12 @@ describe('extract-schemas-oxc: action and type rules', () => {
     );
   }
 
-  // Generation from one source file; returns the schema written for test.sample.
-  async function generated(source: string): Promise<TypeSchema> {
+  // Generation from source.ts and the other named files; returns the schema written for test.sample.
+  async function generated(source: string, others: Record<string, string> = {}): Promise<TypeSchema> {
     const dir = await scratchDir('rule');
     dirs.push(dir);
     await fs.writeFile(path.join(dir, 'source.ts'), source);
+    for (const [name, text] of Object.entries(others)) await fs.writeFile(path.join(dir, name), text);
     await generateSchemas([dir]);
     return JSON.parse(await fs.readFile(path.join(dir, 'schemas', 'test.sample.json'), 'utf-8'));
   }
@@ -680,6 +681,16 @@ describe('extract-schemas-oxc: action and type rules', () => {
     await refused(registered(`/** @io */\nname = '';`));
     await refused(registered(`/** @alias test.old */\nname = '';`));
     await refused(registered(`opts: { /** @post {} */ color?: string } = {};`));
+  });
+
+  it("a member of an imported type takes the JSDoc of its own file, not the importing file's at the same offset", async () => {
+    const source = registered(`opts: Opts = { mail: '' };\n/** @read */\nrun() {}`).replace(/^/, `import type { Opts } from './types';\n`);
+    const head = 'export type Opts = {\n  /** @format email */\n';
+    const types = head + ' '.repeat(source.indexOf('run()') - head.length) + 'mail: string;\n};\n';
+
+    const schema = await generated(source, { 'types.ts': types });
+
+    assert.equal(schema.properties.opts.properties?.mail?.format, 'email');
   });
 
   it('a type naming itself in @alias fails', async () => {

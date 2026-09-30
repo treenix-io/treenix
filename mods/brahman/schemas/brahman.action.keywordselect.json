@@ -71,7 +71,9 @@
                 "type": "string"
               }
             },
-            "error": {}
+            "error": {
+              "title": "Last error for on-error actions"
+            }
           },
           "required": [
             "ctx",

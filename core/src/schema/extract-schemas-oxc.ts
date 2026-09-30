@@ -316,8 +316,15 @@ function fieldAnnotations(docs: FileDocs, pos: number, where: string): Record<st
   return doc?.annotations;
 }
 
+// JSDoc is keyed by offset within its file, so a member of an imported type reads the map of the file declaring it.
+function docsOf(docsByFile: Map<string, Map<number, ParsedJSDoc>>, file: string): FileDocs {
+  const at = docsByFile.get(file);
+  if (!at) throw new Error(`[schema/oxc] ${file} was not scanned for JSDoc`);
+  return { file, at };
+}
+
 interface SchemaCtx {
-  docs?: FileDocs;
+  docsByFile?: Map<string, Map<number, ParsedJSDoc>>;
   // File-scoped aliases/enums: two modules may each define `type Entry = {...}` or `enum Status`
   // with different shapes. A global map silently corrupts whichever class is parsed second.
   aliasesByFile?: Map<string, Map<string, N>>;
@@ -484,10 +491,11 @@ function typeToSchema(node: N | null | undefined, ctx: SchemaCtx = {}): Property
     case 'TSTypeLiteral': {
       const properties: Record<string, PropertySchema> = {};
       const required: string[] = [];
+      const docs = ctx.docsByFile && ctx.currentFile ? docsOf(ctx.docsByFile, ctx.currentFile) : undefined;
       for (const m of node.members ?? []) {
         if (m.type === 'TSPropertySignature' && m.key?.name) {
           properties[m.key.name] = typeToSchema(m.typeAnnotation?.typeAnnotation, ctx);
-          if (ctx.docs) Object.assign(properties[m.key.name], fieldAnnotations(ctx.docs, m.start, `field ${m.key.name}`));
+          if (docs) Object.assign(properties[m.key.name], fieldAnnotations(docs, m.start, `field ${m.key.name}`));
           if (!m.optional) required.push(m.key.name);
         }
       }
@@ -924,7 +932,7 @@ function resolveRegisteredClassType(
 
 function generateClassSchema(
   classNode: N,
-  docs: Map<number, ParsedJSDoc>,
+  docsByFile: Map<string, Map<number, ParsedJSDoc>>,
   classTypesByFile: Map<string, Map<string, string>>,
   entry: ComponentEntry,
   aliasesByFile: Map<string, Map<string, N>>,
@@ -932,9 +940,10 @@ function generateClassSchema(
   importsByFile: Map<string, Map<string, ImportEntry>>,
 ): TypeSchema {
   const { fileName: currentFile, needs } = entry;
-  const fileDocs: FileDocs = { file: currentFile, at: docs };
+  const fileDocs = docsOf(docsByFile, currentFile);
+  const docs = fileDocs.at;
   const ctx: SchemaCtx = {
-    docs: fileDocs,
+    docsByFile,
     currentFile,
     aliasesByFile,
     enumsByFile,
@@ -1093,8 +1102,9 @@ export async function generateSchemas(dirs: string[]): Promise<void> {
   const files = await globSourceFiles(dirs);
 
   const allEntries: ComponentEntry[] = [];
-  const allClasses = new Map<string, { node: N; docs: Map<number, ParsedJSDoc> }>();
+  const allClasses = new Map<string, N>();
   const allExternalActions = new Map<string, ExternalAction[]>();
+  const docsByFile = new Map<string, Map<number, ParsedJSDoc>>();
   // Type aliases and enums are file-scoped: two modules may each define `type Entry = {...}`
   // or `enum Status` with different shapes. A global map would silently corrupt whichever
   // class was parsed second. Cross-file references are followed via the per-file import
@@ -1117,6 +1127,7 @@ export async function generateSchemas(dirs: string[]): Promise<void> {
     }
     const { program: ast, comments } = parsed;
     const docs = buildJSDocMap(comments as Comment[], source, file);
+    docsByFile.set(file, docs);
 
     const fileAliases = findTypeAliases(ast as N);
     if (fileAliases.size) aliasesByFile.set(file, fileAliases);
@@ -1130,7 +1141,7 @@ export async function generateSchemas(dirs: string[]): Promise<void> {
     for (const e of findRegistrations(ast as N, file)) allEntries.push(e);
 
     for (const [name, node] of findClasses(ast as N))
-      allClasses.set(name + '\0' + file, { node, docs });
+      allClasses.set(name + '\0' + file, node);
 
     for (const [typeName, actions] of findExternalActions(ast as N, file, docs)) {
       const existing = allExternalActions.get(typeName) ?? [];
@@ -1147,12 +1158,12 @@ export async function generateSchemas(dirs: string[]): Promise<void> {
   for (const entry of allEntries) {
     if (generated.has(entry.typeName)) continue;
 
-    const classInfo = allClasses.get(entry.className + '\0' + entry.fileName);
-    if (!classInfo) continue;
+    const classNode = allClasses.get(entry.className + '\0' + entry.fileName);
+    if (!classNode) continue;
 
     const body = generateClassSchema(
-      classInfo.node,
-      classInfo.docs,
+      classNode,
+      docsByFile,
       classTypesByFile,
       entry,
       aliasesByFile,
