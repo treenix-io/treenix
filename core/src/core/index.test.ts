@@ -532,12 +532,16 @@ describe('isSafeKey / assertSafeKey', () => {
 });
 
 describe('safeJsonParse', () => {
-  it('strips __proto__/constructor/prototype on parse', () => {
-    const obj = safeJsonParse('{"foo": 1, "__proto__": {"p": 2}, "constructor": "x"}');
-    assert.equal(obj.foo, 1);
-    assert.equal(obj.__proto__, Object.prototype);  // own __proto__ stripped → falls through to chain
-    assert.equal((obj as any).constructor, Object);
-    assert.equal(({} as any).p, undefined);          // global prototype not polluted
+  it('throws on a __proto__/constructor/prototype key at any depth', () => {
+    for (const text of [
+      '{"foo": 1, "__proto__": {"p": 2}}',
+      '{"a": {"constructor": "x"}}',
+      '{"a": [{"b": {"prototype": {}}}]}',
+    ]) {
+      assert.doesNotThrow(() => JSON.parse(text));
+      assert.throws(() => safeJsonParse(text));
+    }
+    assert.equal(({} as Record<string, unknown>).p, undefined);
   });
 
   it('preserves nested non-pollution data', () => {

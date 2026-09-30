@@ -16,7 +16,7 @@ export function assertValidType(type: unknown): asserts type is string {
   }
 }
 
-// kriz: should throw unsafe, not swallow! assertSafeKey
+/** JSON.parse that throws on a prototype key at any depth: dropping it would hide tampered or corrupted input. */
 export function safeJsonParse(text: string): any {
-  return JSON.parse(text, (k, v) => isSafeKey(k) ? v : undefined);
+  return JSON.parse(text, (k, v) => { assertSafeKey(k); return v; });
 }
