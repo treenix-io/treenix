@@ -82,6 +82,13 @@ describe('MemoryStore', () => {
     assert.deepEqual((await tree.getChildren('/r', { query: { arr: 1 } })).items, [], 'a light query over the same nodes runs');
   });
 
+  it('a query never reads the contents of a __proto__ field as the node\'s own fields', async () => {
+    const tree = createMemoryTree();
+    await tree.set(JSON.parse('{"$path":"/r/a","$type":"item","__proto__":{"arr":[0,0,0]}}'));
+
+    assert.deepEqual((await tree.getChildren('/r', { query: { arr: 0 } })).items, []);
+  });
+
   it('remove', async () => {
     const tree = createMemoryTree();
     await tree.set(createNode('/x', 'x'));
@@ -362,5 +369,13 @@ describe('storage key codec — $id mapping (gk8.10)', () => {
     const back = fromStorageKeys({ ...stored, _id: 'mongo-object-id' });
     assert.equal(back.$id, '01ARZ3NDEKTSV4RRFFQ69G5FAV');
     assert.equal('_id' in back, false, 'Mongo _id stays skipped (D06)');
+  });
+
+  it('keeps a __proto__ field a field, whether stored under that name or mapped to it', () => {
+    for (const key of ['__proto__', '$_proto__']) {
+      const stored = toStorageKeys(JSON.parse(`{"$path":"/a","$type":"doc","${key}":{"x":1}}`));
+      assert.deepEqual(Object.keys(stored), ['_path', '_type', '__proto__'], key);
+      assert.equal(stored.x, undefined, key);
+    }
   });
 });
