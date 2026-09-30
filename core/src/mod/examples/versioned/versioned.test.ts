@@ -3,7 +3,7 @@
 // fs adapter underneath. Old-shape JSON on disk (pre-# namespace, pre-$v)
 // arrives to callers fully migrated; the persistent $v-ladder shape converges
 // on disk only when the node is next written (core-anz4.9 — reads never write).
-import { createNode, register } from '#core';
+import { createNode, register, resolveExact } from '#core';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -87,6 +87,16 @@ describe('example.versioned mod (migrations e2e)', () => {
     const scannedDoc = scanned.find(n => n.$path === '/data/doc');
     assert.equal(scannedDoc?.words, 3);
     assert.equal(scannedDoc?.$v, 2);
+  });
+
+  it('each type declares, as @version in its schema, the version its migration ladder reaches', async () => {
+    for (const type of ['example.versioned.doc', 'example.versioned.note']) {
+      const schema = JSON.parse(await readFile(new URL(`./schemas/${type}.json`, import.meta.url), 'utf-8'));
+      const ladder = resolveExact(type, 'migrate');
+      assert.ok(ladder, `${type} has no migrations`);
+
+      assert.equal(schema.version, Math.max(...Object.keys(ladder()).map(Number)), type);
+    }
   });
 
   it('set stamps $v so fresh writes never re-enter the ladder', async () => {

@@ -3,6 +3,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "Versioned document — demonstrates per-type schema migrations",
+  "version": 2,
   "properties": {
     "body": {
       "type": "string",

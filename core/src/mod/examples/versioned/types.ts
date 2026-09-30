@@ -13,7 +13,10 @@
 import { registerType } from '#comp';
 import { register } from '#core';
 
-/** Versioned document — demonstrates per-type schema migrations */
+/**
+ * Versioned document — demonstrates per-type schema migrations
+ * @version 2
+ */
 export class VersionedDoc {
   body = '';
   words = 0;
@@ -31,7 +34,10 @@ register('example.versioned.doc', 'migrate', () => ({
   },
 }));
 
-/** Attachable note component with its own migration ladder (v1 renames txt → note) */
+/**
+ * Attachable note component with its own migration ladder (v1 renames txt → note)
+ * @version 1
+ */
 export class VersionedNote {
   note = '';
 }
