@@ -4,7 +4,7 @@ import { describe, it } from 'node:test'
 import sift from 'sift'
 
 import { KernelError } from '#errors'
-import { assertSafeSiftQuery, createSiftTest } from './expr'
+import { assertSafePredicate, assertSafeSiftQuery, createSiftTest } from './expr'
 import { type ExprWork, exprWork } from './expr-work'
 import { DEFAULT_LIMITS } from './types'
 
@@ -115,6 +115,19 @@ describe('expression size', () => {
     for (const q of invalid) assert.throws(() => createSiftTest(q, DEFAULT_LIMITS), isInvalid, JSON.stringify(q).slice(0, 80))
   })
 
+  it('a prototype key anywhere in a query is INVALID, a decoded __proto__ included, whoever runs the query', () => {
+    const decoded = (key: string) => JSON.parse(`{"list":{"$elemMatch":{"${key}":{"$or":[{"$eq":1}]}}}}`)
+    const invalid: Record<string, unknown>[] = [
+      decoded('__proto__'), decoded('constructor'), decoded('prototype'), JSON.parse('{"__proto__":{"a":1}}'),
+      { 'a.__proto__.b': 1 }, { 'a.constructor': 1 },
+    ]
+    for (const q of invalid) {
+      assert.throws(() => createSiftTest(q, DEFAULT_LIMITS), isInvalid, Object.keys(q).join())
+      assert.throws(() => assertSafeSiftQuery(q, DEFAULT_LIMITS), isInvalid, Object.keys(q).join())
+      assert.throws(() => assertSafePredicate(q, DEFAULT_LIMITS, 'callerWhere'), isInvalid, Object.keys(q).join())
+    }
+  })
+
   it('a group among the conditions of a field, or a value test at the top of an expression, is INVALID at compile', () => {
     const invalid: Record<string, unknown>[] = [
       { a: { $or: [{ $gt: 1 }] } }, { a: { $and: [{ $gt: 1 }] } }, { a: { $nor: [{ $gt: 1 }] } },
@@ -202,11 +215,30 @@ describe('expression work', () => {
     assert.equal(workOf({ a: { $nin: values(500) } }, node), 2)
   })
 
-  it('logical operators sum their branches; $elemMatch adds the inner path to the outer one', () => {
+  it('logical operators sum their branches; $elemMatch weighs 1 per value at its path and adds the inner paths', () => {
     const node = { a: 1, b: 2, list: [{ x: 1, y: 1 }, { x: 2 }] }
     assert.equal(workOf({ $or: [{ a: 1 }, { b: 2 }, { a: 2 }] }, node), 3)
-    assert.equal(workOf({ list: { $elemMatch: { x: 1, y: 1 } } }, node), 4)
-    assert.equal(workOf({ list: { $elemMatch: { x: 1 } }, 'list.x': 2 }, node), 4, 'one walk per path, weights summed')
+    assert.equal(workOf({ list: { $elemMatch: { x: 1, y: 1 } } }, node), 6)
+    assert.equal(workOf({ list: { $elemMatch: { x: 1 } }, 'list.x': 2 }, node), 6, 'one walk per path, weights summed')
+    for (const q of [{ list: { $elemMatch: {} } }, { list: { $not: { $elemMatch: {} } } }, { list: { $all: [{ $elemMatch: {} }] } }])
+      assert.equal(workOf(q, node), 2, JSON.stringify(q))
+  })
+
+  it('600 empty $elemMatch conditions over a 100 000-element array are BUDGET before evaluation', () => {
+    const { array, reads } = countedArray(100_000)
+    const conditions = 600
+    const q = { $and: Array.from({ length: conditions }, () => ({ a: { $elemMatch: {} } })) }
+
+    assert.throws(() => createSiftTest(q, DEFAULT_LIMITS)({ a: array }, exprWork(DEFAULT_LIMITS)), isBudget)
+    assert.ok(reads() <= DEFAULT_LIMITS.exprWork / conditions + 1, `the walk stops at the budget: ${reads()} element reads`)
+  })
+
+  it('the walk reads a path as sift does, through a prototype too', () => {
+    const { array, reads } = countedArray(100_000)
+    const q = { $or: values(1_000, 1).map((v) => ({ 'a.arr': v })) }
+
+    assert.throws(() => createSiftTest(q, DEFAULT_LIMITS)({ a: Object.create({ arr: array }) }, exprWork(DEFAULT_LIMITS)), isBudget)
+    assert.ok(reads() <= DEFAULT_LIMITS.exprWork / 1_000 + 1, `${reads()} element reads`)
   })
 
   it('the work limit is a parameter', () => {

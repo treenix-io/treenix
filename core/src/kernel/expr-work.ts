@@ -99,7 +99,7 @@ function operator(op: string, params: unknown, at: PathWork, level: Level): void
     if (!Array.isArray(params)) throw new KernelError('INVALID', '$all takes an array')
     for (const item of params) allItem(item, at)
   } else if (op === '$elemMatch') {
-    query(op, params, at, 'element')
+    elemMatch(params, at)
   } else if (op === '$not') {
     negated(params, at)
   } else if (op === '$in' || op === '$nin') {
@@ -132,7 +132,14 @@ function allItem(v: unknown, at: PathWork): void {
   const keys = Object.keys(v)
   if (keys.length !== 1 || keys[0] !== '$elemMatch')
     throw new KernelError('INVALID', '$all items are primitives or {$elemMatch: query}')
-  query('$elemMatch', v.$elemMatch, at, 'element')
+  elemMatch(v.$elemMatch, at)
+}
+
+// sift calls $elemMatch on every value at its path whatever its query holds, so it weighs 1 there itself; its
+// query then tests each element.
+function elemMatch(q: unknown, at: PathWork): void {
+  at.weight += 1
+  query('$elemMatch', q, at, 'element')
 }
 
 // A field value holding any $-key is a set of operators; anything else is compared by equality.
@@ -200,11 +207,10 @@ function chargeValues(v: unknown, weight: number, counter: ExprWork): void {
 }
 
 // The children of `at` read from a record; with namesOnly, those sift reaches through the elements of an array.
+// A key is read as sift reads it, inherited properties included; a missing one is one value for the whole subtree.
 function walkFields(v: Record<string, unknown>, at: PathWork, counter: ExprWork, namesOnly: boolean): void {
   for (const [key, next] of at.children) {
-    if (namesOnly && readsArray(key)) continue
-    if (Object.hasOwn(v, key)) walk(v[key], next, counter)
-    else charge(counter, next.total)
+    if (!namesOnly || !readsArray(key)) walk(v[key], next, counter)
   }
 }
 
@@ -226,9 +232,7 @@ function walk(v: unknown, at: PathWork, counter: ExprWork): void {
   if (!Array.isArray(v)) return charge(counter, at.total - at.weight)
 
   for (const [key, next] of at.children) {
-    if (!readsArray(key)) continue
-    if (Object.hasOwn(v, key)) walk(Reflect.get(v, key), next, counter)
-    else charge(counter, next.total)
+    if (readsArray(key)) walk(Reflect.get(v, key), next, counter)
   }
   if (at.nameTotal > 0) walkElements(v, at, counter)
 }

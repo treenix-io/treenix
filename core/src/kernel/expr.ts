@@ -4,6 +4,7 @@
 
 import sift from 'sift'
 
+import { isSafeKey } from '#core/json'
 import { KernelError } from '#errors'
 import { chargeWork, type ExprWork, parseWork } from './expr-work'
 import { SIFT_OPERATIONS } from './sift-ops'
@@ -49,6 +50,8 @@ export function mapSiftQuery(q: unknown): unknown {
     const out: Record<string, unknown> = {}
     for (const [k, v] of Object.entries(q)) {
       if (SIFT_FORBIDDEN.has(k)) throw new KernelError('INVALID', `Forbidden sift operator: ${k}`)
+      // A decoded `__proto__` key would set the mapped query's prototype: sift runs inherited conditions, the parse sees none.
+      if (!k.split('.').every(isSafeKey)) throw new KernelError('INVALID', `Forbidden sift key: ${k}`)
       let newKey = k
       if (k === '$type') newKey = '_type'
       else if (k === '$path') newKey = '_path'
