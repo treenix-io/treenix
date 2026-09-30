@@ -85,4 +85,15 @@ describe('R5-BRAHMAN-1 — QuickJS sandbox', () => {
   it('does not crash on undefined vars', async () => {
     assert.equal(await evalExpr('typeof undefinedVar', {}), 'undefined');
   });
+
+  it('refuses to load on a Node without per-thread CPU time', async () => {
+    const threadCpuUsage = process.threadCpuUsage;
+    Reflect.deleteProperty(process, 'threadCpuUsage');
+    try {
+      // A fresh module instance: the query makes the loader evaluate the file again.
+      await assert.rejects(import(new URL('./sandbox.ts?without-thread-cpu', import.meta.url).href), Error);
+    } finally {
+      process.threadCpuUsage = threadCpuUsage;
+    }
+  });
 });

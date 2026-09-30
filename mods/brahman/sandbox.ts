@@ -14,6 +14,10 @@ const EVAL_CPU_MS = 50;
 const EVAL_MEMORY_BYTES = 1 * 1024 * 1024; // 1 MB
 const EVAL_STACK_BYTES = 128 * 1024;
 
+// The deadline counts thread CPU; without it every eval would fail at its first interrupt poll.
+if (typeof process.threadCpuUsage !== 'function')
+  throw new Error(`brahman sandbox needs process.threadCpuUsage (Node 23.9+); this is Node ${process.version}`);
+
 function threadCpuMs(): number {
   const { user, system } = process.threadCpuUsage();
   return (user + system) / 1000;
