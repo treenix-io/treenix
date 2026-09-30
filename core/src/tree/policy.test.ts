@@ -485,6 +485,24 @@ describe('policy: validation step (Write-Barrier)', () => {
     );
   });
 
+  it('rejects a malformed $order on the node or a component as INVALID, by set and by patch', async () => {
+    const isInvalid = (e: unknown) => e instanceof KernelError && e.code === 'INVALID';
+    // A malformed $order arrives as decoded wire data.
+    const wire = (node: Record<string, unknown>): NodeData => JSON.parse(JSON.stringify(node));
+    await tree.set({ $path: '/a', $type: 'item', $order: 'V', '#t': { $type: 'tag', $order: 'a1' }, '#u': { $type: 'tag' } });
+
+    for (const order of ['a0', '', 'a-b', 5, null]) {
+      await assert.rejects(() => tree.set(wire({ $path: '/b', $type: 'item', $order: order })), isInvalid, JSON.stringify(order));
+      await assert.rejects(
+        () => tree.set(wire({ $path: '/b', $type: 'item', '#t': { $type: 'tag', $order: order }, '#u': { $type: 'tag' } })),
+        isInvalid, JSON.stringify(order));
+      await assert.rejects(() => tree.patch('/a', [['r', '#t.$order', order]]), isInvalid, JSON.stringify(order));
+    }
+
+    assert.equal(await inner.get('/b'), undefined, 'nothing stored');
+    assert.deepEqual((await inner.get('/a'))?.['#t'], { $type: 'tag', $order: 'a1' });
+  });
+
   it('passes through nodes without schemas', async () => {
     await tree.set({
       $path: '/a', $type: 'item',

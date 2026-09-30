@@ -5,6 +5,7 @@
 import { AnyType, type ComponentData, getComponents, isCompKey, type NodeData } from '#core';
 import { resolve, resolveExact } from '#core/registry';
 import { KernelError } from '#errors';
+import { isOrderKey } from '#kernel/order';
 import type { PropertySchema, TypeSchema } from '#schema/types';
 import { createBoundedCache } from '#util/bounded-cache';
 import { isRecord } from '#util/is-record';
@@ -225,11 +226,27 @@ export function validateComponent(comp: ComponentData, schema: TypeSchema, field
   return errors;
 }
 
+// $order of the node and of each component is an order key; it is judged before the components are
+// iterated, because their ($order, name) order throws on a non-string one.
+function orderErrors(node: NodeData): ValidationError[] {
+  const errors: ValidationError[] = [];
+  const check = (path: string, order: unknown) => {
+    if (order !== undefined && !isOrderKey(order)) errors.push({ path, message: `malformed order key ${JSON.stringify(order)}` });
+  };
+
+  check('$order', node.$order);
+  for (const [key, value] of Object.entries(node))
+    if (isCompKey(key) && isRecord(value)) check(`${key}.$order`, value.$order);
+
+  return errors;
+}
+
 // Strict takes the type's own registered schema: it never falls back to `default` and never fires
 // a miss resolver (D4). A schema a miss resolver already registered on an earlier non-strict lookup
 // does count, so a lazily registered pack must publish eagerly before strict can guard its types.
 export function validateNode(node: NodeData, opts?: ValidateOptions): ValidationError[] {
-  const errors: ValidationError[] = [];
+  const errors = orderErrors(node);
+  if (errors.length) return errors;
 
   for (const [name, comp] of getComponents(node, AnyType)) {
     const schema = opts?.strict ? resolveExact(comp.$type, 'schema')?.() : resolve(comp.$type, 'schema')?.();
