@@ -218,6 +218,14 @@ describe('expression work', () => {
     assert.equal(outcome({ a: { $nin: values(3_000, 5_000) } }, node).used, outcome({ a: { $nin: [-1] } }, node).used)
   })
 
+  it('a string compared unit by unit, in code point order, is charged for the units it walks', () => {
+    const prefix = '😀' + 'x'.repeat(800)
+    const walked = outcome({ s: { $gt: prefix + 'b' } }, { s: prefix + 'a' })
+
+    assert.equal(walked.result, false)
+    assert.ok(walked.used >= prefix.length / 8, `work ${walked.used}`)
+  })
+
   it('an ordinary where over 1000 small nodes stays far below the limit', () => {
     const test = createSiftTest({ _type: 'task', status: { $in: ['open', 'review'] }, 'meta.tags': 'x' }, DEFAULT_LIMITS)
     const work = exprWork(DEFAULT_LIMITS)
@@ -257,6 +265,12 @@ describe('expression work: adversarial shapes', () => {
 
   it('a 1000-branch $or over 100 000 elements is BUDGET', fast, () => {
     budget({ $or: values(1_000, 1).map((v) => ({ arr: v })) }, { arr: zeros(100_000) })
+  })
+
+  it('100 000 strings sharing a 4000-unit prefix with a code-point operand are BUDGET', fast, () => {
+    const prefix = '😀' + 'x'.repeat(4_000)
+
+    budget({ s: { $gt: prefix + 'b' } }, { s: new Array<string>(100_000).fill(prefix + 'a') })
   })
 
   it('an object-literal $in over a 12 000-key object is INVALID before any node is tested', fast, () => {

@@ -14,6 +14,7 @@ const U_E000 = String.fromCharCode(0xe000)
 const U_FFFF = String.fromCharCode(0xffff)
 const GRIN = String.fromCodePoint(0x1f600)
 const GRIN_SWEAT = String.fromCodePoint(0x1f605)
+const LONG = 'x'.repeat(40)
 
 // Each row as Mongo 7 answers it: a query, then the nodes it is tested on with the answer.
 const SEMANTICS: [string, Q, [Q, boolean][]][] = [
@@ -64,6 +65,8 @@ const SEMANTICS: [string, Q, [Q, boolean][]][] = [
     [{ a: GRIN }, true], [{ a: U_D7FF }, false]]],
   ['U+E000 to U+FFFF order before a character above U+FFFF', { a: { $lt: GRIN } }, [
     [{ a: U_E000 }, true], [{ a: U_FFFF }, true], [{ a: GRIN_SWEAT }, false]]],
+  ['strings sharing a long prefix order by code point too', { a: { $gt: LONG + U_E000 } }, [
+    [{ a: LONG + GRIN }, true], [{ a: LONG + U_E000 + 'x' }, true], [{ a: LONG + U_D7FF }, false], [{ a: LONG }, false]]],
   ['$in matches a value or an element of one type', { a: { $in: [1, 'x'] } }, [
     [{ a: 'x' }, true], [{ a: [3, 1] }, true], [{ a: '1' }, false], [{ a: [[1]] }, false]]],
   ['$in with null matches a missing value and a null element', { a: { $in: [null] } }, [

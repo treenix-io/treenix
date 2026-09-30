@@ -1,7 +1,7 @@
 // What each operator asks of one value, as Mongo answers it for a primitive operand: values compare only within one
 // type, a null operand stands for a missing value too, and $in looks the value up in a set.
 
-import { charge, type ValueTest } from './eval'
+import { charge, type ExprWork, type ValueTest } from './eval'
 
 /** A comparison operand. NaN is none: JSON cannot carry it, and it equals itself in a set but nowhere else. */
 export type Operand = string | number | boolean | null
@@ -29,8 +29,15 @@ function hasUnitFromD800(s: string): boolean {
   return false
 }
 
-function codePointSign(a: string, b: string): number {
-  for (let i = 0; i < a.length && i < b.length; i++) {
+// Walked unit by unit, a comparison costs some twenty times a native one, so each block of units it walks past the
+// first is a step of its own: a step here then costs about what any other step does, however long the strings.
+const UNITS_PER_STEP = 8
+
+function codePointSign(a: string, b: string, work: ExprWork): number {
+  const n = Math.min(a.length, b.length)
+  for (let i = 0; i < n; i++) {
+    if (i > 0 && i % UNITS_PER_STEP === 0) charge(work)
+
     const x = a.charCodeAt(i)
     const y = b.charCodeAt(i)
     if (x !== y) return codePointUnit(x) - codePointUnit(y)
@@ -54,7 +61,7 @@ export function compares(op: Order, operand: Operand): ValueTest {
   if (typeof operand === 'number') return (v) => typeof v === 'number' && order(v, operand)
   if (!hasUnitFromD800(operand)) return (v) => typeof v === 'string' && order(v, operand)
 
-  return (v) => typeof v === 'string' && order(codePointSign(v, operand), 0)
+  return (v, work) => typeof v === 'string' && order(codePointSign(v, operand, work), 0)
 }
 
 export function within(operands: readonly Operand[]): ValueTest {

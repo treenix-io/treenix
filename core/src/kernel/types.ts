@@ -993,8 +993,9 @@ export interface Limits {
   readonly exprBytes: number
   /**
    * Expression work per operation, counted by the kernel's evaluator as it tests: every field read, array element
-   * visited and value tested is one step, and the step past the limit stops the test. One operation: a query, a
-   * subscription snapshot, a View run, one subscription updated by one write, a commit's precondition check.
+   * visited and value tested is one step (a string the evaluator compares unit by unit, one per 8 units it walks),
+   * and the step past the limit stops the test. One operation: a query, a subscription snapshot, a View run, one
+   * subscription updated by one write, a commit's precondition check.
    */
   readonly exprWork: number
   /** Size of one blob. */
