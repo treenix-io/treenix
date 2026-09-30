@@ -8,8 +8,9 @@ import { assertSafePath } from '#core/path';
 import type { Page, Tree } from '#tree';
 import { initTRPC, TRPCError, type TRPC_ERROR_CODE_KEY } from '@trpc/server';
 import { observable } from '@trpc/server/observable';
-// Pin @trpc/server internal types to a public subpath so declaration emit stays portable (TS2742).
-import type {} from '@trpc/server/unstable-core-do-not-import';
+// The retry codes the tRPC client itself imports. This subpath also pins @trpc/server internal types for a
+// portable declaration emit (TS2742).
+import { retryableRpcCodes, TRPC_ERROR_CODES_BY_KEY } from '@trpc/server/unstable-core-do-not-import';
 import { z } from 'zod';
 import { agentConnect, agentInitPair } from '#agent-port/ops';
 import { buildClearSessionCookie, buildSessionCookie } from '#security/cookies';
@@ -111,14 +112,13 @@ function frameError(err: ErrFrame['err']): TRPCError {
     : toTrpcError(err.code, err.msg);
 }
 
-// The tRPC codes on which the SSE client reconnects and so runs the action again.
-const SSE_RETRIED = new Set<TRPC_ERROR_CODE_KEY>(['INTERNAL_SERVER_ERROR', 'BAD_GATEWAY', 'SERVICE_UNAVAILABLE', 'GATEWAY_TIMEOUT']);
-
-// A stream that ends in an error the client would retry leaves its outcome unknown (earlier steps may have
-// committed), so the error travels as UNKNOWN_OUTCOME does.
+// A stream that ends in an error the SSE client reconnects on runs the action again, though earlier steps may
+// have committed, so such an error travels as UNKNOWN_OUTCOME does. The client decides by the JSON-RPC number,
+// which several tRPC codes share.
 function streamError(err: ErrFrame['err']): TRPCError {
-  if (err.code === 'INTERNAL' || SSE_RETRIED.has(TRPC_CODE[err.code])) return toTrpcError('UNKNOWN_OUTCOME', err.msg);
-  return toTrpcError(err.code, err.msg);
+  const error = frameError(err);
+  if (retryableRpcCodes.includes(TRPC_ERROR_CODES_BY_KEY[error.code])) return toTrpcError('UNKNOWN_OUTCOME', err.msg);
+  return error;
 }
 
 /** Frame → procedure result. T states the procedure's contract; the frame
