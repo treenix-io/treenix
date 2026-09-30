@@ -62,6 +62,11 @@ describe('parseJSDoc — kind tag whitelist', () => {
     assert.throws(() => parseJSDoc('* @write\n* @setuid\n'), isJSDocError);
   });
 
+  it('a kind or @io with a value throws', () => {
+    for (const doc of ['* @setuid false\n', '* @setuid no\n', '* @io false\n', '* @read yes\n', '* @write @io off\n'])
+      assert.throws(() => parseJSDoc(doc), isJSDocError, doc);
+  });
+
   it('rejects removed @mutation alias', () => {
     assert.throws(
       () => parseJSDoc('* @mutation\n'),

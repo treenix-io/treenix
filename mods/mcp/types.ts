@@ -17,11 +17,17 @@ registerType('mcp.server', McpConfig);
 
 /** API token manager for creating and revoking machine access credentials. */
 export class ApiTokenManager {
-  /** @write Create API token for an agent. Token returned ONCE — server stores only sha256(token). Groups go on the user (no allowlist — admin trust). */
+  /**
+   * Create API token for an agent. Token returned ONCE — server stores only sha256(token). Groups go on the user (no allowlist — admin trust).
+   * @write
+   */
   async create(_data: { name: string; groups?: string[] }) {
     return { token: '', userId: '' };
   }
-  /** @write Revoke an API token by name */
+  /**
+   * Revoke an API token by name
+   * @write
+   */
   async revoke(_data: { name: string }) {}
 }
 registerType('t.api.tokens', ApiTokenManager, { noOptimistic: ['create', 'revoke'] });

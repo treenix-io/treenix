@@ -6,6 +6,7 @@
   "properties": {},
   "methods": {
     "create": {
+      "title": "Create API token for an agent. Token returned ONCE — server stores only sha256(token). Groups go on the user (no allowlist — admin trust).",
       "kind": "write",
       "arguments": [
         {
@@ -29,6 +30,7 @@
       ]
     },
     "revoke": {
+      "title": "Revoke an API token by name",
       "kind": "write",
       "arguments": [
         {

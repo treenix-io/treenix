@@ -9,7 +9,10 @@ import { ApiTokenManager } from './types';
 /** Server-side registry for creating and revoking machine credentials. */
 class ApiTokenServer extends ApiTokenManager {
 
-  /** @write Create API token for an agent. Returns the raw token ONCE — server stores only the hash. */
+  /**
+   * Create API token for an agent. Returns the raw token ONCE — server stores only the hash.
+   * @write
+   */
   async create(data: { name: string; groups?: string[] }) {
     if (!data?.name) throw new Error('name required');
     if (!/^[a-z0-9-]+$/.test(data.name)) throw new Error('name must be lowercase alphanumeric with dashes');
@@ -53,7 +56,10 @@ class ApiTokenServer extends ApiTokenManager {
     return { token, userId };
   }
 
-  /** @write Revoke an API token by name */
+  /**
+   * Revoke an API token by name
+   * @write
+   */
   async revoke(data: { name: string }) {
     if (!data?.name) throw new Error('name required');
 

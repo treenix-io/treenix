@@ -74,6 +74,9 @@ const JSON_TAGS = new Set(['pre', 'post']);
 
 const ACTION_KINDS: readonly ActionKind[] = ['read', 'write', 'setuid'];
 
+// A value would read as a setting: `@setuid false` must not grant the node's rights, nor `@actionsOnly false` mean true.
+const FLAG_TAGS = [...ACTION_KINDS, 'io', 'actionsOnly'];
+
 // Parse JSDoc comment body into a tag map.
 // Line-oriented:
 //   - If a line's first non-whitespace char is NOT `@` → prose. Embedded
@@ -162,17 +165,18 @@ export function parseJSDoc(raw: string): ParsedJSDoc {
 function interpretTags(tags: Map<string, string[]>): Omit<ParsedJSDoc, 'annotations'> {
   const doc: Omit<ParsedJSDoc, 'annotations'> = {};
 
+  for (const flag of FLAG_TAGS) {
+    const values = tags.get(flag);
+    if (values?.some(Boolean)) throw new JSDocError(`@${flag} takes no value, got: ${values.join(' ')}`);
+  }
+
   const kinds = ACTION_KINDS.filter((kind) => tags.has(kind));
   if (kinds.length > 1) {
     throw new JSDocError(`Conflicting kind tags: ${kinds.map((k) => '@' + k).join(' ')}`);
   }
   if (kinds.length) doc.kind = kinds[0];
   if (tags.has('io')) doc.io = true;
-
-  // A value would read as a setting, and `@actionsOnly false` must not mean true.
-  const actionsOnly = tags.get('actionsOnly');
-  if (actionsOnly?.some(Boolean)) throw new JSDocError(`@actionsOnly takes no value, got: ${actionsOnly.join(' ')}`);
-  if (actionsOnly) doc.actionsOnly = true;
+  if (tags.has('actionsOnly')) doc.actionsOnly = true;
 
   const version = single(tags, 'version');
   if (version !== undefined) {
