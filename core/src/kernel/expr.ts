@@ -5,7 +5,7 @@
 import { isSafeKey } from '#core/json'
 import { KernelError } from '#errors'
 import type { ExprWork } from './eval'
-import { compileQuery } from './eval-compile'
+import { compileQuery, isQueryObject } from './eval-compile'
 import type { Limits } from './types'
 
 // Refused in every sift query — predicates are user-authored (wire callerWhere,
@@ -57,7 +57,8 @@ export function assertSafePredicate(q: unknown, limits: Limits, where: 'callerWh
 export function mapSiftQuery(q: unknown): unknown {
   if (Array.isArray(q)) return q.map(mapSiftQuery)
   if (q instanceof RegExp) throw new KernelError('INVALID', 'Forbidden sift value: RegExp')
-  if (q && typeof q === 'object' && q.constructor === Object) {
+  // By prototype: an own `constructor` key would otherwise pass an object through unmapped and unchecked.
+  if (isQueryObject(q)) {
     const out: Record<string, unknown> = {}
     for (const [k, v] of Object.entries(q)) {
       if (SIFT_FORBIDDEN.has(k)) throw new KernelError('INVALID', `Forbidden sift operator: ${k}`)
@@ -102,7 +103,7 @@ const LOGICAL_OPS = new Set(['$and', '$or', '$nor'])
  *  of dotted paths. Value-level operators ($exists/$gt/…) live under a field key
  *  and are not re-examined. */
 function assertVisiblePredicate(q: unknown, where: 'callerWhere' | 'viewWhere'): void {
-  if (!q || typeof q !== 'object' || q.constructor !== Object) return
+  if (!isQueryObject(q)) return
   for (const [k, v] of Object.entries(q)) {
     if (LOGICAL_OPS.has(k)) {
       const branches = Array.isArray(v) ? v : [v]

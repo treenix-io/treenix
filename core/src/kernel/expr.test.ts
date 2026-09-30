@@ -149,12 +149,20 @@ describe('expression language', () => {
     const decoded = (key: string) => JSON.parse(`{"list":{"$elemMatch":{"${key}":{"$or":[{"$eq":1}]}}}}`)
     const shapes: Record<string, unknown>[] = [
       decoded('__proto__'), decoded('constructor'), decoded('prototype'), JSON.parse('{"__proto__":{"a":1}}'),
-      { 'a.__proto__.b': 1 }, { 'a.constructor': 1 }, { prototype: 1 },
+      { 'a.__proto__.b': 1 }, { 'a.constructor': 1 }, { prototype: 1 }, { constructor: { $exists: false } },
+      { a: { $elemMatch: { constructor: 1 } } },
     ]
     for (const q of shapes) {
       invalid(q)
       assert.throws(() => assertSafePredicate(q, DEFAULT_LIMITS, 'callerWhere'), isInvalid, Object.keys(q).join())
     }
+  })
+
+  it('an own constructor key does not carry a hidden field past the read predicate check', () => {
+    const q = { constructor: { $exists: false }, _acl: { $exists: true } }
+
+    assert.throws(() => assertSafePredicate(q, DEFAULT_LIMITS, 'callerWhere'), isInvalid)
+    assert.throws(() => assertSafePredicate({ $or: [q] }, DEFAULT_LIMITS, 'callerWhere'), isInvalid)
   })
 })
 
