@@ -894,8 +894,17 @@ describe('R4-MOUNT-4 — dynamic type schema meta-validation', () => {
     );
   });
 
+  // The schema declares the method, so a refused call can only come from the schema check.
+  const withMethod = (x: Record<string, unknown>) => ({
+    properties: {},
+    methods: { go: { arguments: [{ name: 'data', type: 'object', properties: { x } }] } },
+  });
+
   it('rejects a malformed regex pattern as INVALID', async () => {
-    const tree = await setup('test.badre', { properties: { x: { type: 'string', pattern: '[' } } });
+    const good = await setup('test.goodre', withMethod({ type: 'string', pattern: '^a$' }));
+    assert.deepEqual(await executeAction(good, '/data/x', 'test.goodre', undefined, 'go', { x: 'a' }), { x: 'a' });
+
+    const tree = await setup('test.badre', withMethod({ type: 'string', pattern: '[' }));
     await assert.rejects(
       executeAction(tree, '/data/x', 'test.badre', undefined, 'go', { x: 'a' }),
       (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
