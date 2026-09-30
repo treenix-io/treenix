@@ -1,10 +1,12 @@
 // ThrottledEventSource — reconnect backoff for SSE.
 // Regression: with a dead server, native EventSource hammered a refused
 // connect every ~1s forever (console flood at /t/mnt, 2026-08-14).
-// createTrpcTransport watchPath — the event lane opens before the watch registers.
+// createTrpcTransport watchPath — the event lane opens before the watch registers, and its failures reach watchPath.
 
+import { TRPCClientError } from '@trpc/client';
 import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
+import type { TreenixClient } from './index';
 import { createTrpcTransport, ThrottledEventSource } from './trpc';
 
 class FakeES {
@@ -155,17 +157,32 @@ describe('ThrottledEventSource', () => {
 describe('createTrpcTransport watchPath', () => {
   afterEach(restore);
 
-  /** Answers every batched query with the node at its requested path; records each request URL. */
-  function fakeFetch(requests: string[]) {
-    return async (input: string) => {
+  /** Answers every batched query with the node at its requested path and every mutation with null; records each
+   *  request URL. A batch naming a path in `failing` fails at the network. */
+  function fakeFetch(requests: string[], failing = new Set<string>()) {
+    return async (input: string, init?: { body?: string }) => {
       requests.push(input);
-      const batch: Record<string, { path: string }> = JSON.parse(new URL(input).searchParams.get('input') ?? '{}');
-      const results = Object.values(batch).map(({ path }) => ({ result: { data: { $path: path, $type: 'dir' } } }));
+      const batch: Record<string, { path?: string }> = JSON.parse(init?.body ?? new URL(input).searchParams.get('input') ?? '{}');
+      if (Object.values(batch).some(({ path }) => path !== undefined && failing.has(path))) throw new TypeError('fetch failed');
+
+      const results = Object.values(batch).map(({ path }) => ({ result: { data: path === undefined ? null : { $path: path, $type: 'dir' } } }));
       return new Response(JSON.stringify(results), { headers: { 'content-type': 'application/json' } });
     };
   }
 
   const verdict = (epoch: string) => ({ type: 'reconnect', preserved: false, seq: 0, epoch });
+
+  const isTrpcError = (e: unknown) => e instanceof TRPCClientError;
+
+  /** A watchPath that opens a new lane: the lane delivers its verdict and the watch registers. */
+  async function firstWatch(client: TreenixClient, path: string, onEvent: (e: unknown) => void = () => {}) {
+    const opened = FakeES.next();
+    const watched = client.watchPath(path, onEvent);
+    const es = await opened;
+    es.open();
+    es.message(verdict('e1'));
+    return { es, handle: await watched };
+  }
 
   it('registers the watch only after the event lane delivered its first event', async (t) => {
     install();
@@ -210,5 +227,75 @@ describe('createTrpcTransport watchPath', () => {
     await delivered;
     assert.deepEqual(seen.get('/a'), [verdict('e2')]);
     assert.deepEqual(seen.get('/b'), [verdict('e2')]);
+  });
+
+  it('the lane stays open for a watchPath in flight when the last registered consumer leaves', { timeout: 5_000 }, async (t) => {
+    install();
+    const client = createTrpcTransport({ url: 'http://x', fetch: fakeFetch([]) });
+    t.after(() => client.destroy());
+
+    const { es, handle } = await firstWatch(client, '/a');
+    let deliver!: (e: unknown) => void;
+    const reached = new Promise<unknown>((resolve) => { deliver = resolve; });
+    const watchedB = client.watchPath('/b', (e) => deliver(e));
+    handle.unsubscribe();
+    assert.equal(es.readyState, es.OPEN);
+
+    await watchedB;
+    const event = { type: 'set', path: '/b', node: { $type: 'dir' } };
+    es.message(event);
+    assert.deepEqual(await reached, event);
+  });
+
+  it('a lane refused before its verdict fails watchPath, and the next watchPath opens a new lane', { timeout: 5_000 }, async (t) => {
+    install();
+    t.mock.method(console, 'error', () => {});
+    const client = createTrpcTransport({ url: 'http://x', fetch: fakeFetch([]) });
+    t.after(() => client.destroy());
+
+    const opened = FakeES.next();
+    const watched = client.watchPath('/a', () => {});
+    (await opened).failFatal();
+    await assert.rejects(watched, isTrpcError);
+
+    const { handle } = await firstWatch(client, '/a');
+    assert.equal(FakeES.instances.length, 2);
+    assert.equal(handle.node.$path, '/a');
+  });
+
+  it('a network failure before the verdict fails watchPath and stops the lane retrying', { timeout: 5_000 }, async (t) => {
+    install();
+    t.mock.method(console, 'error', () => {});
+    const client = createTrpcTransport({ url: 'http://x', fetch: fakeFetch([]) });
+    t.after(() => client.destroy());
+
+    const opened = FakeES.next();
+    const watched = client.watchPath('/a', () => {});
+    const es = await opened;
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    es.failNetwork();
+    await assert.rejects(watched, isTrpcError);
+
+    t.mock.timers.tick(120_000);
+    assert.equal(FakeES.instances.length, 1);
+    t.mock.timers.reset();
+
+    const { handle } = await firstWatch(client, '/a');
+    assert.equal(FakeES.instances.length, 2);
+    assert.equal(handle.node.$path, '/a');
+  });
+
+  it('a watchPath whose read fails closes the lane nothing else uses', { timeout: 5_000 }, async (t) => {
+    install();
+    const client = createTrpcTransport({ url: 'http://x', fetch: fakeFetch([], new Set(['/a'])) });
+    t.after(() => client.destroy());
+
+    const opened = FakeES.next();
+    const watched = client.watchPath('/a', () => {});
+    const es = await opened;
+    es.open();
+    es.message(verdict('e1'));
+    await assert.rejects(watched, isTrpcError);
+    assert.equal(es.readyState, es.CLOSED);
   });
 });

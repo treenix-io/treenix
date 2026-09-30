@@ -147,22 +147,35 @@ export function createTrpcTransport(opts: TrpcTransportOpts): TreenixClient & { 
   function openLane(): Promise<void> {
     if (lane) return lane;
     return lane = new Promise<void>((resolve, reject) => {
-      eventSub = trpc.events.subscribe({ token: watchToken }, {
+      let spoken = false;
+      const fail = (err: unknown) => {
+        console.error('[trpc] event lane failed:', err);
+        if (eventSub === sub) {
+          eventSub = null;
+          lane = null;
+        }
+        sub.unsubscribe();
+        reject(err);
+      };
+
+      const sub: WatchSub = eventSub = trpc.events.subscribe({ token: watchToken }, {
         onData: (event: any) => {
+          spoken = true;
           resolve();
           if ('path' in event) {
             pathCbs.get(event.path)?.forEach(cb => cb(event));
             return;
           }
-          // A path-less event (the reconnect verdict) concerns every watched path: each consumer refetches.
+          // A path-less event (the reconnect verdict) concerns every watched path, so every consumer gets it.
           for (const set of pathCbs.values()) for (const cb of [...set]) cb(event);
         },
-        onError: (err: unknown) => {
-          console.error('[trpc] event lane failed:', err);
-          eventSub = null;
-          lane = null;
-          reject(err);
+        // tRPC reports a network failure or a retryable server error only as 'connecting' and keeps retrying.
+        // After the lane has spoken, its next verdict covers the gap; before, watchPath waits on the lane and
+        // would hang, so the lane fails instead.
+        onConnectionStateChange: (state) => {
+          if (!spoken && state.state === 'connecting' && state.error) fail(state.error);
         },
+        onError: fail,
       });
     });
   }
