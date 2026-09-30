@@ -4,6 +4,7 @@
 
 import { registerType } from '#comp';
 import { A, createNode, R, register, S, W } from '#core';
+import { KernelError } from '#errors';
 import { createMemoryTree } from '#tree';
 import { TRPCClientError } from '@trpc/client';
 import assert from 'node:assert/strict';
@@ -40,6 +41,11 @@ class Streamer {
     brokenStreamRuns++;
     yield { step: 1 };
     throw new Error('handler bug');
+  }
+  async *unavailable() {
+    brokenStreamRuns++;
+    yield { step: 1 };
+    throw new KernelError('UNAVAILABLE', 'store gone');
   }
   async *objects() {
     yield { type: 'start' };
@@ -164,6 +170,7 @@ describe('e2e: tRPC over HTTP', () => {
         count: { arguments: [{ name: 'data', type: 'object', properties: { n: { type: 'number' } }, required: ['n'] }], streaming: true },
         objects: { arguments: [], streaming: true },
         broken: { arguments: [], streaming: true },
+        unavailable: { arguments: [], streaming: true },
       },
     }));
 
@@ -436,23 +443,28 @@ describe('e2e: tRPC over HTTP', () => {
       assert.equal(err.data?.code, 'BAD_REQUEST');
     });
 
-    it('a handler throwing a plain error ends the stream once, with an outcome the client does not retry', { timeout: 5000 }, async () => {
+    it('a handler failing after a step — a plain error or UNAVAILABLE — ends the stream once, with an outcome the client does not retry', { timeout: 5000 }, async () => {
       const pub = createClient(url);
       const reg = await pub.register.mutate({ userId: 'streamer4', password: 'pass' });
       const client = createClient(url, reg.token);
 
       await pub.set.mutate({ node: { $path: '/s4', $type: 'page', '#str': { $type: 'streamer' } } });
-      brokenStreamRuns = 0;
 
-      const err = await new Promise<unknown>((resolve) => {
-        const sub = client.streamAction.subscribe({ path: '/s4', key: 'str', action: 'broken' }, {
-          onError: (e) => { sub.unsubscribe(); resolve(e); },
+      for (const action of ['broken', 'unavailable']) {
+        brokenStreamRuns = 0;
+        // A rerun yields the first step again: end there, so a retried stream fails the test instead of hanging it.
+        const err = await new Promise<unknown>((resolve) => {
+          let steps = 0;
+          const sub = client.streamAction.subscribe({ path: '/s4', key: 'str', action }, {
+            onData: () => { if (++steps > 1) { sub.unsubscribe(); resolve('rerun'); } },
+            onError: (e) => { sub.unsubscribe(); resolve(e); },
+          });
         });
-      });
 
-      assert.ok(err instanceof TRPCClientError);
-      assert.equal(err.data?.code, 'PRECONDITION_FAILED');
-      assert.equal(brokenStreamRuns, 1);
+        assert.ok(err instanceof TRPCClientError, action);
+        assert.equal(err.data?.code, 'PRECONDITION_FAILED', action);
+        assert.equal(brokenStreamRuns, 1, action);
+      }
     });
 
   });

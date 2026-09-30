@@ -111,10 +111,14 @@ function frameError(err: ErrFrame['err']): TRPCError {
     : toTrpcError(err.code, err.msg);
 }
 
-// The SSE client reconnects on a 5xx and so runs the action again; after an internal failure the stream's
-// outcome is unknown (earlier steps may have committed), so it travels as UNKNOWN_OUTCOME does.
+// The tRPC codes on which the SSE client reconnects and so runs the action again.
+const SSE_RETRIED = new Set<TRPC_ERROR_CODE_KEY>(['INTERNAL_SERVER_ERROR', 'BAD_GATEWAY', 'SERVICE_UNAVAILABLE', 'GATEWAY_TIMEOUT']);
+
+// A stream that ends in an error the client would retry leaves its outcome unknown (earlier steps may have
+// committed), so the error travels as UNKNOWN_OUTCOME does.
 function streamError(err: ErrFrame['err']): TRPCError {
-  return toTrpcError(err.code === 'INTERNAL' ? 'UNKNOWN_OUTCOME' : err.code, err.msg);
+  if (err.code === 'INTERNAL' || SSE_RETRIED.has(TRPC_CODE[err.code])) return toTrpcError('UNKNOWN_OUTCOME', err.msg);
+  return toTrpcError(err.code, err.msg);
 }
 
 /** Frame → procedure result. T states the procedure's contract; the frame
