@@ -263,6 +263,36 @@ describe('TWP peer over loopback', () => {
     }, isCode('NOT_FOUND'));
   });
 
+  it('a handler failing with a plain Error reaches the caller as INTERNAL without its message', async () => {
+    const secret = '/srv/data/users.db: permission denied';
+    const tree = await seededTree();
+    const serve: PeerServe = {
+      tree,
+      execute: async () => { throw new Error(secret); },
+      executeStream: async function* () { yield 1; throw new Error(secret); },
+    };
+    const [ca, cb] = createLoopback();
+    createPeer(() => serve).attach(cb);
+
+    const failures: ResFrame[] = [];
+    const bothFailed = new Promise<void>((resolve) => {
+      ca.onFrame((f) => {
+        if (!isResFrame(f) || !('err' in f)) return;
+        failures.push(f);
+        if (failures.length === 2) resolve();
+      });
+    });
+    ca.send({ id: 1, op: 'act', path: '/a', action: 'x' });
+    ca.send({ id: 2, op: 'act', stream: true, path: '/a', action: 'x' });
+    await bothFailed;
+
+    for (const f of failures) {
+      assert.ok('err' in f);
+      assert.equal(f.err.code, 'INTERNAL');
+      assert.ok(!f.err.msg.includes(secret));
+    }
+  });
+
   it('a cancelled act stream ends with CANCELLED, not with a completed end', async () => {
     const tree = await seededTree();
     const serve: PeerServe = {

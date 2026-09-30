@@ -143,10 +143,12 @@ function vToken(v: unknown): string | undefined {
   return v;
 }
 
+// A failure outside the error vocabulary is a server bug: its message may name internals (paths, queries, stack
+// detail), and any caller, anonymous included, reads the frame, so the detail stays in the server log.
 function toErrFrame(id: number, e: unknown): ErrFrame {
   if (e instanceof KernelError) return { id, err: { code: e.code, msg: e.message } };
   console.error('[twp] handler error:', e);
-  return { id, err: { code: 'INTERNAL', msg: e instanceof Error ? e.message : String(e) } };
+  return { id, err: { code: 'INTERNAL', msg: 'internal error' } };
 }
 
 function cancelledFrame(id: number): ErrFrame {
