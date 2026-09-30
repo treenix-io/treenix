@@ -18,7 +18,7 @@
 
 import type { NodeData } from '#core';
 import { KernelError } from '#errors';
-import { assertSafeSiftQuery, assertVisiblePredicate, createSiftTest } from '#kernel/expr';
+import { assertSafePredicate, createSiftTest } from '#kernel/expr';
 import { exprWork } from '#kernel/expr-work';
 import { DEFAULT_LIMITS } from '#kernel/types';
 import { mapNodeForSift, type TreeSource } from './index';
@@ -64,13 +64,12 @@ export type ExecuteListResult = {
 export const DEFAULT_BUDGET = { maxRawScanned: 10_000 };
 
 /** Both predicates may be user-authored (callerWhere always, viewWhere via a
- *  user-authored query mount): within the expression limits, no code-eval
- *  operators, no hidden fields. Judged before any node is read. */
+ *  user-authored query mount): within the expression limits and language, no
+ *  hidden fields. Judged before any node is read. */
 export function assertPlanPredicates(plan: ReadPlan): void {
   for (const [where, q] of [['callerWhere', plan.callerWhere], ['viewWhere', plan.viewWhere]] as const) {
     if (!q) continue;
-    assertSafeSiftQuery(q, DEFAULT_LIMITS);
-    assertVisiblePredicate(q, where);
+    assertSafePredicate(q, DEFAULT_LIMITS, where);
   }
 }
 

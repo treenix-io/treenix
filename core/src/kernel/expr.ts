@@ -1,6 +1,6 @@
 // The expression language of `where` and `pre`: sift without $regex, without code and with primitive operands.
-// Its size and operands are judged at parse, before sift compiles it; its work is counted at run time with the
-// nodes and bytes of the operation — each node is charged before it is tested (expr-work).
+// Its size and shape are judged at parse, before sift compiles it or a database receives it; its work is counted
+// at run time with the nodes and bytes of the operation — each node is charged before it is tested (expr-work).
 
 import sift from 'sift'
 
@@ -25,12 +25,20 @@ function assertSize(q: unknown, limits: Limits): void {
 }
 
 /**
- * Validate a sift query: BUDGET over the size limit, INVALID on a forbidden operator. Operands and the work
- * formula are judged when the query is compiled for in-process evaluation; a database bounds its own by timeout.
+ * Judge a sift query whole, whoever runs it — sift in process or a database: BUDGET over the size limit, INVALID
+ * on a forbidden operator or a shape the language refuses.
  */
 export function assertSafeSiftQuery(q: unknown, limits: Limits): void {
   assertSize(q, limits)
-  mapSiftQuery(q)
+  parseWork(mapSiftQuery(q))
+}
+
+/** assertSafeSiftQuery for a read predicate: a hidden field is FORBIDDEN before the shape is judged. */
+export function assertSafePredicate(q: unknown, limits: Limits, where: 'callerWhere' | 'viewWhere'): void {
+  assertSize(q, limits)
+  const mapped = mapSiftQuery(q)
+  assertVisiblePredicate(q, where)
+  parseWork(mapped)
 }
 
 /** Validate and map a sift query to storage keys. */
@@ -79,7 +87,7 @@ const LOGICAL_OPS = new Set(['$and', '$or', '$nor'])
  *  or its storage alias). Walks $and/$or/$nor branches; checks the head segment
  *  of dotted paths. Value-level operators ($exists/$gt/…) live under a field key
  *  and are not re-examined. */
-export function assertVisiblePredicate(q: unknown, where: 'callerWhere' | 'viewWhere'): void {
+function assertVisiblePredicate(q: unknown, where: 'callerWhere' | 'viewWhere'): void {
   if (!q || typeof q !== 'object' || q.constructor !== Object) return
   for (const [k, v] of Object.entries(q)) {
     if (LOGICAL_OPS.has(k)) {

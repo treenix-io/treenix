@@ -149,6 +149,22 @@ describe('QueryStore', () => {
     assert.equal(asked, 0);
   });
 
+  it('refuses a shape the language refuses as INVALID before the parent is asked, whatever the parent runs', async () => {
+    const memory = createMemoryTree();
+    let asked = 0;
+    const parent: Tree = { ...memory, getChildren: async (...args) => { asked++; return memory.getChildren(...args); } };
+    const isInvalid = (e: unknown) => e instanceof KernelError && e.code === 'INVALID';
+
+    const compoundMatch = createQueryTree({ source: '/items', match: { status: { value: 'x' } } }, parent);
+    await assert.rejects(() => compoundMatch.getChildren('/x'), isInvalid);
+
+    const qs = createQueryTree({ source: '/items', match: {} }, parent);
+    for (const query of [{ tags: { $all: [{ b: 1 }] } }, { n: { $not: { m: 1 } } }, { n: { $or: [{ $gt: 1 }] } }])
+      await assert.rejects(() => qs.getChildren('/x', { query }), isInvalid, JSON.stringify(query));
+
+    assert.equal(asked, 0);
+  });
+
   it('rejects $function, $accumulator, $expr — defense-in-depth (R4-TREE-3)', () => {
     assert.throws(() => assertSafeSiftQuery({ $function: { body: 'x' } }, DEFAULT_LIMITS), /\$function/);
     assert.throws(() => assertSafeSiftQuery({ $accumulator: {} }, DEFAULT_LIMITS), /\$accumulator/);
