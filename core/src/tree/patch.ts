@@ -2,8 +2,9 @@
 // Compact [op, path, value?] tuples with dot-notation paths.
 // Maps 1:1 to RFC 6902 JSON Patch.
 
-import { assertSafeKey, type NodeData } from '#core';
+import { assertSafeKey, isSafeKey, type NodeData } from '#core';
 import { KernelError } from '#errors';
+import { isRecord } from '#util/is-record';
 
 // ── Types ──
 
@@ -49,6 +50,26 @@ export function assertSafePatchPath(path: string): void {
     try { assertSafeKey(part); }
     catch { throw new KernelError('FORBIDDEN', `Forbidden patch segment: ${JSON.stringify(part)} in ${path}`); }
   }
+}
+
+/** A written value holds no prototype key at any depth. JSON stores read with safeJsonParse, which throws on
+ *  one, so a stored key would make the node — and every listing of its parent — unreadable. */
+export function assertNoPrototypeKeys(value: unknown, path: string): void {
+  if (Array.isArray(value)) {
+    for (const item of value) assertNoPrototypeKeys(item, path);
+    return;
+  }
+  if (!isRecord(value)) return;
+
+  for (const [key, item] of Object.entries(value)) {
+    if (!isSafeKey(key)) throw new KernelError('INVALID', `${path}: forbidden prototype key ${JSON.stringify(key)}`);
+    assertNoPrototypeKeys(item, path);
+  }
+}
+
+/** The values that replace and add ops write pass assertNoPrototypeKeys. */
+export function assertOpValuesSafe(ops: readonly PatchOp[], path: string): void {
+  for (const op of ops) if (op[0] === 'r' || op[0] === 'a') assertNoPrototypeKeys(op[2], path);
 }
 
 // ── Apply ops to object in-place ──

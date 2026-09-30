@@ -14,7 +14,7 @@ import {
 import { KernelError } from '#errors';
 import { ulid } from '#util/ulid';
 import { applyPatchManyEntry, assertPatchManyBatch, type CommitReceipt, hasMutationOps, isSetEntry, type PatchManyEntry, type PatchOp, type Tree } from './index';
-import { patchViaSet } from './patch';
+import { assertNoPrototypeKeys, assertOpValuesSafe, patchViaSet } from './patch';
 import { isMoved, type RefEntry, refsOf } from './refs';
 import { withCache } from './cache';
 import { isTrashExempt } from './trash-exempt';
@@ -244,7 +244,7 @@ function entryId(path: string): string {
   return `${Date.now()}-${entrySeq++}-${path.replace(/^\//, '').replace(/\//g, '~')}`;
 }
 
-// ── Store preparation: $v stamp + $id mint/echo ──
+// ── Store preparation: prototype-key refusal + $v stamp + $id mint/echo ──
 // $id (core-gk8.10): identity is minted ONCE at first persist and never
 // changes. Stored id wins over the payload — a blind upsert from a legacy
 // client (whose read predates $id) must not re-mint; a DIFFERENT incoming id
@@ -273,6 +273,7 @@ function isRelocate(ctx: unknown): boolean {
 }
 
 function prepareForStore(node: NodeData, existing: NodeData | undefined, ctx?: unknown): void {
+  assertNoPrototypeKeys(node, node.$path);
   stampVersion(node);
 
   if (existing?.$id) {
@@ -346,6 +347,7 @@ export function withStoragePolicy(backing: Tree): StoragePolicy {
     },
 
     async patch(path, ops, ctx) {
+      assertOpValuesSafe(ops, path);
       const raw = await backing.get(path, ctx);
       if (raw && migrateNode(raw) !== raw) return patchViaSet(base, path, ops, ctx);
       return migrateReceipt(await backing.patch(path, ops, ctx));
@@ -388,6 +390,7 @@ export function withStoragePolicy(backing: Tree): StoragePolicy {
           continue;
         }
 
+        assertOpValuesSafe(entry.ops, entry.path);
         const raw = await backing.get(entry.path, ctx);
         if (!raw) { augmented.push(entry); continue; } // adapter throws NOT_FOUND itself
         const node = migrateNode(raw);
@@ -453,6 +456,7 @@ export function withStoragePolicy(backing: Tree): StoragePolicy {
             continue;
           }
 
+          assertOpValuesSafe(entry.ops, entry.path);
           const raw = await backing.get(entry.path, ctx);
           if (!raw) throw new KernelError('NOT_FOUND', `Node not found: ${entry.path}`);
           const node = migrateNode(raw);

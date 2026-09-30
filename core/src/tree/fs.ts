@@ -16,7 +16,7 @@ import { scanFromCollected } from './fs-common';
 import { ensureMigrated } from './migrate-component-namespace';
 import { assertPathSafe } from './path-safety';
 import { applyPatchManyEntry, assertPatchManyBatch, assertSetEntryOcc, isSetEntry, mapNodeForSift, paginate, readWork, type TreeSource } from './index';
-import { type CommitChange, type CommitReceipt, hasMutationOps, patchViaSet } from './patch';
+import { assertNoPrototypeKeys, type CommitChange, type CommitReceipt, hasMutationOps, patchViaSet } from './patch';
 
 // A dir-form node lives at <path>/$.json, so a '$' path segment aliases that
 // file: set('/a/$') overwrote node /a, and set('/a/$/c') moved /a's file away —
@@ -231,6 +231,14 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
     node.$rev = rest.$rev; // preserve caller-visible $rev bump
     const data = JSON.stringify(rest, null, 2) + '\n';
 
+    // After-image parsed back from the exact serialized body: an owned deep
+    // snapshot with on-disk fidelity — a shallow {...rest} would alias the
+    // caller's nested objects and could diverge from disk post-mutation.
+    // Parsed BEFORE the write: a body that readNode could not parse back
+    // never reaches disk.
+    const after = safeJsonParse(data);
+    after.$path = path;
+
     if (path === '/' || await hasChildren(path)) {
       // Dir form: has children
       const dirFile = resolve(join(rootDir, path, '$.json'));
@@ -252,11 +260,6 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
       try { await rmdir(resolve(join(rootDir, path))); } catch (e: any) { if (e.code !== 'ENOENT' && e.code !== 'ENOTEMPTY') throw e; }
     }
 
-    // After-image parsed back from the exact serialized body: an owned deep
-    // snapshot with on-disk fidelity — a shallow {...rest} would alias the
-    // caller's nested objects and could diverge from disk post-mutation.
-    const after = safeJsonParse(data);
-    after.$path = path;
     return { path, before: existing ?? null, after };
   }
 
@@ -353,6 +356,10 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
           if (hasMutationOps(entry.ops)) staged.push(copy);
           else guarded.push({ path: entry.path, before: copy, after: copy });
         }
+
+        // writeNode refuses a body it could not parse back — refused here,
+        // before any member is written.
+        for (const n of staged) assertNoPrototypeKeys(n, n.$path);
 
         // writeNode re-checks OCC against each copy's own (unbumped) $rev and
         // bumps it — same semantics as single patch (patchViaSet → set).
