@@ -11,6 +11,8 @@ import {
   MongoClient,
 } from 'mongodb';
 import {
+  type ChildrenOpts,
+  type Page,
   type TreeEvent,
   type TreeSource,
   type TreeWatchOpts,
@@ -91,18 +93,6 @@ export async function createMongoTree(
     }
   }
 
-  async function paginatedFind(
-    filter: Record<string, unknown>,
-    opts?: { limit?: number; offset?: number },
-  ) {
-    const total = await col.countDocuments(filter);
-    const cursor = col.find(filter).sort({ _path: 1 });
-    if (opts?.offset) cursor.skip(opts.offset);
-    if (opts?.limit) cursor.limit(opts.limit);
-    const docs = await cursor.toArray();
-    return { items: docs.map((doc) => fromStorage(doc as Record<string, unknown>)), total };
-  }
-
   const tree: TreeSource & { close(): Promise<void> } = {
     async get(path, ctx) {
       const doc = await col.findOne({ _path: path });
@@ -111,10 +101,7 @@ export async function createMongoTree(
     },
 
     async getChildren(parent, opts, ctx) {
-      const depth = opts?.depth ?? 1;
-      const pathQuery = { _path: buildPattern(parent, depth) };
-      const filter = opts?.query ? { $and: [pathQuery, opts.query] } : pathQuery;
-      return paginatedFind(filter, opts);
+      return mongoGetChildren(col, parent, opts);
     },
 
     // Server-internal streaming for read-runtime (executeList). Honors `after`
@@ -177,6 +164,34 @@ export async function createMongoTree(
   };
 
   return tree;
+}
+
+/** The part of a Collection that a children page reads. */
+export type ChildrenCollection = { find(filter: Record<string, unknown>): ChildrenCursor };
+type ChildrenCursor = {
+  sort(spec: { _path: 1 }): ChildrenCursor;
+  limit(n: number): ChildrenCursor;
+  toArray(): Promise<Record<string, unknown>[]>;
+};
+
+/** Tree.getChildren against a Mongo collection, in `_path` order: resumes strictly after `cursor` (the last `$path`
+ *  of the previous page) and reads one row past `limit` to know whether a next page exists. Exported (like mongoSet)
+ *  so the unit suite drives it with a mocked collection. */
+export async function mongoGetChildren(col: ChildrenCollection, parent: string, opts?: ChildrenOpts): Promise<Page<NodeData>> {
+  const parts: Record<string, unknown>[] = [{ _path: buildPattern(parent, opts?.depth ?? 1) }];
+  if (opts?.cursor !== undefined) parts.push({ _path: { $gt: opts.cursor } });
+  if (opts?.query) parts.push(opts.query);
+
+  const limit = opts?.limit;
+  const found = col.find(parts.length === 1 ? parts[0] : { $and: parts }).sort({ _path: 1 });
+  if (limit) found.limit(limit + 1);
+  const docs = await found.toArray();
+
+  const hasMore = !!limit && docs.length > limit;
+  const items = (hasMore ? docs.slice(0, limit) : docs).map(fromStorage);
+  const page: Page<NodeData> = { items, total: items.length };
+  if (hasMore) page.nextCursor = items[items.length - 1].$path;
+  return page;
 }
 
 /** Tree.set against a Mongo collection. Exported (like mongoWatch) so the unit
