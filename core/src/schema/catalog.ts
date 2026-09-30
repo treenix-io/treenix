@@ -2,7 +2,7 @@
 // No tree deps, only core registry. Usable from MCP, services, LLM, tests.
 
 import { getRegisteredTypes, resolve } from '#core';
-import type { MethodSchema, PropertySchema, TypeSchema } from '#schema/types';
+import type { ActionKind, MethodSchema, PropertySchema, TypeSchema } from '#schema/types';
 
 export type CatalogPropertyDoc = {
   type?: string;
@@ -18,7 +18,7 @@ export type CatalogActionDoc = {
   description?: string;
   streaming?: boolean;
   arguments?: string[];
-  kind?: 'read' | 'write';
+  kind?: ActionKind;
   io?: boolean;
 };
 

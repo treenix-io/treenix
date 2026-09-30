@@ -3,7 +3,12 @@
 import { parseSync } from 'oxc-parser';
 import fs from 'node:fs/promises';
 import * as path from 'node:path';
-import type { MethodArgSchema, MethodSchema, PropertySchema, TypeSchema } from '#schema/types';
+import { assertValidType } from '#core/json';
+import { KernelError } from '#errors';
+import { assertSafeSiftQuery } from '#kernel/expr';
+import { assertPost } from '#kernel/post';
+import { DEFAULT_LIMITS, type Post, type Where } from '#kernel/types';
+import type { ActionKind, MethodArgSchema, MethodSchema, PropertySchema, TypeSchema } from '#schema/types';
 
 interface ComponentEntry {
   typeName: string;
@@ -33,8 +38,9 @@ export class SchemaParseError extends Error {
   constructor(
     message: string,
     readonly file: string,
+    options?: ErrorOptions,
   ) {
-    super(message);
+    super(message, options);
   }
 }
 
@@ -46,14 +52,27 @@ const KNOWN_TAGS = new Set([
   // schema annotations
   'format', 'refType', 'hidden', 'opaque', 'dangerous',
   // method kind
-  'read', 'write', 'io',
+  'read', 'write', 'setuid', 'io',
   // dataflow contract
   'pre', 'post',
+  // type identity and evolution
+  'version', 'actionsOnly', 'alias',
   // standard JSDoc — @param/@returns/@throws allowed but stripped before return
   // (positional signature docs, not schema metadata); @default is kept
   'param', 'returns', 'throws', 'default',
 ]);
 
+// C34: @param/@returns/@throws describe the TS signature, which is already
+// the source of truth for arguments/return — leaking them corrupts schemas.
+const SIGNATURE_TAGS = new Set(['param', 'returns', 'throws']);
+
+// Tags the extractor reads into typed schema fields; every other known tag is an annotation carried as written.
+const INTERPRETED_TAGS = new Set(['read', 'write', 'setuid', 'io', 'pre', 'post', 'version', 'actionsOnly', 'alias']);
+
+// A JSON value may span lines: it runs to the next tag line.
+const JSON_TAGS = new Set(['pre', 'post']);
+
+const ACTION_KINDS: readonly ActionKind[] = ['read', 'write', 'setuid'];
 
 // Parse JSDoc comment body into a tag map.
 // Line-oriented:
@@ -63,16 +82,25 @@ const KNOWN_TAGS = new Set([
 //   - If a line starts with `@` → tag-line. Multiple tags allowed:
 //     `@title Foo @format bar`, or `@read @io` (combined kind+modifier).
 // Tag name: letter-led, allows digits/underscore/hyphen for `@x-foo` escape.
-export type ParsedJSDoc = Record<string, string> & {
-  kind?: 'read' | 'write';
-  io?: boolean;
-};
+export interface ParsedJSDoc {
+  /** Carried into the schema as written. */
+  annotations: Record<string, string>;
+  kind?: ActionKind;
+  io?: true;
+  pre?: Where;
+  post?: Post;
+  version?: number;
+  actionsOnly?: true;
+  aliases?: string[];
+}
 
 export function parseJSDoc(raw: string): ParsedJSDoc {
-  const result: Record<string, any> = {};
-  if (!raw) return result;
+  const annotations: Record<string, string> = {};
+  const interpreted = new Map<string, string[]>();
+  if (!raw) return { annotations };
   const plainDescriptionParts: string[] = [];
   let hasExplicitDescription = false;
+  let openJson: string[] | undefined;
 
   const lines = raw
     .replace(/^\s*\*\s?/gm, '')
@@ -83,10 +111,12 @@ export function parseJSDoc(raw: string): ParsedJSDoc {
   for (const line of lines) {
     // Prose-line: first non-WS char is not `@`. Embedded `@word` is text.
     if (!line.startsWith('@')) {
-      if (!result.title) result.title = line;
+      if (openJson) openJson[openJson.length - 1] += ' ' + line;
+      else if (!annotations.title) annotations.title = line;
       else plainDescriptionParts.push(line);
       continue;
     }
+    openJson = undefined;
 
     // Tag-line: parse all `@tag` instances on this line.
     const tagRe = /(?:^|\s)@([a-zA-Z][\w-]*)/g;
@@ -101,61 +131,133 @@ export function parseJSDoc(raw: string): ParsedJSDoc {
       const { name, valueStart } = hits[i];
       const end = i + 1 < hits.length ? hits[i + 1].idx : line.length;
       const value = line.slice(valueStart, end).trim();
+      if (!KNOWN_TAGS.has(name) && !name.startsWith('x-')) {
+        throw new JSDocError(`Unknown JSDoc tag: @${name}`);
+      }
+      if (SIGNATURE_TAGS.has(name)) continue;
+
+      if (INTERPRETED_TAGS.has(name)) {
+        const values = interpreted.get(name) ?? [];
+        values.push(value);
+        interpreted.set(name, values);
+        if (JSON_TAGS.has(name) && i === hits.length - 1) openJson = values;
+        continue;
+      }
+
       if (name === 'description') hasExplicitDescription = true;
-      result[name] = value;
+      annotations[name] = value;
     }
   }
 
   if (!hasExplicitDescription && plainDescriptionParts.length) {
-    result.description = plainDescriptionParts.join(' ');
+    annotations.description = plainDescriptionParts.join(' ');
   }
-  if (result.description === result.title) {
-    delete result.description;
-  }
-
-  for (const name of Object.keys(result)) {
-    if (!KNOWN_TAGS.has(name) && !name.startsWith('x-')) {
-      throw new JSDocError(`Unknown JSDoc tag: @${name}`);
-    }
+  if (annotations.description === annotations.title) {
+    delete annotations.description;
   }
 
-  // C34: @param/@returns/@throws describe the TS signature, which is already
-  // the source of truth for arguments/return — leaking them corrupts schemas.
-  delete result.param;
-  delete result.returns;
-  delete result.throws;
-
-  // Kind tags: @read/@write canonical.
-  const kindTags: { tag: string; value: 'read' | 'write' }[] = [];
-  if ('read' in result) kindTags.push({ tag: 'read', value: 'read' });
-  if ('write' in result) kindTags.push({ tag: 'write', value: 'write' });
-
-  if (kindTags.length) {
-    const distinct = new Set(kindTags.map((k) => k.value));
-    if (distinct.size > 1) {
-      throw new JSDocError(
-        `Conflicting kind tags: ${kindTags.map((k) => '@' + k.tag).join(' ')}`,
-      );
-    }
-    for (const k of kindTags) delete result[k.tag];
-    result.kind = kindTags[0].value;
-  }
-
-  if ('io' in result) {
-    result.io = true;
-  }
-
-  return result as ParsedJSDoc;
+  return { annotations, ...interpretTags(interpreted) };
 }
 
-function buildJSDocMap(comments: Comment[], source: string): Map<number, Record<string, string>> {
-  const map = new Map<number, Record<string, string>>();
+function interpretTags(tags: Map<string, string[]>): Omit<ParsedJSDoc, 'annotations'> {
+  const doc: Omit<ParsedJSDoc, 'annotations'> = {};
+
+  const kinds = ACTION_KINDS.filter((kind) => tags.has(kind));
+  if (kinds.length > 1) {
+    throw new JSDocError(`Conflicting kind tags: ${kinds.map((k) => '@' + k).join(' ')}`);
+  }
+  if (kinds.length) doc.kind = kinds[0];
+  if (tags.has('io')) doc.io = true;
+
+  // A value would read as a setting, and `@actionsOnly false` must not mean true.
+  const actionsOnly = tags.get('actionsOnly');
+  if (actionsOnly?.some(Boolean)) throw new JSDocError(`@actionsOnly takes no value, got: ${actionsOnly.join(' ')}`);
+  if (actionsOnly) doc.actionsOnly = true;
+
+  const version = single(tags, 'version');
+  if (version !== undefined) {
+    if (!/^(0|[1-9]\d*)$/.test(version) || !Number.isSafeInteger(Number(version)))
+      throw new JSDocError(`@version takes a non-negative integer, got: ${version}`);
+    doc.version = Number(version);
+  }
+
+  const aliases = tags.get('alias')?.flatMap((value) => value.split(/\s+/).filter(Boolean));
+  if (aliases) doc.aliases = typeNames(aliases);
+
+  const pre = single(tags, 'pre');
+  if (pre !== undefined) {
+    doc.pre = jsonTag('pre', pre, (q): Where => {
+      assertSafeSiftQuery(q, DEFAULT_LIMITS);
+      return q;
+    });
+  }
+
+  const post = single(tags, 'post');
+  if (post !== undefined) {
+    doc.post = jsonTag('post', post, (p): Post => {
+      assertPost(p);
+      return p;
+    });
+  }
+
+  return doc;
+}
+
+// A second value of a one-value tag would silently replace the first.
+function single(tags: Map<string, string[]>, name: string): string | undefined {
+  const values = tags.get(name);
+  if (values && values.length > 1) throw new JSDocError(`@${name} is given ${values.length} times`);
+  return values?.[0];
+}
+
+function typeNames(names: string[]): string[] {
+  if (!names.length) throw new JSDocError('@alias takes the earlier type names');
+  if (new Set(names).size < names.length) throw new JSDocError(`@alias repeats a name: ${names.join(' ')}`);
+
+  for (const name of names) {
+    try {
+      assertValidType(name);
+    } catch (e) {
+      throw new JSDocError(`@alias ${name} is not a type name`, { cause: e });
+    }
+  }
+  return names;
+}
+
+// A JSON tag holds what the kernel accepts at run time: @pre a sift query it can evaluate, @post a Post.
+function jsonTag<T>(tag: string, text: string, check: (value: unknown) => T): T {
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch (e) {
+    throw new JSDocError(`@${tag} takes JSON — a list of field names is not one: ${text}`, { cause: e });
+  }
+
+  try {
+    return check(value);
+  } catch (e) {
+    if (!(e instanceof KernelError)) throw e;
+    throw new JSDocError(`@${tag} ${text}: ${e.message}`, { cause: e });
+  }
+}
+
+// Tag errors name the file here: parseJSDoc sees one comment and cannot.
+function parseFileJSDoc(raw: string, file: string): ParsedJSDoc {
+  try {
+    return parseJSDoc(raw);
+  } catch (e) {
+    if (!(e instanceof JSDocError)) throw e;
+    throw new SchemaParseError(`[schema/oxc] ${file}: ${e.message}`, file, { cause: e });
+  }
+}
+
+function buildJSDocMap(comments: Comment[], source: string, file: string): Map<number, ParsedJSDoc> {
+  const map = new Map<number, ParsedJSDoc>();
   for (const c of comments) {
     if (c.type !== 'Block' || !c.value.startsWith('*')) continue;
     let pos = c.end;
     while (pos < source.length && /\s/.test(source[pos])) pos++;
-    const doc = parseJSDoc(c.value);
-    if (!Object.keys(doc).length) continue;
+    const doc = parseFileJSDoc(c.value, file);
     map.set(pos, doc);
 
     // `export class Foo` often reports the ClassDeclaration start at `class`,
@@ -180,8 +282,36 @@ interface ImportEntry {
   sourceFile: string; // absolute path
 }
 
+interface FileDocs {
+  file: string;
+  at: Map<number, ParsedJSDoc>;
+}
+
+// Interpreted tags mean something only where they are read — kinds and contracts on an action, identity and
+// evolution on a type. Anywhere else they would be dropped while their author believes they hold.
+const ACTION_FIELDS = ['kind', 'io', 'pre', 'post'] as const;
+const TYPE_FIELDS = ['version', 'actionsOnly', 'aliases'] as const;
+const INTERPRETED_FIELDS = [...ACTION_FIELDS, ...TYPE_FIELDS];
+type InterpretedField = (typeof INTERPRETED_FIELDS)[number];
+
+const tagOf = (field: InterpretedField): string =>
+  field === 'kind' ? '@read/@write/@setuid' : field === 'aliases' ? '@alias' : `@${field}`;
+
+function assertNoTags(doc: ParsedJSDoc | undefined, fields: readonly InterpretedField[], where: string, file: string): void {
+  const found = fields.filter((field) => doc?.[field] !== undefined);
+  if (found.length) {
+    throw new SchemaParseError(`[schema/oxc] ${file}: ${where} cannot carry ${found.map(tagOf).join(', ')}`, file);
+  }
+}
+
+function fieldAnnotations(docs: FileDocs, pos: number, where: string): Record<string, string> | undefined {
+  const doc = docs.at.get(pos);
+  assertNoTags(doc, INTERPRETED_FIELDS, where, docs.file);
+  return doc?.annotations;
+}
+
 interface SchemaCtx {
-  jsDocMap?: Map<number, Record<string, string>>;
+  docs?: FileDocs;
   // File-scoped aliases/enums: two modules may each define `type Entry = {...}` or `enum Status`
   // with different shapes. A global map silently corrupts whichever class is parsed second.
   aliasesByFile?: Map<string, Map<string, N>>;
@@ -351,7 +481,7 @@ function typeToSchema(node: N | null | undefined, ctx: SchemaCtx = {}): Property
       for (const m of node.members ?? []) {
         if (m.type === 'TSPropertySignature' && m.key?.name) {
           properties[m.key.name] = typeToSchema(m.typeAnnotation?.typeAnnotation, ctx);
-          if (ctx.jsDocMap) Object.assign(properties[m.key.name], ctx.jsDocMap.get(m.start) ?? {});
+          if (ctx.docs) Object.assign(properties[m.key.name], fieldAnnotations(ctx.docs, m.start, `field ${m.key.name}`));
           if (!m.optional) required.push(m.key.name);
         }
       }
@@ -698,12 +828,8 @@ function findExternalActions(ast: N, fileName: string): Map<string, ExternalActi
           handlerArg?.type === 'ArrowFunctionExpression' ||
           handlerArg?.type === 'FunctionExpression'
         ) {
-          const params = handlerArg.params ?? [];
-          const args: MethodArgSchema[] = [];
-          for (let i = 1; i < params.length; i++) {
-            const p = params[i];
-            args.push({ name: p.name ?? 'arg', ...typeToSchema(p.typeAnnotation?.typeAnnotation) });
-          }
+          const params: N[] = handlerArg.params ?? [];
+          const args = actionArguments(params.slice(1), {}, `${typeArg.value}.${actionName}`, fileName);
           if (args.length) action.arguments = args;
         }
 
@@ -715,6 +841,25 @@ function findExternalActions(ast: N, fileName: string): Map<string, ExternalActi
 }
 
 // ── Schema generation ──
+
+// TWP `act` carries one args value, so an action declares at most one data parameter; a rest parameter would take
+// any number of them.
+function actionArguments(params: N[], ctx: SchemaCtx, where: string, file: string): MethodArgSchema[] {
+  if (params.length > 1) {
+    throw new SchemaParseError(
+      `[schema/oxc] ${file}: ${where} declares ${params.length} data parameters; an action takes one args value`,
+      file,
+    );
+  }
+
+  return params.map((param) => {
+    if (param.type === 'RestElement') {
+      throw new SchemaParseError(`[schema/oxc] ${file}: ${where} declares a rest parameter; an action takes one args value`, file);
+    }
+    const p = param.type === 'AssignmentPattern' ? param.left : param;
+    return { name: p.name ?? 'arg', ...typeToSchema(p.typeAnnotation?.typeAnnotation, ctx) };
+  });
+}
 
 function buildClassTypesByFile(entries: ComponentEntry[]): Map<string, Map<string, string>> {
   const byFile = new Map<string, Map<string, string>>();
@@ -745,37 +890,45 @@ function resolveRegisteredClassType(
 
 function generateClassSchema(
   classNode: N,
-  jsDocMap: Map<number, Record<string, string>>,
+  docs: Map<number, ParsedJSDoc>,
   classTypesByFile: Map<string, Map<string, string>>,
   currentFile: string,
   aliasesByFile: Map<string, Map<string, N>>,
   enumsByFile: Map<string, Map<string, N>>,
   importsByFile: Map<string, Map<string, ImportEntry>>,
-): TypeSchema & { $id?: string; $schema?: string } {
+): TypeSchema {
+  const fileDocs: FileDocs = { file: currentFile, at: docs };
   const ctx: SchemaCtx = {
-    jsDocMap,
+    docs: fileDocs,
     currentFile,
     aliasesByFile,
     enumsByFile,
     importsByFile,
   };
+  const className: string = classNode.id.name;
   const properties: Record<string, PropertySchema> = {};
   const required: string[] = [];
   const methods: Record<string, MethodSchema> = {};
 
   const buildMethodFromFn = (name: string, fn: N, startPos: number): MethodSchema | null => {
     if (name.startsWith('_')) return null;
-    if (jsDocMap.get(startPos)?.hidden !== undefined) return null;
-    const params = fn.params ?? [];
-    const args: MethodArgSchema[] = [];
-    for (const param of params) {
-      const p = param.type === 'AssignmentPattern' ? param.left : param;
-      args.push({
-        name: p.name ?? 'arg',
-        ...typeToSchema(p.typeAnnotation?.typeAnnotation, ctx),
-      });
-    }
+    const doc = docs.get(startPos);
+    if (doc?.annotations.hidden !== undefined) return null;
+
+    const where = `${className}.${name}`;
+    assertNoTags(doc, TYPE_FIELDS, where, currentFile);
     const isGenerator = !!fn.generator;
+    if (doc?.post && isGenerator) {
+      throw new SchemaParseError(
+        `[schema/oxc] ${currentFile}: ${where} streams, so it declares no @post — its steps would apply post more than once`,
+        currentFile,
+      );
+    }
+    if (doc?.post && doc.kind === 'read') {
+      throw new SchemaParseError(`[schema/oxc] ${currentFile}: ${where} is @read and writes nothing, so it declares no @post`, currentFile);
+    }
+
+    const args = actionArguments(fn.params ?? [], ctx, where, currentFile);
     const returnTa = fn.returnType?.typeAnnotation;
     let yieldsSchema: PropertySchema | undefined;
     if (isGenerator && returnTa?.type === 'TSTypeReference') {
@@ -786,13 +939,12 @@ function generateClassSchema(
       }
     }
     const ret = isGenerator ? {} : typeToSchema(returnTa, ctx);
-    const methodDoc: Record<string, unknown> = { ...(jsDocMap.get(startPos) ?? {}) };
-    if (typeof methodDoc.pre === 'string')
-      methodDoc.pre = (methodDoc.pre as string).split(/\s+/).filter(Boolean);
-    if (typeof methodDoc.post === 'string')
-      methodDoc.post = (methodDoc.post as string).split(/\s+/).filter(Boolean);
     return {
-      ...methodDoc,
+      ...doc?.annotations,
+      ...(doc?.kind ? { kind: doc.kind } : {}),
+      ...(doc?.io ? { io: true } : {}),
+      ...(doc?.pre ? { pre: doc.pre } : {}),
+      ...(doc?.post ? { post: doc.post } : {}),
       ...(isGenerator ? { streaming: true } : {}),
       arguments: args,
       ...(isGenerator && yieldsSchema && Object.keys(yieldsSchema).length
@@ -800,14 +952,13 @@ function generateClassSchema(
         : {}),
       // C33: union returns are anyOf-shaped (no .type) — only emptiness disqualifies
       ...(!isGenerator && Object.keys(ret).length ? { return: ret } : {}),
-    } as MethodSchema;
+    };
   };
 
   for (const member of classNode.body?.body ?? []) {
     if (member.type === 'PropertyDefinition' && member.key?.name && !member.static) {
       const name = member.key.name;
-      const doc = jsDocMap.get(member.start);
-      if (doc?.hidden !== undefined) continue;
+      if (docs.get(member.start)?.annotations.hidden !== undefined) continue;
 
       // Arrow-field method: `ship = (msg) => 42` — treated as method, not property.
       const initType = member.value?.type;
@@ -834,7 +985,7 @@ function generateClassSchema(
         properties[name] = ta ? typeToSchema(ta, ctx) : typeFromInit(member.value);
       }
 
-      Object.assign(properties[name], jsDocMap.get(member.start) ?? {});
+      Object.assign(properties[name], fieldAnnotations(fileDocs, member.start, `${className}.${name}`));
 
       // `default` and `required` are independent.
       // `default` is the initial value forms (and other writers) seed when the user
@@ -851,63 +1002,23 @@ function generateClassSchema(
     }
 
     if (member.type === 'MethodDefinition' && member.key?.name && member.kind === 'method') {
-      const name = member.key.name;
-      if (name.startsWith('_')) continue;
-      if (jsDocMap.get(member.start)?.hidden !== undefined) continue;
-
-      const fn = member.value;
-      const params = fn.params ?? [];
-      const args: MethodArgSchema[] = [];
-      for (const param of params) {
-        const p = param.type === 'AssignmentPattern' ? param.left : param;
-        args.push({
-          name: p.name ?? 'arg',
-          ...typeToSchema(p.typeAnnotation?.typeAnnotation, ctx),
-        });
-      }
-
-      const isGenerator = !!fn.generator;
-      const returnTa = fn.returnType?.typeAnnotation;
-
-      // For generators, unwrap AsyncGenerator<Y> → yields Y
-      let yieldsSchema: PropertySchema | undefined;
-      if (isGenerator && returnTa?.type === 'TSTypeReference') {
-        const genName = returnTa.typeName?.name;
-        if (genName === 'AsyncGenerator' || genName === 'Generator') {
-          const yieldType = (returnTa.typeArguments?.params ??
-            returnTa.typeParameters?.params)?.[0];
-          if (yieldType) yieldsSchema = typeToSchema(yieldType, ctx);
-        }
-      }
-
-      const ret = isGenerator ? {} : typeToSchema(returnTa, ctx);
-      const methodDoc: Record<string, unknown> = { ...(jsDocMap.get(member.start) ?? {}) };
-
-      if (typeof methodDoc.pre === 'string')
-        methodDoc.pre = (methodDoc.pre as string).split(/\s+/).filter(Boolean);
-      if (typeof methodDoc.post === 'string')
-        methodDoc.post = (methodDoc.post as string).split(/\s+/).filter(Boolean);
-
-      methods[name] = {
-        ...methodDoc,
-        ...(isGenerator ? { streaming: true } : {}),
-        arguments: args,
-        ...(isGenerator && yieldsSchema && Object.keys(yieldsSchema).length
-          ? { yields: yieldsSchema }
-          : {}),
-        // C33: union returns are anyOf-shaped (no .type) — only emptiness disqualifies
-        ...(!isGenerator && Object.keys(ret).length ? { return: ret } : {}),
-      } as MethodSchema;
+      const m = buildMethodFromFn(member.key.name, member.value, member.start);
+      if (m) methods[member.key.name] = m;
     }
   }
 
+  const doc = docs.get(classNode.start);
+  assertNoTags(doc, ACTION_FIELDS, className, currentFile);
   return {
-    type: 'object' as const,
-    ...(jsDocMap.get(classNode.start) ?? {}),
+    type: 'object',
+    ...doc?.annotations,
+    ...(doc?.version !== undefined ? { version: doc.version } : {}),
+    ...(doc?.actionsOnly ? { actionsOnly: true } : {}),
+    ...(doc?.aliases ? { aliases: doc.aliases } : {}),
     properties,
     ...(required.length ? { required } : {}),
     ...(Object.keys(methods).length ? { methods } : {}),
-  } as TypeSchema;
+  };
 }
 
 // ── File scanning ──
@@ -915,13 +1026,9 @@ function generateClassSchema(
 async function globSourceFiles(dirs: string[]): Promise<string[]> {
   const files: string[] = [];
   for (const dir of dirs) {
+    // A directory that cannot be read throws: skipping it would drop its schemas without a word.
     await (async function walkDir(d: string) {
-      let entries;
-      try {
-        entries = await fs.readdir(d, { withFileTypes: true });
-      } catch {
-        return;
-      }
+      const entries = await fs.readdir(d, { withFileTypes: true });
       for (const e of entries) {
         const full = path.join(d, e.name);
         if (e.isDirectory() && e.name !== 'node_modules' && e.name !== 'dist') await walkDir(full);
@@ -948,7 +1055,7 @@ export async function generateSchemas(dirs: string[]): Promise<void> {
   const files = await globSourceFiles(dirs);
 
   const allEntries: ComponentEntry[] = [];
-  const allClasses = new Map<string, { node: N; jsDocMap: Map<number, Record<string, string>> }>();
+  const allClasses = new Map<string, { node: N; docs: Map<number, ParsedJSDoc> }>();
   const allExternalActions = new Map<string, ExternalAction[]>();
   // Type aliases and enums are file-scoped: two modules may each define `type Entry = {...}`
   // or `enum Status` with different shapes. A global map would silently corrupt whichever
@@ -971,7 +1078,7 @@ export async function generateSchemas(dirs: string[]): Promise<void> {
       throw new SchemaParseError(`[schema/oxc] parse failed for ${file}: ${details}`, file);
     }
     const { program: ast, comments } = parsed;
-    const jsDocMap = buildJSDocMap(comments as Comment[], source);
+    const docs = buildJSDocMap(comments as Comment[], source, file);
 
     const fileAliases = findTypeAliases(ast as N);
     if (fileAliases.size) aliasesByFile.set(file, fileAliases);
@@ -985,7 +1092,7 @@ export async function generateSchemas(dirs: string[]): Promise<void> {
     for (const e of findRegistrations(ast as N, file)) allEntries.push(e);
 
     for (const [name, node] of findClasses(ast as N))
-      allClasses.set(name + '\0' + file, { node, jsDocMap });
+      allClasses.set(name + '\0' + file, { node, docs });
 
     for (const [typeName, actions] of findExternalActions(ast as N, file)) {
       const existing = allExternalActions.get(typeName) ?? [];
@@ -1007,13 +1114,16 @@ export async function generateSchemas(dirs: string[]): Promise<void> {
 
     const body = generateClassSchema(
       classInfo.node,
-      classInfo.jsDocMap,
+      classInfo.docs,
       classTypesByFile,
       entry.fileName,
       aliasesByFile,
       enumsByFile,
       importsByFile,
     );
+    if (body.aliases?.includes(entry.typeName)) {
+      throw new SchemaParseError(`[schema/oxc] ${entry.fileName}: ${entry.typeName} names itself in @alias`, entry.fileName);
+    }
     generated.add(entry.typeName);
 
     // Merge external actions

@@ -363,9 +363,9 @@ describe('extract-schemas-oxc', () => {
     assert.equal(m.description, 'Adds one vote to the current count.');
   });
 
-  it('@pre/@post on methods', () => {
-    assert.deepEqual(schema.methods.increment.pre, ['count']);
-    assert.deepEqual(schema.methods.increment.post, ['count']);
+  it('@pre is a sift query and @post update operators per target', () => {
+    assert.deepEqual(schema.methods.increment.pre, { 'node.count': { $gte: 0 } });
+    assert.deepEqual(schema.methods.increment.post, { '': { $inc: { count: 1 } } });
   });
 
   it('method with typed arg', () => {
@@ -375,9 +375,11 @@ describe('extract-schemas-oxc', () => {
     assert.equal(m.arguments[0].type, 'string');
   });
 
-  it('method with multiple args and @description', () => {
+  it('method with one object argument and @description', () => {
     const m = schema.methods.addTag;
-    assert.equal(m.arguments.length, 2);
+    assert.equal(m.arguments.length, 1);
+    assert.equal(m.arguments[0].type, 'object');
+    assert.deepEqual(m.arguments[0].required, ['tag', 'prio']);
     assert.equal(m.description, 'Appends tag to the list');
   });
 
@@ -394,10 +396,24 @@ describe('extract-schemas-oxc', () => {
     assert.deepEqual(m.yields, { type: 'string' });
   });
 
-  it('method with multiple @pre/@post fields', () => {
-    assert.deepEqual(schema.methods.reset.pre, ['count', 'scores']);
-    assert.deepEqual(schema.methods.reset.post, ['count', 'scores', 'tags']);
+  it('@pre and @post JSON spanning several lines', () => {
+    assert.deepEqual(schema.methods.reset.pre, { 'node.count': { $gt: 0 }, 'node.scores': { $exists: true } });
+    assert.deepEqual(schema.methods.reset.post, { '': { $set: { count: 0, scores: [] }, $unset: { tags: true } } });
     assert.equal(schema.methods.reset.description, 'Clears all accumulated data');
+  });
+
+  it('@setuid on a method → kind="setuid"', () => {
+    assert.equal(schema.methods.archive.kind, 'setuid');
+    assert.deepEqual(schema.methods.archive.post, { '': { $set: { status: 'archived' } } });
+  });
+
+  it('@version, @actionsOnly and @alias on the class', () => {
+    assert.equal(schema.version, 3);
+    assert.equal(schema.actionsOnly, true);
+    assert.deepEqual(schema.aliases, ['test.old-widget', 'test.legacy-widget']);
+    assert.equal(exportedSchema.version, undefined);
+    assert.equal(exportedSchema.actionsOnly, undefined);
+    assert.equal(exportedSchema.aliases, undefined);
   });
 
   it('_underscore methods are excluded', () => {
@@ -545,6 +561,85 @@ describe('extract-schemas-oxc: parse errors', () => {
       () => generateSchemas([fixtureDir]),
       (err: unknown) => err instanceof SchemaParseError && err.file === badFile,
     );
+  });
+});
+
+describe('extract-schemas-oxc: action and type rules', () => {
+  const dirs: string[] = [];
+
+  after(async () => {
+    for (const dir of dirs) await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  // Generation from one source file must fail with a SchemaParseError naming that file.
+  async function refused(source: string): Promise<void> {
+    const dir = await scratchDir('rule');
+    dirs.push(dir);
+    const file = path.join(dir, 'source.ts');
+    await fs.writeFile(file, source);
+
+    await assert.rejects(
+      () => generateSchemas([dir]),
+      (err: unknown) => err instanceof SchemaParseError && err.file === file,
+    );
+  }
+
+  const registered = (body: string, classDoc = '') =>
+    `${classDoc}\nclass Sample {\n${body}\n}\nregisterType('test.sample', Sample);\n`;
+
+  it('a streaming method with @post fails', async () => {
+    await refused(registered(`/** @post {"": {"$set": {"a": 1}}} */\nasync *run(): AsyncGenerator<string> { yield '' }`));
+  });
+
+  it('a legacy @pre field list fails, naming the file', async () => {
+    await refused(registered(`/** @pre count scores */\nrun() {}`));
+  });
+
+  it('a two-parameter method fails', async () => {
+    await refused(registered(`run(tag: string, prio: number) {}`));
+  });
+
+  it('a two-parameter arrow-field method fails', async () => {
+    await refused(registered(`run = (tag: string, prio: number) => tag;`));
+  });
+
+  it('a rest parameter fails', async () => {
+    await refused(registered(`run(...tags: string[]) {}`));
+  });
+
+  it('a register()ed action handler with two data parameters fails', async () => {
+    await refused(`register('test.sample', 'action:run', (ctx: unknown, tag: string, prio: number) => tag);\n`);
+  });
+
+  it('a @read method with @post fails', async () => {
+    await refused(registered(`/** @read @post {"": {"$set": {"a": 1}}} */\nrun() {}`));
+  });
+
+  it('a type tag on a method fails', async () => {
+    await refused(registered(`/** @version 2 */\nrun() {}`));
+    await refused(registered(`/** @actionsOnly */\nrun() {}`));
+  });
+
+  it('an action tag on a class fails', async () => {
+    await refused(registered(`name = '';`, '/** @read */'));
+    await refused(registered(`name = '';`, '/** @pre {"node.name": "x"} */'));
+  });
+
+  it('an action or type tag on a field fails', async () => {
+    await refused(registered(`/** @io */\nname = '';`));
+    await refused(registered(`/** @alias test.old */\nname = '';`));
+    await refused(registered(`opts: { /** @post {} */ color?: string } = {};`));
+  });
+
+  it('a type naming itself in @alias fails', async () => {
+    await refused(registered(`name = '';`, '/** @alias test.sample */'));
+  });
+
+  it('a directory that cannot be read fails the run', async () => {
+    const missing = path.join(await scratchDir('missing'), 'absent');
+    dirs.push(path.dirname(missing));
+
+    await assert.rejects(() => generateSchemas([missing]), (err: unknown) => err instanceof Error && 'code' in err && err.code === 'ENOENT');
   });
 });
 

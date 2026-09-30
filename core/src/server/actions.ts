@@ -8,9 +8,13 @@ import { type ExecuteFn, makeTypedProxy, type StreamFn } from '#comp/handle';
 import { collectDeps as _collectDeps, type ResolvedDeps } from '#comp/needs';
 import { assertSafeKey, COMP_PREFIX, type ComponentData, compKey, getComponentField, getMeta, isComponent, type NodeData, normalizeType, register, resolve, resolveExact, safeJsonParse } from '#core';
 import { assertSafeSchema, validateValue, type ValidationError } from '#comp/validate';
-import { type TypeSchema } from '#schema/types';
+import { exprWork } from '#kernel/eval';
+import { createSiftTest } from '#kernel/expr';
+import { DEFAULT_LIMITS, type UpdateOps } from '#kernel/types';
+import { type ActionKind, type TypeSchema } from '#schema/types';
 import type { Session } from '#security/sessions';
 import { type ExecOpts, type PatchManyEntry, type PatchOp, type Tree } from '#tree';
+import { getByPath } from '#tree/patch';
 import { createDraft, enablePatches, finishDraft, type Patch } from 'immer';
 import { randomUUID } from 'node:crypto';
 import { createBoundedCache } from '#util/bounded-cache';
@@ -46,6 +50,16 @@ function validateActionArgs(type: string, action: string, data: unknown, schema:
 // write into FORBIDDEN while leaving deep reads untouched (proxy traps writes only).
 function readonlyDep(dep: ResolvedDeps[string]): ResolvedDeps[string] {
   return Array.isArray(dep) ? readonlyProxy(dep.map(n => readonlyProxy(n))) : readonlyProxy(dep);
+}
+
+// @setuid runs as the caller until the kernel runtime gives it the node as executor, so its writes stay bound by
+// the caller's ACL; for the kind stack it is a writing action.
+function frameKind(kind: ActionKind | undefined): KindFrame['kind'] {
+  return kind === 'read' ? 'read' : 'write';
+}
+
+function updatedFields(ops: UpdateOps): string[] {
+  return [ops.$set, ops.$unset, ops.$inc, ops.$push].flatMap((fields) => (fields ? Object.keys(fields) : []));
 }
 
 function immerToPatchOps(patches: Patch[]): PatchOp[] {
@@ -630,22 +644,21 @@ async function runAction<T = unknown>(
     tree, path, componentType, componentKey, action,
   );
 
-  // Pre/post condition checking (Design by Contract)
+  // Pre/post condition checking (Design by Contract): warnings on this runtime; the kernel runtime refuses
+  // a false pre with CONFLICT and holds the action to its post in the guard.
   const methodSchema = schema?.methods?.[action];
   validateActionArgs(type, action, data, schema);
 
-  const preFields: string[] = methodSchema?.pre ?? [];
-  const postFields: string[] = methodSchema?.post ?? [];
-  const target = fieldKey ? node[fieldKey] as Record<string, unknown> : node as Record<string, unknown>;
-
-  for (const f of preFields) {
-    const v = target[f];
-    if (v === undefined || v === null || v === '' || v === 0) {
-      console.warn(`[pre] ${type}.${action}: field "${f}" is empty`);
-    }
+  const pre = methodSchema?.pre;
+  if (pre && !createSiftTest(pre, DEFAULT_LIMITS)({ node, needs: deps }, exprWork(DEFAULT_LIMITS))) {
+    console.warn(`[pre] ${type}.${action}: pre does not hold on ${node.$path}`);
   }
 
-  const postSnap = Object.fromEntries(postFields.map(f => [f, target[f]]));
+  // Only the own node's post is watched: writes to a needs target go through ctx.tree as separate commits,
+  // which this runtime cannot tie to the action.
+  const ownPost = methodSchema?.post?.[''];
+  const postFields = ownPost ? updatedFields(ownPost) : [];
+  const postSnap = new Map(postFields.map((f) => [f, getByPath(node, f)]));
 
   // Kind enforcement: default 'write' preserves existing semantics.
   // Lookup: registry-meta (programmatic register opts) → schema (JSDoc) → fallback 'write'.
@@ -655,7 +668,7 @@ async function runAction<T = unknown>(
   const actionMeta = getMeta(type, `action:${action}`);
   const metaKind = actionMeta?.kind as 'read' | 'write' | undefined;
   const metaIo = actionMeta?.io as boolean | undefined;
-  const kind: 'read' | 'write' = metaKind ?? methodSchema?.kind ?? 'write';
+  const kind = frameKind(metaKind ?? methodSchema?.kind);
   const io: boolean = metaIo ?? methodSchema?.io ?? false;
 
   // Stack-based propagation check — throws BEFORE we touch the handler so
@@ -706,9 +719,8 @@ async function runAction<T = unknown>(
   let patches: Patch[] = [];
   if (draft) {
     const nextNode = finishDraft(draft, (p) => { patches = p });
-    const postTarget = fieldKey ? nextNode[fieldKey] as Record<string, unknown> : nextNode as Record<string, unknown>;
     for (const f of postFields) {
-      if (postTarget[f] === postSnap[f]) {
+      if (getByPath(nextNode, f) === postSnap.get(f)) {
         console.warn(`[post] ${type}.${action}: field "${f}" unchanged`);
       }
     }
@@ -768,7 +780,7 @@ export async function* executeStream(
   // hazard. Stream writes are individually enveloped by the pipeline instead.
   const methodSchema = schema?.methods?.[action];
   const actionMeta = getMeta(type, `action:${action}`);
-  const kind: 'read' | 'write' = (actionMeta?.kind as 'read' | 'write' | undefined) ?? methodSchema?.kind ?? 'write';
+  const kind = frameKind((actionMeta?.kind as 'read' | 'write' | undefined) ?? methodSchema?.kind);
   const io: boolean = (actionMeta?.io as boolean | undefined) ?? methodSchema?.io ?? false;
   assertCanCall({ kind, io });
   const frame: KindFrame = { kind, io, path, action };

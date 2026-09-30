@@ -1,5 +1,7 @@
 // Schema types — used by SchemaForm, NodeEditor, PageEditor
 
+import type { ActionDef, Post, Where } from '#kernel/types';
+
 declare module '#core/context' {
   interface ContextHandlers {
     schema: () => TypeSchema;
@@ -35,16 +37,19 @@ export type PropertySchema = {
 
 export type MethodArgSchema = { name: string } & PropertySchema;
 
+// A9: read — called with R, runs as the caller, writes nothing; write — W and R; setuid — R, runs as the node.
+export type ActionKind = ActionDef['kind'];
+
 export type MethodSchema = {
   title?: string;
   description?: string;
   streaming?: boolean; // true if async generator — use streamAction, not execute
-  arguments: MethodArgSchema[];
+  arguments: MethodArgSchema[]; // at most one: TWP act carries one args value
   yields?: PropertySchema; // yield type for streaming actions
   return?: PropertySchema;
-  pre?: string[]; // @pre fields — Design by Contract preconditions
-  post?: string[]; // @post fields — Design by Contract postconditions
-  kind?: 'read' | 'write'; // @read | @write
+  pre?: Where; // @pre — sift query over { node, needs }, checked before the handler
+  post?: Post; // @post — update operators per target: '' is the own node, other keys are needs names
+  kind?: ActionKind; // @read | @write | @setuid; absent is an ordinary write action
   io?: boolean; // @io modifier — external side effect, cache-unsafe
 };
 
@@ -57,4 +62,7 @@ export type TypeSchema = {
   required?: string[];
   additionalProperties?: boolean | PropertySchema;
   methods?: Record<string, MethodSchema>;
+  version?: number; // @version — stamped as $v on every component of the type; absent is version 0
+  actionsOnly?: boolean; // @actionsOnly — its nodes change only through its actions; a direct commit only from admin
+  aliases?: string[]; // @alias — earlier names that resolve to this type
 };

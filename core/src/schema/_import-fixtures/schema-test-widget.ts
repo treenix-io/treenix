@@ -37,6 +37,9 @@ enum Direction {
 /**
  * A complex widget for testing schema extraction.
  * Covers class, property, and method metadata used by the catalog.
+ * @version 3
+ * @actionsOnly
+ * @alias test.old-widget test.legacy-widget
  */
 class SchemaTestWidget {
   // Primitives (inferred from initializer)
@@ -150,8 +153,8 @@ class SchemaTestWidget {
   /**
    * Widget action — increment the counter.
    * Adds one vote to the current count.
-   * @pre count
-   * @post count
+   * @pre {"node.count": {"$gte": 0}}
+   * @post {"": {"$inc": {"count": 1}}}
    */
   increment() {}
 
@@ -167,7 +170,7 @@ class SchemaTestWidget {
    * Duplicates are silently ignored.
    * @description Appends tag to the list
    */
-  addTag(tag: string, prio: number) {}
+  addTag(data: { tag: string; prio: number }) {}
 
   /** Bulk update configuration */
   configure(opts: { /** CSS color value */ color?: string; /** 0-1 range */ opacity?: number }) {}
@@ -183,16 +186,19 @@ class SchemaTestWidget {
 
   /**
    * Reset all counters to zero.
-   * @pre count scores
-   * @post count scores tags
+   * @pre {"node.count": {"$gt": 0},
+   *   "node.scores": {"$exists": true}}
+   * @post {"": {"$set": {"count": 0, "scores": []},
+   *   "$unset": {"tags": true}}}
    * @description Clears all accumulated data
    */
   reset() {}
 
   /**
    * Archive the widget.
-   * @pre status
-   * @post status
+   * @setuid
+   * @pre {"node.status": "active"}
+   * @post {"": {"$set": {"status": "archived"}}}
    */
   archive() {}
 

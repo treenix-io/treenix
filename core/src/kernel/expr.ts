@@ -6,7 +6,7 @@ import { isSafeKey } from '#core/json'
 import { KernelError } from '#errors'
 import type { ExprWork } from './eval'
 import { compileQuery, isQueryObject } from './eval-compile'
-import type { Limits } from './types'
+import type { Limits, Where } from './types'
 
 // Refused in every sift query — predicates are user-authored (wire callerWhere,
 // user-authored query mounts). Code-eval operators are server-side RCE. $regex
@@ -40,7 +40,7 @@ function assertBounds(q: unknown, limits: Limits): void {
  * Judge a sift query whole, whoever runs it — the kernel's evaluator or a database: BUDGET over the size limit,
  * INVALID on a forbidden operator or a shape the language refuses.
  */
-export function assertSafeSiftQuery(q: unknown, limits: Limits): void {
+export function assertSafeSiftQuery(q: unknown, limits: Limits): asserts q is Where {
   assertBounds(q, limits)
   compileQuery(mapSiftQuery(q))
 }

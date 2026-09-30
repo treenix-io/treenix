@@ -2,7 +2,7 @@
 JSON Schema generation and loading for registerType/defineComponent classes.
 
 ### Files
-- extract-schemas-oxc.ts — CLI + API: AST walk via OXC (Rust) → JSON Schema per class, writes to `schemas/` dirs. Supports `@hidden`, `@format`, `@refType`, `@pre/@post`
+- extract-schemas-oxc.ts — CLI + API: AST walk via OXC (Rust) → JSON Schema per class, writes to `schemas/` dirs. Supports `@hidden`, `@format`, `@refType`; actions: `@read/@write/@setuid`, `@io`, `@pre` (sift JSON), `@post` (update operators JSON); types: `@version`, `@actionsOnly`, `@alias`. An action takes at most one parameter
 - load.ts — `loadSchemasFromDir(dir)`: reads `*.json` from dir, registers each as `register($id, 'schema', () => schema)`
 - types.ts — PropertySchema, TypeSchema — shared types for SchemaForm/NodeEditor
 

@@ -89,7 +89,7 @@ export function hasMutationOps(ops: readonly PatchOp[]): boolean {
 
 // ── Path helpers (dot notation) ──
 
-function getByPath(obj: any, path: string): unknown {
+export function getByPath(obj: any, path: string): unknown {
   const parts = path.split('.');
   let cur = obj;
   for (const p of parts) {
