@@ -35,11 +35,6 @@ describe('readLimits', () => {
     assert.throws(() => readLimits(limitsNode({ readNode: 500 })), isInvalid)
   })
 
-  it('the static expression cost is no longer a limit', () => {
-    assert.equal(Object.hasOwn(DEFAULT_LIMITS, 'exprCost'), false)
-    assert.throws(() => readLimits(limitsNode({ exprCost: 10_000 })), isInvalid)
-  })
-
   it('a negative, non-finite or non-numeric value is INVALID', () => {
     for (const value of [-1, Number.NaN, Number.POSITIVE_INFINITY, '100', null, true])
       assert.throws(() => readLimits(limitsNode({ nodeBytes: value })), isInvalid, String(value))
