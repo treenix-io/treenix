@@ -416,16 +416,18 @@ export function withSubscriptions(
    *  projection over-invalidates THAT user only — raw eval is never a fallback. */
   type SiftPair = { o: Record<string, unknown> | null; n: Record<string, unknown> | null };
 
-  /** One change is one operation of each watch it reaches: the old and new node share its work counter. Past
-   *  the limit the flip is unknown, so it counts as one — the write is already committed, and the subscriber's
-   *  refetch meets the same BUDGET. */
-  function membershipFlipped(g: WatchGroup, pair: SiftPair, path: string, userId: string): boolean {
+  /** One subscription updated by one write is one operation: the old and new node share its work counter. Past
+   *  the limit the update ends the subscription — the write is already committed. This protocol has no
+   *  per-subscription end, so the handle is unregistered and its subscriber is told to refetch: the read runs
+   *  the plan anew and refuses it while the work is over the limit. */
+  function membershipFlipped(h: QueryHandle, pair: SiftPair, path: string): boolean {
     const work = exprWork(DEFAULT_LIMITS);
     try {
-      return (pair.o ? g.test(pair.o, work) : false) !== (pair.n ? g.test(pair.n, work) : false);
+      return (pair.o ? h.group.test(pair.o, work) : false) !== (pair.n ? h.group.test(pair.n, work) : false);
     } catch (err) {
       if (!(err instanceof KernelError) || err.code !== 'BUDGET') throw err;
-      console.error('[withSubscriptions] membership evaluation over the work limit for user=%s path=%s:', userId, path, err);
+      console.error('[withSubscriptions] query watch %s of user=%s ended: the update by %s is over the work limit:', h.vp, h.userId, path, err);
+      removeHandle(h);
       return true;
     }
   }
@@ -469,7 +471,7 @@ export function withSubscriptions(
     for (const g of matching) {
       for (const h of g.handles) {
         const pair = await projectFor(h.userId);
-        const flipped = pair === 'error' || membershipFlipped(g, pair, path, h.userId);
+        const flipped = pair === 'error' || membershipFlipped(h, pair, path);
         if (!flipped) continue;
         let uids = flips.get(h.vp);
         if (!uids) flips.set(h.vp, uids = new Set());

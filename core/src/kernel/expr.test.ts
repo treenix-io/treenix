@@ -58,10 +58,36 @@ describe('expression size', () => {
   it('an operator sift lacks, or operators mixed with fields, is INVALID at compile', () => {
     const invalid = [
       { name: { $text: 'x' } }, { $comment: 'x' }, { name: { $gt: 1, sub: 2 } }, { $or: [] }, { $and: {} },
-      { name: { $in: [{ $gt: 1 }] } },
+      { $or: [1] }, { name: { $in: [{ $gt: 1 }] } }, { name: { $size: '1' } }, { name: { $mod: [2] } },
+      { name: { $elemMatch: 1 } },
     ]
     for (const q of invalid)
       assert.throws(() => createSiftTest(q, DEFAULT_LIMITS), isInvalid, JSON.stringify(q))
+  })
+
+  it('a compound or NaN operand is INVALID at compile', () => {
+    const invalid: Record<string, unknown>[] = [
+      { a: { x: 1 } }, { a: [1] }, { a: Number.NaN }, { a: { $eq: { x: 1 } } }, { a: { $ne: [1] } }, { a: { $gt: {} } },
+      { a: { $in: [{ x: 1 }] } }, { a: { $nin: [[1]] } }, { a: { $all: [[1]] } }, { a: { $not: [1] } },
+      { $or: [{ a: 1 }, { b: { c: 1 } }] }, { list: { $elemMatch: { x: [1] } } },
+    ]
+    for (const q of invalid) assert.throws(() => createSiftTest(q, DEFAULT_LIMITS), isInvalid, JSON.stringify(q))
+  })
+
+  it('an object-literal $in over a 12 000-key object is INVALID before any node is tested', () => {
+    const node = { a: Object.fromEntries(values(12_000).map((i) => [`k${i}`, i])) }
+    const q = { a: { $in: [{ k0: 0 }] } }
+
+    assert.throws(() => createSiftTest(q, DEFAULT_LIMITS)(node, exprWork(DEFAULT_LIMITS)), isInvalid)
+  })
+
+  it('primitive operands, conditions under $all, $not and $elemMatch, $size and $mod parse', () => {
+    const valid: Record<string, unknown>[] = [
+      { a: 'x', b: 1, c: true, d: null }, { a: { $in: ['x', 1, null], $nin: [false] } }, { a: { $all: [1, { $gt: 0 }] } },
+      { a: { $not: { $gt: 1 } } }, { a: { $not: 1 } }, { list: { $elemMatch: { x: 1, 'y.z': { $exists: true } } } },
+      { a: { $size: 2 } }, { a: { $mod: [2, 0] } }, { $nor: [{ a: 1 }], $and: [{ b: { $lte: 3 } }] },
+    ]
+    for (const q of valid) assert.doesNotThrow(() => createSiftTest(q, DEFAULT_LIMITS), JSON.stringify(q))
   })
 })
 
@@ -72,7 +98,29 @@ describe('expression work', () => {
     const test = createSiftTest(q, DEFAULT_LIMITS)
 
     assert.throws(() => test({ arr: array }, exprWork(DEFAULT_LIMITS)), isBudget)
-    assert.ok(reads() <= 100_000, `the node is counted in one walk and never tested: ${reads()} element reads`)
+    const budgetElements = DEFAULT_LIMITS.exprWork / 1_000
+    assert.ok(reads() <= budgetElements + 1, `the walk stops once the budget is spent, never tested: ${reads()} element reads`)
+  })
+
+  it('1024 nested single-element arrays around 100 000 zeros are BUDGET without a long walk', () => {
+    const { array, reads } = countedArray(100_000)
+    let nested: unknown = array
+    for (let i = 0; i < 1_024; i++) nested = [nested]
+
+    assert.throws(() => createSiftTest({ a: 0 }, DEFAULT_LIMITS)({ a: nested }, exprWork(DEFAULT_LIMITS)), isBudget)
+    assert.equal(reads(), 0)
+  })
+
+  it('an array directly inside an array on a condition path is BUDGET, at the value or through elements', () => {
+    const budget = (q: Record<string, unknown>, node: Record<string, unknown>) =>
+      assert.throws(() => createSiftTest(q, DEFAULT_LIMITS)(node, exprWork(DEFAULT_LIMITS)), isBudget, JSON.stringify(node))
+
+    budget({ a: 1 }, { a: [1, [2]] })
+    budget({ a: { $size: 1 } }, { a: [[1]] })
+    budget({ 'a.b': 1 }, { a: [[{ b: 1 }]] })
+    budget({ 'a.1': 1 }, { a: [0, [1, [2]]] })
+    assert.equal(workOf({ 'a.1': 1 }, { a: [[0], [1, 2]] }), 2, 'a numeric key reads the array itself, not its elements')
+    assert.equal(workOf({ b: 1 }, { a: [[1]], b: 1 }), 1, 'an array off every condition path is not walked')
   })
 
   it('a 3000-value $in over the same array is one Set lookup per element', { timeout: 2_000 }, () => {
@@ -108,17 +156,17 @@ describe('expression work', () => {
     assert.equal(workOf({ a: 1 }, { a: 1 }), 1)
     assert.equal(workOf({ a: { $gt: 1, $lt: 5 } }, { a: 3 }), 2)
     assert.equal(workOf({ a: 1 }, { a: [1, 2, 3] }), 3, 'an array gives a value per element')
-    assert.equal(workOf({ a: 1 }, { a: [[1, 2], [3, [4, 5]]] }), 5, 'nested arrays expand at any level')
+    assert.equal(workOf({ a: 1 }, { a: [] }), 1, 'an empty array is tested itself')
+    assert.equal(workOf({ 'a.b.c': 1 }, { a: [{ b: [{ c: 1 }, { c: [1, 2] }] }, { b: { c: 3 } }] }), 4, 'arrays expand at any level of the path')
     assert.equal(workOf({ 'a.b': 1 }, { a: [{ b: 1 }, { b: [2, 3] }, { c: 4 }] }), 4, 'an element without the path counts 1')
     assert.equal(workOf({ 'a.b': 1 }, {}), 1, 'a missing path counts 1')
     assert.equal(workOf({ 'a.1': 1 }, { a: [[0], [1, 2, 3]] }), 3, 'a numeric key reads the array itself')
   })
 
-  it('$in and $nin over primitives weigh 1; over objects, their values', () => {
+  it('$in and $nin weigh 1 whatever their size', () => {
     const node = { a: [1, 2] }
     assert.equal(workOf({ a: { $in: values(500) } }, node), 2)
     assert.equal(workOf({ a: { $nin: values(500) } }, node), 2)
-    assert.equal(workOf({ a: { $in: [{ x: 1 }, { y: 2 }] } }, node), 8)
   })
 
   it('logical operators sum their branches; $elemMatch adds the inner path to the outer one', () => {
@@ -139,15 +187,12 @@ describe('expression work', () => {
 describe('the kernel $in and $nin', () => {
   const nodes: Record<string, unknown>[] = [
     {}, { a: null }, { a: 1 }, { a: 2 }, { a: '1' }, { a: true }, { a: [] }, { a: [1, 3] }, { a: [3, 4] },
-    { a: [[1], 3] }, { a: [null] }, { a: [{ b: 1 }] }, { a: [{ c: 1 }] }, { a: [{ b: [1, 3] }, { b: null }] },
-    { a: { b: 1 } }, { a: { b: null } }, { a: 0 }, { a: -0 }, { a: new Date(1) },
+    { a: [null] }, { a: [{ b: 1 }] }, { a: [{ c: 1 }] }, { a: [{ b: [1, 3] }, { b: null }] },
+    { a: { b: 1 } }, { a: { b: null } }, { a: 0 }, { a: -0 }, { a: new Date(1) }, { a: [new Date(1), 5] },
   ]
-  const operands: unknown[] = [
-    [1], [1, '1'], [null], [true, 0], [3, 4, 5], [1, null], [], 1,
-    [[1, 3]], [{ b: 1 }, 2], [[{ b: 1 }]], [new Date(1)],
-  ]
+  const operands: unknown[] = [[1], [1, '1'], [null], [true, 0], [3, 4, 5], [1, null], [], 1, null]
 
-  it('matches exactly what sift matches, primitive operands or not', () => {
+  it('matches exactly what sift matches', () => {
     for (const path of ['a', 'a.b'])
       for (const op of ['$in', '$nin'])
         for (const params of operands) {

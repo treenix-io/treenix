@@ -1,39 +1,30 @@
-// The kernel's $in and $nin for sift: operands that are all primitives test through a Set — one lookup per value
-// instead of one comparison per operand — which is why expr-work weighs them 1. Other operands compare as sift
-// does. $nin follows sift's walk over array elements. sift's CommonJS entry exposes only its default export to
-// ES modules, so these are written against its operation protocol rather than imported.
+// The kernel's $in and $nin for sift: their operands are primitives (expr-work refuses others at parse), so a value
+// tests through a Set — one lookup instead of one comparison per operand — which is why expr-work weighs them 1.
+// $nin follows sift's walk over array elements. sift's CommonJS entry exposes only its default export to ES modules,
+// so these are written against its operation protocol rather than imported.
 
-import { type SetOperand, setOperands } from './expr-work'
+import { type Operand, setOperands } from './expr-work'
 
 type Key = string | number
 
-/** The part of sift's options these operations read: its deep equality. */
-interface SiftOptions {
-  readonly compare: (a: unknown, b: unknown) => boolean
-}
-
-interface InOperation {
-  keep: boolean
-  reset(): void
-  next(item: unknown): void
-}
-
-// As sift compares: a Date by its time, an array by its compared elements, an object with toJSON by that value.
+// As sift compares with a primitive: an object with getTime by that time, one with toJSON by that value. An array
+// never equals a primitive, so it is left whole.
 function comparable(v: unknown): unknown {
-  if (v instanceof Date) return v.getTime()
-  if (Array.isArray(v)) return v.map(comparable)
-  if (typeof v === 'object' && v !== null && 'toJSON' in v && typeof v.toJSON === 'function') return v.toJSON()
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return v
+  if ('getTime' in v && typeof v.getTime === 'function') return v.getTime()
+  if ('toJSON' in v && typeof v.toJSON === 'function') return v.toJSON()
   return v
 }
 
-class SetIn implements InOperation {
+class SetIn {
   keep = false
   done = false
   readonly propop = true
   private readonly set: Set<unknown>
+  // sift's equality matches a null operand with undefined too.
   private readonly matchesNull: boolean
 
-  constructor(operands: readonly SetOperand[]) {
+  constructor(operands: readonly Operand[]) {
     this.set = new Set(operands)
     this.matchesNull = this.set.has(null)
   }
@@ -52,40 +43,13 @@ class SetIn implements InOperation {
   }
 }
 
-class ListIn implements InOperation {
-  keep = false
-  done = false
-  readonly propop = true
-  private readonly tests: ((v: unknown) => boolean)[]
-
-  constructor(operands: readonly unknown[], options: SiftOptions) {
-    this.tests = operands.map((operand) => {
-      const a = comparable(operand)
-      return (v) => options.compare(a, v)
-    })
-  }
-
-  reset(): void {
-    this.keep = false
-    this.done = false
-  }
-
-  next(item: unknown): void {
-    const v = comparable(item)
-    if (this.tests.some((test) => test(v))) {
-      this.keep = true
-      this.done = true
-    }
-  }
-}
-
 // Inside an array a value is out of the list only when no element is in it, decided at the last element.
 class Nin {
   keep = false
   done = false
   readonly propop = true
 
-  constructor(private readonly within: InOperation) {}
+  constructor(private readonly within: SetIn) {}
 
   reset(): void {
     this.keep = false
@@ -112,12 +76,7 @@ class Nin {
   }
 }
 
-function inOperation(params: unknown, options: SiftOptions): SetIn | ListIn {
-  const operands = setOperands(params)
-  return operands ? new SetIn(operands) : new ListIn(Array.isArray(params) ? params : [params], options)
-}
-
 export const SIFT_OPERATIONS = {
-  $in: (params: unknown, _owner: unknown, options: SiftOptions) => inOperation(params, options),
-  $nin: (params: unknown, _owner: unknown, options: SiftOptions) => new Nin(inOperation(params, options)),
+  $in: (params: unknown) => new SetIn(setOperands('$in', params)),
+  $nin: (params: unknown) => new Nin(new SetIn(setOperands('$nin', params))),
 }

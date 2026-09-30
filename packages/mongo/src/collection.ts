@@ -22,7 +22,8 @@ export type CollectionTreeConfig = {
 };
 
 // Mongo's own code-eval blocklist: the query goes to a live Mongo server where $where is code-eval.
-// Narrower than core's kernel/expr.ts guard — it neither refuses $regex nor checks the expression size or cost.
+// Narrower than core's kernel/expr.ts guard — it neither refuses $regex nor checks the expression size, its
+// operands or its work.
 const FORBIDDEN_QUERY_KEYS = new Set(['$where', '$function', '$accumulator', '$expr']);
 const SYSTEM_FIELD_KEYS = new Set(['$path', '$id', '$refId', '$rev', '$acl', '$owner', '$v']);
 

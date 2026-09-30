@@ -142,7 +142,10 @@ export type NodeCopy =
 
 // ---- Selectors ----
 
-/** sift query in a linear-cost subset: no `$regex`, no code. Hidden fields are not addressable. */
+/**
+ * sift query without `$regex` and code, with primitive comparison operands (`$elemMatch` reaches objects in
+ * arrays); its work is counted per operation (A10). Hidden fields are not addressable.
+ */
 export type Where = { readonly [key: string]: unknown }
 export type Sort = readonly (readonly [field: string, direction: 1 | -1])[]
 export type Cursor = string
@@ -990,7 +993,9 @@ export interface Limits {
   readonly exprBytes: number
   /**
    * Expression work per operation, counted before each node is tested: every condition's weight times the
-   * number of values at its path in that node. The node that would cross it is refused untested.
+   * number of values at its path in that node. The node that would cross it is refused untested, as is an array
+   * directly inside an array on a condition path. One operation: a query, a subscription snapshot, a View run,
+   * one subscription updated by one write, a commit's precondition check.
    */
   readonly exprWork: number
   /** Size of one blob. */

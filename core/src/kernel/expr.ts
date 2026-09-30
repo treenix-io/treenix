@@ -1,6 +1,6 @@
-// The expression language of `where` and `pre`: sift without $regex and without code. Its size is judged at
-// parse, before sift compiles it; its work is counted at run time with the nodes and bytes of the operation —
-// each node is charged before it is tested (expr-work).
+// The expression language of `where` and `pre`: sift without $regex, without code and with primitive operands.
+// Its size and operands are judged at parse, before sift compiles it; its work is counted at run time with the
+// nodes and bytes of the operation — each node is charged before it is tested (expr-work).
 
 import sift from 'sift'
 
@@ -24,7 +24,10 @@ function assertSize(q: unknown, limits: Limits): void {
   if (bytes > limits.exprBytes) throw new KernelError('BUDGET', `Expression is ${bytes} bytes, limit ${limits.exprBytes}`)
 }
 
-/** Validate a sift query: BUDGET over the size limit, INVALID on a forbidden operator. */
+/**
+ * Validate a sift query: BUDGET over the size limit, INVALID on a forbidden operator. Operands and the work
+ * formula are judged when the query is compiled for in-process evaluation; a database bounds its own by timeout.
+ */
 export function assertSafeSiftQuery(q: unknown, limits: Limits): void {
   assertSize(q, limits)
   mapSiftQuery(q)
