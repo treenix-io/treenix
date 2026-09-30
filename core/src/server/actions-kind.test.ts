@@ -74,6 +74,43 @@ describe('executeAction — kind enforcement', () => {
     assert.equal(writeHandlerRan, false, 'write handler must not run when caller is @read');
   });
 
+  it('@read calling @setuid — refused on entry, the setuid handler never runs', async () => {
+    let setuidHandlerRan = false;
+
+    register('test.kind.rSetuid', 'schema', () => ({
+      $id: 'test.kind.rSetuid',
+      type: 'object',
+      properties: {},
+      methods: { readCallsSetuid: { arguments: [], kind: 'read' as const } },
+    }));
+
+    register('test.kind.setuid', 'schema', () => ({
+      $id: 'test.kind.setuid',
+      type: 'object',
+      properties: {},
+      methods: { archive: { arguments: [], kind: 'setuid' as const } },
+    }));
+
+    register('test.kind.rSetuid', 'action:readCallsSetuid', async (ctx: ActionCtx) => {
+      await executeAction(ctx.tree, '/su', undefined, undefined, 'archive');
+    });
+
+    register('test.kind.setuid', 'action:archive', async () => {
+      setuidHandlerRan = true;
+    });
+
+    const tree = createMemoryTree();
+    await tree.set({ $path: '/rs', $type: 'test.kind.rSetuid' });
+    await tree.set({ $path: '/su', $type: 'test.kind.setuid' });
+
+    await assert.rejects(
+      () => executeAction(tree, '/rs', undefined, undefined, 'readCallsSetuid'),
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
+    );
+
+    assert.equal(setuidHandlerRan, false);
+  });
+
   it('@read action calling @write via ctx.nc().execute throws FORBIDDEN', async () => {
     register('test.kind.r', 'schema', () => ({
       $id: 'test.kind.r',
@@ -324,6 +361,33 @@ describe('executeStream — kind envelope', () => {
       }),
       (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
     );
+  });
+
+  it('read frame cannot start a setuid-kind stream (entry gate)', async () => {
+    let started = false;
+
+    register('test.skind.su', 'schema', () => ({
+      $id: 'test.skind.su',
+      type: 'object',
+      properties: {},
+      methods: { gen: { arguments: [], kind: 'setuid' as const } },
+    }));
+    register('test.skind.su', 'action:gen', async function* () {
+      started = true;
+      yield 1;
+    });
+
+    const tree = createMemoryTree();
+    await tree.set({ $path: '/n', $type: 'test.skind.su' });
+
+    await assert.rejects(
+      () => runWithFrame({ kind: 'read', io: false, path: '/r', action: 'reader' }, async () => {
+        await executeStream(tree, '/n', undefined, undefined, 'gen')[Symbol.asyncIterator]().next();
+      }),
+      (e: unknown) => e instanceof KernelError && e.code === 'FORBIDDEN',
+    );
+
+    assert.equal(started, false);
   });
 
   it('read-kind stream: ctx.tree.set denied even AFTER the first yield (frame per resumption)', async () => {
