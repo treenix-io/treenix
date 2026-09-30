@@ -4,7 +4,7 @@
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { evalBool, evalExpr } from './sandbox';
+import { cpuDeadline, evalBool, evalExpr } from './sandbox';
 
 describe('R5-BRAHMAN-1 — QuickJS sandbox', () => {
   it('evaluates simple arithmetic', async () => {
@@ -21,8 +21,30 @@ describe('R5-BRAHMAN-1 — QuickJS sandbox', () => {
     assert.equal(await evalBool('session.flag', { session: { flag: true } }), true);
   });
 
-  it('evalBool returns false on syntax error (does not throw)', async () => {
-    assert.equal(await evalBool('}}}invalid', {}), false);
+  it('a var the sandbox cannot hold fails the eval instead of going missing', async () => {
+    await assert.rejects(() => evalExpr('typeof big', { big: 'x'.repeat(2 * 1024 * 1024) }), Error);
+  });
+
+  it('evalBool fails on a syntax error instead of reading it as false', async () => {
+    await assert.rejects(() => evalBool('}}}invalid', {}), Error);
+  });
+
+  it('the deadline counts CPU from its first poll: earlier work and descheduled time are not charged', () => {
+    const burn = (ms: number) => {
+      const until = process.threadCpuUsage();
+      const spent = () => { const d = process.threadCpuUsage(until); return (d.user + d.system) / 1000; };
+      while (spent() < ms) { /* spin */ }
+    };
+    const expired = cpuDeadline(20);
+
+    burn(30);
+    assert.equal(expired(), false, 'CPU spent before the first poll is not the expression\'s');
+
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+    assert.equal(expired(), false, 'a descheduled thread spends no budget');
+
+    burn(30);
+    assert.equal(expired(), true);
   });
 
   it('rejects access to host globals (process, require, fetch)', async () => {
@@ -46,11 +68,13 @@ describe('R5-BRAHMAN-1 — QuickJS sandbox', () => {
     assert.equal(result, 'undefined');
   });
 
-  it('terminates infinite loop within the deadline (50ms)', async () => {
-    const t0 = Date.now();
-    await assert.rejects(() => evalExpr('while(true){}', {}), /failed/i);
-    const elapsed = Date.now() - t0;
-    assert.ok(elapsed < 1000, `should hit deadline well under 1s, took ${elapsed}ms`);
+  it('terminates an infinite loop at the 50ms CPU deadline', async () => {
+    const before = process.threadCpuUsage();
+    await assert.rejects(() => evalExpr('(() => { while (true) {} })()', {}), Error);
+
+    const { user, system } = process.threadCpuUsage(before);
+    const spentMs = (user + system) / 1000;
+    assert.ok(spentMs >= 50 && spentMs < 1000, `the loop ran to the deadline and no further: ${spentMs}ms of CPU`);
   });
 
   it('rejects empty / whitespace expression', async () => {
