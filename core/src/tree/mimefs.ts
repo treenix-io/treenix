@@ -6,13 +6,12 @@
 import type { NodeData } from '#core';
 import { resolve as ctxResolve } from '#core/registry';
 import { createSiftTest } from '#kernel/expr';
-import { exprWork } from '#kernel/expr-work';
 import { DEFAULT_LIMITS } from '#kernel/types';
 import { mkdir, readdir, realpath, rmdir, stat, unlink } from 'node:fs/promises';
 import { dirname, extname, join, resolve } from 'node:path';
 import { scanFromCollected } from './fs-common';
 import { assertPathSafe } from './path-safety';
-import { mapNodeForSift, paginate, type TreeSource } from './index';
+import { mapNodeForSift, paginate, readWork, type TreeSource } from './index';
 import './json-codec'; // register JSON decode handler
 import { patchViaSet } from './patch';
 
@@ -133,7 +132,7 @@ export async function createRawFsTree(rootDir: string, mountPath: string = ''): 
       const depth = opts?.depth ?? 1;
       let filtered = await collectDescendants(parent, depth);
       if (test) {
-        const work = exprWork(DEFAULT_LIMITS);
+        const work = readWork(opts);
         filtered = filtered.filter(n => test(mapNodeForSift(n), work));
       }
       return paginate(filtered, opts);

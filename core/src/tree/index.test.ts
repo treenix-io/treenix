@@ -280,6 +280,20 @@ describe('OverlayStore', () => {
     assert.equal(map['/p/c'], 't.upper');
   });
 
+  it('one query spends one budget over both layers', async () => {
+    const upper = createMemoryTree();
+    const lower = createMemoryTree();
+    // 200 conditions over 30 000 values: 6e6 per node, under the limit in either layer alone, over it together.
+    const query = { $or: Array.from({ length: 200 }, (_, i) => ({ arr: i + 1 })) };
+    await lower.set(createNode('/p/a', 'item', { arr: new Array(30_000).fill(0) }));
+    await upper.set(createNode('/p/b', 'item', { arr: new Array(30_000).fill(0) }));
+    const isBudget = (e: unknown) => e instanceof KernelError && e.code === 'BUDGET';
+
+    assert.deepEqual((await upper.getChildren('/p', { query })).items, []);
+    assert.deepEqual((await lower.getChildren('/p', { query })).items, []);
+    await assert.rejects(() => createOverlayTree(upper, lower).getChildren('/p', { query }), isBudget);
+  });
+
   it('remove only affects upper', async () => {
     const upper = createMemoryTree();
     const lower = createMemoryTree();

@@ -8,7 +8,6 @@ import { assertValidType, safeJsonParse } from '#core';
 import { dirname as treeDirname } from '#core/path';
 import { KernelError } from '#errors';
 import { createSiftTest } from '#kernel/expr';
-import { exprWork } from '#kernel/expr-work';
 import { DEFAULT_LIMITS } from '#kernel/types';
 import { mkdir, readdir, readFile, realpath, rmdir, unlink } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
@@ -16,7 +15,7 @@ import { atomicWrite } from './fs-atomic';
 import { scanFromCollected } from './fs-common';
 import { ensureMigrated } from './migrate-component-namespace';
 import { assertPathSafe } from './path-safety';
-import { applyPatchManyEntry, assertPatchManyBatch, assertSetEntryOcc, isSetEntry, mapNodeForSift, paginate, type TreeSource } from './index';
+import { applyPatchManyEntry, assertPatchManyBatch, assertSetEntryOcc, isSetEntry, mapNodeForSift, paginate, readWork, type TreeSource } from './index';
 import { type CommitChange, type CommitReceipt, hasMutationOps, patchViaSet } from './patch';
 
 // A dir-form node lives at <path>/$.json, so a '$' path segment aliases that
@@ -271,7 +270,7 @@ export async function createFsTree(rootDir: string): Promise<TreeSource> {
       const depth = opts?.depth ?? 1;
       let filtered = await collectChildren(parent, depth);
       if (test) {
-        const work = exprWork(DEFAULT_LIMITS);
+        const work = readWork(opts);
         filtered = filtered.filter(n => test(mapNodeForSift(n), work));
       }
       return paginate(filtered, opts);

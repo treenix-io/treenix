@@ -83,6 +83,16 @@ describe('createBranchTree (memory)', () => {
     await assert.rejects(() => branch.getChildren('/', { query }), isCode('BUDGET'));
   });
 
+  it('one query spends one budget over both layers: lower and branch-rewritten nodes add up', async () => {
+    // 200 conditions over 30 000 values: 6e6 per heavy node, under the limit alone, over it together.
+    const query = { $or: Array.from({ length: 200 }, (_, i) => ({ arr: i + 1 })) };
+    await lower.set(createNode('/b', 'doc', { arr: new Array(30_000).fill(0) }));
+    assert.deepEqual((await branch.getChildren('/', { query })).items, []);
+
+    await branch.set(createNode('/a', 'doc', { arr: new Array(30_000).fill(0) }));
+    await assert.rejects(() => branch.getChildren('/', { query }), isCode('BUDGET'));
+  });
+
   it('a query on a system field matches branch-rewritten nodes as it matches live ones', async () => {
     await branch.set(createNode('/a', 'doc', { title: 'branch-a' }));
 

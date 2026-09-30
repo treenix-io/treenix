@@ -13,9 +13,8 @@
 import type { NodeData } from '#core';
 import { KernelError } from '#errors';
 import { createSiftTest } from '#kernel/expr';
-import { exprWork } from '#kernel/expr-work';
 import { DEFAULT_LIMITS } from '#kernel/types';
-import { mapNodeForSift, type Page, paginate, type Tree } from '#tree';
+import { mapNodeForSift, type Page, paginate, readWork, type Tree } from '#tree';
 import { patchViaSet } from './patch';
 
 export const BRANCH_DELTA_TYPE = 't.branch.delta';
@@ -78,8 +77,8 @@ export function createBranchTree(upper: Tree, lower: Tree): Tree {
       const shadowed = new Set(wrappers.map(n => n.$path));
       // Query pushes down to lower untouched; upper wrappers can't match the
       // caller's query (future node is nested) — filter after unwrap instead.
-      const l = await lower.getChildren(parent, { depth, query: opts?.query }, ctx);
-      const work = exprWork(DEFAULT_LIMITS);
+      const work = readWork(opts);
+      const l = await lower.getChildren(parent, { depth, query: opts?.query, work }, ctx);
       const items = [
         ...l.items.filter(n => !shadowed.has(n.$path)),
         ...wrappers.filter(isBranchDelta).map(unwrap)

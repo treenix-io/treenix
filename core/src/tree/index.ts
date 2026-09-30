@@ -5,7 +5,7 @@
 import { comparePaths, isRef, type NodeData, type Ref } from '#core';
 import { KernelError } from '#errors';
 import { createSiftTest } from '#kernel/expr';
-import { exprWork } from '#kernel/expr-work';
+import { type ExprWork, exprWork } from '#kernel/expr-work';
 import { DEFAULT_LIMITS } from '#kernel/types';
 import { scanFromCollected } from './fs-common';
 import { applyOps, type CommitChange, type CommitReceipt, hasMutationOps, type PatchOp, PatchTestError } from './patch';
@@ -121,7 +121,18 @@ export function stageSetEntry(stored: NodeData | undefined, entry: { path: strin
 
 // ── Interface ──
 
-export type ChildrenOpts = { depth?: number; query?: Record<string, unknown>; watch?: boolean; watchNew?: boolean } & PageOpts;
+export type ChildrenOpts = {
+  depth?: number;
+  query?: Record<string, unknown>;
+  /** Expression work of the operation this read belongs to. A Store stacked on others passes it down, so one
+   *  call spends one budget however many layers test `query`; absent, the read is the operation. */
+  work?: ExprWork;
+  watch?: boolean;
+  watchNew?: boolean;
+} & PageOpts;
+
+/** The counter a read charges its `query` tests to. */
+export const readWork = (opts?: ChildrenOpts): ExprWork => opts?.work ?? exprWork(DEFAULT_LIMITS);
 
 /** Options for Tree.execute. Identity (userId/claims/actor) is deliberately
  *  NOT here — it is bound when a tree is wrapped (server withExecute);
@@ -335,7 +346,9 @@ export function createFilterTree(
       return (await upper.get(path, ctx)) ?? (await lower.get(path, ctx));
     },
     async getChildren(parent, opts, ctx) {
-      const passthrough = opts ? { depth: opts.depth, query: opts.query, watch: opts.watch, watchNew: opts.watchNew } : undefined;
+      const passthrough = opts
+        ? { depth: opts.depth, query: opts.query, work: readWork(opts), watch: opts.watch, watchNew: opts.watchNew }
+        : undefined;
       const [u, l] = await Promise.all([
         upper.getChildren(parent, passthrough, ctx),
         lower.getChildren(parent, passthrough, ctx),
@@ -637,7 +650,7 @@ export function createMemoryTree(): TreeSource {
       const depth = opts?.depth ?? 1;
       let result = collectChildren(node, parent, depth);
       if (test) {
-        const work = exprWork(DEFAULT_LIMITS);
+        const work = readWork(opts);
         result = result.filter(n => test(mapNodeForSift(n), work));
       }
       return paginate(result, opts);
