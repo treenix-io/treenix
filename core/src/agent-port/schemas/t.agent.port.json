@@ -40,7 +40,7 @@
       "arguments": []
     },
     "revoke": {
-      "title": "Revoke agent access — clears key, removes ACL entry",
+      "title": "Revoke agent access — clears key, removes ACL entry, blocks the agent user",
       "arguments": []
     },
     "reset": {
