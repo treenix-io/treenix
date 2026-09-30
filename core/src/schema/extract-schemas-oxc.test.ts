@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { generateSchemas, SchemaParseError } from '#schema/extract-schemas-oxc';
+import type { TypeSchema } from '#schema/types';
 
 const IMPORT_FIXTURES_DIR = path.resolve(import.meta.dirname, '_import-fixtures');
 
@@ -584,8 +585,32 @@ describe('extract-schemas-oxc: action and type rules', () => {
     );
   }
 
+  // Generation from one source file; returns the schema written for test.sample.
+  async function generated(source: string): Promise<TypeSchema> {
+    const dir = await scratchDir('rule');
+    dirs.push(dir);
+    await fs.writeFile(path.join(dir, 'source.ts'), source);
+    await generateSchemas([dir]);
+    return JSON.parse(await fs.readFile(path.join(dir, 'schemas', 'test.sample.json'), 'utf-8'));
+  }
+
   const registered = (body: string, classDoc = '') =>
     `${classDoc}\nclass Sample {\n${body}\n}\nregisterType('test.sample', Sample);\n`;
+
+  it("a class method's second parameter is the injected needs, left out of the arguments", async () => {
+    const schema = await generated(registered(
+      `run(tag: string, deps: { order: { status: string } }) {}\nship = (tag: string, deps: unknown) => tag;`,
+    ));
+
+    assert.deepEqual(schema.methods?.run?.arguments, [{ name: 'tag', type: 'string' }]);
+    assert.deepEqual(schema.methods?.ship?.arguments, [{ name: 'tag', type: 'string' }]);
+  });
+
+  it("a register()ed handler's args type is read through a default value", async () => {
+    const schema = await generated(`register('test.sample', 'action:run', (ctx: unknown, params: { n?: number } = {}) => params);\n`);
+
+    assert.deepEqual(schema.methods?.run?.arguments, [{ name: 'params', type: 'object', properties: { n: { type: 'number' } } }]);
+  });
 
   it('a streaming method with @post fails', async () => {
     await refused(registered(`/** @post {"": {"$set": {"a": 1}}} */\nasync *run(): AsyncGenerator<string> { yield '' }`));
@@ -595,16 +620,17 @@ describe('extract-schemas-oxc: action and type rules', () => {
     await refused(registered(`/** @pre count scores */\nrun() {}`));
   });
 
-  it('a two-parameter method fails', async () => {
-    await refused(registered(`run(tag: string, prio: number) {}`));
+  it('a class method with a parameter after the needs fails', async () => {
+    await refused(registered(`run(tag: string, deps: unknown, prio: number) {}`));
   });
 
-  it('a two-parameter arrow-field method fails', async () => {
-    await refused(registered(`run = (tag: string, prio: number) => tag;`));
+  it('an arrow-field method with a parameter after the needs fails', async () => {
+    await refused(registered(`run = (tag: string, deps: unknown, prio: number) => tag;`));
   });
 
   it('a rest parameter fails', async () => {
     await refused(registered(`run(...tags: string[]) {}`));
+    await refused(registered(`run(tag: string, ...deps: unknown[]) {}`));
   });
 
   it('a register()ed action handler with two data parameters fails', async () => {

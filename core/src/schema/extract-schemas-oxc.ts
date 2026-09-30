@@ -829,7 +829,7 @@ function findExternalActions(ast: N, fileName: string): Map<string, ExternalActi
           handlerArg?.type === 'FunctionExpression'
         ) {
           const params: N[] = handlerArg.params ?? [];
-          const args = actionArguments(params.slice(1), {}, `${typeArg.value}.${actionName}`, fileName);
+          const args = actionArguments(params.slice(1), 0, {}, `${typeArg.value}.${actionName}`, fileName);
           if (args.length) action.arguments = args;
         }
 
@@ -843,19 +843,20 @@ function findExternalActions(ast: N, fileName: string): Map<string, ExternalActi
 // ── Schema generation ──
 
 // TWP `act` carries one args value, so an action declares at most one data parameter; a rest parameter would take
-// any number of them.
-function actionArguments(params: N[], ctx: SchemaCtx, where: string, file: string): MethodArgSchema[] {
-  if (params.length > 1) {
+// any number of them. `injected` counts the parameters the runtime passes after the args, which are no caller data.
+function actionArguments(params: N[], injected: number, ctx: SchemaCtx, where: string, file: string): MethodArgSchema[] {
+  if (params.some((param) => param.type === 'RestElement')) {
+    throw new SchemaParseError(`[schema/oxc] ${file}: ${where} declares a rest parameter; an action takes one args value`, file);
+  }
+  if (params.length > 1 + injected) {
     throw new SchemaParseError(
-      `[schema/oxc] ${file}: ${where} declares ${params.length} data parameters; an action takes one args value`,
+      `[schema/oxc] ${file}: ${where} declares ${params.length} parameters; an action takes one args value` +
+        (injected ? ' and the injected needs' : ''),
       file,
     );
   }
 
-  return params.map((param) => {
-    if (param.type === 'RestElement') {
-      throw new SchemaParseError(`[schema/oxc] ${file}: ${where} declares a rest parameter; an action takes one args value`, file);
-    }
+  return params.slice(0, 1).map((param) => {
     const p = param.type === 'AssignmentPattern' ? param.left : param;
     return { name: p.name ?? 'arg', ...typeToSchema(p.typeAnnotation?.typeAnnotation, ctx) };
   });
@@ -928,7 +929,8 @@ function generateClassSchema(
       throw new SchemaParseError(`[schema/oxc] ${currentFile}: ${where} is @read and writes nothing, so it declares no @post`, currentFile);
     }
 
-    const args = actionArguments(fn.params ?? [], ctx, where, currentFile);
+    // registerType calls a class method as (args, needs).
+    const args = actionArguments(fn.params ?? [], 1, ctx, where, currentFile);
     const returnTa = fn.returnType?.typeAnnotation;
     let yieldsSchema: PropertySchema | undefined;
     if (isGenerator && returnTa?.type === 'TSTypeReference') {
