@@ -13,7 +13,7 @@ import { KernelError } from '#errors';
 import { interceptConsole, queryLogs } from '#log';
 import { withAcl } from '#security/acl-tree';
 import type { Tree } from '#tree';
-import { treenix } from './factory';
+import { storageBanner, treenix } from './factory';
 
 let tmp: string;
 
@@ -38,6 +38,29 @@ function rootNode(dir: string) {
   ];
   return n;
 }
+
+describe('storageBanner', () => {
+  it('names the root overlay and each of its layers, read as components', () => {
+    const lines = storageBanner(rootNode(tmp)).split('\n');
+    assert.deepEqual(lines, [
+      't.mount.overlay',
+      `  base: t.mount.fs  ${tmp}/base`,
+      `  work: t.mount.fs  ${tmp}/work`,
+    ]);
+  });
+
+  it('never shows a mount URI', () => {
+    const uri = 'mongodb://admin:hunter2@db.internal:27017';
+    const root = createNode('/', 'root', {}, { mount: { $type: 't.mount.mongo', uri } });
+    const banner = storageBanner(root);
+    assert.ok(banner.startsWith('t.mount.mongo'));
+    assert.ok(!banner.includes(uri));
+  });
+
+  it('a root without a mount is memory', () => {
+    assert.equal(storageBanner(createNode('/', 'root')), 'memory');
+  });
+});
 
 describe('treenix({ wrapTree })', () => {
   it('applies wrapTree to pipeline.tree (mutations go through wrapper)', async () => {

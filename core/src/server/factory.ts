@@ -6,7 +6,7 @@ import '#schema/action';
 import '#mount/adapters';
 
 import { type ServiceHandle, startServices } from '#contexts/service/index';
-import { A, type GroupPerm, type NodeData, R, S, W } from '#core';
+import { A, type ComponentData, getComponentByName, type GroupPerm, type NodeData, R, S, W } from '#core';
 import { addOnLog, createLogger, makeLogPath } from '#log';
 import { loadAllMods } from '#mod';
 import { getAnonKey } from '#security/anon';
@@ -34,6 +34,24 @@ async function ensureLogsContainer(tree: Tree): Promise<void> {
   const node = await tree.get('/sys/logs');
   if (!node) await tree.set({ $path: '/sys/logs', $type: 't.logs', $acl: LOGS_ACL });
   else if (JSON.stringify(node.$acl) !== JSON.stringify(LOGS_ACL)) await tree.patch('/sys/logs', [['r', '$acl', LOGS_ACL]]);
+}
+
+/** The root storage for the startup line: the root mount's type and, for an overlay, each layer's type. An fs
+ *  root is shown; a URI is not — it may carry credentials, and log lines land in /sys/logs. */
+export function storageBanner(root: NodeData): string {
+  const mount = getComponentByName(root, 'mount');
+  if (!mount) return 'memory';
+  if (!Array.isArray(mount.layers)) return describeMount(mount);
+
+  const layers = mount.layers.map((name: string) => {
+    const layer = getComponentByName(root, name);
+    return `  ${name}: ${layer ? describeMount(layer) : 'missing'}`;
+  });
+  return [mount.$type, ...layers].join('\n');
+}
+
+function describeMount(mount: ComponentData): string {
+  return typeof mount.root === 'string' ? `${mount.$type}  ${mount.root}` : mount.$type;
 }
 
 export type TreenixConfig = {
@@ -185,20 +203,7 @@ export async function treenix(config: TreenixConfig): Promise<TreenixServer> {
       });
       return new Promise<Server>((resolve) => {
         server.listen(port, host, () => {
-          const root = rootNode as Record<string, unknown>;
-          const mount = root.mount as Record<string, unknown> | undefined;
-          const storage = mount?.$type ?? 'memory';
-          const layers = mount?.layers as string[] | undefined;
-          if (layers) {
-            const layerInfo = layers.map(k => {
-              const comp = root[k] as Record<string, unknown> | undefined;
-              return `  ${k}: ${comp?.$type ?? '?'}  ${comp?.root ?? comp?.uri ?? ''}`;
-            }).join('\n');
-            console.log(`treenix ${host}:${port}  ${storage}\n${layerInfo}`);
-          } else {
-            const detail = mount?.root ?? mount?.uri ?? '';
-            console.log(`treenix ${host}:${port}  ${storage}${detail ? `  ${detail}` : ''}`);
-          }
+          console.log(`treenix ${host}:${port}  ${storageBanner(rootNode)}`);
           resolve(server);
         });
       });
