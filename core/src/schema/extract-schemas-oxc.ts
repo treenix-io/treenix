@@ -825,7 +825,7 @@ function findEnums(ast: N, fileName: string): Map<string, N> {
   return enums;
 }
 
-function findExternalActions(ast: N, fileName: string): Map<string, ExternalAction[]> {
+function findExternalActions(ast: N, fileName: string, docs: Map<number, ParsedJSDoc>): Map<string, ExternalAction[]> {
   const byType = new Map<string, ExternalAction[]>();
   walk(ast, (node) => {
     if (
@@ -845,6 +845,10 @@ function findExternalActions(ast: N, fileName: string): Map<string, ExternalActi
       ) {
         const actionName = ctxArg.value.slice(7);
         if (actionName.startsWith('_')) return;
+
+        // A register()ed action's schema carries no kind or contract, so its JSDoc must not declare one. register()
+        // returns nothing, so the call starts its statement and the statement's JSDoc is keyed at the call.
+        assertNoTags(docs.get(node.start), INTERPRETED_FIELDS, `${typeArg.value}.${actionName}`, fileName);
 
         if (!byType.has(typeArg.value)) byType.set(typeArg.value, []);
         const list = byType.get(typeArg.value)!;
@@ -1128,7 +1132,7 @@ export async function generateSchemas(dirs: string[]): Promise<void> {
     for (const [name, node] of findClasses(ast as N))
       allClasses.set(name + '\0' + file, { node, docs });
 
-    for (const [typeName, actions] of findExternalActions(ast as N, file)) {
+    for (const [typeName, actions] of findExternalActions(ast as N, file, docs)) {
       const existing = allExternalActions.get(typeName) ?? [];
       existing.push(...actions);
       allExternalActions.set(typeName, existing);

@@ -654,6 +654,14 @@ describe('extract-schemas-oxc: action and type rules', () => {
     await refused(`register('test.sample', 'action:run', (ctx: unknown, tag: string, prio: number) => tag);\n`);
   });
 
+  it('a kind, @io, @pre or @post on a register()ed action fails', async () => {
+    const run = `register('test.sample', 'action:run', (ctx: unknown) => 1);\n`;
+
+    for (const tags of ['@read', '@setuid', '@io', '@pre {"node.a": 1}', '@post {"": {"$set": {"a": 1}}}'])
+      await refused(`/** ${tags} */\n${run}`);
+    assert.deepEqual((await generated(`/** Runs the sample. */\n${run}`)).methods?.run, { arguments: [] });
+  });
+
   it('a @read method with @post fails', async () => {
     await refused(registered(`/** @read @post {"": {"$set": {"a": 1}}} */\nrun() {}`));
   });
