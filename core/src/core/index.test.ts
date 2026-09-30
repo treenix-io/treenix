@@ -9,6 +9,7 @@ import {
   assertValidType,
   createNode,
   getComponent,
+  getComponentByName,
   getComponents,
   getMeta,
   isComponent,
@@ -132,11 +133,14 @@ describe('Component access', () => {
     }
   });
 
-  it('a non-string $order on a component throws when components are ordered', () => {
+  it('a component with a non-string $order is a malformed entry: every lookup that meets it throws', () => {
     const n = createNode('/x', 'x', {}, { a: { $type: 'tag', $order: 5 }, b: { $type: 'tag' } });
+    const alone = createNode('/y', 'y', {}, { a: { $type: 'tag', $order: 5 } });
 
     assert.throws(() => getComponents(n));
     assert.throws(() => getComponent(n, 'tag'));
+    assert.throws(() => getComponent(alone, 'tag'));
+    assert.throws(() => getComponentByName(alone, 'a'));
   });
 
   it('set and remove', () => {

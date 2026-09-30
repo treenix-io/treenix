@@ -272,7 +272,7 @@ export function validateComponent(comp: ComponentData, schema: TypeSchema, field
 }
 
 // $order of the node and of each component is an order key; it is judged before the components are
-// iterated, because their ($order, name) order throws on a non-string one.
+// iterated, because iterating them throws on a non-string one.
 function orderErrors(node: NodeData): ValidationError[] {
   const errors: ValidationError[] = [];
   const check = (path: string, order: unknown) => {

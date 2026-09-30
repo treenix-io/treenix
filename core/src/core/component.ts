@@ -119,10 +119,10 @@ export function compName(key: string): string {
 }
 
 function assertWellFormedCompEntry(node: NodeData, key: string, value: unknown): asserts value is ComponentData {
-  // A #-key whose value carries no $type is neither a field nor a component —
-  // a malformed write slipped past the boundary. Throw, never skip.
-  if (!isComponent(value)) {
-    throw new Error(`Malformed component entry "${key}" on ${node.$path}: value has no $type`);
+  // A #-key whose value carries no $type is neither a field nor a component, and a non-string $order
+  // cannot be ordered — a malformed write slipped past the boundary. Throw, never skip.
+  if (!isComponent(value) || (value.$order !== undefined && typeof value.$order !== 'string')) {
+    throw new Error(`Malformed component entry "${key}" on ${node.$path}: no $type or a non-string $order`);
   }
 }
 
@@ -204,15 +204,10 @@ function* namedOf<T>(node: NodeData, type: TypeId<T>): Generator<[string, Compon
 }
 
 // An absent $order is the empty key: it sorts before every generated key, as a missing field does in a Mongo sort.
-function orderOf([k, c]: [string, { $order?: string }]): string {
-  if (c.$order === undefined || typeof c.$order === 'string') return c.$order ?? '';
-  throw new Error(`Malformed $order on component "${k}": ${JSON.stringify(c.$order)}`);
-}
-
-function byOrderThenName<C extends { $order?: string }>(a: [string, C], b: [string, C]): number {
-  const ao = orderOf(a), bo = orderOf(b);
+function byOrderThenName<C extends { $order?: string }>([ak, a]: [string, C], [bk, b]: [string, C]): number {
+  const ao = a.$order ?? '', bo = b.$order ?? '';
   if (ao !== bo) return ao < bo ? -1 : 1;
-  return a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0;
+  return ak < bk ? -1 : ak > bk ? 1 : 0;
 }
 
 /** The main component '' first, then the named ones by ($order, name). */
