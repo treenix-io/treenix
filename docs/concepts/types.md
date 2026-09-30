@@ -188,8 +188,13 @@ registerType('cafe.order', CafeOrder)
 | `@title` | Field | Label in Inspector forms |
 | `@description` | Field/Method | Tooltip / AI description |
 | `@format` | Field | UI widget: `image`, `textarea`, `uri`, `email`, `path`, `tags`, `tstring`, `timestamp` |
-| `@pre` | Method | Fields this action reads (dependency) |
-| `@post` | Method | Fields this action writes (output) |
+| `@read` / `@write` / `@setuid` | Method | Action kind; `@write` is the default |
+| `@io` | Method | External effects (API, LLM, network) |
+| `@pre` | Method | Precondition: a sift query in JSON over `{ node, needs }` |
+| `@post` | Method | Effect: update operators in JSON per target (`""` = own node) |
+| `@version` | Class | Schema version, stamped as `$v` |
+| `@actionsOnly` | Class | Nodes change only through the type's actions |
+| `@alias` | Class | Earlier names of the type |
 
 ## Naming convention
 

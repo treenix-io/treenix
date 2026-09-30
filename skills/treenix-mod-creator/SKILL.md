@@ -252,8 +252,8 @@ addItem(data: { item: string; price: number }) { ... }
 | `@title`      | field    | Label in Inspector / forms                                                                                    |
 | `@format`     | field    | Widget hint: `email`, `tel`, `url`, `uri`, `password`, `image`, `color`, `date`, `date-time`, `timestamp`, `path`, `tags`, `textarea`, `integer`, `tstring` |
 | `@description`| method   | Action label + tooltip in the Inspector                                                                       |
-| `@pre`        | method   | Design-by-Contract precondition (warning-only)                                                                |
-| `@post`       | method   | Design-by-Contract postcondition (warning-only)                                                               |
+| `@pre`        | method   | Precondition: sift query in JSON over `{ node, needs }`, e.g. `{"node.status": "open"}` (warning-only for now) |
+| `@post`       | method   | Effect: update operators in JSON per target, e.g. `{"": {"$inc": {"count": 1}}}` (warning-only for now)        |
 
 ### Type naming
 

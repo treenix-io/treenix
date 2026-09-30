@@ -52,8 +52,15 @@ The first line of the class JSDoc becomes the type's title and description in th
 | `@description` | Field/Method | Tooltip (fields) or action description (methods) |
 | `@format` | Field | Widget type (see below) |
 | `@refType` | Field | Link to another type (auto-detected for class-typed fields) |
-| `@pre` | Method | Fields the action reads — dependency declaration |
-| `@post` | Method | Fields the action writes — output declaration |
+| `@read` / `@write` / `@setuid` | Method | Action kind: `@read` is called with R and writes nothing; `@write` (the default) needs W; `@setuid` is called with R and runs as the node |
+| `@io` | Method | The action has external effects (API, LLM, network) |
+| `@pre` | Method | Precondition — a sift query in JSON over `{ node, needs }`, e.g. `{"node.status": "open"}` |
+| `@post` | Method | Effect — update operators in JSON per target (`""` is the own node, other keys are `needs` names), e.g. `{"": {"$inc": {"count": 1}}}` |
+| `@version` | Class | Schema version, stamped as `$v` on every component of the type |
+| `@actionsOnly` | Class | Nodes of the type change only through its actions; a direct write only from admin |
+| `@alias` | Class | Earlier type names that resolve to this type |
+
+An action takes at most one parameter — the args object; a second parameter fails schema generation.
 
 ## Format Widgets
 
