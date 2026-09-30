@@ -135,18 +135,43 @@ export function createTrpcTransport(opts: TrpcTransportOpts): TreenixClient & { 
     ],
   });
 
-  // Shared SSE connection for watchPath — lazy, one per transport
+  // Shared SSE lane for watchPath — lazy, one per transport. The server binds the token's lane before its first
+  // event, and a watch registered before that loses the writes in between, so watchPath registers only once the
+  // lane has spoken. `pending` counts watchPath calls between opening the lane and adding their callback: the
+  // lane stays open for them even when every registered consumer leaves meanwhile.
   let eventSub: WatchSub | null = null;
+  let lane: Promise<void> | null = null;
+  let pending = 0;
   const pathCbs = new Map<string, Set<(e: any) => void>>();
 
-  function ensureSSE() {
-    if (eventSub) return;
-    eventSub = trpc.events.subscribe({ token: watchToken }, {
-      onData: (event: any) => {
-        // kriz: what if no path in event?
-        if ('path' in event) pathCbs.get(event.path)?.forEach(cb => cb(event));
-      },
+  function openLane(): Promise<void> {
+    if (lane) return lane;
+    return lane = new Promise<void>((resolve, reject) => {
+      eventSub = trpc.events.subscribe({ token: watchToken }, {
+        onData: (event: any) => {
+          resolve();
+          if ('path' in event) {
+            pathCbs.get(event.path)?.forEach(cb => cb(event));
+            return;
+          }
+          // A path-less event (the reconnect verdict) concerns every watched path: each consumer refetches.
+          for (const set of pathCbs.values()) for (const cb of [...set]) cb(event);
+        },
+        onError: (err: unknown) => {
+          console.error('[trpc] event lane failed:', err);
+          eventSub = null;
+          lane = null;
+          reject(err);
+        },
+      });
     });
+  }
+
+  function closeLaneIfIdle() {
+    if (pathCbs.size || pending || !eventSub) return;
+    eventSub.unsubscribe();
+    eventSub = null;
+    lane = null;
   }
 
   const tree: TreenixClient['tree'] = {
@@ -174,8 +199,18 @@ export function createTrpcTransport(opts: TrpcTransportOpts): TreenixClient & { 
 
     // kriz: repeated in starter why? should reuse!
     watchPath: async (path, onEvent) => {
-      const node = await trpc.get.query({ path, watch: true, token: watchToken });
-      ensureSSE();
+      let node: NodeData | undefined;
+      pending++;
+      try {
+        await openLane();
+        node = await trpc.get.query({ path, watch: true, token: watchToken });
+      } catch (e) {
+        pending--;
+        closeLaneIfIdle();
+        throw e;
+      }
+      pending--;
+
       // kriz: patchCbs.get, if !found -> add; equals, then found.add. dont (has + get)
       if (!pathCbs.has(path)) pathCbs.set(path, new Set());
       pathCbs.get(path)!.add(onEvent);
@@ -193,7 +228,7 @@ export function createTrpcTransport(opts: TrpcTransportOpts): TreenixClient & { 
                 .catch((e: unknown) => console.error('[trpc] unwatch failed:', path, e));
             }
           }
-          if (!pathCbs.size && eventSub) { eventSub.unsubscribe(); eventSub = null; }
+          closeLaneIfIdle();
         },
       };
     },
@@ -201,6 +236,7 @@ export function createTrpcTransport(opts: TrpcTransportOpts): TreenixClient & { 
     trpc,
     destroy() {
       if (eventSub) { eventSub.unsubscribe(); eventSub = null; }
+      lane = null;
       pathCbs.clear();
     },
   };

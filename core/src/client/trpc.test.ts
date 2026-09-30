@@ -1,13 +1,20 @@
 // ThrottledEventSource — reconnect backoff for SSE.
 // Regression: with a dead server, native EventSource hammered a refused
 // connect every ~1s forever (console flood at /t/mnt, 2026-08-14).
+// createTrpcTransport watchPath — the event lane opens before the watch registers.
 
 import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
-import { ThrottledEventSource } from './trpc';
+import { createTrpcTransport, ThrottledEventSource } from './trpc';
 
 class FakeES {
   static instances: FakeES[] = [];
+  static waiters: ((es: FakeES) => void)[] = [];
+
+  /** The next EventSource the code under test creates. */
+  static next(): Promise<FakeES> {
+    return new Promise((resolve) => FakeES.waiters.push(resolve));
+  }
 
   readonly CONNECTING = 0;
   readonly OPEN = 1;
@@ -18,6 +25,7 @@ class FakeES {
 
   constructor(public url: string, public init?: EventSourceInit) {
     FakeES.instances.push(this);
+    for (const resolve of FakeES.waiters.splice(0)) resolve(this);
   }
 
   addEventListener(type: string, cb: (e: unknown) => void) {
@@ -39,19 +47,25 @@ class FakeES {
   open() { this.readyState = this.OPEN; this.emit('open'); }
   failNetwork() { this.readyState = this.CONNECTING; this.emit('error'); }
   failFatal() { this.readyState = this.CLOSED; this.emit('error'); }
+
+  /** One server event on the lane, as tRPC's SSE consumer reads it. */
+  message(data: unknown) { this.emit('message', { data: JSON.stringify(data) }); }
+}
+
+const g = globalThis as { EventSource?: unknown };
+const originalES = g.EventSource;
+
+function install() { g.EventSource = FakeES; }
+
+function restore() {
+  FakeES.instances = [];
+  FakeES.waiters = [];
+  if (originalES === undefined) delete g.EventSource;
+  else g.EventSource = originalES;
 }
 
 describe('ThrottledEventSource', () => {
-  const g = globalThis as { EventSource?: unknown };
-  const originalES = g.EventSource;
-
-  function install() { g.EventSource = FakeES; }
-
-  afterEach(() => {
-    FakeES.instances = [];
-    if (originalES === undefined) delete g.EventSource;
-    else g.EventSource = originalES;
-  });
+  afterEach(restore);
 
   it('throttles reconnects with growing backoff on network failure', (t) => {
     t.mock.timers.enable({ apis: ['setTimeout'] });
@@ -135,5 +149,66 @@ describe('ThrottledEventSource', () => {
     t.mock.timers.tick(120_000);
     assert.equal(FakeES.instances.length, 1);
     assert.equal(es.readyState, es.CLOSED);
+  });
+});
+
+describe('createTrpcTransport watchPath', () => {
+  afterEach(restore);
+
+  /** Answers every batched query with the node at its requested path; records each request URL. */
+  function fakeFetch(requests: string[]) {
+    return async (input: string) => {
+      requests.push(input);
+      const batch: Record<string, { path: string }> = JSON.parse(new URL(input).searchParams.get('input') ?? '{}');
+      const results = Object.values(batch).map(({ path }) => ({ result: { data: { $path: path, $type: 'dir' } } }));
+      return new Response(JSON.stringify(results), { headers: { 'content-type': 'application/json' } });
+    };
+  }
+
+  const verdict = (epoch: string) => ({ type: 'reconnect', preserved: false, seq: 0, epoch });
+
+  it('registers the watch only after the event lane delivered its first event', async (t) => {
+    install();
+    const requests: string[] = [];
+    const client = createTrpcTransport({ url: 'http://x', fetch: fakeFetch(requests) });
+    t.after(() => client.destroy());
+
+    const opened = FakeES.next();
+    const watched = client.watchPath('/a', () => {});
+    const es = await opened;
+    assert.deepEqual(requests, []);
+
+    es.open();
+    es.message(verdict('e1'));
+    const { node } = await watched;
+    assert.equal(node.$path, '/a');
+    assert.equal(requests.length, 1);
+  });
+
+  it('a path-less event on the lane reaches every watchPath consumer', { timeout: 5_000 }, async (t) => {
+    install();
+    const client = createTrpcTransport({ url: 'http://x', fetch: fakeFetch([]) });
+    t.after(() => client.destroy());
+
+    const opened = FakeES.next();
+    const seen = new Map<string, unknown[]>([['/a', []], ['/b', []]]);
+    let bothSaw!: () => void;
+    const delivered = new Promise<void>((resolve) => { bothSaw = resolve; });
+    const consumer = (path: string) => (e: unknown) => {
+      seen.get(path)!.push(e);
+      if ([...seen.values()].every((events) => events.length > 0)) bothSaw();
+    };
+
+    const watchedA = client.watchPath('/a', consumer('/a'));
+    const es = await opened;
+    es.open();
+    es.message(verdict('e1'));
+    await watchedA;
+    await client.watchPath('/b', consumer('/b'));
+
+    es.message(verdict('e2'));
+    await delivered;
+    assert.deepEqual(seen.get('/a'), [verdict('e2')]);
+    assert.deepEqual(seen.get('/b'), [verdict('e2')]);
   });
 });
