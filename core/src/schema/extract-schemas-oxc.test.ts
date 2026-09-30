@@ -1,16 +1,19 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { generateSchemas, SchemaParseError } from '#schema/extract-schemas-oxc';
 
 const IMPORT_FIXTURES_DIR = path.resolve(import.meta.dirname, '_import-fixtures');
-const SCHEMAS_DIR = path.join(IMPORT_FIXTURES_DIR, 'schemas');
-const SCHEMA_FILE = path.join(SCHEMAS_DIR, 'test.schema-widget.json');
-const EXPORTED_SCHEMA_FILE = path.join(SCHEMAS_DIR, 'test.exported-schema-widget.json');
-const IMPORT_SCHEMAS_DIR = SCHEMAS_DIR;
+
+// Generation writes schemas/ next to its sources, and the schema loader tests read every schemas/ dir under
+// src while running in parallel — so every run works on a copy outside the source tree.
+const scratchDir = (name: string) => fs.mkdtemp(path.join(tmpdir(), `treenix-oxc-${name}-`));
 
 describe('extract-schemas-oxc', () => {
+  let fixturesDir: string;
+  let schemaFile: string;
   let schema: any;
   let exportedSchema: any;
   let alphaSchema: any;
@@ -19,38 +22,31 @@ describe('extract-schemas-oxc', () => {
   let warnings: string[];
 
   before(async () => {
-    // Clean previous test artifacts
-    await fs.rm(SCHEMA_FILE, { force: true });
-    await fs.rm(EXPORTED_SCHEMA_FILE, { force: true });
-    await fs.rm(IMPORT_SCHEMAS_DIR, { recursive: true, force: true });
+    fixturesDir = await scratchDir('fixtures');
+    await fs.cp(IMPORT_FIXTURES_DIR, fixturesDir, { recursive: true });
+    const schemasDir = path.join(fixturesDir, 'schemas');
+    schemaFile = path.join(schemasDir, 'test.schema-widget.json');
 
     // Generate from fixture
     warnings = [];
     const originalWarn = console.warn;
     console.warn = (...args: unknown[]) => warnings.push(args.map(String).join(' '));
     try {
-      await generateSchemas([IMPORT_FIXTURES_DIR]);
+      await generateSchemas([fixturesDir]);
     } finally {
       console.warn = originalWarn;
     }
 
-    schema = JSON.parse(await fs.readFile(SCHEMA_FILE, 'utf-8'));
-    exportedSchema = JSON.parse(await fs.readFile(EXPORTED_SCHEMA_FILE, 'utf-8'));
-    alphaSchema = JSON.parse(
-      await fs.readFile(path.join(IMPORT_SCHEMAS_DIR, 'test.import-collision-alpha.json'), 'utf-8'),
-    );
-    betaSchema = JSON.parse(
-      await fs.readFile(path.join(IMPORT_SCHEMAS_DIR, 'test.import-collision-beta.json'), 'utf-8'),
-    );
-    refSourceSchema = JSON.parse(
-      await fs.readFile(path.join(IMPORT_SCHEMAS_DIR, 'test.ref-source.json'), 'utf-8'),
-    );
+    const read = async (file: string) => JSON.parse(await fs.readFile(path.join(schemasDir, file), 'utf-8'));
+    schema = await read('test.schema-widget.json');
+    exportedSchema = await read('test.exported-schema-widget.json');
+    alphaSchema = await read('test.import-collision-alpha.json');
+    betaSchema = await read('test.import-collision-beta.json');
+    refSourceSchema = await read('test.ref-source.json');
   });
 
   after(async () => {
-    await fs.rm(SCHEMA_FILE, { force: true });
-    await fs.rm(EXPORTED_SCHEMA_FILE, { force: true });
-    await fs.rm(IMPORT_SCHEMAS_DIR, { recursive: true, force: true });
+    await fs.rm(fixturesDir, { recursive: true, force: true });
   });
 
   it('sets $id and $schema', () => {
@@ -521,60 +517,53 @@ describe('extract-schemas-oxc', () => {
   // ── Incremental: second run is no-op ──
 
   it('second run produces identical output', async () => {
-    const before = await fs.readFile(SCHEMA_FILE, 'utf-8');
-    const stat1 = await fs.stat(SCHEMA_FILE);
+    const before = await fs.readFile(schemaFile, 'utf-8');
+    // A past mtime: a rewrite, however fast, would move it.
+    const past = new Date(1_000_000_000_000);
+    await fs.utimes(schemaFile, past, past);
 
-    // Small delay so mtime would differ if file were rewritten
-    await new Promise((r) => setTimeout(r, 50));
-    await generateSchemas([IMPORT_FIXTURES_DIR]);
+    await generateSchemas([fixturesDir]);
 
-    const after = await fs.readFile(SCHEMA_FILE, 'utf-8');
-    const stat2 = await fs.stat(SCHEMA_FILE);
-
-    assert.equal(before, after);
-    assert.equal(stat1.mtimeMs, stat2.mtimeMs, 'file should not be rewritten when unchanged');
+    assert.equal(await fs.readFile(schemaFile, 'utf-8'), before);
+    assert.equal((await fs.stat(schemaFile)).mtimeMs, past.getTime(), 'file should not be rewritten when unchanged');
   });
 });
 
 describe('extract-schemas-oxc: parse errors', () => {
-  // Dynamic fixture — created inside the test so the main describe's scan of
-  // schema/ (which runs first) never sees the broken file.
-  const FIXTURE_DIR = path.join(IMPORT_FIXTURES_DIR, '_bad-parse');
+  let fixtureDir: string;
 
   after(async () => {
-    await fs.rm(FIXTURE_DIR, { recursive: true, force: true });
+    await fs.rm(fixtureDir, { recursive: true, force: true });
   });
 
   it('throws SchemaParseError carrying the file path on syntax error', async () => {
-    await fs.mkdir(FIXTURE_DIR, { recursive: true });
-    const badFile = path.join(FIXTURE_DIR, 'broken.ts');
+    fixtureDir = await scratchDir('bad-parse');
+    const badFile = path.join(fixtureDir, 'broken.ts');
     await fs.writeFile(badFile, 'export class Broken {\n  foo( {\n');
 
     await assert.rejects(
-      () => generateSchemas([FIXTURE_DIR]),
+      () => generateSchemas([fixtureDir]),
       (err: unknown) => err instanceof SchemaParseError && err.file === badFile,
     );
   });
 });
 
 describe('extract-schemas-oxc: merged enum rejection', () => {
-  // Dynamic fixture dir — must be outside schema/ to avoid being scanned by the main test.
-  // Created/destroyed per test run.
-  const FIXTURE_DIR = path.join(IMPORT_FIXTURES_DIR, '_merged-enum');
+  let fixtureDir: string;
 
   after(async () => {
-    await fs.rm(FIXTURE_DIR, { recursive: true, force: true });
+    await fs.rm(fixtureDir, { recursive: true, force: true });
   });
 
   it('throws on duplicate enum declaration in the same file', async () => {
-    await fs.mkdir(FIXTURE_DIR, { recursive: true });
+    fixtureDir = await scratchDir('merged-enum');
     await fs.writeFile(
-      path.join(FIXTURE_DIR, 'bad-enum.ts'),
+      path.join(fixtureDir, 'bad-enum.ts'),
       `enum Status { Active, Inactive }\nenum Status { Pending }\n`,
     );
 
     await assert.rejects(
-      () => generateSchemas([FIXTURE_DIR]),
+      () => generateSchemas([fixtureDir]),
       (err: Error) => err.message.includes('declared more than once'),
     );
   });
