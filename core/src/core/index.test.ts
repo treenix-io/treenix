@@ -116,6 +116,29 @@ describe('Component access', () => {
     assert.deepEqual(getComponents(n).map(([name]) => name), ['', '#alpha', '#zeta', '#ordered']);
   });
 
+  it('getComponent by type is the first of getComponents, whatever the key order', () => {
+    const comps: Record<string, { $type: string; $order?: string }> = {
+      m1: { $type: 'money', $order: 'b' }, m2: { $type: 'money', $order: 'a' }, m3: { $type: 'money', $order: 'a' },
+      m4: { $type: 'money' }, t1: { $type: 'tag' },
+    };
+    const names = Object.keys(comps);
+
+    for (let shift = 0; shift < names.length; shift++) {
+      const rotated = [...names.slice(shift), ...names.slice(0, shift)];
+      const n = createNode('/x', 'x', {}, Object.fromEntries(rotated.map((name) => [name, comps[name]])));
+
+      assert.equal(getComponent(n, 'money'), getComponents(n, 'money')[0][1], rotated.join());
+      assert.equal(getComponent(n, 'money'), comps.m4, rotated.join());
+    }
+  });
+
+  it('a non-string $order on a component throws when components are ordered', () => {
+    const n = createNode('/x', 'x', {}, { a: { $type: 'tag', $order: 5 }, b: { $type: 'tag' } });
+
+    assert.throws(() => getComponents(n));
+    assert.throws(() => getComponent(n, 'tag'));
+  });
+
   it('set and remove', () => {
     const n = createNode('/x', 'x');
     (n as any)['#tag'] = { $type: 'tag', value: 'urgent' };

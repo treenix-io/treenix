@@ -182,11 +182,9 @@ export function getComponentField<T = unknown>(
     return;
   }
   if (isOfType<T>(node, type)) return [node, ''];
-  for (const [k, v] of Object.entries(node)) {
-    if (!isCompKey(k)) continue; // bare keys are data, $ keys are system
-    assertWellFormedCompEntry(node, k, v);
-    if (isOfType<T>(v, type)) return [v, k];
-  }
+  let first: [string, ComponentData<T>] | undefined;
+  for (const entry of namedOf(node, type)) if (!first || byOrderThenName(entry, first) < 0) first = entry;
+  return first && [first[1], first[0]];
 }
 
 export function getComponent<T = unknown>(
@@ -197,11 +195,24 @@ export function getComponent<T = unknown>(
   return getComponentField(node, type, field)?.[0];
 }
 
+function* namedOf<T>(node: NodeData, type: TypeId<T>): Generator<[string, ComponentData<T>]> {
+  for (const [k, v] of Object.entries(node)) {
+    if (!isCompKey(k)) continue; // bare keys are data, $ keys are system
+    assertWellFormedCompEntry(node, k, v);
+    if (isOfType<T>(v, type)) yield [k, v];
+  }
+}
+
 // An absent $order is the empty key: it sorts before every generated key, as a missing field does in a Mongo sort.
-function byOrderThenName<C extends { $order?: string }>([ak, a]: [string, C], [bk, b]: [string, C]): number {
-  const ao = a.$order ?? '', bo = b.$order ?? '';
+function orderOf([k, c]: [string, { $order?: string }]): string {
+  if (c.$order === undefined || typeof c.$order === 'string') return c.$order ?? '';
+  throw new Error(`Malformed $order on component "${k}": ${JSON.stringify(c.$order)}`);
+}
+
+function byOrderThenName<C extends { $order?: string }>(a: [string, C], b: [string, C]): number {
+  const ao = orderOf(a), bo = orderOf(b);
   if (ao !== bo) return ao < bo ? -1 : 1;
-  return ak < bk ? -1 : ak > bk ? 1 : 0;
+  return a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0;
 }
 
 /** The main component '' first, then the named ones by ($order, name). */
@@ -209,13 +220,7 @@ export function getComponents<T = unknown>(
   node: NodeData,
   type: TypeId<T> = AnyType,
 ): [string, ComponentData<T>][] {
-  const named: [string, ComponentData<T>][] = [];
-  for (const [k, v] of Object.entries(node)) {
-    if (!isCompKey(k)) continue; // bare keys are data, $ keys are system
-    assertWellFormedCompEntry(node, k, v);
-    if (isOfType<T>(v, type)) named.push([k, v]);
-  }
-  named.sort(byOrderThenName);
+  const named = [...namedOf(node, type)].sort(byOrderThenName);
   return isOfType<T>(node, type) ? [['', node], ...named] : named;
 }
 
