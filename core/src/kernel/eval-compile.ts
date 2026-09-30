@@ -4,7 +4,7 @@
 // so a query means the same whichever Store runs it.
 
 import { KernelError } from '#errors'
-import { anyAt, charge, type Doc, type ExprWork, isDocument, type Path, type ValueTest } from './eval'
+import { anyAt, charge, type Doc, type ExprWork, type FieldPath, isDocument, type ValueTest } from './eval'
 import { compares, equals, isOperand, type Operand, present, sized, someElement, within } from './eval-ops'
 
 /** A compiled test: of a document for a query, of one array element for a value-form $elemMatch. */
@@ -150,7 +150,7 @@ function group(op: string, branches: unknown): Test<Doc> {
 }
 
 // Mongo reads an empty segment its own way at an array ('a.' there is not 'a' then ''), so none is in the language.
-function pathOf(key: string): Path {
+function pathOf(key: string): FieldPath {
   const names = key.split('.')
   if (names.includes('')) throw new KernelError('INVALID', `A path has an empty segment: ${JSON.stringify(key)}`)
   return names.map((name) => ({ name, index: INDEX.test(name) ? Number(name) : -1 }))

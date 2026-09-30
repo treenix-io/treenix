@@ -20,12 +20,13 @@ export function charge(work: ExprWork): void {
 }
 
 /** A segment of a dotted path; `index` is the array position it spells canonically, -1 when it spells none. */
-export interface Segment {
+interface Segment {
   readonly name: string
   readonly index: number
 }
 
-export type Path = readonly Segment[]
+/** A query's dotted field path, split into segments. */
+export type FieldPath = readonly Segment[]
 
 /** A test of one value a path reached; `undefined` is a missing value. */
 export type ValueTest = (value: unknown, work: ExprWork) => boolean
@@ -72,7 +73,7 @@ class Walk {
   whole = false
 
   constructor(
-    private readonly path: Path,
+    private readonly path: FieldPath,
     first: unknown,
   ) {
     this.value = first
@@ -121,7 +122,7 @@ class Walk {
 }
 
 /** Whether `test` holds for any value `path` reaches in `doc`: a condition matches if any value there matches. */
-export function anyAt(doc: Doc, path: Path, expand: boolean, test: ValueTest, work: ExprWork): boolean {
+export function anyAt(doc: Doc, path: FieldPath, expand: boolean, test: ValueTest, work: ExprWork): boolean {
   const walk = new Walk(path, field(doc, path[0], work))
 
   do {
