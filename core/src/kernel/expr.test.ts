@@ -81,13 +81,46 @@ describe('expression size', () => {
     assert.throws(() => createSiftTest(q, DEFAULT_LIMITS)(node, exprWork(DEFAULT_LIMITS)), isInvalid)
   })
 
-  it('primitive operands, conditions under $all, $not and $elemMatch, $size and $mod parse', () => {
+  it('primitive operands, value tests under $not, $elemMatch items in $all, groups at a query root, $size and $mod parse', () => {
     const valid: Record<string, unknown>[] = [
-      { a: 'x', b: 1, c: true, d: null }, { a: { $in: ['x', 1, null], $nin: [false] } }, { a: { $all: [1, { $gt: 0 }] } },
-      { a: { $not: { $gt: 1 } } }, { a: { $not: 1 } }, { list: { $elemMatch: { x: 1, 'y.z': { $exists: true } } } },
+      { a: 'x', b: 1, c: true, d: null }, { a: { $in: ['x', 1, null], $nin: [false] } },
+      { a: { $all: [1, 'x'] } }, { list: { $all: [{ $elemMatch: { x: 1, y: { $all: [2] } } }] } },
+      { a: { $not: { $gt: 1, $lt: 5, $in: [7], $size: 2, $exists: true } } }, { a: { $not: 1 } },
+      { list: { $not: { $elemMatch: { x: { $not: { $eq: 1 } } } } } },
+      { list: { $elemMatch: { x: 1, 'y.z': { $exists: true } } } }, { list: { $elemMatch: { $or: [{ x: 1 }, { $gt: 2 }] } } },
       { a: { $size: 2 } }, { a: { $mod: [2, 0] } }, { $nor: [{ a: 1 }], $and: [{ b: { $lte: 3 } }] },
     ]
     for (const q of valid) assert.doesNotThrow(() => createSiftTest(q, DEFAULT_LIMITS), JSON.stringify(q))
+  })
+
+  it('a query under $not or in $all that reaches past the value itself is INVALID at compile', () => {
+    let notChain: Record<string, unknown> = { $gt: 1 }
+    let allChain: Record<string, unknown> = { $gt: 1 }
+    for (let i = 0; i < 200; i++) {
+      notChain = { $not: notChain }
+      allChain = { $all: [allChain] }
+    }
+    let notFields: Record<string, unknown> = { a: 1 }
+    let allFields: Record<string, unknown> = { a: 1 }
+    for (let i = 0; i < 22; i++) {
+      notFields = { a: { $not: notFields } }
+      allFields = { a: { $all: [allFields] } }
+    }
+
+    const invalid: Record<string, unknown>[] = [
+      { a: notChain }, { a: allChain }, notFields, allFields,
+      { a: { $not: { b: 1 } } }, { a: { $not: { $or: [{ $gt: 1 }] } } }, { a: { $not: { $all: [1] } } },
+      { a: { $all: [{ $gt: 1 }] } }, { a: { $all: [{ b: 1 }] } }, { a: { $all: [{ $elemMatch: { b: 1 }, $gt: 1 }] } },
+    ]
+    for (const q of invalid) assert.throws(() => createSiftTest(q, DEFAULT_LIMITS), isInvalid, JSON.stringify(q).slice(0, 80))
+  })
+
+  it('a group among the conditions of a field, or a value test at the top of an expression, is INVALID at compile', () => {
+    const invalid: Record<string, unknown>[] = [
+      { a: { $or: [{ $gt: 1 }] } }, { a: { $and: [{ $gt: 1 }] } }, { a: { $nor: [{ $gt: 1 }] } },
+      { $exists: true }, { $or: [{ $gt: 1 }] }, { $not: { $gt: 1 } }, { $elemMatch: { a: 1 } },
+    ]
+    for (const q of invalid) assert.throws(() => createSiftTest(q, DEFAULT_LIMITS), isInvalid, JSON.stringify(q))
   })
 })
 
