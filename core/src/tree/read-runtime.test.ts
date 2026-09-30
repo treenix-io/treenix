@@ -193,8 +193,9 @@ describe('executeList', () => {
   it('one list counts the work of both predicates over every node it tests', async () => {
     const source = createMemoryTree();
     for (const name of ['a', 'b']) await source.set(createNode(`/x/${name}`, 'item', { arr: new Array(30_000).fill(0) }));
-    // 100 conditions over 30 000 values: 3e6 per node, 6e6 per predicate over both nodes, 1.2e7 for the two.
-    const viewWhere = { $or: Array.from({ length: 100 }, (_, i) => ({ arr: i })) };
+    // 100 conditions over 30 000 values: 3e6 per node, 6e6 per predicate over both nodes, 1.2e7 for the two. The
+    // matching condition comes last: a test stops at its first match, so the ones before it are all counted.
+    const viewWhere = { $or: Array.from({ length: 100 }, (_, i) => ({ arr: (i + 1) % 100 })) };
     const callerWhere = { $or: Array.from({ length: 100 }, (_, i) => ({ arr: i + 1 })) };
 
     assert.equal((await executeList(source, { source: '/x', viewWhere }, { limit: 10 }, identityProject)).items.length, 2);

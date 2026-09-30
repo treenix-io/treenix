@@ -5,7 +5,7 @@
 import { comparePaths, isRef, type NodeData, type Ref } from '#core';
 import { KernelError } from '#errors';
 import { createSiftTest } from '#kernel/expr';
-import { type ExprWork, exprWork } from '#kernel/expr-work';
+import { type ExprWork, exprWork } from '#kernel/eval';
 import { DEFAULT_LIMITS } from '#kernel/types';
 import { scanFromCollected } from './fs-common';
 import { applyOps, type CommitChange, type CommitReceipt, hasMutationOps, type PatchOp, PatchTestError } from './patch';

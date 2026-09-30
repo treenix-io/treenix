@@ -19,7 +19,7 @@
 import type { NodeData } from '#core';
 import { KernelError } from '#errors';
 import { assertSafePredicate, createSiftTest } from '#kernel/expr';
-import { exprWork } from '#kernel/expr-work';
+import { exprWork } from '#kernel/eval';
 import { DEFAULT_LIMITS } from '#kernel/types';
 import { mapNodeForSift, type TreeSource } from './index';
 import { decodeReadCursor, encodeReadCursor, planHash } from './plan-hash';

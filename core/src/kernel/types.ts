@@ -755,7 +755,7 @@ export interface Budget {
   readonly nodes: number
   /** Bytes of loaded nodes. */
   readonly bytes: number
-  /** Expression work of `where`, counted by in-process Stores before each node is tested. */
+  /** Expression work of `where`, counted by in-process Stores as the kernel's evaluator tests each node. */
   readonly exprWork: number
   /** Absolute time, ms, for work the storage engine does itself (filters, sorts, aggregations). */
   readonly deadline: number
@@ -992,10 +992,9 @@ export interface Limits {
   /** Size of one `sift` expression, judged at parse. */
   readonly exprBytes: number
   /**
-   * Expression work per operation, counted before each node is tested: every condition's weight times the
-   * number of values at its path in that node. The node that would cross it is refused untested, as is an array
-   * directly inside an array on a condition path. One operation: a query, a subscription snapshot, a View run,
-   * one subscription updated by one write, a commit's precondition check.
+   * Expression work per operation, counted by the kernel's evaluator as it tests: every field read, array element
+   * visited and value tested is one step, and the step past the limit stops the test. One operation: a query, a
+   * subscription snapshot, a View run, one subscription updated by one write, a commit's precondition check.
    */
   readonly exprWork: number
   /** Size of one blob. */

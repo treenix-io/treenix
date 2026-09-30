@@ -12,8 +12,7 @@ const srcDir = dirname(kernelDir)
 // admitted here with a reason. errors is the KernelError class alone, built on the kernel's own ErrorCode.
 const ALLOWED = ['kernel', 'core', 'util', 'comp', 'schema/types', 'errors']
 
-// sift is the expression language of `where` and `pre`.
-const PACKAGES = ['sift']
+const PACKAGES: readonly string[] = []
 
 type PackageImports = { readonly [key: string]: { readonly development: string } }
 const packageImports: PackageImports = JSON.parse(readFileSync(join(srcDir, '../package.json'), 'utf8')).imports
@@ -87,13 +86,13 @@ describe('kernel import boundary', () => {
 
   it('admits the allowed areas, node built-ins and admitted packages', () => {
     const file = join(kernelDir, 'contract', 'x.ts')
-    for (const spec of ['../types', '#kernel/types', '#core', '#core/path', '#util/ulid', '#comp', '#comp/needs', '#schema/types', '#errors', 'node:fs', 'sift'])
+    for (const spec of ['../types', '#kernel/types', '#core', '#core/path', '#util/ulid', '#comp', '#comp/needs', '#schema/types', '#errors', 'node:fs'])
       assert.equal(allowed(file, spec), true, spec)
   })
 
   it('rejects the old layers, other packages and paths leaving src', () => {
     const file = join(kernelDir, 'contract', 'x.ts')
-    for (const spec of ['#tree', '#tree/cache', '#server/actions', '#schema/load', '#chain', '../../sub/watch', '../../../package.json', '@treenx/core/kernel', 'immer'])
+    for (const spec of ['#tree', '#tree/cache', '#server/actions', '#schema/load', '#chain', '../../sub/watch', '../../../package.json', '@treenx/core/kernel', 'immer', 'sift'])
       assert.equal(allowed(file, spec), false, spec)
   })
 })

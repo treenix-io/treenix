@@ -5,7 +5,7 @@
 import { type NodeData } from '#core';
 import { KernelError } from '#errors';
 import { assertSafeSiftQuery, createSiftTest, mapSiftQuery } from '#kernel/expr';
-import { exprWork } from '#kernel/expr-work';
+import { exprWork } from '#kernel/eval';
 import { DEFAULT_LIMITS } from '#kernel/types';
 import { isRecord } from '#util/is-record';
 import { mapNodeForSift, type Tree } from './index';

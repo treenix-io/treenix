@@ -6,7 +6,7 @@ import { type SubscribeOpts } from '#contexts/service/index';
 import { isComponent, isCompKey, type NodeData } from '#core';
 import { KernelError } from '#errors';
 import { createSiftTest } from '#kernel/expr';
-import { type ExprWork, exprWork } from '#kernel/expr-work';
+import { type ExprWork, exprWork } from '#kernel/eval';
 import { DEFAULT_LIMITS } from '#kernel/types';
 import {
   isSetEntry,

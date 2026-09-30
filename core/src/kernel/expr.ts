@@ -1,13 +1,11 @@
-// The expression language of `where` and `pre`: sift without $regex, without code and with primitive operands.
-// Its size and shape are judged at parse, before sift compiles it or a database receives it; its work is counted
-// at run time with the nodes and bytes of the operation — each node is charged before it is tested (expr-work).
-
-import sift from 'sift'
+// The expression language of `where` and `pre`: sift, that is Mongo queries without $regex, without code and with
+// primitive operands. Its size and shape are judged at parse, before the kernel's evaluator compiles it or a
+// database receives it; its work is counted as the evaluator tests each node (eval).
 
 import { isSafeKey } from '#core/json'
 import { KernelError } from '#errors'
-import { chargeWork, type ExprWork, parseWork } from './expr-work'
-import { SIFT_OPERATIONS } from './sift-ops'
+import type { ExprWork } from './eval'
+import { compileQuery } from './eval-compile'
 import type { Limits } from './types'
 
 // Refused in every sift query — predicates are user-authored (wire callerWhere,
@@ -18,28 +16,41 @@ import type { Limits } from './types'
 // platform needs user regexes.
 const SIFT_FORBIDDEN = new Set(['$where', '$function', '$accumulator', '$expr', '$regex'])
 
+// Mongo refuses a filter nested deeper than 200 objects and arrays, and so does the language: mapping, compiling
+// and testing an expression recurse through its nesting, which this keeps far from the end of the stack.
+const MAX_DEPTH = 200
+
 const encoder = new TextEncoder()
 
-function assertSize(q: unknown, limits: Limits): void {
+// Size is a budget, depth a rule of the language; both are judged without recursion, as JSON is read.
+function assertBounds(q: unknown, limits: Limits): void {
   const bytes = encoder.encode(JSON.stringify(q)).byteLength
   if (bytes > limits.exprBytes) throw new KernelError('BUDGET', `Expression is ${bytes} bytes, limit ${limits.exprBytes}`)
+
+  const stack: [unknown, number][] = [[q, 1]]
+  for (let top = stack.pop(); top !== undefined; top = stack.pop()) {
+    const [v, depth] = top
+    if (typeof v !== 'object' || v === null) continue
+    if (depth > MAX_DEPTH) throw new KernelError('INVALID', `Expression nests deeper than ${MAX_DEPTH} objects and arrays`)
+    for (const child of Object.values(v)) stack.push([child, depth + 1])
+  }
 }
 
 /**
- * Judge a sift query whole, whoever runs it — sift in process or a database: BUDGET over the size limit, INVALID
- * on a forbidden operator or a shape the language refuses.
+ * Judge a sift query whole, whoever runs it — the kernel's evaluator or a database: BUDGET over the size limit,
+ * INVALID on a forbidden operator or a shape the language refuses.
  */
 export function assertSafeSiftQuery(q: unknown, limits: Limits): void {
-  assertSize(q, limits)
-  parseWork(mapSiftQuery(q))
+  assertBounds(q, limits)
+  compileQuery(mapSiftQuery(q))
 }
 
 /** assertSafeSiftQuery for a read predicate: a hidden field is FORBIDDEN before the shape is judged. */
 export function assertSafePredicate(q: unknown, limits: Limits, where: 'callerWhere' | 'viewWhere'): void {
-  assertSize(q, limits)
+  assertBounds(q, limits)
   const mapped = mapSiftQuery(q)
   assertVisiblePredicate(q, where)
-  parseWork(mapped)
+  compileQuery(mapped)
 }
 
 /** Validate and map a sift query to storage keys. */
@@ -50,7 +61,7 @@ export function mapSiftQuery(q: unknown): unknown {
     const out: Record<string, unknown> = {}
     for (const [k, v] of Object.entries(q)) {
       if (SIFT_FORBIDDEN.has(k)) throw new KernelError('INVALID', `Forbidden sift operator: ${k}`)
-      // A decoded `__proto__` key would set the mapped query's prototype: sift runs inherited conditions, the parse sees none.
+      // A decoded `__proto__` key would set the mapped query's prototype instead of adding a condition.
       if (!k.split('.').every(isSafeKey)) throw new KernelError('INVALID', `Forbidden sift key: ${k}`)
       let newKey = k
       if (k === '$type') newKey = '_type'
@@ -107,18 +118,11 @@ function assertVisiblePredicate(q: unknown, where: 'callerWhere' | 'viewWhere'):
   }
 }
 
-/** A compiled expression; each test charges the node's work to the operation's counter first. */
+/** A compiled expression; each test charges its steps to the operation's counter as it takes them. */
 export type SiftTest = (node: Record<string, unknown>, work: ExprWork) => boolean
 
 /** Compile a sift query over storage-shaped nodes; it is judged whole first, so a refused one evaluates nothing. */
 export function createSiftTest(match: Record<string, unknown>, limits: Limits): SiftTest {
-  assertSize(match, limits)
-  const mapped = mapSiftQuery(match)
-  const paths = parseWork(mapped)
-  const test = sift(mapped, { operations: SIFT_OPERATIONS })
-
-  return (node, work) => {
-    chargeWork(node, paths, work)
-    return test(node)
-  }
+  assertBounds(match, limits)
+  return compileQuery(mapSiftQuery(match))
 }
