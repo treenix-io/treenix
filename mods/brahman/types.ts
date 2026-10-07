@@ -6,7 +6,6 @@ import '@treenx/core/contexts/text';
 import { getCtx, registerType } from '@treenx/core/comp';
 import { KernelError } from '@treenx/core/errors';
 import type { BrahmanCtx } from './helpers';
-import { evalBool, evalExpr } from './sandbox';
 
 // ── Shared types ──
 
@@ -221,6 +220,7 @@ export class IfElseAction {
     // a crafted user message that lands in `session.x` from gaining host JS execution.
     const condition = format(this.condition, bCtx);
     const userData = getComponent(bCtx.user, BrahmanUser);
+    const { evalBool } = await import('./sandbox');
     const result = await evalBool(condition, { session, data: session, user: userData });
 
     const target = result ? this.actionIf : this.actionElse;
@@ -278,6 +278,7 @@ export class TagAction {
     if (this.value && this.value !== 'true') {
       // R5-BRAHMAN-1: QuickJS sandbox.
       const formatted = format(this.value, bCtx);
+      const { evalBool } = await import('./sandbox');
       shouldSet = await evalBool(formatted, { session, data: session });
     }
 
@@ -386,6 +387,7 @@ export class SetValueAction {
       try {
         const formatted = format(this.value, bCtx);
         const userData = getComponent(bCtx.user, BrahmanUser);
+        const { evalExpr } = await import('./sandbox');
         session[this.saveTo] = await evalExpr(formatted, { session, data: session, user: userData });
       } catch {
         session[this.saveTo] = this.value;
