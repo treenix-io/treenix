@@ -855,7 +855,7 @@ const KanbanView: View<BoardKanban, { editable?: boolean }> = ({ value, ctx, edi
       const next = reordered[toIdx + 1] ? columnOrder(reordered[toIdx + 1]) : null;
 
       saves.path(moved.$path).onChange({ '#order': orderComponent(between(prev, next)) });
-      saves.flush(); // commit to cache now — reorder in the same frame, no snap-back
+      withToast(() => saves.flush()); // commit to cache now — reorder in the same frame, no snap-back
       return;
     }
 
@@ -888,7 +888,7 @@ const KanbanView: View<BoardKanban, { editable?: boolean }> = ({ value, ctx, edi
     const prev = reordered[toIdx - 1] ? taskOrder(reordered[toIdx - 1]) : null;
     const next = reordered[toIdx + 1] ? taskOrder(reordered[toIdx + 1]) : null;
     saves.path(taskPath).onChange({ '#order': orderComponent(between(prev, next)) });
-    saves.flush(); // commit to cache now — reorder in the same frame, no snap-back
+    withToast(() => saves.flush()); // commit to cache now — reorder in the same frame, no snap-back
   };
 
   return (

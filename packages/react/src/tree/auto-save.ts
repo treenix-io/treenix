@@ -2,7 +2,7 @@
 // Phase 2-3 of mutation pipeline.
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useSyncExternalStore } from 'react';
-import { mergeIntoNode, mergeToOps, type OnChange, scopeOnChange } from '#tree/on-change';
+import { foldPartial, mergeIntoNode, mergeToOps, type OnChange, scopeOnChange } from '#tree/on-change';
 import type { NodeData } from '@treenx/core';
 import * as cache from '#tree/cache';
 import { useDebounce } from '#lib/use-debounce';
@@ -152,7 +152,7 @@ export function useSave(path: string, options?: SaveOptions): SaveHandle {
         // Skip when stale: the path changed under us, so this partial belongs to
         // the OLD path and must not resurrect into the new path's pending (r2).
         console.error('[useSave] patch failed:', e);
-        if (genRef.current === gen) pending.current = { ...partial, ...(pending.current ?? {}) };
+        if (genRef.current === gen) pending.current = foldPartial(partial, pending.current ?? {});
         throw e;
       } finally {
         // A new run owns inflight after a path change — only the current run clears it.
@@ -189,16 +189,17 @@ export function useSave(path: string, options?: SaveOptions): SaveHandle {
   }, []);
 
   const onChange = useCallback((partial: OnChange) => {
+    // Folded first: an invalid partial throws INVALID to the caller before any edit state changes.
+    const next = foldPartial(pending.current ?? {}, partial);
+
     // Track dirty state — capture snapshot + $rev on first edit for reset/stale detection
     if (!pending.current) {
       const cached = cache.get(pathRef.current);
       baseRef.current = cached ? structuredClone(cached) : null;
       editRevRef.current = cached?.$rev ?? null;
-      pending.current = {};
     }
 
-    // Accumulate ops for flush — in-place mutation, no per-keystroke allocation
-    Object.assign(pending.current, partial as Record<string, unknown>);
+    pending.current = next;
     bump();
 
     // Auto-save: start throttle timer. flush rethrows on failure (already
@@ -280,7 +281,8 @@ export type PathSaveHandle = {
   change: (path: string, partial: OnChange) => void;
   /** Cached handle for a specific path — stable reference */
   path: (path: string) => PathHandle;
-  /** Flush all pending changes to server */
+  /** Flush all pending changes to server. Rejects when a patch fails — with its error, or an AggregateError
+   *  when several do; the failed paths' edits stay pending. */
   flush: () => Promise<void>;
 };
 
@@ -289,6 +291,7 @@ export function usePathSave(options?: { delay?: number; cacheThrottle?: number }
   const cacheThrottle = options?.cacheThrottle ?? DEFAULT_CACHE_THROTTLE;
 
   const pending = useRef(new Map<string, Record<string, unknown>>());
+  const inflight = useRef<Promise<void> | null>(null);
   const handleCache = useRef(new Map<string, PathHandle>());
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [version, bump] = useReducer((v: number) => v + 1, 0);
@@ -307,6 +310,11 @@ export function usePathSave(options?: { delay?: number; cacheThrottle?: number }
   }, cacheThrottle, [version]);
 
   const flush = useCallback(async () => {
+    if (inflight.current) {
+      await inflight.current;
+      if (pending.current.size > 0) return flush();
+      return;
+    }
     clearTimer();
     const entries = [...pending.current];
     pending.current.clear();
@@ -318,25 +326,42 @@ export function usePathSave(options?: { delay?: number; cacheThrottle?: number }
       if (cached) cache.put(mergeIntoNode(cached, partial));
     }
 
-    const settled = await Promise.allSettled(entries.map(([path, partial]) => {
-      const ops = mergeToOps(partial);
-      return ops.length > 0 ? trpc.patch.mutate({ path, ops }) : Promise.resolve();
-    }));
-    settled.forEach((r, i) => {
-      if (r.status === 'rejected') console.error(`[usePathSave] patch failed for ${entries[i][0]}:`, r.reason);
-    });
+    const run = (async () => {
+      const settled = await Promise.allSettled(entries.map(([path, partial]) => {
+        const ops = mergeToOps(partial);
+        return ops.length > 0 ? trpc.patch.mutate({ path, ops }) : Promise.resolve();
+      }));
+
+      // A failed path keeps its edits pending under the ones made since, so the next change or flush resends them.
+      const failures: unknown[] = [];
+      settled.forEach((r, i) => {
+        if (r.status === 'fulfilled') return;
+        const [path, partial] = entries[i];
+        pending.current.set(path, foldPartial(partial, pending.current.get(path) ?? {}));
+        failures.push(r.reason);
+      });
+
+      if (failures.length === 1) throw failures[0];
+      if (failures.length > 1) throw new AggregateError(failures, 'usePathSave: patches failed');
+    })();
+    inflight.current = run;
+    try {
+      await run;
+    } finally {
+      if (inflight.current === run) inflight.current = null;
+    }
   }, [clearTimer]);
 
   const change = useCallback((path: string, partial: OnChange) => {
-    // Accumulate per-path — in-place mutation, no per-event allocation when path already pending
-    const next = pending.current.get(path) ?? {};
-    Object.assign(next, partial as Record<string, unknown>);
-    pending.current.set(path, next);
+    pending.current.set(path, foldPartial(pending.current.get(path) ?? {}, partial));
     bump();
 
-    // Shared timer for all paths (delay=0 → no auto-flush)
+    // Shared timer for all paths (delay=0 → no auto-flush). A timed flush has no caller to reject to;
+    // its failed edits are pending again.
     if (delay > 0 && !timer.current) {
-      timer.current = setTimeout(flush, delay);
+      timer.current = setTimeout(() => {
+        flush().catch((e: unknown) => console.error('[usePathSave] save failed; edits stay pending:', e));
+      }, delay);
     }
   }, [flush, delay]);
 

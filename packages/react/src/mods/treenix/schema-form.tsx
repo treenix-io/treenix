@@ -67,7 +67,7 @@ function DefaultSchemaForm({ value, onChange }: RenderProps) {
             )}
             {createElement(handler as any, {
               value: fieldData,
-              onChange: (next: any) => onChange?.({ ...value, [name]: next.value }),
+              onChange: (next: any) => onChange?.({ [name]: next.value }),
             })}
           </div>
         );

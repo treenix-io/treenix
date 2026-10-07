@@ -23,9 +23,13 @@ mock.module('./trpc', {
 
 const { renderHook, act } = await import('@testing-library/react');
 const { mergeToOps, mergeIntoNode, useSave, useAutoSave, usePathSave } = await import('./auto-save');
+const { foldPartial } = await import('./on-change');
 const cache = await import('#tree/cache');
 const { makeNode } = await import('@treenx/core');
+const { KernelError } = await import('@treenx/core/errors');
 const { $key, $node } = await import('#symbols');
+
+const isInvalid = (e: unknown) => e instanceof KernelError && e.code === 'INVALID';
 
 function seed(path: string, type: string, data?: Record<string, unknown>) {
   cache.put(makeNode(path, type, data));
@@ -33,6 +37,7 @@ function seed(path: string, type: string, data?: Record<string, unknown>) {
 }
 
 beforeEach(() => {
+  patchMutate.mock.restore();
   patchMutate.mock.resetCalls();
   cache.clear();
 });
@@ -63,18 +68,61 @@ describe('mergeToOps', () => {
     assert.deepEqual(ops[2], ['r', 'meta.count', 5]);
   });
 
-  it('skips $ fields', () => {
-    const ops = mergeToOps({ $path: '/x', $type: 'y', title: 'z' });
-    assert.deepEqual(ops, [['r', 'title', 'z']]);
+  it('a system field is INVALID', () => {
+    assert.throws(() => mergeToOps({ $path: '/x', title: 'z' }), isInvalid);
   });
 
-  it('skips invalid dot keys', () => {
-    const ops = mergeToOps({ 'field..inner': 1, 'arr.0.name': 2, valid: 3 });
-    assert.deepEqual(ops, [['r', 'valid', 3]]);
+  it('an empty or numeric segment is INVALID', () => {
+    assert.throws(() => mergeToOps({ 'field..inner': 1 }), isInvalid);
+    assert.throws(() => mergeToOps({ 'arr.0.name': 2 }), isInvalid);
+  });
+
+  it('a key under another key of the same partial is INVALID', () => {
+    assert.throws(() => mergeToOps({ meta: { a: 1 }, 'meta.title': 'x' }), isInvalid);
+    assert.throws(() => mergeToOps({ 'meta.title': 'x', 'meta-2': 1, meta: {} }), isInvalid);
+  });
+
+  it('a prototype segment is INVALID before the optimistic merge', () => {
+    const node = { $path: '/x', $type: 't.dir', meta: { title: 'kept' } };
+    for (const key of ['__proto__.title', 'meta.constructor.title', 'meta.prototype']) {
+      assert.throws(() => mergeToOps({ [key]: 'bad' }), isInvalid);
+      assert.throws(() => foldPartial({}, { [key]: 'bad' }), isInvalid);
+      assert.throws(() => mergeIntoNode(node, { [key]: 'bad' }), isInvalid);
+    }
+    assert.deepEqual(node.meta, { title: 'kept' });
+  });
+
+  it('sibling keys sharing a name prefix are independent', () => {
+    assert.deepEqual(mergeToOps({ meta: 1, metadata: 2, 'meta2.a': 3 }), [['r', 'meta', 1], ['r', 'metadata', 2], ['r', 'meta2.a', 3]]);
   });
 
   it('empty partial → empty ops', () => {
     assert.deepEqual(mergeToOps({}), []);
+  });
+});
+
+describe('foldPartial', () => {
+  it('a later key replaces the accumulated keys under it', () => {
+    assert.deepEqual(foldPartial({ 'meta.title': 'x', other: 1 }, { meta: { count: 2 } }), { other: 1, meta: { count: 2 } });
+  });
+
+  it('a later key under an accumulated one writes into its value', () => {
+    const acc = { meta: { title: 'a', count: 1 } };
+    assert.deepEqual(foldPartial(acc, { 'meta.title': 'b', 'meta.count': undefined }), { meta: { title: 'b' } });
+    assert.deepEqual(acc, { meta: { title: 'a', count: 1 } }, 'the accumulated partial is not changed');
+  });
+
+  it('a later key under a pending delete starts a fresh object', () => {
+    assert.deepEqual(foldPartial({ meta: undefined }, { 'meta.title': 'b' }), { meta: { title: 'b' } });
+  });
+
+  it('a later key under a scalar is INVALID', () => {
+    assert.throws(() => foldPartial({ meta: 5 }, { 'meta.title': 'b' }), isInvalid);
+  });
+
+  it('the result becomes ops without a key under another', () => {
+    const folded = foldPartial(foldPartial({}, { meta: { a: 1 } }), { 'meta.b': 2 });
+    assert.deepEqual(mergeToOps(folded), [['r', 'meta', { a: 1, b: 2 }]]);
   });
 });
 
@@ -103,9 +151,13 @@ describe('mergeIntoNode', () => {
     assert.equal((node.meta as Record<string, unknown>).title, 'old');
   });
 
-  it('skips $ fields', () => {
-    const result = mergeIntoNode({ $path: '/x', $type: 'y' }, { $path: '/hacked' });
-    assert.equal(result.$path, '/x');
+  it('deletes a nested field via undefined', () => {
+    const result = mergeIntoNode({ $path: '/x', $type: 'y', meta: { title: 't', count: 0 } }, { 'meta.title': undefined });
+    assert.deepEqual(result.meta, { count: 0 });
+  });
+
+  it('a system field is INVALID', () => {
+    assert.throws(() => mergeIntoNode({ $path: '/x', $type: 'y' }, { $path: '/hacked' }), isInvalid);
   });
 });
 
@@ -170,6 +222,27 @@ describe('useSave: onChange', () => {
     const v = result.current.value!;
     assert.equal(v.title, 'B');
     assert.equal(v.count, 5);
+  });
+
+  it('a system field throws INVALID to the caller and leaves the edit untouched', () => {
+    seed('/sys', 'task', { title: 'X' });
+    const { result } = renderHook(() => useSave('/sys'));
+
+    assert.throws(() => result.current.onChange({ $type: 'other', title: 'Y' }), isInvalid);
+    assert.equal(result.current.dirty, false);
+  });
+
+  it('a field edit after a whole-component edit is sent inside that component', async () => {
+    seed('/fold', 'task', { meta: { title: 'A', count: 0 } });
+    const { result } = renderHook(() => useSave('/fold'));
+
+    act(() => {
+      result.current.onChange({ meta: { title: 'B', count: 1 } });
+      result.current.scope('meta')({ title: 'C' });
+    });
+    await act(() => result.current.flush());
+
+    assert.deepEqual(patchMutate.mock.calls[0].arguments[0].ops, [['r', 'meta', { title: 'C', count: 1 }]]);
   });
 
 });
@@ -766,6 +839,30 @@ describe('usePathSave: path()', () => {
 // ── usePathSave: flush ──
 
 describe('usePathSave: flush', () => {
+  it('a concurrent flush waits for the first outcome and retains newer edits on failure', async () => {
+    seed('/s/concurrent', 'col', { label: 'A' });
+    const { result } = renderHook(() => usePathSave({ delay: 0 }));
+    const failure = new KernelError('UNAVAILABLE', 'down');
+    let reject!: (error: unknown) => void;
+    const gate = new Promise<void>((_, rej) => { reject = rej; });
+    patchMutate.mock.mockImplementationOnce(() => gate);
+
+    act(() => result.current.change('/s/concurrent', { label: 'B' }));
+    let first!: Promise<void>;
+    act(() => { first = result.current.flush(); });
+    act(() => result.current.change('/s/concurrent', { label: 'C' }));
+    let second!: Promise<void>;
+    act(() => { second = result.current.flush(); });
+    const firstRejected = assert.rejects(first, (error) => error === failure);
+    const secondRejected = assert.rejects(second, (error) => error === failure);
+    assert.equal(patchMutate.mock.callCount(), 1);
+
+    reject(failure);
+    await act(() => Promise.all([firstRejected, secondRejected]));
+    await act(() => result.current.flush());
+    assert.deepEqual(patchMutate.mock.calls[1].arguments[0], { path: '/s/concurrent', ops: [['r', 'label', 'C']] });
+  });
+
   it('sends ops for all accumulated paths', async () => {
     seed('/s/a', 'col', { label: 'A' });
     seed('/s/b', 'col', { label: 'B' });
@@ -788,5 +885,72 @@ describe('usePathSave: flush', () => {
     const { result } = renderHook(() => usePathSave({ delay: 0 }));
     await act(() => result.current.flush());
     assert.equal(patchMutate.mock.callCount(), 0);
+  });
+
+  it('rejects with the failed patch and keeps its edits pending for the next flush', async () => {
+    seed('/s/ok', 'col', { label: 'A' });
+    seed('/s/bad', 'col', { label: 'B' });
+    const { result } = renderHook(() => usePathSave({ delay: 0 }));
+    const conflict = new KernelError('CONFLICT', 'stale');
+
+    act(() => {
+      result.current.change('/s/ok', { label: 'A2' });
+      result.current.change('/s/bad', { label: 'B2' });
+    });
+    patchMutate.mock.mockImplementation(async ({ path }) => { if (path === '/s/bad') throw conflict; });
+
+    await act(() => assert.rejects(result.current.flush(), (e) => e === conflict));
+
+    patchMutate.mock.mockImplementation(async () => {});
+    patchMutate.mock.resetCalls();
+    await act(() => result.current.flush());
+    assert.deepEqual(patchMutate.mock.calls.map((c) => c.arguments[0]), [{ path: '/s/bad', ops: [['r', 'label', 'B2']] }]);
+  });
+
+  it('several failed patches reject together, each path pending again under its newer edits', async () => {
+    seed('/s/x', 'col', { label: 'X', rank: 0 });
+    seed('/s/y', 'col', { label: 'Y' });
+    const { result } = renderHook(() => usePathSave({ delay: 0 }));
+
+    act(() => {
+      result.current.change('/s/x', { label: 'X2', rank: 1 });
+      result.current.change('/s/y', { label: 'Y2' });
+    });
+    let fail!: () => void;
+    const gate = new Promise<void>((_, reject) => { fail = () => reject(new KernelError('UNAVAILABLE', 'down')); });
+    patchMutate.mock.mockImplementation(async () => gate);
+
+    let flushed!: Promise<unknown>;
+    act(() => { flushed = result.current.flush().catch((e: unknown) => e); });
+    act(() => result.current.change('/s/x', { label: 'X3' }));
+    fail();
+    let err: unknown;
+    await act(async () => { err = await flushed; });
+    assert.ok(err instanceof AggregateError && err.errors.length === 2);
+
+    patchMutate.mock.mockImplementation(async () => {});
+    patchMutate.mock.resetCalls();
+    await act(() => result.current.flush());
+    const sent = new Map(patchMutate.mock.calls.map((c) => [c.arguments[0].path, c.arguments[0].ops]));
+    assert.deepEqual(sent.get('/s/x'), [['r', 'label', 'X3'], ['r', 'rank', 1]]);
+    assert.deepEqual(sent.get('/s/y'), [['r', 'label', 'Y2']]);
+  });
+
+  it('a timed flush that fails keeps its edits pending', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    let reported!: () => void;
+    const failureReported = new Promise<void>((resolve) => { reported = resolve; });
+    t.mock.method(console, 'error', () => reported());
+    seed('/s/t', 'col', { label: 'T' });
+    const { result } = renderHook(() => usePathSave({ delay: 100 }));
+
+    patchMutate.mock.mockImplementationOnce(async () => { throw new KernelError('UNAVAILABLE', 'down'); });
+    act(() => result.current.change('/s/t', { label: 'T2' }));
+    act(() => t.mock.timers.tick(100));
+    await act(() => failureReported);
+    assert.equal(patchMutate.mock.callCount(), 1);
+
+    await act(() => result.current.flush());
+    assert.deepEqual(patchMutate.mock.calls[1].arguments[0], { path: '/s/t', ops: [['r', 'label', 'T2']] });
   });
 });
