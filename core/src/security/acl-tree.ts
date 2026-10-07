@@ -69,7 +69,7 @@ function assertComponentAclKept(key: string, next: unknown, prev: unknown, isAdm
 
 function sameValue(a: unknown, b: unknown): boolean {
   if (a === b) return true;
-  try { return JSON.stringify(a) === JSON.stringify(b); } catch { return false; }
+  return JSON.stringify(a) === JSON.stringify(b);
 }
 
 /** Per-op ACL gate shared by patch and patchMany (per member): system-field
