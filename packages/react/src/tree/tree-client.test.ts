@@ -38,7 +38,8 @@ mock.module('#tree/trpc', {
 });
 
 const { treeClient } = await import('#tree/tree-client');
-const { watch } = await import('#hooks');
+const { clientIterator } = await import('#tree/client-stream');
+const { patchNode, watch } = await import('#hooks');
 const cache = await import('#tree/cache');
 const { resetHolds } = await import('#tree/holds');
 const { cancelReadReconverges } = await import('#tree/read-track');
@@ -83,6 +84,27 @@ describe('TreeClient transport contract', () => {
     const failure = new KernelError('FORBIDDEN', 'Write denied');
     patch.mock.mockImplementationOnce(async () => { throw failure; });
     await assert.rejects(() => treeClient.commit([{ kind: 'patch', path: '/doc', ops: [['r', 'title', 'x']] }]), error => error === failure);
+  });
+
+  it('a partial edit refreshes its accepted image without requiring a subscription', async () => {
+    cache.put({ $path: '/doc', $type: 'doc', title: 'old', neighbor: 7 });
+    get.mock.mockImplementationOnce(async () => ({ $path: '/doc', $type: 'doc', title: 'new', neighbor: 9 }));
+    await patchNode('/doc', { title: 'new' });
+    assert.deepEqual(cache.get('/doc'), { $path: '/doc', $type: 'doc', title: 'new', neighbor: 9 });
+    assert.deepEqual(patch.mock.calls[0].arguments[0], { path: '/doc', ops: [['r', 'title', 'new']] });
+  });
+
+  it('a rejected partial edit preserves a newer server image and never resurrects a removed node', async () => {
+    const failure = new KernelError('FORBIDDEN', 'Write denied');
+    cache.put({ $path: '/doc', $type: 'doc', title: 'old' });
+    const newer = { $path: '/doc', $type: 'doc', title: 'foreign', $rev: 3 };
+    patch.mock.mockImplementationOnce(async () => { cache.put(newer); throw failure; });
+    await assert.rejects(() => patchNode('/doc', { title: 'edit' }), error => error === failure);
+    assert.deepEqual(cache.get('/doc'), newer);
+    patch.mock.mockImplementationOnce(async () => { cache.remove('/doc'); throw failure; });
+    await assert.rejects(() => patchNode('/doc', { title: 'edit' }), error => error === failure);
+    assert.equal(cache.get('/doc'), undefined);
+    assert.equal(get.mock.callCount(), 0);
   });
 
   it('cancels a stream once and discards late chunks', () => {
@@ -149,5 +171,34 @@ describe('TreeClient transport contract', () => {
     await iterator.return();
     assert.deepEqual(await waiting, { value: undefined, done: true });
     assert.equal(unwatch.mock.callCount(), 1);
+  });
+
+  it('cancellation resolves every concurrent iterator request', { timeout: 1500 }, async () => {
+    const iterator = watch('/doc');
+    await iterator.next();
+    const first = iterator.next();
+    const second = iterator.next();
+    await iterator.return();
+    assert.deepEqual(await Promise.all([first, second]), [
+      { value: undefined, done: true }, { value: undefined, done: true },
+    ]);
+    assert.equal(unwatch.mock.callCount(), 1);
+  });
+
+  it('a synchronous registration failure closes the iterator', { timeout: 1500 }, async () => {
+    const failure = new KernelError('INVALID', 'Invalid subscription');
+    const iterator = clientIterator<number>(() => { throw failure; });
+    await assert.rejects(() => iterator.next(), error => error === failure);
+    assert.deepEqual(await iterator.next(), { value: undefined, done: true });
+  });
+
+  it('a stream failure propagates its original reason and settles later requests', { timeout: 1500 }, async () => {
+    const iterator = clientIterator<number>(observer => treeClient.sub({
+      kind: 'action', action: { path: '/sensor', action: 'scan' }, observer,
+    }));
+    const waiting = iterator.next();
+    streamCallbacks.onError(0);
+    await assert.rejects(waiting, error => error === 0);
+    assert.deepEqual(await iterator.next(), { value: undefined, done: true });
   });
 });

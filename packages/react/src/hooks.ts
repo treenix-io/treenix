@@ -311,13 +311,11 @@ export async function removeComponent(path: string, name: string) {
 export async function patchNode(path: string, partial: OnChange): Promise<void> {
   const ops = mergeToOps(partial);
   if (!ops.length) return;
-  const prev = cache.get(path);
-  if (prev) cache.put(mergeIntoNode(prev, partial));
-  try {
-    await treeClient.commit([{ kind: 'patch', path, ops }]);
-  } catch (error) {
-    if (prev) cache.put(prev);
-    throw error;
+  await treeClient.commit([{ kind: 'patch', path, ops }]);
+  // Editors with R+W and no S must see their accepted edit; ordered reads preserve newer events.
+  const result = await trackedGet(path, () => treeClient.read({ kind: 'node', path }));
+  if (result.error !== undefined) {
+    console.error('[treenix] patch: post-commit refresh failed for', path, result.error);
   }
 }
 
