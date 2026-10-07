@@ -1,39 +1,40 @@
 // Whisper channel view — checklist of transcribed audio notes
 
-import { register } from '@treenx/core';
-import { set, type View, useChildren } from '@treenx/react';
-import { WhisperChannel } from './types';
+import * as React from 'react';
+import { getComponent, type NodeData, register } from '@treenx/core';
+import { patchNode, type View, useChildren } from '@treenx/react';
+import { WhisperChannel, WhisperMeta, WhisperText } from './types';
+
+function transcriptionText(node: NodeData): string {
+  const text = getComponent(node, WhisperText);
+  if (!text) throw new Error(`Transcription has no text component: ${node.$path}`);
+  return text.content;
+}
 
 const ChannelView: View<WhisperChannel> = ({ value, ctx }) => {
   const node = ctx!.node;
   const { data: children } = useChildren(ctx!.path, { watchNew: true });
-  const checklist = value.checklist as { $type: string; checked?: string[] } | undefined;
+  const checklist = value.checklist;
 
   const checked = new Set<string>(checklist?.checked ?? []);
 
-  const items = children.filter(c => {
-    const text = c.text as { $type: string; content: string } | undefined;
-    return text?.$type === 'whisper.text' && text.content && text.content !== '...';
-  });
-
-  const processing = children.filter(c => {
-    const text = c.text as { $type: string; content: string } | undefined;
-    return text?.$type === 'whisper.text' && text.content === '...';
-  });
+  const transcriptions = children.filter(child => child.$type === 'whisper.transcription');
+  const items = transcriptions.filter(child => transcriptionText(child) !== '...');
+  const processing = transcriptions.filter(child => transcriptionText(child) === '...');
 
   const toggle = (path: string) => {
     const next = new Set(checked);
     if (next.has(path)) next.delete(path);
     else next.add(path);
-    set({ ...node, checklist: { $type: 'whisper.checklist', checked: [...next] } });
+    patchNode(node.$path, { 'checklist.checked': [...next] });
   };
 
   return (
     <div className="node-default-view">
       {items.map(child => {
-        const text = (child.text as any).content as string;
+        const text = transcriptionText(child);
         const name = child.$path.slice(child.$path.lastIndexOf('/') + 1);
-        const meta = child.meta as { duration?: number } | undefined;
+        const meta = getComponent(child, WhisperMeta);
         const done = checked.has(child.$path);
 
         return (
