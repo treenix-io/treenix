@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import { describe, it } from 'node:test'
+import { fileURLToPath } from 'node:url'
 
 import { KernelError } from '#errors'
 import { exprWork } from './eval'
@@ -37,6 +39,29 @@ const budget = (q: Record<string, unknown>, node: Record<string, unknown>) =>
 const invalid = (q: Record<string, unknown>) => {
   assert.throws(() => createSiftTest(q, DEFAULT_LIMITS), isInvalid, JSON.stringify(q)?.slice(0, 100))
   assert.throws(() => assertSafeSiftQuery(q, DEFAULT_LIMITS), isInvalid, JSON.stringify(q)?.slice(0, 100))
+}
+
+// A blocked evaluator cannot service node:test's timer; the parent process enforces the deadline.
+function adversarial(name: string, options: { timeout: number }, body: () => void): void {
+  if (process.env.TREENIX_EXPR_TEST_CHILD === '1') {
+    it(name, options, body)
+    return
+  }
+
+  it(name, () => {
+    const pattern = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'
+    const child = spawnSync(process.execPath, [
+      ...process.execArgv, '--test', '--test-name-pattern', pattern,
+      fileURLToPath(import.meta.url),
+    ], {
+      env: { ...process.env, TREENIX_EXPR_TEST_CHILD: '1' },
+      encoding: 'utf8',
+      timeout: options.timeout + 3_000,
+    })
+
+    assert.equal(child.error, undefined)
+    assert.equal(child.status, 0, child.stdout + child.stderr)
+  })
 }
 
 describe('expression size', () => {
@@ -256,28 +281,36 @@ describe('expression work', () => {
 describe('expression work: adversarial shapes', () => {
   const fast = { timeout: 2_000 }
 
-  it('a 3000-value $in over 100 000 elements is one set lookup per element', fast, () => {
+  it('the process deadline interrupts synchronous work', () => {
+    const child = spawnSync(process.execPath, ['-e', 'while (true) {}'], { timeout: 100 })
+
+    assert.ok(child.error && 'code' in child.error)
+    assert.equal(child.error.code, 'ETIMEDOUT')
+    assert.equal(child.status, null)
+  })
+
+  adversarial('a 3000-value $in over 100 000 elements is one set lookup per element', fast, () => {
     const { result, used } = outcome({ arr: { $in: values(3_000, 1) } }, { arr: zeros(100_000) })
 
     assert.equal(result, false)
     assert.ok(used < 100_010, `work ${used}`)
   })
 
-  it('a 1000-branch $or over 100 000 elements is BUDGET', fast, () => {
+  adversarial('a 1000-branch $or over 100 000 elements is BUDGET', fast, () => {
     budget({ $or: values(1_000, 1).map((v) => ({ arr: v })) }, { arr: zeros(100_000) })
   })
 
-  it('100 000 strings sharing a 4000-unit prefix with a code-point operand are BUDGET', fast, () => {
+  adversarial('100 000 strings sharing a 4000-unit prefix with a code-point operand are BUDGET', fast, () => {
     const prefix = '😀' + 'x'.repeat(4_000)
 
     budget({ s: { $gt: prefix + 'b' } }, { s: new Array<string>(100_000).fill(prefix + 'a') })
   })
 
-  it('an object-literal $in over a 12 000-key object is INVALID before any node is tested', fast, () => {
+  adversarial('an object-literal $in over a 12 000-key object is INVALID before any node is tested', fast, () => {
     invalid({ a: { $in: [{ k0: 0 }] } })
   })
 
-  it('1024 nested single-element arrays around 100 000 zeros are one level deep to a condition: a fast answer, no inner reads', fast, () => {
+  adversarial('1024 nested single-element arrays around 100 000 zeros are one level deep to a condition: a fast answer, no inner reads', fast, () => {
     const { array, reads } = countedArray(zeros(100_000))
     let nested: unknown = array
     for (let i = 0; i < 1_024; i++) nested = [nested]
@@ -287,7 +320,7 @@ describe('expression work: adversarial shapes', () => {
     assert.equal(reads(), 0)
   })
 
-  it('$elemMatch with "0" and "length" keys, and its $not and $all forms, charge every element they read', fast, () => {
+  adversarial('$elemMatch with "0" and "length" keys, and its $not and $all forms, charge every element they read', fast, () => {
     for (const key of ['0', 'length']) {
       const rows = values(10).map(() => countedArray(zeros(10_000)))
       const node = { a: rows.map(({ array }) => ({ [key]: array })) }
@@ -311,7 +344,7 @@ describe('expression work: adversarial shapes', () => {
     }
   })
 
-  it('1400 paths a.0…a.1399 over 80 000 empty objects: their conjunction answers fast, their disjunction is BUDGET', fast, () => {
+  adversarial('1400 paths a.0…a.1399 over 80 000 empty objects: their conjunction answers fast, their disjunction is BUDGET', fast, () => {
     const conjunction: Record<string, unknown> = { 'a.b': 1 }
     for (let i = 0; i < 1_400; i++) conjunction[`a.${i}`] = 1
     const node = { a: Array.from({ length: 80_000 }, () => ({})) }
@@ -320,14 +353,14 @@ describe('expression work: adversarial shapes', () => {
     budget({ $or: values(1_000).map((i) => ({ [`a.${i}`]: 1 })) }, node)
   })
 
-  it('600 empty $elemMatch conditions over 100 000 elements: all of them answer fast, any of them is BUDGET', fast, () => {
+  adversarial('600 empty $elemMatch conditions over 100 000 elements: all of them answer fast, any of them is BUDGET', fast, () => {
     const conditions = Array.from({ length: 600 }, () => ({ a: { $elemMatch: {} } }))
 
     assert.equal(outcome({ $and: conditions }, { a: zeros(100_000) }).result, false)
     budget({ $or: conditions }, { a: zeros(100_000) })
   })
 
-  it('a path reads own fields only: an inherited array and a __proto__ field are never read', fast, () => {
+  adversarial('a path reads own fields only: an inherited array and a __proto__ field are never read', fast, () => {
     const { array, reads } = countedArray(zeros(100_000))
     const q = { $or: values(1_000, 1).map((v) => ({ 'a.arr': v })) }
     const proto = JSON.parse(`{"__proto__":{"arr":[0]}}`)
@@ -337,7 +370,7 @@ describe('expression work: adversarial shapes', () => {
     assert.equal(reads(), 0)
   })
 
-  it('$not chains run once per level; $all and $not over nested fields are INVALID', fast, () => {
+  adversarial('$not chains run once per level; $all and $not over nested fields are INVALID', fast, () => {
     let not: Record<string, unknown> = { $gt: 1 }
     for (let i = 0; i < 180; i++) not = { $not: not }
     let notFields: Record<string, unknown> = { a: 1 }
@@ -353,7 +386,7 @@ describe('expression work: adversarial shapes', () => {
     for (const q of [notFields, allFields, { a: allChain }]) invalid(q)
   })
 
-  it('a path of 8000 segments over data as deep answers without deepening the call stack', fast, () => {
+  adversarial('a path of 8000 segments over data as deep answers without deepening the call stack', fast, () => {
     const path = values(8_000).map(() => 'a').join('.')
     let data: unknown = 1
     for (let i = 0; i < 7_999; i++) data = [{ a: data }]
