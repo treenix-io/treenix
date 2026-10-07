@@ -2,13 +2,12 @@
 // Each action type gets: icon helper, summary helper, full editor, list item
 
 import type { ComponentData, NodeData } from '@treenx/core';
-import { Button } from '@treenx/react/components/ui/button';
-import { Checkbox } from '@treenx/react/components/ui/checkbox';
-import { Input } from '@treenx/react/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@treenx/react/components/ui/select';
-import { Textarea } from '@treenx/react/components/ui/textarea';
-import { set, type View, usePath } from '@treenx/react';
-import { trpc } from '@treenx/react';
+import { Button } from '@treenx/react/ui/button';
+import { Checkbox } from '@treenx/react/ui/checkbox';
+import { Input } from '@treenx/react/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@treenx/react/ui/select';
+import { Textarea } from '@treenx/react/ui/textarea';
+import { readNode, useSave, type View, usePath } from '@treenx/react';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -31,7 +30,7 @@ import {
   Trash2,
   Upload,
 } from 'lucide-react';
-import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import { type ReactNode, useState } from 'react';
 import type {
   BroadcastAction,
   EmitTextAction,
@@ -142,44 +141,13 @@ function getLangs(node: NodeData): string[] {
   return ['ru', 'en'];
 }
 
-// Generic component updater — debounced persist (500ms), instant UI via local state
+// Generic component updater — pending edits and persistence belong to useSave.
 function useActionComp(path: string) {
   const { data: node } = usePath(path);
-  const [pending, setPending] = useState<Record<string, unknown>>({});
-  const pendingRef = useRef<Record<string, unknown>>({});
-  const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const nodeRef = useRef(node);
-  nodeRef.current = node;
-
-  const flush = useCallback(() => {
-    clearTimeout(timerRef.current);
-    const p = pendingRef.current;
-    const n = nodeRef.current;
-    if (!n || Object.keys(p).length === 0) return;
-    pendingRef.current = {};
-    setPending({});
-    set({ ...n, ...p } as NodeData);
-  }, []);
-
-  // Flush on unmount (e.g. collapsing the action card)
-  useEffect(() => () => { flush(); }, [flush]);
-
-  // pending IS read in render → React Compiler keeps setPending calls
-  const display = node && Object.keys(pending).length > 0
-    ? { ...node, ...pending } as NodeData
-    : node;
+  const save = useSave(path, { autoSave: true });
+  const display = save.value ?? node;
   const comp = display ? findActionComp(display) : undefined;
-
-  function update(patch: Record<string, unknown>) {
-    if (!node) return;
-    const next = { ...pendingRef.current, ...patch };
-    pendingRef.current = next;
-    setPending(next);
-    clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(flush, 2000);
-  }
-
-  return { node: display, comp, update, langs: getLangs(node!) };
+  return { node: display, comp, update: save.onChange, langs: getLangs(node!) };
 }
 
 // ── Full editors (react context) ──
@@ -297,7 +265,7 @@ export const PageNavEditor: View<PageNavAction> = ({ value, ctx }) => {
             setDragOver(false);
             if (!path) return;
             e.preventDefault();
-            const node = await trpc.get.query({ path });
+            const node = await readNode(path);
             if (node?.$type === 'brahman.page') update({ targetPage: path });
           }}
         >

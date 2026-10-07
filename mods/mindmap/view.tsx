@@ -5,7 +5,7 @@ import type { NodeData } from '@treenx/core';
 import { register } from '@treenx/core';
 import type { View } from '@treenx/react';
 import { useChildren } from '@treenx/react';
-import { trpc } from '@treenx/react';
+import { createNode, removeNode } from '@treenx/react';
 import { select } from 'd3-selection';
 import 'd3-transition';
 import { zoom as d3zoom, type D3ZoomEvent, type ZoomBehavior, zoomIdentity } from 'd3-zoom';
@@ -127,7 +127,7 @@ const MindMapView: View<MindMapConfig> = ({ value, ctx }) => {
 
   const handleCommitAdd = useCallback((parentPath: string, name: string) => {
     const childPath = `${parentPath}/${name}`;
-    trpc.set.mutate({ node: { $path: childPath, $type: 'dir' } as NodeData });
+    createNode(childPath, 'dir');
     setEditingAt(null);
   }, []);
 
@@ -136,7 +136,7 @@ const MindMapView: View<MindMapConfig> = ({ value, ctx }) => {
   const handleDelete = useCallback((path: string) => {
     if (path === rootPath) return;
     if (!confirm(`Delete ${basename(path)}?`)) return;
-    trpc.remove.mutate({ path });
+    removeNode(path);
     setSelectedPath(null);
   }, [rootPath]);
 

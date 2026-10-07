@@ -1,8 +1,8 @@
 // Chat view — interactive AI chat on any node with ai.chat + ai.thread + ai.agent
-// Registered on ai.chat component. Streams via trpc.streamAction.subscribe.
+// Registered on ai.chat component. Streams through TreeClient.
 
 import { register } from '@treenx/core';
-import { cn, execute, trpc, useActions, useCurrentNode, usePath, type View } from '@treenx/react';
+import { cn, execute, treeClient, useActions, useCurrentNode, usePath, type View } from '@treenx/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AiChat, AiThread, type ThreadMessage } from '../types';
 import { LogRenderer } from './log';
@@ -16,9 +16,11 @@ const ChatView: View<AiChat> = ({ value }) => {
   const [input, setInput] = useState('');
   const [streamText, setStreamText] = useState('');
   const [streaming, setStreaming] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const unsubRef = useRef<(() => void) | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => () => { unsubRef.current?.(); unsubRef.current = null; }, [path]);
 
   // Auto-scroll on new messages or stream text
   useEffect(() => {
@@ -42,27 +44,28 @@ const ChatView: View<AiChat> = ({ value }) => {
     setInput('');
     setStreamText('');
     setStreaming(true);
+    setError(null);
 
-    const sub = trpc.streamAction.subscribe(
-      { path, action: 'send', type: 'ai.chat', key: 'chat', data: { text } },
-      {
-        onData: (item) => {
-          const chunk = item as { type: string; text: string };
+    const id = treeClient.sub<{ type: 'chunk' | 'done'; text: string }>({
+      kind: 'action', action: { path, action: 'send', type: 'ai.chat', component: 'chat', args: { text } },
+      observer: {
+        next: chunk => {
           if (chunk.type === 'chunk') {
             setStreamText(prev => prev + chunk.text);
           }
         },
-        onComplete: () => {
+        complete: () => {
           // Don't clear streamText here — wait for persisted message to arrive
           // via subscription (messages.length change above)
         },
-        onError: () => {
+        error: reason => {
           setStreaming(false);
           setStreamText('');
+          setError(reason instanceof Error ? reason.message : String(reason));
         },
       },
-    );
-    unsubRef.current = () => sub.unsubscribe();
+    });
+    unsubRef.current = () => treeClient.cancel(id);
   }, [path, input, streaming]);
 
   const actions = useActions(value);
@@ -70,7 +73,8 @@ const ChatView: View<AiChat> = ({ value }) => {
   const stop = useCallback(() => {
     unsubRef.current?.();
     unsubRef.current = null;
-    execute(path, 'stop');
+    execute(path, 'stop', undefined, 'ai.chat', 'chat')
+      .catch(reason => setError(reason instanceof Error ? reason.message : String(reason)));
     setStreaming(false);
     setStreamText('');
   }, [actions]);
@@ -89,6 +93,7 @@ const ChatView: View<AiChat> = ({ value }) => {
 
   return (
     <div className="flex flex-col h-full max-w-2xl">
+      {error && <p role="alert" className="text-destructive">{error}</p>}
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-3">
         {messages.length === 0 && !streaming && (

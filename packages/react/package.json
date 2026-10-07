@@ -49,10 +49,7 @@
       "default": "./dist/index.js"
     },
     "./ui/*": {
-      "development": [
-        "./src/components/ui/*.ts",
-        "./src/components/ui/*.tsx"
-      ],
+      "development": "./src/components/ui/*.tsx",
       "types": "./dist/components/ui/*.d.ts",
       "default": "./dist/components/ui/*.js"
     },

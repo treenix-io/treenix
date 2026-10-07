@@ -2,7 +2,7 @@
 
 import { type NodeData, register } from '@treenx/core';
 import { type View, useActions } from '@treenx/react';
-import { trpc } from '@treenx/react';
+import { patchNode } from '@treenx/react';
 import { cn } from '@treenx/react';
 import { Button } from '@treenx/react/ui/button';
 import { Input } from '@treenx/react/ui/input';
@@ -655,7 +655,7 @@ export function AttachMenu({ node }: { node: NodeData }) {
 
   const attach = async (c: typeof ATTACHABLE_COMPONENTS[number]) => {
     try {
-      await trpc.patch.mutate({ path: node.$path, ops: [['r', c.key, { $type: c.type, ...c.defaults }]] });
+      await patchNode(node.$path, { [c.key]: { $type: c.type, ...c.defaults } });
       toast.success(`${c.label} attached`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed');
@@ -665,7 +665,7 @@ export function AttachMenu({ node }: { node: NodeData }) {
 
   const detach = async (key: string) => {
     try {
-      await trpc.patch.mutate({ path: node.$path, ops: [['d', key]] });
+      await patchNode(node.$path, { [key]: undefined });
       toast.success('Component removed');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed');

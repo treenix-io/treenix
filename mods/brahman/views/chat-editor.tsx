@@ -20,15 +20,13 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import type { NodeData } from '@treenx/core';
-import { getDefaults } from '@treenx/core/comp';
 import { Button } from '@treenx/react/components/ui/button';
 import { Checkbox } from '@treenx/react/components/ui/checkbox';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@treenx/react/components/ui/dialog';
 import { Input } from '@treenx/react/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@treenx/react/components/ui/select';
-import { set, type View, useChildren, usePath } from '@treenx/react';
+import { createNode, patchNode, removeNode, useSave, type View, useChildren, usePath } from '@treenx/react';
 import { sanitizeHref } from '@treenx/react';
-import { trpc } from '@treenx/react';
 import { Camera, File, GripVertical, Mic, MoreHorizontal, Plus, Trash2, Video } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ACTION_TYPES, MENU_TYPES, type MenuButton, type MenuRow, type MenuType, type PageConfig, type TString } from '../types';
@@ -478,7 +476,7 @@ function SortableAction({
 
   function update(patch: Record<string, unknown>) {
     if (!n) return;
-    set({ ...n, ...patch } as NodeData);
+    patchNode(n.$path, patch);
   }
 
   const style = {
@@ -674,13 +672,13 @@ export const PageChatEditor: View<PageConfig> = ({ value, ctx }) => {
   // ── Command editing ──
   const command = value.command;
   const [localCmd, setLocalCmd] = useState(command);
-  const cmdTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => { setLocalCmd(command); }, [command]);
 
   const node = ctx!.node;
+  const save = useSave(node.$path, { autoSave: true, delay: 400 });
   const saveNode = useCallback((patch: Record<string, unknown>) => {
-    set({ ...node, ...patch } as NodeData);
-  }, [node]);
+    save.onChange(patch);
+  }, [save.onChange]);
 
   // ── DnD ──
   const sensors = useSensors(
@@ -701,14 +699,13 @@ export const PageChatEditor: View<PageConfig> = ({ value, ctx }) => {
   async function addAction(type: string) {
     const id = Date.now().toString(36);
     const childPath = `${actionsPath}/${id}`;
-    await trpc.set.mutate({ node: { $path: actionsPath, $type: 'dir' } as NodeData });
-    const defaults = getDefaults(type);
-    await trpc.set.mutate({ node: { $path: childPath, $type: type, ...defaults } as NodeData });
+    await createNode(actionsPath, 'dir');
+    await createNode(childPath, type);
     saveNode({ positions: [...positions, childPath] });
   }
 
   async function removeAction(path: string) {
-    await trpc.remove.mutate({ path });
+    await removeNode(path);
     saveNode({ positions: positions.filter(p => p !== path) });
   }
 
@@ -725,11 +722,9 @@ export const PageChatEditor: View<PageConfig> = ({ value, ctx }) => {
           value={localCmd}
           onChange={e => {
             setLocalCmd(e.target.value);
-            clearTimeout(cmdTimer.current);
-            cmdTimer.current = setTimeout(() => saveNode({ command: e.target.value }), 400);
+            saveNode({ command: e.target.value });
           }}
           onBlur={() => {
-            clearTimeout(cmdTimer.current);
             if (localCmd !== command) saveNode({ command: localCmd });
           }}
         />

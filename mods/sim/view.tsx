@@ -6,7 +6,7 @@
 import { getComponent, type NodeData, register } from '@treenx/core';
 import { useCurrentNode } from '@treenx/react';
 import { useChildren } from '@treenx/react';
-import { trpc } from '@treenx/react';
+import { execute } from '@treenx/react';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   type EventEntry,
@@ -85,9 +85,9 @@ function WorldView() {
   const [error, setError] = useState<string | null>(null);
   const mapRef = useRef<HTMLDivElement>(null);
 
-  const call = useCallback((p: Parameters<typeof trpc.execute.mutate>[0]) => {
+  const call = useCallback((p: { path: string; action: string; data?: unknown }) => {
     setError(null);
-    trpc.execute.mutate(p).catch((e) => setError(errMsg(e)));
+    execute(p.path, p.action, p.data).catch((e) => setError(errMsg(e)));
   }, []);
 
   const cfg = getComponent(node, SimConfig);
@@ -320,7 +320,7 @@ function AgentView() {
   const savePrompt = useCallback(() => {
     if (editPrompt === null) return;
     setError(null);
-    trpc.execute.mutate({ path: node.$path, action: 'update', data: { systemPrompt: editPrompt } })
+    execute(node.$path, 'update', { systemPrompt: editPrompt })
       .catch((e) => setError(errMsg(e)));
     setEditPrompt(null);
   }, [node.$path, editPrompt]);

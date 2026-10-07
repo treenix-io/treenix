@@ -21,21 +21,19 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import type { NodeData } from '@treenx/core';
-import { getDefaults } from '@treenx/core/comp';
-import { Button } from '@treenx/react/components/ui/button';
+import { Button } from '@treenx/react/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '@treenx/react/components/ui/dropdown-menu';
-import { Input } from '@treenx/react/components/ui/input';
+} from '@treenx/react/ui/dropdown-menu';
+import { Input } from '@treenx/react/ui/input';
 import { Render, type View } from '@treenx/react';
-import { set, useChildren, useNavigate } from '@treenx/react';
-import { trpc } from '@treenx/react';
+import { createNode, removeNode, useChildren, useNavigate, useSave } from '@treenx/react';
 import type { PageConfig } from '../types';
 import { ChevronDown, ChevronRight, GripVertical, Plus, Trash2 } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ACTION_TYPES } from '../types';
 import { actionIcon, actionSummary } from './action-cards';
 
@@ -176,26 +174,17 @@ export const PageLayoutView: View<PageConfig> = ({ value, ctx }) => {
   const command = value.command;
   const positions = value.positions;
 
-  // Debounced save: update local state immediately, persist after 400ms idle
+  // Local input updates immediately; useSave owns pending edits and flushing.
   const [localCommand, setLocalCommand] = useState(command);
-  const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const save = useSave(node.$path, { autoSave: true, delay: 400 });
 
   // Sync local state when node changes externally
   useEffect(() => { setLocalCommand(command); }, [command]);
 
   const saveNode = useCallback((patch: Record<string, unknown>) => {
     // Strip any leftover 'page' component that shouldn't exist
-    const { page: _drop, ...clean } = node;
-    set({ ...clean, ...patch } as NodeData);
-  }, [node]);
-
-  const debouncedSave = useCallback((patch: Record<string, unknown>) => {
-    clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => saveNode(patch), 400);
-  }, [saveNode]);
-
-  // Cleanup timer on unmount
-  useEffect(() => () => clearTimeout(timerRef.current), []);
+    save.onChange(Object.hasOwn(save.value ?? node, 'page') ? { page: undefined, ...patch } : patch);
+  }, [save.onChange, save.value, node]);
 
   // Sort children by positions, append any untracked
   const tracked = new Set(positions);
@@ -224,20 +213,16 @@ export const PageLayoutView: View<PageConfig> = ({ value, ctx }) => {
     const childPath = `${actionsPath}/${id}`;
 
     // Ensure _actions dir exists as a real node
-    await trpc.set.mutate({ node: { $path: actionsPath, $type: 'dir' } as NodeData });
-
-    const defaults = getDefaults(type);
+    await createNode(actionsPath, 'dir');
 
     // Data on the node directly (findActionComp returns node when $type matches)
-    await trpc.set.mutate({
-      node: { $path: childPath, $type: type, ...defaults } as NodeData,
-    });
+    await createNode(childPath, type);
 
     saveNode({ positions: [...positions, childPath] });
   }
 
   async function removeAction(path: string) {
-    await trpc.remove.mutate({ path });
+    await removeNode(path);
     saveNode({ positions: positions.filter(p => p !== path) });
   }
 
@@ -256,12 +241,11 @@ export const PageLayoutView: View<PageConfig> = ({ value, ctx }) => {
           value={localCommand}
           onChange={e => {
             setLocalCommand(e.target.value);
-            debouncedSave({ command: e.target.value });
+            saveNode({ command: e.target.value });
           }}
           onBlur={() => {
             // Flush pending save on blur
-            clearTimeout(timerRef.current);
-            if (localCommand !== command) saveNode({ command: localCommand });
+            save.flush().catch(error => console.error('[brahman] command save failed:', error));
           }}
         />
       </div>

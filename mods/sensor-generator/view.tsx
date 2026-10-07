@@ -1,33 +1,38 @@
 // Sensor generator — on-demand scan, streams results via streamAction subscription
 
 import { type NodeData, register } from '@treenx/core';
-import { useCurrentNode } from '@treenx/react';
-import { trpc } from '@treenx/react';
-import { useCallback, useRef, useState } from 'react';
+import { treeClient, useCurrentNode } from '@treenx/react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+
+type Reading = NodeData<{ value: number; seq: number; ts: number }>;
 
 function GeneratorDemo() {
   const node = useCurrentNode();
-  const [items, setItems] = useState<NodeData[]>([]);
+  const [items, setItems] = useState<Reading[]>([]);
   const [running, setRunning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const unsubRef = useRef<(() => void) | null>(null);
 
   const scan = useCallback(() => {
     unsubRef.current?.();
     setItems([]);
+    setError(null);
     setRunning(true);
-    const sub = trpc.streamAction.subscribe(
-      { path: node.$path, action: 'scan', data: { count: 10, delay: 500 } },
-      {
-        onData: (item) => {
-          const n = item as NodeData;
-          if (n?.$path) setItems((prev) => [...prev, n]);
+    const id = treeClient.sub<Reading>({
+      kind: 'action', action: { path: node.$path, action: 'scan', args: { count: 10, delay: 500 } },
+      observer: {
+        next: reading => setItems(prev => [...prev, reading]),
+        complete: () => setRunning(false),
+        error: reason => {
+          setRunning(false);
+          setError(reason instanceof Error ? reason.message : String(reason));
         },
-        onComplete: () => setRunning(false),
-        onError: () => setRunning(false),
       },
-    );
-    unsubRef.current = () => sub.unsubscribe();
+    });
+    unsubRef.current = () => treeClient.cancel(id);
   }, [node.$path]);
+
+  useEffect(() => () => { unsubRef.current?.(); unsubRef.current = null; }, [node.$path]);
 
   const stop = useCallback(() => {
     unsubRef.current?.();
@@ -37,6 +42,7 @@ function GeneratorDemo() {
 
   return (
     <div style={{ fontFamily: 'var(--mono)', fontSize: 13 }}>
+      {error && <p role="alert" className="text-destructive">{error}</p>}
       <div
         style={{
           fontSize: 11,
@@ -66,9 +72,9 @@ function GeneratorDemo() {
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
         {items.map((n, i) => {
-          const val = n.value as number;
-          const seq = n.seq as number;
-          const time = new Date(n.ts as number).toLocaleTimeString();
+          const val = n.value;
+          const seq = n.seq;
+          const time = new Date(n.ts).toLocaleTimeString();
           const bar = Math.round(((val - 15) / 15) * 20);
           return (
             <div

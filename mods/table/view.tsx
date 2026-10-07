@@ -1,7 +1,8 @@
-import { type ComponentData, isComponent, type NodeData, register } from '@treenx/core';
+import { type ComponentData, getComponent, isComponent, type NodeData, register } from '@treenx/core';
+import { parseURI } from '@treenx/core/uri';
 import type { TypeSchema } from '@treenx/core/schema/types';
 import { Render, RenderContext, type ViewCtx } from '@treenx/react';
-import { useChildren } from '@treenx/react';
+import { useChildren, useSave } from '@treenx/react';
 import { useSchema } from '@treenx/react/schema-loader';
 import { Button } from '@treenx/react/ui/button';
 import { Input } from '@treenx/react/ui/input';
@@ -17,7 +18,6 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@treenx/react/ui/table';
 import { useMemo } from 'react';
 import type { ColumnConfig, UITable } from './types';
-import { useDebouncedSync } from './use-debounced-sync';
 
 // ── Helpers ──
 
@@ -75,20 +75,13 @@ function buildColumnsFromData(rows: Record<string, unknown>[]): ColumnConfig[] {
 
 const TABLE_DEFAULTS: UITable = { displayType: '', field: '', pageSize: 25, page: 0, sort: '', sortDir: 'asc', columns: {} };
 
-function TableView({ value, ctx }: { value: ComponentData; ctx?: ViewCtx | null }) {
+function TableView({ ctx }: { value: ComponentData<UITable>; ctx?: ViewCtx | null }) {
   if (!ctx?.node) throw new Error('TableView: no node context');
   const node = ctx.node;
-  const componentKey = useMemo(() => {
-    for (const [k, v] of Object.entries(node)) {
-      if (v === value) return k;
-    }
-    for (const [k, v] of Object.entries(node)) {
-      if (v && typeof v === 'object' && (v as any).$type === 'ui.table') return k;
-    }
-    return 'table';
-  }, [node, value]);
-
-  const [state, update] = useDebouncedSync<UITable>(node, componentKey, TABLE_DEFAULTS);
+  const componentKey = parseURI(ctx.path).key ?? '';
+  const save = useSave(node.$path, { autoSave: true, delay: 500 });
+  const state: UITable = { ...TABLE_DEFAULTS, ...getComponent<UITable>(save.value ?? node, 'ui.table', componentKey) };
+  const update = componentKey ? save.scope(componentKey) : save.onChange;
   const { data: children } = useChildren(node.$path, { watch: true, limit: 1000 });
 
   // Collect unique types from children (resolved through field)

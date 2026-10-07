@@ -13,12 +13,12 @@ import {
 } from '@dnd-kit/core';
 import { arrayMove, horizontalListSortingStrategy, SortableContext, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Badge } from '@treenx/react/components/ui/badge';
-import { Button } from '@treenx/react/components/ui/button';
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@treenx/react/components/ui/dialog';
-import { Input } from '@treenx/react/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@treenx/react/components/ui/select';
-import { trpc } from '@treenx/react';
+import { Badge } from '@treenx/react/ui/badge';
+import { Button } from '@treenx/react/ui/button';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@treenx/react/ui/dialog';
+import { Input } from '@treenx/react/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@treenx/react/ui/select';
+import { readNode } from '@treenx/react';
 import { ArrowRight, Plus, X } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { ACTION_TYPES, MENU_TYPES, type MenuButton, type MenuRow, type MenuType, type TString } from '../types';
@@ -193,7 +193,7 @@ function SortableButton({
         setTreeDragOver(false);
         if (!path) return;
         e.preventDefault();
-        const node = await trpc.get.query({ path });
+        const node = await readNode(path);
         if (node?.$type === 'brahman.page') onPageDrop(path);
       }}
     >

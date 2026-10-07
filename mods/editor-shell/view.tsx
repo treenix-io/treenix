@@ -7,10 +7,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import {
   addComponent,
-  cache,
+  removeNode,
+  refreshChildren,
   NavigateProvider,
   setEditorRoot,
-  tree,
   useLocation,
   type View,
   view,
@@ -66,12 +66,10 @@ const EditorShellView: View<EditorShell> = ({ ctx }) => {
 
   const handleDelete = useCallback(
     async (path: string) => {
-      await tree.remove(path);
-      cache.remove(path);
+      await removeNode(path);
       const parent = path === '/' ? null : path.slice(0, path.lastIndexOf('/')) || '/';
       if (parent) {
-        const { items: children } = await tree.getChildren(parent, { watch: true, watchNew: true });
-        cache.replaceChildren(parent, children);
+        refreshChildren(parent);
       }
       nav(parent ?? '/');
     },

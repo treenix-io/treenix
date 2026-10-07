@@ -1,9 +1,9 @@
 // TString editor — tabbed multilingual text input
 // Used by message, question, and menu button editors
 
-import { Button } from '@treenx/react/components/ui/button';
-import { Input } from '@treenx/react/components/ui/input';
-import { Textarea } from '@treenx/react/components/ui/textarea';
+import { Button } from '@treenx/react/ui/button';
+import { Input } from '@treenx/react/ui/input';
+import { Textarea } from '@treenx/react/ui/textarea';
 import { cn } from '@treenx/react';
 import { useState } from 'react';
 import type { TString } from '../types';

@@ -1,7 +1,7 @@
 import type { Editor, Range } from '@tiptap/core';
-import { createNode, getRegisteredTypes } from '@treenx/core';
+import { getRegisteredTypes } from '@treenx/core';
 import { getDefaults } from '@treenx/core/comp';
-import { set } from '@treenx/react/hooks';
+import { createNode } from '@treenx/react/hooks';
 import { MiniTree } from '@treenx/react/mods/editor-ui/form-fields';
 import {
   type FormEvent,
@@ -134,8 +134,7 @@ export const SlashMenu = forwardRef<unknown, Props>(({ items, command, editor, r
     const childPath = `${dp}/${short}-${Date.now().toString(36)}`;
 
     try {
-      const node = createNode(childPath, typeName, getDefaults(typeName));
-      await set(node);
+      await createNode(childPath, typeName, getDefaults(typeName));
       editor.chain().focus().deleteRange(range).insertContent({
         type: 'treenixBlock',
         attrs: { ref: childPath, type: null, props: {} },
