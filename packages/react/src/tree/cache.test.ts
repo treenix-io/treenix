@@ -145,6 +145,20 @@ describe('cache', () => {
     assert.strictEqual(cache.getChildrenNextCursor('/sys/routes'), 'next-page');
   });
 
+  it('hydrate() rejects when IndexedDB cannot be read', async (t) => {
+    const original = Object.getOwnPropertyDescriptor(globalThis, 'indexedDB');
+    Object.defineProperty(globalThis, 'indexedDB', {
+      configurable: true,
+      value: { open() { throw new DOMException('storage disabled', 'InvalidStateError'); } },
+    });
+    t.after(() => {
+      if (original) Object.defineProperty(globalThis, 'indexedDB', original);
+      else Reflect.deleteProperty(globalThis, 'indexedDB');
+    });
+
+    await assert.rejects(() => cache.hydrate());
+  });
+
   it('appendChildren() merges without removing existing', () => {
     cache.replaceChildren('/p', [{ $path: '/p/a', $type: 'x' } as any]);
     cache.appendChildren('/p', [{ $path: '/p/b', $type: 'x' } as any]);

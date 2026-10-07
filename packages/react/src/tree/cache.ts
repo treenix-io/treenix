@@ -725,7 +725,7 @@ export function hydrateFromServerSnapshot(snapshot: ServerHydrationState | undef
 }
 
 // Populate cache from IDB on startup — no IDB writes triggered.
-// Call before first render for instant stale paint.
+// Call before first render for instant stale paint. Rejects when IDB cannot be read.
 // NOTE: hydrate does NOT populate childrenLoaded — IDB entries are incidental
 // cache, not authoritative collections. Pagination metadata (total/truncated/
 // loadedCount) cannot be reconstructed from IDB, so treating a hydrated node
@@ -737,27 +737,23 @@ export async function hydrate(): Promise<void> {
   // SSR / Node has no IndexedDB — silently no-op so server-side imports
   // (e.g. Router on entry-server) don't crash at module load.
   if (typeof indexedDB === 'undefined') return;
-  try {
-    const entries = await idb.loadAll();
-    for (const { data, lastUpdated: ts, virtualParent } of entries) {
-      stampNode(data);
-      nodes.set(data.$path, data);
-      devFreeze(data);
-      lastUpdated.set(data.$path, ts);
-      // Data IS present, though possibly stale — status 'ready' is honest.
-      pathStatus.set(data.$path, 'ready');
-      const p = virtualParent ?? parentOf(data.$path);
-      if (p !== null) {
-        if (!parentIndex.has(p)) parentIndex.set(p, new Set());
-        parentIndex.get(p)!.add(data.$path);
-        linkParent(data.$path, p);
-        childSnap.delete(p);
-      }
+  const entries = await idb.loadAll();
+  for (const { data, lastUpdated: ts, virtualParent } of entries) {
+    stampNode(data);
+    nodes.set(data.$path, data);
+    devFreeze(data);
+    lastUpdated.set(data.$path, ts);
+    // Data IS present, though possibly stale — status 'ready' is honest.
+    pathStatus.set(data.$path, 'ready');
+    const p = virtualParent ?? parentOf(data.$path);
+    if (p !== null) {
+      if (!parentIndex.has(p)) parentIndex.set(p, new Set());
+      parentIndex.get(p)!.add(data.$path);
+      linkParent(data.$path, p);
+      childSnap.delete(p);
     }
-    if (entries.length) bump();
-  } catch {
-    // IDB unavailable (private browsing, etc.) — continue without persistence
   }
+  if (entries.length) bump();
 }
 
 // Expose raw Map for Tree component (read-only contract)

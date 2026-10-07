@@ -1,6 +1,5 @@
 // Treenix IDB — thin IndexedDB wrapper for client node cache
-// Raw IDB API, no dependencies. Fire-and-forget friendly.
-// Degrades silently if IDB unavailable (private browsing, SSR).
+// Raw IDB API, no dependencies. Every call rejects when IDB is unavailable; the cache decides what that means.
 
 import type { NodeData } from '@treenx/core';
 

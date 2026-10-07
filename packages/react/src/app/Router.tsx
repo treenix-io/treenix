@@ -21,7 +21,8 @@ import * as cache from '#tree/cache';
 import { useRouteResolve } from '#router/use-route-resolve';
 
 // Hydrate cache from IDB before first render — RoutedPage relies on this.
-cache.hydrate();
+// The IDB copy only paints stale data early; without it the session reads from the server alone.
+cache.hydrate().catch((e: unknown) => console.error('[cache] IndexedDB hydrate failed; running without the offline copy:', e));
 
 export function Router() {
   const { authed, authChecked, showLoginModal, setAuthed, closeLoginModal } = useAuthContext();
