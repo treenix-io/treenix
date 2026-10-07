@@ -7,6 +7,7 @@ import * as cache from './cache';
 import { cancelReadReconverges, DIRTY_COALESCE_MS, evictTracked, trackedGet } from '#tree/read-track';
 import { applyServerPatch, applyServerRemove, applyServerSet, clear as clearRebase, consumeAckOnly } from './rebase';
 import { AUTH_EXPIRED_EVENT, clearToken, getToken, tabTokenInput, trpc } from './trpc';
+import { treeClient } from '#tree/tree-client';
 
 type LoadChildren = (path: string) => Promise<void>;
 
@@ -101,7 +102,7 @@ export function refetchInvalidatedPath(path: string, fetchNode: FetchNode) {
   }, DIRTY_COALESCE_MS));
 }
 
-const fetchInvalidatedNode: FetchNode = (path) => trpc.get.query({ path });
+const fetchInvalidatedNode: FetchNode = (path) => treeClient.read({ kind: 'node', path });
 
 // ── Data-event rev machine (ns6p.4 §3.3, §3.3.3a) ──
 
@@ -355,7 +356,7 @@ export function startEvents(config: EventsConfig = {}, resume = false) {
             // too — a tokenless re-watch would land on the shared LEGACY hold.
             // Through the door (F1): the re-get competes in the path's
             // generation lane and honors overlap like every other read.
-            void trackedGet(sel, () => trpc.get.query({ path: sel, watch: true, ...tabTokenInput }))
+            void trackedGet(sel, () => treeClient.read({ kind: 'node', path: sel, watch: true }))
               .then((o) => {
                 if (o.error !== undefined && o.current) {
                   console.error('[sse] selected re-watch failed:', sel, o.error);

@@ -2,7 +2,7 @@
 import { type ContextHandlers, getComponent, type NodeData, register, resolve } from '@treenx/core';
 import type { TypeSchema } from '@treenx/core/schema/types';
 import { useEffect, useState } from 'react';
-import { trpc } from '#tree/trpc';
+import { treeClient } from '#tree/tree-client';
 
 // ── Fetcher ──────────────────────────────────────────────────────────────────
 
@@ -21,8 +21,8 @@ export async function ensureType(type: string): Promise<void> {
   const running = inflight.get(type);
   if (running) return running;
 
-  const promise = trpc.get
-    .query({ path: `/sys/types/${type.replace(/\./g, '/')}` })
+  const promise = treeClient
+    .read({ kind: 'node', path: `/sys/types/${type.replace(/\./g, '/')}` })
     .then(
       (node: NodeData | undefined) => {
         // Named components live under '#' keys (namespace migration) — never read node.schema

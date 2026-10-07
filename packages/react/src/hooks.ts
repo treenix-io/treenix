@@ -8,8 +8,8 @@
 import { compKey, getComponent, getComponentByName, getMeta, type NodeData, normalizeType, resolve } from '@treenx/core';
 import { type Class, getDefaults, type TypeProxy } from '@treenx/core/comp';
 import { deriveURI, parseURI } from '@treenx/core/uri';
-import { acquireHoldForRegistration, releaseHold } from '#tree/holds';
-import { mergeIntoNode, type OnChange } from '#tree/on-change';
+import type { ChildrenOpts as TreeChildrenOpts } from '@treenx/core/tree';
+import { mergeIntoNode, mergeToOps, type OnChange } from '#tree/on-change';
 import { trackedGet } from '#tree/read-track';
 import { confirmFromResponse, hasPending, pushOptimistic, rollback } from '#tree/rebase';
 import {
@@ -21,8 +21,8 @@ import {
   useSyncExternalStore,
 } from 'react';
 import * as cache from '#tree/cache';
-import { tree } from '#tree/client';
-import { tabTokenInput, trpc } from '#tree/trpc';
+import { type ClientAction, treeClient } from '#tree/tree-client';
+import { type ClientIterator, clientIterator } from '#tree/client-stream';
 import { ensureType } from '#schema-loader';
 import { type ChildrenHandle, type ChildrenOpts, EMPTY_PATH_SNAPSHOT, type PathHandle } from '#tree/tree-source';
 import { useTreeSource } from '#tree/tree-source-context';
@@ -229,7 +229,7 @@ export async function set(next: NodeData): Promise<NodeData> {
   const prev = cache.get(next.$path);
   cache.put(next);
   try {
-    await tree.set(next);
+    await treeClient.commit([{ kind: 'put', node: next }]);
   } catch (err) {
     // F15: rollback optimistic cache on server reject (validation, ACL, OCC)
     if (prev) cache.put(prev); else cache.remove(next.$path);
@@ -242,9 +242,7 @@ export async function set(next: NodeData): Promise<NodeData> {
   // the door a stale image; /local stays on the FilterTree (memory).
   const o = await trackedGet(
     next.$path,
-    next.$path.startsWith('/local')
-      ? () => tree.get(next.$path)
-      : () => trpc.get.query({ path: next.$path }),
+    () => treeClient.read({ kind: 'node', path: next.$path }),
   );
   if (o.error !== undefined) {
     // Refresh failure is NOT a write failure — the commit stands; rolling back
@@ -264,7 +262,7 @@ export async function createNode(path: string, type: string, data?: Record<strin
   const node: NodeData = { $path: path, $type: type, ...getDefaults(type), ...data };
   cache.put(node);
   try {
-    await tree.set(node);
+    await treeClient.commit([{ kind: 'put', node }]);
   } catch (err) {
     cache.remove(path);
     throw err;
@@ -282,7 +280,7 @@ export async function addComponent(path: string, name: string, type: string) {
   const prev = cache.get(path);
   if (prev) cache.put({ ...prev, [key]: comp });
   try {
-    await trpc.patch.mutate({ path, ops: [['r', key, comp]] });
+    await treeClient.commit([{ kind: 'patch', path, ops: [['r', key, comp]] }]);
   } catch (err) {
     // F15: rollback optimistic cache on server reject — a failed write emits no
     // SSE event, so a phantom component would persist (incl. IndexedDB) forever.
@@ -302,12 +300,37 @@ export async function removeComponent(path: string, name: string) {
     cache.put(next);
   }
   try {
-    await trpc.patch.mutate({ path, ops: [['d', key]] });
+    await treeClient.commit([{ kind: 'patch', path, ops: [['d', key]] }]);
   } catch (err) {
     // F15: rollback — same contract as addComponent/set.
     if (prev) cache.put(prev);
     throw err;
   }
+}
+
+export async function patchNode(path: string, partial: OnChange): Promise<void> {
+  const ops = mergeToOps(partial);
+  if (!ops.length) return;
+  const prev = cache.get(path);
+  if (prev) cache.put(mergeIntoNode(prev, partial));
+  try {
+    await treeClient.commit([{ kind: 'patch', path, ops }]);
+  } catch (error) {
+    if (prev) cache.put(prev);
+    throw error;
+  }
+}
+
+export function readNode(path: string): Promise<NodeData | undefined> {
+  return treeClient.read({ kind: 'node', path });
+}
+
+export function readChildren(path: string, options?: TreeChildrenOpts) {
+  return treeClient.read({ kind: 'children', path, options });
+}
+
+export function refreshChildren(path: string): void {
+  cache.signalChildrenDirty(path);
 }
 
 // ── removeNode: optimistic delete + server persist ──
@@ -316,7 +339,7 @@ export async function removeNode(path: string) {
   const prev = cache.get(path);
   cache.remove(path);
   try {
-    await tree.remove(path);
+    await treeClient.commit([{ kind: 'remove', path }]);
   } catch (err) {
     if (prev) cache.put(prev);
     throw err;
@@ -334,8 +357,8 @@ export async function moveNode(fromPath: string, newPath: string): Promise<void>
   if (!fromNode) throw new Error(`moveNode: ${fromPath} is not in cache`);
 
   const { $rev, ...body } = fromNode;
-  await tree.set({ ...body, $path: newPath });
-  await tree.remove(fromPath);
+  await treeClient.commit([{ kind: 'put', node: { ...body, $path: newPath } }]);
+  await treeClient.commit([{ kind: 'remove', path: fromPath }]);
   cache.remove(fromPath);
 }
 
@@ -371,7 +394,7 @@ export const execute = (
     }
   }
 
-  return trpc.execute.mutate({ path, type, key, action, data, opId }).then(
+  return treeClient.act({ path, type, component: key, action, args: data, opId }).then(
     async result => {
       // Ack-via-response (core-anz4.13): a caller with R+W but no S never gets
       // the `by`-matched event — the overlay would hang forever. The response
@@ -389,7 +412,7 @@ export const execute = (
 
 async function confirmPending(path: string, opId: string): Promise<void> {
   try {
-    const fresh = await trpc.get.query({ path });
+    const fresh = await treeClient.read({ kind: 'node', path });
     confirmFromResponse(path, opId, fresh ?? undefined);
   } catch (err) {
     const code = (err as { data?: { code?: string }; code?: string }).data?.code
@@ -430,7 +453,7 @@ export function useCanWrite(path: string | null): boolean {
     setState({ path, perm: 0 });
 
     let cancelled = false;
-    trpc.getPerm.query({ path }).then((p) => {
+    treeClient.read({ kind: 'permission', path }).then((p) => {
       if (cancelled) return;
       permCache.set(path, { perm: p, ts: Date.now() });
       setState({ path, perm: p });
@@ -449,35 +472,11 @@ export function useCanWrite(path: string | null): boolean {
 // ── Internals ──
 
 function streamToAsyncIterable<T>(
-  input: { path: string; type?: string; key?: string; action: string; data?: unknown },
-): AsyncIterable<T> {
+  action: ClientAction,
+) {
   return {
-    [Symbol.asyncIterator](): AsyncIterator<T> {
-      const queue: T[] = [];
-      let notify: (() => void) | null = null;
-      let done = false;
-      let error: unknown = null;
-
-      const sub = trpc.streamAction.subscribe(input, {
-        onData(item) { queue.push(item as T); notify?.(); notify = null; },
-        onComplete() { done = true; notify?.(); notify = null; },
-        onError(err) { error = err; done = true; notify?.(); notify = null; },
-      });
-
-      return {
-        async next(): Promise<IteratorResult<T>> {
-          while (!queue.length && !done)
-            await new Promise<void>(r => { notify = r; });
-          if (error) throw error;
-          if (queue.length) return { value: queue.shift()!, done: false };
-          return { value: undefined as any, done: true };
-        },
-        async return(): Promise<IteratorResult<T>> {
-          sub.unsubscribe();
-          done = true; notify?.(); notify = null;
-          return { value: undefined as any, done: true };
-        },
-      };
+    [Symbol.asyncIterator](): ClientIterator<T> {
+      return clientIterator(observer => treeClient.sub({ kind: 'action', action, observer }));
     },
   };
 }
@@ -497,7 +496,7 @@ function makeProxy<T extends object>(
       if (!meta) return (comp as any)?.[prop];
 
       if (meta.stream)
-        return (data?: unknown) => streamToAsyncIterable({ path, type, key, action: prop, data });
+        return (data?: unknown) => streamToAsyncIterable({ path, type, component: key, action: prop, args: data });
 
       return (data?: unknown) => execute(path, prop, data, type, key);
     },
@@ -506,51 +505,26 @@ function makeProxy<T extends object>(
 
 // ── watch: universal async generator ──
 
-export async function* watch<T = unknown>(uri: string): AsyncGenerator<T> {
+export function watch<T = unknown>(uri: string): ClientIterator<T | undefined> {
   const parsed = parseURI(uri);
 
   if (parsed.action) {
-    yield* streamToAsyncIterable<T>({
+    return streamToAsyncIterable<T>({
       path: parsed.path,
-      key: parsed.key,
+      component: parsed.key,
       action: parsed.action,
-      data: parsed.data,
-    });
-    return;
+      args: parsed.data,
+    })[Symbol.asyncIterator]();
   }
 
-  const { path } = parsed;
-  // Server holds are per (user, tab-token, path) — count in the tab-global
-  // registry (F5) so no co-consumer's release strips this generator's hold.
-  // r3-F2: count BEFORE the registering get — a co-consumer releasing to zero
-  // mid-flight would unwatch the hold this get is creating; the gate issues
-  // the registration strictly after any in-flight unwatch of the path.
-  await acquireHoldForRegistration(path);
-  // Through the door (ns6p.4 F1): generation + overlap ordering — the initial
-  // get can neither regress a mid-flight event image nor resurrect a node a
-  // concurrent remove just evicted.
-  const initial = await trackedGet(path, () => trpc.get.query({ path, watch: true, ...tabTokenInput }));
-  if (initial.error !== undefined) {
-    releaseHold(path); // registration failed with the request (r3-F2)
-    throw initial.error;
-  }
-
-  let resolve: (() => void) | null = null;
-  const unsub = cache.subscribePath(path, () => { resolve?.(); resolve = null; });
-
-  try {
-    yield deriveURI<T>(cache.get(path), parsed) as T;
-
-    while (true) {
-      await new Promise<void>(r => { resolve = r; });
-      yield deriveURI<T>(cache.get(path), parsed) as T;
-    }
-  } finally {
-    unsub();
-    // core-m77: get{watch:true} registered a server-side hold — release it
-    // with the last tab-wide consumer or it leaks until tab-token grace.
-    releaseHold(path);
-  }
+  return clientIterator(observer => treeClient.sub({
+    kind: 'path', path: parsed.path,
+    observer: {
+      next(node) { observer.next(deriveURI<T>(node, parsed)); },
+      error: observer.error,
+      complete: observer.complete,
+    },
+  }), true);
 }
 
 // ── useValue: useState with OnChange-shaped setter, resets when input identity changes ──

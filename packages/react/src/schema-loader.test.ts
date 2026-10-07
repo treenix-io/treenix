@@ -14,7 +14,7 @@ let resolveQuery: (v: unknown) => void = () => {};
 let rejectQuery: (e: unknown) => void = () => {};
 const queryFn = mock.fn(() => new Promise<unknown>((res, rej) => { resolveQuery = res; rejectQuery = rej; }));
 mock.module('#tree/trpc', {
-  namedExports: { trpc: { get: { query: queryFn } } },
+  namedExports: { trpc: { get: { query: queryFn } }, tabTokenInput: { token: 'test-tab' } },
 });
 
 const { renderHook, act } = await import('@testing-library/react');

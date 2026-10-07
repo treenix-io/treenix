@@ -6,7 +6,7 @@ import { foldPartial, mergeIntoNode, mergeToOps, type OnChange, scopeOnChange } 
 import type { NodeData } from '@treenx/core';
 import * as cache from '#tree/cache';
 import { useDebounce } from '#lib/use-debounce';
-import { trpc } from './trpc';
+import { treeClient } from '#tree/tree-client';
 
 export { type OnChange, mergeToOps, mergeIntoNode, scopeOnChange } from '#tree/on-change';
 export type { MutationOp } from '#tree/on-change';
@@ -143,7 +143,7 @@ export function useSave(path: string, options?: SaveOptions): SaveHandle {
     const gen = genRef.current;
     const run = (async () => {
       try {
-        await trpc.patch.mutate({ path: pathRef.current, ops });
+        await treeClient.commit([{ kind: 'patch', path: pathRef.current, ops }]);
       } catch (e) {
         // Failed write: restore pending so the edits are NOT lost (dirty stays
         // true) and rethrow — a swallowed reject made 'flush then toast' callers
@@ -236,7 +236,7 @@ export function useSave(path: string, options?: SaveOptions): SaveHandle {
     if (!partial) return;
     const ops = mergeToOps(partial);
     if (ops.length > 0) {
-      trpc.patch.mutate({ path: pathRef.current, ops })
+      treeClient.commit([{ kind: 'patch', path: pathRef.current, ops }])
         .catch(e => console.error('[useSave] unmount flush failed:', e));
     }
   }, []);
@@ -329,7 +329,7 @@ export function usePathSave(options?: { delay?: number; cacheThrottle?: number }
     const run = (async () => {
       const settled = await Promise.allSettled(entries.map(([path, partial]) => {
         const ops = mergeToOps(partial);
-        return ops.length > 0 ? trpc.patch.mutate({ path, ops }) : Promise.resolve();
+        return ops.length > 0 ? treeClient.commit([{ kind: 'patch', path, ops }]) : Promise.resolve();
       }));
 
       // A failed path keeps its edits pending under the ones made since, so the next change or flush resends them.
@@ -387,7 +387,7 @@ export function usePathSave(options?: { delay?: number; cacheThrottle?: number }
     for (const [path, partial] of pending.current) {
       const ops = mergeToOps(partial);
       if (ops.length > 0) {
-        trpc.patch.mutate({ path, ops })
+        treeClient.commit([{ kind: 'patch', path, ops }])
           .catch(e => console.error(`[usePathSave] unmount flush failed for ${path}:`, e));
       }
     }
