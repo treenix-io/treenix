@@ -2,83 +2,117 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { debouncedWrite } from './debounced-write';
 
+function deferred() {
+  let resolve!: () => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<void>((res, rej) => { resolve = res; reject = rej; });
+  return { promise, resolve, reject };
+}
+
 describe('debouncedWrite', () => {
-  it('debounces rapid triggers into single write', async () => {
+  it('debounces rapid triggers into one write', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const written = deferred();
     let writes = 0;
-    const dw = debouncedWrite(async () => { writes++; }, 50, 'test');
+    const dw = debouncedWrite(async () => { writes++; written.resolve(); }, 50, 'test');
 
     dw.trigger();
     dw.trigger();
     dw.trigger();
+    t.mock.timers.tick(50);
+    await written.promise;
 
-    await new Promise(r => setTimeout(r, 100));
     assert.equal(writes, 1);
   });
 
-  it('skips trigger while write is in-flight', async () => {
+  it('coalesces triggers while a write is in flight', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const started = deferred();
+    const finish = deferred();
     let writes = 0;
-    const dw = debouncedWrite(async () => {
-      writes++;
-      await new Promise(r => setTimeout(r, 100));
-    }, 20, 'test');
+    const dw = debouncedWrite(async () => { writes++; started.resolve(); await finish.promise; }, 20, 'test');
 
     dw.trigger();
-    await new Promise(r => setTimeout(r, 30)); // write starts
-    dw.trigger(); // should be skipped — inFlight
-    await new Promise(r => setTimeout(r, 150));
+    t.mock.timers.tick(20);
+    await started.promise;
+    dw.trigger();
+    finish.resolve();
+    await dw.flush();
+
     assert.equal(writes, 1);
   });
 
-  it('catches errors without unhandled rejection', async () => {
-    let errLogged = false;
-    const orig = console.error;
-    console.error = () => { errLogged = true; };
+  it('flush rejects with the write failure', async (t) => {
+    t.mock.method(console, 'error', () => {});
+    const failure = new Error('write failed');
+    const dw = debouncedWrite(async () => { throw failure; }, 10, 'test');
 
-    const dw = debouncedWrite(async () => {
-      throw new Error('boom');
-    }, 10, 'test');
-
-    dw.trigger();
-    await new Promise(r => setTimeout(r, 50));
-    console.error = orig;
-    assert.ok(errLogged);
+    await assert.rejects(dw.flush(), (error) => error === failure);
   });
 
-  it('cancel prevents pending write', async () => {
+  it('flush waits for an in-flight write and rejects with its failure', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    t.mock.method(console, 'error', () => {});
+    const started = deferred();
+    const finish = deferred();
+    const failure = new Error('write failed');
+    const dw = debouncedWrite(async () => { started.resolve(); await finish.promise; }, 20, 'test');
+
+    dw.trigger();
+    t.mock.timers.tick(20);
+    await started.promise;
+    const rejected = assert.rejects(dw.flush(), (error) => error === failure);
+    finish.reject(failure);
+    await rejected;
+  });
+
+  it('cancel prevents a pending write', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
     let writes = 0;
     const dw = debouncedWrite(async () => { writes++; }, 50, 'test');
 
     dw.trigger();
     dw.cancel();
-    await new Promise(r => setTimeout(r, 100));
+    t.mock.timers.tick(50);
+    await Promise.resolve();
+
     assert.equal(writes, 0);
   });
 
-  it('flush executes immediately and awaits', async () => {
+  it('flush executes the pending write immediately', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
     let writes = 0;
-    const dw = debouncedWrite(async () => { writes++; }, 5000, 'test');
+    const dw = debouncedWrite(async () => { writes++; }, 5_000, 'test');
 
-    dw.trigger(); // scheduled for 5s from now
-    await dw.flush(); // should cancel timer and execute now
+    dw.trigger();
+    await dw.flush();
+    t.mock.timers.tick(5_000);
+    await Promise.resolve();
+
     assert.equal(writes, 1);
   });
 
-  it('flush is a no-op when nothing is pending', async () => {
+  it('flush writes the final state when no timer is pending', async () => {
     let writes = 0;
     const dw = debouncedWrite(async () => { writes++; }, 50, 'test');
 
     await dw.flush();
-    assert.equal(writes, 1); // flush always executes once (final write pattern)
+
+    assert.equal(writes, 1);
   });
 
-  it('trigger after cancel works normally', async () => {
+  it('trigger after cancel schedules a write', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const written = deferred();
     let writes = 0;
-    const dw = debouncedWrite(async () => { writes++; }, 30, 'test');
+    const dw = debouncedWrite(async () => { writes++; written.resolve(); }, 30, 'test');
 
     dw.trigger();
     dw.cancel();
-    dw.trigger(); // re-trigger after cancel
-    await new Promise(r => setTimeout(r, 80));
+    dw.trigger();
+    t.mock.timers.tick(30);
+    await written.promise;
+
     assert.equal(writes, 1);
   });
 });

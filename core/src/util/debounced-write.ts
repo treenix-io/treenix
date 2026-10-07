@@ -8,19 +8,21 @@ export function debouncedWrite(
   label = 'debouncedWrite',
 ): { trigger(): void; flush(): Promise<void>; cancel(): void } {
   let timer: ReturnType<typeof setTimeout> | null = null;
-  let inFlight = false;
+  let inFlight: Promise<void> | null = null;
 
-  async function execute() {
+  function execute(): Promise<void> {
     timer = null;
-    if (inFlight) return;
-    inFlight = true;
-    try {
-      await fn();
-    } catch (e) {
-      console.error(`[${label}] write failed:`, e);
-    } finally {
-      inFlight = false;
-    }
+    if (inFlight) return inFlight;
+
+    inFlight = Promise.resolve().then(fn).then(
+      () => { inFlight = null; },
+      (e: unknown) => {
+        inFlight = null;
+        console.error(`[${label}] write failed:`, e);
+        throw e;
+      },
+    );
+    return inFlight;
   }
 
   return {
@@ -34,7 +36,7 @@ export function debouncedWrite(
         clearTimeout(timer);
         timer = null;
       }
-      if (!inFlight) await execute();
+      await execute();
     },
 
     cancel() {

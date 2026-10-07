@@ -1,8 +1,8 @@
-// Safe timer wrappers — catch async errors to prevent unhandled rejection storms
+// Timer callbacks log their label and propagate failures.
 
 /**
  * setInterval wrapper that catches async callback errors.
- * Logs failures with label instead of crashing the process.
+ * Logs failures with label and propagates them.
  */
 export function safeInterval(
   fn: () => Promise<void>,
@@ -14,6 +14,7 @@ export function safeInterval(
       await fn();
     } catch (e) {
       console.error(`[${label}] periodic task failed:`, e);
+      throw e;
     }
   }, ms);
 }
@@ -31,6 +32,7 @@ export function safeTimeout(
       await fn();
     } catch (e) {
       console.error(`[${label}] deferred task failed:`, e);
+      throw e;
     }
   }, ms);
 }
