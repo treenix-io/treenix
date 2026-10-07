@@ -103,10 +103,7 @@ export function useEvalRef(path: string, map: string): unknown {
     return () => unsubs.forEach(u => u());
   }, [ref, path]);
 
-  const getSnapshot = useCallback(() => {
-    try { return evaluateRef(ref, evalCtx); }
-    catch { return undefined; }
-  }, [ref]);
+  const getSnapshot = useCallback(() => evaluateRef(ref, evalCtx), [ref]);
 
   return useSyncExternalStore(subscribe, getSnapshot);
 }
