@@ -9,25 +9,36 @@ import { trpc } from '#tree/trpc';
 const fetched = new Set<string>();
 const inflight = new Map<string, Promise<void>>();
 
-/** Fetch /sys/types/{type} and register its contexts into the core registry. */
+function isNotFound(e: unknown): boolean {
+  return typeof e === 'object' && e !== null && 'data' in e
+    && typeof e.data === 'object' && e.data !== null && 'code' in e.data && e.data.code === 'NOT_FOUND';
+}
+
+/** Fetch /sys/types/{type} and register its contexts into the core registry. A failed fetch rejects and
+ *  leaves the type unfetched, so the next caller asks again. */
 export async function ensureType(type: string): Promise<void> {
   if (fetched.has(type)) return;
-  if (inflight.has(type)) return inflight.get(type);
+  const running = inflight.get(type);
+  if (running) return running;
 
   const promise = trpc.get
     .query({ path: `/sys/types/${type.replace(/\./g, '/')}` })
-    .then((node: NodeData | undefined) => {
-      // Named components live under '#' keys (namespace migration) — never read node.schema
-      const schema = node && getComponent<TypeSchema & { $id: string }>(node, 'schema');
-      if (schema?.$id && !resolve(schema.$id, 'schema')) {
-        register(schema.$id, 'schema', () => schema);
-      }
-    })
-    .catch(() => {}) // type may have no schema — not an error
-    .finally(() => {
-      fetched.add(type);
-      inflight.delete(type);
-    });
+    .then(
+      (node: NodeData | undefined) => {
+        // Named components live under '#' keys (namespace migration) — never read node.schema
+        const schema = node && getComponent<TypeSchema & { $id: string }>(node, 'schema');
+        if (schema?.$id && !resolve(schema.$id, 'schema')) {
+          register(schema.$id, 'schema', () => schema);
+        }
+        fetched.add(type);
+      },
+      (e: unknown) => {
+        // A type without a type node has no schema
+        if (!isNotFound(e)) throw e;
+        fetched.add(type);
+      },
+    )
+    .finally(() => inflight.delete(type));
 
   inflight.set(type, promise);
   return promise;
@@ -37,7 +48,7 @@ export async function ensureType(type: string): Promise<void> {
 
 /**
  * Lazy registry hook — returns the handler itself, not its result.
- * undefined = loading, null = not found, Handler = ready.
+ * undefined = loading, null = not found, Handler = ready. A failed type fetch throws to the error boundary.
  *
  * Calling convention is context-specific:
  *   'react'  — handler IS the component:   useReg(type, 'react') → FC
@@ -60,6 +71,7 @@ export function useReg(type: string | null | undefined, context: string) {
   };
 
   const [handler, setHandler] = useState(get);
+  const [failed, setFailed] = useState<{ error: unknown } | null>(null);
 
   useEffect(() => {
     if (!type) { setHandler(null); return; }
@@ -67,14 +79,20 @@ export function useReg(type: string | null | undefined, context: string) {
     if (h) { setHandler(() => h); return; }
     setHandler(undefined);
     let cancelled = false;
-    ensureType(type).then(() => {
-      if (cancelled) return; // type changed mid-flight — don't clobber the current handler
-      const h2 = resolve(type, context);
-      setHandler(h2 ? () => h2 : null);
-    });
+    ensureType(type).then(
+      () => {
+        if (cancelled) return; // type changed mid-flight — don't clobber the current handler
+        const h2 = resolve(type, context);
+        setHandler(h2 ? () => h2 : null);
+      },
+      (error: unknown) => {
+        if (!cancelled) setFailed({ error });
+      },
+    );
     return () => { cancelled = true; };
   }, [type, context]);
 
+  if (failed) throw failed.error;
   return handler;
 }
 
