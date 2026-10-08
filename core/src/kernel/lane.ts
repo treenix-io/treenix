@@ -40,6 +40,8 @@ export interface NodeLaneOptions {
   /** Narrows a continuity reset to subscriptions reading that domain's logical ranges. */
   readonly domainIntersects?: (domain: DomainId, range: ScanRange) => boolean
   readonly issuedCredential?: Credential
+  /** Kernel-owned node sessions can remain idle until their owner or authorization closes them. */
+  readonly heartbeat?: boolean
   readonly transfers?: BlobTransfers
 }
 export type NodeLaneFrame = Extract<Frame, { readonly t: 'welcome' | 'snap' | 'pos' | 'done' | 'fail' | 'end' | 'reset' }>
@@ -514,7 +516,7 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
   }) ?? (() => {});
   admission.signal.addEventListener('abort', revoked, { once: true });
   admission.assertActive();
-  heartbeat();
+  if (options.heartbeat !== false) heartbeat();
   return {
     actor: admission.actor,
     frames,

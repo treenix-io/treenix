@@ -16,6 +16,9 @@ export interface SessionFactoryOptions {
   readonly lane: (admission: AuthAdmission) => NodeLaneOptions
 }
 
+/** Controls idle expiry for a node session whose lifetime is owned by the kernel. */
+export type NodeSessionOptions = Pick<NodeLaneOptions, 'heartbeat'>
+
 /** Opens both authentication doors into the same native lane and owns their lifetime and quota. */
 export function createSessionFactory(options: SessionFactoryOptions) {
   const sessions = new Set<NodeLane>();
@@ -32,6 +35,7 @@ export function createSessionFactory(options: SessionFactoryOptions) {
   async function open(
     resolve: () => Promise<AuthAdmission>,
     issueCredential: boolean,
+    heartbeat = true,
   ): Promise<OpenedSession> {
     available();
     if (sessions.size + opening >= options.limits().maxLanes)
@@ -51,7 +55,7 @@ export function createSessionFactory(options: SessionFactoryOptions) {
       if (count >= options.limits().lanesPerOrigin)
         throw new KernelError('BUDGET', 'Origin lane limit reached');
       const issuedCredential = issueCredential ? bound.resolution.credential : undefined;
-      session = createNodeLane({ ...options.lane(bound), issuedCredential });
+      session = createNodeLane({ ...options.lane(bound), issuedCredential, heartbeat });
       bound.assertActive();
       const owned = session;
 
@@ -87,9 +91,9 @@ export function createSessionFactory(options: SessionFactoryOptions) {
     openCredential(credential?: Credential, origin?: string): Promise<OpenedSession> {
       return open(() => options.auth.openCredential(credential, origin), credential === undefined);
     },
-    /** Open a session authorized for one node path without issuing a credential. */
-    openNode(path: Path): Promise<OpenedSession> {
-      return open(() => options.auth.openNode(path), false);
+    /** Opens a node-authorized lane; kernel owners may disable its network idle expiry. */
+    openNode(path: Path, sessionOptions: NodeSessionOptions = {}): Promise<OpenedSession> {
+      return open(() => options.auth.openNode(path), false, sessionOptions.heartbeat !== false);
     },
     /** Gives new lanes a fresh welcome while accepted requests finish on their original lane. */
     reconnect(): void {
