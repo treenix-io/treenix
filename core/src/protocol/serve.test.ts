@@ -24,6 +24,20 @@ async function setup() {
 }
 
 describe('native serving lifecycle', () => {
+  it('shares real lane admission slots with public Instance sessions and releases them on close', async t => {
+    const f = await setup(); t.after(() => f.close())
+    await f.limits({ maxLanes: 1 })
+    const local = await f.instance.openSession(f.instance.setupCredential)
+    await assert.rejects(f.serving.open({ t: 'hi' }, f.instance.setupCredential, '127.0.0.1'), code('BUDGET'))
+    assert.ok(local.frames.return)
+    await local.frames.return()
+    const opened = await f.serving.open({ t: 'hi' }, f.instance.setupCredential, '127.0.0.1')
+    await assert.rejects(f.instance.openSession(f.instance.setupCredential), code('BUDGET'))
+    f.serving.attach(opened.id, f.instance.setupCredential, '127.0.0.1').close()
+    const replacement = await f.instance.openSession(f.instance.setupCredential)
+    assert.ok(replacement.frames.return)
+    await replacement.frames.return()
+  })
   it('serves children windows and include coverage through the same authenticated lane', async t => {
     const f = await setup(); t.after(() => f.close())
     assert.ok(f.instance.setupCredential)

@@ -147,9 +147,9 @@
       "default": "./dist/kernel/index.js"
     },
     "./kernel/testing": {
-      "development": "./src/kernel/store/contract.ts",
-      "types": "./dist/kernel/store/contract.d.ts",
-      "default": "./dist/kernel/store/contract.js"
+      "development": "./src/kernel/testing.ts",
+      "types": "./dist/kernel/testing.d.ts",
+      "default": "./dist/kernel/testing.js"
     },
     "./errors": {
       "development": "./src/errors.ts",

@@ -11,6 +11,8 @@ import { prepareChangeSet, type ChangeExecutor } from '#kernel/changeset'
 import { createCommands, type CommandOptions, type NativeCommands } from '#kernel/commands'
 import { judgeGates } from '#kernel/gates'
 import type { NodeLaneOptions } from '#kernel/lane'
+import type { NodeLane } from '#kernel/lane'
+import { createSessionFactory, type SessionFactory } from '#kernel/session-factory'
 import { createNodeLaneRead } from '#kernel/lane-source'
 import { createRegistry, type TypeOwnership } from '#kernel/registry'
 import { createProjector } from '#kernel/projection'
@@ -18,7 +20,7 @@ import type { AuthReadSource, AuthSource } from '#kernel/session'
 import type { AuthAdmission } from '#kernel/auth-factory'
 import type { StreamDomain } from '#kernel/stream'
 import { DEFAULT_LIMITS, type Budget, type ChangeMember, type Credential, type InstanceId, type Limits, type NodeId,
-  type BlobStore, type Gate, type Position, type Registry, type Store, type StoreCommit, type StoredNode } from '#kernel/types'
+  type BlobStore, type Gate, type InstanceStream, type Path, type Position, type Registry, type Store, type StoreCommit, type StoredNode } from '#kernel/types'
 import { createWriter, type PositionCounter, type Writer } from '#kernel/writer'
 
 export interface InstanceFoundationConfig {
@@ -43,12 +45,23 @@ export interface InstanceFoundation {
   readonly bootstrap: BootstrapIdentity
   readonly auth?: AuthFactory
   readonly setupCredential?: Credential
+  readonly stream: InstanceStream
+  /** Close sessions and authentication state owned by this foundation. */
+  close(): void
   limits(): Limits
   commit(changes: readonly ChangeMember[], who: ChangeExecutor): Promise<Position>
   commands(admission: AuthAdmission): NativeCommands
+  /** Build lane options bound to the supplied admission. */
   nodeLaneOptions(admission: AuthAdmission): NodeLaneOptions
 }
-export interface InstanceFoundationWithAuth extends InstanceFoundation { readonly auth: AuthFactory }
+export interface InstanceFoundationWithAuth extends InstanceFoundation {
+  readonly auth: AuthFactory
+  readonly sessionFactory: SessionFactory
+  /** Open a credential or anonymous session and return its lane. */
+  openSession(credential?: Credential, origin?: string): Promise<NodeLane>
+  /** Open a lane authorized for the supplied node path. */
+  openNodeSession(path: Path): Promise<NodeLane>
+}
 export interface AuthInstanceFoundationConfig extends InstanceFoundationConfig { readonly initialCredential: { readonly ttlMs: number } }
 
 export function createInstanceFoundation(input: AuthInstanceFoundationConfig): Promise<InstanceFoundationWithAuth>
@@ -259,21 +272,64 @@ export async function createInstanceFoundation(input: InstanceFoundationConfig):
         budget: kind => config.budget === undefined && kind === 'action' ? { ...budget(), deadline: Date.now() + limits.actionMs } : budget(),
         validate: prepared => validate(new Map(prepared.writes.map(write => [write.path, write.node]))) }
   }
-  return { id: config.id, root: config.root, registry, writer, source, bootstrap: identity,
-    ...(auth === undefined ? {} : { auth }), ...(setupCredential === undefined ? {} : { setupCredential }),
-    commands: admission => createCommands(commandOptions(admission)),
-    nodeLaneOptions(admission) {
-      const options = commandOptions(admission)
-      return { admission, commands: createCommands(options), stream: writer.stream, limits: () => limits, intake: () => writer.intake.epoch,
-        transfers: config.blobs === undefined ? undefined : createBlobTransfers(options, config.blobs),
-        read: createNodeLaneRead(options),
-        gateSub: (selector, signal) => judgeGates(options.gates, { kind: 'sub', selector, origin: admission.origin },
-          admission.actor, { signal, deadline: budget().deadline }),
-        registryChanged(listener) {
-          const receive = (event: AuthEvent) => { if (event.t === 'registry') listener() }
-          listeners.add(receive)
-          return () => listeners.delete(receive)
-        } }
+  /** Build lane options with the caller's admission and instance capabilities. */
+  function nodeLaneOptions(admission: AuthAdmission): NodeLaneOptions {
+    const options = commandOptions(admission);
+    return {
+      admission,
+      commands: createCommands(options),
+      stream: writer.stream,
+      limits: () => limits,
+      intake: () => writer.intake.epoch,
+      transfers:
+        config.blobs === undefined ? undefined : createBlobTransfers(options, config.blobs),
+      read: createNodeLaneRead(options),
+      gateSub: (selector, signal) =>
+        judgeGates(
+          options.gates,
+          { kind: 'sub', selector, origin: admission.origin },
+          admission.actor,
+          { signal, deadline: budget().deadline },
+        ),
+      registryChanged(listener) {
+        const receive = (event: AuthEvent) => {
+          if (event.t === 'registry') listener();
+        };
+        listeners.add(receive);
+        return () => listeners.delete(receive);
+      },
+    };
+  }
+  const sessions = auth === undefined ? undefined : createSessionFactory({ auth, limits: () => limits, lane: nodeLaneOptions })
+  return {
+    id: config.id,
+    root: config.root,
+    registry,
+    writer,
+    source,
+    bootstrap: identity,
+    stream: writer.stream,
+    ...(auth === undefined ? {} : { auth }),
+    ...(setupCredential === undefined ? {} : { setupCredential }),
+    ...(sessions === undefined
+      ? {}
+      : {
+          sessionFactory: sessions,
+          openSession: async (credential?: Credential, origin?: string) =>
+            (await sessions.openCredential(credential, origin)).session,
+          openNodeSession: async (path: Path) => (await sessions.openNode(path)).session,
+        }),
+    commands: (admission) => createCommands(commandOptions(admission)),
+    nodeLaneOptions,
+    /** Close the sessions and authentication factory owned by this foundation. */
+    close() {
+      sessions?.close();
+      auth?.close();
     },
-    limits() { available(); return limits }, commit }
+    limits() {
+      available();
+      return limits;
+    },
+    commit,
+  }
 }
