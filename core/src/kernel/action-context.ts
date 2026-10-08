@@ -54,11 +54,11 @@ export function createReadActionContext(options: ActionContextOptions): ReadActi
     read: Object.freeze({
       /** Capture additional reads in the action's shared OCC dependencies. */
       async read(selector: Selector) {
-      options.active()
-      if ('history' in selector) throw new KernelError('UNAVAILABLE', 'History action reads are not implemented')
-      const result = await options.reads.read(selector)
-      options.active()
-      return freeze(result)
+        options.active()
+        if ('history' in selector) throw new KernelError('UNAVAILABLE', 'History action reads are not implemented')
+        const result = await options.reads.read(selector)
+        options.active()
+        return freeze(result)
     } }), act: options.nested })
 }
 
