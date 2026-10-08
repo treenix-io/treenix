@@ -37,6 +37,7 @@ export interface ReaderOptions {
   readonly budget: Budget
   readonly limits?: Limits
   readonly alert?: (path: Path, error: unknown) => void
+  readonly projector?: ReturnType<typeof createProjector>
 }
 
 function ruleTypes(node: ChainNode, registry: Registry): readonly string[] {
@@ -93,7 +94,7 @@ export function createReader(options: ReaderOptions) {
   const { registry, writer, admission, source } = options
   const limits = options.limits ?? DEFAULT_LIMITS, allowance = Object.freeze({ ...options.budget })
   const alert = options.alert ?? ((at: Path, error: unknown) => console.error(at, error))
-  const projectCopy = createProjector({ registry, alert })
+  const projectCopy = options.projector ?? createProjector({ registry, alert })
   const work: ExprWork = { used: 0, limit: allowance.exprWork }
   const nodes = new Map<Path, string>(), absent = new Set<Path>()
   const dependencies = new Map<string, ReadDependency>(), selectors: NonNullable<ReadSet['selectors']>[number][] = []

@@ -19,19 +19,21 @@ async function judge(gates: readonly Gate[], operation: Operation, actor: Actor,
 }
 
 export async function judgeGates(gates: readonly Gate[], operation: Operation, actor: Actor, context: GateContext): Promise<void> {
-  context.signal.throwIfAborted()
+  const cancellation = () => context.signal.reason instanceof KernelError ? context.signal.reason : new KernelError('CANCELLED', 'Request ended')
+  function active(): void { if (context.signal.aborted) throw cancellation() }
+  active()
   if (gates.length === 0) return
   let timer: ReturnType<typeof setTimeout> | undefined
   let expired = false
   let aborted: () => void = () => {}
   const ended = new Promise<never>((_resolve, reject) => {
-    aborted = () => reject(context.signal.reason)
+    aborted = () => reject(cancellation())
     context.signal.addEventListener('abort', aborted, { once: true })
     timer = setTimeout(() => { expired = true; reject(new KernelError('BUDGET', 'Gate deadline exceeded')) }, Math.max(0, context.deadline - Date.now()))
     timer.unref()
   })
   const check = () => {
-    context.signal.throwIfAborted()
+    active()
     if (expired || Date.now() > context.deadline) throw new KernelError('BUDGET', 'Gate deadline exceeded')
   }
   try { await Promise.race([judge(gates, operation, actor, check), ended]) }

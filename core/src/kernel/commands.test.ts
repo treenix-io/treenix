@@ -104,6 +104,40 @@ describe('authenticated native commands', { timeout: 10_000 }, () => {
     assert.equal(commands.signal.aborted, true)
   })
 
+  it('cancels only the waiting request and leaves its session usable', async () => {
+    let entered: () => void = () => {}, waiting = true
+    const ready = new Promise<void>(resolve => { entered = resolve })
+    const { commands, key, instance } = await setup([async () => {
+      if (!waiting) return 'pass'
+      entered()
+      return new Promise<'pass'>(() => {})
+    }])
+    const cancellation = new AbortController()
+    const pending = commands.commit({ opId: key(), changes: [{ op: 'put', node: { $path: '/cancelled', $type: 't.dir' } }] }, cancellation.signal)
+    const ended = assert.rejects(pending, code('CANCELLED'))
+    await ready
+    cancellation.abort()
+    await ended
+    assert.equal(commands.signal.aborted, false)
+    assert.equal(await instance.source.node('/cancelled'), null)
+    waiting = false
+    assert.ok((await commands.commit({ opId: key(), changes: [{ op: 'put', node: { $path: '/next', $type: 't.dir' } }] })).pos)
+    assert.equal((await commands.read({ node: '/next' })).list.length, 1)
+    commands.close()
+  })
+
+  it('refuses a cancelled read before gates without closing its session', async () => {
+    let judged = 0
+    const { commands } = await setup([async () => { judged++; return 'pass' }])
+    const cancellation = new AbortController()
+    cancellation.abort()
+    await assert.rejects(commands.read({ node: '/' }, cancellation.signal), code('CANCELLED'))
+    assert.equal(judged, 0)
+    assert.equal(commands.signal.aborted, false)
+    assert.equal((await commands.read({ node: '/' })).list.length, 1)
+    commands.close()
+  })
+
   it('bounds a gate by the operation deadline without waiting for its promise', async t => {
     t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 1_000_000 })
     let entered: () => void = () => {}
