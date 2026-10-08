@@ -431,12 +431,16 @@ describe('runExternalWatch — dedup', () => {
     ac.abort();
   });
 
-  it('outside window: event after bucket rotation is forwarded', async () => {
+  it('outside window: event after bucket rotation is forwarded', async (t) => {
     const { tree, ctl } = makeMockTree();
     const sw = makeSelfWriteChannel();
     const ac = new AbortController();
     const out: TreeEvent[] = [];
     const windowMs = 40;
+    const start = 1000;
+    t.mock.timers.enable({ apis: ['Date', 'setInterval'], now: start });
+    t.mock.method(performance, 'now', () => Date.now());
+    t.after(() => ac.abort());
 
     runExternalWatch(tree, {
       pathPrefix: '/',
@@ -450,14 +454,97 @@ describe('runExternalWatch — dedup', () => {
     await drain();
     sw.fire('/foo', 3);
 
-    // Wait long enough for both buckets to rotate past the marked entry
-    await new Promise(r => setTimeout(r, windowMs * 2 + 20));
+    for (const [elapsed, forwarded] of [
+      [windowMs - 1, 0],
+      [windowMs, 0],
+      [windowMs * 2 - 1, 0],
+      [windowMs * 2, 1],
+    ]) {
+      t.mock.timers.tick(start + elapsed - Date.now());
+      ctl.push({ type: 'set', path: '/foo', node: { $type: 't', $rev: 3 } });
+      await drain();
+      assert.equal(out.length, forwarded, `forwarded after ${elapsed}ms`);
+    }
+  });
 
+  it('expires self-writes while rotation callbacks are delayed', async (t) => {
+    const { tree, ctl } = makeMockTree();
+    const sw = makeSelfWriteChannel();
+    const ac = new AbortController();
+    const out: TreeEvent[] = [];
+    const windowMs = 40;
+    const start = 1000;
+    t.mock.timers.enable({ apis: ['Date', 'setInterval'], now: start });
+    t.mock.method(performance, 'now', () => Date.now());
+    t.after(() => ac.abort());
+
+    runExternalWatch(tree, {
+      pathPrefix: '/',
+      forwardEvent: (e) => out.push(e),
+      onSelfWrite: sw.onSelfWrite,
+      dedupWindowMs: windowMs,
+      signal: ac.signal,
+      source: 'delayed-expiry',
+    });
+
+    await drain();
+    sw.fire('/foo', 3);
+    t.mock.timers.setTime(start + windowMs * 2 - 1);
     ctl.push({ type: 'set', path: '/foo', node: { $type: 't', $rev: 3 } });
     await drain();
+    assert.equal(out.length, 0, 'self-write is recent before the second rotation');
 
-    assert.equal(out.length, 1, 'after window expiry: event forwarded');
-    ac.abort();
+    // setTime advances the clock without dispatching interval callbacks.
+    t.mock.timers.setTime(start + windowMs * 2);
+    ctl.push({ type: 'set', path: '/foo', node: { $type: 't', $rev: 3 } });
+    await drain();
+    assert.equal(out.length, 1, 'expired self-write is forwarded despite delayed callbacks');
+  });
+
+  it('keeps fresh self-writes after a stall until their own bucket expires', async (t) => {
+    const { tree, ctl } = makeMockTree();
+    const sw = makeSelfWriteChannel();
+    const ac = new AbortController();
+    const out: TreeEvent[] = [];
+    const windowMs = 40;
+    const start = 1000;
+    t.mock.timers.enable({ apis: ['Date', 'setInterval'], now: start });
+    t.mock.method(performance, 'now', () => Date.now());
+    t.after(() => ac.abort());
+
+    runExternalWatch(tree, {
+      pathPrefix: '/',
+      forwardEvent: (e) => out.push(e),
+      onSelfWrite: sw.onSelfWrite,
+      dedupWindowMs: windowMs,
+      signal: ac.signal,
+      source: 'fresh-after-stall',
+    });
+
+    await drain();
+    sw.fire('/old', 1);
+    t.mock.timers.setTime(start + windowMs * 5 + 5);
+    sw.fire('/fresh', 2);
+    ctl.push({ type: 'set', path: '/fresh', node: { $type: 't', $rev: 2 } });
+    await drain();
+    assert.equal(out.length, 0, 'fresh self-write is retained after missed rotations');
+
+    const oldEvent: TreeEvent = { type: 'set', path: '/old', node: { $type: 't', $rev: 1 } };
+    ctl.push(oldEvent);
+    await drain();
+    assert.deepEqual(out, [oldEvent], 'older buckets expired before the fresh write');
+
+    for (const [elapsed, forwarded] of [
+      [windowMs * 6 - 1, 1],
+      [windowMs * 6, 1],
+      [windowMs * 7 - 1, 1],
+      [windowMs * 7, 2],
+    ]) {
+      t.mock.timers.setTime(start + elapsed);
+      ctl.push({ type: 'set', path: '/fresh', node: { $type: 't', $rev: 2 } });
+      await drain();
+      assert.equal(out.length, forwarded, `forwarded after ${elapsed}ms`);
+    }
   });
 });
 

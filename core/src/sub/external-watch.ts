@@ -64,20 +64,30 @@ export function runExternalWatch(tree: Tree, opts: RunExternalWatchOpts): void {
   let bucketPrevious = new Set<string>();
   let rotateTimer: ReturnType<typeof setInterval> | null = null;
   let selfWriteUnsub: (() => void) | null = null;
+  let lastRotation = 0;
+
+  function rotateBuckets() {
+    // Interval callbacks can coalesce while the event loop is stalled.
+    const periods = Math.floor((performance.now() - lastRotation) / dedupWindowMs);
+    if (periods < 1) return;
+    bucketPrevious = periods === 1 ? bucketCurrent : new Set();
+    bucketCurrent = new Set();
+    lastRotation += periods * dedupWindowMs;
+  }
 
   function isRecent(key: string): boolean {
+    rotateBuckets();
     return bucketCurrent.has(key) || bucketPrevious.has(key);
   }
 
   if (dedupEnabled) {
-    rotateTimer = setInterval(() => {
-      bucketPrevious = bucketCurrent;
-      bucketCurrent = new Set();
-    }, dedupWindowMs);
+    lastRotation = performance.now();
+    rotateTimer = setInterval(rotateBuckets, dedupWindowMs);
     if (typeof rotateTimer.unref === 'function') rotateTimer.unref();
 
     selfWriteUnsub = onSelfWrite!((path, rev) => {
       if (rev === undefined) return; // remove: not deduped
+      rotateBuckets();
       const key = dedupKey('set', path, rev);
       if (key !== null) bucketCurrent.add(key);
     });
