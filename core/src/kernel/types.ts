@@ -1010,7 +1010,7 @@ export type MountTarget =
 /** Acquired resources and verified decision continuity belong to the target's constructor. */
 export type MountStoreResources = Pick<StreamDomain, 'epoch' | 'persistent'> & {
   readonly writerEpoch: number
-  readonly decisionHistory: 'fresh' | 'retained'
+  readonly decisionHistory: 'fresh' | 'retained' | 'unconfirmed'
 }
 
 /** A handler owns its target's release; a Store supplies its actual continuity and fencing token. */
@@ -1157,12 +1157,21 @@ export interface AdminInput {
   readonly password: string
 }
 
-/** Acquired writer resources are borrowed; their owner supplies fresh or reopen policy explicitly. */
+/** Pins a startup resource to the accepted declaring node and component revision. */
+export interface ProvisionedStoreMount {
+  readonly node: NodeId
+  readonly component: ComponentName
+  readonly revision: Rev
+  readonly target: OpenedStoreMountTarget
+}
+
+/** Acquired root resources stay borrowed; instance construction owns the supplied startup mounts. */
 export interface InstanceProvisioning {
   readonly counter: PositionCounter
   readonly writerEpoch: number
   readonly domains: readonly StreamDomain[]
   readonly credentialTtlMs: number
+  readonly mounts?: readonly ProvisionedStoreMount[]
   readonly bootstrap:
     | { readonly kind: 'fresh'; readonly admin: AdminInput }
     | { readonly kind: 'reopen'; readonly installerCredential?: Credential }

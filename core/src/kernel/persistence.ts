@@ -27,6 +27,8 @@ export interface PersistentWriter extends PositionCounter {
   readonly epoch: string
   readonly writerEpoch: number
   assertActive(): void
+  /** Persist a new stream continuity while retaining the acquired writer and decision inventory. */
+  renewContinuity(): Promise<string>
   run<T>(operation: (authority: { reserveFence(epoch: number): Promise<void> }) => Promise<T>): Promise<T>
   close(): Promise<void>
 }
@@ -52,6 +54,7 @@ function decodePosition(text: string, instance: string): Position {
   return { instance, epoch: value.epoch, seq: value.seq }
 }
 
+/** Acquires the exclusive durable writer lease and exposes its continuity and counter operations. */
 export async function openPersistentWriter(options: { readonly directory: string; readonly instance: string; readonly pythonExecutable?: string }): Promise<PersistentWriter> {
   const { directory: requestedDirectory, instance, pythonExecutable } = options
   if (instance.length === 0) throw new KernelError('INVALID', 'Instance identity is required')
@@ -93,7 +96,17 @@ export async function openPersistentWriter(options: { readonly directory: string
       return pending
     }
     return {
-      directory, instance: state.instance, domain: state.domain, epoch: state.continuity, writerEpoch: acquiredEpoch, assertActive,
+      directory, instance: state.instance, domain: state.domain,
+      get epoch() { return state.continuity },
+      writerEpoch: acquiredEpoch, assertActive,
+      renewContinuity: () => ordered(async () => {
+        assertCounter()
+        const renewed = { ...state, continuity: randomUUID() }
+
+        await durableWrite(directory, statePath, JSON.stringify(renewed))
+        state = renewed
+        return renewed.continuity
+      }),
       run: operation => ordered(async () => {
         let valid = true
         try {
