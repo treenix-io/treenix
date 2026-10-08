@@ -371,7 +371,7 @@ register('sim.agent', 'action:update', async (ctx: ActionCtx, params: any) => {
 register('sim.item', 'action:examine', async (ctx: ActionCtx) => {
   const desc = getComponent(ctx.node, SimDescriptive);
   return { description: desc?.description ?? 'Nothing special.' };
-}, { description: 'Look at the item closely' });
+}, { kind: 'read', description: 'Look at the item closely' });
 
 /** @description Use or interact with the item */
 register('sim.item', 'action:use', async (ctx: ActionCtx, params: any) => {

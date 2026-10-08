@@ -1,13 +1,18 @@
 // AgentSim tests — round engine, proximity, tools, quorum
 
-import { createNode, getComponent, resolve } from '@treenx/core';
+import { createNode, getComponent, R, resolve } from '@treenx/core';
 import { SimPosition } from './types';
 import type { ServiceHandle } from '@treenx/core/contexts/service';
 import { createMemoryTree, type Tree } from '@treenx/core/tree';
-import { withExecute } from '@treenx/core/server/actions';
+import { executeAction, withExecute } from '@treenx/core/server/actions';
+import { loadSchemasFromDir } from '@treenx/core/schema/load';
+import { withAcl } from '@treenx/core/security';
 import assert from 'node:assert/strict';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import './service'; // registers handlers once (ESM cache)
+
+loadSchemasFromDir(join(import.meta.dirname, 'schemas'));
 
 let tree: Tree;
 
@@ -51,6 +56,17 @@ beforeEach(() => {
 });
 
 describe('sim.world registration', () => {
+  it('a reader can examine an item without write permission', async () => {
+    await tree.set({ ...createNode('/', 'root'), $acl: [{ g: 'public', p: R }] });
+    await tree.set(createNode('/item', 'sim.item', {}, {
+      descriptive: { $type: 'sim.descriptive', description: 'Readable item' },
+    }));
+
+    assert.deepEqual(await executeAction(withAcl(tree, 'reader', ['public']), '/item', undefined, undefined, 'examine'), {
+      description: 'Readable item',
+    });
+  });
+
   it('registers service handler', () => {
     assert.ok(resolve('sim.world', 'service'));
   });

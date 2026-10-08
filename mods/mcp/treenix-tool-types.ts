@@ -20,7 +20,7 @@ export class TreenixMcpTools {
     full?: boolean;
   }) {}
 
-  /** @write @description Create or update a node. May require Guardian approval. */
+  /** @setuid @description Create or update a node. May require Guardian approval. */
   set_node(_data: {
     /** @description Node path to create or update. */
     path: string;
@@ -39,7 +39,7 @@ export class TreenixMcpTools {
     owner?: string;
   }) {}
 
-  /** @write @description Execute an action on a node or component. Actions are methods registered on types. May require Guardian approval. */
+  /** @setuid @description Execute an action on a node or component. Actions are methods registered on types. May require Guardian approval. */
   execute(_data: {
     /** @description Node path that owns the action target. */
     path: string;
@@ -55,7 +55,7 @@ export class TreenixMcpTools {
     opId?: string;
   }) {}
 
-  /** @write @description Deploy a module prefab to a target path. Idempotent: skips existing nodes. */
+  /** @setuid @description Deploy a module prefab to a target path. Idempotent: skips existing nodes. */
   deploy_prefab(_data: {
     /** @description Prefab source path or module-prefab id. */
     source: string;
@@ -65,7 +65,7 @@ export class TreenixMcpTools {
     allowAbsolute?: boolean;
   }) {}
 
-  /** @write @description Remove a node by path. May be denied by Guardian. */
+  /** @setuid @description Remove a node by path. May be denied by Guardian. */
   remove_node(_data: {
     /** @description Node path to remove. */
     path: string;

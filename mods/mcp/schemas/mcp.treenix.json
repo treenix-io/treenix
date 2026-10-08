@@ -57,7 +57,7 @@
     },
     "set_node": {
       "description": "Create or update a node. May require Guardian approval.",
-      "kind": "write",
+      "kind": "setuid",
       "arguments": [
         {
           "name": "_data",
@@ -110,7 +110,7 @@
     },
     "execute": {
       "description": "Execute an action on a node or component. Actions are methods registered on types. May require Guardian approval.",
-      "kind": "write",
+      "kind": "setuid",
       "arguments": [
         {
           "name": "_data",
@@ -150,7 +150,7 @@
     },
     "deploy_prefab": {
       "description": "Deploy a module prefab to a target path. Idempotent: skips existing nodes.",
-      "kind": "write",
+      "kind": "setuid",
       "arguments": [
         {
           "name": "_data",
@@ -178,7 +178,7 @@
     },
     "remove_node": {
       "description": "Remove a node by path. May be denied by Guardian.",
-      "kind": "write",
+      "kind": "setuid",
       "arguments": [
         {
           "name": "_data",
