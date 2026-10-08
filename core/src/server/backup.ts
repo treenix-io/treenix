@@ -6,7 +6,7 @@
 // faithfully: node files keep their connection URIs — treat artifacts as secrets.
 
 import { assertValidType, isCompKey, safeJsonParse } from '#core';
-import { cp, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { NS_VERSION, readDataVersion, VERSION_FILE } from '#tree/migrate-component-namespace';
 
@@ -164,9 +164,8 @@ export async function backupInstance(rootJsonPath: string, outParent: string, lo
   const rootNode = safeJsonParse(configRaw);
 
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const artifactDir = resolve(outParent, `treenix-backup-${stamp}`);
   await mkdir(resolve(outParent), { recursive: true });
-  await mkdir(artifactDir, { recursive: false }); // existing artifact dir = refuse, never merge
+  const artifactDir = await mkdtemp(resolve(outParent, `treenix-backup-${stamp}-`)); // exclusive artifact dir, never merge
 
   await writeFile(join(artifactDir, basename(rootJsonPath)), configRaw);
 
@@ -321,7 +320,6 @@ export async function restoreArtifact(artifactDir: string, opts: RestoreOpts = {
 
   for (const t of targets) {
     log(`[restore] ${t.src} → ${t.dest}`);
-    await rm(t.dest, { recursive: true, force: true }); // only ever an empty dir here — occupied targets were moved aside or rejected above
     await cp(t.src, t.dest, { recursive: true, verbatimSymlinks: true });
   }
 
