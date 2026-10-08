@@ -175,8 +175,8 @@ export function createProcessCache(options: CacheOptions = {}) {
   }
 
   return {
-    get(id: NodeId): CachedNode | undefined { return entries.get(id)?.image },
-    getAt(store: Store, path: string): CachedNode | undefined { const id = paths.get(store)?.get(path); return id === undefined ? undefined : entries.get(id)?.image },
+    get(id: NodeId): Image | undefined { return entries.get(id)?.image },
+    getAt(store: Store, path: string): Image | undefined { const id = paths.get(store)?.get(path); return id === undefined ? undefined : entries.get(id)?.image },
     seedJournalBytes(id: NodeId, pos: Position, journalBytes: number): void {
       const entry = entries.get(id)
       if (entry === undefined) throw new KernelError('NOT_FOUND', `Uncached node ${id}`)

@@ -33,6 +33,7 @@ export function createInstanceStream(options: StreamOptions) {
     epochs.set(domain.store.domain, domain.epoch)
   }
   const subscribers = new Set<Subscriber>()
+  const observers = new Set<(event: StreamEvent) => void>()
   const maxEvents = options.bufferedEvents ?? 256, maxBytes = options.bufferedBytes ?? 32 * 1024 * 1024
 
   function publish(event: StreamEvent): void {
@@ -42,6 +43,7 @@ export function createInstanceStream(options: StreamOptions) {
       if (comparePositions(next, position) <= 0) throw new KernelError('INVALID', 'Stream positions must increase')
       position = next
     }
+    for (const observe of observers) observe(event)
     if (subscribers.size === 0) return
     const owned = structuredClone(event)
     const bytes = Buffer.byteLength(JSON.stringify(owned))
@@ -118,5 +120,10 @@ export function createInstanceStream(options: StreamOptions) {
       return iterator
     },
   }
-  return { ...stream, publish, cursor: (): StreamCursor => ({ pos: { ...position }, epochs: Object.fromEntries(epochs) }) }
+  return { ...stream, publish,
+    observe(listener: (event: StreamEvent) => void): () => void {
+      observers.add(listener)
+      return () => { observers.delete(listener) }
+    },
+    cursor: (): StreamCursor => ({ pos: { ...position }, epochs: Object.fromEntries(epochs) }) }
 }

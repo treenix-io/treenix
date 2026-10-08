@@ -413,8 +413,11 @@ export type Frame =
       readonly rows?: readonly Row[]
       readonly at: readonly Position[]
     }
-  /** Every change of one position in one frame, in position order; a lagging client gets one merged frame up to `pos`. */
-  | { readonly t: 'pos'; readonly pos: Position; readonly changes: readonly LaneChange[] }
+  /** Every record of one position in one frame; a lagging client gets one merged frame up to `pos`. */
+  | { readonly t: 'pos'; readonly pos: Position; readonly changes: readonly LaneChange[]; readonly coverage?: false }
+  /** Releasing coverage is not a Store write: repeat the delivered watermark without advancing mutation completion. */
+  | { readonly t: 'pos'; readonly pos: Position; readonly coverage: true;
+      readonly changes: readonly Extract<LaneChange, { readonly op: 'del' | 'list' }>[] }
   /** A View run as a difference; `rows`, when present, replace all rows of the subscription. */
   | {
       readonly t: 'result'

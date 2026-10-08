@@ -7,8 +7,12 @@ import { assertAuthKey, assertBootstrapState, bootstrap, bootstrapIdentity, boot
 import type { Image } from '#kernel/cache'
 import { createChainIndex } from '#kernel/chain-index'
 import { prepareChangeSet, type ChangeExecutor } from '#kernel/changeset'
-import { createCommands, type NativeCommands } from '#kernel/commands'
+import { createCommands, type CommandOptions, type NativeCommands } from '#kernel/commands'
+import { judgeGates } from '#kernel/gates'
+import type { NodeLaneOptions } from '#kernel/lane'
+import { createNodeLaneRead } from '#kernel/lane-source'
 import { createRegistry, type TypeOwnership } from '#kernel/registry'
+import { createProjector } from '#kernel/projection'
 import type { AuthReadSource, AuthSource } from '#kernel/session'
 import type { AuthAdmission } from '#kernel/auth-factory'
 import type { StreamDomain } from '#kernel/stream'
@@ -40,6 +44,7 @@ export interface InstanceFoundation {
   limits(): Limits
   commit(changes: readonly ChangeMember[], who: ChangeExecutor): Promise<Position>
   commands(admission: AuthAdmission): NativeCommands
+  nodeLaneOptions(admission: AuthAdmission): NodeLaneOptions
 }
 export interface InstanceFoundationWithAuth extends InstanceFoundation { readonly auth: AuthFactory }
 export interface AuthInstanceFoundationConfig extends InstanceFoundationConfig { readonly initialCredential: { readonly ttlMs: number } }
@@ -78,6 +83,7 @@ export async function createInstanceFoundation(input: InstanceFoundationConfig):
   const listeners = new Set<(event: AuthEvent) => void>()
   function notify(event: AuthEvent): void { for (const listener of listeners) listener(event) }
   const registry = createRegistry({ ownership: name => owners.get(name), published() { registryRevision++; notify({ t: 'registry' }) } })
+  const projector = createProjector({ registry, alert: (path, error) => console.error(path, error) })
 
   function available(): void { if (failure !== undefined) throw failure.error }
   function validate(changed: ReadonlyMap<string, StoredNode | null>): void {
@@ -234,17 +240,33 @@ export async function createInstanceFoundation(input: InstanceFoundationConfig):
       return prepared
     })
   }
+  function commandOptions(admission: AuthAdmission): CommandOptions {
+    available()
+    const target = { id: paths.get('/')!, store: config.root, chain: chains.chain, children: chains.children }
+    return { writer, registry, projector, registryRevision: () => registryRevision,
+        admission, source: allowance => ({ domains: [config.root.domain], auth: reader(allowance), resolve: () => target }),
+        capabilities: allowance => {
+          const readSource = reader(allowance)
+          return { node: readSource.nodeById, grants: principal => chains.grantsTo(principal),
+            ownerGrants: chains.grants({ owner: true }), shard: source.shard }
+        },
+        gates: config.gates ?? [], limits: () => limits, budget,
+        validate: prepared => validate(new Map(prepared.writes.map(write => [write.path, write.node]))) }
+  }
   return { id: config.id, root: config.root, registry, writer, source, bootstrap: identity,
     ...(auth === undefined ? {} : { auth }), ...(setupCredential === undefined ? {} : { setupCredential }),
-    commands(admission) {
-      available()
-      const target = { id: paths.get('/')!, store: config.root, chain: chains.chain, children: chains.children }
-      return createCommands({ writer, registry, registryRevision: () => registryRevision,
-        admission, source: allowance => ({ domains: [config.root.domain], auth: reader(allowance), resolve: () => target }),
-        capabilities: allowance => ({ node: id => reader(allowance).nodeById(id), grants: principal => chains.grantsTo(principal),
-          ownerGrants: chains.grants({ owner: true }), shard: source.shard }),
-        gates: config.gates ?? [], limits: () => limits, budget,
-        validate: prepared => validate(new Map(prepared.writes.map(write => [write.path, write.node]))) })
+    commands: admission => createCommands(commandOptions(admission)),
+    nodeLaneOptions(admission) {
+      const options = commandOptions(admission)
+      return { admission, commands: createCommands(options), stream: writer.stream, limits: () => limits, intake: () => writer.intake.epoch,
+        read: createNodeLaneRead(options),
+        gateSub: (selector, signal) => judgeGates(options.gates, { kind: 'sub', selector, origin: admission.origin },
+          admission.actor, { signal, deadline: budget().deadline }),
+        registryChanged(listener) {
+          const receive = (event: AuthEvent) => { if (event.t === 'registry') listener() }
+          listeners.add(receive)
+          return () => listeners.delete(receive)
+        } }
     },
     limits() { available(); return limits }, commit }
 }
