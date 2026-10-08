@@ -149,7 +149,7 @@ export function createPipeline(bootstrap: Tree, opts?: TreeRouterOpts, wrapTree?
   // Mount adapters are NOT invalidated — remote data writes don't change
   // mount configs.
   const exec: TreeRouterOpts['exec'] = {
-    delegate: (path) => mountable.resolveActionTree(path),
+    delegate: (path) => mountable.resolveActionTarget(path),
     onDelegated: () => {
       policy.invalidateAll();
       watcher.breakContinuity();

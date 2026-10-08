@@ -138,7 +138,7 @@ describe('withExecute', () => {
       await inner.set(createNode('/fed/w', 'anything'));
       const events: string[] = [];
       const tree = withExecute(inner, {
-        delegate: async (path) => path.startsWith('/fed') ? remote : undefined,
+        delegate: async (path) => path.startsWith('/fed') ? { tree: remote, mountPath: path } : undefined,
         onDelegating: (info) => { events.push(`intent:${info.path}:${info.action}`); },
         onDelegated: (path, action) => { events.push(`done:${path}:${action}`); },
         onDelegatedSettled: (info) => { events.push(`settled:${info.ok}`); },
@@ -158,7 +158,7 @@ describe('withExecute', () => {
       await inner.set(createNode('/fed/w', 'anything'));
       let delegatedCount = 0;
       const tree = withExecute(inner, {
-        delegate: async () => remote,
+        delegate: async (path) => ({ tree: remote, mountPath: path }),
         onDelegated: () => { delegatedCount++; },
       });
 
@@ -176,7 +176,7 @@ describe('withExecute', () => {
       const { tree: remote, calls } = execRecorder();
       let delegated = false;
       const tree = withExecute(await counterTree(), {
-        delegate: async () => delegated ? remote : undefined,
+        delegate: async (path) => delegated ? { tree: remote, mountPath: path } : undefined,
       });
 
       const first = await tree.execute('/w', 'bump', undefined, { opId: 'route-switch-op' });
@@ -199,11 +199,11 @@ describe('withExecute', () => {
       await inner.set(createNode('/fed/w', 'anything'));
       const firstUser = withExecute(inner, {
         identity: { userId: 'a' },
-        delegate: async () => remote,
+        delegate: async (path) => ({ tree: remote, mountPath: path }),
       });
       const secondUser = withExecute(inner, {
         identity: { userId: 'a b' },
-        delegate: async () => remote,
+        delegate: async (path) => ({ tree: remote, mountPath: path }),
       });
 
       const first = await firstUser.execute('/fed/w', 'bump', undefined, { opId: 'b c' });
@@ -220,7 +220,7 @@ describe('withExecute', () => {
         ...createMemoryTree(),
         get: async () => { throw Object.assign(new Error('Access denied'), { code: 'FORBIDDEN' }); },
       };
-      const tree = withExecute(forbidden, { delegate: async () => remote });
+      const tree = withExecute(forbidden, { delegate: async (path) => ({ tree: remote, mountPath: path }) });
 
       await assert.rejects(
         () => tree.execute('/fed/secret', 'bump'),
@@ -229,9 +229,9 @@ describe('withExecute', () => {
       assert.equal(calls.length, 0);
     });
 
-    it('missing node → NOT_FOUND, target never called', async () => {
+    it('missing mount point → NOT_FOUND, target never called', async () => {
       const { tree: remote, calls } = execRecorder();
-      const tree = withExecute(createMemoryTree(), { delegate: async () => remote });
+      const tree = withExecute(createMemoryTree(), { delegate: async (path) => ({ tree: remote, mountPath: path }) });
 
       await assert.rejects(
         () => tree.execute('/fed/nope', 'bump'),
@@ -245,7 +245,7 @@ describe('withExecute', () => {
       const inner = createMemoryTree();
       await inner.set(createNode('/fed/w', 'anything'));
       const tree = withExecute(inner, {
-        delegate: async () => remote,
+        delegate: async (path) => ({ tree: remote, mountPath: path }),
         onDelegating: () => { throw new Error('audit intent append failed'); },
       });
 
@@ -258,7 +258,7 @@ describe('withExecute', () => {
       const inner = createMemoryTree();
       await inner.set(createNode('/fed/w', 'anything'));
       const tree = withExecute(inner, {
-        delegate: async () => remote,
+        delegate: async (path) => ({ tree: remote, mountPath: path }),
         onDelegatedSettled: () => { throw new Error('post-audit down'); },
       });
 
@@ -274,7 +274,7 @@ describe('withExecute', () => {
       };
       let settled: { ok: boolean } | undefined;
       const tree = withExecute(inner, {
-        delegate: async () => failing,
+        delegate: async (path) => ({ tree: failing, mountPath: path }),
         onDelegatedSettled: (info) => { settled = info; },
       });
 
@@ -293,7 +293,7 @@ describe('withExecute', () => {
         execute: async () => { throw Object.assign(new Error('remote denied'), { code: 'CONFLICT' }); },
       };
       const tree = withExecute(inner, {
-        delegate: async () => failing,
+        delegate: async (path) => ({ tree: failing, mountPath: path }),
         // Async hook that rejects — must be awaited (no floating rejection)
         // and must not replace the remote error the caller needs to see.
         onDelegatedSettled: async () => { throw new Error('journal down'); },
@@ -311,7 +311,7 @@ describe('withExecute', () => {
       await inner.set(createNode('/fed/w', 'anything'));
       const order: string[] = [];
       const tree = withExecute(inner, {
-        delegate: async () => remote,
+        delegate: async (path) => ({ tree: remote, mountPath: path }),
         onDelegatedSettled: async (info) => {
           await Promise.resolve();
           order.push(`settled:${info.ok}:${info.opId}`);
@@ -332,7 +332,7 @@ describe('withExecute', () => {
       await inner.set(createNode('/w', 'test.exec.counter', { n: 0 }));
       await inner.set(createNode('/fed/w', 'anything'));
       const tree = withExecute(inner, {
-        delegate: async (path) => path.startsWith('/fed') ? remote : undefined,
+        delegate: async (path) => path.startsWith('/fed') ? { tree: remote, mountPath: path } : undefined,
       });
       // A service holding the exec-capable tree calls a delegated execute from
       // inside a read action frame — must be rejected, kind does not cross the wire.

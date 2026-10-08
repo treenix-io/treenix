@@ -255,7 +255,7 @@ describe('Mounts', () => {
     const ms = withMounts(rootStore);
     await ms.get('/users/alice', { userId: 'alice' });
     await ms.get('/users/alice', { userId: 'bob' });
-    await ms.resolveActionTree('/users/alice');
+    await ms.resolveActionTarget('/users/alice');
     assert.equal(created, 1);
   });
 
@@ -1023,7 +1023,7 @@ describe('FS mount repath (dedicated)', () => {
 
 });
 
-describe('resolveActionTree (core-pxlu)', () => {
+describe('resolveActionTarget (core-pxlu)', () => {
   let rootStore: Tree;
 
   beforeEach(() => {
@@ -1040,31 +1040,48 @@ describe('resolveActionTree (core-pxlu)', () => {
     await rootStore.set(createNode('/fed', 'dir', {}, { mount: { $type: 'test.mount.exec' } }));
 
     const ms = withMounts(rootStore);
-    const t = await ms.resolveActionTree('/fed/w');
+    const t = await ms.resolveActionTarget('/fed/w');
 
     assert.ok(t);
-    assert.ok(t.execute, 'resolved subtree carries the capability');
-    assert.equal(await t.execute!('/fed/w', 'x'), 'remote');
+    assert.ok(t.tree.execute, 'resolved subtree carries the capability');
+    assert.equal(t.mountPath, '/fed');
+    assert.equal(await t.tree.execute!('/fed/w', 'x'), 'remote');
   });
 
   it('returns undefined for storage mounts (no execute)', async () => {
     await rootStore.set(createNode('/users', 'collection', {}, { mount: { $type: 'test.mount.plain' } }));
 
     const ms = withMounts(rootStore);
-    assert.equal(await ms.resolveActionTree('/users/alice'), undefined);
+    assert.equal(await ms.resolveActionTarget('/users/alice'), undefined);
+  });
+
+  it('delegates at the first foreign mount without inspecting its descendants', async () => {
+    let reads = 0;
+    register('test.mount.foreign', 'mount', () => ({
+      ...createMemoryTree(),
+      get: async () => { reads++; throw new Error('Remote routing belongs to the foreign authority'); },
+      execute: async () => 'remote',
+    }));
+    await rootStore.set(createNode('/fed', 'dir', {}, { mount: { $type: 'test.mount.foreign' } }));
+
+    const target = await withMounts(rootStore).resolveActionTarget('/fed/nested/action');
+
+    assert.equal(target?.mountPath, '/fed');
+    assert.equal(reads, 0);
+    assert.equal(await target?.tree.execute?.('/fed/nested/action', 'run'), 'remote');
   });
 
   it('returns undefined for unmounted paths', async () => {
     await rootStore.set(createNode('/plain', 'dir'));
 
     const ms = withMounts(rootStore);
-    assert.equal(await ms.resolveActionTree('/plain/x'), undefined);
+    assert.equal(await ms.resolveActionTarget('/plain/x'), undefined);
   });
 
   it('action on the mount node itself is local (strict ancestors)', async () => {
     await rootStore.set(createNode('/fed', 'dir', {}, { mount: { $type: 'test.mount.exec' } }));
 
     const ms = withMounts(rootStore);
-    assert.equal(await ms.resolveActionTree('/fed'), undefined);
+    assert.equal(await ms.resolveActionTarget('/fed'), undefined);
   });
 });

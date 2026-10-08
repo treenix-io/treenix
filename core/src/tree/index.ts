@@ -147,6 +147,8 @@ export interface Tree {
   getChildren(path: string, opts?: ChildrenOpts, ctx?: unknown): Promise<Page<NodeData>>;
   /** Actor-bound rights; storage adapters omit this capability. */
   getPerm?(path: string): Promise<number>;
+  /** Trusted wrappers retain their semantic authorization restrictions for action replay. */
+  readonly permissionScope?: readonly string[];
   /** Mutation verbs return a CommitReceipt (core-ns6p.2): what was committed,
    *  with before/after images minted inside the adapter's atomic span.
    *  Wrappers forward/translate it; cache/subs/audit consume it instead of

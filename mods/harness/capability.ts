@@ -5,7 +5,7 @@
 
 import { matchesAny } from '@treenx/core/glob';
 import { KernelError } from '@treenx/core/errors';
-import type { NodeData } from '@treenx/core';
+import { A, type NodeData, R, S, W } from '@treenx/core';
 import type { Tree, Page, PatchOp } from '@treenx/core/tree';
 import { executeAction, type ActorContext } from '@treenx/core/server/actions';
 
@@ -55,8 +55,19 @@ function denyOutOfScope(op: 'read' | 'write', path: string): never {
 export function withCapability(tree: Tree, cap: Capability): Tree {
   const canRead = (path: string) => matchesAny(cap.readPaths, path);
   const canWrite = (path: string) => matchesAny(cap.writePaths, path);
+  const getPerm = tree.getPerm?.bind(tree);
 
   return {
+    get permissionScope() {
+      return [...tree.permissionScope ?? [], JSON.stringify(['capability',
+        [...new Set(cap.readPaths)].sort(), [...new Set(cap.writePaths)].sort(), [...new Set(cap.allowedExec)].sort()])];
+    },
+    ...(getPerm ? {
+      getPerm: async (path: string) => {
+        const mask = (canRead(path) ? R | S : 0) | (canWrite(path) ? W | A : 0);
+        return (await getPerm(path)) & mask;
+      },
+    } : {}),
     async get(path, ctx) {
       if (!canRead(path)) denyOutOfScope('read', path);
       return tree.get(path, ctx);

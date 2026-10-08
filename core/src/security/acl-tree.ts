@@ -273,6 +273,9 @@ export function withAcl(rawStore: Tree, userId: string | null, claims: string[])
   // re-wraps with withExecute binding the correct per-request identity.
   const aclStore: AclStore = {
     getPerm,
+    get permissionScope() {
+      return [...rawStore.permissionScope ?? [], JSON.stringify(['acl', userId, [...new Set(claims)].sort()])];
+    },
     planChildren,
     async get(path, ctx) {
       // Fail loud — same reasoning as getChildren below. Silent `undefined`

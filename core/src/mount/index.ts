@@ -54,18 +54,20 @@ export type WithMountsOpts = {
   startExternalWatch?: ExternalWatchStarter;
 };
 
+export type ActionTarget = { tree: Tree; mountPath: string };
+
 /** withMounts return type — exposes `invalidateMount` so external-watch
  *  consumers can evict cached adapters when a mount config node is rewritten
  *  out-of-band. In-pipeline writes invalidate automatically (set/remove/patch). */
 export type MountableTree = Tree & {
   invalidateMount(path: string): void;
-  /** Resolve the mounted subtree owning `path` IF it is a foreign authority —
+  /** Resolve the first foreign authority on `path` and its local mount point —
    *  i.e. the adapter tree exposes the `execute` capability (transport mounts:
    *  t.mount.tree.trpc, future t.mount.peer). Storage mounts (memory/fs/mongo/
    *  query) and unmounted paths return undefined → the action runs in the
    *  LOCAL executor. Strict ancestors only (an action addressed at the mount
    *  node itself targets the local config node). */
-  resolveActionTree(path: string): Promise<Tree | undefined>;
+  resolveActionTarget(path: string): Promise<ActionTarget | undefined>;
 };
 
 export type MountAdapter<T = unknown> = (mount: T, ctx: MountCtx) => Tree | Promise<Tree>;
@@ -148,7 +150,7 @@ export function withMounts(rootStore: Tree, opts?: WithMountsOpts): MountableTre
     return entry;
   }
 
-  async function resolveTree(path: string, withSelf: boolean, ctx?: unknown): Promise<Tree> {
+  async function resolveTree(path: string, withSelf: boolean, ctx?: unknown, onAuthority?: (target: ActionTarget) => void): Promise<Tree> {
     let store = rootStore;
     for (const p of mountCandidates(path, withSelf)) {
       // Mounts at/under /sys/trash are inert (core-anz4.8) — their copied
@@ -165,6 +167,11 @@ export function withMounts(rootStore: Tree, opts?: WithMountsOpts): MountableTre
         entry = mounts.get(p) ?? open(p, node, mount, store);
       }
       store = await entry.tree;
+      if (onAuthority && store.execute) {
+        // The remote authority owns routing below this local boundary.
+        onAuthority({ tree: store, mountPath: p });
+        break;
+      }
     }
     return store;
   }
@@ -174,10 +181,10 @@ export function withMounts(rootStore: Tree, opts?: WithMountsOpts): MountableTre
   const self: MountableTree = {
     invalidateMount,
 
-    async resolveActionTree(path) {
-      const tree = await resolveTree(path, false);
-      // Capability presence = authority marker. No exceptions as control flow.
-      return tree.execute ? tree : undefined;
+    async resolveActionTarget(path) {
+      let target: ActionTarget | undefined;
+      await resolveTree(path, false, undefined, (resolved) => { target = resolved; });
+      return target;
     },
 
     async get(path, ctx) {

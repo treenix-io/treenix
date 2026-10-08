@@ -6,23 +6,25 @@ import './action-context';
 import { Class, type TypeProxy } from '#comp';
 import { type ExecuteFn, makeTypedProxy, type StreamFn } from '#comp/handle';
 import { collectDeps as _collectDeps, type ResolvedDeps } from '#comp/needs';
-import { assertSafeKey, COMP_PREFIX, type ComponentData, compKey, getComponentField, getMeta, isComponent, type NodeData, normalizeType, register, resolve, resolveExact, safeJsonParse } from '#core';
+import { assertSafeKey, COMP_PREFIX, type ComponentData, compKey, getComponentField, getMeta, isComponent, type NodeData, normalizeType, R, register, resolve, resolveExact, safeJsonParse, W } from '#core';
 import { assertSafeSchema, validateValue, type ValidationError } from '#comp/validate';
 import { exprWork } from '#kernel/eval';
 import { createSiftTest } from '#kernel/expr';
 import { DEFAULT_LIMITS, type UpdateOps } from '#kernel/types';
-import { type ActionKind, type TypeSchema } from '#schema/types';
+import { type TypeSchema } from '#schema/types';
 import type { Session } from '#security/sessions';
 import { type ExecOpts, type PatchManyEntry, type PatchOp, type Tree } from '#tree';
 import { getByPath } from '#kernel/update-ops';
 import { createDraft, enablePatches, finishDraft, type Patch } from 'immer';
 import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { createBoundedCache } from '#util/bounded-cache';
 import { isRecord } from '#util/is-record';
 import { KernelError } from '#errors';
+import { type ActionTarget } from '#mount';
 import { commit, mutationLock } from './commit';
 import { readonlyProxy, wrapAbortGuardTree, wrapReadOnlyTree } from './readonly-tree';
-import { assertCanCall, runWithFrame, type KindFrame } from './kind-stack';
+import { assertCanCall, currentFrame, runWithFrame, type KindFrame } from './kind-stack';
 
 // Schema arrives pre-resolved (registry for static types, freshly-read stored schema for
 // dynamic ones — the latter is never register()ed, see loadDynamicAction).
@@ -54,8 +56,31 @@ function readonlyDep(dep: ResolvedDeps[string]): ResolvedDeps[string] {
 
 // @setuid runs as the caller until the kernel runtime gives it the node as executor, so its writes stay bound by
 // the caller's ACL; for the kind stack it is a writing action.
-function frameKind(kind: ActionKind | undefined): KindFrame['kind'] {
+function frameKind(kind: unknown): KindFrame['kind'] {
   return kind === 'read' ? 'read' : 'write';
+}
+
+function actionEnvelope(type: string, action: string, schema: TypeSchema | undefined) {
+  const meta = getMeta(type, `action:${action}`);
+  const method = schema?.methods?.[action];
+  return { kind: frameKind(meta?.kind ?? method?.kind), io: Boolean(meta?.io ?? method?.io) };
+}
+
+function callerBound(tree: Tree): boolean {
+  return !!tree.getPerm || !!currentFrame()?.callerBound;
+}
+
+async function assertCallPerm(tree: Tree, path: string, kind: unknown): Promise<void> {
+  if (callerBound(tree) && !tree.getPerm) {
+    throw new KernelError('FORBIDDEN', 'Caller-bound actions require a permission provider');
+  }
+  // Unwrapped stores are operator trees; an actor's tree must keep its permission provider.
+  if (!tree.getPerm) return;
+  const perm = await tree.getPerm(path);
+  if (!(perm & R)) throw new KernelError('NOT_FOUND', `Node not found: ${path}`);
+  if (kind !== 'read' && kind !== 'setuid' && !(perm & W)) {
+    throw new KernelError('FORBIDDEN', `Calling an ordinary action requires W on ${path}`);
+  }
 }
 
 function updatedFields(ops: UpdateOps): string[] {
@@ -214,7 +239,6 @@ type ResolvedAction = {
   handler: (ctx: ActionCtx, data: unknown) => unknown;
   type: string;
   comp: ComponentData | undefined;
-  deps: ResolvedDeps;
   fieldKey: string | undefined;
   /** Effective schema: exact registry entry, else freshly-read stored type schema, else
    *  the 'default' schema when it carries this action's method (built-in $schema/patch). */
@@ -442,8 +466,6 @@ async function resolveActionHandler(
 
   const type = comp.$type;
 
-  let deps: ResolvedDeps = await _collectDeps(node, fieldKey!, action, tree);
-
   // Precedence: exact registered handler → dynamic stored handler → inherited default
   // built-in. Exact-only lookups — resolve() falls back to the 'default' entries, which
   // would shadow both the stored dynamic handler/schema and a missing one (core-anz4.23).
@@ -472,7 +494,8 @@ async function resolveActionHandler(
     if (def?.methods?.[action]) schema = def;
   }
 
-  return { node, handler, type, comp, deps, fieldKey, schema };
+  await assertCallPerm(tree, path, getMeta(type, `action:${action}`)?.kind ?? schema?.methods?.[action]?.kind);
+  return { node, handler, type, comp, fieldKey, schema };
 }
 
 // ── executeAction: mutating action with Immer draft + patch collection ──
@@ -499,19 +522,55 @@ export type ActionOpts = {
 // client-generated and must be unique per logical operation.
 // Keyed per user: a bare opId key would let anyone who LEARNS another user's
 // opId (logs, proxy) fetch that user's cached result, bypassing ACL.
-const opResults = createBoundedCache<string, Promise<unknown>>(1000);
+type ActionRequest = { path: string; type?: string; key?: string; action: string; data: unknown };
+type OpResult = { request: ActionRequest; authority: string; result: Promise<unknown> };
+const opResults = createBoundedCache<string, OpResult>(1000);
 
-function runIdempotent<T>(
-  userId: string | null | undefined,
+function snapshotActionData(value: unknown, seen = new Map<object, object>()): unknown {
+  if (value === null || typeof value !== 'object') return value;
+  const hit = seen.get(value);
+  if (hit) return hit;
+
+  const prototype = Object.getPrototypeOf(value);
+  if (!Array.isArray(value) && prototype !== Object.prototype && prototype !== null) {
+    const copy = structuredClone(value);
+    seen.set(value, copy);
+    return copy;
+  }
+
+  // Read through the facade: action arguments may contain our read-only node proxies.
+  const copy: object = Array.isArray(value) ? new Array(value.length) : Object.create(prototype);
+  seen.set(value, copy);
+  for (const [key, item] of Object.entries(value)) {
+    Object.defineProperty(copy, key, { value: snapshotActionData(item, seen), enumerable: true, writable: true, configurable: true });
+  }
+  return copy;
+}
+
+function runIdempotent(
+  tree: Tree,
+  opts: Omit<ActionOpts, 'opId'> | undefined,
   opId: string,
-  run: () => Promise<T>,
-): Promise<T> {
-  const key = JSON.stringify([userId ?? '', opId]);
+  request: ActionRequest,
+  authorize: () => Promise<void>,
+  run: (request: ActionRequest) => Promise<unknown>,
+): Promise<unknown> {
+  const key = JSON.stringify([opts?.userId ?? '', opId]);
+  const actor = opts?.actor;
+  const authority = JSON.stringify([tree.permissionScope ?? [], [...new Set(opts?.claims ?? [])].sort(),
+    actor?.id, actor?.onBehalfOf, actor?.taskPath, actor?.runPath, actor?.action]);
   const prior = opResults.get(key);
-  if (prior) return prior as Promise<T>;
+  if (prior) {
+    if (prior.authority !== authority || !isDeepStrictEqual(prior.request, request)) {
+      return Promise.reject(new KernelError('INVALID', 'Operation id belongs to a different request or authorization scope'));
+    }
+    return authorize().then(() => prior.result);
+  }
 
-  const result = run();
-  opResults.set(key, result);
+  const original = { ...request, data: snapshotActionData(request.data) };
+  // Handlers own mutable args; the cached request retains its original values.
+  const result = run({ ...original, data: snapshotActionData(original.data) });
+  opResults.set(key, { request: original, authority, result });
   return result;
 }
 
@@ -523,12 +582,24 @@ export function executeAction<T = unknown>(
   action: string,
   data?: unknown,
   opts?: ActionOpts,
-): Promise<T> {
+): Promise<T>;
+export function executeAction(
+  tree: Tree,
+  path: string,
+  componentType: string | undefined,
+  componentKey: string | undefined,
+  action: string,
+  data?: unknown,
+  opts?: ActionOpts,
+): Promise<unknown> {
   const opId = opts?.opId;
-  if (!opId) return runAction<T>(tree, path, componentType, componentKey, action, data, opts);
+  if (!opId) return runAction(tree, path, componentType, componentKey, action, data, opts);
 
-  return runIdempotent(opts?.userId, opId, () =>
-    runAction<T>(tree, path, componentType, componentKey, action, data, opts));
+  return runIdempotent(tree, opts, opId, { path, type: componentType, key: componentKey, action, data: data ?? {} }, async () => {
+    const { type, schema } = await resolveActionHandler(tree, path, componentType, componentKey, action);
+    assertCanCall(actionEnvelope(type, action, schema));
+  }, (original) =>
+    runAction(tree, path, componentType, componentKey, action, original.data, opts));
 }
 
 // ── withExecute: Tree.execute capability wrapper (core-pxlu) ──
@@ -547,8 +618,8 @@ export type DelegationInfo = { path: string; action: string; userId?: string | n
 export type DelegationHooks = Pick<WithExecuteOpts, 'onDelegating' | 'onDelegatedSettled'>;
 
 export type WithExecuteOpts = {
-  /** Authority probe (MountableTree.resolveActionTree). Absent = everything local. */
-  delegate?: (path: string) => Promise<Tree | undefined>;
+  /** Authority probe (MountableTree.resolveActionTarget). Absent = everything local. */
+  delegate?: (path: string) => Promise<ActionTarget | undefined>;
   /** Identity bound at wrap time — NEVER taken from ExecOpts (a nested handler
    *  could spoof another principal via ctx.tree.execute otherwise). opId is
    *  per-call, not identity — it arrives via ExecOpts. */
@@ -569,26 +640,29 @@ export type WithExecuteOpts = {
 export function withExecute<T extends Tree>(inner: T, opts?: WithExecuteOpts): T & Required<Pick<Tree, 'execute'>> {
   const identity = opts?.identity;
 
-  async function delegateRun(target: Tree, path: string, action: string, data: unknown, execOpts: ExecOpts | undefined): Promise<unknown> {
-    // Local check is ONLY path visibility (R) — same FORBIDDEN→NOT_FOUND mask
-    // as resolveActionHandler. Everything else is the remote authority's job.
-    const node = await self.get(path).catch((e: unknown) => {
+  async function authorizeDelegate(target: ActionTarget, path: string): Promise<void> {
+    // Foreign ACL belongs to the mount credential, not the local caller.
+    const node = await self.get(target.mountPath).catch((e: unknown) => {
       if ((e as { code?: string })?.code === 'FORBIDDEN') throw new KernelError('NOT_FOUND', `Node not found: ${path}`);
       throw e;
     });
     if (!node) throw new KernelError('NOT_FOUND', `Node not found: ${path}`);
+    await assertCallPerm(self, target.mountPath, 'write');
 
     // Kind-stack does not cross the wire — classify conservatively as write+io.
     // Read-kind frames therefore never delegate (fail closed).
     assertCanCall({ kind: 'write', io: true });
+  }
 
+  async function delegateRun(target: ActionTarget, path: string, action: string, data: unknown, execOpts: ExecOpts | undefined): Promise<unknown> {
+    await authorizeDelegate(target, path);
     const info: DelegationInfo = { path, action, userId: identity?.userId ?? null };
     if (execOpts?.opId) info.opId = execOpts.opId;
     await opts?.onDelegating?.(info);
 
     let result: unknown;
     try {
-      result = await target.execute!(path, action, data, execOpts);
+      result = await target.tree.execute!(path, action, data, execOpts);
     } catch (e) {
       // Awaited in a guard: an async settled hook must not float (unhandled
       // rejection), and its failure must never MASK the remote error.
@@ -612,6 +686,7 @@ export function withExecute<T extends Tree>(inner: T, opts?: WithExecuteOpts): T
 
   const self: T & Required<Pick<Tree, 'execute'>> = {
     ...inner,
+    get permissionScope() { return inner.permissionScope; },
     async execute(path, action, data, execOpts, _ctx) {
       const target = opts?.delegate ? await opts.delegate(path) : undefined;
       if (!target) {
@@ -623,14 +698,16 @@ export function withExecute<T extends Tree>(inner: T, opts?: WithExecuteOpts): T
       // settled outcome (order: dedupe entry → intent → remote → reset → settled).
       const opId = execOpts?.opId;
       if (!opId) return delegateRun(target, path, action, data, execOpts);
-      return runIdempotent(identity?.userId, opId, () =>
-        delegateRun(target, path, action, data, execOpts));
+      return runIdempotent(self, identity, opId,
+        { path, type: execOpts?.type, key: execOpts?.key, action, data: data ?? {} },
+        () => authorizeDelegate(target, path), (original) =>
+        delegateRun(target, path, action, original.data, execOpts));
     },
   };
   return self;
 }
 
-async function runAction<T = unknown>(
+async function runAction(
   tree: Tree,
   path: string,
   componentType: string | undefined,
@@ -638,11 +715,12 @@ async function runAction<T = unknown>(
   action: string,
   data?: unknown,
   opts?: ActionOpts,
-): Promise<T> {
+): Promise<unknown> {
   return lockAction(path, async () => {
-  const { node, handler, type, deps, fieldKey, schema } = await resolveActionHandler(
+  const { node, handler, type, fieldKey, schema } = await resolveActionHandler(
     tree, path, componentType, componentKey, action,
   );
+  const deps = await _collectDeps(node, fieldKey!, action, tree);
 
   // Pre/post condition checking (Design by Contract): warnings on this runtime; the kernel runtime refuses
   // a false pre with CONFLICT and holds the action to its post in the guard.
@@ -665,16 +743,12 @@ async function runAction<T = unknown>(
   // 'read' skips Immer draft entirely and gives the handler a readonly proxy of
   // node/comp + a read-only tree facade. Any assignment (`ctx.node.x = …`,
   // `this.x = …`, `ctx.tree.set(…)`) throws FORBIDDEN immediately.
-  const actionMeta = getMeta(type, `action:${action}`);
-  const metaKind = actionMeta?.kind as 'read' | 'write' | undefined;
-  const metaIo = actionMeta?.io as boolean | undefined;
-  const kind = frameKind(metaKind ?? methodSchema?.kind);
-  const io: boolean = metaIo ?? methodSchema?.io ?? false;
+  const { kind, io } = actionEnvelope(type, action, schema);
 
   // Stack-based propagation check — throws BEFORE we touch the handler so
   // nested invocations don't produce partial side effects.
   assertCanCall({ kind, io });
-  const frame: KindFrame = { kind, io, path, action };
+  const frame: KindFrame = { kind, io, path, action, callerBound: callerBound(tree) };
 
   let draft: NodeData | null = null;
   let nodeForCtx: NodeData;
@@ -751,7 +825,7 @@ async function runAction<T = unknown>(
     }
   }
 
-  return result as T;
+  return result;
   }); // lockAction
 }
 
@@ -768,9 +842,10 @@ export async function* executeStream(
   signal?: AbortSignal,
   opts?: ActionOpts,
 ): AsyncGenerator<unknown> {
-  const { node, handler, type, comp, deps, schema } = await resolveActionHandler(
+  const { node, handler, type, comp, fieldKey, schema } = await resolveActionHandler(
     tree, path, componentType, componentKey, action,
   );
+  const deps = await _collectDeps(node, fieldKey!, action, tree);
 
   validateActionArgs(type, action, data, schema);
 
@@ -778,12 +853,9 @@ export async function* executeStream(
   // actions. NO span lock, deliberately — a stream holds its lane up to
   // STREAM_TIMEOUT (600s); serializing the node that long is a liveness
   // hazard. Stream writes are individually enveloped by the pipeline instead.
-  const methodSchema = schema?.methods?.[action];
-  const actionMeta = getMeta(type, `action:${action}`);
-  const kind = frameKind((actionMeta?.kind as 'read' | 'write' | undefined) ?? methodSchema?.kind);
-  const io: boolean = (actionMeta?.io as boolean | undefined) ?? methodSchema?.io ?? false;
+  const { kind, io } = actionEnvelope(type, action, schema);
   assertCanCall({ kind, io });
-  const frame: KindFrame = { kind, io, path, action };
+  const frame: KindFrame = { kind, io, path, action, callerBound: callerBound(tree) };
 
   // No Immer draft for generators — they persist via ctx.tree.set. A mutation through
   // ctx.node/ctx.comp/ctx.deps would therefore be silently dropped; mirror runAction's
@@ -874,7 +946,7 @@ const DEFAULT_SCHEMA: TypeSchema = {
   type: 'object',
   properties: {},
   methods: {
-    $schema: { arguments: [] },
+    $schema: { arguments: [], kind: 'read' },
     patch: { arguments: [{ name: 'data' }] },
   },
 };

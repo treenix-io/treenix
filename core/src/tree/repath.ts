@@ -78,6 +78,10 @@ export function createRepathTree(inner: Tree, localBase: string, remoteBase: str
   }
 
   return {
+    ...(inner.getPerm ? { getPerm: (path: string) => inner.getPerm!(toRemote(path)) } : {}),
+    get permissionScope() {
+      return [...inner.permissionScope ?? [], JSON.stringify(['repath', lb, rb])];
+    },
     get: async (path, ctx) => {
       const node = await inner.get(toRemote(path), ctx);
       return node ? remapNode(node) : undefined;
