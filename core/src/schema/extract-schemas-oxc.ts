@@ -835,6 +835,11 @@ function findEnums(ast: N, fileName: string): Map<string, N> {
 
 function findExternalActions(ast: N, fileName: string, docs: Map<number, ParsedJSDoc>): Map<string, ExternalAction[]> {
   const byType = new Map<string, ExternalAction[]>();
+  const functions = new Map<string, N>();
+  for (const statement of ast.body) {
+    const declaration = statement.type === 'ExportNamedDeclaration' ? statement.declaration : statement;
+    if (declaration?.type === 'FunctionDeclaration' && declaration.id) functions.set(declaration.id.name, declaration);
+  }
   walk(ast, (node) => {
     if (
       node.type === 'CallExpression' &&
@@ -865,11 +870,13 @@ function findExternalActions(ast: N, fileName: string, docs: Map<number, ParsedJ
         const action: ExternalAction = { name: actionName, fileName };
 
         // Extract handler param types (skip 1st ctx param)
+        const handler = handlerArg?.type === 'Identifier' ? functions.get(handlerArg.name) : handlerArg;
         if (
-          handlerArg?.type === 'ArrowFunctionExpression' ||
-          handlerArg?.type === 'FunctionExpression'
+          handler?.type === 'ArrowFunctionExpression' ||
+          handler?.type === 'FunctionExpression' ||
+          handler?.type === 'FunctionDeclaration'
         ) {
-          const params: N[] = handlerArg.params ?? [];
+          const params: N[] = handler.params ?? [];
           const args = actionArguments(params.slice(1), 0, {}, `${typeArg.value}.${actionName}`, fileName);
           if (args.length) action.arguments = args;
         }

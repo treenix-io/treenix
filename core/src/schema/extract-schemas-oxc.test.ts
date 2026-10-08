@@ -630,6 +630,19 @@ describe('extract-schemas-oxc: action and type rules', () => {
     assert.deepEqual(schema.methods?.run?.arguments, [{ name: 'params', type: 'object', properties: { n: { type: 'number' } } }]);
   });
 
+  it('a named registered handler retains its argument schema', async () => {
+    const schema = await generated(`export async function token(ctx: unknown, data: { displayName?: string }) { return { token: '' }; }
+register('test.sample', 'action:run', token);
+`);
+    assert.deepEqual(schema.methods?.run?.arguments, [{ name: 'data', type: 'object', properties: { displayName: { type: 'string' } } }]);
+  });
+
+  it('a named registered handler cannot add a second data parameter', async () => {
+    await refused(`export function run(ctx: unknown, tag: string, priority: number) {}
+register('test.sample', 'action:run', run);
+`);
+  });
+
   it('a streaming method with @post fails', async () => {
     await refused(registered(`/** @post {"": {"$set": {"a": 1}}} */\nasync *run(): AsyncGenerator<string> { yield '' }`));
   });
