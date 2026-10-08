@@ -14,7 +14,7 @@ export default defineConfig({
   cacheDir: resolve(projectRoot, 'node_modules/.vite/treenx-react'),
   resolve: {
     conditions: ['development'],
-    dedupe: ['react', 'react-dom'],
+    dedupe: ['react', 'react-dom', 'three'],
   },
   plugins: [
     treenixPlugin({ modsDirs: [resolve(projectRoot, 'mods')] }),
