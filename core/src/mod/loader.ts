@@ -1,13 +1,13 @@
-// Treenix Module Loader — dependency sort, load, seed
+// Treenix Module Loader — side-effect imports and schema discovery
 
 import { isInsideRoot } from '#core/path';
+import { safeJsonParse } from '#core/json';
 import { createLogger } from '#log';
 import { loadSchemasRecursive } from '#schema/load';
-import type { Tree } from '#tree';
 import { readdir, readFile, realpath, stat } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { setCurrentMod } from './tracking';
-import type { LoadedMod, ModManifest, TreenixMod } from './types';
+import type { LoadedMod } from './types';
 
 const log = createLogger('mod');
 
@@ -35,59 +35,12 @@ async function confineReal(packagePath: string, candidate: string): Promise<stri
   return realFull;
 }
 
-// ── Dependency sorting (Kahn's algorithm) ──
-
-export function sortByDependencies(mods: ModManifest[]): ModManifest[] {
-  const byName = new Map(mods.map(m => [m.name, m]));
-  const inDegree = new Map<string, number>();
-  const adj = new Map<string, string[]>();
-
-  for (const m of mods) {
-    if (!inDegree.has(m.name)) inDegree.set(m.name, 0);
-    if (!adj.has(m.name)) adj.set(m.name, []);
-
-    for (const dep of m.dependencies ?? []) {
-      if (!byName.has(dep)) throw new Error(`Mod "${m.name}" depends on unknown mod "${dep}"`);
-      if (!adj.has(dep)) adj.set(dep, []);
-      adj.get(dep)!.push(m.name);
-      inDegree.set(m.name, (inDegree.get(m.name) ?? 0) + 1);
-    }
-  }
-
-  const queue: string[] = [];
-  for (const [name, deg] of inDegree) {
-    if (deg === 0) queue.push(name);
-  }
-
-  const sorted: ModManifest[] = [];
-  while (queue.length > 0) {
-    const name = queue.shift()!;
-    sorted.push(byName.get(name)!);
-    for (const next of adj.get(name) ?? []) {
-      const deg = inDegree.get(next)! - 1;
-      inDegree.set(next, deg);
-      if (deg === 0) queue.push(next);
-    }
-  }
-
-  if (sorted.length !== mods.length) {
-    const stuck = mods.filter(m => !sorted.includes(m)).map(m => m.name);
-    throw new Error(`Circular dependency among mods: ${stuck.join(', ')}`);
-  }
-
-  return sorted;
-}
-
 // ── Registry of loaded mods ──
 
 const loaded = new Map<string, LoadedMod>();
 
 export function getLoadedMods(): LoadedMod[] {
   return [...loaded.values()];
-}
-
-export function getMod(name: string): LoadedMod | undefined {
-  return loaded.get(name);
 }
 
 export function isModLoaded(name: string): boolean {
@@ -98,110 +51,11 @@ export function clearModRegistry(): void {
   loaded.clear();
 }
 
-// ── Timeout helper ──
-
-const MOD_TIMEOUT_MS = 30_000;
-
-async function withTimeout<T>(promise: Promise<T>, label: string, ms: number): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new Error(`[mod] ${label} timed out after ${ms}ms`)),
-      ms,
-    );
-    promise.then(resolve, reject).finally(() => clearTimeout(timer));
-  });
-}
-
-// ── Loader ──
-
 export type LoadTarget = 'server' | 'client';
 
 export interface LoadResult {
   loaded: string[];
   failed: { name: string; error: Error }[];
-}
-
-export interface LoadModsOpts {
-  modTimeout?: number;
-}
-
-export async function loadMods(
-  manifests: ModManifest[],
-  target: LoadTarget,
-  tree?: Tree,
-  opts?: LoadModsOpts,
-): Promise<LoadResult> {
-  const timeout = opts?.modTimeout ?? MOD_TIMEOUT_MS;
-  const sorted = sortByDependencies(manifests);
-  const result: LoadResult = { loaded: [], failed: [] };
-
-  for (const manifest of sorted) {
-    const entry: LoadedMod = { name: manifest.name, manifest, state: 'loading' };
-    loaded.set(manifest.name, entry);
-
-    try {
-      for (const dep of manifest.dependencies ?? []) {
-        if (!isModLoaded(dep)) throw new Error(`Dependency "${dep}" not loaded`);
-      }
-
-      const entryPath = target === 'server' ? manifest.server : manifest.client;
-      let mod: TreenixMod | undefined;
-
-      if (entryPath && manifest.packagePath) {
-        const fullPath = await confineReal(manifest.packagePath, entryPath);
-        // R4-BOOT-4: must reset currentMod even if import throws — otherwise the next mod's
-        // register() calls attribute their types to the failed mod's name.
-        setCurrentMod(manifest.name);
-        try {
-          const exported = await import(fullPath);
-          mod = exported.default as TreenixMod;
-        } finally {
-          setCurrentMod(null);
-        }
-      }
-
-      const t0 = performance.now();
-
-      if (mod?.onLoad) {
-        await withTimeout(mod.onLoad(), `${manifest.name}.onLoad`, timeout);
-      }
-
-      // Seed (server-only, needs tree)
-      if (target === 'server' && tree) {
-        if (mod?.seed) {
-          await withTimeout(mod.seed(tree), `${manifest.name}.seed`, timeout);
-        } else if (manifest.seed && manifest.packagePath) {
-          // R4-BOOT-2: seed import must use realpath-confine, not lexical confine — `import`
-          // follows symlinks; a `manifest.seed = "seed.js"` symlink to `../../etc/payload.js`
-          // passes lexical confine but loads foreign code.
-          const seedMod = await import(await confineReal(manifest.packagePath, manifest.seed));
-          await withTimeout(seedMod.default(tree), `${manifest.name}.seed`, timeout);
-        }
-      }
-
-      const elapsed = Math.round(performance.now() - t0);
-      log.info(`${manifest.name} loaded in ${elapsed}ms`);
-
-      entry.mod = mod;
-      entry.state = 'loaded';
-      entry.loadedAt = Date.now();
-      entry.loadDurationMs = elapsed;
-      result.loaded.push(manifest.name);
-
-      // Load per-mod schemas — walks the mod tree for any `schemas/` dir.
-      if (manifest.packagePath) {
-        const entryPath = target === 'server' ? manifest.server : manifest.client;
-        if (entryPath) loadSchemasRecursive(join(manifest.packagePath, dirname(entryPath)));
-      }
-    } catch (err) {
-      const error = err instanceof Error ? err : new Error(String(err));
-      entry.state = 'failed';
-      entry.error = error;
-      result.failed.push({ name: manifest.name, error });
-    }
-  }
-
-  return result;
 }
 
 // ── Local mod loader (side-effect imports from src/mods/) ──
@@ -214,7 +68,10 @@ const SERVER_EXT = ['.ts', '.js'];
 const CLIENT_EXT = ['.tsx', '.ts', '.jsx', '.js'];
 
 async function exists(path: string): Promise<boolean> {
-  try { await stat(path); return true; } catch { return false; }
+  try { await stat(path); return true; } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return false;
+    throw error;
+  }
 }
 
 async function resolveFirst(dir: string, bases: string[], exts: string[]): Promise<string | null> {
@@ -238,10 +95,12 @@ async function resolveFirst(dir: string, bases: string[], exts: string[]): Promi
 // works out of the box, no tsx required for npm-published mods.
 async function packageNameAt(modsDir: string): Promise<string | null> {
   try {
-    const pkg = JSON.parse(await readFile(join(modsDir, 'package.json'), 'utf-8')) as { name?: unknown };
-    return typeof pkg.name === 'string' ? pkg.name : null;
-  } catch {
-    return null;
+    const pkg = safeJsonParse(await readFile(join(modsDir, 'package.json'), 'utf-8'));
+    if (typeof pkg.name !== 'string' || pkg.name.length === 0) throw new TypeError('The mod package needs a name');
+    return pkg.name;
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return null;
+    throw error;
   }
 }
 
@@ -279,8 +138,9 @@ export async function loadLocalMods(modsDir: string, target: LoadTarget): Promis
 
   try {
     entries = await readdir(modsDir, { withFileTypes: true });
-  } catch {
-    return result;
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return result;
+    throw error;
   }
   entries.sort((a, b) => a.name.localeCompare(b.name));
 
@@ -330,13 +190,13 @@ export async function loadLocalMods(modsDir: string, target: LoadTarget): Promis
             await import(real);
           }
         }
+        loadSchemasRecursive(modDir);
       } finally {
         setCurrentMod(null);
       }
       modEntry.state = 'loaded';
       modEntry.loadedAt = Date.now();
       result.loaded.push(entry.name);
-      loadSchemasRecursive(modDir);
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
       modEntry.state = 'failed';

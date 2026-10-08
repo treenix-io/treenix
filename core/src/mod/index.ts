@@ -1,8 +1,7 @@
 // Treenix Module System — public API
 
-export { defineMod } from './types';
-export type { TreenixMod, ModManifest, ModState, LoadedMod } from './types';
-export { sortByDependencies, loadMods, loadLocalMods, loadAllMods, getLoadedMods, isModLoaded, clearModRegistry } from './loader';
+export type { ModState, LoadedMod } from './types';
+export { loadLocalMods, loadAllMods, getLoadedMods, isModLoaded, clearModRegistry } from './loader';
 export type { LoadTarget, LoadResult } from './loader';
 export { registerPrefab, getPrefab, getModPrefabs, getRegisteredMods, getSeedPrefabs, clearPrefabs } from './prefab';
 export type { PrefabSetup, PrefabMeta, PrefabEntry } from './prefab';
