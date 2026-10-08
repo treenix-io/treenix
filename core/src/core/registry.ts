@@ -1,5 +1,6 @@
 import { type Class, ComponentData, normalizeType, type TypeId } from './component';
 import { ContextHandler, Handler } from './context';
+import { createRegistryMap } from './registry-map';
 
 type Entry = { handler: Handler; meta?: Record<string, unknown> };
 
@@ -21,7 +22,7 @@ declare global {
 }
 
 globalThis.__treenxCoreRegistry ??= {
-  registry: new Map(),
+  registry: createRegistryMap<Entry>(),
   listeners: new Set(),
   missResolvers: new Map(),
   version: 0,
@@ -169,4 +170,3 @@ export function onResolveMiss(context: string, resolver: (type: string) => void)
   validateContext(context);
   missResolvers.set(context, resolver);
 }
-

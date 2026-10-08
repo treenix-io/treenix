@@ -83,24 +83,24 @@ export type CompOptions<T> = {
   override?: boolean;
   noOptimistic?: string[];
 };
-const AsyncGenFn = Object.getPrototypeOf(async function* () { }).constructor;
+export const AsyncGenFn = Object.getPrototypeOf(async function* () { }).constructor;
 
 type ActionExecCtx = ExecCtx & { comp?: object; deps?: unknown };
 
-type ActionMethod = { name: string; method: (...args: any[]) => unknown };
+export type ActionMethod = { name: string; method: (...args: any[]) => unknown };
 
-function actionMethods<T>(cls: Class<T>): ActionMethod[] {
-  const proto = cls.prototype as Record<string, unknown>;
+export function actionMethods<T>(cls: Class<T>): ActionMethod[] {
+  const proto = cls.prototype;
   const methods: ActionMethod[] = [];
   for (const name of Object.getOwnPropertyNames(proto)) {
     if (name === 'constructor') continue;
-    const method = proto[name];
-    if (typeof method === 'function') methods.push({ name, method: method as ActionMethod['method'] });
+    const method = Object.getOwnPropertyDescriptor(proto, name)?.value;
+    if (typeof method === 'function') methods.push({ name, method });
   }
   return methods;
 }
 
-function compileNeeds<T>(methods: ActionMethod[], opts?: CompOptions<T>): Map<string, NeedSpec[]> {
+export function compileNeeds<T>(methods: ActionMethod[], opts?: CompOptions<T>): Map<string, NeedSpec[]> {
   const declared = opts?.needs;
   if (!declared) return new Map();
 
