@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 import { createFsTree } from './fs';
-import { assertPathSafe } from './path-safety';
+import { assertPathSafe } from '#util/path-safety';
 
 describe('FsStore', () => {
   let dir: string;

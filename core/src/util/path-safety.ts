@@ -1,4 +1,4 @@
-// FS adapter path safety — server-only. Imports node:fs/node:path at module
+// Filesystem path safety — server-only. Imports node:fs/node:path at module
 // top, so this file MUST NOT be reachable from React/browser bundles.
 
 import { isInsideRoot } from '#core/path';

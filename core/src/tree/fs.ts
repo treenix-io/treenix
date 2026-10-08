@@ -16,7 +16,7 @@ import { dirname, join, resolve } from 'node:path';
 import { atomicWrite } from './fs-atomic';
 import { scanFromCollected } from './fs-common';
 import { ensureMigrated } from './migrate-component-namespace';
-import { assertPathSafe } from './path-safety';
+import { assertPathSafe } from '#util/path-safety';
 import { applyPatchManyEntry, assertPatchManyBatch, assertSetEntryOcc, isSetEntry, paginate, readWork, type TreeSource } from './index';
 import { type CommitChange, type CommitReceipt, hasMutationOps, patchViaSet } from './patch';
 

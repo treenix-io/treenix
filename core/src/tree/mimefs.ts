@@ -11,7 +11,7 @@ import { DEFAULT_LIMITS } from '#kernel/types';
 import { mkdir, readdir, realpath, rmdir, stat, unlink } from 'node:fs/promises';
 import { dirname, extname, join, resolve } from 'node:path';
 import { scanFromCollected } from './fs-common';
-import { assertPathSafe } from './path-safety';
+import { assertPathSafe } from '#util/path-safety';
 import { paginate, readWork, type TreeSource } from './index';
 import './json-codec'; // register JSON decode handler
 import { patchViaSet } from './patch';
