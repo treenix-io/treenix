@@ -2,9 +2,10 @@ import { KernelError } from '#errors'
 import { createProcessCache, type CacheRead, type ProcessCache } from '#kernel/cache'
 import type { NodeChange } from '#kernel/changeset'
 import { createInfluenceIndex, type InfluenceOptions } from '#kernel/influence'
+import { createIdempotency, type IdempotencyOptions, type MutationIdentity } from '#kernel/idempotency'
 import { comparePositions } from '#kernel/position'
 import { createInstanceStream, type StreamDomain } from '#kernel/stream'
-import { DEFAULT_LIMITS, type Budget, type DomainId, type JournalCommit, type Position, type Store, type StoreCommit, type StoredWrite, type StreamEvent } from '#kernel/types'
+import { DEFAULT_LIMITS, type Budget, type DomainId, type JournalCommit, type Outcome, type Position, type Store, type StoreCommit, type StoredWrite, type StreamEvent } from '#kernel/types'
 
 export interface PositionCounter {
   load(): Promise<Position | undefined>
@@ -22,6 +23,7 @@ export interface WriterOptions {
   readonly budget?: () => Budget
   readonly cache?: ProcessCache
   readonly influence?: Pick<InfluenceOptions, 'maxWrites' | 'maxBytes'>
+  readonly intake?: Pick<IdempotencyOptions, 'now' | 'limits'>
 }
 
 export interface PreparedCommit {
@@ -29,6 +31,12 @@ export interface PreparedCommit {
   readonly record: JournalCommit
   readonly transitions?: readonly NodeChange[]
 }
+export interface PreparedMutation extends PreparedCommit { readonly value?: unknown }
+export interface MutationSpan {
+  step(store: Store, reads: readonly DomainId[], prepare: (position: Position) => PreparedCommit | Promise<PreparedCommit>): Promise<Position>
+  finish(store: Store, reads: readonly DomainId[], prepare: (position: Position) => PreparedMutation | Promise<PreparedMutation>): Promise<Outcome>
+}
+
 type Applied =
   | { readonly t: 'committed'; readonly pos: Position; readonly domain: DomainId; readonly commit: StoreCommit; readonly changes: readonly NodeChange[] | null; readonly event: StreamEvent }
   | { readonly t: 'gap'; readonly pos: Position; readonly event: StreamEvent; readonly error: unknown }
@@ -60,6 +68,7 @@ export async function createWriter(options: WriterOptions) {
   const domains = new Set(options.domains.map(domain => domain.store.domain))
   const stores = new Set(options.domains.map(domain => domain.store))
   if (!stores.has(options.root)) throw new KernelError('INVALID', 'Root Store is not a declared target')
+  const intake = await createIdempotency({ root: options.root, domains: options.domains, budget, ...options.intake })
   const influence = createInfluenceIndex({ position, domains: [...domains], ...options.influence })
   const writers = new Map<DomainId, Promise<void>>()
   const readers = new Map<DomainId, Set<Promise<void>>>()
@@ -82,10 +91,12 @@ export async function createWriter(options: WriterOptions) {
   // Fence every target before serving writes: an old process may have reserved a position already.
   for (const store of stores) {
     const pos = await allocate()
-    const record: JournalCommit = { pos, kind: 'kernel', executor: 'kernel', caller: 'kernel', entries: [] }
+    const record: JournalCommit = { pos, kind: 'kernel', executor: 'kernel', caller: 'kernel', entries: [],
+      ...(store === options.root ? { intake: intake.next(pos) } : {}) }
     try {
       const commit = { pos, writerEpoch: options.writerEpoch, writes: [], record }
       await store.commit(commit)
+      if (record.intake !== undefined) intake.publish(record.intake)
       cache.apply(store.domain, commit)
       influence.record(store.domain, pos, [])
       stream.publish({ t: 'commit', domain: store.domain, record })
@@ -154,6 +165,7 @@ export async function createWriter(options: WriterOptions) {
         const result = await applied
         if (fatal !== undefined) throw fatal.error
         if (result.t === 'committed') {
+          if (result.commit.record.intake !== undefined) intake.publish(result.commit.record.intake)
           const images = new Map(cache.apply(result.domain, result.commit).map(image => [image.id, image.node]))
           if (result.changes === null) influence.reset(result.domain, result.pos)
           else influence.record(result.domain, result.pos, result.changes.map(change => ({ ...change,
@@ -177,5 +189,51 @@ export async function createWriter(options: WriterOptions) {
         return result.pos
       })
   }
-  return { stream, cache, influence, get position(): Position { return { ...position } }, commit }
+  async function refreshIntake(force = false): Promise<void> {
+    await commit(options.root, [...domains], pos => ({ writes: [], transitions: [],
+      record: { pos, kind: 'kernel', executor: 'kernel', caller: 'kernel', entries: [], intake: intake.next(pos, force) } }))
+  }
+  async function mutate(input: MutationIdentity, execute: (span: MutationSpan) => Promise<unknown>): Promise<Outcome> {
+    if (fatal !== undefined) throw fatal.error
+    return intake.run(input, () => refreshIntake(), async decision => {
+      let started = false, pending = false, outcome: Outcome | undefined
+      async function apply(store: Store, reads: readonly DomainId[], prepare: (pos: Position) => PreparedMutation | Promise<PreparedMutation>, finish: boolean): Promise<Position> {
+        if (pending || outcome !== undefined) throw new KernelError('INVALID', 'Mutation steps must be ordered and finish once')
+        pending = true
+        try {
+          let final: Outcome | undefined
+          const position = await commit(store, [...new Set([...reads, options.root.domain])], async pos => {
+            intake.checkAdmitted(input.opId)
+            const prepared = await prepare(pos)
+            if (prepared.record.caller !== input.actor.principal) throw new KernelError('INVALID', 'Mutation caller differs from its journal')
+            const value: Outcome = structuredClone({ pos, ...(Object.hasOwn(prepared, 'value') ? { value: prepared.value } : {}) })
+            const record = { ...prepared.record, ...(finish || !started ? {
+              decision: { ...decision, ...(finish ? { outcome: value } : {}) },
+            } : {}) }
+            if (finish) final = value
+            return { ...prepared, record }
+          })
+          if (finish) outcome = final
+          return position
+        } finally { pending = false }
+      }
+      const span: MutationSpan = {
+        async step(store, reads, prepare) {
+          if (input.stream === undefined) throw new KernelError('INVALID', 'Only a stream has intermediate mutation steps')
+          const pos = await apply(store, reads, prepare, false)
+          started = true
+          return pos
+        },
+        async finish(store, reads, prepare) {
+          await apply(store, reads, prepare, true)
+          return structuredClone(outcome!)
+        },
+      }
+      await execute(span)
+      if (outcome === undefined) throw new KernelError('INVALID', 'Mutation returned without its durable final outcome')
+      return outcome
+    })
+  }
+  return { stream, cache, influence, get position(): Position { return { ...position } },
+    get intake() { return intake.state }, commit, mutate, refreshIntake }
 }
