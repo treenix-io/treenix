@@ -128,6 +128,7 @@ describe('journal-backed mutation identity', { timeout: 10_000 }, () => {
     const refusal = assert.rejects(first, (error: unknown) => error === failure)
     await entered.promise
     const duplicate = assert.rejects(writer.mutate(input, noExecution), (error: unknown) => error === failure)
+    await assert.rejects(() => writer.mutate({ ...input, actor: { ...actor, scope: ['/other'] } }, noExecution), errorCode('KEY_REUSED'))
     release.resolve()
     await Promise.all([refusal, duplicate])
     assert.deepEqual(await decision(root, input.opId), [])

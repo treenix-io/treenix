@@ -93,13 +93,13 @@ export async function createIdempotency(options: IdempotencyOptions) {
         if (input.opId.time < expires && expires > current().boundary) await advance()
         if (input.opId.time < current().boundary) throw new KernelError('EXPIRED', 'Mutation key has expired')
         if (prior !== undefined) {
+          if (prior.hash !== hash) throw new KernelError('KEY_REUSED', 'Mutation key was used by another request or actor')
           const value = await prior.outcome.catch(async error => {
             const record = await lookup(caller, input.opId)
             if (record === undefined) throw error
             console.error(error)
             return replay(record, hash)
           })
-          if (prior.hash !== hash) throw new KernelError('KEY_REUSED', 'Mutation key was used by another request or actor')
           return structuredClone(value)
         }
         const record = await lookup(caller, input.opId)
