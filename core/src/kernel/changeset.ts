@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from 'node:util'
 import { ancestorPaths, assertSafePath, dirname, isChildPath } from '#core/path'
 import { KernelError } from '#errors'
+import { validateBlobReferences } from '#kernel/blobs'
 import { runStoreQuery } from '#kernel/store/budget'
 import type { ActionProvenance } from '#kernel/action-guard'
 import type { CacheRead, ProcessCache } from '#kernel/cache'
@@ -12,7 +13,7 @@ import { comparePositions } from '#kernel/position'
 import { checkPreconditions, type PreconditionOptions, type ReadSet } from '#kernel/preconditions'
 import { DEFAULT_LIMITS, type Actor, type Budget, type ChangeMember, type Component, type Executor, type JournalAddress, type JournalEntry,
   type Principal,
-  type Limits, type NodeInput, type Position, type Registry, type ScanRange, type Store, type StoredNode } from '#kernel/types'
+  type BlobStore, type Limits, type NodeInput, type Position, type Registry, type ScanRange, type Store, type StoredNode } from '#kernel/types'
 import { applyUpdateOps, assertNoPrototypeKeys, assertUpdateOps } from '#kernel/update-ops'
 import type { PreparedCommit } from '#kernel/writer'
 import { ulid } from '#util/ulid'
@@ -33,6 +34,7 @@ export interface ChangeSetOptions {
   readonly readBefore?: (path: string) => Promise<StoredNode | null>
   readonly capabilities?: CapabilityState
   readonly preconditions?: Omit<PreconditionOptions, 'position'>
+  readonly blobs?: BlobStore
 }
 export interface PreparedChangeSet extends PreparedCommit {
   readonly transitions: readonly NodeChange[]
@@ -251,6 +253,7 @@ export async function prepareChangeSet(options: ChangeSetOptions, changes: reado
       expanded.push({ id, before, after })
     }
     await guard.finish(expanded)
+    await validateBlobReferences(expanded.map(change => change.after), options.blobs, budget)
     const paths = new Set(expanded.flatMap(change => [...change.before === null ? [] : [change.before.$path],
       ...change.after === null ? [] : [change.after.$path]]))
     return { writes: [...paths].map(at => ({ path: at, node: states.get(at)! })),

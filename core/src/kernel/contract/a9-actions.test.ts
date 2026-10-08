@@ -398,6 +398,38 @@ describe('native action handlers', { timeout: 10_000 }, () => {
     assert.equal(restored.$id, before.$id); assert.equal(restored.value, 'child')
   })
 
+  it('rejects embedded binary in action inputs and staged writes without committing earlier changes', async t => {
+    const f = await setup({
+      putBinary: { kind: 'write', args: {}, handler: async ctx => {
+        ctx.change.put({ $path: '/work/staged', $type: 't.dir' })
+        ctx.change.put({ $path: '/work/binary', $type: 't.dir', file: new Uint8Array([1]) })
+      } },
+      patchBinary: { kind: 'write', args: {}, handler: async ctx => {
+        ctx.change.put({ $path: '/work/staged', $type: 't.dir' })
+        ctx.change.patch('/work/stock', { $set: { file: Buffer.from([1]) } })
+      } },
+      nestedBinary: { kind: 'write', args: {}, handler: async ctx => {
+        ctx.change.put({ $path: '/work/staged', $type: 't.dir' })
+        await ctx.act({ path: ctx.node.$path, action: 'inspect', args: { file: new Uint8Array([1]) } })
+      } },
+      draftBinary: { kind: 'write', args: {}, handler: async function(this: { count: number; file?: unknown }, ctx) {
+        ctx.change.put({ $path: '/work/staged', $type: 't.dir' })
+        this.count++
+        this.file = new Uint8Array([1])
+      } },
+      inspect: { kind: 'read', args: {}, handler: async () => 1 },
+    })
+    t.after(() => f.instance.auth.close())
+    for (const action of ['putBinary', 'patchBinary', 'nestedBinary', 'draftBinary']) {
+      await assert.rejects(f.commands.act(f.request(action)), code('INVALID'))
+      assert.equal(await f.instance.source.node('/work/staged'), null)
+      assert.equal(await f.instance.source.node('/work/binary'), null)
+      assert.equal((await f.instance.source.node('/work/stock'))?.file, undefined)
+      assert.equal((await f.instance.source.node('/work/document'))?.count, 0)
+    }
+    await assert.rejects(f.commands.act({ ...f.request('inspect'), args: { file: new Uint8Array([1]) } }), code('INVALID'))
+  })
+
   it('refuses a subtree removal expanding into 101 transitions without a partial deletion', async t => {
     const f = await setup({ remove: { kind: 'write', args: {}, handler: async ctx => ctx.change.remove('/work/tree') } })
     t.after(() => f.instance.auth.close())

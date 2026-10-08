@@ -13,7 +13,7 @@ import { judgeGates } from '#kernel/gates'
 import { componentEntries } from '#kernel/migrate'
 import { assertPost } from '#kernel/post'
 import { createReader } from '#kernel/reader'
-import { createRequestAdmission } from '#kernel/request'
+import { createRequestAdmission, serializeRequest } from '#kernel/request'
 import { R, W, type ActRequest, type ActionDef, type ActionResult, type NestedActRequest, type OpId, type Outcome } from '#kernel/types'
 import type { MutationSpan } from '#kernel/writer'
 import { freeze } from '#util/freeze'
@@ -62,8 +62,9 @@ export function createActionRuntime(options: CommandOptions) {
     try {
       assertActive()
       if (depth > limits.actionDepth) throw new KernelError('BUDGET', 'Action nesting exceeds its limit')
-      if (Buffer.byteLength(JSON.stringify(input)) > limits.requestBytes) throw new KernelError('BUDGET', 'Action request budget exceeded')
-      const request = freeze(structuredClone(input))
+      const owned = structuredClone(input)
+      if (Buffer.byteLength(serializeRequest(owned)) > limits.requestBytes) throw new KernelError('BUDGET', 'Action request budget exceeded')
+      const request = freeze(owned)
       const opId = request.opId
       const component = request.component ?? ''
       if (request.anchor !== undefined) throw new KernelError('UNAVAILABLE', 'Streaming actions are not implemented')
@@ -144,7 +145,9 @@ export function createActionRuntime(options: CommandOptions) {
         async function callNestedAction(input: NestedActRequest): Promise<unknown> {
           assertActionCurrent()
           if (Object.hasOwn(input, 'opId') || Object.hasOwn(input, 'anchor')) throw new KernelError('INVALID', 'Nested mutation keys belong to the runtime')
-          const nestedRequest = freeze(structuredClone(input))
+          const nestedInput = structuredClone(input)
+          serializeRequest(nestedInput)
+          const nestedRequest = freeze(nestedInput)
           const key = nestedRequest.key
           if (key !== undefined) {
             if (typeof key !== 'string' || key.length === 0 || keys.has(key)) throw new KernelError('INVALID', 'Nested call keys must be unique and nonempty')
@@ -201,6 +204,7 @@ export function createActionRuntime(options: CommandOptions) {
             assertActionCurrent()
 
             const prepareOptions: ChangeSetOptions = { store, cache: writer.cache, registry, limits, budget,
+              blobs: options.blobs,
               resolve: path => source.resolve(path).store, readBefore: source.auth.node, capabilities: options.capabilities(budget),
               preconditions: { index: writer.influence, read: reads.projectedNode, domains: reads.domains,
                 dependency: reads.dependency, project: reads.project, work: reads.work, limits } }

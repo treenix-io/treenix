@@ -6,8 +6,8 @@ import { prepareChangeSet, type PreparedChangeSet } from '#kernel/changeset'
 import { judgeGates } from '#kernel/gates'
 import type { createProjector } from '#kernel/projection'
 import { createReader, type ReaderSource } from '#kernel/reader'
-import { createRequestAdmission } from '#kernel/request'
-import type { Budget, CommitRequest, Gate, Io, Limits, Outcome, Registry, Selector } from '#kernel/types'
+import { createRequestAdmission, serializeRequest } from '#kernel/request'
+import type { BlobStore, Budget, CommitRequest, Gate, Io, Limits, Outcome, Registry, Selector } from '#kernel/types'
 import type { Writer } from '#kernel/writer'
 import { freeze } from '#util/freeze'
 
@@ -24,6 +24,7 @@ export interface CommandOptions {
   readonly validate: (prepared: PreparedChangeSet) => void
   readonly projector?: ReturnType<typeof createProjector>
   readonly io?: Io
+  readonly blobs?: BlobStore
 }
 
 export function createCommands(options: CommandOptions) {
@@ -54,9 +55,10 @@ export function createCommands(options: CommandOptions) {
       const authorization = createRequestAdmission(admission, requestSignal)
       const budget = options.budget(), limits = options.limits()
       active(budget, authorization)
-      const serialized = JSON.stringify(input)
+      const owned = structuredClone(input)
+      const serialized = serializeRequest(owned)
       if (Buffer.byteLength(serialized) > limits.requestBytes) throw new KernelError('BUDGET', 'Commit request budget exceeded')
-      const request = freeze(structuredClone(input)), opId = request.opId
+      const request = freeze(owned), opId = request.opId
       if (opId === undefined || typeof opId.epoch !== 'string' || opId.epoch.length === 0
         || !Number.isSafeInteger(opId.time) || opId.time < 0 || typeof opId.nonce !== 'string' || opId.nonce.length === 0)
         throw new KernelError('INVALID', 'A mutation key is required')
@@ -72,6 +74,7 @@ export function createCommands(options: CommandOptions) {
           await authorization.validate(source.auth)
           const revision = options.registryRevision(), reads = reader(budget, source, authorization)
           const prepared = await prepareChangeSet({ store, cache: writer.cache, registry, limits, budget,
+            blobs: options.blobs,
             resolve: path => source.resolve(path).store, readBefore: source.auth.node, capabilities,
             preconditions: { index: writer.influence, read: reads.projectedNode, domains: () => source.domains,
               dependency: reads.dependency, project: reads.project, work: reads.work, limits } },

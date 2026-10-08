@@ -5,6 +5,7 @@ import { recheckLogin } from '#kernel/auth/login'
 import { assertAuthKey, assertBootstrapState, bootstrap, bootstrapIdentity, bootstrapModules, LIMITS_PATH,
   ownershipRecord, storedLimits, TYPE_PATH, type BootstrapIdentity } from '#kernel/bootstrap'
 import { createProcessCache, type Image } from '#kernel/cache'
+import { createBlobTransfers } from '#kernel/blobs'
 import { createChainIndex } from '#kernel/chain-index'
 import { prepareChangeSet, type ChangeExecutor } from '#kernel/changeset'
 import { createCommands, type CommandOptions, type NativeCommands } from '#kernel/commands'
@@ -17,7 +18,7 @@ import type { AuthReadSource, AuthSource } from '#kernel/session'
 import type { AuthAdmission } from '#kernel/auth-factory'
 import type { StreamDomain } from '#kernel/stream'
 import { DEFAULT_LIMITS, type Budget, type ChangeMember, type Credential, type InstanceId, type Limits, type NodeId,
-  type Gate, type Position, type Registry, type Store, type StoreCommit, type StoredNode } from '#kernel/types'
+  type BlobStore, type Gate, type Position, type Registry, type Store, type StoreCommit, type StoredNode } from '#kernel/types'
 import { createWriter, type PositionCounter, type Writer } from '#kernel/writer'
 
 export interface InstanceFoundationConfig {
@@ -30,6 +31,7 @@ export interface InstanceFoundationConfig {
   readonly budget?: () => Budget
   readonly initialCredential?: { readonly ttlMs: number }
   readonly gates?: readonly Gate[]
+  readonly blobs?: BlobStore
 }
 
 export interface InstanceFoundation {
@@ -234,6 +236,7 @@ export async function createInstanceFoundation(input: InstanceFoundationConfig):
     return writer.commit(config.root, [], async pos => {
       const allowance = budget(), readSource = reader(allowance)
       const prepared = await prepareChangeSet({ store: config.root, cache: writer.cache, registry, limits,
+        blobs: config.blobs,
         budget: allowance, readBefore: readSource.node, capabilities: { node: readSource.nodeById,
           grants: principal => chains.grantsTo(principal), ownerGrants: chains.grants({ owner: true }), shard: readSource.shard } },
       changes, pos, who)
@@ -245,6 +248,7 @@ export async function createInstanceFoundation(input: InstanceFoundationConfig):
     available()
     const target = { id: paths.get('/')!, store: config.root, chain: chains.chain, children: chains.children }
     return { writer, registry, projector, registryRevision: () => registryRevision,
+        blobs: config.blobs,
         admission, source: allowance => ({ domains: [config.root.domain], auth: reader(allowance), resolve: () => target }),
         capabilities: allowance => {
           const readSource = reader(allowance)
@@ -261,6 +265,7 @@ export async function createInstanceFoundation(input: InstanceFoundationConfig):
     nodeLaneOptions(admission) {
       const options = commandOptions(admission)
       return { admission, commands: createCommands(options), stream: writer.stream, limits: () => limits, intake: () => writer.intake.epoch,
+        transfers: config.blobs === undefined ? undefined : createBlobTransfers(options, config.blobs),
         read: createNodeLaneRead(options),
         gateSub: (selector, signal) => judgeGates(options.gates, { kind: 'sub', selector, origin: admission.origin },
           admission.actor, { signal, deadline: budget().deadline }),

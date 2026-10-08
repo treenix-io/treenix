@@ -1,4 +1,5 @@
 import { KernelError } from '#errors'
+import { serializeRequest } from '#kernel/request'
 import type { ChangeBuilder, ChangeMember, JournalAddress, Limits, NodeInput, Path, UpdateOps } from '#kernel/types'
 import { freeze } from '#util/freeze'
 
@@ -16,13 +17,13 @@ export function createChangeBuilder(active: () => void, limits: Limits) {
   function add(input: ChangeMember): void {
     check()
     if (closed) throw new KernelError('INVALID', 'Action changes are closed')
-    const change = freeze(structuredClone(input))
-    bytes += Buffer.byteLength(JSON.stringify(change))
+    const owned = structuredClone(input)
+    bytes += Buffer.byteLength(serializeRequest(owned))
     if (changes.length >= limits.changeSet || bytes > limits.requestBytes) {
       failure = new KernelError('BUDGET', 'Action changes exceed their budget')
       throw failure
     }
-    changes.push(change)
+    changes.push(freeze(owned))
   }
 
   const change: ChangeBuilder = Object.freeze({

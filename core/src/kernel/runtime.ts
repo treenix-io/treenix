@@ -7,6 +7,7 @@ import { createInstanceFoundation, type InstanceFoundationWithAuth } from '#kern
 import { openPersistentWriter } from '#kernel/persistence'
 import { copyManifest, createRegistry } from '#kernel/registry'
 import { createFsStore } from '#kernel/store/fs'
+import { createFsBlobStore } from '#kernel/blob-store-fs'
 import { DEFAULT_LIMITS, type ChangeMember, type Credential, type Gate, type ModuleManifest } from '#kernel/types'
 
 export interface NativeRuntimeConfig {
@@ -69,6 +70,7 @@ export async function openNativeRuntime(input: NativeRuntimeConfig) {
     const existing = await store.scan({ range: { node: '/' }, budget: { nodes: 1, bytes: DEFAULT_LIMITS.readBytes,
       exprWork: DEFAULT_LIMITS.exprWork, deadline: Date.now() + DEFAULT_LIMITS.queryMs } })
     foundation = await createInstanceFoundation({ id: config.id, root: store, writerEpoch: lease.writerEpoch,
+      blobs: await createFsBlobStore(join(config.directory, '.treenix', 'blobs')),
       counter: lease, domains: [{ store, epoch: lease.epoch, persistent: true }], gates: config.gates,
       initialCredential: { ttlMs: config.credentialTtlMs }, ...(existing.items.length === 0 && firstAdmin !== undefined ? { firstAdmin } : {}) })
     await installModules(foundation, modules, config.installerCredential)
