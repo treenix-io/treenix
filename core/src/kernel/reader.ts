@@ -1,17 +1,19 @@
-import { ancestorPaths, assertSafePath } from '#core/path'
+import { ancestorPaths, assertSafePath, isChildPath } from '#core/path'
 import { KernelError } from '#errors'
 import type { AuthAdmission } from '#kernel/auth-factory'
 import type { CacheRead } from '#kernel/cache'
 import { decodeChainNode } from '#kernel/chain-index'
 import type { ExprWork } from '#kernel/eval'
 import { createSiftTest } from '#kernel/expr'
+import { applyFieldDeltas } from '#kernel/journal'
+import type { LaneBranch, LaneRange, LaneRoot, LaneSelection } from '#kernel/lane-selection'
 import { positionToRev } from '#kernel/position'
 import { typeReadVersion, type ReadDependency, type ReadSet } from '#kernel/preconditions'
 import { createProjector, visibleNode } from '#kernel/projection'
 import { computeRights, type ChainNode } from '#kernel/rights'
 import type { AuthReadSource } from '#kernel/session'
 import { mapNodeForSift } from '#kernel/store/keys'
-import { scanPage } from '#kernel/store/scan'
+import { compareScanKeys, parseScanCursor, scanCursor, scanKey, scanPage, type ScanKey } from '#kernel/store/scan'
 import { DEFAULT_LIMITS, R, type Budget, type DomainId, type IncludeSpec, type Limits, type Node, type NodeCopy,
   type Path, type ReadResult, type Registry, type Selector, type Sort, type Store, type StoredNode, type SubSelector } from '#kernel/types'
 import { getByPath } from '#kernel/update-ops'
@@ -38,6 +40,7 @@ export interface ReaderOptions {
   readonly limits?: Limits
   readonly alert?: (path: Path, error: unknown) => void
   readonly projector?: ReturnType<typeof createProjector>
+  readonly scope?: { check(): void; hold(lease: CacheRead): void }
 }
 
 function ruleTypes(node: ChainNode, registry: Registry): readonly string[] {
@@ -88,185 +91,476 @@ function reference(node: Node, field: string): Path | undefined {
   throw new KernelError('INVALID', 'Include field does not contain a reference')
 }
 
-interface Loaded { readonly copy: NodeCopy; readonly visible: Node }
+interface Loaded {
+  readonly copy: NodeCopy;
+  readonly visible: Node;
+  readonly stored: StoredNode;
+  readonly store: Store;
+  readonly bits: number;
+  readonly sort: Sort;
+}
 
+/** Reads canonical projections and records the dependencies used by queries, actions and subscriptions. */
 export function createReader(options: ReaderOptions) {
-  const { registry, writer, admission, source } = options
-  const limits = options.limits ?? DEFAULT_LIMITS, allowance = Object.freeze({ ...options.budget })
-  const alert = options.alert ?? ((at: Path, error: unknown) => console.error(at, error))
-  const projectCopy = options.projector ?? createProjector({ registry, alert })
-  const work: ExprWork = { used: 0, limit: allowance.exprWork }
-  const nodes = new Map<Path, string>(), absent = new Set<Path>()
-  const dependencies = new Map<string, ReadDependency>(), selectors: NonNullable<ReadSet['selectors']>[number][] = []
-  let scanned = 0, bytes = 0, requestBytes = 0
+  const { registry, writer, admission, source } = options;
+  const limits = options.limits ?? DEFAULT_LIMITS,
+    allowance = Object.freeze({ ...options.budget });
+  const alert = options.alert ?? ((at: Path, error: unknown) => console.error(at, error));
+  const projectCopy = options.projector ?? createProjector({ registry, alert });
+  const work: ExprWork = { used: 0, limit: allowance.exprWork };
+  const nodes = new Map<Path, string>(),
+    absent = new Set<Path>();
+  const dependencies = new Map<string, ReadDependency>(),
+    selectors: NonNullable<ReadSet['selectors']>[number][] = [];
+  const scopeLoaded = options.scope === undefined ? undefined : new Map<Path, Loaded | null>();
+  let scanned = 0,
+    bytes = 0,
+    requestBytes = 0;
 
   function active(): void {
-    admission.assertActive()
-    if (Date.now() > allowance.deadline) throw new KernelError('BUDGET', 'Read deadline exceeded')
+    options.scope?.check();
+    admission.assertActive();
+    if (Date.now() > allowance.deadline) throw new KernelError('BUDGET', 'Read deadline exceeded');
   }
   function depend(input: ReadDependency): void {
-    const key = `${input.kind}:${input.key}`
-    if (!dependencies.has(key)) dependencies.set(key, input)
+    const key = `${input.kind}:${input.key}`;
+    if (!dependencies.has(key)) dependencies.set(key, input);
   }
   function target(at: Path): ReaderTarget {
-    const found = source.resolve(at)
-    depend({ kind: 'target', key: at, value: { id: found.id, domain: found.store.domain } })
-    return found
+    const found = source.resolve(at);
+    depend({ kind: 'target', key: at, value: { id: found.id, domain: found.store.domain } });
+    return found;
   }
   function rights(at: Path, found: ReaderTarget, image?: StoredNode, capture = true) {
-    const chain = found.chain(at), inputs = new Map(chain.map(node => [node.path, node]))
-    const ancestors = ancestorPaths(at)
-    if (image !== undefined) inputs.set(at, decodeChainNode(image))
-    if (capture) for (const ancestor of ancestors) {
-      if (dependencies.has(`rights:${ancestor}`)) continue
-      const node = inputs.get(ancestor)
-      depend({ kind: 'rights', key: ancestor, value: readerRightsInput(node, registry) })
-      if (node !== undefined) for (const name of ruleTypes(node, registry)) depend({ kind: 'type', key: name, value: typeReadVersion(registry, name) })
-    }
-    const ordered = ancestors.flatMap(ancestor => {
-      const node = inputs.get(ancestor)
-      return node === undefined ? [] : [node]
-    })
-    if (ordered.at(-1)?.path !== at) ordered.push({ path: at, id: '', types: [], acl: [], hasAcl: false, hasOwner: false, alerts: [] })
-    const result = computeRights(admission.actor, ordered, registry)
-    for (const failure of result.alerts) alert(failure.path, failure.error)
-    active()
-    return result
+    const chain = found.chain(at),
+      inputs = new Map(chain.map((node) => [node.path, node]));
+    const ancestors = ancestorPaths(at);
+    if (image !== undefined) inputs.set(at, decodeChainNode(image));
+    if (capture)
+      for (const ancestor of ancestors) {
+        if (dependencies.has(`rights:${ancestor}`)) continue;
+        const node = inputs.get(ancestor);
+        depend({ kind: 'rights', key: ancestor, value: readerRightsInput(node, registry) });
+        if (node !== undefined)
+          for (const name of ruleTypes(node, registry))
+            depend({ kind: 'type', key: name, value: typeReadVersion(registry, name) });
+      }
+    const ordered = ancestors.flatMap((ancestor) => {
+      const node = inputs.get(ancestor);
+      return node === undefined ? [] : [node];
+    });
+    if (ordered.at(-1)?.path !== at)
+      ordered.push({
+        path: at,
+        id: '',
+        types: [],
+        acl: [],
+        hasAcl: false,
+        hasOwner: false,
+        alerts: [],
+      });
+    const result = computeRights(admission.actor, ordered, registry);
+    for (const failure of result.alerts) alert(failure.path, failure.error);
+    active();
+    return result;
   }
   function project(stored: StoredNode, selector: Selector): Node | null {
-    const bits = rights(stored.$path, source.resolve(stored.$path), stored, false).bits
-    const copy = projectCopy(stored, bits, 'children' in selector ? selector.sort : undefined)
-    active()
-    return copy === null ? null : 'node' in copy ? copy.node : visibleNode(stored, bits)
+    const bits = rights(stored.$path, source.resolve(stored.$path), stored, false).bits;
+    const copy = projectCopy(stored, bits, 'children' in selector ? selector.sort : undefined);
+    active();
+    return copy === null ? null : 'node' in copy ? copy.node : visibleNode(stored, bits);
   }
   function dependency(input: ReadDependency): unknown {
-    if (input.kind === 'actor') return admission.dependency()
-    if (input.kind === 'type') return typeReadVersion(registry, input.key)
-    if (input.kind === 'epoch') return writer.stream.cursor().epochs[input.key]
-    const found = source.resolve(input.key)
-    if (input.kind === 'target') return { id: found.id, domain: found.store.domain }
-    return readerRightsInput(found.chain(input.key).find(node => node.path === input.key), registry)
+    if (input.kind === 'actor') return admission.dependency();
+    if (input.kind === 'type') return typeReadVersion(registry, input.key);
+    if (input.kind === 'epoch') return writer.stream.cursor().epochs[input.key];
+    const found = source.resolve(input.key);
+    if (input.kind === 'target') return { id: found.id, domain: found.store.domain };
+    return readerRightsInput(
+      found.chain(input.key).find((node) => node.path === input.key),
+      registry,
+    );
   }
   function checkDependencies(): void {
-    for (const input of dependencies.values()) if (!isDeepStrictEqual(input.value, dependency(input)))
-      throw new KernelError('CONFLICT', 'Read dependencies changed while awaiting data')
+    for (const input of dependencies.values())
+      if (!isDeepStrictEqual(input.value, dependency(input)))
+        throw new KernelError('CONFLICT', 'Read dependencies changed while awaiting data');
   }
   function charge(stored: StoredNode): void {
-    active()
-    scanned++; bytes += Buffer.byteLength(JSON.stringify(stored))
-    if (scanned > allowance.nodes || bytes > allowance.bytes) throw new KernelError('BUDGET', 'Read budget exceeded')
+    active();
+    scanned++;
+    bytes += Buffer.byteLength(JSON.stringify(stored));
+    if (scanned > allowance.nodes || bytes > allowance.bytes)
+      throw new KernelError('BUDGET', 'Read budget exceeded');
   }
   function remaining(): Budget {
-    active()
-    if (scanned >= allowance.nodes) throw new KernelError('BUDGET', 'Read node budget exceeded')
-    return { ...allowance, nodes: allowance.nodes - scanned, bytes: allowance.bytes - bytes }
+    active();
+    if (scanned >= allowance.nodes) throw new KernelError('BUDGET', 'Read node budget exceeded');
+    return { ...allowance, nodes: allowance.nodes - scanned, bytes: allowance.bytes - bytes };
   }
   // The caller holds source.domains in an ordered read or commit span.
   async function projectedNode(at: Path): Promise<Node | null> {
-    active()
-    path(at)
-    const found = source.resolve(at), chain = found.chain(at), bits = rights(at, found, undefined, false).bits
-    const expected = chain.find(node => node.path === at)
-    if (expected === undefined || (bits & R) === 0) return null
-    const lease = await writer.cache.fill(found.store, { node: at }, remaining())
+    active();
+    path(at);
+    const found = source.resolve(at),
+      chain = found.chain(at),
+      bits = rights(at, found, undefined, false).bits;
+    const expected = chain.find((node) => node.path === at);
+    if (expected === undefined || (bits & R) === 0) return null;
+    const lease = await writer.cache.fill(found.store, { node: at }, remaining());
     try {
-      active()
-      const stored = lease.nodes[0]
-      if (stored === undefined || stored.$id !== expected.id) throw new KernelError('INVALID', 'Accepted metadata differs from its Store')
-      charge(stored)
-      const currentBits = rights(at, found, undefined, false).bits
-      const copy = projectCopy(stored, currentBits)
-      active()
-      return copy === null ? null : 'node' in copy ? copy.node : visibleNode(stored, currentBits)
-    } finally { lease.release() }
+      active();
+      const stored = lease.nodes[0];
+      if (stored === undefined || stored.$id !== expected.id)
+        throw new KernelError('INVALID', 'Accepted metadata differs from its Store');
+      charge(stored);
+      const currentBits = rights(at, found, undefined, false).bits;
+      const copy = projectCopy(stored, currentBits);
+      active();
+      return copy === null ? null : 'node' in copy ? copy.node : visibleNode(stored, currentBits);
+    } finally {
+      lease.release();
+    }
   }
 
-  async function read(input: SubSelector): Promise<ReadResult> {
-    active()
-    const selector = structuredClone(input)
-    requestBytes += Buffer.byteLength(JSON.stringify(selector))
-    if (requestBytes > limits.requestBytes) throw new KernelError('BUDGET', 'Read request budget exceeded')
-    const root = 'node' in selector ? selector.node : selector.children
-    path(root)
-    includeDepth(selector.include, limits.includeDepth)
-    const sort: Sort = 'children' in selector ? selector.sort ?? [['$order', 1]] : []
-    const test = 'children' in selector && selector.where !== undefined ? createSiftTest(selector.where, limits) : undefined
-    return writer.read(source.domains, async () => {
-      active()
-      await admission.validate(source.auth)
-      active()
-      const cursor = writer.stream.cursor(), at = [cursor.pos]
-      depend({ kind: 'actor', key: admission.dependencyKey, value: admission.dependency() })
-      for (const domain of source.domains) depend({ kind: 'epoch', key: domain, value: cursor.epochs[domain] })
-      selectors.push({ selector, at })
-      const loaded = new Map<Path, Loaded | null>(), copies = new Map<string, NodeCopy>(), held: CacheRead[] = []
+  function selectorSort(selector: SubSelector): Sort {
+    return 'children' in selector ? (selector.sort ?? [['$order', 1]]) : [];
+  }
+  /** Binds pagination to the actor, target and selector while excluding the changing page cursor. */
+  function selectorScope(selector: SubSelector): string {
+    const root = 'node' in selector ? selector.node : selector.children;
+    return createHash('sha256')
+      .update(
+        stableJson([
+          admission.actor,
+          source.resolve(root).id,
+          {
+            ...selector,
+            ...('children' in selector
+              ? {
+                  window:
+                    selector.window === undefined ? undefined : { limit: selector.window.limit },
+                }
+              : {}),
+          },
+        ]),
+      )
+      .digest('hex');
+  }
+  /** Encodes a continuation using the same scope as the original selection. */
+  function cursor(selector: SubSelector, key: ScanKey): string {
+    active();
+    return scanCursor(selectorScope(selector), key);
+  }
+  /** Selects projected members and includes inside an already held Writer read span. */
+  async function selectInSpan(
+    input: SubSelector,
+    candidates?: readonly Path[],
+    range?: LaneRange,
+    projectionSort?: Sort,
+  ): Promise<LaneSelection> {
+    active();
+    const selector = structuredClone(input);
+    requestBytes += Buffer.byteLength(JSON.stringify(selector));
+    if (requestBytes > limits.requestBytes)
+      throw new KernelError('BUDGET', 'Read request budget exceeded');
+    const root = 'node' in selector ? selector.node : selector.children;
+    path(root);
+    includeDepth(selector.include, limits.includeDepth);
+    const sort = projectionSort ?? selectorSort(selector);
+    if (candidates !== undefined)
+      for (const candidate of candidates) {
+        if ('node' in selector ? candidate !== root : !isChildPath(root, candidate))
+          throw new KernelError('INVALID', 'A selection candidate is outside its range');
+      }
+    const test =
+      'children' in selector && selector.where !== undefined
+        ? createSiftTest(selector.where, limits)
+        : undefined;
 
-      async function load(at: Path): Promise<Loaded | null> {
-        active()
-        if (loaded.has(at)) return loaded.get(at)!
-        const found = target(at), chain = found.chain(at), bits = rights(at, found).bits
-        const expected = chain.find(node => node.path === at)
-        if (expected === undefined || (bits & R) === 0) { loaded.set(at, null); absent.add(at); return null }
-        const lease = await writer.cache.fill(found.store, { node: at }, remaining())
-        held.push(lease)
-        active()
-        const stored = lease.nodes[0]
-        if (stored === undefined || stored.$id !== expected.id) throw new KernelError('INVALID', 'Accepted metadata differs from its Store')
-        charge(stored)
-        for (const name of decodeChainNode(stored).types) depend({ kind: 'type', key: name, value: typeReadVersion(registry, name) })
-        if (!nodes.has(at)) nodes.set(at, positionToRev(stored.$pos))
-        const copy = projectCopy(stored, bits, sort)
-        active()
-        if (copy === null) { loaded.set(at, null); absent.add(at); return null }
-        const value = { copy, visible: 'node' in copy ? copy.node : visibleNode(stored, bits) }
-        loaded.set(at, value)
-        return value
-      }
-      async function includes(base: Loaded | undefined, specs: readonly IncludeSpec[]): Promise<void> {
-        for (const spec of specs) {
-          active()
-          const at = 'path' in spec ? spec.path : base === undefined ? undefined : reference(base.visible, spec.ref)
-          if (at === undefined) continue
-          const value = await load(at)
-          if (value === null) continue
-          copies.set(value.visible.$id, value.copy)
-          if ('ref' in spec && spec.then !== undefined) await includes(value, spec.then)
+    active();
+    await admission.validate(source.auth);
+    active();
+    const cursor = writer.stream.cursor(),
+      at = [cursor.pos];
+    depend({ kind: 'actor', key: admission.dependencyKey, value: admission.dependency() });
+    for (const domain of source.domains)
+      depend({ kind: 'epoch', key: domain, value: cursor.epochs[domain] });
+    selectors.push({ selector, at });
+    const loaded = scopeLoaded ?? new Map<Path, Loaded | null>(),
+      byId = new Map<string, Loaded>(),
+      copies = new Map<string, NodeCopy>(),
+      held: CacheRead[] = [];
+    let visited = new Set<Path>();
+    /** Captures dependency addresses for one include branch without retaining node bodies. */
+    function branch(covered: readonly string[]): LaneBranch {
+      const inputs = new Map<string, ReadDependency>();
+      for (const at of visited)
+        for (const key of [
+          `target:${at}`,
+          ...ancestorPaths(at).map((ancestor) => `rights:${ancestor}`),
+        ]) {
+          const input = dependencies.get(key);
+          if (input !== undefined) inputs.set(key, input);
         }
+      return {
+        covered,
+        reads: {
+          nodes: [...visited].flatMap((path) => {
+            const rev = nodes.get(path);
+            return rev === undefined ? [] : [{ path, rev }];
+          }),
+          absent: [...visited].filter((at) => absent.has(at)),
+          dependencies: [...inputs.values()],
+        },
+      };
+    }
+
+    /** Loads a visible projection once per span and keeps its lease until delivery preparation ends. */
+    async function load(at: Path): Promise<Loaded | null> {
+      active();
+      visited.add(at);
+      if (loaded.has(at)) {
+        const previous = loaded.get(at)!;
+        if (previous === null) return null;
+        if (
+          previous.sort.length === sort.length &&
+          previous.sort.every(
+            ([field, direction], i) => field === sort[i][0] && direction === sort[i][1],
+          )
+        ) {
+          byId.set(previous.visible.$id, previous);
+          return previous;
+        }
+        const copy = projectCopy(previous.stored, previous.bits, sort);
+        if (copy === null)
+          throw new KernelError('CONFLICT', 'Projection changed within a read span');
+        const value = {
+          ...previous,
+          copy,
+          sort,
+          visible: 'node' in copy ? copy.node : visibleNode(previous.stored, previous.bits),
+        };
+        loaded.set(at, value);
+        byId.set(value.visible.$id, value);
+        return value;
       }
+      const found = target(at),
+        chain = found.chain(at),
+        bits = rights(at, found).bits;
+      const expected = chain.find((node) => node.path === at);
+      if (expected === undefined || (bits & R) === 0) {
+        loaded.set(at, null);
+        absent.add(at);
+        return null;
+      }
+      const lease = await writer.cache.fill(found.store, { node: at }, remaining());
       try {
-        const found = target(root)
-        let members: Loaded[], next: string | undefined
-        if ('node' in selector) {
-          const value = await load(root)
-          if (value === null) throw new KernelError('NOT_FOUND', 'Node is absent')
-          members = [value]
-        } else {
-          rights(root, found)
-          const candidates: Node[] = []
-          for (const child of found.children(root)) {
-            const value = await load(child.path)
-            if (value !== null && (test === undefined || test(mapNodeForSift(value.visible), work))) candidates.push(value.visible)
-          }
-          const scope = createHash('sha256').update(stableJson([admission.actor, found.id,
-            { ...selector, window: selector.window === undefined ? undefined : { limit: selector.window.limit } }])).digest('hex')
-          const page = scanPage(candidates, sort, node => node.$path, scope, selector.window?.after, selector.window?.limit, active)
-          next = page.next
-          members = page.items.map(node => loaded.get(node.$path)!)
+        active();
+      } catch (error) {
+        lease.release();
+        throw error;
+      }
+      if (options.scope === undefined) held.push(lease);
+      else options.scope.hold(lease);
+      const stored = lease.nodes[0];
+      if (stored === undefined || stored.$id !== expected.id)
+        throw new KernelError('INVALID', 'Accepted metadata differs from its Store');
+      charge(stored);
+      for (const name of decodeChainNode(stored).types)
+        depend({ kind: 'type', key: name, value: typeReadVersion(registry, name) });
+      if (!nodes.has(at)) nodes.set(at, positionToRev(stored.$pos));
+      const copy = projectCopy(stored, bits, sort);
+      active();
+      if (copy === null) {
+        loaded.set(at, null);
+        absent.add(at);
+        return null;
+      }
+      const value = {
+        copy,
+        visible: 'node' in copy ? copy.node : visibleNode(stored, bits),
+        stored,
+        store: found.store,
+        bits,
+        sort,
+      };
+      loaded.set(at, value);
+      byId.set(stored.$id, value);
+      return value;
+    }
+    /** Adds reachable include copies and records missing or hidden targets as branch dependencies. */
+    async function includes(
+      base: Loaded | undefined,
+      specs: readonly IncludeSpec[],
+      covered: Set<string>,
+    ): Promise<void> {
+      for (const spec of specs) {
+        active();
+        const at =
+          'path' in spec
+            ? spec.path
+            : base === undefined
+              ? undefined
+              : reference(base.visible, spec.ref);
+        if (at === undefined) continue;
+        const value = await load(at);
+        if (value === null) continue;
+        copies.set(value.visible.$id, value.copy);
+        covered.add(value.visible.$id);
+        if ('ref' in spec && spec.then !== undefined) await includes(value, spec.then, covered);
+      }
+    }
+    try {
+      const found = target(root);
+      let members: Loaded[], next: string | undefined;
+      const scope = selectorScope(selector);
+      if ('node' in selector) {
+        const value = await load(root);
+        if (value === null && candidates === undefined)
+          throw new KernelError('NOT_FOUND', 'Node is absent');
+        members = value === null ? [] : [value];
+      } else {
+        rights(root, found);
+        const matching: Node[] = [];
+        const after =
+          selector.window?.after === undefined
+            ? undefined
+            : parseScanCursor(selector.window.after, scope, sort.length);
+        const paths =
+          candidates ??
+          (function* () {
+            for (const child of found.children(root)) yield child.path;
+          })();
+        for (const child of paths) {
+          const value = await load(child);
+          if (value === null || (test !== undefined && !test(mapNodeForSift(value.visible), work)))
+            continue;
+          const key = scanKey(value.visible, sort, value.visible.$path);
+          if (
+            range !== undefined &&
+            (range.upper === null ||
+              (after !== undefined && compareScanKeys(key, after, sort) <= 0) ||
+              (range.upper !== undefined && compareScanKeys(key, range.upper, sort) > 0))
+          )
+            continue;
+          matching.push(value.visible);
         }
-        for (const member of members) copies.set(member.visible.$id, member.copy)
-        if (members.length === 0) await includes(undefined, selector.include ?? [])
-        for (const member of members) await includes(member, selector.include ?? [])
-        active()
-        checkDependencies()
-        const result = { list: members.map(member => member.visible.$id), copies: [...copies.values()], at, ...(next === undefined ? {} : { next }) }
-        active()
-        return result
-      } finally { for (const lease of held) lease.release() }
-    })
+        const page = scanPage(
+          matching,
+          sort,
+          (node) => node.$path,
+          scope,
+          range === undefined ? selector.window?.after : undefined,
+          range === undefined ? selector.window?.limit : undefined,
+          active,
+        );
+        next = page.next;
+        members = page.items.map((node) => loaded.get(node.$path)!);
+      }
+      const fixed = new Set<string>(),
+        refs: IncludeSpec[] = [];
+      visited = new Set();
+      for (const spec of selector.include ?? []) {
+        if ('path' in spec) await includes(undefined, [spec], fixed);
+        else refs.push(spec);
+      }
+      const fixedIncludes = branch([...fixed]),
+        roots: LaneRoot[] = [];
+      const selected = new Map(members.map((member) => [member.visible.$path, member]));
+      for (const at of candidates ?? members.map((member) => member.visible.$path)) {
+        visited = new Set();
+        await load(at);
+        const member = selected.get(at),
+          covered = new Set<string>();
+        if (member !== undefined) {
+          copies.set(member.visible.$id, member.copy);
+          covered.add(member.visible.$id);
+          await includes(member, refs, covered);
+        }
+        roots.push({
+          path: at,
+          ...branch([...covered]),
+          ...(member === undefined
+            ? {}
+            : {
+                member: {
+                  id: member.visible.$id,
+                  key: scanKey(member.visible, sort, member.visible.$path),
+                },
+              }),
+        });
+      }
+      active();
+      checkDependencies();
+
+      const images = [...copies].map(([id, copy]) => {
+        const value = byId.get(id)!;
+        const cached = writer.cache.getAt(value.store, value.visible.$path);
+        if (cached === undefined)
+          throw new KernelError('INVALID', 'Read image left its cache lease');
+        const before =
+          cached.delta === undefined
+            ? undefined
+            : projectCopy(applyFieldDeltas(value.stored, cached.delta, 'from'), value.bits, sort);
+        return {
+          copy,
+          before,
+          bytes: Math.max(cached.bytes, Buffer.byteLength(JSON.stringify(copy))),
+          retain() {
+            active();
+            return writer.cache.retain(id);
+          },
+        };
+      });
+      const result = {
+        roots,
+        fixedIncludes,
+        images,
+        reads: expect(),
+        ...(next === undefined ? {} : { next }),
+      };
+      active();
+      return result;
+    } finally {
+      for (const lease of held) lease.release();
+    }
   }
-  return { read, work, project, projectedNode, dependency, domains: () => source.domains,
-    expect(): ReadSet { return { nodes: [...nodes].map(([path, rev]) => ({ path, rev })), absent: [...absent],
-      selectors: [...selectors], dependencies: [...dependencies.values()] } } }
+  /** Returns the complete read set required to reject stale action or commit preparation. */
+  function expect(): ReadSet {
+    return {
+      nodes: [...nodes].map(([path, rev]) => ({ path, rev })),
+      absent: [...absent],
+      selectors: [...selectors],
+      dependencies: [...dependencies.values()],
+    };
+  }
+  /** Owns the selector before waiting for the ordered span, then returns its projected snapshot. */
+  async function read(selector: SubSelector): Promise<ReadResult> {
+    const owned = structuredClone(selector);
+    return writer.read(source.domains, async () => {
+      const selection = await selectInSpan(owned);
+      return {
+        list: selection.roots.flatMap((root) =>
+          root.member === undefined ? [] : [root.member.id],
+        ),
+        copies: selection.images.map((image) => image.copy),
+        at: [writer.stream.cursor().pos],
+        ...(selection.next === undefined ? {} : { next: selection.next }),
+      };
+    });
+  }
+  return {
+    read,
+    selectInSpan,
+    cursor,
+    work,
+    project,
+    projectedNode,
+    dependency,
+    domains: () => source.domains,
+    expect,
+  };
 }
 import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'

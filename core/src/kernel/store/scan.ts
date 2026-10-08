@@ -6,7 +6,7 @@ import { stableJson } from '#util/stable-json'
 import { isRecord } from '#util/is-record'
 
 type Value = { rank: number; value: null | number | string | boolean }
-type Anchor = { scope: string; values: Value[]; key: string }
+export interface ScanKey { readonly values: readonly Value[]; readonly key: string }
 
 function value(raw: unknown): Value {
   if (raw === undefined || raw === null) return { rank: 0, value: null }
@@ -38,7 +38,8 @@ function isValue(raw: unknown): raw is Value {
   }
 }
 
-function anchor(cursor: Cursor, scope: string, width: number): Anchor {
+/** Decodes an external cursor and rejects reuse with a different query scope or sort width. */
+export function parseScanCursor(cursor: Cursor, scope: string, width: number): ScanKey {
   let raw: unknown
   try { raw = JSON.parse(cursor) } catch (error) {
     if (!(error instanceof SyntaxError)) throw error
@@ -47,25 +48,40 @@ function anchor(cursor: Cursor, scope: string, width: number): Anchor {
   }
   if (!isRecord(raw) || raw.scope !== scope || typeof raw.key !== 'string' || !Array.isArray(raw.values)
     || raw.values.length !== width || !raw.values.every(isValue)) throw new KernelError('INVALID', 'Cursor belongs to another scan')
-  return { scope: raw.scope, key: raw.key, values: raw.values }
+  return { key: raw.key, values: raw.values }
+}
+
+/** Builds the shared JSON ordering key, using the path to break ties. */
+export function scanKey(item: object, sort: Sort, key: string, fieldValue: (item: object, field: string) => unknown = getByPath): ScanKey {
+  return { values: sort.map(([field]) => value(fieldValue(item, field))), key }
+}
+
+/** Compares projected sort values and then the stable path key. */
+export function compareScanKeys(a: ScanKey, b: ScanKey, sort: Sort): number {
+  for (let i = 0; i < sort.length; i++) {
+    const difference = compare(a.values[i], b.values[i]) * sort[i][1]
+    if (difference !== 0) return difference
+  }
+  return comparePaths(a.key, b.key)
+}
+
+/** Encodes the last ordering key together with its originating query scope. */
+export function scanCursor(scope: string, key: ScanKey): Cursor {
+  return stableJson({ scope, values: key.values, key: key.key })
 }
 
 export function scanPage<T extends object>(items: readonly T[], sort: Sort, key: (item: T) => string,
   scope: string, after: Cursor | undefined, limit: number | undefined, check: () => void): ScanResult<T> {
   check()
   if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1)) throw new KernelError('INVALID', 'Scan limit must be a positive integer')
-  const cursor = after === undefined ? undefined : anchor(after, scope, sort.length)
+  const cursor = after === undefined ? undefined : parseScanCursor(after, scope, sort.length)
   const rows = items.map(item => {
     check()
-    return { item, values: sort.map(([field]) => value(getByPath(item, field))), key: key(item) }
+    return { item, ...scanKey(item, sort, key(item)) }
   })
-  const order = (a: Pick<Anchor, 'values' | 'key'>, b: Pick<Anchor, 'values' | 'key'>): number => {
+  const order = (a: ScanKey, b: ScanKey): number => {
     check()
-    for (let i = 0; i < sort.length; i++) {
-      const difference = compare(a.values[i], b.values[i]) * sort[i][1]
-      if (difference !== 0) return difference
-    }
-    return comparePaths(a.key, b.key)
+    return compareScanKeys(a, b, sort)
   }
   rows.sort(order)
   const eligible = cursor === undefined ? rows : rows.filter(row => order(row, cursor) > 0)
@@ -78,6 +94,6 @@ export function scanPage<T extends object>(items: readonly T[], sort: Sort, key:
   check()
   return {
     items: output,
-    ...last !== undefined && page.length < eligible.length ? { next: stableJson({ scope, values: last.values, key: last.key }) } : {},
+    ...last !== undefined && page.length < eligible.length ? { next: scanCursor(scope, last) } : {},
   }
 }

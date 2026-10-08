@@ -1,20 +1,21 @@
-import { assertSafePath } from '#core/path'
+import { dirname } from '#core/path'
 import { KernelError } from '#errors'
 import type { CacheRead } from '#kernel/cache'
 import type { CommandOptions } from '#kernel/commands'
-import { applyFieldDeltas } from '#kernel/journal'
 import type { NodeLaneRead } from '#kernel/lane'
-import { computeRights } from '#kernel/rights'
-import { R } from '#kernel/types'
+import { createReader } from '#kernel/reader'
 
+/** Shares one Reader and its cache leases across a lane's ordered delivery preparation. */
 export function createNodeLaneRead(options: CommandOptions) {
   const { admission, writer, registry, projector } = options
   if (projector === undefined) throw new KernelError('INVALID', 'A lane requires the instance projector')
   const project = projector
+  /** Keeps selection images usable until preparation and its final lifetime check complete. */
   return async function read<T>(run: (source: NodeLaneRead) => Promise<T>): Promise<T> {
     const budget = options.budget(), input = options.source(budget), revision = options.registryRevision()
     const held: CacheRead[] = []
-    let nodes = 0, bytes = 0, live = true
+    let live = true
+    /** Rejects late reads and projections from a registry generation that has already changed. */
     function check(): void {
       admission.assertActive()
       if (!live) throw new KernelError('INVALID', 'Lane read scope ended')
@@ -24,32 +25,26 @@ export function createNodeLaneRead(options: CommandOptions) {
     return writer.read(input.domains, async () => {
       check()
       await admission.validate(input.auth)
+      const reads = createReader({ admission, writer, registry, source: input, budget, limits: options.limits(), projector: project,
+        scope: { check, hold(lease) { held.push(lease) } } })
       const source: NodeLaneRead = {
         pos: writer.stream.cursor().pos, check,
-        async image(path) {
-          check()
-          assertSafePath(path)
-          const target = input.resolve(path), chain = target.chain(path)
-          const expected = chain.find(node => node.path === path)
-          const rights = computeRights(admission.actor, chain, registry)
-          for (const alert of rights.alerts) console.error(alert.path, alert.error)
-          if (expected === undefined || (rights.bits & R) === 0) return null
-          if (nodes >= budget.nodes) throw new KernelError('BUDGET', 'Lane read node budget exceeded')
-          const lease = await writer.cache.fill(target.store, { node: path }, { ...budget,
-            nodes: budget.nodes - nodes, bytes: budget.bytes - bytes })
-          try { check() } catch (error) { lease.release(); throw error }
-          held.push(lease)
-          const stored = lease.nodes[0]
-          if (stored === undefined || stored.$id !== expected.id) throw new KernelError('INVALID', 'Lane metadata differs from its Store')
-          nodes++; bytes += Buffer.byteLength(JSON.stringify(stored))
-          if (nodes > budget.nodes || bytes > budget.bytes) throw new KernelError('BUDGET', 'Lane read budget exceeded')
-          const copy = project(stored, rights.bits)
-          check()
-          if (copy === null) return null
-          const cached = writer.cache.getAt(target.store, path)
-          const before = cached?.delta === undefined ? undefined : project(applyFieldDeltas(stored, cached.delta, 'from'), rights.bits)
-          if (cached === undefined) throw new KernelError('INVALID', 'Lane image left its retained cache lease')
-          return { copy, before, bytes: Math.max(cached.bytes, Buffer.byteLength(JSON.stringify(copy))), retain() { check(); return writer.cache.retain(stored.$id) } }
+        select: reads.selectInSpan,
+        cursor: reads.cursor,
+        /** Resolves eviction order with the same projection and comparator as the window snapshot. */
+        async key(path, sort) {
+          const parent = dirname(path)
+          if (parent === null) throw new KernelError('INVALID', 'The root is not a child window member')
+          const selection = await reads.selectInSpan({ children: parent, sort }, [path], {})
+          return selection.roots[0]?.member?.key ?? null
+        },
+        /** Returns the canonical image, with an absent or unreadable target represented by null. */
+        async image(path, sort) {
+          try { return (await reads.selectInSpan({ node: path }, undefined, undefined, sort)).images[0]! }
+          catch (error) {
+            if (error instanceof KernelError && error.code === 'NOT_FOUND') return null
+            throw error
+          }
         },
       }
       try {

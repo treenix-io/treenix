@@ -391,7 +391,8 @@ export type LaneChange =
   /** Deleted, invisible, or no longer covered by any subscription of the lane. */
   | { readonly op: 'del'; readonly id: NodeId }
   /** Membership of one subscription changed; membership never touches the node copies. */
-  | { readonly op: 'list'; readonly sub: SubId; readonly gen: Generation; readonly diff: ListDiff }
+  | { readonly op: 'list'; readonly sub: SubId; readonly gen: Generation; readonly diff: ListDiff;
+      readonly covered?: readonly NodeId[]; readonly next?: Cursor }
 
 export type Frame =
   | {
@@ -408,10 +409,12 @@ export type Frame =
       readonly sub: SubId
       readonly gen: Generation
       readonly list: readonly NodeId[]
+      readonly covered?: readonly NodeId[]
       readonly copies: readonly NodeCopy[]
       readonly computed?: readonly ComputedNode[]
       readonly rows?: readonly Row[]
       readonly at: readonly Position[]
+      readonly next?: Cursor
     }
   /** Every record of one position in one frame; a lagging client gets one merged frame up to `pos`. */
   | { readonly t: 'pos'; readonly pos: Position; readonly changes: readonly LaneChange[]; readonly coverage?: false }
@@ -424,10 +427,12 @@ export type Frame =
       readonly sub: SubId
       readonly gen: Generation
       readonly diff: ListDiff
+      readonly covered?: readonly NodeId[]
       readonly copies: readonly NodeCopy[]
       readonly computed?: readonly ComputedNode[]
       readonly rows?: readonly Row[]
       readonly at: readonly Position[]
+      readonly next?: Cursor
     }
   /** The subscription's state is void; a new generation's `snap` follows. */
   | { readonly t: 'reset'; readonly sub: SubId; readonly gen: Generation }
