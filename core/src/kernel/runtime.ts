@@ -51,11 +51,14 @@ export async function openNativeRuntime(input: NativeRuntimeConfig) {
   let foundation: InstanceFoundationWithAuth | undefined;
   /** Release instance, store, and writer resources in ownership order. */
   async function release(): Promise<void> {
-    foundation?.close();
     try {
-      await store.close();
+      await foundation?.close();
     } finally {
-      await lease.close();
+      try {
+        await store.close();
+      } finally {
+        await lease.close();
+      }
     }
   }
   try {

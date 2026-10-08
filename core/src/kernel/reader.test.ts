@@ -1,22 +1,23 @@
 import type { PositionCounter } from '#kernel/types'
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { isChildPath } from '#core/path'
+import { dirname, isChildPath } from '#core/path'
 import { KernelError } from '#errors'
 import { createChainIndex, type ChainInput } from '#kernel/chain-index'
 import { createInstanceFoundation } from '#kernel/instance'
 import { createReader } from '#kernel/reader'
+import { prepareChangeSet } from '#kernel/changeset'
 import { checkPreconditions } from '#kernel/preconditions'
 import { createMemoryStore } from '#kernel/store/memory'
 import { scanBudget } from '#kernel/store/contract'
-import { A, DEFAULT_LIMITS, R, type ChangeMember, type Limits, type ModuleManifest, type Path, type Position, type Store } from '#kernel/types'
+import { A, DEFAULT_LIMITS, R, type ChangeMember, type Component, type Limits, type ModuleManifest, type Path, type Position, type ScanRange, type Store } from '#kernel/types'
 
 
 const code = (expected: KernelError['code']) => (error: unknown) => error instanceof KernelError && error.code === expected
 const kernel = { executor: 'kernel', caller: 'kernel' } as const
 const put = (path: Path, fields: Record<string, unknown> = {}): ChangeMember => ({ op: 'put', node: { $path: path, $type: 'test.item', ...fields } })
 
-async function setup() {
+async function setup(mounts: readonly { prefix: string; domain: string }[] = []) {
   const raw = createMemoryStore({ domain: 'reader' }), index = createChainIndex(), paths = new Map<string, string>()
   function install(node: ChainInput): void {
     index.put(node); paths.set(node.$path, node.$id)
@@ -55,17 +56,107 @@ async function setup() {
     },
     shard: () => false,
   }
-  const source = { domains: [store.domain], auth: bound, resolve: () => target }
   assert.ok(instance.setupCredential)
   const admin = await auth.openCredential(instance.setupCredential)
   const anonymous = await auth.openCredential()
+  const declarations = new Map<Path, Record<`#${string}`, Component>>()
+  for (const [i, mount] of mounts.entries()) {
+    const base = dirname(mount.prefix)
+    assert.ok(base)
+    const fields = declarations.get(base) ?? {}
+    fields[`#mount${i}`] = { $type: 't.mount.memory', pattern: mount.prefix.slice(base.length + 1) }
+    declarations.set(base, fields)
+  }
+  if (declarations.size > 0) {
+    await instance.commit([...declarations].map(([base, fields]) => put(base, fields)), kernel)
+    for (const base of declarations.keys()) await instance.commands(admin).read({ children: base })
+  }
+  const source = mounts.length === 0
+    ? { domains: [store.domain], auth: bound, resolve: () => target,
+      targets: (_range: ScanRange) => [target], topology: (_range: ScanRange) => target.id }
+    : instance.readerSource(scanBudget())
+  const targets = mounts.map(mount => ({ ...source.resolve(mount.prefix), prefix: mount.prefix }))
   const reader = (admission = anonymous, budget = scanBudget(), limits: Partial<Limits> = {}) => createReader({ registry: instance.registry,
     writer: instance.writer, admission, source, budget, limits: { ...DEFAULT_LIMITS, ...limits }, alert: () => {} })
-  return { instance, auth, admin, anonymous, reader, source, target, store, index, module,
-    commit: (changes: readonly ChangeMember[]) => instance.commit(changes, kernel) }
+  return { instance, auth, admin, anonymous, reader, source, target, store, index, module, mounted: targets,
+    commitTarget: (store: Store, changes: readonly ChangeMember[]) => instance.writer.commit(store, source.domains,
+      pos => prepareChangeSet({ store, cache: instance.writer.cache, registry: instance.registry,
+        readBefore: source.auth.node, resolve: path => source.resolve(path).store }, changes, pos)),
+    commit: (changes: readonly ChangeMember[]) => instance.commit(changes.map(change => change.op === 'put'
+      ? { ...change, node: { ...declarations.get(change.node.$path), ...change.node } } : change), kernel) }
 }
 
 describe('native Reader contract', () => {
+  it('enumerates logical children and reference includes across registered memory targets', async t => {
+    const f = await setup([{ prefix: '/visible/a', domain: 'a' }, { prefix: '/visible/b', domain: 'b' }])
+    t.after(() => f.auth.close())
+    await f.commit([put('/visible', { $acl: [{ subject: { group: 'public' }, grant: A | R }] })])
+    await f.commitTarget(f.mounted[0].store, [put('/visible/a', { value: 'a', link: '/visible/b' })])
+    await f.commitTarget(f.mounted[1].store, [put('/visible/b', { value: 'b' })])
+    const result = await f.reader().read({ children: '/visible', include: [{ ref: 'link' }] })
+    assert.equal(result.list.length, 2)
+    assert.equal(result.copies.length, 2)
+    assert.deepEqual(result.copies.map(copy => {
+      assert.ok('node' in copy)
+      return [copy.node.$path, copy.node.value]
+    }).sort(), [['/visible/a', 'a'], ['/visible/b', 'b']])
+  })
+
+  it('selects a global history page before loading payloads from its target Store', async t => {
+    const f = await setup([{ prefix: '/visible/a', domain: 'a' }, { prefix: '/visible/b', domain: 'b' }])
+    t.after(() => f.auth.close())
+    const after = await f.commit([put('/visible', { $acl: [{ subject: { group: 'public' }, grant: A | R }] })])
+    await f.commitTarget(f.mounted[0].store, [put('/visible/a', { value: 'a' })])
+    await f.commitTarget(f.mounted[1].store, [put('/visible/b', { value: 'b' })])
+    await assert.rejects(f.reader(f.anonymous, { ...scanBudget(), nodes: 2 }).read({
+      history: '/visible', after, window: { limit: 1 },
+    }), code('BUDGET'))
+    const budget = { ...scanBudget(), nodes: 3 }
+    const first = await f.reader(f.anonymous, budget).read({ history: '/visible', after, window: { limit: 1 } })
+    assert.deepEqual(first.history?.map(entry => entry.path), ['/visible/a'])
+    assert.ok(first.next)
+    const second = await f.reader(f.anonymous, budget).read({ history: '/visible', after,
+      window: { limit: 1, after: first.next } })
+    assert.deepEqual(second.history?.map(entry => entry.path), ['/visible/b'])
+    assert.equal(second.next, undefined)
+  })
+
+  it('prunes hidden mounted history before image reconstruction and resolves restore by its journal address', async t => {
+    const f = await setup([{ prefix: '/hidden/a', domain: 'a' }])
+    t.after(() => f.auth.close())
+    await f.commit([put('/hidden')])
+    const pos = await f.commitTarget(f.mounted[0].store, [put('/hidden/a', { value: 'secret'.repeat(200) })])
+    const lease = await f.instance.writer.cache.fill(f.mounted[0].store, { node: '/hidden/a' }, scanBudget())
+    const id = lease.nodes[0].$id
+    lease.release()
+    const result = await f.reader(f.anonymous, { ...scanBudget(), nodes: 1 }).read({ history: '/hidden' })
+    assert.deepEqual(result.history, [])
+    const denied = f.reader(f.anonymous, { ...scanBudget(), nodes: 1 })
+    await assert.rejects(f.instance.writer.read(f.source.domains, () => denied.journalTarget({ pos, id })), code('NOT_FOUND'))
+    const accepted = f.reader(f.admin, { ...scanBudget(), nodes: 1 })
+    const owner = await f.instance.writer.read(f.source.domains, () => accepted.journalTarget({ pos, id }))
+    assert.equal(owner.store, f.mounted[0].store)
+    assert.equal(accepted.remainingBudget().nodes, 1)
+  })
+
+  it('rejects a changed range topology while the root target identity remains unchanged', async t => {
+    const f = await setup([{ prefix: '/visible/a', domain: 'a' }])
+    t.after(() => f.auth.close())
+    await f.commit([put('/visible', { $acl: [{ subject: { group: 'public' }, grant: A | R }] })])
+    await f.commitTarget(f.mounted[0].store, [put('/visible/a')])
+    const rootIdentity = f.source.resolve('/visible').id
+    let stamp = 'first'
+    t.mock.method(f.source, 'topology', () => stamp)
+    const fill = f.instance.writer.cache.fill
+    t.mock.method(f.instance.writer.cache, 'fill', async (...args: Parameters<typeof fill>) => {
+      const lease = await fill(...args)
+      if ('node' in args[1] && args[1].node === '/visible/a') stamp = 'changed'
+      return lease
+    })
+    await assert.rejects(f.reader().read({ children: '/visible' }), code('CONFLICT'))
+    assert.equal(f.source.resolve('/visible').id, rootIdentity)
+  })
+
   it('prunes unrelated journal payloads before the history budget', async t => {
     const f = await setup(); t.after(() => f.auth.close())
     await f.commit([put('/visible', { $acl: [{ subject: { group: 'public' }, grant: A | R }] }), put('/visible/item', { value: 'visible' })])

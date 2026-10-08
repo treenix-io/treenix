@@ -7,7 +7,7 @@ import type { ExprWork } from '#kernel/eval'
 import { createSiftTest } from '#kernel/expr'
 import { applyFieldDeltas, applyJournalChange } from '#kernel/journal'
 import type { LaneBranch, LaneRange, LaneRoot, LaneSelection } from '#kernel/lane-selection'
-import { positionToRev } from '#kernel/position'
+import { comparePositions, positionToRev } from '#kernel/position'
 import { typeReadVersion, type ReadDependency, type ReadSet } from '#kernel/preconditions'
 import { createProjector, visibleNode } from '#kernel/projection'
 import { computeRights, type ChainNode } from '#kernel/rights'
@@ -15,7 +15,8 @@ import type { AuthReadSource } from '#kernel/session'
 import { mapNodeForSift } from '#kernel/store/keys'
 import { compareScanKeys, parseScanCursor, scanCursor, scanKey, scanPage, type ScanKey } from '#kernel/store/scan'
 import { A, DEFAULT_LIMITS, R, type Budget, type DomainId, type HistoryEntry, type IncludeSpec, type JournalImageTypes, type JournalVisibility, type Limits, type Node, type NodeCopy,
-  type Path, type ReadResult, type Registry, type Selector, type Sort, type Store, type StoredNode, type SubSelector } from '#kernel/types'
+  type JournalAddress, type JournalCommit, type JournalRange, type Path, type ReadResult, type Registry, type ScanRange,
+  type Selector, type Sort, type Store, type StoredNode, type SubSelector } from '#kernel/types'
 import { getByPath } from '#kernel/update-ops'
 import type { Writer } from '#kernel/writer'
 import { stableJson } from '#util/stable-json'
@@ -30,6 +31,10 @@ export interface ReaderSource {
   readonly domains: readonly DomainId[]
   readonly auth: AuthReadSource
   resolve(path: Path): ReaderTarget
+  /** Canonical, unique Store owners intersecting the logical range. */
+  targets(range: ScanRange): readonly ReaderTarget[]
+  /** Semantic claim/generation stamp, including empty and unavailable intersections. */
+  topology(range: ScanRange): string
 }
 export interface ReaderOptions {
   readonly registry: Registry
@@ -131,6 +136,14 @@ export function createReader(options: ReaderOptions) {
     depend({ kind: 'target', key: at, value: { id: found.id, domain: found.store.domain } });
     return found;
   }
+  /** Pins claimed ranges, including empty targets, before any selection reads their data. */
+  function topology(range: ScanRange): void {
+    depend({ kind: 'topology', key: stableJson(range), range, value: source.topology(range) });
+  }
+  /** Carries traversal work into the next phase of the same operation. */
+  function remainingBudget(): Budget {
+    return { ...remaining(), exprWork: work.limit - work.used };
+  }
   function rights(at: Path, found: ReaderTarget, image?: StoredNode, capture = true) {
     const chain = found.chain(at),
       inputs = new Map(chain.map((node) => [node.path, node]));
@@ -171,6 +184,7 @@ export function createReader(options: ReaderOptions) {
     return copy === null ? null : 'node' in copy ? copy.node : visibleNode(stored, bits);
   }
   function dependency(input: ReadDependency): unknown {
+    if (input.kind === 'topology') return source.topology(input.range);
     if (input.kind === 'actor') return admission.dependency();
     if (input.kind === 'type') return typeReadVersion(registry, input.key);
     if (input.kind === 'epoch') return writer.stream.cursor().epochs[input.key];
@@ -234,6 +248,7 @@ export function createReader(options: ReaderOptions) {
         stableJson([
           admission.actor,
           source.resolve(root).id,
+          'children' in selector ? source.topology({ children: root }) : undefined,
           {
             ...selector,
             ...('children' in selector
@@ -266,6 +281,7 @@ export function createReader(options: ReaderOptions) {
       throw new KernelError('BUDGET', 'Read request budget exceeded');
     const root = 'node' in selector ? selector.node : selector.children;
     path(root);
+    topology('node' in selector ? { node: root } : { children: root });
     includeDepth(selector.include, limits.includeDepth);
     const sort = projectionSort ?? selectorSort(selector);
     if (candidates !== undefined)
@@ -551,6 +567,81 @@ export function createReader(options: ReaderOptions) {
       };
     });
   }
+  /** Intersects current logical rights with the historical type rules before loading journal images. */
+  function historyAllowed(at: Path, image?: JournalImageTypes): boolean {
+    const found = target(at);
+    const current = rights(at, found);
+    if ((current.bits & A) === 0) return false;
+    if (image === undefined) return true;
+
+    for (const name of image.types)
+      depend({ kind: 'type', key: name, value: typeReadVersion(registry, name) });
+    let owner;
+    for (const node of found.chain(at))
+      if (node.path !== at && node.owner !== undefined) owner = node.owner;
+    const result = computeRights(admission.actor,
+      [{ ...image, acl: [], hasAcl: false, alerts: [] }], registry,
+      { ...current.prefix, granted: current.bits, denied: 0, owner });
+    for (const failure of result.alerts) alert(failure.path, failure.error);
+    active();
+    return (result.bits & A) !== 0;
+  }
+  /** Rejects parent shadow records and checks both recorded addresses under the current topology. */
+  function visibleJournalEntry(found: ReaderTarget, entry: JournalVisibility): boolean {
+    active();
+    if (entry.kind === 'transfer' || source.resolve(entry.path).store !== found.store) return false;
+    if (!historyAllowed(entry.path)) return false;
+    if (entry.from !== undefined &&
+      (source.resolve(entry.from).store !== found.store || !historyAllowed(entry.from))) return false;
+    if (entry.before !== null && entry.before !== 'unknown' &&
+      !historyAllowed(entry.before.path, entry.before)) return false;
+    if (entry.after !== null && !historyAllowed(entry.after.path, entry.after)) return false;
+    return true;
+  }
+  /** Charges metadata traversal and image reconstruction to the same operation across all Stores. */
+  async function journalRows(found: ReaderTarget, range: JournalRange): Promise<readonly JournalCommit[]> {
+    const deadline = Math.min(allowance.deadline, Date.now() + limits.queryMs);
+    const records = await found.store.scan({ range,
+      budget: { ...remaining(), exprWork: work.limit - work.used, deadline } });
+    active();
+    if (Date.now() > deadline) throw new KernelError('BUDGET', 'History query deadline exceeded');
+    if (records.cost === undefined) throw new KernelError('INVALID', 'History Store omitted reconstruction cost');
+    scanned += records.cost.nodes;
+    bytes += records.cost.bytes;
+    work.used += records.cost.exprWork;
+    if (scanned > allowance.nodes || bytes > allowance.bytes || work.used > work.limit)
+      throw new KernelError('BUDGET', 'History scan budget exceeded');
+    return records.items;
+  }
+  /** Keeps a journal address stable across target enumeration and global page selection. */
+  function journalKey(address: JournalAddress): string {
+    return stableJson([address.pos, address.id]);
+  }
+  /** Resolves restore ownership from visible journal metadata inside the caller's ordered read span. */
+  async function journalTarget(address: JournalAddress): Promise<ReaderTarget> {
+    active();
+    const range: ScanRange = { subtree: '/' };
+    topology(range);
+    depend({ kind: 'actor', key: admission.dependencyKey, value: admission.dependency() });
+    for (const domain of source.domains)
+      depend({ kind: 'epoch', key: domain, value: writer.stream.cursor().epochs[domain] });
+    let owner: ReaderTarget | undefined;
+    for (const found of source.targets(range)) {
+      await journalRows(found, { journal: '/', accept(entry) {
+        if (entry.address.id !== address.id || comparePositions(entry.address.pos, address.pos) !== 0)
+          return false;
+        if (!visibleJournalEntry(found, entry)) return false;
+        if (owner !== undefined && owner.store !== found.store)
+          throw new KernelError('INVALID', 'Journal address belongs to multiple Stores');
+        owner = found;
+        return false;
+      } });
+    }
+    active();
+    checkDependencies();
+    if (owner === undefined) throw new KernelError('NOT_FOUND', 'Journal address is absent');
+    return owner;
+  }
   /** Reads administrative journal images under present rights and the recorded type restrictions. */
   async function historyInSpan(selector: Extract<Selector, { history: Path }>): Promise<ReadResult> {
     active();
@@ -560,50 +651,44 @@ export function createReader(options: ReaderOptions) {
     if (selector.window?.evict !== undefined) throw new KernelError('INVALID', 'History is read-only');
     await admission.validate(source.auth);
     active();
-    const found = target(selector.history);
+    const range: ScanRange = { subtree: selector.history };
+    topology(range);
+    const targets = source.targets(range);
     depend({ kind: 'actor', key: admission.dependencyKey, value: admission.dependency() });
     for (const domain of source.domains)
       depend({ kind: 'epoch', key: domain, value: writer.stream.cursor().epochs[domain] });
-    const entries: HistoryEntry[] = [];
     const sort: Sort = [['address.pos.epoch', 1], ['address.pos.seq', 1]];
-    const scope = stableJson([admission.actor, found.id, selector.history, selector.after, selector.window?.limit]);
+    const scope = stableJson([admission.actor, source.topology(range), selector.history, selector.after, selector.window?.limit]);
     const after = selector.window?.after === undefined ? undefined : parseScanCursor(selector.window.after, scope, sort.length);
     if (selector.window !== undefined && (!Number.isSafeInteger(selector.window.limit) || selector.window.limit < 1))
       throw new KernelError('INVALID', 'History limit must be positive');
-    function allowed(at: Path, image?: JournalImageTypes): boolean {
-      const current = rights(at, found);
-      if ((current.bits & A) === 0) return false;
-      if (image === undefined) return true;
-      for (const name of image.types)
-        depend({ kind: 'type', key: name, value: typeReadVersion(registry, name) });
-      // Historical ACL grants cannot revive revoked access; only the recorded type rules apply.
-      let owner;
-      for (const node of found.chain(at))
-        if (node.path !== at && node.owner !== undefined) owner = node.owner;
-      const result = computeRights(admission.actor, [{ ...image, acl: [], hasAcl: false, alerts: [] }], registry,
-        { ...current.prefix, granted: current.bits, denied: 0, owner });
-      for (const failure of result.alerts) alert(failure.path, failure.error);
-      active();
-      return (result.bits & A) !== 0;
+    const metadata: JournalVisibility[] = [];
+    const owners = new Map<string, ReaderTarget>();
+    for (const found of targets)
+      await journalRows(found, { journal: selector.history, after: selector.after, accept(entry) {
+        if (!visibleJournalEntry(found, entry)) return false;
+        if (after !== undefined && compareScanKeys(scanKey(entry, sort, entry.address.id), after, sort) <= 0)
+          return false;
+        metadata.push(entry);
+        owners.set(journalKey(entry.address), found);
+        return false;
+      } });
+
+    const page = scanPage(metadata, sort, entry => entry.address.id, scope,
+      selector.window?.after, selector.window?.limit, active);
+    const selected = new Map<ReaderTarget, Set<string>>();
+    for (const entry of page.items) {
+      const key = journalKey(entry.address);
+      const found = owners.get(key)!;
+      let keys = selected.get(found);
+      if (keys === undefined) { keys = new Set(); selected.set(found, keys); }
+      keys.add(key);
     }
-    function accept(entry: JournalVisibility): boolean {
-      active();
-      if (entry.kind === 'transfer') return false;
-      if (!allowed(entry.path) || entry.from !== undefined && !allowed(entry.from)) return false;
-      if (entry.before !== null && entry.before !== 'unknown' && !allowed(entry.before.path, entry.before)) return false;
-      if (entry.after !== null && !allowed(entry.after.path, entry.after)) return false;
-      return after === undefined || compareScanKeys(scanKey(entry, sort, entry.address.id), after, sort) > 0;
-    }
-    const records = await found.store.scan({ range: { journal: selector.history, after: selector.after, accept,
-      ...(selector.window === undefined ? {} : { take: Math.min(selector.window.limit + 1, Number.MAX_SAFE_INTEGER) }) },
-      budget: { ...remaining(), exprWork: work.limit - work.used,
-        deadline: Math.min(allowance.deadline, Date.now() + limits.queryMs) } });
-    active();
-    if (records.cost === undefined) throw new KernelError('INVALID', 'History Store omitted reconstruction cost');
-    scanned += records.cost.nodes; bytes += records.cost.bytes; work.used += records.cost.exprWork;
-    if (scanned > allowance.nodes || bytes > allowance.bytes || work.used > work.limit)
-      throw new KernelError('BUDGET', 'History scan budget exceeded');
-    for (const record of records.items) {
+    const entries = new Map<string, HistoryEntry>();
+    for (const [found, keys] of selected) {
+      const records = await journalRows(found, { journal: selector.history,
+        accept: entry => keys.has(journalKey(entry.address)) });
+      for (const record of records) {
       active();
       for (const entry of record.entries) {
         active();
@@ -616,16 +701,15 @@ export function createReader(options: ReaderOptions) {
         if (images.after !== null) {
           charge(images.after);
         }
-        entries.push({ address, path: entry.path, executor: record.executor, caller: record.caller,
+        entries.set(journalKey(address), { address, path: entry.path, executor: record.executor, caller: record.caller,
           ...(record.decision === undefined ? {} : { opId: record.decision.opId }),
           before: images.before === null || images.before === 'unknown' ? images.before : visibleNode(images.before, A | R),
           after: images.after === null ? null : visibleNode(images.after, A | R) });
       }
+      }
     }
-    const page = scanPage(entries, sort, entry => entry.address.id, scope, selector.window?.after,
-      selector.window?.limit, active);
     checkDependencies();
-    return { list: [], copies: [], history: page.items, at: [writer.stream.cursor().pos],
+    return { list: [], copies: [], history: page.items.map(entry => entries.get(journalKey(entry.address))!), at: [writer.stream.cursor().pos],
       ...(page.next === undefined ? {} : { next: page.next }) };
   }
   return {
@@ -635,6 +719,9 @@ export function createReader(options: ReaderOptions) {
     work,
     project,
     projectedNode,
+    journalTarget,
+    pin: topology,
+    remainingBudget,
     dependency,
     domains: () => source.domains,
     expect,

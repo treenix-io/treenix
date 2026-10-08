@@ -2,13 +2,11 @@ import { isDeepStrictEqual } from 'node:util'
 import { KernelError } from '#errors'
 import { decodeChainNode } from '#kernel/chain-index'
 import type { InfluenceContext, InfluenceIndex } from '#kernel/influence'
-import type { DomainId, Node, Position, Preconditions, Registry, Selector, StoredNode } from '#kernel/types'
+import type { DomainId, Node, Position, Preconditions, Registry, ScanRange, Selector, StoredNode } from '#kernel/types'
 
-export interface ReadDependency {
-  readonly kind: 'target' | 'rights' | 'type' | 'actor' | 'epoch'
-  readonly key: string
-  readonly value: unknown
-}
+export type ReadDependency =
+  | { readonly kind: 'target' | 'rights' | 'type' | 'actor' | 'epoch'; readonly key: string; readonly value: unknown }
+  | { readonly kind: 'topology'; readonly key: string; readonly range: ScanRange; readonly value: string }
 export interface ReadSet extends Preconditions {
   readonly dependencies?: readonly ReadDependency[]
 }
@@ -20,6 +18,7 @@ export interface PreconditionOptions extends InfluenceContext {
   readonly dependency: (input: ReadDependency) => unknown | Promise<unknown>
 }
 
+/** Rejects a prepared operation when captured dependencies, nodes, or selectors have changed. */
 export async function checkPreconditions(expect: ReadSet, options: PreconditionOptions): Promise<void> {
   for (const input of expect.dependencies ?? []) {
     if (!isDeepStrictEqual(input.value, await options.dependency(input))) throw new KernelError('CONFLICT', 'A read dependency changed')

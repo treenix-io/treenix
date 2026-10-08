@@ -91,6 +91,10 @@ export function createSessionFactory(options: SessionFactoryOptions) {
     openNode(path: Path): Promise<OpenedSession> {
       return open(() => options.auth.openNode(path), false);
     },
+    /** Gives new lanes a fresh welcome while accepted requests finish on their original lane. */
+    reconnect(): void {
+      for (const session of sessions) session.reconnect()
+    },
     /** Close active sessions and refuse future opens. */
     close(): void {
       if (closed) return;

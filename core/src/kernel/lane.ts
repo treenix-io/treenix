@@ -7,7 +7,7 @@ import { comparePositions } from '#kernel/position'
 import { createSubscriptions, type NodeSubscription } from '#kernel/subscription'
 import { createLaneDelivery } from '#kernel/lane-delivery'
 import type { LaneSelectionSource } from '#kernel/lane-selection'
-import type { Credential, Frame, LaneChange, Limits, NodeCopy, NodeId, Outcome, Path, Pending, Position, Request, Selector, Session, Sort, SubSelector } from '#kernel/types'
+import type { Credential, DomainId, Frame, LaneChange, Limits, NodeCopy, NodeId, Outcome, Path, Pending, Position, Request, ScanRange, Selector, Session, Sort, SubSelector } from '#kernel/types'
 
 export type NodeSubSelector = SubSelector
 export type NodeLaneCommand =
@@ -32,9 +32,13 @@ export interface NodeLaneOptions {
   readonly stream: Pick<ReturnType<typeof createInstanceStream>, 'cursor' | 'observe'>
   readonly limits: () => Limits
   readonly intake: () => string
-  readonly read: <T>(run: (source: NodeLaneRead) => Promise<T>) => Promise<T>
+  readonly read: <T>(run: (source: NodeLaneRead) => Promise<T>, selectors?: readonly SubSelector[]) => Promise<T>
   readonly gateSub: (selector: NodeSubSelector, signal: AbortSignal) => Promise<void>
   readonly registryChanged: (listener: () => void) => () => void
+  /** Reports changed target ranges when the source supports dynamic mounts. */
+  readonly topologyChanged?: (listener: (intersects: (range: ScanRange) => boolean) => void) => () => void
+  /** Narrows a continuity reset to subscriptions reading that domain's logical ranges. */
+  readonly domainIntersects?: (domain: DomainId, range: ScanRange) => boolean
   readonly issuedCredential?: Credential
   readonly transfers?: BlobTransfers
 }
@@ -52,6 +56,7 @@ export interface NodeLane extends Session {
   cancel(id: string): void
   touch(): void
   close(reason?: KernelError): void
+  reconnect(): void
 }
 interface Mutation {
   readonly id: string
@@ -91,6 +96,7 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
   let generation = 0;
   let welcome = true;
   let closed = false;
+  let reconnecting = false;
   let draining = false;
   let notification = 0;
   let watermark: Position | undefined;
@@ -99,11 +105,12 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
   let lastActivity = Date.now();
   let unsubscribeStream = () => {};
   let unsubscribeRegistry = () => {};
+  let unsubscribeTopology = () => {};
   /** Allocates a lane-local request or subscription identifier. */
   const id = () => `${prefix}:${++sequence}`;
   /** Rejects new work after the lane or its authorization closes. */
   const active = () => {
-    if (closed) throw failure ?? new KernelError('CANCELLED', 'Lane is closed');
+    if (closed || reconnecting) throw failure ?? new KernelError('CANCELLED', 'Lane is closed');
     admission.assertActive();
   };
   /** Preserves kernel refusals and reports unexpected operation failures. */
@@ -140,6 +147,7 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
     if (timer !== undefined) clearTimeout(timer);
     unsubscribeStream();
     unsubscribeRegistry();
+    unsubscribeTopology();
     admission.signal.removeEventListener('abort', revoked);
     for (const sub of subscriptions.entries.values()) {
       sub.controller.abort(reason);
@@ -167,6 +175,13 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
     admission.close(reason);
     for (const pull of pulls.splice(0))
       reason === undefined ? pull.resolve({ done: true, value: undefined }) : pull.reject(reason);
+  }
+  /** Ends an old intake lane after its accepted outcomes have passed their covering position. */
+  function reconnect(): void {
+    if (closed || reconnecting) return
+    reconnecting = true
+    if (mutations.size === 0) close()
+    else wake()
   }
   /** Closes delivery when the admission loses authority. */
   const revoked = () => close(error(admission.signal.reason));
@@ -280,13 +295,28 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
     wake();
   }
   /** Starts new projection generations and requests fresh snapshots. */
-  function reset(): void {
+  function reset(affected: (sub: NodeSubscription) => boolean = () => true): void {
     for (const sub of subscriptions.entries.values()) {
+      if (!affected(sub)) continue;
       sub.gen = ++generation;
       sub.initial = true;
       subscriptions.dirty(sub, true);
       enqueue({ t: 'reset', sub: sub.id, gen: sub.gen });
     }
+  }
+  /** Includes absent selector ranges and inherited rights alongside current copy dependencies. */
+  function intersectsSubscription(
+    sub: NodeSubscription,
+    intersects: (range: ScanRange) => boolean,
+  ): boolean {
+    const range = 'node' in sub.selector ? { node: sub.selector.node } : { children: sub.selector.children };
+    if (intersects(range)) return true;
+
+    for (const branch of [sub.state.fixed, ...sub.state.roots.values()]) {
+      for (const path of branch.paths) if (intersects({ node: path })) return true;
+      for (const path of branch.rights) if (intersects({ node: path })) return true;
+    }
+    return false;
   }
   /** Requires ordinary progress before dirty subscriptions or accepted mutations can complete. */
   function ordinaryNeeded(): boolean {
@@ -389,6 +419,7 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
         return { t: 'fail', req: requestId, error: error(caught) };
       }
     }
+    if (reconnecting && mutations.size === 0) close()
     return undefined;
   }
   /** Drains only waiting pulls and rechecks notifications received during preparation. */
@@ -447,7 +478,10 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
     },
   };
   unsubscribeStream = options.stream.observe((event) => {
-    if (event.t === 'reset') reset();
+    if (event.t === 'reset')
+      reset(sub => options.domainIntersects === undefined
+        || sub.state.domains.includes(event.domain)
+          && intersectsSubscription(sub, range => options.domainIntersects!(event.domain, range)));
     else if (event.t === 'commit')
       for (const entry of event.record.entries) {
         const force =
@@ -474,6 +508,10 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
     reset();
     wake();
   });
+  unsubscribeTopology = options.topologyChanged?.(intersects => {
+    reset(sub => intersectsSubscription(sub, intersects));
+    wake();
+  }) ?? (() => {});
   admission.signal.addEventListener('abort', revoked, { once: true });
   admission.assertActive();
   heartbeat();
@@ -482,6 +520,7 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
     frames,
     lane: frames,
     close,
+    reconnect,
     touch,
     cancel,
     /** Counts binary uploads in the same unfinished-request quota as commands. */

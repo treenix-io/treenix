@@ -85,7 +85,8 @@ export async function prepareChangeSet(options: ChangeSetOptions, changes: reado
       console.error(error)
       throw new KernelError('INVALID', `Invalid node path: ${value}`)
     }
-    if (options.resolve !== undefined && options.resolve(value).domain !== store.domain) throw new KernelError('CROSS_DOMAIN', 'ChangeSet spans transaction domains')
+    if (options.resolve !== undefined && options.resolve(value) !== store)
+      throw new KernelError('CROSS_DOMAIN', 'ChangeSet spans atomic Store owners')
   }
   function touch(before: StoredNode | null, after: StoredNode | null, at: string): void {
     if (++transitions > limits.changeSet) throw new KernelError('BUDGET', 'ChangeSet transition budget exceeded')
@@ -179,15 +180,30 @@ export async function prepareChangeSet(options: ChangeSetOptions, changes: reado
     const staged = final.get(before.$id)
     if (staged !== undefined && staged !== null) throw new KernelError('CONFLICT', 'Restore identity is alive')
     if (staged === undefined) {
-      const live = (
-        await runStoreQuery(budget, limits.queryMs, (queryBudget) =>
-          store.scan({ range: { subtree: '/' }, where: { $id: before.$id }, budget: queryBudget }),
-        )
-      ).items;
-      if (live.length !== 0) throw new KernelError('CONFLICT', 'Restore identity is alive')
+      if (options.capabilities !== undefined) {
+        if (await options.capabilities.node(before.$id) !== null)
+          throw new KernelError('CONFLICT', 'Restore identity is alive')
+      } else {
+        const live = (
+          await runStoreQuery(budget, limits.queryMs, (queryBudget) =>
+            store.scan({ range: { subtree: '/' }, where: { $id: before.$id }, budget: queryBudget }),
+          )
+        ).items;
+        if (live.length !== 0) throw new KernelError('CONFLICT', 'Restore identity is alive')
+      }
     }
     const parent = dirname(before.$path)
-    if (parent !== null && await get(parent) === null) throw new KernelError('NOT_FOUND', 'Restore parent is absent')
+    if (parent !== null) {
+      const parentStore = options.resolve?.(parent) ?? store
+      let parentNode: StoredNode | null
+      if (parentStore === store) parentNode = await get(parent)
+      else {
+        if (options.readBefore === undefined)
+          throw new KernelError('INVALID', 'Restore requires its composed parent source')
+        parentNode = await options.readBefore(parent)
+      }
+      if (parentNode === null) throw new KernelError('NOT_FOUND', 'Restore parent is absent')
+    }
     touch(null, { ...migrator.migrate(before), $pos: pos }, before.$path)
   }
   async function checkpoint(before: StoredNode): Promise<{ bytes: number; full: boolean }> {

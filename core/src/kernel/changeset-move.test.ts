@@ -109,6 +109,25 @@ describe('subtree relocation', () => {
     assert.deepEqual(await f.nodes(), before)
   })
 
+  it('rejects distinct atomic Store owners even when their transaction domains match', async () => {
+    const local = createMemoryStore({ domain: 'shared' })
+    const foreign = createMemoryStore({ domain: 'shared' })
+    const f = await fixture({ store: local, resolve: path => path.startsWith('/foreign') ? foreign : local })
+    await f.commit([put('/old', { value: 1 })])
+    const before = await f.nodes()
+    const records = await f.journal()
+    await assert.rejects(f.commit([
+      { op: 'patch', path: '/old', ops: { $inc: { value: 1 } } },
+      { op: 'move', from: '/old', to: '/foreign/new' },
+    ]), code('CROSS_DOMAIN'))
+    assert.deepEqual(await f.nodes(), before)
+    assert.equal((await f.journal()).filter(record => record.entries.length > 0).length,
+      records.filter(record => record.entries.length > 0).length)
+    assert.deepEqual((await foreign.scan({ range: { subtree: '/' }, budget: {
+      nodes: 100, bytes: 100_000, exprWork: 100_000, deadline: Date.now() + 1000,
+    } })).items, [])
+  })
+
   it('recreates path identities with a kernel identity instead of carrying the old path id', async () => {
     const f = await fixture()
     await f.writer.commit(f.store, [], pos => {

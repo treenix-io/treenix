@@ -710,7 +710,7 @@ export interface MountDecl extends Component {
 }
 
 /** One declaration yields exactly one target instance. */
-export type MountHandler = (decl: Node, session: Session) => Promise<MountTarget>
+export type MountHandler = (decl: Node, session: Session) => Promise<OpenedMountTarget>
 
 export interface SecurityHandlers {
   readonly acl: RightsRule
@@ -1007,6 +1007,22 @@ export type MountTarget =
     }
   | { readonly kind: 'authority'; readonly authority: Authority }
 
+/** Acquired resources and verified decision continuity belong to the target's constructor. */
+export type MountStoreResources = Pick<StreamDomain, 'epoch' | 'persistent'> & {
+  readonly writerEpoch: number
+  readonly decisionHistory: 'fresh' | 'retained'
+}
+
+/** A handler owns its target's release; a Store supplies its actual continuity and fencing token. */
+export type OpenedStoreMountTarget = Extract<MountTarget, { readonly kind: 'store' }> & {
+  readonly resources: MountStoreResources
+  close(): Promise<void>
+}
+
+export type OpenedMountTarget = OpenedStoreMountTarget | (
+  Exclude<MountTarget, { readonly kind: 'store' }> & { close(): Promise<void> }
+)
+
 // ---- Instance stream (replicas) ----
 
 export interface StreamCursor {
@@ -1177,8 +1193,8 @@ export interface Instance {
   openSession(credential?: Credential, origin?: string): Promise<Session>
   /** For stream consumers; replicas come later. */
   readonly stream: InstanceStream
-  /** Releases this instance's sessions and authentication, preserving borrowed Store and writer resources. */
-  close(): void
+  /** Awaits owned targets, sessions and authentication; borrowed deployment resources stay with their owner. */
+  close(): Promise<void>
 }
 
 export type CreateInstance = (config: InstanceConfig) => Promise<Instance>

@@ -6,7 +6,7 @@ import { assertAdminPath, assertAuthKey, assertBootstrapState, bootstrap, bootst
   ownershipRecord, storedLimits, TYPE_PATH, type BootstrapIdentity } from '#kernel/bootstrap'
 import { createProcessCache, type Image } from '#kernel/cache'
 import { createBlobTransfers } from '#kernel/blobs'
-import { createChainIndex } from '#kernel/chain-index'
+import { createAcceptedTargets } from '#kernel/instance-targets'
 import { prepareChangeSet, type ChangeExecutor } from '#kernel/changeset'
 import { createCommands, type CommandOptions, type NativeCommands } from '#kernel/commands'
 import { judgeGates } from '#kernel/gates'
@@ -18,10 +18,17 @@ import { copyManifest, createRegistry, type TypeOwnership } from '#kernel/regist
 import { assertTypeOwner, installModuleOwnership, previewModules } from '#kernel/module-install'
 import { loadAllMods, publishLoadedModules } from '#mod/loader'
 import { createProjector } from '#kernel/projection'
+import { componentEntries } from '#kernel/migrate'
+import { createMemoryMountManifest } from '#kernel/mount-memory'
+import { createMountTable, type MountChange, type MountEntry, type MountRange, type MountTable } from '#kernel/mounts'
+import { positionToRev } from '#kernel/position'
+import type { ReaderSource, ReaderTarget } from '#kernel/reader'
+import { drainSession } from '#kernel/session-delivery'
+import { runStoreQuery } from '#kernel/store/budget'
 import type { AuthReadSource, AuthSource } from '#kernel/session'
 import type { AuthAdmission } from '#kernel/auth-factory'
 import { DEFAULT_LIMITS, type AdminInput, type Budget, type ChangeMember, type Credential, type InstanceConfig, type InstanceId, type Limits, type ModuleManifest, type NodeId,
-  type BlobStore, type Gate, type InstanceStream, type Path, type Position, type PositionCounter, type Registry, type Store, type StoreCommit, type StoredNode, type StreamCursor, type StreamDomain } from '#kernel/types'
+  type BlobStore, type Gate, type InstanceStream, type Node, type Path, type Position, type PositionCounter, type Registry, type ScanRange, type Selector, type Store, type StoreCommit, type StoredNode, type StreamCursor, type StreamDomain } from '#kernel/types'
 import { assertWriterDomains, createWriter, type Writer } from '#kernel/writer'
 
 export interface InstanceFoundationConfig {
@@ -51,10 +58,12 @@ export interface InstanceFoundation {
   readonly stream: InstanceStream
   readonly bootstrapCursor: StreamCursor
   /** Close sessions and authentication state owned by this foundation. */
-  close(): void
+  close(): Promise<void>
   limits(): Limits
   commit(changes: readonly ChangeMember[], who: ChangeExecutor): Promise<Position>
   commands(admission: AuthAdmission): NativeCommands
+  /** Supplies the same composed Store source used by native commands and lanes. */
+  readerSource(allowance: Budget): ReaderSource
   /** Build lane options bound to the supplied admission. */
   nodeLaneOptions(admission: AuthAdmission): NodeLaneOptions
 }
@@ -138,20 +147,23 @@ export async function createInstance(input: InstanceConfig): Promise<InstanceFou
     ...(bootstrapPolicy.kind === 'fresh' ? { firstAdmin: bootstrapPolicy.admin } : {}),
   })
   try {
+    const installBuiltins = bootstrapPolicy.kind === 'reopen' && bootstrapPolicy.installerCredential !== undefined
     await installModuleOwnership(
       instance,
-      modules,
+      installBuiltins ? [...bootstrapModules, ...modules] : modules,
       bootstrapPolicy.kind === 'reopen' ? bootstrapPolicy.installerCredential : undefined,
     )
+    if (installBuiltins) instance.registry.publish(createMemoryMountManifest(config.writerEpoch))
     if (discovered === undefined) for (const module of modules) instance.registry.publish(module)
     else await publishLoadedModules(instance.registry, discovered, { allowPartialMods: config.allowPartialMods })
     return instance
   } catch (error) {
-    instance.close()
+    await instance.close()
     throw error
   }
 }
 
+/** Owns the instance's accepted Store indexes, Writer, mount routes, and session lifecycle. */
 export function createInstanceFoundation(input: AuthInstanceFoundationConfig): Promise<InstanceFoundationWithAuth>
 export function createInstanceFoundation(input: InstanceFoundationConfig): Promise<InstanceFoundation>
 export async function createInstanceFoundation(input: InstanceFoundationConfig): Promise<InstanceFoundation> {
@@ -180,24 +192,78 @@ export async function createInstanceFoundation(input: InstanceFoundationConfig):
     if (config.firstAdmin !== undefined) throw new KernelError('INVALID', 'First-account provisioning requires an empty instance')
   } else if (config.firstAdmin === undefined) throw new KernelError('INVALID', 'First-account provisioning is required')
 
-  const paths = new Map<string, NodeId>(), ids = new Map<NodeId, string>()
-  const owners = new Map<string, TypeOwnership>(), chains = createChainIndex()
+  let mounts: MountTable | undefined
+  let closed = false
+  const pendingMounts = new Map<NodeId, Node>()
+  const mountTypes = new Set(['t.mount.memory', ...config.modules?.flatMap(module =>
+    module.security.flatMap(entry => entry.context === 'mount' ? [entry.type] : [])) ?? []])
+  /** Keeps claimed unavailable ranges separate from the unclaimed root Store. */
+  function resolveStore(path: Path): Store {
+    const found = mounts?.resolve(path)
+    if (found === undefined) return config.root
+    if (found.target.kind !== 'store') throw new KernelError('UNAVAILABLE', 'Mount target is not a supported Store')
+    return found.target.store
+  }
+  const targets = createAcceptedTargets(config.root, resolveStore)
+  const paths = targets.root.paths
+  const preparedTargets = new Map<Store, readonly StoredNode[]>()
+  const preparedEntries = new Map<Store, MountEntry>()
+  const registeredTargets = new Map<string, { readonly store: Store; readonly range: MountRange; readonly target: ReaderTarget }>()
+  const journalOnlyStores = new Set(config.domains.map(domain => domain.store).filter(store => store !== config.root))
+  const owners = new Map<string, TypeOwnership>()
   let identity: BootstrapIdentity | undefined
   let setupCredential: Credential | undefined
   let accepted = false, failure: { readonly error: unknown } | undefined
   let registryRevision = 0
   const listeners = new Set<(event: AuthEvent) => void>()
+  const topologyListeners = new Set<(intersects: (range: ScanRange) => boolean) => void>()
+  let topologyPosition: Position | undefined
   function notify(event: AuthEvent): void { for (const listener of listeners) listener(event) }
-  const registry = createRegistry({ ownership: name => owners.get(name), published() { registryRevision++; notify({ t: 'registry' }) } })
+  const registry = createRegistry({ ownership: name => owners.get(name), published() {
+    registryRevision++
+    mounts?.registryChanged()
+    notify({ t: 'registry' })
+  } })
   const projector = createProjector({ registry, alert: (path, error) => console.error(path, error) })
 
-  function available(): void { if (failure !== undefined) throw failure.error }
-  function validate(changed: ReadonlyMap<string, StoredNode | null>): void {
+  /** Rejects work after the instance fails or begins closing. */
+  function available(): void {
+    if (failure !== undefined) throw failure.error
+    if (closed) throw new KernelError('UNAVAILABLE', 'Instance is closed')
+  }
+  /** Captures declaration settings only; ordinary payloads stay in their Store and bounded cache. */
+  function mounting(node: StoredNode): Node | undefined {
+    if (!componentEntries(node).some(([name, component]) => name === '#mount' || mountTypes.has(component.$type)
+      || registry.security(component.$type, 'mount') !== undefined)) return undefined
+    const { $pos, ...fields } = node
+    return { ...fields, $rev: positionToRev($pos) }
+  }
+  /** Stages the final declarations of a whole ChangeSet before storage accepts it. */
+  function mountChanges(changed: ReadonlyMap<string, StoredNode | null>): readonly MountChange[] {
+    if (mounts === undefined) return []
+    const changes = new Map<NodeId, MountChange>()
+    for (const [path, node] of changed) {
+      const old = targets.target(resolveStore(path)).paths.get(path)
+      if (old !== undefined) changes.set(old, { id: old, declarations: [] })
+      if (node !== null) {
+        const candidate = mounting(node)
+        changes.set(node.$id, candidate === undefined ? { id: node.$id, declarations: [] } : mounts.declarationsOf(candidate))
+      }
+    }
+    return [...changes.values()]
+  }
+  /** Validates target identities and root invariants before accepted metadata changes. */
+  function validate(changed: ReadonlyMap<string, StoredNode | null>, store = config.root): void {
+    targets.validate(store, changed)
+    if (mounts !== undefined) mounts.stage(mountChanges(changed))
+    if (store !== config.root) return
+
     if (!accepted) {
       const fresh = new Map<string, StoredNode>()
       for (const [path, node] of changed) if (node !== null) fresh.set(path, node)
       assertBootstrapState(config.id, fresh)
     }
+
     for (const [path, node] of changed) {
       if (path === '/') {
         if (node === null) throw new KernelError('FORBIDDEN', 'Instance root is required')
@@ -217,36 +283,47 @@ export async function createInstanceFoundation(input: InstanceFoundationConfig):
         if (previous !== undefined && (previous.module !== next.module || previous.security !== next.security))
           throw new KernelError('FORBIDDEN', 'Persisted type ownership is immutable')
       }
-      if (node !== null) {
-        const prior = ids.get(node.$id)
-        if (prior !== undefined && prior !== path && !changed.has(prior)) throw new KernelError('INVALID', 'Duplicate accepted node identity')
-      }
     }
   }
-  function put(node: StoredNode): void {
-    const path = ids.get(node.$id)
-    if (path !== undefined && path !== node.$path) throw new KernelError('INVALID', 'Duplicate accepted node identity')
-    paths.set(node.$path, node.$id); ids.set(node.$id, node.$path); chains.put(node)
+  /** Updates a target index and, for root nodes, kernel-owned metadata. */
+  function put(node: StoredNode, store = config.root): void {
+    targets.put(store, node)
+    if (mounts === undefined) {
+      const candidate = mounting(node)
+      if (candidate !== undefined) pendingMounts.set(node.$id, candidate)
+      else pendingMounts.delete(node.$id)
+    }
+    if (store !== config.root) return
     if (node.$path.startsWith(`${TYPE_PATH}/`) || node.$type === 't.type') {
       const owner = ownershipRecord(node)
       owners.set(node.$path.slice(TYPE_PATH.length + 1), owner)
     }
     if (node.$path === LIMITS_PATH) limits = storedLimits(node)
   }
-  function remove(path: string): void {
-    const id = paths.get(path)
-    if (id !== undefined) ids.delete(id)
-    paths.delete(path); chains.remove(path)
+  /** Removes target metadata before the replacement images of a commit are installed. */
+  function remove(path: string, store = config.root): void {
+    const id = targets.target(store).paths.get(path)
+    if (id !== undefined) pendingMounts.delete(id)
+    targets.remove(store, path)
+    if (store !== config.root) return
     if (path.startsWith(`${TYPE_PATH}/`)) owners.delete(path.slice(TYPE_PATH.length + 1))
   }
+  /** Publishes one Store commit to accepted indexes and notifies its readers. */
   function publish(_domain: string, commit: StoreCommit, images: readonly Image[], store: Store): void {
-    if (store !== config.root || commit.writes.length === 0) return
+    // Borrowed journal domains have no logical route; mounted Store metadata is registered separately.
+    if (journalOnlyStores.has(store)) return
+    if (commit.writes.length === 0) return
     try {
       const changed = new Map<string, StoredNode | null>(commit.writes.map(write => [write.path, null]))
       for (const image of images) if (image.node !== null) changed.set(image.path, image.node)
-      validate(changed)
-      for (const write of commit.writes) remove(write.path)
-      for (const image of images) if (image.node !== null) put(image.node)
+      validate(changed, store)
+      const stage = mounts?.stage(mountChanges(changed))
+      for (const write of commit.writes) remove(write.path, store)
+      for (const image of images) if (image.node !== null) put(image.node, store)
+      if (mounts !== undefined && stage !== undefined) {
+        topologyPosition = commit.pos
+        try { mounts.publish(stage) } finally { topologyPosition = undefined }
+      }
       accepted = true
       const final = new Map<NodeId, StoredNode | null>()
       for (const image of images) if (!final.has(image.id) || image.node !== null) final.set(image.id, image.node)
@@ -270,7 +347,37 @@ export async function createInstanceFoundation(input: InstanceFoundationConfig):
         throw new KernelError('UNAUTHENTICATED', 'Module installation requires a credential')
     }
     writer = await createWriter({ instance: config.id, root: config.root, writerEpoch: config.writerEpoch,
-      domains: config.domains, counter: config.counter, budget, applied: publish, cache })
+      domains: config.domains, counter: config.counter, budget, applied: publish, cache,
+      targetLifecycle: {
+        /** Checks prepared target identity before Writer publication authority is granted. */
+        validate(registration) {
+          if (mounts === undefined) throw new KernelError('UNAVAILABLE', 'Mount table is not initialized')
+          mounts.validate(registration.key, registration.revision)
+          if (registeredTargets.get(registration.key)?.store !== registration.target.store) {
+            const nodes = preparedTargets.get(registration.target.store)
+            if (nodes === undefined) throw new KernelError('INVALID', 'Target metadata is not prepared')
+            targets.validateAttach(registration.target.store, nodes)
+          }
+        },
+        /** Installs or removes accepted metadata as a mounted target changes routes. */
+        publish(event) {
+          if (mounts === undefined) throw new KernelError('UNAVAILABLE', 'Mount table is not initialized')
+          if (event.kind === 'activate') {
+            const nodes = preparedTargets.get(event.registration.target.store)
+            const entry = preparedEntries.get(event.registration.target.store)
+            if (nodes === undefined || entry === undefined) throw new KernelError('INVALID', 'Target metadata is not prepared')
+            targets.attach(event.registration.target.store, nodes)
+            preparedTargets.delete(event.registration.target.store)
+            registeredTargets.set(entry.key, { store: event.registration.target.store, range: entry.range,
+              target: { id: entry.range.generation, store: event.registration.target.store, chain: targets.chain, children: targets.children } })
+            mounts.activated(event.registration.key, event.registration.revision, event.registration.target)
+          } else {
+            targets.detach(event.registration.target.store)
+            if (registeredTargets.get(event.registration.key)?.store === event.registration.target.store)
+              registeredTargets.delete(event.registration.key)
+          }
+        },
+      } })
   } finally { initial.release() }
 
   function reader(allowance: Budget, active = () => true): AuthReadSource {
@@ -283,10 +390,11 @@ export async function createInstanceFoundation(input: InstanceFoundationConfig):
     const readSource: AuthReadSource = {
       async node(path) {
         check()
-        const id = paths.get(path)
+        const store = resolveStore(path)
+        const id = targets.target(store).paths.get(path)
         if (id === undefined) return null
         if (nodes >= allowance.nodes) throw new KernelError('BUDGET', 'Read node budget exceeded')
-        const lease = await writer.cache.fill(config.root, { node: path }, { ...allowance,
+        const lease = await writer.cache.fill(store, { node: path }, { ...allowance,
           nodes: allowance.nodes - nodes, bytes: allowance.bytes - bytes })
         try {
           check()
@@ -297,7 +405,12 @@ export async function createInstanceFoundation(input: InstanceFoundationConfig):
           return node
         } finally { lease.release() }
       },
-      async nodeById(id) { check(); const path = ids.get(id); return path === undefined ? null : readSource.node(path) },
+      async nodeById(id) {
+        check()
+        const address = targets.address(id)
+        if (address === undefined || resolveStore(address.path) !== address.store) return null
+        return readSource.node(address.path)
+      },
       shard() { check(); return false },
     }
     return readSource
@@ -309,7 +422,7 @@ export async function createInstanceFoundation(input: InstanceFoundationConfig):
     read(run) {
       let active = true
       const readSource = reader(budget(), () => active)
-      return writer.read([config.root.domain], async () => {
+      return writer.read(Object.keys(writer.intake.domains), async () => {
         try { return await run(readSource) } finally { active = false }
       })
     },
@@ -325,7 +438,13 @@ export async function createInstanceFoundation(input: InstanceFoundationConfig):
     accepted = true
   }
   if (identity === undefined) throw new KernelError('INVALID', 'Instance bootstrap identity is absent')
-  for (const module of bootstrapModules) registry.publish(module)
+  for (const module of bootstrapModules) {
+    const manifest = module.id === 'kernel' ? createMemoryMountManifest(config.writerEpoch) : module
+    // An older instance keeps optional builtins uninstalled until its admin installs their ownership.
+    const installed = manifest.types.filter(type => owners.has(type.name))
+    const names = new Set(installed.flatMap(type => [type.name, ...type.aliases ?? []]))
+    registry.publish({ ...manifest, types: installed, security: manifest.security.filter(entry => names.has(entry.type)) })
+  }
 
   const auth = config.initialCredential === undefined ? undefined : createAuthFactory({ instance: config.id, registry, source,
     ttlMs: config.initialCredential.ttlMs, events: { subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener) } },
@@ -349,26 +468,80 @@ export async function createInstanceFoundation(input: InstanceFoundationConfig):
       const prepared = await prepareChangeSet({ store: config.root, cache: writer.cache, registry, limits,
         blobs: config.blobs,
         budget: allowance, readBefore: readSource.node, capabilities: { node: readSource.nodeById,
-          grants: principal => chains.grantsTo(principal), ownerGrants: chains.grants({ owner: true }), shard: readSource.shard } },
+          grants: targets.grantsTo, ownerGrants: targets.ownerGrants(), shard: readSource.shard } },
       changes, pos, who)
       validate(new Map(prepared.writes.map(write => [write.path, write.node])))
       return prepared
     })
   }
+  /** Opens only selector ranges before their Writer barriers; reference includes may address any target. */
+  async function prepareSource(allowance: Budget, selectors: readonly Selector[]): Promise<void> {
+    available()
+    if (mounts === undefined) return
+    const ranges: ScanRange[] = []
+    for (const selector of selectors) {
+      if ('node' in selector) ranges.push({ node: selector.node })
+      else if ('children' in selector) ranges.push({ children: selector.children })
+      else ranges.push({ subtree: selector.history })
+      const pending = 'include' in selector ? [...selector.include ?? []] : []
+      for (let include = pending.pop(); include !== undefined; include = pending.pop()) {
+        if ('path' in include) ranges.push({ node: include.path })
+        else {
+          ranges.push({ subtree: '/' })
+          pending.push(...include.then ?? [])
+        }
+      }
+    }
+    await mounts.prepareRanges(ranges, allowance)
+    available()
+  }
+  /** Composes accepted target metadata and Store reads under one caller budget. */
+  function readerSource(allowance: Budget): ReaderSource {
+    available()
+    const rootTarget: ReaderTarget = { id: paths.get('/')!, store: config.root, chain: targets.chain, children: targets.children }
+    /** Resolves an actual registered target while preserving its semantic generation. */
+    function resolve(path: Path): ReaderTarget {
+      const found = mounts?.resolve(path)
+      if (found === undefined) return rootTarget
+      const registered = registeredTargets.get(found.entry.key)
+      if (registered === undefined || found.target.kind !== 'store' || registered.store !== found.target.store)
+        throw new KernelError('UNAVAILABLE', 'Mount metadata is unavailable')
+      return registered.target
+    }
+    /** Includes every intersecting native Store, even when the range root belongs to another target. */
+    function rangeTargets(range: ScanRange): readonly ReaderTarget[] {
+      const result = new Map<Store, ReaderTarget>()
+      if ('node' in range) {
+        const found = resolve(range.node)
+        return [found]
+      }
+      result.set(config.root, rootTarget)
+      for (const claim of mounts?.ranges(range) ?? []) {
+        const registered = registeredTargets.get(claim.key)
+        if (claim.state !== 'active' || registered === undefined || registered.target.id !== claim.generation)
+          throw new KernelError('UNAVAILABLE', 'Claimed range is unavailable')
+        result.set(registered.store, registered.target)
+      }
+      return [...result.values()]
+    }
+    return { domains: Object.keys(writer.intake.domains), auth: reader(allowance), resolve,
+      targets: rangeTargets, topology: range => mounts === undefined ? '[]' : mounts.topology(range) }
+  }
   function commandOptions(admission: AuthAdmission): CommandOptions {
     available()
-    const target = { id: paths.get('/')!, store: config.root, chain: chains.chain, children: chains.children }
     return { writer, registry, projector, registryRevision: () => registryRevision,
         blobs: config.blobs,
-        admission, source: allowance => ({ domains: [config.root.domain], auth: reader(allowance), resolve: () => target }),
+        admission, source: readerSource,
+        prepareSource, boundary: path => mounts?.boundary(path) ?? false,
         capabilities: allowance => {
           const readSource = reader(allowance)
-          return { node: readSource.nodeById, grants: principal => chains.grantsTo(principal),
-            ownerGrants: chains.grants({ owner: true }), shard: source.shard }
+          return { node: readSource.nodeById, grants: targets.grantsTo,
+            ownerGrants: targets.ownerGrants(), shard: source.shard }
         },
         gates: config.gates ?? [], limits: () => limits,
         budget: kind => config.budget === undefined && kind === 'action' ? { ...budget(), deadline: Date.now() + limits.actionMs } : budget(),
-        validate: prepared => validate(new Map(prepared.writes.map(write => [write.path, write.node]))) }
+        validate: prepared => validate(new Map(prepared.writes.map(write => [write.path, write.node])),
+          prepared.writes.length === 0 ? config.root : resolveStore(prepared.writes[0].path)) }
   }
   /** Build lane options with the caller's admission and instance capabilities. */
   function nodeLaneOptions(admission: AuthAdmission): NodeLaneOptions {
@@ -396,9 +569,79 @@ export async function createInstanceFoundation(input: InstanceFoundationConfig):
         listeners.add(receive);
         return () => listeners.delete(receive);
       },
+      /** Notifies lanes when a mount changes their logical topology. */
+      topologyChanged(listener) {
+        topologyListeners.add(listener)
+        return () => topologyListeners.delete(listener)
+      },
+      /** Checks whether a subscription range reads from the specified Store domain. */
+      domainIntersects(domain, range) {
+        if (domain === config.root.domain) return true
+        for (const registered of registeredTargets.values())
+          if (registered.store.domain === domain && registered.range.intersects(range)) return true
+        return false
+      },
     };
   }
   const sessions = auth === undefined ? undefined : createSessionFactory({ auth, limits: () => limits, lane: nodeLaneOptions })
+  const mountDeliveries = new Set<Promise<void>>()
+  mounts = createMountTable({
+    registry,
+    declarationTypes: mountTypes,
+    async openSession(node) {
+      if (sessions === undefined) throw new KernelError('UNAUTHENTICATED', 'Mount handlers require a node session')
+      const opened = await sessions.openNode(node.$path)
+      const delivery = drainSession(opened.session).catch(error => {
+        // Losing the declaring node's authority ends only its owned mount session.
+        if (error instanceof KernelError && (error.code === 'CANCELLED' || error.code === 'UNAUTHENTICATED')) return
+        throw error
+      })
+      mountDeliveries.add(delivery)
+      void delivery.then(() => mountDeliveries.delete(delivery), error => {
+        mountDeliveries.delete(delivery)
+        console.error(error)
+        failure = { error }
+      })
+      return { session: opened.session, close: () => opened.session.close() }
+    },
+    async activate(entry, target) {
+      if (target.kind !== 'store') throw new KernelError('UNAVAILABLE', 'Mount target is not a supported Store')
+      // Off-route rows must pass accepted identity checks before entering the shared cache.
+      const scanned = await runStoreQuery(budget(), limits.queryMs,
+        allowance => target.store.scan({ range: { subtree: '/' }, budget: allowance }))
+      preparedTargets.set(target.store, scanned.items)
+      preparedEntries.set(target.store, entry)
+      try {
+        await writer.activateTarget({ key: entry.key, revision: entry.revision, target })
+      } finally {
+        preparedTargets.delete(target.store)
+        preparedEntries.delete(target.store)
+      }
+    },
+    async retire(entry) { await writer.retireTarget(entry.key, entry.revision) },
+    changed(before, after) {
+      const previous = new Map(before.map(range => [range.key, range]))
+      const next = new Map(after.map(range => [range.key, range]))
+      const changed: MountRange[] = []
+      for (const range of before) if (next.get(range.key)?.generation !== range.generation) changed.push(range)
+      for (const range of after) if (previous.get(range.key)?.generation !== range.generation) changed.push(range)
+      const pos = topologyPosition ?? writer.stream.cursor().pos
+      // A claim can shadow root data without writing those addresses into its journal.
+      writer.influence.replaceDomains(Object.keys(writer.intake.domains), pos, [config.root.domain])
+      for (const listener of topologyListeners) listener(range => changed.some(claim => claim.intersects(range)))
+    },
+    failed(error) { console.error(error); failure = { error } },
+  })
+  mounts.publish(mounts.stage([...pendingMounts.values()].map(node => mounts!.declarationsOf(node))))
+  pendingMounts.clear()
+  let intakeEpoch = writer.intake.epoch
+  const unsubscribeIntake = writer.stream.observe(event => {
+    if (event.t === 'commit' && event.record.intake !== undefined && event.record.intake.epoch !== intakeEpoch) {
+      intakeEpoch = event.record.intake.epoch
+      sessions?.reconnect()
+    }
+  })
+  let closing: Promise<void> | undefined
   return {
     id: config.id,
     root: config.root,
@@ -419,11 +662,24 @@ export async function createInstanceFoundation(input: InstanceFoundationConfig):
           openNodeSession: async (path: Path) => (await sessions.openNode(path)).session,
         }),
     commands: (admission) => createCommands(commandOptions(admission)),
+    readerSource,
     nodeLaneOptions,
     /** Close the sessions and authentication factory owned by this foundation. */
     close() {
-      sessions?.close();
-      auth?.close();
+      if (closing !== undefined) return closing
+      closed = true
+      unsubscribeIntake()
+      sessions?.close()
+      auth?.close()
+      closing = (async () => {
+        const errors: unknown[] = []
+        try { await mounts!.close() } catch (error) { console.error(error); errors.push(error) }
+        try { await writer.closeTargets() } catch (error) { console.error(error); errors.push(error) }
+        const drained = await Promise.allSettled(mountDeliveries)
+        for (const result of drained) if (result.status === 'rejected') errors.push(result.reason)
+        if (errors.length !== 0) throw new AggregateError(errors, 'Instance resources failed to close')
+      })()
+      return closing
     },
     limits() {
       available();

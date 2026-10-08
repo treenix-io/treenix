@@ -21,6 +21,7 @@ export interface InfluenceContext {
   readonly limits?: Limits
 }
 
+/** Builds a predicate for writes that can change a selector result. */
 export function createInfluenceTest(selector: Selector, { project, work, limits = DEFAULT_LIMITS }: InfluenceContext) {
   const test = 'children' in selector && selector.where !== undefined ? createSiftTest(selector.where, limits) : undefined
   return (write: InfluenceWrite): boolean => {
@@ -44,12 +45,14 @@ export interface InfluenceOptions {
   readonly maxWrites?: number
   readonly maxBytes?: number
 }
+/** Keeps a bounded history of accepted writes for selector precondition checks. */
 export function createInfluenceIndex(options: InfluenceOptions) {
   const rows = new Map<InfluenceWrite, number>()
   const floors = new Map(options.domains.map(domain => [domain, options.position]))
   const maxWrites = options.maxWrites ?? DEFAULT_LIMITS.readNodes, maxBytes = options.maxBytes ?? DEFAULT_LIMITS.readBytes
   let position = options.position, bytes = 0
   const image = (node: StoredNode | null) => node === null || Object.isFrozen(node) ? node : freeze(structuredClone(node))
+  /** Advance the global position and move domain floors across gaps. */
   function advance(pos: Position): void {
     if (comparePositions(pos, position) <= 0) throw new KernelError('INVALID', 'Influence positions must increase')
     if (pos.epoch !== position.epoch || pos.seq !== position.seq + 1) {
@@ -58,6 +61,7 @@ export function createInfluenceIndex(options: InfluenceOptions) {
     }
     position = Object.freeze({ ...pos })
   }
+  /** Retain a write and advance its domain floor when capacity evicts older history. */
   function put(write: InfluenceWrite): void {
     const size = Buffer.byteLength(JSON.stringify(write))
     rows.set(Object.freeze(write), size); bytes += size
@@ -72,6 +76,15 @@ export function createInfluenceIndex(options: InfluenceOptions) {
     get size(): number { return rows.size },
     get bytes(): number { return bytes },
     advance,
+    /** Discard intervals whose domain ownership changed at this publication boundary. */
+    replaceDomains(domains: readonly DomainId[], pos: Position, changed: readonly DomainId[] = []): void {
+      const next = new Set(domains)
+      const invalid = new Set(changed)
+      for (const domain of floors.keys()) if (!next.has(domain)) floors.delete(domain)
+      for (const domain of next) if (!floors.has(domain) || invalid.has(domain)) floors.set(domain, Object.freeze({ ...pos }))
+      for (const [write, size] of rows) if (!next.has(write.domain) || invalid.has(write.domain)) { rows.delete(write); bytes -= size }
+    },
+    /** Record one accepted Store publication at its global Writer position. */
     record(domain: DomainId, pos: Position, changes: readonly NodeChange[]): void {
       if (!floors.has(domain)) throw new KernelError('INVALID', 'Unknown influence domain')
       advance(pos)
@@ -84,11 +97,13 @@ export function createInfluenceIndex(options: InfluenceOptions) {
         }
       }
     },
+    /** Drop one domain’s retained writes and establish a new comparison floor. */
     reset(domain: DomainId, pos: Position): void {
       if (!floors.has(domain)) throw new KernelError('INVALID', 'Unknown influence domain')
       advance(pos); floors.set(domain, position)
       for (const [write, size] of rows) if (write.domain === domain) { rows.delete(write); bytes -= size }
     },
+    /** Reject intervals that are unknown, truncated, or affected by a retained write. */
     check(selector: Selector, cursors: readonly Position[], before: Position, domains: readonly DomainId[], context: InfluenceContext): void {
       let from: Position | undefined
       for (const cursor of cursors) if (cursor.instance === before.instance

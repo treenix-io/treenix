@@ -121,6 +121,7 @@ export function createLaneDelivery(
       stage.state.fixed,
       { upper },
       upper === null ? undefined : source.cursor(stage.sub.selector, upper),
+      stage.state.domains,
     );
     return true;
   }
@@ -178,6 +179,7 @@ export function createLaneDelivery(
             subscriptionBranch(selection.fixedIncludes),
             range,
             initial ? selection.next : sub.state.next,
+            selection.reads.dependencies?.flatMap(input => input.kind === 'epoch' ? [input.key] : []) ?? [],
           );
           stages.push({ sub, gen, stamp, force, keys, state, changes: new Map(sub.changes) });
           for (const image of selection.images) images.set(copyId(image.copy), image);
@@ -231,7 +233,7 @@ export function createLaneDelivery(
         for (const [id, image] of images)
           if ((estimated.counts.get(id) ?? 0) > 0) held.set(id, image.retain());
         return { stages, images, pos: source.pos, interrupted };
-      });
+      }, subs.map(sub => sub.selector));
       return { ...result, held };
     } catch (error) {
       for (const release of held.values()) release();

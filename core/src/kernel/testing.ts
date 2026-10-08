@@ -89,8 +89,7 @@ export async function createTestInstance(input: TestInstanceConfig): Promise<Nat
   /** Releases lanes before awaiting their pumps; setup failures use the same cleanup. */
   function close(): Promise<void> {
     if (closing !== undefined) return closing;
-    instance.close();
-    closing = Promise.all(deliveries).then(() => undefined);
+    closing = instance.close().then(() => Promise.all(deliveries)).then(() => undefined);
     return closing;
   }
 

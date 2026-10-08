@@ -76,6 +76,9 @@ export function createActionRuntime(options: CommandOptions) {
         const replay = await writer.replay(identity, control.wait)
         if (replay !== undefined) return replay
       }
+      await options.prepareSource(budget, [{ history: '/' }])
+      assertActive()
+
       const revision = options.registryRevision()
       const source = options.source(budget)
 
@@ -205,6 +208,7 @@ export function createActionRuntime(options: CommandOptions) {
 
             const prepareOptions: ChangeSetOptions = { store, cache: writer.cache, registry, limits, budget,
               blobs: options.blobs,
+              boundary: options.boundary,
               resolve: path => source.resolve(path).store, readBefore: source.auth.node, capabilities: options.capabilities(budget),
               preconditions: { index: writer.influence, read: reads.projectedNode, domains: reads.domains,
                 dependency: reads.dependency, project: reads.project, work: reads.work, limits } }

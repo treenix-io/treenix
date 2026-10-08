@@ -7,7 +7,7 @@ import { judgeGates } from '#kernel/gates'
 import type { createProjector } from '#kernel/projection'
 import { createReader, type ReaderSource } from '#kernel/reader'
 import { createRequestAdmission, serializeRequest } from '#kernel/request'
-import type { BlobStore, Budget, CommitRequest, Gate, Io, Limits, Outcome, Registry, Selector } from '#kernel/types'
+import type { BlobStore, Budget, CommitRequest, Gate, Io, Limits, Outcome, Registry, Selector, Store } from '#kernel/types'
 import type { Writer } from '#kernel/writer'
 import { freeze } from '#util/freeze'
 
@@ -17,6 +17,9 @@ export interface CommandOptions {
   readonly registryRevision: () => number
   readonly admission: AuthAdmission
   readonly source: (budget: Budget) => ReaderSource
+  /** Opens required targets before any Writer read or prepare span is held. */
+  readonly prepareSource: (budget: Budget, selectors: readonly Selector[]) => Promise<void>
+  readonly boundary: (path: string) => boolean
   readonly capabilities: (budget: Budget) => CapabilityState
   readonly gates: readonly Gate[]
   readonly limits: () => Limits
@@ -27,6 +30,7 @@ export interface CommandOptions {
   readonly blobs?: BlobStore
 }
 
+/** Binds read and commit operations to one admission and its current target topology. */
 export function createCommands(options: CommandOptions) {
   const { admission, writer, registry } = options
   const gates = Object.freeze([...options.gates])
@@ -40,6 +44,7 @@ export function createCommands(options: CommandOptions) {
     actor: admission.actor,
     signal: admission.signal,
     act: actions.act,
+    /** Prepare the selector’s targets before taking its ordered read span. */
     async read(selector: Selector, requestSignal?: AbortSignal) {
       const request = createRequestAdmission(admission, requestSignal)
       const budget = options.budget()
@@ -49,8 +54,11 @@ export function createCommands(options: CommandOptions) {
       await judgeGates(gates, { kind: 'read', selector: owned, origin: admission.origin }, admission.actor,
         { signal: request.signal, deadline: budget.deadline })
       active(budget, request)
+      await options.prepareSource(budget, [owned])
+      active(budget, request)
       return reader(budget, options.source(budget), request).read(owned)
     },
+    /** Resolve every change to one actual Store before preparing the mutation. */
     async commit(input: CommitRequest, requestSignal?: AbortSignal): Promise<Outcome> {
       const authorization = createRequestAdmission(admission, requestSignal)
       const budget = options.budget(), limits = options.limits()
@@ -67,19 +75,54 @@ export function createCommands(options: CommandOptions) {
         await judgeGates(gates, { kind: 'commit', changes: request.changes, origin: admission.origin }, admission.actor,
           { signal: authorization.signal, deadline: budget.deadline })
         active(budget, authorization)
+        const selectors: Selector[] = []
+        for (const change of request.changes) {
+          if (change.op === 'restore') selectors.push({ history: '/' })
+          else if (change.op === 'move') selectors.push({ node: change.from }, { node: change.to })
+          else selectors.push({ node: change.op === 'put' ? change.node.$path : change.path })
+        }
+        await options.prepareSource(budget, selectors)
+        active(budget, authorization)
         const source = options.source(budget), capabilities = options.capabilities(budget)
-        const store = source.resolve(request.changes.length === 0 ? '/' : changePath(request.changes[0])).store
-        await span.finish(store, source.domains, async pos => {
+        const ownership = reader(budget, source, authorization)
+        let store: Store | undefined
+        /** Chooses one atomic writer without treating equal domain names as an atomic Store. */
+        async function resolveOwners(): Promise<void> {
+          for (const change of request.changes) {
+            if (change.op !== 'restore') ownership.pin({ node: changePath(change) })
+            const target = change.op === 'restore'
+              ? await ownership.journalTarget(change.record)
+              : source.resolve(changePath(change))
+            if (store !== undefined && store !== target.store)
+              throw new KernelError('CROSS_DOMAIN', 'ChangeSet spans atomic Store owners')
+            store = target.store
+            if (change.op === 'move') {
+              ownership.pin({ node: change.to })
+              if (source.resolve(change.to).store !== store)
+                throw new KernelError('CROSS_DOMAIN', 'ChangeSet spans atomic Store owners')
+            }
+          }
+        }
+        if (request.changes.some(change => change.op === 'restore'))
+          await writer.read(source.domains, async () => {
+            await authorization.validate(source.auth)
+            await resolveOwners()
+          })
+        else await resolveOwners()
+        const selectedStore = store ?? source.resolve('/').store
+        const dependencies = ownership.expect().dependencies
+        const remaining = ownership.remainingBudget()
+        await span.finish(selectedStore, source.domains, async pos => {
           active(budget, authorization)
           await authorization.validate(source.auth)
-          const revision = options.registryRevision(), reads = reader(budget, source, authorization)
-          const prepared = await prepareChangeSet({ store, cache: writer.cache, registry, limits, budget,
+          const revision = options.registryRevision(), reads = reader(remaining, source, authorization)
+          const prepared = await prepareChangeSet({ store: selectedStore, cache: writer.cache, registry, limits, budget: remaining,
             blobs: options.blobs,
-            resolve: path => source.resolve(path).store, readBefore: source.auth.node, capabilities,
+            resolve: path => source.resolve(path).store, boundary: options.boundary, readBefore: source.auth.node, capabilities,
             preconditions: { index: writer.influence, read: reads.projectedNode, domains: () => source.domains,
               dependency: reads.dependency, project: reads.project, work: reads.work, limits } },
           request.changes, pos, { executor: admission.actor.principal, caller: admission.actor.principal,
-            actor: admission.actor, expect: request.expect })
+            actor: admission.actor, expect: { ...request.expect, dependencies } })
           options.validate(prepared)
           const check = () => {
             active(budget, authorization)

@@ -164,6 +164,8 @@ describe('native instance bootstrap', { timeout: 10_000 }, () => {
       { path: `${TYPE_PATH}/t.user`, change: () => null, error: 'INVALID' },
       { path: `${TYPE_PATH}/t.user`, change: node => ({ ...node, module: 'foreign' }), error: 'FORBIDDEN' },
       { path: `${TYPE_PATH}/t.user`, change: node => ({ ...node, security: 'user-capability' }), error: 'FORBIDDEN' },
+      { path: `${TYPE_PATH}/t.mount.memory`, change: node => ({ ...node, module: 'foreign' }), error: 'FORBIDDEN' },
+      { path: `${TYPE_PATH}/t.mount.memory`, change: node => ({ ...node, security: 'ordinary' }), error: 'FORBIDDEN' },
     ]
     for (const variant of variants) {
       const restored = createMemoryStore({ domain: 'restored-state' }), nodes: StoredNode[] = []

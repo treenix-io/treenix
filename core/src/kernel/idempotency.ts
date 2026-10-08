@@ -35,8 +35,9 @@ export const requestHash = (request: unknown, actor: Actor) => createHash('sha25
 export async function createIdempotency(options: IdempotencyOptions) {
   const now = options.now ?? Date.now
   const limits = options.limits ?? DEFAULT_LIMITS
-  const stores = [...new Set(options.domains.map(domain => domain.store))]
-  const domains = Object.fromEntries(options.domains.map(domain => [domain.store.domain, domain.epoch]))
+  let stores = [...new Set(options.domains.map(domain => domain.store))]
+  let domains: Record<string, string> = Object.fromEntries(options.domains.map(domain => [domain.store.domain, domain.epoch]))
+  const lookups = new Set<Promise<void>>()
   const saved = await options.root.scan({ range: { journal: '/' }, where: { intake: { $exists: true } },
     sort: [['pos.epoch', -1], ['pos.seq', -1]], limit: 1, budget: options.budget() })
   let state = saved.items[0]?.intake
@@ -64,23 +65,45 @@ export async function createIdempotency(options: IdempotencyOptions) {
   }
 
   /** Find the newest durable decision within one cumulative read budget. */
-  async function lookup(caller: Actor['principal'], opId: OpId): Promise<JournalCommit | undefined> {
-    const allowance = options.budget()
-    let latest: JournalCommit | undefined
-    let nodes = 0
-    let bytes = 0
+  async function lookup(
+    caller: Actor['principal'],
+    opId: OpId,
+  ): Promise<JournalCommit | undefined> {
+    const inventory = stores;
+    let release: () => void = () => {};
+    const done = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    lookups.add(done);
+    try {
+      const allowance = options.budget();
+      let latest: JournalCommit | undefined;
+      let nodes = 0;
+      let bytes = 0;
 
-    for (const store of stores) {
-      const found = await store.scan({ range: { decision: { caller, opId } }, limit: 1,
-        budget: { ...allowance, nodes: allowance.nodes - nodes, bytes: allowance.bytes - bytes } })
-      const record = found.items[0]
-      nodes++
-      if (record !== undefined) bytes += Buffer.byteLength(JSON.stringify(record))
-      if (nodes > allowance.nodes || bytes > allowance.bytes || Date.now() > allowance.deadline) throw new KernelError('BUDGET', 'Decision lookup exceeded the read budget')
-      if (record !== undefined && (latest === undefined || comparePositions(record.pos, latest.pos) > 0)) latest = record
+      for (const store of inventory) {
+        const found = await store.scan({
+          range: { decision: { caller, opId } },
+          limit: 1,
+          budget: { ...allowance, nodes: allowance.nodes - nodes, bytes: allowance.bytes - bytes },
+        });
+        const record = found.items[0];
+        nodes++;
+        if (record !== undefined) bytes += Buffer.byteLength(JSON.stringify(record));
+        if (nodes > allowance.nodes || bytes > allowance.bytes || Date.now() > allowance.deadline)
+          throw new KernelError('BUDGET', 'Decision lookup exceeded the read budget');
+        if (
+          record !== undefined &&
+          (latest === undefined || comparePositions(record.pos, latest.pos) > 0)
+        )
+          latest = record;
+      }
+
+      return latest;
+    } finally {
+      lookups.delete(done);
+      release();
     }
-
-    return latest
   }
 
   /** Return a complete outcome only when its request and actor hash match. */
@@ -139,10 +162,18 @@ export async function createIdempotency(options: IdempotencyOptions) {
     checkAdmitted,
     lookup,
     previous,
+    /** Replace owned decision sources and drain lookups that captured their predecessors. */
+    replaceDomains(next: readonly StreamDomain[]): Promise<void> {
+      stores = [...new Set(next.map(domain => domain.store))]
+      domains = Object.fromEntries(next.map(domain => [domain.store.domain, domain.epoch]))
+      return Promise.all([...lookups]).then(() => {})
+    },
     /** Preserve the intake epoch while its declared domain epochs remain unchanged. */
-    next(pos: Position, force = false): IntakeState {
-      return freeze({ epoch: !force && state !== undefined && isDeepStrictEqual(state.domains, domains) ? state.epoch : positionToRev(pos),
-        boundary: Math.max(0, state?.boundary ?? 0, now() - limits.opIdWindowMs), domains: { ...domains } })
+    next(pos: Position, force = false, inventory = domains, preserveAddition = false): IntakeState {
+      const unchanged = state !== undefined && (isDeepStrictEqual(state.domains, inventory)
+        || preserveAddition && Object.entries(state.domains).every(([domain, epoch]) => inventory[domain] === epoch))
+      return freeze({ epoch: !force && unchanged ? state!.epoch : positionToRev(pos),
+        boundary: Math.max(0, state?.boundary ?? 0, now() - limits.opIdWindowMs), domains: { ...inventory } })
     },
     /** Install accepted intake without moving its durable expiry backward. */
     publish(next: IntakeState): void {

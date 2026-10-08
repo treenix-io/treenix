@@ -1,5 +1,5 @@
 import { ancestorPaths, assertSafePath, isChildPath } from '#core/path'
-import { kernelManifest } from '#kernel/builtins'
+import { kernelManifest, optionalKernelTypes } from '#kernel/builtins'
 import { KernelError } from '#errors'
 import { AUTH_KEY_PATH, authKeyInput, authManifest, prepareAdmin } from '#kernel/auth-module'
 import { prepareCredential } from '#kernel/auth/credentials'
@@ -60,6 +60,7 @@ export function assertAuthKey(node: StoredNode | null, instance: InstanceId): vo
     || typeof node.key !== 'string' || !/^[0-9a-f]{64}$/.test(node.key)) throw new KernelError('INVALID', 'Invalid instance signing key')
 }
 
+/** Validate required checkpoint records; older checkpoints may omit optional kernel type ownership. */
 export function assertBootstrapState(instance: InstanceId, nodes: Pick<ReadonlyMap<string, StoredNode>, 'get'>): BootstrapIdentity {
   const root = nodes.get('/'), limits = nodes.get(LIMITS_PATH)
   if (root === undefined || limits === undefined) throw new KernelError('INVALID', 'Incomplete instance bootstrap')
@@ -68,7 +69,11 @@ export function assertBootstrapState(instance: InstanceId, nodes: Pick<ReadonlyM
   storedLimits(limits)
   for (const module of bootstrapModules) for (const type of module.types) for (const name of [type.name, ...type.aliases ?? []]) {
     const node = nodes.get(`${TYPE_PATH}/${name}`)
-    if (node === undefined) throw new KernelError('INVALID', 'Missing built-in type ownership')
+    if (node === undefined) {
+      // Older checkpoints require admin installation before these types become available.
+      if (optionalKernelTypes.includes(type)) continue
+      throw new KernelError('INVALID', 'Missing built-in type ownership')
+    }
     const owner = ownershipRecord(node)
     if (owner.module !== type.module || owner.security !== type.security) throw new KernelError('FORBIDDEN', 'Built-in type ownership differs')
   }

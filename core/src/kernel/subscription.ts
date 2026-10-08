@@ -1,6 +1,6 @@
 import { assertSafePath, dirname } from '#core/path';
 import type { LaneBranch, LaneRange, LaneRoot } from '#kernel/lane-selection';
-import type { Cursor, NodeId, Path, SubSelector } from '#kernel/types';
+import type { Cursor, DomainId, NodeId, Path, SubSelector } from '#kernel/types';
 
 export interface SubscriptionBranch {
   readonly covered: readonly NodeId[];
@@ -15,6 +15,7 @@ export interface SubscriptionState {
   readonly roots: ReadonlyMap<Path, SubscriptionRoot>;
   readonly fixed: SubscriptionBranch;
   readonly covered: ReadonlySet<NodeId>;
+  readonly domains: readonly DomainId[];
   readonly range?: LaneRange;
   readonly next?: Cursor;
 }
@@ -60,16 +61,17 @@ export function subscriptionRoot(root: LaneRoot): SubscriptionRoot {
     ...(root.member === undefined ? {} : { member: root.member.id }),
   };
 }
-/** Combines branch coverage into the subscription membership of shared IDs. */
+/** Combines branch coverage and source domains for membership and reset invalidation. */
 export function subscriptionState(
   roots: ReadonlyMap<Path, SubscriptionRoot>,
   fixed: SubscriptionBranch,
   range?: LaneRange,
   next?: Cursor,
+  domains: readonly DomainId[] = [],
 ): SubscriptionState {
   const covered = new Set(fixed.covered);
   for (const root of roots.values()) for (const id of root.covered) covered.add(id);
-  return { roots, fixed, covered, range, next };
+  return { roots, fixed, covered, range, next, domains };
 }
 
 /** Routes accepted changes to affected roots using metadata only. */
