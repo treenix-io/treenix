@@ -25,6 +25,7 @@ interface TargetPin {
   readonly registration: StoreTargetRegistration
   readonly writerEpoch: number
   active: boolean
+  readonly startup?: boolean
 }
 
 export interface WriterOptions {
@@ -39,6 +40,7 @@ export interface WriterOptions {
   readonly intake?: Pick<IdempotencyOptions, 'now' | 'limits'>
   readonly applied?: (domain: DomainId, commit: StoreCommit, images: readonly Image[], store: Store) => void
   readonly targetLifecycle?: TargetLifecycle
+  readonly startupTargets?: readonly StoreTargetRegistration[]
 }
 
 export interface PreparedCommit {
@@ -66,18 +68,48 @@ export function assertWriterDomains(root: Store, domains: readonly StreamDomain[
 }
 
 /** Owns ordered positions, commit delivery, decision intake, and registered target lifetimes. */
+/** Release only acquired startup resources if ordered initialization cannot complete. */
 export async function createWriter(options: WriterOptions) {
+  try { return await initializeWriter(options) }
+  catch (error) {
+    console.error(error)
+    const borrowed = new Set(options.domains.map(domain => domain.store))
+    const owned = new Set(options.startupTargets?.map(registration => registration.target).filter(target => !borrowed.has(target.store)))
+    const released = await Promise.allSettled([...owned].map(target => Promise.resolve().then(() => target.close())))
+    const failures = released.flatMap(result => result.status === 'rejected' ? [result.reason] : [])
+    if (failures.length !== 0) throw new AggregateError([error, ...failures], 'Writer initialization and release failed')
+    throw error
+  }
+}
+
+/** Establish all accepted position and decision sources before any root effect. */
+async function initializeWriter(options: WriterOptions) {
   assertWriterDomains(options.root, options.domains)
+  const startupTargets = options.startupTargets ?? []
+  if (startupTargets.length !== 0 && options.targetLifecycle === undefined) throw new KernelError('INVALID', 'Target lifecycle owner is missing')
+  const initial = [...options.domains]
+  const initialStores = new Set(initial.map(domain => domain.store)), keys = new Set<string>()
+  for (const registration of startupTargets) {
+    const { store, resources } = registration.target
+    if (keys.has(registration.key) || initialStores.has(store)) throw new KernelError('INVALID', 'Startup target already has an owner')
+    if (!Number.isSafeInteger(resources.writerEpoch) || resources.writerEpoch < 0) throw new KernelError('INVALID', 'Target writer token is invalid')
+    keys.add(registration.key); initialStores.add(store)
+    initial.push({ store, epoch: resources.epoch, persistent: resources.persistent })
+  }
+  streamDomainEpochs(initial)
+  const startupStores = new Set(startupTargets.map(registration => registration.target.store))
   const cache = options.cache ?? createProcessCache()
   const budget = options.budget ?? (() => ({ nodes: DEFAULT_LIMITS.readNodes, bytes: DEFAULT_LIMITS.readBytes,
     exprWork: DEFAULT_LIMITS.exprWork, deadline: Date.now() + DEFAULT_LIMITS.queryMs }))
   const loaded = await options.counter.load()
   let maximum: Position = { instance: options.instance, epoch: 0, seq: 0 }
-  for (const domain of options.domains) {
-    if (!domain.persistent) continue
-    const rows = await domain.store.scan({ range: { journal: '/' }, where: { 'pos.instance': options.instance },
+  for (const domain of initial) {
+    if (!domain.persistent && !startupStores.has(domain.store)) continue
+    const rows = await domain.store.scan({ range: { journal: '/' },
+      ...(startupStores.has(domain.store) ? {} : { where: { 'pos.instance': options.instance } }),
       sort: [['pos.epoch', -1], ['pos.seq', -1]], limit: 1, budget: budget() })
     const last = rows.items[0]?.pos
+    if (last !== undefined && last.instance !== options.instance) throw new KernelError('INVALID', 'Target belongs to another instance')
     if (last !== undefined && comparePositions(last, maximum) > 0) maximum = last
   }
   let position: Position
@@ -89,16 +121,24 @@ export async function createWriter(options: WriterOptions) {
     position = { instance: options.instance, epoch, seq: 0 }
     await options.counter.save(position, options.writerEpoch)
   }
-  const stream = createInstanceStream({ position, domains: options.domains, budget })
-  const domains = new Set(options.domains.map(domain => domain.store.domain))
-  const stores = new Set(options.domains.map(domain => domain.store))
-  let inventory = [...options.domains]
+  const stream = createInstanceStream({ position, domains: initial, budget })
+  const domains = new Set(initial.map(domain => domain.store.domain))
+  const stores = new Set(initial.map(domain => domain.store))
+  let inventory = initial
   const targets = new Map<string, TargetPin>()
   const storePins = new Map<Store, TargetPin>()
   const domainPins = new Map<DomainId, Set<TargetPin>>()
   const cleanup = new WeakMap<OpenedStoreMountTarget, Promise<void>>()
   const ownedTargets = new Set<OpenedStoreMountTarget>()
-  const intake = await createIdempotency({ root: options.root, domains: options.domains, budget, ...options.intake })
+  for (const registration of startupTargets) {
+    const pin: TargetPin = { registration, writerEpoch: registration.target.resources.writerEpoch, active: false, startup: true }
+    targets.set(registration.key, pin); storePins.set(registration.target.store, pin); ownedTargets.add(registration.target)
+    const domain = registration.target.store.domain
+    let selected = domainPins.get(domain)
+    if (selected === undefined) { selected = new Set(); domainPins.set(domain, selected) }
+    selected.add(pin)
+  }
+  const intake = await createIdempotency({ root: options.root, domains: initial, budget, ...options.intake })
   const influence = createInfluenceIndex({ position, domains: [...domains], ...options.influence })
   const writers = new Map<DomainId, Promise<void>>()
   const readers = new Map<DomainId, Set<Promise<void>>>()
@@ -129,12 +169,14 @@ export async function createWriter(options: WriterOptions) {
   }
 
   // Fence every target before serving writes: an old process may have reserved a position already.
-  for (const store of stores) {
+  const fencing = startupTargets.length === 0 ? [...stores] : [...stores].filter(store => store !== options.root).concat(options.root)
+  const rotate = startupTargets.some(registration => registration.target.resources.decisionHistory === 'unconfirmed')
+  for (const store of fencing) {
     const pos = await allocate()
     const record: JournalCommit = { pos, kind: 'kernel', executor: 'kernel', caller: 'kernel', entries: [],
-      ...(store === options.root ? { intake: intake.next(pos) } : {}) }
+      ...(store === options.root ? { intake: intake.next(pos, rotate) } : {}) }
     try {
-      const commit = { pos, writerEpoch: options.writerEpoch, writes: [], record }
+      const commit = { pos, writerEpoch: storePins.get(store)?.writerEpoch ?? options.writerEpoch, writes: [], record }
       await store.commit(commit)
       if (record.intake !== undefined) intake.publish(record.intake)
       const images = cache.apply(store, commit)
@@ -346,6 +388,15 @@ export async function createWriter(options: WriterOptions) {
         checkFailure()
         if (owner === undefined) throw new KernelError('INVALID', 'Target lifecycle owner is missing')
         owner.validate(registration)
+        if (previous?.startup && !previous.active) {
+          if (previous.registration.revision !== registration.revision || previous.registration.target !== target)
+            throw new KernelError('UNAVAILABLE', 'Startup target registration differs')
+          const pos = stream.cursor().pos
+          previous.active = true
+          try { owner.publish({ registration: previous.registration, pos, kind: 'activate' }) }
+          catch (error) { fatal = { error }; throw error }
+          return pos
+        }
         if (!Number.isSafeInteger(resources.writerEpoch) || resources.writerEpoch < 0)
           throw new KernelError('INVALID', 'Target writer token is invalid')
         if (stores.has(store)) throw new KernelError('INVALID', 'Store already has a writer owner')
