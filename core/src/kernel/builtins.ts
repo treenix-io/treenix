@@ -1,11 +1,17 @@
 import { normalizeType } from '#core/component'
 import { A, DEFAULT_LIMITS, R, W, type ModuleManifest, type TypeDef } from '#kernel/types'
 
+export const fsMountType: TypeDef = {
+  name: 't.mount.fs', module: 'kernel', security: 'privileged-capability', version: 0, actions: {},
+  schema: { type: 'object', required: ['pattern', 'directory'], additionalProperties: false,
+    properties: { pattern: { type: 'string' }, directory: { type: 'string', minLength: 1 }, external: { enum: ['none'] } } },
+}
+
 export const optionalKernelTypes: readonly TypeDef[] = [{
   name: 't.mount.memory', module: 'kernel', security: 'user-capability', version: 0, actions: {},
   schema: { type: 'object', required: ['pattern'], additionalProperties: false,
     properties: { pattern: { type: 'string' }, external: { enum: ['none', 'trusted'] } } },
-}]
+}, fsMountType]
 
 export const kernelManifest: ModuleManifest = {
   id: 'kernel',

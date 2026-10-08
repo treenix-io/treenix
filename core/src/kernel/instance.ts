@@ -19,7 +19,8 @@ import { assertTypeOwner, installModuleOwnership, previewModules } from '#kernel
 import { loadAllMods, publishLoadedModules } from '#mod/loader'
 import { createProjector } from '#kernel/projection'
 import { componentEntries } from '#kernel/migrate'
-import { createMemoryMountManifest } from '#kernel/mount-memory'
+import { createNativeMountManifest } from '#kernel/mount-native'
+import { ownMountTarget } from '#kernel/mount-resource'
 import { createMountTable, type MountChange, type MountEntry, type MountRange, type MountTable } from '#kernel/mounts'
 import { positionToRev } from '#kernel/position'
 import type { ReaderSource, ReaderTarget } from '#kernel/reader'
@@ -28,8 +29,9 @@ import { runStoreQuery } from '#kernel/store/budget'
 import type { AuthReadSource, AuthSource } from '#kernel/session'
 import type { AuthAdmission } from '#kernel/auth-factory'
 import { DEFAULT_LIMITS, type AdminInput, type Budget, type ChangeMember, type Credential, type InstanceConfig, type InstanceId, type Limits, type ModuleManifest, type NodeId,
-  type BlobStore, type Gate, type InstanceStream, type Node, type Path, type Position, type PositionCounter, type Registry, type ScanRange, type Selector, type Store, type StoreCommit, type StoredNode, type StreamCursor, type StreamDomain } from '#kernel/types'
+  type BlobStore, type Gate, type InstanceStream, type Node, type Path, type Position, type PositionCounter, type ProvisionedStoreMount, type Registry, type ScanRange, type Selector, type Store, type StoreCommit, type StoredNode, type StreamCursor, type StreamDomain } from '#kernel/types'
 import { assertWriterDomains, createWriter, type Writer } from '#kernel/writer'
+import { stableJson } from '#util/stable-json'
 
 export interface InstanceFoundationConfig {
   readonly id: InstanceId
@@ -44,6 +46,7 @@ export interface InstanceFoundationConfig {
   readonly blobs?: BlobStore
   readonly modules?: readonly ModuleManifest[]
   readonly installerCredential?: Credential
+  readonly mounts?: readonly ProvisionedStoreMount[]
 }
 
 export interface InstanceFoundation {
@@ -66,6 +69,8 @@ export interface InstanceFoundation {
   readerSource(allowance: Budget): ReaderSource
   /** Build lane options bound to the supplied admission. */
   nodeLaneOptions(admission: AuthAdmission): NodeLaneOptions
+  /** Adopts provisioned startup resources through their exact declaring-node handlers. */
+  prepareMounts(): Promise<void>
 }
 export interface InstanceFoundationWithAuth extends InstanceFoundation {
   readonly auth: AuthFactory
@@ -89,6 +94,47 @@ function assertInstanceOptions(
 
 /** Composes an instance from borrowed deployment resources and publishes only owned native types. */
 export async function createInstance(input: InstanceConfig): Promise<InstanceFoundationWithAuth> {
+  const mounts = captureMounts(input.provisioning.mounts)
+  const borrowed = new Set(input.provisioning.domains.map(domain => domain.store))
+  if (input.root.kind === 'store') borrowed.add(input.root.store)
+  try {
+    return await buildCanonicalInstance({ ...input, provisioning: { ...input.provisioning, mounts } })
+  } catch (error) {
+    return closeStartupAfterFailure(mounts, borrowed, error)
+  }
+}
+
+/** Capture startup ownership before the asynchronous constructor validates deployment input. */
+function captureMounts(
+  mounts: readonly ProvisionedStoreMount[] | undefined,
+): readonly ProvisionedStoreMount[] | undefined {
+  return mounts?.map(mount => Object.freeze({ ...mount, target: ownMountTarget(mount.target) }))
+}
+
+/** Preserve the construction error and every owned resource failure without closing borrowed root resources. */
+async function closeStartupAfterFailure(
+  mounts: readonly ProvisionedStoreMount[] | undefined,
+  borrowed: ReadonlySet<Store>,
+  error: unknown,
+): Promise<never> {
+  const closing: Promise<void>[] = []
+  for (const mount of mounts ?? []) {
+    if (!borrowed.has(mount.target.store)) closing.push(mount.target.close())
+  }
+
+  const closed = await Promise.allSettled(closing)
+  const failures = closed.flatMap(result => {
+    if (result.status === 'fulfilled') return []
+    console.error(result.reason)
+    return [result.reason]
+  })
+
+  if (failures.length !== 0) throw new AggregateError([error, ...failures], 'Instance construction and startup cleanup failed')
+  throw error
+}
+
+/** Publishes owned modules only after the accepted root and startup inventory are initialized. */
+async function buildCanonicalInstance(input: InstanceConfig): Promise<InstanceFoundationWithAuth> {
   const provisioning = input.provisioning
   const policy = provisioning.bootstrap
   const bootstrapPolicy = policy.kind === 'fresh'
@@ -108,10 +154,13 @@ export async function createInstance(input: InstanceConfig): Promise<InstanceFou
     counter: provisioning.counter,
     writerEpoch: provisioning.writerEpoch,
     domains: Object.freeze(provisioning.domains.map(domain => Object.freeze({ ...domain }))),
+    mounts: provisioning.mounts?.map(mount => Object.freeze({ ...mount, target: ownMountTarget(mount.target) })),
     credentialTtlMs: provisioning.credentialTtlMs,
     bootstrapPolicy,
-    modules: input.modules?.map(copyManifest), allowPartialMods: input.allowPartialMods,
+    modules: input.modules?.map(copyManifest),
+    allowPartialMods: input.allowPartialMods,
   })
+
   if (config.root.kind !== 'store' || config.rootExternal !== undefined && config.rootExternal !== 'none')
     throw new KernelError('UNAVAILABLE', 'Instance root requires a supported Store target')
   assertInstanceOptions({
@@ -128,6 +177,7 @@ export async function createInstance(input: InstanceConfig): Promise<InstanceFou
   const discovered = config.modules === undefined ? await loadAllMods('kernel') : undefined
   const modules = config.modules ?? discovered!.manifests.map(copyManifest)
   previewModules(modules)
+
   if (discovered !== undefined) {
     const preview = createRegistry()
     for (const module of bootstrapModules) preview.publish(module)
@@ -139,6 +189,7 @@ export async function createInstance(input: InstanceConfig): Promise<InstanceFou
     counter: config.counter,
     writerEpoch: config.writerEpoch,
     domains: config.domains,
+    mounts: config.mounts,
     blobs: config.blobs,
     gates: config.gates,
     modules,
@@ -153,9 +204,10 @@ export async function createInstance(input: InstanceConfig): Promise<InstanceFou
       installBuiltins ? [...bootstrapModules, ...modules] : modules,
       bootstrapPolicy.kind === 'reopen' ? bootstrapPolicy.installerCredential : undefined,
     )
-    if (installBuiltins) instance.registry.publish(createMemoryMountManifest(config.writerEpoch))
+    if (installBuiltins) instance.registry.publish(createNativeMountManifest(config.writerEpoch, config.mounts))
     if (discovered === undefined) for (const module of modules) instance.registry.publish(module)
     else await publishLoadedModules(instance.registry, discovered, { allowPartialMods: config.allowPartialMods })
+    await instance.prepareMounts()
     return instance
   } catch (error) {
     await instance.close()
@@ -167,6 +219,17 @@ export async function createInstance(input: InstanceConfig): Promise<InstanceFou
 export function createInstanceFoundation(input: AuthInstanceFoundationConfig): Promise<InstanceFoundationWithAuth>
 export function createInstanceFoundation(input: InstanceFoundationConfig): Promise<InstanceFoundation>
 export async function createInstanceFoundation(input: InstanceFoundationConfig): Promise<InstanceFoundation> {
+  const mounts = captureMounts(input.mounts)
+  const borrowed = new Set([input.root, ...input.domains.map(domain => domain.store)])
+  try {
+    return await buildInstanceFoundation({ ...input, mounts })
+  } catch (error) {
+    return closeStartupAfterFailure(mounts, borrowed, error)
+  }
+}
+
+/** Builds the accepted root state before exposing sessions or startup mount routes. */
+async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise<InstanceFoundation> {
   const { firstAdmin, domains, initialCredential, gates, modules, ...options } = input
   const config: InstanceFoundationConfig = Object.freeze({ ...options,
     domains: Object.freeze(domains.map(domain => Object.freeze({ ...domain }))),
@@ -180,6 +243,7 @@ export async function createInstanceFoundation(input: InstanceFoundationConfig):
     assertAdminPath(config.firstAdmin.path)
     assertAdminInput(config.firstAdmin)
   }
+
   let limits: Limits = DEFAULT_LIMITS
   const budget = config.budget ?? (() => ({ nodes: limits.readNodes, bytes: limits.readBytes,
     exprWork: limits.exprWork, deadline: Date.now() + limits.queryMs }))
@@ -193,9 +257,12 @@ export async function createInstanceFoundation(input: InstanceFoundationConfig):
   } else if (config.firstAdmin === undefined) throw new KernelError('INVALID', 'First-account provisioning is required')
 
   let mounts: MountTable | undefined
+  let sessions: SessionFactory | undefined
+  const mountDeliveries = new Set<Promise<void>>()
+  let constructing = true
   let closed = false
   const pendingMounts = new Map<NodeId, Node>()
-  const mountTypes = new Set(['t.mount.memory', ...config.modules?.flatMap(module =>
+  const mountTypes = new Set(['t.mount.memory', 't.mount.fs', ...config.modules?.flatMap(module =>
     module.security.flatMap(entry => entry.context === 'mount' ? [entry.type] : [])) ?? []])
   /** Keeps claimed unavailable ranges separate from the unclaimed root Store. */
   function resolveStore(path: Path): Store {
@@ -346,8 +413,47 @@ export async function createInstanceFoundation(input: InstanceFoundationConfig):
       else if (storedRoot !== undefined && config.installerCredential === undefined)
         throw new KernelError('UNAUTHENTICATED', 'Module installation requires a credential')
     }
+    const manifests = [
+      ...bootstrapModules.map(module => module.id === 'kernel'
+        ? createNativeMountManifest(config.writerEpoch, config.mounts)
+        : module),
+      ...config.modules ?? [],
+    ]
+    const startupTargets = (config.mounts ?? []).map(mount => {
+      const node = pendingMounts.get(mount.node)
+      const component = node === undefined ? undefined : componentEntries(node).find(([name]) => name === mount.component)?.[1]
+      if (node === undefined || node.$rev !== mount.revision || component === undefined)
+        throw new KernelError('CONFLICT', 'Startup mount declaration changed')
+      const module = manifests.find(module =>
+        module.types.some(type => type.name === component.$type || type.aliases?.includes(component.$type)))
+      const type = module?.types.find(type => type.name === component.$type || type.aliases?.includes(component.$type))
+      if (type === undefined || type.security === 'ordinary'
+        || module!.security.every(entry => entry.type !== type.name || entry.context !== 'mount'))
+        throw new KernelError('UNAVAILABLE', 'Startup mount owner handler is unavailable')
+      const owner = owners.get(type.name)
+      if (owner === undefined) throw new KernelError('UNAVAILABLE', 'Startup mount type is not installed')
+      assertTypeOwner(owner, type)
+      return { key: stableJson([mount.node, mount.component]), revision: mount.revision, target: ownMountTarget(mount.target) }
+    })
+
+    mounts = buildMountTable()
+    mounts.publish(mounts.stage([...pendingMounts.values()].map(node => mounts!.declarationsOf(node))))
+    pendingMounts.clear()
+
+    const startupIdentities = new Set<NodeId>()
+    for (const registration of startupTargets) {
+      const scanned = await runStoreQuery(budget(), limits.queryMs,
+        allowance => registration.target.store.scan({ range: { subtree: '/' }, budget: allowance }))
+      targets.validateAttach(registration.target.store, scanned.items)
+      for (const node of scanned.items) {
+        if (startupIdentities.has(node.$id)) throw new KernelError('INVALID', 'Duplicate startup node identity')
+        startupIdentities.add(node.$id)
+      }
+      preparedTargets.set(registration.target.store, scanned.items)
+    }
+
     writer = await createWriter({ instance: config.id, root: config.root, writerEpoch: config.writerEpoch,
-      domains: config.domains, counter: config.counter, budget, applied: publish, cache,
+      domains: config.domains, startupTargets, counter: config.counter, budget, applied: publish, cache,
       targetLifecycle: {
         /** Checks prepared target identity before Writer publication authority is granted. */
         validate(registration) {
@@ -379,6 +485,7 @@ export async function createInstanceFoundation(input: InstanceFoundationConfig):
         },
       } })
   } finally { initial.release() }
+  constructing = false
 
   function reader(allowance: Budget, active = () => true): AuthReadSource {
     let nodes = 0, bytes = 0
@@ -422,10 +529,14 @@ export async function createInstanceFoundation(input: InstanceFoundationConfig):
     read(run) {
       let active = true
       const readSource = reader(budget(), () => active)
-      return writer.read(Object.keys(writer.intake.domains), async () => {
+      return writer.read(addressedDomains(), async () => {
         try { return await run(readSource) } finally { active = false }
       })
     },
+  }
+  /** Quarantined startup journals participate in replay without exposing a logical read target. */
+  function addressedDomains(): readonly string[] {
+    return [...new Set([config.root.domain, ...[...registeredTargets.values()].map(target => target.store.domain)])]
   }
   if (storedRoot === undefined) {
     const admin = config.firstAdmin
@@ -439,7 +550,7 @@ export async function createInstanceFoundation(input: InstanceFoundationConfig):
   }
   if (identity === undefined) throw new KernelError('INVALID', 'Instance bootstrap identity is absent')
   for (const module of bootstrapModules) {
-    const manifest = module.id === 'kernel' ? createMemoryMountManifest(config.writerEpoch) : module
+    const manifest = module.id === 'kernel' ? createNativeMountManifest(config.writerEpoch, config.mounts) : module
     // An older instance keeps optional builtins uninstalled until its admin installs their ownership.
     const installed = manifest.types.filter(type => owners.has(type.name))
     const names = new Set(installed.flatMap(type => [type.name, ...type.aliases ?? []]))
@@ -475,7 +586,7 @@ export async function createInstanceFoundation(input: InstanceFoundationConfig):
     })
   }
   /** Opens only selector ranges before their Writer barriers; reference includes may address any target. */
-  async function prepareSource(allowance: Budget, selectors: readonly Selector[]): Promise<void> {
+  async function prepareSource(allowance: Budget, selectors: readonly Selector[], signal: AbortSignal): Promise<void> {
     available()
     if (mounts === undefined) return
     const ranges: ScanRange[] = []
@@ -492,7 +603,7 @@ export async function createInstanceFoundation(input: InstanceFoundationConfig):
         }
       }
     }
-    await mounts.prepareRanges(ranges, allowance)
+    await mounts.prepareRanges(ranges, allowance, signal)
     available()
   }
   /** Composes accepted target metadata and Store reads under one caller budget. */
@@ -524,7 +635,7 @@ export async function createInstanceFoundation(input: InstanceFoundationConfig):
       }
       return [...result.values()]
     }
-    return { domains: Object.keys(writer.intake.domains), auth: reader(allowance), resolve,
+    return { domains: addressedDomains(), auth: reader(allowance), resolve,
       targets: rangeTargets, topology: range => mounts === undefined ? '[]' : mounts.topology(range) }
   }
   function commandOptions(admission: AuthAdmission): CommandOptions {
@@ -583,57 +694,61 @@ export async function createInstanceFoundation(input: InstanceFoundationConfig):
       },
     };
   }
-  const sessions = auth === undefined ? undefined : createSessionFactory({ auth, limits: () => limits, lane: nodeLaneOptions })
-  const mountDeliveries = new Set<Promise<void>>()
-  mounts = createMountTable({
-    registry,
-    declarationTypes: mountTypes,
-    async openSession(node) {
-      if (sessions === undefined) throw new KernelError('UNAUTHENTICATED', 'Mount handlers require a node session')
-      const opened = await sessions.openNode(node.$path)
-      const delivery = drainSession(opened.session).catch(error => {
-        // Losing the declaring node's authority ends only its owned mount session.
-        if (error instanceof KernelError && (error.code === 'CANCELLED' || error.code === 'UNAUTHENTICATED')) return
-        throw error
-      })
-      mountDeliveries.add(delivery)
-      void delivery.then(() => mountDeliveries.delete(delivery), error => {
-        mountDeliveries.delete(delivery)
-        console.error(error)
-        failure = { error }
-      })
-      return { session: opened.session, close: () => opened.session.close() }
-    },
-    async activate(entry, target) {
-      if (target.kind !== 'store') throw new KernelError('UNAVAILABLE', 'Mount target is not a supported Store')
-      // Off-route rows must pass accepted identity checks before entering the shared cache.
-      const scanned = await runStoreQuery(budget(), limits.queryMs,
-        allowance => target.store.scan({ range: { subtree: '/' }, budget: allowance }))
-      preparedTargets.set(target.store, scanned.items)
-      preparedEntries.set(target.store, entry)
-      try {
-        await writer.activateTarget({ key: entry.key, revision: entry.revision, target })
-      } finally {
-        preparedTargets.delete(target.store)
-        preparedEntries.delete(target.store)
-      }
-    },
-    async retire(entry) { await writer.retireTarget(entry.key, entry.revision) },
-    changed(before, after) {
-      const previous = new Map(before.map(range => [range.key, range]))
-      const next = new Map(after.map(range => [range.key, range]))
-      const changed: MountRange[] = []
-      for (const range of before) if (next.get(range.key)?.generation !== range.generation) changed.push(range)
-      for (const range of after) if (previous.get(range.key)?.generation !== range.generation) changed.push(range)
-      const pos = topologyPosition ?? writer.stream.cursor().pos
-      // A claim can shadow root data without writing those addresses into its journal.
-      writer.influence.replaceDomains(Object.keys(writer.intake.domains), pos, [config.root.domain])
-      for (const listener of topologyListeners) listener(range => changed.some(claim => claim.intersects(range)))
-    },
-    failed(error) { console.error(error); failure = { error } },
-  })
-  mounts.publish(mounts.stage([...pendingMounts.values()].map(node => mounts!.declarationsOf(node))))
-  pendingMounts.clear()
+  sessions = auth === undefined ? undefined : createSessionFactory({ auth, limits: () => limits, lane: nodeLaneOptions })
+  /** Stages root claims before Writer effects; handlers open after the real session factory exists. */
+  function buildMountTable(): MountTable {
+    return createMountTable({
+      registry,
+      declarationTypes: mountTypes,
+      async openSession(node) {
+        if (sessions === undefined) throw new KernelError('UNAUTHENTICATED', 'Mount handlers require a node session')
+        const opened = await sessions.openNode(node.$path, { heartbeat: false })
+        const delivery = drainSession(opened.session).catch(error => {
+          // Losing the declaring node's authority ends only its owned mount session.
+          if (error instanceof KernelError && (error.code === 'CANCELLED' || error.code === 'UNAUTHENTICATED')) return
+          throw error
+        })
+        mountDeliveries.add(delivery)
+        void delivery.then(() => mountDeliveries.delete(delivery), error => {
+          mountDeliveries.delete(delivery)
+          console.error(error)
+          failure = { error }
+        })
+        return { session: opened.session, close: () => opened.session.close() }
+      },
+
+      async activate(entry, target) {
+        if (target.kind !== 'store') throw new KernelError('UNAVAILABLE', 'Mount target is not a supported Store')
+        // Off-route rows must pass accepted identity checks before entering the shared cache.
+        const nodes = preparedTargets.get(target.store) ?? (await runStoreQuery(budget(), limits.queryMs,
+          allowance => target.store.scan({ range: { subtree: '/' }, budget: allowance }))).items
+        preparedTargets.set(target.store, nodes)
+        preparedEntries.set(target.store, entry)
+        try {
+          await writer.activateTarget({ key: entry.key, revision: entry.revision, target })
+        } finally {
+          preparedTargets.delete(target.store)
+          preparedEntries.delete(target.store)
+        }
+      },
+
+      async retire(entry) { await writer.retireTarget(entry.key, entry.revision) },
+      changed(before, after) {
+        if (constructing) return
+        const previous = new Map(before.map(range => [range.key, range]))
+        const next = new Map(after.map(range => [range.key, range]))
+        const changed: MountRange[] = []
+        for (const range of before) if (next.get(range.key)?.generation !== range.generation) changed.push(range)
+        for (const range of after) if (previous.get(range.key)?.generation !== range.generation) changed.push(range)
+        const pos = topologyPosition ?? writer.stream.cursor().pos
+        // A claim can shadow root data without writing those addresses into its journal.
+        writer.influence.replaceDomains(Object.keys(writer.intake.domains), pos, [config.root.domain])
+        for (const listener of topologyListeners) listener(range => changed.some(claim => claim.intersects(range)))
+      },
+
+      failed(error) { console.error(error); failure = { error } },
+    })
+  }
   let intakeEpoch = writer.intake.epoch
   const unsubscribeIntake = writer.stream.observe(event => {
     if (event.t === 'commit' && event.record.intake !== undefined && event.record.intake.epoch !== intakeEpoch) {
@@ -664,6 +779,11 @@ export async function createInstanceFoundation(input: InstanceFoundationConfig):
     commands: (admission) => createCommands(commandOptions(admission)),
     readerSource,
     nodeLaneOptions,
+    /** Opens configured mount keys before the native runtime returns the instance. */
+    async prepareMounts() {
+      available()
+      await mounts!.prepareKeys((config.mounts ?? []).map(mount => stableJson([mount.node, mount.component])), budget())
+    },
     /** Close the sessions and authentication factory owned by this foundation. */
     close() {
       if (closing !== undefined) return closing
