@@ -3,9 +3,15 @@ import { createHash } from 'node:crypto'
 import { createRegistryMap } from '#core/registry-map'
 import { KernelError } from '#errors'
 import { stableJson } from '#util/stable-json'
-import type { ActionDef, ModuleManifest, Registry, SecurityClass, SecurityContext, SecurityHandlers, SecurityRegistration, TypeDef } from './types'
+import type { ActionDef, ModuleId, ModuleManifest, Registry, SecurityClass, SecurityContext, SecurityHandlers, SecurityRegistration, TypeDef, TypeName } from './types'
 
-type Owner = { module: string; security: SecurityClass }
+export interface TypeOwnership {
+  readonly module: ModuleId
+  readonly security: SecurityClass
+}
+export interface RegistryOptions {
+  readonly ownership?: (name: TypeName) => TypeOwnership | undefined
+}
 type SecurityEntries = { -readonly [C in SecurityContext]?: SecurityHandlers[C] }
 
 function freezeData<T>(value: T, seen = new WeakSet<object>()): T {
@@ -94,10 +100,10 @@ function setSecurity(entries: SecurityEntries, registration: SecurityRegistratio
   }
 }
 
-export function createRegistry(): Registry {
+export function createRegistry(options: RegistryOptions = {}): Registry {
   let modules = new Map<string, ModuleManifest>()
   // Removing a generation does not relinquish its type ownership or security class.
-  let owners = new Map<string, Owner>()
+  let owners = new Map<string, TypeOwnership>()
   let types = new Map<string, TypeDef>()
   let security = new Map<string, SecurityEntries>()
   let open = createRegistryMap<unknown>()
@@ -127,6 +133,12 @@ export function createRegistry(): Registry {
       for (const published of nextModules.values()) for (const def of published.types) {
         if (def.module !== published.id) throw new KernelError('FORBIDDEN', `Type owner differs from publisher: ${def.name}`)
         for (const name of [def.name, ...def.aliases ?? []]) {
+          if (options.ownership !== undefined) {
+            const accepted = options.ownership(name)
+            if (accepted === undefined || accepted.module !== def.module || accepted.security !== def.security) {
+              throw new KernelError('FORBIDDEN', `Type publication differs from accepted ownership: ${name}`)
+            }
+          }
           const owner = nextOwners.get(name)
           if (owner && (owner.module !== published.id || owner.security !== def.security)) {
             throw new KernelError('FORBIDDEN', `Type ownership or security class changed: ${name}`)

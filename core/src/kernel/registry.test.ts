@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
 import { KernelError } from '#errors'
-import { createRegistry } from './registry'
+import { createRegistry, type TypeOwnership } from './registry'
 import type { ActionDef, Migration, ModuleManifest, SecurityClass, SecurityRegistration, TypeDef } from './types'
 
 const code = (expected: KernelError['code']) => (error: unknown) => error instanceof KernelError && error.code === expected
@@ -14,6 +14,42 @@ const manifest = (id = 'owner', types: readonly TypeDef[] = [type()], security: 
 })
 
 describe('kernel registry', () => {
+  it('requires accepted ownership and rejects a conflicting publication atomically', () => {
+    const accepted = new Map<string, TypeOwnership>([['test.item', { module: 'owner', security: 'ordinary' }]])
+    const registry = createRegistry({ ownership: name => accepted.get(name) })
+    registry.publish(manifest())
+    const before = registry.digest
+    for (const candidate of [manifest('foreign', [type('test.item', 'foreign')]),
+      manifest('owner', [type('test.item', 'owner', 'privileged-capability')]),
+      manifest('owner', [type(), type('test.new')])]) {
+      assert.throws(() => registry.publish(candidate), code('FORBIDDEN'))
+      assert.equal(registry.digest, before)
+      assert.equal(registry.type('test.item').security, 'ordinary')
+      assert.throws(() => registry.type('test.new'), code('UNKNOWN_TYPE'))
+    }
+    accepted.set('test.new', { module: 'owner', security: 'ordinary' })
+    registry.publish(manifest('owner', [type(), type('test.new')]))
+    assert.equal(registry.type('test.new').module, 'owner')
+  })
+
+  it('checks persisted alias ownership and later accepted changes on every publication', () => {
+    const accepted = new Map<string, TypeOwnership>([
+      ['test.item', { module: 'owner', security: 'ordinary' }],
+      ['test.old', { module: 'foreign', security: 'ordinary' }],
+    ])
+    const registry = createRegistry({ ownership: name => accepted.get(name) })
+    const before = registry.digest
+    assert.throws(() => registry.publish(manifest('owner', [{ ...type(), aliases: ['test.old'] }])), code('FORBIDDEN'))
+    assert.equal(registry.digest, before)
+    accepted.set('test.old', { module: 'owner', security: 'ordinary' })
+    registry.publish(manifest('owner', [{ ...type(), aliases: ['test.old'] }]))
+    const published = registry.digest
+    accepted.delete('test.item')
+    assert.throws(() => registry.publish(manifest()), code('FORBIDDEN'))
+    assert.equal(registry.digest, published)
+    assert.equal(registry.type('test.old'), registry.type('test.item'))
+  })
+
   it('keeps kernel instances independent', () => {
     const first = createRegistry()
     const second = createRegistry()
