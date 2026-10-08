@@ -5,7 +5,7 @@ import { Billboard, OrbitControls, Text, Trail } from '@react-three/drei';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { getComponent, type NodeData } from '@treenx/core';
 import { useResolvedNode } from '@treenx/react/bind/hook';
-import { cache } from '@treenx/react';
+import { useTreeSource } from '@treenx/react/tree/tree-source-context';
 import { type View, useCurrentNode } from '@treenx/react';
 import { execute, useChildren, usePath } from '@treenx/react';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -330,6 +330,7 @@ function ScriptRunner({ path, code, groupRef }: {
   code: string;
   groupRef: React.RefObject<THREE.Group | null>;
 }) {
+  const source = useTreeSource();
   const fnRef = useRef<((ctx: unknown) => void) | null>(null);
   const { data: node } = usePath(path);
 
@@ -360,8 +361,8 @@ function ScriptRunner({ path, code, groupRef }: {
         time: state.clock.elapsedTime,
         ref: groupRef.current,
         execute: throttledExecute,
-        getNode: (p: string) => cache.get(p),
-        getChildren: (p: string) => cache.getChildren(p),
+        getNode: (p: string) => source.getPathSnapshot(p).data,
+        getChildren: (p: string) => source.getChildrenSnapshot(p).data,
       });
     } catch (e) {
       console.error(`[t3d.script] runtime error at ${path}:`, e);
