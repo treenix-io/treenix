@@ -12,6 +12,8 @@ import type { Session, Store } from '@treenx/core/kernel';
 const PUBLIC_DOORS = [
   '.',
   './client',
+  './client/http-twp',
+  './client/twp',
   './comp',
   './comp/validate',
   './contexts/service',
@@ -19,12 +21,15 @@ const PUBLIC_DOORS = [
   './errors',
   './glob',
   './kernel',
+  './kernel/runtime',
+  './kernel/types',
   './kernel/store/keys',
   './kernel/testing',
   './log',
   './mod',
   './mods/autostart/service',
   './mount',
+  './protocol/twp',
   './schema/catalog',
   './schema/load',
   './schema/types',
@@ -32,6 +37,7 @@ const PUBLIC_DOORS = [
   './security/projector',
   './server/actions',
   './server/client',
+  './server/http-twp',
   './server/jobs',
   './server/prefab',
   './server/readonly-tree',
@@ -85,7 +91,7 @@ describe('exports map (qvrt)', () => {
       '@treenx/core/security/seed',
       '@treenx/core/core/index.test',
       '@treenx/core/observability/logs',
-      '@treenx/core/kernel/types',
+      '@treenx/core/kernel/instance',
     ];
     for (const spec of internals) {
       await assert.rejects(

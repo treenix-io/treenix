@@ -106,6 +106,36 @@
       "types": "./dist/client.d.ts",
       "default": "./dist/client.js"
     },
+    "./client/twp": {
+      "development": "./src/client/twp.ts",
+      "types": "./dist/client/twp.d.ts",
+      "default": "./dist/client/twp.js"
+    },
+    "./client/http-twp": {
+      "development": "./src/client/http-twp.ts",
+      "types": "./dist/client/http-twp.d.ts",
+      "default": "./dist/client/http-twp.js"
+    },
+    "./protocol/twp": {
+      "development": "./src/protocol/twp.ts",
+      "types": "./dist/protocol/twp.d.ts",
+      "default": "./dist/protocol/twp.js"
+    },
+    "./kernel/runtime": {
+      "development": "./src/kernel/runtime.ts",
+      "types": "./dist/kernel/runtime.d.ts",
+      "default": "./dist/kernel/runtime.js"
+    },
+    "./kernel/types": {
+      "development": "./src/kernel/types.ts",
+      "types": "./dist/kernel/types.d.ts",
+      "default": "./dist/kernel/types.js"
+    },
+    "./server/http-twp": {
+      "development": "./src/server/http-twp.ts",
+      "types": "./dist/server/http-twp.d.ts",
+      "default": "./dist/server/http-twp.js"
+    },
     "./kernel/store/keys": {
       "development": "./src/kernel/store/keys.ts",
       "types": "./dist/kernel/store/keys.d.ts",

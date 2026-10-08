@@ -29,7 +29,7 @@ function copyAction(action: ActionDef): ActionDef {
   return { ...action, ...common }
 }
 
-function copyManifest(manifest: ModuleManifest): ModuleManifest {
+export function copyManifest(manifest: ModuleManifest): ModuleManifest {
   return Object.freeze({
     ...manifest,
     types: Object.freeze(manifest.types.map(def => freezeData({
