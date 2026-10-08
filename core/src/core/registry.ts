@@ -1,6 +1,7 @@
 import { type Class, ComponentData, normalizeType, type TypeId } from './component';
 import { ContextHandler, Handler } from './context';
 import { createRegistryMap } from './registry-map';
+import { recordRegistration } from './registration';
 
 type Entry = { handler: Handler; meta?: Record<string, unknown> };
 
@@ -52,6 +53,13 @@ function validateContext(context: string): void {
 export function register<C extends string>(type: string, context: C, handler: ContextHandler<C>, meta?: Record<string, unknown>): void;
 export function register<T, C extends string>(type: Class<T>, context: C, handler: ContextHandler<C, T>, meta?: Record<string, unknown>): void;
 export function register(type: TypeId, context: string, handler: Handler, meta?: Record<string, unknown>): void {
+  validateContext(context);
+  const t = normalizeType(type);
+  recordRegistration({ type: t, context, handler, meta });
+  registerLegacy(t, context, handler, meta);
+}
+
+export function registerLegacy(type: string, context: string, handler: Handler, meta?: Record<string, unknown>): void {
   validateContext(context);
   const t = normalizeType(type);
   let inner = registry.get(t);
@@ -115,6 +123,7 @@ export function resolveExact<C extends string>(type: TypeId, context: C): Contex
 export function unregister(type: string, context: string): boolean {
   validateContext(context);
   const t = normalizeType(type);
+  recordRegistration({ type: t, context, remove: true });
   const inner = registry.get(t);
   if (!inner?.has(context)) return false;
   inner.delete(context);
@@ -130,8 +139,10 @@ export function unregister(type: string, context: string): boolean {
 export function replaceHandler<C extends string>(type: string, context: C, handler: ContextHandler<C>, meta?: Record<string, unknown>): void;
 export function replaceHandler<T, C extends string>(type: Class<T>, context: C, handler: ContextHandler<C, T>, meta?: Record<string, unknown>): void;
 export function replaceHandler(type: TypeId, context: string, handler: Handler, meta?: Record<string, unknown>): void {
-  unregister(normalizeType(type), context);
-  register(type as any, context, handler as any, meta);
+  const normalized = normalizeType(type);
+  unregister(normalized, context);
+  recordRegistration({ type: normalized, context, handler, meta });
+  registerLegacy(normalized, context, handler, meta);
 }
 
 // Snapshot — callers (e.g. clearRegistry) may unregister during iteration.

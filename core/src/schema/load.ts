@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export function loadSchemasFromDir(dir: string): number {
+export function loadSchemasFromDir(dir: string, accept?: (type: string) => void): number {
   if (!fs.existsSync(dir)) return 0;
   let count = 0;
   for (const file of fs.readdirSync(dir).filter(f => f.endsWith('.json'))) {
@@ -17,6 +17,7 @@ export function loadSchemasFromDir(dir: string): number {
     if (!schema || typeof schema !== 'object') throw new Error(`[schema] ${full}: parsed value is not an object`);
     if (!schema.$id) throw new Error(`[schema] ${full}: missing "$id" — required for registry lookup`);
     schema.$id = normalizeType(schema.$id);
+    accept?.(schema.$id);
     register(schema.$id, 'schema', () => schema);
     count++;
   }
@@ -27,15 +28,15 @@ const SCHEMA_RECURSE_SKIP = new Set(['node_modules', 'dist', 'build', '.git']);
 
 /** Walk `root` recursively; for every directory named `schemas`, call loadSchemasFromDir.
  * Skips node_modules, dist, build, hidden dirs. */
-export function loadSchemasRecursive(root: string): number {
+export function loadSchemasRecursive(root: string, accept?: (type: string) => void): number {
   if (!fs.existsSync(root)) return 0;
   let total = 0;
   for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
     if (entry.name.startsWith('.') || SCHEMA_RECURSE_SKIP.has(entry.name)) continue;
     const sub = path.join(root, entry.name);
-    if (entry.name === 'schemas') total += loadSchemasFromDir(sub);
-    else total += loadSchemasRecursive(sub);
+    if (entry.name === 'schemas') total += loadSchemasFromDir(sub, accept);
+    else total += loadSchemasRecursive(sub, accept);
   }
   return total;
 }

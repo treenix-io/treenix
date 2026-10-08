@@ -17,6 +17,8 @@ import {
   unregister,
 } from '#core';
 import { trackType } from '#mod/tracking';
+import { recordClass, recordMethod } from '#comp/registration';
+import type { SecurityClass } from '#kernel/types';
 import { type TypeSchema } from '#schema/types';
 
 export type { Class };
@@ -78,6 +80,7 @@ type ActionName<T> = Extract<{
   [K in keyof T]: T[K] extends (...args: any[]) => any ? K : never;
 }[keyof T], string>;
 export type CompOptions<T> = {
+  security?: SecurityClass;
   needs?: Partial<Record<ActionName<T> | '*', readonly string[]>>;
   ports?: Record<string, PortDecl>;
   override?: boolean;
@@ -137,10 +140,12 @@ function registerMethods<T>(
     if (method instanceof AsyncGenFn) meta.stream = true;
     if (opts?.override) unregister(normalizedType, context);
 
-    register(normalizedType, context, (ctx: ActionExecCtx, data: unknown) => {
+    const handler = (ctx: ActionExecCtx, data: unknown) => {
       const target = ctx.comp ?? ctx.node;
       return runWithExecCtx(ctx, () => method.call(target, data, ctx.deps));
-    }, Object.keys(meta).length ? meta : undefined);
+    };
+    recordMethod(handler, { name, method, needs: actionNeeds });
+    register(normalizedType, context, handler, Object.keys(meta).length ? meta : undefined);
   }
 }
 
@@ -154,8 +159,8 @@ export function registerType<T extends object>(type: string, cls: Class<T>, opts
     for (const ctx of getContextsForType(n)) unregister(n, ctx);
   }
 
-  const compClass = cls as TypeClass<T>;
-  compClass.$type = normalizeType(type);
+  const compClass = Object.assign(cls, { $type: normalizeType(type) });
+  recordClass(compClass.$type, cls, opts?.security ?? 'ordinary');
   register(type, 'class', cls, opts);
   trackType(compClass.$type);
 

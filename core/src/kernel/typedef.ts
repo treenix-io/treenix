@@ -1,15 +1,24 @@
 import { actionMethods, AsyncGenFn, compileNeeds, type ActionMethod, type Class, type CompOptions } from '#comp/index'
 import type { NeedSpec } from '#comp/needs'
+import type { RegisteredMethod } from '#comp/registration'
+import { assertSafeSchema } from '#comp/validate'
 import { KernelError } from '#errors'
 import type { MethodSchema, TypeSchema } from '#schema/types'
 import { assertSafeSiftQuery } from './expr'
 import { assertPost } from './post'
-import { DEFAULT_LIMITS, type ActionDef, type Limits, type ReadActionContext, type Selector, type TypeDef } from './types'
+import { DEFAULT_LIMITS, type ActionDef, type Limits, type Post, type ReadActionContext, type Selector, type TypeDef, type Where } from './types'
 
 export type TypeDefOptions<T> = Pick<TypeDef, 'name' | 'module' | 'security'> & {
   schema: TypeSchema
   needs?: CompOptions<T>['needs']
   limits?: Limits
+}
+
+export type RegisteredTypeDefOptions = Pick<TypeDef, 'name' | 'module' | 'security'> & {
+  readonly schema: TypeSchema
+  readonly methods: readonly RegisteredMethod[]
+  readonly actions?: Readonly<Record<string, ActionDef>>
+  readonly limits?: Limits
 }
 
 function selector(spec: NeedSpec): Selector {
@@ -21,6 +30,17 @@ function selector(spec: NeedSpec): Selector {
   }
 }
 
+function assertExpressions(pre: Where | undefined, post: Post | undefined, needs: ActionDef['needs'], limits: Limits, stream: boolean): void {
+  if (pre !== undefined) assertSafeSiftQuery(pre, limits)
+  if (post !== undefined) {
+    assertPost(post)
+    if (stream) throw new KernelError('INVALID', 'A streaming action cannot declare post')
+    for (const target of Object.keys(post)) {
+      if (target !== '' && !Object.hasOwn(needs ?? {}, target)) throw new KernelError('INVALID', `Post target is not a declared need: ${target}`)
+    }
+  }
+}
+
 function action(method: ActionMethod['method'], schema: MethodSchema, needs: ActionDef['needs'], limits: Limits): ActionDef {
   if (schema.arguments.length > 1) throw new KernelError('INVALID', 'An action takes at most one data argument')
   const argument = schema.arguments[0]
@@ -28,14 +48,7 @@ function action(method: ActionMethod['method'], schema: MethodSchema, needs: Act
   const kind = schema.kind ?? 'write'
   const stream = method instanceof AsyncGenFn
   if (schema.streaming !== undefined && schema.streaming !== stream) throw new KernelError('INVALID', 'The streaming schema differs from the method')
-  if (schema.pre !== undefined) assertSafeSiftQuery(schema.pre, limits)
-  if (schema.post !== undefined) {
-    assertPost(schema.post)
-    if (stream) throw new KernelError('INVALID', 'A streaming action cannot declare post')
-    for (const target of Object.keys(schema.post)) {
-      if (target !== '' && !Object.hasOwn(needs ?? {}, target)) throw new KernelError('INVALID', `Post target is not a declared need: ${target}`)
-    }
-  }
+  assertExpressions(schema.pre, schema.post, needs, limits, stream)
   const common = { args, needs, pre: schema.pre }
   const plain = async function(this: object, ctx: ReadActionContext, data: unknown): Promise<unknown> {
     return method.call(this, data, ctx.needs)
@@ -55,20 +68,30 @@ function action(method: ActionMethod['method'], schema: MethodSchema, needs: Act
 }
 
 export function buildTypeDef<T extends object>(cls: Class<T>, options: TypeDefOptions<T>): TypeDef {
-  const { schema, name, module, security, limits = DEFAULT_LIMITS } = options
   const methods = actionMethods(cls).filter(method => !method.name.startsWith('_'))
-  const schemas = new Map(Object.entries(schema.methods ?? {}).filter(([name]) => !name.startsWith('_')))
   const compiledNeeds = compileNeeds(methods, { needs: options.needs })
-  const actions: Record<string, ActionDef> = {}
-  for (const { name, method } of methods) {
+  return buildRegisteredTypeDef({ ...options, methods: methods.map(method => ({ ...method, needs: compiledNeeds.get(method.name) })) })
+}
+
+export function buildRegisteredTypeDef(options: RegisteredTypeDefOptions): TypeDef {
+  const { schema, name, module, security, limits = DEFAULT_LIMITS } = options
+  const methods = options.methods.filter(method => !method.name.startsWith('_'))
+  const schemas = new Map(Object.entries(schema.methods ?? {}).filter(([name]) => !name.startsWith('_')))
+  const actions: Record<string, ActionDef> = { ...options.actions }
+  for (const [name, declared] of Object.entries(actions)) {
+    assertSafeSchema(declared.args, 'action arguments')
+    assertExpressions(declared.pre, declared.kind === 'read' ? undefined : declared.post, declared.needs, limits, declared.handler instanceof AsyncGenFn)
+    schemas.delete(name)
+  }
+  for (const { name, method, needs: specs } of methods) {
+    if (Object.hasOwn(actions, name)) throw new KernelError('CONFLICT', `Action declared twice: ${name}`)
     const generated = schemas.get(name)
     if (generated === undefined) throw new KernelError('INVALID', `Missing action schema: ${name}`)
-    const specs = compiledNeeds.get(name)
     const needs = specs && Object.fromEntries(specs.map(spec => [spec.key, selector(spec)]))
     Object.defineProperty(actions, name, { value: action(method, generated, needs, limits), enumerable: true })
     schemas.delete(name)
   }
-  if (schemas.size !== 0) throw new KernelError('INVALID', 'The schema declares actions absent from the class')
+  if (schemas.size !== 0) throw Object.assign(new KernelError('INVALID', 'The schema declares actions without a native implementation'), { type: name, actions: [...schemas.keys()] })
   const { methods: methodSchemas, version = 0, actionsOnly, aliases, ...fields } = schema
   return { name, module, security, schema: fields, version, actionsOnly, aliases, actions }
 }

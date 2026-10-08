@@ -70,9 +70,9 @@ describe('exports map (qvrt)', () => {
     assert.equal(typeof inflight.createInflight, 'function');
   });
 
-  it('the kernel door is types only, except the default limits and the right bits', async () => {
+  it('the kernel door exports types, constants and native module authoring', async () => {
     const kernel = await import('@treenx/core/kernel');
-    assert.deepEqual(Object.keys(kernel).sort(), ['A', 'DEFAULT_LIMITS', 'R', 'W']);
+    assert.deepEqual(Object.keys(kernel).sort(), ['A', 'DEFAULT_LIMITS', 'R', 'W', 'collectModule', 'registerKernel', 'registerKernelAction']);
   });
 
   it('internals do not resolve — pipeline wrappers and infra are private', async () => {

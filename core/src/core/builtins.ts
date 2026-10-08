@@ -2,7 +2,8 @@
 // Convention: no dot = core built-in (see Type Naming Convention in CLAUDE.md)
 
 import { normalizeType } from './component';
-import { register } from './registry';
+import { registerLegacy } from './registry';
+import type { ModuleManifest } from '#kernel/types';
 
 // kriz: should be 't.dir', 't.root', and so on
 // kriz: should be revised and reviewed
@@ -12,7 +13,7 @@ const builtins = [
 
 export function registerBuiltins() {
   for (const type of builtins) {
-    register(type, 'schema', () => ({
+    registerLegacy(type, 'schema', () => ({
       $id: normalizeType(type),
       type: 'object' as const,
       title: type,
@@ -22,3 +23,12 @@ export function registerBuiltins() {
 }
 
 registerBuiltins();
+
+export const kernelManifest: ModuleManifest = {
+  id: 'kernel',
+  types: ['dir', 'root', 'ref', 'type', 'mount-point'].map(type => ({
+    name: normalizeType(type), module: 'kernel', security: 'ordinary', version: 0,
+    schema: { type: 'object', properties: {} }, actions: {},
+  })),
+  security: [], open: [],
+};

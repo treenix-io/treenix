@@ -6,6 +6,8 @@
 
 import { mapRegistry, register, resolve, unregister } from '#core';
 import { registerBuiltins } from '#core/builtins';
+import { ambientModule, clearAmbientRegistrations, publishModules } from '#kernel/manifest';
+import type { Registry } from '#kernel/types';
 
 const testTypes = ['test.doc', 'test.item', 'test.session', 'test.task'];
 
@@ -17,9 +19,14 @@ export function registerTestTypes() {
 registerTestTypes();
 
 export function clearRegistry(): void {
+  clearAmbientRegistrations();
   mapRegistry((t, c) => unregister(t, c));
   registerBuiltins();
   registerTestTypes();
+}
+
+export function publishAmbientModule(registry: Registry): void {
+  publishModules(registry, [ambientModule()]);
 }
 
 /** Save current registry state — pairs with restoreRegistrySnapshot */

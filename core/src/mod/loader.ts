@@ -8,6 +8,7 @@ import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { setCurrentMod } from './tracking';
 import type { LoadedMod } from './types';
+import type { CollectedModule } from '#kernel/manifest';
 
 const log = createLogger('mod');
 
@@ -51,11 +52,12 @@ export function clearModRegistry(): void {
   loaded.clear();
 }
 
-export type LoadTarget = 'server' | 'client';
+export type LoadTarget = 'server' | 'client' | 'kernel';
 
 export interface LoadResult {
   loaded: string[];
   failed: { name: string; error: Error }[];
+  manifests: CollectedModule[];
 }
 
 // ── Local mod loader (side-effect imports from src/mods/) ──
@@ -130,10 +132,11 @@ async function ensureTsxRegistered(): Promise<void> {
 
 
 export async function loadLocalMods(modsDir: string, target: LoadTarget): Promise<LoadResult> {
-  const result: LoadResult = { loaded: [], failed: [] };
-  const entryBase = target === 'server' ? 'server' : 'client';
-  const exts = target === 'server' ? SERVER_EXT : CLIENT_EXT;
-  const convention = target === 'server' ? SERVER_CONVENTION : CLIENT_CONVENTION;
+  const result: LoadResult = { loaded: [], failed: [], manifests: [] };
+  const entryBase = target === 'client' ? 'client' : 'server';
+  const exts = target === 'client' ? CLIENT_EXT : SERVER_EXT;
+  const convention = target === 'client' ? CLIENT_CONVENTION : SERVER_CONVENTION;
+  const native = target === 'kernel' ? await import('#kernel/manifest') : undefined;
   let entries: import('node:fs').Dirent[];
 
   try {
@@ -176,8 +179,7 @@ export async function loadLocalMods(modsDir: string, target: LoadTarget): Promis
       // of the next mod's register() calls to this failed mod.
       // R4-BOOT-2: realpath-confine each file inside modDir — symlinked entry files inside
       // a real mod dir would otherwise import code outside the mod root.
-      setCurrentMod(entry.name);
-      try {
+      const importModule = async () => {
         for (const f of filesToImport) {
           const real = await confineReal(modDir, f);
           if (pkgName) {
@@ -190,9 +192,16 @@ export async function loadLocalMods(modsDir: string, target: LoadTarget): Promis
             await import(real);
           }
         }
-        loadSchemasRecursive(modDir);
-      } finally {
-        setCurrentMod(null);
+        loadSchemasRecursive(modDir, native?.assertModuleSchema);
+      };
+      if (native) {
+        const id = `${await packageNameAt(modsDir) ?? resolve(modsDir)}/${entry.name}`;
+        const manifest = native.getCollectedModule(id) ?? await native.collectModule(id, importModule);
+        result.manifests.push(manifest);
+      } else {
+        setCurrentMod(entry.name);
+        try { await importModule(); }
+        finally { setCurrentMod(null); }
       }
       modEntry.state = 'loaded';
       modEntry.loadedAt = Date.now();
@@ -211,6 +220,7 @@ export async function loadLocalMods(modsDir: string, target: LoadTarget): Promis
 // ── Load all mods: internal + engine + project (CWD) ──
 
 export async function loadAllMods(target: LoadTarget, ...extraDirs: string[]): Promise<LoadResult> {
+  if (target === 'kernel') (await import('#kernel/manifest')).assertNoAmbientRegistrations();
   const internalDir = new URL('../mods', import.meta.url).pathname;
   const engineDir = new URL('../../../mods', import.meta.url).pathname;
 
@@ -231,7 +241,7 @@ export async function loadAllMods(target: LoadTarget, ...extraDirs: string[]): P
   }
 
   const seen = new Set<string>();
-  const result: LoadResult = { loaded: [], failed: [] };
+  const result: LoadResult = { loaded: [], failed: [], manifests: [] };
 
   for (const dir of dirs) {
     const abs = resolve(dir);
@@ -241,6 +251,7 @@ export async function loadAllMods(target: LoadTarget, ...extraDirs: string[]): P
     const r = await loadLocalMods(dir, target);
     result.loaded.push(...r.loaded);
     result.failed.push(...r.failed);
+    result.manifests.push(...r.manifests);
   }
 
   for (const f of result.failed) log.error(`${f.name}: ${f.error.message}`);
