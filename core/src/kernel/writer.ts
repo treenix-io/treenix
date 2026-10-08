@@ -31,6 +31,7 @@ export interface PreparedCommit {
   readonly writes: readonly StoredWrite[]
   readonly record: JournalCommit
   readonly transitions?: readonly NodeChange[]
+  readonly check?: () => void
 }
 export interface PreparedMutation extends PreparedCommit { readonly value?: unknown }
 export interface MutationSpan {
@@ -156,6 +157,7 @@ export async function createWriter(options: WriterOptions) {
           }
           const commit: StoreCommit = { writes: prepared.writes, record: prepared.record, pos, writerEpoch: options.writerEpoch }
           checkFailure()
+          prepared.check?.()
           await store.commit(commit)
           return { t: 'committed', pos, domain: store.domain, store, commit, changes, event: { t: 'commit', domain: store.domain, record: commit.record } }
         } catch (error) {

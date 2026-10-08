@@ -82,6 +82,19 @@ describe('position identity', () => {
 })
 
 describe('instance writer', { timeout: 10_000 }, () => {
+  it('refuses authorization that ends after preparation and before persistence', async () => {
+    const [root] = stores(), writer = await open([root])
+    let active = true
+    await assert.rejects(writer.commit(root, [], pos => {
+      queueMicrotask(() => { active = false })
+      return { ...prepared(pos, ['/cancelled']), check() {
+        if (!active) throw new KernelError('CANCELLED', 'Request ended')
+      } }
+    }), (error: unknown) => error instanceof KernelError && error.code === 'CANCELLED')
+    assert.equal((await root.scan({ range: { node: '/cancelled' }, budget: scanBudget() })).items.length, 0)
+    assert.ok((await writer.commit(root, [], pos => prepared(pos, ['/next']))).seq > 0)
+  })
+
   it('denies queued prepares, pending reads and a prepared independent write after publication fails', async () => {
     const [root, other] = stores(), entered = signal(), release = signal(), otherEntered = signal(), otherRelease = signal()
     const failure = new KernelError('INVALID', 'Accepted publication failed')
