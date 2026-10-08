@@ -4,7 +4,8 @@ import { createMemoryTree, isSetEntry, type PatchManyEntry, type Tree } from '#t
 import { DEFAULT_BUDGET } from '#tree/read-runtime';
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it, mock } from 'node:test';
-import { ancestorPaths, componentPerm, resolvePermission, stripComponents, typeAclRule } from './acl';
+import { ancestorPaths } from '#core/path';
+import { componentPerm, resolvePermission, stripComponents, typeAclRule } from './acl';
 import { withAcl } from './acl-tree';
 import { assertNotSystem, buildClaims, SYSTEM_CLAIM } from './claims';
 import { buildSessionCookie } from './cookies';

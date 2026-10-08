@@ -4,7 +4,8 @@
 
 import { A, type ComponentData, isComponent, type NodeData, R, W } from '#core';
 import { KernelError } from '#errors';
-import { asTreeSource, assertSafePatchPath, type ChildrenOpts, type CommitChange, type CommitReceipt, isSetEntry, type Page, type PatchManyEntry, type PatchOp, type Tree } from '#tree';
+import { asTreeSource, type ChildrenOpts, type CommitChange, type CommitReceipt, isSetEntry, type Page, type PatchManyEntry, type PatchOp, type Tree } from '#tree';
+import { assertSafePatchPath } from '#kernel/update-ops';
 import { executeList } from '#tree/read-runtime';
 import { type ResolvedReadPlan, resolveReadPlan } from '#mount/resolve-plan';
 import { type AclState, componentPerm, projectNode, resolvePermission } from './acl';

@@ -15,6 +15,7 @@ import {
   W,
 } from '#core';
 import type { Tree } from '#tree';
+import { ancestorPaths } from '#core/path';
 
 export type AclHandler = () => GroupPerm[];
 
@@ -25,18 +26,6 @@ declare module '#core/context' {
 }
 
 // ── Path utils ──
-
-export function ancestorPaths(path: string): string[] {
-  if (path === '/') return ['/'];
-  const parts = path.split('/').filter(Boolean);
-  const result = ['/'];
-  let current = '';
-  for (const part of parts) {
-    current += '/' + part;
-    result.push(current);
-  }
-  return result;
-}
 
 // ── ACL resolution ──
 

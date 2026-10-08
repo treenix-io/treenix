@@ -1,5 +1,17 @@
 // ── Path utils ──
 
+export function ancestorPaths(path: string): string[] {
+  if (path === '/') return ['/'];
+  const parts = path.split('/').filter(Boolean);
+  const result = ['/'];
+  let current = '';
+  for (const part of parts) {
+    current += '/' + part;
+    result.push(current);
+  }
+  return result;
+}
+
 export function dirname(path: string): string | null {
   if (path === '/') return null;
   const idx = path.lastIndexOf('/');
