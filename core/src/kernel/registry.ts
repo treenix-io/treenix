@@ -11,6 +11,7 @@ export interface TypeOwnership {
 }
 export interface RegistryOptions {
   readonly ownership?: (name: TypeName) => TypeOwnership | undefined
+  readonly published?: () => void
 }
 type SecurityEntries = { -readonly [C in SecurityContext]?: SecurityHandlers[C] }
 
@@ -180,6 +181,7 @@ export function createRegistry(options: RegistryOptions = {}): Registry {
       security = nextSecurity
       open = nextOpen
       generation = nextDigest
+      options.published?.()
       return generation
     },
   }

@@ -1,4 +1,4 @@
-import { ancestorPaths } from '#core/path'
+import { ancestorPaths, dirname } from '#core/path'
 import { KernelError } from '#errors'
 import { isRecord } from '#util/is-record'
 import { validBits, type ChainNode, type RightsAlert } from './rights'
@@ -59,6 +59,7 @@ const subjectKey = (who: Subject) => 'group' in who ? `group:${who.group}` : 'ow
 
 export function createChainIndex() {
   const nodes = new Map<Path, ChainNode>()
+  const children = new Map<Path, Set<Path>>()
   const grants = new Map<string, Set<Path>>()
   const boundaries: TreeNode<ChainNode> = { children: new Map() }
   let ownerGrants: Map<Principal, Set<Path>> | undefined
@@ -77,6 +78,12 @@ export function createChainIndex() {
       if (previous !== undefined) unindex(previous)
       if (node.hasOwner || previous?.hasOwner || [...node.acl, ...previous?.acl ?? []].some(entry => 'owner' in entry.subject)) ownerGrants = undefined
       nodes.set(node.path, node)
+      const parent = dirname(node.path)
+      if (parent !== null) {
+        let paths = children.get(parent)
+        if (paths === undefined) { paths = new Set(); children.set(parent, paths) }
+        paths.add(node.path)
+      }
       if (node.hasAcl || node.hasOwner) treeEnsure(boundaries, node.path).data = node
       else treeRemove(boundaries, node.path)
       for (const entry of node.acl) {
@@ -93,9 +100,18 @@ export function createChainIndex() {
       if (previous !== undefined) unindex(previous)
       if (previous?.hasOwner || previous?.acl.some(entry => 'owner' in entry.subject)) ownerGrants = undefined
       nodes.delete(path)
+      const parent = dirname(path)
+      if (parent !== null) {
+        const paths = children.get(parent)
+        paths?.delete(path)
+        if (paths?.size === 0) children.delete(parent)
+      }
       treeRemove(boundaries, path)
     },
     get: (path: Path): ChainNode | undefined => nodes.get(path),
+    *children(path: Path): Iterable<ChainNode> {
+      for (const child of children.get(path) ?? []) yield nodes.get(child)!
+    },
     chain(path: Path): readonly ChainNode[] {
       const chain: ChainNode[] = []
       for (const ancestor of ancestorPaths(path)) {

@@ -2,13 +2,14 @@ import { ancestorPaths, assertSafePath, isChildPath } from '#core/path'
 import { kernelManifest } from '#kernel/builtins'
 import { KernelError } from '#errors'
 import { AUTH_KEY_PATH, authKeyInput, authManifest, prepareAdmin, type AdminInput } from '#kernel/auth-module'
+import { prepareCredential } from '#kernel/auth/credentials'
 import { prepareChangeSet } from '#kernel/changeset'
 import type { ProcessCache } from '#kernel/cache'
 import { readLimits } from '#kernel/limits'
 import { positionToRev } from '#kernel/position'
 import { createRegistry, type TypeOwnership } from '#kernel/registry'
 import { DEFAULT_LIMITS, R, W, A, type Budget, type InstanceId, type Limits, type NodeId, type NodeInput,
-  type Registry, type Store, type StoredNode } from '#kernel/types'
+  type Credential, type Registry, type Store, type StoredNode } from '#kernel/types'
 import type { Writer } from '#kernel/writer'
 
 export const LIMITS_PATH = '/sys/limits'
@@ -18,6 +19,10 @@ export const bootstrapModules = [kernelManifest, authManifest] as const
 export interface BootstrapIdentity {
   readonly adminId: NodeId
   readonly adminPath: string
+}
+export interface BootstrapResult {
+  readonly identity: BootstrapIdentity
+  readonly credential?: Credential
 }
 
 export function ownershipRecord(node: StoredNode): TypeOwnership {
@@ -64,8 +69,12 @@ export function assertBootstrapState(instance: InstanceId, nodes: Pick<ReadonlyM
 
 export async function bootstrap(options: { readonly instance: InstanceId; readonly store: Store; readonly writer: Writer;
   readonly cache: ProcessCache; readonly admin: AdminInput; readonly budget: () => Budget;
-  readonly node: (path: string) => Promise<StoredNode | null> }): Promise<BootstrapIdentity> {
+  readonly credentialTtlMs?: number;
+  readonly node: (path: string) => Promise<StoredNode | null> }): Promise<BootstrapResult> {
   const adminInput = Object.freeze({ ...options.admin })
+  const credentialTtlMs = options.credentialTtlMs
+  if (credentialTtlMs !== undefined && (!Number.isFinite(credentialTtlMs) || credentialTtlMs <= 0))
+    throw new KernelError('INVALID', 'Credential lifetime must be positive and finite')
   assertSafePath(adminInput.path)
   if (adminInput.path === '/' || ['/sys', '/auth/credentials', '/auth/sessions'].some(path =>
     adminInput.path === path || isChildPath(path, adminInput.path, false))
@@ -74,6 +83,7 @@ export async function bootstrap(options: { readonly instance: InstanceId; readon
   const registry: Registry = createRegistry()
   for (const module of bootstrapModules) registry.publish(module)
   let identity: BootstrapIdentity | undefined
+  let credential: Credential | undefined
   await options.writer.commit(options.store, [], async pos => {
     const parents = ancestorPaths(adminInput.path).slice(1, -1)
     const first = await prepareChangeSet({ store: options.store, cache: options.cache, registry, budget: options.budget(),
@@ -82,6 +92,7 @@ export async function bootstrap(options: { readonly instance: InstanceId; readon
     const account = first.writes.find(write => write.path === adminInput.path)?.node
     if (account === undefined || account === null) throw new KernelError('INVALID', 'First account was not prepared')
     const preparedIdentity = Object.freeze({ adminId: account.$id, adminPath: account.$path })
+    const session = credentialTtlMs === undefined ? undefined : prepareCredential(account.$id, { expiresAt: Date.now() + credentialTtlMs })
     const staged = new Map(first.writes.map(write => [write.path, write.node]))
     const directories = ['/auth', '/auth/users', '/auth/credentials', '/auth/sessions', '/sys', TYPE_PATH]
     const inputs: NodeInput[] = [
@@ -92,6 +103,7 @@ export async function bootstrap(options: { readonly instance: InstanceId; readon
         ({ $path: `${TYPE_PATH}/${name}`, $type: 't.type', name, module: type.module, security: type.security })))),
       { $path: LIMITS_PATH, $type: 't.limits', ...DEFAULT_LIMITS },
       authKeyInput(options.instance), admin.passwordRecord(account.$id),
+      ...(session === undefined ? [] : [session.node]),
     ]
     const second = await prepareChangeSet({ store: options.store, cache: options.cache, registry, budget: options.budget(),
       readBefore: async path => staged.has(path) ? staged.get(path)! : options.node(path) },
@@ -99,9 +111,10 @@ export async function bootstrap(options: { readonly instance: InstanceId; readon
     if (first.transitions.length + second.transitions.length > DEFAULT_LIMITS.changeSet)
       throw new KernelError('BUDGET', 'Bootstrap ChangeSet transition budget exceeded')
     identity = preparedIdentity
+    credential = session?.credential
     return { writes: [...first.writes, ...second.writes], transitions: [...first.transitions, ...second.transitions],
       record: { ...second.record, kind: 'kernel', entries: [...first.record.entries, ...second.record.entries] } }
   })
   if (identity === undefined) throw new KernelError('INVALID', 'Bootstrap did not commit')
-  return identity
+  return Object.freeze({ identity, ...(credential === undefined ? {} : { credential }) })
 }

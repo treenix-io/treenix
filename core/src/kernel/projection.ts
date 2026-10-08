@@ -13,7 +13,7 @@ export interface ProjectionOptions {
   readonly alert: (path: string, error: KernelError) => void
 }
 
-function visibleNode(stored: StoredNode, bits: Bits): Node {
+export function visibleNode(stored: StoredNode, bits: Bits): Node {
   const { $pos, ...body } = stored
   const full: Node = { ...body, $rev: positionToRev($pos) }
   if ((bits & A) !== 0) return full
