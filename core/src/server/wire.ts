@@ -190,8 +190,11 @@ export function createWireSession(deps: WireDeps, session: Session) {
       return execTree.execute(req.path, req.action, req.data, { type: undefined, key: req.key, opId: req.opId });
     };
 
-    const execStream = (req: ActReq, signal: AbortSignal) =>
-      executeStream(tree, req.path, req.type, req.key, req.action, req.data, signal, { userId, claims, actor: actorFor(req) });
+    const execStream = (req: ActReq, signal: AbortSignal) => {
+      // The workload executor owns narrowing and has no streaming contract.
+      if (isWorkload) throw new KernelError('FORBIDDEN', 'Workload streaming is unavailable');
+      return executeStream(tree, req.path, req.type, req.key, req.action, req.data, signal, { userId, claims, actor: actorFor(req) });
+    };
 
     // Opts (incl. the anz4.28 token) pass through — ServeHooks opts are a subset
     // of WatchOpts/UnwatchOpts. Leases return so the register-first peer can undo.
