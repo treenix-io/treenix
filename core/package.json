@@ -76,10 +76,10 @@
       "types": "./dist/tree/cache.d.ts",
       "default": "./dist/tree/cache.js"
     },
-    "./tree/inflight": {
-      "development": "./src/tree/inflight.ts",
-      "types": "./dist/tree/inflight.d.ts",
-      "default": "./dist/tree/inflight.js"
+    "./util/inflight": {
+      "development": "./src/util/inflight.ts",
+      "types": "./dist/util/inflight.d.ts",
+      "default": "./dist/util/inflight.js"
     },
     "./tree/mimefs": {
       "development": "./src/tree/mimefs.ts",
@@ -106,10 +106,20 @@
       "types": "./dist/client.d.ts",
       "default": "./dist/client.js"
     },
+    "./kernel/store/keys": {
+      "development": "./src/kernel/store/keys.ts",
+      "types": "./dist/kernel/store/keys.d.ts",
+      "default": "./dist/kernel/store/keys.js"
+    },
     "./kernel": {
       "development": "./src/kernel/index.ts",
       "types": "./dist/kernel/index.d.ts",
       "default": "./dist/kernel/index.js"
+    },
+    "./kernel/testing": {
+      "development": "./src/kernel/store/contract.ts",
+      "types": "./dist/kernel/store/contract.d.ts",
+      "default": "./dist/kernel/store/contract.js"
     },
     "./errors": {
       "development": "./src/errors.ts",

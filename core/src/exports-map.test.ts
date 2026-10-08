@@ -19,6 +19,8 @@ const PUBLIC_DOORS = [
   './errors',
   './glob',
   './kernel',
+  './kernel/store/keys',
+  './kernel/testing',
   './log',
   './mod',
   './mods/autostart/service',
@@ -38,13 +40,13 @@ const PUBLIC_DOORS = [
   './tree',
   './tree/branch',
   './tree/cache',
-  './tree/inflight',
   './tree/migrate-component-namespace',
   './tree/mimefs',
   './tree/patch',
   './tree/trash-exempt',
   './uri',
   './util/debounced-write',
+  './util/inflight',
   './util/safe-timers',
   './util/yaml',
   './vite-plugin',
@@ -59,14 +61,13 @@ describe('exports map (qvrt)', () => {
   });
 
   it('public doors resolve via package self-reference', async () => {
-    await import('@treenx/core');
-    await import('@treenx/core/comp');
-    await import('@treenx/core/tree');
-    await import('@treenx/core/errors');
-    await import('@treenx/core/kernel');
-    await import('@treenx/core/testing');
-    await import('@treenx/core/server/actions');
-    await import('@treenx/core/security');
+    for (const door of PUBLIC_DOORS) await import(door === '.' ? '@treenx/core' : `@treenx/core/${door.slice(2)}`);
+    const keys = await import('@treenx/core/kernel/store/keys');
+    const storeTesting = await import('@treenx/core/kernel/testing');
+    assert.equal(typeof keys.toStorageKeys, 'function');
+    assert.equal(typeof storeTesting.runStoreContract, 'function');
+    const inflight = await import('@treenx/core/util/inflight');
+    assert.equal(typeof inflight.createInflight, 'function');
   });
 
   it('the kernel door is types only, except the default limits and the right bits', async () => {
@@ -78,6 +79,7 @@ describe('exports map (qvrt)', () => {
     // Non-literal specifiers so tsc doesn't try to resolve them at typecheck.
     const internals: string[] = [
       '@treenx/core/tree/policy',
+      '@treenx/core/tree/inflight',
       '@treenx/core/sub',
       '@treenx/core/server/trpc',
       '@treenx/core/security/seed',

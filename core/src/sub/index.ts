@@ -1,3 +1,4 @@
+import { mapNodeForSift } from '#kernel/store/keys';
 // Treenix Subscriptions — Layer 3
 // Wraps any Tree, emits events on set/remove.
 // No dependencies beyond Tree + core types.
@@ -10,7 +11,6 @@ import { type ExprWork, exprWork } from '#kernel/eval';
 import { DEFAULT_LIMITS } from '#kernel/types';
 import {
   isSetEntry,
-  mapNodeForSift,
   type PatchManyEntry,
   type PatchOp,
   subscriptionToAsyncIterable,

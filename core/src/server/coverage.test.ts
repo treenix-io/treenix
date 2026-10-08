@@ -1,3 +1,4 @@
+import { mapNodeForSift } from '#kernel/store/keys';
 // Coverage gap tests — exercises uncovered code paths across the codebase.
 // Excludes Mongo (requires connection). Focuses on:
 //  - mount-adapters (memory, query, overlay, types, fs validation)
@@ -12,7 +13,7 @@ import { registerType } from '#comp';
 import { createNode, getComponentByName, type NodeData, register, resolve } from '#core';
 import { mapSiftQuery } from '#kernel/expr';
 import { clearRegistry } from '#testing';
-import { createMemoryTree, createOverlayTree, mapNodeForSift, type Tree } from '#tree';
+import { createMemoryTree, createOverlayTree, type Tree } from '#tree';
 import { createFsTree } from '#tree/fs';
 import { createQueryTree, matchesFilter } from '#tree/query';
 import assert from 'node:assert/strict';

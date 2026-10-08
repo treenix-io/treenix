@@ -1,3 +1,4 @@
+import { mapNodeForSift } from '#kernel/store/keys';
 // Treenix Query Tree — Layer 1
 // Virtual filtered view over a parent tree's children.
 // Used by t.mount.query to create virtual folders (e.g., /orders/incoming shows orders where status.value === 'incoming').
@@ -8,7 +9,7 @@ import { assertSafeSiftQuery, createSiftTest, mapSiftQuery } from '#kernel/expr'
 import { exprWork } from '#kernel/eval';
 import { DEFAULT_LIMITS } from '#kernel/types';
 import { isRecord } from '#util/is-record';
-import { mapNodeForSift, type Tree } from './index';
+import { type Tree } from './index';
 
 export type QueryConfig = {
   source: string;

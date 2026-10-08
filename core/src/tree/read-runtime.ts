@@ -1,3 +1,4 @@
+import { mapNodeForSift } from '#kernel/store/keys';
 // Treenix Read Runtime — Layer 3
 // Server-internal safe list algorithm. Replaces ad-hoc ACL scan in
 // withAcl.getChildren and the virtual query-tree dispatch path.
@@ -21,7 +22,7 @@ import { KernelError } from '#errors';
 import { assertSafePredicate, createSiftTest } from '#kernel/expr';
 import { exprWork } from '#kernel/eval';
 import { DEFAULT_LIMITS } from '#kernel/types';
-import { mapNodeForSift, type TreeSource } from './index';
+import { type TreeSource } from './index';
 import { decodeReadCursor, encodeReadCursor, planHash } from './plan-hash';
 
 export type Projector = (node: NodeData) => Promise<NodeData | null>;

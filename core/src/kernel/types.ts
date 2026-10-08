@@ -788,15 +788,20 @@ export type FieldDeltas = { readonly [field: string]: { readonly from?: unknown;
 
 /**
  * The side of a full image is explicit. Full images: creation, deletion, reconciliation, an update after
- * which the fields changed since the last full image exceed the node size, and the oldest record kept by
- * compaction.
+ * which the fields changed since the last full image exceed the node size, a trusted before-image that
+ * differs from the journal's earlier state, and the oldest record kept by compaction.
  */
 export type NodeTransition =
   | { readonly t: 'create'; readonly after: StoredNode }
   | { readonly t: 'update'; readonly delta: FieldDeltas; readonly after?: StoredNode }
   | { readonly t: 'delete'; readonly before: StoredNode }
   /** External edit: the full new state; the previous one may be unknown. */
-  | { readonly t: 'reconcile'; readonly after: StoredNode | null }
+  | {
+      readonly t: 'reconcile'
+      readonly after: StoredNode | null
+      /** Compaction preserves a known before-image when its earlier anchor is removed. */
+      readonly before?: StoredNode | null
+    }
 
 export interface JournalEntry {
   readonly id: NodeId
@@ -813,6 +818,13 @@ export interface OpDecision {
   readonly requestHash: string
   /** Absent: a stream started under this key and has not finished — a replay gets UNKNOWN_OUTCOME. */
   readonly outcome?: Outcome
+  readonly stream?: { readonly executor: Principal; readonly target: NodeId }
+}
+
+export interface IntakeState {
+  readonly epoch: string
+  readonly boundary: number
+  readonly domains: Readonly<Record<DomainId, string>>
 }
 
 /** One commit in one Store's journal, written atomically with the commit itself. */
@@ -830,6 +842,7 @@ export interface JournalCommit {
    * A `write`/`setuid` action without writes still leaves a commit with only this decision, in the target node's domain.
    */
   readonly decision?: OpDecision
+  readonly intake?: IntakeState
   readonly entries: readonly JournalEntry[]
 }
 

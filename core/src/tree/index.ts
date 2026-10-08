@@ -7,6 +7,8 @@ import { KernelError } from '#errors';
 import { createSiftTest } from '#kernel/expr';
 import { type ExprWork, exprWork } from '#kernel/eval';
 import { DEFAULT_LIMITS } from '#kernel/types';
+import { mapNodeForSift } from '#kernel/store/keys';
+import { treeEnsure, treeNavigate, type TreeNode } from '#kernel/store/nested-map';
 import { scanFromCollected } from './fs-common';
 import { applyOps, type CommitChange, type CommitReceipt, hasMutationOps, type PatchOp, PatchTestError } from './patch';
 import { isMoved } from './refs';
@@ -143,6 +145,8 @@ export type ExecOpts = { type?: string; key?: string; opId?: string };
 export interface Tree {
   get(path: string, ctx?: unknown): Promise<NodeData | undefined>;
   getChildren(path: string, opts?: ChildrenOpts, ctx?: unknown): Promise<Page<NodeData>>;
+  /** Actor-bound rights; storage adapters omit this capability. */
+  getPerm?(path: string): Promise<number>;
   /** Mutation verbs return a CommitReceipt (core-ns6p.2): what was committed,
    *  with before/after images minted inside the adapter's atomic span.
    *  Wrappers forward/translate it; cache/subs/audit consume it instead of
@@ -543,71 +547,6 @@ export function createOverlayTree(upper: Tree, lower: Tree): Tree {
       return { changes: [{ ...receipt.changes[0], after: revealed }] };
     },
   };
-}
-
-// ── $ ↔ _ key mapping (D06: Mongo/sift storage compat) ──
-// $-prefixed system keys ($path, $type, $acl, ...) become _-prefixed for
-// storage: Mongo forbids $-keys, and sift queries are pre-mapped by
-// `mapSiftQuery`, so nodes must match the same form. Layer-1 concern —
-// lived in core/component.ts until 2026-07 (core-tbcn).
-
-// fromEntries keeps a `__proto__` field a field; assigning it would set the copy's prototype, and a query would
-// read its contents as the node's own fields. The reverse mapping never yields that key.
-export function toStorageKeys(node: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(Object.entries(node).map(([k, v]) => {
-    // $id maps to _tid (treenix id), NOT _id — Mongo's immutable primary key
-    // (D06: _id is skipped on read; the generic mapping would swallow identity).
-    if (k === '$id') return ['_tid', v];
-    return [k.startsWith('$') ? `_${k.slice(1)}` : k, v];
-  }));
-}
-
-export function fromStorageKeys(doc: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(doc)) {
-    if (k === '_id') continue;
-    if (k === '_tid') { out['$id'] = v; continue; }
-    out[k.startsWith('_') ? `$${k.slice(1)}` : k] = v;
-  }
-  return out;
-}
-
-export function mapNodeForSift(node: NodeData): Record<string, unknown> {
-  return toStorageKeys(node);
-}
-
-// ── In-memory implementation ──
-
-export type TreeNode<T> = {
-  data?: T;
-  children: Map<string, TreeNode<T>>;
-};
-
-export function treeNavigate<T>(root: TreeNode<T>, path: string): TreeNode<T> | undefined {
-  if (path === '/') return root;
-  const parts = path.slice(1).split('/');
-  let node = root;
-  for (const part of parts) {
-    const child = node.children.get(part);
-    if (!child) return undefined;
-    node = child;
-  }
-  return node;
-}
-
-export function treeEnsure<T>(root: TreeNode<T>, path: string): TreeNode<T> {
-  if (path === '/') return root;
-  const parts = path.slice(1).split('/');
-  let node = root;
-  for (const part of parts) {
-    let child = node.children.get(part);
-    if (!child) {
-      child = { children: new Map() } as TreeNode<T>;
-      node.children.set(part, child);
-    }
-    node = child;
-  }
-  return node;
 }
 
 export function createMemoryTree(): TreeSource {

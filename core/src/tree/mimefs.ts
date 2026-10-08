@@ -1,3 +1,4 @@
+import { mapNodeForSift } from '#kernel/store/keys';
 // Treenix RawFS Tree — Layer 1
 // Bidirectional tree that maps real filesystem files to typed nodes.
 // Files become nodes with $type from mime type. Directories become $type "dir".
@@ -11,7 +12,7 @@ import { mkdir, readdir, realpath, rmdir, stat, unlink } from 'node:fs/promises'
 import { dirname, extname, join, resolve } from 'node:path';
 import { scanFromCollected } from './fs-common';
 import { assertPathSafe } from './path-safety';
-import { mapNodeForSift, paginate, readWork, type TreeSource } from './index';
+import { paginate, readWork, type TreeSource } from './index';
 import './json-codec'; // register JSON decode handler
 import { patchViaSet } from './patch';
 

@@ -5,7 +5,7 @@
 import type { NodeData } from '#core';
 import { createBoundedCache } from '#util/bounded-cache';
 import { type CommitReceipt, type PatchManyEntry, type Tree, type TreeEvent, type TreeWatchOpts, type TreeWatchScope } from './index';
-import { createInflight } from './inflight';
+import { createInflight } from '#util/inflight';
 import { patchViaSet } from './patch';
 
 // Cache stores live refs — callers MUST clone before mutating. We tried

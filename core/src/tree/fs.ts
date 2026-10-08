@@ -1,3 +1,4 @@
+import { mapNodeForSift } from '#kernel/store/keys';
 // Treenix FS Tree — Layer 1
 // Stores nodes as JSON files on disk.
 // Leaf nodes → name.json, directory nodes (with children) → name/$.json
@@ -9,14 +10,14 @@ import { dirname as treeDirname } from '#core/path';
 import { KernelError } from '#errors';
 import { createSiftTest } from '#kernel/expr';
 import { DEFAULT_LIMITS } from '#kernel/types';
+import { assertNoPrototypeKeys } from '#kernel/update-ops';
 import { mkdir, readdir, readFile, realpath, rmdir, unlink } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { atomicWrite } from './fs-atomic';
 import { scanFromCollected } from './fs-common';
 import { ensureMigrated } from './migrate-component-namespace';
 import { assertPathSafe } from './path-safety';
-import { applyPatchManyEntry, assertPatchManyBatch, assertSetEntryOcc, isSetEntry, mapNodeForSift, paginate, readWork, type TreeSource } from './index';
-import { assertNoPrototypeKeys } from '#kernel/update-ops';
+import { applyPatchManyEntry, assertPatchManyBatch, assertSetEntryOcc, isSetEntry, paginate, readWork, type TreeSource } from './index';
 import { type CommitChange, type CommitReceipt, hasMutationOps, patchViaSet } from './patch';
 
 // A dir-form node lives at <path>/$.json, so a '$' path segment aliases that

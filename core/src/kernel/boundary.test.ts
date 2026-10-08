@@ -3,6 +3,7 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 import { describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
+import ts from 'typescript'
 
 const kernelDir = dirname(fileURLToPath(import.meta.url))
 const srcDir = dirname(kernelDir)
@@ -17,11 +18,18 @@ const PACKAGES: readonly string[] = []
 type PackageImports = { readonly [key: string]: { readonly development: string } }
 const packageImports: PackageImports = JSON.parse(readFileSync(join(srcDir, '../package.json'), 'utf8')).imports
 
-// Over-approximates: every from or import followed by a quoted specifier counts, in comments too.
-const SPECIFIER = /(?<![\w$.])(?:from|import)\s*\(?\s*['"]([^'"\n]+)['"]/g
-
 function specifiers(source: string): string[] {
-  return [...source.matchAll(SPECIFIER)].map((match) => match[1])
+  const result: string[] = []
+  function visit(node: ts.Node): void {
+    const specifier = ts.isImportDeclaration(node) || ts.isExportDeclaration(node) ? node.moduleSpecifier
+      : ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference) ? node.moduleReference.expression
+      : ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword ? node.arguments[0]
+      : undefined
+    if (specifier !== undefined && ts.isStringLiteralLike(specifier)) result.push(specifier.text)
+    ts.forEachChild(node, visit)
+  }
+  visit(ts.createSourceFile('source.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX))
+  return result
 }
 
 function packageTarget(spec: string): string {
@@ -39,6 +47,8 @@ function packageTarget(spec: string): string {
 
 function allowed(file: string, spec: string): boolean {
   if (spec.startsWith('node:') || PACKAGES.includes(spec)) return true
+  // The boundary check parses source with the development dependency; runtime kernel files cannot import it.
+  if (file === fileURLToPath(import.meta.url) && spec === 'typescript') return true
 
   const local = spec.startsWith('.') ? resolve(dirname(file), spec)
     : spec.startsWith('#') ? resolve(srcDir, '..', packageTarget(spec))
@@ -88,6 +98,19 @@ describe('kernel import boundary', () => {
     const file = join(kernelDir, 'contract', 'x.ts')
     for (const spec of ['../types', '#kernel/types', '#core', '#core/path', '#util/ulid', '#comp', '#comp/needs', '#schema/types', '#errors', 'node:fs'])
       assert.equal(allowed(file, spec), true, spec)
+  })
+
+  it('does not read quoted field names as import declarations', () => {
+    const q = "'"
+    assert.deepEqual(specifiers(`type Side = ${q}from${q} | ${q}to${q}; const value = ${q}import${q}`), [])
+    assert.deepEqual(specifiers(`put(${q}/from${q}, {}, ${q}dir${q}); const title = ${q}from a folder${q}`), [])
+  })
+
+  it('finds imports inside template expressions and decodes escaped specifiers', () => {
+    const q = "'", tick = '`'
+    const source = `const value = ${tick}result: \${await import(${q}#tree${q})}${tick}; import ${q}#ser\\x76er${q}`
+    assert.deepEqual(specifiers(source), ['#tree', '#server'])
+    assert.equal(allowed(join(kernelDir, 'guard.ts'), 'typescript'), false)
   })
 
   it('rejects the old layers, other packages and paths leaving src', () => {

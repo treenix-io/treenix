@@ -2,7 +2,7 @@
 // Auto-discovered via import.meta.glob('../mods/*/client.ts')
 
 import { getComponent, onResolveMiss, register, unregister } from '@treenx/core';
-import { createInflight } from '@treenx/core/tree/inflight';
+import { createInflight } from '@treenx/core/util/inflight';
 import { UixNoView } from '#context';
 import * as cache from '#tree/cache';
 import { tree } from '#tree/client';

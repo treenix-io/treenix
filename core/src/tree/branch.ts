@@ -1,3 +1,4 @@
+import { mapNodeForSift } from '#kernel/store/keys';
 // Treenix Branch — Layer 1
 // Write-isolated overlay: reads merge upper (delta) over lower (live),
 // writes land in upper as wrapper nodes, deletions are whiteouts
@@ -14,7 +15,7 @@ import type { NodeData } from '#core';
 import { KernelError } from '#errors';
 import { createSiftTest } from '#kernel/expr';
 import { DEFAULT_LIMITS } from '#kernel/types';
-import { mapNodeForSift, type Page, paginate, readWork, type Tree } from '#tree';
+import { type Page, paginate, readWork, type Tree } from '#tree';
 import { patchViaSet } from './patch';
 
 export const BRANCH_DELTA_TYPE = 't.branch.delta';

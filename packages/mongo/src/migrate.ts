@@ -12,7 +12,7 @@
 
 import type { Collection } from 'mongodb';
 import { globMatch } from '@treenx/core/glob';
-import { fromStorageKeys, toStorageKeys } from '@treenx/core/tree';
+import { fromStorageKeys, toStorageKeys } from '@treenx/core/kernel/store/keys';
 import { NS_VERSION, type Stats, transformNode } from '@treenx/core/tree/migrate-component-namespace';
 
 // Reserved _path — no leading '/', so node lookups and children regexes

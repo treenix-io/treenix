@@ -1,8 +1,9 @@
+import { fromStorageKeys, toStorageKeys } from '#kernel/store/keys';
 import { createNode } from '#core';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { KernelError } from '#errors';
-import { createFilterTree, createMemoryTree, createOverlayTree, fromStorageKeys, PatchTestError, toStorageKeys } from './index';
+import { createFilterTree, createMemoryTree, createOverlayTree, PatchTestError } from './index';
 
 describe('MemoryStore', () => {
   it('set and get', async () => {
