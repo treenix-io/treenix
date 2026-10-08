@@ -56,9 +56,39 @@ describe('readonlyProxy', () => {
     assert.equal(JSON.stringify(ro), JSON.stringify(live));
   });
 
-  it('frozen parents return their exact values (proxy invariant)', () => {
+  it('frozen parents keep their mutable children protected', () => {
     const inner = { n: 1 };
     const ro = readonlyProxy(Object.freeze({ inner }));
-    assert.equal(ro.inner, inner);
+    assert.notEqual(ro.inner, inner);
+    assert.throws(() => { ro.inner.n = 2; }, isKindViolation);
+    assert.equal(Object.getOwnPropertyDescriptor(ro, 'inner')?.value, ro.inner);
+    assert.deepEqual(Object.keys(ro), ['inner']);
+    assert.equal(inner.n, 1);
+    assert.equal(Object.isExtensible(inner), true);
+  });
+
+  it('a locked object property keeps its mutable child protected', () => {
+    const inner = { n: 1 };
+    const target = { inner };
+    Object.defineProperty(target, 'inner', { configurable: false, writable: false });
+    const ro = readonlyProxy(target);
+
+    assert.throws(() => { ro.inner.n = 2; }, isKindViolation);
+    assert.deepEqual(ro, { inner: { n: 1 } });
+    assert.equal(inner.n, 1);
+  });
+
+  it('frozen arrays retain their length, reflection and iteration with protected children', () => {
+    const inner = { n: 1 };
+    const ro = readonlyProxy(Object.freeze([inner]));
+
+    assert.equal(Array.isArray(ro), true);
+    assert.equal(ro.length, 1);
+    assert.equal(Object.getOwnPropertyDescriptor(ro, 'length')?.value, 1);
+    assert.deepEqual(Reflect.ownKeys(ro), ['0', 'length']);
+    assert.deepEqual([...ro].map(value => value.n), [1]);
+    assert.equal(JSON.stringify(ro), '[{"n":1}]');
+    assert.throws(() => { ro[0].n = 2; }, isKindViolation);
+    assert.equal(inner.n, 1);
   });
 });

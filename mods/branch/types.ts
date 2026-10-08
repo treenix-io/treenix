@@ -61,7 +61,8 @@ function rewriteViewRefs(node: NodeData, viewRoot: string, base: string): NodeDa
     return base === '/' ? (rest || '/') : base + rest;
   };
 
-  const clone = structuredClone(node);
+  // Read actions receive immutable proxies of the plain JSON node data.
+  const clone: NodeData = JSON.parse(JSON.stringify(node));
 
   // Same traversal shape as the policy's extractRefs: skip $-keys, walk
   // component keys and plain data alike.

@@ -3,30 +3,43 @@
 // `this.x = …`) throws FORBIDDEN.
 //
 // `wrapReadOnlyTree`   — blocks tree-level mutation methods.
-// `readonlyProxy`      — shallow Proxy that throws on assignment/delete.
-//                        Sufficient for direct field writes; deeper nested
-//                        mutation through returned objects falls outside this
-//                        layer (handlers shouldn't reach for it from a read).
+// `readonlyProxy`      — deep Proxy that throws on mutation.
 
 import { KernelError } from '#errors';
-import type { Tree } from '#tree';
+import type { ScanChildrenOpts, Tree, TreeWatchOpts, TreeWatchScope } from '#tree';
 
 function deny(action: string): never {
   throw new KernelError('FORBIDDEN', `read-only context: ${action} is forbidden`);
 }
 
+async function* readonlyResults<T extends object>(source: AsyncIterable<T>): AsyncIterable<T> {
+  for await (const value of source) yield readonlyProxy(value);
+}
+
 export function wrapReadOnlyTree(tree: Tree): Tree {
   // Spread forwards the full read surface — get, getChildren, and the optional
-  // scanChildren/watch (both pure reads a handler may legitimately use); only
-  // mutations are denied. Hand-listing read methods would silently drop
-  // scanChildren and break the read runtime if this facade ever fed a source.
+  // capabilities. Returned objects must stay immutable too: reads may share
+  // nested data with the cache or another watch consumer.
   const { execute: _execute, ...readSurface } = tree;
+  const scanChildren = tree.scanChildren?.bind(tree);
+  const watch = tree.watch?.bind(tree);
   // execute is STRIPPED, not denied: it is a write channel (core-pxlu), and
   // capability PRESENCE marks foreign authority — a deny stub would make this
   // facade look exec-capable. Absent key → callers fall back to the local
   // executor, where the kind-stack rejects write actions inside a read frame.
   return {
     ...readSurface,
+    get: async (path, ctx) => {
+      const node = await tree.get(path, ctx);
+      return node ? readonlyProxy(node) : node;
+    },
+    getChildren: async (path, opts, ctx) => readonlyProxy(await tree.getChildren(path, opts, ctx)),
+    ...(scanChildren ? {
+      scanChildren: (path: string, opts?: ScanChildrenOpts, ctx?: unknown) => readonlyResults(scanChildren(path, opts, ctx)),
+    } : {}),
+    ...(watch ? {
+      watch: (scope: TreeWatchScope, opts?: TreeWatchOpts, ctx?: unknown) => readonlyResults(watch(scope, opts, ctx)),
+    } : {}),
     set: () => deny('tree.set()'),
     patch: () => deny('tree.patch()'),
     remove: () => deny('tree.remove()'),
@@ -64,21 +77,40 @@ export function wrapAbortGuardTree(tree: Tree, signal: AbortSignal): Tree {
 // readers then saw, unpersisted. One proxy per object keeps identity stable.
 const proxies = new WeakMap<object, object>();
 
+function readonlyValue(value: unknown): unknown {
+  return value !== null && typeof value === 'object' ? readonlyProxy(value) : value;
+}
+
 export function readonlyProxy<T extends object>(target: T): T {
   const hit = proxies.get(target);
   if (hit) return hit as T;
-  const proxy = new Proxy(target, {
-    get: (t, prop, receiver) => {
-      const v: unknown = Reflect.get(t, prop, receiver);
-      if (v === null || typeof v !== 'object') return v;
-      // Proxy invariant: a non-configurable, non-writable slot (frozen
-      // parent) must return its exact value — it is immutable anyway.
-      const d = Reflect.getOwnPropertyDescriptor(t, prop);
-      return d && !d.configurable && !d.writable ? v : readonlyProxy(v);
+  // A frozen source slot cannot legally return a protected child when the
+  // source itself is the proxy target. An empty shadow keeps reads lazy.
+  const shadow: T = Array.isArray(target) ? [] : Object.create(Object.getPrototypeOf(target));
+  const proxy = new Proxy(shadow, {
+    get: (_t, prop, receiver) => readonlyValue(Reflect.get(target, prop, receiver)),
+    has: (_t, prop) => Reflect.has(target, prop),
+    ownKeys: () => Reflect.ownKeys(target),
+    getPrototypeOf: () => Reflect.getPrototypeOf(target),
+    getOwnPropertyDescriptor: (_t, prop) => {
+      const descriptor = Reflect.getOwnPropertyDescriptor(target, prop);
+      if (!descriptor) return undefined;
+      if ('value' in descriptor) {
+        const length = Array.isArray(target) && prop === 'length';
+        return { ...descriptor, value: readonlyValue(descriptor.value), configurable: !length, writable: length };
+      }
+      return {
+        enumerable: descriptor.enumerable,
+        configurable: true,
+        get: descriptor.get ? () => readonlyValue(Reflect.get(target, prop, proxy)) : undefined,
+        set: descriptor.set ? () => deny(`assign ${String(prop)}`) : undefined,
+      };
     },
     set: (_t, prop) => deny(`assign ${String(prop)}`),
     deleteProperty: (_t, prop) => deny(`delete ${String(prop)}`),
     defineProperty: (_t, prop) => deny(`defineProperty ${String(prop)}`),
+    setPrototypeOf: () => deny('set prototype'),
+    preventExtensions: () => deny('prevent extensions'),
   });
   proxies.set(target, proxy);
   return proxy;

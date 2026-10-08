@@ -200,6 +200,36 @@ describe('branch mod: create + mounted view', () => {
 });
 
 describe('branch mod: diff + abandon', () => {
+  it('read diff returns owned node images and preserves the stored view references', async () => {
+    const { tree, branchPath, view } = await setupPipeline();
+    const originalTarget = `${view}/doc`;
+    await tree.set(makeNode(`${view}/link`, 'branchtest.doc', {
+      title: 'future', count: 7,
+      links: [{ $type: 'ref', $ref: originalTarget }],
+    }));
+
+    const { entries } = await executeAction<{ entries: DiffEntry[] }>(
+      tree, branchPath, undefined, undefined, 'diff', undefined, ACTOR,
+    );
+    const node = entries.find(entry => entry.path === '/link')?.node;
+    assert.ok(node);
+    assert.ok(Array.isArray(node.links));
+    const link = node.links[0];
+    assert.ok(isRef(link));
+    assert.equal(link.$ref, '/doc');
+    link.$ref = '/elsewhere';
+    node.title = 'changed response';
+
+    const wrapper = await tree.get(`${branchPath}/delta/link`);
+    assert.ok(wrapper && typeof wrapper.node === 'object' && wrapper.node !== null);
+    const stored = wrapper.node;
+    assert.ok('title' in stored && 'links' in stored);
+    assert.equal(stored.title, 'future');
+    assert.ok(Array.isArray(stored.links));
+    assert.ok(isRef(stored.links[0]));
+    assert.equal(stored.links[0].$ref, originalTarget);
+  });
+
   it('diff reports create/set/remove/noop with live paths and baseRev', async () => {
     const { tree, branchPath, view } = await setup();
 
