@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, it } from 'node:test'
 import { registerActions, registerType } from '#comp'
 import { getRegistryVersion, mapRegistry, register, registerLegacy, replaceHandler, resolveExact, resolveExactEntry, unregister } from '#core/registry'
-import { kernelManifest } from '#core/builtins'
+import { kernelManifest } from '#kernel/builtins'
 import { KernelError } from '#errors'
 import type { TypeSchema } from '#schema/types'
 import { ambientModule, assertModuleSchema, assertNoAmbientRegistrations, clearAmbientRegistrations, clearCollectedModules,

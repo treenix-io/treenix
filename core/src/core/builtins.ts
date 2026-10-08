@@ -3,7 +3,6 @@
 
 import { normalizeType } from './component';
 import { registerLegacy } from './registry';
-import type { ModuleManifest } from '#kernel/types';
 
 // kriz: should be 't.dir', 't.root', and so on
 // kriz: should be revised and reviewed
@@ -23,12 +22,3 @@ export function registerBuiltins() {
 }
 
 registerBuiltins();
-
-export const kernelManifest: ModuleManifest = {
-  id: 'kernel',
-  types: ['dir', 'root', 'ref', 'type', 'mount-point'].map(type => ({
-    name: normalizeType(type), module: 'kernel', security: 'ordinary', version: 0,
-    schema: { type: 'object', properties: {} }, actions: {},
-  })),
-  security: [], open: [],
-};
