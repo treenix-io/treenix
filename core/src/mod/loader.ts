@@ -144,11 +144,12 @@ async function ensureTsxRegistered(): Promise<void> {
 }
 
 
+/** Loads target entries and collects manifests when running in the native kernel. */
 export async function loadLocalMods(modsDir: string, target: LoadTarget): Promise<LoadResult> {
   const result: LoadResult = { loaded: [], failed: [], manifests: [] };
-  const entryBase = target === 'client' ? 'client' : 'server';
+  const entryBase = target === 'kernel' ? 'kernel' : target === 'client' ? 'client' : 'server';
   const exts = target === 'client' ? CLIENT_EXT : SERVER_EXT;
-  const convention = target === 'client' ? CLIENT_CONVENTION : SERVER_CONVENTION;
+  const convention = target === 'kernel' ? [] : target === 'client' ? CLIENT_CONVENTION : SERVER_CONVENTION;
   let entries: import('node:fs').Dirent[];
 
   try {
@@ -170,6 +171,8 @@ export async function loadLocalMods(modsDir: string, target: LoadTarget): Promis
 
     const modDir = join(modsDir, entry.name);
     const entryPath = await resolveFirst(modDir, [entryBase], exts);
+    const legacyEntry = target === 'kernel' && entryPath === null
+      ? await resolveFirst(modDir, ['server', ...SERVER_CONVENTION], SERVER_EXT) : null;
 
     // Discover convention files if no explicit entry
     const filesToImport: string[] = [];
@@ -182,12 +185,14 @@ export async function loadLocalMods(modsDir: string, target: LoadTarget): Promis
       }
     }
 
-    if (filesToImport.length === 0) continue;
+    if (filesToImport.length === 0 && legacyEntry === null) continue;
 
     const modEntry: LoadedMod = { name: entry.name, state: 'loading' };
     loaded.set(entry.name, modEntry);
 
     try {
+      // Refuse before importing: legacy entries can start services or register process-wide handlers.
+      if (legacyEntry !== null) throw Object.assign(new KernelError('INVALID', 'Module requires a native kernel entry'), { entry: legacyEntry });
       // R4-BOOT-4: reset currentMod even on import-throw — prevents cross-attribution
       // of the next mod's register() calls to this failed mod.
       // R4-BOOT-2: realpath-confine each file inside modDir — symlinked entry files inside

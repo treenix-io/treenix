@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { afterEach, beforeEach, describe, it } from 'node:test'
 import { mapRegistry, register, registerLegacy, resolveExactEntry, unregister } from '#core/registry'
@@ -12,7 +12,9 @@ const componentModule = new URL('../comp/index.ts', import.meta.url).href
 
 describe('native module loading', () => {
   let dir: string
+
   let restore: () => void
+
   beforeEach(async () => {
     const scratch = resolve(import.meta.dirname, '../../../../temp')
     await mkdir(scratch, { recursive: true })
@@ -30,12 +32,13 @@ describe('native module loading', () => {
       for (const { type, context, entry } of previous) registerLegacy(type, context, entry.handler, entry.meta)
     }
   })
+
   afterEach(() => restore())
 
-  async function mod(name: string, type: string, schemaType = type, suffix = '', root = dir): Promise<void> {
+  async function mod(name: string, type: string, schemaType = type, suffix = '', root = dir, entry = 'kernel'): Promise<void> {
     const path = join(root, name)
     await mkdir(join(path, 'schemas'), { recursive: true })
-    await writeFile(join(path, 'server.ts'), `import { registerType } from ${JSON.stringify(componentModule)};\nregisterType(${JSON.stringify(type)}, class Item {});\n${suffix}`)
+    await writeFile(join(path, `${entry}.ts`), `import { registerType } from ${JSON.stringify(componentModule)};\nregisterType(${JSON.stringify(type)}, class Item {});\n${suffix}`)
     await writeFile(join(path, 'schemas', 'item.json'), JSON.stringify({ $id: schemaType, type: 'object', properties: {} }))
   }
 
@@ -83,11 +86,52 @@ describe('native module loading', () => {
   })
 
   it('keeps the legacy profile available without collecting native manifests', async () => {
-    await mod('legacy', 'native.legacy')
+    await mod('legacy', 'native.legacy', 'native.legacy', '', dir, 'server')
     const result = await loadLocalMods(dir, 'server')
     assert.deepEqual(result.loaded, ['legacy'])
     assert.deepEqual(result.failed, [])
     assert.deepEqual(result.manifests, [])
+  })
+
+  it('refuses legacy entry and convention modules before executing their file side effects', async () => {
+    const marker = join(dir, 'legacy-executed')
+    for (const entry of ['server', 'types', 'seed', 'service']) {
+      const path = join(dir, entry)
+      await mkdir(path)
+      await writeFile(join(path, `${entry}.ts`), `import { writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(marker)}, 'executed');`)
+    }
+    const result = await loadLocalMods(dir, 'kernel')
+    assert.deepEqual(result.loaded, [])
+    assert.deepEqual(result.manifests, [])
+    assert.deepEqual(result.failed.map(failed => failed.name), ['seed', 'server', 'service', 'types'])
+    for (const failed of result.failed) {
+      assert.ok(failed.error instanceof KernelError)
+      assert.equal(failed.error.code, 'INVALID')
+    }
+    await assert.rejects(readFile(marker), (error) => error instanceof Error && 'code' in error && error.code === 'ENOENT')
+    await assert.rejects(publishLoadedModules(createRegistry(), result), (error) => error instanceof KernelError && error.code === 'INVALID')
+  })
+
+  it('loads the explicit native entry without executing a neighboring server entry', async () => {
+    await mod('native', 'native.explicit')
+    const marker = join(dir, 'server-executed')
+    await writeFile(join(dir, 'native', 'server.ts'), `import { writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(marker)}, 'executed');`)
+    const result = await loadLocalMods(dir, 'kernel')
+    assert.deepEqual(result.loaded, ['native'])
+    assert.deepEqual(result.failed, [])
+    assert.equal(result.manifests[0].types[0].name, 'native.explicit')
+    await assert.rejects(readFile(marker), (error) => error instanceof Error && 'code' in error && error.code === 'ENOENT')
+  })
+
+  it('collects a compiled JavaScript native entry', async () => {
+    const path = join(dir, 'compiled')
+    await mkdir(join(path, 'schemas'), { recursive: true })
+    await writeFile(join(path, 'kernel.js'), `import { registerType } from ${JSON.stringify(componentModule)}; registerType('native.compiled', class Item {});`)
+    await writeFile(join(path, 'schemas', 'item.json'), JSON.stringify({ $id: 'native.compiled', type: 'object', properties: {} }))
+    const result = await loadLocalMods(dir, 'kernel')
+    assert.deepEqual(result.loaded, ['compiled'])
+    assert.deepEqual(result.failed, [])
+    assert.equal(result.manifests[0].types[0].name, 'native.compiled')
   })
 
   it('rejects unscoped registrations before loading production kernel modules', async () => {
@@ -174,16 +218,31 @@ describe('native module loading', () => {
   })
 
   it('names a legacy-only capability handler in a failed native boot', async () => {
-    const path = join(dir, 'legacy-mount')
-    await mkdir(join(path, 'schemas'), { recursive: true })
-    const coreModule = new URL('../core/registry.ts', import.meta.url).href
-    await writeFile(join(path, 'server.ts'), `import { registerType } from ${JSON.stringify(componentModule)};\nimport { register } from ${JSON.stringify(coreModule)};\nregisterType('native.mount', class Mount {}, {security:'user-capability'});\nregister('native.mount', 'mount', async () => { throw new Error('unused'); });`)
-    await writeFile(join(path, 'schemas', 'mount.json'), JSON.stringify({ $id: 'native.mount', type: 'object', properties: {} }))
-    const result = await loadLocalMods(dir, 'kernel')
-    assert.deepEqual(result.failed, [])
-    const registry = createRegistry(), before = registry.digest
-    await assert.rejects(() => publishLoadedModules(registry, result, { allowPartialMods: true }), (error: unknown) =>
-      error instanceof KernelError && error.code === 'INVALID' && 'type' in error && error.type === 'native.mount' && 'context' in error && error.context === 'mount')
-    assert.equal(registry.digest, before)
-  })
+    const path = join(dir, 'legacy-mount');
+    await mkdir(join(path, 'schemas'), { recursive: true });
+    const coreModule = new URL('../core/registry.ts', import.meta.url).href;
+    await writeFile(
+      join(path, 'kernel.ts'),
+      `import { registerType } from ${JSON.stringify(componentModule)};\nimport { register } from ${JSON.stringify(coreModule)};\nregisterType('native.mount', class Mount {}, {security:'user-capability'});\nregister('native.mount', 'mount', async () => { throw new Error('unused'); });`,
+    );
+    await writeFile(
+      join(path, 'schemas', 'mount.json'),
+      JSON.stringify({ $id: 'native.mount', type: 'object', properties: {} }),
+    );
+    const result = await loadLocalMods(dir, 'kernel');
+    assert.deepEqual(result.failed, []);
+    const registry = createRegistry(),
+      before = registry.digest;
+    await assert.rejects(
+      () => publishLoadedModules(registry, result, { allowPartialMods: true }),
+      (error: unknown) =>
+        error instanceof KernelError &&
+        error.code === 'INVALID' &&
+        'type' in error &&
+        error.type === 'native.mount' &&
+        'context' in error &&
+        error.context === 'mount',
+    );
+    assert.equal(registry.digest, before);
+  });
 })
