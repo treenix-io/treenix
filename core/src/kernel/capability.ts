@@ -21,6 +21,19 @@ export interface CapabilityOptions {
   readonly expect?: Preconditions
 }
 
+export function executorDeclaration(node: StoredNode, registry: Registry): { readonly executable: boolean; readonly privileged: boolean } {
+  let executable = false, privileged = false
+  for (const name of decodeChainNode(node).types) {
+    const def = registry.type(name)
+    const declared = Object.values(def.actions).some(action => action.kind === 'setuid')
+      || registry.security(name, 'mount') !== undefined || registry.security(name, 'service') !== undefined
+      || registry.security(name, 'derive') !== undefined
+    executable ||= declared
+    privileged ||= declared && def.security === 'privileged-capability'
+  }
+  return { executable, privileged }
+}
+
 export async function guardCapabilities(changes: readonly NodeChange[], options: CapabilityOptions): Promise<void> {
   const { registry, state, readBefore, requireA, admin, expect } = options
   const after = new Map<Path, StoredNode | null>()
@@ -60,13 +73,7 @@ export async function guardCapabilities(changes: readonly NodeChange[], options:
     if (id.startsWith('p:')) throw new KernelError('INVALID', 'A path identity cannot receive grants')
     const node = await state.node(id)
     if (node === null || state.shard(node.$path)) throw new KernelError('INVALID', 'A grant requires a local executor node')
-    const executable = decodeChainNode(node).types.some(name => {
-      const def = registry.type(name)
-      return Object.values(def.actions).some(action => action.kind === 'setuid')
-        || registry.security(name, 'mount') !== undefined || registry.security(name, 'service') !== undefined
-        || registry.security(name, 'derive') !== undefined
-    })
-    if (!executable) throw new KernelError('INVALID', 'The node cannot be an executor')
+    if (!executorDeclaration(node, registry).executable) throw new KernelError('INVALID', 'The node cannot be an executor')
     await requireA(node.$path)
     const pin = expect?.nodes?.find(input => input.path === node.$path)
     if (pin === undefined) throw new KernelError('INVALID', 'A node grant requires a named version')
@@ -85,7 +92,7 @@ export async function guardCapabilities(changes: readonly NodeChange[], options:
       if (node === null) continue
       const types = decodeChainNode(node).types.map(name => registry.type(name))
       if (!admin && (types.some(type => type.security === 'privileged-capability')
-        || componentEntries(node).some(([, component]) => registry.type(component.$type).name === 'groups'))) {
+        || componentEntries(node).some(([, component]) => registry.type(component.$type).name === 't.groups'))) {
         throw new KernelError('FORBIDDEN', 'Only an administrator may write this capability')
       }
     }

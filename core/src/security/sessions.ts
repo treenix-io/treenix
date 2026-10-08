@@ -3,10 +3,13 @@
 
 import { A, type NodeData, R, S, W } from '#core';
 import type { Tree } from '#tree';
-import { createHash, randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
+import { credentialPath as sessionPath } from '#kernel/auth/crypto';
 import { ANON_PREFIX, createAnonSession, getAnonKey, verifyAnon } from './anon';
 import { assertNotSystem, SYSTEM_CLAIM } from './claims';
 import { SESSION_COOKIE_MAX_AGE } from './cookies';
+
+export { hashPassword, verifyPassword, DUMMY_HASH } from '#kernel/auth/crypto';
 
 export const SESSION_TTL_MS = SESSION_COOKIE_MAX_AGE * 1000;
 
@@ -14,14 +17,9 @@ export const SESSION_TTL_MS = SESSION_COOKIE_MAX_AGE * 1000;
 // in the store path or on disk — a DB dump / FS snapshot / accidental backup of
 // `/auth/sessions/*` reveals only hashes, not impersonable tokens. Mirrors the
 // `hashAgentKey` pattern already used for agent keys.
-function sessionHash(token: string): string {
-  return createHash('sha256').update(token).digest('hex');
-}
 /** Storage path for a session token. Exported for tests / admin tooling that need to look up
  *  a session by its plaintext token (the path itself stores only the hash). */
-export function sessionPath(token: string): string {
-  return `/auth/sessions/${sessionHash(token)}`;
-}
+export { sessionPath };
 
 // ── Types ──
 
@@ -141,28 +139,4 @@ export async function resolveOrIssueSession(
   }
   const anon = await createAnonSession(tree);
   return { kind: 'ok', session: anon.session, token: anon.token, issued: true };
-}
-
-// ── Password hashing ──
-
-export async function hashPassword(password: string): Promise<string> {
-  const salt = randomBytes(16);
-  const key = await new Promise<Buffer>((resolve, reject) =>
-    scrypt(password, salt, 64, (err, key) => (err ? reject(err) : resolve(key))),
-  );
-  return salt.toString('hex') + ':' + key.toString('hex');
-}
-
-// Pre-computed dummy hash for constant-time login (prevents timing-based user enumeration)
-export const DUMMY_HASH = randomBytes(16).toString('hex') + ':' + randomBytes(64).toString('hex');
-
-export async function verifyPassword(password: string, hash: string): Promise<boolean> {
-  const [saltHex, keyHex] = hash.split(':');
-  if (!saltHex || !keyHex) throw new Error('Malformed password hash');
-  const salt = Buffer.from(saltHex, 'hex');
-  const stored = Buffer.from(keyHex, 'hex');
-  const key = await new Promise<Buffer>((resolve, reject) =>
-    scrypt(password, salt, 64, (err, key) => (err ? reject(err) : resolve(key))),
-  );
-  return timingSafeEqual(stored, key);
 }

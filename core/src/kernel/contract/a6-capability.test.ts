@@ -18,7 +18,8 @@ function registry() {
   const result = createRegistry()
   result.publish({ id: 'test', open: [{ type: 'fake', context: 'service:custom', handler: async () => ({ stop: async () => {} }) }],
     security: [{ type: 'limited', context: 'acl', handler: () => R | W }], types: [
-      ...['dir', 'item', 'groups', 'limited', 'fake'].map(name => ({ name, module: 'test', security: 'ordinary', version: 0, schema: {}, actions: {} } as const)),
+      ...['dir', 'item', 'limited', 'fake'].map(name => ({ name, module: 'test', security: 'ordinary', version: 0, schema: {}, actions: {} } as const)),
+      { name: 't.groups', aliases: ['groups'], module: 'test', security: 'ordinary', version: 0, schema: {}, actions: {} },
       { name: 'privileged', aliases: ['old.privileged'], module: 'test', security: 'privileged-capability', version: 0, schema: {}, actions: {} },
       { name: 'form', module: 'test', security: 'user-capability', version: 0, schema: {},
         actions: { submit: { kind: 'setuid', args: {}, handler: async () => undefined } } },
