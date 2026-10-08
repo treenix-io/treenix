@@ -17,13 +17,33 @@ async function setup() {
     }, budget: scanBudget, firstAdmin: { path: '/admin', name: 'admin', password: 'serving-password' }, initialCredential: { ttlMs: 60_000 } })
   assert.ok(instance.setupCredential)
   const admin = instance.commands(await instance.auth.openCredential(instance.setupCredential)), serving = createTwpServing(instance)
-  return { instance, serving,
+  return { instance, serving, admin,
     limits(values: Record<string, number>) { return admin.commit({ opId: { epoch: instance.writer.intake.epoch, time: Date.now(), nonce: String(++nonce) },
       changes: [{ op: 'patch', path: '/sys/limits', ops: { $set: values } }] }) },
     close() { serving.close(); admin.close(); instance.auth.close() } }
 }
 
 describe('native serving lifecycle', () => {
+  it('serves children windows and include coverage through the same authenticated lane', async t => {
+    const f = await setup(); t.after(() => f.close())
+    assert.ok(f.instance.setupCredential)
+    await f.admin.commit({ opId: { epoch: f.instance.writer.intake.epoch, time: Date.now(), nonce: 'serving-sub' }, changes: [
+      { op: 'put', node: { $path: '/items', $type: 't.dir' } },
+      { op: 'put', node: { $path: '/items/a', $type: 't.dir', $order: 'A' } },
+      { op: 'put', node: { $path: '/items/b', $type: 't.dir', $order: 'B' } },
+      { op: 'put', node: { $path: '/included', $type: 't.dir' } },
+    ] })
+    const opened = await f.serving.open({ t: 'hi' }, f.instance.setupCredential, '127.0.0.1')
+    const frames = f.serving.attach(opened.id, f.instance.setupCredential, '127.0.0.1').frames[Symbol.asyncIterator]()
+    const welcome = await frames.next(); assert.ok(welcome.done === false && welcome.value.t === 'welcome')
+    f.serving.dispatch(opened.id, f.instance.setupCredential, '127.0.0.1', [{ t: 'sub', sub: 'page',
+      selector: { children: '/items', window: { limit: 1 }, include: [{ path: '/included' }] } }])
+    const snap = await frames.next(); assert.ok(snap.done === false && snap.value.t === 'snap')
+    assert.equal(snap.value.list.length, 1)
+    assert.equal(snap.value.covered?.length, 2)
+    assert.ok(snap.value.next)
+    assert.ok(snap.value.copies.some(copy => 'node' in copy && copy.node.$path === '/included'))
+  })
   it('does not retain a lane slot after synchronous heartbeat expiry during construction', async t => {
     const f = await setup(); t.after(() => f.close())
     await f.limits({ heartbeatMs: 0, maxLanes: 1 })

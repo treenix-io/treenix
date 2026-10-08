@@ -55,4 +55,13 @@ describe('native TWP boundary', () => {
     const done = decodeFrame(encodeFrame({ t: 'done', req: 'r', value: result }), 4096); assert.ok(done.t === 'done' && isReadResult(done.value))
     assert.ok('error' in done.value.copies[0]); assert.equal(done.value.copies[0].error.message, failure.message)
   })
+
+  it('carries page cursors and include ownership through snapshots and position changes', () => {
+    const pos = { instance: 'test', epoch: 1, seq: 4 }
+    const snap: Frame = { t: 'snap', sub: 'page', gen: 1, list: ['member'], covered: ['member', 'included'], copies: [], at: [pos], next: 'cursor' }
+    assert.deepEqual(decodeFrame(encodeFrame(snap), 4096), snap)
+    const changed: Frame = { t: 'pos', pos, changes: [{ op: 'list', sub: 'page', gen: 1, diff: [{ remove: 'member' }], covered: ['included'], next: 'next-cursor' }] }
+    assert.deepEqual(decodeFrame(encodeFrame(changed), 4096), changed)
+    assert.throws(() => decodeFrame(JSON.stringify({ ...snap, covered: [42] }), 4096), code('INVALID'))
+  })
 })

@@ -48,7 +48,31 @@ describe('native lane cache', () => {
     assert.deepEqual(cache.at('/counter'), copy(0))
     cache.apply({ t: 'reset', sub: 'one', gen: 2 })
     cache.apply(snapshot('one', 1))
-    assert.deepEqual(cache.list('one'), { gen: 2, ids: [] })
+    assert.deepEqual(cache.list('one'), { gen: 2, ids: [], covered: [], phase: 'loading' })
+  })
+
+  it('keeps include coverage and real cursors separate from direct members', () => {
+    const cache = createLaneCache(), related: NodeCopy = { node: { $path: '/related', $id: 'related', $type: 't.dir', $rev: '0' }, bits: 7, ver: '0' }
+    cache.apply({ t: 'snap', sub: 'page', gen: 1, list: ['counter'], covered: ['counter', 'related'],
+      copies: [copy(0), related], at: [pos(0)], next: 'cursor' })
+    assert.deepEqual(cache.list('page'), { gen: 1, ids: ['counter'], covered: ['counter', 'related'], phase: 'ready', next: 'cursor' })
+    cache.apply({ t: 'pos', pos: pos(1), changes: [{ op: 'list', sub: 'page', gen: 1, diff: [], covered: ['counter'] }] })
+    assert.deepEqual(cache.list('page'), { gen: 1, ids: ['counter'], covered: ['counter'], phase: 'ready' })
+    assert.deepEqual(cache.copy('related'), related)
+    cache.apply({ t: 'reset', sub: 'page', gen: 2 })
+    assert.equal(cache.list('page')?.phase, 'loading')
+    cache.apply({ t: 'snap', sub: 'page', gen: 2, list: [], copies: [], at: [pos(1)] })
+    assert.equal(cache.list('page')?.phase, 'ready')
+  })
+
+  it('sorts malformed and valid members with the same JSON ranks and path order', () => {
+    const cache = createLaneCache(), malformed: NodeCopy = { id: 'bad', path: '/bad', error: new KernelError('INVALID', 'Bad node'),
+      sort: { 'nested.order': 1 }, ver: 'bad' }, valid: NodeCopy = { node: { $path: '/valid', $id: 'valid', $type: 't.dir', $rev: '0',
+        nested: { order: 2 } }, bits: 7, ver: '0' }
+    cache.apply({ t: 'snap', sub: 'sorted', gen: 1, list: ['valid', 'bad'], copies: [valid, malformed], at: [pos(0)] })
+    assert.deepEqual(cache.ordered(['valid', 'bad'], [['nested.order', 1]]), [malformed, valid])
+    assert.deepEqual(cache.ordered(['valid', 'bad'], [['nested.order', -1]]), [valid, malformed])
+    assert.throws(() => cache.ordered(['missing'], []), code('INVALID'))
   })
 
   it('clears all copies and lists when a new principal opens the client', () => {

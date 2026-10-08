@@ -147,7 +147,8 @@ function laneChange(value: unknown): boolean {
   switch (value.op) {
     case 'put': return keys(value, ['op', 'copy']) && copy(value.copy)
     case 'del': return keys(value, ['op', 'id']) && text(value.id)
-    case 'list': return keys(value, ['op', 'sub', 'gen', 'diff']) && text(value.sub) && integer(value.gen) && listDiff(value.diff)
+    case 'list': return keys(value, ['op', 'sub', 'gen', 'diff', 'covered', 'next']) && text(value.sub) && integer(value.gen) && listDiff(value.diff)
+      && optional(value.covered, input => array(input, text)) && optional(value.next, text)
     case 'patch': return keys(value, ['op', 'id', 'base', 'delta', 'ver', 'bits']) && text(value.id) && text(value.base)
       && text(value.ver) && bits(value.bits) && isRecord(value.delta) && keys(value.delta, ['set', 'unset'])
       && optional(value.delta.set, isRecord) && optional(value.delta.unset, input => array(input, item => typeof item === 'string'))
@@ -170,9 +171,10 @@ export function isFrame(value: unknown): value is Frame {
     case 'pos': return keys(value, ['t', 'pos', 'changes', 'coverage']) && isPosition(value.pos) && Array.isArray(value.changes)
       && value.changes.every(laneChange) && (value.coverage === undefined || value.coverage === true
         && value.changes.every(item => isRecord(item) && (item.op === 'del' || item.op === 'list')))
-    case 'snap': case 'result': return keys(value, ['t', 'sub', 'gen', value.t === 'snap' ? 'list' : 'diff', 'copies', 'computed', 'rows', 'at'])
+    case 'snap': case 'result': return keys(value, ['t', 'sub', 'gen', value.t === 'snap' ? 'list' : 'diff', 'covered', 'copies', 'computed', 'rows', 'at', 'next'])
       && text(value.sub) && integer(value.gen) && (value.t === 'snap' ? array(value.list, text) : listDiff(value.diff))
-      && array(value.copies, copy) && array(value.at, isPosition) && optional(value.computed, input => array(input, computed)) && optional(value.rows, input => array(input, row))
+      && array(value.copies, copy) && array(value.at, isPosition) && optional(value.next, text) && optional(value.covered, input => array(input, text))
+      && optional(value.computed, input => array(input, computed)) && optional(value.rows, input => array(input, row))
     default: return false
   }
 }

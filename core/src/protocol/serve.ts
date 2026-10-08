@@ -37,10 +37,7 @@ function command(request: Request): NodeLaneCommand {
     case 'read':
       if ('history' in request.selector) throw new KernelError('INVALID', 'History is not available on this binding')
       return { ...request, selector: request.selector }
-    case 'sub':
-      if (!('node' in request.selector) || request.selector.include !== undefined)
-        throw new KernelError('INVALID', 'This binding subscribes to individual nodes')
-      return { ...request, selector: { node: request.selector.node } }
+    case 'sub': return request
     case 'commit':
       if (request.expect?.selectors?.some(input => 'history' in input.selector)) throw new KernelError('INVALID', 'Historical preconditions are not available on this binding')
       return request

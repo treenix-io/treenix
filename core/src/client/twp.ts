@@ -92,7 +92,7 @@ export function createTwpClient(connection: Connection, options: NativeClientOpt
     }
   }
   void consume()
-  return { ready, cache, key,
+  return { ready, cache, key, failure: () => failure,
     read(selector: SubSelector): Promise<ReadResult> {
       return request(req => ({ t: 'read', req, selector })).outcome.then(result => {
         if (!isReadResult(result.value))
@@ -109,7 +109,7 @@ export function createTwpClient(connection: Connection, options: NativeClientOpt
       return request(req => ({ t: 'act', req, path: input.path, component: input.component, action: input.action,
         args: input.args, anchor: input.anchor, opId }))
     },
-    sub(selector: { readonly node: string }, changed: () => void, refused?: (error: KernelError) => void): NodeSubscription {
+    sub(selector: SubSelector, changed: () => void, refused?: (error: KernelError) => void): NodeSubscription {
       active()
       const id = `sub:${++sequence}`
       const ready = new Promise<void>((resolve, reject) => {
