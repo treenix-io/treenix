@@ -367,9 +367,17 @@ export async function moveNode(fromPath: string, newPath: string): Promise<void>
 
 // ── execute: action caller ──
 
-export const execute = (
+export interface ActionResults {}
+
+export function execute<T extends keyof ActionResults, A extends keyof ActionResults[T] & string>(
+  pathOrUri: string, action: A, data: unknown, type: T, key?: string,
+): Promise<ActionResults[T][A]>;
+export function execute(
   pathOrUri: string, action: string, data?: unknown, type?: string, key?: string,
-) => {
+): Promise<unknown>;
+export function execute(
+  pathOrUri: string, action: string, data?: unknown, type?: string, key?: string,
+) {
   let path = pathOrUri;
   if (!key && pathOrUri.includes('#')) {
     const parsed = parseURI(pathOrUri);
@@ -411,7 +419,7 @@ export const execute = (
       throw err;
     },
   );
-};
+}
 
 async function confirmPending(path: string, opId: string): Promise<void> {
   try {
