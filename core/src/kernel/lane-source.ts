@@ -14,7 +14,7 @@ export function createNodeLaneRead(options: CommandOptions) {
   /** Keeps selection images usable until preparation and its final lifetime check complete. */
   return async function read<T>(run: (source: NodeLaneRead) => Promise<T>, selectors: readonly SubSelector[] = []): Promise<T> {
     const budget = options.budget()
-    await options.prepareSource(budget, selectors)
+    await options.prepareSource(budget, selectors, admission.signal)
     const input = options.source(budget), revision = options.registryRevision()
     const held: CacheRead[] = []
     let live = true

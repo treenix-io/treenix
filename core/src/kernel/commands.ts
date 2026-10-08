@@ -18,7 +18,7 @@ export interface CommandOptions {
   readonly admission: AuthAdmission
   readonly source: (budget: Budget) => ReaderSource
   /** Opens required targets before any Writer read or prepare span is held. */
-  readonly prepareSource: (budget: Budget, selectors: readonly Selector[]) => Promise<void>
+  readonly prepareSource: (budget: Budget, selectors: readonly Selector[], signal: AbortSignal) => Promise<void>
   readonly boundary: (path: string) => boolean
   readonly capabilities: (budget: Budget) => CapabilityState
   readonly gates: readonly Gate[]
@@ -54,7 +54,7 @@ export function createCommands(options: CommandOptions) {
       await judgeGates(gates, { kind: 'read', selector: owned, origin: admission.origin }, admission.actor,
         { signal: request.signal, deadline: budget.deadline })
       active(budget, request)
-      await options.prepareSource(budget, [owned])
+      await options.prepareSource(budget, [owned], request.signal)
       active(budget, request)
       return reader(budget, options.source(budget), request).read(owned)
     },
@@ -81,7 +81,7 @@ export function createCommands(options: CommandOptions) {
           else if (change.op === 'move') selectors.push({ node: change.from }, { node: change.to })
           else selectors.push({ node: change.op === 'put' ? change.node.$path : change.path })
         }
-        await options.prepareSource(budget, selectors)
+        await options.prepareSource(budget, selectors, authorization.signal)
         active(budget, authorization)
         const source = options.source(budget), capabilities = options.capabilities(budget)
         const ownership = reader(budget, source, authorization)

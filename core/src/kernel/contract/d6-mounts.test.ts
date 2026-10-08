@@ -91,6 +91,15 @@ async function fixture(handler?: MountHandler, writerEpoch = 1) {
 }
 
 describe('native mount declaration preflight', { timeout: 10_000 }, () => {
+  it('rejects missing startup keys before opening any requested declaration', async () => {
+    const { table } = preflight()
+    table.publish(table.stage([table.declarationsOf(declaration('/data', '*/stats'))]))
+    const key = table.ranges()[0].key
+    await assert.rejects(table.prepareKeys([key, 'missing'], scanBudget()), code('UNAVAILABLE'))
+    assert.equal(table.ranges()[0].state, 'idle')
+    await table.close()
+  })
+
   it('compiles relative wildcard roots and their descendants without claiming the declaring node', () => {
     const { table } = preflight()
     const staged = table.stage([table.declarationsOf(declaration('/data', '*/stats'))])

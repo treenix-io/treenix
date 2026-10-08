@@ -76,7 +76,7 @@ export function createActionRuntime(options: CommandOptions) {
         const replay = await writer.replay(identity, control.wait)
         if (replay !== undefined) return replay
       }
-      await options.prepareSource(budget, [{ history: '/' }])
+      await options.prepareSource(budget, [{ history: '/' }], admission.signal)
       assertActive()
 
       const revision = options.registryRevision()

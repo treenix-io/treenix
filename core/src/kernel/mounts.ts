@@ -3,6 +3,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { assertSafePath } from '#core/path'
 import { KernelError } from '#errors'
 import { componentEntries } from '#kernel/migrate'
+import { ownMountTarget } from '#kernel/mount-resource'
 import type {
   Budget, Component, ComponentName, MountDecl, MountHandler, Node, NodeId, OpenedMountTarget,
   NodeMeta, Path, Registry, Rev, ScanRange, Session, TypeDef, TypeName,
@@ -85,6 +86,11 @@ interface Entry extends MountEntry {
 interface StageState {
   readonly version: number
   readonly entries: Map<string, Entry>
+}
+
+interface OpeningWaiter {
+  resolve(): void
+  reject(reason: unknown): void
 }
 
 const wildcard = Symbol('mount-segment')
@@ -173,17 +179,6 @@ function snapshot(input: MountDeclaration): MountDeclaration {
   return { node, component: input.component, declaration: settings }
 }
 
-/** Share one release Promise across failed opening, Writer retirement and instance shutdown. */
-function ownTarget(target: OpenedMountTarget): OpenedMountTarget {
-  let closing: Promise<void> | undefined
-  const close = () => closing ??= Promise.resolve().then(() => target.close())
-  if (target.kind === 'store') return { kind: 'store', store: target.store, resources: target.resources, close }
-  if (target.kind === 'authority') return { kind: 'authority', authority: target.authority, close }
-  if (target.executor === 'reader') return { kind: 'view', derive: target.derive, executor: 'reader', close }
-  return { kind: 'view', derive: target.derive, executor: 'node', close,
-    ...(target.sources === undefined ? {} : { sources: target.sources }) }
-}
-
 /** Owns accepted claims independently of the asynchronously opened and fenced target resources. */
 export function createMountTable(options: MountTableOptions) {
   let entries = new Map<string, Entry>()
@@ -192,6 +187,7 @@ export function createMountTable(options: MountTableOptions) {
   const stages = new WeakMap<MountStage, StageState>()
   const retiring = new Set<Promise<void>>()
   const openingContext = new AsyncLocalStorage<readonly string[]>()
+  const waits = new WeakMap<Promise<void>, Set<OpeningWaiter>>()
   let version = 0, generation = 0
   let closed = false
   let failure: { readonly error: unknown } | undefined
@@ -375,7 +371,7 @@ export function createMountTable(options: MountTableOptions) {
         if (entry.session.session.actor.principal !== `n:${entry.node.$id}`) {
           throw new KernelError('INVALID', 'Mount handler requires its declaring node session')
         }
-        entry.target = ownTarget(await handler(entry.node, entry.session.session))
+        entry.target = ownMountTarget(await handler(entry.node, entry.session.session))
         validate(entry.key, entry.revision)
         if (entry.target.kind === 'store' && entry.declaration.external === 'trusted'
           && entry.target.store.external === undefined) {
@@ -410,36 +406,99 @@ export function createMountTable(options: MountTableOptions) {
     return work
   }
 
-  /** Check wall time independently of payload accounting, including unopened or invalid ranges. */
-  function check(budget: Budget): void {
+  /** Check cancellation and wall time independently of payload accounting. */
+  function check(budget: Budget, signal?: AbortSignal): void {
     available()
+    if (signal?.aborted) throw cancellation(signal)
     if (Date.now() > budget.deadline) throw new KernelError('BUDGET', 'Mount preparation deadline exceeded')
   }
 
-  /** One caller's deadline ends its wait without cancelling another caller's shared target opening. */
-  function wait(work: Promise<void>, budget: Budget): Promise<void> {
+  /** Preserve native admission failures and normalize external AbortController reasons. */
+  function cancellation(signal: AbortSignal): KernelError {
+    return signal.reason instanceof KernelError
+      ? signal.reason
+      : new KernelError('CANCELLED', 'Mount preparation cancelled')
+  }
+
+  /** Keep one Promise dispatcher so detached callers are not retained by a stalled opener. */
+  function openingWaiters(work: Promise<void>): Set<OpeningWaiter> {
+    const existing = waits.get(work)
+    if (existing !== undefined) return existing
+    const waiters = new Set<OpeningWaiter>()
+    waits.set(work, waiters)
+    work.then(() => {
+      waits.delete(work)
+      for (const waiter of waiters) waiter.resolve()
+    }, reason => {
+      waits.delete(work)
+      for (const waiter of waiters) waiter.reject(reason)
+    })
+    return waiters
+  }
+
+  /** Detach one cancelled or expired caller while the declaration keeps its shared target opening. */
+  function waitOpening(work: Promise<void>, budget: Budget, signal?: AbortSignal): Promise<void> {
+    const waiters = openingWaiters(work)
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new KernelError('BUDGET', 'Mount opening deadline exceeded')),
+      let settled = false
+      let timer: ReturnType<typeof setTimeout> | undefined
+      let aborted: (() => void) | undefined
+      /** Remove every per-caller resource on the first settlement. */
+      function cleanup(): boolean {
+        if (settled) return false
+        settled = true
+        if (timer !== undefined) clearTimeout(timer)
+        if (signal !== undefined && aborted !== undefined) signal.removeEventListener('abort', aborted)
+        waiters.delete(waiter)
+        return true
+      }
+      const waiter: OpeningWaiter = {
+        resolve() { if (cleanup()) resolve() },
+        reject(reason) { if (cleanup()) reject(reason) },
+      }
+      waiters.add(waiter)
+      timer = setTimeout(() => waiter.reject(new KernelError('BUDGET', 'Mount opening deadline exceeded')),
         Math.max(1, budget.deadline - Date.now() + 1))
-      work.then(() => { clearTimeout(timer); resolve() }, error => { clearTimeout(timer); reject(error) })
+      if (signal !== undefined) {
+        aborted = () => waiter.reject(cancellation(signal))
+        signal.addEventListener('abort', aborted, { once: true })
+        if (signal.aborted) aborted()
+      }
     })
   }
 
+  /** Reuse active targets and bind pending openings to this caller's lifetime. */
+  async function prepareEntry(entry: Entry, budget: Budget, signal?: AbortSignal): Promise<void> {
+    check(budget, signal)
+    if (entry.state !== 'active' || !current(entry))
+      await waitOpening(open(entry), budget, signal)
+    check(budget, signal)
+  }
+
   /** Open intersecting targets before any Reader barrier that their handlers may themselves need. */
-  async function prepareRanges(ranges: readonly ScanRange[], budget: Budget): Promise<void> {
-    check(budget)
+  async function prepareRanges(ranges: readonly ScanRange[], budget: Budget, signal?: AbortSignal): Promise<void> {
+    check(budget, signal)
     const addresses = ranges.map(addressOf)
     for (const entry of entries.values()) {
-      check(budget)
+      check(budget, signal)
       if (addresses.some(range => intersects(entry.pattern, range))) {
-        await wait(open(entry), budget)
-        check(budget)
+        await prepareEntry(entry, budget, signal)
       }
     }
   }
 
   return {
     stage, validateStage, publish, validate, activated, prepareRanges,
+    /** Adopt only exact accepted declarations during startup, without inventing wildcard addresses. */
+    async prepareKeys(keys: readonly string[], budget: Budget, signal?: AbortSignal): Promise<void> {
+      check(budget, signal)
+      const selected = keys.map(key => {
+        const entry = entries.get(key)
+        if (entry === undefined) throw new KernelError('UNAVAILABLE', 'Mount declaration is unavailable')
+        return entry
+      })
+      for (const entry of selected) await prepareEntry(entry, budget, signal)
+    },
     /** Rebind accepted declarations after owner publication without relinquishing their claimed ranges. */
     registryChanged(): void {
       available()
@@ -464,8 +523,8 @@ export function createMountTable(options: MountTableOptions) {
       return { id: node.$id, declarations }
     },
     /** Prepare direct addresses using the same range-aware opening path. */
-    prepare(paths: readonly Path[], budget: Budget): Promise<void> {
-      return prepareRanges(paths.map(node => ({ node })), budget)
+    prepare(paths: readonly Path[], budget: Budget, signal?: AbortSignal): Promise<void> {
+      return prepareRanges(paths.map(node => ({ node })), budget, signal)
     },
     /** Resolve only active claims; a claimed but unavailable address never falls back to its parent. */
     resolve(path: Path): MountResolution | undefined {
