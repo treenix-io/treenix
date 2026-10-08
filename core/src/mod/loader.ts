@@ -3,12 +3,14 @@
 import { isInsideRoot } from '#core/path';
 import { safeJsonParse } from '#core/json';
 import { createLogger } from '#log';
+import { KernelError } from '#errors';
 import { loadSchemasRecursive } from '#schema/load';
 import { readdir, readFile, realpath, stat } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { setCurrentMod } from './tracking';
 import type { LoadedMod } from './types';
 import type { CollectedModule } from '#kernel/manifest';
+import type { Registry } from '#kernel/types';
 
 const log = createLogger('mod');
 
@@ -106,6 +108,17 @@ async function packageNameAt(modsDir: string): Promise<string | null> {
   }
 }
 
+async function modulePackageAt(modsDir: string): Promise<string> {
+  let dir = await realpath(resolve(modsDir));
+  while (true) {
+    const name = await packageNameAt(dir);
+    if (name !== null) return name;
+    const parent = dirname(dir);
+    if (parent === dir) throw new KernelError('INVALID', 'Native modules require a named package');
+    dir = parent;
+  }
+}
+
 function basenameNoExt(p: string): string {
   const slash = p.lastIndexOf('/');
   const name = slash >= 0 ? p.slice(slash + 1) : p;
@@ -136,7 +149,6 @@ export async function loadLocalMods(modsDir: string, target: LoadTarget): Promis
   const entryBase = target === 'client' ? 'client' : 'server';
   const exts = target === 'client' ? CLIENT_EXT : SERVER_EXT;
   const convention = target === 'client' ? CLIENT_CONVENTION : SERVER_CONVENTION;
-  const native = target === 'kernel' ? await import('#kernel/manifest') : undefined;
   let entries: import('node:fs').Dirent[];
 
   try {
@@ -146,6 +158,7 @@ export async function loadLocalMods(modsDir: string, target: LoadTarget): Promis
     throw error;
   }
   entries.sort((a, b) => a.name.localeCompare(b.name));
+  const native = target === 'kernel' ? { collector: await import('#kernel/manifest'), package: await modulePackageAt(modsDir) } : undefined;
 
   // Inside node_modules, prefer importing through the package specifier so the package's
   // `exports` map picks the compiled .js by default (and the .ts source under `development`).
@@ -192,11 +205,11 @@ export async function loadLocalMods(modsDir: string, target: LoadTarget): Promis
             await import(real);
           }
         }
-        loadSchemasRecursive(modDir, native?.assertModuleSchema);
+        loadSchemasRecursive(modDir, native?.collector.assertModuleSchema);
       };
       if (native) {
-        const id = `${await packageNameAt(modsDir) ?? resolve(modsDir)}/${entry.name}`;
-        const manifest = native.getCollectedModule(id) ?? await native.collectModule(id, importModule);
+        const id = `${native.package}/${entry.name}`, origin = await realpath(modDir);
+        const manifest = native.collector.getCollectedModule(id, origin) ?? await native.collector.collectModule(id, importModule, origin);
         result.manifests.push(manifest);
       } else {
         setCurrentMod(entry.name);
@@ -215,6 +228,15 @@ export async function loadLocalMods(modsDir: string, target: LoadTarget): Promis
   }
 
   return result;
+}
+
+export async function publishLoadedModules(registry: Registry, result: LoadResult, options: { allowPartialMods?: boolean } = {}): Promise<void> {
+  const native = await import('#kernel/manifest');
+  native.assertNoAmbientRegistrations();
+  if (result.failed.length && !options.allowPartialMods) {
+    throw Object.assign(new KernelError('INVALID', 'Module loading failed'), { failures: result.failed });
+  }
+  native.publishModules(registry, result.manifests);
 }
 
 // ── Load all mods: internal + engine + project (CWD) ──

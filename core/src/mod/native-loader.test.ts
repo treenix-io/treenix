@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, symlink, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { afterEach, beforeEach, describe, it } from 'node:test'
 import { mapRegistry, register, registerLegacy, resolveExactEntry, unregister } from '#core/registry'
 import { KernelError } from '#errors'
 import { clearAmbientRegistrations, clearCollectedModules, publishModules } from '#kernel/manifest'
 import { createRegistry } from '#kernel/registry'
-import { clearModRegistry, loadAllMods, loadLocalMods } from './loader'
+import { clearModRegistry, loadAllMods, loadLocalMods, publishLoadedModules } from './loader'
 
 const componentModule = new URL('../comp/index.ts', import.meta.url).href
 
@@ -32,8 +32,8 @@ describe('native module loading', () => {
   })
   afterEach(() => restore())
 
-  async function mod(name: string, type: string, schemaType = type, suffix = ''): Promise<void> {
-    const path = join(dir, name)
+  async function mod(name: string, type: string, schemaType = type, suffix = '', root = dir): Promise<void> {
+    const path = join(root, name)
     await mkdir(join(path, 'schemas'), { recursive: true })
     await writeFile(join(path, 'server.ts'), `import { registerType } from ${JSON.stringify(componentModule)};\nregisterType(${JSON.stringify(type)}, class Item {});\n${suffix}`)
     await writeFile(join(path, 'schemas', 'item.json'), JSON.stringify({ $id: schemaType, type: 'object', properties: {} }))
@@ -93,5 +93,97 @@ describe('native module loading', () => {
   it('rejects unscoped registrations before loading production kernel modules', async () => {
     register('native.unscoped', 'text', () => 'unscoped')
     await assert.rejects(() => loadAllMods('kernel'), (error: unknown) => error instanceof KernelError && error.code === 'INVALID')
+  })
+
+  it('uses a named ancestor package for internal modules', async () => {
+    const nested = join(dir, 'src', 'mods')
+    await mod('internal', 'native.internal', 'native.internal', '', nested)
+    const result = await loadLocalMods(nested, 'kernel')
+    assert.deepEqual(result.failed, [])
+    assert.equal(result.manifests[0].id, '@test/native-mods/internal')
+    const otherPackage = join(dir, 'other-package')
+    await mkdir(otherPackage)
+    await writeFile(join(otherPackage, 'package.json'), JSON.stringify({ name: '@test/alias-host' }))
+    const alias = join(otherPackage, 'mods')
+    await symlink(nested, alias, 'dir')
+    const aliased = await loadLocalMods(alias, 'kernel')
+    assert.deepEqual(aliased.failed, [])
+    assert.equal(aliased.manifests[0], result.manifests[0])
+  })
+
+  it('reuses an imported manifest through a directory alias', async () => {
+    await mod('item', 'native.aliased')
+    const alias = join(dir, 'alias')
+    await symlink(dir, alias, 'dir')
+    const first = await loadLocalMods(dir, 'kernel')
+    const second = await loadLocalMods(alias, 'kernel')
+    assert.deepEqual(first.failed, [])
+    assert.deepEqual(second.failed, [])
+    assert.equal(second.manifests[0], first.manifests[0])
+  })
+
+  it('collects two package copies independently and refuses duplicate identities at boot', async () => {
+    const firstRoot = join(dir, 'first'), secondRoot = join(dir, 'second')
+    for (const root of [firstRoot, secondRoot]) {
+      await mkdir(root)
+      await writeFile(join(root, 'package.json'), JSON.stringify({ name: '@test/copied-mods' }))
+    }
+    await mod('item', 'native.first', 'native.first', '', firstRoot)
+    await mod('item', 'native.second', 'native.second', '', secondRoot)
+    const first = await loadLocalMods(firstRoot, 'kernel'), second = await loadLocalMods(secondRoot, 'kernel')
+    assert.deepEqual(first.failed, [])
+    assert.deepEqual(second.failed, [])
+    assert.equal(first.manifests[0].id, second.manifests[0].id)
+    assert.equal(first.manifests[0].types[0].name, 'native.first')
+    assert.equal(second.manifests[0].types[0].name, 'native.second')
+    const registry = createRegistry(), before = registry.digest
+    await assert.rejects(() => publishLoadedModules(registry, {
+      loaded: [...first.loaded, ...second.loaded], failed: [], manifests: [...first.manifests, ...second.manifests],
+    }), (error: unknown) => error instanceof KernelError && error.code === 'CONFLICT')
+    assert.equal(registry.digest, before)
+  })
+
+  it('produces the same generation from identical modules installed at different paths', async () => {
+    const firstRoot = join(dir, 'first'), secondRoot = join(dir, 'second')
+    for (const root of [firstRoot, secondRoot]) {
+      await mkdir(root)
+      await writeFile(join(root, 'package.json'), JSON.stringify({ name: '@test/copied-mods' }))
+      await mod('item', 'native.identical', 'native.identical', '', root)
+    }
+    const first = await loadLocalMods(firstRoot, 'kernel'), second = await loadLocalMods(secondRoot, 'kernel')
+    assert.deepEqual(first.failed, [])
+    assert.deepEqual(second.failed, [])
+    const a = createRegistry(), b = createRegistry()
+    await publishLoadedModules(a, first)
+    await publishLoadedModules(b, second)
+    assert.equal(a.digest, b.digest)
+    assert.notEqual(first.manifests[0], second.manifests[0])
+  })
+
+  it('refuses a failed import at boot unless partial modules are explicitly allowed', async () => {
+    await mod('bad', 'native.bad', 'native.bad', 'throw new TypeError();')
+    await mod('good', 'native.good')
+    const result = await loadLocalMods(dir, 'kernel')
+    const registry = createRegistry(), before = registry.digest
+    await assert.rejects(() => publishLoadedModules(registry, result), (error: unknown) =>
+      error instanceof KernelError && error.code === 'INVALID' && 'failures' in error && error.failures === result.failed)
+    assert.equal(registry.digest, before)
+    await publishLoadedModules(registry, result, { allowPartialMods: true })
+    assert.equal(registry.type('native.good').module, '@test/native-mods/good')
+    assert.throws(() => registry.type('native.bad'), (error: unknown) => error instanceof KernelError && error.code === 'UNKNOWN_TYPE')
+  })
+
+  it('names a legacy-only capability handler in a failed native boot', async () => {
+    const path = join(dir, 'legacy-mount')
+    await mkdir(join(path, 'schemas'), { recursive: true })
+    const coreModule = new URL('../core/registry.ts', import.meta.url).href
+    await writeFile(join(path, 'server.ts'), `import { registerType } from ${JSON.stringify(componentModule)};\nimport { register } from ${JSON.stringify(coreModule)};\nregisterType('native.mount', class Mount {}, {security:'user-capability'});\nregister('native.mount', 'mount', async () => { throw new Error('unused'); });`)
+    await writeFile(join(path, 'schemas', 'mount.json'), JSON.stringify({ $id: 'native.mount', type: 'object', properties: {} }))
+    const result = await loadLocalMods(dir, 'kernel')
+    assert.deepEqual(result.failed, [])
+    const registry = createRegistry(), before = registry.digest
+    await assert.rejects(() => publishLoadedModules(registry, result, { allowPartialMods: true }), (error: unknown) =>
+      error instanceof KernelError && error.code === 'INVALID' && 'type' in error && error.type === 'native.mount' && 'context' in error && error.context === 'mount')
+    assert.equal(registry.digest, before)
   })
 })

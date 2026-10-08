@@ -182,6 +182,20 @@ describe('module manifest collection', () => {
     assert.throws(() => registry.type('manifest.discarded'), code('UNKNOWN_TYPE'))
   })
 
+  it('retains a completed import by its source and rejects a changed module identity', async () => {
+    const first = await collectModule('owner', () => schema('manifest.origin'), 'source')
+    assert.equal(getCollectedModule('owner', 'source'), first)
+    assert.equal(getCollectedModule('owner', 'another-source'), undefined)
+    assert.throws(() => getCollectedModule('changed-owner', 'source'), code('CONFLICT'))
+    const failure = new TypeError('import failed')
+    await assert.rejects(() => collectModule('owner', () => { throw failure }, 'source'), error => error === failure)
+    assert.equal(getCollectedModule('owner', 'source'), first)
+    assert.equal(getCollectedModule('owner'), first)
+    clearCollectedModules()
+    assert.equal(getCollectedModule('owner', 'source'), undefined)
+    assert.equal(getCollectedModule('owner'), undefined)
+  })
+
   it('keeps concurrent asynchronous module imports isolated', async () => {
     const firstGate = gate(), secondGate = gate()
     const first = collectModule('first', async () => {

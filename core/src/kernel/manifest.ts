@@ -26,6 +26,7 @@ const builder = (id: string): Builder => ({ id, registrations: new Map(), classe
 interface CollectionState {
   readonly scope: AsyncLocalStorage<Builder>
   readonly modules: Map<string, CollectedModule>
+  readonly imports: Map<string, CollectedModule>
   ambient: Builder
 }
 
@@ -34,7 +35,7 @@ declare global {
 }
 
 // Source and dist registrations share the legacy map and must share their import scope too.
-const state = globalThis.__treenxModuleCollection ??= { scope: new AsyncLocalStorage<Builder>(), modules: new Map(), ambient: builder('ambient') }
+const state = globalThis.__treenxModuleCollection ??= { scope: new AsyncLocalStorage<Builder>(), modules: new Map(), imports: new Map(), ambient: builder('ambient') }
 const scope = state.scope, modules = state.modules
 
 export function isSecurityContext(context: string): context is SecurityContext {
@@ -136,13 +137,14 @@ function finish(active: Builder): CollectedModule {
     open: Object.freeze(open), legacySecurity: Object.freeze(legacySecurity), legacyActions: Object.freeze(legacyActions) })
 }
 
-export async function collectModule(id: string, importModule: () => Promise<unknown> | void): Promise<CollectedModule> {
+export async function collectModule(id: string, importModule: () => Promise<unknown> | void, origin?: string): Promise<CollectedModule> {
   const active = builder(id)
   return scope.run(active, async () => {
     try {
       await importModule()
       const manifest = finish(active)
       modules.set(id, manifest)
+      if (origin !== undefined) state.imports.set(origin, manifest)
       return manifest
     } finally {
       active.closed = true
@@ -150,11 +152,13 @@ export async function collectModule(id: string, importModule: () => Promise<unkn
   })
 }
 
-export function getCollectedModule(id: string): CollectedModule | undefined {
-  return modules.get(id)
+export function getCollectedModule(id: string, origin?: string): CollectedModule | undefined {
+  const manifest = origin === undefined ? modules.get(id) : state.imports.get(origin)
+  if (manifest && manifest.id !== id) throw new KernelError('CONFLICT', 'The imported module changed its identity')
+  return manifest
 }
 
-export function clearCollectedModules(): void { modules.clear() }
+export function clearCollectedModules(): void { modules.clear(); state.imports.clear() }
 
 export function ambientModule(): CollectedModule { return finish(state.ambient) }
 export function clearAmbientRegistrations(): void { state.ambient = builder('ambient') }
@@ -164,6 +168,11 @@ export function assertNoAmbientRegistrations(): void {
 }
 
 export function publishModules(registry: Registry, manifests: readonly CollectedModule[]): void {
+  const identities = new Set<string>()
+  for (const manifest of manifests) {
+    if (identities.has(manifest.id)) throw new KernelError('CONFLICT', `Duplicate module identity: ${manifest.id}`)
+    identities.add(manifest.id)
+  }
   for (const manifest of manifests) if (manifest.legacyActions.length) {
     const legacy = manifest.legacyActions[0]
     throw Object.assign(new KernelError('INVALID', `Legacy action without a native declaration: ${legacy.type}:${legacy.name}`), { type: legacy.type, context: `action:${legacy.name}` })
