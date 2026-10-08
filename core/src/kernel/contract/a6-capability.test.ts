@@ -116,6 +116,135 @@ describe('capability guards', () => {
     await unchanged(f, [{ op: 'patch', path: '/target', ops: { $set: { $acl: [grant(`n:${form.$id}`, W)] } } }], 'FORBIDDEN', pin(form))
   })
 
+  it('permits an ACL-only self grant on the pinned executor configuration', async () => {
+    const f = await setup(all);
+    await f.commit([put('/form', { target: '/form' }, 'form')]);
+    const form = (await f.nodes()).find((node) => node.$path === '/form')!;
+    const acl = [grant('users'), grant(`n:${form.$id}`, R | W)];
+    await f.asActor([{ op: 'patch', path: '/form', ops: { $set: { $acl: acl } } }], pin(form));
+    const updated = (await f.nodes()).find((node) => node.$path === '/form')!;
+    assert.deepEqual(updated.$acl, acl);
+    assert.equal(updated.target, form.target);
+  });
+
+  it('requires the current named version and prior A for a self grant', async () => {
+    const f = await setup(all);
+    await f.commit([put('/form', {}, 'form')]);
+    const form = (await f.nodes()).find((node) => node.$path === '/form')!;
+    const changes: ChangeMember[] = [
+      {
+        op: 'patch',
+        path: '/form',
+        ops: {
+          $set: { $acl: [grant('users'), grant(`n:${form.$id}`, R | W)] },
+        },
+      },
+    ];
+    await unchanged(f, changes, 'INVALID');
+    await unchanged(f, changes, 'CONFLICT', { nodes: [{ path: '/form', rev: 'stale' }] });
+
+    const limited = await setup();
+    await limited.commit([put('/form', {}, 'form')]);
+    const limitedForm = (await limited.nodes()).find((node) => node.$path === '/form')!;
+    await unchanged(
+      limited,
+      [
+        {
+          op: 'patch',
+          path: '/form',
+          ops: {
+            $set: { $acl: [grant('users'), grant(`n:${limitedForm.$id}`, R | W)] },
+          },
+        },
+      ],
+      'FORBIDDEN',
+      pin(limitedForm),
+    );
+  });
+
+  it('rejects an ACL self grant combined with a configuration, owner or component change', async () => {
+    const f = await setup(all);
+    await f.commit([
+      put(
+        '/form',
+        {
+          target: 'old',
+          '#settings': { $type: 'item', value: 'old' },
+          '#membership': { $type: 't.groups', list: [] },
+        },
+        'form',
+      ),
+    ]);
+    const form = (await f.nodes()).find((node) => node.$path === '/form')!;
+    const acl = [grant('users'), grant(`n:${form.$id}`, R | W)];
+    const settings: readonly Record<string, unknown>[] = [
+      { target: 'different' },
+      { $owner: 'u:bob' },
+      { $order: 'z' },
+      { '#settings.value': 'different' },
+      { '#new': { $type: 'item', value: 'new' } },
+      { '#membership.list': ['agents'] },
+    ];
+    for (const fields of settings) {
+      await unchanged(
+        f,
+        [
+          {
+            op: 'patch',
+            path: '/form',
+            ops: {
+              $set: { $acl: acl, ...fields },
+            },
+          },
+        ],
+        'CONFLICT',
+        pin(form),
+      );
+    }
+    await unchanged(
+      f,
+      [
+        {
+          op: 'patch',
+          path: '/form',
+          ops: {
+            $set: { $acl: acl },
+            $unset: { '#settings': true },
+          },
+        },
+      ],
+      'CONFLICT',
+      pin(form),
+    );
+  });
+
+  it('rejects a new grant when its pinned recipient moves, is removed or is replaced', async () => {
+    const f = await setup(all);
+    await f.commit([put('/form', {}, 'form'), put('/target')]);
+    const form = (await f.nodes()).find((node) => node.$path === '/form')!;
+    const destination: ChangeMember = {
+      op: 'patch',
+      path: '/target',
+      ops: {
+        $set: { $acl: [grant(`n:${form.$id}`, W)] },
+      },
+    };
+    await unchanged(
+      f,
+      [{ op: 'move', from: '/form', to: '/moved' }, destination],
+      'CONFLICT',
+      pin(form),
+    );
+    await unchanged(f, [{ op: 'remove', path: '/form' }, destination], 'CONFLICT', pin(form));
+    await unchanged(
+      f,
+      [{ op: 'remove', path: '/form' }, put('/form', {}, 'form'), destination],
+      'CONFLICT',
+      pin(form),
+    );
+    await unchanged(f, [put('/new', { $acl: [grant('n:unissued', W)] }, 'form')], 'INVALID');
+  });
+
   it('rejects grants to path identities and to nodes with no declared executor behavior', async () => {
     const f = await setup(all)
     await f.commit([put('/target'), put('/ordinary')])

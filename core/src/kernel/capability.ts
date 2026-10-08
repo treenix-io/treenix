@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util'
 import { ancestorPaths, dirname, isChildPath } from '#core/path'
 import { KernelError } from '#errors'
 import { decodeChainNode } from '#kernel/chain-index'
@@ -34,13 +35,28 @@ export function executorDeclaration(node: StoredNode, registry: Registry): { rea
   return { executable, privileged }
 }
 
+/** An ACL grant can update its own target while preserving the pinned executor configuration. */
+function sameExecutorConfiguration({ before, after }: NodeChange): boolean {
+  if (before === null || after === null) return false
+
+  for (const field of Object.keys(before)) {
+    if (field === '$acl' || field === '$pos') continue
+    if (!Object.hasOwn(after, field) || !isDeepStrictEqual(before[field], after[field])) return false
+  }
+  for (const field of Object.keys(after)) {
+    if (field === '$acl' || field === '$pos') continue
+    if (!Object.hasOwn(before, field)) return false
+  }
+  return true
+}
+
 export async function guardCapabilities(changes: readonly NodeChange[], options: CapabilityOptions): Promise<void> {
   const { registry, state, readBefore, requireA, admin, expect } = options
   const after = new Map<Path, StoredNode | null>()
-  const changed = new Set<string>()
+  const changed = new Map<string, NodeChange>()
   const ownership = new Set<Path>()
   for (const change of changes) {
-    changed.add(change.id)
+    changed.set(change.id, change)
     if (change.before !== null) after.set(change.before.$path, null)
     if (change.before?.$owner !== change.after?.$owner || change.before?.$owner !== undefined
       && change.before.$path !== change.after?.$path) {
@@ -77,7 +93,10 @@ export async function guardCapabilities(changes: readonly NodeChange[], options:
     await requireA(node.$path)
     const pin = expect?.nodes?.find(input => input.path === node.$path)
     if (pin === undefined) throw new KernelError('INVALID', 'A node grant requires a named version')
-    if (pin.rev !== positionToRev(node.$pos) || changed.has(node.$id)) throw new KernelError('CONFLICT', 'The named executor version changed')
+    const change = changed.get(node.$id)
+    if (pin.rev !== positionToRev(node.$pos) || change !== undefined && !sameExecutorConfiguration(change)) {
+      throw new KernelError('CONFLICT', 'The named executor version changed')
+    }
   }
   async function grants(before: StoredNode | null, next: StoredNode | null): Promise<void> {
     const previous = await nodeGrants(before, readBefore), current = await nodeGrants(next, readAfter)
