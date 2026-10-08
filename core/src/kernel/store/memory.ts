@@ -14,14 +14,25 @@ export interface MemoryStoreOptions {
   beforeRecord?(): void
 }
 
+export interface MemoryStore extends Store {
+  close(): void
+}
+
 const equalPosition = (a: Position, b: Position) => a.instance === b.instance && a.epoch === b.epoch && a.seq === b.seq
 const decisionKey = (caller: string, opId: OpId) => stableJson([caller, opId])
 
-export function createMemoryStore(options: MemoryStoreOptions): Store {
+/** Creates an in-memory Store whose node, journal, and decision state publish together. */
+export function createMemoryStore(options: MemoryStoreOptions): MemoryStore {
   const root: TreeNode<StoredNode> = { children: new Map() }
-  const journalIndex = createJournalIndex()
+  let journalIndex = createJournalIndex()
   const decisions = new Map<string, JournalCommit>()
   let writerEpoch = 0
+  let closed = false
+
+  /** Refuse IO after the owner releases this storage instance. */
+  function available(): void {
+    if (closed) throw new KernelError('UNAVAILABLE', 'Memory Store is closed')
+  }
 
   function check(budget: Budget): void {
     if (Date.now() > budget.deadline) throw new KernelError('BUDGET', 'Scan deadline exceeded')
@@ -69,6 +80,7 @@ export function createMemoryStore(options: MemoryStoreOptions): Store {
   function scan(query: ScanQuery<ScanRange>): Promise<ScanResult<StoredNode>>
   function scan(query: ScanQuery<JournalRange | DecisionRange>): Promise<ScanResult<JournalCommit>>
   async function scan(query: ScanQuery<ScanRange | JournalRange | DecisionRange>): Promise<ScanResult<StoredNode> | ScanResult<JournalCommit>> {
+    available()
     const range = query.range
     const scopedRange = 'journal' in range ? { journal: range.journal, after: range.after } : range
     const scope = stableJson([options.domain, scopedRange, query.where, query.sort])
@@ -93,6 +105,7 @@ export function createMemoryStore(options: MemoryStoreOptions): Store {
     domain: options.domain,
     scan,
     async commit(input: StoreCommit) {
+      available()
       if (input.writerEpoch < writerEpoch) throw new KernelError('CONFLICT', 'Writer epoch is stale')
       const commit = structuredClone(input)
       if (commit.writerEpoch < writerEpoch) throw new KernelError('CONFLICT', 'Writer epoch is stale')
@@ -106,6 +119,7 @@ export function createMemoryStore(options: MemoryStoreOptions): Store {
         }
       }
       options.beforeRecord?.()
+      available()
       if (commit.writerEpoch < writerEpoch) throw new KernelError('CONFLICT', 'Writer epoch is stale')
       const record = commit.record
       const publishJournal = journalIndex.prepare(record, commit.writes)
@@ -118,6 +132,15 @@ export function createMemoryStore(options: MemoryStoreOptions): Store {
       publishJournal()
       if (key !== undefined) decisions.set(key, record)
       writerEpoch = commit.writerEpoch
+    },
+    /** Release the owned node data; repeated release has no effects. */
+    close(): void {
+      if (closed) return
+      closed = true
+      root.children.clear()
+      root.data = undefined
+      decisions.clear()
+      journalIndex = createJournalIndex()
     },
   }
 }

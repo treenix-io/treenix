@@ -3,7 +3,7 @@ import { describe, it } from 'node:test'
 import { KernelError } from '#errors'
 import type { Store } from '#kernel/types'
 import { position, runStoreContract, scanBudget, storeCommit, storedNode } from './contract'
-import { createMemoryStore } from './memory'
+import { createMemoryStore, type MemoryStore } from './memory'
 
 let failing = false
 runStoreContract(() => createMemoryStore({ domain: 'memory', beforeRecord: () => {
@@ -17,6 +17,24 @@ runStoreContract(() => createMemoryStore({ domain: 'memory', beforeRecord: () =>
 })
 
 describe('Memory Store publication', () => {
+  it('releases owned memory idempotently and rejects every subsequent IO operation', async () => {
+    const store = createMemoryStore({ domain: 'owned-memory' })
+    await store.commit(storeCommit(1, [storedNode('/owned')]))
+    store.close()
+    store.close()
+    const unavailable = (error: unknown) => error instanceof KernelError && error.code === 'UNAVAILABLE'
+    await assert.rejects(store.scan({ range: { node: '/owned' }, budget: scanBudget() }), unavailable)
+    await assert.rejects(store.scan({ range: { journal: '/' }, budget: scanBudget() }), unavailable)
+    await assert.rejects(store.commit(storeCommit(2, [storedNode('/late')])), unavailable)
+  })
+
+  it('rejects a staged commit when its owner closes storage before publication', async () => {
+    let store: MemoryStore
+    store = createMemoryStore({ domain: 'owned-memory', beforeRecord() { store.close() } })
+    await assert.rejects(store.commit(storeCommit(1, [storedNode('/late')])),
+      (error: unknown) => error instanceof KernelError && error.code === 'UNAVAILABLE')
+  })
+
   it('owns the staged commit before a failure hook can change its caller input', async () => {
     const input = storeCommit(1, [storedNode('/a', { value: 1 })])
     const store = createMemoryStore({ domain: 'memory', beforeRecord() {
