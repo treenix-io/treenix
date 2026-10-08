@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url'
 import { safeJsonParse } from '#core/json'
 import { KernelError } from '#errors'
 import { collectModule } from '#kernel/manifest'
+import type { FsDirectoryBindings } from '#kernel/mount-fs-provider'
 import { openNativeRuntime } from '#kernel/runtime'
 import type { Credential } from '#kernel/types'
 import { createTwpHttpServer } from '#server/http-twp'
@@ -21,6 +22,12 @@ function credentialInput(value: unknown): value is Credential {
   return isRecord(value) && typeof value.token === 'string'
 }
 
+/** Decode host-directory capabilities before any runtime resource is acquired. */
+function directoryBindings(value: unknown): value is FsDirectoryBindings {
+  return isRecord(value) && Object.values(value).every(directory => typeof directory === 'string' && directory.length > 0)
+}
+
+/** Validate CLI configuration, acquire native runtime resources, and serve until shutdown. */
 async function main(): Promise<void> {
   const argument = process.argv[2]
   if (argument === undefined) throw new KernelError('INVALID', 'Use npm run dev:kernel -- path/to/kernel-config.json')
@@ -29,6 +36,7 @@ async function main(): Promise<void> {
     || !Array.isArray(config.allowedOrigins) || !config.allowedOrigins.every((value: unknown): value is string => typeof value === 'string')
     || config.firstAdmin !== undefined && !adminInput(config.firstAdmin)
     || config.installerCredential !== undefined && !credentialInput(config.installerCredential)
+    || config.mountDirectories !== undefined && !directoryBindings(config.mountDirectories)
     || config.modules !== undefined && (!Array.isArray(config.modules) || !config.modules.every(moduleEntry)))
     throw new KernelError('INVALID', 'Malformed native server configuration')
   const port = config.port ?? 4882, host = config.host ?? '127.0.0.1'
@@ -40,8 +48,17 @@ async function main(): Promise<void> {
       ? pathToFileURL(resolve(dirname(configPath), entry.entry)).href : entry.entry
     modules.push(await collectModule(entry.id, () => import(target), target))
   }
+  const mountDirectories =
+    config.mountDirectories === undefined
+      ? undefined
+      : Object.fromEntries(
+          Object.entries(config.mountDirectories).map(([capability, directory]) => [
+            capability,
+            resolve(dirname(configPath), directory),
+          ]),
+        )
   const runtime = await openNativeRuntime({ id: config.id, directory: resolve(dirname(configPath), config.directory),
-    credentialTtlMs: config.credentialTtlMs, firstAdmin: config.firstAdmin, installerCredential: config.installerCredential, modules })
+    credentialTtlMs: config.credentialTtlMs, firstAdmin: config.firstAdmin, installerCredential: config.installerCredential, modules, mountDirectories })
   const binding = createTwpHttpServer({ instance: runtime.instance, allowedOrigins: config.allowedOrigins, credentialTtlMs: config.credentialTtlMs })
   try {
     await new Promise<void>((done, reject) => { binding.server.once('error', reject); binding.server.listen(port, host, () => { binding.server.off('error', reject); done() }) })
