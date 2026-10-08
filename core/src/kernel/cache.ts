@@ -6,6 +6,7 @@ import { DEFAULT_LIMITS, type Budget, type DomainId, type FieldDeltas, type Node
 import { createInflight } from '#util/inflight'
 import { freeze } from '#util/freeze'
 import { stableJson } from '#util/stable-json'
+import { runStoreQuery } from '#kernel/store/budget'
 
 export interface CachedNode {
   readonly node: StoredNode | null
@@ -34,6 +35,7 @@ export interface CacheRead {
 export interface CacheOptions {
   readonly uncoveredBytes?: number
   readonly fillBytes?: number
+  readonly queryMs?: () => number
 }
 
 const includes = (range: ScanRange, path: string) => 'node' in range ? path === range.node
@@ -147,7 +149,11 @@ export function createProcessCache(options: CacheOptions = {}) {
     active.readers++
     const generation = active.generation
     try {
-      const scanned = await store.scan({ range, budget })
+      const scanned = await runStoreQuery(
+        budget,
+        options.queryMs?.() ?? DEFAULT_LIMITS.queryMs,
+        (queryBudget) => store.scan({ range, budget: queryBudget }),
+      );
       if (Date.now() > budget.deadline) throw new KernelError('BUDGET', 'Cache fill deadline exceeded')
       if (active.generation !== generation) throw new KernelError('BUDGET', 'Cache fill buffer exceeded')
       const candidates = new Map<NodeId, Image>()

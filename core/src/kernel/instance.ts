@@ -4,7 +4,7 @@ import { createAuthFactory, type AuthEvent, type AuthFactory } from '#kernel/aut
 import { recheckLogin } from '#kernel/auth/login'
 import { assertAuthKey, assertBootstrapState, bootstrap, bootstrapIdentity, bootstrapModules, LIMITS_PATH,
   ownershipRecord, storedLimits, TYPE_PATH, type BootstrapIdentity } from '#kernel/bootstrap'
-import type { Image } from '#kernel/cache'
+import { createProcessCache, type Image } from '#kernel/cache'
 import { createChainIndex } from '#kernel/chain-index'
 import { prepareChangeSet, type ChangeExecutor } from '#kernel/changeset'
 import { createCommands, type CommandOptions, type NativeCommands } from '#kernel/commands'
@@ -151,7 +151,8 @@ export async function createInstanceFoundation(input: InstanceFoundationConfig):
     }
   }
   const writer = await createWriter({ instance: config.id, root: config.root, writerEpoch: config.writerEpoch,
-    domains: config.domains, counter: config.counter, budget, applied: publish })
+    domains: config.domains, counter: config.counter, budget, applied: publish,
+    cache: createProcessCache({ queryMs: () => limits.queryMs }) })
   const initial = await writer.cache.fill(config.root, { subtree: '/' }, budget())
   try {
     for (const node of initial.nodes) put(node)

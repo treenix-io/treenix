@@ -45,6 +45,33 @@ function move(seq: number, before: StoredNode, path: string): StoreCommit {
 }
 
 describe('process cache', { timeout: 10_000 }, () => {
+  it('rejects a late Store query before installing it under a longer operation budget', async t => {
+    t.mock.timers.enable({ apis: ['Date'], now: 1_000_000 })
+    const held = delayed(memory()), cache = createProcessCache({ queryMs: () => 10 })
+    await held.store.commit(change(1, 1))
+    const pending = cache.fill(held.store, { node: '/item' }, { ...scanBudget(), deadline: Date.now() + 1000 })
+    await held.entered.promise; t.mock.timers.tick(11); held.release.resolve()
+    await assert.rejects(pending, refused('BUDGET'))
+    assert.equal(cache.getAt(held.store, '/item'), undefined)
+  })
+
+  it('keeps the parent deadline when it is shorter than the Store query allowance', async t => {
+    t.mock.timers.enable({ apis: ['Date'], now: 1_000_000 })
+    const held = delayed(memory()), cache = createProcessCache({ queryMs: () => 100 })
+    await held.store.commit(change(1, 1))
+    const pending = cache.fill(held.store, { node: '/item' }, { ...scanBudget(), deadline: Date.now() + 2 })
+    await held.entered.promise; t.mock.timers.tick(3); held.release.resolve()
+    await assert.rejects(pending, refused('BUDGET'))
+    assert.equal(cache.getAt(held.store, '/item'), undefined)
+  })
+
+  it('does not start a query allowance for an exact process-cache hit', async () => {
+    const store = memory(), cache = createProcessCache({ queryMs() { throw new Error('No Store query expected') } })
+    await apply(store, cache, change(1, 1))
+    const read = await cache.fill(store, { node: '/item' }, scanBudget())
+    assert.equal(read.nodes[0].value, 1); read.release()
+  })
+
   it('isolates exact-path hits and in-flight fills between Stores sharing a transaction domain', async () => {
     const root = memory(), alias = memory(), cache = createProcessCache()
     await apply(root, cache, storeCommit(1, [storedNode('/private', { secret: 'root-sensitive' })]))

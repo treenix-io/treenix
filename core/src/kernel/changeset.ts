@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from 'node:util'
 import { ancestorPaths, assertSafePath, dirname, isChildPath } from '#core/path'
 import { KernelError } from '#errors'
+import { runStoreQuery } from '#kernel/store/budget'
 import type { ActionProvenance } from '#kernel/action-guard'
 import type { CacheRead, ProcessCache } from '#kernel/cache'
 import type { CapabilityState } from '#kernel/capability'
@@ -157,7 +158,15 @@ export async function prepareChangeSet(options: ChangeSetOptions, changes: reado
     }
   }
   async function restore(address: JournalAddress): Promise<void> {
-    const records = (await store.scan({ range: { journal: '/' }, where: { 'entries.id': address.id }, budget })).items
+    const records = (
+      await runStoreQuery(budget, limits.queryMs, (queryBudget) =>
+        store.scan({
+          range: { journal: '/' },
+          where: { 'entries.id': address.id },
+          budget: queryBudget,
+        }),
+      )
+    ).items;
     const images = readJournalImages(records, address)
     const entry = records.find(record => comparePositions(record.pos, address.pos) === 0)!.entries.find(entry => entry.id === address.id)!
     await guard.history(entry, [images.before, images.after])
@@ -168,7 +177,11 @@ export async function prepareChangeSet(options: ChangeSetOptions, changes: reado
     const staged = final.get(before.$id)
     if (staged !== undefined && staged !== null) throw new KernelError('CONFLICT', 'Restore identity is alive')
     if (staged === undefined) {
-      const live = (await store.scan({ range: { subtree: '/' }, where: { $id: before.$id }, budget })).items
+      const live = (
+        await runStoreQuery(budget, limits.queryMs, (queryBudget) =>
+          store.scan({ range: { subtree: '/' }, where: { $id: before.$id }, budget: queryBudget }),
+        )
+      ).items;
       if (live.length !== 0) throw new KernelError('CONFLICT', 'Restore identity is alive')
     }
     const parent = dirname(before.$path)
@@ -178,8 +191,15 @@ export async function prepareChangeSet(options: ChangeSetOptions, changes: reado
   async function checkpoint(before: StoredNode): Promise<{ bytes: number; full: boolean }> {
     const known = cache.get(before.$id)?.journalBytes
     if (known !== undefined) return { bytes: known, full: false }
-    const records = (await store.scan({ range: { journal: '/' }, where: { 'entries.id': before.$id }, budget })).items
-      .filter(record => comparePositions(record.pos, before.$pos) <= 0)
+    const records = (
+      await runStoreQuery(budget, limits.queryMs, (queryBudget) =>
+        store.scan({
+          range: { journal: '/' },
+          where: { 'entries.id': before.$id },
+          budget: queryBudget,
+        }),
+      )
+    ).items.filter((record) => comparePositions(record.pos, before.$pos) <= 0);
     let bytes: number | undefined
     for (const record of records) for (const entry of record.entries) if (entry.id === before.$id) {
       if (entry.change.t !== 'update' || entry.change.after !== undefined) bytes = 0
