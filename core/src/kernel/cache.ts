@@ -20,7 +20,7 @@ export interface Image extends CachedNode {
   readonly domain: DomainId
   readonly bytes: number
 }
-interface Entry { image: Image; refs: number }
+interface Entry { image: Image; refs: number; readonly store: Store }
 interface Filling {
   readers: number
   generation: number
@@ -42,16 +42,27 @@ const includes = (range: ScanRange, path: string) => 'node' in range ? path === 
 const endsAbsent = (change: NodeTransition) => change.t === 'delete' || change.t === 'reconcile' && change.after === null
 
 export function createProcessCache(options: CacheOptions = {}) {
-  const entries = new Map<NodeId, Entry>(), paths = new Map<string, NodeId>(), uncovered = new Map<NodeId, Entry>()
-  const filling = new Map<DomainId, Filling>()
+  const entries = new Map<NodeId, Entry>(), uncovered = new Map<NodeId, Entry>()
+  const paths = new WeakMap<Store, Map<string, NodeId>>()
+  const filling = new Map<Store, Filling>()
   const loads = new WeakMap<Store, ReturnType<typeof createInflight<CacheRead>>>()
   const waiters = new WeakMap<Promise<CacheRead>, number>()
   const maxBytes = options.uncoveredBytes ?? DEFAULT_LIMITS.readBytes, fillBytes = options.fillBytes ?? DEFAULT_LIMITS.readBytes
   let bytes = 0, position: Position | undefined
 
+  function pathIndex(store: Store): Map<string, NodeId> {
+    let index = paths.get(store)
+    if (index === undefined) { index = new Map(); paths.set(store, index) }
+    return index
+  }
+  function assertOwner(store: Store, id: NodeId): void {
+    const previous = entries.get(id)
+    if (previous !== undefined && previous.store !== store) throw new KernelError('INVALID', 'Node identity belongs to another Store')
+  }
   function remove(id: NodeId, entry: Entry): void {
     entries.delete(id); uncovered.delete(id); bytes -= entry.image.bytes
-    if (paths.get(entry.image.path) === id) paths.delete(entry.image.path)
+    const index = pathIndex(entry.store)
+    if (index.get(entry.image.path) === id) index.delete(entry.image.path)
   }
   function evict(): void {
     while (bytes > maxBytes) {
@@ -65,19 +76,21 @@ export function createProcessCache(options: CacheOptions = {}) {
       ...(journalBytes === undefined ? {} : { journalBytes }) })
     return freeze({ ...value, bytes: Buffer.byteLength(JSON.stringify(value)) })
   }
-  function install(next: Image): Entry {
+  function install(store: Store, next: Image): Entry {
+    assertOwner(store, next.id)
+    const index = pathIndex(store)
     let entry = entries.get(next.id)
     if (entry !== undefined) {
       const order = comparePositions(next.pos, entry.image.pos)
       if (order < 0 || order === 0 && (next.delta === undefined && next.journalBytes === undefined || !isDeepStrictEqual(next.node, entry.image.node))) return entry
     }
-    if (entry === undefined) { entry = { image: next, refs: 0 }; entries.set(next.id, entry) }
+    if (entry === undefined) { entry = { image: next, refs: 0, store }; entries.set(next.id, entry) }
     else {
       if (entry.refs === 0) bytes -= entry.image.bytes
-      if (paths.get(entry.image.path) === next.id) paths.delete(entry.image.path)
+      if (index.get(entry.image.path) === next.id) index.delete(entry.image.path)
       entry.image = next
     }
-    if (next.node !== null) paths.set(next.node.$path, next.id)
+    if (next.node !== null) index.set(next.node.$path, next.id)
     if (entry.refs === 0) { bytes += next.bytes; uncovered.delete(next.id); uncovered.set(next.id, entry) }
     return entry
   }
@@ -119,8 +132,8 @@ export function createProcessCache(options: CacheOptions = {}) {
       release() { for (const release of releases) release() },
     }
   }
-  function buffer(next: Image): void {
-    const active = filling.get(next.domain)
+  function buffer(store: Store, next: Image): void {
+    const active = filling.get(store)
     if (active === undefined) return
     active.bytes += next.bytes - (active.images.get(next.id)?.bytes ?? 0)
     active.images.set(next.id, next)
@@ -129,8 +142,8 @@ export function createProcessCache(options: CacheOptions = {}) {
   }
 
   async function load(store: Store, range: ScanRange, budget: Budget): Promise<CacheRead> {
-    let active = filling.get(store.domain)
-    if (active === undefined) { active = { readers: 0, generation: 0, bytes: 0, images: new Map() }; filling.set(store.domain, active) }
+    let active = filling.get(store)
+    if (active === undefined) { active = { readers: 0, generation: 0, bytes: 0, images: new Map() }; filling.set(store, active) }
     active.readers++
     const generation = active.generation
     try {
@@ -138,35 +151,39 @@ export function createProcessCache(options: CacheOptions = {}) {
       if (Date.now() > budget.deadline) throw new KernelError('BUDGET', 'Cache fill deadline exceeded')
       if (active.generation !== generation) throw new KernelError('BUDGET', 'Cache fill buffer exceeded')
       const candidates = new Map<NodeId, Image>()
-      for (const node of scanned.items) candidates.set(node.$id, image(store.domain, node.$id, node.$path, node, node.$pos))
+      for (const node of scanned.items) {
+        if (candidates.has(node.$id)) throw new KernelError('INVALID', 'Duplicate Store node identity')
+        candidates.set(node.$id, image(store.domain, node.$id, node.$path, node, node.$pos))
+      }
       for (const next of active.images.values()) {
         const previous = candidates.get(next.id)
         if ((previous !== undefined || includes(range, next.path)) && (previous === undefined || comparePositions(next.pos, previous.pos) > 0)) candidates.set(next.id, next)
       }
+      for (const next of candidates.values()) assertOwner(store, next.id)
       const nodes: StoredNode[] = []
       for (const next of candidates.values()) {
-        const entry = install(next)
+        const entry = install(store, next)
         if (entry.image.node !== null && includes(range, entry.image.node.$path)) nodes.push(entry.image.node)
       }
       nodes.sort((a, b) => a.$path < b.$path ? -1 : a.$path > b.$path ? 1 : 0)
       checkRows(nodes, budget)
       return lease(nodes, range)
     } finally {
-      if (--active.readers === 0) filling.delete(store.domain)
+      if (--active.readers === 0) filling.delete(store)
       evict()
     }
   }
 
   return {
     get(id: NodeId): CachedNode | undefined { return entries.get(id)?.image },
-    getAt(path: string): CachedNode | undefined { const id = paths.get(path); return id === undefined ? undefined : entries.get(id)?.image },
+    getAt(store: Store, path: string): CachedNode | undefined { const id = paths.get(store)?.get(path); return id === undefined ? undefined : entries.get(id)?.image },
     seedJournalBytes(id: NodeId, pos: Position, journalBytes: number): void {
       const entry = entries.get(id)
       if (entry === undefined) throw new KernelError('NOT_FOUND', `Uncached node ${id}`)
       if (comparePositions(entry.image.pos, pos) !== 0) throw new KernelError('CONFLICT', 'Journal checkpoint belongs to another image')
       const { bytes: oldBytes, ...old } = entry.image
       const value = { ...old, journalBytes }
-      install(Object.freeze({ ...value, bytes: Buffer.byteLength(JSON.stringify(value)) }))
+      install(entry.store, Object.freeze({ ...value, bytes: Buffer.byteLength(JSON.stringify(value)) }))
       evict()
     },
     retain,
@@ -174,8 +191,8 @@ export function createProcessCache(options: CacheOptions = {}) {
     get uncoveredBytes(): number { return bytes },
     async fill(store: Store, range: ScanRange, budget: Budget): Promise<CacheRead> {
       if ('node' in range) {
-        const id = paths.get(range.node), entry = id === undefined ? undefined : entries.get(id)
-        if (entry !== undefined && entry.image.domain === store.domain && entry.image.node !== null) {
+        const id = paths.get(store)?.get(range.node), entry = id === undefined ? undefined : entries.get(id)
+        if (entry !== undefined && entry.image.node !== null) {
           checkRows([entry.image.node], budget)
           return lease([entry.image.node], range)
         }
@@ -196,7 +213,7 @@ export function createProcessCache(options: CacheOptions = {}) {
         }
       }, error => { waiters.delete(pending); throw error })
     },
-    apply(domain: DomainId, commit: StoreCommit): readonly Image[] {
+    apply(store: Store, commit: StoreCommit): readonly Image[] {
       if (position !== undefined && comparePositions(commit.pos, position) <= 0) throw new KernelError('INVALID', 'Cache commit positions must increase')
       const writes = new Map(commit.writes.map(write => [write.path, write.node]))
       const recorded = new Set(commit.record.entries.flatMap(entry => entry.from === undefined ? [entry.path] : [entry.from, entry.path]))
@@ -218,13 +235,15 @@ export function createProcessCache(options: CacheOptions = {}) {
         const changed = entry.change.t === 'update' && entry.change.after === undefined
         const journalBytes = changed ? prior?.journalBytes === undefined ? undefined
           : prior.journalBytes + Buffer.byteLength(JSON.stringify(entry.change.delta)) : 0
-        return image(domain, entry.id, entry.path, node, commit.pos, entry.change.t === 'update' ? entry.change.delta : undefined, journalBytes)
+        return image(store.domain, entry.id, entry.path, node, commit.pos, entry.change.t === 'update' ? entry.change.delta : undefined, journalBytes)
       })
+      for (const next of images) assertOwner(store, next.id)
+      const index = pathIndex(store)
       for (const next of images) {
         const prior = entries.get(next.id)
-        if (prior !== undefined && comparePositions(next.pos, prior.image.pos) > 0 && paths.get(prior.image.path) === next.id) paths.delete(prior.image.path)
+        if (prior !== undefined && comparePositions(next.pos, prior.image.pos) > 0 && index.get(prior.image.path) === next.id) index.delete(prior.image.path)
       }
-      for (const next of images) { install(next); buffer(next) }
+      for (const next of images) { install(store, next); buffer(store, next) }
       position = { ...commit.pos }
       evict()
       return images

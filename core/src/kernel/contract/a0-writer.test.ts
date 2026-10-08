@@ -82,6 +82,135 @@ describe('position identity', () => {
 })
 
 describe('instance writer', { timeout: 10_000 }, () => {
+  it('denies queued prepares, pending reads and a prepared independent write after publication fails', async () => {
+    const [root, other] = stores(), entered = signal(), release = signal(), otherEntered = signal(), otherRelease = signal()
+    const failure = new KernelError('INVALID', 'Accepted publication failed')
+    const writer = await createWriter({ instance: 'test', root, writerEpoch: 1, counter: counter(), budget: scanBudget,
+      domains: [root, other].map(store => ({ store, epoch: '1', persistent: false })),
+      applied(_domain, commit) { if (commit.writes.length !== 0) throw failure } })
+    const first = writer.commit(root, [], async pos => { entered.resolve(); await release.promise; return prepared(pos, ['/durable']) })
+    const deniedFirst = assert.rejects(first, error => error === failure)
+    await entered.promise
+    const independent = writer.commit(other, [], async pos => { otherEntered.resolve(); await otherRelease.promise; return prepared(pos, ['/independent']) })
+    const deniedIndependent = assert.rejects(independent, error => error === failure)
+    await otherEntered.promise
+    let ran = false, read = false
+    const queued = writer.commit(root, [], pos => { ran = true; return prepared(pos, ['/queued']) })
+    const deniedQueued = assert.rejects(queued, error => error === failure)
+    const pending = writer.read([root.domain], async () => { read = true; return 'cached-result' })
+    const deniedRead = assert.rejects(pending, error => error === failure)
+    release.resolve()
+    await deniedFirst
+    otherRelease.resolve()
+    await Promise.all([deniedIndependent, deniedQueued, deniedRead])
+    assert.equal(ran, false)
+    assert.equal(read, false)
+    assert.deepEqual((await root.scan({ range: { node: '/queued' }, budget: scanBudget() })).items, [])
+    assert.deepEqual((await other.scan({ range: { node: '/independent' }, budget: scanBudget() })).items, [])
+    assert.equal((await root.scan({ range: { node: '/durable' }, budget: scanBudget() })).items.length, 1)
+  })
+
+  it('holds domain reads through completion without issuing positions and releases rejected reads', async () => {
+    const [root] = stores(), writer = await open([root]), entered = signal(), release = signal()
+    const before = writer.position
+    let preparedNext = false
+    const reading = writer.read([root.domain], async () => {
+      entered.resolve()
+      await release.promise
+      assert.equal(preparedNext, false)
+      return 'snapshot'
+    })
+    await entered.promise
+    assert.deepEqual(writer.position, before)
+    const writing = writer.commit(root, [], pos => { preparedNext = true; return prepared(pos, ['/after-read']) })
+    release.resolve()
+    assert.equal(await reading, 'snapshot')
+    await writing
+    assert.equal(preparedNext, true)
+    const failure = new KernelError('INVALID', 'Read callback failed')
+    await assert.rejects(writer.read([root.domain], async () => { throw failure }), error => error === failure)
+    const next = await writer.commit(root, [], pos => prepared(pos, ['/after-rejected-read']))
+    assert.equal(next.seq, before.seq + 2)
+    await assert.rejects(writer.read(['unknown'], async () => 'unreachable'),
+      (error: unknown) => error instanceof KernelError && error.code === 'INVALID')
+  })
+
+  it('starts domain reads after the preceding writer publishes and identifies same-domain target Stores', async () => {
+    const root = createMemoryStore({ domain: 'shared' }), other = createMemoryStore({ domain: 'shared' })
+    const published = new Map<Store, string[]>(), entered = signal(), release = signal()
+    const writer = await createWriter({ instance: 'test', root, writerEpoch: 1, counter: counter(), budget: scanBudget,
+      domains: [root, other].map(store => ({ store, epoch: 'shared1', persistent: false })),
+      applied(domain, _commit, images, store) {
+        assert.equal(domain, root.domain)
+        const paths = published.get(store) ?? []
+        paths.push(...images.map(image => image.path))
+        published.set(store, paths)
+      } })
+    const writing = writer.commit(root, [], async pos => { entered.resolve(); await release.promise; return prepared(pos, ['/root']) })
+    await entered.promise
+    const reading = writer.read([root.domain], async () => { assert.deepEqual(published.get(root), ['/root']); return writer.position })
+    release.resolve()
+    const pos = await writing
+    assert.deepEqual(await reading, pos)
+    await writer.commit(other, [], pos => prepared(pos, ['/other']))
+    assert.deepEqual(published.get(root), ['/root'])
+    assert.deepEqual(published.get(other), ['/other'])
+  })
+
+  it('publishes accepted images before observers and queued same-domain preparations', async () => {
+    const store = createMemoryStore({ domain: 'memory' }), accepted = new Map<string, StoredNode | null>()
+    const writer = await createWriter({ instance: 'test', root: store, writerEpoch: 1, counter: counter(), budget: scanBudget,
+      domains: [{ store, epoch: 'memory1', persistent: false }],
+      applied(domain, commit, images) {
+        assert.equal(domain, store.domain)
+        for (const image of images) {
+          assert.ok(Object.isFrozen(image))
+          if (image.node !== null) assert.ok(Object.isFrozen(image.node))
+          assert.deepEqual(image.pos, commit.pos)
+          accepted.set(image.path, image.node)
+        }
+      },
+    })
+    const iterator = writer.stream.follow(writer.stream.cursor())[Symbol.asyncIterator]()
+    const observed = iterator.next().then(frame => {
+      assert.equal(frame.done, false)
+      assert.ok(accepted.get('/first'))
+      return frame
+    })
+    const started = signal(), release = signal()
+    const first = writer.commit(store, [], async pos => {
+      started.resolve()
+      await release.promise
+      return prepared(pos, ['/first'])
+    })
+    await started.promise
+    const second = writer.commit(store, [], pos => {
+      assert.ok(accepted.get('/first'))
+      return prepared(pos, ['/second'])
+    })
+    release.resolve()
+    const positions = await Promise.all([first, second])
+    await observed
+    assert.deepEqual(accepted.get('/second')?.$pos, positions[1])
+    assert.equal(comparePositions(positions[0], positions[1]), -1)
+    await iterator.return?.()
+  })
+
+  it('stops serving writes when accepted-image publication fails after a durable commit', async () => {
+    const store = createMemoryStore({ domain: 'memory' }), failure = new KernelError('INVALID', 'Injected publication failure')
+    const writer = await createWriter({ instance: 'test', root: store, writerEpoch: 1, counter: counter(), budget: scanBudget,
+      domains: [{ store, epoch: 'memory1', persistent: false }],
+      applied(_domain, commit) { if (commit.writes.length !== 0) throw failure },
+    })
+    await assert.rejects(writer.commit(store, [], pos => prepared(pos, ['/durable'])), error => error === failure)
+    const stored = (await store.scan({ range: { node: '/durable' }, budget: scanBudget() })).items
+    assert.equal(stored.length, 1)
+    let ran = false
+    await assert.rejects(writer.commit(store, [], pos => { ran = true; return prepared(pos, ['/later']) }), error => error === failure)
+    assert.equal(ran, false)
+    assert.equal((await store.scan({ range: { node: '/later' }, budget: scanBudget() })).items.length, 0)
+  })
+
   it('uses one position for every write and its journal record', async () => {
     const [a] = stores(), writer = await open([a])
     const pos = await writer.commit(a, [], pos => prepared(pos, ['/x', '/y']))
@@ -114,7 +243,7 @@ describe('instance writer', { timeout: 10_000 }, () => {
     const order: number[] = []
     const first = writer.commit(a, [], async pos => { entered.resolve(); await release.promise; order.push(pos.seq); return prepared(pos) })
     await entered.promise
-    const second = writer.commit(b, [], pos => { order.push(pos.seq); secondApplied.resolve(); return prepared(pos) })
+    const second = writer.commit(b, [], pos => { order.push(pos.seq); secondApplied.resolve(); return prepared(pos, ['/b-item']) })
     await secondApplied.promise
     assert.deepEqual(order, [base + 2])
     release.resolve()
@@ -130,7 +259,7 @@ describe('instance writer', { timeout: 10_000 }, () => {
     let state = 'before'
     const first = writer.commit(a, [], async pos => { entered.resolve(); await release.promise; state = 'after'; return prepared(pos) })
     await entered.promise
-    const second = writer.commit(b, ['a'], pos => { assert.equal(state, 'after'); return prepared(pos) })
+    const second = writer.commit(b, ['a'], pos => { assert.equal(state, 'after'); return prepared(pos, ['/b-item']) })
     release.resolve()
     await Promise.all([first, second])
     assert.equal(state, 'after')
@@ -141,7 +270,7 @@ describe('instance writer', { timeout: 10_000 }, () => {
     let state = 'before'
     const first = writer.commit(a, ['b'], async pos => { entered.resolve(); await release.promise; assert.equal(state, 'before'); return prepared(pos) })
     await entered.promise
-    const second = writer.commit(b, [], pos => { state = 'after'; return prepared(pos) })
+    const second = writer.commit(b, [], pos => { state = 'after'; return prepared(pos, ['/b-item']) })
     release.resolve()
     await Promise.all([first, second])
     assert.equal(state, 'after')
@@ -279,7 +408,7 @@ describe('instance stream', { timeout: 10_000 }, () => {
     const [a, b] = stores(), writer = await open([a, b])
     const from = writer.stream.cursor()
     await writer.commit(a, [], pos => prepared(pos))
-    await writer.commit(b, [], pos => prepared(pos))
+    await writer.commit(b, [], pos => prepared(pos, ['/b-item']))
     const iterator = writer.stream.follow(from)[Symbol.asyncIterator]()
     const first = await event(iterator), second = await event(iterator)
     assert.equal(first.t, 'commit'); assert.equal(second.t, 'commit')
@@ -326,7 +455,7 @@ describe('instance stream', { timeout: 10_000 }, () => {
     const one = await first
     assert.equal(one.t, 'commit')
     if (one.t === 'commit') assert.equal(one.record.pos.seq, from.pos.seq + 1)
-    await writer.commit(b, [], pos => prepared(pos))
+    await writer.commit(b, [], pos => prepared(pos, ['/b-item']))
     const two = await event(iterator)
     assert.equal(two.t, 'commit')
     if (two.t === 'commit') assert.equal(two.record.pos.seq, from.pos.seq + 2)

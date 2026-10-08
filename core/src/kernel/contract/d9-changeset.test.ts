@@ -72,7 +72,7 @@ describe('ordered ChangeSet preparation', () => {
     const [after] = await f.nodes()
     assert.notEqual(after.$id, before.$id)
     assert.equal(after.$type, 'other')
-    assert.equal(f.cache.getAt('/item')?.node?.$id, after.$id)
+    assert.equal(f.cache.getAt(f.store, '/item')?.node?.$id, after.$id)
     assert.equal(f.cache.get(before.$id)?.node, null)
     const record = (await f.journal()).at(-1)!
     assert.equal(record.entries.length, 2)
@@ -186,7 +186,7 @@ describe('ordered ChangeSet preparation', () => {
     await assert.rejects(f.commit([{ op: 'patch', path: '/a', ops: { $inc: { value: 1 } } },
       { op: 'patch', path: '/b', ops: { $inc: { value: 1 } } }]), error => error === failure)
     assert.deepEqual(await f.nodes(), before); assert.deepEqual(await f.journal(), records)
-    assert.deepEqual(f.cache.getAt('/a')?.node, before[0])
+    assert.deepEqual(f.cache.getAt(f.store, '/a')?.node, before[0])
   })
 
   it('writes the whole cached before over an undetected external edit', async () => {
@@ -231,7 +231,7 @@ describe('ordered ChangeSet preparation', () => {
     await f.commit([put('/item', { value: 1 })])
     await Promise.all(Array.from({ length: 10 }, () => f.commit([{ op: 'patch', path: '/item', ops: { $inc: { value: 1 } } }])))
     assert.equal((await f.nodes())[0].value, 11)
-    assert.equal(f.cache.getAt('/item')?.node?.value, 11)
+    assert.equal(f.cache.getAt(f.store, '/item')?.node?.value, 11)
   })
 
   it('keeps preparation before-images out of the Store commit payload', async () => {

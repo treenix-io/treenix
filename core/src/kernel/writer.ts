@@ -1,5 +1,5 @@
 import { KernelError } from '#errors'
-import { createProcessCache, type CacheRead, type ProcessCache } from '#kernel/cache'
+import { createProcessCache, type CacheRead, type Image, type ProcessCache } from '#kernel/cache'
 import type { NodeChange } from '#kernel/changeset'
 import { createInfluenceIndex, type InfluenceOptions } from '#kernel/influence'
 import { createIdempotency, type IdempotencyOptions, type MutationIdentity } from '#kernel/idempotency'
@@ -24,6 +24,7 @@ export interface WriterOptions {
   readonly cache?: ProcessCache
   readonly influence?: Pick<InfluenceOptions, 'maxWrites' | 'maxBytes'>
   readonly intake?: Pick<IdempotencyOptions, 'now' | 'limits'>
+  readonly applied?: (domain: DomainId, commit: StoreCommit, images: readonly Image[], store: Store) => void
 }
 
 export interface PreparedCommit {
@@ -38,7 +39,7 @@ export interface MutationSpan {
 }
 
 type Applied =
-  | { readonly t: 'committed'; readonly pos: Position; readonly domain: DomainId; readonly commit: StoreCommit; readonly changes: readonly NodeChange[] | null; readonly event: StreamEvent }
+  | { readonly t: 'committed'; readonly pos: Position; readonly domain: DomainId; readonly store: Store; readonly commit: StoreCommit; readonly changes: readonly NodeChange[] | null; readonly event: StreamEvent }
   | { readonly t: 'gap'; readonly pos: Position; readonly event: StreamEvent; readonly error: unknown }
   | { readonly t: 'refused'; readonly error: unknown }
 
@@ -74,6 +75,7 @@ export async function createWriter(options: WriterOptions) {
   const readers = new Map<DomainId, Set<Promise<void>>>()
   let reservation = Promise.resolve(), publication = Promise.resolve()
   let fatal: { readonly error: unknown } | undefined
+  function checkFailure(): void { if (fatal !== undefined) throw fatal.error }
 
   function allocate(): Promise<Position> {
     const next = reservation.then(async () => {
@@ -97,7 +99,8 @@ export async function createWriter(options: WriterOptions) {
       const commit = { pos, writerEpoch: options.writerEpoch, writes: [], record }
       await store.commit(commit)
       if (record.intake !== undefined) intake.publish(record.intake)
-      cache.apply(store.domain, commit)
+      const images = cache.apply(store, commit)
+      options.applied?.(store.domain, commit, images, store)
       influence.record(store.domain, pos, [])
       stream.publish({ t: 'commit', domain: store.domain, record })
     } catch (error) {
@@ -133,6 +136,7 @@ export async function createWriter(options: WriterOptions) {
         try {
           pos = await assigned
           await Promise.all(dependencies)
+          checkFailure()
           const prepared = await prepare(pos)
           let changes: readonly NodeChange[] | null = prepared.transitions ?? null
           if (prepared.transitions === undefined && !prepared.record.entries.some(entry => entry.change.t === 'reconcile' && entry.change.before === undefined)) {
@@ -151,8 +155,9 @@ export async function createWriter(options: WriterOptions) {
             changes = captured
           }
           const commit: StoreCommit = { writes: prepared.writes, record: prepared.record, pos, writerEpoch: options.writerEpoch }
+          checkFailure()
           await store.commit(commit)
-          return { t: 'committed', pos, domain: store.domain, commit, changes, event: { t: 'commit', domain: store.domain, record: commit.record } }
+          return { t: 'committed', pos, domain: store.domain, store, commit, changes, event: { t: 'commit', domain: store.domain, record: commit.record } }
         } catch (error) {
           if (pos === undefined) return { t: 'refused', error }
           console.error(error)
@@ -166,14 +171,16 @@ export async function createWriter(options: WriterOptions) {
         if (fatal !== undefined) throw fatal.error
         if (result.t === 'committed') {
           if (result.commit.record.intake !== undefined) intake.publish(result.commit.record.intake)
-          const images = new Map(cache.apply(result.domain, result.commit).map(image => [image.id, image.node]))
+          const accepted = cache.apply(result.store, result.commit)
+          options.applied?.(result.domain, result.commit, accepted, result.store)
+          const images = new Map(accepted.map(image => [image.id, image.node]))
           if (result.changes === null) influence.reset(result.domain, result.pos)
           else influence.record(result.domain, result.pos, result.changes.map(change => ({ ...change,
             after: change.after === null ? null : images.get(change.id)! })))
         } else if (result.t === 'gap') influence.advance(result.pos)
         if (result.t !== 'refused') stream.publish(result.event)
         return result
-      }).finally(() => {
+      }).catch(error => { fatal = { error }; throw error }).finally(() => {
         // Later rights checks read the shared cache, so completion includes its ordered update.
         release()
         if (writers.get(store.domain) === done) writers.delete(store.domain)
@@ -188,6 +195,33 @@ export async function createWriter(options: WriterOptions) {
         if (result.t !== 'committed') throw result.error
         return result.pos
       })
+  }
+  async function read<T>(inputs: readonly DomainId[], run: () => Promise<T>): Promise<T> {
+    checkFailure()
+    const locked = new Set(inputs)
+    if ([...locked].some(domain => !domains.has(domain))) throw new KernelError('INVALID', 'Unknown read domain')
+    const dependencies = new Set<Promise<void>>()
+    let release: () => void = () => {}
+    const done = new Promise<void>(resolve => { release = resolve })
+    for (const domain of locked) {
+      const prior = writers.get(domain)
+      if (prior !== undefined) dependencies.add(prior)
+      let active = readers.get(domain)
+      if (active === undefined) { active = new Set(); readers.set(domain, active) }
+      active.add(done)
+    }
+    try {
+      await Promise.all(dependencies)
+      checkFailure()
+      return await run()
+    } finally {
+      release()
+      for (const domain of locked) {
+        const active = readers.get(domain)
+        active?.delete(done)
+        if (active?.size === 0) readers.delete(domain)
+      }
+    }
   }
   async function refreshIntake(force = false): Promise<void> {
     await commit(options.root, [...domains], pos => ({ writes: [], transitions: [],
@@ -235,5 +269,7 @@ export async function createWriter(options: WriterOptions) {
     })
   }
   return { stream, cache, influence, get position(): Position { return { ...position } },
-    get intake() { return intake.state }, commit, mutate, refreshIntake }
+    get intake() { return intake.state }, commit, read, mutate, refreshIntake }
 }
+
+export type Writer = Awaited<ReturnType<typeof createWriter>>

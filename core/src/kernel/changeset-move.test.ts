@@ -22,8 +22,8 @@ describe('subtree relocation', () => {
       assert.deepEqual(relocated, { ...node, $path: path, $pos: pos })
       assert.equal(entries.find(entry => entry.id === node.$id)?.from, node.$path)
       assert.deepEqual(readJournalImages(records, { pos, id: node.$id }), { before: node, after: relocated })
-      assert.equal(f.cache.getAt(node.$path), undefined)
-      assert.equal(f.cache.getAt(path)?.node?.$id, node.$id)
+      assert.equal(f.cache.getAt(f.store, node.$path), undefined)
+      assert.equal(f.cache.getAt(f.store, path)?.node?.$id, node.$id)
     }
     assert.equal(after.some(node => node.$type === 'moved'), false)
   })
