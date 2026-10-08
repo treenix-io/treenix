@@ -8,13 +8,16 @@
 
 import { validateNode } from '#comp/validate';
 import {
-  getRegistryVersion, isCompKey, isComponent, isRef,
+  isRef,
   type NodeData, resolveExact,
 } from '#core';
 import { KernelError } from '#errors';
+import { createMigrator, type MigrationSource } from '#kernel/migrate';
+import type { Migration } from '#kernel/types';
+import type { TypeSchema } from '#schema/types';
+import { assertNoPrototypeKeys } from '#kernel/update-ops';
 import { ulid } from '#util/ulid';
 import { applyPatchManyEntry, assertPatchManyBatch, type CommitReceipt, hasMutationOps, isSetEntry, type PatchManyEntry, type PatchOp, type Tree } from './index';
-import { assertNoPrototypeKeys } from '#kernel/update-ops';
 import { assertOpValuesSafe, patchViaSet } from './patch';
 import { isMoved, type RefEntry, refsOf } from './refs';
 import { withCache } from './cache';
@@ -22,8 +25,8 @@ import { isTrashExempt } from './trash-exempt';
 
 // ── Migration: per-type $v ladder, applied on read (R-gk8.29) ──
 // THE mechanism mod developers use to evolve stored data shapes:
-//   register(type, 'migrate', () => ({ 1: fn, 2: fn }))
-// Absent $v = version 0. Each step mutates the clone in place; $v stamps to the
+//   register(type, 'migrate', () => [{ from: 0, to: 1, up: component => component }])
+// Absent $v = version 0. Each step returns its own component; $v stamps to the
 // highest registered step after apply. Example mod: src/mod/examples/versioned.
 // The policy wraps the MOUNTED tree — above fs/mongo/federation/query adapters —
 // so every adapter's nodes migrate on read and one layer covers all read verbs
@@ -34,106 +37,25 @@ import { isTrashExempt } from './trash-exempt';
 // broke read-only query mounts). The corpus converges when a migrated node is
 // next written; set() stamps $v so fresh writes never re-enter the ladder.
 //
-// Hot path:
-//  1. checked: WeakSet — same NodeData object seen twice → instant skip
-//  2. migrationInfo: per-type cache (Map) — second time we ask "has type X
-//     any migrations?" returns cached answer (including a cached "no") without
-//     touching the registry. Cache is keyed by registry version
-//     (`getRegistryVersion()`) so any register/unregister/replaceHandler call
-//     invalidates it in one integer compare.
+// The descriptor cache follows each type's migration and schema handlers; UI registrations leave it intact.
 
-type Migrator = (data: Record<string, unknown>) => void;
-type Migrations = Record<number, Migrator>;
-type MigrationInfo = { steps: [number, Migrator][]; version: number };
-
-// Objects that passed through migrateNode and need no changes
-const checked = new WeakSet<NodeData>();
-
-// Per-type migration descriptor cache. `null` is cached too, so types with no
-// migrations registered cost a single Map.get on the hot read path.
-const migrationInfo = new Map<string, MigrationInfo | null>();
-let cachedRegistryVersion = -1;
-
-function getMigrations(type: string): MigrationInfo | null {
-  const v = getRegistryVersion();
-  if (v !== cachedRegistryVersion) {
-    migrationInfo.clear();
-    cachedRegistryVersion = v;
-  }
-  const cached = migrationInfo.get(type);
-  if (cached !== undefined) return cached;
-
-  const info = computeMigrationInfo(type);
-  migrationInfo.set(type, info);
-  return info;
+declare module '#core/context' {
+  interface ContextHandlers { migrate: () => readonly Migration[] }
 }
 
-function computeMigrationInfo(type: string): MigrationInfo | null {
+const migrationInfo = new Map<string, { handler: () => readonly Migration[]; schema: (() => TypeSchema) | null; source: MigrationSource }>();
+const migrator = createMigrator(type => {
   const handler = resolveExact(type, 'migrate');
-  if (!handler) return null;
-  const migrations = handler() as Migrations;
-  const keys = Object.keys(migrations).map(Number).sort((a, b) => a - b);
-  if (!keys.length) return null;
-  return {
-    steps: keys.map(k => [k, migrations[k]]),
-    version: keys[keys.length - 1],
-  };
-}
-
-/** Apply pending migrations to a data object. Returns true if anything changed. */
-function applyMigrations(data: Record<string, unknown>, type: string): boolean {
-  const m = getMigrations(type);
-  if (!m) return false;
-
-  const v = (data['$v'] as number) ?? 0;
-  if (v >= m.version) return false;
-
-  for (const [ver, fn] of m.steps) {
-    if (ver > v) fn(data);
-  }
-  data['$v'] = m.version;
-  return true;
-}
-
-/** Check if node or any of its `#` components need migration. */
-function needsMigration(node: NodeData): boolean {
-  const nm = getMigrations(node.$type);
-  if (nm && ((node['$v'] as number) ?? 0) < nm.version) return true;
-
-  // Strict namespace: only '#' keys are components; bare {$type} values are data.
-  for (const key of Object.keys(node)) {
-    if (!isCompKey(key)) continue;
-    const val = node[key];
-    if (!isComponent(val)) continue;
-    const cm = getMigrations(val.$type);
-    if (cm && ((val['$v'] as number) ?? 0) < cm.version) return true;
-  }
-
-  return false;
-}
-
-function migrateNode(node: NodeData): NodeData {
-  if (checked.has(node)) return node;
-
-  if (!needsMigration(node)) {
-    checked.add(node);
-    return node;
-  }
-
-  const clone = structuredClone(node);
-
-  applyMigrations(clone as Record<string, unknown>, clone.$type);
-
-  for (const key of Object.keys(clone)) {
-    if (!isCompKey(key)) continue;
-    const val = clone[key];
-    if (!isComponent(val)) continue;
-    applyMigrations(val as Record<string, unknown>, val.$type);
-  }
-
-  checked.add(clone);
-  return clone;
-}
+  if (!handler) return undefined;
+  const schema = resolveExact(type, 'schema'), cached = migrationInfo.get(type);
+  if (cached?.handler === handler && cached.schema === schema) return cached.source;
+  const steps = handler();
+  const source = { steps, version: schema?.().version ?? Math.max(0, ...steps.map(step => step.to)) };
+  migrationInfo.set(type, { handler, schema, source });
+  return source;
+});
+const migrateNode = migrator.migrate;
+const stampVersion = migrator.stamp;
 
 /** Migrate receipt images (core-ns6p.2): raw stored shapes must not leak
  *  above the policy — subs diff them, audit journals them, the cache SERVES
@@ -152,19 +74,6 @@ function migrateReceipt(receipt: CommitReceipt): CommitReceipt {
     return { ...c, before, after };
   });
   return dirty ? { changes } : receipt;
-}
-
-function stampVersion(node: NodeData): void {
-  const m = getMigrations(node.$type);
-  if (m) node['$v'] = m.version;
-
-  for (const key of Object.keys(node)) {
-    if (!isCompKey(key)) continue;
-    const val = node[key];
-    if (!isComponent(val)) continue;
-    const cm = getMigrations(val.$type);
-    if (cm) (val as Record<string, unknown>)['$v'] = cm.version;
-  }
 }
 
 // ── $refs derivation: auto-populated index of outgoing refs on set() ──

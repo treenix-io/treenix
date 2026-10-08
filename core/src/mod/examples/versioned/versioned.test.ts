@@ -95,7 +95,7 @@ describe('example.versioned mod (migrations e2e)', () => {
       const ladder = resolveExact(type, 'migrate');
       assert.ok(ladder, `${type} has no migrations`);
 
-      assert.equal(schema.version, Math.max(...Object.keys(ladder()).map(Number)), type);
+      assert.equal(schema.version, Math.max(...ladder().map(step => step.to)), type);
     }
   });
 

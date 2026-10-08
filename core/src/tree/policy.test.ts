@@ -5,6 +5,7 @@
 
 import { A, createNode, type NodeData, R, register, S, unregister, W } from '#core';
 import { KernelError } from '#errors';
+import type { Component, Migration } from '#kernel/types';
 import { createPipeline } from '#server/server';
 import { clearRegistry } from '#testing';
 import { withMounts } from '#mount';
@@ -26,11 +27,57 @@ const TEST_TYPE = 'test.migrated';
 const COMP_TYPE = 'test.comp.migrated';
 const UNREL_TYPE = 'test.unrelated-bump';
 
+function registerMigrations(type: string, make: () => Record<number, (component: Record<string, unknown>) => void>): void {
+  register(type, 'migrate', () => {
+    let from = 0;
+    return Object.entries(make()).sort(([a], [b]) => Number(a) - Number(b)).map(([key, apply]): Migration => {
+      const to = Number(key), step = { from, to, up: (component: Component) => {
+        const result = { ...component };
+        apply(result);
+        return result;
+      } };
+      from = to;
+      return step;
+    });
+  });
+}
+
+
 describe('policy: migration step', () => {
   afterEach(() => {
     for (const t of [TEST_TYPE, COMP_TYPE, UNREL_TYPE]) {
       try { unregister(t, 'migrate'); } catch { /* not registered in this test */ }
     }
+  });
+
+  it('rejects stale versions on full writes and batch set members without persisting any member', async () => {
+    registerMigrations(TEST_TYPE, () => ({ 1: () => {}, 2: () => {} }));
+    registerMigrations(COMP_TYPE, () => ({ 1: () => {} }));
+    const inner = createMemoryTree(), { base, tree } = withStoragePolicy(inner);
+    const invalid = (error: unknown) => error instanceof KernelError && error.code === 'INVALID';
+    await assert.rejects(base.set({ $path: '/old', $type: TEST_TYPE, $v: 1 }), invalid);
+    await assert.rejects(tree.set({ $path: '/named', $type: TEST_TYPE, '#note': { $type: COMP_TYPE, $v: 0 } }), invalid);
+    assert.ok(tree.patchMany);
+    await assert.rejects(tree.patchMany('/batch', [
+      { path: '/batch/first', node: { $path: '/batch/first', $type: TEST_TYPE } },
+      { path: '/batch/stale', node: { $path: '/batch/stale', $type: TEST_TYPE, $v: 1 } },
+    ]), invalid);
+    assert.equal(await inner.get('/old'), undefined); assert.equal(await inner.get('/named'), undefined);
+    assert.equal(await inner.get('/batch/first'), undefined); assert.equal(await inner.get('/batch/stale'), undefined);
+    await base.set({ $path: '/current', $type: TEST_TYPE, $v: 2 });
+    assert.equal((await inner.get('/current'))?.$v, 2);
+  });
+
+  it('keeps a migration descriptor when an unrelated UI handler is registered', async t => {
+    let reads = 0;
+    registerMigrations(TEST_TYPE, () => { reads++; return { 1: component => { component.current = true; } }; });
+    const inner = createMemoryTree(), { base } = withStoragePolicy(inner);
+    await inner.set(createNode('/a', TEST_TYPE, {}));
+    assert.equal((await base.get('/a'))?.current, true);
+    register(UNREL_TYPE, 'react', () => null);
+    t.after(() => unregister(UNREL_TYPE, 'react'));
+    assert.equal((await base.get('/a'))?.current, true);
+    assert.equal(reads, 1);
   });
 
   it('passes through nodes without migrations', async () => {
@@ -44,7 +91,7 @@ describe('policy: migration step', () => {
   });
 
   it('runs the migration ladder on read and stamps $v', async () => {
-    register(TEST_TYPE, 'migrate', () => ({
+    registerMigrations(TEST_TYPE, () => ({
       1: (n: Record<string, unknown>) => { n.items = Array.isArray(n.items) ? n.items : []; },
       2: (n: Record<string, unknown>) => { n.label ??= 'default'; },
     }));
@@ -61,7 +108,7 @@ describe('policy: migration step', () => {
 
   it('skips steps at or below the stored $v', async () => {
     let ran1 = 0;
-    register(TEST_TYPE, 'migrate', () => ({
+    registerMigrations(TEST_TYPE, () => ({
       1: () => { ran1++; },
       2: (n: Record<string, unknown>) => { n.upgraded = true; },
     }));
@@ -79,7 +126,7 @@ describe('policy: migration step', () => {
   });
 
   it('migrates # components by their own ladder; bare $type values are data and stay untouched', async () => {
-    register(COMP_TYPE, 'migrate', () => ({
+    registerMigrations(COMP_TYPE, () => ({
       1: (n: Record<string, unknown>) => { n.renamed = n.old; delete n.old; },
     }));
 
@@ -105,7 +152,7 @@ describe('policy: migration step', () => {
   });
 
   it('read migrates in memory but does NOT write back — raw stays old, converges on next write (core-anz4.9)', async () => {
-    register(TEST_TYPE, 'migrate', () => ({
+    registerMigrations(TEST_TYPE, () => ({
       1: (n: Record<string, unknown>) => { n.fixed = true; },
     }));
 
@@ -131,8 +178,8 @@ describe('policy: migration step', () => {
   });
 
   it('set() stamps $v on node and # components', async () => {
-    register(TEST_TYPE, 'migrate', () => ({ 1: () => {} }));
-    register(COMP_TYPE, 'migrate', () => ({ 1: () => {}, 2: () => {} }));
+    registerMigrations(TEST_TYPE, () => ({ 1: () => {} }));
+    registerMigrations(COMP_TYPE, () => ({ 1: () => {}, 2: () => {} }));
 
     const inner = createMemoryTree();
     const { base: tree } = withStoragePolicy(inner);
@@ -147,7 +194,7 @@ describe('policy: migration step', () => {
   });
 
   it('getChildren and scanChildren serve migrated nodes', async () => {
-    register(TEST_TYPE, 'migrate', () => ({
+    registerMigrations(TEST_TYPE, () => ({
       1: (n: Record<string, unknown>) => { n.migrated = true; },
     }));
 
@@ -172,7 +219,7 @@ describe('policy: migration step', () => {
   });
 
   it('does not touch types with no registered migrations when others have them', async () => {
-    register(UNREL_TYPE, 'migrate', () => ({
+    registerMigrations(UNREL_TYPE, () => ({
       1: (n: Record<string, unknown>) => { n.bumped = true; },
     }));
 
@@ -186,7 +233,7 @@ describe('policy: migration step', () => {
   });
 
   it('patchMany persists the migrated post-image, not ops against the stale stored shape (core-anz4.9)', async () => {
-    register(TEST_TYPE, 'migrate', () => ({
+    registerMigrations(TEST_TYPE, () => ({
       1: (n: Record<string, unknown>) => { n.body = n.text; delete n.text; },
     }));
 
@@ -211,7 +258,7 @@ describe('policy: migration step', () => {
   });
 
   it('receipt images pass up MIGRATED — guarded no-op member keeps one shared image (core-ns6p.2)', async () => {
-    register(TEST_TYPE, 'migrate', () => ({
+    registerMigrations(TEST_TYPE, () => ({
       1: (n: Record<string, unknown>) => { n.body = n.text; delete n.text; },
     }));
 
@@ -235,7 +282,7 @@ describe('policy: migration step', () => {
   });
 
   it('patchMany mixed batch: set-member, mutation on a v0 node, and test-only member in one commit (core-anz4.9)', async () => {
-    register(TEST_TYPE, 'migrate', () => ({
+    registerMigrations(TEST_TYPE, () => ({
       1: (n: Record<string, unknown>) => { n.body = n.text; delete n.text; },
     }));
 
@@ -268,7 +315,7 @@ describe('policy: migration step', () => {
   });
 
   it('test-only member preconditions evaluate against the MIGRATED shape (core-anz4.9)', async () => {
-    register(TEST_TYPE, 'migrate', () => ({
+    registerMigrations(TEST_TYPE, () => ({
       1: (n: Record<string, unknown>) => { n.body = n.text; delete n.text; },
     }));
 
@@ -292,7 +339,7 @@ describe('policy: migration step', () => {
   });
 
   it('concurrent write during a batch: migration-pending member denies the whole batch, converged member merges (core-anz4.9)', async () => {
-    register(TEST_TYPE, 'migrate', () => ({
+    registerMigrations(TEST_TYPE, () => ({
       1: (n: Record<string, unknown>) => { n.body = n.text; delete n.text; },
     }));
 
@@ -339,7 +386,7 @@ describe('policy: migration step', () => {
   });
 
   it('system path (base) converges a migration-pending node on patch and patchMany (core-anz4.9)', async () => {
-    register(TEST_TYPE, 'migrate', () => ({
+    registerMigrations(TEST_TYPE, () => ({
       1: (n: Record<string, unknown>) => { n.body = n.text; delete n.text; },
     }));
 
@@ -372,7 +419,7 @@ describe('policy: migration step', () => {
   });
 
   it('revisionless legacy fs node: pending-migration mutation converges via blind upsert — documented residual (core-anz4.9)', async () => {
-    register(TEST_TYPE, 'migrate', () => ({
+    registerMigrations(TEST_TYPE, () => ({
       1: (n: Record<string, unknown>) => { n.body = n.text; delete n.text; },
     }));
 

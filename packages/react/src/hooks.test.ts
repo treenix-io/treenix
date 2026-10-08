@@ -82,6 +82,18 @@ describe('addComponent / removeComponent — rollback on server reject (C42)', (
 });
 
 describe('set — split failure domains + door-routed refresh (ns6p.4 r3-F1a)', () => {
+  it('omits schema versions from each component of a full write without altering the client image', async () => {
+    const next: NodeData = { $path: '/versions', $type: 'doc', $v: 1, body: 'current',
+      '#note': { $type: 'note', $v: 3, note: 'current' }, snapshot: { $type: 'doc', $v: 7 } };
+    const original = structuredClone(next);
+    await set(next);
+    const sent = setMutate.mock.calls[0].arguments[0].node;
+    assert.equal(Object.hasOwn(sent, '$v'), false);
+    assert.deepEqual(sent['#note'], { $type: 'note', note: 'current' });
+    assert.deepEqual(sent.snapshot, { $type: 'doc', $v: 7 });
+    assert.deepEqual(next, original);
+  });
+
   it('write failure still rolls back the optimistic image', async () => {
     cache.put({ $path: '/s1', $type: 'doc', v: 'old' });
     setMutate.mock.mockImplementationOnce(async () => { throw new Error('CONFLICT'); });

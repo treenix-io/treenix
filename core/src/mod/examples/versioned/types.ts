@@ -23,16 +23,16 @@ export class VersionedDoc {
 }
 registerType('example.versioned.doc', VersionedDoc);
 
-register('example.versioned.doc', 'migrate', () => ({
-  1: (n: Record<string, unknown>) => {
-    n.body = typeof n.text === 'string' ? n.text : '';
-    delete n.text;
-  },
-  2: (n: Record<string, unknown>) => {
+register('example.versioned.doc', 'migrate', () => [
+  { from: 0, to: 1, up: n => {
+    const { text, ...fields } = n;
+    return { ...fields, body: typeof text === 'string' ? text : '' };
+  } },
+  { from: 1, to: 2, up: n => {
     const body = String(n.body ?? '').trim();
-    n.words = body ? body.split(/\s+/).length : 0;
-  },
-}));
+    return { ...n, words: body ? body.split(/\s+/).length : 0 };
+  } },
+]);
 
 /**
  * Attachable note component with its own migration ladder (v1 renames txt → note)
@@ -43,9 +43,9 @@ export class VersionedNote {
 }
 registerType('example.versioned.note', VersionedNote);
 
-register('example.versioned.note', 'migrate', () => ({
-  1: (n: Record<string, unknown>) => {
-    n.note = typeof n.txt === 'string' ? n.txt : '';
-    delete n.txt;
-  },
-}));
+register('example.versioned.note', 'migrate', () => [
+  { from: 0, to: 1, up: n => {
+    const { txt, ...fields } = n;
+    return { ...fields, note: typeof txt === 'string' ? txt : '' };
+  } },
+]);

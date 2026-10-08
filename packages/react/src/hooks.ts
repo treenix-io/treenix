@@ -5,7 +5,7 @@
 // execute:     action caller
 // watch:       universal async generator
 
-import { compKey, getComponent, getComponentByName, getMeta, type NodeData, normalizeType, resolve } from '@treenx/core';
+import { AnyType, compKey, getComponent, getComponentByName, getComponents, getMeta, type NodeData, normalizeType, resolve } from '@treenx/core';
 import { type Class, getDefaults, type TypeProxy } from '@treenx/core/comp';
 import { deriveURI, parseURI } from '@treenx/core/uri';
 import type { ChildrenOpts as TreeChildrenOpts } from '@treenx/core/tree';
@@ -229,7 +229,12 @@ export async function set(next: NodeData): Promise<NodeData> {
   const prev = cache.get(next.$path);
   cache.put(next);
   try {
-    await treeClient.commit([{ kind: 'put', node: next }]);
+    const { $v, ...input } = next;
+    for (const [name, component] of getComponents(next, AnyType)) if (name !== '') {
+      const { $v, ...fields } = component;
+      input[name] = fields;
+    }
+    await treeClient.commit([{ kind: 'put', node: input }]);
   } catch (err) {
     // F15: rollback optimistic cache on server reject (validation, ACL, OCC)
     if (prev) cache.put(prev); else cache.remove(next.$path);
