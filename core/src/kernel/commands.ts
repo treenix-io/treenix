@@ -7,7 +7,7 @@ import { judgeGates } from '#kernel/gates'
 import type { createProjector } from '#kernel/projection'
 import { createReader, type ReaderSource } from '#kernel/reader'
 import { createRequestAdmission } from '#kernel/request'
-import type { Budget, CommitRequest, Gate, Limits, Outcome, Registry, SubSelector } from '#kernel/types'
+import type { Budget, CommitRequest, Gate, Io, Limits, Outcome, Registry, SubSelector } from '#kernel/types'
 import type { Writer } from '#kernel/writer'
 import { freeze } from '#util/freeze'
 
@@ -20,9 +20,10 @@ export interface CommandOptions {
   readonly capabilities: (budget: Budget) => CapabilityState
   readonly gates: readonly Gate[]
   readonly limits: () => Limits
-  readonly budget: () => Budget
+  readonly budget: (kind?: 'read' | 'action') => Budget
   readonly validate: (prepared: PreparedChangeSet) => void
   readonly projector?: ReturnType<typeof createProjector>
+  readonly io?: Io
 }
 
 export function createCommands(options: CommandOptions) {

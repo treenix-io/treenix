@@ -14,7 +14,7 @@ function assertComponent(value: unknown, name: string): asserts value is Compone
 
 export function componentEntries(node: Component): readonly (readonly [string, Component])[] {
   const main: Component = { ...Object.fromEntries(Object.entries(node).filter(([key]) => !key.startsWith('$') && !key.startsWith('#'))),
-    $type: node.$type, $v: node.$v, $order: node.$order }
+    $type: node.$type, ...(node.$v === undefined ? {} : { $v: node.$v }), ...(node.$order === undefined ? {} : { $order: node.$order }) }
   const entries: (readonly [string, Component])[] = [['', main]]
   for (const [name, value] of Object.entries(node)) if (name.startsWith('#')) {
     assertComponent(value, name)

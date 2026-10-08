@@ -82,6 +82,31 @@ describe('journal-backed mutation identity', { timeout: 10_000 }, () => {
     assert.notEqual(replay.pos!.seq, 999)
   })
 
+  it('probes accepted decisions before loading a removed target and does not admit a read key', async () => {
+    const f = await fixture(), input = f.identity(), rows = await journal(f.root)
+    assert.equal(await f.writer.replay(f.identity('missing', { opId: { epoch: 'unknown', time: 0, nonce: 'read' } })), undefined)
+    assert.deepEqual(await journal(f.root), rows)
+    const outcome = await f.writer.mutate(input, span => span.finish(f.root, [], pos => prepared(pos)))
+    assert.deepEqual(await f.writer.replay(input), outcome)
+    await assert.rejects(() => f.writer.replay({ ...input, request: 'changed' }), errorCode('KEY_REUSED'))
+    f.time(11_001)
+    await assert.rejects(() => f.writer.replay(input), errorCode('EXPIRED'))
+  })
+
+  it('coalesces a decision probe with an in-flight effect', async () => {
+    const f = await fixture(), input = f.identity(), entered = signal(), release = signal()
+    const pending = f.writer.mutate(input, async span => {
+      entered.resolve(); await release.promise
+      await span.finish(f.root, [], pos => prepared(pos))
+    })
+    await entered.promise
+    const replay = f.writer.replay(input)
+    await assert.rejects(() => f.writer.replay({ ...input, request: 'changed' }), errorCode('KEY_REUSED'))
+    release.resolve()
+    assert.deepEqual(await replay, await pending)
+    assert.equal((await decision(f.root, input.opId)).length, 1)
+  })
+
   it('refuses reuse with a different request, claims or scope without returning the outcome', async () => {
     const { writer, root, identity } = await fixture(), input = identity()
     await writer.mutate(input, span => span.finish(root, [], pos => prepared(pos)))

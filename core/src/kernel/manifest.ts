@@ -111,7 +111,7 @@ function finish(active: Builder): CollectedModule {
         if (method) methods.push(method)
       }
       types.push(buildRegisteredTypeDef({ name, module: active.id, security: definition?.security ?? 'ordinary',
-        schema, methods, actions: Object.fromEntries(active.actions.get(name) ?? []) }))
+        schema, prototype: definition?.cls.prototype, methods, actions: Object.fromEntries(active.actions.get(name) ?? []) }))
     }
     for (const registration of contexts.values()) {
       if (isSecurityContext(registration.context)) legacySecurity.push({ type: name, context: registration.context })

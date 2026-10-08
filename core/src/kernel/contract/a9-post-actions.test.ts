@@ -227,11 +227,11 @@ describe('native handlerless post actions', { timeout: 10_000 }, () => {
     assert.equal((await f.instance.source.node('/work/document'))?.count, 1)
   })
 
-  it('rejects unsupported kinds, handlers, I/O and history before gates or effects', async t => {
+  it('rejects unavailable executors, I/O and history before gates or effects', async t => {
     let calls = 0
     const f = await setup([async operation => { if (operation.kind === 'act') calls++; return 'pass' }])
     t.after(() => f.instance.auth.close())
-    for (const action of ['inspect', 'handled', 'elevated', 'external', 'historical']) {
+    for (const action of ['elevated', 'external', 'historical']) {
       await assert.rejects(f.commands.act(f.request(action)), code('UNAVAILABLE'))
     }
     await assert.rejects(f.commands.act({ ...f.request(), opId: undefined }), code('INVALID'))

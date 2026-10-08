@@ -251,7 +251,8 @@ export async function createInstanceFoundation(input: InstanceFoundationConfig):
           return { node: readSource.nodeById, grants: principal => chains.grantsTo(principal),
             ownerGrants: chains.grants({ owner: true }), shard: source.shard }
         },
-        gates: config.gates ?? [], limits: () => limits, budget,
+        gates: config.gates ?? [], limits: () => limits,
+        budget: kind => config.budget === undefined && kind === 'action' ? { ...budget(), deadline: Date.now() + limits.actionMs } : budget(),
         validate: prepared => validate(new Map(prepared.writes.map(write => [write.path, write.node]))) }
   }
   return { id: config.id, root: config.root, registry, writer, source, bootstrap: identity,

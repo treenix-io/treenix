@@ -2,7 +2,7 @@ import { KernelError } from '#errors'
 import { createProcessCache, type CacheRead, type Image, type ProcessCache } from '#kernel/cache'
 import type { NodeChange } from '#kernel/changeset'
 import { createInfluenceIndex, type InfluenceOptions } from '#kernel/influence'
-import { createIdempotency, type IdempotencyOptions, type MutationIdentity } from '#kernel/idempotency'
+import { createIdempotency, type IdempotencyOptions, type MutationIdentity, type MutationWaiter } from '#kernel/idempotency'
 import { comparePositions } from '#kernel/position'
 import { createInstanceStream, type StreamDomain } from '#kernel/stream'
 import { DEFAULT_LIMITS, type Budget, type DomainId, type JournalCommit, type Outcome, type Position, type Store, type StoreCommit, type StoredWrite, type StreamEvent } from '#kernel/types'
@@ -229,7 +229,7 @@ export async function createWriter(options: WriterOptions) {
     await commit(options.root, [...domains], pos => ({ writes: [], transitions: [],
       record: { pos, kind: 'kernel', executor: 'kernel', caller: 'kernel', entries: [], intake: intake.next(pos, force) } }))
   }
-  async function mutate(input: MutationIdentity, execute: (span: MutationSpan) => Promise<unknown>): Promise<Outcome> {
+  async function mutate(input: MutationIdentity, execute: (span: MutationSpan) => Promise<unknown>, wait?: MutationWaiter): Promise<Outcome> {
     if (fatal !== undefined) throw fatal.error
     return intake.run(input, () => refreshIntake(), async decision => {
       let started = false, pending = false, outcome: Outcome | undefined
@@ -268,10 +268,14 @@ export async function createWriter(options: WriterOptions) {
       await execute(span)
       if (outcome === undefined) throw new KernelError('INVALID', 'Mutation returned without its durable final outcome')
       return outcome
-    })
+    }, wait)
+  }
+  function replay(input: MutationIdentity, wait?: MutationWaiter): Promise<Outcome | undefined> {
+    checkFailure()
+    return intake.previous(input, wait)
   }
   return { stream, cache, influence, get position(): Position { return { ...position } },
-    get intake() { return intake.state }, commit, read, mutate, refreshIntake }
+    get intake() { return intake.state }, commit, read, mutate, replay, refreshIntake }
 }
 
 export type Writer = Awaited<ReturnType<typeof createWriter>>

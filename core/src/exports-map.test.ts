@@ -78,7 +78,7 @@ describe('exports map (qvrt)', () => {
 
   it('the kernel door exports types, constants and native module authoring', async () => {
     const kernel = await import('@treenx/core/kernel');
-    assert.deepEqual(Object.keys(kernel).sort(), ['A', 'DEFAULT_LIMITS', 'R', 'W', 'collectModule', 'registerKernel', 'registerKernelAction']);
+    assert.deepEqual(Object.keys(kernel).sort(), ['A', 'DEFAULT_LIMITS', 'R', 'W', 'collectModule', 'getActionContext', 'registerKernel', 'registerKernelAction']);
   });
 
   it('internals do not resolve — pipeline wrappers and infra are private', async () => {

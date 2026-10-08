@@ -4,9 +4,12 @@ import { describe, it } from 'node:test'
 import { getRegistryVersion } from '#core/registry'
 import { KernelError } from '#errors'
 import type { TypeSchema } from '#schema/types'
+import { createInstanceFoundation } from './instance'
 import { createRegistry } from './registry'
+import { scanBudget } from './store/contract'
+import { createMemoryStore } from './store/memory'
 import { buildTypeDef } from './typedef'
-import { DEFAULT_LIMITS, type ReadActionContext, type WriteActionContext } from './types'
+import { DEFAULT_LIMITS, type Position, type ReadActionContext, type WriteActionContext } from './types'
 
 const invalid = (error: unknown) => error instanceof KernelError && error.code === 'INVALID'
 const context: WriteActionContext = {
@@ -82,6 +85,72 @@ describe('class type definitions', () => {
     assert.ok('next' in stream)
     assert.deepEqual(await stream.next(), { value: 4, done: false })
     assert.deepEqual(await stream.next(), { value: 5, done: true })
+  })
+
+  it('uses captured class helpers and getters without adding methods to component data', async () => {
+    class WithHelper {
+      value = 1
+      increment() { this.value = this._next(); return this.doubled }
+      _next() { return this.value + 1 }
+      get doubled() { return this.value * 2 }
+    }
+    const def = buildTypeDef(WithHelper, options({ type: 'object', properties: {}, methods: {
+      increment: { arguments: [] },
+    } }))
+    WithHelper.prototype._next = () => 999
+    const handler = def.actions.increment.handler
+    assert.ok(handler)
+    const component = { $type: def.name, value: 3 }
+    assert.equal(await handler.call(component, context, undefined), 8)
+    assert.deepEqual(component, { $type: def.name, value: 4 })
+  })
+
+  it('changes the module generation when a captured class helper changes', () => {
+    class First {
+      increment() { return this._value() }
+      _value() { return 1 }
+    }
+    class Second {
+      increment() { return this._value() }
+      _value() { return 2 }
+    }
+    const schema: TypeSchema = { type: 'object', properties: {}, methods: { increment: { arguments: [] } } }
+    const registry = createRegistry()
+    registry.publish({ id: 'test', types: [buildTypeDef(First, options(schema))], security: [], open: [] })
+    const first = registry.digest
+    registry.publish({ id: 'test', types: [buildTypeDef(Second, options(schema))], security: [], open: [] })
+    assert.notEqual(registry.digest, first)
+  })
+
+  it('executes captured class setters against the real action draft', { timeout: 10_000 }, async t => {
+    const root = createMemoryStore({ domain: 'class-accessors' })
+    let saved: Position | undefined, sequence = 0
+    const instance = await createInstanceFoundation({ id: 'class-accessors', root, writerEpoch: 1,
+      counter: { async load() { return saved }, async save(pos) { saved = pos }, async freshEpoch(floor) { return floor + 1 } },
+      domains: [{ store: root, epoch: 'accessors1', persistent: false }], budget: scanBudget,
+      firstAdmin: { path: '/admin', name: 'admin', password: 'accessor-password' }, initialCredential: { ttlMs: 60_000 } })
+    t.after(() => instance.auth.close())
+    assert.ok(instance.setupCredential)
+    const admin = instance.commands(await instance.auth.openCredential(instance.setupCredential))
+    const key = () => ({ epoch: instance.writer.intake.epoch, time: Date.now(), nonce: String(++sequence) })
+    class WithSetter {
+      value = 0
+      get doubled() { return this.value * 2 }
+      set doubled(value: number) { this.value = value / 2 }
+      assign(value: number) { this.doubled = value; return this.value }
+    }
+    const def = buildTypeDef(WithSetter, options({ type: 'object', properties: { value: { type: 'number' } }, required: ['value'],
+      methods: { assign: { arguments: [{ name: 'value', type: 'number' }] } } }))
+    await admin.commit({ opId: key(), changes: [{ op: 'put', node: { $path: '/sys/types/test.counter', $type: 't.type',
+      name: def.name, module: def.module, security: def.security } }] })
+    instance.registry.publish({ id: 'test', types: [def], security: [], open: [] })
+    await admin.commit({ opId: key(), changes: [{ op: 'put', node: { $path: '/counter', $type: def.name, value: 1 } }] })
+    const result = await admin.act({ path: '/counter', action: 'assign', args: 8, opId: key() })
+    const node = await instance.source.node('/counter')
+    assert.equal(result.value, 4)
+    assert.ok(node)
+    assert.equal(node.value, 4)
+    assert.equal(Object.hasOwn(node, 'doubled'), false)
   })
 
   it('retains pre, post, setuid and I/O metadata', () => {
