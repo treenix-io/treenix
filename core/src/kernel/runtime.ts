@@ -1,13 +1,12 @@
 import { join } from 'node:path'
 import { KernelError } from '#errors'
-import type { AdminInput } from '#kernel/auth-module'
-import { createInstanceFoundation, type InstanceFoundationWithAuth } from '#kernel/instance'
+import { createInstance, type InstanceFoundationWithAuth } from '#kernel/instance'
 import { openPersistentWriter } from '#kernel/persistence'
 import { copyManifest } from '#kernel/registry'
-import { installModules, previewModules } from '#kernel/module-install'
+import { previewModules } from '#kernel/module-install'
 import { createFsStore } from '#kernel/store/fs'
 import { createFsBlobStore } from '#kernel/blob-store-fs'
-import { DEFAULT_LIMITS, type Credential, type Gate, type ModuleManifest } from '#kernel/types'
+import { DEFAULT_LIMITS, type AdminInput, type Credential, type Gate, type ModuleManifest } from '#kernel/types'
 
 export interface NativeRuntimeConfig {
   readonly id: string
@@ -15,6 +14,7 @@ export interface NativeRuntimeConfig {
   readonly credentialTtlMs: number
   readonly firstAdmin?: AdminInput
   readonly installerCredential?: Credential
+  /** This deployment binding supplies configured manifests; omission selects an empty set. */
   readonly modules?: readonly ModuleManifest[]
   readonly gates?: readonly Gate[]
 }
@@ -68,18 +68,22 @@ export async function openNativeRuntime(input: NativeRuntimeConfig) {
         deadline: Date.now() + DEFAULT_LIMITS.queryMs,
       },
     });
-    foundation = await createInstanceFoundation({
+    foundation = await createInstance({
       id: config.id,
-      root: store,
-      writerEpoch: lease.writerEpoch,
+      root: { kind: 'store', store },
       blobs: await createFsBlobStore(join(config.directory, '.treenix', 'blobs')),
-      counter: lease,
-      domains: [{ store, epoch: lease.epoch, persistent: true }],
+      provisioning: {
+        counter: lease,
+        writerEpoch: lease.writerEpoch,
+        domains: [{ store, epoch: lease.epoch, persistent: true }],
+        credentialTtlMs: config.credentialTtlMs,
+        bootstrap: existing.items.length === 0 && firstAdmin !== undefined
+          ? { kind: 'fresh', admin: firstAdmin }
+          : { kind: 'reopen', installerCredential: config.installerCredential },
+      },
       gates: config.gates,
-      initialCredential: { ttlMs: config.credentialTtlMs },
-      ...(existing.items.length === 0 && firstAdmin !== undefined ? { firstAdmin } : {}),
+      modules,
     });
-    await installModules(foundation, modules, config.installerCredential);
     let closing: Promise<void> | undefined;
     return {
       instance: foundation,

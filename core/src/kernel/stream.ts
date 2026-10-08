@@ -1,13 +1,7 @@
 import { KernelError } from '#errors'
 import { isDeepStrictEqual } from 'node:util'
 import { comparePositions, positionToRev } from '#kernel/position'
-import type { Budget, DomainId, InstanceStream, Position, Store, StreamCursor, StreamEvent } from '#kernel/types'
-
-export interface StreamDomain {
-  readonly store: Store
-  readonly epoch: string
-  readonly persistent: boolean
-}
+import type { Budget, DomainId, InstanceStream, Position, StreamCursor, StreamDomain, StreamEvent } from '#kernel/types'
 
 interface Subscriber {
   readonly events: { readonly event: StreamEvent; readonly bytes: number }[]
@@ -24,14 +18,22 @@ export interface StreamOptions {
   readonly bufferedBytes?: number
 }
 
-export function createInstanceStream(options: StreamOptions) {
-  let position = options.position
+/** Checks continuity before resource acquisition and constructs the stream's domain epochs. */
+export function streamDomainEpochs(domains: readonly StreamDomain[]): Map<DomainId, string> {
   const epochs = new Map<DomainId, string>()
-  for (const domain of options.domains) {
+  for (const domain of domains) {
+    if (domain.epoch.length === 0) throw new KernelError('INVALID', 'Domain continuity epoch must be nonempty')
     const prior = epochs.get(domain.store.domain)
-    if (prior !== undefined && prior !== domain.epoch) throw new KernelError('INVALID', 'Stores in one domain have different continuity epochs')
+    if (prior !== undefined && prior !== domain.epoch)
+      throw new KernelError('INVALID', 'Stores in one domain have different continuity epochs')
     epochs.set(domain.store.domain, domain.epoch)
   }
+  return epochs
+}
+
+export function createInstanceStream(options: StreamOptions) {
+  let position = options.position
+  const epochs = streamDomainEpochs(options.domains)
   const subscribers = new Set<Subscriber>()
   const observers = new Set<(event: StreamEvent) => void>()
   const maxEvents = options.bufferedEvents ?? 256, maxBytes = options.bufferedBytes ?? 32 * 1024 * 1024

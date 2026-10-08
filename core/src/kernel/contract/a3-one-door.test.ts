@@ -1,3 +1,4 @@
+import type { PositionCounter } from '#kernel/types'
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { KernelError } from '#errors'
@@ -10,7 +11,7 @@ import { createMemoryStore } from '#kernel/store/memory'
 import { computeRights } from '#kernel/rights'
 import { createChainIndex } from '#kernel/chain-index'
 import type { ModuleManifest, Position } from '#kernel/types'
-import type { PositionCounter } from '#kernel/writer'
+
 
 const code = (expected: KernelError['code']) => (error: unknown) => error instanceof KernelError && error.code === expected
 const kernel = { executor: 'kernel', caller: 'kernel' } as const

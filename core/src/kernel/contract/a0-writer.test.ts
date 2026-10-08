@@ -1,3 +1,4 @@
+import type { PositionCounter } from '#kernel/types'
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { KernelError } from '#errors'
@@ -5,8 +6,8 @@ import { comparePositions, positionToRev, revToPosition } from '#kernel/position
 import { createMemoryStore } from '#kernel/store/memory'
 import { scanBudget, storedNode } from '#kernel/store/contract'
 import { createInstanceStream } from '#kernel/stream'
-import { createWriter, type PositionCounter, type PreparedCommit } from '#kernel/writer'
-import type { DecisionRange, JournalCommit, JournalEntry, JournalRange, Position, ScanQuery, ScanRange, ScanResult, Store, StoredNode, StreamCursor, StreamEvent } from '#kernel/types'
+import { createWriter, type PreparedCommit } from '#kernel/writer'
+import type { DecisionRange, JournalCommit, JournalEntry, JournalRange, Position, ScanQuery, ScanRange, ScanResult, Store, StoredNode, StreamCursor, StreamDomain, StreamEvent } from '#kernel/types'
 
 function signal() {
   let resolve: () => void = () => {}
@@ -82,6 +83,32 @@ describe('position identity', () => {
 })
 
 describe('instance writer', { timeout: 10_000 }, () => {
+  it('refuses invalid domain bindings before touching the counter or Store', async () => {
+    const store = createMemoryStore({ domain: 'root' }), effects: string[] = []
+    const root: Store = {
+      ...store,
+      scan() { effects.push('scan'); throw new Error('Unexpected Store scan') },
+      async commit(input) { effects.push('commit'); return store.commit(input) },
+    }
+    const saved: PositionCounter = {
+      async load() { effects.push('load'); return undefined },
+      async freshEpoch(floor) { effects.push('epoch'); return floor + 1 },
+      async save() { effects.push('save') },
+    }
+    const variants: readonly (readonly StreamDomain[])[] = [
+      [],
+      [{ store, epoch: 'root1', persistent: true }],
+      [{ store: root, epoch: '', persistent: true }],
+      [{ store: root, epoch: 'root1', persistent: true }, { store, epoch: 'root2', persistent: true }],
+    ]
+
+    for (const domains of variants) {
+      await assert.rejects(createWriter({ instance: 'test', root, writerEpoch: 1, domains, counter: saved }),
+        (error: unknown) => error instanceof KernelError && error.code === 'INVALID')
+      assert.deepEqual(effects, [])
+    }
+  })
+
   it('refuses authorization that ends after preparation and before persistence', async () => {
     const [root] = stores(), writer = await open([root])
     let active = true

@@ -1,3 +1,4 @@
+import type { PositionCounter } from '#kernel/types'
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { KernelError } from '#errors'
@@ -8,7 +9,7 @@ import type { AuthReadSource } from '#kernel/session'
 import { createMemoryStore } from '#kernel/store/memory'
 import { scanBudget } from '#kernel/store/contract'
 import type { ChangeMember, ModuleManifest, Position } from '#kernel/types'
-import type { PositionCounter } from '#kernel/writer'
+
 
 const code = (expected: KernelError['code']) => (error: unknown) => error instanceof KernelError && error.code === expected
 function signal() {

@@ -1,3 +1,4 @@
+import type { PositionCounter } from '#kernel/types'
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { prepareAdmin } from '#kernel/auth-module'
@@ -6,7 +7,7 @@ import { createInstanceFoundation } from '#kernel/instance'
 import { createMemoryStore } from '#kernel/store/memory'
 import { scanBudget } from '#kernel/store/contract'
 import type { Position } from '#kernel/types'
-import type { PositionCounter } from '#kernel/writer'
+
 
 function input() {
   let notify: () => void = () => {}

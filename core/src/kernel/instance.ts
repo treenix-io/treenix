@@ -1,8 +1,8 @@
 import { KernelError } from '#errors'
-import { AUTH_KEY_PATH, type AdminInput } from '#kernel/auth-module'
+import { AUTH_KEY_PATH, assertAdminInput } from '#kernel/auth-module'
 import { createAuthFactory, type AuthEvent, type AuthFactory } from '#kernel/auth-factory'
 import { recheckLogin } from '#kernel/auth/login'
-import { assertAuthKey, assertBootstrapState, bootstrap, bootstrapIdentity, bootstrapModules, LIMITS_PATH,
+import { assertAdminPath, assertAuthKey, assertBootstrapState, bootstrap, bootstrapIdentity, bootstrapModules, LIMITS_PATH,
   ownershipRecord, storedLimits, TYPE_PATH, type BootstrapIdentity } from '#kernel/bootstrap'
 import { createProcessCache, type Image } from '#kernel/cache'
 import { createBlobTransfers } from '#kernel/blobs'
@@ -14,14 +14,15 @@ import type { NodeLaneOptions } from '#kernel/lane'
 import type { NodeLane } from '#kernel/lane'
 import { createSessionFactory, type SessionFactory } from '#kernel/session-factory'
 import { createNodeLaneRead } from '#kernel/lane-source'
-import { createRegistry, type TypeOwnership } from '#kernel/registry'
+import { copyManifest, createRegistry, type TypeOwnership } from '#kernel/registry'
+import { assertTypeOwner, installModuleOwnership, previewModules } from '#kernel/module-install'
+import { loadAllMods, publishLoadedModules } from '#mod/loader'
 import { createProjector } from '#kernel/projection'
 import type { AuthReadSource, AuthSource } from '#kernel/session'
 import type { AuthAdmission } from '#kernel/auth-factory'
-import type { StreamDomain } from '#kernel/stream'
-import { DEFAULT_LIMITS, type Budget, type ChangeMember, type Credential, type InstanceId, type Limits, type NodeId,
-  type BlobStore, type Gate, type InstanceStream, type Path, type Position, type Registry, type Store, type StoreCommit, type StoredNode } from '#kernel/types'
-import { createWriter, type PositionCounter, type Writer } from '#kernel/writer'
+import { DEFAULT_LIMITS, type AdminInput, type Budget, type ChangeMember, type Credential, type InstanceConfig, type InstanceId, type Limits, type ModuleManifest, type NodeId,
+  type BlobStore, type Gate, type InstanceStream, type Path, type Position, type PositionCounter, type Registry, type Store, type StoreCommit, type StoredNode, type StreamCursor, type StreamDomain } from '#kernel/types'
+import { assertWriterDomains, createWriter, type Writer } from '#kernel/writer'
 
 export interface InstanceFoundationConfig {
   readonly id: InstanceId
@@ -34,6 +35,8 @@ export interface InstanceFoundationConfig {
   readonly initialCredential?: { readonly ttlMs: number }
   readonly gates?: readonly Gate[]
   readonly blobs?: BlobStore
+  readonly modules?: readonly ModuleManifest[]
+  readonly installerCredential?: Credential
 }
 
 export interface InstanceFoundation {
@@ -46,6 +49,7 @@ export interface InstanceFoundation {
   readonly auth?: AuthFactory
   readonly setupCredential?: Credential
   readonly stream: InstanceStream
+  readonly bootstrapCursor: StreamCursor
   /** Close sessions and authentication state owned by this foundation. */
   close(): void
   limits(): Limits
@@ -64,19 +68,106 @@ export interface InstanceFoundationWithAuth extends InstanceFoundation {
 }
 export interface AuthInstanceFoundationConfig extends InstanceFoundationConfig { readonly initialCredential: { readonly ttlMs: number } }
 
-export function createInstanceFoundation(input: AuthInstanceFoundationConfig): Promise<InstanceFoundationWithAuth>
-export function createInstanceFoundation(input: InstanceFoundationConfig): Promise<InstanceFoundation>
-export async function createInstanceFoundation(input: InstanceFoundationConfig): Promise<InstanceFoundation> {
-  const { firstAdmin, domains, initialCredential, gates, ...options } = input
-  const config: InstanceFoundationConfig = Object.freeze({ ...options,
-    domains: Object.freeze(domains.map(domain => Object.freeze({ ...domain }))),
-    ...(gates === undefined ? {} : { gates: Object.freeze([...gates]) }),
-    ...(initialCredential === undefined ? {} : { initialCredential: Object.freeze({ ttlMs: initialCredential.ttlMs }) }),
-    ...(firstAdmin === undefined ? {} : { firstAdmin: Object.freeze({ ...firstAdmin }) }) })
+/** Checks deployment identity and credential policy before module loading or storage work. */
+function assertInstanceOptions(
+  config: Pick<InstanceFoundationConfig, 'id' | 'writerEpoch' | 'initialCredential'>,
+): void {
   if (config.id.length === 0 || !Number.isSafeInteger(config.writerEpoch) || config.writerEpoch < 0)
     throw new KernelError('INVALID', 'Invalid instance lease identity')
   if (config.initialCredential !== undefined && (!Number.isFinite(config.initialCredential.ttlMs) || config.initialCredential.ttlMs <= 0))
     throw new KernelError('INVALID', 'Credential lifetime must be positive and finite')
+}
+
+/** Composes an instance from borrowed deployment resources and publishes only owned native types. */
+export async function createInstance(input: InstanceConfig): Promise<InstanceFoundationWithAuth> {
+  const provisioning = input.provisioning
+  const policy = provisioning.bootstrap
+  const bootstrapPolicy = policy.kind === 'fresh'
+    ? { kind: 'fresh' as const, admin: Object.freeze({ ...policy.admin }) }
+    : {
+        kind: 'reopen' as const,
+        installerCredential: policy.installerCredential === undefined
+          ? undefined
+          : Object.freeze({ ...policy.installerCredential }),
+      }
+  const config = Object.freeze({
+    id: input.id,
+    root: Object.freeze({ ...input.root }),
+    rootExternal: input.rootExternal,
+    blobs: input.blobs,
+    gates: input.gates === undefined ? undefined : Object.freeze([...input.gates]),
+    counter: provisioning.counter,
+    writerEpoch: provisioning.writerEpoch,
+    domains: Object.freeze(provisioning.domains.map(domain => Object.freeze({ ...domain }))),
+    credentialTtlMs: provisioning.credentialTtlMs,
+    bootstrapPolicy,
+    modules: input.modules?.map(copyManifest), allowPartialMods: input.allowPartialMods,
+  })
+  if (config.root.kind !== 'store' || config.rootExternal !== undefined && config.rootExternal !== 'none')
+    throw new KernelError('UNAVAILABLE', 'Instance root requires a supported Store target')
+  assertInstanceOptions({
+    id: config.id,
+    writerEpoch: config.writerEpoch,
+    initialCredential: { ttlMs: config.credentialTtlMs },
+  })
+  assertWriterDomains(config.root.store, config.domains)
+  if (bootstrapPolicy.kind === 'fresh') {
+    assertAdminPath(bootstrapPolicy.admin.path)
+    assertAdminInput(bootstrapPolicy.admin)
+  }
+
+  const discovered = config.modules === undefined ? await loadAllMods('kernel') : undefined
+  const modules = config.modules ?? discovered!.manifests.map(copyManifest)
+  previewModules(modules)
+  if (discovered !== undefined) {
+    const preview = createRegistry()
+    for (const module of bootstrapModules) preview.publish(module)
+    await publishLoadedModules(preview, discovered, { allowPartialMods: config.allowPartialMods })
+  }
+  const instance = await createInstanceFoundation({
+    id: config.id,
+    root: config.root.store,
+    counter: config.counter,
+    writerEpoch: config.writerEpoch,
+    domains: config.domains,
+    blobs: config.blobs,
+    gates: config.gates,
+    modules,
+    initialCredential: { ttlMs: config.credentialTtlMs },
+    installerCredential: bootstrapPolicy.kind === 'reopen' ? bootstrapPolicy.installerCredential : undefined,
+    ...(bootstrapPolicy.kind === 'fresh' ? { firstAdmin: bootstrapPolicy.admin } : {}),
+  })
+  try {
+    await installModuleOwnership(
+      instance,
+      modules,
+      bootstrapPolicy.kind === 'reopen' ? bootstrapPolicy.installerCredential : undefined,
+    )
+    if (discovered === undefined) for (const module of modules) instance.registry.publish(module)
+    else await publishLoadedModules(instance.registry, discovered, { allowPartialMods: config.allowPartialMods })
+    return instance
+  } catch (error) {
+    instance.close()
+    throw error
+  }
+}
+
+export function createInstanceFoundation(input: AuthInstanceFoundationConfig): Promise<InstanceFoundationWithAuth>
+export function createInstanceFoundation(input: InstanceFoundationConfig): Promise<InstanceFoundation>
+export async function createInstanceFoundation(input: InstanceFoundationConfig): Promise<InstanceFoundation> {
+  const { firstAdmin, domains, initialCredential, gates, modules, ...options } = input
+  const config: InstanceFoundationConfig = Object.freeze({ ...options,
+    domains: Object.freeze(domains.map(domain => Object.freeze({ ...domain }))),
+    ...(gates === undefined ? {} : { gates: Object.freeze([...gates]) }),
+    ...(modules === undefined ? {} : { modules: Object.freeze(modules.map(copyManifest)) }),
+    ...(initialCredential === undefined ? {} : { initialCredential: Object.freeze({ ttlMs: initialCredential.ttlMs }) }),
+    ...(firstAdmin === undefined ? {} : { firstAdmin: Object.freeze({ ...firstAdmin }) }) })
+  assertInstanceOptions(config)
+  assertWriterDomains(config.root, config.domains)
+  if (config.firstAdmin !== undefined) {
+    assertAdminPath(config.firstAdmin.path)
+    assertAdminInput(config.firstAdmin)
+  }
   let limits: Limits = DEFAULT_LIMITS
   const budget = config.budget ?? (() => ({ nodes: limits.readNodes, bytes: limits.readBytes,
     exprWork: limits.exprWork, deadline: Date.now() + limits.queryMs }))
@@ -165,13 +256,21 @@ export async function createInstanceFoundation(input: InstanceFoundationConfig):
       throw error
     }
   }
-  const writer = await createWriter({ instance: config.id, root: config.root, writerEpoch: config.writerEpoch,
-    domains: config.domains, counter: config.counter, budget, applied: publish,
-    cache: createProcessCache({ queryMs: () => limits.queryMs }) })
-  const initial = await writer.cache.fill(config.root, { subtree: '/' }, budget())
+  const cache = createProcessCache({ queryMs: () => limits.queryMs })
+  const initial = await cache.fill(config.root, { subtree: '/' }, budget())
+  let writer: Writer
   try {
     for (const node of initial.nodes) put(node)
     if (storedRoot !== undefined) identity = assertBootstrapState(config.id, new Map(initial.nodes.map(node => [node.$path, node])))
+    else if (paths.size !== 0) throw new KernelError('INVALID', 'Bootstrap requires an empty root Store')
+    for (const module of config.modules ?? []) for (const type of module.types) for (const name of [type.name, ...type.aliases ?? []]) {
+      const owner = owners.get(name)
+      if (owner !== undefined) assertTypeOwner(owner, type)
+      else if (storedRoot !== undefined && config.installerCredential === undefined)
+        throw new KernelError('UNAUTHENTICATED', 'Module installation requires a credential')
+    }
+    writer = await createWriter({ instance: config.id, root: config.root, writerEpoch: config.writerEpoch,
+      domains: config.domains, counter: config.counter, budget, applied: publish, cache })
   } finally { initial.release() }
 
   function reader(allowance: Budget, active = () => true): AuthReadSource {
@@ -216,7 +315,6 @@ export async function createInstanceFoundation(input: InstanceFoundationConfig):
     },
   }
   if (storedRoot === undefined) {
-    if (paths.size !== 0) throw new KernelError('INVALID', 'Bootstrap requires an empty root Store')
     const admin = config.firstAdmin
     if (admin === undefined) throw new KernelError('INVALID', 'First-account provisioning is required')
     const result = await bootstrap({ instance: config.id, store: config.root, writer, cache: writer.cache,
@@ -309,6 +407,7 @@ export async function createInstanceFoundation(input: InstanceFoundationConfig):
     source,
     bootstrap: identity,
     stream: writer.stream,
+    bootstrapCursor: writer.stream.cursor(),
     ...(auth === undefined ? {} : { auth }),
     ...(setupCredential === undefined ? {} : { setupCredential }),
     ...(sessions === undefined

@@ -1,3 +1,4 @@
+import type { PositionCounter } from '#kernel/types'
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { KernelError } from '#errors'
@@ -6,7 +7,7 @@ import { compactJournal } from '#kernel/journal'
 import { scanBudget, storedNode } from '#kernel/store/contract'
 import { createMemoryStore } from '#kernel/store/memory'
 import type { Actor, OpId, Position, Store } from '#kernel/types'
-import { createWriter, type PositionCounter, type PreparedMutation } from '#kernel/writer'
+import { createWriter, type PreparedMutation } from '#kernel/writer'
 
 const actor: Actor = { principal: 'u:one', claims: ['u:one', 'group:editors'], scope: ['/items'] }
 const errorCode = (code: KernelError['code']) => (error: unknown) => error instanceof KernelError && error.code === code

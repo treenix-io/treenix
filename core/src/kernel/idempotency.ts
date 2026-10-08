@@ -1,8 +1,9 @@
+import type { StreamDomain } from '#kernel/types'
 import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import { KernelError } from '#errors'
 import { comparePositions, positionToRev } from '#kernel/position'
-import type { StreamDomain } from '#kernel/stream'
+
 import { DEFAULT_LIMITS, type Actor, type Budget, type IntakeState, type JournalCommit, type Limits,
   type OpDecision, type OpId, type Outcome, type Position, type Store } from '#kernel/types'
 import { freeze } from '#util/freeze'

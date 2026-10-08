@@ -57,6 +57,8 @@ function allowed(file: string, spec: string): boolean {
   if (local === null) return false
 
   const target = relative(srcDir, local).replace(/\.tsx?$/, '')
+  // Instance owns native module discovery; the remaining kernel stays independent of the loader.
+  if (file === join(kernelDir, 'instance.ts') && target === 'mod/loader') return true
   return ALLOWED.some((area) => target === area || target.startsWith(`${area}/`))
 }
 
@@ -118,5 +120,11 @@ describe('kernel import boundary', () => {
     const file = join(kernelDir, 'contract', 'x.ts')
     for (const spec of ['#tree', '#tree/cache', '#server/actions', '#schema/load', '#chain', '../../sub/watch', '../../../package.json', '@treenx/core/kernel', 'sift'])
       assert.equal(allowed(file, spec), false, spec)
+  })
+
+  it('admits native discovery only at the instance composition boundary', () => {
+    assert.equal(allowed(join(kernelDir, 'instance.ts'), '#mod/loader'), true)
+    assert.equal(allowed(join(kernelDir, 'writer.ts'), '#mod/loader'), false)
+    assert.equal(allowed(join(kernelDir, 'instance.ts'), '#mod/prefab'), false)
   })
 })

@@ -1,10 +1,39 @@
 // Type-level assertions for types.ts: each @ts-expect-error must stay an error.
 import type { CreateTestInstance, TestActorInput, TestInstanceConfig } from '#kernel/index'
+import { createInstance } from '#kernel/index'
 import type {
   ActRequest, Actor, CommitRequest, ModuleManifest, NestedActRequest, OpId, Pending, ReadActionContext,
   Reader, Request, WriteActionContext, NodeInput, ReadAction, WriteAction, PostAction, OpenRegistration,
   SecurityRegistration, SubSelector, Operation, RightsRule, Gate, MountTarget, DeriveHandler, ComputedNode,
+  CreateInstance, Instance, InstanceConfig, InstanceProvisioning,
 } from '#kernel/types'
+
+export const canonicalFactory: CreateInstance = createInstance
+
+/** Checks that the public factory borrows explicit deployment resources and exposes the session door. */
+export async function instanceFactorySurface(config: InstanceConfig): Promise<Instance> {
+  const instance = await createInstance(config)
+  await instance.openSession()
+  instance.close()
+  // @ts-expect-error the public instance does not expose writer admission
+  instance.writer
+  return instance
+}
+
+/** Keeps fresh bootstrap authority distinct from reopening a provisioned root. */
+export function instanceProvisioningSurface(config: InstanceConfig, provisioning: InstanceProvisioning): void {
+  const { provisioning: resources, ...withoutResources } = config
+  // @ts-expect-error deployment resources cannot be inferred from a Store
+  createInstance(withoutResources)
+  // @ts-expect-error a fresh root requires explicit first-admin provisioning
+  const freshWithoutAdmin: InstanceProvisioning = { ...provisioning, bootstrap: { kind: 'fresh' } }
+  const reopenWithAdmin: InstanceProvisioning = {
+    ...provisioning,
+    // @ts-expect-error reopening cannot recreate the first admin
+    bootstrap: { kind: 'reopen', admin: { path: '/admin', name: 'admin', password: 'password' } },
+  }
+  void [resources, freshWithoutAdmin, reopenWithAdmin]
+}
 
 const streamKey: OpId = { epoch: 'intake', time: 1, nonce: 'stream' }
 export const streamContinuation: ActRequest = { path: '/chat', action: 'send', args: {}, opId: { ...streamKey, nonce: 'continuation' }, anchor: streamKey }

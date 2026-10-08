@@ -1122,14 +1122,49 @@ export interface BlobStore {
   delete(id: string): Promise<void>
 }
 
+export interface PositionCounter {
+  load(): Promise<Position | undefined>
+  save(position: Position, writerEpoch: number): Promise<void>
+  /** The lease provider reserves a never-used epoch above every previously issued epoch. */
+  freshEpoch(previous: number): Promise<number>
+}
+
+export interface StreamDomain {
+  readonly store: Store
+  readonly epoch: string
+  readonly persistent: boolean
+}
+
+export interface AdminInput {
+  readonly path: string
+  readonly name: string
+  readonly password: string
+}
+
+/** Acquired writer resources are borrowed; their owner supplies fresh or reopen policy explicitly. */
+export interface InstanceProvisioning {
+  readonly counter: PositionCounter
+  readonly writerEpoch: number
+  readonly domains: readonly StreamDomain[]
+  readonly credentialTtlMs: number
+  readonly bootstrap:
+    | { readonly kind: 'fresh'; readonly admin: AdminInput }
+    | { readonly kind: 'reopen'; readonly installerCredential?: Credential }
+}
+
 export interface InstanceConfig {
   readonly id: InstanceId
   readonly root: MountTarget
+  readonly provisioning: InstanceProvisioning
   /** Whether a Store root admits edits outside the kernel, as `MountDecl.external` does for mounts; absent is `none`. */
   readonly rootExternal?: ExternalEdits
   readonly blobs: BlobStore
   /** Applied in order to every operation of every session. */
   readonly gates?: readonly Gate[]
+  /** Explicit manifests replace default native module discovery, including an empty set. */
+  readonly modules?: readonly ModuleManifest[]
+  /** Allows reported discovery failures; manifest and persisted ownership conflicts still refuse. */
+  readonly allowPartialMods?: boolean
 }
 
 export interface Instance {
@@ -1142,6 +1177,8 @@ export interface Instance {
   openSession(credential?: Credential, origin?: string): Promise<Session>
   /** For stream consumers; replicas come later. */
   readonly stream: InstanceStream
+  /** Releases this instance's sessions and authentication, preserving borrowed Store and writer resources. */
+  close(): void
 }
 
 export type CreateInstance = (config: InstanceConfig) => Promise<Instance>

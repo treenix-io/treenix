@@ -8,6 +8,7 @@ import { readFile } from 'node:fs/promises';
 import { describe, it } from 'node:test';
 // Unused on purpose: tsc fails if the kernel door stops carrying the normative types.
 import type { Session, Store } from '@treenx/core/kernel';
+import { createInstance } from '#kernel/instance';
 
 const PUBLIC_DOORS = [
   '.',
@@ -76,9 +77,13 @@ describe('exports map (qvrt)', () => {
     assert.equal(typeof inflight.createInflight, 'function');
   });
 
-  it('the kernel door exports types, constants and native module authoring', async () => {
+  it('the kernel door exports the canonical factory and native module authoring', async () => {
     const kernel = await import('@treenx/core/kernel');
-    assert.deepEqual(Object.keys(kernel).sort(), ['A', 'DEFAULT_LIMITS', 'R', 'W', 'collectModule', 'getActionContext', 'registerKernel', 'registerKernelAction']);
+    assert.deepEqual(Object.keys(kernel).sort(), [
+      'A', 'DEFAULT_LIMITS', 'R', 'W', 'collectModule', 'createInstance',
+      'getActionContext', 'registerKernel', 'registerKernelAction',
+    ]);
+    assert.equal(kernel.createInstance, createInstance);
   });
 
   it('internals do not resolve — pipeline wrappers and infra are private', async () => {

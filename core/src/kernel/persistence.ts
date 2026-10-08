@@ -1,3 +1,4 @@
+import type { PositionCounter } from '#kernel/types'
 import { spawnSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { open, readFile, readdir, realpath } from 'node:fs/promises'
@@ -6,7 +7,7 @@ import { KernelError } from '#errors'
 import { comparePositions } from '#kernel/position'
 import { durableDirectory, durableWrite, missing, syncDirectory } from '#kernel/store/fs-io'
 import type { Position } from '#kernel/types'
-import type { PositionCounter } from '#kernel/writer'
+
 import { isRecord } from '#util/is-record'
 import { assertPathSafe } from '#util/path-safety'
 

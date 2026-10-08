@@ -2,9 +2,15 @@ import { randomUUID } from 'node:crypto'
 import { KernelError } from '#errors'
 import { bootstrapModules, ownershipRecord, TYPE_PATH } from '#kernel/bootstrap'
 import type { InstanceFoundationWithAuth } from '#kernel/instance'
-import { createRegistry } from '#kernel/registry'
+import { createRegistry, type TypeOwnership } from '#kernel/registry'
 import { drainSession } from '#kernel/session-delivery'
-import type { ChangeMember, Credential, ModuleManifest } from '#kernel/types'
+import type { ChangeMember, Credential, ModuleManifest, TypeDef } from '#kernel/types'
+
+/** Persisted type ownership survives module replacement and security-class changes. */
+export function assertTypeOwner(owner: TypeOwnership, type: TypeDef): void {
+  if (owner.module !== type.module || owner.security !== type.security)
+    throw new KernelError('FORBIDDEN', 'Module differs from persisted type ownership')
+}
 
 /** Checks configured manifests before provisioning or writing persisted ownership. */
 export function previewModules(modules: readonly ModuleManifest[]): void {
@@ -17,8 +23,8 @@ export function previewModules(modules: readonly ModuleManifest[]): void {
   }
 }
 
-/** Writes type ownership through the installing admin's actual Session before publishing each manifest. */
-export async function installModules(
+/** Writes type ownership through the installing admin's actual Session before publication. */
+export async function installModuleOwnership(
   instance: InstanceFoundationWithAuth,
   modules: readonly ModuleManifest[],
   installerCredential?: Credential,
@@ -31,8 +37,7 @@ export async function installModules(
         const previous = await instance.source.node(path);
         if (previous !== null) {
           const owner = ownershipRecord(previous);
-          if (owner.module !== type.module || owner.security !== type.security)
-            throw new KernelError('FORBIDDEN', 'Module differs from persisted type ownership');
+          assertTypeOwner(owner, type);
         } else {
           changes.push({
             op: 'put',
@@ -67,5 +72,4 @@ export async function installModules(
       await delivery;
     }
   }
-  for (const module of modules) instance.registry.publish(module);
 }

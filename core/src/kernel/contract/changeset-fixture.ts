@@ -1,3 +1,4 @@
+import type { PositionCounter } from '#kernel/types'
 import { createProcessCache } from '#kernel/cache'
 import { createChainIndex, decodeChainNode } from '#kernel/chain-index'
 import { rightsReadInput, typeReadVersion } from '#kernel/preconditions'
@@ -8,7 +9,7 @@ import { createRegistry } from '#kernel/registry'
 import { createMemoryStore } from '#kernel/store/memory'
 import { scanBudget } from '#kernel/store/contract'
 import type { ChangeMember, NodeInput, Position, StoredNode } from '#kernel/types'
-import { createWriter, type PositionCounter } from '#kernel/writer'
+import { createWriter } from '#kernel/writer'
 
 export const input = (path: string, fields: Record<string, unknown> = {}, type = 'item'): NodeInput => ({ ...fields, $path: path, $type: type })
 export const put = (path: string, fields: Record<string, unknown> = {}, type = 'item'): ChangeMember => ({ op: 'put', node: input(path, fields, type) })

@@ -1,20 +1,28 @@
 import { ancestorPaths, assertSafePath, isChildPath } from '#core/path'
 import { kernelManifest } from '#kernel/builtins'
 import { KernelError } from '#errors'
-import { AUTH_KEY_PATH, authKeyInput, authManifest, prepareAdmin, type AdminInput } from '#kernel/auth-module'
+import { AUTH_KEY_PATH, authKeyInput, authManifest, prepareAdmin } from '#kernel/auth-module'
 import { prepareCredential } from '#kernel/auth/credentials'
 import { prepareChangeSet } from '#kernel/changeset'
 import type { ProcessCache } from '#kernel/cache'
 import { readLimits } from '#kernel/limits'
 import { positionToRev } from '#kernel/position'
 import { createRegistry, type TypeOwnership } from '#kernel/registry'
-import { DEFAULT_LIMITS, R, W, A, type Budget, type InstanceId, type Limits, type NodeId, type NodeInput,
+import { DEFAULT_LIMITS, R, W, A, type AdminInput, type Budget, type InstanceId, type Limits, type NodeId, type NodeInput,
   type Credential, type Registry, type Store, type StoredNode } from '#kernel/types'
 import type { Writer } from '#kernel/writer'
 
 export const LIMITS_PATH = '/sys/limits'
 export const TYPE_PATH = '/sys/types'
 export const bootstrapModules = [kernelManifest, authManifest] as const
+
+/** Keeps first-account provisioning outside the protected bootstrap namespace. */
+export function assertAdminPath(path: string): void {
+  assertSafePath(path)
+  if (path === '/' || ['/sys', '/auth/credentials', '/auth/sessions'].some(reserved =>
+      path === reserved || isChildPath(reserved, path, false))
+    || path === '/auth' || path === '/auth/users') throw new KernelError('INVALID', 'Reserved first-account path')
+}
 
 export interface BootstrapIdentity {
   readonly adminId: NodeId
@@ -75,10 +83,7 @@ export async function bootstrap(options: { readonly instance: InstanceId; readon
   const credentialTtlMs = options.credentialTtlMs
   if (credentialTtlMs !== undefined && (!Number.isFinite(credentialTtlMs) || credentialTtlMs <= 0))
     throw new KernelError('INVALID', 'Credential lifetime must be positive and finite')
-  assertSafePath(adminInput.path)
-  if (adminInput.path === '/' || ['/sys', '/auth/credentials', '/auth/sessions'].some(path =>
-    adminInput.path === path || isChildPath(path, adminInput.path, false))
-    || adminInput.path === '/auth' || adminInput.path === '/auth/users') throw new KernelError('INVALID', 'Reserved first-account path')
+  assertAdminPath(adminInput.path)
   const admin = await prepareAdmin(adminInput)
   const registry: Registry = createRegistry()
   for (const module of bootstrapModules) registry.publish(module)

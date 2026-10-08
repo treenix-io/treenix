@@ -1,7 +1,9 @@
 import { randomBytes } from 'node:crypto'
 import { KernelError } from '#errors'
 import { hashPassword, passwordPath } from '#kernel/auth/crypto'
-import { A, R, W, type JsonSchema, type ModuleManifest, type NodeId, type NodeInput, type RuleInput, type TypeDef } from '#kernel/types'
+import { createRegistry } from '#kernel/registry'
+import { assertNodeSchema } from '#kernel/schema'
+import { A, R, W, type AdminInput, type JsonSchema, type ModuleManifest, type NodeId, type NodeInput, type RuleInput, type TypeDef } from '#kernel/types'
 
 export const AUTH_KEY_PATH = '/sys/auth-key'
 export const AUTH_MODULE = 'treenix.auth'
@@ -40,17 +42,28 @@ export const authManifest: ModuleManifest = {
   open: [],
 }
 
-export interface AdminInput {
-  readonly path: string
-  readonly name: string
-  readonly password: string
+/** Builds the account whose schema also governs first-account provisioning. */
+function adminAccount(input: AdminInput): NodeInput {
+  return {
+    $path: input.path,
+    $type: 't.user',
+    name: input.name,
+    status: 'active',
+    '#groups': { $type: 't.groups', list: ['admins'] },
+  }
+}
+
+/** Validates provisioning through the account schema before storage or password work. */
+export function assertAdminInput(input: AdminInput): void {
+  const registry = createRegistry()
+  registry.publish(authManifest)
+  assertNodeSchema(adminAccount(input), registry)
 }
 
 export async function prepareAdmin(input: AdminInput) {
-  const { path, name, password } = input
+  const { password } = input
+  const account = adminAccount(input)
   const hash = await hashPassword(password)
-  const account: NodeInput = { $path: path, $type: 't.user', name, status: 'active',
-    '#groups': { $type: 't.groups', list: ['admins'] } }
   const passwordRecord = (accountId: NodeId): NodeInput =>
     ({ $path: passwordPath(accountId), $type: 't.credentials', accountId, hash })
   return { account, passwordRecord }

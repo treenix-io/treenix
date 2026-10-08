@@ -1,14 +1,13 @@
 import { randomUUID } from 'node:crypto'
 import { KernelError } from '#errors'
 import { createMemoryBlobStore } from '#kernel/blob-store-memory'
-import { createInstanceFoundation } from '#kernel/instance'
+import { createInstance } from '#kernel/instance'
 import { ambientModule, publishModules } from '#kernel/manifest'
-import { installModules, previewModules } from '#kernel/module-install'
+import { previewModules } from '#kernel/module-install'
 import { copyManifest, createRegistry } from '#kernel/registry'
 import { drainSession } from '#kernel/session-delivery'
 import { createMemoryStore } from '#kernel/store/memory'
-import type { Position, StreamCursor, TestActor, TestInstance, TestInstanceConfig } from '#kernel/types'
-import type { PositionCounter } from '#kernel/writer'
+import type { Position, PositionCounter, StreamCursor, TestActor, TestInstance, TestInstanceConfig } from '#kernel/types'
 
 export { runStoreContract, scanBudget, position, storedNode, storeCommit } from '#kernel/store/contract'
 export type { StoreContractOptions } from '#kernel/store/contract'
@@ -69,17 +68,20 @@ export async function createTestInstance(input: TestInstanceConfig): Promise<Nat
   );
   const id = `test:${randomUUID()}`;
   const root = createMemoryStore({ domain: id });
-  const instance = await createInstanceFoundation({
+  const instance = await createInstance({
     id,
-    root,
-    writerEpoch: 1,
-    counter: testCounter(id),
-    domains: [{ store: root, epoch: randomUUID(), persistent: false }],
-    firstAdmin: { path: '/auth/users/test-admin', name: 'test-admin', password: randomUUID() },
-    initialCredential: { ttlMs: 60_000 },
+    root: { kind: 'store', store: root },
+    provisioning: {
+      writerEpoch: 1,
+      counter: testCounter(id),
+      domains: [{ store: root, epoch: randomUUID(), persistent: false }],
+      credentialTtlMs: 60_000,
+      bootstrap: { kind: 'fresh', admin: { path: '/auth/users/test-admin', name: 'test-admin', password: randomUUID() } },
+    },
     blobs: createMemoryBlobStore(),
+    modules,
   });
-  const initialCursor = instance.writer.stream.cursor();
+  const initialCursor = instance.bootstrapCursor;
   const deliveries: Promise<void>[] = [];
   const actors: Record<string, TestActor> = {};
   let closing: Promise<void> | undefined;
@@ -93,7 +95,6 @@ export async function createTestInstance(input: TestInstanceConfig): Promise<Nat
   }
 
   try {
-    await installModules(instance, modules);
     const credential = instance.setupCredential;
     if (credential === undefined)
       throw new KernelError('INVALID', 'Test bootstrap did not issue an admin credential');

@@ -4,15 +4,8 @@ import type { NodeChange } from '#kernel/changeset'
 import { createInfluenceIndex, type InfluenceOptions } from '#kernel/influence'
 import { createIdempotency, type IdempotencyOptions, type MutationIdentity, type MutationWaiter } from '#kernel/idempotency'
 import { comparePositions } from '#kernel/position'
-import { createInstanceStream, type StreamDomain } from '#kernel/stream'
-import { DEFAULT_LIMITS, type Budget, type DomainId, type JournalCommit, type Outcome, type Position, type Store, type StoreCommit, type StoredWrite, type StreamEvent } from '#kernel/types'
-
-export interface PositionCounter {
-  load(): Promise<Position | undefined>
-  save(position: Position, writerEpoch: number): Promise<void>
-  /** The lease provider reserves a never-used epoch above every previously issued epoch. */
-  freshEpoch(previous: number): Promise<number>
-}
+import { createInstanceStream, streamDomainEpochs } from '#kernel/stream'
+import { DEFAULT_LIMITS, type Budget, type DomainId, type JournalCommit, type Outcome, type Position, type PositionCounter, type Store, type StoreCommit, type StoredWrite, type StreamDomain, type StreamEvent } from '#kernel/types'
 
 export interface WriterOptions {
   readonly instance: string
@@ -44,7 +37,15 @@ type Applied =
   | { readonly t: 'gap'; readonly pos: Position; readonly event: StreamEvent; readonly error: unknown }
   | { readonly t: 'refused'; readonly error: unknown }
 
+/** Refuses invalid domain bindings before the counter or Store can accept an effect. */
+export function assertWriterDomains(root: Store, domains: readonly StreamDomain[]): void {
+  streamDomainEpochs(domains)
+  if (!domains.some(domain => domain.store === root))
+    throw new KernelError('INVALID', 'Root Store is not a declared target')
+}
+
 export async function createWriter(options: WriterOptions) {
+  assertWriterDomains(options.root, options.domains)
   const cache = options.cache ?? createProcessCache()
   const budget = options.budget ?? (() => ({ nodes: DEFAULT_LIMITS.readNodes, bytes: DEFAULT_LIMITS.readBytes,
     exprWork: DEFAULT_LIMITS.exprWork, deadline: Date.now() + DEFAULT_LIMITS.queryMs }))
@@ -69,7 +70,6 @@ export async function createWriter(options: WriterOptions) {
   const stream = createInstanceStream({ position, domains: options.domains, budget })
   const domains = new Set(options.domains.map(domain => domain.store.domain))
   const stores = new Set(options.domains.map(domain => domain.store))
-  if (!stores.has(options.root)) throw new KernelError('INVALID', 'Root Store is not a declared target')
   const intake = await createIdempotency({ root: options.root, domains: options.domains, budget, ...options.intake })
   const influence = createInfluenceIndex({ position, domains: [...domains], ...options.influence })
   const writers = new Map<DomainId, Promise<void>>()
