@@ -52,6 +52,14 @@ describe('ordered ChangeSet preparation', () => {
     }
   })
 
+  it('rejects prototype keys in a full put before any node is accepted', async () => {
+    const f = await fixture()
+    for (const key of ['constructor', 'prototype', '__proto__']) {
+      await assert.rejects(f.commit([put('/good'), put('/invalid', { payload: { [key]: 'unreadable' } })]), code('INVALID'))
+      assert.deepEqual(await f.nodes(), [])
+    }
+  })
+
   it('rejects old main and named versions atomically and accepts explicit current versions', async () => {
     const f = await fixture()
     for (const fields of [{ $v: 0 }, { '#extra': { $type: 'extra', $v: 1 } }]) {

@@ -12,7 +12,7 @@ import { checkPreconditions, type PreconditionOptions, type ReadSet } from '#ker
 import { DEFAULT_LIMITS, type Actor, type Budget, type ChangeMember, type Component, type Executor, type JournalAddress, type JournalEntry,
   type Principal,
   type Limits, type NodeInput, type Position, type Registry, type ScanRange, type Store, type StoredNode } from '#kernel/types'
-import { applyUpdateOps, assertUpdateOps } from '#kernel/update-ops'
+import { applyUpdateOps, assertNoPrototypeKeys, assertUpdateOps } from '#kernel/update-ops'
 import type { PreparedCommit } from '#kernel/writer'
 import { ulid } from '#util/ulid'
 
@@ -47,6 +47,7 @@ function component(input: Component, registry: Registry): Component {
 }
 
 function normalize(input: NodeInput, before: StoredNode | null, pos: Position, registry: Registry): StoredNode {
+  assertNoPrototypeKeys(input, input.$path)
   for (const field of ['$id', '$rev', '$pos']) {
     if (Object.hasOwn(input, field)) throw new KernelError('INVALID', `Kernel metadata in write input: ${field}`)
   }
