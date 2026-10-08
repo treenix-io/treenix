@@ -77,12 +77,12 @@ describe('invariant R-gk8.29: mounted nodes migrate on read', () => {
       if (!t) throw new Error(`no backing registered for key ${String(mount.key)}`);
       return t;
     });
-    register('inv.versioned', 'migrate', () => ({
-      1: (d: Record<string, unknown>) => {
-        d.renamed = d.old;
-        delete d.old;
-      },
-    }));
+    register('inv.versioned', 'migrate', () => [
+      { from: 0, to: 1, up: d => {
+        const { old, ...fields } = d;
+        return { ...fields, renamed: old };
+      } },
+    ]);
   });
 
   after(() => {
