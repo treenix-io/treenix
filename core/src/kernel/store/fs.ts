@@ -3,17 +3,20 @@ import { join, resolve } from 'node:path'
 import { KernelError } from '#errors'
 import type { PersistentWriter } from '#kernel/persistence'
 import { comparePositions } from '#kernel/position'
-import type { DecisionRange, JournalCommit, JournalRange, Position, ScanQuery, ScanRange, ScanResult, Store, StoreCommit, StoredNode } from '#kernel/types'
+import type { DecisionRange, JournalCommit, JournalRange, Path, Position, ScanQuery, ScanRange, ScanResult, Store, StoreCommit, StoredNode } from '#kernel/types'
 import { stableJson } from '#util/stable-json'
 import { assertPathSafe } from '#util/path-safety'
 import { durableDirectory, durableWrite, missing } from './fs-io'
 import { decodeCommit, openFsJournal, validateCommit } from './fs-journal'
 import { fsWriteSafe, readFsNodes, writeFsNode } from './fs-layout'
+import { createFsNamespace } from './fs-namespace'
 import { createMemoryStore } from './memory'
 
 export interface FsStoreOptions {
   readonly directory: string
   readonly lease: PersistentWriter
+  /** Logical address of the physical root; the persisted journal stays local. */
+  readonly logicalBase?: Path
   readonly checkpoint?: (stage: 'beforeRecord' | 'recordSynced' | 'nodeWritten', path?: string) => void | Promise<void>
 }
 
@@ -22,8 +25,10 @@ export interface FsStore extends Store {
   close(): Promise<void>
 }
 
+/** Recover one owned logical storage shadow from local files, snapshot and journal. */
 export async function createFsStore(options: FsStoreOptions): Promise<FsStore> {
   const lease = options.lease, checkpoint = options.checkpoint, requestedDirectory = options.directory
+  const namespace = createFsNamespace(options.logicalBase ?? '/')
   lease.assertActive()
   await durableDirectory(resolve(requestedDirectory))
   const directory = await realpath(resolve(requestedDirectory)), stateDirectory = join(directory, '.treenix')
@@ -52,7 +57,7 @@ export async function createFsStore(options: FsStoreOptions): Promise<FsStore> {
       await durableWrite(directory, snapshotPath, JSON.stringify(snapshot))
     }
     if (snapshot.pos.instance !== lease.instance) throw new KernelError('INVALID', 'Filesystem snapshot belongs to another instance')
-    if (snapshot.writes.length > 0) await shadow.commit(snapshot)
+    if (snapshot.writes.length > 0) await shadow.commit(namespace.logical(snapshot))
     await assertPathSafe(directory, join(stateDirectory, 'journal.log'))
     const journal = await openFsJournal(stateDirectory)
     try {
@@ -65,7 +70,7 @@ export async function createFsStore(options: FsStoreOptions): Promise<FsStore> {
         if (comparePositions(commit.pos, last) <= 0) throw new KernelError('INVALID', 'Filesystem journal positions are not increasing')
         last = commit.pos
         positions.add(stableJson(commit.pos))
-        await shadow.commit(commit)
+        await shadow.commit(namespace.logical(commit))
         if (redo) for (const write of commit.writes) await writeFsNode(directory, write)
         if (stableJson(commit.pos) === applied) redo = true
       }
@@ -75,7 +80,7 @@ export async function createFsStore(options: FsStoreOptions): Promise<FsStore> {
       const actual = await readFsNodes(directory, last)
       const accepted = await shadow.scan({ range: { subtree: '/' }, budget: { nodes: Number.MAX_SAFE_INTEGER, bytes: Number.MAX_SAFE_INTEGER, exprWork: 0, deadline: Date.now() + 10_000 } })
       const images = (nodes: typeof actual) => stableJson(nodes.map(({ $pos, ...node }) => node).sort((a, b) => a.$path.localeCompare(b.$path)))
-      if (images(actual) !== images([...accepted.items])) throw new KernelError('INVALID', 'Filesystem contents differ from accepted storage state')
+      if (images(actual.map(namespace.logicalNode)) !== images([...accepted.items])) throw new KernelError('INVALID', 'Filesystem contents differ from accepted storage state')
       journal.releaseReplay()
     } catch (error) { await journal.close(); throw error }
     function scan(query: ScanQuery<ScanRange>): Promise<ScanResult<StoredNode>>
@@ -92,12 +97,13 @@ export async function createFsStore(options: FsStoreOptions): Promise<FsStore> {
         lease.assertActive()
         const commit = structuredClone(input)
         validateCommit(commit)
+        const local = namespace.local(commit)
         if (closing) throw new KernelError('UNAVAILABLE', 'Filesystem Store is closing')
         await lease.run(async authority => {
           assertOpen()
           if (commit.pos.instance !== lease.instance) throw new KernelError('INVALID', 'Filesystem commit belongs to another instance')
           if (comparePositions(commit.pos, last) <= 0) throw new KernelError('CONFLICT', 'Filesystem commit position is already used')
-          for (const write of commit.writes) {
+          for (const write of local.writes) {
             await fsWriteSafe(directory, write.path)
             if (write.node?.$id.startsWith('p:') && write.node.$id !== `p:${write.path}`) throw new KernelError('INVALID', 'Path identity differs from its address')
           }
@@ -105,9 +111,9 @@ export async function createFsStore(options: FsStoreOptions): Promise<FsStore> {
           lease.assertActive()
           await authority.reserveFence(commit.writerEpoch)
           try {
-            await journal.append(commit)
+            await journal.append(local)
             await checkpoint?.('recordSynced')
-            for (const write of commit.writes) { await writeFsNode(directory, write); await checkpoint?.('nodeWritten', write.path) }
+            for (const write of local.writes) { await writeFsNode(directory, write); await checkpoint?.('nodeWritten', write.path) }
             await durableWrite(directory, appliedPath, stableJson(commit.pos))
             await shadow.commit(commit)
             last = commit.pos
