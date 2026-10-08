@@ -20,6 +20,7 @@ const context: WriteActionContext = {
   read: { read: async () => ({ list: [], copies: [], at: [] }) },
   caller: { principal: 'u:alice', claims: ['u:alice'] },
   executor: { principal: 'u:alice', claims: ['u:alice'] },
+  act: async () => { throw new Error('unused') },
   change: {
     put: () => { throw new Error('unused') }, patch: () => { throw new Error('unused') },
     remove: () => { throw new Error('unused') }, move: () => { throw new Error('unused') }, restore: () => { throw new Error('unused') },

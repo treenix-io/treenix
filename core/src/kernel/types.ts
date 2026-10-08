@@ -348,6 +348,7 @@ export type Request =
       readonly action: ActionName
       readonly args: unknown
       readonly opId?: OpId
+      readonly anchor?: OpId
     }
   | {
       readonly t: 'commit'
@@ -452,7 +453,12 @@ export interface ActRequest {
   readonly action: ActionName
   readonly args: unknown
   readonly opId?: OpId
+  /** Original stream call's key, supplied by the client when continuing that stream. */
+  readonly anchor?: OpId
 }
+
+/** Nested keys are derived by the kernel; the handler supplies only the stable logical call name. */
+export type NestedActRequest = Omit<ActRequest, 'opId' | 'anchor'> & { key?: string }
 
 export interface CommitRequest {
   readonly changes: readonly ChangeMember[]
@@ -553,6 +559,8 @@ export interface ReadActionContext {
   readonly read: Reader
   readonly caller: Actor
   readonly executor: Actor
+  /** Separate call through the executor's session; an inner stream resolves to its final value. */
+  act(request: NestedActRequest): Promise<unknown>
 }
 
 /**
@@ -1105,3 +1113,27 @@ export interface Instance {
 }
 
 export type CreateInstance = (config: InstanceConfig) => Promise<Instance>
+
+// ---- Test instance API ----
+
+/** Uses the same credential and capability-node inputs as the real session factory. */
+export type TestActorInput =
+  | { readonly kind: 'credential'; readonly credential?: Credential; readonly origin?: string }
+  | { readonly kind: 'node'; readonly node: Path }
+
+export interface TestInstanceConfig<ActorName extends string = string> {
+  readonly modules: readonly ModuleManifest[]
+  /** Plain-JSON write inputs with explicit paths, installed through the bootstrap admin's session. */
+  readonly seed: readonly NodeInput[]
+  readonly actors: Readonly<Record<ActorName, TestActorInput>>
+}
+
+/** Every operation stays bound to this actor's real session, including its pending outcome and chunks. */
+export type TestActor = Pick<Session, 'actor' | 'read' | 'commit' | 'act'>
+
+export interface TestInstance<ActorName extends string = string> {
+  readonly instance: Instance
+  readonly actors: Readonly<Record<ActorName, TestActor>>
+}
+
+export type CreateTestInstance = <ActorName extends string>(config: TestInstanceConfig<ActorName>) => Promise<TestInstance<ActorName>>
