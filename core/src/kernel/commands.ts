@@ -7,7 +7,7 @@ import { judgeGates } from '#kernel/gates'
 import type { createProjector } from '#kernel/projection'
 import { createReader, type ReaderSource } from '#kernel/reader'
 import { createRequestAdmission } from '#kernel/request'
-import type { Budget, CommitRequest, Gate, Io, Limits, Outcome, Registry, SubSelector } from '#kernel/types'
+import type { Budget, CommitRequest, Gate, Io, Limits, Outcome, Registry, Selector } from '#kernel/types'
 import type { Writer } from '#kernel/writer'
 import { freeze } from '#util/freeze'
 
@@ -39,7 +39,7 @@ export function createCommands(options: CommandOptions) {
     actor: admission.actor,
     signal: admission.signal,
     act: actions.act,
-    async read(selector: SubSelector, requestSignal?: AbortSignal) {
+    async read(selector: Selector, requestSignal?: AbortSignal) {
       const request = createRequestAdmission(admission, requestSignal)
       const budget = options.budget()
       active(budget, request)

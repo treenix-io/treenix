@@ -26,6 +26,25 @@ const pos = { instance: 'client', epoch: 1, seq: 1 }
 const code = (expected: KernelError['code']) => (error: unknown) => error instanceof KernelError && error.code === expected
 
 describe('native TWP client', () => {
+  it('delivers history images through the native lane and client read API', async t => {
+    const root = createMemoryStore({ domain: 'client-history' })
+    let saved: Position | undefined
+    const instance = await createInstanceFoundation({ id: 'client-history', root, writerEpoch: 1,
+      counter: { async load() { return saved }, async save(value) { saved = value }, async freshEpoch(floor) { return floor + 1 } },
+      domains: [{ store: root, epoch: 'history1', persistent: false }], budget: scanBudget,
+      firstAdmin: { path: '/admin', name: 'admin', password: 'client-password' }, initialCredential: { ttlMs: 60_000 } })
+    t.after(() => instance.auth.close()); assert.ok(instance.setupCredential)
+    const lane = createNodeLane(instance.nodeLaneOptions(await instance.auth.openCredential(instance.setupCredential)))
+    t.after(() => lane.close())
+    const client = createTwpClient({ frames: lane.frames, send(request) {
+      assert.ok(request.t !== 'hi'); lane.accept(request)
+    } })
+    t.after(() => client.close()); await client.ready
+    const result = await client.read({ history: '/', window: { limit: 1 } })
+    assert.equal(result.history?.length, 1)
+    assert.equal(result.copies.length, 0)
+    assert.ok(result.history?.[0].address.pos)
+  })
   it('correlates only after the covering position and preserves the exact supplied retry key', async t => {
     const f = connection(); t.after(() => f.client.close()); await f.client.ready
     const key = { epoch: 'intake', time: 123, nonce: 'retry' }

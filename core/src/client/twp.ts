@@ -2,7 +2,7 @@ import { createLaneCache } from '#client/lane-cache'
 import { KernelError } from '#errors'
 import { comparePositions } from '#kernel/position'
 import { isReadResult } from '#protocol/twp'
-import type { ActRequest, CommitRequest, Connection, Frame, OpId, Outcome, Pending, ReadResult, Request, SubSelector } from '#kernel/types'
+import type { ActRequest, CommitRequest, Connection, Frame, OpId, Outcome, Pending, ReadResult, Request, Selector, SubSelector } from '#kernel/types'
 
 export interface NativeClientOptions { readonly maxRequests?: number; readonly close?: () => void; readonly onError?: (error: KernelError) => void }
 export interface NodeSubscription { readonly id: string; readonly ready: Promise<void>; close(): void }
@@ -93,7 +93,7 @@ export function createTwpClient(connection: Connection, options: NativeClientOpt
   }
   void consume()
   return { ready, cache, key, failure: () => failure,
-    read(selector: SubSelector): Promise<ReadResult> {
+    read(selector: Selector): Promise<ReadResult> {
       return request(req => ({ t: 'read', req, selector })).outcome.then(result => {
         if (!isReadResult(result.value))
           throw new KernelError('INVALID', 'Malformed wire read result')

@@ -5,7 +5,7 @@ import type { CacheRead } from '#kernel/cache'
 import { decodeChainNode } from '#kernel/chain-index'
 import type { ExprWork } from '#kernel/eval'
 import { createSiftTest } from '#kernel/expr'
-import { applyFieldDeltas } from '#kernel/journal'
+import { applyFieldDeltas, applyJournalChange } from '#kernel/journal'
 import type { LaneBranch, LaneRange, LaneRoot, LaneSelection } from '#kernel/lane-selection'
 import { positionToRev } from '#kernel/position'
 import { typeReadVersion, type ReadDependency, type ReadSet } from '#kernel/preconditions'
@@ -14,7 +14,7 @@ import { computeRights, type ChainNode } from '#kernel/rights'
 import type { AuthReadSource } from '#kernel/session'
 import { mapNodeForSift } from '#kernel/store/keys'
 import { compareScanKeys, parseScanCursor, scanCursor, scanKey, scanPage, type ScanKey } from '#kernel/store/scan'
-import { DEFAULT_LIMITS, R, type Budget, type DomainId, type IncludeSpec, type Limits, type Node, type NodeCopy,
+import { A, DEFAULT_LIMITS, R, type Budget, type DomainId, type HistoryEntry, type IncludeSpec, type JournalImageTypes, type JournalVisibility, type Limits, type Node, type NodeCopy,
   type Path, type ReadResult, type Registry, type Selector, type Sort, type Store, type StoredNode, type SubSelector } from '#kernel/types'
 import { getByPath } from '#kernel/update-ops'
 import type { Writer } from '#kernel/writer'
@@ -536,9 +536,10 @@ export function createReader(options: ReaderOptions) {
     };
   }
   /** Owns the selector before waiting for the ordered span, then returns its projected snapshot. */
-  async function read(selector: SubSelector): Promise<ReadResult> {
+  async function read(selector: Selector): Promise<ReadResult> {
     const owned = structuredClone(selector);
     return writer.read(source.domains, async () => {
+      if ('history' in owned) return historyInSpan(owned);
       const selection = await selectInSpan(owned);
       return {
         list: selection.roots.flatMap((root) =>
@@ -549,6 +550,83 @@ export function createReader(options: ReaderOptions) {
         ...(selection.next === undefined ? {} : { next: selection.next }),
       };
     });
+  }
+  /** Reads administrative journal images under present rights and the recorded type restrictions. */
+  async function historyInSpan(selector: Extract<Selector, { history: Path }>): Promise<ReadResult> {
+    active();
+    path(selector.history);
+    if (Buffer.byteLength(JSON.stringify(selector)) > limits.requestBytes)
+      throw new KernelError('BUDGET', 'Read request budget exceeded');
+    if (selector.window?.evict !== undefined) throw new KernelError('INVALID', 'History is read-only');
+    await admission.validate(source.auth);
+    active();
+    const found = target(selector.history);
+    depend({ kind: 'actor', key: admission.dependencyKey, value: admission.dependency() });
+    for (const domain of source.domains)
+      depend({ kind: 'epoch', key: domain, value: writer.stream.cursor().epochs[domain] });
+    const entries: HistoryEntry[] = [];
+    const sort: Sort = [['address.pos.epoch', 1], ['address.pos.seq', 1]];
+    const scope = stableJson([admission.actor, found.id, selector.history, selector.after, selector.window?.limit]);
+    const after = selector.window?.after === undefined ? undefined : parseScanCursor(selector.window.after, scope, sort.length);
+    if (selector.window !== undefined && (!Number.isSafeInteger(selector.window.limit) || selector.window.limit < 1))
+      throw new KernelError('INVALID', 'History limit must be positive');
+    function allowed(at: Path, image?: JournalImageTypes): boolean {
+      const current = rights(at, found);
+      if ((current.bits & A) === 0) return false;
+      if (image === undefined) return true;
+      for (const name of image.types)
+        depend({ kind: 'type', key: name, value: typeReadVersion(registry, name) });
+      // Historical ACL grants cannot revive revoked access; only the recorded type rules apply.
+      let owner;
+      for (const node of found.chain(at))
+        if (node.path !== at && node.owner !== undefined) owner = node.owner;
+      const result = computeRights(admission.actor, [{ ...image, acl: [], hasAcl: false, alerts: [] }], registry,
+        { ...current.prefix, granted: current.bits, denied: 0, owner });
+      for (const failure of result.alerts) alert(failure.path, failure.error);
+      active();
+      return (result.bits & A) !== 0;
+    }
+    function accept(entry: JournalVisibility): boolean {
+      active();
+      if (entry.kind === 'transfer') return false;
+      if (!allowed(entry.path) || entry.from !== undefined && !allowed(entry.from)) return false;
+      if (entry.before !== null && entry.before !== 'unknown' && !allowed(entry.before.path, entry.before)) return false;
+      if (entry.after !== null && !allowed(entry.after.path, entry.after)) return false;
+      return after === undefined || compareScanKeys(scanKey(entry, sort, entry.address.id), after, sort) > 0;
+    }
+    const records = await found.store.scan({ range: { journal: selector.history, after: selector.after, accept,
+      ...(selector.window === undefined ? {} : { take: Math.min(selector.window.limit + 1, Number.MAX_SAFE_INTEGER) }) },
+      budget: { ...remaining(), exprWork: work.limit - work.used,
+        deadline: Math.min(allowance.deadline, Date.now() + limits.queryMs) } });
+    active();
+    if (records.cost === undefined) throw new KernelError('INVALID', 'History Store omitted reconstruction cost');
+    scanned += records.cost.nodes; bytes += records.cost.bytes; work.used += records.cost.exprWork;
+    if (scanned > allowance.nodes || bytes > allowance.bytes || work.used > work.limit)
+      throw new KernelError('BUDGET', 'History scan budget exceeded');
+    for (const record of records.items) {
+      active();
+      for (const entry of record.entries) {
+        active();
+        if (++work.used > work.limit) throw new KernelError('BUDGET', 'History work budget exceeded');
+        const address = { pos: record.pos, id: entry.id };
+        const images = applyJournalChange(entry.change, 'unknown');
+        if (images.before !== null && images.before !== 'unknown') {
+          charge(images.before);
+        }
+        if (images.after !== null) {
+          charge(images.after);
+        }
+        entries.push({ address, path: entry.path, executor: record.executor, caller: record.caller,
+          ...(record.decision === undefined ? {} : { opId: record.decision.opId }),
+          before: images.before === null || images.before === 'unknown' ? images.before : visibleNode(images.before, A | R),
+          after: images.after === null ? null : visibleNode(images.after, A | R) });
+      }
+    }
+    const page = scanPage(entries, sort, entry => entry.address.id, scope, selector.window?.after,
+      selector.window?.limit, active);
+    checkDependencies();
+    return { list: [], copies: [], history: page.items, at: [writer.stream.cursor().pos],
+      ...(page.next === undefined ? {} : { next: page.next }) };
   }
   return {
     read,

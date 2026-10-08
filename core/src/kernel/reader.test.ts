@@ -8,7 +8,7 @@ import { createReader } from '#kernel/reader'
 import { checkPreconditions } from '#kernel/preconditions'
 import { createMemoryStore } from '#kernel/store/memory'
 import { scanBudget } from '#kernel/store/contract'
-import { DEFAULT_LIMITS, R, type ChangeMember, type Limits, type ModuleManifest, type Path, type Position, type Store } from '#kernel/types'
+import { A, DEFAULT_LIMITS, R, type ChangeMember, type Limits, type ModuleManifest, type Path, type Position, type Store } from '#kernel/types'
 import type { PositionCounter } from '#kernel/writer'
 
 const code = (expected: KernelError['code']) => (error: unknown) => error instanceof KernelError && error.code === expected
@@ -65,6 +65,102 @@ async function setup() {
 }
 
 describe('native Reader contract', () => {
+  it('prunes unrelated journal payloads before the history budget', async t => {
+    const f = await setup(); t.after(() => f.auth.close())
+    await f.commit([put('/visible', { $acl: [{ subject: { group: 'public' }, grant: A | R }] }), put('/visible/item', { value: 'visible' })])
+    const allowance = { ...scanBudget(), nodes: 8 }
+    const before = await f.reader(f.anonymous, allowance).read({ history: '/visible/item' })
+    assert.equal(before.history?.length, 1)
+    await f.commit([put('/hidden'), put('/hidden/item', { value: 0 })])
+    for (let value = 1; value <= 12; value++) await f.commit([{ op: 'patch', path: '/hidden/item', ops: { $set: { value } } }])
+    assert.deepEqual((await f.reader(f.anonymous, allowance).read({ history: '/visible/item' })).history, before.history)
+  })
+  it('loads only the cursor page of visible history under a payload budget', async t => {
+    const f = await setup(); t.after(() => f.auth.close())
+    await f.commit([put('/visible', { $acl: [{ subject: { group: 'public' }, grant: A | R }] }), put('/visible/item', { value: 0 })])
+    for (let value = 1; value <= 20; value++) await f.commit([{ op: 'patch', path: '/visible/item', ops: { $set: { value } } }])
+    const budget = { ...scanBudget(), nodes: 12 }
+    const first = await f.reader(f.anonymous, budget).read({ history: '/visible/item', window: { limit: 1 } })
+    assert.equal(first.history?.[0].after?.value, 0); assert.ok(first.next)
+    const second = await f.reader(f.anonymous, budget).read({ history: '/visible/item', window: { limit: 1, after: first.next } })
+    assert.equal(second.history?.[0].after?.value, 1); assert.ok(second.next)
+  })
+
+  it('returns denied history without spending payload budget and includes delegated descendants', async t => {
+    const f = await setup(); t.after(() => f.auth.close())
+    await f.commit([put('/hidden'), put('/hidden/item', { value: 'secret' })])
+    assert.deepEqual((await f.reader(f.anonymous, { ...scanBudget(), nodes: 1 }).read({ history: '/hidden' })).history, [])
+    await f.commit([put('/hidden/delegated', { $acl: [{ subject: { group: 'public' }, grant: A | R }] })])
+    const result = await f.reader().read({ history: '/hidden' })
+    assert.equal(result.history?.length, 1)
+    assert.equal(result.history?.[0].path, '/hidden/delegated')
+  })
+  it('reads journal images with cursor paging and removes history access when A is revoked', async t => {
+    const f = await setup(); t.after(() => f.auth.close())
+    await f.commit([put('/history', { $acl: [{ subject: { group: 'public' }, grant: A | R }] }), put('/history/item', { value: 'secret' })])
+    await f.commit([{ op: 'patch', path: '/history/item', ops: { $set: { value: 'changed' } } }])
+    const first = await f.reader().read({ history: '/history/item', window: { limit: 1 } })
+    assert.equal(first.history?.length, 1)
+    assert.ok(first.next)
+    const second = await f.reader().read({ history: '/history/item', window: { limit: 1, after: first.next } })
+    assert.equal(second.history?.length, 1)
+    assert.equal(second.history?.[0].before === 'unknown' ? undefined : second.history?.[0].before?.value, 'secret')
+    assert.equal(second.history?.[0].after?.value, 'changed')
+    await f.commit([{ op: 'patch', path: '/history', ops: { $set: { $acl: [{ subject: { group: 'public' }, grant: R }] } } }])
+    assert.deepEqual((await f.reader().read({ history: '/history' })).history, [])
+  })
+
+  it('requires present A on both paths of a historical move', async t => {
+    const f = await setup(); t.after(() => f.auth.close())
+    await f.commit([put('/open', { $acl: [{ subject: { group: 'public' }, grant: A | R }] }), put('/closed'), put('/open/item')])
+    await f.commit([{ op: 'move', from: '/open/item', to: '/closed/item' }])
+    const result = await f.reader().read({ history: '/open' })
+    assert.ok(result.history)
+    assert.equal(result.history.some(entry => entry.path === '/closed/item'), false)
+  })
+
+  it('reconstructs compact moved images from anchors outside the selected subtree and position', async t => {
+    const f = await setup(); t.after(() => f.auth.close())
+    const acl = [{ subject: { group: 'public' }, grant: A | R }]
+    await f.commit([put('/old', { $acl: acl }), put('/new', { $acl: acl }), put('/old/item', { value: 1 })])
+    await f.commit([{ op: 'patch', path: '/old/item', ops: { $set: { value: 2 } } }])
+    const after = f.instance.writer.stream.cursor().pos
+    await f.commit([{ op: 'move', from: '/old/item', to: '/new/item' }])
+    await f.commit([{ op: 'patch', path: '/new/item', ops: { $set: { value: 3 } } }])
+    const result = await f.reader().read({ history: '/new/item', after })
+    assert.equal(result.history?.length, 2)
+    const moved = result.history?.[0]; assert.ok(moved && moved.before !== 'unknown')
+    assert.equal(moved.before?.$path, '/old/item'); assert.equal(moved.before?.value, 2)
+    assert.equal(moved.after?.$path, '/new/item'); assert.equal(moved.after?.value, 2)
+    assert.equal(result.history?.[1].after?.value, 3)
+  })
+
+  it('applies recorded type restrictions to deleted images and refuses exhausted journal work', async t => {
+    const f = await setup(); t.after(() => f.auth.close())
+    await f.commit([put('/history'), put('/history/item', { value: 'secret' })])
+    await f.commit([{ op: 'remove', path: '/history/item' }])
+    f.instance.registry.publish({ ...f.module, security: [{ type: 'test.item', context: 'acl', handler: () => R }] })
+    assert.deepEqual((await f.reader(f.admin).read({ history: '/history/item' })).history, [])
+    await assert.rejects(() => f.reader(f.admin, { ...scanBudget(), nodes: 1 }).read({ history: '/' }), code('BUDGET'))
+    await assert.rejects(() => f.reader(f.admin, { ...scanBudget(), exprWork: 0 }).read({ history: '/' }), code('BUDGET'))
+  })
+  it('evaluates historical type restrictions with the image owner after a current owner change', async t => {
+    const f = await setup(); t.after(() => f.auth.close())
+    await f.commit([put('/history', { $owner: 'u:private', value: 'secret' })])
+    await f.commit([{ op: 'patch', path: '/history', ops: { $set: { $owner: 'u:public', value: 'current' } } }])
+    f.instance.registry.publish({ ...f.module, security: [{ type: 'test.item', context: 'acl',
+      handler: input => input.owner === 'u:private' ? R : A | R }] })
+    assert.deepEqual((await f.reader(f.admin).read({ history: '/history' })).history, [])
+  })
+  it('keeps current owner-subject grants when recorded images have another owner', async t => {
+    const f = await setup(); t.after(() => f.auth.close())
+    await f.commit([put('/history', { $owner: 'u:former', $acl: [{ subject: { owner: true }, grant: A | R }], value: 'before' })])
+    await f.commit([{ op: 'patch', path: '/history', ops: { $set: { $owner: f.anonymous.actor.principal, value: 'after' } } }])
+    const result = await f.reader().read({ history: '/history' })
+    assert.equal(result.history?.length, 2)
+    assert.equal(result.history?.[0].after?.value, 'before')
+    assert.equal(result.history?.[1].after?.value, 'after')
+  })
   it('prunes hidden children before payload budgets and makes hidden nodes indistinguishable from absence', async t => {
     const f = await setup(); t.after(() => f.auth.close())
     await f.commit([put('/list'), put('/list/visible', { score: 1, $acl: [{ subject: { group: 'public' }, grant: R }] }),

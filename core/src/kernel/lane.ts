@@ -6,12 +6,12 @@ import { comparePositions } from '#kernel/position'
 import { createSubscriptions, type NodeSubscription } from '#kernel/subscription'
 import { createLaneDelivery } from '#kernel/lane-delivery'
 import type { LaneSelectionSource } from '#kernel/lane-selection'
-import type { Credential, Frame, LaneChange, Limits, NodeCopy, NodeId, Outcome, Path, Pending, Position, Request, Sort, SubSelector } from '#kernel/types'
+import type { Credential, Frame, LaneChange, Limits, NodeCopy, NodeId, Outcome, Path, Pending, Position, Request, Selector, Sort, SubSelector } from '#kernel/types'
 
 export type NodeSubSelector = SubSelector
 export type NodeLaneCommand =
   | Extract<Request, { readonly t: 'commit' | 'act' | 'cancel' | 'unsub' }>
-  | { readonly t: 'read'; readonly req: string; readonly selector: SubSelector }
+  | { readonly t: 'read'; readonly req: string; readonly selector: Selector }
   | { readonly t: 'sub'; readonly sub: string; readonly selector: SubSelector }
 
 export interface NodeLaneImage {
@@ -42,7 +42,7 @@ export interface NodeLane {
   readonly actor: AuthAdmission['actor']
   readonly frames: AsyncIterableIterator<NodeLaneFrame, void, undefined>
   accept(command: NodeLaneCommand): void
-  read(selector: SubSelector): ReturnType<NativeCommands['read']>
+  read(selector: Selector): ReturnType<NativeCommands['read']>
   sub(selector: NodeSubSelector): string
   unsub(sub: string): void
   commit(request: Parameters<NativeCommands['commit']>[0]): Pending
@@ -74,7 +74,7 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
   admission.assertActive()
   const subscriptions = createSubscriptions()
   const mutations = new Map<string, Mutation>()
-  const reads = new Map<string, { readonly selector: SubSelector; readonly controller: AbortController }>()
+  const reads = new Map<string, { readonly selector: Selector; readonly controller: AbortController }>()
   const directReads = new Set<AbortController>()
   const controls: Control[] = [];
 const removals = new Map<NodeId, CoverageChange>();

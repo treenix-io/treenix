@@ -791,6 +791,8 @@ export interface ScanQuery<Range> {
 export interface ScanResult<Item> {
   readonly items: readonly Item[]
   readonly next?: Cursor
+  /** Charged journal image reconstruction, including compact anchors, for the enclosing read operation. */
+  readonly cost?: { readonly nodes: number; readonly bytes: number; readonly exprWork: number }
 }
 
 /**
@@ -866,6 +868,28 @@ export interface JournalCommit {
 export interface JournalRange {
   readonly journal: Path
   readonly after?: Position
+  /** Kernel-only metadata predicate, applied before loading journal images; accepted entries carry full images. */
+  readonly accept?: (entry: JournalVisibility) => boolean
+  /** History mode only: maximum accepted entries whose compact images are loaded. */
+  readonly take?: number
+}
+
+export interface JournalImageTypes {
+  readonly path: Path
+  readonly id: NodeId
+  readonly types: readonly TypeName[]
+  readonly owner?: Principal
+  readonly hasOwner: boolean
+  readonly invalid?: 'chain' | 'node'
+}
+
+export interface JournalVisibility {
+  readonly address: JournalAddress
+  readonly kind: JournalCommit['kind']
+  readonly path: Path
+  readonly from?: Path
+  readonly before: JournalImageTypes | null | 'unknown'
+  readonly after: JournalImageTypes | null
 }
 
 /**

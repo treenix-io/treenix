@@ -58,7 +58,7 @@ export function encodeReconciliation(id: string, path: string, after: StoredNode
   return { id, path, change: { t: 'reconcile', after: structuredClone(after) } }
 }
 
-function images(change: NodeTransition, previous: JournalImages['before']): JournalImages {
+export function applyJournalChange(change: NodeTransition, previous: JournalImages['before']): JournalImages {
   switch (change.t) {
     case 'create': return { before: null, after: change.after }
     case 'delete': return { before: change.before, after: null }
@@ -81,7 +81,7 @@ export function readJournalImages(records: readonly JournalCommit[], address: Jo
   if (target === undefined) throw new KernelError('NOT_FOUND', 'Journal address is absent')
   const change = target.change
   if (change.t !== 'reconcile' && fullAfter(change) !== undefined || change.t === 'reconcile' && change.before !== undefined) {
-    return structuredClone(images(change, 'unknown'))
+    return structuredClone(applyJournalChange(change, 'unknown'))
   }
   const pending: NodeTransition[] = [change]
   let previous: JournalImages['before'] = 'unknown'
@@ -94,7 +94,7 @@ export function readJournalImages(records: readonly JournalCommit[], address: Jo
   }
   let result: JournalImages = { before: 'unknown', after: null }
   for (const transition of pending.reverse()) {
-    result = images(transition, previous)
+    result = applyJournalChange(transition, previous)
     previous = result.after
   }
   return structuredClone(result)
@@ -112,7 +112,7 @@ export function compactJournal(records: readonly JournalCommit[], keepFrom: Posi
     const entries: JournalEntry[] = []
     for (const entry of record.entries) {
       const prior = current.get(entry.id)
-      const state = images(entry.change, prior === undefined ? 'unknown' : prior)
+      const state = applyJournalChange(entry.change, prior === undefined ? 'unknown' : prior)
       current.set(entry.id, state.after)
       if (!retain) continue
       let change = entry.change

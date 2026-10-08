@@ -57,6 +57,26 @@ async function message(process: ChildProcess): Promise<Record<string, unknown>> 
 }
 
 describe('native filesystem persistence', { timeout: 30_000 }, () => {
+  it('rebuilds selective history metadata and compact anchors from imported snapshots and replay', async () => {
+    const directory = await scratch()
+    await writeFile(join(directory, 'existing.json'), JSON.stringify({ $type: 'test.item', value: 1 }))
+    const first = await setup(directory)
+    const before = (await first.store.scan({ range: { node: '/existing' }, budget: scanBudget() })).items[0]
+    const after = { ...before, $pos: { ...before.$pos, seq: 1 }, value: 2 }
+    await first.store.commit({ pos: after.$pos, writerEpoch: first.lease.writerEpoch,
+      writes: [{ path: after.$path, node: after }],
+      record: { pos: after.$pos, kind: 'commit', executor: 'kernel', caller: 'kernel', entries: [{ id: after.$id,
+        path: after.$path, change: { t: 'update', delta: { value: { from: 1, to: 2 }, $pos: { from: before.$pos, to: after.$pos } } } }] } })
+    await first.store.close(); await first.lease.close()
+    const second = await setup(directory)
+    const raw = await second.store.scan({ range: { journal: '/existing' }, budget: scanBudget() })
+    const compact = raw.items[1].entries[0].change; assert.ok(compact.t === 'update'); assert.equal(compact.after, undefined)
+    const history = await second.store.scan({ range: { journal: '/existing', after: before.$pos, accept: entry => entry.after?.types.includes('test.item') === true }, budget: scanBudget() })
+    assert.equal(history.items.length, 1)
+    const images = readJournalImages(history.items, { pos: after.$pos, id: after.$id })
+    assert.ok(images.before !== 'unknown'); assert.equal(images.before?.value, 1); assert.equal(images.after?.value, 2)
+    assert.ok(history.cost && history.cost.nodes > 0)
+  })
   it('persists strong identity without path or version metadata in files and restores the exact accepted position', async () => {
     const first = await setup()
     const commit = storeCommit(1, [storedNode('/parent'), storedNode('/parent/child', { value: 7 })])

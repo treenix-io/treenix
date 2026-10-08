@@ -119,7 +119,7 @@ describe('real native HTTP binding', { timeout: 30_000 }, () => {
     const f = await setup(); t.after(() => f.close())
     const signed = await login(f), lane = await openLane(f, signed.token); t.after(() => lane.close()); await lane.next()
     const mutation = { t: 'commit', req: 'before-invalid', opId: f.key(), changes: [{ op: 'patch', path: '/counter', ops: { $set: { count: 99 } } }] }
-    for (const suffix of [{ t: 'unknown' }, { t: 'read', req: 'history', selector: { history: '/' } }]) {
+    for (const suffix of [{ t: 'unknown' }, { t: 'read', req: 'history', selector: { history: 12 } }]) {
       const response = await f.post('/twp', [mutation, suffix], { Authorization: `Bearer ${signed.token}`, 'TWP-Lane': lane.id })
       assert.equal(response.status, 400); const error = decodeFrame(await response.text(), 4096); assert.ok(error.t === 'fail'); assert.equal(error.error.code, 'INVALID')
     }
@@ -130,6 +130,25 @@ describe('real native HTTP binding', { timeout: 30_000 }, () => {
     const failure = await lane.next(); assert.ok(failure.t === 'fail'); assert.equal(failure.error.code, 'NOT_FOUND')
     assert.equal((await lane.send({ t: 'read', req: 'healthy', selector: { node: '/counter' } })).status, 202)
     assert.equal((await lane.next()).t, 'done')
+  })
+  it('reads administrative history through native HTTP lanes with exclusive cursor pages', async t => {
+    const f = await setup(); t.after(() => f.close())
+    const signed = await login(f), lane = await openLane(f, signed.token); t.after(() => lane.close())
+    await lane.next()
+    assert.equal((await lane.send({ t: 'commit', req: 'change', opId: f.key(),
+      changes: [{ op: 'patch', path: '/counter', ops: { $inc: { count: 1 } } }] })).status, 202)
+    assert.equal((await lane.next()).t, 'pos')
+    assert.equal((await lane.next()).t, 'done')
+    assert.equal((await lane.send({ t: 'read', req: 'history', selector: { history: '/counter', window: { limit: 1 } } })).status, 202)
+    const first = await lane.next(); assert.ok(first.t === 'done' && isReadResult(first.value))
+    assert.equal(first.value.history?.length, 1); assert.ok(first.value.next)
+    assert.equal(first.value.history[0].after?.count, 0)
+    assert.equal((await lane.send({ t: 'read', req: 'next', selector: { history: '/counter', window: { limit: 1, after: first.value.next } } })).status, 202)
+    const second = await lane.next(); assert.ok(second.t === 'done' && isReadResult(second.value))
+    assert.equal(second.value.history?.length, 1)
+    const entry = second.value.history[0]; assert.ok(entry.before !== 'unknown')
+    assert.equal(entry.before?.count, 0); assert.equal(entry.after?.count, 1)
+    assert.equal(entry.opId?.nonce.startsWith('http-'), true)
   })
   it('binds attachment to the original credential and refuses invalid auth without an anonymous downgrade', async t => {
     const f = await setup(); t.after(() => f.close())

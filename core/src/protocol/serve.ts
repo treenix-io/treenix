@@ -35,7 +35,6 @@ interface ServedLane {
 function command(request: Request): NodeLaneCommand {
   switch (request.t) {
     case 'read':
-      if ('history' in request.selector) throw new KernelError('INVALID', 'History is not available on this binding')
       return { ...request, selector: request.selector }
     case 'sub': return request
     case 'commit':
