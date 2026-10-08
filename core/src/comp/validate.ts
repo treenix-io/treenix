@@ -6,6 +6,7 @@ import { AnyType, type ComponentData, getComponents, isCompKey, type NodeData } 
 import { resolve, resolveExact } from '#core/registry';
 import { KernelError } from '#errors';
 import { isOrderKey } from '#kernel/order';
+import type { Component } from '#kernel/types';
 import type { PropertySchema, TypeSchema } from '#schema/types';
 import { createBoundedCache } from '#util/bounded-cache';
 import { isRecord } from '#util/is-record';
@@ -44,7 +45,7 @@ const malformed = (ctx: string, what: string) => new KernelError('INVALID', `${c
  * the validator reads has the shape it expects, and every pattern is safe. Its `methods` carry the schemas of
  * the actions' arguments, yields and returns.
  */
-export function assertSafeSchema(schema: unknown, ctx: string, depth = 0): void {
+export function assertSafeSchema(schema: unknown, ctx: string, depth = 0): asserts schema is PropertySchema {
   if (depth > SCHEMA_DEPTH_MAX) throw malformed(ctx, `schema too deep (max ${SCHEMA_DEPTH_MAX})`);
   if (!isRecord(schema)) throw malformed(ctx, 'a schema must be an object');
   const sub = (s: unknown) => assertSafeSchema(s, ctx, depth + 1);
@@ -265,9 +266,13 @@ function validateFields(
   }
 }
 
-export function validateComponent(comp: ComponentData, schema: TypeSchema, field: string): ValidationError[] {
+export function validateComponent(comp: Component, schema: PropertySchema, field: string): ValidationError[] {
   const errors: ValidationError[] = [];
   validateFields(comp, schema, field || comp.$type, errors, isOwnField);
+  if (schema.anyOf || schema.oneOf || schema.allOf || schema.enum || schema.type && schema.type !== 'object') {
+    const fields = Object.fromEntries(Object.entries(comp).filter(([key]) => isOwnField(key)));
+    validateValue(fields, { ...schema, type: schema.type === 'object' ? undefined : schema.type }, field || comp.$type, errors);
+  }
   return errors;
 }
 
