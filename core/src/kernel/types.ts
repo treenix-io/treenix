@@ -361,7 +361,8 @@ export type Request =
 
 /**
  * Plain-JSON difference of two projected images. Keys of `set` and entries of `unset` are dot-paths into
- * the node; no path in one delta is a prefix of another.
+ * the node; no path in one delta is a prefix of another. An empty `set` path replaces the image when a
+ * literal JSON key cannot be addressed by a dot-path.
  */
 export interface Delta {
   readonly set?: { readonly [field: string]: unknown }

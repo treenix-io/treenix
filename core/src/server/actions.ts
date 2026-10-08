@@ -14,7 +14,7 @@ import { DEFAULT_LIMITS, type UpdateOps } from '#kernel/types';
 import { type ActionKind, type TypeSchema } from '#schema/types';
 import type { Session } from '#security/sessions';
 import { type ExecOpts, type PatchManyEntry, type PatchOp, type Tree } from '#tree';
-import { getByPath } from '#tree/patch';
+import { getByPath } from '#kernel/update-ops';
 import { createDraft, enablePatches, finishDraft, type Patch } from 'immer';
 import { randomUUID } from 'node:crypto';
 import { createBoundedCache } from '#util/bounded-cache';

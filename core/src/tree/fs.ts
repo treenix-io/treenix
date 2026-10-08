@@ -16,7 +16,8 @@ import { scanFromCollected } from './fs-common';
 import { ensureMigrated } from './migrate-component-namespace';
 import { assertPathSafe } from './path-safety';
 import { applyPatchManyEntry, assertPatchManyBatch, assertSetEntryOcc, isSetEntry, mapNodeForSift, paginate, readWork, type TreeSource } from './index';
-import { assertNoPrototypeKeys, type CommitChange, type CommitReceipt, hasMutationOps, patchViaSet } from './patch';
+import { assertNoPrototypeKeys } from '#kernel/update-ops';
+import { type CommitChange, type CommitReceipt, hasMutationOps, patchViaSet } from './patch';
 
 // A dir-form node lives at <path>/$.json, so a '$' path segment aliases that
 // file: set('/a/$') overwrote node /a, and set('/a/$/c') moved /a's file away —

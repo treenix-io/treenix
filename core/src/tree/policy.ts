@@ -14,7 +14,8 @@ import {
 import { KernelError } from '#errors';
 import { ulid } from '#util/ulid';
 import { applyPatchManyEntry, assertPatchManyBatch, type CommitReceipt, hasMutationOps, isSetEntry, type PatchManyEntry, type PatchOp, type Tree } from './index';
-import { assertNoPrototypeKeys, assertOpValuesSafe, patchViaSet } from './patch';
+import { assertNoPrototypeKeys } from '#kernel/update-ops';
+import { assertOpValuesSafe, patchViaSet } from './patch';
 import { isMoved, type RefEntry, refsOf } from './refs';
 import { withCache } from './cache';
 import { isTrashExempt } from './trash-exempt';

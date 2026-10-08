@@ -750,7 +750,8 @@ export function createMemoryTree(): TreeSource {
   };
 }
 
-export { type CommitChange, type CommitReceipt, type PatchOp, PatchTestError, applyOps, assertSafePatchPath, hasMutationOps, patchViaSet } from './patch';
+export { type CommitChange, type CommitReceipt, type PatchOp, PatchTestError, applyOps, hasMutationOps, patchViaSet } from './patch';
+export { assertSafePatchPath } from '#kernel/update-ops';
 // Curated door for trusted in-process relocation (core-anz4.2): mods that
 // legitimately carry $id to a new path (branch merge) import it here — the
 // policy module itself stays private.
