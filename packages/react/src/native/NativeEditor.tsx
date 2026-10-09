@@ -26,6 +26,7 @@ function NodeEditor({ path }: { path: string }) {
   const [draft, setDraft] = useState(''),
     [dirty, setDirty] = useState(false);
   const [baseRev, setBaseRev] = useState<string>();
+  const [response, setResponse] = useState<string>();
   const [error, setError] = useState(''),
     [busy, setBusy] = useState(false),
     [action, setAction] = useState(''),
@@ -69,9 +70,18 @@ function NodeEditor({ path }: { path: string }) {
     event.preventDefault();
     setBusy(true);
     setError('');
+    setResponse(undefined);
     try {
       const data: unknown = JSON.parse(args);
-      await source.act({ path, action, args: data }).outcome;
+      const pending = source.act({ path, action, args: data });
+      const [outcome] = await Promise.all([
+        pending.outcome,
+        (async () => {
+          // Keeping only the latest piece displays progress without retaining the stream.
+          for await (const piece of pending.chunks) setResponse(JSON.stringify(piece, null, 2));
+        })(),
+      ]);
+      if (outcome.value !== undefined) setResponse(JSON.stringify(outcome.value, null, 2));
     } catch (error) {
       setError(message(error));
     } finally {
@@ -81,6 +91,11 @@ function NodeEditor({ path }: { path: string }) {
   return (
     <section className="flex min-w-0 flex-1 flex-col gap-4">
       <h2 className="text-xl font-semibold">{path}</h2>
+      {response !== undefined && (
+        <pre aria-label="Ответ действия" className="overflow-auto rounded bg-slate-100 p-3 text-sm">
+          {response}
+        </pre>
+      )}
       {error && (
         <p role="alert" className="text-red-700">
           {error}
