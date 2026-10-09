@@ -1,7 +1,7 @@
 import { KernelError } from '#errors'
 import type { AuthAdmission } from '#kernel/auth-factory'
 import type { createReader } from '#kernel/reader'
-import type { Actor, ChangeBuilder, Io, NestedActRequest, Node, ReadActionContext, ReadResult, Selector, WriteActionContext } from '#kernel/types'
+import type { Actor, ChangeBuilder, Io, NestedActRequest, Node, Path, ReadActionContext, ReadResult, Selector, WriteActionContext } from '#kernel/types'
 import { freeze } from '#util/freeze'
 
 /** Bind pre-effect waits and escaped context access to the request and parent lifetime. */
@@ -64,6 +64,20 @@ export function createReadActionContext(options: ActionContextOptions): ReadActi
 }
 
 /** Add the owned change builder and declared I/O to a writing action context. */
-export function createWriteActionContext(options: ActionContextOptions, change: ChangeBuilder, io?: Io): WriteActionContext {
-  return Object.freeze({ ...createReadActionContext(options), change, ...(io === undefined ? {} : { io }) })
+export function createWriteActionContext(
+  options: ActionContextOptions,
+  change: ChangeBuilder,
+  io?: Io,
+): WriteActionContext {
+  return Object.freeze({
+    ...createReadActionContext(options),
+    change,
+    /** Keep destination authorization in the same executor read set and action lifetime. */
+    async requireReadWrite(path: Path): Promise<void> {
+      options.active()
+      await options.reads.requireReadWrite(path)
+      options.active()
+    },
+    ...(io === undefined ? {} : { io }),
+  })
 }

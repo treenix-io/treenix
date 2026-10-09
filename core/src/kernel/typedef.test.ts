@@ -19,6 +19,9 @@ const context: WriteActionContext = {
   caller: { principal: 'u:alice', claims: ['u:alice'] },
   executor: { principal: 'u:alice', claims: ['u:alice'] },
   act: async () => { throw new Error('unused') },
+  requireReadWrite: async () => {
+    throw new KernelError('UNAVAILABLE', 'Metadata fixture cannot authorize writes')
+  },
   change: {
     put: () => { throw new Error('unused') }, patch: () => { throw new Error('unused') },
     remove: () => { throw new Error('unused') }, move: () => { throw new Error('unused') }, restore: () => { throw new Error('unused') },

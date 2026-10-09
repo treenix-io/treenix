@@ -577,6 +577,8 @@ export interface ReadActionContext {
  */
 export interface WriteActionContext extends ReadActionContext {
   readonly change: ChangeBuilder
+  /** Require both destination rights and retain their inputs as commit preconditions, without reading its data. */
+  requireReadWrite(path: Path): Promise<void>
   readonly io?: Io
 }
 

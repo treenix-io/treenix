@@ -14,7 +14,7 @@ import { computeRights, type ChainNode } from '#kernel/rights'
 import type { AuthReadSource } from '#kernel/session'
 import { mapNodeForSift } from '#kernel/store/keys'
 import { compareScanKeys, parseScanCursor, scanCursor, scanKey, scanPage, type ScanKey } from '#kernel/store/scan'
-import { A, DEFAULT_LIMITS, R, type Budget, type DomainId, type HistoryEntry, type IncludeSpec, type JournalImageTypes, type JournalVisibility, type Limits, type Node, type NodeCopy,
+import { A, DEFAULT_LIMITS, R, W, type Budget, type DomainId, type HistoryEntry, type IncludeSpec, type JournalImageTypes, type JournalVisibility, type Limits, type Node, type NodeCopy,
   type JournalAddress, type JournalCommit, type JournalRange, type Path, type ReadResult, type Registry, type ScanRange,
   type Selector, type Sort, type Store, type StoredNode, type SubSelector } from '#kernel/types'
 import { getByPath } from '#kernel/update-ops'
@@ -125,6 +125,8 @@ export function createReader(options: ReaderOptions) {
   function active(): void {
     options.scope?.check();
     admission.assertActive();
+    if (work.used > work.limit || requestBytes > limits.requestBytes)
+      throw new KernelError('BUDGET', 'Read operation budget exceeded');
     if (Date.now() > allowance.deadline) throw new KernelError('BUDGET', 'Read deadline exceeded');
   }
   function depend(input: ReadDependency): void {
@@ -144,9 +146,8 @@ export function createReader(options: ReaderOptions) {
   function remainingBudget(): Budget {
     return { ...remaining(), exprWork: work.limit - work.used };
   }
-  function rights(at: Path, found: ReaderTarget, image?: StoredNode, capture = true) {
-    const chain = found.chain(at),
-      inputs = new Map(chain.map((node) => [node.path, node]));
+  function rights(at: Path, found: ReaderTarget, image?: StoredNode, capture = true, chain = found.chain(at)) {
+    const inputs = new Map(chain.map((node) => [node.path, node]));
     const ancestors = ancestorPaths(at);
     if (image !== undefined) inputs.set(at, decodeChainNode(image));
     if (capture)
@@ -544,6 +545,7 @@ export function createReader(options: ReaderOptions) {
   }
   /** Returns the complete read set required to reject stale action or commit preparation. */
   function expect(): ReadSet {
+    active();
     return {
       nodes: [...nodes].map(([path, rev]) => ({ path, rev })),
       absent: [...absent],
@@ -566,6 +568,52 @@ export function createReader(options: ReaderOptions) {
         ...(selection.next === undefined ? {} : { next: selection.next }),
       };
     });
+  }
+  /** Assert destination authorization without revealing data, retaining its inputs for final OCC. */
+  async function requireReadWrite(at: Path): Promise<void> {
+    active();
+    requestBytes += Buffer.byteLength(JSON.stringify({ requireReadWrite: at }));
+    if (requestBytes > limits.requestBytes)
+      throw new KernelError('BUDGET', 'Read request budget exceeded');
+    chargeAuthorization(at.length + 1);
+    let prefixWork = at.length + 1;
+    for (let index = 1; index < at.length; index++) if (at[index] === '/') prefixWork += index;
+    // Both the target chain and rights capture build every prefix, including absent ancestors.
+    chargeAuthorization(prefixWork * 2);
+    path(at);
+    return writer.read(source.domains, async () => {
+      active();
+      await admission.validate(source.auth);
+      active();
+      const current = writer.stream.cursor();
+      depend({ kind: 'actor', key: admission.dependencyKey, value: admission.dependency() });
+      for (const domain of source.domains)
+        depend({ kind: 'epoch', key: domain, value: current.epochs[domain] });
+      topology({ node: at });
+      const found = target(at),
+        chain = found.chain(at);
+      // Charge the complete metadata traversal before allocating or evaluating the rights fold.
+      for (const claim of admission.actor.claims) chargeAuthorization(claim.length + 1);
+      for (const scope of admission.actor.scope ?? [])
+        chargeAuthorization((at.length + scope.length + 1) * (chain.length + 1));
+      for (const node of chain) {
+        chargeAuthorization(node.path.length + node.alerts.length + 1);
+        for (const entry of node.acl)
+          chargeAuthorization('group' in entry.subject ? entry.subject.group.length + 1 : 1);
+        for (const type of node.types)
+          chargeAuthorization((type.length + 1) * (node.types.length + 1));
+      }
+      const result = rights(at, found, undefined, true, chain);
+      if ((result.bits & (R | W)) !== (R | W))
+        throw new KernelError('FORBIDDEN', 'Destination requires read and write rights');
+      active();
+    });
+  }
+  /** Bound metadata folding, including rule sorting and prefix comparisons, by the shared action work allowance. */
+  function chargeAuthorization(units: number): void {
+    work.used += units;
+    if (work.used > work.limit)
+      throw new KernelError('BUDGET', 'Authorization work budget exceeded');
   }
   /** Intersects current logical rights with the historical type rules before loading journal images. */
   function historyAllowed(at: Path, image?: JournalImageTypes): boolean {
@@ -714,6 +762,7 @@ export function createReader(options: ReaderOptions) {
   }
   return {
     read,
+    requireReadWrite,
     selectInSpan,
     cursor,
     work,
