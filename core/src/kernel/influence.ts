@@ -104,11 +104,11 @@ export function createInfluenceIndex(options: InfluenceOptions) {
       for (const [write, size] of rows) if (write.domain === domain) { rows.delete(write); bytes -= size }
     },
     /** Reject intervals that are unknown, truncated, or affected by a retained write. */
-    check(selector: Selector, cursors: readonly Position[], before: Position, domains: readonly DomainId[], context: InfluenceContext): void {
+    check(selector: Selector, cursors: readonly Position[], before: Position, domains: readonly DomainId[], context: InfluenceContext, inclusive = false): void {
       let from: Position | undefined
       for (const cursor of cursors) if (cursor.instance === before.instance
         && (from === undefined || comparePositions(cursor, from) < 0)) from = cursor
-      if (from === undefined || comparePositions(from, before) >= 0 || comparePositions(from, position) > 0) throw new KernelError('CONFLICT', 'The selector interval is not known')
+      if (from === undefined || (inclusive ? comparePositions(from, before) > 0 : comparePositions(from, before) >= 0) || comparePositions(from, position) > 0) throw new KernelError('CONFLICT', 'The selector interval is not known')
       for (const domain of domains) {
         const floor = floors.get(domain)
         if (floor === undefined) throw new KernelError('INVALID', 'Unknown influence domain')
@@ -116,7 +116,7 @@ export function createInfluenceIndex(options: InfluenceOptions) {
       }
       const selected = new Set(domains), affects = createInfluenceTest(selector, context)
       for (const write of rows.keys()) if (selected.has(write.domain) && comparePositions(write.pos, from) > 0
-        && comparePositions(write.pos, before) < 0 && affects(write)) throw new KernelError('CONFLICT', 'A write affected the selector')
+        && (inclusive ? comparePositions(write.pos, before) <= 0 : comparePositions(write.pos, before) < 0) && affects(write)) throw new KernelError('CONFLICT', 'A write affected the selector')
     },
   }
 }

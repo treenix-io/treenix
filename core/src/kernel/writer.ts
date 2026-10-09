@@ -4,8 +4,9 @@ import type { NodeChange } from '#kernel/changeset'
 import { createInfluenceIndex, type InfluenceOptions } from '#kernel/influence'
 import { createIdempotency, type IdempotencyOptions, type MutationIdentity, type MutationWaiter } from '#kernel/idempotency'
 import { comparePositions } from '#kernel/position'
+import { matchingDecision } from '#kernel/journal'
 import { createInstanceStream, streamDomainEpochs } from '#kernel/stream'
-import { DEFAULT_LIMITS, type Budget, type DomainId, type JournalCommit, type OpenedStoreMountTarget, type Outcome, type Position, type PositionCounter, type Rev, type Store, type StoreCommit, type StoredWrite, type StreamDomain, type StreamEvent } from '#kernel/types'
+import { DEFAULT_LIMITS, type Budget, type DomainId, type JournalCommit, type OpDecision, type OpenedStoreMountTarget, type Outcome, type Position, type PositionCounter, type Rev, type Store, type StoreCommit, type StoredWrite, type StreamDomain, type StreamEvent } from '#kernel/types'
 
 export interface StoreTargetRegistration {
   readonly key: string
@@ -51,6 +52,9 @@ export interface PreparedCommit {
 }
 export interface PreparedMutation extends PreparedCommit { readonly value?: unknown }
 export interface MutationSpan {
+  readonly anchor: OpDecision
+  beginStream(stream: NonNullable<OpDecision['stream']>): Promise<void>
+  validateAnchor(): Promise<void>
   step(store: Store, reads: readonly DomainId[], prepare: (position: Position) => PreparedCommit | Promise<PreparedCommit>): Promise<Position>
   finish(store: Store, reads: readonly DomainId[], prepare: (position: Position) => PreparedMutation | Promise<PreparedMutation>): Promise<Outcome>
 }
@@ -514,46 +518,136 @@ async function initializeWriter(options: WriterOptions) {
     })()
     return closedTargets
   }
-  async function mutate(input: MutationIdentity, execute: (span: MutationSpan) => Promise<unknown>, wait?: MutationWaiter): Promise<Outcome> {
-    checkFailure()
-    return intake.run(input, () => refreshIntake(), async decision => {
-      let started = false, pending = false, outcome: Outcome | undefined
-      async function apply(store: Store, reads: readonly DomainId[], prepare: (pos: Position) => PreparedMutation | Promise<PreparedMutation>, finish: boolean): Promise<Position> {
-        if (pending || outcome !== undefined) throw new KernelError('INVALID', 'Mutation steps must be ordered and finish once')
-        pending = true
-        try {
-          let final: Outcome | undefined
-          const position = await commit(store, [...new Set([...reads, options.root.domain])], async pos => {
-            intake.checkAdmitted(input.opId)
-            const prepared = await prepare(pos)
-            if (prepared.record.caller !== input.actor.principal) throw new KernelError('INVALID', 'Mutation caller differs from its journal')
-            const value: Outcome = structuredClone({ pos, ...(Object.hasOwn(prepared, 'value') ? { value: prepared.value } : {}) })
-            const record = { ...prepared.record, ...(finish || !started ? {
-              decision: { ...decision, ...(finish ? { outcome: value } : {}) },
-            } : {}) }
-            if (finish) final = value
-            return { ...prepared, record }
-          })
-          if (finish) outcome = final
-          return position
-        } finally { pending = false }
-      }
-      const span: MutationSpan = {
-        async step(store, reads, prepare) {
-          if (input.stream === undefined) throw new KernelError('INVALID', 'Only a stream has intermediate mutation steps')
-          const pos = await apply(store, reads, prepare, false)
-          started = true
-          return pos
-        },
-        async finish(store, reads, prepare) {
-          await apply(store, reads, prepare, true)
-          return structuredClone(outcome!)
-        },
-      }
-      await execute(span)
-      if (outcome === undefined) throw new KernelError('INVALID', 'Mutation returned without its durable final outcome')
-      return outcome
-    }, wait)
+  /** Coordinates one ordered mutation, including its unfinished stream anchors. */
+  async function mutate(
+    input: MutationIdentity,
+    execute: (span: MutationSpan) => Promise<unknown>,
+    wait?: MutationWaiter,
+  ): Promise<Outcome> {
+    checkFailure();
+    return intake.run(
+      input,
+      () => refreshIntake(),
+      async (decision) => {
+        let started = false,
+          pending = false,
+          outcome: Outcome | undefined;
+        let stream = input.stream,
+          currentDecision = decision,
+          anchor = decision;
+        /** Recheck the original started decision inside each ordered preparation, including finalization. */
+        async function validateAnchor(): Promise<void> {
+          if (input.anchor === undefined && !started) return;
+          if (stream === undefined)
+            throw new KernelError('INVALID', 'Only a stream may continue an anchor');
+          const anchorId = input.anchor ?? input.opId;
+          if (anchorId.time < intake.boundary())
+            throw new KernelError('EXPIRED', 'Stream anchor has expired');
+          const record = await intake.lookup(
+            input.actor.principal,
+            anchorId,
+            input.anchorLookupCost,
+          );
+          if (record === undefined) {
+            intake.checkAdmitted(anchorId);
+            throw new KernelError('INVALID', 'Stream anchor is absent');
+          }
+          const found = matchingDecision(record, input.actor.principal, anchorId);
+          if (
+            found.outcome !== undefined ||
+            found.stream === undefined ||
+            found.stream.executor !== stream.executor ||
+            found.stream.target !== stream.target
+          )
+            throw new KernelError(
+              'INVALID',
+              'Stream anchor does not name this unfinished execution',
+            );
+          anchor = found;
+        }
+        await validateAnchor();
+        async function apply(
+          store: Store,
+          reads: readonly DomainId[],
+          prepare: (pos: Position) => PreparedMutation | Promise<PreparedMutation>,
+          finish: boolean,
+        ): Promise<Position> {
+          if (pending || outcome !== undefined)
+            throw new KernelError('INVALID', 'Mutation steps must be ordered and finish once');
+          pending = true;
+          try {
+            let final: Outcome | undefined;
+            const position = await commit(
+              store,
+              [...new Set([...reads, options.root.domain])],
+              async (pos) => {
+                intake.checkAdmitted(input.opId);
+                await validateAnchor();
+                const prepared = await prepare(pos);
+                if (prepared.record.caller !== input.actor.principal)
+                  throw new KernelError('INVALID', 'Mutation caller differs from its journal');
+                const value: Outcome = structuredClone({
+                  pos,
+                  ...(Object.hasOwn(prepared, 'value') ? { value: prepared.value } : {}),
+                });
+                const record = {
+                  ...prepared.record,
+                  ...(finish || !started
+                    ? {
+                        decision: { ...currentDecision, ...(finish ? { outcome: value } : {}) },
+                      }
+                    : {}),
+                  ...(finish && input.anchor !== undefined
+                    ? {
+                        anchorDecision: { ...anchor, outcome: value },
+                      }
+                    : {}),
+                };
+                if (finish) final = value;
+                return { ...prepared, record };
+              },
+            );
+            if (finish) outcome = final;
+            return position;
+          } finally {
+            pending = false;
+          }
+        }
+        const span: MutationSpan = {
+          get anchor() {
+            return anchor;
+          },
+          async beginStream(metadata) {
+            if (
+              stream !== undefined &&
+              (stream.executor !== metadata.executor || stream.target !== metadata.target)
+            )
+              throw new KernelError('INVALID', 'Stream execution identity changed');
+            stream = metadata;
+            currentDecision = { ...decision, stream: metadata };
+            if (input.anchor === undefined && !started) anchor = currentDecision;
+            await validateAnchor();
+          },
+          validateAnchor,
+          async step(store, reads, prepare) {
+            if (stream === undefined)
+              throw new KernelError('INVALID', 'Only a stream has intermediate mutation steps');
+            const pos = await apply(store, reads, prepare, false);
+            started = true;
+            return pos;
+          },
+          async finish(store, reads, prepare) {
+            await apply(store, reads, prepare, true);
+            return structuredClone(outcome!);
+          },
+        };
+        await execute(span);
+        if (outcome === undefined)
+          throw new KernelError('INVALID', 'Mutation returned without its durable final outcome');
+        return outcome;
+      },
+      wait,
+    );
   }
   function replay(input: MutationIdentity, wait?: MutationWaiter): Promise<Outcome | undefined> {
     checkFailure()

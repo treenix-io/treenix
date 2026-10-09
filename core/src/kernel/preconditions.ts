@@ -12,6 +12,8 @@ export interface ReadSet extends Preconditions {
 }
 export interface PreconditionOptions extends InfluenceContext {
   readonly index: InfluenceIndex
+  /** Read-only steps include the actual current cursor; reserved writes remain exclusive. */
+  readonly inclusivePosition?: boolean
   readonly position: Position
   readonly read: (path: string) => Promise<Node | null>
   readonly domains: (selector: Selector) => readonly DomainId[]
@@ -31,7 +33,7 @@ export async function checkPreconditions(expect: ReadSet, options: PreconditionO
     if (await options.read(path) !== null) throw new KernelError('CONFLICT', 'A read absence changed')
   }
   for (const input of expect.selectors ?? []) {
-    options.index.check(input.selector, input.at, options.position, options.domains(input.selector), options)
+    options.index.check(input.selector, input.at, options.position, options.domains(input.selector), options, options.inclusivePosition)
   }
 }
 

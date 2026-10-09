@@ -40,7 +40,9 @@ export function runStoreContract(factory: () => Store | Promise<Store>, options:
     const scan = () => store.scan({ range: { subtree: '/' }, budget: scanBudget() })
 
     it('reads empty ranges and exact nodes without requiring a stored parent', async () => {
-      assert.deepEqual(await scan(), { items: [] })
+      const empty = await scan()
+      assert.deepEqual(empty.items, [])
+      assert.equal(empty.next, undefined)
       await store.commit(storeCommit(1, [storedNode('/p/a'), storedNode('/p/a/x'), storedNode('/p/b')]))
       assert.deepEqual((await store.scan({ range: { node: '/p/a' }, budget: scanBudget() })).items.map(node => node.$path), ['/p/a'])
       assert.deepEqual((await store.scan({ range: { children: '/p' }, budget: scanBudget() })).items.map(node => node.$path), ['/p/a', '/p/b'])
@@ -81,8 +83,18 @@ export function runStoreContract(factory: () => Store | Promise<Store>, options:
     })
 
     it('counts filtered-out nodes against the scan budget', async () => {
-      await store.commit(storeCommit(1, [storedNode('/a', { value: 1 }), storedNode('/b', { value: 2 })]))
-      await assert.rejects(() => store.scan({ range: { subtree: '/' }, where: { value: 99 }, budget: { ...scanBudget(), nodes: 1 } }), errorCode('BUDGET'))
+      await store.commit(
+        storeCommit(1, [storedNode('/a', { value: 1 }), storedNode('/b', { value: 2 })]),
+      )
+      await assert.rejects(
+        () =>
+          store.scan({
+            range: { subtree: '/' },
+            where: { value: 99 },
+            budget: { ...scanBudget(), nodes: 1 },
+          }),
+        errorCode('BUDGET'),
+      )
     })
 
     it('deletes only the addressed node and keeps its descendants readable', async () => {
@@ -175,7 +187,9 @@ export function runStoreContract(factory: () => Store | Promise<Store>, options:
       ]
       for (const commit of invalid) {
         await assert.rejects(() => store.commit(commit), errorCode('INVALID'))
-        assert.deepEqual(await scan(), { items: [] })
+        const empty = await scan()
+        assert.deepEqual(empty.items, [])
+        assert.equal(empty.next, undefined)
         assert.deepEqual((await store.scan({ range: { journal: '/' }, budget: scanBudget() })).items, [])
       }
     })

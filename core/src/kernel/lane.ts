@@ -7,7 +7,8 @@ import { comparePositions } from '#kernel/position'
 import { createSubscriptions, type NodeSubscription } from '#kernel/subscription'
 import { createLaneDelivery } from '#kernel/lane-delivery'
 import type { LaneSelectionSource } from '#kernel/lane-selection'
-import type { Credential, DomainId, Frame, LaneChange, Limits, NodeCopy, NodeId, Outcome, Path, Pending, Position, Request, ScanRange, Selector, Session, Sort, SubSelector } from '#kernel/types'
+import { createChunkChannel } from '#util/chunk-channel'
+import type { ActionPiece, ActionPieceDelivery, Credential, DomainId, Frame, LaneChange, Limits, NodeCopy, NodeId, Outcome, Path, Pending, Position, Request, ScanRange, Selector, Session, Sort, SubSelector } from '#kernel/types'
 
 export type NodeSubSelector = SubSelector
 export type NodeLaneCommand =
@@ -44,7 +45,7 @@ export interface NodeLaneOptions {
   readonly heartbeat?: boolean
   readonly transfers?: BlobTransfers
 }
-export type NodeLaneFrame = Extract<Frame, { readonly t: 'welcome' | 'snap' | 'pos' | 'done' | 'fail' | 'end' | 'reset' }>
+export type NodeLaneFrame = Extract<Frame, { readonly t: 'welcome' | 'snap' | 'pos' | 'chunk' | 'done' | 'fail' | 'end' | 'reset' }>
 
 export interface NodeLane extends Session {
   readonly actor: AuthAdmission['actor']
@@ -65,6 +66,8 @@ interface Mutation {
   readonly controller: AbortController
   readonly resolve: (outcome: Outcome) => void
   readonly reject: (error: KernelError) => void
+  readonly chunks?: ReturnType<typeof createChunkChannel>
+  piece?: { readonly value: ActionPiece; readonly taken: () => void }
   outcome?: Outcome
   error?: KernelError
 }
@@ -103,6 +106,7 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
   let notification = 0;
   let watermark: Position | undefined;
   let failure: KernelError | undefined;
+  let takePiece: (() => void) | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let lastActivity = Date.now();
   let unsubscribeStream = () => {};
@@ -165,6 +169,7 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
     reads.clear();
     // An accepted mutation must retain its canonical success even if delivery has ended.
     for (const request of mutations.values()) {
+      request.chunks?.end(reason ?? new KernelError('CANCELLED', 'Lane is closed'));
       request.controller.abort(reason);
       if (request.outcome !== undefined) {
         request.resolve(request.outcome);
@@ -252,8 +257,16 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
       throw denied;
     }
   }
+  /** Requires a covering ordinary frame before a piece or its final outcome is delivered. */
+  function uncovered(pos: Position | undefined): boolean {
+    return pos !== undefined && (watermark === undefined || comparePositions(pos, watermark) > 0);
+  }
   /** Starts a cancellable mutation whose outcome settles after its completion frame. */
-  function start(run: (signal: AbortSignal) => Promise<Outcome>, requestId: string): Pending {
+  function start(
+    run: (signal: AbortSignal, deliver: ActionPieceDelivery) => Promise<Outcome>,
+    requestId: string,
+    owner: 'pending' | 'frames' | 'none' = 'none',
+  ): Pending {
     reserve(requestId);
     let resolve!: Mutation['resolve'];
     let reject!: Mutation['reject'];
@@ -268,12 +281,43 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
       controller: new AbortController(),
       resolve,
       reject,
+      chunks: owner === 'pending' ? createChunkChannel(() => cancel(requestId)) : undefined,
     };
     mutations.set(requestId, mutation);
-    run(mutation.controller.signal).then(
+
+    /** A direct Pending owns its pieces; wire calls own correlated lane frames, never both. */
+    const deliver: ActionPieceDelivery = async (piece, signal) => {
+      signal.throwIfAborted();
+      if (closed) throw failure ?? new KernelError('CANCELLED', 'Lane is closed');
+      if (owner === 'none') throw new KernelError('INVALID', 'Request has no piece consumer');
+      if (mutation.piece !== undefined)
+        throw new KernelError('INVALID', 'Piece delivery is pending');
+      if (owner === 'frames' || uncovered(piece.pos)) {
+        let abort = () => {};
+        try {
+          await new Promise<void>((resolve, reject) => {
+            const held = { value: piece, taken: resolve };
+            mutation.piece = held;
+            abort = () => {
+              if (mutation.piece === held) mutation.piece = undefined;
+              reject(signal.reason);
+              wake();
+            };
+            signal.addEventListener('abort', abort, { once: true });
+            wake();
+          });
+        } finally {
+          signal.removeEventListener('abort', abort);
+        }
+      }
+      if (mutation.chunks !== undefined) await mutation.chunks.deliver(piece.data, signal);
+    };
+
+    run(mutation.controller.signal, deliver).then(
       (result) => {
         mutation.outcome = result;
         if (closed) {
+          mutation.chunks?.end();
           mutation.resolve(result);
           mutations.delete(requestId);
         } else wake();
@@ -281,18 +325,22 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
       (caught) => {
         mutation.error = error(caught);
         if (closed) {
+          mutation.chunks?.end(mutation.error);
           mutation.reject(mutation.error);
           mutations.delete(requestId);
         } else wake();
       },
     );
-    return { id: requestId, chunks: noChunks, outcome };
+    return { id: requestId, chunks: mutation.chunks?.chunks ?? noChunks, outcome };
   }
   /** Cancels unfinished work without discarding an accepted mutation outcome. */
   function cancel(requestId: string): void {
     const mutation = mutations.get(requestId);
-    if (mutation !== undefined && mutation.outcome === undefined)
-      mutation.controller.abort(new KernelError('CANCELLED', 'Request cancelled'));
+    if (mutation !== undefined && mutation.outcome === undefined) {
+      const denied = new KernelError('CANCELLED', 'Request cancelled');
+      mutation.chunks?.end(denied);
+      mutation.controller.abort(denied);
+    }
     reads.get(requestId)?.controller.abort(new KernelError('CANCELLED', 'Request cancelled'));
     wake();
   }
@@ -327,11 +375,7 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
     )
       return true;
     for (const request of mutations.values())
-      if (
-        request.outcome?.pos !== undefined &&
-        (watermark === undefined || comparePositions(request.outcome.pos, watermark) > 0)
-      )
-        return true;
+      if (uncovered(request.piece?.value.pos) || uncovered(request.outcome?.pos)) return true;
     return false;
   }
   /** Publishes a snapshot and retains coverage releases at the delivered watermark. */
@@ -397,13 +441,24 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
     for (const sub of subscriptions.entries.values())
       if (sub.ready && sub.initial) return snapshot(sub);
     for (const request of mutations.values()) {
+      if (request.piece !== undefined) {
+        const held = request.piece;
+        request.piece = undefined;
+        if (request.chunks !== undefined) held.taken();
+        else {
+          takePiece = held.taken;
+          return { t: 'chunk', req: request.id, data: held.value.data };
+        }
+      }
       if (request.error !== undefined) {
         mutations.delete(request.id);
+        request.chunks?.end(request.error);
         request.reject(request.error);
         return { t: 'fail', req: request.id, error: request.error };
       }
       if (request.outcome !== undefined) {
         mutations.delete(request.id);
+        request.chunks?.end();
         request.resolve(request.outcome);
         return { t: 'done', req: request.id, ...request.outcome };
       }
@@ -421,7 +476,7 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
         return { t: 'fail', req: requestId, error: error(caught) };
       }
     }
-    if (reconnecting && mutations.size === 0) close()
+    if (reconnecting && mutations.size === 0) close();
     return undefined;
   }
   /** Drains only waiting pulls and rechecks notifications received during preparation. */
@@ -435,12 +490,16 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
         while (!closed && pulls.length > 0) {
           observed = notification;
           const frame = await nextFrame();
+          const taken = takePiece;
+          takePiece = undefined;
           if (closed) break;
           if (frame === undefined) {
             if (observed !== notification) continue;
             break;
           }
           pulls.shift()!.resolve({ done: false, value: frame });
+          // The producer resumes after the owning pull takes the chunk, never after enqueueing it.
+          taken?.();
         }
       } catch (caught) {
         close(error(caught));
@@ -575,7 +634,7 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
     },
     act: (request) => {
       touch();
-      return start((signal) => options.commands.act(request, signal), id());
+      return start((signal, deliver) => options.commands.act(request, signal, deliver), id(), 'pending');
     },
     /** Preserves wire correlation while scheduling an admitted native command. */
     accept(command) {
@@ -589,7 +648,7 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
       } else if (command.t === 'commit')
         start((signal) => options.commands.commit(command, signal), command.req);
       else if (command.t === 'act')
-        start((signal) => options.commands.act(command, signal), command.req);
+        start((signal, deliver) => options.commands.act(command, signal, deliver), command.req, 'frames');
       else if (command.t === 'cancel') cancel(command.req);
       else {
         reserve(command.req);

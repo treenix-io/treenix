@@ -1,4 +1,5 @@
 import { KernelError } from '#errors'
+import { assertDecisionAliases } from '#kernel/journal'
 import type { ExprWork } from '#kernel/eval'
 import { createSiftTest } from '#kernel/expr'
 import { DEFAULT_LIMITS, type Budget, type DecisionRange, type JournalCommit, type JournalRange, type Position,
@@ -59,7 +60,12 @@ export function createMemoryStore(options: MemoryStoreOptions): MemoryStore {
     }
   }
 
-  function collect<T extends object>(items: Iterable<T>, query: ScanQuery<unknown>, cost = { nodes: 0, bytes: 0, exprWork: 0 }): T[] {
+  /** Applies filters and charges every inspected item to the scan's shared cost ledger. */
+  function collect<T extends object>(
+    items: Iterable<T>,
+    query: ScanQuery<unknown>,
+    cost = { nodes: 0, bytes: 0, exprWork: 0 },
+  ): T[] {
     const result: T[] = []
     const work: ExprWork = { limit: query.budget.exprWork, used: cost.exprWork }
     const test = query.where === undefined ? undefined : createSiftTest(query.where, DEFAULT_LIMITS)
@@ -67,9 +73,11 @@ export function createMemoryStore(options: MemoryStoreOptions): MemoryStore {
     for (const item of items) {
       check(query.budget)
       cost.nodes++
-      if (cost.nodes > query.budget.nodes) throw new KernelError('BUDGET', 'Scan node budget exceeded')
+      if (cost.nodes > query.budget.nodes)
+        throw new KernelError('BUDGET', 'Scan node budget exceeded')
       cost.bytes += Buffer.byteLength(JSON.stringify(item))
-      if (cost.bytes > query.budget.bytes) throw new KernelError('BUDGET', 'Scan byte budget exceeded')
+      if (cost.bytes > query.budget.bytes)
+        throw new KernelError('BUDGET', 'Scan byte budget exceeded')
       if (test === undefined || test(mapNodeForSift(item), work)) result.push(item)
     }
     check(query.budget)
@@ -77,6 +85,7 @@ export function createMemoryStore(options: MemoryStoreOptions): MemoryStore {
     return result
   }
 
+  /** Selects bounded node, journal, or decision results and reports inspected scan cost. */
   function scan(query: ScanQuery<ScanRange>): Promise<ScanResult<StoredNode>>
   function scan(query: ScanQuery<JournalRange | DecisionRange>): Promise<ScanResult<JournalCommit>>
   async function scan(query: ScanQuery<ScanRange | JournalRange | DecisionRange>): Promise<ScanResult<StoredNode> | ScanResult<JournalCommit>> {
@@ -94,11 +103,13 @@ export function createMemoryStore(options: MemoryStoreOptions): MemoryStore {
         const selected = journalIndex.select(range, query.budget)
         const records = collect(selected.records, query, selected.cost)
         const page = scanPage(records, query.sort ?? [['pos.epoch', 1], ['pos.seq', 1]], record => stableJson(record.pos), scope, query.after, query.limit, deadline)
-        return range.accept === undefined ? page : { ...page, cost: selected.cost }
+        return { ...page, cost: selected.cost }
       }
-      return scanPage(collect(records, query), query.sort ?? [['pos.epoch', 1], ['pos.seq', 1]], record => stableJson(record.pos), scope, query.after, query.limit, deadline)
+      const cost = { nodes: 0, bytes: 0, exprWork: 0 }
+      return { ...scanPage(collect(records, query, cost), query.sort ?? [['pos.epoch', 1], ['pos.seq', 1]], record => stableJson(record.pos), scope, query.after, query.limit, deadline), cost }
     }
-    return scanPage(collect(candidates(range, query.budget), query), query.sort ?? [], node => node.$path, scope, query.after, query.limit, deadline)
+    const cost = { nodes: 0, bytes: 0, exprWork: 0 }
+    return { ...scanPage(collect(candidates(range, query.budget), query, cost), query.sort ?? [], node => node.$path, scope, query.after, query.limit, deadline), cost }
   }
 
   return {
@@ -118,12 +129,14 @@ export function createMemoryStore(options: MemoryStoreOptions): MemoryStore {
           throw new KernelError('INVALID', 'Stored node address or position differs from its commit')
         }
       }
+      assertDecisionAliases(commit.record)
       options.beforeRecord?.()
       available()
       if (commit.writerEpoch < writerEpoch) throw new KernelError('CONFLICT', 'Writer epoch is stale')
       const record = commit.record
       const publishJournal = journalIndex.prepare(record, commit.writes)
       const key = record.decision === undefined ? undefined : decisionKey(record.caller, record.decision.opId)
+      const anchorKey = record.anchorDecision === undefined ? undefined : decisionKey(record.caller, record.anchorDecision.opId)
       // All fallible staging finishes before the synchronous data and journal publication.
       for (const write of commit.writes) {
         if (write.node === null) treeRemove(root, write.path)
@@ -131,6 +144,7 @@ export function createMemoryStore(options: MemoryStoreOptions): MemoryStore {
       }
       publishJournal()
       if (key !== undefined) decisions.set(key, record)
+      if (anchorKey !== undefined) decisions.set(anchorKey, record)
       writerEpoch = commit.writerEpoch
     },
     /** Release the owned node data; repeated release has no effects. */

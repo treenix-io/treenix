@@ -3,6 +3,7 @@ import { open, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { isSafeKey, safeJsonParse } from '#core/json'
 import { KernelError } from '#errors'
+import { assertDecisionAliases } from '#kernel/journal'
 import type { Executor, JournalEntry, OpId, Position, Principal, StoreCommit, StoredNode } from '#kernel/types'
 import { isRecord } from '#util/is-record'
 import { durableWrite, missing, syncDirectory } from './fs-io'
@@ -19,35 +20,92 @@ const opId = (value: unknown): value is OpId => isRecord(value) && typeof value.
 function storedNode(value: unknown): value is StoredNode {
   return isRecord(value) && typeof value.$path === 'string' && typeof value.$id === 'string' && typeof value.$type === 'string' && position(value.$pos)
 }
+/** Checks one decoded journal entry before it enters the Store index. */
 function entry(value: unknown): value is JournalEntry {
-  if (!isRecord(value) || typeof value.id !== 'string' || typeof value.path !== 'string' || value.from !== undefined && typeof value.from !== 'string'
-    || !isRecord(value.change)) return false
+  if (
+    !isRecord(value) ||
+    typeof value.id !== 'string' ||
+    typeof value.path !== 'string' ||
+    (value.from !== undefined && typeof value.from !== 'string') ||
+    !isRecord(value.change)
+  )
+    return false
   const change = value.change
   switch (change.t) {
-    case 'create': return storedNode(change.after)
-    case 'delete': return storedNode(change.before)
-    case 'update': return isRecord(change.delta) && Object.values(change.delta).every(isRecord) && (change.after === undefined || storedNode(change.after))
-    case 'reconcile': return (change.after === null || storedNode(change.after)) && (change.before === undefined || change.before === null || storedNode(change.before))
-    default: return false
+    case 'create':
+      return storedNode(change.after)
+    case 'delete':
+      return storedNode(change.before)
+    case 'update':
+      return (
+        isRecord(change.delta) &&
+        Object.values(change.delta).every(isRecord) &&
+        (change.after === undefined || storedNode(change.after))
+      )
+    case 'reconcile':
+      return (
+        (change.after === null || storedNode(change.after)) &&
+        (change.before === undefined || change.before === null || storedNode(change.before))
+      )
+    default:
+      return false
   }
 }
+/** Checks persisted commit data, including its optional stream decision metadata. */
 function storedCommit(value: unknown): value is StoreCommit {
-  if (!isRecord(value) || !position(value.pos) || typeof value.writerEpoch !== 'number' || !Number.isSafeInteger(value.writerEpoch) || value.writerEpoch < 0
-    || !Array.isArray(value.writes) || !value.writes.every(write => isRecord(write) && typeof write.path === 'string' && (write.node === null || storedNode(write.node)))
-    || !isRecord(value.record)) return false
+  if (
+    !isRecord(value) ||
+    !position(value.pos) ||
+    typeof value.writerEpoch !== 'number' ||
+    !Number.isSafeInteger(value.writerEpoch) ||
+    value.writerEpoch < 0 ||
+    !Array.isArray(value.writes) ||
+    !value.writes.every(
+      (write) =>
+        isRecord(write) &&
+        typeof write.path === 'string' &&
+        (write.node === null || storedNode(write.node)),
+    ) ||
+    !isRecord(value.record)
+  )
+    return false
   const record = value.record
-  if (!position(record.pos) || !executor(record.executor) || !executor(record.caller) || !Array.isArray(record.entries) || !record.entries.every(entry)
-    || !['commit', 'kernel', 'reconcile', 'transfer'].includes(String(record.kind))) return false
-  if (record.decision !== undefined) {
-    const decision = record.decision
-    if (!isRecord(decision) || !opId(decision.opId) || typeof decision.requestHash !== 'string'
-      || decision.outcome !== undefined && (!isRecord(decision.outcome) || decision.outcome.pos !== undefined && !position(decision.outcome.pos))
-      || decision.stream !== undefined && (!isRecord(decision.stream) || !principal(decision.stream.executor) || typeof decision.stream.target !== 'string')) return false
+  if (
+    !position(record.pos) ||
+    !executor(record.executor) ||
+    !executor(record.caller) ||
+    !Array.isArray(record.entries) ||
+    !record.entries.every(entry) ||
+    !['commit', 'kernel', 'reconcile', 'transfer'].includes(String(record.kind))
+  )
+    return false
+  for (const decision of [record.decision, record.anchorDecision]) {
+    if (decision === undefined) continue
+    if (
+      !isRecord(decision) ||
+      !opId(decision.opId) ||
+      typeof decision.requestHash !== 'string' ||
+      (decision.outcome !== undefined &&
+        (!isRecord(decision.outcome) ||
+          (decision.outcome.pos !== undefined && !position(decision.outcome.pos)))) ||
+      (decision.stream !== undefined &&
+        (!isRecord(decision.stream) ||
+          !principal(decision.stream.executor) ||
+          typeof decision.stream.target !== 'string'))
+    )
+      return false
   }
   if (record.intake !== undefined) {
     const intake = record.intake
-    if (!isRecord(intake) || typeof intake.epoch !== 'string' || typeof intake.boundary !== 'number' || !Number.isFinite(intake.boundary)
-      || !isRecord(intake.domains) || !Object.values(intake.domains).every(epoch => typeof epoch === 'string')) return false
+    if (
+      !isRecord(intake) ||
+      typeof intake.epoch !== 'string' ||
+      typeof intake.boundary !== 'number' ||
+      !Number.isFinite(intake.boundary) ||
+      !isRecord(intake.domains) ||
+      !Object.values(intake.domains).every((epoch) => typeof epoch === 'string')
+    )
+      return false
   }
   return true
 }
@@ -68,6 +126,7 @@ export function assertStoredJson(value: unknown): void {
 export function validateCommit(commit: StoreCommit): void {
   if (!storedCommit(commit) || !equalPosition(commit.pos, commit.record.pos)) throw new KernelError('INVALID', 'Invalid filesystem commit')
   assertStoredJson(commit)
+  assertDecisionAliases(commit.record)
   const paths = new Set<string>()
   for (const write of commit.writes) {
     if (typeof write.path !== 'string' || paths.has(write.path)) throw new KernelError('INVALID', 'Invalid filesystem write address')

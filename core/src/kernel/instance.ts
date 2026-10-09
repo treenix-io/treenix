@@ -22,8 +22,8 @@ import { componentEntries } from '#kernel/migrate'
 import { createNativeMountManifest } from '#kernel/mount-native'
 import { ownMountTarget } from '#kernel/mount-resource'
 import { createMountTable, type MountChange, type MountEntry, type MountRange, type MountTable } from '#kernel/mounts'
-import { positionToRev } from '#kernel/position'
-import type { ReaderSource, ReaderTarget } from '#kernel/reader'
+import { comparePositions, positionToRev } from '#kernel/position'
+import { readerOperationCost, type ReaderLedger, type ReaderSource, type ReaderTarget } from '#kernel/reader'
 import { drainSession } from '#kernel/session-delivery'
 import { runStoreQuery } from '#kernel/store/budget'
 import type { AuthReadSource, AuthSource } from '#kernel/session'
@@ -488,12 +488,17 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
   } finally { initial.release() }
   constructing = false
 
-  function reader(allowance: Budget, active = () => true): AuthReadSource {
+  function reader(allowance: Budget, active = () => true, ledger?: ReaderLedger): AuthReadSource {
+    const cost = ledger === undefined ? undefined : readerOperationCost(ledger)
     let nodes = 0, bytes = 0
     function check(): void {
       available()
       if (!active()) throw new KernelError('INVALID', 'Read scope has ended')
-      if (Date.now() > allowance.deadline) throw new KernelError('BUDGET', 'Read deadline exceeded')
+      if (Date.now() > allowance.deadline) {
+        const error = new KernelError('BUDGET', 'Read deadline exceeded')
+        if (cost !== undefined) cost.refuse(error)
+        throw error
+      }
     }
     const readSource: AuthReadSource = {
       async node(path) {
@@ -501,15 +506,32 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
         const store = resolveStore(path)
         const id = targets.target(store).paths.get(path)
         if (id === undefined) return null
-        if (nodes >= allowance.nodes) throw new KernelError('BUDGET', 'Read node budget exceeded')
+        if (nodes >= allowance.nodes) {
+          const error = new KernelError('BUDGET', 'Read node budget exceeded')
+          if (cost !== undefined) cost.refuse(error)
+          throw error
+        }
+        const remaining = cost?.budget()
+        if (remaining !== undefined && remaining.nodes <= 0)
+          cost!.refuse(new KernelError('BUDGET', 'Read node budget exceeded'))
         const lease = await writer.cache.fill(store, { node: path }, { ...allowance,
-          nodes: allowance.nodes - nodes, bytes: allowance.bytes - bytes })
+          nodes: Math.min(allowance.nodes - nodes, remaining?.nodes ?? allowance.nodes),
+          bytes: Math.min(allowance.bytes - bytes, remaining?.bytes ?? allowance.bytes) }).catch(error => {
+            if (cost !== undefined) cost.refuse(error)
+            throw error
+          })
         try {
           check()
           const node = lease.nodes[0]
           if (node === undefined || node.$id !== id) throw new KernelError('INVALID', 'Accepted identity differs from the root Store')
-          nodes++; bytes += Buffer.byteLength(JSON.stringify(node))
-          if (nodes > allowance.nodes || bytes > allowance.bytes) throw new KernelError('BUDGET', 'Read budget exceeded')
+          const loadedBytes = Buffer.byteLength(JSON.stringify(node))
+          nodes++; bytes += loadedBytes
+          cost?.charge(1, loadedBytes)
+          if (nodes > allowance.nodes || bytes > allowance.bytes) {
+            const error = new KernelError('BUDGET', 'Read budget exceeded')
+            if (cost !== undefined) cost.refuse(error)
+            throw error
+          }
           return node
         } finally { lease.release() }
       },
@@ -608,106 +630,187 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
     available()
   }
   /** Composes accepted target metadata and Store reads under one caller budget. */
-  function readerSource(allowance: Budget): ReaderSource {
-    available()
-    const rootTarget: ReaderTarget = { id: paths.get('/')!, store: config.root, chain: targets.chain, children: targets.children }
+  /** Pins source routing and read accounting to the selected operation. */
+  function readerSource(allowance: Budget, ledger?: ReaderLedger): ReaderSource {
+    available();
+    const rootTarget: ReaderTarget = {
+      id: paths.get('/')!,
+      store: config.root,
+      chain: targets.chain,
+      children: targets.children,
+    };
     /** Resolves an actual registered target while preserving its semantic generation. */
     function resolve(path: Path): ReaderTarget {
-      const found = mounts?.resolve(path)
-      if (found === undefined) return rootTarget
-      const registered = registeredTargets.get(found.entry.key)
-      if (registered === undefined || found.target.kind !== 'store' || registered.store !== found.target.store)
-        throw new KernelError('UNAVAILABLE', 'Mount metadata is unavailable')
-      return registered.target
+      const found = mounts?.resolve(path);
+      if (found === undefined) return rootTarget;
+      const registered = registeredTargets.get(found.entry.key);
+      if (
+        registered === undefined ||
+        found.target.kind !== 'store' ||
+        registered.store !== found.target.store
+      )
+        throw new KernelError('UNAVAILABLE', 'Mount metadata is unavailable');
+      return registered.target;
     }
     /** Includes every intersecting native Store, even when the range root belongs to another target. */
     function rangeTargets(range: ScanRange): readonly ReaderTarget[] {
-      const result = new Map<Store, ReaderTarget>()
+      const result = new Map<Store, ReaderTarget>();
       if ('node' in range) {
-        const found = resolve(range.node)
-        return [found]
+        const found = resolve(range.node);
+        return [found];
       }
-      result.set(config.root, rootTarget)
+      result.set(config.root, rootTarget);
       for (const claim of mounts?.ranges(range) ?? []) {
-        const registered = registeredTargets.get(claim.key)
-        if (claim.state !== 'active' || registered === undefined || registered.target.id !== claim.generation)
-          throw new KernelError('UNAVAILABLE', 'Claimed range is unavailable')
-        result.set(registered.store, registered.target)
+        const registered = registeredTargets.get(claim.key);
+        if (
+          claim.state !== 'active' ||
+          registered === undefined ||
+          registered.target.id !== claim.generation
+        )
+          throw new KernelError('UNAVAILABLE', 'Claimed range is unavailable');
+        result.set(registered.store, registered.target);
       }
-      return [...result.values()]
+      return [...result.values()];
     }
-    return { domains: addressedDomains(), auth: reader(allowance), resolve,
-      targets: rangeTargets, topology: range => mounts === undefined ? '[]' : mounts.topology(range) }
+    return {
+      domains: addressedDomains(),
+      auth: reader(allowance, undefined, ledger),
+      resolve,
+      targets: rangeTargets,
+      topology: (range) => (mounts === undefined ? '[]' : mounts.topology(range)),
+    };
   }
+  /** Binds commands to the current registry, source routing, and operation budget. */
   function commandOptions(admission: AuthAdmission): CommandOptions {
-    available()
-    return { writer, registry, projector, registryRevision: () => registryRevision,
-        blobs: config.blobs,
-        admission, source: readerSource, withNodeExecutor,
-        prepareSource, boundary: path => mounts?.boundary(path) ?? false,
-        capabilities: allowance => {
-          const readSource = reader(allowance)
-          return { node: readSource.nodeById, grants: targets.grantsTo,
-            ownerGrants: targets.ownerGrants(), shard: source.shard }
-        },
-        gates: config.gates ?? [], limits: () => limits,
-        budget: kind => config.budget === undefined && kind === 'action' ? { ...budget(), deadline: Date.now() + limits.actionMs } : budget(),
-        validate: prepared => validate(new Map(prepared.writes.map(write => [write.path, write.node])),
-          prepared.writes.length === 0 ? config.root : resolveStore(prepared.writes[0].path)) }
+    available();
+    return {
+      writer,
+      registry,
+      projector,
+      registryRevision: () => registryRevision,
+      blobs: config.blobs,
+      admission,
+      source: readerSource,
+      withNodeExecutor,
+      prepareSource,
+      boundary: (path) => mounts?.boundary(path) ?? false,
+      capabilities: (allowance, ledger) => {
+        const readSource = reader(allowance, undefined, ledger);
+        return {
+          node: readSource.nodeById,
+          grants: targets.grantsTo,
+          ownerGrants: targets.ownerGrants(),
+          shard: source.shard,
+        };
+      },
+      gates: config.gates ?? [],
+      limits: () => limits,
+      budget: (kind) =>
+        config.budget === undefined && kind === 'action'
+          ? { ...budget(), deadline: Date.now() + limits.actionMs }
+          : budget(),
+      validate: (prepared) =>
+        validate(
+          new Map(prepared.writes.map((write) => [write.path, write.node])),
+          prepared.writes.length === 0 ? config.root : resolveStore(prepared.writes[0].path),
+        ),
+    };
   }
   /** Holds a genuine node session and pins its own configuration without requiring read grants. */
   async function withNodeExecutor<T>(
     target: NodeActionTarget,
-    allowance: Budget, signal: AbortSignal, wait: <V>(pending: Promise<V>) => Promise<V>,
+    allowance: Budget,
+    signal: AbortSignal,
+    wait: <V>(pending: Promise<V>) => Promise<V>,
     run: (binding: NodeActionBinding) => Promise<T>,
+    ledger?: ReaderLedger,
   ): Promise<T> {
-    if (sessions === undefined) throw new KernelError('UNAUTHENTICATED', 'Node execution requires authentication')
-    const opening = sessions.openNode(target.path, { heartbeat: false })
-    let opened: Awaited<typeof opening>
-    try { opened = await wait(opening) }
-    catch (error) {
-      void opening.then(late => late.session.close(), error => console.error(error))
-      throw error
+    if (sessions === undefined)
+      throw new KernelError('UNAUTHENTICATED', 'Node execution requires authentication');
+    const opening = sessions.openNode(target.path, { heartbeat: false });
+    let opened: Awaited<typeof opening>;
+    try {
+      opened = await wait(opening);
+    } catch (error) {
+      void opening.then(
+        (late) => late.session.close(),
+        (error) => console.error(error),
+      );
+      throw error;
     }
-    let closed = false
+    let closed = false;
     /** Releases the acquired lane once, including cancellation during its callback. */
     function close(): void {
-      if (closed) return
-      closed = true
-      opened.session.close()
+      if (closed) return;
+      closed = true;
+      opened.session.close();
     }
-    signal.addEventListener('abort', close, { once: true })
-    const delivery = drainSession(opened.session).catch(error => {
-      if (error instanceof KernelError && (error.code === 'CANCELLED' || error.code === 'UNAUTHENTICATED')) return
-      throw error
-    })
-    mountDeliveries.add(delivery)
-    void delivery.then(() => mountDeliveries.delete(delivery), () => mountDeliveries.delete(delivery))
+    signal.addEventListener('abort', close, { once: true });
+    const delivery = drainSession(opened.session).catch((error) => {
+      if (
+        error instanceof KernelError &&
+        (error.code === 'CANCELLED' || error.code === 'UNAUTHENTICATED')
+      )
+        return;
+      throw error;
+    });
+    mountDeliveries.add(delivery);
+    void delivery.then(
+      () => mountDeliveries.delete(delivery),
+      () => mountDeliveries.delete(delivery),
+    );
     try {
-      signal.throwIfAborted()
-      const source = readerSource(allowance)
-      const owner = source.resolve(target.path)
-      const settings = await wait(writer.read(source.domains, async () => {
-        await opened.admission.validate(source.auth)
-        const node = await source.auth.nodeById(target.id)
-        if (node === null || node.$path !== target.path || positionToRev(node.$pos) !== target.rev)
-          throw new KernelError('CONFLICT', 'Executor configuration changed')
-        return freeze(structuredClone(node))
-      }))
-      return await run({ admission: opened.admission, options: commandOptions(opened.admission), settings,
+      signal.throwIfAborted();
+      const source = readerSource(allowance, ledger);
+      const owner = source.resolve(target.path);
+      let settings = await wait(
+        writer.read(source.domains, async () => {
+          await opened.admission.validate(source.auth);
+          const node = await source.auth.nodeById(target.id);
+          if (
+            node === null ||
+            node.$path !== target.path ||
+            positionToRev(node.$pos) !== target.rev
+          )
+            throw new KernelError('CONFLICT', 'Executor configuration changed');
+          return freeze(structuredClone(node));
+        }),
+      );
+      return await run({
+        admission: opened.admission,
+        options: commandOptions(opened.admission),
+        get settings() {
+          return settings;
+        },
+        /** A stream may advance its pin only with its own exact accepted image. */
+        acceptOwnStep(node) {
+          if (
+            node.$id !== target.id ||
+            node.$path !== target.path ||
+            comparePositions(node.$pos, settings.$pos) <= 0
+          )
+            throw new KernelError('INVALID', 'Accepted executor image does not advance its pin');
+          settings = freeze(structuredClone(node));
+        },
         /** Rechecks admission and routed executor identity before the action can commit. */
         async validate(read) {
-          await opened.admission.validate(read)
-          const current = readerSource(allowance).resolve(target.path)
-          const node = await read.nodeById(target.id)
-          if (current.id !== owner.id || current.store !== owner.store || node === null
-            || node.$path !== target.path || positionToRev(node.$pos) !== target.rev)
-            throw new KernelError('CONFLICT', 'Executor configuration changed')
-        } })
+          await opened.admission.validate(read);
+          const current = readerSource(allowance).resolve(target.path);
+          const node = await read.nodeById(target.id);
+          if (
+            current.id !== owner.id ||
+            current.store !== owner.store ||
+            node === null ||
+            node.$path !== target.path ||
+            positionToRev(node.$pos) !== positionToRev(settings.$pos)
+          )
+            throw new KernelError('CONFLICT', 'Executor configuration changed');
+        },
+      });
     } finally {
-      signal.removeEventListener('abort', close)
-      close()
-      await delivery
+      signal.removeEventListener('abort', close);
+      close();
+      await delivery;
     }
   }
   /** Build lane options with the caller's admission and instance capabilities. */

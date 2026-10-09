@@ -42,10 +42,54 @@ export interface ReaderOptions {
   readonly admission: AuthAdmission
   readonly source: ReaderSource
   readonly budget: Budget
+  readonly ledger?: ReaderLedger
   readonly limits?: Limits
   readonly alert?: (path: Path, error: unknown) => void
   readonly projector?: ReturnType<typeof createProjector>
   readonly scope?: { check(): void; hold(lease: CacheRead): void }
+}
+
+/** Whole-call costs outlive individual stream read sets and cannot be replenished by a new frame. */
+export interface ReaderLedger {
+  readonly budget: Budget
+  readonly work: ExprWork
+  readonly requestLimit: number
+  scanned: number
+  bytes: number
+  requestBytes: number
+  failure?: KernelError
+}
+
+/** Own one cumulative allowance for caller, executor and nested action frames. */
+export function createReaderLedger(budget: Budget, limits: Limits): ReaderLedger {
+  return { budget: Object.freeze({ ...budget }), work: { used: 0, limit: budget.exprWork },
+    requestLimit: limits.requestBytes, scanned: 0, bytes: 0, requestBytes: 0 }
+}
+
+/** Charge actual Store probes to the same monotonic action allowance. */
+export function readerOperationCost(ledger: ReaderLedger) {
+  /** Keep refused Store work terminal even when trusted handlers catch it. */
+  function refuse(error: unknown): never {
+    if (error instanceof KernelError && error.code === 'BUDGET') ledger.failure = error
+    throw error
+  }
+  /** Supply only the unspent operation allowance before Store work starts. */
+  function budget(): Budget {
+    if (ledger.failure !== undefined) throw ledger.failure
+    if (Date.now() > ledger.budget.deadline || ledger.work.used > ledger.work.limit)
+      refuse(new KernelError('BUDGET', 'Store reads exceeded the action budget'))
+    return { ...ledger.budget, nodes: ledger.budget.nodes - ledger.scanned,
+      bytes: ledger.budget.bytes - ledger.bytes, exprWork: ledger.work.limit - ledger.work.used }
+  }
+  /** Account actual domain probes and returned journal bytes. */
+  function charge(nodes: number, bytes: number, exprWork = 0): void {
+    ledger.scanned += nodes
+    ledger.bytes += bytes
+    ledger.work.used += exprWork
+    if (ledger.scanned > ledger.budget.nodes || ledger.bytes > ledger.budget.bytes || ledger.work.used > ledger.work.limit)
+      refuse(new KernelError('BUDGET', 'Store reads exceeded the action budget'))
+  }
+  return { budget, charge, refuse }
 }
 
 function ruleTypes(node: ChainNode, registry: Registry): readonly string[] {
@@ -108,24 +152,24 @@ interface Loaded {
 /** Reads canonical projections and records the dependencies used by queries, actions and subscriptions. */
 export function createReader(options: ReaderOptions) {
   const { registry, writer, admission, source } = options;
-  const limits = options.limits ?? DEFAULT_LIMITS,
-    allowance = Object.freeze({ ...options.budget });
+  const limits = options.limits ?? DEFAULT_LIMITS;
+  const ledger = options.ledger ?? createReaderLedger(options.budget, limits);
+  const allowance = { ...ledger.budget, deadline: Math.min(ledger.budget.deadline, options.budget.deadline) };
   const alert = options.alert ?? ((at: Path, error: unknown) => console.error(at, error));
   const projectCopy = options.projector ?? createProjector({ registry, alert });
-  const work: ExprWork = { used: 0, limit: allowance.exprWork };
+  const work = ledger.work;
   const nodes = new Map<Path, string>(),
     absent = new Set<Path>();
   const dependencies = new Map<string, ReadDependency>(),
     selectors: NonNullable<ReadSet['selectors']>[number][] = [];
   const scopeLoaded = options.scope === undefined ? undefined : new Map<Path, Loaded | null>();
-  let scanned = 0,
-    bytes = 0,
-    requestBytes = 0;
 
   function active(): void {
     options.scope?.check();
     admission.assertActive();
-    if (work.used > work.limit || requestBytes > limits.requestBytes)
+    if (ledger.failure !== undefined) throw ledger.failure;
+    if (work.used > work.limit || ledger.requestBytes > Math.min(limits.requestBytes, ledger.requestLimit)
+      || ledger.scanned > allowance.nodes || ledger.bytes > allowance.bytes)
       throw new KernelError('BUDGET', 'Read operation budget exceeded');
     if (Date.now() > allowance.deadline) throw new KernelError('BUDGET', 'Read deadline exceeded');
   }
@@ -203,15 +247,15 @@ export function createReader(options: ReaderOptions) {
   }
   function charge(stored: StoredNode): void {
     active();
-    scanned++;
-    bytes += Buffer.byteLength(JSON.stringify(stored));
-    if (scanned > allowance.nodes || bytes > allowance.bytes)
+    ledger.scanned++;
+    ledger.bytes += Buffer.byteLength(JSON.stringify(stored));
+    if (ledger.scanned > allowance.nodes || ledger.bytes > allowance.bytes)
       throw new KernelError('BUDGET', 'Read budget exceeded');
   }
   function remaining(): Budget {
     active();
-    if (scanned >= allowance.nodes) throw new KernelError('BUDGET', 'Read node budget exceeded');
-    return { ...allowance, nodes: allowance.nodes - scanned, bytes: allowance.bytes - bytes };
+    if (ledger.scanned >= allowance.nodes) throw new KernelError('BUDGET', 'Read node budget exceeded');
+    return { ...allowance, nodes: allowance.nodes - ledger.scanned, bytes: allowance.bytes - ledger.bytes };
   }
   // The caller holds source.domains in an ordered read or commit span.
   async function projectedNode(at: Path): Promise<Node | null> {
@@ -277,8 +321,8 @@ export function createReader(options: ReaderOptions) {
   ): Promise<LaneSelection> {
     active();
     const selector = structuredClone(input);
-    requestBytes += Buffer.byteLength(JSON.stringify(selector));
-    if (requestBytes > limits.requestBytes)
+    ledger.requestBytes += Buffer.byteLength(JSON.stringify(selector));
+    if (ledger.requestBytes > limits.requestBytes)
       throw new KernelError('BUDGET', 'Read request budget exceeded');
     const root = 'node' in selector ? selector.node : selector.children;
     path(root);
@@ -555,25 +599,42 @@ export function createReader(options: ReaderOptions) {
   }
   /** Owns the selector before waiting for the ordered span, then returns its projected snapshot. */
   async function read(selector: Selector): Promise<ReadResult> {
-    const owned = structuredClone(selector);
-    return writer.read(source.domains, async () => {
-      if ('history' in owned) return historyInSpan(owned);
-      const selection = await selectInSpan(owned);
-      return {
-        list: selection.roots.flatMap((root) =>
-          root.member === undefined ? [] : [root.member.id],
-        ),
-        copies: selection.images.map((image) => image.copy),
-        at: [writer.stream.cursor().pos],
-        ...(selection.next === undefined ? {} : { next: selection.next }),
-      };
-    });
+    try {
+      const owned = structuredClone(selector);
+      return await writer.read(source.domains, async () => {
+        if ('history' in owned) return historyInSpan(owned);
+        const selection = await selectInSpan(owned);
+        return {
+          list: selection.roots.flatMap((root) =>
+            root.member === undefined ? [] : [root.member.id],
+          ),
+          copies: selection.images.map((image) => image.copy),
+          at: [writer.stream.cursor().pos],
+          ...(selection.next === undefined ? {} : { next: selection.next }),
+        };
+      });
+    } catch (error) {
+      refuseBudget(error);
+    }
   }
   /** Assert destination authorization without revealing data, retaining its inputs for final OCC. */
   async function requireReadWrite(at: Path): Promise<void> {
+    try {
+      await assertReadWrite(at);
+    } catch (error) {
+      refuseBudget(error);
+    }
+  }
+  /** Retain actual budget refusals even when a handler catches one whose counter is exactly at its limit. */
+  function refuseBudget(error: unknown): never {
+    if (error instanceof KernelError && error.code === 'BUDGET') ledger.failure = error;
+    throw error;
+  }
+  /** Capture authorization in the executor's ordered metadata span. */
+  async function assertReadWrite(at: Path): Promise<void> {
     active();
-    requestBytes += Buffer.byteLength(JSON.stringify({ requireReadWrite: at }));
-    if (requestBytes > limits.requestBytes)
+    ledger.requestBytes += Buffer.byteLength(JSON.stringify({ requireReadWrite: at }));
+    if (ledger.requestBytes > limits.requestBytes)
       throw new KernelError('BUDGET', 'Read request budget exceeded');
     chargeAuthorization(at.length + 1);
     let prefixWork = at.length + 1;
@@ -654,10 +715,10 @@ export function createReader(options: ReaderOptions) {
     active();
     if (Date.now() > deadline) throw new KernelError('BUDGET', 'History query deadline exceeded');
     if (records.cost === undefined) throw new KernelError('INVALID', 'History Store omitted reconstruction cost');
-    scanned += records.cost.nodes;
-    bytes += records.cost.bytes;
+    ledger.scanned += records.cost.nodes;
+    ledger.bytes += records.cost.bytes;
     work.used += records.cost.exprWork;
-    if (scanned > allowance.nodes || bytes > allowance.bytes || work.used > work.limit)
+    if (ledger.scanned > allowance.nodes || ledger.bytes > allowance.bytes || work.used > work.limit)
       throw new KernelError('BUDGET', 'History scan budget exceeded');
     return records.items;
   }
@@ -762,6 +823,7 @@ export function createReader(options: ReaderOptions) {
   }
   return {
     read,
+    check: active,
     requireReadWrite,
     selectInSpan,
     cursor,

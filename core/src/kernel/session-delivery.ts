@@ -1,10 +1,12 @@
 import { KernelError } from '#errors'
 import type { NodeLane } from '#kernel/lane'
 
-/** Pulls a hidden session's real lane so Pending outcomes obey ordinary delivery ordering. */
+/** Orders direct Pending outcomes; their pieces stay with Pending.chunks, outside this pump. */
 export function drainSession(session: NodeLane): Promise<void> {
   const delivery = (async () => {
-    for await (const _frame of session.lane) {
+    for await (const frame of session.lane) {
+      if (frame.t === 'chunk')
+        throw new KernelError('INVALID', 'Wire stream requires its own piece consumer');
     }
   })();
   void delivery.catch((error) => {

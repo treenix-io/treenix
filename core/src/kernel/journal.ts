@@ -1,11 +1,36 @@
 import { KernelError } from '#errors'
+import { isDeepStrictEqual } from 'node:util'
 import { comparePositions } from '#kernel/position'
-import type { FieldDeltas, JournalAddress, JournalCommit, JournalEntry, NodeTransition, Position, StoredNode } from '#kernel/types'
+import type { FieldDeltas, JournalAddress, JournalCommit, JournalEntry, NodeTransition, OpDecision, OpId, Position, Principal, StoredNode } from '#kernel/types'
 import { applyDelta, computeDelta, getByPath } from '#kernel/update-ops'
 
 export interface JournalImages {
   readonly before: StoredNode | null | 'unknown'
   readonly after: StoredNode | null
+}
+
+/** Select the queried key from a physical record while preserving each alias's original request hash. */
+export function matchingDecision(record: JournalCommit, caller: Principal, opId: OpId): OpDecision {
+  if (record.caller !== caller) throw new KernelError('INVALID', 'Decision lookup returned another caller')
+  for (const decision of [record.decision, record.anchorDecision]) {
+    if (decision !== undefined && decision.opId.epoch === opId.epoch
+      && decision.opId.time === opId.time && decision.opId.nonce === opId.nonce) return decision
+  }
+  throw new KernelError('INVALID', 'Decision lookup returned another key')
+}
+
+/** A terminal alias is accepted only alongside the same physical final outcome for the continuing call. */
+export function assertDecisionAliases(record: JournalCommit): void {
+  const anchor = record.anchorDecision
+  if (anchor === undefined) return
+  const decision = record.decision
+  if (decision === undefined || decision.outcome === undefined || anchor.outcome === undefined
+    || decision.stream === undefined || anchor.stream === undefined
+    || !isDeepStrictEqual(decision.stream, anchor.stream)
+    || !isDeepStrictEqual(decision.outcome, anchor.outcome)
+    || decision.outcome.pos === undefined || comparePositions(decision.outcome.pos, record.pos) !== 0
+    || isDeepStrictEqual(decision.opId, anchor.opId))
+    throw new KernelError('INVALID', 'Stream final decisions do not describe one accepted outcome')
 }
 
 export function computeFieldDeltas(before: Record<string, unknown>, after: Record<string, unknown>): FieldDeltas {
@@ -101,33 +126,44 @@ export function readJournalImages(records: readonly JournalCommit[], address: Jo
 }
 
 /** The first kept record must carry its own anchor, including a known reconciliation before-image. */
-export function compactJournal(records: readonly JournalCommit[], keepFrom: Position, expiryBoundary = 0): readonly JournalCommit[] {
-  const current = new Map<string, StoredNode | null>()
-  const anchored = new Set<string>()
-  const kept: JournalCommit[] = []
-  let intake: JournalCommit | undefined
-  for (const record of records) if (record.intake !== undefined) intake = record
+export function compactJournal(
+  records: readonly JournalCommit[],
+  keepFrom: Position,
+  expiryBoundary = 0,
+): readonly JournalCommit[] {
+  const current = new Map<string, StoredNode | null>();
+  const anchored = new Set<string>();
+  const kept: JournalCommit[] = [];
+  let intake: JournalCommit | undefined;
+  for (const record of records) if (record.intake !== undefined) intake = record;
   for (const record of records) {
-    const retain = comparePositions(record.pos, keepFrom) >= 0
-    const entries: JournalEntry[] = []
+    const retain = comparePositions(record.pos, keepFrom) >= 0;
+    const entries: JournalEntry[] = [];
     for (const entry of record.entries) {
-      const prior = current.get(entry.id)
-      const state = applyJournalChange(entry.change, prior === undefined ? 'unknown' : prior)
-      current.set(entry.id, state.after)
-      if (!retain) continue
-      let change = entry.change
+      const prior = current.get(entry.id);
+      const state = applyJournalChange(entry.change, prior === undefined ? 'unknown' : prior);
+      current.set(entry.id, state.after);
+      if (!retain) continue;
+      let change = entry.change;
       if (!anchored.has(entry.id)) {
-        anchored.add(entry.id)
+        anchored.add(entry.id);
         if (change.t === 'update') {
-          if (state.after === null) throw new KernelError('INVALID', 'Journal update has no after-image')
-          change = { ...change, after: state.after }
-        } else if (change.t === 'reconcile' && state.before !== 'unknown') change = { ...change, before: state.before }
+          if (state.after === null)
+            throw new KernelError('INVALID', 'Journal update has no after-image');
+          change = { ...change, after: state.after };
+        } else if (change.t === 'reconcile' && state.before !== 'unknown')
+          change = { ...change, before: state.before };
       }
-      entries.push({ ...entry, change })
+      entries.push({ ...entry, change });
     }
-    if (retain || record === intake || record.decision !== undefined && record.decision.opId.time >= expiryBoundary) {
-      kept.push(structuredClone({ ...record, entries }))
+    if (
+      retain ||
+      record === intake ||
+      (record.decision !== undefined && record.decision.opId.time >= expiryBoundary) ||
+      (record.anchorDecision !== undefined && record.anchorDecision.opId.time >= expiryBoundary)
+    ) {
+      kept.push(structuredClone({ ...record, entries }));
     }
   }
-  return kept
+  return kept;
 }

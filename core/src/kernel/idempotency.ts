@@ -3,6 +3,8 @@ import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import { KernelError } from '#errors'
 import { comparePositions, positionToRev } from '#kernel/position'
+import { matchingDecision } from '#kernel/journal'
+import type { OperationReadCost } from '#kernel/store/budget'
 
 import { DEFAULT_LIMITS, type Actor, type Budget, type IntakeState, type JournalCommit, type Limits,
   type OpDecision, type OpId, type Outcome, type Position, type Store } from '#kernel/types'
@@ -14,6 +16,8 @@ export interface MutationIdentity {
   readonly opId: OpId
   readonly request: unknown
   readonly stream?: OpDecision['stream']
+  readonly anchor?: OpId
+  readonly anchorLookupCost?: OperationReadCost
 }
 export type MutationWaiter = <T>(pending: Promise<T>) => Promise<T>
 export interface IdempotencyOptions {
@@ -68,6 +72,7 @@ export async function createIdempotency(options: IdempotencyOptions) {
   async function lookup(
     caller: Actor['principal'],
     opId: OpId,
+    cost?: OperationReadCost,
   ): Promise<JournalCommit | undefined> {
     const inventory = stores;
     let release: () => void = () => {};
@@ -76,12 +81,13 @@ export async function createIdempotency(options: IdempotencyOptions) {
     });
     lookups.add(done);
     try {
-      const allowance = options.budget();
+      const allowance = cost?.budget() ?? options.budget();
       let latest: JournalCommit | undefined;
       let nodes = 0;
       let bytes = 0;
 
       for (const store of inventory) {
+        if (nodes >= allowance.nodes) throw new KernelError('BUDGET', 'Decision lookup exceeded the read budget');
         const found = await store.scan({
           range: { decision: { caller, opId } },
           limit: 1,
@@ -89,7 +95,9 @@ export async function createIdempotency(options: IdempotencyOptions) {
         });
         const record = found.items[0];
         nodes++;
-        if (record !== undefined) bytes += Buffer.byteLength(JSON.stringify(record));
+        const recordBytes = record === undefined ? 0 : Buffer.byteLength(JSON.stringify(record));
+        bytes += recordBytes;
+        cost?.charge(1, recordBytes);
         if (nodes > allowance.nodes || bytes > allowance.bytes || Date.now() > allowance.deadline)
           throw new KernelError('BUDGET', 'Decision lookup exceeded the read budget');
         if (
@@ -100,6 +108,9 @@ export async function createIdempotency(options: IdempotencyOptions) {
       }
 
       return latest;
+    } catch (error) {
+      if (cost !== undefined) cost.refuse(error);
+      throw error;
     } finally {
       lookups.delete(done);
       release();
@@ -107,8 +118,8 @@ export async function createIdempotency(options: IdempotencyOptions) {
   }
 
   /** Return a complete outcome only when its request and actor hash match. */
-  function replay(record: JournalCommit, hash: string): Outcome {
-    const decision = record.decision!
+  function replay(record: JournalCommit, input: MutationIdentity, hash: string): Outcome {
+    const decision = matchingDecision(record, input.actor.principal, input.opId)
     if (decision.requestHash !== hash) throw new KernelError('KEY_REUSED', 'Mutation key was used by another request or actor')
     if (decision.outcome === undefined) throw new KernelError('UNKNOWN_OUTCOME', 'The stream has no final outcome')
     return structuredClone(decision.outcome)
@@ -121,7 +132,7 @@ export async function createIdempotency(options: IdempotencyOptions) {
       const record = await lookup(input.actor.principal, input.opId)
       if (record === undefined) throw error
       console.error(error)
-      return replay(record, hash)
+      return replay(record, input, hash)
     })
 
     return structuredClone(value)
@@ -151,7 +162,7 @@ export async function createIdempotency(options: IdempotencyOptions) {
     const record = await lookupPrevious(input, wait)
     if (record === undefined) return undefined
     if (input.opId.time < boundary()) throw new KernelError('EXPIRED', 'Mutation key has expired')
-    return replay(record, hash)
+    return replay(record, input, hash)
   }
 
   return {
@@ -195,7 +206,7 @@ export async function createIdempotency(options: IdempotencyOptions) {
           return recover(input, prior, hash, wait)
         }
         const record = await lookupPrevious(input, wait)
-        if (record !== undefined) return replay(record, hash)
+        if (record !== undefined) return replay(record, input, hash)
         checkNew(input.opId)
         return execute({ opId: { ...input.opId }, requestHash: hash, ...(input.stream === undefined ? {} : { stream: input.stream }) })
       })()

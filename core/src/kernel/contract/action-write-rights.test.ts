@@ -386,14 +386,20 @@ describe('writing action destination authorization', { timeout: 30_000 }, () => 
       },
     });
     await f.grant('/box', W);
+    // Allow genuine caller/executor validation loads while excluding the hidden payload.
+    const readBytes = 4096;
     await f.admin.commit({
       opId: f.key(),
       changes: [
         { op: 'patch', path: '/box/existing', ops: { $set: { payload: 'secret'.repeat(4096) } } },
-        { op: 'patch', path: '/sys/limits', ops: { $set: { readBytes: 1024 } } },
+        { op: 'patch', path: '/sys/limits', ops: { $set: { readBytes } } },
       ],
     }).outcome;
     const before = await f.accepted();
+    const hidden = before.nodes.find((node) => node.$path === '/box/existing');
+    assert.ok(hidden);
+    assert.ok(Buffer.byteLength(JSON.stringify(hidden)) > readBytes);
+
     await assert.rejects(f.act().outcome, code('FORBIDDEN'));
     assert.deepEqual(await f.accepted(), before);
   });

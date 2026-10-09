@@ -599,6 +599,14 @@ interface ActionBase {
  */
 export type ActionResult = Promise<unknown> | AsyncGenerator<unknown, unknown, undefined>
 
+/** A piece retains its accepted step position until its owning delivery channel takes it. */
+export interface ActionPiece {
+  readonly pos?: Position
+  readonly data: unknown
+}
+/** Settles only when the owning consumer takes the piece or its request ends. */
+export type ActionPieceDelivery = (piece: ActionPiece, signal: AbortSignal) => Promise<void>
+
 /** Call: R. Executor: the caller. No writes, no external effects. */
 export interface ReadAction extends ActionBase {
   readonly kind: 'read'
@@ -793,7 +801,7 @@ export interface ScanQuery<Range> {
 export interface ScanResult<Item> {
   readonly items: readonly Item[]
   readonly next?: Cursor
-  /** Charged journal image reconstruction, including compact anchors, for the enclosing read operation. */
+  /** Actual inspected scan cost, including filtered rows and journal image reconstruction. */
   readonly cost?: { readonly nodes: number; readonly bytes: number; readonly exprWork: number }
 }
 
@@ -862,6 +870,8 @@ export interface JournalCommit {
    * A `write`/`setuid` action without writes still leaves a commit with only this decision, in the target node's domain.
    */
   readonly decision?: OpDecision
+  /** A continuation's terminal commit also finishes the original anchor under its original request hash. */
+  readonly anchorDecision?: OpDecision
   readonly intake?: IntakeState
   readonly entries: readonly JournalEntry[]
 }
