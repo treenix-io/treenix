@@ -36,6 +36,7 @@ export function createSessionFactory(options: SessionFactoryOptions) {
     resolve: () => Promise<AuthAdmission>,
     issueCredential: boolean,
     heartbeat = true,
+    cache?: NodeLaneOptions['cache'],
   ): Promise<OpenedSession> {
     available();
     if (sessions.size + opening >= options.limits().maxLanes)
@@ -55,7 +56,7 @@ export function createSessionFactory(options: SessionFactoryOptions) {
       if (count >= options.limits().lanesPerOrigin)
         throw new KernelError('BUDGET', 'Origin lane limit reached');
       const issuedCredential = issueCredential ? bound.resolution.credential : undefined;
-      session = createNodeLane({ ...options.lane(bound), issuedCredential, heartbeat });
+      session = createNodeLane({ ...options.lane(bound), issuedCredential, heartbeat, cache });
       bound.assertActive();
       const owned = session;
 
@@ -88,8 +89,17 @@ export function createSessionFactory(options: SessionFactoryOptions) {
 
   return {
     /** Open an authenticated session, issuing a credential when the caller is anonymous. */
-    openCredential(credential?: Credential, origin?: string): Promise<OpenedSession> {
-      return open(() => options.auth.openCredential(credential, origin), credential === undefined);
+    openCredential(
+      credential?: Credential,
+      origin?: string,
+      sessionOptions: Pick<NodeLaneOptions, 'cache'> = {},
+    ): Promise<OpenedSession> {
+      return open(
+        () => options.auth.openCredential(credential, origin),
+        credential === undefined,
+        true,
+        sessionOptions.cache,
+      )
     },
     /** Opens a node-authorized lane; kernel owners may disable its network idle expiry. */
     openNode(path: Path, sessionOptions: NodeSessionOptions = {}): Promise<OpenedSession> {

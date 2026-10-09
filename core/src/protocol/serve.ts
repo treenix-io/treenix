@@ -5,7 +5,7 @@ import type { AuthAdmission } from '#kernel/auth-factory'
 import type { InstanceFoundationWithAuth } from '#kernel/instance'
 import type { NodeLane, NodeLaneCommand } from '#kernel/lane'
 export { networkAddress } from '#kernel/session-origin'
-import type { Credential, Request } from '#kernel/types'
+import type { CacheClaim, Credential, Request } from '#kernel/types'
 
 
 interface ServedLane {
@@ -51,8 +51,22 @@ export function createTwpServing(instance: InstanceFoundationWithAuth) {
       origin: string,
     ) {
       available();
-      if (hi.cache !== undefined)
-        throw new KernelError('INVALID', 'Cache claims are not available on this binding');
+      const limits = instance.limits();
+      if (
+        Buffer.byteLength(JSON.stringify(hi)) > limits.requestBytes ||
+        (hi.cache?.length ?? 0) > limits.readNodes
+      )
+        throw new KernelError('BUDGET', 'Handshake budget exceeded');
+      let cache: readonly CacheClaim[] | undefined;
+      if (hi.cache !== undefined && hi.cache.length > 0) {
+        const ids = new Set<string>();
+        cache = hi.cache.map(claim => {
+          if (ids.has(claim.id)) throw new KernelError('INVALID', 'Duplicate cache claim');
+          ids.add(claim.id);
+          return Object.freeze({ ...claim });
+        });
+      }
+
       if (
         hi.credential !== undefined &&
         credential !== undefined &&
@@ -64,7 +78,7 @@ export function createTwpServing(instance: InstanceFoundationWithAuth) {
       let admission: AuthAdmission | undefined;
       let session: NodeLane | undefined;
       try {
-        const opened = await instance.sessionFactory.openCredential(supplied, origin);
+        const opened = await instance.sessionFactory.openCredential(supplied, origin, { cache });
         admission = opened.admission;
         session = opened.session;
         available();

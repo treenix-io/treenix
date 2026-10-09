@@ -42,12 +42,16 @@ const sortOf = (sub: NodeSubscription): Sort =>
 
 /** Shares cache pins across subscriptions and stages delivery inside one read barrier. */
 export function createLaneDelivery(
-  options: Pick<NodeLaneOptions, 'read' | 'limits'>,
+  options: Pick<NodeLaneOptions, 'read' | 'limits' | 'cache'>,
   subscriptions: ReturnType<typeof createSubscriptions>,
   registered: (sub: NodeSubscription) => boolean,
   remove: (sub: NodeSubscription, reason: KernelError) => void,
 ) {
   const coverage = new Map<NodeId, Coverage>();
+  const claims =
+    options.cache === undefined || options.cache.length === 0
+      ? undefined
+      : new Map(options.cache.map(claim => [claim.id, claim.ver]));
   /** Releases one subscription while retaining IDs covered elsewhere. */
   function release(sub: NodeSubscription): LaneChange[] {
     const changes: LaneChange[] = [];
@@ -131,6 +135,10 @@ export function createLaneDelivery(
     try {
       const result = await options.read(async (source) => {
         const images = new Map<NodeId, NodeLaneImage>();
+        const reusable =
+          initial && claims !== undefined && claims.size > 0
+            ? new Set<NodeId>()
+            : undefined;
         const stages: Stage[] = [];
         let interrupted = false;
         /** Queues a refusal before any staged data can be published. */
@@ -182,7 +190,17 @@ export function createLaneDelivery(
             selection.reads.dependencies?.flatMap(input => input.kind === 'epoch' ? [input.key] : []) ?? [],
           );
           stages.push({ sub, gen, stamp, force, keys, state, changes: new Map(sub.changes) });
-          for (const image of selection.images) images.set(copyId(image.copy), image);
+          for (const image of selection.images) {
+            const id = copyId(image.copy);
+            images.set(id, image);
+            if (
+              reusable !== undefined &&
+              'node' in image.copy &&
+              claims?.get(id) === image.copy.ver &&
+              source.claimable(copyPath(image.copy))
+            )
+              reusable.add(id);
+          }
         }
         for (let i = 0; i < stages.length; ) {
           const stage = stages[i];
@@ -232,7 +250,7 @@ export function createLaneDelivery(
         for (const stage of stages) subscriptions.capture(stage.sub, stage.state);
         for (const [id, image] of images)
           if ((estimated.counts.get(id) ?? 0) > 0) held.set(id, image.retain());
-        return { stages, images, pos: source.pos, interrupted };
+        return { stages, images, reusable, pos: source.pos, interrupted };
       }, subs.map(sub => sub.selector));
       return { ...result, held };
     } catch (error) {
@@ -294,6 +312,7 @@ export function createLaneDelivery(
           next: stage.state.next,
         });
       subscriptions.install(stage.sub, stage.state);
+      for (const id of stage.state.covered) claims?.delete(id);
       stage.sub.initial = false;
       if (stage.stamp === stage.sub.stamp) {
         stage.sub.dirty = 0;
@@ -345,6 +364,7 @@ export function createLaneDelivery(
     close() {
       for (const held of coverage.values()) held.release();
       coverage.clear();
+      claims?.clear();
     },
     /** Publishes current membership and exposes released IDs for coverage controls. */
     async snapshot(sub: NodeSubscription) {
@@ -353,7 +373,9 @@ export function createLaneDelivery(
         const stage = result.stages[0];
         if (stage === undefined || !registered(sub) || sub.gen !== stage.gen) return undefined;
         const copies = [...result.images].flatMap(([id, image]) =>
-          stage.state.covered.has(id) && (!coverage.has(id) || stage.force || 'error' in image.copy)
+          stage.state.covered.has(id) &&
+          result.reusable?.has(id) !== true &&
+          (!coverage.has(id) || stage.force || 'error' in image.copy)
             ? [image.copy]
             : [],
         );

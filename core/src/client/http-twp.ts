@@ -1,3 +1,4 @@
+import type { CacheClaimLimits, LaneCache } from '#client/lane-cache'
 import { KernelError } from '#errors'
 import type { Connection, Credential, Frame, Request } from '#kernel/types'
 import { decodeFrame } from '#protocol/twp'
@@ -6,6 +7,9 @@ import { isRecord } from '#util/is-record'
 export interface TwpHttpClientOptions {
   readonly url: string
   readonly credential?: Credential
+  /** Supplies claims from the same borrowed cache and credential passed to the native client. */
+  readonly cache?: LaneCache
+  readonly limits?: CacheClaimLimits
   readonly headers?: HeadersInit
   readonly signal?: AbortSignal
   readonly frameBytes?: number
@@ -25,6 +29,7 @@ async function refusal(response: Response): Promise<never> {
   throw new KernelError(frame.error.code, frame.error.message)
 }
 
+/** Opens an HTTP TWP transport, offering bounded claims from the borrowed cache. */
 export async function openTwpHttp(options: TwpHttpClientOptions) {
   const controller = new AbortController(), signal = options.signal === undefined ? controller.signal : AbortSignal.any([controller.signal, options.signal])
   const url = options.url.replace(/\/$/, ''), headers = new Headers(options.headers)
@@ -35,7 +40,12 @@ export async function openTwpHttp(options: TwpHttpClientOptions) {
   }
   headers.set('Content-Type', 'application/json')
   const credentials = headers.has('Authorization') ? 'omit' : 'include'
-  const hello: Request = { t: 'hi', ...(options.credential === undefined ? {} : { credential: options.credential }) }
+  const cache = options.cache?.reconnectClaims(options.credential, options.limits)
+  const hello: Request = {
+    t: 'hi',
+    ...(options.credential === undefined ? {} : { credential: options.credential }),
+    ...(cache === undefined || cache.length === 0 ? {} : { cache }),
+  }
   const response = await fetch(`${url}/twp`, { method: 'POST', headers, credentials, signal, body: JSON.stringify(hello) })
   if (!response.ok) return refusal(response)
   const locator: unknown = await response.json()

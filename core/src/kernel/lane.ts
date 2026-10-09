@@ -8,7 +8,28 @@ import { createSubscriptions, type NodeSubscription } from '#kernel/subscription
 import { createLaneDelivery } from '#kernel/lane-delivery'
 import type { LaneSelectionSource } from '#kernel/lane-selection'
 import { createChunkChannel } from '#util/chunk-channel'
-import type { ActionPiece, ActionPieceDelivery, Credential, DomainId, Frame, LaneChange, Limits, NodeCopy, NodeId, Outcome, Path, Pending, Position, Request, ScanRange, Selector, Session, Sort, SubSelector } from '#kernel/types'
+import type {
+  ActionPiece,
+  ActionPieceDelivery,
+  CacheClaim,
+  Credential,
+  DomainId,
+  Frame,
+  LaneChange,
+  Limits,
+  NodeCopy,
+  NodeId,
+  Outcome,
+  Path,
+  Pending,
+  Position,
+  Request,
+  ScanRange,
+  Selector,
+  Session,
+  Sort,
+  SubSelector,
+} from '#kernel/types'
 
 export type NodeSubSelector = SubSelector
 export type NodeLaneCommand =
@@ -24,6 +45,8 @@ export interface NodeLaneImage {
 }
 export interface NodeLaneRead extends LaneSelectionSource {
   readonly pos: Position
+  /** Checks whether this ordered read may reuse a retained copy for a path. */
+  claimable(path: Path): boolean
   image(path: Path, sort?: Sort): Promise<NodeLaneImage | null>
   check(): void
 }
@@ -41,6 +64,7 @@ export interface NodeLaneOptions {
   /** Narrows a continuity reset to subscriptions reading that domain's logical ranges. */
   readonly domainIntersects?: (domain: DomainId, range: ScanRange) => boolean
   readonly issuedCredential?: Credential
+  readonly cache?: readonly CacheClaim[]
   /** Kernel-owned node sessions can remain idle until their owner or authorization closes them. */
   readonly heartbeat?: boolean
   readonly transfers?: BlobTransfers

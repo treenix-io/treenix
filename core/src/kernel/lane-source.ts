@@ -4,10 +4,10 @@ import type { CacheRead } from '#kernel/cache'
 import type { CommandOptions } from '#kernel/commands'
 import type { NodeLaneRead } from '#kernel/lane'
 import { createReader } from '#kernel/reader'
-import type { SubSelector } from '#kernel/types'
+import type { Path, SubSelector } from '#kernel/types'
 
 /** Shares one Reader and its cache leases across a lane's ordered delivery preparation. */
-export function createNodeLaneRead(options: CommandOptions) {
+export function createNodeLaneRead(options: CommandOptions, claimable: (path: Path) => boolean) {
   const { admission, writer, registry, projector } = options
   if (projector === undefined) throw new KernelError('INVALID', 'A lane requires the instance projector')
   const project = projector
@@ -32,6 +32,10 @@ export function createNodeLaneRead(options: CommandOptions) {
         scope: { check, hold(lease) { held.push(lease) } } })
       const source: NodeLaneRead = {
         pos: writer.stream.cursor().pos, check,
+        claimable(path) {
+          check()
+          return claimable(path)
+        },
         select: reads.selectInSpan,
         cursor: reads.cursor,
         /** Resolves eviction order with the same projection and comparator as the window snapshot. */

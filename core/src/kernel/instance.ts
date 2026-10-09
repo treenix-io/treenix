@@ -828,7 +828,10 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
       intake: () => writer.intake.epoch,
       transfers:
         config.blobs === undefined ? undefined : createBlobTransfers(options, config.blobs),
-      read: createNodeLaneRead(options),
+      read: createNodeLaneRead(
+        options,
+        path => mounts?.resolve(path)?.entry.declaration.external !== 'trusted',
+      ),
       gateSub: (selector, signal) =>
         judgeGates(
           options.gates,

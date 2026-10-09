@@ -1,8 +1,24 @@
 import { KernelError } from '#errors'
 import { comparePositions } from '#kernel/position'
 import { compareScanKeys, scanKey } from '#kernel/store/scan'
-import type { Cursor, Frame, LaneChange, NodeCopy, NodeId, Position, Principal, Sort, SubId } from '#kernel/types'
+import type {
+  CacheClaim,
+  Credential,
+  Cursor,
+  Frame,
+  Limits,
+  LaneChange,
+  NodeCopy,
+  NodeId,
+  Position,
+  Principal,
+  Sort,
+  SubId,
+} from '#kernel/types'
+import { DEFAULT_LIMITS } from '#kernel/types'
 import { applyDelta } from '#kernel/update-ops'
+
+export type CacheClaimLimits = Pick<Limits, 'requestBytes' | 'readNodes'>
 
 export interface LaneList {
   readonly gen: number
@@ -14,15 +30,75 @@ export interface LaneList {
 const identity = (copy: NodeCopy) => 'node' in copy ? copy.node.$id : copy.id
 const path = (copy: NodeCopy) => 'node' in copy ? copy.node.$path : copy.path
 
+/** Creates a client cache that can offer authenticated copies during reconnect. */
 export function createLaneCache() {
   const copies = new Map<NodeId, NodeCopy>(), paths = new Map<string, NodeId>(), lists = new Map<SubId, LaneList>()
   const watermarks = new Map<string, Position>()
   let principal: Principal | undefined
-  function clear(): void { copies.clear(); paths.clear(); lists.clear(); watermarks.clear() }
+  let credential: string | undefined
+  let attached = false
+  let retained: Map<NodeId, NodeCopy> | undefined
+  function clear(): void {
+    copies.clear()
+    paths.clear()
+    lists.clear()
+    watermarks.clear()
+    retained?.clear()
+  }
+  /** Reuses only copies from the immediately preceding lane with the same explicit credential. */
+  function reconnectClaims(
+    identity?: Credential,
+    limits: CacheClaimLimits = DEFAULT_LIMITS,
+  ): readonly CacheClaim[] {
+    if (attached) throw new KernelError('CONFLICT', 'Cache already belongs to an active client')
+    if (identity === undefined || identity.token !== credential) retained?.clear()
+    const claims: CacheClaim[] = []
+    if (retained === undefined || retained.size === 0) return claims
+    const encoder = new TextEncoder()
+    let bytes = encoder.encode(
+      JSON.stringify({ t: 'hi', credential: identity, cache: [] }),
+    ).byteLength
+    for (const [id, copy] of retained) {
+      if (claims.length >= limits.readNodes) break
+      const claim = { id, ver: copy.ver }
+      const cost =
+        encoder.encode(JSON.stringify(claim)).byteLength +
+        (claims.length === 0 ? 0 : 1)
+      if (bytes + cost > limits.requestBytes) break
+      bytes += cost
+      claims.push(claim)
+    }
+    return claims
+  }
+  /** Acquires one lane consumer without making reconnect candidates visible. */
+  function attach(identity?: Credential): void {
+    if (attached) throw new KernelError('CONFLICT', 'Cache already belongs to an active client')
+    if (
+      retained !== undefined &&
+      retained.size > 0 &&
+      identity === undefined
+    )
+      throw new KernelError('INVALID', 'Reconnect cache requires an explicit credential')
+    if (identity?.token !== credential) retained?.clear()
+    credential = identity?.token
+    attached = true
+  }
+  /** Ends lane visibility; the borrowing owner decides whether to retain authenticated candidates. */
+  function detach(retain: boolean): void {
+    if (!attached) throw new KernelError('INVALID', 'Cache has no active client')
+    retained = retain && credential !== undefined ? new Map(copies) : undefined
+    copies.clear()
+    paths.clear()
+    lists.clear()
+    watermarks.clear()
+    attached = false
+  }
+  /** Applies lane frames while removing retained claims as accepted coverage replaces them. */
   function apply(frame: Frame): void {
     if (frame.t === 'welcome') {
       if (principal !== frame.principal) clear()
       principal = frame.principal
+      if (frame.credential !== undefined) credential = frame.credential.token
       return
     }
     const changes = new Map<NodeId, NodeCopy | null>(), membership = new Map<SubId, LaneList>()
@@ -41,6 +117,14 @@ export function createLaneCache() {
         membership.set(frame.sub, { gen: frame.gen, ids: [...frame.list], covered: frame.covered ?? frame.copies.map(identity), phase: 'ready',
           ...(frame.next === undefined ? {} : { next: frame.next }) })
         for (const copy of frame.copies) put(copy)
+        for (const id of frame.covered ?? frame.copies.map(identity)) {
+          if (!changes.has(id) && !copies.has(id)) {
+            const previous = retained?.get(id)
+            if (previous === undefined) throw new KernelError('INVALID', 'Covered member has no cached copy')
+            put(previous)
+          }
+          retained?.delete(id)
+        }
         for (const pos of frame.at) if (!watermarks.has(pos.instance)) watermarks.set(pos.instance, pos)
         break
       }
@@ -87,6 +171,7 @@ export function createLaneCache() {
       if (previous !== undefined && paths.get(path(previous)) === id) paths.delete(path(previous))
     }
     for (const [id, copy] of changes) {
+      retained?.delete(id)
       if (copy === null) copies.delete(id)
       else { copies.set(id, copy); paths.set(path(copy), id) }
     }
@@ -95,6 +180,9 @@ export function createLaneCache() {
   return {
     apply,
     clear,
+    attach,
+    detach,
+    reconnectClaims,
     copy: (id: NodeId) => copies.get(id),
     at: (path: string) => {
       const id = paths.get(path);

@@ -1,11 +1,19 @@
-import { createLaneCache } from '#client/lane-cache'
+import { createLaneCache, type LaneCache } from '#client/lane-cache'
 import { KernelError } from '#errors'
 import { comparePositions } from '#kernel/position'
 import { isReadResult } from '#protocol/twp'
 import { createChunkChannel } from '#util/chunk-channel'
-import type { ActRequest, CommitRequest, Connection, Frame, OpId, Outcome, Pending, ReadResult, Request, Selector, SubSelector } from '#kernel/types'
+import type { ActRequest, CommitRequest, Connection, Credential, Frame, OpId, Outcome, Pending, ReadResult, Request, Selector, SubSelector } from '#kernel/types'
 
-export interface NativeClientOptions { readonly maxRequests?: number; readonly close?: () => void; readonly onError?: (error: KernelError) => void }
+export interface NativeClientOptions {
+  /** Borrows one reconnect cache until close; its previous client must have ended. */
+  readonly cache?: LaneCache
+  /** Binds retained copies to the same explicit identity used by the transport. */
+  readonly credential?: Credential
+  readonly maxRequests?: number
+  readonly close?: () => void
+  readonly onError?: (error: KernelError) => void
+}
 export interface NodeSubscription { readonly id: string; readonly ready: Promise<void>; close(): void }
 interface Waiting {
   readonly resolve: (outcome: Outcome) => void
@@ -15,8 +23,12 @@ interface Waiting {
 }
 interface Watching { readonly resolve: () => void; readonly reject: (error: KernelError) => void; readonly changed: () => void }
 
+/** Creates a TWP client and attaches its optional caller-owned reconnect cache. */
 export function createTwpClient(connection: Connection, options: NativeClientOptions = {}) {
-  const cache = createLaneCache(), waiting = new Map<string, Waiting>(), watching = new Map<string, Watching>()
+  const cache = options.cache ?? createLaneCache(),
+    waiting = new Map<string, Waiting>(),
+    watching = new Map<string, Watching>()
+  cache.attach(options.credential)
   const maxRequests = options.maxRequests ?? 8
   const controller = new AbortController()
   let sequence = 0, welcome: Extract<Frame, { t: 'welcome' }> | undefined, failure: KernelError | undefined
@@ -29,7 +41,10 @@ export function createTwpClient(connection: Connection, options: NativeClientOpt
     readyReject(error)
     for (const request of waiting.values()) { request.chunks?.end(error); request.reject(error) }
     for (const sub of watching.values()) sub.reject(error)
-    waiting.clear(); watching.clear(); cache.clear()
+    waiting.clear()
+    watching.clear()
+    cache.detach(options.cache !== undefined)
+    if (options.cache === undefined) cache.clear()
     controller.abort(error)
     options.close?.()
     if (reason !== undefined) options.onError?.(error)
