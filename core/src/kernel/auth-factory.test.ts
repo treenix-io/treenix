@@ -257,6 +257,31 @@ describe('native authentication factory', { timeout: 10_000 }, () => {
     await fixture.instance.source.read(read => admission.validate(read))
   })
 
+  it('preserves a closed admission reason when its in-flight source read rejects later', async t => {
+    const fixture = await setup()
+    t.after(() => fixture.auth.close())
+    const entered = signal(), release = signal()
+    const cancelled = new KernelError('CANCELLED', 'Owner ended admission')
+    const failure = new KernelError('UNAVAILABLE', 'Late source failure')
+    const logged = t.mock.method(console, 'error', () => {})
+    const validation = fixture.instance.source.read(read => fixture.admin.validate({ ...read,
+      async nodeById(id) {
+        assert.ok(await read.nodeById(id))
+        entered.resolve()
+        await release.promise
+        throw failure
+      },
+    }))
+    const refused = assert.rejects(validation, error => error === cancelled)
+    await entered.promise
+    fixture.admin.close(cancelled)
+    release.resolve()
+    await refused
+    assert.equal(fixture.admin.signal.reason, cancelled)
+    assert.equal(logged.mock.callCount(), 0)
+    assert.throws(() => fixture.admin.assertActive(), error => error === cancelled)
+  })
+
   it('propagates auth-source failures and aborts the admission before releasing an operation', async t => {
     const fixture = await setup()
     t.after(() => fixture.auth.close())

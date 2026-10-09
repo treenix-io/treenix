@@ -709,6 +709,9 @@ export interface DerivedResult {
 export type DeriveHandler = (view: Node, request: DeriveRequest, read: Reader) => Promise<DerivedResult>
 
 export interface ServiceRun {
+  /** Completion of the service's owned background task, when it has one. */
+  readonly done?: Promise<void>
+  /** Stops the service after its owning node session has closed. */
   stop(): Promise<void>
 }
 

@@ -104,6 +104,7 @@ export function createAuthFactory(options: AuthFactoryOptions) {
           let node: StoredNode | null
           try { node = await read.nodeById(dep.id) }
           catch (error) {
+            admission.assertActive()
             admission.close(error instanceof KernelError ? error : new KernelError('UNAVAILABLE', 'Auth source failed'))
             console.error(error)
             throw error

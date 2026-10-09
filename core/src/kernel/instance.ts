@@ -1,4 +1,5 @@
 import { KernelError } from '#errors'
+import { createAutostartHandler, createInstanceServices, serviceConfiguration, type ServiceBootstrapPorts, type ServiceTarget } from '#kernel/services'
 import { AUTH_KEY_PATH, assertAdminInput } from '#kernel/auth-module'
 import { createAuthFactory, type AuthEvent, type AuthFactory } from '#kernel/auth-factory'
 import { recheckLogin } from '#kernel/auth/login'
@@ -17,7 +18,7 @@ import { createNodeLaneRead } from '#kernel/lane-source'
 import { copyManifest, createRegistry, type TypeOwnership } from '#kernel/registry'
 import { assertTypeOwner, installModuleOwnership, previewModules } from '#kernel/module-install'
 import { loadAllMods, publishLoadedModules } from '#mod/loader'
-import { createProjector } from '#kernel/projection'
+import { createProjector, visibleNode } from '#kernel/projection'
 import { componentEntries } from '#kernel/migrate'
 import { createNativeMountManifest } from '#kernel/mount-native'
 import { ownMountTarget } from '#kernel/mount-resource'
@@ -73,6 +74,8 @@ export interface InstanceFoundation {
   nodeLaneOptions(admission: AuthAdmission): NodeLaneOptions
   /** Adopts provisioned startup resources through their exact declaring-node handlers. */
   prepareMounts(): Promise<void>
+  bindAutostartModule(module: ModuleManifest): ModuleManifest
+  prepareServices(): Promise<void>
 }
 export interface InstanceFoundationWithAuth extends InstanceFoundation {
   readonly auth: AuthFactory
@@ -209,9 +212,12 @@ async function buildCanonicalInstance(input: InstanceConfig): Promise<InstanceFo
       bootstrapPolicy.kind === 'reopen' ? bootstrapPolicy.installerCredential : undefined,
     )
     if (installBuiltins) instance.registry.publish(createNativeMountManifest(config.writerEpoch, config.mounts))
-    if (discovered === undefined) for (const module of modules) instance.registry.publish(module)
-    else await publishLoadedModules(instance.registry, discovered, { allowPartialMods: config.allowPartialMods })
+    if (discovered === undefined) for (const module of modules) instance.registry.publish(instance.bindAutostartModule(module))
+    else await publishLoadedModules(instance.registry, { ...discovered, manifests: discovered.manifests.map(module => ({
+      ...module, security: instance.bindAutostartModule(module).security,
+    })) }, { allowPartialMods: config.allowPartialMods })
     await instance.prepareMounts()
+    await instance.prepareServices()
     return instance
   } catch (error) {
     await instance.close()
@@ -916,6 +922,134 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
     })
   }
 
+  /** Bind service configuration to its real admission and accepted target owner. */
+  interface ServiceNodePin {
+    readonly node: Node
+    readonly invalidated: () => void
+  }
+  const servicePins = new Map<NodeId, Set<ServiceNodePin>>()
+
+  /** Accepted changes revoke only the registrations pinned to their actual node identity. */
+  function invalidateServiceNodes(event: AuthEvent): void {
+    if (event.t === 'registry') {
+      for (const pins of servicePins.values()) for (const pin of [...pins]) pin.invalidated()
+      return
+    }
+    for (const change of event.changes) {
+      const pins = servicePins.get(change.id)
+      if (pins === undefined) continue
+      const configuration = change.node === null ? undefined : serviceConfiguration(visibleNode(change.node, 0))
+      for (const pin of [...pins])
+        if (configuration !== serviceConfiguration(pin.node)) pin.invalidated()
+    }
+  }
+
+  /** Revoke registrations whose pinned route intersects an accepted mount change. */
+  function invalidateServiceRoutes(intersects: (range: ScanRange) => boolean): void {
+    for (const pins of servicePins.values()) for (const pin of [...pins])
+      if (intersects({ node: pin.node.$path })) pin.invalidated()
+  }
+
+  /** Supplies service bootstrap with the real session factory and accepted-identity lookups. */
+  function servicePorts(): ServiceBootstrapPorts {
+    if (sessions === undefined) throw new KernelError('UNAUTHENTICATED', 'Services require authentication')
+    const factory = sessions
+
+    /** Captures a service target while its node admission and current route remain valid. */
+    async function captureOwn(opened: Awaited<ReturnType<SessionFactory['openNode']>>, path: Path, expected?: Node): Promise<ServiceTarget> {
+      const allowance = budget()
+      await prepareSource(allowance, [{ node: path }], opened.admission.signal)
+      let input: ReaderSource
+      return writer.read(() => {
+        input = readerSource(allowance)
+        return input.domains
+      }, async () => {
+        await opened.admission.validate(input.auth)
+        const owner = input.resolve(path)
+        const stored = await input.auth.node(path)
+        if (stored === null || opened.admission.actor.principal !== `n:${stored.$id}`)
+          throw new KernelError('CONFLICT', 'Service identity changed')
+        const node = freeze(structuredClone(visibleNode(stored, 0)))
+        if (expected !== undefined && serviceConfiguration(node) !== serviceConfiguration(expected))
+          throw new KernelError('CONFLICT', 'Service configuration changed')
+        const handler = registry.security(stored.$type, 'service')
+        if (handler === undefined) throw new KernelError('UNAVAILABLE', 'Service handler is unavailable')
+        return { node, handler, store: owner.store, generation: owner.id, registryType: registry.type(stored.$type) }
+      })
+    }
+
+    return {
+      openNode: (path, options) => factory.openNode(path, options),
+      limits: () => limits,
+      captureOwn,
+
+      /** Rechecks the admission, configuration, and route immediately before startup. */
+      async validateOwn(opened, target) {
+        const current = await captureOwn(opened, target.node.$path, target.node)
+        if (current.handler !== target.handler || current.store !== target.store || current.generation !== target.generation
+          || current.registryType !== target.registryType) throw new KernelError('CONFLICT', 'Service owner changed')
+      },
+
+      /** Resolves the persisted bootstrap marker through the accepted root index. */
+      async bootstrapPath() {
+        return writer.read(() => addressedDomains(), async () => {
+          const path = '/sys/autostart'
+          return targets.target(resolveStore(path)).paths.has(path) ? path : undefined
+        })
+      },
+
+      /** Resolves a kernel-issued node identity through the current address index. */
+      async addressById(id) {
+        return writer.read(() => addressedDomains(), async () => {
+          const address = targets.address(id)
+          if (address === undefined) return undefined
+          if (resolveStore(address.path) !== address.store)
+            throw new KernelError('UNAVAILABLE', 'Reference target route is unavailable')
+          return address.path
+        })
+      },
+
+      /** Observes the accepted identity and removes its invalidation pin on release. */
+      observeNode(node, invalidated) {
+        const pin = { node, invalidated }
+        const pins = servicePins.get(node.$id) ?? new Set<ServiceNodePin>()
+        servicePins.set(node.$id, pins)
+        pins.add(pin)
+        if (servicePins.size === 1 && pins.size === 1) {
+          listeners.add(invalidateServiceNodes)
+          topologyListeners.add(invalidateServiceRoutes)
+        }
+        return () => {
+          pins.delete(pin)
+          if (pins.size === 0) servicePins.delete(node.$id)
+          if (servicePins.size === 0) {
+            listeners.delete(invalidateServiceNodes)
+            topologyListeners.delete(invalidateServiceRoutes)
+          }
+        }
+      },
+
+      /** Notifies discovery when the marker or its owning registry changes. */
+      observeBootstrap(changed) {
+        let marker = targets.target(resolveStore('/sys/autostart')).paths.get('/sys/autostart')
+        const receive = (event: AuthEvent) => {
+          if (event.t === 'registry' || event.changes.some(change => change.node?.$path === '/sys/autostart'
+            || change.id === marker)) {
+            marker = targets.target(resolveStore('/sys/autostart')).paths.get('/sys/autostart')
+            changed()
+          }
+        }
+        const topology = (intersects: (range: ScanRange) => boolean) => {
+          if (intersects({ node: '/sys/autostart' })) changed()
+        }
+        listeners.add(receive)
+        topologyListeners.add(topology)
+        return () => { listeners.delete(receive); topologyListeners.delete(topology) }
+      },
+    }
+  }
+
+  let services: ReturnType<typeof createInstanceServices> | undefined
   let closing: Promise<void> | undefined
 
   return {
@@ -940,6 +1074,17 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
     commands: (admission) => createCommands(commandOptions(admission)),
     readerSource,
     nodeLaneOptions,
+    bindAutostartModule(module) {
+      if (module.id !== '@treenx/core/autostart') return module
+      return { ...module, security: [...module.security, {
+        type: 't.autostart', context: 'service', handler: createAutostartHandler(servicePorts()),
+      }] }
+    },
+    async prepareServices() {
+      available()
+      if (services === undefined) services = createInstanceServices(servicePorts())
+      await services.ready()
+    },
     /** Opens configured mount keys before the native runtime returns the instance. */
     async prepareMounts() {
       available()
@@ -953,6 +1098,7 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
       auth?.close()
       closing = (async () => {
         const errors: unknown[] = []
+        try { await services?.close() } catch (error) { console.error(error); errors.push(error) }
         try { await mounts!.close() } catch (error) { console.error(error); errors.push(error) }
         try { await writer.closeTargets() } catch (error) { console.error(error); errors.push(error) }
         const drained = await Promise.allSettled(mountDeliveries)
