@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { openTwpHttp } from '@treenx/core/client/http-twp'
 import { createTwpClient, type TwpClient } from '@treenx/core/client/twp'
 import { KernelError } from '@treenx/core/errors'
@@ -18,8 +18,8 @@ const message = (error: unknown) =>
 const inputClass = 'w-full rounded border border-slate-300 bg-white px-3 py-2 text-slate-900';
 const buttonClass = 'rounded bg-slate-900 px-4 py-2 text-white disabled:opacity-40';
 
-/** Edit a node snapshot and invoke actions allowed by its current rights. */
-function NodeEditor({ path }: { path: string }) {
+/** Edit the selected node and report each accepted save or action to the parent browser. */
+function NodeEditor({ path, onAccepted }: { path: string; onAccepted: () => void }) {
   const source = useNativeSource(),
     snapshot = useNativeNode(path),
     copy = snapshot.members[0];
@@ -59,6 +59,7 @@ function NodeEditor({ path }: { path: string }) {
         expect: { nodes: [{ path, rev: baseRev }] },
       }).outcome;
       setDirty(false);
+      onAccepted();
     } catch (error) {
       setError(message(error));
     } finally {
@@ -82,6 +83,7 @@ function NodeEditor({ path }: { path: string }) {
         })(),
       ]);
       if (outcome.value !== undefined) setResponse(JSON.stringify(outcome.value, null, 2));
+      onAccepted();
     } catch (error) {
       setError(message(error));
     } finally {
@@ -184,6 +186,23 @@ export function NativeTreeBrowser() {
   const [pathDraft, setPathDraft] = useState('/'),
     [pathError, setPathError] = useState('');
   const children = useNativeChildren(parent);
+  const listing = useRef({ active: true, refetch: children.refetch });
+  useEffect(() => {
+    listing.current.refetch = children.refetch;
+  }, [children.refetch]);
+  useEffect(() => {
+    listing.current.active = true;
+    return () => {
+      listing.current.active = false;
+    };
+  }, []);
+  /** Completed actions from an old editor refresh the current parent while its browser remains mounted. */
+  function refreshChildren(): void {
+    if (!listing.current.active) return;
+    setPathError('');
+    try { listing.current.refetch(); }
+    catch (error) { setPathError(message(error)); }
+  }
   /** Open the entered address as both the child listing and selected node. */
   function open(event: FormEvent): void {
     event.preventDefault();
@@ -191,6 +210,7 @@ export function NativeTreeBrowser() {
     try {
       if (!isSelector({ node: pathDraft }))
         throw new KernelError('INVALID', 'Укажите корректный адрес узла');
+      if (pathDraft === parent) refreshChildren();
       setParent(pathDraft);
       setPath(pathDraft);
     } catch (error) {
@@ -210,6 +230,7 @@ export function NativeTreeBrowser() {
           />
           <button className={buttonClass}>Открыть</button>
         </form>
+        <button className={buttonClass} onClick={refreshChildren}>Обновить список</button>
         {pathError && (
           <p role="alert" className="text-red-700">
             {pathError}
@@ -256,7 +277,7 @@ export function NativeTreeBrowser() {
           </button>
         )}
       </aside>
-      <NodeEditor key={path} path={path} />
+      <NodeEditor key={path} path={path} onAccepted={refreshChildren} />
     </div>
   );
 }
