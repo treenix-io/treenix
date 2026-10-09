@@ -1,4 +1,5 @@
 import { lstat, readdir, readFile, unlink } from 'node:fs/promises'
+import type { Stats } from 'node:fs'
 import { dirname, join, relative } from 'node:path'
 import { safeJsonParse } from '#core/json'
 import { assertSafePath } from '#core/path'
@@ -33,10 +34,39 @@ export async function fsWriteSafe(root: string, path: string): Promise<void> {
     } catch (error) { if (!missing(error)) throw error }
   }
   if (blockedByLeaf) return
-  for (const file of [join(root, path.slice(1), '$'), join(root, path.slice(1), '$.json'), join(root, `${path.slice(1)}.json`)]) {
+  for (const file of [join(root, path.slice(1), '$'), join(root, path.slice(1), '$.json')]) {
     await assertPathSafe(root, file)
     try { if ((await lstat(file)).isSymbolicLink()) throw new KernelError('FORBIDDEN', 'Filesystem node symlinks are not allowed') } catch (error) { if (!missing(error)) throw error }
   }
+  await legacyEntry(root, path === '/' ? `${root}/` : join(root, path.slice(1)))
+}
+
+/** An optional legacy sibling may exceed the filename limit while its genuine directory address fits. */
+async function legacyEntry(root: string, base: string): Promise<Stats | undefined> {
+  await assertPathSafe(root, base)
+  try {
+    const file = `${base}.json`
+    await assertPathSafe(root, file)
+    const entry = await lstat(file)
+    if (entry.isSymbolicLink())
+      throw new KernelError('FORBIDDEN', 'Filesystem node symlinks are not allowed')
+    return entry
+  } catch (error) {
+    if (
+      missing(error) ||
+      (error instanceof Error && 'code' in error && error.code === 'ENAMETOOLONG')
+    )
+      return undefined
+    throw error
+  }
+}
+
+/** Remove only a present optional leaf; directory node bodies use their ordinary path checks. */
+async function removeLegacyFile(root: string, base: string): Promise<void> {
+  const entry = await legacyEntry(root, base)
+  if (entry === undefined || entry.isDirectory()) return
+  await unlink(`${base}.json`)
+  await syncDirectory(dirname(base))
 }
 
 export async function readFsNodes(root: string, pos: Position): Promise<StoredNode[]> {
@@ -72,12 +102,12 @@ async function removeFile(root: string, file: string): Promise<void> {
 }
 
 export async function writeFsNode(root: string, write: StoredWrite): Promise<void> {
-  const base = join(root, write.path.slice(1)), directoryFile = join(base, '$'), leaf = `${base}.json`
+  const base = join(root, write.path.slice(1)), directoryFile = join(base, '$')
   fsAddress(write.path)
   if (write.node === null) {
     await removeFile(root, directoryFile)
     await removeFile(root, join(base, '$.json'))
-    if (write.path !== '/') await removeFile(root, leaf)
+    if (write.path !== '/') await removeLegacyFile(root, base)
     return
   }
   const parts = write.path === '/' ? [] : write.path.slice(1).split('/')
@@ -93,14 +123,11 @@ export async function writeFsNode(root: string, write: StoredWrite): Promise<voi
         await removeFile(root, parent)
       }
     } catch (error) { if (!missing(error)) throw error }
-    await assertPathSafe(root, parentLeaf)
-    try {
-      if ((await lstat(parentLeaf)).isFile()) {
-        const data = await readFile(parentLeaf)
-        await durableWrite(root, join(parent, '$'), data)
-        await removeFile(root, parentLeaf)
-      }
-    } catch (error) { if (!missing(error)) throw error }
+    if ((await legacyEntry(root, parent))?.isFile()) {
+      const data = await readFile(parentLeaf)
+      await durableWrite(root, join(parent, '$'), data)
+      await removeLegacyFile(root, parent)
+    }
     await durableDirectory(parent)
     const legacy = join(parent, '$.json')
     await assertPathSafe(root, legacy)
