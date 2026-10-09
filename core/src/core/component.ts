@@ -118,7 +118,9 @@ export function compName(key: string): string {
   return bareName(key);
 }
 
-function assertWellFormedCompEntry(node: NodeData, key: string, value: unknown): asserts value is ComponentData {
+type ComponentSource = Readonly<Pick<NodeData, '$path' | '$type'> & Record<string, unknown>>;
+
+function assertWellFormedCompEntry(node: ComponentSource, key: string, value: unknown): asserts value is ComponentData {
   // A #-key whose value carries no $type is neither a field nor a component, and a non-string $order
   // cannot be ordered — a malformed write slipped past the boundary. Throw, never skip.
   if (!isComponent(value) || (value.$order !== undefined && typeof value.$order !== 'string')) {
@@ -127,7 +129,7 @@ function assertWellFormedCompEntry(node: NodeData, key: string, value: unknown):
 }
 
 /** Component lookup by NAME: accepts 'run' or '#run', reads node['#run']. */
-export function getComponentByName(node: NodeData, name: string): ComponentData | undefined {
+export function getComponentByName(node: ComponentSource, name: string): ComponentData | undefined {
   const bare = isCompKey(name) ? name.slice(1) : name;
   const value = node[COMP_PREFIX + bare];
   if (value === undefined) return undefined;
@@ -168,7 +170,7 @@ export function makeNode(
 export const createNode = makeNode;
 
 export function getComponentField<T = unknown>(
-  node: NodeData,
+  node: ComponentSource,
   type: TypeId<T>,
   field?: string,
 ): [ComponentData<T>, string] | undefined {
@@ -188,14 +190,14 @@ export function getComponentField<T = unknown>(
 }
 
 export function getComponent<T = unknown>(
-  node: NodeData,
+  node: ComponentSource,
   type: TypeId<T>,
   field?: string,
 ): ComponentData<T> | undefined {
   return getComponentField(node, type, field)?.[0];
 }
 
-function* namedOf<T>(node: NodeData, type: TypeId<T>): Generator<[string, ComponentData<T>]> {
+function* namedOf<T>(node: ComponentSource, type: TypeId<T>): Generator<[string, ComponentData<T>]> {
   for (const [k, v] of Object.entries(node)) {
     if (!isCompKey(k)) continue; // bare keys are data, $ keys are system
     assertWellFormedCompEntry(node, k, v);
@@ -212,7 +214,7 @@ function byOrderThenName<C extends { $order?: string }>([ak, a]: [string, C], [b
 
 /** The main component '' first, then the named ones by ($order, name). */
 export function getComponents<T = unknown>(
-  node: NodeData,
+  node: ComponentSource,
   type: TypeId<T> = AnyType,
 ): [string, ComponentData<T>][] {
   const named = [...namedOf(node, type)].sort(byOrderThenName);
