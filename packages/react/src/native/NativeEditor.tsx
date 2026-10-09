@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { openTwpHttp } from '@treenx/core/client/http-twp'
 import { createTwpClient, type TwpClient } from '@treenx/core/client/twp'
 import { KernelError } from '@treenx/core/errors'
-import { A, W, type Credential } from '@treenx/core/kernel/types'
+import { A, R, W, type Credential } from '@treenx/core/kernel/types'
 import { isNodeInput, isSelector } from '@treenx/core/protocol/twp'
 import { createNativeTreeSource } from '#tree/native-source'
 import { NativeSourceProvider, useNativeSource } from '#tree/native-source-context'
@@ -114,7 +114,6 @@ function NodeEditor({ path }: { path: string }) {
               {JSON.stringify(copy.node, null, 2)}
             </pre>
             {(copy.bits & W) !== 0 && (
-              <>
                 <form onSubmit={save} className="flex flex-col gap-3">
                   <label htmlFor="node-json">Данные узла</label>
                   <textarea
@@ -132,6 +131,8 @@ function NodeEditor({ path }: { path: string }) {
                     Сохранить
                   </button>
                 </form>
+            )}
+            {(copy.bits & R) !== 0 && (
                 <form
                   onSubmit={execute}
                   className="flex flex-col gap-3 border-t border-slate-200 pt-4"
@@ -154,7 +155,6 @@ function NodeEditor({ path }: { path: string }) {
                     Выполнить
                   </button>
                 </form>
-              </>
             )}
           </>
         ))}
