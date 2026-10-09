@@ -168,9 +168,20 @@ export function isFrame(value: unknown): value is Frame {
     case 'chunk': return keys(value, ['t', 'req', 'data']) && text(value.req) && 'data' in value
     case 'end': return keys(value, ['t', 'sub', 'error']) && text(value.sub) && error(value.error)
     case 'reset': return keys(value, ['t', 'sub', 'gen']) && text(value.sub) && integer(value.gen)
-    case 'pos': return keys(value, ['t', 'pos', 'changes', 'coverage']) && isPosition(value.pos) && Array.isArray(value.changes)
-      && value.changes.every(laneChange) && (value.coverage === undefined || value.coverage === true
-        && value.changes.every(item => isRecord(item) && (item.op === 'del' || item.op === 'list')))
+    case 'pos':
+      return (
+        keys(value, ['t', 'pos', 'changes', 'coverage', 'intake']) &&
+        isPosition(value.pos) &&
+        Array.isArray(value.changes) &&
+        value.changes.every(laneChange) &&
+        (value.coverage === undefined
+          ? optional(value.intake, text)
+          : value.coverage === true &&
+            value.intake === undefined &&
+            value.changes.every(
+              (item) => isRecord(item) && (item.op === 'del' || item.op === 'list'),
+            ))
+      )
     case 'snap': case 'result': return keys(value, ['t', 'sub', 'gen', value.t === 'snap' ? 'list' : 'diff', 'covered', 'copies', 'computed', 'rows', 'at', 'next'])
       && text(value.sub) && integer(value.gen) && (value.t === 'snap' ? array(value.list, text) : listDiff(value.diff))
       && array(value.copies, copy) && array(value.at, isPosition) && optional(value.next, text) && optional(value.covered, input => array(input, text))

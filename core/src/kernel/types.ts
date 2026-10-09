@@ -417,7 +417,7 @@ export type Frame =
       readonly next?: Cursor
     }
   /** Every record of one position in one frame; a lagging client gets one merged frame up to `pos`. */
-  | { readonly t: 'pos'; readonly pos: Position; readonly changes: readonly LaneChange[]; readonly coverage?: false }
+  | { readonly t: 'pos'; readonly pos: Position; readonly changes: readonly LaneChange[]; readonly coverage?: false; readonly intake?: string }
   /** Releasing coverage is not a Store write: repeat the delivered watermark without advancing mutation completion. */
   | { readonly t: 'pos'; readonly pos: Position; readonly coverage: true;
       readonly changes: readonly Extract<LaneChange, { readonly op: 'del' | 'list' }>[] }

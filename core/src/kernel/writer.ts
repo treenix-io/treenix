@@ -292,7 +292,16 @@ async function initializeWriter(options: WriterOptions) {
         return result.pos
       })
   }
-  async function read<T>(inputs: readonly DomainId[], run: () => Promise<T>): Promise<T> {
+  async function read<T>(inputs: readonly DomainId[] | (() => readonly DomainId[]), run: () => Promise<T>): Promise<T> {
+    if (typeof inputs === 'function') {
+      for (;;) {
+        const admitted = admission, published = publication
+        await Promise.all([admitted, published])
+        checkFailure()
+        if (admitted === admission && published === publication) break
+      }
+      inputs = inputs()
+    }
     checkFailure()
     const locked = new Set(inputs)
     const pinned = new Set<TargetPin>()

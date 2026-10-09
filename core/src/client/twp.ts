@@ -32,6 +32,7 @@ export function createTwpClient(connection: Connection, options: NativeClientOpt
   const maxRequests = options.maxRequests ?? 8
   const controller = new AbortController()
   let sequence = 0, welcome: Extract<Frame, { t: 'welcome' }> | undefined, failure: KernelError | undefined
+  let intake: string | undefined
   let readyResolve: (frame: Extract<Frame, { t: 'welcome' }>) => void = () => {}, readyReject: (error: KernelError) => void = () => {}
   const ready = new Promise<Extract<Frame, { t: 'welcome' }>>((resolve, reject) => { readyResolve = resolve; readyReject = reject })
   function close(reason?: KernelError): void {
@@ -56,8 +57,8 @@ export function createTwpClient(connection: Connection, options: NativeClientOpt
   function key(): OpId {
     active()
     const current = welcome
-    if (current === undefined) throw new KernelError('UNAVAILABLE', 'Client handshake is pending')
-    return { epoch: current.intake, time: Date.now(), nonce: crypto.randomUUID() }
+    if (current === undefined || intake === undefined) throw new KernelError('UNAVAILABLE', 'Client handshake is pending')
+    return { epoch: intake, time: Date.now(), nonce: crypto.randomUUID() }
   }
   /** Cancels the selected consumer while retaining its request until the canonical answer arrives. */
   function cancel(id: string): void {
@@ -99,6 +100,7 @@ export function createTwpClient(connection: Connection, options: NativeClientOpt
         if (frame.t === 'welcome') {
           if (welcome !== undefined) throw new KernelError('INVALID', 'Duplicate client handshake')
           welcome = frame
+          intake = frame.intake
           cache.apply(frame)
           readyResolve(frame)
           continue
@@ -142,6 +144,7 @@ export function createTwpClient(connection: Connection, options: NativeClientOpt
           continue
         }
         cache.apply(frame)
+        if (frame.t === 'pos' && frame.coverage !== true && frame.intake !== undefined) intake = frame.intake
         if (
           (frame.t === 'snap' ||
             frame.t === 'result' ||

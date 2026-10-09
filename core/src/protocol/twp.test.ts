@@ -42,6 +42,22 @@ describe('native TWP boundary', () => {
     assert.throws(() => decodeFrame(JSON.stringify({ ...control, coverage: false }), 512), code('INVALID'))
     assert.equal(decodeFrame(JSON.stringify({ t: 'pos', pos, changes: [patch] }), 512).t, 'pos')
   })
+
+  it('carries renewed intake only on ordinary position frames', () => {
+    const pos = { instance: 'test', epoch: 1, seq: 4 }
+    const progress: Frame = { t: 'pos', pos, changes: [], intake: 'renewed-intake' }
+    assert.deepEqual(decodeFrame(encodeFrame(progress), 512), progress)
+    assert.throws(
+      () => decodeFrame(JSON.stringify({ ...progress, coverage: true }), 512),
+      code('INVALID'),
+    )
+    for (const intake of ['', 42, null, false, {}])
+      assert.throws(
+        () => decodeFrame(JSON.stringify({ ...progress, intake }), 512),
+        code('INVALID'),
+      )
+  })
+
   it('serializes native errors in failures, subscriptions and nested read copies', () => {
     const failure = new KernelError('NOT_FOUND', 'Node is absent')
     const frames: Frame[] = [{ t: 'fail', req: 'missing', error: failure }, { t: 'end', sub: 'hidden', error: failure }]

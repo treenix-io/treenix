@@ -45,6 +45,8 @@ export interface NodeLaneImage {
 }
 export interface NodeLaneRead extends LaneSelectionSource {
   readonly pos: Position
+  /** Intake epoch associated with this ordered read. */
+  readonly intake: string
   /** Checks whether this ordered read may reuse a retained copy for a path. */
   claimable(path: Path): boolean
   image(path: Path, sort?: Sort): Promise<NodeLaneImage | null>
@@ -129,6 +131,7 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
   let draining = false;
   let notification = 0;
   let watermark: Position | undefined;
+  let deliveredIntake: string | undefined;
   let failure: KernelError | undefined;
   let takePiece: (() => void) | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -394,6 +397,7 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
   }
   /** Requires ordinary progress before dirty subscriptions or accepted mutations can complete. */
   function ordinaryNeeded(): boolean {
+    if (options.intake() !== deliveredIntake) return true;
     if (
       [...subscriptions.entries.values()].some((sub) => sub.ready && !sub.initial && sub.dirty > 0)
     )
@@ -405,7 +409,7 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
   /** Publishes a snapshot and retains coverage releases at the delivered watermark. */
   async function snapshot(sub: NodeSubscription): Promise<NodeLaneFrame | undefined> {
     try {
-      const result = await delivery.snapshot(sub);
+      const result = await delivery.snapshot(sub, (_pos, intake) => intake === deliveredIntake);
       if (result !== undefined) {
         for (const id of result.removed) removals.set(id, { op: 'del', id });
         for (const id of result.frame.covered ?? result.frame.list) removals.delete(id);
@@ -420,14 +424,19 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
   }
   /** Publishes current changes once and suppresses queued deletions of transferred coverage. */
   async function flush(): Promise<NodeLaneFrame | undefined> {
-    const dirty = [...subscriptions.entries.values()].filter(
-      (sub) => sub.ready && !sub.initial && sub.dirty > 0,
+    const eligible = [...subscriptions.entries.values()].filter(
+      (sub) => sub.ready && !sub.initial,
     );
     try {
-      const result = await delivery.flush(dirty, (pos) => {
+      const result = await delivery.flush(eligible, (pos) => {
         if (closed) return false;
         if (watermark !== undefined && comparePositions(pos, watermark) <= 0) {
-          if (dirty.length > 0) reset();
+          if (
+            eligible.some(
+              (sub) => registered(sub) && sub.ready && !sub.initial && sub.dirty > 0,
+            )
+          )
+            reset();
           return false;
         }
         return true;
@@ -435,7 +444,14 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
       if (result === undefined) return undefined;
       for (const id of removals.keys()) if (delivery.covers(id)) removals.delete(id);
       watermark = result.pos;
-      return { t: 'pos', pos: result.pos, changes: result.changes };
+      const intake = result.intake === deliveredIntake ? undefined : result.intake;
+      deliveredIntake = result.intake;
+      return {
+        t: 'pos',
+        pos: result.pos,
+        changes: result.changes,
+        ...(intake === undefined ? {} : { intake }),
+      };
     } catch (caught) {
       const denied = error(caught);
       if (denied.code !== 'CONFLICT') close(denied);
@@ -446,10 +462,11 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
   async function nextFrame(): Promise<NodeLaneFrame | undefined> {
     if (welcome) {
       welcome = false;
+      deliveredIntake = options.intake();
       return {
         t: 'welcome',
         principal: admission.actor.principal,
-        intake: options.intake(),
+        intake: deliveredIntake,
         ...(options.issuedCredential === undefined ? {} : { credential: options.issuedCredential }),
       };
     }

@@ -92,7 +92,7 @@ describe('mounted lane topology and intake lifetime', { timeout: 10_000 }, () =>
     assert.equal(copy.node.value, 1)
   })
 
-  it('finishes an accepted Pending before reconnecting with one fresh welcome', async t => {
+  it('finishes an accepted Pending and announces the renewed intake on its live lane', async t => {
     const f = await setup()
     t.after(() => f.instance.close())
 
@@ -118,6 +118,8 @@ describe('mounted lane topology and intake lifetime', { timeout: 10_000 }, () =>
 
     const progress = await lane.frames.next()
     assert.ok(progress.done === false && progress.value.t === 'pos')
+    assert.ok(progress.value.coverage !== true)
+    assert.equal(progress.value.intake, f.instance.writer.intake.epoch)
     const completed = await lane.frames.next()
     assert.ok(completed.done === false && completed.value.t === 'done')
     assert.equal(completed.value.req, pending.id)
@@ -125,14 +127,25 @@ describe('mounted lane topology and intake lifetime', { timeout: 10_000 }, () =>
     assert.ok(outcome.pos)
     assert.ok(comparePositions(progress.value.pos, outcome.pos) >= 0)
     assert.deepEqual(completed.value.pos, outcome.pos)
-    assert.equal((await lane.frames.next()).done, true)
     assert.deepEqual(await f.admin.commit(request), outcome)
 
-    const next = await f.instance.openSession(f.instance.setupCredential)
-    const fresh = await next.frames.next()
-    assert.ok(fresh.done === false && fresh.value.t === 'welcome')
-    assert.equal(fresh.value.intake, f.instance.writer.intake.epoch)
-    next.sub({ node: '/stable' })
-    assert.equal((await next.frames.next()).value?.t, 'snap')
+    assert.equal(lane.actor.principal, welcome.value.principal)
+    assert.equal(welcome.value.intake, request.opId.epoch)
+    const current = (await lane.read({ node: '/stable' })).copies[0]
+    assert.ok('node' in current)
+    assert.equal(current.node.value, 2)
+    const fresh = lane.commit({ opId: f.key(), changes: [
+      { op: 'patch', path: '/stable', ops: { $inc: { value: 1 } } },
+    ] })
+    const renewed = await lane.frames.next()
+    assert.ok(renewed.done === false && renewed.value.t === 'pos')
+    assert.ok(comparePositions(renewed.value.pos, progress.value.pos) > 0)
+    const finished = await lane.frames.next()
+    assert.ok(finished.done === false && finished.value.t === 'done')
+    assert.equal(finished.value.req, fresh.id)
+    assert.deepEqual(finished.value.pos, (await fresh.outcome).pos)
+    const after = (await lane.read({ node: '/stable' })).copies[0]
+    assert.ok('node' in after)
+    assert.equal(after.node.value, 3)
   })
 })

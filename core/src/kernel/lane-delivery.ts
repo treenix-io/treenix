@@ -130,10 +130,15 @@ export function createLaneDelivery(
     return true;
   }
   /** Stages canonical projections, coverage limits and pins before the read barrier releases. */
-  async function prepare(subs: readonly NodeSubscription[], initial: boolean) {
+  async function prepare(
+    subs: readonly NodeSubscription[],
+    initial: boolean,
+    ready?: (pos: Position, intake: string) => boolean,
+  ) {
     const held = new Map<NodeId, () => void>();
     try {
       const result = await options.read(async (source) => {
+        if (ready?.(source.pos, source.intake) === false) return undefined;
         const images = new Map<NodeId, NodeLaneImage>();
         const reusable =
           initial && claims !== undefined && claims.size > 0
@@ -147,6 +152,11 @@ export function createLaneDelivery(
           remove(stage.sub, reason);
         }
         for (const sub of subs) {
+          if (
+            !initial &&
+            (!registered(sub) || !sub.ready || sub.initial || sub.dirty === 0)
+          )
+            continue;
           const gen = sub.gen;
           const stamp = sub.stamp;
           const force = sub.forcePut;
@@ -250,16 +260,16 @@ export function createLaneDelivery(
         for (const stage of stages) subscriptions.capture(stage.sub, stage.state);
         for (const [id, image] of images)
           if ((estimated.counts.get(id) ?? 0) > 0) held.set(id, image.retain());
-        return { stages, images, reusable, pos: source.pos, interrupted };
+        return { stages, images, reusable, pos: source.pos, intake: source.intake, interrupted };
       }, subs.map(sub => sub.selector));
-      return { ...result, held };
+      return result === undefined ? undefined : { ...result, held };
     } catch (error) {
       for (const release of held.values()) release();
       throw error;
     }
   }
   /** Reconciles shared coverage atomically before forming copy and list differences. */
-  function apply(result: Awaited<ReturnType<typeof prepare>>, initial: boolean) {
+  function apply(result: NonNullable<Awaited<ReturnType<typeof prepare>>>, initial: boolean) {
     const stages = result.stages.filter(
       (stage) => registered(stage.sub) && stage.gen === stage.sub.gen,
     );
@@ -367,8 +377,9 @@ export function createLaneDelivery(
       claims?.clear();
     },
     /** Publishes current membership and exposes released IDs for coverage controls. */
-    async snapshot(sub: NodeSubscription) {
-      const result = await prepare([sub], true);
+    async snapshot(sub: NodeSubscription, ready: (pos: Position, intake: string) => boolean) {
+      const result = await prepare([sub], true, ready);
+      if (result === undefined) return undefined;
       try {
         const stage = result.stages[0];
         if (stage === undefined || !registered(sub) || sub.gen !== stage.gen) return undefined;
@@ -398,9 +409,10 @@ export function createLaneDelivery(
     /** Publishes prepared differences only when their ordinary position can advance. */
     async flush(subs: readonly NodeSubscription[], after: (pos: Position) => boolean) {
       const result = await prepare(subs, false);
+      if (result === undefined) return undefined;
       try {
         if (result.interrupted || !after(result.pos)) return undefined;
-        return { pos: result.pos, changes: apply(result, false).changes };
+        return { pos: result.pos, intake: result.intake, changes: apply(result, false).changes };
       } finally {
         for (const release of result.held.values()) release();
       }

@@ -915,14 +915,9 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
       failed(error) { console.error(error); failure = { error } },
     })
   }
-  let intakeEpoch = writer.intake.epoch
-  const unsubscribeIntake = writer.stream.observe(event => {
-    if (event.t === 'commit' && event.record.intake !== undefined && event.record.intake.epoch !== intakeEpoch) {
-      intakeEpoch = event.record.intake.epoch
-      sessions?.reconnect()
-    }
-  })
+
   let closing: Promise<void> | undefined
+
   return {
     id: config.id,
     root: config.root,
@@ -954,7 +949,6 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
     close() {
       if (closing !== undefined) return closing
       closed = true
-      unsubscribeIntake()
       sessions?.close()
       auth?.close()
       closing = (async () => {

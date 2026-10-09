@@ -12,10 +12,13 @@ export function createNodeLaneRead(options: CommandOptions, claimable: (path: Pa
   if (projector === undefined) throw new KernelError('INVALID', 'A lane requires the instance projector')
   const project = projector
   /** Keeps selection images usable until preparation and its final lifetime check complete. */
-  return async function read<T>(run: (source: NodeLaneRead) => Promise<T>, selectors: readonly SubSelector[] = []): Promise<T> {
+  return async function read<T>(
+      run: (source: NodeLaneRead) => Promise<T>,
+      selectors: readonly SubSelector[] = [],
+    ): Promise<T> {
     const budget = options.budget()
     await options.prepareSource(budget, selectors, admission.signal)
-    const input = options.source(budget), revision = options.registryRevision()
+    const revision = options.registryRevision()
     const held: CacheRead[] = []
     let live = true
     /** Rejects late reads and projections from a registry generation that has already changed. */
@@ -25,13 +28,25 @@ export function createNodeLaneRead(options: CommandOptions, claimable: (path: Pa
       if (Date.now() > budget.deadline) throw new KernelError('BUDGET', 'Lane read deadline exceeded')
       if (options.registryRevision() !== revision) throw new KernelError('CONFLICT', 'Projection changed during lane delivery')
     }
-    return writer.read(input.domains, async () => {
+    let input: ReturnType<CommandOptions['source']>
+    return writer.read(() => {
+      input = options.source(budget)
+      return input.domains
+    }, async () => {
       check()
       await admission.validate(input.auth)
-      const reads = createReader({ admission, writer, registry, source: input, budget, limits: options.limits(), projector: project,
-        scope: { check, hold(lease) { held.push(lease) } } })
+      const reads = createReader({
+        admission,
+        writer,
+        registry,
+        source: input,
+        budget,
+        limits: options.limits(),
+        projector: project,
+        scope: { check, hold(lease) { held.push(lease) } },
+      })
       const source: NodeLaneRead = {
-        pos: writer.stream.cursor().pos, check,
+        pos: writer.stream.cursor().pos, intake: writer.intake.epoch, check,
         claimable(path) {
           check()
           return claimable(path)
