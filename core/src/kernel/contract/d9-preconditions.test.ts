@@ -31,12 +31,31 @@ async function unchanged(f: Awaited<ReturnType<typeof fixture>>, expect: ReadSet
 
 describe('selector influence', () => {
   it('covers exact nodes, direct children and recursive history ranges', () => {
-    const write = { domain: 'memory', path: '/slots/deep/item', pos: pos(1), before: null, after: node('/slots/deep/item') }
-    assert.equal(createInfluenceTest({ node: '/slots/deep/item' }, context())(write), true)
-    assert.equal(createInfluenceTest({ node: '/slots' }, context())(write), false)
-    assert.equal(createInfluenceTest({ children: '/slots' }, context())(write), false)
-    assert.equal(createInfluenceTest({ history: '/slots' }, context())(write), true)
-  })
+    const write = {
+      domain: 'memory',
+      path: '/slots/deep/item',
+      pos: pos(1),
+      before: null,
+      after: node('/slots/deep/item'),
+    };
+    assert.equal(createInfluenceTest({ node: '/slots/deep/item' }, context())(write), true);
+    assert.equal(createInfluenceTest({ node: '/slots' }, context())(write), false);
+    assert.equal(createInfluenceTest({ children: '/slots' }, context())(write), false);
+    assert.equal(
+      createInfluenceTest(
+        { history: '/slots' },
+        {
+          ...context(),
+          historyVisible: (change) =>
+            change.after !== null && project(change.after) !== null,
+        },
+      )({
+        ...write,
+        transition: { id: write.after.$id, before: write.before, after: write.after },
+      }),
+      true,
+    );
+  });
 
   it('counts both entry into and exit from a filter', () => {
     const affects = createInfluenceTest(selector, context())

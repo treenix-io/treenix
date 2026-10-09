@@ -102,8 +102,6 @@ export function createReadActionContext(source: ActionContextSource): ReadAction
       async read(selector: Selector) {
         const options = current()
         options.active()
-        if ('history' in selector)
-          throw new KernelError('UNAVAILABLE', 'History action reads are not implemented')
         const result = await options.reads.read(selector)
         options.active()
         return freeze(result)

@@ -14,29 +14,47 @@ export interface InfluenceWrite {
   readonly pos: Position
   readonly before: StoredNode | null | 'unknown'
   readonly after: StoredNode | null
+  /** Retains both addresses so history checks can evaluate a moved node as one change. */
+  readonly transition?: NodeChange
 }
 export interface InfluenceContext {
   readonly project: (node: StoredNode, selector: Selector) => Node | null
+  readonly historyVisible?: (change: NodeChange, domain: DomainId) => boolean
   readonly work: ExprWork
   readonly limits?: Limits
 }
 
 /** Builds a predicate for writes that can change a selector result. */
-export function createInfluenceTest(selector: Selector, { project, work, limits = DEFAULT_LIMITS }: InfluenceContext) {
-  const test = 'children' in selector && selector.where !== undefined ? createSiftTest(selector.where, limits) : undefined
+export function createInfluenceTest(
+  selector: Selector,
+  { project, historyVisible, work, limits = DEFAULT_LIMITS }: InfluenceContext,
+) {
+  const test =
+    'children' in selector && selector.where !== undefined
+      ? createSiftTest(selector.where, limits)
+      : undefined;
   return (write: InfluenceWrite): boolean => {
-    const inRange = 'node' in selector ? write.path === selector.node
-      : 'children' in selector ? isChildPath(selector.children, write.path, true)
-      : write.path === selector.history || isChildPath(selector.history, write.path, false)
-    if (!inRange) return false
-    if (write.before === 'unknown') return true
-    for (const image of [write.before, write.after]) {
-      if (image === null) continue
-      const visible = project(image, selector)
-      if (visible !== null && (test === undefined || test(mapNodeForSift(visible), work))) return true
+    const inRange =
+      'node' in selector
+        ? write.path === selector.node
+        : 'children' in selector
+          ? isChildPath(selector.children, write.path, true)
+          : write.path === selector.history || isChildPath(selector.history, write.path, false);
+    if (!inRange) return false;
+    if (write.before === 'unknown') return true;
+    if ('history' in selector) {
+      if (write.transition === undefined || historyVisible === undefined)
+        throw new KernelError('INVALID', 'History influence requires the complete transition');
+      return historyVisible(write.transition, write.domain);
     }
-    return false
-  }
+    for (const image of [write.before, write.after]) {
+      if (image === null) continue;
+      const visible = project(image, selector);
+      if (visible !== null && (test === undefined || test(mapNodeForSift(visible), work)))
+        return true;
+    }
+    return false;
+  };
 }
 
 export interface InfluenceOptions {
@@ -89,11 +107,21 @@ export function createInfluenceIndex(options: InfluenceOptions) {
       if (!floors.has(domain)) throw new KernelError('INVALID', 'Unknown influence domain')
       advance(pos)
       for (const change of changes) {
-        const before = image(change.before), after = image(change.after)
-        if (before !== null) put({ domain, pos: position, path: before.$path, before,
-          after: after?.$path === before.$path ? after : null })
+        const before = image(change.before),
+          after = image(change.after)
+        const transition: NodeChange = Object.freeze({ id: change.id, before, after })
+
+        if (before !== null)
+          put({
+            domain,
+            pos: position,
+            path: before.$path,
+            before,
+            transition,
+            after: after?.$path === before.$path ? after : null,
+          })
         if (after !== null && before?.$path !== after.$path) {
-          put({ domain, pos: position, path: after.$path, before: null, after })
+          put({ domain, pos: position, path: after.$path, before: null, after, transition })
         }
       }
     },

@@ -255,17 +255,25 @@ describe('native handlerless post actions', { timeout: 10_000 }, () => {
     assert.deepEqual(await f.instance.source.node('/work/document'), before)
   })
 
-  it('rejects unavailable I/O and history before gates or effects', async t => {
-    let calls = 0
-    const f = await setup([async operation => { if (operation.kind === 'act') calls++; return 'pass' }])
-    t.after(() => f.instance.auth.close())
-    for (const action of ['external', 'historical']) {
-      await assert.rejects(f.commands.act(f.request(action)), code('UNAVAILABLE'))
-    }
-    await assert.rejects(f.commands.act({ ...f.request(), opId: undefined }), code('INVALID'))
-    assert.equal(calls, 0)
-    assert.equal((await f.instance.source.node('/work/document'))?.count, 0)
-  })
+  it('refuses unavailable I/O and invalid keys before gates, then accepts a read-only history need', async (t) => {
+    let calls = 0;
+    const f = await setup([
+      async (operation) => {
+        if (operation.kind === 'act') calls++;
+        return 'pass';
+      },
+    ]);
+    t.after(() => f.instance.auth.close());
+    await assert.rejects(f.commands.act(f.request('external')), code('UNAVAILABLE'));
+    await assert.rejects(f.commands.act({ ...f.request(), opId: undefined }), code('INVALID'));
+    assert.equal(calls, 0);
+    assert.equal((await f.instance.source.node('/work/document'))?.count, 0);
+    const before = await f.instance.source.node('/work/document');
+    const outcome = await f.commands.act(f.request('historical'));
+    assert.ok(outcome.pos);
+    assert.equal(calls, 1);
+    assert.deepEqual(await f.instance.source.node('/work/document'), before);
+  });
 
   it('cancels one gated action without closing its admission or applying its post', async t => {
     const entered = signal(), release = signal()

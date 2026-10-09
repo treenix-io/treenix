@@ -170,6 +170,7 @@ export function createCommands(options: CommandOptions) {
                   domains: () => source.domains,
                   dependency: reads.dependency,
                   project: reads.project,
+                  historyVisible: reads.historyVisible,
                   work: reads.work,
                   limits,
                 },

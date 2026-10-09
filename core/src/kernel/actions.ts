@@ -3,7 +3,7 @@ import { assertSafeSchema, validateValue, type ValidationError } from '#comp/val
 import { KernelError } from '#errors'
 import { createActionControl, createReadActionContext, createWriteActionContext } from '#kernel/action-context'
 import { createActionDraft } from '#kernel/action-draft'
-import { assertSupportedNeeds, resolveActionNeeds, type ResolvedActionNeeds } from '#kernel/action-needs'
+import { resolveActionNeeds, type ResolvedActionNeeds } from '#kernel/action-needs'
 import { createChangeBuilder } from '#kernel/change-builder'
 import { changeSelectors, selectChangeStore, prepareChangeSet, type ChangeExecutor, type ChangeSetOptions } from '#kernel/changeset'
 import type { CommandOptions, NodeActionBinding } from '#kernel/commands'
@@ -39,13 +39,12 @@ function assertMutationKey(opId: OpId | undefined): asserts opId is OpId {
     throw new KernelError('INVALID', 'A mutation key is required')
 }
 
-/** Reject action kinds and declared needs that this runtime cannot execute. */
+/** Reject action kinds and effects that this runtime cannot execute. */
 function assertSupportedAction(action: ActionDef, options: CommandOptions): void {
   if (action.kind !== 'read' && action.io === true && options.io === undefined) throw new KernelError('UNAVAILABLE', 'Action I/O is not configured')
   if (action.kind !== 'read' && action.post !== undefined && action.handler !== undefined
     && (action.handler instanceof AsyncGenerator || Reflect.get(action.handler, 'implementation') instanceof AsyncGenerator))
     throw new KernelError('INVALID', 'A streaming action cannot declare post')
-  assertSupportedNeeds(action.needs)
   if (action.kind !== 'read' && action.post !== undefined) assertPost(action.post)
 }
 
@@ -201,6 +200,7 @@ export function createActionRuntime(options: CommandOptions) {
           domains: callerReads.domains,
           dependency: callerReads.dependency,
           project: callerReads.project,
+          historyVisible: callerReads.historyVisible,
           work: callerReads.work,
           limits,
         });
@@ -381,6 +381,7 @@ export function createActionRuntime(options: CommandOptions) {
                   domains: reads.domains,
                   dependency: reads.dependency,
                   project: reads.project,
+                  historyVisible: reads.historyVisible,
                   work: reads.work,
                   limits,
                 });
@@ -446,6 +447,7 @@ export function createActionRuntime(options: CommandOptions) {
                     domains: reads.domains,
                     dependency: reads.dependency,
                     project: reads.project,
+                    historyVisible: reads.historyVisible,
                     work: reads.work,
                     limits,
                   },

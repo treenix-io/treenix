@@ -2,6 +2,7 @@ import { ancestorPaths, assertSafePath, isChildPath } from '#core/path'
 import { KernelError } from '#errors'
 import type { AuthAdmission } from '#kernel/auth-factory'
 import type { CacheRead } from '#kernel/cache'
+import type { NodeChange } from '#kernel/changeset'
 import { decodeChainNode } from '#kernel/chain-index'
 import type { ExprWork } from '#kernel/eval'
 import { createSiftTest } from '#kernel/expr'
@@ -109,6 +110,7 @@ function ruleTypes(node: ChainNode, registry: Registry): readonly string[] {
 export function readerRightsInput(node: ChainNode | undefined, registry: Registry): unknown {
   if (node === undefined) return null
   const rules = ruleTypes(node, registry)
+  if (!node.hasAcl && !node.hasOwner && rules.length === 0 && node.invalid === undefined) return null
   return { acl: node.hasAcl ? node.acl : undefined, owner: node.hasOwner ? node.owner : undefined,
     rules, invalid: node.invalid, ...(rules.length === 0 ? {} : { id: node.id }) }
 }
@@ -227,6 +229,24 @@ export function createReader(options: ReaderOptions) {
     const copy = projectCopy(stored, bits, 'children' in selector ? selector.sort : undefined);
     active();
     return copy === null ? null : 'node' in copy ? copy.node : visibleNode(stored, bits);
+  }
+  /** Match journal visibility across both addresses of one accepted transition. */
+  function historyVisible(change: NodeChange, domain: DomainId): boolean {
+    active();
+    const images = [change.before, change.after];
+    const first = change.after ?? change.before;
+    if (first === null) throw new KernelError('INVALID', 'An influence transition has no image');
+    const store = source.resolve(first.$path).store;
+    if (store.domain !== domain) return false;
+    for (const image of images) {
+      if (
+        image !== null &&
+        (source.resolve(image.$path).store !== store ||
+          !historyAllowed(image.$path, decodeChainNode(image)))
+      )
+        return false;
+    }
+    return true;
   }
   function dependency(input: ReadDependency): unknown {
     if (input.kind === 'topology') return source.topology(input.range);
@@ -752,74 +772,129 @@ export function createReader(options: ReaderOptions) {
     return owner;
   }
   /** Reads administrative journal images under present rights and the recorded type restrictions. */
-  async function historyInSpan(selector: Extract<Selector, { history: Path }>): Promise<ReadResult> {
+  async function historyInSpan(
+    selector: Extract<Selector, { history: Path }>,
+  ): Promise<ReadResult> {
     active();
-    path(selector.history);
-    if (Buffer.byteLength(JSON.stringify(selector)) > limits.requestBytes)
+    ledger.requestBytes += Buffer.byteLength(JSON.stringify(selector));
+    if (ledger.requestBytes > limits.requestBytes)
       throw new KernelError('BUDGET', 'Read request budget exceeded');
-    if (selector.window?.evict !== undefined) throw new KernelError('INVALID', 'History is read-only');
+    path(selector.history);
+    if (selector.window?.evict !== undefined)
+      throw new KernelError('INVALID', 'History is read-only');
     await admission.validate(source.auth);
     active();
+    const snapshot = writer.stream.cursor();
     const range: ScanRange = { subtree: selector.history };
     topology(range);
     const targets = source.targets(range);
     depend({ kind: 'actor', key: admission.dependencyKey, value: admission.dependency() });
     for (const domain of source.domains)
-      depend({ kind: 'epoch', key: domain, value: writer.stream.cursor().epochs[domain] });
-    const sort: Sort = [['address.pos.epoch', 1], ['address.pos.seq', 1]];
-    const scope = stableJson([admission.actor, source.topology(range), selector.history, selector.after, selector.window?.limit]);
-    const after = selector.window?.after === undefined ? undefined : parseScanCursor(selector.window.after, scope, sort.length);
-    if (selector.window !== undefined && (!Number.isSafeInteger(selector.window.limit) || selector.window.limit < 1))
+      depend({ kind: 'epoch', key: domain, value: snapshot.epochs[domain] });
+    const sort: Sort = [
+      ['address.pos.epoch', 1],
+      ['address.pos.seq', 1],
+    ];
+    const scope = stableJson([
+      admission.actor,
+      source.topology(range),
+      selector.history,
+      selector.after,
+      selector.window?.limit,
+    ]);
+    const after =
+      selector.window?.after === undefined
+        ? undefined
+        : parseScanCursor(selector.window.after, scope, sort.length);
+    if (
+      selector.window !== undefined &&
+      (!Number.isSafeInteger(selector.window.limit) || selector.window.limit < 1)
+    )
       throw new KernelError('INVALID', 'History limit must be positive');
     const metadata: JournalVisibility[] = [];
     const owners = new Map<string, ReaderTarget>();
     for (const found of targets)
-      await journalRows(found, { journal: selector.history, after: selector.after, accept(entry) {
-        if (!visibleJournalEntry(found, entry)) return false;
-        if (after !== undefined && compareScanKeys(scanKey(entry, sort, entry.address.id), after, sort) <= 0)
+      await journalRows(found, {
+        journal: selector.history,
+        after: selector.after,
+        accept(entry) {
+          if (!visibleJournalEntry(found, entry)) return false;
+          if (
+            after !== undefined &&
+            compareScanKeys(scanKey(entry, sort, entry.address.id), after, sort) <= 0
+          )
+            return false;
+          metadata.push(entry);
+          owners.set(journalKey(entry.address), found);
           return false;
-        metadata.push(entry);
-        owners.set(journalKey(entry.address), found);
-        return false;
-      } });
+        },
+      });
 
-    const page = scanPage(metadata, sort, entry => entry.address.id, scope,
-      selector.window?.after, selector.window?.limit, active);
+    const page = scanPage(
+      metadata,
+      sort,
+      (entry) => entry.address.id,
+      scope,
+      selector.window?.after,
+      selector.window?.limit,
+      active,
+    );
     const selected = new Map<ReaderTarget, Set<string>>();
     for (const entry of page.items) {
       const key = journalKey(entry.address);
       const found = owners.get(key)!;
       let keys = selected.get(found);
-      if (keys === undefined) { keys = new Set(); selected.set(found, keys); }
+      if (keys === undefined) {
+        keys = new Set();
+        selected.set(found, keys);
+      }
       keys.add(key);
     }
     const entries = new Map<string, HistoryEntry>();
     for (const [found, keys] of selected) {
-      const records = await journalRows(found, { journal: selector.history,
-        accept: entry => keys.has(journalKey(entry.address)) });
+      const records = await journalRows(found, {
+        journal: selector.history,
+        accept: (entry) => keys.has(journalKey(entry.address)),
+      });
       for (const record of records) {
-      active();
-      for (const entry of record.entries) {
         active();
-        if (++work.used > work.limit) throw new KernelError('BUDGET', 'History work budget exceeded');
-        const address = { pos: record.pos, id: entry.id };
-        const images = applyJournalChange(entry.change, 'unknown');
-        if (images.before !== null && images.before !== 'unknown') {
-          charge(images.before);
+        for (const entry of record.entries) {
+          active();
+          if (++work.used > work.limit)
+            throw new KernelError('BUDGET', 'History work budget exceeded');
+          const address = { pos: record.pos, id: entry.id };
+          const images = applyJournalChange(entry.change, 'unknown');
+          if (images.before !== null && images.before !== 'unknown') {
+            charge(images.before);
+          }
+          if (images.after !== null) {
+            charge(images.after);
+          }
+          entries.set(journalKey(address), {
+            address,
+            path: entry.path,
+            executor: record.executor,
+            caller: record.caller,
+            ...(record.decision === undefined ? {} : { opId: record.decision.opId }),
+            before:
+              images.before === null || images.before === 'unknown'
+                ? images.before
+                : visibleNode(images.before, A | R),
+            after: images.after === null ? null : visibleNode(images.after, A | R),
+          });
         }
-        if (images.after !== null) {
-          charge(images.after);
-        }
-        entries.set(journalKey(address), { address, path: entry.path, executor: record.executor, caller: record.caller,
-          ...(record.decision === undefined ? {} : { opId: record.decision.opId }),
-          before: images.before === null || images.before === 'unknown' ? images.before : visibleNode(images.before, A | R),
-          after: images.after === null ? null : visibleNode(images.after, A | R) });
-      }
       }
     }
     checkDependencies();
-    return { list: [], copies: [], history: page.items.map(entry => entries.get(journalKey(entry.address))!), at: [writer.stream.cursor().pos],
-      ...(page.next === undefined ? {} : { next: page.next }) };
+    active();
+    selectors.push({ selector, at: [snapshot.pos] });
+    return {
+      list: [],
+      copies: [],
+      history: page.items.map((entry) => entries.get(journalKey(entry.address))!),
+      at: [snapshot.pos],
+      ...(page.next === undefined ? {} : { next: page.next }),
+    };
   }
   return {
     read,
@@ -829,6 +904,7 @@ export function createReader(options: ReaderOptions) {
     cursor,
     work,
     project,
+    historyVisible,
     projectedNode,
     journalTarget,
     pin: topology,

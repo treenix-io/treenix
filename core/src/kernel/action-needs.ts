@@ -34,28 +34,37 @@ function includes(base: Path, specs: readonly IncludeSpec[], limit: number, dept
     : { ref: spec.ref, ...(spec.then === undefined ? {} : { then: includes(base, spec.then, limit, depth + 1) }) })
 }
 
-export function assertSupportedNeeds(needs: ActionDef['needs']): void {
-  for (const selector of Object.values(needs ?? {})) {
-    if ('history' in selector) throw new KernelError('UNAVAILABLE', 'History action needs are not implemented')
-  }
-}
-
-export async function resolveActionNeeds(needs: ActionDef['needs'], base: Path,
-  reader: ReturnType<typeof createReader>, limits: Limits): Promise<ResolvedActionNeeds> {
-  const results: (readonly [string, ReadResult])[] = [], targets: (readonly [string, readonly Path[]])[] = []
+/** Resolve declared reads and the paths available to post operations. */
+export async function resolveActionNeeds(
+  needs: ActionDef['needs'],
+  base: Path,
+  reader: ReturnType<typeof createReader>,
+  limits: Limits,
+): Promise<ResolvedActionNeeds> {
+  const results: (readonly [string, ReadResult])[] = [],
+    targets: (readonly [string, readonly Path[]])[] = [];
   for (const [name, input] of Object.entries(needs ?? {})) {
-    if ('history' in input) throw new KernelError('UNAVAILABLE', 'History action needs are not implemented')
-    const include = input.include === undefined ? undefined : includes(base, input.include, limits.includeDepth)
-    const selector: SubSelector = 'node' in input ? { ...input, node: relative(base, input.node), include }
-      : { ...input, children: relative(base, input.children), include }
-    const result = await reader.read(selector)
-    const copies = new Map(result.copies.map(copy => ['node' in copy ? copy.node.$id : copy.id, copy]))
-    const paths = result.list.map(id => {
-      const copy = copies.get(id)!
-      if (!('node' in copy)) throw copy.error
-      return copy.node.$path
-    })
-    results.push([name, result]); targets.push([name, paths])
+    if ('history' in input) {
+      results.push([name, await reader.read({ ...input, history: relative(base, input.history) })]);
+      continue;
+    }
+    const include =
+      input.include === undefined ? undefined : includes(base, input.include, limits.includeDepth);
+    const selector: SubSelector =
+      'node' in input
+        ? { ...input, node: relative(base, input.node), include }
+        : { ...input, children: relative(base, input.children), include };
+    const result = await reader.read(selector);
+    const copies = new Map(
+      result.copies.map((copy) => ['node' in copy ? copy.node.$id : copy.id, copy]),
+    );
+    const paths = result.list.map((id) => {
+      const copy = copies.get(id)!;
+      if (!('node' in copy)) throw copy.error;
+      return copy.node.$path;
+    });
+    results.push([name, result]);
+    targets.push([name, paths]);
   }
-  return { needs: Object.fromEntries(results), targets: Object.fromEntries(targets) }
+  return { needs: Object.fromEntries(results), targets: Object.fromEntries(targets) };
 }
