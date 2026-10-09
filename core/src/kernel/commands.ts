@@ -8,7 +8,7 @@ import type { createProjector } from '#kernel/projection'
 import { createReader, type ReaderLedger, type ReaderSource } from '#kernel/reader'
 import { createRequestAdmission, serializeRequest } from '#kernel/request'
 import type { AuthReadSource } from '#kernel/session'
-import type { BlobStore, Budget, CommitRequest, Gate, Io, Limits, NodeId, Outcome, Path, Registry, Rev, Selector, Store, StoredNode } from '#kernel/types'
+import type { BlobStore, Budget, CommitRequest, Gate, ActionIoBinding, Limits, NodeId, Outcome, Path, Registry, Rev, Selector, Store, StoredNode } from '#kernel/types'
 import type { Writer } from '#kernel/writer'
 import { freeze } from '#util/freeze'
 
@@ -43,7 +43,7 @@ export interface CommandOptions {
   readonly budget: (kind?: 'read' | 'action') => Budget
   readonly validate: (prepared: PreparedChangeSet) => void
   readonly projector?: ReturnType<typeof createProjector>
-  readonly io?: Io
+  readonly io?: ActionIoBinding
   readonly blobs?: BlobStore
   /** Owns a real node session while an action executes under its admission. */
   readonly withNodeExecutor: <T>(target: NodeActionTarget,

@@ -1,4 +1,4 @@
-import type { AdminInput } from '#kernel/types'
+import type { ActionIoBinding, AdminInput } from '#kernel/types'
 import { readFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -10,6 +10,12 @@ import { openNativeRuntime } from '#kernel/runtime'
 import type { Credential } from '#kernel/types'
 import { createTwpHttpServer } from '#server/http-twp'
 import { isRecord } from '#util/is-record'
+
+interface IoEntry { readonly entry: string }
+/** Decode the deployment entry before acquiring persistent runtime resources. */
+function ioEntry(value: unknown): value is IoEntry {
+  return isRecord(value) && typeof value.entry === 'string' && value.entry.length > 0
+}
 
 interface ModuleEntry { readonly id: string; readonly entry: string }
 function moduleEntry(value: unknown): value is ModuleEntry {
@@ -36,6 +42,7 @@ async function main(): Promise<void> {
     || !Array.isArray(config.allowedOrigins) || !config.allowedOrigins.every((value: unknown): value is string => typeof value === 'string')
     || config.firstAdmin !== undefined && !adminInput(config.firstAdmin)
     || config.installerCredential !== undefined && !credentialInput(config.installerCredential)
+    || config.io !== undefined && !ioEntry(config.io)
     || config.mountDirectories !== undefined && !directoryBindings(config.mountDirectories)
     || config.modules !== undefined && (!Array.isArray(config.modules) || !config.modules.every(moduleEntry)))
     throw new KernelError('INVALID', 'Malformed native server configuration')
@@ -48,6 +55,14 @@ async function main(): Promise<void> {
       ? pathToFileURL(resolve(dirname(configPath), entry.entry)).href : entry.entry
     modules.push(await collectModule(entry.id, () => import(target), target))
   }
+  let io: ActionIoBinding | undefined;
+  if (config.io !== undefined) {
+    const target = pathToFileURL(resolve(dirname(configPath), config.io.entry)).href;
+    const deployment: { readonly bindIo: ActionIoBinding } = await import(target);
+    if (typeof deployment.bindIo !== 'function')
+      throw new KernelError('INVALID', 'Native I/O entry must export bindIo');
+    io = deployment.bindIo;
+  }
   const mountDirectories =
     config.mountDirectories === undefined
       ? undefined
@@ -58,7 +73,7 @@ async function main(): Promise<void> {
           ]),
         )
   const runtime = await openNativeRuntime({ id: config.id, directory: resolve(dirname(configPath), config.directory),
-    credentialTtlMs: config.credentialTtlMs, firstAdmin: config.firstAdmin, installerCredential: config.installerCredential, modules, mountDirectories })
+    credentialTtlMs: config.credentialTtlMs, firstAdmin: config.firstAdmin, installerCredential: config.installerCredential, modules, mountDirectories, io })
   const binding = createTwpHttpServer({ instance: runtime.instance, allowedOrigins: config.allowedOrigins, credentialTtlMs: config.credentialTtlMs })
   try {
     await new Promise<void>((done, reject) => { binding.server.once('error', reject); binding.server.listen(port, host, () => { binding.server.off('error', reject); done() }) })

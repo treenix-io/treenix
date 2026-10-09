@@ -552,6 +552,13 @@ export type JsonSchema = { readonly [keyword: string]: unknown }
 /** Kernel I/O for handlers, extended by the deployment; present only where external effects are allowed. */
 export interface Io {}
 
+/** Owns external calls under the same request signal and current action frame. */
+export interface ActionIoScope {
+  readonly signal: AbortSignal
+  readonly assertActive: () => void
+}
+export type ActionIoBinding = (scope: ActionIoScope) => Io
+
 export interface ChangeBuilder {
   put(node: NodeInput): void
   patch(path: Path, ops: UpdateOps): void
@@ -1190,6 +1197,8 @@ export interface InstanceProvisioning {
 }
 
 export interface InstanceConfig {
+  /** Deployment capabilities are bound separately to each declared writing action. */
+  readonly io?: ActionIoBinding
   readonly id: InstanceId
   readonly root: MountTarget
   readonly provisioning: InstanceProvisioning
@@ -1228,6 +1237,8 @@ export type TestActorInput =
   | { readonly kind: 'node'; readonly node: Path }
 
 export interface TestInstanceConfig<ActorName extends string = string> {
+  /** Deployment capabilities are bound separately to each declared writing action. */
+  readonly io?: ActionIoBinding
   readonly modules: readonly ModuleManifest[]
   /** Plain-JSON write inputs with explicit paths, installed through the bootstrap admin's session. */
   readonly seed: readonly NodeInput[]

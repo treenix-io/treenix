@@ -28,13 +28,14 @@ import { drainSession } from '#kernel/session-delivery'
 import { runStoreQuery } from '#kernel/store/budget'
 import type { AuthReadSource, AuthSource } from '#kernel/session'
 import type { AuthAdmission } from '#kernel/auth-factory'
-import { DEFAULT_LIMITS, type AdminInput, type Budget, type ChangeMember, type Credential, type InstanceConfig, type InstanceId, type Limits, type ModuleManifest, type NodeId,
+import { DEFAULT_LIMITS, type ActionIoBinding, type AdminInput, type Budget, type ChangeMember, type Credential, type InstanceConfig, type InstanceId, type Limits, type ModuleManifest, type NodeId,
   type BlobStore, type Gate, type InstanceStream, type Node, type Path, type Position, type PositionCounter, type ProvisionedStoreMount, type Registry, type ScanRange, type Selector, type Store, type StoreCommit, type StoredNode, type StreamCursor, type StreamDomain } from '#kernel/types'
 import { assertWriterDomains, createWriter, type Writer } from '#kernel/writer'
 import { stableJson } from '#util/stable-json'
 import { freeze } from '#util/freeze'
 
 export interface InstanceFoundationConfig {
+  readonly io?: ActionIoBinding
   readonly id: InstanceId
   readonly root: Store
   readonly writerEpoch: number
@@ -151,6 +152,7 @@ async function buildCanonicalInstance(input: InstanceConfig): Promise<InstanceFo
     root: Object.freeze({ ...input.root }),
     rootExternal: input.rootExternal,
     blobs: input.blobs,
+    io: input.io,
     gates: input.gates === undefined ? undefined : Object.freeze([...input.gates]),
     counter: provisioning.counter,
     writerEpoch: provisioning.writerEpoch,
@@ -192,6 +194,7 @@ async function buildCanonicalInstance(input: InstanceConfig): Promise<InstanceFo
     domains: config.domains,
     mounts: config.mounts,
     blobs: config.blobs,
+    io: config.io,
     gates: config.gates,
     modules,
     initialCredential: { ttlMs: config.credentialTtlMs },
@@ -689,6 +692,7 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
       projector,
       registryRevision: () => registryRevision,
       blobs: config.blobs,
+      io: config.io,
       admission,
       source: readerSource,
       withNodeExecutor,

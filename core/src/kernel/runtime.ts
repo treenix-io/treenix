@@ -7,9 +7,10 @@ import { previewModules } from '#kernel/module-install'
 import { provisionFsMounts, type FsDirectoryBindings } from '#kernel/mount-fs-provider'
 import { createFsStore } from '#kernel/store/fs'
 import { createFsBlobStore } from '#kernel/blob-store-fs'
-import { DEFAULT_LIMITS, type AdminInput, type Credential, type Gate, type ModuleManifest, type ProvisionedStoreMount } from '#kernel/types'
+import { DEFAULT_LIMITS, type ActionIoBinding, type AdminInput, type Credential, type Gate, type ModuleManifest, type ProvisionedStoreMount } from '#kernel/types'
 
 export interface NativeRuntimeConfig {
+  readonly io?: ActionIoBinding
   readonly id: string
   readonly directory: string
   readonly credentialTtlMs: number
@@ -29,6 +30,7 @@ export async function openNativeRuntime(input: NativeRuntimeConfig) {
       input.firstAdmin === undefined ? undefined : Object.freeze({ ...input.firstAdmin });
   const config = Object.freeze({
     id: input.id,
+    io: input.io,
     directory: input.directory,
     credentialTtlMs: input.credentialTtlMs,
     installerCredential:
@@ -99,6 +101,7 @@ export async function openNativeRuntime(input: NativeRuntimeConfig) {
           : { kind: 'reopen', installerCredential: config.installerCredential },
       },
       gates: config.gates,
+      io: config.io,
       modules,
     });
     let closing: Promise<void> | undefined;

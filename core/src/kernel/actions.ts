@@ -17,7 +17,7 @@ import { visibleNode } from '#kernel/projection'
 import { assertPost } from '#kernel/post'
 import { createReader, createReaderLedger, readerOperationCost, type ReaderLedger } from '#kernel/reader'
 import { createRequestAdmission, serializeRequest } from '#kernel/request'
-import { R, W, type ActRequest, type ActionDef, type ActionPieceDelivery, type ActionResult, type NestedActRequest, type OpId, type Outcome, type Position, type Principal, type StoredNode } from '#kernel/types'
+import { R, W, type ActRequest, type Io, type ActionDef, type ActionPieceDelivery, type ActionResult, type NestedActRequest, type OpId, type Outcome, type Position, type Principal, type StoredNode } from '#kernel/types'
 import type { MutationSpan } from '#kernel/writer'
 import { freeze } from '#util/freeze'
 import { stableJson } from '#util/stable-json'
@@ -356,13 +356,17 @@ export function createActionRuntime(options: CommandOptions) {
             active: frameActive,
             nested: callNestedAction,
           });
+          let boundIo: Io | undefined;
+          const bindIo = executorOptions.io;
           const writeContext =
             action.kind === 'read'
               ? undefined
               : createWriteActionContext(
                   contextOptions,
                   () => builder.change,
-                  action.io === true ? executorOptions.io : undefined,
+                  action.io === true && bindIo !== undefined
+                    ? () => boundIo ??= bindIo({ signal: executorControl.signal, assertActive: frameActive })
+                    : undefined,
                 );
           const context = writeContext ?? createReadActionContext(contextOptions);
 

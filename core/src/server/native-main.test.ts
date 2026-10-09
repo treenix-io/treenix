@@ -2,7 +2,8 @@ import assert from 'node:assert/strict'
 import { fork, type ChildProcess } from 'node:child_process'
 import { once } from 'node:events'
 import { mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { createServer } from 'node:http'
+import { join, relative, resolve } from 'node:path'
 import { afterEach, describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
 
@@ -154,3 +155,124 @@ describe('native CLI mount directory configuration', { timeout: 45_000 }, () => 
     }
   })
 })
+
+describe('native CLI action I/O configuration', { timeout: 45_000 }, () => {
+  it('rejects malformed deployment entries before acquiring persistent resources', async () => {
+    for (const io of [null, [], 'provider', { entry: 1 }, { entry: '' }]) {
+      const directory = await scratch();
+      const configPath = join(directory, 'config.json');
+      await writeFile(
+        configPath,
+        JSON.stringify({
+          id: 'cli-io-invalid',
+          directory: './root',
+          credentialTtlMs: 60_000,
+          allowedOrigins: [],
+          modules: [],
+          port: 0,
+          io,
+        }),
+      );
+      const running = run(configPath);
+      const error = await report(running);
+      assert.equal(error.type, 'error');
+      assert.equal(error.code, 'INVALID');
+      assert.deepEqual(await running.exited, [1, null]);
+      assert.deepEqual(await readdir(directory), ['config.json']);
+    }
+  });
+
+  it('requires a callable named binding before acquiring persistent resources', async () => {
+    for (const source of ['export const other = 1', 'export const bindIo = 1']) {
+      const directory = await scratch();
+      await writeFile(join(directory, 'provider.mjs'), source);
+      const configPath = join(directory, 'config.json');
+      await writeFile(
+        configPath,
+        JSON.stringify({
+          id: 'cli-io-export',
+          directory: './root',
+          credentialTtlMs: 60_000,
+          allowedOrigins: [],
+          modules: [],
+          port: 0,
+          io: { entry: './provider.mjs' },
+        }),
+      );
+      const running = run(configPath);
+      const error = await report(running);
+      assert.equal(error.type, 'error');
+      assert.equal(error.code, 'INVALID');
+      assert.deepEqual(await running.exited, [1, null]);
+      assert.deepEqual((await readdir(directory)).sort(), ['config.json', 'provider.mjs']);
+    }
+  });
+
+  it('resolves a relative entry and invokes its real provider through the stock CLI', async (t) => {
+    const received: string[] = [];
+    const provider = createServer(async (request, response) => {
+      let input = '';
+      for await (const data of request) input += data.toString();
+      received.push(input);
+      response.end(`external:${input}`);
+    });
+    await new Promise<void>((done) => provider.listen(0, '127.0.0.1', done));
+    t.after(
+      () =>
+        new Promise<void>((done, reject) =>
+          provider.close((error) => (error === undefined ? done() : reject(error))),
+        ),
+    );
+    const address = provider.address();
+    assert.ok(address !== null && typeof address !== 'string');
+    const endpoint = `http://127.0.0.1:${address.port}`;
+    const directory = await scratch();
+    const configuration = join(directory, 'configuration');
+    await mkdir(configuration);
+    const entry = relative(
+      configuration,
+      fileURLToPath(new URL('./native-main-io-fixture.ts', import.meta.url)),
+    );
+    const configPath = join(configuration, 'config.json');
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        id: 'cli-io-live',
+        directory: '../root',
+        credentialTtlMs: 60_000,
+        allowedOrigins: [],
+        port: 0,
+        firstAdmin: { path: '/admin', name: 'admin', password: 'cli-password' },
+        modules: [{ id: 'cli-io-fixture', entry }],
+        io: { entry },
+      }),
+    );
+    const running = await start(configPath);
+    const connection = await openTwpHttp({
+      url: running.address,
+      credential: await login(running.address),
+    });
+    const errors: unknown[] = [];
+    const client = createTwpClient(connection, {
+      close: connection.close,
+      onError: (error) => errors.push(error),
+    });
+    await client.ready;
+    try {
+      await client.commit({ changes: [{ op: 'put', node: { $path: '/worker', $type: 'cli.io' } }] })
+        .outcome;
+      const outcome = await client.act({
+        path: '/worker',
+        action: 'exchange',
+        args: { endpoint, input: 'owned-request' },
+      }).outcome;
+      assert.equal(outcome.value, 'external:owned-request');
+      assert.ok(outcome.pos);
+      assert.deepEqual(received, ['owned-request']);
+      assert.deepEqual(errors, []);
+    } finally {
+      client.close();
+      await running.close();
+    }
+  });
+});

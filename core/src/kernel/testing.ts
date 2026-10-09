@@ -80,6 +80,7 @@ export async function createTestInstance(input: TestInstanceConfig): Promise<Nat
     },
     blobs: createMemoryBlobStore(),
     modules,
+    io: input.io,
   });
   const initialCursor = instance.bootstrapCursor;
   const deliveries: Promise<void>[] = [];

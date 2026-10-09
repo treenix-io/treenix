@@ -115,7 +115,7 @@ export function createReadActionContext(source: ActionContextSource): ReadAction
 export function createWriteActionContext(
   source: ActionContextSource,
   change: ChangeBuilder | (() => ChangeBuilder),
-  io?: Io,
+  io?: () => Io,
 ): WriteActionContext {
   const current = typeof source === 'function' ? source : () => source
   const changes = typeof change === 'function' ? change : () => change
@@ -127,7 +127,7 @@ export function createWriteActionContext(
     move: (from, to) => changes().move(from, to),
     restore: (record) => changes().restore(record),
   }
-  return Object.freeze({
+  const context: WriteActionContext = {
     get node() {
       return read.node
     },
@@ -150,6 +150,10 @@ export function createWriteActionContext(
       await options.reads.requireReadWrite(path)
       options.active()
     },
-    ...(io === undefined ? {} : { io }),
+  }
+  if (io !== undefined) Object.defineProperty(context, 'io', {
+    enumerable: true,
+    get() { current().active(); return io() },
   })
+  return Object.freeze(context)
 }
