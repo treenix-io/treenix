@@ -7,9 +7,24 @@ import { judgeGates } from '#kernel/gates'
 import type { createProjector } from '#kernel/projection'
 import { createReader, type ReaderSource } from '#kernel/reader'
 import { createRequestAdmission, serializeRequest } from '#kernel/request'
-import type { BlobStore, Budget, CommitRequest, Gate, Io, Limits, Outcome, Registry, Selector, Store } from '#kernel/types'
+import type { AuthReadSource } from '#kernel/session'
+import type { BlobStore, Budget, CommitRequest, Gate, Io, Limits, NodeId, Outcome, Path, Registry, Rev, Selector, Store, StoredNode } from '#kernel/types'
 import type { Writer } from '#kernel/writer'
 import { freeze } from '#util/freeze'
+
+export interface NodeActionTarget {
+  readonly path: Path
+  readonly id: NodeId
+  readonly rev: Rev
+}
+
+export interface NodeActionBinding {
+  readonly admission: AuthAdmission
+  readonly options: CommandOptions
+  readonly settings: StoredNode
+  /** Rechecks the actual admission, configuration version and routed Store identity. */
+  validate(source: AuthReadSource): Promise<void>
+}
 
 export interface CommandOptions {
   readonly writer: Writer
@@ -28,6 +43,10 @@ export interface CommandOptions {
   readonly projector?: ReturnType<typeof createProjector>
   readonly io?: Io
   readonly blobs?: BlobStore
+  /** Owns a real node session while an action executes under its admission. */
+  readonly withNodeExecutor: <T>(target: NodeActionTarget,
+    budget: Budget, signal: AbortSignal, wait: <V>(pending: Promise<V>) => Promise<V>,
+    run: (binding: NodeActionBinding) => Promise<T>) => Promise<T>
 }
 
 /** Binds read and commit operations to one admission and its current target topology. */

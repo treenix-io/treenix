@@ -227,11 +227,39 @@ describe('native handlerless post actions', { timeout: 10_000 }, () => {
     assert.equal((await f.instance.source.node('/work/document'))?.count, 1)
   })
 
-  it('rejects unavailable executors, I/O and history before gates or effects', async t => {
+  it('executes a handlerless setuid post through the declared node executor', async t => {
+    let calls = 0
+    const f = await setup([
+      async operation => { if (operation.kind === 'act') calls++; return 'pass' },
+    ])
+    t.after(() => f.instance.close())
+
+    const before = await f.instance.source.node('/work/document')
+    assert.ok(before)
+    const request = f.request('elevated')
+    assert.ok(request.opId)
+    const outcome = await f.commands.act(request)
+    assert.ok(outcome.pos)
+
+    const records = await f.root.scan({
+      range: { decision: { caller: f.commands.actor.principal, opId: request.opId } },
+      budget: scanBudget(),
+    })
+    const record = records.items[0]
+    assert.ok(record)
+    assert.equal(record.executor, `n:${before.$id}`)
+    assert.equal(record.caller, f.commands.actor.principal)
+    assert.deepEqual(record.decision?.outcome, outcome)
+    assert.equal(record.entries.length, 0)
+    assert.equal(calls, 2)
+    assert.deepEqual(await f.instance.source.node('/work/document'), before)
+  })
+
+  it('rejects unavailable I/O and history before gates or effects', async t => {
     let calls = 0
     const f = await setup([async operation => { if (operation.kind === 'act') calls++; return 'pass' }])
     t.after(() => f.instance.auth.close())
-    for (const action of ['elevated', 'external', 'historical']) {
+    for (const action of ['external', 'historical']) {
       await assert.rejects(f.commands.act(f.request(action)), code('UNAVAILABLE'))
     }
     await assert.rejects(f.commands.act({ ...f.request(), opId: undefined }), code('INVALID'))

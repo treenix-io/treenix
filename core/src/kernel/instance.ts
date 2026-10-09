@@ -8,7 +8,7 @@ import { createProcessCache, type Image } from '#kernel/cache'
 import { createBlobTransfers } from '#kernel/blobs'
 import { createAcceptedTargets } from '#kernel/instance-targets'
 import { prepareChangeSet, type ChangeExecutor } from '#kernel/changeset'
-import { createCommands, type CommandOptions, type NativeCommands } from '#kernel/commands'
+import { createCommands, type CommandOptions, type NativeCommands, type NodeActionBinding, type NodeActionTarget } from '#kernel/commands'
 import { judgeGates } from '#kernel/gates'
 import type { NodeLaneOptions } from '#kernel/lane'
 import type { NodeLane } from '#kernel/lane'
@@ -32,6 +32,7 @@ import { DEFAULT_LIMITS, type AdminInput, type Budget, type ChangeMember, type C
   type BlobStore, type Gate, type InstanceStream, type Node, type Path, type Position, type PositionCounter, type ProvisionedStoreMount, type Registry, type ScanRange, type Selector, type Store, type StoreCommit, type StoredNode, type StreamCursor, type StreamDomain } from '#kernel/types'
 import { assertWriterDomains, createWriter, type Writer } from '#kernel/writer'
 import { stableJson } from '#util/stable-json'
+import { freeze } from '#util/freeze'
 
 export interface InstanceFoundationConfig {
   readonly id: InstanceId
@@ -642,7 +643,7 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
     available()
     return { writer, registry, projector, registryRevision: () => registryRevision,
         blobs: config.blobs,
-        admission, source: readerSource,
+        admission, source: readerSource, withNodeExecutor,
         prepareSource, boundary: path => mounts?.boundary(path) ?? false,
         capabilities: allowance => {
           const readSource = reader(allowance)
@@ -653,6 +654,61 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
         budget: kind => config.budget === undefined && kind === 'action' ? { ...budget(), deadline: Date.now() + limits.actionMs } : budget(),
         validate: prepared => validate(new Map(prepared.writes.map(write => [write.path, write.node])),
           prepared.writes.length === 0 ? config.root : resolveStore(prepared.writes[0].path)) }
+  }
+  /** Holds a genuine node session and pins its own configuration without requiring read grants. */
+  async function withNodeExecutor<T>(
+    target: NodeActionTarget,
+    allowance: Budget, signal: AbortSignal, wait: <V>(pending: Promise<V>) => Promise<V>,
+    run: (binding: NodeActionBinding) => Promise<T>,
+  ): Promise<T> {
+    if (sessions === undefined) throw new KernelError('UNAUTHENTICATED', 'Node execution requires authentication')
+    const opening = sessions.openNode(target.path, { heartbeat: false })
+    let opened: Awaited<typeof opening>
+    try { opened = await wait(opening) }
+    catch (error) {
+      void opening.then(late => late.session.close(), error => console.error(error))
+      throw error
+    }
+    let closed = false
+    /** Releases the acquired lane once, including cancellation during its callback. */
+    function close(): void {
+      if (closed) return
+      closed = true
+      opened.session.close()
+    }
+    signal.addEventListener('abort', close, { once: true })
+    const delivery = drainSession(opened.session).catch(error => {
+      if (error instanceof KernelError && (error.code === 'CANCELLED' || error.code === 'UNAUTHENTICATED')) return
+      throw error
+    })
+    mountDeliveries.add(delivery)
+    void delivery.then(() => mountDeliveries.delete(delivery), () => mountDeliveries.delete(delivery))
+    try {
+      signal.throwIfAborted()
+      const source = readerSource(allowance)
+      const owner = source.resolve(target.path)
+      const settings = await wait(writer.read(source.domains, async () => {
+        await opened.admission.validate(source.auth)
+        const node = await source.auth.nodeById(target.id)
+        if (node === null || node.$path !== target.path || positionToRev(node.$pos) !== target.rev)
+          throw new KernelError('CONFLICT', 'Executor configuration changed')
+        return freeze(structuredClone(node))
+      }))
+      return await run({ admission: opened.admission, options: commandOptions(opened.admission), settings,
+        /** Rechecks admission and routed executor identity before the action can commit. */
+        async validate(read) {
+          await opened.admission.validate(read)
+          const current = readerSource(allowance).resolve(target.path)
+          const node = await read.nodeById(target.id)
+          if (current.id !== owner.id || current.store !== owner.store || node === null
+            || node.$path !== target.path || positionToRev(node.$pos) !== target.rev)
+            throw new KernelError('CONFLICT', 'Executor configuration changed')
+        } })
+    } finally {
+      signal.removeEventListener('abort', close)
+      close()
+      await delivery
+    }
   }
   /** Build lane options with the caller's admission and instance capabilities. */
   function nodeLaneOptions(admission: AuthAdmission): NodeLaneOptions {

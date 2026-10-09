@@ -42,7 +42,8 @@ export interface ActionContextOptions {
   readonly node: Node
   readonly needs: Readonly<Record<string, ReadResult>>
   readonly reads: ReturnType<typeof createReader>
-  readonly actor: Actor
+  readonly caller: Actor
+  readonly executor: Actor
   readonly active: () => void
   readonly nested: (request: NestedActRequest) => Promise<unknown>
 }
@@ -50,7 +51,7 @@ export interface ActionContextOptions {
 /** Expose immutable data through the same executor Reader and action lifetime. */
 export function createReadActionContext(options: ActionContextOptions): ReadActionContext {
   return Object.freeze({ node: freeze(options.node), needs: freeze(options.needs),
-    caller: options.actor, executor: options.actor,
+    caller: options.caller, executor: options.executor,
     read: Object.freeze({
       /** Capture additional reads in the action's shared OCC dependencies. */
       async read(selector: Selector) {
