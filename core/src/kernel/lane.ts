@@ -7,6 +7,7 @@ import { comparePositions } from '#kernel/position'
 import { createSubscriptions, type NodeSubscription } from '#kernel/subscription'
 import { createLaneDelivery } from '#kernel/lane-delivery'
 import type { LaneSelectionSource } from '#kernel/lane-selection'
+import type { ViewSubscription } from '#kernel/view'
 import { createChunkChannel } from '#util/chunk-channel'
 import type {
   ActionPiece,
@@ -17,6 +18,7 @@ import type {
   Frame,
   LaneChange,
   Limits,
+  Node,
   NodeCopy,
   NodeId,
   Outcome,
@@ -39,8 +41,10 @@ export type NodeLaneCommand =
 
 export interface NodeLaneImage {
   readonly copy: NodeCopy
+  readonly visible: Node
   readonly before?: NodeCopy | null
   readonly bytes: number
+  readonly position?: Position
   retain(): () => void
 }
 export interface NodeLaneRead extends LaneSelectionSource {
@@ -51,6 +55,7 @@ export interface NodeLaneRead extends LaneSelectionSource {
   claimable(path: Path): boolean
   image(path: Path, sort?: Sort): Promise<NodeLaneImage | null>
   check(): void
+  authorizeView?(selector: SubSelector): Promise<void>
 }
 export interface NodeLaneOptions {
   readonly admission: AuthAdmission
@@ -70,8 +75,9 @@ export interface NodeLaneOptions {
   /** Kernel-owned node sessions can remain idle until their owner or authorization closes them. */
   readonly heartbeat?: boolean
   readonly transfers?: BlobTransfers
+  readonly openView?: (selector: SubSelector, changed: () => void) => Promise<ViewSubscription | undefined>
 }
-export type NodeLaneFrame = Extract<Frame, { readonly t: 'welcome' | 'snap' | 'pos' | 'chunk' | 'done' | 'fail' | 'end' | 'reset' }>
+export type NodeLaneFrame = Extract<Frame, { readonly t: 'welcome' | 'snap' | 'result' | 'pos' | 'chunk' | 'done' | 'fail' | 'end' | 'reset' }>
 
 export interface NodeLane extends Session {
   readonly actor: AuthAdmission['actor']
@@ -163,6 +169,7 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
   }
   /** Ends one subscription and queues releases of its shared coverage. */
   function remove(sub: NodeSubscription, reason?: KernelError): void {
+    sub.view?.close();
     subscriptions.remove(sub);
     sub.controller.abort(reason ?? new KernelError('CANCELLED', 'Subscription ended'));
     for (const change of delivery.release(sub)) {
@@ -183,6 +190,7 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
     unsubscribeTopology();
     admission.signal.removeEventListener('abort', revoked);
     for (const sub of subscriptions.entries.values()) {
+      sub.view?.close();
       sub.controller.abort(reason);
       subscriptions.remove(sub);
     }
@@ -239,6 +247,22 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
   function registered(sub: NodeSubscription): boolean {
     return !closed && subscriptions.current(sub);
   }
+  async function prepareSubscription(sub: NodeSubscription): Promise<void> {
+    const gen = sub.gen;
+    try {
+      const view = await options.openView?.(sub.selector, () => {
+        if (!registered(sub) || sub.gen !== gen) return;
+        subscriptions.dirty(sub, false);
+        wake();
+      });
+      if (!registered(sub) || sub.gen !== gen) { view?.close(); return; }
+      sub.view = view;
+      sub.ready = true;
+      wake();
+    } catch (caught) {
+      if (registered(sub) && sub.gen === gen) remove(sub, error(caught));
+    }
+  }
   /** Registers a selector before running its asynchronous subscription gate. */
   function subscribe(selector: NodeSubSelector, subId: string): void {
     active();
@@ -262,12 +286,7 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
     }
     const sub = subscriptions.add(subId, selector, ++generation);
     options.gateSub(selector, sub.controller.signal).then(
-      () => {
-        if (registered(sub)) {
-          sub.ready = true;
-          wake();
-        }
-      },
+      () => { if (registered(sub)) void prepareSubscription(sub); },
       (caught) => {
         if (registered(sub)) remove(sub, error(caught));
       },
@@ -377,8 +396,15 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
       if (!affected(sub)) continue;
       sub.gen = ++generation;
       sub.initial = true;
+      sub.view?.invalidate();
+      sub.view?.close();
+      sub.view = undefined;
+      sub.viewVersion = undefined;
+      sub.ready = false;
+      sub.state = { ...sub.state, range: undefined, next: undefined };
       subscriptions.dirty(sub, true);
       enqueue({ t: 'reset', sub: sub.id, gen: sub.gen });
+      void prepareSubscription(sub);
     }
   }
   /** Includes absent selector ranges and inherited rights alongside current copy dependencies. */
@@ -388,10 +414,12 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
   ): boolean {
     const range = 'node' in sub.selector ? { node: sub.selector.node } : { children: sub.selector.children };
     if (intersects(range)) return true;
+    if (sub.view?.intersects(intersects)) return true;
 
     for (const branch of [sub.state.fixed, ...sub.state.roots.values()]) {
       for (const path of branch.paths) if (intersects({ node: path })) return true;
       for (const path of branch.rights) if (intersects({ node: path })) return true;
+      for (const range of branch.ranges ?? []) if (intersects(range)) return true;
     }
     return false;
   }
@@ -399,7 +427,7 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
   function ordinaryNeeded(): boolean {
     if (options.intake() !== deliveredIntake) return true;
     if (
-      [...subscriptions.entries.values()].some((sub) => sub.ready && !sub.initial && sub.dirty > 0)
+      [...subscriptions.entries.values()].some((sub) => sub.view === undefined && sub.ready && !sub.initial && sub.dirty > 0)
     )
       return true;
     for (const request of mutations.values())
@@ -412,7 +440,7 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
       const result = await delivery.snapshot(sub, (_pos, intake) => intake === deliveredIntake);
       if (result !== undefined) {
         for (const id of result.removed) removals.set(id, { op: 'del', id });
-        for (const id of result.frame.covered ?? result.frame.list) removals.delete(id);
+        for (const id of result.frame.covered ?? result.frame.list) if (delivery.covers(id)) removals.delete(id);
         watermark ??= result.frame.at[0];
       }
       return result?.frame;
@@ -425,7 +453,7 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
   /** Publishes current changes once and suppresses queued deletions of transferred coverage. */
   async function flush(): Promise<NodeLaneFrame | undefined> {
     const eligible = [...subscriptions.entries.values()].filter(
-      (sub) => sub.ready && !sub.initial,
+      (sub) => sub.view === undefined && sub.ready && !sub.initial,
     );
     try {
       const result = await delivery.flush(eligible, (pos) => {
@@ -479,8 +507,18 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
       return { t: 'pos', pos: watermark, coverage: true, changes };
     }
     if (ordinaryNeeded()) return flush();
-    for (const sub of subscriptions.entries.values())
-      if (sub.ready && sub.initial) return snapshot(sub);
+    for (const sub of subscriptions.entries.values()) {
+      try {
+        if (sub.ready && sub.initial && (sub.view === undefined || sub.view.ready)) return snapshot(sub);
+        if (sub.ready && !sub.initial && sub.view !== undefined && sub.viewVersion !== sub.view.version) {
+          const result = await delivery.result(sub);
+          if (result === undefined) continue;
+          for (const id of result.removed) removals.set(id, { op: 'del', id });
+          for (const id of result.frame.covered ?? []) if (delivery.covers(id)) removals.delete(id);
+          return result.frame;
+        }
+      } catch (caught) { if (registered(sub)) remove(sub, error(caught)); }
+    }
     for (const request of mutations.values()) {
       if (request.piece !== undefined) {
         const held = request.piece;

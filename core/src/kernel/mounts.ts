@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 
 import { assertSafePath } from '#core/path'
 import { KernelError } from '#errors'
+import type { AuthAdmission } from '#kernel/auth-factory'
 import { componentEntries } from '#kernel/migrate'
 import { ownMountTarget } from '#kernel/mount-resource'
 import type {
@@ -46,6 +47,7 @@ export interface MountResolution {
 
 export interface MountSession {
   readonly session: Session
+  readonly admission: AuthAdmission
   close(): void
 }
 
@@ -54,7 +56,7 @@ export interface MountTableOptions {
   /** Configured owners publish after bootstrap; their accepted claims must already block parent routing. */
   readonly declarationTypes?: ReadonlySet<TypeName>
   readonly openSession: (node: Node) => Promise<MountSession>
-  readonly activate: (entry: MountEntry, target: OpenedMountTarget) => Promise<void>
+  readonly activate: (entry: MountEntry, target: OpenedMountTarget, owner: MountSession) => Promise<void>
   /** Ordered Writer retirement owns release of a registered target. */
   readonly retire: (entry: MountEntry, target: OpenedMountTarget) => Promise<void>
   readonly changed: (before: readonly MountRange[], after: readonly MountRange[]) => void
@@ -381,7 +383,7 @@ export function createMountTable(options: MountTableOptions) {
           && entry.target.sources !== undefined && entry.type?.security !== 'privileged-capability') {
           throw new KernelError('FORBIDDEN', 'View sources require a privileged mount owner')
         }
-        await options.activate(entry, entry.target)
+        await options.activate(entry, entry.target, entry.session)
         if (!entry.registered) throw new KernelError('INVALID', 'Mount activation did not publish its registration')
       } catch (error) {
         try {
@@ -527,11 +529,12 @@ export function createMountTable(options: MountTableOptions) {
       return prepareRanges(paths.map(node => ({ node })), budget, signal)
     },
     /** Resolve only active claims; a claimed but unavailable address never falls back to its parent. */
-    resolve(path: Path): MountResolution | undefined {
+    resolve(path: Path, children = false): MountResolution | undefined {
       available()
       const parts = partsOf(path)
       for (const entry of entries.values()) {
-        if (!contains(entry.pattern, parts)) continue
+        if (!contains(entry.pattern, parts) && !(children && entry.pattern.descendantsOnly
+          && compatible(parts, entry.pattern.segments) && parts.length === entry.pattern.segments.length)) continue
         if (!current(entry) || entry.state !== 'active' || entry.target === undefined) {
           throw new KernelError('UNAVAILABLE', 'Mount target is not available')
         }
@@ -568,6 +571,8 @@ export function createMountTable(options: MountTableOptions) {
       for (const entry of entries.values()) entry.session?.close()
       closing = (async () => {
         const work = [...retiring]
+        for (const entry of entries.values()) if (entry.target !== undefined && entry.target.kind !== 'store')
+          work.push(entry.target.close())
         const openings = [...entries.values()].flatMap(entry => entry.opening === undefined ? [] : [entry.opening])
         await Promise.allSettled(openings)
         for (const entry of entries.values()) if (entry.cleanupError !== undefined) work.push(Promise.reject(entry.cleanupError))

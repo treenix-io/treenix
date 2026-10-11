@@ -6,7 +6,7 @@
 // non-mount paths the source IS the path.
 
 import type { Tree } from '#tree';
-import { queryConfigOf } from '#tree/query';
+import { queryConfigOf } from '#kernel/query';
 import type { ReadPlan } from '#tree/read-runtime';
 import { activeMount } from './index';
 

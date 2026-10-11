@@ -1,5 +1,7 @@
-import { ancestorPaths, assertSafePath, isChildPath } from '#core/path'
+import { serializeKernel } from '#kernel/serialization'
+import { ancestorPaths, isChildPath } from '#core/path'
 import { KernelError } from '#errors'
+import { assertIncludeDepth, assertReadPath as path, followIncludes } from '#kernel/include'
 import type { AuthAdmission } from '#kernel/auth-factory'
 import type { CacheRead } from '#kernel/cache'
 import type { NodeChange } from '#kernel/changeset'
@@ -48,6 +50,8 @@ export interface ReaderOptions {
   readonly alert?: (path: Path, error: unknown) => void
   readonly projector?: ReturnType<typeof createProjector>
   readonly scope?: { check(): void; hold(lease: CacheRead): void }
+  /** Views install influence routes synchronously, before the source access they describe. */
+  readonly observeDependency?: (input: ReadDependency) => void
 }
 
 /** Whole-call costs outlive individual stream read sets and cannot be replenished by a new frame. */
@@ -115,32 +119,6 @@ export function readerRightsInput(node: ChainNode | undefined, registry: Registr
     rules, invalid: node.invalid, ...(rules.length === 0 ? {} : { id: node.id }) }
 }
 
-function path(value: Path): void {
-  try { assertSafePath(value) } catch (error) {
-    console.error(error)
-    throw new KernelError('INVALID', 'Invalid selector path')
-  }
-}
-
-function includeDepth(include: readonly IncludeSpec[] | undefined, limit: number): void {
-  const pending = [...include ?? []].map(spec => ({ spec, depth: 1 }))
-  for (let item = pending.pop(); item !== undefined; item = pending.pop()) {
-    if (item.depth > limit) throw new KernelError('BUDGET', 'Include depth exceeded')
-    if ('path' in item.spec) path(item.spec.path)
-    else {
-      if (item.spec.ref.length === 0) throw new KernelError('INVALID', 'Include needs a reference field')
-      for (const spec of item.spec.then ?? []) pending.push({ spec, depth: item.depth + 1 })
-    }
-  }
-}
-
-function reference(node: Node, field: string): Path | undefined {
-  const value = getByPath(node, field)
-  if (value === undefined || value === null) return undefined
-  if (typeof value === 'string') { path(value); return value }
-  if (typeof value === 'object' && '$ref' in value && typeof value.$ref === 'string') { path(value.$ref); return value.$ref }
-  throw new KernelError('INVALID', 'Include field does not contain a reference')
-}
 
 interface Loaded {
   readonly copy: NodeCopy;
@@ -177,7 +155,10 @@ export function createReader(options: ReaderOptions) {
   }
   function depend(input: ReadDependency): void {
     const key = `${input.kind}:${input.key}`;
-    if (!dependencies.has(key)) dependencies.set(key, input);
+    if (!dependencies.has(key)) {
+      options.observeDependency?.(input);
+      dependencies.set(key, input);
+    }
   }
   function target(at: Path): ReaderTarget {
     const found = source.resolve(at);
@@ -347,7 +328,7 @@ export function createReader(options: ReaderOptions) {
     const root = 'node' in selector ? selector.node : selector.children;
     path(root);
     topology('node' in selector ? { node: root } : { children: root });
-    includeDepth(selector.include, limits.includeDepth);
+    assertIncludeDepth(selector.include, limits.includeDepth);
     const sort = projectionSort ?? selectorSort(selector);
     if (candidates !== undefined)
       for (const candidate of candidates) {
@@ -476,21 +457,10 @@ export function createReader(options: ReaderOptions) {
       specs: readonly IncludeSpec[],
       covered: Set<string>,
     ): Promise<void> {
-      for (const spec of specs) {
-        active();
-        const at =
-          'path' in spec
-            ? spec.path
-            : base === undefined
-              ? undefined
-              : reference(base.visible, spec.ref);
-        if (at === undefined) continue;
-        const value = await load(at);
-        if (value === null) continue;
+      await followIncludes(base, specs, load, value => {
         copies.set(value.visible.$id, value.copy);
         covered.add(value.visible.$id);
-        if ('ref' in spec && spec.then !== undefined) await includes(value, spec.then, covered);
-      }
+      }, active);
     }
     try {
       const found = target(root);
@@ -586,8 +556,10 @@ export function createReader(options: ReaderOptions) {
             : projectCopy(applyFieldDeltas(value.stored, cached.delta, 'from'), value.bits, sort);
         return {
           copy,
+          visible: value.visible,
           before,
-          bytes: Math.max(cached.bytes, Buffer.byteLength(JSON.stringify(copy))),
+          position: cursor.pos,
+          bytes: Math.max(cached.bytes, Buffer.byteLength(serializeKernel(copy))),
           retain() {
             active();
             return writer.cache.retain(id);

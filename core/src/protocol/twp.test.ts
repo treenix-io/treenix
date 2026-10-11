@@ -81,3 +81,18 @@ describe('native TWP boundary', () => {
     assert.throws(() => decodeFrame(JSON.stringify({ ...snap, covered: [42] }), 4096), code('INVALID'))
   })
 })
+
+
+it('round-trips subscription-owned View errors with their complete diagnostic message', () => {
+  const error = { id: 'source', path: '/source', ver: 'projection', error: new KernelError('INVALID', 'Stored field violates the current schema'), sort: { value: 2 } }
+  const frame: Frame = { t: 'snap', sub: 'view', gen: 1, list: ['source'], copies: [], viewErrors: [error], rows: [], at: [] }
+  const decoded = decodeFrame(encodeFrame(frame), 512 * 1024)
+  assert.ok(decoded.t === 'snap')
+  assert.deepEqual(decoded.viewErrors?.[0].error, { code: 'INVALID', message: 'Stored field violates the current schema' })
+  assert.deepEqual(decoded.viewErrors?.[0].sort, { value: 2 })
+  assert.deepEqual(decoded.copies, [])
+  assert.deepEqual(decoded.rows, [])
+  assert.ok(isReadResult({ list: ['source'], copies: [], viewErrors: decoded.viewErrors, at: [] }))
+  const ordinary = { node: { $id: 'source', $path: '/source', $type: 't.dir', $rev: 'rev' }, bits: 1, ver: 'projection' }
+  assert.throws(() => decodeFrame(JSON.stringify({ ...frame, viewErrors: [ordinary] }), 512 * 1024), code('INVALID'))
+})

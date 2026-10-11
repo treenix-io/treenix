@@ -141,6 +141,7 @@ export type NodeCopy =
       readonly ver: ProjectionVersion
     }
 
+
 // ---- Selectors ----
 
 /**
@@ -1056,6 +1057,7 @@ export type MountTarget =
    * subscription to that selector, without runs.
    */
   | { readonly kind: 'view'; readonly derive: DeriveHandler; readonly executor: 'reader' }
+  | { readonly kind: 'view'; readonly selector: Extract<SubSelector, { readonly children: Path }>; readonly executor: 'reader' }
   /** Executed by the View node's principal — a declassification; one run serves all its subscriptions. */
   | {
       readonly kind: 'view'

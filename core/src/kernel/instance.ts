@@ -1,6 +1,7 @@
 import { ACTION_PUBLICATION_PREFIX, installPublishedAction, publishedAction, actionPublicationPath } from '#kernel/action-publication'
 import { installPublishedView, publishedView, PUBLICATION_PREFIX } from '#kernel/uix-publication'
 import { verifyActionSource } from '#kernel/source-action'
+import { serializeKernel } from '#kernel/serialization'
 import { KernelError } from '#errors'
 import { createAutostartHandler, createInstanceServices, serviceConfiguration, type ServiceBootstrapPorts, type ServiceTarget } from '#kernel/services'
 import { AUTH_KEY_PATH, assertAdminInput } from '#kernel/auth-module'
@@ -28,13 +29,16 @@ import { withTypeDescriptions } from '#kernel/type-description'
 import { ownMountTarget } from '#kernel/mount-resource'
 import { createMountTable, type MountChange, type MountEntry, type MountRange, type MountTable } from '#kernel/mounts'
 import { comparePositions, positionToRev } from '#kernel/position'
-import { readerOperationCost, type ReaderLedger, type ReaderSource, type ReaderTarget } from '#kernel/reader'
+import { createReader, readerOperationCost, type ReaderLedger, type ReaderSource, type ReaderTarget } from '#kernel/reader'
+import { computeRights } from '#kernel/rights'
+import { createView, type ViewRead } from '#kernel/view'
+import { createActionControl } from '#kernel/action-context'
 import { drainSession } from '#kernel/session-delivery'
 import { runStoreQuery } from '#kernel/store/budget'
 import type { AuthReadSource, AuthSource } from '#kernel/session'
 import type { AuthAdmission } from '#kernel/auth-factory'
 import { DEFAULT_LIMITS, type ActionIoBinding, type AdminInput, type Budget, type ChangeMember, type Credential, type InstanceConfig, type InstanceId, type Limits, type ModuleManifest, type NodeId,
-  type BlobStore, type Gate, type InstanceStream, type Node, type Path, type Position, type PositionCounter, type ProvisionedStoreMount, type Registry, type ScanRange, type Selector, type Store, type StoreCommit, type StoredNode, type StreamCursor, type StreamDomain } from '#kernel/types'
+  type BlobStore, type Gate, type InstanceStream, type Node, type Path, type Position, type PositionCounter, type ProvisionedStoreMount, type Registry, type ScanRange, type Selector, type SubSelector, type Store, type StoreCommit, type StoredNode, type StreamCursor, type StreamDomain } from '#kernel/types'
 import { assertWriterDomains, createWriter, type Writer } from '#kernel/writer'
 import { stableJson } from '#util/stable-json'
 import { freeze } from '#util/freeze'
@@ -275,15 +279,17 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
   let mounts: MountTable | undefined
   let sessions: SessionFactory | undefined
   const mountDeliveries = new Set<Promise<void>>()
+  const viewOwners = new Map<string, { readonly view: ReturnType<typeof createView>; readonly close: () => void }>()
   let constructing = true
   let closed = false
   const pendingMounts = new Map<NodeId, Node>()
-  const mountTypes = new Set(['t.mount.memory', 't.mount.fs', ...config.modules?.flatMap(module =>
+  const mountTypes = new Set(['t.mount.memory', 't.mount.fs', 't.mount.query', ...config.modules?.flatMap(module =>
     module.security.flatMap(entry => entry.context === 'mount' ? [entry.type] : [])) ?? []])
   /** Keeps claimed unavailable ranges separate from the unclaimed root Store. */
   function resolveStore(path: Path): Store {
     const found = mounts?.resolve(path)
     if (found === undefined) return config.root
+    if (found.target.kind === 'view') throw new KernelError('READ_ONLY', 'A View has no writable Store')
     if (found.target.kind !== 'store') throw new KernelError('UNAVAILABLE', 'Mount target is not a supported Store')
     return found.target.store
   }
@@ -666,6 +672,19 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
       }
     }
     await mounts.prepareRanges(ranges, allowance, signal)
+    const querySources: ScanRange[] = []
+    for (const selector of selectors) if ('children' in selector) {
+      const found = mounts.resolve(selector.children, true)
+      if (found?.target.kind === 'view' && 'selector' in found.target) querySources.push({ children: found.target.selector.children })
+    }
+    if (querySources.length > 0) {
+      await mounts.prepareRanges(querySources, allowance, signal)
+      for (const range of querySources) {
+        if (!('children' in range)) throw new KernelError('INVALID', 'Query source range must select children')
+        if (mounts.resolve(range.children, true)?.target.kind === 'view')
+          throw new KernelError('INVALID', 'A query View cannot read another View')
+      }
+    }
     available()
   }
   /** Composes accepted target metadata and Store reads under one caller budget. */
@@ -682,6 +701,7 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
     function resolve(path: Path): ReaderTarget {
       const found = mounts?.resolve(path);
       if (found === undefined) return rootTarget;
+      if (found.target.kind === 'view') throw new KernelError('READ_ONLY', 'A View has no writable Store');
       const registered = registeredTargets.get(found.entry.key);
       if (
         registered === undefined ||
@@ -731,6 +751,50 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
       io: config.io,
       admission,
       source: readerSource,
+      async readView(selector, request, allowance) {
+        let changed: () => void = () => {}
+        let pending = new Promise<void>(resolve => { changed = resolve })
+        const view = await openView(request, selector, () => changed())
+        if (view === undefined) return undefined
+        const control = createActionControl(request, allowance.deadline)
+        try {
+          while (!view.ready) {
+            await control.wait(pending)
+            pending = new Promise<void>(resolve => { changed = resolve })
+          }
+          const path = 'node' in selector ? selector.node : selector.children
+          const found = mounts?.resolve(path, 'children' in selector)
+          if (found?.target.kind !== 'view') throw new KernelError('CONFLICT', 'View target changed')
+          await control.wait(createReader({ registry, writer, admission: request, source: readerSource(allowance),
+            budget: allowance, limits, projector }).read({ node: found.entry.node.$path }))
+          control.active()
+          const selection = view.select()
+          if (selection === undefined) throw new KernelError('CONFLICT', 'View generation changed')
+          const output = { list: selection.roots.flatMap(root => root.member === undefined ? [] : [root.member.id]),
+            copies: selection.images.map(image => image.copy), computed: selection.computed, viewErrors: selection.viewErrors, rows: selection.rows,
+            next: selection.next, at: selection.at ?? [writer.stream.cursor().pos] }
+          if (Buffer.byteLength(serializeKernel(output)) > allowance.bytes)
+            throw new KernelError('BUDGET', 'View read result exceeded byte budget')
+          return output
+        } finally { view.close(); control.close() }
+      },
+      viewDefinition(selector) {
+        const path = 'node' in selector ? selector.node : selector.children
+        const found = mounts?.resolve(path, 'children' in selector)
+        return found?.target.kind === 'view' ? found.entry.node.$path : undefined
+      },
+      resolveSelector(selector) {
+        if (!('children' in selector)) return selector
+        const found = mounts?.resolve(selector.children, true)
+        if (found?.target.kind !== 'view' || !('selector' in found.target)) return selector
+        const rights = computeRights(admission.actor, targets.chain(found.entry.node.$path), registry)
+        if ((rights.bits & 1) === 0) throw new KernelError('NOT_FOUND', 'Query mount is not readable')
+        const source = found.target.selector
+        const sourceTarget = mounts?.resolve(source.children, true)
+        if (sourceTarget?.target.kind === 'view') throw new KernelError('INVALID', 'A View cannot read another View')
+        return { ...selector, children: source.children,
+          where: selector.where === undefined ? source.where : { $and: [source.where, selector.where] } }
+      },
       withNodeExecutor,
       prepareSource,
       boundary: (path) => mounts?.boundary(path) ?? false,
@@ -854,11 +918,49 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
     }
   }
   /** Build lane options with the caller's admission and instance capabilities. */
+  function topologyChanged(listener: (test: (range: ScanRange) => boolean) => void) {
+    topologyListeners.add(listener)
+    return () => topologyListeners.delete(listener)
+  }
+  function domainIntersects(domain: string, range: ScanRange): boolean {
+    if (domain === config.root.domain) return true
+    for (const registered of registeredTargets.values())
+      if (registered.store.domain === domain && registered.range.intersects(range)) return true
+    return false
+  }
+  async function openView(admission: AuthAdmission, selector: SubSelector, changed: () => void) {
+
+        const allowance = budget()
+        await prepareSource(allowance, [selector], admission.signal)
+        const path = 'node' in selector ? selector.node : selector.children
+        const found = mounts?.resolve(path, 'children' in selector)
+        if (found?.target.kind !== 'view') return undefined
+        if ('selector' in found.target) return undefined
+        const rights = computeRights(admission.actor, targets.chain(found.entry.node.$path), registry)
+        if ((rights.bits & 1) === 0) throw new KernelError('NOT_FOUND', 'View is not readable')
+        if (found.target.executor === 'node') {
+          const owner = viewOwners.get(found.entry.key)
+          if (owner === undefined) throw new KernelError('UNAVAILABLE', 'View executor is not available')
+          return owner.view.subscribe(selector, changed)
+        }
+        const view = createView({ node: found.entry.node, admission, derive: found.target.derive, executor: 'reader',
+          active() {
+            const current = mounts?.resolve(path, 'children' in selector)
+            if (current?.target !== found.target) throw new KernelError('CONFLICT', 'View target changed')
+          },
+          read: viewRead(admission), limits: () => limits, budget, observe: writer.stream.observe, topologyChanged, domainIntersects,
+          position: () => writer.stream.cursor().pos })
+        const subscription = view.subscribe(selector, changed)
+        return { key: subscription.key, get version() { return subscription.version }, get ready() { return subscription.ready }, select: subscription.select,
+          intersects: subscription.intersects, invalidate: subscription.invalidate, cursor: subscription.cursor,
+          close() { subscription.close(); view.close() } }
+  }
   function nodeLaneOptions(admission: AuthAdmission): NodeLaneOptions {
     const options = commandOptions(admission);
     return {
       admission,
       commands: createCommands(options),
+      openView: (selector, changed) => openView(admission, selector, changed),
       stream: writer.stream,
       limits: () => limits,
       intake: () => writer.intake.epoch,
@@ -883,17 +985,8 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
         return () => listeners.delete(receive);
       },
       /** Notifies lanes when a mount changes their logical topology. */
-      topologyChanged(listener) {
-        topologyListeners.add(listener)
-        return () => topologyListeners.delete(listener)
-      },
-      /** Checks whether a subscription range reads from the specified Store domain. */
-      domainIntersects(domain, range) {
-        if (domain === config.root.domain) return true
-        for (const registered of registeredTargets.values())
-          if (registered.store.domain === domain && registered.range.intersects(range)) return true
-        return false
-      },
+      topologyChanged,
+      domainIntersects,
     };
   }
   sessions = auth === undefined ? undefined : createSessionFactory({ auth, limits: () => limits, lane: nodeLaneOptions })
@@ -916,10 +1009,20 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
           console.error(error)
           failure = { error }
         })
-        return { session: opened.session, close: () => opened.session.close() }
+        return { session: opened.session, admission: opened.admission, close: () => opened.session.close() }
       },
 
-      async activate(entry, target) {
+      async activate(entry, target, owner) {
+        if (target.kind === 'view') {
+          if (target.executor === 'node') {
+            const view = createView({ node: entry.node, admission: owner.admission, derive: target.derive, executor: 'node', sources: target.sources,
+              read: viewRead(owner.admission), limits: () => limits, budget, observe: writer.stream.observe, topologyChanged, domainIntersects,
+              position: () => writer.stream.cursor().pos })
+            viewOwners.set(entry.key, { view, close() { view.close() } })
+          }
+          mounts!.activated(entry.key, entry.revision, target)
+          return
+        }
         if (target.kind !== 'store') throw new KernelError('UNAVAILABLE', 'Mount target is not a supported Store')
         // Off-route rows must pass accepted identity checks before entering the shared cache.
         const nodes = preparedTargets.get(target.store) ?? (await runStoreQuery(budget(), limits.queryMs,
@@ -934,7 +1037,15 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
         }
       },
 
-      async retire(entry) { await writer.retireTarget(entry.key, entry.revision) },
+      async retire(entry, target) {
+        if (target.kind === 'view') {
+          viewOwners.get(entry.key)?.close()
+          viewOwners.delete(entry.key)
+          await target.close?.()
+          return
+        }
+        await writer.retireTarget(entry.key, entry.revision)
+      },
       changed(before, after) {
         if (constructing) return
         const previous = new Map(before.map(range => [range.key, range]))
@@ -1154,6 +1265,8 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
     close() {
       if (closing !== undefined) return closing
       closed = true
+      for (const owner of viewOwners.values()) owner.close()
+      viewOwners.clear()
       sessions?.close()
       auth?.close()
       closing = (async () => {

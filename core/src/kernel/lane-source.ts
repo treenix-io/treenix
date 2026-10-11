@@ -47,12 +47,26 @@ export function createNodeLaneRead(options: CommandOptions, claimable: (path: Pa
       })
       const source: NodeLaneRead = {
         pos: writer.stream.cursor().pos, intake: writer.intake.epoch, check,
+        async authorizeView(selector) {
+          const path = options.viewDefinition?.(selector)
+          if (path !== undefined) await reads.selectInSpan({ node: path })
+        },
         claimable(path) {
           check()
           return claimable(path)
         },
-        select: reads.selectInSpan,
-        cursor: reads.cursor,
+        async select(selector, candidates, range) {
+          const resolved = options.resolveSelector?.(selector) ?? selector
+          if ('history' in resolved) throw new KernelError('INVALID', 'A subscription cannot select history')
+          const selection = await reads.selectInSpan(resolved, candidates, range)
+          return resolved === selector ? selection : { ...selection,
+            fixedIncludes: { ...selection.fixedIncludes, reads: selection.reads } }
+        },
+        cursor(selector, key) {
+          const resolved = options.resolveSelector?.(selector) ?? selector
+          if ('history' in resolved) throw new KernelError('INVALID', 'A subscription cannot select history')
+          return reads.cursor(resolved, key)
+        },
         /** Resolves eviction order with the same projection and comparator as the window snapshot. */
         async key(path, sort) {
           const parent = dirname(path)

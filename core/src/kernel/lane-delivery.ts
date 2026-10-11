@@ -1,4 +1,7 @@
+import { serializeKernel, kernelErrorData } from '#kernel/serialization'
 import { KernelError } from '#errors';
+import { comparePositions } from '#kernel/position';
+import { createHash } from 'node:crypto';
 import type { NodeLaneImage, NodeLaneOptions, NodeLaneRead } from '#kernel/lane';
 import { compareScanKeys, type ScanKey } from '#kernel/store/scan';
 import {
@@ -10,12 +13,16 @@ import {
   type createSubscriptions,
 } from '#kernel/subscription';
 import { computeDelta } from '#kernel/update-ops';
-import type { Frame, LaneChange, NodeCopy, NodeId, Path, Position, Sort } from '#kernel/types';
+import { stableJson } from '#util/stable-json';
+import type { ComputedNode, ErrorCopy, Frame, LaneChange, NodeCopy, NodeId, Path, Position, Row, Sort } from '#kernel/types';
 
 interface Coverage {
   count: number;
   bytes: number;
   readonly release: () => void;
+  ver: string;
+  copy: NodeCopy;
+  position?: Position;
 }
 interface Stage {
   readonly sub: NodeSubscription;
@@ -25,6 +32,10 @@ interface Stage {
   readonly changes: ReadonlyMap<Path, { count: number; force: boolean }>;
   readonly keys: Map<Path, ScanKey>;
   state: SubscriptionState;
+  computed?: readonly ComputedNode[];
+  viewErrors?: readonly ErrorCopy[];
+  readonly rows?: readonly Row[];
+  readonly at?: readonly Position[];
 }
 /** Returns the shared identity of either a projected node or an error copy. */
 const copyId = (copy: NodeCopy): NodeId => ('node' in copy ? copy.node.$id : copy.id);
@@ -36,6 +47,7 @@ const members = (state: SubscriptionState): NodeId[] =>
 /** Compares coverage membership independently of list order. */
 const sameIds = (a: ReadonlySet<NodeId>, b: ReadonlySet<NodeId>): boolean =>
   a.size === b.size && [...a].every((id) => b.has(id));
+const version = (value: unknown): string => createHash('sha256').update(value === undefined ? 'undefined' : stableJson(value)).digest('hex');
 /** Uses the selector sort or native child default for eviction. */
 const sortOf = (sub: NodeSubscription): Sort =>
   'children' in sub.selector ? (sub.selector.sort ?? [['$order', 1]]) : [];
@@ -48,12 +60,34 @@ export function createLaneDelivery(
   remove: (sub: NodeSubscription, reason: KernelError) => void,
 ) {
   const coverage = new Map<NodeId, Coverage>();
+  const extras = new Map<NodeSubscription, { computed?: readonly ComputedNode[]; viewErrors?: readonly ErrorCopy[]; rows?: readonly Row[] }>();
+  const versions = new Map<NodeSubscription, Map<NodeId, string>>();
+  function currentImage(image: NodeLaneImage, prior: Coverage | undefined): boolean {
+    return prior?.position === undefined || image.position === undefined
+      || comparePositions(image.position, prior.position) >= 0;
+  }
+  function extraCost(stages: readonly Stage[]): number {
+    const current = new Map(extras);
+    for (const stage of stages) if (registered(stage.sub))
+      current.set(stage.sub, { computed: stage.computed, viewErrors: stage.viewErrors, rows: stage.rows });
+    const computed = new Map<string, ComputedNode>();
+    let bytes = 0;
+    for (const [sub, extra] of current) {
+      if (extra.rows !== undefined) bytes += Buffer.byteLength(serializeKernel(extra.rows));
+      if (extra.viewErrors !== undefined) bytes += Buffer.byteLength(serializeKernel(extra.viewErrors));
+      for (const node of extra.computed ?? []) computed.set(`${sub.view!.key}:${node.$id}`, node);
+    }
+    for (const node of computed.values()) bytes += Buffer.byteLength(serializeKernel(node));
+    return bytes;
+  }
   const claims =
     options.cache === undefined || options.cache.length === 0
       ? undefined
       : new Map(options.cache.map(claim => [claim.id, claim.ver]));
   /** Releases one subscription while retaining IDs covered elsewhere. */
   function release(sub: NodeSubscription): LaneChange[] {
+    extras.delete(sub);
+    versions.delete(sub);
     const changes: LaneChange[] = [];
     if (sub.state.covered.size === 0) return changes;
     for (const id of sub.state.covered) {
@@ -88,7 +122,11 @@ export function createLaneDelivery(
       }
     let bytes = 0;
     for (const [id, count] of counts)
-      if (count > 0) bytes += images.get(id)?.bytes ?? coverage.get(id)!.bytes;
+      if (count > 0) {
+        const image = images.get(id);
+        const prior = coverage.get(id);
+        bytes += image !== undefined && currentImage(image, prior) ? image.bytes : prior!.bytes;
+      }
     return { counts, bytes };
   }
   /** Evicts the last unique member and preserves a monotonically bounded range. */
@@ -96,6 +134,7 @@ export function createLaneDelivery(
     stage: Stage,
     source: NodeLaneRead,
     counts: ReadonlyMap<NodeId, number>,
+    stages: readonly Stage[],
   ): Promise<boolean> {
     const sort = sortOf(stage.sub);
     const rows: { path: Path; key: ScanKey; id: NodeId }[] = [];
@@ -113,8 +152,16 @@ export function createLaneDelivery(
       }
     source.check();
     rows.sort((a, b) => compareScanKeys(a.key, b.key, sort));
+    const computedCounts = new Map<NodeId, number>();
+    if (stage.computed !== undefined) {
+      const current = new Map(extras);
+      for (const staged of stages) current.set(staged.sub, { computed: staged.computed, viewErrors: staged.viewErrors, rows: staged.rows });
+      for (const [sub, extra] of current) if (sub.view?.key === stage.sub.view?.key)
+        for (const node of extra.computed ?? []) computedCounts.set(node.$id, (computedCounts.get(node.$id) ?? 0) + 1);
+    }
     let index = rows.length - 1;
-    while (index >= 0 && counts.get(rows[index].id)! > 1) index--;
+    while (index >= 0 && (stage.viewErrors?.some(copy => copy.id === rows[index].id) !== true)
+      && (stage.computed === undefined ? counts : computedCounts).get(rows[index].id)! > 1) index--;
     if (index < 0) return false;
     const [last] = rows.splice(index, 1);
     const roots = new Map(stage.state.roots);
@@ -124,9 +171,19 @@ export function createLaneDelivery(
       roots,
       stage.state.fixed,
       { upper },
-      upper === null ? undefined : source.cursor(stage.sub.selector, upper),
+      upper === null ? undefined : stage.sub.view?.cursor(upper) ?? source.cursor(stage.sub.selector, upper),
       stage.state.domains,
     );
+    if (stage.computed !== undefined) {
+      const remaining = new Set(stage.state.fixed.computed);
+      for (const root of roots.values()) for (const id of root.computed ?? []) remaining.add(id);
+      stage.computed = stage.computed.filter(node => remaining.has(node.$id));
+    }
+    if (stage.viewErrors !== undefined) {
+      const remaining = new Set(stage.state.fixed.viewErrors);
+      for (const root of roots.values()) for (const id of root.viewErrors ?? []) remaining.add(id);
+      stage.viewErrors = stage.viewErrors.filter(copy => remaining.has(copy.id));
+    }
     return true;
   }
   /** Stages canonical projections, coverage limits and pins before the read barrier releases. */
@@ -160,16 +217,18 @@ export function createLaneDelivery(
           const gen = sub.gen;
           const stamp = sub.stamp;
           const force = sub.forcePut;
+          await source.authorizeView?.(sub.selector);
           let candidates: readonly Path[] | undefined;
           if (!initial) {
             if ('node' in sub.selector) candidates = [sub.path];
             else if (!sub.full) candidates = [...sub.candidates];
           }
-          const selection = await source.select(
+          const selection = sub.view === undefined ? await source.select(
             sub.selector,
             candidates,
             initial ? sub.state.range : (sub.state.range ?? {}),
-          );
+          ) : sub.view.select(initial ? sub.state.range : (sub.state.range ?? {}));
+          if (selection === undefined) continue;
           source.check();
           if (!registered(sub) || sub.gen !== gen) continue;
           const roots =
@@ -199,7 +258,8 @@ export function createLaneDelivery(
             initial ? selection.next : sub.state.next,
             selection.reads.dependencies?.flatMap(input => input.kind === 'epoch' ? [input.key] : []) ?? [],
           );
-          stages.push({ sub, gen, stamp, force, keys, state, changes: new Map(sub.changes) });
+          stages.push({ sub, gen, stamp, force, keys, state, changes: new Map(sub.changes),
+            computed: selection.computed, viewErrors: selection.viewErrors, rows: selection.rows, at: selection.at });
           for (const image of selection.images) {
             const id = copyId(image.copy);
             images.set(id, image);
@@ -216,7 +276,7 @@ export function createLaneDelivery(
           const stage = stages[i];
           const window = 'children' in stage.sub.selector ? stage.sub.selector.window : undefined;
           if (window?.evict === true && members(stage.state).length > window.limit) {
-            if (await narrow(stage, source, estimate(stages, images).counts)) continue;
+            if (await narrow(stage, source, estimate(stages, images).counts, stages)) continue;
             deny(stage, new KernelError('BUDGET', 'Window cannot release shared coverage'));
             stages.splice(i, 1);
             continue;
@@ -239,18 +299,20 @@ export function createLaneDelivery(
             images.set(id, combined);
           }
         let estimated = estimate(stages, images);
-        while (estimated.bytes > options.limits().laneCoverageBytes) {
+        while (estimated.bytes + extraCost(stages) > options.limits().laneCoverageBytes) {
           const expanded = new Set<NodeId>();
           for (const [id, image] of images)
             if (!coverage.has(id) || image.bytes > coverage.get(id)!.bytes) expanded.add(id);
           const charged = stages.find((stage) =>
             [...stage.state.covered].some((id) => expanded.has(id)),
-          );
+          ) ?? stages.find(stage => stage.sub.view !== undefined
+            && Buffer.byteLength(serializeKernel({ computed: stage.computed, viewErrors: stage.viewErrors, rows: stage.rows }))
+              > Buffer.byteLength(serializeKernel(extras.get(stage.sub) ?? {})));
           if (charged === undefined)
             throw new KernelError('BUDGET', 'Lane coverage budget exceeded');
           const window =
             'children' in charged.sub.selector ? charged.sub.selector.window : undefined;
-          if (window?.evict !== true || !(await narrow(charged, source, estimated.counts))) {
+          if (window?.evict !== true || !(await narrow(charged, source, estimated.counts, stages))) {
             deny(charged, new KernelError('BUDGET', 'Lane coverage budget exceeded'));
             stages.splice(stages.indexOf(charged), 1);
           }
@@ -292,11 +354,17 @@ export function createLaneDelivery(
         const image = result.images.get(id);
         if (release === undefined || image === undefined)
           throw new KernelError('INVALID', 'Coverage pin is missing');
-        coverage.set(id, { count, bytes: image.bytes, release });
+        coverage.set(id, { count, bytes: image.bytes, release, ver: image.copy.ver, copy: image.copy, position: image.position });
         result.held.delete(id);
       } else {
         prior.count = count;
-        prior.bytes = result.images.get(id)?.bytes ?? prior.bytes;
+        const image = result.images.get(id);
+        if (image !== undefined && currentImage(image, prior)) {
+          prior.bytes = image.bytes;
+          prior.ver = image.copy.ver;
+          prior.copy = image.copy;
+          prior.position = image.position;
+        }
       }
     }
     for (const stage of stages) {
@@ -322,8 +390,10 @@ export function createLaneDelivery(
           next: stage.state.next,
         });
       subscriptions.install(stage.sub, stage.state);
+      extras.set(stage.sub, { computed: stage.computed, viewErrors: stage.viewErrors, rows: stage.rows });
       for (const id of stage.state.covered) claims?.delete(id);
       stage.sub.initial = false;
+      if (stage.sub.view !== undefined) stage.sub.viewVersion = stage.sub.view.version;
       if (stage.stamp === stage.sub.stamp) {
         stage.sub.dirty = 0;
         stage.sub.forcePut = false;
@@ -334,6 +404,7 @@ export function createLaneDelivery(
     }
     for (const [id, image] of result.images) {
       if (!coverage.has(id)) continue;
+      if (!currentImage(image, coverage.get(id))) continue;
       let count = 0;
       let force = !previous.has(id);
       for (const stage of stages)
@@ -374,6 +445,8 @@ export function createLaneDelivery(
     close() {
       for (const held of coverage.values()) held.release();
       coverage.clear();
+      extras.clear();
+      versions.clear();
       claims?.clear();
     },
     /** Publishes current membership and exposes released IDs for coverage controls. */
@@ -386,25 +459,72 @@ export function createLaneDelivery(
         const copies = [...result.images].flatMap(([id, image]) =>
           stage.state.covered.has(id) &&
           result.reusable?.has(id) !== true &&
+          currentImage(image, coverage.get(id)) &&
           (!coverage.has(id) || stage.force || 'error' in image.copy)
             ? [image.copy]
             : [],
         );
         const { removed } = apply(result, true);
+        versions.set(sub, new Map([
+          ...stage.computed?.map(node => [node.$id, version(node)] as const) ?? [],
+          ...stage.viewErrors?.map(copy => [copy.id, version({ ...copy, error: kernelErrorData(copy.error) })] as const) ?? [],
+        ]));
         const frame: Extract<Frame, { t: 'snap' }> = {
           t: 'snap',
           sub: sub.id,
           gen: stage.gen,
           list: members(stage.state),
-          covered: [...stage.state.covered],
+          covered: [...stage.state.covered, ...stage.computed?.map(node => node.$id) ?? [], ...stage.viewErrors?.map(copy => copy.id) ?? []],
           copies,
-          at: [result.pos],
+          computed: stage.computed,
+          viewErrors: stage.viewErrors,
+          rows: stage.rows,
+          at: stage.at ?? [result.pos],
           next: stage.state.next,
         };
         return { frame, removed };
       } finally {
         for (const release of result.held.values()) release();
       }
+    },
+    async result(sub: NodeSubscription) {
+      const result = await prepare([sub], false);
+      if (result === undefined) return undefined;
+      try {
+        const stage = result.stages[0];
+        if (stage === undefined || !registered(sub) || stage.gen !== sub.gen) return undefined;
+        const before = new Set(members(sub.state));
+        const after = new Set(members(stage.state));
+        const prior = versions.get(sub) ?? new Map<NodeId, string>();
+        const current = new Map<NodeId, string>();
+        const copies: NodeCopy[] = [];
+        for (const [id, image] of result.images) {
+          const held = coverage.get(id);
+          const transfer = extras.get(sub)?.viewErrors?.some(copy => copy.id === id) === true;
+          if (transfer && held !== undefined && !currentImage(image, held)) copies.push(held.copy);
+          else if (currentImage(image, held) && (held?.ver !== image.copy.ver || transfer)) copies.push(image.copy);
+        }
+        const computed = stage.computed?.filter(node => {
+          const hash = version(node);
+          current.set(node.$id, hash);
+          return prior.get(node.$id) !== hash;
+        });
+        const viewErrors = stage.viewErrors?.filter(copy => {
+          const hash = version({ ...copy, error: kernelErrorData(copy.error) });
+          current.set(copy.id, hash);
+          return prior.get(copy.id) !== hash;
+        });
+        const rows = stage.rows === undefined || version(stage.rows) === version(extras.get(sub)?.rows)
+          ? undefined : stage.rows;
+        const { removed } = apply(result, false);
+        versions.set(sub, current);
+        const frame: Extract<Frame, { t: 'result' }> = { t: 'result', sub: sub.id, gen: stage.gen,
+          diff: [...[...before].filter(id => !after.has(id)).map(remove => ({ remove })),
+            ...[...after].filter(id => !before.has(id)).map(add => ({ add }))],
+          covered: [...stage.state.covered, ...stage.computed?.map(node => node.$id) ?? [], ...stage.viewErrors?.map(copy => copy.id) ?? []],
+          copies, computed, viewErrors, rows, at: stage.at ?? [result.pos], next: stage.state.next };
+        return { frame, removed };
+      } finally { for (const release of result.held.values()) release(); }
     },
     /** Publishes prepared differences only when their ordinary position can advance. */
     async flush(subs: readonly NodeSubscription[], after: (pos: Position) => boolean) {

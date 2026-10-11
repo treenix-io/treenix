@@ -11,7 +11,11 @@ export const optionalKernelTypes: readonly TypeDef[] = [{
   name: 't.mount.memory', module: 'kernel', security: 'user-capability', version: 0, actions: {},
   schema: { type: 'object', required: ['pattern'], additionalProperties: false,
     properties: { pattern: { type: 'string' }, external: { enum: ['none', 'trusted'] } } },
-}, fsMountType]
+}, fsMountType, {
+  name: 't.mount.query', module: 'kernel', security: 'user-capability', version: 0, actions: {},
+  schema: { type: 'object', required: ['pattern', 'source', 'match'], additionalProperties: false,
+    properties: { pattern: { type: 'string' }, source: { type: 'string' }, match: { type: 'object' } } },
+}]
 
 export const kernelManifest: ModuleManifest = {
   id: 'kernel',

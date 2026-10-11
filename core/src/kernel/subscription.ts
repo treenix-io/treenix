@@ -1,11 +1,15 @@
 import { assertSafePath, dirname } from '#core/path';
 import type { LaneBranch, LaneRange, LaneRoot } from '#kernel/lane-selection';
-import type { Cursor, DomainId, NodeId, Path, SubSelector } from '#kernel/types';
+import type { Cursor, DomainId, NodeId, Path, ScanRange, SubSelector } from '#kernel/types';
+import type { ViewSubscription } from '#kernel/view';
 
 export interface SubscriptionBranch {
   readonly covered: readonly NodeId[];
   readonly paths: readonly Path[];
   readonly rights: readonly Path[];
+  readonly ranges?: readonly ScanRange[];
+  readonly computed?: readonly NodeId[];
+  readonly viewErrors?: readonly NodeId[];
 }
 export interface SubscriptionRoot extends SubscriptionBranch {
   readonly path: Path;
@@ -34,6 +38,8 @@ export interface NodeSubscription {
   state: SubscriptionState;
   readonly candidates: Set<Path>;
   readonly changes: Map<Path, { count: number; force: boolean }>;
+  view?: ViewSubscription;
+  viewVersion?: number;
 }
 type Route = {
   readonly sub: NodeSubscription;
@@ -51,7 +57,8 @@ export function subscriptionBranch(branch: LaneBranch): SubscriptionBranch {
     if (input.kind === 'rights') rights.add(input.key);
     else if (input.kind === 'target') paths.add(input.key);
   }
-  return { covered: branch.covered, paths: [...paths], rights: [...rights] };
+  return { covered: branch.covered, computed: branch.computed, viewErrors: branch.viewErrors, paths: [...paths], rights: [...rights],
+    ranges: branch.reads.dependencies?.flatMap(input => input.kind === 'topology' ? [input.range] : []) };
 }
 /** Stores direct membership separately from include coverage. */
 export function subscriptionRoot(root: LaneRoot): SubscriptionRoot {
@@ -80,6 +87,18 @@ export function createSubscriptions() {
   const routes = new Map<Path, Set<Route>>();
   const bindings = new Map<NodeSubscription, { path: Path; route: Route }[]>();
   const children = new Map<Path, Set<NodeSubscription>>();
+  const childBindings = new Map<NodeSubscription, Set<Path>>();
+  function captureRanges(sub: NodeSubscription, branch: SubscriptionBranch): void {
+    for (const range of branch.ranges ?? []) {
+      if (!('children' in range) || range.children === sub.path) continue;
+      const path = range.children;
+      if (childBindings.get(sub)!.has(path)) continue;
+      let at = children.get(path);
+      if (at === undefined) { at = new Set(); children.set(path, at); }
+      at.add(sub);
+      childBindings.get(sub)!.add(path);
+    }
+  }
   /** Records one address dependency so it can be removed with its subscription. */
   function bind(
     sub: NodeSubscription,
@@ -100,14 +119,22 @@ export function createSubscriptions() {
   /** Registers replacement dependencies before the Writer read barrier releases. */
   function capture(sub: NodeSubscription, state: SubscriptionState): void {
     for (const root of state.roots.values()) {
+      captureRanges(sub, root);
       for (const path of root.paths) bind(sub, path, root.path, false);
       for (const path of root.rights) bind(sub, path, root.path, true);
     }
     for (const path of state.fixed.paths) bind(sub, path, undefined, false);
     for (const path of state.fixed.rights) bind(sub, path, undefined, true);
+    captureRanges(sub, state.fixed);
   }
   /** Removes both installed and provisional dependency routes. */
   function unbind(sub: NodeSubscription): void {
+    for (const path of childBindings.get(sub)!) {
+      const at = children.get(path)!;
+      at.delete(sub);
+      if (at.size === 0) children.delete(path);
+    }
+    childBindings.get(sub)!.clear();
     for (const { path, route } of bindings.get(sub)!) {
       const at = routes.get(path)!;
       at.delete(route);
@@ -136,6 +163,7 @@ export function createSubscriptions() {
     entries.delete(sub.id);
     unbind(sub);
     bindings.delete(sub);
+    childBindings.delete(sub);
     if ('children' in sub.selector) {
       const at = children.get(sub.path)!;
       at.delete(sub);
@@ -176,6 +204,7 @@ export function createSubscriptions() {
       };
       entries.set(id, sub);
       bindings.set(sub, []);
+      childBindings.set(sub, new Set());
       rootRoutes(sub);
       if ('children' in selector) {
         let at = children.get(path);

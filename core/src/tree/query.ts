@@ -8,25 +8,8 @@ import { KernelError } from '#errors';
 import { assertSafeSiftQuery, createSiftTest, mapSiftQuery } from '#kernel/expr';
 import { exprWork } from '#kernel/eval';
 import { DEFAULT_LIMITS } from '#kernel/types';
-import { isRecord } from '#util/is-record';
+import type { QueryConfig } from '#kernel/query';
 import { type Tree } from './index';
-
-export type QueryConfig = {
-  source: string;
-  match: Record<string, unknown>;
-};
-
-/** Validate a t.mount.query component — shared by the mount adapter and the
- *  ACL read planner (resolve-plan.ts) so both accept and reject the same
- *  configs. An empty `match` is a legitimate match-all; a missing one is not. */
-export function queryConfigOf(comp: Record<string, unknown>, at: string): QueryConfig {
-  const { source, match } = comp;
-  if (typeof source !== 'string' || !source.startsWith('/')) {
-    throw new KernelError('INVALID', `query mount at ${at}: source must be an absolute path`);
-  }
-  if (!isRecord(match)) throw new KernelError('INVALID', `query mount at ${at}: match must be an object`);
-  return { source, match };
-}
 
 export function matchesFilter(node: NodeData, match: Record<string, unknown>): boolean {
   return createSiftTest(match, DEFAULT_LIMITS)(mapNodeForSift(node), exprWork(DEFAULT_LIMITS));

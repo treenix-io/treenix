@@ -8,7 +8,7 @@ import type { createProjector } from '#kernel/projection'
 import { createReader, type ReaderLedger, type ReaderSource } from '#kernel/reader'
 import { createRequestAdmission, serializeRequest } from '#kernel/request'
 import type { AuthReadSource } from '#kernel/session'
-import type { BlobStore, Budget, CommitRequest, Gate, ActionIoBinding, Limits, NodeId, Outcome, Path, Registry, Rev, Selector, Store, StoredNode } from '#kernel/types'
+import type { BlobStore, Budget, CommitRequest, Gate, ActionIoBinding, Limits, NodeId, Outcome, Path, ReadResult, Registry, Rev, Selector, SubSelector, Store, StoredNode } from '#kernel/types'
 import type { Writer } from '#kernel/writer'
 import { freeze } from '#util/freeze'
 
@@ -37,6 +37,9 @@ export interface CommandOptions {
   /** Opens required targets before any Writer read or prepare span is held. */
   readonly prepareSource: (budget: Budget, selectors: readonly Selector[], signal: AbortSignal) => Promise<void>
   readonly boundary: (path: string) => boolean
+  readonly resolveSelector?: (selector: Selector) => Selector
+  readonly viewDefinition?: (selector: SubSelector) => Path | undefined
+  readonly readView?: (selector: SubSelector, request: AuthAdmission, budget: Budget) => Promise<ReadResult | undefined>
   readonly capabilities: (budget: Budget, ledger?: ReaderLedger) => CapabilityState
   readonly gates: readonly Gate[]
   readonly limits: () => Limits
@@ -88,7 +91,16 @@ export function createCommands(options: CommandOptions) {
       active(budget, request)
       await options.prepareSource(budget, [owned], request.signal)
       active(budget, request)
-      return reader(budget, options.source(budget), request).read(owned)
+      if (!('history' in owned)) {
+        const view = await options.readView?.(owned, request, budget)
+        if (view !== undefined) return view
+      }
+      const resolved = options.resolveSelector?.(owned) ?? owned
+      await options.prepareSource(budget, [resolved], request.signal)
+      const reads = reader(budget, options.source(budget), request)
+      const declaration = 'history' in owned ? undefined : options.viewDefinition?.(owned)
+      if (declaration !== undefined) await reads.read({ node: declaration })
+      return reads.read(resolved)
     },
     /** Resolve every change to one actual Store before preparing the mutation. */
     async commit(input: CommitRequest, requestSignal?: AbortSignal): Promise<Outcome> {

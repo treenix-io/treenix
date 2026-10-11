@@ -14,6 +14,7 @@ export function ownMountTarget(target: OpenedMountTarget): OpenedMountTarget {
   let result: OpenedMountTarget
   if (target.kind === 'store') result = { kind: 'store', store: target.store, resources: Object.freeze({ ...target.resources }), close }
   else if (target.kind === 'authority') result = { kind: 'authority', authority: target.authority, close }
+  else if ('selector' in target) result = { kind: 'view', selector: target.selector, executor: 'reader', close }
   else if (target.executor === 'reader') result = { kind: 'view', derive: target.derive, executor: 'reader', close }
   else result = { kind: 'view', derive: target.derive, executor: 'node', close,
     ...(target.sources === undefined ? {} : { sources: target.sources }) }

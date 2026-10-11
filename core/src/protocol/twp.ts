@@ -1,7 +1,9 @@
+import { viewOwner } from '#kernel/input-boundary'
 import { safeJsonParse } from '#core/json'
 import { assertSafePath } from '#core/path'
 import { KernelError } from '#errors'
-import type { AclEntry, ChangeMember, Component, ComputedNode, Credential, Frame, IncludeSpec, Node, NodeCopy, NodeInput,
+import { serializeKernel } from '#kernel/serialization'
+import type { AclEntry, ChangeMember, Component, ComputedNode, ErrorCopy, Credential, Frame, IncludeSpec, Node, NodeCopy, NodeInput,
   OpId, Position, Preconditions, Principal, ReadResult, Request, Row, Selector, UpdateOps } from '#kernel/types'
 import { isRecord } from '#util/is-record'
 
@@ -129,12 +131,14 @@ function copy(value: unknown): value is NodeCopy {
   return 'node' in value ? keys(value, ['node', 'bits', 'ver']) && node(value.node) && bits(value.bits)
     : keys(value, ['id', 'path', 'error', 'sort', 'ver']) && text(value.id) && path(value.path) && error(value.error) && optional(value.sort, isRecord)
 }
+function viewError(value: unknown): value is ErrorCopy { return copy(value) && 'error' in value }
 function computed(value: unknown): value is ComputedNode { return node(value) && value.$acl === undefined && value.$owner === undefined }
 function row(value: unknown): value is Row { return isRecord(value) && text(value.key) }
 export function isReadResult(value: unknown): value is ReadResult {
-  return isRecord(value) && keys(value, ['list', 'copies', 'computed', 'rows', 'history', 'at', 'next'])
+  return isRecord(value) && keys(value, ['list', 'copies', 'computed', 'viewErrors', 'rows', 'history', 'at', 'next', 'viewOwner'])
+    && optional(value.viewOwner, viewOwner)
     && array(value.list, text) && array(value.copies, copy) && array(value.at, isPosition) && optional(value.next, text)
-    && optional(value.computed, input => array(input, computed)) && optional(value.rows, input => array(input, row))
+    && optional(value.viewErrors, input => array(input, viewError)) && optional(value.computed, input => array(input, computed)) && optional(value.rows, input => array(input, row))
     && (value.history === undefined || Array.isArray(value.history) && value.history.every(item => isRecord(item)
       && keys(item, ['address', 'path', 'executor', 'caller', 'opId', 'before', 'after']) && path(item.path)
       && isRecord(item.address) && keys(item.address, ['pos', 'id']) && isPosition(item.address.pos) && text(item.address.id)
@@ -182,10 +186,11 @@ export function isFrame(value: unknown): value is Frame {
               (item) => isRecord(item) && (item.op === 'del' || item.op === 'list'),
             ))
       )
-    case 'snap': case 'result': return keys(value, ['t', 'sub', 'gen', value.t === 'snap' ? 'list' : 'diff', 'covered', 'copies', 'computed', 'rows', 'at', 'next'])
+    case 'snap': case 'result': return keys(value, ['t', 'sub', 'gen', value.t === 'snap' ? 'list' : 'diff', 'covered', 'copies', 'computed', 'viewErrors', 'rows', 'at', 'next', 'viewOwner'])
+      && optional(value.viewOwner, viewOwner)
       && text(value.sub) && integer(value.gen) && (value.t === 'snap' ? array(value.list, text) : listDiff(value.diff))
       && array(value.copies, copy) && array(value.at, isPosition) && optional(value.next, text) && optional(value.covered, input => array(input, text))
-      && optional(value.computed, input => array(input, computed)) && optional(value.rows, input => array(input, row))
+      && optional(value.viewErrors, input => array(input, viewError)) && optional(value.computed, input => array(input, computed)) && optional(value.rows, input => array(input, row))
     default: return false
   }
 }
@@ -209,5 +214,5 @@ export function decodeFrame(input: Uint8Array | string, limit: number): Frame {
   return value
 }
 export function encodeFrame(frame: Frame): string {
-  return JSON.stringify(frame, (_key, value: unknown) => value instanceof KernelError ? { code: value.code, message: value.message } : value)
+  return serializeKernel(frame)
 }
