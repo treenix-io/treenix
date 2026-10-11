@@ -10,7 +10,7 @@ import { dirname, join, resolve } from 'node:path';
 import { setCurrentMod } from './tracking';
 import type { LoadedMod } from './types';
 import type { CollectedModule, NativeModuleDeployment, NativeModuleExports, NativeModuleHost, NativeModuleFactory } from '#kernel/manifest';
-import type { ActionIoBinding, Io, Registry } from '#kernel/types';
+import type { ActionIoBinding, Gate, Io, Registry } from '#kernel/types';
 
 const log = createLogger('mod');
 
@@ -66,6 +66,7 @@ export interface LoadResult {
   failed: { name: string; error: Error }[];
   manifests: CollectedModule[];
   io?: ActionIoBinding;
+  gates?: readonly Gate[];
 }
 
 // ── Local mod loader (side-effect imports from src/mods/) ──
@@ -220,7 +221,7 @@ export async function loadLocalMods(modsDir: string, target: LoadTarget, options
         if (deployment === undefined) loadSchemasRecursive(modDir, native?.collector.assertModuleSchema);
       };
       if (native) {
-        const id = `${native.package}/${entry.name}`, origin = await realpath(modDir);
+        const id = `${native.package}/${entry.name}`, origin = await confineReal(modDir, filesToImport[0]);
         const definition = native.collector.getModuleDefinition(id, origin);
         const cached = native.collector.getCollectedModule(id, origin);
         const manifest = definition !== undefined
@@ -244,6 +245,7 @@ export async function loadLocalMods(modsDir: string, target: LoadTarget, options
   }
 
   result.io = moduleIo(result.manifests);
+  result.gates = moduleGates(result.manifests);
   return result;
 }
 
@@ -260,6 +262,13 @@ export function bindModuleIo(bindings: readonly ActionIoBinding[]): ActionIoBind
     }
     return Object.freeze(ports);
   };
+}
+
+/** Keep each module's predicates attached to its own deployment lifetime. */
+export function moduleGates(manifests: readonly CollectedModule[]): readonly Gate[] {
+  const gates: Gate[] = [];
+  for (const manifest of manifests) if (manifest.gates !== undefined) gates.push(...manifest.gates);
+  return Object.freeze(gates);
 }
 
 function moduleIo(manifests: readonly CollectedModule[]): ActionIoBinding | undefined {
@@ -319,5 +328,6 @@ export async function loadAllMods(target: LoadTarget, options: ModuleLoadOptions
   log.info(`loaded: ${result.loaded.join(', ')}`);
 
   result.io = moduleIo(result.manifests);
+  result.gates = moduleGates(result.manifests);
   return result;
 }

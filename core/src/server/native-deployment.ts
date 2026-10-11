@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { collectModule, evaluateModuleFactory, getCollectedModule, getModuleDefinition, instantiateModule, type CollectedModule, type NativeModuleDeployment, type NativeModuleExports, type NativeModuleFactory, type NativeModuleHost } from '#kernel/manifest';
 import { installNativeSeeds, type NativeSeedPlan } from '#kernel/seed-install';
 import { openNativeRuntime, type NativeRuntimeConfig } from '#kernel/runtime';
-import { bindModuleIo, loadAllMods, type LoadResult } from '#mod/loader';
+import { bindModuleIo, loadAllMods, moduleGates, type LoadResult } from '#mod/loader';
 import { KernelError } from '#errors';
 import type { ActionIoBinding } from '#kernel/types';
 
@@ -48,14 +48,15 @@ export async function openNativeDeployment(config: NativeDeploymentConfig) {
     for (const location of config.modules) manifests.push(await explicitModule(location, host));
     const bindings: ActionIoBinding[] = [];
     for (const manifest of manifests) if (manifest.io !== undefined) bindings.push(manifest.io);
-    loaded = { loaded: config.modules.map(location => location.id), failed: [], manifests, io: bindModuleIo(bindings) };
+    loaded = { loaded: config.modules.map(location => location.id), failed: [], manifests, io: bindModuleIo(bindings), gates: moduleGates(manifests) };
   }
   if (loaded.failed.length > 0)
     throw new AggregateError(loaded.failed.map(failure => failure.error), 'Native module discovery failed');
   const bindings: ActionIoBinding[] = [];
   if (loaded.io !== undefined) bindings.push(loaded.io);
   if (config.io !== undefined) bindings.push(config.io);
-  const runtime = await openNativeRuntime({ ...config.runtime, modules: loaded.manifests, io: bindModuleIo(bindings) });
+  const runtime = await openNativeRuntime({ ...config.runtime, modules: loaded.manifests, io: bindModuleIo(bindings),
+    gates: [...(loaded.gates ?? []), ...(config.runtime.gates ?? [])] });
   try {
     if (config.seeds !== undefined) {
       const credential = runtime.instance.setupCredential ?? config.runtime.installerCredential;

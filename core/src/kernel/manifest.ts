@@ -1,3 +1,5 @@
+import { isAbsolute } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { normalizeType, type TypeId } from '#core/component'
 import { collectRegistrations, type Registration } from '#core/registration'
@@ -6,11 +8,12 @@ import { KernelError } from '#errors'
 import type { TypeSchema } from '#schema/types'
 import { copyManifest } from '#kernel/registry'
 import { buildRegisteredTypeDef } from '#kernel/typedef'
-import type { ActionDef, ActionIoBinding, ModuleManifest, OpenRegistration, Registry, SecurityContext, SecurityHandlers, SecurityRegistration, TypeDef } from '#kernel/types'
+import type { ActionDef, ActionIoBinding, Gate, ModuleManifest, OpenRegistration, Registry, SecurityContext, SecurityHandlers, SecurityRegistration, TypeDef } from '#kernel/types'
 
 export interface NativeModuleDeployment {
   readonly manifest: ModuleManifest
   readonly io?: ActionIoBinding
+  readonly gates?: readonly Gate[]
 }
 /** Host capabilities are declared by their owning deployment bindings. */
 export interface NativeModuleHost {}
@@ -29,6 +32,7 @@ export async function evaluateModuleFactory(entry: NativeModuleExports, host: Na
 export interface CollectedModule extends ModuleManifest {
   readonly collectionId?: string
   readonly io?: ActionIoBinding
+  readonly gates?: readonly Gate[]
   readonly legacySecurity: readonly { readonly type: string; readonly context: SecurityContext }[]
   readonly legacyActions: readonly { readonly type: string; readonly name: string }[]
 }
@@ -176,13 +180,14 @@ export async function collectModule(id: string, importModule: () => Promise<unkn
         throw new KernelError('INVALID', 'Native module factory returned no deployment');
       const manifest: CollectedModule = declared === undefined ? finish(active) : Object.freeze({
         ...copyManifest(declared.manifest), collectionId: id, io: declared.io,
+        gates: declared.gates === undefined ? undefined : Object.freeze([...declared.gates]),
         legacySecurity: Object.freeze([]), legacyActions: Object.freeze([]),
       })
       if (compiled === undefined) {
         modules.set(id, manifest)
-        if (origin !== undefined) state.imports.set(origin, manifest)
+        if (origin !== undefined) state.imports.set(moduleOrigin(origin), manifest)
       } else {
-        factories.set(origin ?? id, Object.freeze({ collectionId: id, factory: compiled }));
+        factories.set(origin === undefined ? id : moduleOrigin(origin), Object.freeze({ collectionId: id, factory: compiled }));
       }
       return manifest
     } finally {
@@ -191,15 +196,26 @@ export async function collectModule(id: string, importModule: () => Promise<unkn
   })
 }
 
+/** Node imports share one identity for absolute filesystem paths and their file URLs. */
+function moduleOrigin(origin: string): string {
+  if (origin.startsWith('file:')) {
+    const imported = new URL(origin), canonical = pathToFileURL(fileURLToPath(imported))
+    canonical.search = imported.search
+    canonical.hash = imported.hash
+    return canonical.href
+  }
+  return isAbsolute(origin) ? pathToFileURL(origin).href : origin
+}
+
 export function getCollectedModule(id: string, origin?: string): CollectedModule | undefined {
-  const manifest = origin === undefined ? modules.get(id) : state.imports.get(origin)
+  const manifest = origin === undefined ? modules.get(id) : state.imports.get(moduleOrigin(origin))
   if (manifest && (manifest.collectionId ?? manifest.id) !== id) throw new KernelError('CONFLICT', 'The imported module changed its identity')
   return manifest
 }
 
 /** Retrieve the compiled factory declaration without retaining any deployment resources. */
 export function getModuleDefinition(id: string, origin?: string): NativeModuleDefinition | undefined {
-  const definition = factories.get(origin ?? id);
+  const definition = factories.get(origin === undefined ? id : moduleOrigin(origin));
   if (definition !== undefined && definition.collectionId !== id)
     throw new KernelError('CONFLICT', 'The imported module changed its identity');
   return definition;

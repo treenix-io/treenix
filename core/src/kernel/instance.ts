@@ -245,6 +245,7 @@ async function buildCanonicalInstance(input: InstanceConfig): Promise<InstanceFo
   if (discovered?.io !== undefined) ioBindings.push(discovered.io)
   if (config.io !== undefined) ioBindings.push(config.io)
   const io = bindModuleIo(ioBindings)
+  const gates = [...(discovered?.gates ?? []), ...(config.gates ?? [])]
 
   if (discovered !== undefined) {
     const preview = createRegistry()
@@ -265,7 +266,7 @@ async function buildCanonicalInstance(input: InstanceConfig): Promise<InstanceFo
     mountDirectories: config.mountDirectories,
     blobs: config.blobs,
     io,
-    gates: config.gates,
+    gates,
     modules,
     initialCredential: { ttlMs: config.credentialTtlMs },
     installerCredential: bootstrapPolicy.kind === 'reopen' ? bootstrapPolicy.installerCredential : undefined,
