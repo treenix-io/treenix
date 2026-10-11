@@ -52,6 +52,7 @@ interface Builder {
   readonly security: SecurityRegistration[]
   readonly actions: Map<string, Map<string, ActionDef>>
   closed: boolean
+  seeds?: NativeSeedDefinition
 }
 
 const builder = (id: string): Builder => ({ id, registrations: new Map(), classes: new Map(), security: [], actions: new Map(), closed: false })
@@ -116,6 +117,13 @@ export function registerKernel(...args: KernelArguments): void {
   }
 }
 
+/** Attach seed data to an implicitly collected module without replacing its compiled types and actions. */
+export function registerKernelSeeds(seeds: NativeSeedDefinition): void {
+  const active = current();
+  if (active.seeds !== undefined) throw new KernelError('CONFLICT', 'Native seeds already have an owner');
+  active.seeds = seeds;
+}
+
 export function registerKernelAction(type: TypeId, name: string, action: ActionDef): void {
   if (!name || name.trim() !== name || name.startsWith('_')) throw new KernelError('INVALID', 'Invalid public action name')
   const active = current(), normalized = normalizeType(type)
@@ -168,7 +176,7 @@ function finish(active: Builder): CollectedModule {
   for (const [type, actions] of active.actions) for (const [name, action] of actions) {
     if (!open.some(entry => entry.type === type && entry.context === `action:${name}`)) open.push({ type, context: `action:${name}`, handler: action })
   }
-  return Object.freeze({ id: active.id, types: Object.freeze(types), security: Object.freeze([...active.security]),
+  return Object.freeze({ id: active.id, types: Object.freeze(types), security: Object.freeze([...active.security]), seeds: active.seeds,
     open: Object.freeze(open), legacySecurity: Object.freeze(legacySecurity), legacyActions: Object.freeze(legacyActions) })
 }
 

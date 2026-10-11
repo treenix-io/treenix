@@ -1,19 +1,28 @@
 import { readFile } from 'node:fs/promises';
+import { normalizeType } from '#core/component';
 import type { ModuleManifest, Node, NodeInput } from '#kernel/types';
 import type { TypeSchema } from '#schema/types';
 import { deployPrefabAction } from '#mod/native-prefab-actions';
 import type { NativeSeedDefinition } from '#kernel/seed-install';
 
 export type CapturedSeedNode = NodeInput | Node;
+export interface NativeSeedGrant {
+  readonly executor: string;
+  readonly target: string;
+  readonly grant: number;
+}
 export type NativePrefabSource = NodeInput & {
   readonly $type: 't.prefab';
   readonly mod: string;
   readonly name: string;
   readonly nodes: readonly NodeInput[];
+  readonly grants?: readonly NativeSeedGrant[];
 };
 
 /** Declare a module's seed source and its catalog parents for administrator installation. */
-export function nativeSeed(mod: string, nodes: readonly NodeInput[], parents: readonly NodeInput[] = []): NativeSeedDefinition {
+export function nativeSeed(
+  mod: string, nodes: readonly NodeInput[], parents: readonly NodeInput[] = [], grants: readonly NativeSeedGrant[] = [],
+): NativeSeedDefinition {
   return {
     sources: [
       { $path: '/sys/mods', $type: 't.dir' },
@@ -22,7 +31,8 @@ export function nativeSeed(mod: string, nodes: readonly NodeInput[], parents: re
       ...parents,
     ],
     prefabs: [{ target: '/', allowAbsolute: true, source: {
-      $path: `/sys/mods/${mod}/prefabs/seed`, $type: 't.prefab', mod, name: 'seed', nodes,
+      $path: `/sys/mods/${mod}/prefabs/seed`, $type: 't.prefab', mod, name: 'seed',
+      nodes: nodes.map(node => ({ ...node, $type: normalizeType(node.$type) })), grants,
     } }],
   };
 }
@@ -42,7 +52,10 @@ export async function nativePrefabManifest(): Promise<ModuleManifest> {
         module: '@treenx/core/prefab',
         security: 'ordinary',
         version: 0,
-        schema: { ...schema, required: ['mod', 'name', 'nodes'] },
+        schema: { ...schema, required: ['mod', 'name', 'nodes'], properties: { ...schema.properties,
+          grants: { type: 'array', items: { type: 'object', required: ['executor', 'target', 'grant'], additionalProperties: false,
+            properties: { executor: { type: 'string' }, target: { type: 'string' }, grant: { type: 'integer', minimum: 1, maximum: 7 } } } },
+        } },
         actions: { deploy: deployPrefabAction },
       },
     ],
