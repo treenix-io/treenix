@@ -26,6 +26,8 @@ import { createFsExternalWatcher } from './fs-external'
 export type FsPhysicalCost = NonNullable<ScanResult<StoredNode>['cost']>
 
 export interface FsPhysicalLayout {
+  readonly externalDirectories?: readonly string[]
+  readonly externalMetadata?: readonly string[]
   readonly preflight?: (commit: StoreCommit) => Promise<FsPhysicalCost>
   readonly release?: () => void
   readonly scan: typeof scanFsNodes
@@ -173,7 +175,7 @@ export async function createFsStore(options: FsStoreOptions): Promise<FsStore> {
       for (const node of accepted.items) acceptedPositions.set(node.$path, node.$pos)
       const images = (nodes: typeof actual) => stableJson(nodes.map(({ $pos, ...node }) => node).sort((a, b) => a.$path.localeCompare(b.$path)))
       if (options.external !== 'trusted' && images(actual.map(namespace.logicalNode)) !== images([...accepted.items])) throw new KernelError('INVALID', 'Filesystem contents differ from accepted storage state')
-      if (options.external === 'trusted') reporter = createFsExternalWatcher(directory, namespace.logicalPath, [namespace.logicalPath('/')])
+      if (options.external === 'trusted') reporter = createFsExternalWatcher([directory, ...(layout.externalDirectories ?? [])], namespace.logicalPath, [namespace.logicalPath('/')], layout.externalMetadata)
       journal.releaseReplay()
     } catch (error) { await journal.close(); throw error }
     function scan(query: StoreCensusQuery): Promise<ScanResult<StoreCensusNode>>

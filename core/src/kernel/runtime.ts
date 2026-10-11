@@ -6,6 +6,7 @@ import { copyManifest } from '#kernel/registry'
 import { previewModules } from '#kernel/module-install'
 import { provisionFsMounts, type FsDirectoryBindings } from '#kernel/mount-fs-provider'
 import { createFsStore } from '#kernel/store/fs'
+import { createFsOverlayLayout } from '#kernel/store/fs-overlay'
 import { createFsBlobStore } from '#kernel/blob-store-fs'
 import { DEFAULT_LIMITS, type FederationBinding, type ActionIoBinding, type AdminInput, type Credential, type Gate, type ModuleManifest, type ProvisionedStoreMount } from '#kernel/types'
 
@@ -15,6 +16,7 @@ export interface NativeRuntimeConfig {
   readonly io?: ActionIoBinding
   readonly id: string
   readonly directory: string
+  readonly baseDirectory?: string
   readonly credentialTtlMs: number
   readonly firstAdmin?: AdminInput
   readonly installerCredential?: Credential
@@ -36,6 +38,7 @@ export async function openNativeRuntime(input: NativeRuntimeConfig) {
     federation: input.federation,
     io: input.io,
     directory: input.directory,
+    baseDirectory: input.baseDirectory,
     credentialTtlMs: input.credentialTtlMs,
     installerCredential:
       input.installerCredential === undefined
@@ -47,13 +50,16 @@ export async function openNativeRuntime(input: NativeRuntimeConfig) {
   if (!Number.isFinite(config.credentialTtlMs) || config.credentialTtlMs <= 0)
     throw new KernelError('INVALID', 'Credential lifetime must be positive and finite');
   previewModules(modules);
+  if (config.baseDirectory !== undefined && (typeof config.baseDirectory !== 'string' || config.baseDirectory.length === 0))
+    throw new KernelError('INVALID', 'Overlay base directory capability must be a nonempty path');
+  const layout = config.baseDirectory === undefined ? undefined : await createFsOverlayLayout(config.directory, config.baseDirectory);
   const lease = await openPersistentWriter({
     directory: join(config.directory, '.treenix'),
     instance: config.id,
   });
   let store: Awaited<ReturnType<typeof createFsStore>>;
   try {
-    store = await createFsStore({ directory: config.directory, lease });
+    store = await createFsStore({ directory: config.directory, lease, layout });
   } catch (error) {
     await lease.close();
     throw error;
