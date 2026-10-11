@@ -5,12 +5,17 @@ import { isRecord } from '#util/is-record';
 export interface NativeRootStorage {
   readonly directory: string;
   readonly baseDirectory?: string;
+  readonly seedFilter?: readonly string[];
 }
 
 /** Resolve the existing root mount without importing the retiring mount registry. */
 export function nativeRootStorage(value: unknown, cwd: string): NativeRootStorage {
   if (!isRecord(value) || value.$path !== '/' || value.$type !== 'root')
     throw new KernelError('INVALID', 'Native boot requires a root configuration');
+  if (value.seeds !== undefined && (!Array.isArray(value.seeds)
+    || !value.seeds.every((name: unknown): name is string => typeof name === 'string')))
+    throw new KernelError('INVALID', 'Root seeds must be module names');
+  const seedFilter = value.seeds;
 
   const mount = value['#mount'];
   if (!isRecord(mount)) throw new KernelError('INVALID', 'Root mount is missing');
@@ -24,7 +29,7 @@ export function nativeRootStorage(value: unknown, cwd: string): NativeRootStorag
     return resolve(cwd, component.root);
   }
 
-  if (mount.$type === 't.mount.fs') return { directory: directory(mount) };
+  if (mount.$type === 't.mount.fs') return { directory: directory(mount), seedFilter };
 
   if (mount.$type !== 't.mount.overlay' || !Array.isArray(mount.layers)
     || mount.layers.length !== 2 || !mount.layers.every((name: unknown) => typeof name === 'string'))
@@ -35,5 +40,5 @@ export function nativeRootStorage(value: unknown, cwd: string): NativeRootStorag
   if (baseDirectory === writable)
     throw new KernelError('INVALID', 'Root overlay layers must have distinct directories');
 
-  return { directory: writable, baseDirectory };
+  return { directory: writable, baseDirectory, seedFilter };
 }

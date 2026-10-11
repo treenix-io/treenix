@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import type { ModuleManifest, Node, NodeInput } from '#kernel/types';
 import type { TypeSchema } from '#schema/types';
 import { deployPrefabAction } from '#mod/native-prefab-actions';
+import type { NativeSeedDefinition } from '#kernel/seed-install';
 
 export type CapturedSeedNode = NodeInput | Node;
 export type NativePrefabSource = NodeInput & {
@@ -10,6 +11,21 @@ export type NativePrefabSource = NodeInput & {
   readonly name: string;
   readonly nodes: readonly NodeInput[];
 };
+
+/** Declare a module's seed source and its catalog parents for administrator installation. */
+export function nativeSeed(mod: string, nodes: readonly NodeInput[], parents: readonly NodeInput[] = []): NativeSeedDefinition {
+  return {
+    sources: [
+      { $path: '/sys/mods', $type: 't.dir' },
+      { $path: `/sys/mods/${mod}`, $type: 't.dir' },
+      { $path: `/sys/mods/${mod}/prefabs`, $type: 't.dir' },
+      ...parents,
+    ],
+    prefabs: [{ target: '/', allowAbsolute: true, source: {
+      $path: `/sys/mods/${mod}/prefabs/seed`, $type: 't.prefab', mod, name: 'seed', nodes,
+    } }],
+  };
+}
 
 /** Publish the existing prefab owner's canonical schema without importing its retiring deploy executor. */
 export async function nativePrefabManifest(): Promise<ModuleManifest> {

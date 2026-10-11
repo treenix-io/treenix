@@ -96,6 +96,11 @@
       "types": "./dist/mod.d.ts",
       "default": "./dist/mod.js"
     },
+    "./mod/native-prefab": {
+      "development": "./src/mod/native-prefab.ts",
+      "types": "./dist/mod/native-prefab.d.ts",
+      "default": "./dist/mod/native-prefab.js"
+    },
     "./mount": {
       "development": "./src/mount.ts",
       "types": "./dist/mount.d.ts",

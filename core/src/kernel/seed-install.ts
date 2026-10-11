@@ -5,6 +5,7 @@ import { A, type Node, type NodeInput, type OpId, type Session } from '#kernel/t
 import type { CapturedSeedNode, NativePrefabSource } from '#mod/native-prefab';
 import { assertPrefabPath, prefabInput, resolvePrefabPath } from '#mod/prefab-path';
 import { stableJson } from '#util/stable-json';
+import type { CollectedModule } from '#kernel/manifest';
 
 export interface NativeSeedPrefab {
   readonly source: NodeInput & {
@@ -25,6 +26,36 @@ export interface NativeSeedPlan {
   readonly prefabs: readonly NativeSeedPrefab[];
   /** Owned by the caller from the actual current intake; retain it unchanged when retrying. */
   readonly opId: OpId;
+}
+
+export type NativeSeedDefinition = Omit<NativeSeedPlan, 'opId'>;
+
+/** Select the root's named seeds from native module declarations before opening storage. */
+export function selectNativeSeeds(modules: readonly CollectedModule[], names: readonly string[]): NativeSeedDefinition {
+  const sources = new Map<string, NodeInput>();
+  const prefabs: NativeSeedPrefab[] = [];
+
+  for (const name of names) {
+    let found = false;
+    for (const module of modules) {
+      if (module.seeds === undefined) continue;
+      const selected = module.seeds.prefabs.filter(prefab => prefab.source.mod === name);
+      if (selected.length === 0) continue;
+      if (found) throw new KernelError('CONFLICT', `Seed has multiple native owners: ${name}`);
+      found = true;
+      prefabs.push(...selected);
+
+      for (const source of module.seeds.sources) {
+        const previous = sources.get(source.$path);
+        if (previous !== undefined && stableJson(previous) !== stableJson(source))
+          throw new KernelError('CONFLICT', `Conflicting seed source: ${source.$path}`);
+        sources.set(source.$path, source);
+      }
+    }
+    if (!found) throw new KernelError('UNAVAILABLE', `Seed requires a native declaration: ${name}`);
+  }
+
+  return { sources: [...sources.values()], prefabs };
 }
 
 export interface NativeSeedResult {
@@ -56,11 +87,8 @@ function childKey(operation: OpId, owner: string, path: string): OpId {
   return { epoch: operation.epoch, time: operation.time, nonce: `${operation.nonce}:${digest}` };
 }
 
-/** Install native sources first, then copy accepted prefab data through bounded caller-owned requests. */
-export async function installNativeSeeds(
-  session: Session,
-  plan: NativeSeedPlan,
-): Promise<NativeSeedResult> {
+/** Refuse unsupported setup and malformed source paths before seed writes or boot resource acquisition. */
+export function assertNativeSeeds(plan: NativeSeedDefinition): void {
   for (const prefab of plan.prefabs) {
     if (prefab.setup !== undefined)
       throw new KernelError('UNAVAILABLE', 'Legacy prefab setup requires its retiring runtime');
@@ -73,6 +101,14 @@ export async function installNativeSeeds(
       resolvePrefabPath(node.$path, prefab.target, prefab.allowAbsolute);
   }
   for (const source of plan.sources) assertPrefabPath(source.$path);
+}
+
+/** Install native sources first, then copy accepted prefab data through bounded caller-owned requests. */
+export async function installNativeSeeds(
+  session: Session,
+  plan: NativeSeedPlan,
+): Promise<NativeSeedResult> {
+  assertNativeSeeds(plan);
 
   const rootCopy = (await session.read({ node: '/' })).copies[0];
   if ('error' in rootCopy) throw new KernelError(rootCopy.error.code, rootCopy.error.message);

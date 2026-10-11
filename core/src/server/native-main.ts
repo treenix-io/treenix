@@ -50,8 +50,8 @@ async function main(): Promise<void> {
 
   const storage = deployment === undefined ? undefined
     : nativeRootStorage(safeJsonParse(await readFile(resolve(argument), 'utf8')), process.cwd())
-  if (storage !== undefined && (input.directory !== undefined || input.baseDirectory !== undefined))
-    throw new KernelError('INVALID', 'Root mount storage must be configured only in root.json')
+  if (storage !== undefined && (input.directory !== undefined || input.baseDirectory !== undefined || input.seedFilter !== undefined))
+    throw new KernelError('INVALID', 'Root storage and seeds must be configured only in root.json')
 
   const config: Record<string, unknown> = { ...input, ...storage }
   if (typeof config.id !== 'string' || typeof config.directory !== 'string' || typeof config.credentialTtlMs !== 'number'
@@ -62,6 +62,8 @@ async function main(): Promise<void> {
     || config.io !== undefined && !ioEntry(config.io)
     || config.baseDirectory !== undefined && (typeof config.baseDirectory !== 'string' || config.baseDirectory.length === 0)
     || config.mountDirectories !== undefined && !directoryBindings(config.mountDirectories)
+    || config.seedFilter !== undefined && (!Array.isArray(config.seedFilter)
+      || !config.seedFilter.every((name: unknown): name is string => typeof name === 'string'))
     || config.modules !== undefined && (!Array.isArray(config.modules) || !config.modules.every(moduleEntry)))
     throw new KernelError('INVALID', 'Malformed native server configuration')
   const port = config.port ?? 4882, host = config.host ?? '127.0.0.1'
@@ -89,7 +91,7 @@ async function main(): Promise<void> {
             resolve(dirname(configPath), directory),
           ]),
         )
-  const runtime = await openNativeDeployment({ runtime: { id: config.id, directory: resolve(dirname(configPath), config.directory),
+  const runtime = await openNativeDeployment({ seedFilter: config.seedFilter, runtime: { id: config.id, directory: resolve(dirname(configPath), config.directory),
     baseDirectory: config.baseDirectory === undefined ? undefined : resolve(dirname(configPath), config.baseDirectory),
     credentialTtlMs: config.credentialTtlMs, firstAdmin: config.firstAdmin, installerCredential: config.installerCredential, mountDirectories }, modules, io, persistentLogs: config.persistentLogs })
   const binding = createTwpHttpServer({ instance: runtime.instance, routes: runtime.httpRoutes, allowedOrigins: config.allowedOrigins, credentialTtlMs: config.credentialTtlMs })

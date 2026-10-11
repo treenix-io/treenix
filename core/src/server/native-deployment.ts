@@ -1,7 +1,7 @@
 import { createTwpHttpRoutes } from '#server/http-routes';
 import { randomUUID } from 'node:crypto';
 import { collectModule, evaluateModuleFactory, getCollectedModule, getModuleDefinition, instantiateModule, type CollectedModule, type NativeModuleDeployment, type NativeModuleExports, type NativeModuleFactory, type NativeModuleHost } from '#kernel/manifest';
-import { installNativeSeeds, type NativeSeedPlan } from '#kernel/seed-install';
+import { assertNativeSeeds, installNativeSeeds, selectNativeSeeds, type NativeSeedDefinition } from '#kernel/seed-install';
 import { openNativeRuntime, type NativeRuntimeConfig } from '#kernel/runtime';
 import { bindModuleIo, loadAllMods, moduleGates, type LoadResult } from '#mod/loader';
 import { KernelError } from '#errors';
@@ -22,7 +22,8 @@ export interface NativeDeploymentConfig {
   readonly modules?: readonly NativeModuleLocation[];
   readonly modsDir?: string;
   readonly io?: ActionIoBinding;
-  readonly seeds?: Omit<NativeSeedPlan, 'opId'>;
+  readonly seeds?: NativeSeedDefinition;
+  readonly seedFilter?: readonly string[];
   /** Explicit host-directory capability name; no filesystem authority is stored in log nodes. */
   readonly persistentLogs?: PersistentLogsConfig;
 }
@@ -59,13 +60,18 @@ export async function openNativeDeployment(config: NativeDeploymentConfig) {
   }
   if (loaded.failed.length > 0)
     throw new AggregateError(loaded.failed.map(failure => failure.error), 'Native module discovery failed');
+  if (config.seeds !== undefined && config.seedFilter !== undefined)
+    throw new KernelError('INVALID', 'Choose an explicit seed plan or named module seeds');
+  const seeds = config.seedFilter === undefined ? config.seeds : selectNativeSeeds(loaded.manifests, config.seedFilter);
+  if (seeds !== undefined) assertNativeSeeds(seeds);
+
   const bindings: ActionIoBinding[] = [];
   if (loaded.io !== undefined) bindings.push(loaded.io);
   if (config.io !== undefined) bindings.push(config.io);
   const runtime = await openNativeRuntime({ ...config.runtime, modules: loaded.manifests, io: bindModuleIo(bindings),
     gates: [...(loaded.gates ?? []), ...(config.runtime.gates ?? [])] });
   try {
-    if (config.seeds !== undefined || config.persistentLogs !== undefined) {
+    if (seeds !== undefined || config.persistentLogs !== undefined) {
       const credential = runtime.instance.setupCredential ?? config.runtime.installerCredential
         ?? (config.runtime.firstAdmin === undefined ? undefined : await runtime.instance.auth.login({
           account: config.runtime.firstAdmin.path, password: config.runtime.firstAdmin.password }));
@@ -84,7 +90,7 @@ export async function openNativeDeployment(config: NativeDeploymentConfig) {
         }
       })();
       try {
-        if (config.seeds !== undefined) await installNativeSeeds(session, { ...config.seeds,
+        if (seeds !== undefined) await installNativeSeeds(session, { ...seeds,
           opId: { epoch: intake, time: Date.now(), nonce: randomUUID() } });
         if (config.persistentLogs !== undefined) await provisionLogs(session, config.persistentLogs.directory,
           () => ({ epoch: intake, time: Date.now(), nonce: randomUUID() }));
