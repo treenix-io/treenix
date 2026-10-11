@@ -9,8 +9,8 @@ import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { setCurrentMod } from './tracking';
 import type { LoadedMod } from './types';
-import type { CollectedModule } from '#kernel/manifest';
-import type { Registry } from '#kernel/types';
+import type { CollectedModule, NativeModuleDeployment, NativeModuleFactory } from '#kernel/manifest';
+import type { ActionIoBinding, Io, Registry } from '#kernel/types';
 
 const log = createLogger('mod');
 
@@ -60,6 +60,7 @@ export interface LoadResult {
   loaded: string[];
   failed: { name: string; error: Error }[];
   manifests: CollectedModule[];
+  io?: ActionIoBinding;
 }
 
 // ── Local mod loader (side-effect imports from src/mods/) ──
@@ -197,24 +198,24 @@ export async function loadLocalMods(modsDir: string, target: LoadTarget): Promis
       // of the next mod's register() calls to this failed mod.
       // R4-BOOT-2: realpath-confine each file inside modDir — symlinked entry files inside
       // a real mod dir would otherwise import code outside the mod root.
+      let deployment: NativeModuleDeployment | undefined;
       const importModule = async () => {
         for (const f of filesToImport) {
           const real = await confineReal(modDir, f);
-          if (pkgName) {
-            // pkgName/<mod>/<entry> → exports field decides .ts vs .js
-            await import(`${pkgName}/${entry.name}/${basenameNoExt(real)}`);
-          } else if (real.endsWith('.ts') || real.endsWith('.tsx')) {
-            await ensureTsxRegistered();
-            await import(real);
-          } else {
-            await import(real);
+          if (real.endsWith('.ts') || real.endsWith('.tsx')) await ensureTsxRegistered();
+          const imported: { readonly default?: NativeModuleFactory } = await import(
+            pkgName ? `${pkgName}/${entry.name}/${basenameNoExt(real)}` : real);
+          if (native !== undefined && imported.default !== undefined) {
+            if (typeof imported.default !== 'function') throw new KernelError('INVALID', 'Native module factory must be callable');
+            if (deployment !== undefined) throw new KernelError('CONFLICT', 'Module has more than one native factory');
+            deployment = await imported.default();
           }
         }
-        loadSchemasRecursive(modDir, native?.collector.assertModuleSchema);
+        if (deployment === undefined) loadSchemasRecursive(modDir, native?.collector.assertModuleSchema);
       };
       if (native) {
         const id = `${native.package}/${entry.name}`, origin = await realpath(modDir);
-        const manifest = native.collector.getCollectedModule(id, origin) ?? await native.collector.collectModule(id, importModule, origin);
+        const manifest = native.collector.getCollectedModule(id, origin) ?? await native.collector.collectModule(id, importModule, origin, () => deployment);
         result.manifests.push(manifest);
       } else {
         setCurrentMod(entry.name);
@@ -232,7 +233,29 @@ export async function loadLocalMods(modsDir: string, target: LoadTarget): Promis
     }
   }
 
+  result.io = moduleIo(result.manifests);
   return result;
+}
+
+export function bindModuleIo(bindings: readonly ActionIoBinding[]): ActionIoBinding | undefined {
+  if (bindings.length === 0) return undefined;
+  if (bindings.length === 1) return bindings[0];
+  return scope => {
+    const ports: Io = {};
+    for (const binding of bindings) {
+      const declared = binding(scope);
+      for (const name of Object.keys(declared))
+        if (Object.hasOwn(ports, name)) throw new KernelError('CONFLICT', 'Native module IO port has more than one owner');
+      Object.assign(ports, declared);
+    }
+    return Object.freeze(ports);
+  };
+}
+
+function moduleIo(manifests: readonly CollectedModule[]): ActionIoBinding | undefined {
+  const bindings: ActionIoBinding[] = [];
+  for (const manifest of manifests) if (manifest.io !== undefined) bindings.push(manifest.io);
+  return bindModuleIo(bindings);
 }
 
 export async function publishLoadedModules(registry: Registry, result: LoadResult, options: { allowPartialMods?: boolean } = {}): Promise<void> {
@@ -284,5 +307,6 @@ export async function loadAllMods(target: LoadTarget, ...extraDirs: string[]): P
   for (const f of result.failed) log.error(`${f.name}: ${f.error.message}`);
   log.info(`loaded: ${result.loaded.join(', ')}`);
 
+  result.io = moduleIo(result.manifests);
   return result;
 }

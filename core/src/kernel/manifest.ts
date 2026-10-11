@@ -4,10 +4,19 @@ import { collectRegistrations, type Registration } from '#core/registration'
 import { registeredClass, registeredMethod, type RegisteredClass, type RegisteredMethod } from '#comp/registration'
 import { KernelError } from '#errors'
 import type { TypeSchema } from '#schema/types'
+import { copyManifest } from '#kernel/registry'
 import { buildRegisteredTypeDef } from '#kernel/typedef'
-import type { ActionDef, ModuleManifest, OpenRegistration, Registry, SecurityContext, SecurityHandlers, SecurityRegistration, TypeDef } from '#kernel/types'
+import type { ActionDef, ActionIoBinding, ModuleManifest, OpenRegistration, Registry, SecurityContext, SecurityHandlers, SecurityRegistration, TypeDef } from '#kernel/types'
+
+export interface NativeModuleDeployment {
+  readonly manifest: ModuleManifest
+  readonly io?: ActionIoBinding
+}
+export type NativeModuleFactory = () => Promise<NativeModuleDeployment>
 
 export interface CollectedModule extends ModuleManifest {
+  readonly collectionId?: string
+  readonly io?: ActionIoBinding
   readonly legacySecurity: readonly { readonly type: string; readonly context: SecurityContext }[]
   readonly legacyActions: readonly { readonly type: string; readonly name: string }[]
 }
@@ -137,12 +146,16 @@ function finish(active: Builder): CollectedModule {
     open: Object.freeze(open), legacySecurity: Object.freeze(legacySecurity), legacyActions: Object.freeze(legacyActions) })
 }
 
-export async function collectModule(id: string, importModule: () => Promise<unknown> | void, origin?: string): Promise<CollectedModule> {
+export async function collectModule(id: string, importModule: () => Promise<unknown> | void, origin?: string, deployment?: () => NativeModuleDeployment | undefined): Promise<CollectedModule> {
   const active = builder(id)
   return scope.run(active, async () => {
     try {
       await importModule()
-      const manifest = finish(active)
+      const declared = deployment?.()
+      const manifest: CollectedModule = declared === undefined ? finish(active) : Object.freeze({
+        ...copyManifest(declared.manifest), collectionId: id, io: declared.io,
+        legacySecurity: Object.freeze([]), legacyActions: Object.freeze([]),
+      })
       modules.set(id, manifest)
       if (origin !== undefined) state.imports.set(origin, manifest)
       return manifest
@@ -154,7 +167,7 @@ export async function collectModule(id: string, importModule: () => Promise<unkn
 
 export function getCollectedModule(id: string, origin?: string): CollectedModule | undefined {
   const manifest = origin === undefined ? modules.get(id) : state.imports.get(origin)
-  if (manifest && manifest.id !== id) throw new KernelError('CONFLICT', 'The imported module changed its identity')
+  if (manifest && (manifest.collectionId ?? manifest.id) !== id) throw new KernelError('CONFLICT', 'The imported module changed its identity')
   return manifest
 }
 

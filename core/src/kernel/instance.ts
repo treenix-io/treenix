@@ -36,7 +36,7 @@ import { createSessionFactory, type OpenedSession, type SessionFactory } from '#
 import { createNodeLaneRead } from '#kernel/lane-source'
 import { copyManifest, createRegistry, type TypeOwnership } from '#kernel/registry'
 import { assertTypeOwner, installModuleOwnership, previewModules } from '#kernel/module-install'
-import { loadAllMods, publishLoadedModules } from '#mod/loader'
+import { bindModuleIo, loadAllMods, publishLoadedModules } from '#mod/loader'
 import { createGuard } from '#kernel/guard'
 import { createProjector, visibleNode } from '#kernel/projection'
 import { componentEntries } from '#kernel/migrate'
@@ -241,6 +241,10 @@ async function buildCanonicalInstance(input: InstanceConfig): Promise<InstanceFo
   const discovered = config.modules === undefined ? await loadAllMods('kernel') : undefined
   const modules = config.modules ?? discovered!.manifests.map(copyManifest)
   previewModules(modules)
+  const ioBindings: ActionIoBinding[] = []
+  if (discovered?.io !== undefined) ioBindings.push(discovered.io)
+  if (config.io !== undefined) ioBindings.push(config.io)
+  const io = bindModuleIo(ioBindings)
 
   if (discovered !== undefined) {
     const preview = createRegistry()
@@ -260,7 +264,7 @@ async function buildCanonicalInstance(input: InstanceConfig): Promise<InstanceFo
     rawfsCodecs: config.rawfsCodecs,
     mountDirectories: config.mountDirectories,
     blobs: config.blobs,
-    io: config.io,
+    io,
     gates: config.gates,
     modules,
     initialCredential: { ttlMs: config.credentialTtlMs },
