@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { LaneMember } from '@treenx/core/client/twp'
 import type { NativeSnapshot } from '#tree/native-source'
+import { NativeTrashControls } from '#native/TrashControls'
 
 /** Retain selection by real identity while displaying the owning subscription's current payload. */
 function identity(member: LaneMember): string {
@@ -24,7 +25,7 @@ function ViewMemberDetails({ member }: { member: LaneMember }) {
   return <pre aria-label="Данные View" className="overflow-auto rounded bg-slate-100 p-3 text-sm">{content}</pre>
 }
 
-/** Inspect declassified View output without creating a path subscription or mutation controls. */
+/** Inspect declassified output; actions address its authorized owning declaration. */
 export function NativeViewOutput({ snapshot, title }: { snapshot: NativeSnapshot; title?: string }) {
   const [selectedId, select] = useState<string>()
   const selected = selectedId === undefined
@@ -33,7 +34,7 @@ export function NativeViewOutput({ snapshot, title }: { snapshot: NativeSnapshot
 
   return <section aria-label="Результат View" className="flex min-w-0 flex-1 flex-col gap-3">
     <h2 className="text-xl font-semibold">{title ?? 'View'}</h2>
-    <p className="text-sm text-slate-600">Только чтение</p>
+    <p className="text-sm text-slate-600">Данные View</p>
     {snapshot.output?.map(member => {
       const path = member.kind === 'computed'
         ? member.node.$path
@@ -48,5 +49,8 @@ export function NativeViewOutput({ snapshot, title }: { snapshot: NativeSnapshot
     {snapshot.rows !== undefined && <div aria-label="Строки View" className="flex flex-col gap-2">
       {snapshot.rows.map((row, index) => <pre key={index} className="overflow-auto rounded bg-slate-100 p-3 text-sm">{JSON.stringify(row, null, 2)}</pre>)}
     </div>}
+    {snapshot.phase === 'ready' && snapshot.viewOwner !== undefined && snapshot.rows !== undefined
+      && <NativeTrashControls key={`${snapshot.viewOwner.path}:${snapshot.viewOwner.component}:${snapshot.generations.join(',')}`}
+        owner={snapshot.viewOwner} rows={snapshot.rows} />}
   </section>
 }

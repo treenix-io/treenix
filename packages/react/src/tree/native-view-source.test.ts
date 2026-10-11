@@ -5,6 +5,8 @@ import { useNativeChildren } from '#tree/native-hooks'
 import { NativeSourceProvider } from '#tree/native-source-context'
 import { KernelError } from '@treenx/core/errors'
 import { NativeTreeBrowser } from '#native/NativeEditor'
+import { NativeViewOutput } from '#native/ViewOutput'
+import { createTrashManifest } from '../../../../mods/trash/native'
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { it, type TestContext } from 'node:test'
@@ -24,7 +26,7 @@ function deferred<T>() {
 }
 
 /** Opens a real instance, Session serving connection, and client with explicit View-node grants. */
-async function fixture(t: TestContext, derive: DeriveHandler, executor: 'node' | 'reader' = 'node', beforeDelivery?: (frame: Frame) => Promise<void>, restricted = false) {
+async function fixture(t: TestContext, derive: DeriveHandler, executor: 'node' | 'reader' = 'node', beforeDelivery?: (frame: Frame) => Promise<void>, restricted = false, modules: readonly ModuleManifest[] = []) {
   const id = randomUUID()
   const store = createMemoryStore({ domain: id })
   let saved: Position | undefined
@@ -40,7 +42,7 @@ async function fixture(t: TestContext, derive: DeriveHandler, executor: 'node' |
     } }],
     open: [],
   }
-  const instance = await createInstance({ id, root: { kind: 'store', store }, modules: [module], blobs: createMemoryBlobStore(),
+  const instance = await createInstance({ id, root: { kind: 'store', store }, modules: [module, ...modules], blobs: createMemoryBlobStore(),
     provisioning: { writerEpoch: 1, domains: [{ store, epoch: randomUUID(), persistent: false }],
       credentialTtlMs: 60_000, counter: { async load() { return saved }, async save(pos) { saved = pos },
         async freshEpoch(floor) { return floor + 1 } },
@@ -109,6 +111,67 @@ function changed(handle: NativeMount, check: (snapshot: NativeSnapshot) => boole
   })
 }
 
+it('restores and streams undo through the exact native Trash declaration while retaining issued identities', { timeout: 10_000 }, async t => {
+  const f = await fixture(t, async () => ({ members: [] }), 'reader', undefined, false, [createTrashManifest('/source')])
+  await f.commit([{ op: 'put', node: { $path: '/trash', $type: 't.dir',
+    '#first': { $type: 't.mount.trash', pattern: 'first' },
+    '#second': { $type: 't.mount.trash', pattern: 'second' } } }])
+  const original = await f.source.read({ children: '/source' })
+  const identities = original.copies.map(copy => {
+    assert.ok('node' in copy)
+    return copy.node.$id
+  })
+  await f.commit([{ op: 'remove', path: '/source/a' }])
+  const selector = { children: '/trash/second', window: { limit: 100 } }
+  const result = f.source.mount(selector)
+  const declaration = f.source.mount({ node: '/trash' })
+  await changed(result, snapshot => snapshot.phase === 'ready' && snapshot.rows?.length === 1)
+  await changed(declaration, snapshot => snapshot.phase === 'ready')
+  assert.deepEqual(result.getSnapshot().viewOwner, { path: '/trash', component: '#second' })
+  assert.deepEqual((await f.source.read(selector)).viewOwner, { path: '/trash', component: '#second' })
+  const restoredAction = deferred<unknown>(), undoAction = deferred<unknown>()
+  const invoke = f.source.act
+  t.mock.method(f.source, 'act', (...args: Parameters<typeof invoke>) => {
+    const pending = invoke(...args)
+    const observed = args[0].action === 'restore' ? restoredAction : undoAction
+    void pending.outcome.then(observed.resolve, observed.resolve)
+    return pending
+  })
+  const View = () => createElement(NativeViewOutput, { snapshot: useNativeChildren('/trash/second') })
+  const browser = render(createElement(View), { wrapper: f.wrapper })
+  t.after(() => { act(() => browser.unmount()); result.dispose(); declaration.dispose() })
+  assert.ok(browser.getByLabelText('Восстановление из корзины'))
+  await act(async () => {
+    fireEvent.click(browser.getByRole('button', { name: 'Восстановить' }))
+    assert.ok(!(await restoredAction.promise instanceof KernelError))
+  })
+  await act(async () => {
+    await f.commit([{ op: 'remove', path: '/source/a' }, { op: 'remove', path: '/source/b' }])
+    await changed(result, snapshot => snapshot.rows?.length === 3)
+  })
+  const latest = result.getSnapshot().rows!
+  const newest = latest.slice(-2)
+  await act(async () => {
+    for (const row of newest) fireEvent.click(browser.getByLabelText(`Выбрать ${row.key}`))
+    fireEvent.click(browser.getByRole('button', { name: 'Отменить выбранные удаления' }))
+    assert.ok(!(await undoAction.promise instanceof KernelError))
+  })
+  const restored = await f.source.read({ children: '/source' })
+  assert.deepEqual(restored.copies.map(copy => {
+    assert.ok('node' in copy)
+    return copy.node.$id
+  }), identities)
+  const requests = f.sent.filter(request => request.t === 'act')
+  assert.deepEqual(requests.map(request => [request.path, request.component, request.action]),
+    [['/trash', '#second', 'restore'], ['/trash', '#second', 'undo']])
+  await act(async () => {
+    await f.commit([{ op: 'patch', path: '/trash', ops: { $unset: { '#second': true } } }])
+    await changed(result, snapshot => snapshot.viewOwner === undefined)
+  })
+  assert.equal(browser.queryByLabelText('Восстановление из корзины'), null)
+  assert.deepEqual((await f.source.read({ children: '/trash/first' })).viewOwner, { path: '/trash', component: '#first' })
+})
+
 it('exposes live computed deltas and replacing rows through the genuine native React hook', { timeout: 10_000 }, async t => {
   const f = await fixture(t, async (_node, _request, read) => {
     const result = await read.read({ children: '/source' })
@@ -127,6 +190,7 @@ it('exposes live computed deltas and replacing rows through the genuine native R
   assert.deepEqual(snapshot.members, [])
   assert.deepEqual(snapshot.computed?.map(node => node.value), [1, 2])
   assert.deepEqual(snapshot.rows, [{ key: 'count', value: 2 }])
+  assert.deepEqual(snapshot.viewOwner, { path: '/view', component: '#mount' })
   assert.deepEqual(f.client.cache.claims(), [])
   await act(async () => {
     await f.commit([{ op: 'patch', path: '/source/b', ops: { $set: { value: 0 } } }])
@@ -152,6 +216,79 @@ it('exposes live computed deltas and replacing rows through the genuine native R
   assert.equal(handle.getSnapshot().error?.code, 'CANCELLED')
   assert.equal(handle.getSnapshot().computed, undefined)
   assert.equal(handle.getSnapshot().rows, undefined)
+})
+
+it('clears retired page ownership and refetches both pages from the new declaration', { timeout: 10_000 }, async t => {
+  const blocked = deferred<void>(), release = deferred<void>()
+  let secondSub: string | undefined
+  let holding = false
+  const f = await fixture(t, async (_node, _request, read) => {
+    const result = await read.read({ children: '/source' })
+    return { members: result.copies.map(copy => {
+      assert.ok('node' in copy)
+      return copy.node.$path
+    }) }
+  }, 'node', async frame => {
+    if (holding && frame.t === 'end' && frame.sub === secondSub) {
+      blocked.resolve()
+      await release.promise
+    }
+  })
+  const handle = f.source.mount({ children: '/view/result', sort: [['value', 1]], window: { limit: 1 } })
+  t.after(() => { release.resolve(); handle.dispose() })
+  await changed(handle, snapshot => snapshot.phase === 'ready' && snapshot.next !== undefined)
+  handle.loadMore()
+  await changed(handle, snapshot => snapshot.phase === 'ready' && snapshot.generations.length === 2)
+  const pages = f.sent.filter(request => request.t === 'sub')
+    .filter(request => 'children' in request.selector && request.selector.children === '/view/result')
+  assert.equal(pages.length, 2)
+  secondSub = pages[1].sub
+  holding = true
+  await f.commit([{ op: 'patch', path: '/view', ops: { $unset: { '#mount': true },
+    $set: { '#replacement': { $type: 'example.view', pattern: 'result' } } } }])
+  await blocked.promise
+  await changed(handle, snapshot => snapshot.phase === 'loading')
+  assert.equal(handle.getSnapshot().viewOwner, undefined)
+  release.resolve()
+  const failed = await changed(handle, snapshot => snapshot.phase === 'error')
+  assert.equal(failed.viewOwner, undefined)
+  assert.equal(failed.error?.code, 'INVALID')
+  handle.refetch()
+  await changed(handle, snapshot => snapshot.phase === 'ready' && snapshot.viewOwner?.component === '#replacement')
+  handle.loadMore()
+  const settled = await changed(handle, snapshot => snapshot.phase === 'ready' && snapshot.generations.length === 2)
+  assert.deepEqual(settled.viewOwner, { path: '/view', component: '#replacement' })
+  assert.deepEqual(settled.computed?.map(node => node.value), [1, 2])
+})
+
+it('reports conflicting ready page declarations and recovers through explicit refetch', { timeout: 10_000 }, async t => {
+  const f = await fixture(t, async (_node, _request, read) => {
+    const result = await read.read({ children: '/source' })
+    return { members: result.copies.map(copy => {
+      assert.ok('node' in copy)
+      return copy.node.$path
+    }) }
+  })
+  const selector = { children: '/view/result', sort: [['value', 1]] as const, window: { limit: 1 } }
+  const handle = f.source.mount(selector)
+  t.after(() => { handle.dispose() })
+  await changed(handle, snapshot => snapshot.phase === 'ready' && snapshot.next !== undefined)
+  handle.loadMore()
+  await changed(handle, snapshot => snapshot.phase === 'ready' && snapshot.generations.length === 2)
+  const pages = f.sent.filter(request => request.t === 'sub')
+    .filter(request => 'children' in request.selector && request.selector.children === '/view/result')
+  assert.equal(pages.length, 2)
+  const second = f.seen.find((frame): frame is Extract<Frame, { t: 'snap' }> => frame.t === 'snap' && frame.sub === pages[1].sub)
+  assert.ok(second)
+  f.client.cache.apply({ ...second, viewOwner: { path: '/other-declaration', component: '#mount' } })
+  const inspection = f.source.mount(selector)
+  inspection.dispose()
+  assert.equal(handle.getSnapshot().phase, 'error')
+  assert.equal(handle.getSnapshot().error?.code, 'CONFLICT')
+  assert.equal(handle.getSnapshot().viewOwner, undefined)
+  handle.refetch()
+  const recovered = await changed(handle, snapshot => snapshot.phase === 'ready')
+  assert.deepEqual(recovered.viewOwner, { path: '/view', component: '#mount' })
 })
 
 it('keeps computed includes separate from later direct cursor members and preserves duplicate row keys per page', { timeout: 10_000 }, async t => {
