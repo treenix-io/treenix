@@ -1223,7 +1223,7 @@ describe('native streaming action contracts', { timeout: 30_000 }, () => {
         kind: 'write',
         args: {},
         handler: async function* (ctx) {
-          for (let frame = 0; frame < 4; frame++) {
+          for (let frame = 0; frame < 16; frame++) {
             for (let child = frame * 24; child < (frame + 1) * 24; child++)
               ctx.change.patch('/box/' + child, { $inc: { value: 1 } });
             yield frame;
@@ -1233,14 +1233,15 @@ describe('native streaming action contracts', { timeout: 30_000 }, () => {
       },
     });
     await f.grant('/box', 0, R | W);
-    const seed: ChangeMember[] = Array.from({ length: 96 }, (_value, child) => ({
+    const seed: ChangeMember[] = Array.from({ length: 384 }, (_value, child) => ({
       op: 'put',
       node: { $path: '/box/' + child, $type: 't.dir', value: 0 },
     }));
-    await f.admin.commit({ opId: f.key(), changes: seed }).outcome;
+    for (let offset = 0; offset < seed.length; offset += 96)
+      await f.admin.commit({ opId: f.key(), changes: seed.slice(offset, offset + 96) }).outcome;
     await f.admin.commit({
       opId: f.key(),
-      changes: [{ op: 'patch', path: '/sys/limits', ops: { $set: { readNodes: 850 } } }],
+      changes: [{ op: 'patch', path: '/sys/limits', ops: { $set: { readNodes: 250 } } }],
     }).outcome;
     const caller = await f.open(undefined, 'BUDGET');
     const request = { path: workerPath, action: 'run', args: {}, opId: f.key() };
@@ -1250,10 +1251,10 @@ describe('native streaming action contracts', { timeout: 30_000 }, () => {
       for await (const _piece of pending.chunks) pieces++;
     }, code('BUDGET'));
     await assert.rejects(pending.outcome, code('BUDGET'));
-    assert.ok(pieces > 0 && pieces < 4);
+    assert.ok(pieces > 0 && pieces < 16);
     const state = await f.accepted();
     const targets = state.nodes.filter((node) => node.$path.startsWith('/box/'));
-    assert.equal(targets.length, 96);
+    assert.equal(targets.length, 384);
     assert.equal(targets.filter((node) => node.value === 1).length, pieces * 24);
     assert.ok(targets.every((node) => node.value === 0 || node.value === 1));
     assert.equal(

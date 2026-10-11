@@ -320,6 +320,51 @@
       "development": "./src/util/stable-json.ts",
       "types": "./dist/util/stable-json.d.ts",
       "default": "./dist/util/stable-json.js"
+    },
+    "./kernel/type-description": {
+      "types": "./dist/kernel/type-description.d.ts",
+      "development": "./src/kernel/type-description.ts",
+      "default": "./dist/kernel/type-description.js"
+    },
+    "./kernel/uix-publication": {
+      "types": "./src/kernel/uix-publication.ts",
+      "development": "./src/kernel/uix-publication.ts",
+      "default": "./dist/kernel/uix-publication.js"
+    },
+    "./kernel/manifest": {
+      "development": "./src/kernel/manifest.ts",
+      "types": "./dist/kernel/manifest.d.ts",
+      "default": "./dist/kernel/manifest.js"
+    },
+    "./kernel/order": {
+      "development": "./src/kernel/order.ts",
+      "types": "./dist/kernel/order.d.ts",
+      "default": "./dist/kernel/order.js"
+    },
+    "./util/is-record": {
+      "development": "./src/util/is-record.ts",
+      "types": "./dist/util/is-record.d.ts",
+      "default": "./dist/util/is-record.js"
+    },
+    "./kernel/migrate": {
+      "development": "./src/kernel/migrate.ts",
+      "types": "./dist/kernel/migrate.d.ts",
+      "default": "./dist/kernel/migrate.js"
+    },
+    "./kernel/input-boundary": {
+      "development": "./src/kernel/input-boundary.ts",
+      "types": "./dist/kernel/input-boundary.d.ts",
+      "default": "./dist/kernel/input-boundary.js"
+    },
+    "./kernel/source-action": {
+      "development": "./src/kernel/source-action.ts",
+      "types": "./dist/kernel/source-action.d.ts",
+      "default": "./dist/kernel/source-action.js"
+    },
+    "./kernel/action-publication": {
+      "development": "./src/kernel/action-publication.ts",
+      "types": "./dist/kernel/action-publication.d.ts",
+      "default": "./dist/kernel/action-publication.js"
     }
   },
   "treenix": {

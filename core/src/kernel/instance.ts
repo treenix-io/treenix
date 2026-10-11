@@ -1,3 +1,6 @@
+import { ACTION_PUBLICATION_PREFIX, installPublishedAction, publishedAction, actionPublicationPath } from '#kernel/action-publication'
+import { installPublishedView, publishedView, PUBLICATION_PREFIX } from '#kernel/uix-publication'
+import { verifyActionSource } from '#kernel/source-action'
 import { KernelError } from '#errors'
 import { createAutostartHandler, createInstanceServices, serviceConfiguration, type ServiceBootstrapPorts, type ServiceTarget } from '#kernel/services'
 import { AUTH_KEY_PATH, assertAdminInput } from '#kernel/auth-module'
@@ -77,6 +80,7 @@ export interface InstanceFoundation {
   prepareMounts(): Promise<void>
   bindAutostartModule(module: ModuleManifest): ModuleManifest
   prepareServices(): Promise<void>
+  preparePublications(): Promise<void>
 }
 export interface InstanceFoundationWithAuth extends InstanceFoundation {
   readonly auth: AuthFactory
@@ -218,6 +222,7 @@ async function buildCanonicalInstance(input: InstanceConfig): Promise<InstanceFo
       ...module, security: instance.bindAutostartModule(module).security,
     })) }, { allowPartialMods: config.allowPartialMods })
     await instance.prepareMounts()
+    await instance.preparePublications()
     await instance.prepareServices()
     return instance
   } catch (error) {
@@ -336,6 +341,26 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
     if (mounts !== undefined) mounts.stage(mountChanges(changed))
     if (store !== config.root) return
 
+    for (const [path, node] of changed) {
+      if (node === null && path.startsWith(ACTION_PUBLICATION_PREFIX))
+        throw new KernelError('FORBIDDEN', 'Accepted action publication is required')
+      if (node?.$type === 'uix.action-publication') {
+        const source = publishedAction(node)
+        if (registry.type(source.type).module !== source.module)
+          throw new KernelError('FORBIDDEN', 'Action publication differs from type ownership')
+        registry.module(source.module)
+        if (source.stream && source.definition.kind !== 'read' && source.definition.post !== undefined)
+          throw new KernelError('INVALID', 'Streaming action source cannot declare post')
+      }
+    }
+
+    for (const node of changed.values()) if (node?.$type === 'uix.publication') {
+      const view = publishedView(node)
+      if (registry.type(view.type).module !== view.module)
+        throw new KernelError('FORBIDDEN', 'Publication differs from type ownership')
+      registry.module(view.module)
+    }
+
     if (!accepted) {
       const fresh = new Map<string, StoredNode>()
       for (const [path, node] of changed) if (node !== null) fresh.set(path, node)
@@ -403,6 +428,10 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
         try { mounts.publish(stage) } finally { topologyPosition = undefined }
       }
       accepted = true
+      for (const image of images) if (image.node?.$type === 'uix.publication')
+        installPublishedView(registry, publishedView(image.node))
+      for (const image of images) if (image.node?.$type === 'uix.action-publication')
+        installPublishedAction(registry, publishedAction(image.node))
       const final = new Map<NodeId, StoredNode | null>()
       for (const image of images) if (!final.has(image.id) || image.node !== null) final.set(image.id, image.node)
       notify({ t: 'nodes', changes: [...final].map(([id, node]) => ({ id, node })) })
@@ -1075,6 +1104,36 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
     commands: (admission) => createCommands(commandOptions(admission)),
     readerSource,
     nodeLaneOptions,
+    async preparePublications() {
+      available()
+      for (const path of targets.target(config.root).paths.keys()) {
+        if (!path.startsWith(PUBLICATION_PREFIX) && !path.startsWith(ACTION_PUBLICATION_PREFIX)) continue
+        const node = await reader(budget()).node(path)
+        if (node === null) throw new KernelError('CONFLICT', 'Accepted publication disappeared')
+        if (path.startsWith(ACTION_PUBLICATION_PREFIX)) {
+          const source = publishedAction(node)
+          await verifyActionSource(source.source, source.stream)
+          installPublishedAction(registry, source)
+        } else installPublishedView(registry, publishedView(node))
+      }
+      for (const path of targets.target(config.root).paths.keys()) {
+        if (!path.startsWith('/sys/types/')) continue
+        const node = await reader(budget()).node(path)
+        const locators = node?.actionPublications
+        if (locators === undefined) continue
+        if (typeof locators !== 'object' || locators === null || Array.isArray(locators) || typeof node?.name !== 'string')
+          throw new KernelError('INVALID', 'Malformed accepted action locators')
+        for (const [action, locator] of Object.entries(locators)) {
+          if (locator !== actionPublicationPath(node.name, action)) throw new KernelError('INVALID', 'Action publication locator differs')
+          const snapshot = await reader(budget()).node(locator)
+          if (snapshot === null) throw new KernelError('CONFLICT', 'Accepted action publication disappeared')
+          const source = publishedAction(snapshot)
+          if (source.type !== node.name || source.action !== action || source.module !== node.module)
+            throw new KernelError('CONFLICT', 'Accepted action source ownership differs')
+        }
+      }
+      available()
+    },
     bindAutostartModule(module) {
       if (module.id !== '@treenx/core/autostart') return module
       return { ...module, security: [...module.security, {

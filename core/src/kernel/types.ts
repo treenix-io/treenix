@@ -557,7 +557,30 @@ export type Gate = (operation: Operation, actor: Actor) => Promise<'pass' | { re
 
 // ---- Types, actions, registry ----
 
-export type JsonSchema = { readonly [keyword: string]: unknown }
+export type JsonSchema = {
+  readonly [keyword: string]: unknown
+  readonly type?: string | readonly string[]
+  readonly title?: string
+  readonly description?: string
+  readonly format?: string
+  readonly default?: unknown
+  readonly readOnly?: boolean
+  readonly enum?: readonly unknown[]
+  readonly properties?: Readonly<Record<string, JsonSchema>>
+  readonly required?: readonly string[]
+  readonly items?: JsonSchema | readonly JsonSchema[]
+  readonly additionalProperties?: boolean | JsonSchema
+  readonly anyOf?: readonly JsonSchema[]
+  readonly oneOf?: readonly JsonSchema[]
+  readonly allOf?: readonly JsonSchema[]
+  readonly minimum?: number
+  readonly maximum?: number
+  readonly minLength?: number
+  readonly maxLength?: number
+  readonly minItems?: number
+  readonly maxItems?: number
+  readonly pattern?: string
+}
 
 /** Kernel I/O for handlers, extended by the deployment; present only where external effects are allowed. */
 export interface Io {}
@@ -771,12 +794,16 @@ export interface ModuleManifest {
   readonly types: readonly TypeDef[]
   readonly security: readonly SecurityRegistration[]
   readonly open: readonly OpenRegistration[]
+  readonly views?: Readonly<Record<TypeName, PublishedView>>
+  readonly actionSources?: readonly PublishedActionSource[]
+  readonly sourceIo?: Readonly<Record<string, (io: Io, input: unknown) => Promise<unknown>>>
 }
 
 /** Content digest of the published module set — the generation: equal counters could hide different rules. */
 export type ModuleDigest = string
 
 export interface Registry {
+  module(id: ModuleId): ModuleManifest
   /** Atomic: the module's types and handlers appear together in a new generation, or not at all. */
   publish(manifest: ModuleManifest): ModuleDigest
   /** Resolves aliases; an unknown type throws UNKNOWN_TYPE. */
@@ -1309,3 +1336,21 @@ export interface LaneOwnership {
 
 
 export type LaneProducer = { readonly req: RequestId } | { readonly sub: SubId; readonly gen: Generation }
+export interface PublishedView {
+  readonly type: TypeName
+  readonly module: ModuleId
+  readonly source: string
+  readonly draft: Path
+  readonly draftRev: Rev
+}
+
+export type SourceActionDefinition =
+  | Omit<ReadAction, 'handler'>
+  | Omit<PostAction, 'handler'>
+  | Omit<WriteAction, 'handler'>
+
+export interface PublishedActionSource extends PublishedView {
+  readonly action: ActionName
+  readonly definition: SourceActionDefinition
+  readonly stream: boolean
+}

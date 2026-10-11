@@ -1,5 +1,7 @@
+import { publishView } from '#kernel/uix-publication';
+import { publishAction } from '#kernel/action-publication';
 import { KernelError } from '#errors';
-import type { ActionDef, JsonSchema, ModuleManifest, Registry, TypeDef } from '#kernel/types';
+import type { ActionDef, JsonSchema, ModuleManifest, Registry, TypeDef, PublishedView } from '#kernel/types';
 
 export type NativeActionDescription =
   | Pick<Extract<ActionDef, { kind: 'read' }>, 'kind' | 'args' | 'needs' | 'pre'>
@@ -11,6 +13,7 @@ export interface NativeTypeDescription {
   readonly version: number;
   readonly schema: JsonSchema;
   readonly actions: Readonly<Record<string, NativeActionDescription>>;
+  readonly view?: PublishedView;
 }
 
 /** Publish every data precondition and effect declaration without exposing executable handlers. */
@@ -25,14 +28,15 @@ function describeAction(action: ActionDef): NativeActionDescription {
 
 /** Expose data declarations while keeping implementation functions inside the actual registry. */
 function describe(type: TypeDef, registry: Registry): NativeTypeDescription {
-  return { name: type.name, module: type.module, version: type.version, schema: type.schema,
+  const view = registry.module(type.module).views?.[type.name];
+  return { name: type.name, module: type.module, version: type.version, schema: type.schema, ...(view === undefined ? {} : { view }),
     actions: Object.fromEntries(Object.entries(type.actions).map(([name, action]) => [name, describeAction(action)])) };
 }
 
 /** The ownership node's ordinary read action supplies schema metadata under the live caller's projection. */
 export function withTypeDescriptions(manifest: ModuleManifest, registry: Registry): ModuleManifest {
   return { ...manifest, types: manifest.types.map(type => type.name !== 't.type' ? type : {
-    ...type, actions: { ...type.actions, describe_type: {
+    ...type, actions: { ...type.actions, publish_action: { kind: 'write', args: { type: 'object', required: ['draft', 'action'], additionalProperties: false, properties: { draft: { type: 'string' }, action: { type: 'string' }, definition: { type: 'object' }, stream: { type: 'boolean' } } }, handler: publishAction(registry) }, publish_view: { kind: 'write', args: { type: 'object', required: ['draft'], additionalProperties: false, properties: { draft: { type: 'string' } } }, handler: publishView }, describe_type: {
       kind: 'read', args: { type: 'object', additionalProperties: false },
       async handler(context) {
         const name = context.node.name;

@@ -22,7 +22,7 @@ export const kernelManifest: ModuleManifest = {
     name: 't.type', module: 'kernel', security: 'ordinary', version: 0, actions: {}, actionsOnly: true,
     schema: { type: 'object', required: ['name', 'module', 'security'], additionalProperties: false,
       properties: { name: { type: 'string', minLength: 1 }, module: { type: 'string', minLength: 1 },
-        security: { enum: ['ordinary', 'user-capability', 'privileged-capability'] } } },
+        security: { enum: ['ordinary', 'user-capability', 'privileged-capability'] }, viewPublication: { type: 'string' }, actionPublications: { type: 'object', additionalProperties: { type: 'string' } } } },
   }, {
     name: 't.limits', module: 'kernel', security: 'ordinary', version: 0, actions: {}, actionsOnly: true,
     schema: { type: 'object', additionalProperties: false,

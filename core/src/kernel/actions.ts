@@ -356,6 +356,11 @@ export function createActionRuntime(options: CommandOptions) {
             frameActive();
             return outcome.value;
           }
+          const lifetime = { signal: executorControl.signal, chargeBytes(bytes: number) {
+            frameActive();
+            ledger.requestBytes += bytes;
+            if (ledger.requestBytes > ledger.requestLimit) throw new KernelError('BUDGET', 'Action request budget exceeded');
+          } };
           const contextOptions = () => ({
             node,
             needs: resolved.needs,
@@ -626,11 +631,13 @@ export function createActionRuntime(options: CommandOptions) {
                 const handler = action.handler;
                 pending = runWithActionContext(context, frameActive, () =>
                   handler.call(freeze(ownComponent), context, structuredClone(request.args)),
+                  lifetime,
                 );
               } else {
                 const handler = action.handler;
                 pending = runWithActionContext(context, frameActive, () =>
                   handler.call(draft!.draft, writeContext!, structuredClone(request.args)),
+                  lifetime,
                 );
               }
               if ('next' in pending) {
@@ -652,7 +659,7 @@ export function createActionRuntime(options: CommandOptions) {
                   if (span !== undefined)
                     await writer.read(source.domains, () => span.validateAnchor());
                   const step = await executorControl.wait(
-                    runWithActionContext(context, frameActive, () => iterator!.next()),
+                    runWithActionContext(context, frameActive, () => iterator!.next(), lifetime),
                   );
                   frameActive();
                   if (step.done) {

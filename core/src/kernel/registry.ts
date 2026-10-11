@@ -32,6 +32,9 @@ function copyAction(action: ActionDef): ActionDef {
 export function copyManifest(manifest: ModuleManifest): ModuleManifest {
   return Object.freeze({
     ...manifest,
+    ...(manifest.views === undefined ? {} : { views: freezeData(structuredClone(manifest.views)) }),
+    ...(manifest.actionSources === undefined ? {} : { actionSources: freezeData(structuredClone(manifest.actionSources)) }),
+    ...(manifest.sourceIo === undefined ? {} : { sourceIo: Object.freeze({ ...manifest.sourceIo }) }),
     types: Object.freeze(manifest.types.map(def => freezeData({
       ...def, schema: structuredClone(def.schema), aliases: def.aliases && [...def.aliases],
       actions: Object.fromEntries(Object.entries(def.actions).map(([name, action]) => [name, copyAction(action)])),
@@ -111,6 +114,11 @@ export function createRegistry(options: RegistryOptions = {}): Registry {
   let generation = digest(modules)
 
   return {
+    module(id) {
+      const manifest = modules.get(id)
+      if (manifest === undefined) throw new KernelError('NOT_FOUND', 'Module is not installed')
+      return manifest
+    },
     get digest() { return generation },
     type(name) {
       const def = types.get(name)
