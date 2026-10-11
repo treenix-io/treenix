@@ -1,4 +1,5 @@
 import { KernelError } from '#errors'
+import { getComponent } from '#core'
 import { assertBootstrapState, ownershipRecord, TYPE_PATH } from '#kernel/bootstrap'
 import { fsMountType, kernelManifest } from '#kernel/builtins'
 import { componentEntries } from '#kernel/migrate'
@@ -9,7 +10,7 @@ import { positionToRev } from '#kernel/position'
 import { createRegistry } from '#kernel/registry'
 import { assertNodeSchema } from '#kernel/schema'
 import { runStoreQuery } from '#kernel/store/budget'
-import { DEFAULT_LIMITS, type ExternalEdits, type ComponentName, type InstanceId, type MountHandler, type ProvisionedStoreMount, type Store, type StoredNode } from '#kernel/types'
+import { DEFAULT_LIMITS, type ExternalEdits, type ComponentName, type InstanceId, type MountHandler, type ProvisionedStoreMount, type Store, type StoredNode, type Session, type Node } from '#kernel/types'
 import { stableJson } from '#util/stable-json'
 
 export type FsDirectoryBindings = Readonly<Record<string, string>>
@@ -22,17 +23,34 @@ interface PreparedDeclaration {
 }
 
 /** Adopt only the accepted startup resource through its declaring node's session. */
-export function createFsMountHandler(mounts: readonly ProvisionedStoreMount[]): MountHandler {
+export interface FsMountDeployment {
+  readonly instance: InstanceId
+  readonly directories: FsDirectoryBindings
+}
+
+/** Adopt startup resources unchanged; later declarations use only this deployment's directory capabilities. */
+export function createFsMountHandler(mounts: readonly ProvisionedStoreMount[], deployment?: FsMountDeployment): MountHandler {
   const prepared = new Map(mounts.map(mount => [stableJson([mount.node, mount.component]), mount]))
 
-  return async (node, session) => {
-    const component = componentEntries(node).find(([, value]) => value.$type === fsMountType.name)
-    const mount = component === undefined ? undefined : prepared.get(stableJson([node.$id, component[0]]))
-    if (mount === undefined) throw new KernelError('UNAVAILABLE', 'Filesystem mount requires startup provisioning')
-    if (mount.revision !== node.$rev) throw new KernelError('CONFLICT', 'Filesystem mount declaration changed')
+  async function open(node: Node, session: Session, component: ComponentName) {
     if (session.actor.principal !== `n:${node.$id}`) throw new KernelError('FORBIDDEN', 'Filesystem mount requires its declaring node session')
-    return mount.target
+    const mount = prepared.get(stableJson([node.$id, component]))
+    if (mount !== undefined) {
+      if (mount.revision !== node.$rev) throw new KernelError('CONFLICT', 'Filesystem mount declaration changed')
+      return mount.target
+    }
+    const declaration = getComponent<{ directory: string; external?: ExternalEdits }>(node, fsMountType.name, component)
+    if (declaration === undefined) throw new KernelError('INVALID', 'Filesystem mount declaration is absent')
+    if (deployment === undefined || !Object.hasOwn(deployment.directories, declaration.directory))
+      throw new KernelError('UNAVAILABLE', 'Filesystem directory capability is unavailable')
+    return openFsMountTarget({ directory: deployment.directories[declaration.directory], instance: deployment.instance,
+      logicalBase: node.$path, external: declaration.external })
   }
+
+  return Object.assign(open, { async prepare(node: Node, component: ComponentName, owner?: import('#kernel/types').MountPreparation) {
+    if (owner === undefined) throw new KernelError('UNAVAILABLE', 'Filesystem preparation requires its accepted declaring session')
+    return open(node, await owner.openSession(), component)
+  } })
 }
 
 /** Validate the complete accepted census before acquiring any configured host-directory authority. */

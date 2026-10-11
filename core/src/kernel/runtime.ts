@@ -107,6 +107,7 @@ export async function openNativeRuntime(input: NativeRuntimeConfig) {
         writerEpoch: lease.writerEpoch,
         domains: [{ store, epoch: lease.epoch, persistent: true }],
         mounts,
+      mountDirectories: config.mountDirectories,
         credentialTtlMs: config.credentialTtlMs,
         bootstrap: existing.items.length === 0 && firstAdmin !== undefined
           ? { kind: 'fresh', admin: firstAdmin }
