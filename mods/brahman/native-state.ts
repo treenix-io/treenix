@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { formatTString, renderTemplate } from '#brahman/helpers';
 import { evalExpr } from '#brahman/sandbox';
 import { BotConfig, BrahmanSession, BrahmanUser, type TString, type WaitState } from '#brahman/types';
-import { brahmanRunSchema, type BrahmanFlow, type BrahmanRunArgs, type BrahmanTelegram } from '#brahman/native-ports';
+import { brahmanRunSchema, type BrahmanFlow, type BrahmanMedia, type BrahmanRunArgs, type BrahmanTelegram } from '#brahman/native-ports';
 
 export interface NativeConversation {
   readonly args: BrahmanRunArgs;
@@ -33,6 +33,15 @@ export interface NativeSessionState extends BrahmanSession {
   data: NativeConversationData;
 }
 
+/** Decode optional Telegram media at the serialized update boundary. */
+function mediaInput(value: unknown): BrahmanMedia | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'object' || value === null || !('fileId' in value) || typeof value.fileId !== 'string'
+    || value.fileId.length === 0 || !('mime' in value) || typeof value.mime !== 'string' || value.mime.length === 0)
+    throw new KernelError('INVALID', 'Invalid serialized Telegram media');
+  return { fileId: value.fileId, mime: value.mime };
+}
+
 /** Decode the external action argument before it selects conversation state. */
 export function runArguments(value: unknown): BrahmanRunArgs {
   if (typeof value !== 'object' || value === null || !('botPath' in value) || typeof value.botPath !== 'string'
@@ -49,6 +58,8 @@ export function runArguments(value: unknown): BrahmanRunArgs {
   const firstName = 'firstName' in update ? update.firstName : undefined;
   const lastName = 'lastName' in update ? update.lastName : undefined;
   const username = 'username' in update ? update.username : undefined;
+  const voice = mediaInput('voice' in update ? update.voice : undefined);
+  const audio = mediaInput('audio' in update ? update.audio : undefined);
   if ((text !== undefined && typeof text !== 'string') || (photo !== undefined && typeof photo !== 'string')
     || (callbackData !== undefined && typeof callbackData !== 'string')
     || (messageId !== undefined && (typeof messageId !== 'number' || !Number.isSafeInteger(messageId)))
@@ -59,7 +70,8 @@ export function runArguments(value: unknown): BrahmanRunArgs {
     update: { ...(text === undefined ? {} : { text }), ...(photo === undefined ? {} : { photo }),
       ...(callbackData === undefined ? {} : { callbackData }), ...(messageId === undefined ? {} : { messageId }),
       ...(firstName === undefined ? {} : { firstName }), ...(lastName === undefined ? {} : { lastName }),
-      ...(username === undefined ? {} : { username }) } };
+      ...(username === undefined ? {} : { username }),
+      ...(voice === undefined ? {} : { voice }), ...(audio === undefined ? {} : { audio }) } };
 }
 
 /** Propagate the canonical native node read, including its admission and absence result. */

@@ -69,11 +69,14 @@ export async function createNativeBrahman(options: NativeBrahmanOptions = {}): P
       const photo = context.message?.photo?.at(-1)?.file_id;
       const callbackData = context.callbackQuery?.data;
       const firstName = context.from.first_name, lastName = context.from.last_name, username = context.from.username;
+      const voice = context.message?.voice, audio = context.message?.audio;
       const args: BrahmanRunArgs = { botPath: node.$path, userId: context.from.id, chatId: context.chat.id,
         lang: context.from.language_code ?? config.langs.split(',')[0].trim(), update: {
           ...(textInput === undefined ? {} : { text: textInput }), ...(messageId === undefined ? {} : { messageId }),
           ...(photo === undefined ? {} : { photo }), ...(callbackData === undefined ? {} : { callbackData }),
           firstName, ...(lastName === undefined ? {} : { lastName }), ...(username === undefined ? {} : { username }),
+          ...(voice === undefined ? {} : { voice: { fileId: voice.file_id, mime: voice.mime_type ?? 'audio/ogg' } }),
+          ...(audio === undefined ? {} : { audio: { fileId: audio.file_id, mime: audio.mime_type ?? 'audio/ogg' } }),
         } };
       await conversation.act(node.$path, 'initialize', args);
       const user = component(await nativeNode(session, `${node.$path}/users/${args.userId}`), BrahmanUser);

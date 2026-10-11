@@ -1,6 +1,11 @@
 import type { JsonSchema, WriteActionContext } from '@treenx/core/kernel/types';
 import type { buildReplyMarkup } from '#brahman/helpers';
 
+export interface BrahmanMedia {
+  readonly fileId: string;
+  readonly mime: string;
+}
+
 export interface BrahmanUpdate {
   readonly text?: string;
   readonly messageId?: number;
@@ -9,6 +14,8 @@ export interface BrahmanUpdate {
   readonly firstName?: string;
   readonly lastName?: string;
   readonly username?: string;
+  readonly voice?: BrahmanMedia;
+  readonly audio?: BrahmanMedia;
 }
 
 export interface BrahmanRunArgs {
@@ -50,6 +57,11 @@ declare module '@treenx/core/kernel/types' {
   }
 }
 
+const mediaSchema: JsonSchema = {
+  type: 'object', additionalProperties: false, required: ['fileId', 'mime'],
+  properties: { fileId: { type: 'string', minLength: 1 }, mime: { type: 'string', minLength: 1 } },
+};
+
 export const brahmanRunSchema: JsonSchema = {
   type: 'object', additionalProperties: false,
   required: ['botPath', 'userId', 'chatId', 'lang', 'update'],
@@ -58,6 +70,7 @@ export const brahmanRunSchema: JsonSchema = {
     update: { type: 'object', additionalProperties: false, properties: {
       text: { type: 'string' }, messageId: { type: 'integer' }, photo: { type: 'string' }, callbackData: { type: 'string' },
       firstName: { type: 'string' }, lastName: { type: 'string' }, username: { type: 'string' },
+      voice: mediaSchema, audio: mediaSchema,
     } },
   },
 };
