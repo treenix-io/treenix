@@ -8,7 +8,7 @@ import { viteSsrPlugin } from '@treenx/ssr/vite-ssr';
 const repoRoot = resolve(import.meta.dirname, '../../..');
 const initCwd = process.env.INIT_CWD;
 const projectRoot = initCwd && existsSync(resolve(initCwd, 'node_modules')) ? initCwd : repoRoot;
-const native = process.env.TREENIX_NATIVE === '1';
+const native = process.env.TREENIX_KERNEL === '1' || process.env.TREENIX_NATIVE === '1';
 const apiPort = process.env.VITE_API_PORT || (native ? '4882' : '3211');
 
 export default defineConfig({
