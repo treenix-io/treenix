@@ -1,37 +1,36 @@
 #!/usr/bin/env tsx
 // CLI: treenix-mount <mountpoint> [--url=http://localhost:3211] [--token=...] [--debug]
+import { createFuseMount } from '#index'
+import { openTwpHttp } from '@treenx/core/client/http-twp'
+import { createTwpClient } from '@treenx/core/client/twp'
+import { mkdir } from 'node:fs/promises'
 
-import { createFuseMount } from '#index';
-import { createTrpcTransport } from '@treenx/core/client';
-import { mkdir } from 'node:fs/promises';
+const args = process.argv.slice(2)
+const flags = Object.fromEntries(args.filter(arg => arg.startsWith('--')).map(arg => {
+  const separator = arg.indexOf('=')
+  return separator === -1 ? [arg.slice(2), 'true'] : [arg.slice(2, separator), arg.slice(separator + 1)]
+}))
+const mountpoint = args.find(arg => !arg.startsWith('--'))
+if (mountpoint === undefined) throw new Error('Usage: treenix-mount <mountpoint> [--url=...] [--token=...] [--debug]')
 
-const args = process.argv.slice(2);
-const flags = Object.fromEntries(
-  args.filter(a => a.startsWith('--')).map(a => {
-    const [k, v] = a.slice(2).split('=');
-    return [k, v ?? 'true'];
-  }),
-);
-const positional = args.filter(a => !a.startsWith('--'));
+const url = flags.url ?? 'http://localhost:3211'
+const credential = flags.token === undefined ? undefined : { token: flags.token }
+await mkdir(mountpoint, { recursive: true })
+const connection = await openTwpHttp({ url, credential })
+const client = createTwpClient(connection, { credential, close: connection.close })
+const mount = createFuseMount({ client, mountpoint, debug: 'debug' in flags })
 
-const mountpoint = positional[0];
-if (!mountpoint) {
-  console.error('Usage: treenix-mount <mountpoint> [--url=http://localhost:3211] [--token=...] [--debug]');
-  process.exit(1);
+/** Finish native unmount before relinquishing the request-owned transport. */
+async function shutdown(): Promise<void> {
+  try { await mount.close() } catch (error) { console.error(error); process.exitCode = 1 }
 }
-
-const url = flags.url ?? 'http://localhost:3211';
-const token = flags.token;
-const debug = 'debug' in flags;
-
-await mkdir(mountpoint, { recursive: true });
-
-const client = createTrpcTransport({ url, token });
-const mount = createFuseMount({ client, mountpoint, debug });
-
-console.log(`[fuse] tree @ ${url} → ${mountpoint}`);
-console.log('[fuse] Ctrl+C to unmount');
-
-// fuse_main (-f, foreground) installs its own SIGINT/SIGTERM handlers and blocks
-// this thread until unmount — a JS shutdown block here would be dead and redundant.
-mount.mount();
+process.once('SIGINT', shutdown)
+process.once('SIGTERM', shutdown)
+try {
+  await client.ready
+  await mount.mount()
+  console.log(`[fuse] native @ ${url} → ${mountpoint}`)
+} catch (error) {
+  await shutdown()
+  throw error
+}

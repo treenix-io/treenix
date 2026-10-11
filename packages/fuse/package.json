@@ -19,5 +19,9 @@
   },
   "peerDependencies": {
     "@treenx/core": "^3.0.0"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "tsx --conditions development --test src/index.test.ts"
   }
 }
