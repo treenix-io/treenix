@@ -150,6 +150,13 @@ export function createWriteActionContext(
       await options.reads.requireReadWrite(path)
       options.active()
     },
+    /** Keep root administration bound to the same executor, metadata span and request lifetime. */
+    async requireAdmin(): Promise<void> {
+      const options = current()
+      options.active()
+      await options.reads.requireAdmin()
+      options.active()
+    },
   }
   if (io !== undefined) Object.defineProperty(context, 'io', {
     enumerable: true,

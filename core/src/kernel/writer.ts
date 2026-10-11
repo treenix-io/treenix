@@ -45,6 +45,7 @@ export interface WriterOptions {
 }
 
 export interface PreparedCommit {
+  readonly budget?: Budget
   readonly writes: readonly StoredWrite[]
   readonly record: JournalCommit
   readonly transitions?: readonly NodeChange[]

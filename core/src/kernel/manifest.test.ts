@@ -24,6 +24,9 @@ const context: WriteActionContext = {
   requireReadWrite: async () => {
     throw new KernelError('UNAVAILABLE', 'Metadata fixture cannot authorize writes')
   },
+  requireAdmin: async () => {
+    throw new KernelError('UNAVAILABLE', 'Metadata fixture cannot authorize administration')
+  },
   change: {
     put: () => { throw new Error('unused') }, patch: () => { throw new Error('unused') },
     remove: () => { throw new Error('unused') }, move: () => { throw new Error('unused') }, restore: () => { throw new Error('unused') },

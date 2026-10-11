@@ -364,11 +364,12 @@ export async function prepareChangeSet(
       expanded.push({ id, before, after });
     }
     await guard.finish(expanded);
-    await validateBlobReferences(
+    const blobWork = await validateBlobReferences(
       expanded.map((change) => change.after),
       options.blobs,
-      budget,
+      options.readCost?.budget() ?? budget,
     );
+    options.readCost?.charge(0, 0, blobWork);
     const paths = new Set(
       expanded.flatMap((change) => [
         ...(change.before === null ? [] : [change.before.$path]),
@@ -379,6 +380,7 @@ export async function prepareChangeSet(
       writes: [...paths].map((at) => ({ path: at, node: states.get(at)! })),
       record: { pos, kind: 'commit', executor: who.executor, caller: who.caller, entries },
       transitions: expanded,
+      budget: options.readCost?.budget() ?? { ...budget, nodes: budget.nodes - loaded.size, bytes: budget.bytes - readBytes, exprWork: budget.exprWork - blobWork },
     };
   } finally {
     for (const lease of leases) lease.release();

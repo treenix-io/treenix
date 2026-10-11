@@ -29,7 +29,7 @@ export async function validateBlobReferences(
   value: unknown,
   store: BlobStore | undefined,
   budget: Budget,
-): Promise<void> {
+): Promise<number> {
   const references = new Map<string, BlobRef>();
   let work = 0;
 
@@ -76,6 +76,7 @@ export async function validateBlobReferences(
     if (Date.now() > budget.deadline)
       throw new KernelError('BUDGET', 'Blob reference validation exceeded its deadline');
   }
+  return work;
 }
 
 /** Resolves a caller-supplied field through the visible node, without prototype lookup. */

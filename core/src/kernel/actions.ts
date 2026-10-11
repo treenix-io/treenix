@@ -1,3 +1,4 @@
+import { pairingOperation, preparePairing } from '#kernel/auth-pairing'
 import { createHash } from 'node:crypto'
 import { assertSafeSchema, validateValue, type ValidationError } from '#comp/validate'
 import { KernelError } from '#errors'
@@ -213,6 +214,14 @@ export function createActionRuntime(options: CommandOptions) {
         const required = action.kind === 'write' ? R | W : R;
         if ((bits & required) !== required)
           throw new KernelError('FORBIDDEN', 'Action call rights are missing');
+        const pairing = pairingOperation(definition, action);
+        if (pairing !== undefined) {
+          if (component !== '') throw new KernelError('INVALID', 'Pairing requires its owning port');
+          if (pairing === 'initPair') {
+            if (!admission.actor.principal.startsWith('u:')) throw new KernelError('UNAUTHENTICATED', 'Pairing initialization requires an account');
+            await callerReads.requireReadWrite(request.path);
+          } else if (pairing !== 'connect') await callerReads.requireAdmin();
+        }
         assertSafeSchema(action.args, 'Action arguments');
         const errors: ValidationError[] = [];
         validateValue(request.args, action.args, 'args', errors);
@@ -432,8 +441,23 @@ export function createActionRuntime(options: CommandOptions) {
                 await checkCallerReads(pos);
               }
               frameActive();
-              const prepared = await prepareChangeSet(
-                {
+              const acceptedReads = new Map<string, Promise<StoredNode | null>>();
+              function readBefore(path: string): Promise<StoredNode | null> {
+                if (source.resolve(path).external !== 'none') return source.auth.node(path);
+                let pending = acceptedReads.get(path);
+                if (pending === undefined) {
+                  pending = source.auth.node(path);
+                  acceptedReads.set(path, pending);
+                }
+                return pending;
+              }
+              const pairing = pairingOperation(definition, action);
+              const acceptedPort = pairing === undefined ? undefined : await readBefore(request.path);
+              if (pairing !== undefined && (acceptedPort === undefined || acceptedPort === null || acceptedPort.$id !== node.$id))
+                throw new KernelError('CONFLICT', 'Pairing owner changed');
+              const accepted = pairing === undefined || acceptedPort === undefined || acceptedPort === null
+                ? undefined : await preparePairing(pairing, acceptedPort, request.args, source.auth);
+              const preparation: ChangeSetOptions = {
                   store,
                   cache: writer.cache,
                   registry,
@@ -443,7 +467,7 @@ export function createActionRuntime(options: CommandOptions) {
                   blobs: executorOptions.blobs,
                   boundary: executorOptions.boundary,
                   resolve: (path) => source.resolve(path).store,
-                  readBefore: source.auth.node,
+                  readBefore,
                   capabilities: executorOptions.capabilities(budget, ledger),
                   preconditions: {
                     index: writer.influence,
@@ -455,8 +479,10 @@ export function createActionRuntime(options: CommandOptions) {
                     work: reads.work,
                     limits,
                   },
-                },
-                changes,
+              };
+              const portPrepared = await prepareChangeSet(
+                preparation,
+                accepted === undefined ? changes : accepted.portChange === undefined ? [] : [accepted.portChange],
                 pos,
                 {
                   executor: executorAdmission.actor.principal,
@@ -474,10 +500,27 @@ export function createActionRuntime(options: CommandOptions) {
                   },
                 },
               );
+              let prepared = portPrepared;
+              if (accepted !== undefined && accepted.authChanges.length !== 0) {
+                const authPrepared = await prepareChangeSet(
+                  { ...preparation, budget: portPrepared.budget }, accepted.authChanges, pos,
+                  { executor: 'kernel', caller: admission.actor.principal },
+                );
+                if (await selectChangeStore(accepted.authChanges, source, ownership, store) !== store)
+                  throw new KernelError('CROSS_DOMAIN', 'Pairing requires one physical Store owner');
+                if (portPrepared.transitions.length + authPrepared.transitions.length > limits.changeSet)
+                  throw new KernelError('BUDGET', 'Pairing exceeds the shared transition budget');
+                prepared = {
+                  writes: [...portPrepared.writes, ...authPrepared.writes],
+                  transitions: [...portPrepared.transitions, ...authPrepared.transitions],
+                  record: { ...authPrepared.record, entries: [...portPrepared.record.entries, ...authPrepared.record.entries] },
+                  budget: authPrepared.budget,
+                };
+              }
               executorOptions.validate(prepared);
               ownImage = prepared.writes.find((write) => write.path === request.path)?.node;
               frameActive();
-              return { ...prepared, ...(value === undefined ? {} : { value }), check: frameActive };
+              return { ...prepared, ...(accepted === undefined ? value === undefined ? {} : { value } : { value: accepted.value }), check: frameActive };
             };
             if (final) return span.finish(store, source.domains, prepare);
             const pos = await span.step(store, source.domains, prepare);
@@ -577,7 +620,7 @@ export function createActionRuntime(options: CommandOptions) {
             resolved = await resolveActionNeeds(action.needs, request.path, reads, limits);
             checkPre();
             let value: unknown;
-            if (action.handler !== undefined) {
+            if (action.handler !== undefined && pairingOperation(definition, action) === undefined) {
               let pending: ActionResult;
               if (action.kind === 'read') {
                 const handler = action.handler;

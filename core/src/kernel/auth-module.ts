@@ -1,3 +1,4 @@
+import { pairingTypes } from '#kernel/auth-pairing'
 import { randomBytes } from 'node:crypto'
 import { KernelError } from '#errors'
 import { hashPassword, passwordPath } from '#kernel/auth/crypto'
@@ -15,7 +16,7 @@ export function assertGroups(groups: readonly string[]): void {
   for (const group of groups) if (!validGroup.test(group)) throw new KernelError('INVALID', 'Reserved or empty group')
 }
 
-const schema = (properties: JsonSchema, required = Object.keys(properties)): JsonSchema =>
+const schema = (properties: Readonly<Record<string, JsonSchema>>, required = Object.keys(properties)): JsonSchema =>
   ({ type: 'object', properties, required, additionalProperties: false })
 const text = { type: 'string', minLength: 1 }
 const secret = (input: RuleInput) => input.admin ? W : 0
@@ -27,6 +28,7 @@ const definition = (name: string, shape: JsonSchema): TypeDef =>
 export const authManifest: ModuleManifest = {
   id: AUTH_MODULE,
   types: [
+    ...pairingTypes,
     definition('t.user', schema({ name: text, status: { enum: ['active', 'pending', 'blocked'] } })),
     definition('t.groups', schema({ list: { type: 'array', items: { ...text, pattern: groupPattern } } })),
     definition('t.credentials', schema({ accountId: text, hash: { type: 'string', pattern: '^[0-9a-f]{32}:[0-9a-f]{128}$' } })),
@@ -35,6 +37,7 @@ export const authManifest: ModuleManifest = {
     definition('t.auth-key', schema({ instance: text, key: { type: 'string', pattern: '^[0-9a-f]{64}$' } })),
   ],
   security: [
+    { type: 't.agent.pairing', context: 'acl', handler: secret },
     { type: 't.user', context: 'acl', handler: account },
     { type: 't.groups', context: 'acl', handler: admin },
     ...['t.credentials', 't.session', 't.auth-key'].map(type => ({ type, context: 'acl' as const, handler: secret })),

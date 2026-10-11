@@ -21,6 +21,7 @@ import { loadAllMods, publishLoadedModules } from '#mod/loader'
 import { createProjector, visibleNode } from '#kernel/projection'
 import { componentEntries } from '#kernel/migrate'
 import { createNativeMountManifest } from '#kernel/mount-native'
+import { withTypeDescriptions } from '#kernel/type-description'
 import { ownMountTarget } from '#kernel/mount-resource'
 import { createMountTable, type MountChange, type MountEntry, type MountRange, type MountTable } from '#kernel/mounts'
 import { comparePositions, positionToRev } from '#kernel/position'
@@ -211,7 +212,7 @@ async function buildCanonicalInstance(input: InstanceConfig): Promise<InstanceFo
       installBuiltins ? [...bootstrapModules, ...modules] : modules,
       bootstrapPolicy.kind === 'reopen' ? bootstrapPolicy.installerCredential : undefined,
     )
-    if (installBuiltins) instance.registry.publish(createNativeMountManifest(config.writerEpoch, config.mounts))
+    if (installBuiltins) instance.registry.publish(withTypeDescriptions(createNativeMountManifest(config.writerEpoch, config.mounts), instance.registry))
     if (discovered === undefined) for (const module of modules) instance.registry.publish(instance.bindAutostartModule(module))
     else await publishLoadedModules(instance.registry, { ...discovered, manifests: discovered.manifests.map(module => ({
       ...module, security: instance.bindAutostartModule(module).security,
@@ -425,7 +426,7 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
     }
     const manifests = [
       ...bootstrapModules.map(module => module.id === 'kernel'
-        ? createNativeMountManifest(config.writerEpoch, config.mounts)
+        ? withTypeDescriptions(createNativeMountManifest(config.writerEpoch, config.mounts), registry)
         : module),
       ...config.modules ?? [],
     ]
@@ -582,7 +583,7 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
   }
   if (identity === undefined) throw new KernelError('INVALID', 'Instance bootstrap identity is absent')
   for (const module of bootstrapModules) {
-    const manifest = module.id === 'kernel' ? createNativeMountManifest(config.writerEpoch, config.mounts) : module
+    const manifest = module.id === 'kernel' ? withTypeDescriptions(createNativeMountManifest(config.writerEpoch, config.mounts), registry) : module
     // An older instance keeps optional builtins uninstalled until its admin installs their ownership.
     const installed = manifest.types.filter(type => owners.has(type.name))
     const names = new Set(installed.flatMap(type => [type.name, ...type.aliases ?? []]))

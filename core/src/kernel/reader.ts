@@ -651,9 +651,13 @@ export function createReader(options: ReaderOptions) {
     throw error;
   }
   /** Capture authorization in the executor's ordered metadata span. */
-  async function assertReadWrite(at: Path): Promise<void> {
+  async function requireAdmin(): Promise<void> {
+    try { await assertReadWrite('/', A, 'requireAdmin'); }
+    catch (error) { refuseBudget(error); }
+  }
+  async function assertReadWrite(at: Path, required = R | W, operation = 'requireReadWrite'): Promise<void> {
     active();
-    ledger.requestBytes += Buffer.byteLength(JSON.stringify({ requireReadWrite: at }));
+    ledger.requestBytes += Buffer.byteLength(JSON.stringify({ [operation]: at }));
     if (ledger.requestBytes > limits.requestBytes)
       throw new KernelError('BUDGET', 'Read request budget exceeded');
     chargeAuthorization(at.length + 1);
@@ -685,7 +689,7 @@ export function createReader(options: ReaderOptions) {
           chargeAuthorization((type.length + 1) * (node.types.length + 1));
       }
       const result = rights(at, found, undefined, true, chain);
-      if ((result.bits & (R | W)) !== (R | W))
+      if ((result.bits & required) !== required)
         throw new KernelError('FORBIDDEN', 'Destination requires read and write rights');
       active();
     });
@@ -900,6 +904,7 @@ export function createReader(options: ReaderOptions) {
     read,
     check: active,
     requireReadWrite,
+    requireAdmin,
     selectInSpan,
     cursor,
     work,
