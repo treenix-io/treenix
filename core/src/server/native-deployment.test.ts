@@ -1,3 +1,7 @@
+import { randomUUID } from 'node:crypto';
+import { resolve } from 'node:path';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { mkdir, mkdtemp } from 'node:fs/promises';
@@ -96,4 +100,68 @@ test('native deployment cold boots accepted seeds, HTTP actions and an owned ser
     if ('error' in state) throw state.error;
     assert.equal(state.node.label, 'ecivres');
   } finally { await second.close(); await reopened.close(); }
+});
+
+
+/** Repeated compiled imports must bind each actual service to its own deployment HTTP lifetime. */
+test('native module factories bind independent MCP route owners', async () => {
+  const modules = [
+    { id: 'mcp-deployment', entry: new URL('../../../mods/mcp/kernel.ts', import.meta.url).href },
+    { id: 'mcp-system', entry: new URL('./native-http-module-fixture.ts', import.meta.url).href },
+  ];
+  async function deployment() {
+    const directory = await mkdtemp(resolve('temp/native-mcp-deployment-'));
+    const runtime = await openNativeDeployment({ runtime: { id: randomUUID(), directory, credentialTtlMs: 60_000,
+      firstAdmin: { path: '/admin', name: 'admin', password: 'mcp-deployment-password' } }, modules });
+    const credential = runtime.instance.setupCredential;
+    assert.ok(credential);
+    const session = await runtime.instance.openSession(credential);
+    const delivery = (async () => { for await (const _frame of session.lane) {} })();
+    const key = () => ({ epoch: runtime.instance.writer.intake.epoch, time: Date.now(), nonce: randomUUID() });
+    let registeredResolve = () => {};
+    const registered = new Promise<void>(resolve => { registeredResolve = resolve; });
+    const register = runtime.httpRoutes.register;
+    runtime.httpRoutes.register = (path, handler) => {
+      const retire = register(path, handler);
+      registeredResolve();
+      return retire;
+    };
+    try {
+      await session.commit({ opId: key(), changes: [
+        { op: 'put', node: { $path: '/sys/mcp', $type: 't.dir' } },
+        { op: 'put', node: { $path: '/sys/mcp/catalog', $type: 't.system' } },
+        { op: 'put', node: { $path: '/data', $type: 't.dir' } },
+        { op: 'put', node: { $path: '/mcp-service', $type: 'mcp.server', url: '/mcp', systemPath: '/sys/mcp/catalog' } },
+      ] }).outcome;
+      const copy = (await session.read({ node: '/mcp-service' })).copies[0];
+      if ('error' in copy) throw copy.error;
+      await session.commit({ opId: key(), expect: { nodes: [{ path: copy.node.$path, rev: copy.node.$rev }] }, changes: [
+        { op: 'patch', path: copy.node.$path, ops: { $set: { $acl: [{ subject: { group: `n:${copy.node.$id}` }, grant: R }] } } },
+      ] }).outcome;
+      await session.commit({ opId: key(), changes: [{ op: 'move', from: copy.node.$path, to: '/sys/autostart' }] }).outcome;
+      await registered;
+    } finally { session.close(); await delivery; }
+    const binding = createTwpHttpServer({ instance: runtime.instance, routes: runtime.httpRoutes, allowedOrigins: [], credentialTtlMs: 60_000 });
+    binding.server.listen(0, '127.0.0.1');
+    await once(binding.server, 'listening');
+    const address = binding.server.address();
+    if (address === null || typeof address === 'string') throw new Error('Missing HTTP address');
+    const client = new Client({ name: 'deployment-test', version: '1.0.0' });
+    await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${address.port}/mcp`),
+      { requestInit: { headers: { authorization: `Bearer ${credential.token}` } } }));
+    return { runtime, client, async close() { await client.close(); await binding.close(); await runtime.close(); } };
+  }
+  const first = await deployment();
+  let firstClosed = false;
+  try {
+    const second = await deployment();
+    try {
+      assert.notEqual(first.runtime.httpRoutes, second.runtime.httpRoutes);
+      assert.equal((await first.client.callTool({ name: 'get_node', arguments: { path: '/data' } })).isError, undefined);
+      assert.equal((await second.client.callTool({ name: 'get_node', arguments: { path: '/data' } })).isError, undefined);
+      await first.close(); firstClosed = true;
+      assert.equal((await second.client.callTool({ name: 'get_node', arguments: { path: '/data' } })).isError, undefined);
+      assert.equal((await second.client.callTool({ name: 'catalog', arguments: {} })).isError, undefined);
+    } finally { await second.close(); }
+  } finally { if (!firstClosed) await first.close(); }
 });

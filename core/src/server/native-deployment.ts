@@ -1,5 +1,6 @@
+import { createTwpHttpRoutes } from '#server/http-routes';
 import { randomUUID } from 'node:crypto';
-import { collectModule, evaluateModuleFactory, getCollectedModule, type CollectedModule, type NativeModuleDeployment, type NativeModuleExports } from '#kernel/manifest';
+import { collectModule, evaluateModuleFactory, getCollectedModule, getModuleDefinition, instantiateModule, type CollectedModule, type NativeModuleDeployment, type NativeModuleExports, type NativeModuleFactory, type NativeModuleHost } from '#kernel/manifest';
 import { installNativeSeeds, type NativeSeedPlan } from '#kernel/seed-install';
 import { openNativeRuntime, type NativeRuntimeConfig } from '#kernel/runtime';
 import { bindModuleIo, loadAllMods, type LoadResult } from '#mod/loader';
@@ -21,24 +22,30 @@ export interface NativeDeploymentConfig {
 }
 
 /** Collect an explicit entry under the same factory and ownership contract as discovered modules. */
-async function explicitModule(location: NativeModuleLocation): Promise<CollectedModule> {
+async function explicitModule(location: NativeModuleLocation, host: NativeModuleHost): Promise<CollectedModule> {
+  const definition = getModuleDefinition(location.id, location.entry);
+  if (definition !== undefined) return instantiateModule(definition, host, location.entry);
   const accepted = getCollectedModule(location.id, location.entry);
   if (accepted !== undefined) return accepted;
   let deployment: NativeModuleDeployment | undefined;
+  let factory: NativeModuleFactory | undefined;
   return collectModule(location.id, async () => {
     const entry: NativeModuleExports = await import(location.entry);
-    deployment = await evaluateModuleFactory(entry);
-  }, location.entry, () => deployment);
+    factory = entry.default;
+    deployment = await evaluateModuleFactory(entry, host);
+  }, location.entry, () => deployment, () => factory);
 }
 
 /** Open a native deployment; modules and IO are resolved before persistent resources are acquired. */
 export async function openNativeDeployment(config: NativeDeploymentConfig) {
+  const httpRoutes = createTwpHttpRoutes();
+  const host: NativeModuleHost = { httpRoutes };
   let loaded: LoadResult;
   if (config.modules === undefined) {
-    loaded = await loadAllMods('kernel', ...(config.modsDir === undefined ? [] : [config.modsDir]));
+    loaded = await loadAllMods('kernel', { host, extraDirs: config.modsDir === undefined ? [] : [config.modsDir] });
   } else {
     const manifests: CollectedModule[] = [];
-    for (const location of config.modules) manifests.push(await explicitModule(location));
+    for (const location of config.modules) manifests.push(await explicitModule(location, host));
     const bindings: ActionIoBinding[] = [];
     for (const manifest of manifests) if (manifest.io !== undefined) bindings.push(manifest.io);
     loaded = { loaded: config.modules.map(location => location.id), failed: [], manifests, io: bindModuleIo(bindings) };
@@ -64,7 +71,7 @@ export async function openNativeDeployment(config: NativeDeploymentConfig) {
           opId: { epoch: intake, time: Date.now(), nonce: randomUUID() } });
       } finally { session.close(); await delivery; }
     }
-    return runtime;
+    return { ...runtime, httpRoutes };
   } catch (error) {
     await runtime.close();
     throw error;

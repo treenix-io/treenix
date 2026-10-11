@@ -1,3 +1,6 @@
 import { createNativeBrahman } from './native-service';
 
-export default createNativeBrahman;
+/** Bind explicit Telegram defaults without interpreting deployment host ports as bot options. */
+export default function createBrahmanModule() {
+  return createNativeBrahman();
+}

@@ -9,7 +9,7 @@ import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { setCurrentMod } from './tracking';
 import type { LoadedMod } from './types';
-import type { CollectedModule, NativeModuleDeployment, NativeModuleExports } from '#kernel/manifest';
+import type { CollectedModule, NativeModuleDeployment, NativeModuleExports, NativeModuleHost, NativeModuleFactory } from '#kernel/manifest';
 import type { ActionIoBinding, Io, Registry } from '#kernel/types';
 
 const log = createLogger('mod');
@@ -55,6 +55,11 @@ export function clearModRegistry(): void {
 }
 
 export type LoadTarget = 'server' | 'client' | 'kernel';
+
+export interface ModuleLoadOptions {
+  readonly host?: NativeModuleHost;
+  readonly extraDirs?: readonly string[];
+}
 
 export interface LoadResult {
   loaded: string[];
@@ -146,7 +151,7 @@ async function ensureTsxRegistered(): Promise<void> {
 
 
 /** Loads target entries and collects manifests when running in the native kernel. */
-export async function loadLocalMods(modsDir: string, target: LoadTarget): Promise<LoadResult> {
+export async function loadLocalMods(modsDir: string, target: LoadTarget, options: ModuleLoadOptions = {}): Promise<LoadResult> {
   const result: LoadResult = { loaded: [], failed: [], manifests: [] };
   const entryBase = target === 'kernel' ? 'kernel' : target === 'client' ? 'client' : 'server';
   const exts = target === 'client' ? CLIENT_EXT : SERVER_EXT;
@@ -199,6 +204,7 @@ export async function loadLocalMods(modsDir: string, target: LoadTarget): Promis
       // R4-BOOT-2: realpath-confine each file inside modDir — symlinked entry files inside
       // a real mod dir would otherwise import code outside the mod root.
       let deployment: NativeModuleDeployment | undefined;
+      let factory: NativeModuleFactory | undefined;
       const importModule = async () => {
         for (const f of filesToImport) {
           const real = await confineReal(modDir, f);
@@ -207,14 +213,19 @@ export async function loadLocalMods(modsDir: string, target: LoadTarget): Promis
             pkgName ? `${pkgName}/${entry.name}/${basenameNoExt(real)}` : real);
           if (native !== undefined && imported.default !== undefined) {
             if (deployment !== undefined) throw new KernelError('CONFLICT', 'Module has more than one native factory');
-            deployment = await native.collector.evaluateModuleFactory(imported);
+            factory = imported.default;
+            deployment = await native.collector.evaluateModuleFactory(imported, options.host);
           }
         }
         if (deployment === undefined) loadSchemasRecursive(modDir, native?.collector.assertModuleSchema);
       };
       if (native) {
         const id = `${native.package}/${entry.name}`, origin = await realpath(modDir);
-        const manifest = native.collector.getCollectedModule(id, origin) ?? await native.collector.collectModule(id, importModule, origin, () => deployment);
+        const definition = native.collector.getModuleDefinition(id, origin);
+        const cached = native.collector.getCollectedModule(id, origin);
+        const manifest = definition !== undefined
+          ? await native.collector.instantiateModule(definition, options.host ?? {}, origin)
+          : cached ?? await native.collector.collectModule(id, importModule, origin, () => deployment, () => factory);
         result.manifests.push(manifest);
       } else {
         setCurrentMod(entry.name);
@@ -268,8 +279,9 @@ export async function publishLoadedModules(registry: Registry, result: LoadResul
 
 // ── Load all mods: internal + engine + project (CWD) ──
 
-export async function loadAllMods(target: LoadTarget, ...extraDirs: string[]): Promise<LoadResult> {
+export async function loadAllMods(target: LoadTarget, options: ModuleLoadOptions = {}): Promise<LoadResult> {
   if (target === 'kernel') (await import('#kernel/manifest')).assertNoAmbientRegistrations();
+  const extraDirs = options.extraDirs ?? [];
   const internalDir = new URL('../mods', import.meta.url).pathname;
   const engineDir = new URL('../../../mods', import.meta.url).pathname;
 
@@ -297,7 +309,7 @@ export async function loadAllMods(target: LoadTarget, ...extraDirs: string[]): P
     if (seen.has(abs)) continue;
     seen.add(abs);
 
-    const r = await loadLocalMods(dir, target);
+    const r = await loadLocalMods(dir, target, options);
     result.loaded.push(...r.loaded);
     result.failed.push(...r.failed);
     result.manifests.push(...r.manifests);

@@ -111,7 +111,7 @@ export async function treenix(config: TreenixConfig): Promise<TreenixServer> {
   // atomic registry generations parked until real hot reload/unload exists).
   if (config.modsDir !== false) {
     const extraDirs = config.modsDir ? [config.modsDir] : [];
-    const mods = await loadAllMods('server', ...extraDirs);
+    const mods = await loadAllMods('server', { extraDirs });
     if (mods.failed.length) {
       if (config.allowPartialMods) {
         const log = createLogger('boot');

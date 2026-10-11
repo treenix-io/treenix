@@ -72,7 +72,7 @@ async function main(): Promise<void> {
         )
   const runtime = await openNativeDeployment({ runtime: { id: config.id, directory: resolve(dirname(configPath), config.directory),
     credentialTtlMs: config.credentialTtlMs, firstAdmin: config.firstAdmin, installerCredential: config.installerCredential, mountDirectories }, modules, io })
-  const binding = createTwpHttpServer({ instance: runtime.instance, allowedOrigins: config.allowedOrigins, credentialTtlMs: config.credentialTtlMs })
+  const binding = createTwpHttpServer({ instance: runtime.instance, routes: runtime.httpRoutes, allowedOrigins: config.allowedOrigins, credentialTtlMs: config.credentialTtlMs })
   try {
     await new Promise<void>((done, reject) => { binding.server.once('error', reject); binding.server.listen(port, host, () => { binding.server.off('error', reject); done() }) })
   } catch (error) { await binding.close(); await runtime.close(); throw error }

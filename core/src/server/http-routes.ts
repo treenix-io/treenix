@@ -57,3 +57,10 @@ export function createTwpHttpRoutes() {
 }
 
 export type TwpHttpRoutes = ReturnType<typeof createTwpHttpRoutes>
+
+
+declare module '#kernel/manifest' {
+  interface NativeModuleHost {
+    readonly httpRoutes?: TwpHttpRoutes;
+  }
+}

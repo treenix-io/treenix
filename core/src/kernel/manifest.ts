@@ -12,15 +12,17 @@ export interface NativeModuleDeployment {
   readonly manifest: ModuleManifest
   readonly io?: ActionIoBinding
 }
-export type NativeModuleFactory = () => Promise<NativeModuleDeployment>
+/** Host capabilities are declared by their owning deployment bindings. */
+export interface NativeModuleHost {}
+export type NativeModuleFactory = (host: NativeModuleHost) => NativeModuleDeployment | Promise<NativeModuleDeployment>
 
 export interface NativeModuleExports { readonly default?: NativeModuleFactory }
 
 /** Evaluate the declared deployment factory while its module collection is owned by the caller. */
-export async function evaluateModuleFactory(entry: NativeModuleExports): Promise<NativeModuleDeployment | undefined> {
+export async function evaluateModuleFactory(entry: NativeModuleExports, host: NativeModuleHost = {}): Promise<NativeModuleDeployment | undefined> {
   if (entry.default === undefined) return undefined;
   if (typeof entry.default !== 'function') throw new KernelError('INVALID', 'Native module factory must be callable');
-  return entry.default();
+  return entry.default(host);
 }
 
 
@@ -29,6 +31,11 @@ export interface CollectedModule extends ModuleManifest {
   readonly io?: ActionIoBinding
   readonly legacySecurity: readonly { readonly type: string; readonly context: SecurityContext }[]
   readonly legacyActions: readonly { readonly type: string; readonly name: string }[]
+}
+
+export interface NativeModuleDefinition {
+  readonly collectionId: string;
+  readonly factory: NativeModuleFactory;
 }
 
 interface Builder {
@@ -46,6 +53,7 @@ interface CollectionState {
   readonly scope: AsyncLocalStorage<Builder>
   readonly modules: Map<string, CollectedModule>
   readonly imports: Map<string, CollectedModule>
+  factories?: Map<string, NativeModuleDefinition>
   ambient: Builder
 }
 
@@ -54,8 +62,9 @@ declare global {
 }
 
 // Source and dist registrations share the legacy map and must share their import scope too.
-const state = globalThis.__treenxModuleCollection ??= { scope: new AsyncLocalStorage<Builder>(), modules: new Map(), imports: new Map(), ambient: builder('ambient') }
+const state: CollectionState = globalThis.__treenxModuleCollection ??= { scope: new AsyncLocalStorage<Builder>(), modules: new Map(), imports: new Map(), ambient: builder('ambient') }
 const scope = state.scope, modules = state.modules
+const factories = state.factories ??= new Map<string, NativeModuleDefinition>()
 
 export function isSecurityContext(context: string): context is SecurityContext {
   return context === 'acl' || context === 'migrate' || context === 'mount' || context === 'service' || context === 'derive'
@@ -156,18 +165,25 @@ function finish(active: Builder): CollectedModule {
     open: Object.freeze(open), legacySecurity: Object.freeze(legacySecurity), legacyActions: Object.freeze(legacyActions) })
 }
 
-export async function collectModule(id: string, importModule: () => Promise<unknown> | void, origin?: string, deployment?: () => NativeModuleDeployment | undefined): Promise<CollectedModule> {
+export async function collectModule(id: string, importModule: () => Promise<unknown> | void, origin?: string, deployment?: () => NativeModuleDeployment | undefined, factory?: () => NativeModuleFactory | undefined): Promise<CollectedModule> {
   const active = builder(id)
   return scope.run(active, async () => {
     try {
       await importModule()
       const declared = deployment?.()
+      const compiled = factory?.();
+      if (compiled !== undefined && declared === undefined)
+        throw new KernelError('INVALID', 'Native module factory returned no deployment');
       const manifest: CollectedModule = declared === undefined ? finish(active) : Object.freeze({
         ...copyManifest(declared.manifest), collectionId: id, io: declared.io,
         legacySecurity: Object.freeze([]), legacyActions: Object.freeze([]),
       })
-      modules.set(id, manifest)
-      if (origin !== undefined) state.imports.set(origin, manifest)
+      if (compiled === undefined) {
+        modules.set(id, manifest)
+        if (origin !== undefined) state.imports.set(origin, manifest)
+      } else {
+        factories.set(origin ?? id, Object.freeze({ collectionId: id, factory: compiled }));
+      }
       return manifest
     } finally {
       active.closed = true
@@ -181,7 +197,23 @@ export function getCollectedModule(id: string, origin?: string): CollectedModule
   return manifest
 }
 
-export function clearCollectedModules(): void { modules.clear(); state.imports.clear() }
+/** Retrieve the compiled factory declaration without retaining any deployment resources. */
+export function getModuleDefinition(id: string, origin?: string): NativeModuleDefinition | undefined {
+  const definition = factories.get(origin ?? id);
+  if (definition !== undefined && definition.collectionId !== id)
+    throw new KernelError('CONFLICT', 'The imported module changed its identity');
+  return definition;
+}
+
+/** Evaluate an imported factory inside its own collection for a fresh host lifetime. */
+export async function instantiateModule(definition: NativeModuleDefinition, host: NativeModuleHost, origin?: string): Promise<CollectedModule> {
+  let deployment: NativeModuleDeployment | undefined;
+  return collectModule(definition.collectionId, async () => {
+    deployment = await definition.factory(host);
+  }, origin, () => deployment, () => definition.factory);
+}
+
+export function clearCollectedModules(): void { modules.clear(); state.imports.clear(); factories.clear() }
 
 export function ambientModule(): CollectedModule { return finish(state.ambient) }
 export function clearAmbientRegistrations(): void { state.ambient = builder('ambient') }
