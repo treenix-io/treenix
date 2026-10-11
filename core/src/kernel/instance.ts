@@ -1,4 +1,9 @@
 import { ancestorPaths } from '#core/path'
+import { ACTION_PUBLICATION_PREFIX, installPublishedAction, publishedAction, actionPublicationPath } from '#kernel/action-publication'
+import { verifyActionSource } from '#kernel/source-action'
+import { installPublishedView, publishedView, PUBLICATION_PREFIX } from '#kernel/uix-publication'
+import { withTypeDescriptions } from '#kernel/type-description'
+import { selectionOwnership } from '#kernel/lane-selection'
 import { createForeignSubscription } from '#kernel/authority/subscription'
 import { runFederationCommit } from '#kernel/authority/commit'
 import { runFederationAction } from '#kernel/authority/action'
@@ -8,36 +13,39 @@ import { createShardOwner } from '#kernel/authority/shard-owner'
 import { createShardRelay } from '#kernel/authority/shard-relay'
 import { runShardCommit, runShardAction } from '#kernel/authority/shard-mutation'
 import { observeCredential } from '#kernel/authority/credential-watch'
-import { ACTION_PUBLICATION_PREFIX, installPublishedAction, publishedAction, actionPublicationPath } from '#kernel/action-publication'
-import { installPublishedView, publishedView, PUBLICATION_PREFIX } from '#kernel/uix-publication'
-import { verifyActionSource } from '#kernel/source-action'
 import { serializeKernel } from '#kernel/serialization'
+import type { RawFsCodecs } from '#kernel/store/rawfs-codec'
+import { comparePaths } from '#core/path'
 import { KernelError } from '#errors'
 import { createAutostartHandler, createInstanceServices, serviceConfiguration, type ServiceBootstrapPorts, type ServiceTarget } from '#kernel/services'
 import { AUTH_KEY_PATH, assertAdminInput } from '#kernel/auth-module'
 import { createAuthFactory, type AuthEvent, type AuthFactory } from '#kernel/auth-factory'
 import { recheckLogin } from '#kernel/auth/login'
-import { assertAdminPath, assertAuthKey, assertBootstrapState, bootstrap, bootstrapIdentity, bootstrapModules, LIMITS_PATH,
-  ownershipRecord, storedLimits, TYPE_PATH, type BootstrapIdentity } from '#kernel/bootstrap'
+import { assertAdminPath, assertAuthKey, assertBootstrapState, bootstrap, bootstrapIdentity, bootstrapModules, LIMITS_PATH, ownershipRecord, storedLimits, TYPE_PATH, type BootstrapIdentity } from '#kernel/bootstrap'
 import { createProcessCache, type Image } from '#kernel/cache'
 import { createBlobTransfers } from '#kernel/blobs'
 import { createAcceptedTargets } from '#kernel/instance-targets'
 import { changeSelectors, prepareChangeSet, type ChangeExecutor } from '#kernel/changeset'
+import { type AcceptedTargetReplacement } from '#kernel/instance-targets'
+import { runBackfill } from '#kernel/backfill'
 import { createCommands, type CommandOptions, type NativeCommands, type NodeActionBinding, type NodeActionTarget } from '#kernel/commands'
 import { judgeGates } from '#kernel/gates'
 import type { NodeLaneOptions } from '#kernel/lane'
 import type { NodeLane } from '#kernel/lane'
-import { createSessionFactory, type SessionFactory } from '#kernel/session-factory'
+import { createSessionFactory, type OpenedSession, type SessionFactory } from '#kernel/session-factory'
 import { createNodeLaneRead } from '#kernel/lane-source'
 import { copyManifest, createRegistry, type TypeOwnership } from '#kernel/registry'
 import { assertTypeOwner, installModuleOwnership, previewModules } from '#kernel/module-install'
 import { loadAllMods, publishLoadedModules } from '#mod/loader'
+import { createGuard } from '#kernel/guard'
 import { createProjector, visibleNode } from '#kernel/projection'
 import { componentEntries } from '#kernel/migrate'
 import { createNativeMountManifest } from '#kernel/mount-native'
-import { withTypeDescriptions } from '#kernel/type-description'
+import type { FsDirectoryBindings } from '#kernel/mount-fs-provider'
 import { ownMountTarget } from '#kernel/mount-resource'
-import { createMountTable, type MountChange, type MountEntry, type MountRange, type MountTable } from '#kernel/mounts'
+import { createMountTable, type MountChange, type MountEntry, type MountRange, type MountStage, type MountTable, type PreparedMountReplacement } from '#kernel/mounts'
+import { transferSubtree as runSubtreeTransfer, type SubtreeTransfer } from '#kernel/transfer'
+import { readTransferProvenance, reopenTransferSource, type ReopenedTransferSource } from '#kernel/transfer-provenance'
 import { comparePositions, positionToRev } from '#kernel/position'
 import { createReader, createReaderLedger, readerOperationCost, type ReaderLedger, type ReaderSource, type ReaderTarget } from '#kernel/reader'
 import { computeRights } from '#kernel/rights'
@@ -48,18 +56,36 @@ import { runStoreQuery } from '#kernel/store/budget'
 import type { ShardConnection, ShardEnvelope } from '#kernel/types'
 import type { AuthReadSource, AuthSource } from '#kernel/session'
 import type { AuthAdmission } from '#kernel/auth-factory'
-import { A, R, W, DEFAULT_LIMITS, type FederationBinding, type ActionIoBinding, type AdminInput, type Budget, type ChangeMember, type Credential, type InstanceConfig, type InstanceId, type Limits, type ModuleManifest, type NodeId,
-  type BlobStore, type Gate, type InstanceStream, type Node, type Path, type Position, type PositionCounter, type ProvisionedStoreMount, type Registry, type ScanRange, type Selector, type SubSelector, type Store, type StoreCommit, type StoredNode, type StreamCursor, type StreamDomain } from '#kernel/types'
+import { A, R, W, DEFAULT_LIMITS, type FederationBinding, type ActionIoBinding, type AdminInput, type Budget, type ChangeMember, type Credential, type InstanceConfig, type ExternalEdits, type InstanceId, type Limits, type ModuleManifest, type NodeId, type BlobStore, type Gate, type InstanceStream, type Node, type Path, type Position, type PositionCounter, type ProvisionedStoreMount, type Registry, type ScanRange, type Selector, type SubSelector, type Store, type StoreCommit, type StoredNode, type StreamCursor, type StreamDomain } from '#kernel/types'
+import type { StoreCommitGroup } from '#kernel/types'
+import type { OpenedStoreMountTarget } from '#kernel/types'
 import { assertWriterDomains, createWriter, type Writer } from '#kernel/writer'
 import { stableJson } from '#util/stable-json'
 import { freeze } from '#util/freeze'
+interface PreparedTransferRoute {
+  readonly replacement: PreparedMountReplacement
+  readonly source: AcceptedTargetReplacement
+  readonly target: OpenedStoreMountTarget
+  stage: MountStage
+  revision: string
+  entry?: MountEntry
+  pos?: Position
+  installed: boolean
+}
+interface BoundTransferRoute extends PreparedTransferRoute {
+  readonly entry: MountEntry
+  readonly pos: Position
+}
 
 export interface InstanceFoundationConfig {
   readonly federation?: FederationBinding
   readonly shardPath?: Path
+  readonly rawfsCodecs?: RawFsCodecs
+  readonly mountDirectories?: FsDirectoryBindings
   readonly io?: ActionIoBinding
   readonly id: InstanceId
   readonly root: Store
+  readonly rootExternal?: ExternalEdits
   readonly writerEpoch: number
   readonly domains: readonly StreamDomain[]
   readonly counter: PositionCounter
@@ -88,6 +114,8 @@ export interface InstanceFoundation {
   close(): Promise<void>
   limits(): Limits
   commit(changes: readonly ChangeMember[], who: ChangeExecutor): Promise<Position>
+  /** Kernel-owned physical transfer; ordinary Session mutations cannot invoke it. */
+  transferSubtree(input: SubtreeTransfer): Promise<Position>
   commands(admission: AuthAdmission): NativeCommands
   /** Supplies the same composed Store source used by native commands and lanes. */
   readerSource(allowance: Budget): ReaderSource
@@ -182,6 +210,8 @@ async function buildCanonicalInstance(input: InstanceConfig): Promise<InstanceFo
     rootExternal: input.rootExternal,
     blobs: input.blobs,
     io: input.io,
+    rawfsCodecs: Object.freeze({ ...input.rawfsCodecs }),
+    mountDirectories: Object.freeze({ ...input.mountDirectories }),
     gates: input.gates === undefined ? undefined : Object.freeze([...input.gates]),
     counter: provisioning.counter,
     writerEpoch: provisioning.writerEpoch,
@@ -193,8 +223,10 @@ async function buildCanonicalInstance(input: InstanceConfig): Promise<InstanceFo
     allowPartialMods: input.allowPartialMods,
   })
 
-  if (config.root.kind !== 'store' || config.rootExternal !== undefined && config.rootExternal !== 'none')
+  if (config.root.kind !== 'store')
     throw new KernelError('UNAVAILABLE', 'Instance root requires a supported Store target')
+  if (config.rootExternal === 'trusted' && (config.root.store.external === undefined || config.root.store.readExternal === undefined))
+    throw new KernelError('INVALID', 'Trusted root Store must report and read external edits')
   assertInstanceOptions({
     id: config.id,
     writerEpoch: config.writerEpoch,
@@ -218,12 +250,15 @@ async function buildCanonicalInstance(input: InstanceConfig): Promise<InstanceFo
   const instance = await createInstanceFoundation({
     id: config.id,
     root: config.root.store,
+    rootExternal: config.rootExternal,
     counter: config.counter,
     writerEpoch: config.writerEpoch,
     domains: config.domains,
     mounts: config.mounts,
     federation: config.federation,
     shardPath: config.shardPath,
+    rawfsCodecs: config.rawfsCodecs,
+    mountDirectories: config.mountDirectories,
     blobs: config.blobs,
     io: config.io,
     gates: config.gates,
@@ -244,6 +279,7 @@ async function buildCanonicalInstance(input: InstanceConfig): Promise<InstanceFo
     else await publishLoadedModules(instance.registry, { ...discovered, manifests: discovered.manifests.map(module => ({
       ...module, security: instance.bindAutostartModule(module).security,
     })) }, { allowPartialMods: config.allowPartialMods })
+    await instance.preparePublications()
     await instance.prepareMounts()
     await instance.preparePublications()
     await instance.prepareServices()
@@ -288,6 +324,8 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
     exprWork: limits.exprWork, deadline: Date.now() + limits.queryMs }))
   // Check the binding before fencing: opening another instance must not acquire its Store lease.
   const storedRoot = (await config.root.scan({ range: { node: '/' }, budget: budget() })).items[0]
+  if (config.root.storageFault?.('/') !== undefined)
+    throw new KernelError('INVALID', 'An unreadable root cannot be bootstrapped')
   if (storedRoot !== undefined) {
     bootstrapIdentity(storedRoot, config.id)
     const key = (await config.root.scan({ range: { node: AUTH_KEY_PATH }, budget: budget() })).items[0]
@@ -314,16 +352,37 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
     if (found.target.kind !== 'store') throw new KernelError('UNAVAILABLE', 'Mount target is not a supported Store')
     return found.target.store
   }
-  const targets = createAcceptedTargets(config.root, resolveStore)
+  const targets = createAcceptedTargets(config.root, resolveStore, (store, path, id) => {
+    if (!externalStore(store)) return undefined
+    const image = cache.getAt(store, path) ?? (id === undefined ? undefined : cache.get(id))
+    return image?.node
+  })
   const paths = targets.root.paths
-  const preparedTargets = new Map<Store, readonly StoredNode[]>()
+  const preparedTargets = new Map<Store, ReturnType<typeof targets.prepare>>()
   const preparedEntries = new Map<Store, MountEntry>()
+  const preparedTransferSources = new Map<Store, ReopenedTransferSource>()
+  const transferRoutes = new Map<Store, PreparedTransferRoute>()
+  const transferPublications = new Map<string, BoundTransferRoute>()
+  const preparedTransferOwners = new Set<PreparedMountReplacement>()
   const registeredTargets = new Map<string, { readonly store: Store; readonly range: MountRange; readonly target: ReaderTarget }>()
+  const backfills = new Map<Store, Promise<void>>()
+  let backfillReady = false
   const journalOnlyStores = new Set(config.domains.map(domain => domain.store).filter(store => store !== config.root))
   const owners = new Map<string, TypeOwnership>()
   let identity: BootstrapIdentity | undefined
   let setupCredential: Credential | undefined
-  let accepted = false, failure: { readonly error: unknown } | undefined
+
+  /** Install physical-owner metadata before the accepted route can be observed. */
+  function installTarget(entry: MountEntry, target: OpenedStoreMountTarget,
+    nodes: ReturnType<typeof targets.prepare>, replacement?: AcceptedTargetReplacement): void {
+    targets.attach(nodes, replacement)
+    if (replacement !== undefined) cache.retireStore(replacement.store)
+    preparedTargets.delete(target.store)
+    registeredTargets.set(entry.key, { store: target.store, range: entry.range,
+      target: { id: entry.range.generation, store: target.store, external: entry.declaration.external,
+        chain: targets.chain, children: targets.children } })
+  }
+  let accepted = storedRoot !== undefined, failure: { readonly error: unknown } | undefined
   let registryRevision = 0
   const listeners = new Set<(event: AuthEvent) => void>()
   const topologyListeners = new Set<(intersects: (range: ScanRange) => boolean) => void>()
@@ -333,6 +392,10 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
     registryRevision++
     mounts?.registryChanged()
     notify({ t: 'registry' })
+    if (backfillReady) {
+      queueBackfill(config.root)
+      for (const target of registeredTargets.values()) queueBackfill(target.store)
+    }
   } })
   const projector = createProjector({ registry, alert: (path, error) => console.error(path, error) })
 
@@ -342,30 +405,36 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
     if (closed) throw new KernelError('UNAVAILABLE', 'Instance is closed')
   }
   /** Captures declaration settings only; ordinary payloads stay in their Store and bounded cache. */
-  function mounting(node: StoredNode): Node | undefined {
-    if (!componentEntries(node).some(([name, component]) => name === '#mount' || mountTypes.has(component.$type)
-      || registry.security(component.$type, 'mount') !== undefined)) return undefined
+  function mounting(node: StoredNode, external = false): Node | undefined {
+    if (!Object.hasOwn(node, '#mount')) {
+      try {
+        if (!componentEntries(node).some(([name, component]) => name === '#mount' || mountTypes.has(component.$type)
+          || registry.security(component.$type, 'mount') !== undefined)) return undefined
+      } catch (error) {
+        if (!external || !(error instanceof KernelError) || error.code !== 'INVALID') throw error
+      }
+    }
     const { $pos, ...fields } = node
     return { ...fields, $rev: positionToRev($pos) }
   }
   /** Stages the final declarations of a whole ChangeSet before storage accepts it. */
-  function mountChanges(changed: ReadonlyMap<string, StoredNode | null>): readonly MountChange[] {
+  function mountChanges(changed: ReadonlyMap<string, StoredNode | null>, external = false): readonly MountChange[] {
     if (mounts === undefined) return []
     const changes = new Map<NodeId, MountChange>()
     for (const [path, node] of changed) {
       const old = targets.target(resolveStore(path)).paths.get(path)
       if (old !== undefined) changes.set(old, { id: old, declarations: [] })
       if (node !== null) {
-        const candidate = mounting(node)
-        changes.set(node.$id, candidate === undefined ? { id: node.$id, declarations: [] } : mounts.declarationsOf(candidate))
+        const candidate = mounting(node, external)
+        changes.set(node.$id, candidate === undefined ? { id: node.$id, declarations: [] } : mounts.declarationsOf(candidate, external))
       }
     }
     return [...changes.values()]
   }
   /** Validates target identities and root invariants before accepted metadata changes. */
-  function validate(changed: ReadonlyMap<string, StoredNode | null>, store = config.root): void {
-    targets.validate(store, changed)
-    if (mounts !== undefined) mounts.stage(mountChanges(changed))
+  function validate(changed: ReadonlyMap<string, StoredNode | null>, store = config.root, external = false, grouped = false): void {
+    if (!grouped) targets.validate(store, changed)
+    if (mounts !== undefined) mounts.stage(mountChanges(changed, external))
     if (store !== config.root) return
 
     for (const [path, node] of changed) {
@@ -419,7 +488,7 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
   function put(node: StoredNode, store = config.root): void {
     targets.put(store, node)
     if (mounts === undefined) {
-      const candidate = mounting(node)
+      const candidate = mounting(node, config.rootExternal === 'trusted')
       if (candidate !== undefined) pendingMounts.set(node.$id, candidate)
       else pendingMounts.delete(node.$id)
     }
@@ -442,17 +511,25 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
   function publish(_domain: string, commit: StoreCommit, images: readonly Image[], store: Store): void {
     // Borrowed journal domains have no logical route; mounted Store metadata is registered separately.
     if (journalOnlyStores.has(store)) return
-    if (commit.writes.length === 0) return
+    if (commit.writes.length === 0 && !commit.record.quarantine?.length) return
     try {
       const changed = new Map<string, StoredNode | null>(commit.writes.map(write => [write.path, null]))
       for (const image of images) if (image.node !== null) changed.set(image.path, image.node)
-      validate(changed, store)
-      const stage = mounts?.stage(mountChanges(changed))
+      const external = commit.record.executor.startsWith('external:')
+      validate(changed, store, external)
+      const claims = new Map(mountChanges(changed, external).map(change => [change.id, change]))
+      for (const fault of mounts?.faultChanges((commit.record.quarantine ?? []).filter(change => change.fault !== null).map(change => change.path)) ?? [])
+        claims.set(fault.id, fault)
+      const transferred = transferPublications.get(positionToRev(commit.pos))
+      const stage = transferred?.stage ?? mounts?.stage([...claims.values()])
       for (const write of commit.writes) remove(write.path, store)
       for (const image of images) if (image.node !== null) put(image.node, store)
       if (mounts !== undefined && stage !== undefined) {
         topologyPosition = commit.pos
-        try { mounts.publish(stage) } finally { topologyPosition = undefined }
+        try {
+          if (transferred === undefined) mounts.publish(stage)
+          else transferred.replacement.publish(stage)
+        } finally { topologyPosition = undefined }
       }
       accepted = true
       for (const image of images) if (image.node?.$type === 'uix.publication')
@@ -461,15 +538,74 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
         installPublishedAction(registry, publishedAction(image.node))
       const final = new Map<NodeId, StoredNode | null>()
       for (const image of images) if (!final.has(image.id) || image.node !== null) final.set(image.id, image.node)
+      if (commit.record.quarantine !== undefined) notify({ t: 'faults', changes: commit.record.quarantine })
       notify({ t: 'nodes', changes: [...final].map(([id, node]) => ({ id, node })) })
     } catch (error) {
       failure = { error }
       throw error
     }
   }
-  const cache = createProcessCache({ queryMs: () => limits.queryMs })
+
+  /** Stages all metadata together; persistence must succeed before the returned publication runs. */
+  function stageGroups(commit: StoreCommit, groups: readonly StoreCommitGroup[]): () => void {
+    targets.validateGroups(groups)
+    const external = commit.record.executor.startsWith('external:')
+    const changed = new Map(commit.writes.map(write => [write.path, write.node]))
+    for (const group of groups)
+      validate(new Map(group.writes.map(write => [write.path, write.node])), group.store, external, true)
+    const claims = new Map(mountChanges(changed, external).map(change => [change.id, change]))
+    for (const fault of mounts?.faultChanges((commit.record.quarantine ?? []).filter(change => change.fault !== null).map(change => change.path)) ?? [])
+      claims.set(fault.id, fault)
+    const stage = mounts?.stage([...claims.values()])
+    const final = new Map<NodeId, StoredNode | null>()
+    for (const entry of commit.record.entries) final.set(entry.id, null)
+    for (const write of commit.writes) if (write.node !== null) final.set(write.node.$id, write.node)
+
+    return () => {
+      for (const group of groups) for (const write of group.writes) remove(write.path, group.store)
+      for (const group of groups) for (const write of group.writes) if (write.node !== null) put(write.node, group.store)
+      if (mounts !== undefined && stage !== undefined) {
+        topologyPosition = commit.pos
+        try { mounts.publish(stage) } finally { topologyPosition = undefined }
+      }
+      accepted = true
+      if (commit.record.quarantine !== undefined) notify({ t: 'faults', changes: commit.record.quarantine })
+      notify({ t: 'nodes', changes: [...final].map(([id, node]) => ({ id, node })) })
+    }
+  }
+  /** Active declarations decide freshness; advertising a reporter alone does not enable external edits. */
+  function externalStore(store: Store): boolean {
+    if (store === config.root) return config.rootExternal === 'trusted'
+    const prepared = preparedEntries.get(store)
+    if (prepared !== undefined) return prepared.declaration.external === 'trusted'
+    for (const registered of registeredTargets.values())
+      if (registered.store === store) return registered.target.external === 'trusted'
+    return false
+  }
+  const cache = createProcessCache({ queryMs: () => limits.queryMs, external: externalStore })
   const initial = await cache.fill(config.root, { subtree: '/' }, budget())
   let writer: Writer
+  /** Migration batches release Writer barriers and retain native owner authority per accepted step. */
+  function queueBackfill(store: Store): void {
+    if (!backfillReady || store.backfill === undefined || backfills.has(store)) return
+    const active = () => !closed && (store === config.root || config.domains.some(domain => domain.store === store)
+      || [...registeredTargets.values()].some(target => target.store === store))
+    const task = (async () => {
+      while (active()) {
+        try {
+          const generation = registry.digest
+          await runBackfill({ writer, store, registry, limits: () => limits, budget, active })
+          if (registry.digest === generation) return
+        }
+        catch (error) {
+          console.error(error)
+          if (!active()) return
+          if (!(error instanceof KernelError) || error.code !== 'CONFLICT') throw error
+        }
+      }
+    })().catch(error => { failure = { error }; console.error(error) }).finally(() => { backfills.delete(store) })
+    backfills.set(store, task)
+  }
   try {
     for (const node of initial.nodes) put(node)
     if (storedRoot !== undefined) identity = assertBootstrapState(config.id, new Map(initial.nodes.map(node => [node.$path, node])))
@@ -504,45 +640,67 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
     })
 
     mounts = buildMountTable()
-    mounts.publish(mounts.stage([...pendingMounts.values()].map(node => mounts!.declarationsOf(node))))
+    mounts.publish(mounts.stage([...pendingMounts.values()].map(node => mounts!.declarationsOf(node, config.rootExternal === 'trusted'))))
     pendingMounts.clear()
 
     const startupIdentities = new Set<NodeId>()
     for (const registration of startupTargets) {
+      const entry = mounts.declaration(registration.key)
+      const proof = await readTransferProvenance(config.root, registration.target.store.blobOwner, budget())
+      if (proof?.intent.source === config.root.blobOwner) {
+        const recovered = await reopenTransferSource(config.root, config.writerEpoch, entry,
+          registration.target, mounts, registry, budget())
+        if (recovered === undefined) throw new KernelError('CONFLICT', 'Startup transfer ownership changed')
+        preparedTransferSources.set(registration.target.store, recovered)
+      }
       const scanned = await runStoreQuery(budget(), limits.queryMs,
-        allowance => registration.target.store.scan({ range: { subtree: '/' }, budget: allowance }))
-      targets.validateAttach(registration.target.store, scanned.items)
+        allowance => registration.target.store.scan({ range: { census: '/' }, budget: allowance }))
+      const prepared = targets.prepare(registration.target.store, scanned.items,
+        preparedTransferSources.get(registration.target.store)?.replacement)
       for (const node of scanned.items) {
         if (startupIdentities.has(node.$id)) throw new KernelError('INVALID', 'Duplicate startup node identity')
         startupIdentities.add(node.$id)
       }
-      preparedTargets.set(registration.target.store, scanned.items)
+      preparedTargets.set(registration.target.store, prepared)
     }
 
-    writer = await createWriter({ instance: config.id, root: config.root, writerEpoch: config.writerEpoch,
-      domains: config.domains, startupTargets, counter: config.counter, budget, applied: publish, cache,
+    writer = await createWriter({ instance: config.id, root: config.root, blobs: config.blobs, writerEpoch: config.writerEpoch,
+      domains: config.domains, startupTargets, counter: config.counter, budget, applied: publish, stageApplied: stageGroups, cache,
+      maintenance: { retentionMs: () => limits.journalRetentionMs, changeSet: () => limits.changeSet,
+        orphanMs: () => limits.blobOrphanMs },
       targetLifecycle: {
         /** Checks prepared target identity before Writer publication authority is granted. */
         validate(registration) {
           if (mounts === undefined) throw new KernelError('UNAVAILABLE', 'Mount table is not initialized')
-          mounts.validate(registration.key, registration.revision)
+          const transferred = transferRoutes.get(registration.target.store)
+          if (transferred === undefined) mounts.validate(registration.key, registration.revision)
+          else {
+            transferred.replacement.validate(transferred.stage)
+            if (registration.key !== transferred.replacement.entry.key || registration.revision !== transferred.revision)
+              throw new KernelError('CONFLICT', 'Prepared transfer declaration changed')
+          }
           if (registeredTargets.get(registration.key)?.store !== registration.target.store) {
             const nodes = preparedTargets.get(registration.target.store)
             if (nodes === undefined) throw new KernelError('INVALID', 'Target metadata is not prepared')
-            targets.validateAttach(registration.target.store, nodes)
+            targets.validateAttach(nodes, transferred?.source ?? preparedTransferSources.get(registration.target.store)?.replacement)
           }
         },
         /** Installs or removes accepted metadata as a mounted target changes routes. */
         publish(event) {
           if (mounts === undefined) throw new KernelError('UNAVAILABLE', 'Mount table is not initialized')
           if (event.kind === 'activate') {
+            const transferred = transferRoutes.get(event.registration.target.store)
+            if (transferred !== undefined) {
+              if (!transferred.installed) throw new KernelError('INVALID', 'Transfer route was not published')
+              mounts.activated(event.registration.key, event.registration.revision, event.registration.target)
+              transferPublications.delete(positionToRev(event.pos))
+              transferRoutes.delete(event.registration.target.store)
+              return
+            }
             const nodes = preparedTargets.get(event.registration.target.store)
             const entry = preparedEntries.get(event.registration.target.store)
             if (nodes === undefined || entry === undefined) throw new KernelError('INVALID', 'Target metadata is not prepared')
-            targets.attach(event.registration.target.store, nodes)
-            preparedTargets.delete(event.registration.target.store)
-            registeredTargets.set(entry.key, { store: event.registration.target.store, range: entry.range,
-              target: { id: entry.range.generation, store: event.registration.target.store, chain: targets.chain, children: targets.children } })
+            installTarget(entry, event.registration.target, nodes, preparedTransferSources.get(event.registration.target.store)?.replacement)
             mounts.activated(event.registration.key, event.registration.revision, event.registration.target)
           } else {
             targets.detach(event.registration.target.store)
@@ -553,10 +711,11 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
       } })
   } finally { initial.release() }
   constructing = false
+  const externalOwners = new Map<Store, { readonly control: AbortController; readonly done: Promise<void> }>()
 
   function reader(allowance: Budget, active = () => true, ledger?: ReaderLedger): AuthReadSource {
     const cost = ledger === undefined ? undefined : readerOperationCost(ledger)
-    let nodes = 0, bytes = 0
+    let nodes = 0, bytes = 0, exprWork = 0
     function check(): void {
       available()
       if (!active()) throw new KernelError('INVALID', 'Read scope has ended')
@@ -582,30 +741,38 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
           cost!.refuse(new KernelError('BUDGET', 'Read node budget exceeded'))
         const lease = await writer.cache.fill(store, { node: path }, { ...allowance,
           nodes: Math.min(allowance.nodes - nodes, remaining?.nodes ?? allowance.nodes),
-          bytes: Math.min(allowance.bytes - bytes, remaining?.bytes ?? allowance.bytes) }).catch(error => {
+          bytes: Math.min(allowance.bytes - bytes, remaining?.bytes ?? allowance.bytes),
+          exprWork: Math.min(allowance.exprWork - exprWork, remaining?.exprWork ?? allowance.exprWork) }).catch(error => {
             if (cost !== undefined) cost.refuse(error)
             throw error
           })
         try {
           check()
           const node = lease.nodes[0]
-          if (node === undefined || node.$id !== id) throw new KernelError('INVALID', 'Accepted identity differs from the root Store')
-          const loadedBytes = Buffer.byteLength(JSON.stringify(node))
-          nodes++; bytes += loadedBytes
-          cost?.charge(1, loadedBytes)
-          if (nodes > allowance.nodes || bytes > allowance.bytes) {
+          if (externalStore(store)) {
+            if (lease.cost === undefined) throw new KernelError('INVALID', 'Trusted physical read has no inspected cost')
+            nodes += lease.cost.nodes; bytes += lease.cost.bytes; exprWork += lease.cost.exprWork
+            cost?.charge(lease.cost.nodes, lease.cost.bytes, lease.cost.exprWork)
+          } else {
+            if (node === undefined || node.$id !== id) throw new KernelError('INVALID', 'Accepted identity differs from the root Store')
+            const loadedBytes = Buffer.byteLength(JSON.stringify(node))
+            nodes++; bytes += loadedBytes
+            cost?.charge(1, loadedBytes)
+          }
+          if (nodes > allowance.nodes || bytes > allowance.bytes || exprWork > allowance.exprWork) {
             const error = new KernelError('BUDGET', 'Read budget exceeded')
             if (cost !== undefined) cost.refuse(error)
             throw error
           }
-          return node
+          return node ?? null
         } finally { lease.release() }
       },
       async nodeById(id) {
         check()
         const address = targets.address(id)
         if (address === undefined || resolveStore(address.path) !== address.store) return null
-        return readSource.node(address.path)
+        const node = await readSource.node(address.path)
+        return node === null || node.$id !== id ? null : node
       },
       shard(path) { check(); return shardAt(path) },
     }
@@ -645,6 +812,8 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
     const names = new Set(installed.flatMap(type => [type.name, ...type.aliases ?? []]))
     registry.publish({ ...manifest, types: installed, security: manifest.security.filter(entry => names.has(entry.type)) })
   }
+
+  if (config.rootExternal === 'trusted') await startExternal(config.root)
 
   const auth = config.initialCredential === undefined ? undefined : createAuthFactory({ instance: config.id, registry, source,
     shardPath: config.shardPath,
@@ -710,6 +879,7 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
     const rootTarget: ReaderTarget = {
       id: paths.get('/')!,
       store: config.root,
+      external: config.rootExternal,
       chain: targets.chain,
       children: targets.children,
     };
@@ -1044,11 +1214,18 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
         config.budget === undefined && kind === 'action'
           ? { ...budget(), deadline: Date.now() + limits.actionMs }
           : budget(),
-      validate: (prepared) =>
+      validate: (prepared) => {
+        if (prepared.groups !== undefined) {
+          targets.validateGroups(prepared.groups)
+          for (const group of prepared.groups)
+            validate(new Map(group.writes.map(write => [write.path, write.node])), group.store, false, true)
+          return
+        }
         validate(
           new Map(prepared.writes.map((write) => [write.path, write.node])),
           prepared.writes.length === 0 ? config.root : resolveStore(prepared.writes[0].path),
-        ),
+        )
+      },
     };
     return options;
   }
@@ -1148,6 +1325,158 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
       signal.removeEventListener('abort', close);
       close();
       await delivery;
+    }
+  }
+  /** Start one declared reporter and reconcile its stopped edits before public admission. */
+  async function startExternal(store: Store, root: Path = '/'): Promise<void> {
+    if (externalOwners.has(store)) return
+    if (store.external === undefined || store.readExternal === undefined)
+      throw new KernelError('INVALID', 'Trusted Store requires paired external reporting and reads')
+    const control = new AbortController()
+    const external = store.external
+    /** Preserve actual invariants and accepted indexes before physical images enter the order. */
+    async function reconcile(paths: readonly Path[]): Promise<void> {
+      await writer.reconcile(store, paths, async (changes, unknown) => {
+        control.signal.throwIfAborted()
+        const guard = createGuard({ registry, executor: `external:${store.domain}`, readBefore: source.node })
+        for (const change of changes) await guard.transition(change.before, change.after)
+        const changed = new Map(changes.map(change => [change.after?.$path ?? change.before!.$path, change.after]))
+        for (const image of unknown) {
+          const address = targets.address(image.id)
+          if (address !== undefined && (address.store !== store || address.path !== image.path))
+            throw new KernelError('INVALID', 'External current state differs from its accepted identity')
+          if (image.after !== null) await guard.transition(null, image.after)
+          changed.set(image.path, image.after)
+        }
+        validate(changed, store, true)
+      })
+    }
+    const reporter = external(control.signal)
+    try {
+      await reporter.ready
+      await reconcile([root])
+    } catch (error) {
+      control.abort(error)
+      throw error
+    }
+    const done = (async () => {
+      try {
+        for await (const paths of reporter) {
+          if ('t' in paths) {
+            await recoverExternal(store, paths.epoch, control.signal)
+          } else await reconcile(paths)
+        }
+      } catch (error) {
+        if (error === control.signal.reason) return
+        console.error(error)
+        if (store.transactionOwner !== undefined) {
+          writer.failObservation(store)
+          control.abort(error)
+          return
+        }
+        failure = { error }
+        sessions?.close()
+        throw error
+      }
+    })()
+    void done.catch(() => {})
+    externalOwners.set(store, { control, done })
+  }
+
+  /** Reconcile bounded current images before reopening the affected observation domain. */
+  async function recoverExternal(store: Store, epoch: string, signal: AbortSignal): Promise<void> {
+    await writer.recover(store, async (members, accept) => {
+      signal.throwIfAborted()
+      const recoveryBudget = budget()
+      const recovering = []
+      for (const member of members) {
+        if (journalOnlyStores.has(member)) continue
+        cache.retireStore(member)
+        recovering.push({ member, prior: targets.invalidate(member) })
+      }
+      writer.influence.replaceDomains(Object.keys(writer.intake.domains), writer.position, [store.domain])
+
+      for (const { member, prior } of recovering) {
+        const census = await member.scan({ range: { census: '/' }, budget: recoveryBudget })
+        if (census.next !== undefined) throw new KernelError('BUDGET', 'External recovery census is incomplete')
+        const current = new Map(census.items.map(node => [node.$path, node]))
+        const paths = [...new Set([...prior.paths.keys(), ...current.keys()])].sort((left, right) => {
+          signal.throwIfAborted()
+          if (Date.now() >= recoveryBudget.deadline) throw new KernelError('BUDGET', 'External recovery deadline exceeded')
+          return comparePaths(left, right)
+        })
+        for (const path of paths) {
+          signal.throwIfAborted()
+          const before = prior.paths.get(path), metadata = current.get(path)
+          if (before !== undefined && metadata !== undefined && before !== metadata.$id)
+            throw new KernelError('INVALID', 'External recovery changes accepted node identity')
+          if (metadata !== undefined && prior.chains.get(path)?.types[0] !== undefined
+            && prior.chains.get(path)!.types[0] !== metadata.chain.types[0])
+            throw new KernelError('INVALID', 'External recovery changes accepted node type')
+          await accept(member, [path], async (changes, unknown) => {
+            const guard = createGuard({ registry, executor: `external:${member.domain}`, readBefore: reader(budget()).node })
+            for (const change of changes) await guard.transition(change.before, change.after)
+            const changed = new Map<Path, StoredNode | null>()
+            for (const image of unknown) {
+              if (image.after !== null) await guard.transition(null, image.after)
+              changed.set(image.path, image.after)
+            }
+            validate(changed, member, true)
+          }, async (selected, allowance) => {
+            const result = await member.readExternal!(selected, { ...allowance,
+              deadline: Math.min(allowance.deadline, recoveryBudget.deadline) })
+            if (result.items.length !== 0 || before === undefined) return result
+            return { ...result, items: [{ path, id: before, before: 'unknown', after: null }] }
+          })
+        }
+      }
+      if (Date.now() >= recoveryBudget.deadline) throw new KernelError('BUDGET', 'External recovery deadline exceeded')
+      writer.stream.publish({ t: 'reset', domain: store.domain, epoch })
+    })
+  }
+
+  /** End the reporter before target retirement waits for its accepted reads and writes. */
+  async function stopExternal(store: Store): Promise<void> {
+    const owner = externalOwners.get(store)
+    if (owner === undefined) return
+    owner.control.abort(new KernelError('CANCELLED', 'External Store reporting ended'))
+    await owner.done
+    externalOwners.delete(store)
+  }
+  /** Keep each executor read ordered while its asynchronous derive runs outside the Writer barrier. */
+  function viewRead(admission: AuthAdmission): ViewRead {
+    return async (selector, observeDependency, ledger, check) => {
+      check()
+      const allowance = readerOperationCost(ledger).budget()
+      await prepareSource(allowance, [selector], admission.signal)
+      const input = readerSource(allowance, ledger)
+      const at = 'node' in selector ? selector.node : 'children' in selector ? selector.children : selector.history
+      const resolution = mounts?.resolve(at, 'children' in selector)
+      if (resolution?.target.kind === 'view') throw new KernelError('INVALID', 'A View cannot read another View')
+      const held: import('#kernel/cache').CacheRead[] = []
+      const reads = createReader({ registry, writer, admission, source: input, budget: allowance, ledger,
+        limits, projector, observeDependency, scope: { check, hold(lease) { held.push(lease) } } })
+      try {
+        if ('history' in selector) {
+          const result = await reads.read(selector)
+          return { roots: [], images: [], fixedIncludes: { covered: [], reads: reads.expect() },
+            reads: reads.expect(), at: result.at, history: result.history, next: result.next }
+        }
+        return await writer.read(input.domains, async () => {
+          const selected = await reads.selectInSpan(selector)
+          const images = selected.images.map(image => {
+            const pin = image.retain()
+            let pending = true
+            return { ...image, retain() {
+              if (pending) { pending = false; return pin }
+              const id = 'node' in image.copy ? image.copy.node.$id : image.copy.id
+              return writer.cache.retain(id)
+            } }
+          })
+          return { ...selected, images, at: [writer.stream.cursor().pos] }
+        })
+      } catch (error) { return readerOperationCost(ledger).refuse(error) }
+      finally { for (const lease of held) lease.release() }
     }
   }
   /** Build lane options with the caller's admission and instance capabilities. */
@@ -1263,7 +1592,10 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
         config.blobs === undefined ? undefined : createBlobTransfers(options, config.blobs),
       read: createNodeLaneRead(
         options,
-        path => mounts?.resolve(path)?.entry.declaration.external !== 'trusted',
+        path => {
+          const mounted = mounts?.resolve(path)
+          return mounted === undefined ? config.rootExternal !== 'trusted' : mounted.entry.declaration.external !== 'trusted'
+        },
       ),
       gateSub: (selector, signal) =>
         judgeGates(
@@ -1285,6 +1617,23 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
     };
   }
   sessions = auth === undefined ? undefined : createSessionFactory({ auth, limits: () => limits, lane: nodeLaneOptions })
+
+  /** Keep the actual declaring lane alive until its owned mount ends or accepted authority is revoked. */
+  function mountSession(opened: OpenedSession) {
+    const delivery = drainSession(opened.session).catch(error => {
+      // Losing the declaring node's authority ends only its owned mount session.
+      if (error instanceof KernelError && (error.code === 'CANCELLED' || error.code === 'UNAUTHENTICATED')) return
+      throw error
+    })
+    mountDeliveries.add(delivery)
+    void delivery.then(() => mountDeliveries.delete(delivery), error => {
+      mountDeliveries.delete(delivery)
+      console.error(error)
+      failure = { error }
+    })
+    return { session: opened.session, admission: opened.admission, close: () => opened.session.close() }
+  }
+
   /** Stages root claims before Writer effects; handlers open after the real session factory exists. */
   function buildMountTable(): MountTable {
     return createMountTable({
@@ -1369,16 +1718,23 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
           return
         }
         if (target.kind !== 'store') throw new KernelError('UNAVAILABLE', 'Mount target is not a supported Store')
+        const recovered = await reopenTransferSource(config.root, config.writerEpoch, entry, target, mounts!, registry, budget())
+        if (recovered !== undefined) {
+          preparedTransferSources.set(target.store, recovered)
+          if (recovered.opened !== undefined) writer.retainTarget(recovered.opened)
+        }
         // Off-route rows must pass accepted identity checks before entering the shared cache.
-        const nodes = preparedTargets.get(target.store) ?? (await runStoreQuery(budget(), limits.queryMs,
-          allowance => target.store.scan({ range: { subtree: '/' }, budget: allowance }))).items
+        const nodes = preparedTargets.get(target.store) ?? targets.prepare(target.store, (await runStoreQuery(budget(), limits.queryMs,
+          allowance => target.store.scan({ range: { census: '/' }, budget: allowance }))).items, recovered?.replacement)
         preparedTargets.set(target.store, nodes)
         preparedEntries.set(target.store, entry)
         try {
           await writer.activateTarget({ key: entry.key, revision: entry.revision, target })
+          if (entry.declaration.external === 'trusted') await startExternal(target.store, entry.node.$path)
         } finally {
           preparedTargets.delete(target.store)
           preparedEntries.delete(target.store)
+          preparedTransferSources.delete(target.store)
         }
       },
 
@@ -1398,6 +1754,7 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
           await target.close?.()
           return
         }
+        if (target.kind === 'store') await stopExternal(target.store)
         await writer.retireTarget(entry.key, entry.revision)
       },
       changed(before, after) {
@@ -1426,6 +1783,11 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
 
   /** Accepted changes revoke only the registrations pinned to their actual node identity. */
   function invalidateServiceNodes(event: AuthEvent): void {
+    if (event.t === 'faults') {
+      for (const pins of servicePins.values()) for (const pin of [...pins])
+        if (event.changes.some(change => change.path === pin.node.$path || pin.node.$path.startsWith(`${change.path === '/' ? '' : change.path}/`))) pin.invalidated()
+      return
+    }
     if (event.t === 'registry') {
       for (const pins of servicePins.values()) for (const pin of [...pins]) pin.invalidated()
       return
@@ -1528,6 +1890,10 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
       observeBootstrap(changed) {
         let marker = targets.target(resolveStore('/sys/autostart')).paths.get('/sys/autostart')
         const receive = (event: AuthEvent) => {
+          if (event.t === 'faults') {
+            if (event.changes.some(change => '/sys/autostart' === change.path || '/sys/autostart'.startsWith(`${change.path === '/' ? '' : change.path}/`))) changed()
+            return
+          }
           if (event.t === 'registry' || event.changes.some(change => change.node?.$path === '/sys/autostart'
             || change.id === marker)) {
             marker = targets.target(resolveStore('/sys/autostart')).paths.get('/sys/autostart')
@@ -1547,11 +1913,74 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
   let services: ReturnType<typeof createInstanceServices> | undefined
   let closing: Promise<void> | undefined
 
+  /** Bind an off-route physical copy to the canonical declaration and its fresh Writer intake. */
+  function transferSubtree(input: SubtreeTransfer): Promise<Position> {
+    available()
+    if (mounts === undefined) throw new KernelError('UNAVAILABLE', 'Mount table is not initialized')
+    const table = mounts
+    return runSubtreeTransfer({ writer, mounts: table, registry, targets, root: config.root, budget, limits: () => limits,
+      resolve: resolveStore, retain: replacement => { preparedTransferOwners.add(replacement) },
+      handoff: replacement => { preparedTransferOwners.delete(replacement) },
+      async activate(prepared) {
+        const { replacement, source, stage, allowance } = prepared
+        const target = replacement.target
+        const scanned = await target.store.scan({ range: { census: '/' }, budget: allowance })
+        const nodes = targets.prepare(target.store, scanned.items, source)
+        preparedTargets.set(target.store, nodes)
+        const route: PreparedTransferRoute = { replacement, source, stage, target,
+          revision: replacement.entry.revision, installed: false }
+        transferRoutes.set(target.store, route)
+        preparedEntries.set(target.store, replacement.entry)
+        const registration = { key: replacement.entry.key, revision: replacement.entry.revision, target }
+
+        return writer.activateTarget(registration, { declarationStore: prepared.declarationStore,
+          before: prepared.before,
+          rejected() {
+            replacement.cancelSession()
+            const current = transferRoutes.get(target.store)
+            if (current?.pos !== undefined) transferPublications.delete(positionToRev(current.pos))
+            transferRoutes.delete(target.store)
+            preparedTargets.delete(target.store)
+            preparedEntries.delete(target.store)
+          },
+          source: source.store, removed: prepared.removed, check: prepared.check,
+          async prepare(pos) {
+            prepared.check()
+            const after = { ...prepared.draft, $pos: pos }
+            await createGuard({ registry, executor: 'kernel', readBefore: async () => prepared.before }).transition(prepared.before, after)
+            validate(new Map([[after.$path, after]]), prepared.declarationStore)
+            const { $pos, ...fields } = after
+            const finalStage = table.stage([table.declarationsOf({ ...fields, $rev: positionToRev($pos) })])
+            const entry = replacement.bind(finalStage)
+            const bound: BoundTransferRoute = { ...route, stage: finalStage, revision: entry.revision, entry, pos }
+            transferRoutes.set(target.store, bound)
+            transferPublications.set(positionToRev(pos), bound)
+            preparedEntries.set(target.store, entry)
+
+            return { registration: { key: entry.key, revision: entry.revision, target },
+              writes: [{ path: after.$path, node: after }], budget: allowance,
+              transitions: [{ id: after.$id, before: prepared.before, after }],
+              check() { prepared.check(); replacement.validate(finalStage) },
+              async accepted(owner) { await replacement.authorize(owner) },
+              record: { pos, kind: 'kernel', executor: 'kernel', caller: 'kernel',
+                entries: [{ id: after.$id, path: after.$path,
+                  change: { t: 'reconcile', before: prepared.before, after } }] } }
+          },
+        })
+      },
+    }, input)
+  }
+
+  backfillReady = true
+  queueBackfill(config.root)
+  for (const target of registeredTargets.values()) queueBackfill(target.store)
+
   return {
     id: config.id,
     root: config.root,
     registry,
     writer,
+    transferSubtree,
     source,
     bootstrap: identity,
     stream: writer.stream,
@@ -1650,6 +2079,7 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
       available()
       if (services === undefined) services = createInstanceServices(servicePorts())
       await services.ready()
+      available()
     },
     /** Opens configured mount keys before the native runtime returns the instance. */
     async prepareMounts() {
@@ -1673,9 +2103,14 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
         authorityOwners.clear()
         for (const result of authorities) if (result.status === 'rejected') { console.error(result.reason); errors.push(result.reason) }
 
+        const stopped = await Promise.allSettled([...externalOwners.keys()].map(stopExternal))
+        for (const result of stopped) if (result.status === 'rejected') errors.push(result.reason)
         try { await services?.close() } catch (error) { console.error(error); errors.push(error) }
         try { await mounts!.close() } catch (error) { console.error(error); errors.push(error) }
         try { await writer.closeTargets() } catch (error) { console.error(error); errors.push(error) }
+        for (const owner of preparedTransferOwners) {
+          try { await owner.close() } catch (error) { console.error(error); errors.push(error) }
+        }
         const drained = await Promise.allSettled(mountDeliveries)
         for (const result of drained) if (result.status === 'rejected') errors.push(result.reason)
         if (errors.length !== 0) throw new AggregateError(errors, 'Instance resources failed to close')

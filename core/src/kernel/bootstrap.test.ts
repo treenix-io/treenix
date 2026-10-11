@@ -1,3 +1,5 @@
+import type { StoreCensusQuery, StoreCensusRange, StoreCensusNode } from "#kernel/types"
+import type { JournalPositionHeadRange, JournalIntakeHeadRange, DecisionMetadataRange, JournalPositionHead, JournalIntakeHead, DecisionMetadata } from '#kernel/types'
 import type { PositionCounter } from '#kernel/types'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
@@ -96,10 +98,20 @@ describe('native instance bootstrap', { timeout: 10_000 }, () => {
     const root = createMemoryStore({ domain: 'failed-prepare' })
     const failure = new KernelError('BUDGET', 'Injected second preparation failure')
     let rootReads = 0
-    function scan(query: ScanQuery<ScanRange>): Promise<ScanResult<StoredNode>>
+    function scan(query: StoreCensusQuery): Promise<ScanResult<StoreCensusNode>>
+  function scan(query: ScanQuery<ScanRange>): Promise<ScanResult<StoredNode>>
     function scan(query: ScanQuery<JournalRange | DecisionRange>): Promise<ScanResult<JournalCommit>>
-    async function scan(query: ScanQuery<ScanRange | JournalRange | DecisionRange>): Promise<ScanResult<StoredNode> | ScanResult<JournalCommit>> {
+    function scan(query: ScanQuery<JournalPositionHeadRange>): Promise<ScanResult<JournalPositionHead>>
+    function scan(query: ScanQuery<JournalIntakeHeadRange>): Promise<ScanResult<JournalIntakeHead>>
+    function scan(query: ScanQuery<DecisionMetadataRange>): Promise<ScanResult<DecisionMetadata>>
+    async function scan(query: ScanQuery<ScanRange | StoreCensusRange | JournalRange | DecisionRange | JournalPositionHeadRange | JournalIntakeHeadRange | DecisionMetadataRange>): Promise<ScanResult<StoreCensusNode> | ScanResult<StoredNode> | ScanResult<JournalCommit> | ScanResult<JournalPositionHead> | ScanResult<JournalIntakeHead> | ScanResult<DecisionMetadata>> {
       const range = query.range
+    if ("census" in range) return root.scan({ range, budget: query.budget })
+      if ('journalHead' in range) return range.journalHead === 'position'
+        ? root.scan({ ...query, range: { journalHead: 'position' } }) : root.scan({ ...query, range: { journalHead: 'intake' } })
+      if ('decisionMetadata' in range) {
+        return root.scan({ ...query, range })
+      }
       if ('node' in range && range.node === '/' && ++rootReads === 2) throw failure
       if ('journal' in range || 'decision' in range) return root.scan({ ...query, range })
       return root.scan({ ...query, range })

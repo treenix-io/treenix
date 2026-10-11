@@ -380,6 +380,51 @@
       "development": "./src/tools/upgrade-kernel-plan.ts",
       "types": "./dist/tools/upgrade-kernel-plan.d.ts",
       "default": "./dist/tools/upgrade-kernel-plan.js"
+    },
+    "./kernel/journal": {
+      "development": "./src/kernel/journal.ts",
+      "types": "./dist/kernel/journal.d.ts",
+      "default": "./dist/kernel/journal.js"
+    },
+    "./kernel/store/journal-index": {
+      "development": "./src/kernel/store/journal-index.ts",
+      "types": "./dist/kernel/store/journal-index.d.ts",
+      "default": "./dist/kernel/store/journal-index.js"
+    },
+    "./kernel/blob-archives": {
+      "development": "./src/kernel/blob-archives.ts",
+      "types": "./dist/kernel/blob-archives.d.ts",
+      "default": "./dist/kernel/blob-archives.js"
+    },
+    "./kernel/position": {
+      "development": "./src/kernel/position.ts",
+      "types": "./dist/kernel/position.d.ts",
+      "default": "./dist/kernel/position.js"
+    },
+    "./kernel/expr": {
+      "development": "./src/kernel/expr.ts",
+      "types": "./dist/kernel/expr.d.ts",
+      "default": "./dist/kernel/expr.js"
+    },
+    "./kernel/blob-references": {
+      "development": "./src/kernel/blob-references.ts",
+      "types": "./dist/kernel/blob-references.d.ts",
+      "default": "./dist/kernel/blob-references.js"
+    },
+    "./kernel/transfer-image": {
+      "development": "./src/kernel/transfer-image.ts",
+      "types": "./dist/kernel/transfer-image.d.ts",
+      "default": "./dist/kernel/transfer-image.js"
+    },
+    "./kernel/store/commit": {
+      "development": "./src/kernel/store/commit.ts",
+      "types": "./dist/kernel/store/commit.d.ts",
+      "default": "./dist/kernel/store/commit.js"
+    },
+    "./kernel/chain-index": {
+      "development": "./src/kernel/chain-index.ts",
+      "types": "./dist/kernel/chain-index.d.ts",
+      "default": "./dist/kernel/chain-index.js"
     }
   },
   "treenix": {

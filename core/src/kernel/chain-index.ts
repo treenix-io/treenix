@@ -33,7 +33,7 @@ function acl(raw: unknown): readonly AclEntry[] | undefined {
   return Object.freeze(entries.map(entry => Object.freeze(entry)))
 }
 
-export function decodeChainNode(input: ChainInput): ChainNode {
+export function decodeChainNode(input: ChainInput): ChainNode & { readonly id: string } {
   const alerts: RightsAlert[] = []
   const bad = (field: string) => alerts.push({ path: input.$path, field, error: new KernelError('INVALID', 'Uncomputable stored rights') })
   const hasAcl = input.$acl !== undefined, hasOwner = input.$owner !== undefined
@@ -71,30 +71,35 @@ export function createChainIndex() {
       if (paths?.size === 0) grants.delete(key)
     }
   }
+  /** Indexes canonical metadata without decoding or retaining ordinary payloads. */
+  function putChain(node: ChainNode): ChainNode {
+    const previous = nodes.get(node.path)
+    if (previous !== undefined) unindex(previous)
+    if (node.hasOwner || previous?.hasOwner || [...node.acl, ...previous?.acl ?? []].some(entry => 'owner' in entry.subject)) ownerGrants = undefined
+    nodes.set(node.path, node)
+    const parent = dirname(node.path)
+    if (parent !== null) {
+      let paths = children.get(parent)
+      if (paths === undefined) { paths = new Set(); children.set(parent, paths) }
+      paths.add(node.path)
+    }
+    if (node.hasAcl || node.hasOwner) treeEnsure(boundaries, node.path).data = node
+    else treeRemove(boundaries, node.path)
+    for (const entry of node.acl) {
+      if (!('grant' in entry) || entry.grant === 0) continue
+      const key = subjectKey(entry.subject)
+      let paths = grants.get(key)
+      if (paths === undefined) { paths = new Set(); grants.set(key, paths) }
+      paths.add(node.path)
+    }
+    return node
+  }
+
   return {
     put(input: ChainInput): ChainNode {
-      const node = decodeChainNode(input)
-      const previous = nodes.get(node.path)
-      if (previous !== undefined) unindex(previous)
-      if (node.hasOwner || previous?.hasOwner || [...node.acl, ...previous?.acl ?? []].some(entry => 'owner' in entry.subject)) ownerGrants = undefined
-      nodes.set(node.path, node)
-      const parent = dirname(node.path)
-      if (parent !== null) {
-        let paths = children.get(parent)
-        if (paths === undefined) { paths = new Set(); children.set(parent, paths) }
-        paths.add(node.path)
-      }
-      if (node.hasAcl || node.hasOwner) treeEnsure(boundaries, node.path).data = node
-      else treeRemove(boundaries, node.path)
-      for (const entry of node.acl) {
-        if (!('grant' in entry) || entry.grant === 0) continue
-        const key = subjectKey(entry.subject)
-        let paths = grants.get(key)
-        if (paths === undefined) { paths = new Set(); grants.set(key, paths) }
-        paths.add(node.path)
-      }
-      return node
+      return putChain(decodeChainNode(input))
     },
+    putChain,
     remove(path: Path): void {
       const previous = nodes.get(path)
       if (previous !== undefined) unindex(previous)

@@ -7,22 +7,7 @@ import { createReader } from '#kernel/reader';
 import { createRequestAdmission } from '#kernel/request';
 import type { BlobRef, BlobStore, Budget, Path } from '#kernel/types';
 import { assertSafePatchPath, getByPath } from '#kernel/update-ops';
-import { isRecord } from '#util/is-record';
-
-/** Decodes a reference at the node-write boundary, where binary data is forbidden. */
-function decodeReference(value: unknown): BlobRef {
-  if (
-    !isRecord(value) ||
-    typeof value.$blob !== 'string' ||
-    typeof value.type !== 'string' ||
-    typeof value.size !== 'number' ||
-    !Number.isSafeInteger(value.size) ||
-    value.size < 0 ||
-    Object.keys(value).some((key) => key !== '$blob' && key !== 'size' && key !== 'type')
-  )
-    throw new KernelError('INVALID', 'Malformed blob reference');
-  return { $blob: value.$blob, size: value.size, type: value.type };
-}
+import { blobReferences, decodeReference } from '#kernel/blob-references';
 
 /** Walks write input once; only references cause storage I/O. */
 export async function validateBlobReferences(
@@ -30,37 +15,8 @@ export async function validateBlobReferences(
   store: BlobStore | undefined,
   budget: Budget,
 ): Promise<number> {
-  const references = new Map<string, BlobRef>();
-  let work = 0;
-
-  /** Finds references without permitting binary values to be embedded in nodes. */
-  function visit(item: unknown): void {
-    if (++work > budget.exprWork || Date.now() > budget.deadline)
-      throw new KernelError('BUDGET', 'Blob reference validation exceeded its budget');
-    if (item === null || typeof item !== 'object') return;
-    if (
-      ArrayBuffer.isView(item) ||
-      item instanceof ArrayBuffer ||
-      item instanceof SharedArrayBuffer
-    )
-      throw new KernelError('INVALID', 'Binary content belongs in a blob');
-    if (Array.isArray(item)) {
-      for (const child of item) visit(child);
-      return;
-    }
-    if (!isRecord(item)) throw new KernelError('INVALID', 'Malformed node data');
-    if (Object.hasOwn(item, '$blob')) {
-      const ref = decodeReference(item);
-      const previous = references.get(ref.$blob);
-      if (previous !== undefined && (previous.size !== ref.size || previous.type !== ref.type))
-        throw new KernelError('INVALID', 'Conflicting blob reference metadata');
-      references.set(ref.$blob, ref);
-      return;
-    }
-    for (const child of Object.values(item)) visit(child);
-  }
-
-  visit(value);
+  const work = { exprWork: 0 };
+  const references = blobReferences(value, budget, work);
   for (const ref of references.values()) {
     if (store === undefined) throw new KernelError('UNAVAILABLE', 'Blob storage is not configured');
     let stored: BlobRef;
@@ -76,7 +32,7 @@ export async function validateBlobReferences(
     if (Date.now() > budget.deadline)
       throw new KernelError('BUDGET', 'Blob reference validation exceeded its deadline');
   }
-  return work;
+  return work.exprWork;
 }
 
 /** Resolves a caller-supplied field through the visible node, without prototype lookup. */
@@ -88,7 +44,9 @@ function fieldReference(node: unknown, field: string): BlobRef {
 }
 
 /** Produces streamed transfers through the same admission, Reader and gates as other requests. */
-export function createBlobTransfers(options: CommandOptions, store: BlobStore) {
+export type BlobTransferOptions = Pick<CommandOptions, 'admission' | 'budget' | 'limits' | 'gates' | 'source' | 'writer' | 'registry' | 'projector' | 'authority'>;
+
+export function createBlobTransfers(options: BlobTransferOptions, store: BlobStore) {
   /** Issues an unpredictable id and forwards one chunk at a time under the operation deadline. */
   async function upload(
     parts: AsyncIterable<Uint8Array>,

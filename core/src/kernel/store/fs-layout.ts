@@ -1,10 +1,11 @@
-import { lstat, readdir, readFile, unlink } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { lstat, open, opendir, readFile, unlink } from 'node:fs/promises'
 import type { Stats } from 'node:fs'
 import { dirname, join, relative } from 'node:path'
 import { safeJsonParse } from '#core/json'
 import { assertSafePath } from '#core/path'
 import { KernelError } from '#errors'
-import type { Position, StoredNode, StoredWrite } from '#kernel/types'
+import type { Budget, Path, ScanRange, Position, StoredNode, StoredWrite, StorageFaultChange } from '#kernel/types'
 import { assertPathSafe } from '#util/path-safety'
 import { isRecord } from '#util/is-record'
 import { durableDirectory, durableWrite, missing, syncDirectory } from './fs-io'
@@ -69,28 +70,109 @@ async function removeLegacyFile(root: string, base: string): Promise<void> {
   await syncDirectory(dirname(base))
 }
 
-export async function readFsNodes(root: string, pos: Position): Promise<StoredNode[]> {
+/** Read physical bodies in one bounded logical subtree, validating the filesystem boundary. */
+export async function scanFsNodes(root: string, pos: Position, range: ScanRange, budget: Budget, quarantine = false) {
+  const subtree = 'node' in range ? range.node : 'children' in range ? range.children : range.subtree
+  fsAddress(subtree)
+  const depth = 'node' in range ? 0 : 'children' in range ? 1 : Number.MAX_SAFE_INTEGER
   const nodes = new Map<string, StoredNode>()
-  async function walk(directory: string): Promise<void> {
+  const hashes = new Map<Path, string>()
+  const faults: StorageFaultChange[] = []
+  const cost = { nodes: 0, bytes: 0, exprWork: 0 }
+  function check(): void {
+    if (Date.now() > budget.deadline || cost.nodes > budget.nodes || cost.bytes > budget.bytes || cost.exprWork > budget.exprWork)
+      throw new KernelError('BUDGET', 'Filesystem physical read budget exceeded')
+  }
+  async function body(file: string, path: string): Promise<void> {
+    cost.nodes++; check()
+    await assertPathSafe(root, file)
+    const handle = await open(file, 'r')
+    const chunks: Buffer[] = []
+    try {
+      while (true) {
+        check()
+        const buffer = Buffer.alloc(Math.min(64 * 1024, budget.bytes - cost.bytes + 1))
+        const { bytesRead } = await handle.read(buffer)
+        cost.bytes += bytesRead; cost.exprWork++; check()
+        if (bytesRead === 0) break
+        chunks.push(buffer.subarray(0, bytesRead))
+      }
+    } finally { await handle.close() }
+    const data = Buffer.concat(chunks).toString('utf8')
+    hashes.set(path, createHash('sha256').update(data).digest('hex'))
+    try {
+      const raw: unknown = safeJsonParse(data)
+      if (!isRecord(raw) || typeof raw.$type !== 'string' || raw.$type.length === 0 || raw.$id !== undefined && (typeof raw.$id !== 'string' || raw.$id.length === 0)
+        || '$rev' in raw || '$pos' in raw || '$path' in raw || nodes.has(path)) throw new KernelError('INVALID', 'Invalid filesystem node body')
+      assertStoredJson(raw)
+      nodes.set(path, { ...raw, $id: raw.$id ?? `p:${path}`, $type: raw.$type, $path: path, $pos: pos })
+    } catch (error) {
+      if (!quarantine || !(error instanceof SyntaxError || error instanceof KernelError && error.code === 'INVALID')) throw error
+      faults.push({ path, fault: { code: 'INVALID', invalid: 'chain' } })
+    }
+  }
+  async function walk(directory: string, level = 0): Promise<void> {
+    cost.exprWork++; check()
     await assertPathSafe(root, directory)
-    for (const entry of await readdir(directory, { withFileTypes: true })) {
+    for await (const entry of await opendir(directory, { bufferSize: 1 })) {
+      cost.exprWork++; check()
       if (directory === root && ['.treenix', '.git'].includes(entry.name)) continue
       const file = join(directory, entry.name)
       await assertPathSafe(root, file)
       if (entry.isSymbolicLink()) throw new KernelError('FORBIDDEN', 'Filesystem node symlinks are not allowed')
-      if (entry.isDirectory()) { await walk(file); continue }
+      if (entry.isDirectory()) {
+        if ('children' in range && level === 0) await directoryBody(file, `/${relative(root, file)}`)
+        else if (level < depth) await walk(file, level + 1)
+        continue
+      }
       if (entry.name !== '$' && !entry.name.endsWith('.json')) continue
       const path = entry.name === '$' || entry.name === '$.json' ? `/${relative(root, directory)}` : `/${relative(root, file).slice(0, -5)}`
       fsAddress(path)
-      const raw: unknown = safeJsonParse(await readFile(file, 'utf8'))
-      if (!isRecord(raw) || typeof raw.$type !== 'string' || raw.$id !== undefined && typeof raw.$id !== 'string'
-        || '$rev' in raw || '$pos' in raw || '$path' in raw || nodes.has(path)) throw new KernelError('INVALID', 'Invalid filesystem node body')
-      assertStoredJson(raw)
-      nodes.set(path, { ...raw, $id: raw.$id ?? `p:${path}`, $type: raw.$type, $path: path, $pos: pos })
+      if (path === subtree && 'children' in range || path !== subtree && 'node' in range) continue
+      await body(file, path)
     }
   }
-  await walk(root)
-  return [...nodes.values()]
+  /** An exact node body does not require enumerating the directory's children. */
+  async function directoryBody(directory: string, path: Path): Promise<void> {
+    for (const name of ['$', '$.json']) {
+      cost.exprWork++; check()
+      const file = join(directory, name)
+      await assertPathSafe(root, file)
+      let entry: Stats | undefined
+      try { entry = await lstat(file) } catch (error) { if (!missing(error)) throw error }
+      if (entry?.isSymbolicLink()) throw new KernelError('FORBIDDEN', 'Filesystem node symlinks are not allowed')
+      if (entry?.isFile()) await body(file, path)
+    }
+  }
+  const base = join(root, subtree.slice(1))
+  while (true) {
+    cost.exprWork++; check()
+    await assertPathSafe(root, base)
+    let entry: Stats | undefined
+    try {
+      entry = await lstat(base)
+    } catch (error) { if (!missing(error)) throw error }
+    try {
+      if (entry?.isSymbolicLink()) throw new KernelError('FORBIDDEN', 'Filesystem node symlinks are not allowed')
+      if (entry?.isDirectory()) {
+        if ('node' in range) await directoryBody(base, subtree)
+        else await walk(base)
+      }
+      if (!('children' in range) && subtree !== '/' && (await legacyEntry(root, base))?.isFile()) await body(`${base}.json`, subtree)
+      return { nodes: [...nodes.values()], hashes, faults, cost }
+    } catch (error) {
+      if (!missing(error)) throw error
+      // A disappearing descendant invalidates the whole result; retries retain every consumed unit.
+      nodes.clear(); hashes.clear(); faults.length = 0
+    }
+  }
+}
+
+/** Import accepted startup files before a journal exists. */
+export async function readFsNodes(root: string, pos: Position): Promise<StoredNode[]> {
+  const result = await scanFsNodes(root, pos, { subtree: '/' }, { nodes: Number.MAX_SAFE_INTEGER, bytes: Number.MAX_SAFE_INTEGER,
+    exprWork: Number.MAX_SAFE_INTEGER, deadline: Date.now() + 10_000 })
+  return result.nodes
 }
 
 async function removeFile(root: string, file: string): Promise<void> {
@@ -101,7 +183,7 @@ async function removeFile(root: string, file: string): Promise<void> {
   } catch (error) { if (!missing(error)) throw error }
 }
 
-export async function writeFsNode(root: string, write: StoredWrite): Promise<void> {
+export async function writeFsNode(root: string, write: StoredWrite): Promise<string | undefined> {
   const base = join(root, write.path.slice(1)), directoryFile = join(base, '$')
   fsAddress(write.path)
   if (write.node === null) {
@@ -143,6 +225,8 @@ export async function writeFsNode(root: string, write: StoredWrite): Promise<voi
   const { $path, $pos, $rev, $id, ...body } = write.node
   if ($id.startsWith('p:') && $id !== `p:${write.path}`) throw new KernelError('INVALID', 'Path identity differs from the filesystem address')
   const data = $id.startsWith('p:') ? body : { ...body, $id }
-  await durableWrite(root, directoryFile, `${JSON.stringify(data, null, 2)}\n`)
+  const content = `${JSON.stringify(data, null, 2)}\n`
+  await durableWrite(root, directoryFile, content)
   await removeFile(root, legacyBody)
+  return content
 }

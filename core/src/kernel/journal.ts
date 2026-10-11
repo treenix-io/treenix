@@ -10,7 +10,7 @@ export interface JournalImages {
 }
 
 /** Select the queried key from a physical record while preserving each alias's original request hash. */
-export function matchingDecision(record: JournalCommit, caller: Principal, opId: OpId): OpDecision {
+export function matchingDecision(record: Pick<JournalCommit, 'caller' | 'decision' | 'anchorDecision'>, caller: Principal, opId: OpId): OpDecision {
   if (record.caller !== caller) throw new KernelError('INVALID', 'Decision lookup returned another caller')
   for (const decision of [record.decision, record.anchorDecision]) {
     if (decision !== undefined && decision.opId.epoch === opId.epoch

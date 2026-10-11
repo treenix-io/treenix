@@ -9,7 +9,7 @@ import { positionToRev } from '#kernel/position'
 import { createRegistry } from '#kernel/registry'
 import { assertNodeSchema } from '#kernel/schema'
 import { runStoreQuery } from '#kernel/store/budget'
-import { DEFAULT_LIMITS, type ComponentName, type InstanceId, type MountHandler, type ProvisionedStoreMount, type Store, type StoredNode } from '#kernel/types'
+import { DEFAULT_LIMITS, type ExternalEdits, type ComponentName, type InstanceId, type MountHandler, type ProvisionedStoreMount, type Store, type StoredNode } from '#kernel/types'
 import { stableJson } from '#util/stable-json'
 
 export type FsDirectoryBindings = Readonly<Record<string, string>>
@@ -18,6 +18,7 @@ interface PreparedDeclaration {
   readonly node: StoredNode
   readonly component: ComponentName
   readonly directory: string
+  readonly external?: ExternalEdits
 }
 
 /** Adopt only the accepted startup resource through its declaring node's session. */
@@ -66,7 +67,7 @@ export async function provisionFsMounts(
     const directory = value.directory
     if (typeof directory !== 'string') throw new KernelError('INVALID', 'Malformed filesystem mount directory binding')
     if (!Object.hasOwn(bindings, directory)) throw new KernelError('UNAVAILABLE', 'Filesystem directory capability is unavailable')
-    declarations.push({ node, component, directory: bindings[directory] })
+    declarations.push({ node, component, directory: bindings[directory], external: value.external === 'trusted' ? 'trusted' : undefined })
   }
 
   const mounts: ProvisionedStoreMount[] = []
@@ -76,6 +77,7 @@ export async function provisionFsMounts(
         directory: declaration.directory,
         instance,
         logicalBase: declaration.node.$path,
+        external: declaration.external,
       }))
       mounts.push(Object.freeze({ node: declaration.node.$id, component: declaration.component,
         revision: positionToRev(declaration.node.$pos), target }))

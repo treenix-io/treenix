@@ -1,3 +1,6 @@
+import type { RawFsCodecs } from '#kernel/store/rawfs-codec'
+import type { ChainNode } from './rights'
+
 // Kernel interfaces derived from docs/engine/axioms.md.
 // Every export follows from a definition, axiom or theorem there; the mapping table
 // closes that document. Types and limit constants only — no behaviour lives here.
@@ -367,6 +370,7 @@ export type Request =
       readonly args: unknown
       readonly opId?: OpId
       readonly anchor?: OpId
+      readonly pre?: ActionDescriptor
     }
   | {
       readonly t: 'commit'
@@ -781,7 +785,10 @@ export interface MountDecl extends Component {
 }
 
 /** One declaration yields exactly one target instance. */
-export type MountHandler = (decl: Node, session: Session, component: ComponentName) => Promise<OpenedMountTarget>
+export type MountHandler = ((decl: Node, session: Session, component: ComponentName) => Promise<OpenedMountTarget>) & {
+  /** Kernel transfer preparation acquires physical storage before the declaring Session can exist. */
+  readonly prepare?: (decl: Node, component: ComponentName) => Promise<OpenedStoreMountTarget>
+}
 
 export interface SecurityHandlers {
   readonly acl: RightsRule
@@ -804,6 +811,15 @@ export interface OpenRegistration {
   readonly type: TypeName
   readonly context: string
   readonly handler: unknown
+}
+
+/** Immutable client view source accepted by the administrator into its owning module generation. */
+export interface PublishedView {
+  readonly type: TypeName
+  readonly module: ModuleId
+  readonly source: string
+  readonly draft: Path
+  readonly draftRev: Rev
 }
 
 export interface ModuleManifest {
@@ -830,6 +846,29 @@ export interface Registry {
   /** Open contexts, exact lookup; any fallback belongs to the binding that uses the context. */
   handler(type: TypeName, context: string): unknown
   readonly digest: ModuleDigest
+  /** Installed migration ladders have independent durable backfill generations. */
+  readonly migrations: readonly BackfillGeneration[]
+}
+
+export interface BackfillGeneration {
+  readonly type: TypeName
+  readonly version: number
+  readonly generation: string
+}
+
+export interface BackfillProgress extends BackfillGeneration {
+  readonly after?: Path
+  readonly complete: boolean
+}
+
+export type StoreBackfillNode = Pick<StoredNode, '$path' | '$id' | '$pos'> & {
+  readonly main: Pick<Component, '$type' | '$v'>
+  readonly named: Readonly<Record<ComponentName, Pick<Component, '$type' | '$v'>>>
+}
+
+export interface StoreBackfill {
+  state(type: TypeName, budget: Budget): Promise<{ readonly state: BackfillProgress | undefined; readonly cost: { readonly nodes: number; readonly bytes: number; readonly exprWork: number } }>
+  page(after: Path | undefined, budget: Budget, limit: number): Promise<ScanResult<StoreBackfillNode>>
 }
 
 // ---- Store ----
@@ -865,6 +904,8 @@ export interface ScanQuery<Range> {
 
 export interface ScanResult<Item> {
   readonly items: readonly Item[]
+  /** Journal continuity before this position has been retired. */
+  readonly retainedFrom?: Position
   readonly next?: Cursor
   /** Actual inspected scan cost, including filtered rows and journal image reconstruction. */
   readonly cost?: { readonly nodes: number; readonly bytes: number; readonly exprWork: number }
@@ -875,6 +916,17 @@ export interface ScanResult<Item> {
  * cache fill still apply.
  */
 export type StoredNode = Omit<NodeMeta, '$rev'> & { readonly $pos: Position } & Fields
+
+/** Complete activation metadata, without ordinary node or component payloads. */
+export type StoreCensusNode = Pick<StoredNode, '$path' | '$id' | '$pos'> & {
+  readonly chain: ChainNode & { readonly id: NodeId }
+}
+
+export interface StoreCensusRange {
+  readonly census: '/'
+}
+
+export type StoreCensusQuery = Pick<ScanQuery<StoreCensusRange>, 'range' | 'budget'>
 
 /** Changed fields by dot-path, with previous and new values: enough to go both ways. */
 export type FieldDeltas = { readonly [field: string]: { readonly from?: unknown; readonly to?: unknown } }
@@ -918,7 +970,7 @@ export interface OpDecision {
   readonly opId: OpId
   /** Hash of the normalized request together with the original actor, claims and scope included. */
   readonly requestHash: string
-  /** Absent: a stream started under this key and has not finished — a replay gets UNKNOWN_OUTCOME. */
+  /** Absent for an unfinished stream or prepared foreign request; only the latter can resume. */
   readonly outcome?: Outcome
   readonly stream?: { readonly executor: Principal; readonly target: NodeId }
   readonly forward?: FederationForward
@@ -951,6 +1003,9 @@ export interface JournalCommit {
   /** A continuation's terminal commit also finishes the original anchor under its original request hash. */
   readonly anchorDecision?: OpDecision
   readonly intake?: IntakeState
+  readonly maintenance?: { readonly journalBefore: number; readonly decisionBefore: number }
+  readonly backfill?: BackfillProgress
+  readonly quarantine?: readonly StorageFaultChange[]
   readonly entries: readonly JournalEntry[]
 }
 
@@ -990,6 +1045,18 @@ export interface DecisionRange {
   readonly decision: { readonly caller: Principal; readonly opId: OpId }
 }
 
+/** Latest actual persisted record position, without journal entry payloads. */
+export interface JournalPositionHeadRange { readonly journalHead: 'position' }
+export type JournalPositionHead = Pick<JournalCommit, 'pos'>
+
+/** Latest actual persisted record containing intake state. */
+export interface JournalIntakeHeadRange { readonly journalHead: 'intake' }
+export type JournalIntakeHead = Pick<JournalCommit, 'pos' | 'intake'>
+
+/** Latest matching direct or anchor decision, retaining the complete outcome. */
+export interface DecisionMetadataRange { readonly decisionMetadata: DecisionRange['decision'] }
+export type DecisionMetadata = Pick<JournalCommit, 'pos' | 'caller' | 'decision' | 'anchorDecision'>
+
 export type StoredWrite =
   | { readonly path: Path; readonly node: StoredNode }
   | { readonly path: Path; readonly node: null }
@@ -997,20 +1064,158 @@ export type StoredWrite =
 /** Applied atomically inside the Store's domain. */
 export interface StoreCommit {
   readonly pos: Position
+  readonly acceptedAt?: number
+  /** Actual Writer policy, including every shared-owner participant's declared minimum. */
+  readonly journalRetentionMs?: number
+  /** Current execution allowance; recovery supplies fresh caps rather than replaying an old deadline. */
+  readonly maintenanceLimits?: { readonly budget: Budget; readonly changeSet: number }
+  readonly blobArchive?: readonly BlobArchiveMutation[]
+  /** Exact physical originals for atomic transfer copy or cleanup. */
+  readonly transferBefore?: readonly TransferCopy[]
+  readonly transferAbsent?: readonly Path[]
   /** Fencing: the Store rejects a commit of an older writer epoch. */
   readonly writerEpoch: number
   readonly writes: readonly StoredWrite[]
   readonly record: JournalCommit
 }
 
-export interface Store {
+export interface StoreCommitGroup extends Pick<StoreCommit, 'writes'> {
+  readonly store: Store
+}
+
+/** Atomically persists groups; every member reads the same complete canonical journal, decisions and continuity. */
+export interface StoreTransactionOwner {
   readonly domain: DomainId
+  commit(commit: StoreCommit, groups: readonly StoreCommitGroup[]): Promise<void>
+}
+
+/** Physical external state and the accepted image remain distinct until the Writer reconciles them. */
+export interface ExternalImage {
+  readonly path: Path
+  readonly before: StoredNode | null
+  readonly after: StoredNode | null
+}
+
+/** Current physical state can prove its address while the prior image remains unknown. */
+export interface UnknownExternalImage {
+  readonly path: Path
+  readonly id: NodeId
+  readonly before: 'unknown'
+  readonly after: StoredNode | null
+}
+
+export type ExternalNotification = readonly Path[] | { readonly t: 'reset'; readonly epoch: string }
+
+/** A native reporter can establish its observation cursor before initial reconciliation. */
+export interface ExternalReporter extends AsyncIterable<ExternalNotification> {
+  readonly ready?: Promise<void>
+}
+
+/** Storage diagnostics never become authored node fields or supply authorization. */
+export interface StorageFault { readonly code: 'INVALID'; readonly invalid: 'chain' }
+export interface StorageFaultChange { readonly path: Path; readonly fault: StorageFault | null }
+export type ExternalCandidate = ExternalImage | UnknownExternalImage | StorageFaultChange
+
+/** Sparse durable reference census, streamed while the Writer pins the actual owner. */
+export type BlobHoldRow =
+  | { readonly t: 'live'; readonly key: string; readonly ids: readonly string[] }
+  | { readonly t: 'history'; readonly address: JournalAddress; readonly acceptedAt?: number; readonly retainUntil?: number; readonly ids: readonly string[] }
+  | { readonly t: 'released'; readonly id: string; readonly at: number }
+
+/** Domain-owned reference holds published in the same transaction as data and history. */
+export interface BlobHold {
+  readonly id: string
+  /** Accepted nodes containing the identity, counted once per node. */
+  readonly live: number
+  /** Retained canonical entries containing the identity, counted once per journal address. */
+  readonly history: number
+  readonly releasedAt: number
+}
+
+/** Keyed hold reads report all consulted metadata to the shared maintenance budget. */
+export interface BlobHoldResult extends ScanResult<BlobHold> {
+  readonly cost: { readonly nodes: number; readonly bytes: number; readonly exprWork: number }
+}
+
+/** Bounded root-owned archive units accepted before a persistent carrier closes. */
+export interface TransferOwnership {
+  readonly node: NodeId
+  readonly component: ComponentName
+  readonly base: Path
+  readonly pattern: string
+  readonly source: string
+  readonly sourceDeclaration?: { readonly node: Node; readonly component: ComponentName }
+  readonly destination: string
+  readonly cursor: Position
+  readonly firstPage: number
+}
+export interface TransferCopy {
+  readonly path: Path
+  readonly sourceId: NodeId
+  readonly id: NodeId
+  readonly pos: Position
+  readonly digest: string
+  readonly copiedDigest: string
+}
+export type BlobArchiveMutation =
+  | { readonly t: 'begin'; readonly owner: string; readonly generation: Position; readonly transfer?: TransferOwnership }
+  | { readonly t: 'restartTransfer'; readonly owner: string; readonly generation: Position; readonly transfer: TransferOwnership }
+  | { readonly t: 'page'; readonly owner: string; readonly generation: Position; readonly page: number;
+      readonly rows: readonly BlobHoldRow[]; readonly clock: number; readonly boundary?: number; readonly retiredAt?: number }
+  | { readonly t: 'retirePage'; readonly owner: string; readonly generation: Position; readonly page: number; readonly at: number }
+  | { readonly t: 'seal'; readonly owner: string; readonly generation: Position; readonly pages: number }
+  | { readonly t: 'removePage'; readonly owner: string; readonly generation: Position; readonly page: number }
+  | { readonly t: 'remove'; readonly owner: string; readonly generation: Position }
+  | { readonly t: 'copyPage'; readonly owner: string; readonly generation: Position; readonly page: number; readonly copies: readonly TransferCopy[] }
+  | { readonly t: 'retireCopyPage'; readonly owner: string; readonly generation: Position; readonly page: number }
+  | { readonly t: 'switchTransfer'; readonly owner: string; readonly generation: Position; readonly pos: Position }
+  | { readonly t: 'completeTransfer'; readonly owner: string; readonly generation: Position }
+  | { readonly t: 'reopen'; readonly owner: string; readonly generation: Position }
+
+/** One exact physical carrier owns its accepted live or canonical-history references. */
+export interface BlobCarrier {
+  readonly blobOwner: string
+  readonly journalRetentionBoundary?: number
+  readonly journalRetentionClock?: number
+  /** Streams accepted reference metadata while the owning carrier is pinned. */
+  blobCensus(): AsyncIterable<BlobHoldRow>
+  /** Reads aggregate holds for the requested identities under the supplied budget. */
+  blobHolds(ids: readonly string[], budget: Budget): Promise<BlobHoldResult>
+}
+
+export interface Store extends BlobCarrier {
+  /** A shared canonical journal may have a different physical owner from this node collection. */
+  readonly blobJournal?: BlobCarrier
+  /** Streams root-owned archive units, optionally for one exact physical owner. */
+  blobArchiveCensus(owner?: string): AsyncIterable<BlobArchiveMutation>
+  /** Reads retained archive holds using the durable root clock. */
+  archivedBlobHolds(ids: readonly string[], clock: number, budget: Budget): Promise<BlobHoldResult>
+  readonly domain: DomainId
+  readonly transactionOwner?: StoreTransactionOwner
+  /** Declared minimum journal lifetime; absent uses the Instance policy. */
+  readonly journalRetentionMs?: number
+  /** A durable maintenance batch remains unfinished across accepted commits and restarts. */
+  readonly maintenancePending?: boolean
+  /** Durable maintenance cutoff; accepted history and its expiry horizon remain separate. */
+  readonly journalRetentionBoundary?: number
+  /** Monotonic clock of accepted owning transactions. */
+  readonly journalRetentionClock?: number
+  /** Native metadata pages support restartable migrations without loading ordinary payloads. */
+  readonly backfill?: StoreBackfill
+  scan(query: StoreCensusQuery): Promise<ScanResult<StoreCensusNode>>
   scan(query: ScanQuery<ScanRange>): Promise<ScanResult<StoredNode>>
   /** The journal is Store data, read by the same operation. */
   scan(query: ScanQuery<JournalRange | DecisionRange>): Promise<ScanResult<JournalCommit>>
+  scan(query: ScanQuery<JournalPositionHeadRange>): Promise<ScanResult<JournalPositionHead>>
+  scan(query: ScanQuery<JournalIntakeHeadRange>): Promise<ScanResult<JournalIntakeHead>>
+  scan(query: ScanQuery<DecisionMetadataRange>): Promise<ScanResult<DecisionMetadata>>
   commit(commit: StoreCommit): Promise<void>
   /** Stores admitting external edits report addresses changed outside the kernel. */
-  external?(): AsyncIterable<readonly Path[]>
+  external?(signal?: AbortSignal): ExternalReporter
+  /** Read reported physical addresses without replacing their accepted journal before-images. */
+  readExternal?(paths: readonly Path[], budget: Budget): Promise<ScanResult<ExternalCandidate>>
+  storageFault?(path: Path): StorageFault | undefined
+  acceptedFault?(path: Path): StorageFault | undefined
 }
 
 // ---- Mount targets ----
@@ -1254,12 +1459,24 @@ export const DEFAULT_LIMITS: Limits = {
   writerLeaseMs: 10_000,
 }
 
+/** Durable acceptance and retirement metadata for a completed binary upload. */
+export interface BlobBirth {
+  readonly reference: BlobRef
+  readonly bornAt: number
+  readonly retiredAt?: number
+}
+
 /** One instance's blob storage, written in parts; the kernel issues the ids. */
 export interface BlobStore {
+  /** Streams completed upload metadata without opening binary content. */
+  census(): AsyncIterable<BlobBirth>
+  /** Stores a completed upload under the id issued by the kernel. */
   put(id: string, parts: AsyncIterable<Uint8Array>, type: string): Promise<BlobRef>
   /** Rejects with NOT_FOUND for an absent blob. */
   stat(id: string): Promise<BlobRef>
+  /** Streams binary content; the consumer controls how long the read remains active. */
   get(id: string): AsyncIterable<Uint8Array>
+  /** Deletes the blob content and its upload metadata. */
   delete(id: string): Promise<void>
 }
 
@@ -1306,6 +1523,9 @@ export interface InstanceConfig {
   /** Same-zone shard deployments bind their immutable logical range before startup. */
   readonly shardPath?: Path
   readonly federation?: FederationBinding
+  /** Named host-directory capabilities for native filesystem declarations. */
+  readonly rawfsCodecs?: RawFsCodecs
+  readonly mountDirectories?: Readonly<Record<string, string>>
   /** Deployment capabilities are bound separately to each declared writing action. */
   readonly io?: ActionIoBinding
   readonly id: InstanceId

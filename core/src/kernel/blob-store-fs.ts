@@ -1,9 +1,33 @@
-import { link, mkdir, open, readFile, stat as fileStat, unlink } from 'node:fs/promises';
+import { link, mkdir, open, opendir, readFile, realpath, stat as fileStat, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { safeJsonParse } from '#core/json';
 import { KernelError } from '#errors';
-import type { BlobRef, BlobStore } from '#kernel/types';
+import type { BlobBirth, BlobRef, BlobStore } from '#kernel/types';
 import { isRecord } from '#util/is-record';
+import { durableWrite, missing, syncDirectory } from '#kernel/store/fs-io';
+
+interface Transfers {
+  readonly readers: Map<string, number>;
+  readonly writing: Set<string>;
+  readonly retiring: Set<string>;
+}
+
+const physicalTransfers = new Map<string, WeakRef<Transfers>>();
+const releasedTransfers = new FinalizationRegistry<{ path: string; reference: WeakRef<Transfers> }>(owner => {
+  if (physicalTransfers.get(owner.path) === owner.reference) physicalTransfers.delete(owner.path);
+});
+
+/** Aliases of one physical carrier share transfer pins for their actual handle lifetime. */
+function transfers(path: string): Transfers {
+  const existing = physicalTransfers.get(path)?.deref();
+  if (existing !== undefined) return existing;
+
+  const state: Transfers = { readers: new Map(), writing: new Set(), retiring: new Set() };
+  const reference = new WeakRef(state);
+  physicalTransfers.set(path, reference);
+  releasedTransfers.register(state, { path, reference });
+  return state;
+}
 
 /** Keeps filesystem errors useful without exposing the secret blob id in paths. */
 function storageError(error: unknown): KernelError {
@@ -37,10 +61,14 @@ function reference(value: unknown, id: string): BlobRef {
 /** Publishes metadata last; incomplete binary writes never become readable blobs. */
 export async function createFsBlobStore(directory: string): Promise<BlobStore> {
   await mkdir(directory, { recursive: true });
+  directory = await realpath(directory);
+  const owner = transfers(directory);
 
   /** Writes one stream with bounded in-flight memory and exclusive id ownership. */
   async function put(id: string, parts: AsyncIterable<Uint8Array>, type: string): Promise<BlobRef> {
     assertId(id);
+    if (owner.writing.has(id) || owner.retiring.has(id)) throw new KernelError('CONFLICT', 'Blob transfer is active');
+    owner.writing.add(id);
     const data = join(directory, `${id}.data`);
     const pending = join(directory, `${id}.pending`);
     const metadata = join(directory, `${id}.json`);
@@ -71,12 +99,13 @@ export async function createFsBlobStore(directory: string): Promise<BlobStore> {
       const marker = await open(pending, 'wx');
       ownsPending = true;
       try {
-        await marker.writeFile(JSON.stringify(result));
+        await marker.writeFile(JSON.stringify({ ...result, bornAt: Date.now() }));
         await marker.sync();
       } finally {
         await marker.close();
       }
       await link(pending, metadata);
+      await syncDirectory(directory);
       ownsData = false;
       await unlink(pending);
       ownsPending = false;
@@ -91,17 +120,21 @@ export async function createFsBlobStore(directory: string): Promise<BlobStore> {
           throw storageError(caught);
         });
       throw storageError(error);
-    }
+    } finally { owner.writing.delete(id); }
   }
 
   /** Checks the marker against the actual file so corruption fails loudly. */
   async function stat(id: string): Promise<BlobRef> {
     assertId(id);
     try {
-      const result = reference(
-        safeJsonParse(await readFile(join(directory, `${id}.json`), 'utf8')),
-        id,
-      );
+      if (owner.retiring.has(id)) throw new KernelError('NOT_FOUND', 'Blob is retired');
+      const value: unknown = safeJsonParse(await readFile(join(directory, `${id}.json`), 'utf8'));
+      if (isRecord(value) && value.retiredAt !== undefined) {
+        if (typeof value.retiredAt !== 'number' || !Number.isFinite(value.retiredAt))
+          throw new KernelError('INVALID', 'Blob retirement metadata is malformed');
+        throw new KernelError('NOT_FOUND', 'Blob is retired');
+      }
+      const result = reference(value, id);
       const data = await fileStat(join(directory, `${id}.data`));
       if (data.size !== result.size)
         throw new KernelError('INVALID', 'Blob size differs from its metadata');
@@ -113,8 +146,11 @@ export async function createFsBlobStore(directory: string): Promise<BlobStore> {
 
   /** Streams fixed-size chunks and closes the descriptor when the consumer stops. */
   async function* get(id: string): AsyncIterable<Uint8Array> {
-    await stat(id);
+    assertId(id);
+    if (owner.retiring.has(id)) throw new KernelError('NOT_FOUND', 'Blob is retired');
+    owner.readers.set(id, (owner.readers.get(id) ?? 0) + 1);
     try {
+      await stat(id);
       const file = await open(join(directory, `${id}.data`), 'r');
       try {
         for (;;) {
@@ -128,19 +164,66 @@ export async function createFsBlobStore(directory: string): Promise<BlobStore> {
       }
     } catch (error) {
       throw storageError(error);
+    } finally {
+      const count = owner.readers.get(id)! - 1;
+      if (count === 0) owner.readers.delete(id);
+      else owner.readers.set(id, count);
     }
   }
 
-  /** Withdraws metadata before removing binary content. */
+  /** Reads completed birth decisions without loading binary files or partial uploads. */
+  async function* census(): AsyncIterable<BlobBirth> {
+    const entries = await opendir(directory);
+    for await (const entry of entries) {
+      if (!entry.name.endsWith('.json')) continue;
+      const id = entry.name.slice(0, -5);
+      assertId(id);
+      const value: unknown = safeJsonParse(await readFile(join(directory, entry.name), 'utf8'));
+      const ref = reference(value, id);
+      if (!isRecord(value)
+        || value.retiredAt !== undefined && (typeof value.retiredAt !== 'number' || !Number.isFinite(value.retiredAt)))
+        throw new KernelError('INVALID', 'Blob birth metadata is malformed');
+
+      let bornAt = value.bornAt;
+      if (bornAt === undefined) {
+        if (owner.writing.has(id) || owner.retiring.has(id))
+          throw new KernelError('CONFLICT', 'Blob metadata adoption is active');
+        owner.writing.add(id);
+        try {
+          // An unknown earlier birth gains a full orphan grace period from durable adoption.
+          bornAt = Date.now();
+          await durableWrite(directory, join(directory, entry.name), JSON.stringify({ ...ref, bornAt,
+            ...(value.retiredAt === undefined ? {} : { retiredAt: value.retiredAt }) }));
+        } finally { owner.writing.delete(id); }
+      }
+      if (typeof bornAt !== 'number' || !Number.isFinite(bornAt))
+        throw new KernelError('INVALID', 'Blob birth metadata is malformed');
+      yield { reference: ref, bornAt,
+        ...(value.retiredAt === undefined ? {} : { retiredAt: value.retiredAt }) };
+    }
+  }
+
+  /** Durably retires the identity before unlinking content; retry completes interrupted removal. */
   async function remove(id: string): Promise<void> {
     assertId(id);
+    if (owner.readers.has(id) || owner.writing.has(id) || owner.retiring.has(id))
+      throw new KernelError('CONFLICT', 'Blob transfer is active');
+    owner.retiring.add(id);
     try {
-      await unlink(join(directory, `${id}.json`));
-      await unlink(join(directory, `${id}.data`));
+      const file = join(directory, `${id}.json`);
+      const value: unknown = safeJsonParse(await readFile(file, 'utf8'));
+      const ref = reference(value, id);
+      if (!isRecord(value) || typeof value.bornAt !== 'number' || !Number.isFinite(value.bornAt))
+        throw new KernelError('INVALID', 'Blob birth metadata is malformed');
+      if (value.retiredAt === undefined)
+        await durableWrite(directory, file, JSON.stringify({ ...ref, bornAt: value.bornAt, retiredAt: Date.now() }));
+      try { await unlink(join(directory, `${id}.data`)); }
+      catch (error) { if (!missing(error)) throw error; }
+      await syncDirectory(directory);
     } catch (error) {
       throw storageError(error);
-    }
+    } finally { owner.retiring.delete(id); }
   }
 
-  return { put, stat, get, delete: remove };
+  return { put, stat, get, census, delete: remove };
 }

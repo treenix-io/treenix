@@ -29,6 +29,7 @@ import { stableJson } from '#util/stable-json'
 export interface ReaderTarget {
   readonly id: string
   readonly store: Store
+  readonly external?: 'none' | 'trusted'
   chain(path: Path): readonly ChainNode[]
   children(path: Path): Iterable<ChainNode>
 }
@@ -173,6 +174,43 @@ export function createReader(options: ReaderOptions) {
   const dependencies = new Map<string, ReadDependency>(),
     selectors: NonNullable<ReadSet['selectors']>[number][] = [];
   const scopeLoaded = options.scope === undefined ? undefined : new Map<Path, Loaded | null>();
+  const scopeCurrent = options.scope === undefined ? undefined : new Map<Path, { readonly store: Store; readonly node: StoredNode | null }>();
+
+  /** Pin each genuinely fresh external body once, including its actual scanner work. */
+  async function currentBody(at: Path, found: ReaderTarget,
+    current: Map<Path, { readonly store: Store; readonly node: StoredNode | null }>, held: CacheRead[]): Promise<StoredNode | null> {
+    const prior = current.get(at);
+    if (prior !== undefined) {
+      if (prior.store !== found.store) throw new KernelError('CONFLICT', 'Read target changed within its span');
+      return prior.node;
+    }
+    const lease = await writer.cache.fill(found.store, { node: at }, remaining());
+    if (options.scope === undefined) held.push(lease); else options.scope.hold(lease);
+    if (lease.cost === undefined) throw new KernelError('INVALID', 'Trusted physical read has no inspected cost');
+    readerOperationCost(ledger).charge(lease.cost.nodes, lease.cost.bytes, lease.cost.exprWork);
+    active();
+    const node = lease.nodes[0] ?? null;
+    current.set(at, { store: found.store, node });
+    return node;
+  }
+
+  /** Current ancestors supply authority while ordinary Stores retain their accepted metadata path. */
+  async function currentChain(at: Path, found: ReaderTarget,
+    current: Map<Path, { readonly store: Store; readonly node: StoredNode | null }>, held: CacheRead[], leaf = false): Promise<readonly ChainNode[]> {
+    const inputs = new Map(found.chain(at).map(node => [node.path, node]));
+    const ancestry = ancestorPaths(at);
+    for (const ancestor of ancestry) {
+      const owner = target(ancestor);
+      if (owner.external !== 'trusted' || ancestor === at && !leaf) continue;
+      const node = await currentBody(ancestor, owner, current, held);
+      const fault = owner.store.storageFault?.(ancestor);
+      if (fault !== undefined) inputs.set(ancestor, { path: ancestor, types: [], acl: [], hasAcl: false, hasOwner: false,
+        invalid: fault.invalid, alerts: [{ path: ancestor, field: '$storage', error: new KernelError(fault.code, 'Uncomputable filesystem node') }] });
+      else if (node === null) inputs.delete(ancestor);
+      else inputs.set(ancestor, decodeChainNode(node));
+    }
+    return ancestry.flatMap(path => { const node = inputs.get(path); return node === undefined ? [] : [node]; });
+  }
 
   function active(): void {
     options.scope?.check();
@@ -524,6 +562,7 @@ export function createReader(options: ReaderOptions) {
       byId = new Map<string, Loaded>(),
       copies = new Map<string, NodeCopy>(),
       held: CacheRead[] = [];
+    const current = scopeCurrent ?? new Map<Path, { readonly store: Store; readonly node: StoredNode | null }>();
     let visited = new Set<Path>();
     /** Captures dependency addresses for one include branch without retaining node bodies. */
     function branch(covered: readonly string[]): LaneBranch {
@@ -578,14 +617,29 @@ export function createReader(options: ReaderOptions) {
         byId.set(value.visible.$id, value);
         return value;
       }
-      const found = target(at),
-        chain = found.chain(at),
-        bits = rights(at, found).bits;
+      const found = target(at), chain = await currentChain(at, found, current, held);
+      let bits = rights(at, found, undefined, found.external !== 'trusted', chain).bits;
       const expected = chain.find((node) => node.path === at);
       if (expected === undefined || (bits & R) === 0) {
+        if (found.external === 'trusted') rights(at, found, undefined, true, chain);
         loaded.set(at, null);
         absent.add(at);
         return null;
+      }
+      if (found.external === 'trusted') {
+        const stored = await currentBody(at, found, current, held);
+        const fresh = await currentChain(at, found, current, held, true);
+        bits = rights(at, found, undefined, true, fresh).bits;
+        if (stored === null || (bits & R) === 0) {
+          loaded.set(at, null); absent.add(at); return null;
+        }
+        for (const name of decodeChainNode(stored).types)
+          depend({ kind: 'type', key: name, value: typeReadVersion(registry, name) });
+        if (!nodes.has(at)) nodes.set(at, positionToRev(stored.$pos));
+        const copy = projectCopy(stored, bits, sort);
+        if (copy === null) { loaded.set(at, null); absent.add(at); return null; }
+        const value = { copy, visible: 'node' in copy ? copy.node : visibleNode(stored, bits), stored, store: found.store, bits, sort };
+        loaded.set(at, value); byId.set(stored.$id, value); return value;
       }
       const lease = await writer.cache.fill(found.store, { node: at }, remaining());
       try {
@@ -997,6 +1051,8 @@ export function createReader(options: ReaderOptions) {
     chargeAuthorization(prefixWork * 2);
     path(at);
     await source.prepare?.([{ node: at }], admission.signal);
+    const held: CacheRead[] = [];
+    const images = scopeCurrent ?? new Map<Path, { readonly store: Store; readonly node: StoredNode | null }>();
     return writer.read(source.domains, async () => {
       active();
       await admission.validate(source.auth);
@@ -1006,8 +1062,7 @@ export function createReader(options: ReaderOptions) {
       for (const domain of source.domains)
         depend({ kind: 'epoch', key: domain, value: current.epochs[domain] });
       topology({ node: at });
-      const found = target(at),
-        chain = found.chain(at);
+      const found = target(at), chain = await currentChain(at, found, images, held, true);
       // Charge the complete metadata traversal before allocating or evaluating the rights fold.
       for (const claim of admission.actor.claims) chargeAuthorization(claim.length + 1);
       for (const scope of admission.actor.scope ?? [])
@@ -1024,7 +1079,7 @@ export function createReader(options: ReaderOptions) {
         throw new KernelError('FORBIDDEN', 'Destination requires read and write rights');
       active();
       return result.prefix;
-    });
+    }).finally(() => { for (const lease of held) lease.release(); });
   }
   /** Bound metadata folding, including rule sorting and prefix comparisons, by the shared action work allowance. */
   function chargeAuthorization(units: number): void {

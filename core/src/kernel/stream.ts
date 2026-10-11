@@ -1,6 +1,7 @@
 import { KernelError } from '#errors'
 import { isDeepStrictEqual } from 'node:util'
 import { comparePositions, positionToRev } from '#kernel/position'
+import { uniqueStoreOwners } from '#kernel/store/owner'
 import type { Budget, DomainId, InstanceStream, Position, StreamCursor, StreamDomain, StreamEvent } from '#kernel/types'
 
 interface Subscriber {
@@ -55,6 +56,8 @@ export function createInstanceStream(options: StreamOptions) {
       if (comparePositions(next, position) <= 0) throw new KernelError('INVALID', 'Stream positions must increase')
       position = next
     }
+    if (event.t === 'commit' && event.record.kind === 'transfer') return
+
     for (const observe of observers) observe(event)
     if (subscribers.size === 0) return
     const owned = structuredClone(event)
@@ -98,12 +101,20 @@ export function createInstanceStream(options: StreamOptions) {
           }
           const records = new Map<string, Extract<StreamEvent, { t: 'commit' }>>()
           if (from.pos.instance === barrier.instance) {
+            const scanStores = new Set(uniqueStoreOwners(currentInventory.map(domain => domain.store)))
             for (const domain of currentInventory) {
+              if (!scanStores.has(domain.store)) continue
               if (reset.has(domain.store.domain)) continue
               const query = await domain.store.scan({ range: { journal: '/', after: from.pos },
                 where: { 'pos.instance': barrier.instance }, budget: options.budget() })
+              if (query.retainedFrom !== undefined && comparePositions(from.pos, query.retainedFrom) < 0) {
+                reset.add(domain.store.domain)
+                continue
+              }
               for (const record of query.items) {
                 if (comparePositions(record.pos, barrier) > 0) continue
+                // Maintenance advances the accepted position without changing node data.
+                if (record.maintenance !== undefined || record.kind === 'transfer' || record.decision?.forward !== undefined) continue
                 const key = positionToRev(record.pos)
                 const event = { t: 'commit', domain: domain.store.domain, record } as const
                 const prior = records.get(key)

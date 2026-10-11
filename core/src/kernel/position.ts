@@ -1,5 +1,12 @@
 import { KernelError } from '#errors'
-import type { Position, Rev } from '#kernel/types'
+import type { JournalCommit, Position, Rev } from '#kernel/types'
+
+/** Physical transfer preserves native revisions; authored writes use their accepted commit position. */
+export function acceptsWritePosition(node: Position, commit: Position, kind: JournalCommit['kind']): boolean {
+  if (node.instance !== commit.instance) return false
+
+  return kind === 'transfer' ? comparePositions(node, commit) <= 0 : comparePositions(node, commit) === 0
+}
 
 export function comparePositions(a: Position, b: Position): number {
   if (a.instance !== b.instance) throw new KernelError('INVALID', 'Positions belong to different instances')

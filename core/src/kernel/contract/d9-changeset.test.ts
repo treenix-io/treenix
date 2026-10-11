@@ -1,3 +1,5 @@
+import type { StoreCensusQuery, StoreCensusRange, StoreCensusNode } from "#kernel/types"
+import type { JournalPositionHeadRange, JournalIntakeHeadRange, DecisionMetadataRange, JournalPositionHead, JournalIntakeHead, DecisionMetadata } from '#kernel/types'
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { KernelError } from '#errors'
@@ -14,10 +16,20 @@ const code = (expected: KernelError['code']) => (error: unknown) => error instan
 
 function editable(base: Store) {
   const edits = new Map<string, StoredNode>()
+  function scan(query: StoreCensusQuery): Promise<ScanResult<StoreCensusNode>>
   function scan(query: ScanQuery<ScanRange>): Promise<ScanResult<StoredNode>>
   function scan(query: ScanQuery<JournalRange | DecisionRange>): Promise<ScanResult<JournalCommit>>
-  async function scan(query: ScanQuery<ScanRange | JournalRange | DecisionRange>): Promise<ScanResult<StoredNode> | ScanResult<JournalCommit>> {
+  function scan(query: ScanQuery<JournalPositionHeadRange>): Promise<ScanResult<JournalPositionHead>>
+  function scan(query: ScanQuery<JournalIntakeHeadRange>): Promise<ScanResult<JournalIntakeHead>>
+  function scan(query: ScanQuery<DecisionMetadataRange>): Promise<ScanResult<DecisionMetadata>>
+  async function scan(query: ScanQuery<ScanRange | StoreCensusRange | JournalRange | DecisionRange | JournalPositionHeadRange | JournalIntakeHeadRange | DecisionMetadataRange>): Promise<ScanResult<StoreCensusNode> | ScanResult<StoredNode> | ScanResult<JournalCommit> | ScanResult<JournalPositionHead> | ScanResult<JournalIntakeHead> | ScanResult<DecisionMetadata>> {
     const range = query.range
+    if ("census" in range) return base.scan({ range, budget: query.budget })
+    if ('journalHead' in range) return range.journalHead === 'position'
+      ? base.scan({ ...query, range: { journalHead: 'position' } }) : base.scan({ ...query, range: { journalHead: 'intake' } })
+    if ('decisionMetadata' in range) {
+      return base.scan({ ...query, range })
+    }
     if ('journal' in range || 'decision' in range) return base.scan({ ...query, range })
     const rows = await base.scan({ ...query, range })
     return { ...rows, items: rows.items.map(node => edits.get(node.$path) ?? node) }
@@ -210,7 +222,7 @@ describe('ordered ChangeSet preparation', () => {
 
   it('anchors an externally edited before loaded under the preceding position', async () => {
     const disk = editable(createMemoryStore({ domain: 'memory' }))
-    const f = await fixture({ store: disk.store, cache: createProcessCache({ uncoveredBytes: 0 }) })
+    const f = await fixture({ store: disk.store, cache: createProcessCache({ uncoveredBytes: 0, external: owner => owner === disk.store }) })
     await f.commit([put('/item', { value: 1, label: 'cached', payload: 'x'.repeat(1024) })])
     const before = { ...(await f.nodes())[0], label: 'external' }
     disk.edit(before)
@@ -221,7 +233,7 @@ describe('ordered ChangeSet preparation', () => {
     assert.deepEqual(readJournalImages(await f.journal(), { pos, id: before.$id }), { before, after })
   })
 
-  it('recovers cumulative journal bytes after cache eviction instead of resetting every update', async () => {
+  it('retains sparse checkpoint cadence after payload eviction and reconstructs canonical images', async () => {
     const f = await fixture({ cache: createProcessCache({ uncoveredBytes: 0 }) })
     await f.commit([put('/item', { value: 1, payload: 'x'.repeat(1024) })])
     let pos = f.writer.position
@@ -232,6 +244,9 @@ describe('ordered ChangeSet preparation', () => {
     const [after] = await f.nodes()
     assert.equal(after.value, 31)
     assert.deepEqual(readJournalImages(records, { pos, id: after.$id }).after, after)
+    const before = readJournalImages(records, { pos, id: after.$id }).before
+    assert.ok(before !== null && before !== 'unknown')
+    assert.equal(before.value, 30)
   })
 
   it('serializes concurrent increments against the shared process copy', async () => {

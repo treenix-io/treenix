@@ -10,17 +10,19 @@ export interface RightsAlert {
   readonly error: unknown
 }
 
-export interface ChainNode {
+interface ChainFields {
   readonly path: Path
-  readonly id: string
   readonly types: readonly TypeName[]
   readonly acl: readonly AclEntry[]
   readonly owner?: Principal
   readonly hasAcl: boolean
   readonly hasOwner: boolean
-  readonly invalid?: 'chain' | 'node'
   readonly alerts: readonly RightsAlert[]
 }
+export type ChainNode = ChainFields & (
+  | { readonly invalid: 'chain'; readonly id?: string }
+  | { readonly invalid?: 'node'; readonly id: string }
+)
 
 export interface RightsResult {
   readonly bits: Bits
@@ -32,7 +34,7 @@ const ALL = R | W | A
 
 export const validBits = (bits: unknown): bits is Bits => typeof bits === 'number' && Number.isSafeInteger(bits) && bits >= 0 && bits <= ALL
 
-function rules(node: ChainNode, registry: Registry, input: RuleInput, alerts: RightsAlert[]): Bits {
+function rules(node: ChainNode & { readonly id: string }, registry: Registry, input: RuleInput, alerts: RightsAlert[]): Bits {
   let mask = ALL
   for (const name of node.types) {
     try { registry.type(name) } catch (error) {

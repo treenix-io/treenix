@@ -3,11 +3,12 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { assertSafePath } from '#core/path'
 import { KernelError } from '#errors'
 import type { AuthAdmission } from '#kernel/auth-factory'
+import type { AcceptedNodeRead } from '#kernel/writer'
 import { componentEntries } from '#kernel/migrate'
 import { ownMountTarget } from '#kernel/mount-resource'
 import type {
   Budget, Component, ComponentName, MountDecl, MountHandler, Node, NodeId, OpenedMountTarget,
-  NodeMeta, Path, Registry, Rev, ScanRange, Session, TypeDef, TypeName,
+  NodeMeta, OpenedStoreMountTarget, Path, Registry, Rev, ScanRange, Session, TypeDef, TypeName,
 } from '#kernel/types'
 import { stableJson } from '#util/stable-json'
 
@@ -20,6 +21,7 @@ export interface MountDeclaration {
 export interface MountChange {
   readonly id: NodeId
   readonly declarations: readonly MountDeclaration[]
+  readonly invalid?: readonly { readonly node: Node; readonly component: ComponentName }[]
 }
 
 export interface MountRange {
@@ -50,12 +52,31 @@ export interface MountSession {
   readonly admission: AuthAdmission
   close(): void
 }
+export interface MountSessionReservation {
+  validate(): void
+  open(owner: AcceptedNodeRead): Promise<MountSession>
+  close(): void
+}
+
+export interface PreparedMountReplacement {
+  readonly entry: MountEntry
+  readonly target: OpenedStoreMountTarget
+  authorize(read: AcceptedNodeRead): Promise<void>
+  cancelSession(): void
+  /** Bind the opened physical owner to its final canonical declaring-node revision. */
+  bind(stage: MountStage): MountEntry
+  validate(stage: MountStage): void
+  /** Hand the old physical resource to the Writer's ordered cleanup before route publication. */
+  publish(stage: MountStage): void
+  close(): Promise<void>
+}
 
 export interface MountTableOptions {
   readonly registry: Registry
   /** Configured owners publish after bootstrap; their accepted claims must already block parent routing. */
   readonly declarationTypes?: ReadonlySet<TypeName>
   readonly openSession: (node: Node) => Promise<MountSession>
+  readonly reserveSession?: (node: Node) => MountSessionReservation
   readonly activate: (entry: MountEntry, target: OpenedMountTarget, owner: MountSession) => Promise<void>
   /** Ordered Writer retirement owns release of a registered target. */
   readonly retire: (entry: MountEntry, target: OpenedMountTarget) => Promise<void>
@@ -88,6 +109,7 @@ interface Entry extends MountEntry {
 interface StageState {
   readonly version: number
   readonly entries: Map<string, Entry>
+  readonly blocked: Map<string, { readonly id: NodeId; readonly range: MountRange }>
 }
 
 interface OpeningWaiter {
@@ -184,6 +206,7 @@ function snapshot(input: MountDeclaration): MountDeclaration {
 /** Owns accepted claims independently of the asynchronously opened and fenced target resources. */
 export function createMountTable(options: MountTableOptions) {
   let entries = new Map<string, Entry>()
+  let blocked = new Map<string, { readonly id: NodeId; readonly range: MountRange }>()
   let keysByNode = new Map<NodeId, readonly string[]>()
   let acceptedRanges: readonly MountRange[] = []
   const stages = new WeakMap<MountStage, StageState>()
@@ -285,10 +308,27 @@ export function createMountTable(options: MountTableOptions) {
     const updated = new Map<string, Entry>()
     const removed = new Set<string>()
     const changed = new Set<NodeId>()
+    const nextBlocked = new Map(blocked)
     for (const change of changes) {
       if (changed.has(change.id)) throw new KernelError('INVALID', 'Duplicate mount node change')
       changed.add(change.id)
       const replacements = new Set<string>()
+      for (const [key, claim] of nextBlocked) if (claim.id === change.id) nextBlocked.delete(key)
+      for (const invalid of change.invalid ?? []) {
+        const key = stableJson([change.id, invalid.component])
+        if (replacements.has(key)) throw new KernelError('INVALID', 'Duplicate mount component')
+        replacements.add(key)
+        removed.add(key)
+        const previous = entries.get(key)
+        const prior = previous?.range ?? blocked.get(key)?.range
+        const pattern = previous?.pattern ?? compile(invalid.node.$path, '')
+        const range: MountRange = { key, generation: `${key}:${++generation}`, base: prior?.base ?? invalid.node.$path,
+          pattern: prior?.pattern ?? '', state: 'unavailable',
+          contains: path => prior === undefined ? contains(pattern, partsOf(path)) : prior.contains(path),
+          intersects: query => prior === undefined ? intersects(pattern, addressOf(query)) : prior.intersects(query),
+          start: path => prior === undefined ? undefined : prior.start(path) }
+        nextBlocked.set(key, { id: change.id, range })
+      }
       for (const input of change.declarations) {
         if (input.node.$id !== change.id) throw new KernelError('INVALID', 'Mount declaration belongs to another node')
         const key = stableJson([change.id, input.component])
@@ -309,9 +349,10 @@ export function createMountTable(options: MountTableOptions) {
         throw new KernelError('INVALID', 'Overlapping mount declarations')
       }
     }
-    const staged = Object.freeze({ ranges: next === entries ? acceptedRanges
-      : Object.freeze([...next.values()].map(entry => entry.range)) })
-    stages.set(staged, { version, entries: next })
+    const sameBlocks = nextBlocked.size === blocked.size && [...nextBlocked].every(([key, claim]) => blocked.get(key) === claim)
+    const staged = Object.freeze({ ranges: next === entries && sameBlocks ? acceptedRanges
+      : Object.freeze([...next.values()].map(entry => entry.range).concat([...nextBlocked.values()].map(claim => claim.range))) })
+    stages.set(staged, { version, entries: next, blocked: sameBlocks ? blocked : nextBlocked })
     return staged
   }
 
@@ -319,9 +360,11 @@ export function createMountTable(options: MountTableOptions) {
   function publish(stage: MountStage): void {
     validateStage(stage)
     const staged = stages.get(stage)!
-    if (staged.entries === entries) return
+    if (staged.entries === entries && staged.blocked === blocked) return
     const before = [...entries.values()]
+    const beforeRanges = acceptedRanges
     entries = staged.entries
+    blocked = staged.blocked
     acceptedRanges = stage.ranges
     const nextKeys = new Map<NodeId, string[]>()
     for (const entry of entries.values()) {
@@ -332,7 +375,7 @@ export function createMountTable(options: MountTableOptions) {
     keysByNode = nextKeys
     version++
     for (const entry of before) if (entries.get(entry.key) !== entry) retire(entry)
-    options.changed(before.map(entry => entry.range), [...entries.values()].map(entry => entry.range))
+    options.changed(beforeRanges, acceptedRanges)
   }
 
   /** Require the same accepted declaration and owner handler inside the Writer lifecycle span. */
@@ -376,7 +419,7 @@ export function createMountTable(options: MountTableOptions) {
         entry.target = ownMountTarget(await handler(entry.node, entry.session.session, entry.component))
         validate(entry.key, entry.revision)
         if (entry.target.kind === 'store' && entry.declaration.external === 'trusted'
-          && entry.target.store.external === undefined) {
+          && (entry.target.store.external === undefined || entry.target.store.readExternal === undefined)) {
           throw new KernelError('INVALID', 'Trusted mount Store must report external edits')
         }
         if (entry.target.kind === 'view' && entry.target.executor === 'node'
@@ -480,6 +523,8 @@ export function createMountTable(options: MountTableOptions) {
   /** Open intersecting targets before any Reader barrier that their handlers may themselves need. */
   async function prepareRanges(ranges: readonly ScanRange[], budget: Budget, signal?: AbortSignal): Promise<void> {
     check(budget, signal)
+    for (const claim of blocked.values()) if (ranges.some(range => claim.range.intersects(range)))
+      throw new KernelError('UNAVAILABLE', 'Mount declaration is invalid')
     const addresses = ranges.map(addressOf)
     for (const entry of entries.values()) {
       check(budget, signal)
@@ -491,6 +536,121 @@ export function createMountTable(options: MountTableOptions) {
 
   return {
     stage, validateStage, publish, validate, activated, prepareRanges,
+    /** Return the accepted declaration identity before its owner handler is activated. */
+    declaration(key: string): MountEntry {
+      available()
+      const entry = entries.get(key)
+      if (entry === undefined) throw new KernelError('UNAVAILABLE', 'Mount declaration is absent')
+      return entry
+    },
+    /** Open a replacement off-route while retaining the accepted declaration's routing authority. */
+    async prepareReplacement(input: MountDeclaration, budget: Budget): Promise<PreparedMountReplacement> {
+      check(budget)
+      const draft = entryOf(input)
+      const before = entries.get(draft.key)
+      const preparedVersion = version
+      let bound: Entry | undefined
+      let accepted = false
+      let reservation: MountSessionReservation | undefined
+
+      /** Keep topology and the exact owner handler pinned while the physical copy is prepared. */
+      function checkDraft(): void {
+        check(budget)
+        if (version !== preparedVersion || entries.get(draft.key) !== before
+          || options.registry.type(draft.declaration.$type) !== draft.type
+          || options.registry.security(draft.declaration.$type, 'mount') !== draft.handler) {
+          throw new KernelError('CONFLICT', 'Prepared mount owner changed')
+        }
+      }
+
+      if (draft.handler === undefined || draft.type?.security === 'ordinary')
+        throw new KernelError('UNAVAILABLE', 'Mount owner handler is unavailable')
+      try {
+        checkDraft()
+        if (draft.handler.prepare !== undefined) {
+          if (options.reserveSession === undefined) throw new KernelError('UNAVAILABLE', 'Physical mount preparation requires reserved Session ownership')
+          reservation = options.reserveSession(draft.node)
+          draft.target = ownMountTarget(await draft.handler.prepare(draft.node, draft.component))
+        } else {
+          draft.session = await options.openSession(draft.node)
+          if (draft.session.session.actor.principal !== `n:${draft.node.$id}`)
+            throw new KernelError('INVALID', 'Mount handler requires its declaring node session')
+          draft.target = ownMountTarget(await draft.handler(draft.node, draft.session.session, draft.component))
+        }
+        checkDraft()
+        if (draft.target.kind !== 'store') throw new KernelError('INVALID', 'Subtree transfer requires a Store target')
+        if (draft.declaration.external === 'trusted'
+          && (draft.target.store.external === undefined || draft.target.store.readExternal === undefined))
+          throw new KernelError('INVALID', 'Trusted mount Store must report external edits')
+      } catch (error) {
+        try { await draft.target?.close() }
+        catch (closeError) { throw new AggregateError([error, closeError], 'Mount preparation and resource release failed') }
+        finally { draft.session?.close(); reservation?.close() }
+        throw error
+      }
+      const target = draft.target
+
+      /** Refuse stale stages or an independently changed declaring component. */
+      function validateReplacement(stage: MountStage): void {
+        checkDraft()
+        if (draft.session === undefined) reservation?.validate()
+        validateStage(stage)
+        const candidate = stages.get(stage)!.entries.get(draft.key)
+        if (candidate === undefined || candidate === before || candidate.node.$id !== draft.node.$id
+          || candidate.node.$path !== draft.node.$path
+          || stableJson(candidate.declaration) !== stableJson(draft.declaration))
+          throw new KernelError('CONFLICT', 'Replacement declaration differs from its opened owner')
+        if (bound !== undefined && candidate !== bound)
+          throw new KernelError('CONFLICT', 'Replacement is bound to another stage')
+      }
+
+      return {
+        entry: draft, target,
+        cancelSession() { draft.session?.close(); reservation?.close() },
+        async authorize(read) {
+          if (draft.session === undefined) {
+            if (reservation === undefined) throw new KernelError('INVALID', 'Replacement has no reserved Session')
+            draft.session = await reservation.open(read)
+          }
+          if (draft.session.session.actor.principal !== `n:${draft.node.$id}`)
+            throw new KernelError('INVALID', 'Mount handler requires its declaring node session')
+          if (bound !== undefined) bound.session = draft.session
+        },
+        bind(stage) {
+          validateReplacement(stage)
+          bound = stages.get(stage)!.entries.get(draft.key)!
+          bound.target = target
+          bound.session = draft.session
+          bound.registered = true
+          bound.state = 'active'
+          return bound
+        },
+        validate: validateReplacement,
+        publish(stage) {
+          validateReplacement(stage)
+          if (bound === undefined) throw new KernelError('INVALID', 'Replacement has no canonical stage')
+          if (bound.session === undefined) throw new KernelError('INVALID', 'Replacement has no accepted declaring Session')
+          if (before !== undefined) before.registered = false
+          accepted = true
+          publish(stage)
+        },
+        async close() {
+          if (accepted) return
+          try { await target.close() }
+          finally { draft.session?.close(); reservation?.close() }
+        },
+      }
+    },
+    /** Preserve existing claimed ranges when physical declaration authority cannot be decoded. */
+    faultChanges(paths: readonly Path[]): readonly MountChange[] {
+      const changes = new Map<NodeId, { id: NodeId; declarations: MountDeclaration[]; invalid: { node: Node; component: ComponentName }[] }>()
+      for (const entry of entries.values()) if (paths.some(path => entry.node.$path === path || entry.node.$path.startsWith(`${path === '/' ? '' : path}/`))) {
+        let change = changes.get(entry.node.$id)
+        if (change === undefined) { change = { id: entry.node.$id, declarations: [], invalid: [] }; changes.set(change.id, change) }
+        change.invalid.push({ node: entry.node, component: entry.component })
+      }
+      return [...changes.values()]
+    },
     /** Adopt only exact accepted declarations during startup, without inventing wildcard addresses. */
     async prepareKeys(keys: readonly string[], budget: Budget, signal?: AbortSignal): Promise<void> {
       check(budget, signal)
@@ -515,14 +675,31 @@ export function createMountTable(options: MountTableOptions) {
       options.changed(before.map(entry => entry.range), [...entries.values()].map(entry => entry.range))
     },
     /** Extract all owner-handler declarations, retaining explicit invalid mount claims loudly. */
-    declarationsOf(node: Node): MountChange {
+    declarationsOf(node: Node, external = false): MountChange {
       const declarations: MountDeclaration[] = []
-      for (const [component, value] of componentEntries(node)) {
+      const invalid: { readonly node: Node; readonly component: ComponentName }[] = []
+      let components: ReturnType<typeof componentEntries>
+      try { components = componentEntries(node) } catch (error) {
+        if (!external || !(error instanceof KernelError) || error.code !== 'INVALID') throw error
+        for (const entry of entries.values()) if (entry.node.$id === node.$id)
+          invalid.push({ node, component: entry.component })
+        if (Object.hasOwn(node, '#mount') && !invalid.some(item => item.component === '#mount'))
+          invalid.push({ node, component: '#mount' })
+        return { id: node.$id, declarations, invalid }
+      }
+      for (const [component, value] of components) {
         if (component !== '#mount' && !options.declarationTypes?.has(value.$type)
           && options.registry.security(value.$type, 'mount') === undefined) continue
-        declarations.push({ node, component, declaration: declaration(value) })
+        try {
+          const declared = declaration(value)
+          compile(node.$path, declared.pattern)
+          declarations.push({ node, component, declaration: declared })
+        } catch (error) {
+          if (!external || !(error instanceof KernelError) || error.code !== 'INVALID') throw error
+          invalid.push({ node, component })
+        }
       }
-      return { id: node.$id, declarations }
+      return { id: node.$id, declarations, ...(invalid.length === 0 ? {} : { invalid }) }
     },
     /** Prepare direct addresses using the same range-aware opening path. */
     prepare(paths: readonly Path[], budget: Budget, signal?: AbortSignal): Promise<void> {
@@ -531,6 +708,8 @@ export function createMountTable(options: MountTableOptions) {
     /** Resolve only active claims; a claimed but unavailable address never falls back to its parent. */
     resolve(path: Path, children = false): MountResolution | undefined {
       available()
+      for (const claim of blocked.values()) if (claim.range.contains(path))
+        throw new KernelError('UNAVAILABLE', 'Mount declaration is invalid')
       const parts = partsOf(path)
       for (const entry of entries.values()) {
         if (!contains(entry.pattern, parts) && !(children && entry.pattern.descendantsOnly
@@ -548,7 +727,7 @@ export function createMountTable(options: MountTableOptions) {
     ranges(range?: ScanRange): readonly MountRange[] {
       if (range === undefined) return acceptedRanges
       const address = addressOf(range)
-      return [...entries.values()].flatMap(entry => intersects(entry.pattern, address) ? [entry.range] : [])
+      return acceptedRanges.filter(claim => claim.intersects(range))
     },
     target(key: string, generation: string): OpenedMountTarget {
       available()
@@ -560,9 +739,7 @@ export function createMountTable(options: MountTableOptions) {
     },
     /** Pin semantic topology, including unavailable claims, for Reader and subscription dependencies. */
     topology(range: ScanRange): string {
-      const address = addressOf(range)
-      return stableJson([...entries.values()].flatMap(entry => intersects(entry.pattern, address)
-        ? [[entry.key, entry.range.generation, entry.range.state]] : []))
+      return stableJson(acceptedRanges.filter(claim => claim.intersects(range)).map(claim => [claim.key, claim.generation, claim.state]))
     },
     /** Detect concrete match roots without enumerating the subtree behind a declaration. */
     boundary(path: Path): boolean {

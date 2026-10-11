@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { createRegistryMap } from '#core/registry-map'
 import { KernelError } from '#errors'
 import { stableJson } from '#util/stable-json'
-import type { ActionDef, ModuleId, ModuleManifest, Registry, SecurityClass, SecurityContext, SecurityHandlers, SecurityRegistration, TypeDef, TypeName } from './types'
+import type { ActionDef, BackfillGeneration, ModuleId, ModuleManifest, Registry, SecurityClass, SecurityContext, SecurityHandlers, SecurityRegistration, TypeDef, TypeName } from './types'
 
 export interface TypeOwnership {
   readonly module: ModuleId
@@ -112,6 +112,7 @@ export function createRegistry(options: RegistryOptions = {}): Registry {
   let security = new Map<string, SecurityEntries>()
   let open = createRegistryMap<unknown>()
   let generation = digest(modules)
+  let migrations: readonly BackfillGeneration[] = []
 
   return {
     module(id) {
@@ -120,6 +121,7 @@ export function createRegistry(options: RegistryOptions = {}): Registry {
       return manifest
     },
     get digest() { return generation },
+    get migrations() { return migrations },
     type(name) {
       const def = types.get(name)
       if (def === undefined) throw new KernelError('UNKNOWN_TYPE', `Unknown type: ${name}`)
@@ -183,12 +185,21 @@ export function createRegistry(options: RegistryOptions = {}): Registry {
       }
 
       const nextDigest = digest(nextModules)
+      const nextMigrations: BackfillGeneration[] = []
+      for (const def of new Set(nextTypes.values())) {
+        const ladder = nextSecurity.get(def.name)?.migrate
+        if (ladder === undefined || ladder.length === 0) continue
+        const generation = createHash('sha256').update(stableJson(canonical({ version: def.version, ladder }))).digest('hex')
+        nextMigrations.push(Object.freeze({ type: def.name, version: def.version, generation }))
+      }
+      nextMigrations.sort((a, b) => compare(a.type, b.type))
       modules = nextModules
       owners = nextOwners
       types = nextTypes
       security = nextSecurity
       open = nextOpen
       generation = nextDigest
+      migrations = Object.freeze(nextMigrations)
       options.published?.()
       return generation
     },

@@ -3,6 +3,7 @@ import { isDeepStrictEqual } from 'node:util'
 import { KernelError } from '#errors'
 import { validateBlobReferences } from '#kernel/blobs'
 import { runStoreScan, type OperationReadCost } from '#kernel/store/budget'
+import { sameStoreOwner } from '#kernel/store/owner'
 import type { ActionProvenance } from '#kernel/action-guard'
 import type { CacheRead, ProcessCache } from '#kernel/cache'
 import type { CapabilityState } from '#kernel/capability'
@@ -115,7 +116,7 @@ export async function prepareChangeSet(
       console.error(error);
       throw new KernelError('INVALID', `Invalid node path: ${value}`);
     }
-    if (options.resolve !== undefined && options.resolve(value) !== store)
+    if (options.resolve !== undefined && !sameStoreOwner(options.resolve(value), store))
       throw new KernelError('CROSS_DOMAIN', 'ChangeSet spans atomic Store owners');
   }
   function touch(before: StoredNode | null, after: StoredNode | null, at: string): void {
@@ -133,7 +134,10 @@ export async function prepareChangeSet(
     states.set(at, after);
   }
   async function load(range: ScanRange): Promise<readonly StoredNode[]> {
-    const lease = await cache.fill(store, range, options.readCost?.budget() ?? budget);
+    const at = 'node' in range ? range.node : 'children' in range ? range.children : range.subtree;
+    const local = options.resolve?.(at) ?? store;
+    if (!sameStoreOwner(local, store)) throw new KernelError('CROSS_DOMAIN', 'ChangeSet spans atomic Store owners');
+    const lease = await cache.fill(local, range, options.readCost?.budget() ?? budget);
     leases.push(lease);
     const nodes = lease.nodes;
     if (options.readCost !== undefined)
@@ -339,38 +343,10 @@ export async function prepareChangeSet(
     }
   }
   async function checkpoint(before: StoredNode): Promise<{ bytes: number; full: boolean }> {
-    const known = cache.get(before.$id)?.journalBytes;
+    const known = cache.getJournalBytes(options.resolve?.(before.$path) ?? store, before);
     if (known !== undefined) return { bytes: known, full: false };
-    const records = (
-      await runStoreScan(
-        budget,
-        limits.queryMs,
-        (queryBudget) =>
-          store.scan({
-            range: { journal: '/' },
-            where: { 'entries.id': before.$id },
-            budget: queryBudget,
-          }),
-        options.readCost,
-      )
-    ).items.filter((record) => comparePositions(record.pos, before.$pos) <= 0);
-    let bytes: number | undefined;
-    for (const record of records)
-      for (const entry of record.entries)
-        if (entry.id === before.$id) {
-          if (entry.change.t !== 'update' || entry.change.after !== undefined) bytes = 0;
-          else if (bytes !== undefined)
-            bytes += Buffer.byteLength(JSON.stringify(entry.change.delta));
-        }
-    const last = records.at(-1);
-    if (bytes === undefined || last === undefined) return { bytes: 0, full: true };
-    // A trusted external edit can enter the cache under the old position; its before needs a new anchor.
-    const full = !isDeepStrictEqual(
-      readJournalImages(records, { pos: last.pos, id: before.$id }).after,
-      before,
-    );
-    if (!full) cache.seedJournalBytes(before.$id, before.$pos, bytes);
-    return { bytes, full };
+    // A full after-image and its reversible delta anchor a cold identity without older history.
+    return { bytes: 0, full: true };
   }
 
   try {
@@ -453,11 +429,27 @@ export async function prepareChangeSet(
         ...(change.after === null ? [] : [change.after.$path]),
       ]),
     );
+    const writes = [...paths].map((at) => ({ path: at, node: states.get(at)! }));
+    let groups: PreparedCommit['groups'];
+    const resolve = options.resolve;
+    if (resolve !== undefined && writes.some(write => resolve(write.path) !== store)) {
+      const handles = new Map<Store, typeof writes>([[store, []]]);
+      for (const write of writes) {
+        const local = resolve(write.path);
+        path(write.path);
+        const group = handles.get(local);
+        if (group === undefined) handles.set(local, [write]);
+        else group.push(write);
+      }
+      if (handles.size > 1) groups = [...handles].map(([store, writes]) => ({ store, writes }));
+    }
     return {
-      writes: [...paths].map((at) => ({ path: at, node: states.get(at)! })),
+      writes,
+      ...(groups === undefined ? {} : { groups }),
       record: { pos, kind: 'commit', executor: who.executor, caller: who.caller, entries },
       transitions: expanded,
-      budget: options.readCost?.budget() ?? { ...budget, nodes: budget.nodes - loaded.size, bytes: budget.bytes - readBytes, exprWork: budget.exprWork - blobWork },
+      budget: options.readCost?.budget() ?? { ...budget, nodes: budget.nodes - loaded.size, bytes: budget.bytes - readBytes,
+        exprWork: budget.exprWork - blobWork },
     };
   } finally {
     for (const lease of leases) lease.release();
@@ -480,12 +472,12 @@ export async function selectChangeStore(changes: readonly ChangeMember[], source
       : change.op === 'restore' || change.op === 'undo' ? '/' : change.path
     if (change.op !== 'restore' && change.op !== 'undo') ownership.pin({ node: path })
     const target = change.op === 'restore' || change.op === 'undo' ? await ownership.journalTarget(change.record) : source.resolve(path)
-    if (store !== undefined && store !== target.store)
+    if (store !== undefined && !sameStoreOwner(store, target.store))
       throw new KernelError('CROSS_DOMAIN', 'ChangeSet spans atomic Store owners')
     store = target.store
     if (change.op === 'move') {
       ownership.pin({ node: change.to })
-      if (source.resolve(change.to).store !== store)
+      if (!sameStoreOwner(source.resolve(change.to).store, store))
         throw new KernelError('CROSS_DOMAIN', 'ChangeSet spans atomic Store owners')
     }
   }

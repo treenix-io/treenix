@@ -764,7 +764,9 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
       reset(sub => options.domainIntersects === undefined
         || sub.state.domains.includes(event.domain)
           && intersectsSubscription(sub, range => options.domainIntersects!(event.domain, range)));
-    else if (event.t === 'commit')
+    else if (event.t === 'commit') {
+      for (const change of event.record.quarantine ?? [])
+        subscriptions.changed(change.path, true, options.limits().readNodes);
       for (const entry of event.record.entries) {
         const force =
           entry.change.t !== 'update' ||

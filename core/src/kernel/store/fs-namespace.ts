@@ -76,8 +76,16 @@ export function createFsNamespace(base: Path) {
   function commit(input: StoreCommit, path: (value: Path) => Path): StoreCommit {
     if (base === '/') return input
     return { ...input,
+      ...(input.transferAbsent === undefined ? {} : { transferAbsent: input.transferAbsent.map(path) }),
+      ...(input.transferBefore === undefined ? {} : { transferBefore: input.transferBefore.map(original => ({
+        ...original, path: path(original.path),
+        sourceId: original.sourceId.startsWith('p:') ? `p:${path(original.sourceId.slice(2))}` : original.sourceId,
+        id: original.id.startsWith('p:') ? `p:${path(original.id.slice(2))}` : original.id,
+      })) }),
       writes: input.writes.map(write => ({ path: path(write.path), node: write.node === null ? null : node(write.node, path) })),
-      record: { ...input.record, entries: input.record.entries.map(entry => ({ ...entry,
+      record: { ...input.record,
+        ...(input.record.quarantine === undefined ? {} : { quarantine: input.record.quarantine.map(change => ({ ...change, path: path(change.path) })) }),
+        entries: input.record.entries.map(entry => ({ ...entry,
         id: entry.id.startsWith('p:') ? `p:${path(entry.id.slice(2))}` : entry.id,
         path: path(entry.path), ...(entry.from === undefined ? {} : { from: path(entry.from) }),
         change: transition(entry.change, path),
@@ -88,6 +96,8 @@ export function createFsNamespace(base: Path) {
   return {
     local: (input: StoreCommit) => commit(input, localPath),
     logical: (input: StoreCommit) => commit(input, logicalPath),
+    localPath, logicalPath,
     logicalNode: (image: StoredNode) => base === '/' ? image : node(image, logicalPath),
+    localNode: (image: StoredNode) => base === '/' ? image : node(image, localPath),
   }
 }

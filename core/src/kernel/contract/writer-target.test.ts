@@ -1,3 +1,5 @@
+import type { StoreCensusQuery, StoreCensusRange, StoreCensusNode } from "#kernel/types"
+import type { JournalPositionHeadRange, JournalIntakeHeadRange, DecisionMetadataRange, JournalPositionHead, JournalIntakeHead, DecisionMetadata } from '#kernel/types'
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { mkdir, mkdtemp, readFile } from 'node:fs/promises'
@@ -59,10 +61,21 @@ async function writer(root: Store, token = 1, lifecycle: TargetLifecycle = { val
 /** Hold actual replay or decision IO while retirement changes its ownership inventory. */
 function heldScan(store: Store, kind: 'journal' | 'decision') {
   const entered = barrier(), resume = barrier()
+  function scan(query: StoreCensusQuery): Promise<ScanResult<StoreCensusNode>>
   function scan(query: ScanQuery<ScanRange>): Promise<ScanResult<StoredNode>>
   function scan(query: ScanQuery<JournalRange | DecisionRange>): Promise<ScanResult<JournalCommit>>
-  async function scan(query: ScanQuery<ScanRange | JournalRange | DecisionRange>): Promise<ScanResult<StoredNode> | ScanResult<JournalCommit>> {
+  function scan(query: ScanQuery<JournalPositionHeadRange>): Promise<ScanResult<JournalPositionHead>>
+  function scan(query: ScanQuery<JournalIntakeHeadRange>): Promise<ScanResult<JournalIntakeHead>>
+  function scan(query: ScanQuery<DecisionMetadataRange>): Promise<ScanResult<DecisionMetadata>>
+  async function scan(query: ScanQuery<ScanRange | StoreCensusRange | JournalRange | DecisionRange | JournalPositionHeadRange | JournalIntakeHeadRange | DecisionMetadataRange>): Promise<ScanResult<StoreCensusNode> | ScanResult<StoredNode> | ScanResult<JournalCommit> | ScanResult<JournalPositionHead> | ScanResult<JournalIntakeHead> | ScanResult<DecisionMetadata>> {
     const range = query.range
+    if ("census" in range) return store.scan({ range, budget: query.budget })
+    if ('journalHead' in range) return range.journalHead === 'position'
+      ? store.scan({ ...query, range: { journalHead: 'position' } }) : store.scan({ ...query, range: { journalHead: 'intake' } })
+    if ('decisionMetadata' in range) {
+      if (kind === 'decision') { entered.release(); await resume.reached }
+      return store.scan({ ...query, range })
+    }
     if ('journal' in range) {
       if (kind === 'journal' && range.after !== undefined) { entered.release(); await resume.reached }
       return store.scan({ ...query, range })

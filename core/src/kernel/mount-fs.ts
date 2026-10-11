@@ -2,11 +2,12 @@ import { join } from 'node:path'
 
 import { openPersistentWriter, type PersistentWriter } from '#kernel/persistence'
 import { createFsStore, type FsStore } from '#kernel/store/fs'
-import type { InstanceId, OpenedStoreMountTarget, Path } from '#kernel/types'
+import type { ExternalEdits, InstanceId, OpenedStoreMountTarget, Path } from '#kernel/types'
 
 export interface FsMountTargetOptions {
   readonly directory: string
   readonly instance: InstanceId
+  readonly external?: ExternalEdits
   readonly logicalBase: Path
 }
 
@@ -43,7 +44,7 @@ export async function openFsMountTarget(options: FsMountTargetOptions): Promise<
   let store: FsStore | undefined
 
   try {
-    store = await createFsStore({ directory, lease, logicalBase })
+    store = await createFsStore({ directory, lease, logicalBase, external: options.external })
     const epoch = await lease.renewContinuity()
     const acquiredStore = store
     let closing: Promise<void> | undefined

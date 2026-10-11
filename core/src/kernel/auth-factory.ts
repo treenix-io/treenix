@@ -4,11 +4,12 @@ import { credentialScope, tokenHash } from '#kernel/auth/crypto'
 import { authenticateLogin, type LoginInput, type LoginProof } from '#kernel/auth/login'
 import { actorDependencyVersion, createActorResolver, type ActorDependency, type ActorResolution,
   type AuthReadSource, type AuthSource } from '#kernel/session'
-import type { Actor, Credential, InstanceId, NodeId, Path, Registry, RightsPrefix, ShardEnvelope, StoredNode } from '#kernel/types'
+import type { Actor, Credential, InstanceId, NodeId, Path, Registry, RightsPrefix, ShardEnvelope, StoredNode, StorageFaultChange } from '#kernel/types'
 import { stableJson } from '#util/stable-json'
 
 export interface AuthChange { readonly id: NodeId; readonly node: StoredNode | null }
 export type AuthEvent = { readonly t: 'nodes'; readonly changes: readonly AuthChange[] } | { readonly t: 'registry' }
+  | { readonly t: 'faults'; readonly changes: readonly StorageFaultChange[] }
 export interface AuthEvents { subscribe(listener: (event: AuthEvent) => void): () => void }
 export interface AuthIssuer { issue(proof: LoginProof, credential: PreparedCredential): Promise<void> }
 export interface ShardRights {
@@ -61,6 +62,12 @@ export function createAuthFactory(options: AuthFactoryOptions) {
     }
   }
   const unsubscribe = events.subscribe(event => {
+    if (event.t === 'faults') {
+      for (const admission of active) if (event.changes.some(change => change.fault !== null &&
+        admission.resolution.sources.some(dep => dep.path === change.path || dep.path.startsWith(`${change.path === '/' ? '' : change.path}/`))))
+        admission.close(unauthorized())
+      return
+    }
     if (event.t === 'registry') {
       if (digest === registry.digest) return
       digest = registry.digest
