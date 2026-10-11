@@ -3,6 +3,7 @@ import type { ActRequest, CommitRequest, NodeInput, OpId } from '@treenx/core/ke
 export interface NativeMcpServerConfig {
   readonly url: string;
   readonly systemPath: string;
+  readonly branchPath?: string;
 }
 
 /** Client tool inputs use the native action, node and precondition contracts directly. */
@@ -14,4 +15,9 @@ export interface NativeMcpToolInputs {
   readonly remove_node: { path: string; expect?: CommitRequest['expect']; opId?: OpId };
   readonly describe_type: { type: string };
   readonly search_types: { query: string };
+}
+
+/** Explicit deployment coordinates preserve the authenticated Session authority. */
+export interface NativeMcpCoordinates {
+  readonly branchPath?: string;
 }
