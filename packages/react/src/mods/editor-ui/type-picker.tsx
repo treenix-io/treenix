@@ -1,3 +1,6 @@
+import { useTreeEffects } from '#hooks';
+import type { TreeEffects } from '#tree/effects';
+import { KernelError } from '@treenx/core/errors';
 import { Button } from '#components/ui/button';
 import { Command, CommandGroup, CommandInput, CommandItem, CommandList } from '#components/ui/command';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '#components/ui/dialog';
@@ -9,7 +12,24 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 export type TypeInfo = { type: string; label: string; description: string };
 
-export async function loadTypes(): Promise<TypeInfo[]> {
+export async function loadTypes(effects?: TreeEffects): Promise<TypeInfo[]> {
+  const kernel = effects?.kernel;
+  if (kernel !== undefined && effects !== undefined) {
+    const types: TypeInfo[] = [];
+    let after: string | undefined;
+    do {
+      const page = await kernel.read({ children: '/sys/types', window: { limit: 50, ...(after === undefined ? {} : { after }) } });
+      for (const copy of page.copies) {
+        if ('error' in copy) throw new KernelError(copy.error.code, copy.error.message);
+        const description = await effects.execute(copy.node.$path, 'describe_type', {}, 't.type');
+        types.push({ type: description.name, label: description.schema.title ?? description.name,
+          description: description.schema.description ?? '' });
+      }
+      after = page.next;
+    } while (after !== undefined);
+    return types;
+  }
+
   const { items } = (await trpc.getChildren.query({ path: '/sys/types', limit: 0, depth: 99 })) as {
     items: NodeData[];
     total: number;
@@ -53,9 +73,11 @@ export function TypePicker({
   action?: string;
   autoName?: boolean;
 }) {
-  const [types, setTypes] = useState<TypeInfo[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const effects = useTreeEffects();
+  const [owned, setOwned] = useState<{ effects: TreeEffects; types: TypeInfo[]; loading: boolean; error: string | null }>(() => ({ effects, types: [], loading: true, error: null }));
+  const types = owned.effects === effects ? owned.types : [];
+  const loading = owned.effects === effects ? owned.loading : true;
+  const error = owned.effects === effects ? owned.error : null;
   const [name, setName] = useState('');
   const [nameManual, setNameManual] = useState(false);
   const [selectedType, setSelectedType] = useState<string | null>(null);
@@ -63,14 +85,14 @@ export function TypePicker({
   const nameRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    loadTypes()
-      .then(setTypes)
-      .catch((err) => {
-        console.error('Failed to load types:', err);
-        setError('Failed to load types');
-      })
-      .finally(() => setLoading(false));
-  }, []);
+    let active = true;
+    setOwned({ effects, types: [], loading: true, error: null });
+    loadTypes(effects).then(
+      types => { if (active) setOwned({ effects, types, loading: false, error: null }); },
+      reason => { if (active) setOwned({ effects, types: [], loading: false, error: reason instanceof Error ? reason.message : String(reason) }); },
+    );
+    return () => { active = false; };
+  }, [effects]);
 
   const visibleTypes = useMemo(() => {
     const s = search.trim();

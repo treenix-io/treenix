@@ -1,5 +1,7 @@
 import { Checkbox } from '#components/ui/checkbox';
 import { Input } from '#components/ui/input';
+import { useTreeEffects } from '#hooks';
+import { NativeSchemaFields } from '#editor/NativeSchemaFields';
 import { useSchema } from '#schema-loader';
 import { type ComponentData, isComponent, isRef, register, resolve } from '@treenx/core';
 import type { PropertySchema } from '@treenx/core/schema/types';
@@ -8,7 +10,7 @@ import { createElement } from 'react';
 import { FieldLabel, RefEditor } from './FieldLabel';
 import { renderField, StringArrayField } from './form-field';
 
-const DefaultEditForm: View<ComponentData> = ({ value, onChange }) => {
+const LegacyEditForm: View<ComponentData> = ({ value, onChange }) => {
   const schema = useSchema(value.$type);
   if (schema === undefined) return null;
 
@@ -109,6 +111,13 @@ const DefaultEditForm: View<ComponentData> = ({ value, onChange }) => {
       no fields
     </div>
   );
+};
+
+/** Native forms obtain schema through the actual selected caller instead of the legacy registry. */
+const DefaultEditForm: View<ComponentData> = props => {
+  const effects = useTreeEffects();
+  return effects.kernel === undefined ? <LegacyEditForm {...props} />
+    : <NativeSchemaFields value={props.value} onChange={(name, value) => props.onChange?.({ [name]: value })} />;
 };
 
 register('default', 'react:edit', DefaultEditForm);

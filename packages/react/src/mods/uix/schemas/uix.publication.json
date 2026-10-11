@@ -1,0 +1,15 @@
+{
+  "$id": "uix.publication",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Published module view source",
+  "properties": {
+    "type": { "type": "string" },
+    "module": { "type": "string" },
+    "source": { "type": "string" },
+    "draft": { "type": "string" },
+    "draftRev": { "type": "string" }
+  },
+  "required": ["type", "module", "source", "draft", "draftRev"],
+  "additionalProperties": false
+}

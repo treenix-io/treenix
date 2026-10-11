@@ -1,0 +1,40 @@
+{
+  "$id": "uix.action-publication",
+  "type": "object",
+  "properties": {
+    "type": {
+      "type": "string"
+    },
+    "module": {
+      "type": "string"
+    },
+    "source": {
+      "type": "string"
+    },
+    "draft": {
+      "type": "string"
+    },
+    "draftRev": {
+      "type": "string"
+    },
+    "action": {
+      "type": "string"
+    },
+    "definition": {
+      "type": "object"
+    },
+    "stream": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "type",
+    "module",
+    "source",
+    "draft",
+    "draftRev",
+    "action",
+    "definition",
+    "stream"
+  ]
+}

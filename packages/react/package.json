@@ -1,7 +1,7 @@
 {
   "name": "@treenx/react",
   "version": "3.0.21",
-  "description": "React binding for Treenix — reactive hooks, admin UI, and context-based component rendering.",
+  "description": "React binding for Treenix \u2014 reactive hooks, admin UI, and context-based component rendering.",
   "type": "module",
   "publishConfig": {
     "access": "public"
@@ -64,6 +64,42 @@
     "#app/RoutedPage": {
       "development": "./src/app/RoutedPage.tsx",
       "default": "./dist/app/RoutedPage.js"
+    },
+    "#editor/NativeSchemaFields": {
+      "development": "./src/editor/NativeSchemaFields.tsx",
+      "default": "./dist/editor/NativeSchemaFields.js"
+    },
+    "#editor/NodeEditor": {
+      "development": "./src/editor/NodeEditor.tsx",
+      "default": "./dist/editor/NodeEditor.js"
+    },
+    "#editor/Tree": {
+      "development": "./src/editor/Tree.tsx",
+      "default": "./dist/editor/Tree.js"
+    },
+    "#mods/editor-ui/JsonEditor": {
+      "development": "./src/mods/editor-ui/JsonEditor.tsx",
+      "default": "./dist/mods/editor-ui/JsonEditor.js"
+    },
+    "#mods/editor-ui/DraftTextarea": {
+      "development": "./src/mods/editor-ui/DraftTextarea.tsx",
+      "default": "./dist/mods/editor-ui/DraftTextarea.js"
+    },
+    "#mods/editor-ui/form-field": {
+      "development": "./src/mods/editor-ui/form-field.tsx",
+      "default": "./dist/mods/editor-ui/form-field.js"
+    },
+    "#mods/editor-ui/type-picker": {
+      "development": "./src/mods/editor-ui/type-picker.tsx",
+      "default": "./dist/mods/editor-ui/type-picker.js"
+    },
+    "#components/ConfirmDialog": {
+      "development": "./src/components/ConfirmDialog.tsx",
+      "default": "./dist/components/ConfirmDialog.js"
+    },
+    "#app/LaneSessionProvider": {
+      "development": "./src/app/LaneSessionProvider.tsx",
+      "default": "./dist/app/LaneSessionProvider.js"
     }
   },
   "exports": {

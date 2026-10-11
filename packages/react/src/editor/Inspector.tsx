@@ -1,4 +1,6 @@
-import type { NodeData } from '@treenx/core';
+import type { Node } from '@treenx/core/kernel/types';
+import { useTreeEffects } from '#hooks';
+import { LegacyInspector } from './LegacyInspector';
 // Inspector — view + edit panel for selected node (Unity-style inspector)
 // Shell only: header, rendered view, delegates editing to NodeEditor
 
@@ -7,9 +9,8 @@ import { ErrorBoundary } from '#app/ErrorBoundary';
 import { ScrollArea } from '#components/ui/scroll-area';
 import { Render, RenderContext } from '#context';
 import { usePath } from '#hooks';
-import { useReactivePathEvents } from '#hooks/use-reactive-path-events';
 import { pickDefaultContext } from '#mods/editor-ui/node-utils';
-import { useLegacySave } from '#tree/auto-save';
+import { useSave } from '#tree/auto-save';
 import { useState } from 'react';
 import { InspectorHeader } from './InspectorHeader';
 import { NodeEditor } from './NodeEditor';
@@ -23,10 +24,10 @@ type Props = {
   onSetRoot?: (path: string) => void;
 };
 
-export function Inspector({ path, currentUserId, onDelete, onAddComponent, onSelect, onSetRoot }: Props) {
-  useReactivePathEvents();
-  const { data: node } = usePath<NodeData>(path);
-  const save = useLegacySave(path ?? '', { autoSave: true });
+/** Present the selected canonical node and capture its actual native save owner. */
+function NativeInspector({ path, currentUserId, onDelete, onAddComponent, onSelect, onSetRoot }: Props) {
+  const { data: node } = usePath<Node>(path);
+  const save = useSave(path ?? '', { autoSave: true });
   const [propsOpen, setPropsOpen] = useState(false);
   const [context, setContext] = useState('react:layout');
 
@@ -77,14 +78,19 @@ export function Inspector({ path, currentUserId, onDelete, onAddComponent, onSel
 
       {/* Slide-out edit panel */}
       <NodeEditor
-        node={draftNode}
+        node={node}
         save={save}
         open={propsOpen}
         onClose={() => setPropsOpen(false)}
         onDelete={() => onDelete(draftNode.$path)}
-        currentUserId={currentUserId}
         onAddComponent={onAddComponent}
       />
     </div>
   );
+}
+
+/** Keep retiring legacy presentation explicit while native providers own their editor effects. */
+export function Inspector(props: Props) {
+  const effects = useTreeEffects();
+  return effects.kernel === undefined ? <LegacyInspector {...props} /> : <NativeInspector {...props} />;
 }

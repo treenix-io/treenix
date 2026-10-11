@@ -1,35 +1,23 @@
 // UIX mod — dynamic JSX component engine
 // Auto-discovered via import.meta.glob('../mods/*/client.ts')
 
-import { getComponent, onResolveMiss, register, unregister } from '@treenx/core';
-import { createInflight } from '@treenx/core/util/inflight';
+import { getComponent, onResolveMiss, register, type NodeData } from '@treenx/core';
+import type { Node } from '@treenx/core/kernel/types';
+import type { RenderProps } from '#context';
+import { usePath, useTreeEffects } from '#hooks';
+import { useNativeTypeDescription } from '#schema-loader';
 import { UixNoView } from '#context';
-import * as cache from '#tree/cache';
-import { tree } from '#tree/client';
 import React from 'react';
 import { compileComponent, invalidateCache } from './compile';
 import { UixSource } from './uix-source';
 
 export { compileComponent, invalidateCache };
 
-// ── Error view — loud inline error when view compilation fails ──
-
-function createErrorView(type: string, error: string) {
-  const ErrorView: React.FC<any> = () =>
-    React.createElement('div', { className: 'p-4 m-2 rounded-lg bg-red-950 border border-red-700' },
-      React.createElement('div', { className: 'text-red-400 font-semibold text-sm mb-1' },
-        `View compile error: ${type}`),
-      React.createElement('pre', { className: 'text-red-300 text-xs whitespace-pre-wrap' }, error),
-    );
-  ErrorView.displayName = `UIXError(${type})`;
-  return ErrorView;
-}
-
 // ── UixView: self-rendering node ──
 // Node shape: { $type: 'uix.view', code: { source: '...' } }
 // Compiles JSX from the node's own `code.source` and renders it inline.
 
-function UixView({ value, onChange }: { value: any; onChange?: (next: any) => void }) {
+function LegacyUixView({ value, onChange }: { value: any; onChange?: (next: any) => void }) {
   const source = value.code?.source;
   if (!source || typeof source !== 'string') {
     return React.createElement('div', { className: 'p-4 text-gray-400' }, 'uix.view — no code.source');
@@ -46,73 +34,56 @@ function UixView({ value, onChange }: { value: any; onChange?: (next: any) => vo
   }
 }
 
-register('uix.view', 'react', UixView);
-
-// ── Lazy loader: resolve miss → check type node for view.source ──
-// When resolve(type, 'react') misses, fetch /sys/types/{type} and compile if it has a view.
-// All UIX logic stays here — no other module knows about dynamic views.
-
-// Dedup concurrent fetches for the same type. Auto-clears on settle so retries work.
-const dedup = createInflight<void>();
-
-// Watch a type node for future view creation (e.g. AI agent saves view.source via MCP).
-// When the node changes and gains view.source, swap UixNoView for the real view.
-const watched = new Set<string>();
-
-function watchTypeNode(type: string, typePath: string) {
-  if (watched.has(type)) return;
-  watched.add(type);
-
-  const unsub = cache.subscribePath(typePath, () => {
-    const node = cache.get(typePath);
-    const source = node ? getComponent(node, UixSource, 'view')?.source : undefined;
-    if (!source) return;
-
-    // View appeared — swap fallback for real compiled view
-    unsub();
-    watched.delete(type);
-    unregister(type, 'react');
-    invalidateCache(type);
-
-    try {
-      compileComponent(type, source);
-      console.log(`[uix] hot-loaded view for "${type}"`);
-    } catch (err: any) {
-      register(type, 'react', createErrorView(type, err.message));
-      console.error(`[uix] failed to hot-compile view for "${type}":`, err.message);
-    }
-  });
+/** Native sources observe published ownership; legacy self-rendering code remains explicitly legacy. */
+function UixView(props: RenderProps) {
+  const effects = useTreeEffects();
+  return effects.kernel === undefined
+    ? React.createElement(LegacyUixView, props)
+    : React.createElement(NativeTypeView, { ...props, type: props.value.$type });
 }
 
-onResolveMiss('react', (type) => {
-  // Built-in types (no dot) never have UIX views — avoid contaminating tRPC batches
-  if (!type.includes('.')) {
-    register(type, 'react', UixNoView);
-    return;
+register('uix.view', 'react', UixView);
+
+// ── Lazy loader: the mounted provider owns type coverage ──
+
+/** Keep canonical ownership under a real subscription without treating drafts as published handlers. */
+function NativeTypeView({ type, ...props }: RenderProps & { type: string }) {
+  const { data: ownership, loading, error } = usePath<Node>(`/sys/types/${type}`);
+  const description = useNativeTypeDescription(type, ownership?.$rev);
+  if (error !== null) return React.createElement('p', { role: 'alert' }, error.message);
+  if (loading) return React.createElement('p', null, 'Loading type ownership…');
+  if (ownership === undefined || description === undefined) return React.createElement(UixNoView, props);
+  const view = description.view;
+  if (view === undefined) return React.createElement(UixNoView, props);
+
+  const Component = compileComponent(type, view.source, { skipRegister: true });
+  return React.createElement(Component, props);
+}
+
+/** Existing legacy type-node code remains owned by its actual mounted legacy source. */
+function LegacyTypeView({ type, ...props }: RenderProps & { type: string }) {
+  const { data: node, loading, error } = usePath<NodeData>(`/sys/types/${type.replace(/\./g, '/')}`);
+  if (error !== null) return React.createElement('p', { role: 'alert' }, error.message);
+  if (loading) return React.createElement('p', null, 'Loading type view…');
+  const source = node === undefined ? undefined : getComponent(node, UixSource, 'view')?.source;
+  if (source === undefined) return React.createElement(UixNoView, props);
+
+  try {
+    const Component = compileComponent(type, source, { skipRegister: true });
+    return React.createElement(Component, props);
+  } catch (reason) {
+    return React.createElement('p', { role: 'alert' }, reason instanceof Error ? reason.message : String(reason));
+  }
+}
+
+/** Register a provider-aware rendering owner, never a module-global selected source or draft body. */
+function typeView(type: string): React.FC<RenderProps> {
+  function OwnedTypeView(props: RenderProps) {
+    const effects = useTreeEffects();
+    return React.createElement(effects.kernel === undefined ? LegacyTypeView : NativeTypeView, { ...props, type });
   }
 
-  // Types mount converts dots to path segments: foo.bar → /sys/types/foo/bar
-  const typePath = `/sys/types/${type.replace(/\./g, '/')}`;
+  return OwnedTypeView;
+}
 
-  dedup(type, async () => {
-    const typeNode = await tree.get(typePath);
-    const source = typeNode ? getComponent(typeNode, UixSource, 'view')?.source : undefined;
-
-    if (!source) {
-      register(type, 'react', UixNoView);
-      // Watch for future view creation (e.g. AI agent saves view.source later)
-      watchTypeNode(type, typePath);
-      return;
-    }
-
-    try {
-      compileComponent(type, source);
-    } catch (err: any) {
-      register(type, 'react', createErrorView(type, err.message));
-      watchTypeNode(type, typePath);
-      console.error(`[uix] failed to compile view for "${type}":`, err.message);
-    }
-  }).catch((err: any) => {
-    console.warn(`[uix] failed to fetch type "${type}":`, err?.message ?? err);
-  });
-});
+onResolveMiss('react', type => register(type, 'react', type.includes('.') ? typeView(type) : UixNoView));

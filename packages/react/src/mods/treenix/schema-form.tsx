@@ -2,11 +2,13 @@
 // Any type without a specific react:form handler falls here via resolve('default', 'react:form')
 
 import { type RenderProps } from '#context';
+import { useTreeEffects } from '#hooks';
+import { NativeSchemaFields } from '#editor/NativeSchemaFields';
 import { useSchema } from '#schema-loader';
 import { register, resolve } from '@treenx/core';
 import { createElement } from 'react';
 
-function DefaultSchemaForm({ value, onChange }: RenderProps) {
+function LegacySchemaForm({ value, onChange }: RenderProps) {
   // useSchema lazy-fetches /sys/types/{type} and registers the schema.
   // undefined = loading, null = type has no schema.
   const schema = useSchema(value.$type);
@@ -74,6 +76,13 @@ function DefaultSchemaForm({ value, onChange }: RenderProps) {
       })}
     </div>
   );
+}
+
+/** Preserve legacy forms while native sources read their actual full schema descriptor. */
+function DefaultSchemaForm(props: RenderProps) {
+  const effects = useTreeEffects();
+  return effects.kernel === undefined ? <LegacySchemaForm {...props} />
+    : <NativeSchemaFields value={props.value} onChange={(name, value) => props.onChange?.({ [name]: value })} />;
 }
 
 register('default', 'react:form', DefaultSchemaForm as any);

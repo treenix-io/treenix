@@ -1,311 +1,170 @@
-// NodeEditor — self-contained edit panel for a node (properties, components, actions)
-// Reusable: Inspector uses it as a slide-out, but can be embedded anywhere.
-// Data fields auto-save via patch (no $rev). System fields ($type, $acl) use Save button.
-
-import { Button } from '#components/ui/button';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#components/ui/collapsible';
-import { ScrollArea } from '#components/ui/scroll-area';
-import { Tabs, TabsList, TabsTrigger } from '#components/ui/tabs';
-import { ConfirmPopover } from '#components/ConfirmPopover';
-import { JsonEditor } from '#mods/editor-ui/JsonEditor';
-import { removeComponent, set } from '#hooks';
-import { getComponents } from '#mods/editor-ui/node-utils';
-import type { SaveHandle } from '#tree/auto-save';
-import { type ComponentData, type GroupPerm, type NodeData } from '@treenx/core';
-import { ChevronRight, Trash2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { toast } from 'sonner';
-import { proxy, useSnapshot } from 'valtio';
+import { A, W, type AclEntry, type Node, type Principal, type ErrorCode, type Component, type Rev } from '@treenx/core/kernel/types';
+import { componentEntries } from '@treenx/core/kernel/migrate';
+import { KernelError } from '@treenx/core/errors';
+import { isNode, isNodeInput } from '@treenx/core/kernel/input-boundary';
+import { useTreeEffects } from '#hooks';
+import type { TreeEffects } from '#tree/effects';
+import type { SaveHandle } from '#tree/auto-save';
+import type { PresentationNode } from '#tree/presentation';
+import { Button } from '#components/ui/button';
+import { JsonEditor } from '#mods/editor-ui/JsonEditor';
+import { NativeActionCards } from './NativeActionCards';
+import { useNativeTypeDescription } from '#schema-loader';
+import { NativeSchemaForm } from './NativeSchemaFields';
 import { AclEditor } from './AclEditor';
-import { ComponentSection } from './ComponentSection';
-import { getNodeEditorJsonText, saveNodeEditorJson } from './node-editor-state';
 
-// Skip $acl/$owner — AclEditor renders them.
-const NODE_CARD_SKIP = new Set(['$acl', '$owner']);
-
-function formatSystemValue(v: unknown): string {
-  if (v == null) return '';
-  if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') return String(v);
-  return JSON.stringify(v);
+export interface NodeEditorProps {
+  readonly node: Node;
+  readonly save?: SaveHandle<PresentationNode>;
+  readonly open: boolean;
+  readonly onClose: () => void;
+  readonly onDelete?: () => void;
+  readonly onAddComponent?: (path: string) => void;
+}
+interface Draft {
+  readonly effects: TreeEffects;
+  readonly path: string;
+  readonly generation: number;
+  readonly node: Node;
+  readonly baseRev: Rev;
+  readonly baseline: string;
+  readonly text: string;
+  readonly mode: 'properties' | 'json';
+  readonly error?: string;
+  readonly errorCode?: ErrorCode;
+  readonly busy: boolean;
 }
 
-function NodeCard({ node }: { node: NodeData }) {
-  const entries = Object.entries(node).filter(
-    ([k]) => k.startsWith('$') && !NODE_CARD_SKIP.has(k),
-  );
-  return (
-    <Collapsible className="border-t border-border mt-2 pt-0.5 first:border-t-0 first:mt-0 first:pt-0">
-      <CollapsibleTrigger className="group flex w-full items-center justify-between py-2 pb-1.5 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider cursor-pointer select-none">
-        <span>Node</span>
-        <span className="flex items-center gap-2 normal-case tracking-normal font-normal text-[11px] font-mono text-foreground/50">
-          <span className="group-data-[state=open]:hidden truncate">{node.$path}</span>
-          <span className="text-primary group-data-[state=open]:hidden">{node.$type}</span>
-          <ChevronRight className="h-3 w-3 transition-transform duration-200 group-data-[state=open]:rotate-90" />
-        </span>
-      </CollapsibleTrigger>
-      <CollapsibleContent>
-        <div className="py-0.5 pb-2.5">
-          {entries.map(([k, v]) => {
-            const text = formatSystemValue(v);
-            return (
-              <div key={k} className="field">
-                <label>{k}</label>
-                <span className="text-xs font-mono text-muted-foreground truncate" title={text}>
-                  {text}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      </CollapsibleContent>
-    </Collapsible>
-  );
+/** Bind a loaded full-node revision to exactly one selected-source editor lifetime. */
+function load(node: Node, effects: TreeEffects, generation: number): Draft {
+  const text = JSON.stringify(node, null, 2);
+  return { effects, path: node.$path, generation, node, baseRev: node.$rev, baseline: text, text, mode: 'properties', busy: false };
 }
 
-export type NodeEditorProps = {
-  node: NodeData;
-  save: SaveHandle;
-  open: boolean;
-  onClose: () => void;
-  onDelete?: () => void;
-  currentUserId?: string;
-  onAddComponent: (path: string) => void;
-};
+/** Own one description for a component's existing field widgets and actual action controls. */
+function ComponentPanel({ path, name, value, onChange }: {
+  path: string; name: string; value: Component; onChange: (field: string, value: unknown) => void;
+}) {
+  const description = useNativeTypeDescription(value.$type);
+  if (description === undefined) return <p>Loading schema…</p>;
 
-export function NodeEditor({ node, save, open, onClose, onDelete, currentUserId, onAddComponent }: NodeEditorProps) {
-  const { onChange, scope, flush, reset: resetSave, dirty, stale } = save;
+  return <><NativeSchemaForm schema={description.schema} value={value} onChange={onChange} />
+    <NativeActionCards path={path} type={value.$type} component={name === '' ? undefined : name} description={description} /></>;
+}
 
-  // Valtio only for system fields ($acl) and UI state
-  const [st] = useState(() => proxy({
-    aclEdit: null as { owner: string; rules: GroupPerm[] } | null,
-    tab: 'properties' as 'properties' | 'json',
-    jsonText: '',
-    // Node JSON at the moment jsonText was (re)seeded — dirty/stale anchor.
-    // Comparing jsonText against the LIVE node made external changes look
-    // like user edits (spurious Save button → one-click lost update, cnr.5 C45).
-    jsonBaseline: '',
-    collapsed: { $node: true } as Record<string, boolean>,
-  }));
-  const snap = useSnapshot(st);
+/** Keep form and JSON edits under one expected native revision until the canonical put settles. */
+export function NodeEditor({ node, save: pendingSave, open, onClose, onDelete, onAddComponent }: NodeEditorProps) {
+  const effects = useTreeEffects();
+  const nextGeneration = useRef(0);
+  const current = useRef<{ generation: number; mounted: boolean }>({ generation: 0, mounted: true });
+  const pending = useRef<{ generation: number; token: symbol } | undefined>(undefined);
+  const [draft, setDraft] = useState(() => load(node, effects, 0));
+  const fresh = JSON.stringify(node, null, 2);
+  let owned = draft;
 
-  // Reset on path change
-  const prevPathRef = useRef<string | null>(null);
-  if (node.$path !== prevPathRef.current) {
-    prevPathRef.current = node.$path;
-    st.aclEdit = null;
-    st.tab = 'properties';
-    st.jsonText = '';
-    st.jsonBaseline = '';
+  if (draft.effects !== effects || draft.path !== node.$path) {
+    nextGeneration.current += 1;
+    owned = load(node, effects, nextGeneration.current);
+    setDraft(owned);
+  } else if (!draft.busy && draft.text === draft.baseline && draft.baseline !== fresh) {
+    owned = load(node, effects, draft.generation);
+    setDraft(owned);
   }
-
-  // Derived from node + system edits
-  const formattedNodeJson = getNodeEditorJsonText(node);
-  const aclOwner = snap.aclEdit?.owner ?? (node.$owner as string) ?? '';
-  const aclRules = snap.aclEdit?.rules ?? (node.$acl as GroupPerm[]) ?? [];
-  const jsonDirty = snap.jsonText !== snap.jsonBaseline;
-  // Node moved since the buffer was seeded. Clean buffers auto-follow (effect
-  // below), so this is visible only while the user holds unsaved JSON edits.
-  const jsonStale = snap.jsonBaseline !== '' && snap.jsonBaseline !== formattedNodeJson;
-  const hasPendingSystemEdits = snap.aclEdit != null;
-
-  // Clean JSON buffer follows the live node; an edited buffer freezes and
-  // staleness is surfaced instead — Save then honestly CONFLICTs on the old $rev.
+  current.current.generation = owned.generation;
+  const generation = owned.generation;
   useEffect(() => {
-    if (st.jsonBaseline && st.jsonText === st.jsonBaseline && st.jsonBaseline !== formattedNodeJson) {
-      st.jsonText = formattedNodeJson;
-      st.jsonBaseline = formattedNodeJson;
-    }
-    // st is a stable valtio proxy — only the node text matters here
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [formattedNodeJson]);
+    current.current.mounted = true;
+    return () => { current.current.mounted = false; };
+  }, [generation]);
+  const bits = effects.bits(node.$path) ?? 0;
+  const dirty = owned.text !== owned.baseline;
 
-  const nodeName = node.$path === '/' ? '/' : node.$path.slice(node.$path.lastIndexOf('/') + 1);
-  const components = getComponents(node);
-
-  // Reset only the properties tab state (system field edits + auto-save buffer)
-  function resetProperties() {
-    st.aclEdit = null;
-    resetSave();
+  /** Retained callbacks never become valid again after a source or path round trip. */
+  function assertOwner(): void {
+    if (!current.current.mounted || current.current.generation !== generation) throw new KernelError('CANCELLED', 'The editor owner changed');
   }
 
-  // Reset only the JSON tab buffer back to current node
-  function resetJson() {
-    st.jsonText = formattedNodeJson;
-    st.jsonBaseline = formattedNodeJson;
+  /** Form fields retain the complete node, including every untouched component and loaded revision. */
+  function edit(value: Node): void {
+    assertOwner();
+    if (pending.current?.generation === generation) throw new KernelError('UNAVAILABLE', 'The editor save is pending');
+    setDraft(previous => ({ ...previous, node: value, text: JSON.stringify(value, null, 2), error: undefined }));
   }
 
-  // Save properties tab — ONE commit per logical save (cnr.5 C21).
-  async function handleSaveProperties() {
+  /** Decode user JSON before replacing the form draft. */
+  function editJson(text: string): void {
+    assertOwner();
+    if (pending.current?.generation === generation) throw new KernelError('UNAVAILABLE', 'The editor save is pending');
     try {
-      if (hasPendingSystemEdits) {
-        // `node` is the merged draft (cache + pending), so this set() persists
-        // data edits AND $acl/$owner together in a single OCC'd commit. The
-        // pending buffer is then discarded WITHOUT flush() — re-sending the
-        // same fields as a patch was the double-commit.
-        const toSave = { ...node };
-        if (snap.aclEdit) {
-          toSave.$owner = aclOwner;
-          toSave.$acl = [...aclRules] as GroupPerm[];
-        }
-        await set(toSave);
-        save.discard();
-        st.aclEdit = null;
-      } else {
-        await flush();
-      }
-      toast.success('Saved');
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Save failed');
+      const value: unknown = JSON.parse(text);
+      if (!isNode(value) || value.$path !== owned.path) throw new KernelError('INVALID', 'A node at the loaded path is required');
+      setDraft(previous => ({ ...previous, text, node: value, error: undefined }));
+    } catch (reason) {
+      setDraft(previous => ({ ...previous, text, error: reason instanceof Error ? reason.message : String(reason) }));
     }
   }
 
-  // Save JSON tab: full-node replacement via set(). The buffer's own $rev is
-  // the OCC token — an external change since seeding surfaces as CONFLICT.
-  async function handleSaveJson() {
+  /** Put the visible full node under its loaded revision; the server preserves hidden administration metadata. */
+  async function save(): Promise<void> {
+    assertOwner();
+    if (pending.current?.generation === generation) return;
+    const token = Symbol('editor-save');
+    pending.current = { generation, token };
+    setDraft(previous => ({ ...previous, busy: true, error: undefined }));
     try {
-      // Serialize against auto-save: an already-dispatched patch carries the
-      // pre-Save snapshot and, if it lands AFTER our set(), reverts this Save.
-      // discard() only cancels the armed TIMER, not an in-flight request — so
-      // await it to settle first, then drop parked pending, then full-set
-      // (core-anz4.17 / JSON-race).
-      await save.settle();
-      save.discard();
-      const freshText = await saveNodeEditorJson(snap.jsonText, set);
-      st.jsonText = freshText;
-      st.jsonBaseline = freshText;
-      toast.success('Saved');
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Save failed');
+      const value: unknown = JSON.parse(owned.text);
+      if (!isNode(value) || value.$path !== owned.path) throw new KernelError('INVALID', 'A loaded node revision is required');
+      const { $id, $rev, $pos, ...input } = value;
+      if (!isNodeInput(input)) throw new KernelError('INVALID', 'Invalid full node input');
+      const kernel = effects.kernel;
+      if (kernel === undefined) throw new KernelError('UNAVAILABLE', 'Canonical editing requires a native source');
+      await pendingSave?.settle();
+      assertOwner();
+      pendingSave?.discard();
+      await kernel.commit({ changes: [{ op: 'put', node: input }], expect: { nodes: [{ path: input.$path, rev: owned.baseRev }] } });
+      assertOwner();
+      setDraft(previous => ({ ...previous, baseline: owned.text, busy: false }));
+    } catch (reason) {
+      if (!current.current.mounted || current.current.generation !== generation) return;
+      setDraft(previous => ({ ...previous, busy: false, error: reason instanceof Error ? reason.message : String(reason), errorCode: reason instanceof KernelError ? reason.code : undefined }));
+    } finally {
+      if (pending.current?.token === token) pending.current = undefined;
     }
   }
 
-  async function handleRemoveComponent(name: string) {
-    try {
-      await removeComponent(node.$path, name);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : `Failed to remove ${name}`);
-    }
+  /** ACL edits share the full-node buffer and its original OCC revision. */
+  function editAcl(owner: Principal | undefined, rules: readonly AclEntry[]): void {
+    const { $owner, ...withoutOwner } = owned.node;
+    edit({ ...withoutOwner, ...(owner === undefined ? {} : { $owner: owner }), $acl: rules });
   }
 
-  return (
-    <div className={`edit-panel${open ? ' open' : ''}`}>
-      <div className="edit-panel-header">
-        <span>Edit {nodeName}</span>
-        <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={onClose}>
-          &#10005;
-        </Button>
-      </div>
-
-      <Tabs value={snap.tab} onValueChange={(v) => {
-        st.tab = v as 'properties' | 'json';
-        if (v === 'json') {
-          // (Re)seed a clean buffer on tab open; unsaved edits survive tab switches.
-          // formattedNodeJson is the merged draft (cache + pending), so the buffer
-          // captures the pending form edits before we cancel them below.
-          if (st.jsonText === st.jsonBaseline) {
-            st.jsonText = formattedNodeJson;
-            st.jsonBaseline = formattedNodeJson;
-          }
-          // Cancel the armed form auto-save — the JSON buffer now owns these edits;
-          // a debounced flush firing after JSON Save would clobber it (core-anz4.17).
-          save.discard();
-        }
-      }} className="shrink-0">
-        <TabsList variant="line" className="h-8">
-          <TabsTrigger value="properties" className="text-xs">Properties</TabsTrigger>
-          <TabsTrigger value="json" className="text-xs">JSON</TabsTrigger>
-        </TabsList>
-      </Tabs>
-
-      <ScrollArea className="flex-1 min-h-0">
-        <div className="p-3.5">
-        {snap.tab === 'properties' ? (
-          <>
-            <NodeCard node={node} />
-            <AclEditor
-              path={node.$path}
-              owner={aclOwner}
-              rules={aclRules as GroupPerm[]}
-              currentUserId={currentUserId}
-              onChange={(o, r) => { st.aclEdit = { owner: o, rules: r }; }}
-            />
-
-            {/* Main type section — node IS the main component (getComponent returns
-                node when types match). Cache stamps $node on the node itself, so
-                useActions / viewCtx work without synthesis. */}
-            <ComponentSection
-              node={node}
-              name=""
-              value={node}
-              onChange={onChange}
-              onActionComplete={resetProperties}
-            />
-
-            {/* Named components — scoped auto-save onChange */}
-            {components.map(([name, comp]) => (
-              <ComponentSection
-                key={name}
-                node={node}
-                name={name}
-                value={comp as ComponentData}
-                onChange={scope(name)}
-                collapsed={!!snap.collapsed[name]}
-                onToggle={() => { st.collapsed[name] = !st.collapsed[name]; }}
-                onRemove={() => handleRemoveComponent(name)}
-                onActionComplete={resetProperties}
-              />
-            ))}
-          </>
-        ) : (
-          <JsonEditor
-            value={snap.jsonText}
-            onChange={(text) => { st.jsonText = text; }}
-          />
-        )}
-        </div>
-      </ScrollArea>
-
-      <div className="edit-panel-actions">
-        {snap.tab === 'properties' ? (
-          <>
-            {(dirty || hasPendingSystemEdits) && (
-              <Button size="sm" onClick={handleSaveProperties}>Save</Button>
-            )}
-            {(dirty || hasPendingSystemEdits) && (
-              <Button variant="ghost" size="sm" onClick={resetProperties} title="Discard property changes">
-                Reset
-              </Button>
-            )}
-            {stale && (
-              <span className="text-[10px] text-orange-500" title="Node changed externally">stale</span>
-            )}
-            <Button variant="outline" size="sm" onClick={() => onAddComponent(node.$path)}>+ Component</Button>
-          </>
-        ) : (
-          <>
-            {jsonDirty && (
-              <Button size="sm" onClick={handleSaveJson}>Save JSON</Button>
-            )}
-            {jsonDirty && (
-              <Button variant="ghost" size="sm" onClick={resetJson} title="Discard JSON edits">
-                Reset
-              </Button>
-            )}
-            {jsonStale && (
-              <span className="text-[10px] text-orange-500" title="Node changed externally — Save will conflict; Reset to reload">stale</span>
-            )}
-          </>
-        )}
-        <span className="flex-1" />
-        {onDelete && (
-          <ConfirmPopover title={`Delete "${nodeName}"?`} variant="destructive" onConfirm={onDelete}>
-            <Button variant="ghost" size="sm" className="text-muted-foreground/50 hover:text-destructive">
-              <Trash2 className="size-3.5" />
-            </Button>
-          </ConfirmPopover>
-        )}
-      </div>
-
-    </div>
-  );
+  if (!open) return null;
+  return <section aria-label="Node editor" className="flex min-w-0 flex-col gap-3 p-4">
+    <div className="flex items-center justify-between"><h2>{node.$path}</h2><Button onClick={onClose}>Close editor</Button></div>
+    <p className="text-xs text-muted-foreground">Revision {owned.baseRev}{dirty && owned.baseline !== fresh ? ' · changed since loaded' : ''}</p>
+    {owned.error !== undefined && <p role="alert" data-error-code={owned.errorCode} className="text-red-600">{owned.error}</p>}
+    <div className="flex gap-2"><Button onClick={() => setDraft(previous => ({ ...previous, mode: 'properties' }))}>Properties</Button>
+      <Button onClick={() => setDraft(previous => ({ ...previous, mode: 'json' }))}>JSON</Button></div>
+    <fieldset disabled={owned.busy} className="flex min-w-0 flex-col gap-3">
+    {owned.mode === 'json' ? <JsonEditor value={owned.text} onChange={editJson} /> : <>
+      <AclEditor bits={bits} owner={owned.node.$owner} rules={owned.node.$acl ?? []} onChange={editAcl} />
+      {componentEntries(owned.node).map(([name, value]) => <section key={`${generation}:${name}`} aria-label={name || 'Main component'}>
+        <h3>{name || value.$type}</h3><ComponentPanel path={owned.path} name={name} value={value} onChange={(field, fieldValue) => {
+          const replacement = { ...owned.node };
+          if (name === '') Reflect.set(replacement, field, fieldValue);
+          else Reflect.set(replacement, name, { ...value, [field]: fieldValue });
+          edit(replacement);
+        }} />
+        {name !== '' && (bits & W) !== 0 && <Button onClick={() => {
+          const replacement = { ...owned.node }; Reflect.deleteProperty(replacement, name); edit(replacement);
+        }}>Remove component</Button>}
+      </section>)}
+    </>}
+    </fieldset>
+    <div className="flex gap-2"><Button onClick={() => { void save(); }} disabled={owned.busy || !dirty || (bits & W) === 0}>Save node</Button>
+      <Button disabled={owned.busy} onClick={() => { assertOwner(); if (pending.current?.generation === generation) return; setDraft(load(node, effects, generation)); }}>Reset</Button>
+      {(bits & A) !== 0 && onAddComponent !== undefined && <Button disabled={owned.busy} onClick={() => onAddComponent(node.$path)}>Add component</Button>}
+      {(bits & W) !== 0 && onDelete !== undefined && <Button disabled={owned.busy} onClick={onDelete}>Delete node</Button>}</div>
+  </section>;
 }

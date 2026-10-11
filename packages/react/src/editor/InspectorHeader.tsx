@@ -9,11 +9,11 @@ import {
   DropdownMenuTrigger,
 } from '#components/ui/dropdown-menu';
 import { getViewContexts, pickDefaultContext } from '#mods/editor-ui/node-utils';
-import type { NodeData } from '@treenx/core';
+import type { PresentationNode } from '#tree/presentation';
 import { Bug, ChevronDown, ExternalLink, FileText, PenLine } from 'lucide-react';
 
 type InspectorHeaderProps = {
-  node: NodeData;
+  node: PresentationNode;
   context: string;
   propsOpen: boolean;
   onContextChange: (context: string) => void;

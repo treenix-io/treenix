@@ -1,347 +1,66 @@
-import { Button } from '#components/ui/button';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#components/ui/collapsible';
-import { Input } from '#components/ui/input';
-import { A, getComponentByName, type GroupPerm, R, S, W } from '@treenx/core';
-import { ChevronRight, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import * as cache from '#tree/cache';
-import { tree } from '#tree/client';
+import { A, R, W, type AclEntry, type Principal } from '@treenx/core/kernel/types';
+import { isNodeInput } from '@treenx/core/protocol/twp';
+import { Button } from '#components/ui/button';
+import { Input } from '#components/ui/input';
 
-const BITS = [
-  { bit: R, label: 'R' },
-  { bit: W, label: 'W' },
-  { bit: A, label: 'A' },
-  { bit: S, label: 'S' },
-] as const;
+const BITS = [{ bit: R, label: 'R' }, { bit: W, label: 'W' }, { bit: A, label: 'A' }] as const;
 
-function permStr(p: number): string {
-  return (
-    BITS.filter((b) => p & b.bit)
-      .map((b) => b.label)
-      .join('') || '—'
-  );
+export interface AclEditorProps {
+  readonly bits: number;
+  readonly owner?: Principal;
+  readonly rules: readonly AclEntry[];
+  readonly onChange: (owner: Principal | undefined, rules: readonly AclEntry[]) => void;
 }
 
-// Compute claims for userId from cache (mirrors server buildClaims — no 'public' for authenticated)
-function getUserClaims(userId: string): Set<string> {
-  const claims = new Set([`u:${userId}`, 'authenticated']);
-  const userNode = cache.get(`/auth/users/${userId}`);
-  if (userNode) {
-    const groups = getComponentByName(userNode, 'groups');
-    if (Array.isArray(groups?.list)) {
-      for (const g of groups.list) if (typeof g === 'string') claims.add(g);
-    }
-  }
-  return claims;
-}
+/** Edit canonical entries only when the actual server copy grants administration. */
+export function AclEditor({ bits, owner, rules, onChange }: AclEditorProps) {
+  const [group, setGroup] = useState('');
+  const [ownerText, setOwnerText] = useState(owner ?? '');
+  const [error, setError] = useState<string>();
+  useEffect(() => { setOwnerText(owner ?? ''); }, [owner]);
+  if ((bits & A) === 0) return null;
 
-// Mirrors server resolvePermission: walk root→node accumulating allow/deny per group.
-// Allow rules cascade down; deny is sticky (once denied, can't be re-allowed).
-function computeEffective(
-  currentNodeOwner: string,
-  currentNodeRules: GroupPerm[],
-  userId: string,
-  path: string,
-): { perms: number; matchedGroups: string[] } {
-  const claims = getUserClaims(userId);
-
-  // All paths from root → current node inclusive
-  const allPaths =
-    path === '/'
-      ? ['/']
-      : [
-          '/',
-          ...path
-            .split('/')
-            .filter(Boolean)
-            .reduce<string[]>((acc, seg) => {
-              acc.push((acc.length ? acc[acc.length - 1] : '') + '/' + seg);
-              return acc;
-            }, []),
-        ];
-
-  const groupPerms = new Map<string, number>();
-  const denied = new Set<string>();
-  const deniedBits = new Map<string, number>();
-  let resolvedOwner = '';
-
-  for (const p of allPaths) {
-    let nodeOwner: string | undefined;
-    let nodeRules: GroupPerm[] | undefined;
-
-    if (p === path) {
-      // Current node: use local (possibly unsaved) state
-      nodeOwner = currentNodeOwner || undefined;
-      nodeRules = currentNodeRules;
-    } else {
-      const cached = cache.get(p);
-      if (!cached) continue;
-      nodeOwner = cached.$owner as string | undefined;
-      nodeRules = cached.$acl as GroupPerm[] | undefined;
-    }
-
-    if (nodeOwner) resolvedOwner = nodeOwner;
-    if (!nodeRules || nodeRules.length === 0) continue;
-
-    for (const { g, p: perm } of nodeRules) {
-      const matches = g === 'owner' ? userId === resolvedOwner : claims.has(g);
-      if (!matches) continue;
-      if (denied.has(g)) continue;
-      if (perm < 0) {
-        const bits = -perm;
-        deniedBits.set(g, (deniedBits.get(g) || 0) | bits);
-      } else if (perm === 0) {
-        denied.add(g);
-        groupPerms.set(g, 0);
-      } else {
-        groupPerms.set(g, perm & ~(deniedBits.get(g) || 0));
-      }
-    }
+  function toggle(index: number, bit: number): void {
+    onChange(owner, rules.map((entry, position) => position !== index ? entry
+      : 'grant' in entry ? { subject: entry.subject, grant: entry.grant ^ bit }
+      : { subject: entry.subject, deny: entry.deny ^ bit }));
   }
 
-  let effective = 0;
-  const matchedGroups: string[] = [];
-  for (const [g, p] of groupPerms.entries()) {
-    if (p > 0) matchedGroups.push(g);
-    if (p > effective) effective = p;
-  }
-  return { perms: effective, matchedGroups };
-}
-
-type Props = {
-  path: string;
-  owner: string;
-  rules: GroupPerm[];
-  currentUserId?: string;
-  onChange: (owner: string, rules: GroupPerm[]) => void;
-};
-
-type InheritedEntry = { path: string; owner?: string; acl?: GroupPerm[] };
-
-// Ancestor paths strictly ABOVE `path` (excludes the node itself; '/' has none).
-function ancestorPaths(path: string): string[] {
-  if (path === '/') return [];
-  const segs = path.split('/').filter(Boolean);
-  const paths = ['/'];
-  let cur = '';
-  for (let i = 0; i < segs.length - 1; i++) {
-    cur += '/' + segs[i];
-    paths.push(cur);
-  }
-  return paths;
-}
-
-export function AclEditor({ path, owner, rules, currentUserId, onChange }: Props) {
-  const [newGroup, setNewGroup] = useState('');
-  const [chain, setChain] = useState<InheritedEntry[]>([]);
-
-  // Fetch ancestors (not just whatever's cached) so the inherited chain is complete
-  // for deep nodes whose mid-ancestors were never loaded into the tree cache.
-  useEffect(() => {
-    let cancelled = false;
-    const paths = ancestorPaths(path);
-    Promise.all(paths.map((p) => tree.get(p).catch((e: unknown) => {
-      // Unreadable ancestors (FORBIDDEN/NOT_FOUND) are expected — the chain
-      // renders with what's visible. Anything else is a real fetch failure;
-      // don't hide it behind a silently shorter inherited chain (core-pfy).
-      const code = (e as { data?: { code?: string }; code?: string })?.data?.code
-        ?? (e as { code?: string })?.code;
-      if (code !== 'NOT_FOUND' && code !== 'FORBIDDEN') {
-        console.warn('[AclEditor] ancestor fetch failed:', p, e);
-      }
-      return undefined;
-    }))).then((nodes) => {
-      if (cancelled) return;
-      const next: InheritedEntry[] = [];
-      paths.forEach((p, i) => {
-        const node = nodes[i];
-        if (node && (node.$acl || node.$owner)) next.push({ path: p, owner: node.$owner, acl: node.$acl });
-      });
-      setChain(next);
-    });
-    return () => { cancelled = true; };
-  }, [path]);
-
-  const effective = currentUserId ? computeEffective(owner, rules, currentUserId, path) : null;
-
-  function toggleBit(idx: number, bit: number) {
-    const next = [...rules];
-    next[idx] = { ...next[idx], p: next[idx].p ^ bit };
-    onChange(owner, next);
+  function add(ownerSubject = false): void {
+    const name = group.trim();
+    if (!ownerSubject && name.length === 0) return;
+    onChange(owner, [...rules, { subject: ownerSubject ? { owner: true } : { group: name }, grant: R }]);
+    setGroup('');
   }
 
-  function removeRule(idx: number) {
-    onChange(
-      owner,
-      rules.filter((_, i) => i !== idx),
-    );
+  /** Validate the user's principal input with the existing canonical node boundary. */
+  function editOwner(value: string): void {
+    const input = { $path: '/', $type: 'dir', ...(value.length === 0 ? {} : { $owner: value }) };
+    if (!isNodeInput(input)) { setError('Invalid owner principal'); return; }
+    setError(undefined);
+    onChange(input.$owner, rules);
   }
 
-  function addRule() {
-    if (!newGroup.trim()) return;
-    onChange(owner, [...rules, { g: newGroup.trim(), p: R }]);
-    setNewGroup('');
-  }
-
-  return (
-    <Collapsible className="border-t border-border mt-2 pt-0.5 first:border-t-0 first:mt-0 first:pt-0">
-      <CollapsibleTrigger className="flex w-full items-center justify-between py-2 pb-1.5 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider cursor-pointer select-none">
-        <span>Access Control</span>
-        <span className="flex items-center gap-2 normal-case tracking-normal font-normal">
-          {effective && (
-            <span className="flex items-center gap-1.5">
-              {effective.matchedGroups.length > 0 && (
-                <span className="text-[10px] font-mono text-muted-foreground/60 truncate max-w-[120px]">
-                  {effective.matchedGroups[effective.matchedGroups.length - 1]}
-                </span>
-              )}
-              <span className="flex items-center gap-0.5">
-                {BITS.map(({ bit, label }) => (
-                  <span
-                    key={label}
-                    className={`text-[10px] font-mono font-bold px-1 rounded ${
-                      effective.perms & bit
-                        ? 'text-primary bg-primary/10'
-                        : 'text-muted-foreground/30'
-                    }`}
-                  >
-                    {label}
-                  </span>
-                ))}
-              </span>
-            </span>
-          )}
-          <ChevronRight className="h-3 w-3 transition-transform duration-200 group-data-[state=open]:rotate-90" />
-        </span>
-      </CollapsibleTrigger>
-      <CollapsibleContent>
-        <div className="py-0.5 pb-2.5 space-y-3">
-          {chain.length > 0 && (
-            <div className="space-y-1">
-              <span className="text-[11px] text-muted-foreground/60 uppercase tracking-wide">Inherited</span>
-              <div className="space-y-1.5 pl-2 border-l border-border/40">
-                {chain.map((entry) => (
-                  <div key={entry.path} className="text-[11px] font-mono">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="truncate text-muted-foreground">{entry.path}</span>
-                      {entry.owner && (
-                        <span className="text-foreground/50 text-[10px] shrink-0">owner={entry.owner}</span>
-                      )}
-                    </div>
-                    {entry.acl && entry.acl.length > 0 && (
-                      <div className="mt-0.5 flex flex-wrap items-center gap-1">
-                        {entry.acl.map((r, i) => (
-                          <span
-                            key={i}
-                            className="inline-flex items-center gap-1.5 rounded bg-secondary px-1.5 py-0.5"
-                          >
-                            <span className="text-muted-foreground">{r.g}</span>
-                            <span className={r.p === 0 ? 'text-destructive' : 'text-primary'}>
-                              {permStr(r.p)}
-                            </span>
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div className="field">
-            <label className="text-xs text-muted-foreground">$owner</label>
-            <Input className="h-7 text-xs" value={owner} onChange={(e) => onChange(e.target.value, rules)} />
-          </div>
-
-          {rules.length > 0 && (
-            <AclTable
-              rules={rules}
-              editable
-              onToggleBit={toggleBit}
-              onRemove={removeRule}
-            />
-          )}
-          <div className="flex gap-2">
-            <Input
-              className="h-7 text-xs"
-              placeholder="Group name"
-              value={newGroup}
-              onChange={(e) => setNewGroup(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && addRule()}
-            />
-            <Button variant="outline" size="sm" className="h-7 text-xs" onClick={addRule}>
-              Add
-            </Button>
-          </div>
-        </div>
-      </CollapsibleContent>
-    </Collapsible>
-  );
-}
-
-// ── Reusable ACL table ──
-
-function AclTable({
-  rules,
-  editable,
-  onToggleBit,
-  onRemove,
-}: {
-  rules: GroupPerm[];
-  editable?: boolean;
-  onToggleBit?: (i: number, bit: number) => void;
-  onRemove?: (i: number) => void;
-}) {
-  return (
-    <div className="flex flex-col gap-1">
-      {rules.map((rule, i) => (
-        <div
-          key={i}
-          className="flex items-center gap-2 px-1 py-0.5"
-        >
-          <span className="flex-1 text-[12px] font-mono text-foreground/70 truncate">
-            {rule.g}
-          </span>
-          <span className="flex items-center gap-0.5">
-            {BITS.map(({ bit, label }) => {
-              const active = !!(rule.p & bit);
-              return editable ? (
-                <button
-                  key={label}
-                  type="button"
-                  onClick={() => onToggleBit?.(i, bit)}
-                  className={`text-[10px] font-mono font-bold w-6 h-5 rounded transition-colors ${
-                    active
-                      ? 'text-primary bg-primary/15 border border-primary/30'
-                      : 'text-muted-foreground/40 bg-transparent border border-transparent hover:border-border'
-                  }`}
-                >
-                  {label}
-                </button>
-              ) : (
-                <span
-                  key={label}
-                  className={`text-[10px] font-mono font-bold w-6 text-center ${
-                    active ? 'text-primary' : 'text-muted-foreground/20'
-                  }`}
-                >
-                  {label}
-                </span>
-              );
-            })}
-          </span>
-          {editable && (
-            <button
-              type="button"
-              className="text-muted-foreground/40 hover:text-destructive transition-colors p-0.5"
-              onClick={() => onRemove?.(i)}
-            >
-              <X className="h-3 w-3" />
-            </button>
-          )}
-        </div>
-      ))}
-    </div>
-  );
+  return <section aria-label="Access control" className="space-y-2 border-t border-border py-3">
+    <h3 className="text-sm font-semibold">Access control · {BITS.map(({ bit, label }) => bits & bit ? label : '').join('')}</h3>
+    <label className="block text-xs">Owner<Input aria-label="Owner" value={ownerText}
+      onChange={event => setOwnerText(event.target.value)} onBlur={() => editOwner(ownerText)} /></label>
+    {error !== undefined && <p role="alert">{error}</p>}
+    {rules.map((entry, index) => <div key={index} className="flex items-center gap-2 text-xs">
+      <span>{'group' in entry.subject ? entry.subject.group : 'Owner'}</span>
+      <select aria-label={`Rule ${index + 1} mode`} value={'grant' in entry ? 'grant' : 'deny'}
+        onChange={event => onChange(owner, rules.map((rule, position) => position !== index ? rule
+          : event.target.value === 'grant' ? { subject: rule.subject, grant: 'grant' in rule ? rule.grant : rule.deny }
+          : { subject: rule.subject, deny: 'grant' in rule ? rule.grant : rule.deny }))}>
+        <option value="grant">Grant</option><option value="deny">Deny</option>
+      </select>
+      {BITS.map(({ bit, label }) => <Button key={label} size="sm" variant="outline"
+        aria-label={`Rule ${index + 1} ${label}`} aria-pressed={Boolean(('grant' in entry ? entry.grant : entry.deny) & bit)}
+        onClick={() => toggle(index, bit)}>{label}</Button>)}
+      <Button variant="ghost" onClick={() => onChange(owner, rules.filter((_, position) => position !== index))}>Remove rule</Button>
+    </div>)}
+    <div className="flex gap-2"><Input aria-label="Group" placeholder="Group" value={group} onChange={event => setGroup(event.target.value)} />
+      <Button onClick={() => add()}>Add group</Button><Button onClick={() => add(true)}>Add owner</Button></div>
+  </section>;
 }

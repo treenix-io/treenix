@@ -1,8 +1,9 @@
 // ActionCards — action pill buttons with expandable params, run, and results
 
+import { NativeActionCards } from './NativeActionCards';
 import { Button } from '#components/ui/button';
 import { Render } from '#context';
-import { execute } from '#hooks';
+import { legacyTreeEffects, useTreeEffects } from '#hooks';
 import { renderField } from '#mods/editor-ui/form-field';
 import { getActions, getActionSchema } from '#mods/editor-ui/node-utils';
 import { useSchema } from '#schema-loader';
@@ -38,7 +39,7 @@ function ResultView({ value }: { value: unknown }) {
   );
 }
 
-export function ActionCardList({
+function LegacyActionCardList({
   path,
   componentName,
   compType,
@@ -50,6 +51,7 @@ export function ActionCardList({
   compData: Record<string, unknown>;
   onActionComplete?: () => void;
 }) {
+  const effects = useTreeEffects();
   const schema = useSchema(compType);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [paramsText, setParamsText] = useState<Record<string, string>>({});
@@ -77,11 +79,11 @@ export function ActionCardList({
           catch { toast.error('Invalid JSON params'); setRunning(null); return; }
         }
       }
-      const result = await execute(path, a, data, undefined, componentName);
+      const result = await effects.execute(path, a, data, undefined, componentName);
       // Door-routed refresh with transient hold accounting (ns6p.4 F1/F5) —
       // the raw watch-get + cache.put here used to clobber overlays and leak
       // its registration.
-      await refreshWatchedNode(path);
+      if (effects === legacyTreeEffects) await refreshWatchedNode(path);
       onActionComplete?.();
       setResults((prev) => ({ ...prev, [a]: { ok: true, value: result } }));
       setExpanded(a);
@@ -207,4 +209,11 @@ export function ActionCardList({
       })()}
     </div>
   );
+}
+
+/** Keep actual native action metadata separate from the retiring legacy registry owner. */
+export function ActionCardList(props: Parameters<typeof LegacyActionCardList>[0]) {
+  const effects = useTreeEffects();
+  return effects.kernel === undefined ? <LegacyActionCardList {...props} />
+    : <NativeActionCards path={props.path} type={props.compType} component={props.componentName || undefined} />;
 }

@@ -2,6 +2,8 @@
 import { type ContextHandlers, getComponent, type NodeData, register, resolve } from '@treenx/core';
 import type { TypeSchema } from '@treenx/core/schema/types';
 import { useEffect, useState } from 'react';
+import { useTreeEffects } from '#hooks';
+import type { NativeTypeDescription } from '@treenx/core/kernel/type-description';
 import { treeClient } from '#tree/tree-client';
 
 // ── Fetcher ──────────────────────────────────────────────────────────────────
@@ -103,4 +105,33 @@ export function useSchema(type: string | null | undefined): TypeSchema | null | 
   const getter = useReg(type, 'schema');
   if (getter === undefined) return undefined;
   return (getter as (() => TypeSchema) | null)?.() ?? null;
+}
+
+declare module '#hooks' {
+  interface ActionResults {
+    't.type': { describe_type: NativeTypeDescription };
+  }
+}
+
+/** Read the actual registry description through the selected source and live caller. */
+export function useNativeTypeDescription(type: string, revision?: string): NativeTypeDescription | undefined {
+  const effects = useTreeEffects();
+  const [loaded, setLoaded] = useState<{ effects: typeof effects; type: string; revision?: string; value: NativeTypeDescription }>();
+  const [failure, setFailure] = useState<{ effects: typeof effects; type: string; revision?: string; error: unknown }>();
+
+  useEffect(() => {
+    let active = true;
+    const kernel = effects.kernel;
+    if (kernel === undefined) throw new Error('Native schema description requires a native source');
+    effects.execute(`/sys/types/${type}`, 'describe_type', {}, 't.type').then(
+      result => {
+        if (active) setLoaded({ effects, type, revision, value: result });
+      },
+      error => { if (active) setFailure({ effects, type, revision, error }); },
+    );
+    return () => { active = false; };
+  }, [effects, type, revision]);
+
+  if (failure?.effects === effects && failure.type === type && failure.revision === revision) throw failure.error;
+  return loaded?.effects === effects && loaded.type === type && loaded.revision === revision ? loaded.value : undefined;
 }
