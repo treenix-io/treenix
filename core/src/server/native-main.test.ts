@@ -25,12 +25,13 @@ async function scratch(): Promise<string> {
 }
 
 /** Launch the actual CLI with bounded owned process lifetime and structured error observation. */
-function run(configPath: string) {
-  const child = fork(fileURLToPath(new URL('./native-main-process-fixture.ts', import.meta.url)), [configPath], {
+function run(configPath: string, deployment?: string) {
+  const args = deployment === undefined ? [configPath] : [configPath, '--deployment', deployment];
+  const child = fork(fileURLToPath(new URL('./native-main-process-fixture.ts', import.meta.url)), args, {
     execArgv: ['--conditions=development', '--import', 'tsx'],
     stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
     signal: AbortSignal.timeout(10_000),
-    env: { ...process.env, NODE_OPTIONS: '', VSCODE_INSPECTOR_OPTIONS: '' },
+    env: { ...process.env, TREENIX_KERNEL: '1', NODE_OPTIONS: '', VSCODE_INSPECTOR_OPTIONS: '' },
   })
   children.push(child)
   let stderr = ''
@@ -52,8 +53,8 @@ async function report(running: ReturnType<typeof run>): Promise<Record<string, u
 }
 
 /** Resolve only a genuine listen report, preserving startup errors as failures. */
-async function start(configPath: string) {
-  const running = run(configPath)
+async function start(configPath: string, deployment?: string) {
+  const running = run(configPath, deployment)
   const message = await report(running)
   assert.equal(message.type, 'info', running.stderr())
   assert.ok(Array.isArray(message.values) && isRecord(message.values[1]))
@@ -295,7 +296,7 @@ describe('native CLI readonly base configuration', { timeout: 20_000 }, () => {
     }
   });
 
-  it('binds a relative readonly base capability through the actual CLI across upper writes and restart', async () => {
+  it('boots the root.json overlay through the normal launcher across upper writes and restart', async () => {
     const directory = await scratch(), configuration = join(directory, 'configuration'), base = join(directory, 'base');
     await mkdir(configuration);
     const prepared = await openNativeRuntime({ id: 'cli-base', directory: base, credentialTtlMs: 60_000, modules: [],
@@ -311,9 +312,15 @@ describe('native CLI readonly base configuration', { timeout: 20_000 }, () => {
       identity = copy.node.$id;
     } finally { session.close(); await delivery; await prepared.close(); }
     const before = await readFile(join(base, 'doc', '$'), 'utf8'), configPath = join(configuration, 'config.json');
-    await writeFile(configPath, JSON.stringify({ id: 'cli-base', directory: '../work', baseDirectory: '../base',
+    const rootPath = join(configuration, 'root.json');
+    await writeFile(rootPath, JSON.stringify({ $path: '/', $type: 'root',
+      '#mount': { $type: 't.mount.overlay', layers: ['base', 'work'] },
+      '#base': { $type: 't.mount.fs', root: relative(process.cwd(), base) },
+      '#work': { $type: 't.mount.fs', root: relative(process.cwd(), join(directory, 'work')) },
+    }));
+    await writeFile(configPath, JSON.stringify({ id: 'cli-base',
       credentialTtlMs: 60_000, allowedOrigins: [], modules: [], port: 0 }));
-    const first = await start(configPath), connection = await openTwpHttp({ url: first.address, credential: await login(first.address) });
+    const first = await start(rootPath, configPath), connection = await openTwpHttp({ url: first.address, credential: await login(first.address) });
     const errors: unknown[] = [], client = createTwpClient(connection, { close: connection.close, onError: error => errors.push(error) });
     await client.ready;
     try {
@@ -324,7 +331,7 @@ describe('native CLI readonly base configuration', { timeout: 20_000 }, () => {
       assert.ok((await client.commit({ changes: [{ op: 'patch', path: '/doc', ops: { $inc: { count: 1 } } }] }).outcome).pos);
       assert.equal(errors.length, 0);
     } finally { client.close(); await first.close(); }
-    const second = await start(configPath), reopenedConnection = await openTwpHttp({ url: second.address, credential: await login(second.address) });
+    const second = await start(rootPath, configPath), reopenedConnection = await openTwpHttp({ url: second.address, credential: await login(second.address) });
     const reopened = createTwpClient(reopenedConnection, { close: reopenedConnection.close, onError: error => errors.push(error) });
     await reopened.ready;
     try {

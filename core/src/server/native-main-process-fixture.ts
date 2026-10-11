@@ -17,4 +17,4 @@ process.once('exit', () => {
   console.info = originalInfo
 })
 
-await import('#server/native-main')
+await import('#server/main')

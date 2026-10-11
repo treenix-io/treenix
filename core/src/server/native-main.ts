@@ -9,6 +9,7 @@ import type { FsDirectoryBindings } from '#kernel/mount-fs-provider'
 import type { Credential } from '#kernel/types'
 import { createTwpHttpServer } from '#server/http-twp'
 import { isRecord } from '#util/is-record'
+import { nativeRootStorage } from '#server/native-root'
 
 interface IoEntry { readonly entry: string }
 /** Decode the deployment entry before acquiring persistent runtime resources. */
@@ -38,10 +39,22 @@ function directoryBindings(value: unknown): value is FsDirectoryBindings {
 
 /** Validate CLI configuration, acquire native runtime resources, and serve until shutdown. */
 async function main(): Promise<void> {
-  const argument = process.argv[2]
+  const [argument, option, deployment, ...extra] = process.argv.slice(2)
   if (argument === undefined) throw new KernelError('INVALID', 'Use npm run dev:kernel -- path/to/kernel-config.json')
-  const configPath = resolve(argument), config = safeJsonParse(await readFile(configPath, 'utf8'))
-  if (!isRecord(config) || typeof config.id !== 'string' || typeof config.directory !== 'string' || typeof config.credentialTtlMs !== 'number'
+  if (option !== undefined && (option !== '--deployment' || deployment === undefined) || extra.length !== 0)
+    throw new KernelError('INVALID', 'Use root.json --deployment path/to/kernel-config.json')
+
+  const configPath = resolve(deployment ?? argument)
+  const input: unknown = safeJsonParse(await readFile(configPath, 'utf8'))
+  if (!isRecord(input)) throw new KernelError('INVALID', 'Malformed native server configuration')
+
+  const storage = deployment === undefined ? undefined
+    : nativeRootStorage(safeJsonParse(await readFile(resolve(argument), 'utf8')), process.cwd())
+  if (storage !== undefined && (input.directory !== undefined || input.baseDirectory !== undefined))
+    throw new KernelError('INVALID', 'Root mount storage must be configured only in root.json')
+
+  const config: Record<string, unknown> = { ...input, ...storage }
+  if (typeof config.id !== 'string' || typeof config.directory !== 'string' || typeof config.credentialTtlMs !== 'number'
     || !Array.isArray(config.allowedOrigins) || !config.allowedOrigins.every((value: unknown): value is string => typeof value === 'string')
     || config.firstAdmin !== undefined && !adminInput(config.firstAdmin)
     || config.installerCredential !== undefined && !credentialInput(config.installerCredential)
