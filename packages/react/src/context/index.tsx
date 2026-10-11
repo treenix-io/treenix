@@ -89,23 +89,23 @@ type Actions<T> = {
         : () => Promise<unknown>;
 };
 
+/** Finds an admitted node or its exact named component without decorating the payload. */
+function nativeLocation(value: object, current: PresentationNode | null): string | undefined {
+  if (current === null) return undefined;
+  if (value === current) return current.$path;
+  for (const name of Object.keys(current)) {
+    if (name.startsWith('#') && getComponentByName(current, name.slice(1)) === value)
+      return `${current.$path}${name}`;
+  }
+  return undefined;
+}
+
 export function useActions<T extends object>(value: T & { readonly [$node]?: NodeData; readonly [$key]?: string }): Actions<T> {
   const effects = useTreeEffects();
   const current = useContext(NodeCtx);
-  let nativePath: string | undefined;
-  if (effects.lane) {
-    if (current === null) throw new Error('useActions: no owning node context');
-    if (value === current) nativePath = current.$path;
-    else {
-      for (const name of Object.keys(current)) {
-        if (name.startsWith('#') && getComponentByName(current, name.slice(1)) === value) {
-          nativePath = `${current.$path}${name}`;
-          break;
-        }
-      }
-      if (nativePath === undefined) throw new Error('useActions: component does not belong to the current node');
-    }
-  }
+  const nativePath = effects.lane ? nativeLocation(value, current) : undefined;
+  if (effects.lane && nativePath === undefined)
+    throw new Error('useActions: component does not belong to the current node');
   const node = value[$node];
   if (!effects.lane && !node) throw new Error('useActions: value has no node context (missing $node symbol)');
   const key = value[$key] ?? '';
@@ -136,6 +136,8 @@ export const UixNoView: FC<RenderProps> = ({ value, onChange, ctx }) => {
 
 export function Render<E extends Record<string, unknown> = {}>({ value, onChange, ctx: suppliedContext, ...extra }: RenderProps & E) {
   const context = useTreeContext();
+  const effects = useTreeEffects();
+  const current = useContext(NodeCtx);
   const type = value.$type;
 
   const ctx_ = context as 'react';
@@ -170,7 +172,12 @@ export function Render<E extends Record<string, unknown> = {}>({ value, onChange
   const preset = entry.meta?.props;
   const regProps = preset && typeof preset === 'object' ? preset : undefined;
 
-  const ctx = suppliedContext === undefined ? viewCtx(value) : suppliedContext;
+  const path = effects.lane ? nativeLocation(value, current) : undefined;
+  const derived = effects.lane
+    ? path === undefined || current === null ? null
+      : { node: current, path, execute: (action: string, data?: unknown) => effects.execute(path, action, data) }
+    : viewCtx(value);
+  const ctx = suppliedContext === undefined ? derived : suppliedContext;
   const el = createElement(entry.handler, { value, onChange, ctx, ...extra, ...regProps } as RenderProps);
   return ctx?.node ? createElement(NodeProvider, { value: ctx.node }, el) : el;
 }

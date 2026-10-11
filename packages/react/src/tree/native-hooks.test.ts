@@ -2,6 +2,11 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { act, cleanup, fireEvent, render, renderHook } from '@testing-library/react'
 import { createElement, type ReactNode } from 'react'
+import { renderToString } from 'react-dom/server'
+import { register, unregister } from '@treenx/core'
+import { NodeProvider, Render, RenderContext, type ViewCtx } from '#context'
+import { createLaneTreeSource } from '#tree/lane-source'
+import { TreeSourceProvider } from '#tree/tree-source-context'
 import { createTwpClient } from '@treenx/core/client/twp'
 import { KernelError } from '@treenx/core/errors'
 import type { Connection, Position, Request, SubSelector } from '@treenx/core/kernel/types'
@@ -58,6 +63,40 @@ function textarea(element: HTMLElement): HTMLTextAreaElement {
 }
 
 describe('native React hooks over an actual admitted kernel lane', { timeout: 10_000 }, () => {
+  it('renders admitted nodes through the registered view with native context on client and server', async t => {
+    const f = await fixture('react-render-context'); t.after(f.close)
+    const source = createLaneTreeSource(f.client); t.after(() => source.close())
+    const result = await f.client.read({ node: '/item' })
+    const copy = result.copies[0]; assert.ok('node' in copy)
+    const node = copy.node
+    const context = 'react:admitted-context'
+    const observed: (ViewCtx | null | undefined)[] = []
+    register('t.dir', context, ({ ctx }) => {
+      observed.push(ctx)
+      return createElement('span', null, ctx?.path ?? 'presentation')
+    })
+    t.after(() => unregister('t.dir', context))
+    const tree = createElement(TreeSourceProvider, { source, children:
+      createElement(NodeProvider, { value: node, children:
+        createElement(RenderContext, { name: context, children: createElement(Render, { value: node }) }) }) })
+    assert.ok(renderToString(tree).includes('/item'))
+    const view = render(tree)
+    assert.equal(view.getByText('/item').textContent, '/item')
+    for (const ctx of observed) { assert.ok(ctx); assert.equal(ctx.node, node); assert.equal(ctx.path, '/item') }
+    assert.equal(Object.getOwnPropertySymbols(node).length, 0)
+    const explicit = { node, path: '/item#explicit', execute: source.effects.execute }
+    const supplied = createElement(TreeSourceProvider, { source, children:
+      createElement(NodeProvider, { value: node, children:
+        createElement(RenderContext, { name: context, children: createElement(Render, { value: node, ctx: explicit }) }) }) })
+    assert.ok(renderToString(supplied).includes('/item#explicit'))
+    assert.equal(observed.at(-1), explicit)
+    const presentation = createElement(TreeSourceProvider, { source, children:
+      createElement(NodeProvider, { value: node, children:
+        createElement(RenderContext, { name: context, children: createElement(Render, { value: { $type: 't.dir' } }) }) }) })
+    assert.ok(renderToString(presentation).includes('presentation'))
+    assert.equal(observed.at(-1), null)
+  })
+
   it('appends actual cursor pages and preserves included copies through live membership updates', async t => {
     const f = await fixture('react-children'); t.after(f.close)
     await f.admin.commit({ opId: f.key(), changes: [

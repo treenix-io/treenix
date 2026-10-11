@@ -9,11 +9,13 @@
 import { EMPTY, RouteParamsContext, useRouteParams } from '@treenx/react/context/route-params';
 import {
   NavigateProvider,
+  NodeProvider,
   Render,
   RenderContext,
   useAutoSave,
   useLocation,
   usePath,
+  useTreeEffects,
   useReactivePathEvents,
   type View,
   view,
@@ -23,6 +25,7 @@ import { useRouteShell } from '@treenx/react/router/use-route-shell';
 import { ViewShell } from './types';
 
 const ViewShellView: View<ViewShell> = ({ value, ctx }) => {
+  const effects = useTreeEffects();
   const { target, nav } = useRouteShell(ctx!.node, { preserveQuery: { ctx: 'react' } });
   const { search } = useLocation();
   const renderCtx = new URLSearchParams(search).get('ctx') || 'react';
@@ -55,7 +58,8 @@ const ViewShellView: View<ViewShell> = ({ value, ctx }) => {
         <div className="flex flex-col h-screen">
           <div className="flex-1 overflow-auto p-4 has-[.view-full]:p-0">
             <RenderContext name={renderCtx}>
-              <Render value={draft} onChange={onChange} />
+              <NodeProvider value={draft}><Render value={draft} onChange={onChange} ctx={effects.lane ? { node: draft, path: draft.$path,
+                execute: (action, data) => effects.execute(draft.$path, action, data) } : undefined} /></NodeProvider>
             </RenderContext>
           </div>
         </div>

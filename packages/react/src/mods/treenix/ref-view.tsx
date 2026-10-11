@@ -1,8 +1,8 @@
 // Ref node/component view — shows target path, resolve button, inline preview
 
 import { Button } from '#components/ui/button';
-import { Render, RenderContext } from '#context';
-import { usePath } from '#hooks';
+import { NodeProvider, Render, RenderContext } from '#context';
+import { usePath, useTreeEffects } from '#hooks';
 import { type NodeData, register } from '@treenx/core';
 import { useState } from 'react';
 
@@ -37,6 +37,7 @@ function RefListItem({ value }: { value: NodeData }) {
 // ── Shared display ──
 
 function RefDisplay({ target, onSelect }: { target: string; onSelect?: (p: string) => void }) {
+  const effects = useTreeEffects();
   const [resolved, setResolved] = useState(false);
   const { data: targetNode } = usePath(resolved ? target : null);
 
@@ -77,7 +78,8 @@ function RefDisplay({ target, onSelect }: { target: string; onSelect?: (p: strin
                 <span className="font-mono">{targetNode.$type}</span>
                 <span>{targetNode.$path}</span>
               </div>
-              <Render value={targetNode} />
+              <NodeProvider value={targetNode}><Render value={targetNode} ctx={effects.lane ? { node: targetNode, path: targetNode.$path,
+                execute: (action, data) => effects.execute(targetNode.$path, action, data) } : undefined} /></NodeProvider>
             </div>
           ) : (
             <div className="text-sm text-muted-foreground">Loading...</div>
@@ -91,14 +93,16 @@ function RefDisplay({ target, onSelect }: { target: string; onSelect?: (p: strin
 // ── Route-context view: when a /sys/routes/* node is a ref, follow it and
 //    render the target as the page content (in plain `react` context). ──
 
-function RefRouteView({ value }: { value: NodeData }) {
-  const ref = (value as { $ref?: string }).$ref;
+function RefRouteView({ value }: { value: { readonly $ref: string } }) {
+  const effects = useTreeEffects();
+  const ref = value.$ref;
   const { data: target } = usePath(ref ?? '');
   if (!ref) return null;
   if (!target) return null;
   return (
     <RenderContext name="react">
-      <Render value={target} />
+      <NodeProvider value={target}><Render value={target} ctx={effects.lane ? { node: target, path: target.$path,
+        execute: (action, data) => effects.execute(target.$path, action, data) } : undefined} /></NodeProvider>
     </RenderContext>
   );
 }
@@ -107,4 +111,4 @@ function RefRouteView({ value }: { value: NodeData }) {
 
 register('ref', 'react', RefNodeView as any);
 register('ref', 'react:list', RefListItem as any);
-register('ref', 'react:route', RefRouteView as any);
+register('ref', 'react:route', RefRouteView);
