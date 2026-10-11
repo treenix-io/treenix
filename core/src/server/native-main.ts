@@ -4,9 +4,8 @@ import { dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { safeJsonParse } from '#core/json'
 import { KernelError } from '#errors'
-import { collectModule } from '#kernel/manifest'
+import { openNativeDeployment, type NativeModuleLocation } from '#server/native-deployment'
 import type { FsDirectoryBindings } from '#kernel/mount-fs-provider'
-import { openNativeRuntime } from '#kernel/runtime'
 import type { Credential } from '#kernel/types'
 import { createTwpHttpServer } from '#server/http-twp'
 import { isRecord } from '#util/is-record'
@@ -49,12 +48,11 @@ async function main(): Promise<void> {
   const port = config.port ?? 4882, host = config.host ?? '127.0.0.1'
   if (typeof port !== 'number' || !Number.isSafeInteger(port) || port < 0 || port > 65535 || typeof host !== 'string')
     throw new KernelError('INVALID', 'Malformed native listen address')
-  const modules = []
-  for (const entry of config.modules ?? []) {
-    const target = entry.entry.startsWith('.') || entry.entry.startsWith('/')
-      ? pathToFileURL(resolve(dirname(configPath), entry.entry)).href : entry.entry
-    modules.push(await collectModule(entry.id, () => import(target), target))
-  }
+  const modules: readonly NativeModuleLocation[] | undefined = config.modules?.map(entry => ({
+    id: entry.id,
+    entry: entry.entry.startsWith('.') || entry.entry.startsWith('/')
+      ? pathToFileURL(resolve(dirname(configPath), entry.entry)).href : entry.entry,
+  }))
   let io: ActionIoBinding | undefined;
   if (config.io !== undefined) {
     const target = pathToFileURL(resolve(dirname(configPath), config.io.entry)).href;
@@ -72,8 +70,8 @@ async function main(): Promise<void> {
             resolve(dirname(configPath), directory),
           ]),
         )
-  const runtime = await openNativeRuntime({ id: config.id, directory: resolve(dirname(configPath), config.directory),
-    credentialTtlMs: config.credentialTtlMs, firstAdmin: config.firstAdmin, installerCredential: config.installerCredential, modules, mountDirectories, io })
+  const runtime = await openNativeDeployment({ runtime: { id: config.id, directory: resolve(dirname(configPath), config.directory),
+    credentialTtlMs: config.credentialTtlMs, firstAdmin: config.firstAdmin, installerCredential: config.installerCredential, mountDirectories }, modules, io })
   const binding = createTwpHttpServer({ instance: runtime.instance, allowedOrigins: config.allowedOrigins, credentialTtlMs: config.credentialTtlMs })
   try {
     await new Promise<void>((done, reject) => { binding.server.once('error', reject); binding.server.listen(port, host, () => { binding.server.off('error', reject); done() }) })

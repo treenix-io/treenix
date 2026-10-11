@@ -9,7 +9,7 @@ import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { setCurrentMod } from './tracking';
 import type { LoadedMod } from './types';
-import type { CollectedModule, NativeModuleDeployment, NativeModuleFactory } from '#kernel/manifest';
+import type { CollectedModule, NativeModuleDeployment, NativeModuleExports } from '#kernel/manifest';
 import type { ActionIoBinding, Io, Registry } from '#kernel/types';
 
 const log = createLogger('mod');
@@ -203,12 +203,11 @@ export async function loadLocalMods(modsDir: string, target: LoadTarget): Promis
         for (const f of filesToImport) {
           const real = await confineReal(modDir, f);
           if (real.endsWith('.ts') || real.endsWith('.tsx')) await ensureTsxRegistered();
-          const imported: { readonly default?: NativeModuleFactory } = await import(
+          const imported: NativeModuleExports = await import(
             pkgName ? `${pkgName}/${entry.name}/${basenameNoExt(real)}` : real);
           if (native !== undefined && imported.default !== undefined) {
-            if (typeof imported.default !== 'function') throw new KernelError('INVALID', 'Native module factory must be callable');
             if (deployment !== undefined) throw new KernelError('CONFLICT', 'Module has more than one native factory');
-            deployment = await imported.default();
+            deployment = await native.collector.evaluateModuleFactory(imported);
           }
         }
         if (deployment === undefined) loadSchemasRecursive(modDir, native?.collector.assertModuleSchema);

@@ -14,6 +14,16 @@ export interface NativeModuleDeployment {
 }
 export type NativeModuleFactory = () => Promise<NativeModuleDeployment>
 
+export interface NativeModuleExports { readonly default?: NativeModuleFactory }
+
+/** Evaluate the declared deployment factory while its module collection is owned by the caller. */
+export async function evaluateModuleFactory(entry: NativeModuleExports): Promise<NativeModuleDeployment | undefined> {
+  if (entry.default === undefined) return undefined;
+  if (typeof entry.default !== 'function') throw new KernelError('INVALID', 'Native module factory must be callable');
+  return entry.default();
+}
+
+
 export interface CollectedModule extends ModuleManifest {
   readonly collectionId?: string
   readonly io?: ActionIoBinding
