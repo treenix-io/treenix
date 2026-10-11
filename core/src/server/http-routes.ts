@@ -6,7 +6,7 @@ import type { Session } from '#kernel/types'
 /** A route owns consumption of its Session lane; the binding owns its lifetime. */
 export type TwpHttpHandler = (request: IncomingMessage, response: ServerResponse, session: Session) => Promise<void>
 
-interface RegisteredRoute {
+export interface RegisteredRoute {
   readonly handler: TwpHttpHandler
   readonly signal: AbortSignal
   readonly controller: AbortController
