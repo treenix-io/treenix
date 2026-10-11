@@ -131,6 +131,11 @@
       "types": "./dist/kernel/runtime.d.ts",
       "default": "./dist/kernel/runtime.js"
     },
+    "./kernel/session-delivery": {
+      "development": "./src/kernel/session-delivery.ts",
+      "types": "./dist/kernel/session-delivery.d.ts",
+      "default": "./dist/kernel/session-delivery.js"
+    },
     "./kernel/types": {
       "development": "./src/kernel/types.ts",
       "types": "./dist/kernel/types.d.ts",

@@ -86,6 +86,16 @@ export function telegramOwner(): {
         scope.assertActive();
         return sent.message_id;
       },
+      async download(path, fileId) {
+        const bot = await admitted(path);
+        const file = await bot.api.getFile(fileId, telegramSignal);
+        if (file.file_path === undefined) throw new KernelError('NOT_FOUND', 'Telegram file path is absent');
+        const response = await fetch(`https://api.telegram.org/file/bot${bot.token}/${file.file_path}`, { signal: scope.signal });
+        if (!response.ok) throw new KernelError('UNAVAILABLE', `Telegram download failed: ${response.status}`);
+        const body = new Uint8Array(await response.arrayBuffer());
+        scope.assertActive();
+        return body;
+      },
     };
     return { brahman };
   };

@@ -98,7 +98,6 @@ export function createTwpHttpServer(input: TwpHttpOptions) {
     response.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, TWP-Lane')
     if (request.method === 'OPTIONS') { response.writeHead(204); response.end(); return }
     const url = new URL(request.url ?? '/', 'http://localhost')
-    if (url.search !== '') throw new KernelError('INVALID', 'TWP does not accept query credentials or commands')
     const route = routes.get(url.pathname)
     const network = clientOrigin(request, trustProxy), credential = credentials(request)
     if (request.method === 'POST' && request.headers.cookie !== undefined && request.headers.authorization === undefined && origin === undefined)
@@ -128,6 +127,7 @@ export function createTwpHttpServer(input: TwpHttpOptions) {
       }
       return
     }
+    if (url.search !== '') throw new KernelError('INVALID', 'TWP does not accept query credentials or commands')
     if (request.method === 'POST' && url.pathname === '/auth/login') {
       const token = await instance.auth.login(login(decodeJson(await body(request, instance.limits().requestBytes), instance.limits().requestBytes)))
       response.setHeader('Set-Cookie', buildSessionCookie(token.token, Math.floor(credentialTtlMs / 1000)))

@@ -49,6 +49,7 @@ export interface BrahmanTelegram {
   remove(botPath: string, chatId: number, messageId: number): Promise<void>;
   forward(botPath: string, chatId: number, fromChatId: number, messageId: number): Promise<number>;
   file(botPath: string, chatId: number, kind: string, fileId: string): Promise<number>;
+  download(botPath: string, fileId: string): Promise<Uint8Array>;
 }
 
 declare module '@treenx/core/kernel/types' {

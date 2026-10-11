@@ -2,55 +2,20 @@
 // ingestAudio(): create node immediately, transcribe in background, update node.
 // HTTP: POST ?id=channel with audio body; Bearer auth from env, channel map from config (fail closed).
 
-import { type AutomaticSpeechRecognitionPipeline, pipeline } from '@huggingface/transformers';
 import { createNode } from '@treenx/core';
 import { newComponent } from '@treenx/core/comp';
 import type { Tree } from '@treenx/core/tree';
 import { execFile } from 'node:child_process';
-import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, unlink, writeFile } from 'node:fs/promises';
 import { type IncomingMessage, type ServerResponse } from 'node:http';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
-import WaveFile from 'wavefile';
+import { extForMime, getTranscriber, readWavAsFloat32 } from './audio';
 import { WhisperAudio, WhisperChecklist, WhisperMeta, WhisperText } from './types';
 
 const execFileAsync = promisify(execFile);
 
 const MAX_BODY = 25 * 1024 * 1024;
-
-// MIME allowlist → file extension; anything else is rejected at the route
-const MIME_EXT: Array<[string, string]> = [
-  ['mpeg', 'mp3'], ['mp3', 'mp3'],
-  ['ogg', 'ogg'], ['opus', 'ogg'],
-  ['webm', 'webm'],
-  ['m4a', 'm4a'], ['mp4', 'm4a'], ['aac', 'm4a'],
-  ['wav', 'wav'], ['x-wav', 'wav'],
-];
-
-// Lazy-initialized pipelines keyed by model name
-const pipelines = new Map<string, Promise<AutomaticSpeechRecognitionPipeline>>();
-
-function getTranscriber(model: string): Promise<AutomaticSpeechRecognitionPipeline> {
-  let p = pipelines.get(model);
-  if (!p) {
-    const modelId = model.includes('/') ? model : `onnx-community/whisper-${model}`;
-    console.log(`[whisper] loading model ${modelId}...`);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- pipeline() union type is too complex for TS
-    p = (pipeline as any)('automatic-speech-recognition', modelId, {
-      dtype: {
-        encoder_model: 'fp32',
-        decoder_model_merged: 'q4',
-      },
-    }) as Promise<AutomaticSpeechRecognitionPipeline>;
-    p.then(() => console.log(`[whisper] model ${modelId} ready`))
-      .catch((e: unknown) => {
-        console.error(`[whisper] model ${modelId} failed:`, e);
-        pipelines.delete(model); // allow retry on next request
-      });
-    pipelines.set(model, p);
-  }
-  return p;
-}
 
 function respond(res: ServerResponse, status: number, body: unknown) {
   res.writeHead(status, { 'Content-Type': 'application/json' });
@@ -62,17 +27,6 @@ function timeId(): string {
   const d = new Date();
   const pad = (n: number, w = 2) => String(n).padStart(w, '0');
   return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}-${pad(d.getMilliseconds(), 3)}`;
-}
-
-/** Read 16kHz mono WAV file → Float32Array for transformers.js */
-async function readWavAsFloat32(wavPath: string): Promise<Float32Array> {
-  const buf = await readFile(wavPath);
-  const wav = new WaveFile.WaveFile(buf);
-  wav.toBitDepth('32f');
-  wav.toSampleRate(16000);
-  let samples = wav.getSamples();
-  if (Array.isArray(samples)) samples = samples[0];
-  return new Float32Array(samples);
 }
 
 export type IngestOpts = {
@@ -178,11 +132,6 @@ export async function ingestAudio(tree: Tree, opts: IngestOpts, body: Buffer, ex
     });
 
   return nodePath;
-}
-
-export function extForMime(mime: string): string | null {
-  for (const [key, ext] of MIME_EXT) if (mime.includes(key)) return ext;
-  return null;
 }
 
 export type WhisperRouteConfig = {
