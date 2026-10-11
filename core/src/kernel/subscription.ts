@@ -39,6 +39,7 @@ export interface NodeSubscription {
   state: SubscriptionState;
   readonly candidates: Set<Path>;
   readonly changes: Map<Path, { count: number; force: boolean }>;
+  raw?: { close(): void };
   view?: LaneProjection;
   viewVersion?: number;
 }

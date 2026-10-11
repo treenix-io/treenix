@@ -30,23 +30,20 @@ export function createNodeLaneRead(options: CommandOptions, claimable: (path: Pa
       if (Date.now() > budget.deadline) throw new KernelError('BUDGET', 'Lane read deadline exceeded')
       if (options.registryRevision() !== revision) throw new KernelError('CONFLICT', 'Projection changed during lane delivery')
     }
-    let input: ReturnType<CommandOptions['source']>
-    return writer.read(() => {
-      input = options.source(budget)
-      return input.domains
-    }, async () => {
+    const input = options.source(budget, undefined, selectors)
+    const reads = createReader({ admission, writer, registry, source: input, budget,
+      limits: options.limits(), projector: project,
+      scope: { check, hold(lease) { held.push(lease) } } })
+    for (const selector of selectors) {
+      const resolved = options.resolveSelector?.(selector) ?? selector
+      if ('history' in resolved) throw new KernelError('INVALID', 'A subscription cannot select history')
+      // Native Views prepare projected includes through their executor reads.
+      if (options.viewDefinition?.(resolved) === undefined) await reads.prepare(resolved)
+    }
+    return writer.read(() => input.domains, async () => {
       check()
       await admission.validate(input.auth)
-      const reads = createReader({
-        admission,
-        writer,
-        registry,
-        source: input,
-        budget,
-        limits: options.limits(),
-        projector: project,
-        scope: { check, hold(lease) { held.push(lease) } },
-      })
+      await reads.validatePrepared()
       const source: NodeLaneRead = {
         pos: writer.stream.cursor().pos, intake: writer.intake.epoch, check,
         async authorizeView(selector) {

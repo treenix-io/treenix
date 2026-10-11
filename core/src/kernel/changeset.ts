@@ -41,9 +41,11 @@ export interface ChangeSetOptions {
 export interface PreparedChangeSet extends PreparedCommit {
   readonly transitions: readonly NodeChange[]
 }
+import type { ShardRights } from '#kernel/auth-factory'
+
 export type ChangeExecutor =
   | { readonly executor: 'kernel' | `external:${string}`; readonly caller: Executor; readonly expect?: ReadSet }
-  | { readonly executor: Principal; readonly caller: Executor; readonly actor: Actor; readonly expect?: ReadSet; readonly action?: ActionProvenance }
+  | { readonly executor: Principal; readonly caller: Executor; readonly actor: Actor; readonly shard?: ShardRights; readonly expect?: ReadSet; readonly action?: ActionProvenance }
 
 function component(input: Component, registry: Registry): Component {
   const def = registry.type(input.$type)
@@ -95,6 +97,7 @@ export async function prepareChangeSet(
   const guard = createGuard({
     registry,
     executor: 'actor' in who ? who.actor : who.executor,
+    shard: 'actor' in who ? who.shard : undefined,
     readBefore: options.readBefore ?? original,
     capabilities: options.capabilities,
     expect: 'actor' in who ? who.expect : undefined,

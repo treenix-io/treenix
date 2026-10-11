@@ -2,7 +2,8 @@ import type { StreamDomain } from '#kernel/types'
 import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import { KernelError } from '#errors'
-import { comparePositions, positionToRev } from '#kernel/position'
+import { comparePositions, positionToRev, revToPosition } from '#kernel/position'
+import { compositeIntake, shardIntakePart } from '#kernel/intake-epoch'
 import { matchingDecision } from '#kernel/journal'
 import type { OperationReadCost } from '#kernel/store/budget'
 
@@ -60,7 +61,10 @@ export async function createIdempotency(options: IdempotencyOptions) {
   /** Check the durable epoch and expiry for a previously admitted key. */
   function checkAdmitted(opId: OpId): void {
     if (opId.time < current().boundary) throw new KernelError('EXPIRED', 'Mutation key has expired')
-    if (opId.epoch !== current().epoch) throw new KernelError('UNKNOWN_OUTCOME', 'Mutation key belongs to another intake epoch')
+    const accepted = current()
+    if (opId.epoch !== accepted.epoch
+      && shardIntakePart(opId.epoch, accepted.owner ?? revToPosition(accepted.epoch).instance) !== accepted.epoch)
+      throw new KernelError('UNKNOWN_OUTCOME', 'Mutation key belongs to another intake epoch')
   }
 
   /** Apply clock tolerance as well when admitting a fresh decision. */
@@ -181,10 +185,14 @@ export async function createIdempotency(options: IdempotencyOptions) {
       return Promise.all([...lookups]).then(() => {})
     },
     /** Preserve the intake epoch while its declared domain epochs remain unchanged. */
-    next(pos: Position, force = false, inventory = domains, preserveAddition = false): IntakeState {
+    next(pos: Position, force = false, inventory = domains, preserveAddition = false,
+      shards = state?.shards ?? {}): IntakeState {
       const unchanged = state !== undefined && (isDeepStrictEqual(state.domains, inventory)
         || preserveAddition && Object.entries(state.domains).every(([domain, epoch]) => inventory[domain] === epoch))
-      return freeze({ epoch: !force && unchanged ? state!.epoch : positionToRev(pos),
+      const sameShards = isDeepStrictEqual(state?.shards ?? {}, shards)
+      const local = !force && unchanged && sameShards ? state!.local ?? state!.epoch : positionToRev(pos)
+      const epoch = Object.keys(shards).length === 0 ? local : compositeIntake({ owner: pos.instance, local, shards })
+      return freeze({ owner: pos.instance, local, shards: { ...shards }, epoch,
         boundary: Math.max(0, state?.boundary ?? 0, now() - limits.opIdWindowMs), domains: { ...inventory } })
     },
     /** Install accepted intake without moving its durable expiry backward. */

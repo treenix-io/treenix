@@ -4,18 +4,25 @@ import { credentialScope, tokenHash } from '#kernel/auth/crypto'
 import { authenticateLogin, type LoginInput, type LoginProof } from '#kernel/auth/login'
 import { actorDependencyVersion, createActorResolver, type ActorDependency, type ActorResolution,
   type AuthReadSource, type AuthSource } from '#kernel/session'
-import type { Actor, Credential, InstanceId, NodeId, Path, Registry, StoredNode } from '#kernel/types'
+import type { Actor, Credential, InstanceId, NodeId, Path, Registry, RightsPrefix, ShardEnvelope, StoredNode } from '#kernel/types'
 import { stableJson } from '#util/stable-json'
 
 export interface AuthChange { readonly id: NodeId; readonly node: StoredNode | null }
 export type AuthEvent = { readonly t: 'nodes'; readonly changes: readonly AuthChange[] } | { readonly t: 'registry' }
 export interface AuthEvents { subscribe(listener: (event: AuthEvent) => void): () => void }
 export interface AuthIssuer { issue(proof: LoginProof, credential: PreparedCredential): Promise<void> }
+export interface ShardRights {
+  readonly path: Path
+  readonly prefix: RightsPrefix
+}
+
 export interface ActorReadInput {
+  readonly shard?: ShardRights
   readonly actor: Actor
   readonly sources: readonly { readonly id: NodeId; readonly version: string }[]
 }
 export interface AuthAdmission {
+  readonly shard?: ShardRights
   readonly actor: Actor
   readonly resolution: ActorResolution
   readonly origin?: string
@@ -27,6 +34,7 @@ export interface AuthAdmission {
   close(reason?: KernelError): void
 }
 export interface AuthFactoryOptions {
+  readonly shardPath?: Path
   readonly instance: InstanceId
   readonly registry: Registry
   readonly source: AuthSource
@@ -56,7 +64,10 @@ export function createAuthFactory(options: AuthFactoryOptions) {
     if (event.t === 'registry') {
       if (digest === registry.digest) return
       digest = registry.digest
-      for (const admission of active) if (admission.resolution.sources.some(dep => dep.kind === 'executor')) admission.close(unauthorized())
+      for (const admission of active) {
+        if (admission.shard !== undefined) admission.close(new KernelError('GENERATION', 'Shard module generation changed'))
+        else if (admission.resolution.sources.some(dep => dep.kind === 'executor')) admission.close(unauthorized())
+      }
     } else for (const change of event.changes) {
       const affected = dependencies.get(change.id)
       if (affected !== undefined) {
@@ -78,11 +89,12 @@ export function createAuthFactory(options: AuthFactoryOptions) {
     }
   })
 
-  function admit(resolution: ActorResolution, origin?: string): AuthAdmission {
+  function admit(resolution: ActorResolution, origin?: string, shard?: () => ShardRights): AuthAdmission {
     available()
     const controller = new AbortController()
     const input: ActorReadInput = Object.freeze({ actor: resolution.actor,
       sources: Object.freeze(resolution.sources.map(({ id, version }) => Object.freeze({ id, version }))) })
+    const digestAtOpen = registry.digest
     let timer: ReturnType<typeof setTimeout> | undefined
     function expire(): void {
       const expiresAt = resolution.expiresAt
@@ -92,11 +104,14 @@ export function createAuthFactory(options: AuthFactoryOptions) {
       else { timer = setTimeout(expire, Math.min(remaining, 2_147_483_647)); timer.unref() }
     }
     const admission: AuthAdmission = Object.freeze({ actor: resolution.actor, resolution, origin,
+      get shard() { return shard?.() },
       signal: controller.signal, dependencyKey: `actor:${tokenHash(stableJson([resolution.actor.principal, input.sources.map(dep => dep.id)]))}`,
-      dependency: () => input,
+      dependency: () => shard === undefined ? input : Object.freeze({ ...input, shard: shard() }),
       assertActive() {
         if (!controller.signal.aborted && resolution.expiresAt !== undefined && Date.now() >= resolution.expiresAt) admission.close(unauthorized())
         controller.signal.throwIfAborted()
+        if (shard !== undefined && registry.digest !== digestAtOpen)
+          throw new KernelError('GENERATION', 'Shard module generation changed')
       },
       async validate(read: AuthReadSource) {
         admission.assertActive()
@@ -137,6 +152,21 @@ export function createAuthFactory(options: AuthFactoryOptions) {
   }
 
   return {
+    /** Accept only the configured same-zone range and current owning module set. */
+    openShard(envelope: ShardEnvelope) {
+      available()
+      if (options.shardPath === undefined || envelope.path !== options.shardPath)
+        throw new KernelError('INVALID', 'Shard range differs from its deployment binding')
+      if (envelope.modules !== registry.digest) throw new KernelError('GENERATION', 'Shard module set differs')
+      const actor = Object.freeze({ ...envelope.actor, claims: Object.freeze([...envelope.actor.claims]),
+        ...(envelope.actor.scope === undefined ? {} : { scope: Object.freeze([...envelope.actor.scope]) }) })
+      let rights: ShardRights = Object.freeze({ path: envelope.path, prefix: Object.freeze({ ...envelope.prefix }) })
+      const admission = admit(Object.freeze({ actor, sources: Object.freeze([]) }), undefined, () => rights)
+      return { admission, update(prefix: RightsPrefix) {
+        admission.assertActive()
+        rights = Object.freeze({ path: envelope.path, prefix: Object.freeze({ ...prefix }) })
+      } }
+    },
     async login(input: LoginInput): Promise<Credential> {
       available()
       const request: LoginInput = Object.freeze({ account: input.account, password: input.password, scope: credentialScope(input.scope) })

@@ -5,7 +5,7 @@ import { createInstanceFoundation } from '#kernel/instance'
 import type { AuthReadSource } from '#kernel/session'
 import { scanBudget } from '#kernel/store/contract'
 import { createMemoryStore } from '#kernel/store/memory'
-import { R, W, type Budget, type ModuleManifest, type OpId, type Position } from '#kernel/types'
+import { R, W, type Budget, type ModuleManifest, type OpId, type Position, type ReadQueryCost } from '#kernel/types'
 
 const code = (expected: KernelError['code']) => (error: unknown) => error instanceof KernelError && error.code === expected
 async function setup() {
@@ -65,8 +65,13 @@ describe('independent native Reader composition', { timeout: 10_000 }, () => {
       if ('node' in args[1]) loaded.push(args[1].node)
       return fill(...args)
     })
-    f.budget(() => ({ ...scanBudget(), nodes: 1, bytes: 1024 }))
-    const result = await f.anonymous.read({ children: '/list', where: { score: 7 }, sort: [['score', -1]], window: { limit: 1 } })
+    f.budget(() => ({ ...scanBudget(), nodes: 4, bytes: 4096 }))
+    let spent: ReadQueryCost | undefined;
+    const result = await f.anonymous.read({ children: '/list', where: { score: 7 }, sort: [['score', -1]], window: { limit: 1 } },
+      undefined, { budget: scanBudget(), spent(cost) { spent = cost } })
+    assert.ok(spent !== undefined);
+    assert.ok(spent.nodes > 1 && spent.nodes <= 4);
+    assert.ok(spent.bytes <= 4096);
     assert.equal(result.list.length, 1)
     assert.ok('node' in result.copies[0])
     assert.equal(result.copies[0].node.$path, '/list/public')

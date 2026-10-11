@@ -10,6 +10,7 @@ import { createFsBlobStore } from '#kernel/blob-store-fs'
 import { DEFAULT_LIMITS, type FederationBinding, type ActionIoBinding, type AdminInput, type Credential, type Gate, type ModuleManifest, type ProvisionedStoreMount } from '#kernel/types'
 
 export interface NativeRuntimeConfig {
+  readonly shardPath?: string
   readonly federation?: FederationBinding
   readonly io?: ActionIoBinding
   readonly id: string
@@ -31,6 +32,7 @@ export async function openNativeRuntime(input: NativeRuntimeConfig) {
       input.firstAdmin === undefined ? undefined : Object.freeze({ ...input.firstAdmin });
   const config = Object.freeze({
     id: input.id,
+    shardPath: input.shardPath,
     federation: input.federation,
     io: input.io,
     directory: input.directory,
@@ -91,6 +93,7 @@ export async function openNativeRuntime(input: NativeRuntimeConfig) {
     foundation = await createInstance({
       id: config.id,
       federation: config.federation,
+      shardPath: config.shardPath,
       root: { kind: 'store', store },
       blobs: await createFsBlobStore(join(config.directory, '.treenix', 'blobs')),
       provisioning: {

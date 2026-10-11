@@ -212,6 +212,19 @@ export interface Row {
   readonly [field: string]: unknown
 }
 
+/** Actual Reader work owned by one native query, including its request preparation. */
+export interface ReadQueryCost {
+  readonly nodes: number
+  readonly bytes: number
+  readonly exprWork: number
+  readonly requestBytes: number
+}
+
+/** Failed queries retain their spent work so handled failures cannot replenish an enclosing allowance. */
+export type ReadReceipt = { readonly cost: ReadQueryCost } & (
+  { readonly result: ReadResult } | { readonly error: unknown }
+)
+
 export interface ReadResult {
   readonly ownership?: LaneOwnership
   readonly action?: ActionDescriptor
@@ -912,6 +925,9 @@ export interface OpDecision {
 }
 
 export interface IntakeState {
+  readonly owner?: string
+  readonly local?: string
+  readonly shards?: Readonly<Record<string, string>>
   readonly epoch: string
   readonly boundary: number
   readonly domains: Readonly<Record<DomainId, string>>
@@ -1022,6 +1038,8 @@ export interface RightsPrefix {
 
 /** Sent once, when the origin's writer opens the shard lane of one client lane. */
 export interface ShardEnvelope {
+  /** Logical range bound by the receiving deployment. */
+  readonly path: Path
   /** Fixed for the lane, as every lane's actor. */
   readonly actor: Actor
   /** The shard refuses a different module set with GENERATION. */
@@ -1048,7 +1066,7 @@ export type Authority =
    * client lane is ready, so the shard lane does the merging. The shard lane's `welcome` carries the shard's
    * intake epoch, part of the origin's composite epoch. Nodes under a shard cannot be executors.
    */
-  | { readonly kind: 'shard'; connect(envelope: ShardEnvelope): Promise<ShardConnection> }
+  | { readonly kind: 'shard'; connect(envelope: ShardEnvelope, signal?: AbortSignal): Promise<ShardConnection> }
 
 /** The declaring mount session supplies the closed credential for each connection. */
 export type OpenedAuthority =
@@ -1070,6 +1088,19 @@ export interface FederationTransport {
 export type FederationBinding = (url: string, limits: () => Limits) => Promise<FederationTransport>
 
 export interface ShardConnection {
+  readonly instance: InstanceId
+  readonly intake: string
+  read(selector: Selector, signal?: AbortSignal): Promise<ReadResult>
+  readOwned(selector: Selector, budget: Budget, signal?: AbortSignal): Promise<ReadReceipt>
+  commit(request: CommitRequest, signal?: AbortSignal): Pending
+  act(request: ActRequest, signal?: AbortSignal): Pending
+  cancel(id: RequestId): void
+  /** Consumes one frame only for an actual client credit; an idle lane returns no frame. */
+  poll(): Promise<Frame | undefined>
+  /** Announces changed readiness without pulling or retaining node payloads. */
+  observeReady(listener: () => void): () => void
+  /** Ends this ordered lane and releases its owned transport. */
+  close(): Promise<void>
   send(request: Request): void
   /**
    * A changed chain above the mount point, sent to every shard lane of the actor: the shard checks every
@@ -1272,6 +1303,8 @@ export interface InstanceProvisioning {
 }
 
 export interface InstanceConfig {
+  /** Same-zone shard deployments bind their immutable logical range before startup. */
+  readonly shardPath?: Path
   readonly federation?: FederationBinding
   /** Deployment capabilities are bound separately to each declared writing action. */
   readonly io?: ActionIoBinding

@@ -12,9 +12,9 @@ import { assertSafePredicate, createSiftTest } from '#kernel/expr'
 import { applyFieldDeltas, applyJournalChange } from '#kernel/journal'
 import { selectionOwnership, type LaneBranch, LaneRange, LaneRoot, LaneSelection } from '#kernel/lane-selection'
 import { comparePositions, positionToRev } from '#kernel/position'
-import { typeReadVersion, type ReadDependency, type ReadSet } from '#kernel/preconditions'
+import { checkPreconditions, typeReadVersion, type ReadDependency, type ReadSet } from '#kernel/preconditions'
 import { createProjector, visibleNode } from '#kernel/projection'
-import { computeRights, type ChainNode } from '#kernel/rights'
+import { computeAdmittedRights, computeRights, type ChainNode } from '#kernel/rights'
 import type { AuthReadSource } from '#kernel/session'
 import { mapNodeForSift } from '#kernel/store/keys'
 import { compareScanKeys, parseScanCursor, scanCursor, scanKey, scanPage, type ScanKey } from '#kernel/store/scan'
@@ -23,6 +23,7 @@ import { A, DEFAULT_LIMITS, R, W, type Budget, type DomainId, type HistoryEntry,
   type Selector, type Sort, type Store, type StoredNode, type SubSelector } from '#kernel/types'
 import { getByPath } from '#kernel/update-ops'
 import type { Writer } from '#kernel/writer'
+import type { OperationReadCost } from '#kernel/store/budget'
 import { stableJson } from '#util/stable-json'
 
 export interface ReaderTarget {
@@ -34,6 +35,10 @@ export interface ReaderTarget {
 export interface ReaderSource {
   readonly domains: readonly DomainId[]
   readonly auth: AuthReadSource
+  /** Prepare actual addressed targets before entering their ordered read span. */
+  prepare?(selectors: readonly Selector[], signal: AbortSignal): Promise<void>
+  /** Read actual Authority projections without creating physical Store images. */
+  projectedRead?(selector: Selector, budget: Budget, observe: () => void, cost: ReaderOperationCost): Promise<ReadResult | undefined>
   resolve(path: Path): ReaderTarget
   /** Canonical, unique Store owners intersecting the logical range. */
   targets(range: ScanRange): readonly ReaderTarget[]
@@ -42,7 +47,7 @@ export interface ReaderSource {
 }
 export interface ReaderOptions {
   readonly registry: Registry
-  readonly writer: Pick<Writer, 'cache' | 'stream' | 'read'>
+  readonly writer: Pick<Writer, 'cache' | 'stream' | 'read' | 'influence'>
   readonly admission: AuthAdmission
   readonly source: ReaderSource
   readonly budget: Budget
@@ -51,6 +56,8 @@ export interface ReaderOptions {
   readonly alert?: (path: Path, error: unknown) => void
   readonly projector?: ReturnType<typeof createProjector>
   readonly scope?: { check(): void; hold(lease: CacheRead): void }
+  /** Check the owning lifetime without retaining images across ordered spans. */
+  readonly check?: () => void
   /** Views install influence routes synchronously, before the source access they describe. */
   readonly observeDependency?: (input: ReadDependency) => void
 }
@@ -64,6 +71,11 @@ export interface ReaderLedger {
   bytes: number
   requestBytes: number
   failure?: KernelError
+}
+
+export interface ReaderOperationCost extends OperationReadCost {
+  /** Charge retained structural requests to the same query or action limit. */
+  request(bytes: number): void
 }
 
 export interface ProjectedQueryRow {
@@ -84,7 +96,7 @@ export function createReaderLedger(budget: Budget, limits: Limits): ReaderLedger
 }
 
 /** Charge actual Store probes to the same monotonic action allowance. */
-export function readerOperationCost(ledger: ReaderLedger) {
+export function readerOperationCost(ledger: ReaderLedger): ReaderOperationCost {
   /** Keep refused Store work terminal even when trusted handlers catch it. */
   function refuse(error: unknown): never {
     if (error instanceof KernelError && error.code === 'BUDGET') ledger.failure = error
@@ -106,7 +118,12 @@ export function readerOperationCost(ledger: ReaderLedger) {
     if (ledger.scanned > ledger.budget.nodes || ledger.bytes > ledger.budget.bytes || ledger.work.used > ledger.work.limit)
       refuse(new KernelError('BUDGET', 'Store reads exceeded the action budget'))
   }
-  return { budget, charge, refuse }
+  function request(bytes: number): void {
+    if (ledger.failure !== undefined) throw ledger.failure
+    ledger.requestBytes += bytes
+    if (ledger.requestBytes > ledger.requestLimit) refuse(new KernelError('BUDGET', 'Read request budget exceeded'))
+  }
+  return { budget, charge, refuse, request }
 }
 
 function ruleTypes(node: ChainNode, registry: Registry): readonly string[] {
@@ -150,6 +167,7 @@ export function createReader(options: ReaderOptions) {
   const alert = options.alert ?? ((at: Path, error: unknown) => console.error(at, error));
   const projectCopy = options.projector ?? createProjector({ registry, alert });
   const work = ledger.work;
+  let foreignRead = false;
   const nodes = new Map<Path, string>(),
     absent = new Set<Path>();
   const dependencies = new Map<string, ReadDependency>(),
@@ -158,6 +176,7 @@ export function createReader(options: ReaderOptions) {
 
   function active(): void {
     options.scope?.check();
+    options.check?.();
     admission.assertActive();
     if (ledger.failure !== undefined) throw ledger.failure;
     if (work.used > work.limit || ledger.requestBytes > Math.min(limits.requestBytes, ledger.requestLimit)
@@ -212,7 +231,7 @@ export function createReader(options: ReaderOptions) {
         hasOwner: false,
         alerts: [],
       });
-    const result = computeRights(admission.actor, ordered, registry);
+    const result = computeAdmittedRights(admission.actor, ordered, registry, admission.shard);
     for (const failure of result.alerts) alert(failure.path, failure.error);
     active();
     return result;
@@ -268,7 +287,7 @@ export function createReader(options: ReaderOptions) {
   function remaining(): Budget {
     active();
     if (ledger.scanned >= allowance.nodes) throw new KernelError('BUDGET', 'Read node budget exceeded');
-    return { ...allowance, nodes: allowance.nodes - ledger.scanned, bytes: allowance.bytes - ledger.bytes };
+    return { ...allowance, nodes: allowance.nodes - ledger.scanned, bytes: allowance.bytes - ledger.bytes, exprWork: work.limit - work.used };
   }
   // The caller holds source.domains in an ordered read or commit span.
   async function projectedNode(at: Path): Promise<Node | null> {
@@ -609,7 +628,12 @@ export function createReader(options: ReaderOptions) {
       specs: readonly IncludeSpec[],
       covered: Set<string>,
     ): Promise<void> {
-      await followIncludes(base, specs, load, value => {
+      await followIncludes(base, specs, async at => {
+        const admitted = admittedIncludes.get(stableJson(selector));
+        if (admitted !== undefined && !admitted.has(at))
+          throw new KernelError('CONFLICT', 'Reference changed after target preparation');
+        return load(at);
+      }, value => {
         copies.set(value.visible.$id, value.copy);
         covered.add(value.visible.$id);
       }, active);
@@ -742,11 +766,172 @@ export function createReader(options: ReaderOptions) {
       dependencies: [...dependencies.values()],
     };
   }
+  const preparedSets: ReadSet[] = [];
+  const admittedIncludes = new Map<string, ReadonlySet<Path>>();
+  /** Revalidate projected discovery before its final selection or another target acquisition. */
+  async function validatePrepared(fresh = true): Promise<void> {
+    for (const prepared of preparedSets) {
+      await checkPreconditions(
+        fresh ? prepared : { dependencies: prepared.dependencies, selectors: prepared.selectors },
+        {
+          index: writer.influence,
+          position: writer.stream.cursor().pos,
+          inclusivePosition: true,
+          read: projectedNode,
+          domains: found => source.targets('node' in found ? { node: found.node }
+            : 'children' in found ? { children: found.children } : { subtree: found.history }).map(target => target.store.domain),
+          dependency,
+          project,
+          historyVisible,
+          work,
+          limits
+        }
+      );
+      for (const input of prepared.nodes ?? []) nodes.set(input.path, input.rev);
+      for (const at of prepared.absent ?? []) absent.add(at);
+      for (const input of prepared.selectors ?? []) if (!selectors.includes(input)) selectors.push(input);
+      for (const input of prepared.dependencies ?? []) depend(input);
+    }
+  }
+  /** Use the same ordinary selector identity for metadata reads and lane selections. */
+  function baseSelector(selector: SubSelector): SubSelector {
+    return 'node' in selector ? { node: selector.node, include: selector.include } : selector;
+  }
+  /** Discover includes from canonical projections, acquiring only their admitted targets outside Writer spans. */
+  async function prepare(selector: Selector): Promise<void> {
+    active();
+    await source.prepare?.([selector], admission.signal);
+    if ('history' in selector || !selector.include?.some(spec => 'ref' in spec)) return;
+    assertIncludeDepth(selector.include, limits.includeDepth);
+    const discovery = createReader({ ...options, ledger, scope: undefined, check: active });
+    const base = { ...selector, include: undefined };
+
+    const selected = await writer.read(source.domains, async () => {
+      await validatePrepared(false);
+      const selection = await discovery.selectInSpan(base);
+      const projected: Node[] = [];
+      for (const image of selection.images) if ('node' in image.copy) projected.push(image.copy.node);
+      return projected;
+    });
+    const preparation = preparedSets.length;
+    preparedSets.push(discovery.expect());
+    const admitted = new Set<Path>();
+    admittedIncludes.set(stableJson(baseSelector(selector)), admitted);
+
+    /** Load one included path from its prepared target and record its read set. */
+    async function load(at: Path): Promise<{ readonly visible: Node } | null> {
+      active();
+      await writer.read(source.domains, () => validatePrepared(false));
+      if (!admitted.has(at)) {
+        await source.prepare?.([{ node: at }], admission.signal);
+        admitted.add(at);
+      }
+      return writer.read(source.domains, async () => {
+        await validatePrepared(false);
+        let result: LaneSelection;
+        try { result = await discovery.selectInSpan({ node: at }); }
+        catch (error) {
+          if (!(error instanceof KernelError && error.code === 'NOT_FOUND')) throw error;
+          preparedSets[preparation] = discovery.expect();
+          return null;
+        }
+        preparedSets[preparation] = discovery.expect();
+        const copy = result.images[0]?.copy;
+        return copy !== undefined && 'node' in copy ? { visible: copy.node } : null;
+      });
+    }
+    const references: IncludeSpec[] = [];
+    for (const spec of selector.include) if ('ref' in spec) references.push(spec);
+    for (const node of selected)
+      await followIncludes({ visible: node }, references, load, () => {}, active);
+    // Fixed paths are meaningful even when no base member is visible.
+    for (const spec of selector.include) if ('path' in spec)
+      await followIncludes(undefined, [spec], load, () => {}, active);
+  }
+  /** Keep included projections actor-local while every physical read retains its canonical dependencies. */
+  async function readIncludes(selector: SubSelector): Promise<ReadResult> {
+    assertIncludeDepth(selector.include, limits.includeDepth);
+    const result = await read({ ...selector, include: undefined });
+    const ownership = result.ownership;
+    if (ownership === undefined) throw new KernelError('INVALID', 'Included selection ownership is absent');
+    const copies = new Map(result.copies.map(copy => ['node' in copy ? copy.node.$id : copy.id, copy]));
+    const positions = new Map(result.at.map(position => [position.instance, position]));
+    const fixed = new Set(ownership.fixed);
+    const roots = ownership.roots.map(root => ({ ...root, covered: new Set(root.covered) }));
+    const loaded = new Map<Path, NodeCopy | null>();
+    async function include(at: Path, covered: Set<string>): Promise<{ readonly visible: Node } | null> {
+      let copy = loaded.get(at);
+      if (copy === undefined) {
+        try {
+          const included = await read({ node: at });
+          copy = included.copies[0];
+          if (copy === undefined) throw new KernelError('INVALID', 'Included node projection is absent');
+          for (const position of included.at) {
+            const prior = positions.get(position.instance);
+            if (position.instance !== writer.stream.cursor().pos.instance && prior !== undefined && comparePositions(prior, position) !== 0)
+              throw new KernelError('CONFLICT', 'Included Authority observations changed position');
+            positions.set(position.instance, position);
+          }
+        } catch (error) {
+          if (!(error instanceof KernelError && error.code === 'NOT_FOUND')) throw error;
+          copy = null;
+        }
+        loaded.set(at, copy);
+      }
+      if (copy === null) return null;
+      const id = 'node' in copy ? copy.node.$id : copy.id;
+      copies.set(id, copy);
+      covered.add(id);
+      return 'node' in copy ? { visible: copy.node } : null;
+    }
+    for (const spec of selector.include ?? []) {
+      if ('path' in spec) await followIncludes(undefined, [spec], at => include(at, fixed), () => {}, active);
+    }
+    for (const root of roots) {
+      const copy = copies.get(root.id);
+      if (copy === undefined) throw new KernelError('INVALID', 'Included root projection is absent');
+      if ('node' in copy) for (const spec of selector.include ?? []) {
+        if ('ref' in spec) await followIncludes({ visible: copy.node }, [spec], at => include(at, root.covered), () => {}, active);
+      }
+    }
+    await writer.read(source.domains, async () => {
+      active();
+      await checkPreconditions(expect(), { index: writer.influence, position: writer.stream.cursor().pos,
+        inclusivePosition: true, read: projectedNode, domains: found => source.targets('node' in found ? { node: found.node }
+          : 'children' in found ? { children: found.children } : { subtree: found.history }).map(target => target.store.domain),
+        dependency, project, historyVisible, work, limits });
+      const position = writer.stream.cursor().pos;
+      if (positions.has(position.instance)) positions.set(position.instance, position);
+      active();
+    });
+    return { ...result, copies: [...copies.values()], at: [...positions.values()],
+      ownership: { fixed: [...fixed], roots: roots.map(root => ({ ...root, covered: [...root.covered] })) } };
+  }
+  /** Reject local decisions whose ordinary reads belong to another Authority. */
+  function assertLocal(): void {
+    active();
+    if (foreignRead) throw new KernelError('CROSS_DOMAIN', 'A local mutation depends on another Authority');
+  }
   /** Owns the selector before waiting for the ordered span, then returns its projected snapshot. */
   async function read(selector: Selector): Promise<ReadResult> {
     try {
       const owned = structuredClone(selector);
+      if (source.projectedRead !== undefined) {
+        if (!('history' in owned) && owned.include !== undefined) return await readIncludes(owned);
+        const projected = await source.projectedRead(owned, remaining(), () => {
+          foreignRead = true;
+          readerOperationCost(ledger).request(Buffer.byteLength(serializeKernel(owned)));
+        }, readerOperationCost(ledger));
+        if (projected !== undefined) {
+          active();
+          foreignRead = true;
+          readerOperationCost(ledger).charge(0, Buffer.byteLength(serializeKernel(projected)));
+          return projected;
+        }
+      }
+      await prepare(owned);
       return await writer.read(source.domains, async () => {
+        await validatePrepared();
         if ('history' in owned) return historyInSpan(owned);
         const modules = registry.digest;
         const ordinary = 'node' in owned ? { node: owned.node, include: owned.include } : owned;
@@ -785,7 +970,7 @@ export function createReader(options: ReaderOptions) {
   /** Assert destination authorization without revealing data, retaining its inputs for final OCC. */
   async function requireReadWrite(at: Path): Promise<void> {
     try {
-      await assertReadWrite(at);
+      await assertAuthorization(at, R | W, 'requireReadWrite');
     } catch (error) {
       refuseBudget(error);
     }
@@ -797,10 +982,10 @@ export function createReader(options: ReaderOptions) {
   }
   /** Capture authorization in the executor's ordered metadata span. */
   async function requireAdmin(): Promise<void> {
-    try { await assertReadWrite('/', A, 'requireAdmin'); }
+    try { await assertAuthorization('/', A, 'requireAdmin'); }
     catch (error) { refuseBudget(error); }
   }
-  async function assertReadWrite(at: Path, required = R | W, operation = 'requireReadWrite'): Promise<void> {
+  async function assertAuthorization(at: Path, required: number, operation: 'requireReadWrite' | 'requireAdmin' | 'rightsPrefix'): Promise<ReturnType<typeof computeAdmittedRights>['prefix']> {
     active();
     ledger.requestBytes += Buffer.byteLength(JSON.stringify({ [operation]: at }));
     if (ledger.requestBytes > limits.requestBytes)
@@ -811,6 +996,7 @@ export function createReader(options: ReaderOptions) {
     // Both the target chain and rights capture build every prefix, including absent ancestors.
     chargeAuthorization(prefixWork * 2);
     path(at);
+    await source.prepare?.([{ node: at }], admission.signal);
     return writer.read(source.domains, async () => {
       active();
       await admission.validate(source.auth);
@@ -837,6 +1023,7 @@ export function createReader(options: ReaderOptions) {
       if ((result.bits & required) !== required)
         throw new KernelError('FORBIDDEN', 'Destination requires read and write rights');
       active();
+      return result.prefix;
     });
   }
   /** Bound metadata folding, including rule sorting and prefix comparisons, by the shared action work allowance. */
@@ -1048,9 +1235,12 @@ export function createReader(options: ReaderOptions) {
   }
   return {
     read,
+    prepare,
+    validatePrepared,
     check: active,
     requireReadWrite,
     requireAdmin,
+    rightsPrefix: (at: Path) => assertAuthorization(at, 0, 'rightsPrefix'),
     selectInSpan,
     cursor,
     projectedPage,
@@ -1060,6 +1250,7 @@ export function createReader(options: ReaderOptions) {
     project,
     historyVisible,
     projectedNode,
+    assertLocal,
     journalTarget,
     pin: topology,
     remainingBudget,

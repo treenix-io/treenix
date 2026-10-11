@@ -63,6 +63,7 @@ export function createActionRuntime(options: CommandOptions) {
     parent?: ParentAction,
     options: CommandOptions = initialOptions,
     deliver?: ActionPieceDelivery,
+    requestId?: string,
   ): Promise<Outcome> {
     const admission = createRequestAdmission(options.admission, requestSignal);
     const limits = options.limits();
@@ -110,7 +111,7 @@ export function createActionRuntime(options: CommandOptions) {
               },
             };
       if (identity !== undefined && !parent?.onlyRead) assertMutationKey(opId);
-      const foreign = await options.actAuthority?.({ request, admission, cost: readerOperationCost(ledger), identity,
+      const foreign = await options.actAuthority?.({ request, requestId, admission, cost: readerOperationCost(ledger), identity,
         onlyRead: parent?.onlyRead ?? false, wait: control.wait, signal: control.signal, deliver });
       if (foreign !== undefined) return foreign;
       if (identity !== undefined && !parent?.onlyRead) {
@@ -355,6 +356,7 @@ export function createActionRuntime(options: CommandOptions) {
                 },
                 executorOptions,
                 deliver,
+                requestId,
               ),
             );
             frameActive();
@@ -411,6 +413,8 @@ export function createActionRuntime(options: CommandOptions) {
               });
               return { value };
             }
+            reads.assertLocal();
+            callerReads.assertLocal();
             await executorOptions.prepareSource(
               budget,
               changeSelectors(changes),
@@ -497,6 +501,7 @@ export function createActionRuntime(options: CommandOptions) {
                   executor: executorAdmission.actor.principal,
                   caller: admission.actor.principal,
                   actor: executorAdmission.actor,
+                  shard: executorAdmission.shard,
                   expect: {
                     ...reads.expect(),
                     dependencies: [...(reads.expect().dependencies ?? []), ...ownerDependencies],
@@ -758,5 +763,5 @@ export function createActionRuntime(options: CommandOptions) {
     }
   }
 
-  return { act: (input: ActRequest, requestSignal?: AbortSignal, deliver?: ActionPieceDelivery) => run(input, requestSignal, undefined, initialOptions, deliver) }
+  return { act: (input: ActRequest, requestSignal?: AbortSignal, deliver?: ActionPieceDelivery, requestId?: string) => run(input, requestSignal, undefined, initialOptions, deliver, requestId) }
 }

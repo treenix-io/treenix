@@ -1,3 +1,4 @@
+import type { ShardRights } from '#kernel/auth-factory'
 import { isChildPath } from '#core/path'
 import { KernelError } from '#errors'
 import { A, R, W, type AclEntry, type Actor, type Bits, type Path, type Principal, type Registry,
@@ -86,4 +87,11 @@ export function computeRights(actor: Actor, chain: readonly ChainNode[], registr
     aboveA ||= (bits & A) !== 0
   }
   return { bits, prefix: { granted, denied, owner, aboveA, admin }, alerts }
+}
+
+/** Continue the origin fold only through the receiving shard's bound logical range. */
+export function computeAdmittedRights(actor: Actor, chain: readonly ChainNode[], registry: Registry, shard?: ShardRights): RightsResult {
+  if (shard === undefined) return computeRights(actor, chain, registry)
+  const local = chain.filter(node => node.path === shard.path || isChildPath(shard.path, node.path, false))
+  return computeRights(actor, local, registry, shard.prefix)
 }

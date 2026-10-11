@@ -5,12 +5,14 @@ import { guardAction, type ActionProvenance } from '#kernel/action-guard'
 import { guardCapabilities, type CapabilityState } from '#kernel/capability'
 import { decodeChainNode } from '#kernel/chain-index'
 import type { NodeChange } from '#kernel/changeset'
-import { computeRights, type ChainNode, type RightsAlert, type RightsResult } from '#kernel/rights'
+import type { ShardRights } from '#kernel/auth-factory'
+import { computeAdmittedRights, computeRights, type ChainNode, type RightsAlert, type RightsResult } from '#kernel/rights'
 import { assertNodeSchema } from '#kernel/schema'
 import { A, W, type Actor, type JournalEntry, type Preconditions, type Registry, type StoredNode } from '#kernel/types'
 
 export type GuardExecutor = Actor | 'kernel' | `external:${string}`
 export interface GuardOptions {
+  readonly shard?: ShardRights
   readonly registry: Registry
   readonly executor: GuardExecutor
   readonly readBefore: (path: string) => Promise<StoredNode | null>
@@ -20,7 +22,7 @@ export interface GuardOptions {
   readonly action?: ActionProvenance
 }
 
-export function createGuard({ registry, executor, readBefore, capabilities, expect, action, alert = value => console.error(value.error) }: GuardOptions) {
+export function createGuard({ registry, executor, shard, readBefore, capabilities, expect, action, alert = value => console.error(value.error) }: GuardOptions) {
   const permissions = new Map<string, Promise<RightsResult>>()
   const actor = typeof executor === 'string' ? undefined : executor
   async function rights(path: string): Promise<RightsResult> {
@@ -34,7 +36,7 @@ export function createGuard({ registry, executor, readBefore, capabilities, expe
         if (node !== null) chain.push(decodeChainNode(node))
       }
       if (chain.at(-1)?.path !== path) chain.push({ path, id: '', types: [], acl: [], hasAcl: false, hasOwner: false, alerts: [] })
-      const result = computeRights(actor, chain, registry)
+      const result = computeAdmittedRights(actor, chain, registry, shard)
       for (const failure of result.alerts) alert(failure)
       return result
     })()

@@ -8,12 +8,18 @@ import type { CapabilityState } from '#kernel/capability'
 import { changeSelectors, selectChangeStore, prepareChangeSet, type PreparedChangeSet } from '#kernel/changeset'
 import { judgeGates } from '#kernel/gates'
 import type { createProjector } from '#kernel/projection'
-import { createReader, createReaderLedger, readerOperationCost, type ReaderLedger, type ReaderSource } from '#kernel/reader'
+import { createReader, createReaderLedger, readerOperationCost, type ReaderLedger, type ReaderSource, type ReaderOperationCost } from '#kernel/reader'
 import { createRequestAdmission, serializeRequest } from '#kernel/request'
 import type { AuthReadSource } from '#kernel/session'
-import type { ActionPieceDelivery, ActRequest, BlobStore, Budget, CommitRequest, Gate, ActionIoBinding, Limits, NodeId, Outcome, Path, ReadResult, Registry, Rev, Selector, SubSelector, Store, StoredNode } from '#kernel/types'
+import type { ActionPieceDelivery, ActRequest, BlobStore, Budget, CommitRequest, Gate, ActionIoBinding, Limits, NodeId, Outcome, Path, ReadResult, ReadQueryCost, Registry, Rev, Selector, SubSelector, Store, StoredNode } from '#kernel/types'
 import type { Writer } from '#kernel/writer'
 import { freeze } from '#util/freeze'
+
+/** Supplies an enclosing allowance and receives actual work from the same native Reader. */
+export interface ReadAccounting {
+  readonly budget: Budget
+  readonly spent: (cost: ReadQueryCost) => void
+}
 
 export interface NodeActionTarget {
   readonly path: Path
@@ -32,9 +38,10 @@ export interface NodeActionBinding {
 }
 
 export interface ForeignActionInput {
+  readonly requestId?: string
   readonly request: ActRequest
   readonly admission: AuthAdmission
-  readonly cost: OperationReadCost
+  readonly cost: ReaderOperationCost
   readonly identity?: MutationIdentity
   readonly onlyRead: boolean
   readonly wait: MutationWaiter
@@ -43,9 +50,10 @@ export interface ForeignActionInput {
 }
 
 export interface ForeignCommitInput {
+  readonly requestId?: string
   readonly request: CommitRequest
   readonly admission: AuthAdmission
-  readonly cost: OperationReadCost
+  readonly cost: ReaderOperationCost
   readonly identity: MutationIdentity
   readonly wait: MutationWaiter
   readonly signal: AbortSignal
@@ -56,7 +64,7 @@ export interface CommandOptions {
   readonly registry: Registry
   readonly registryRevision: () => number
   readonly admission: AuthAdmission
-  readonly source: (budget: Budget, ledger?: ReaderLedger) => ReaderSource
+  readonly source: (budget: Budget, ledger?: ReaderLedger, selectors?: readonly Selector[]) => ReaderSource
   /** Opens required targets before any Writer read or prepare span is held. */
   readonly prepareSource: (budget: Budget, selectors: readonly Selector[], signal: AbortSignal) => Promise<void>
   readonly boundary: (path: string) => boolean
@@ -65,7 +73,7 @@ export interface CommandOptions {
   readonly readView?: (selector: SubSelector, request: AuthAdmission, budget: Budget) => Promise<ReadResult | undefined>
   /** Identifies foreign blob owners without reading their projected payloads. */
   readonly authority?: (path: Path) => boolean
-  readonly readAuthority?: (selector: Selector, request: AuthAdmission, budget: Budget) => Promise<ReadResult | undefined>
+  readonly readAuthority?: (selector: Selector, request: AuthAdmission, budget: Budget, cost?: ReaderOperationCost) => Promise<ReadResult | undefined>
   readonly commitAuthority?: (input: ForeignCommitInput) => Promise<Outcome | undefined>
   readonly actAuthority?: (input: ForeignActionInput) => Promise<Outcome | undefined>
   readonly capabilities: (budget: Budget, ledger?: ReaderLedger) => CapabilityState
@@ -88,13 +96,14 @@ export function createCommands(options: CommandOptions) {
   const gates = Object.freeze([...options.gates])
   const actions = createActionRuntime(options)
   /** Creates a Reader with this request's admission and selected source. */
-  function reader(budget: Budget, source: ReaderSource, request: AuthAdmission) {
+  function reader(budget: Budget, source: ReaderSource, request: AuthAdmission, ledger?: ReaderLedger) {
     return createReader({
       admission: request,
       writer,
       registry,
       source,
       budget,
+      ledger,
       limits: options.limits(),
       projector: options.projector,
     });
@@ -108,9 +117,14 @@ export function createCommands(options: CommandOptions) {
     signal: admission.signal,
     act: actions.act,
     /** Prepare the selector’s targets before taking its ordered read span. */
-    async read(selector: Selector, requestSignal?: AbortSignal) {
+    async read(selector: Selector, requestSignal?: AbortSignal, accounting?: ReadAccounting) {
       const request = createRequestAdmission(admission, requestSignal)
-      const budget = options.budget()
+      const own = options.budget(), parent = accounting?.budget
+      const budget = parent === undefined ? own : { nodes: Math.min(own.nodes, parent.nodes),
+        bytes: Math.min(own.bytes, parent.bytes), exprWork: Math.min(own.exprWork, parent.exprWork),
+        deadline: Math.min(own.deadline, parent.deadline) }
+      const ledger = createReaderLedger(budget, options.limits())
+      try {
       active(budget, request)
       if (Buffer.byteLength(JSON.stringify(selector)) > options.limits().requestBytes) throw new KernelError('BUDGET', 'Read request budget exceeded')
       const owned = freeze(structuredClone(selector))
@@ -119,21 +133,28 @@ export function createCommands(options: CommandOptions) {
       active(budget, request)
       await options.prepareSource(budget, [owned], request.signal)
       active(budget, request)
-      const foreign = await options.readAuthority?.(owned, request, budget)
-      if (foreign !== undefined) return foreign
+      if ('history' in owned || owned.include === undefined) {
+        const foreign = await options.readAuthority?.(owned, request, budget, readerOperationCost(ledger))
+        if (foreign !== undefined) return foreign
+      }
       if (!('history' in owned)) {
         const view = await options.readView?.(owned, request, budget)
         if (view !== undefined) return view
       }
       const resolved = options.resolveSelector?.(owned) ?? owned
       await options.prepareSource(budget, [resolved], request.signal)
-      const reads = reader(budget, options.source(budget), request)
       const declaration = 'history' in owned ? undefined : options.viewDefinition?.(owned)
+      const selectors: Selector[] = [resolved]
+      if (declaration !== undefined) selectors.push({ node: declaration })
+      const reads = reader(budget, options.source(budget, ledger, selectors), request, ledger)
       if (declaration !== undefined) await reads.read({ node: declaration })
-      return reads.read(resolved)
+      return await reads.read(resolved)
+      } finally {
+        accounting?.spent({ nodes: ledger.scanned, bytes: ledger.bytes, exprWork: ledger.work.used, requestBytes: ledger.requestBytes })
+      }
     },
     /** Resolve every change to one actual Store before preparing the mutation. */
-    async commit(input: CommitRequest, requestSignal?: AbortSignal): Promise<Outcome> {
+    async commit(input: CommitRequest, requestSignal?: AbortSignal, requestId?: string): Promise<Outcome> {
       const authorization = createRequestAdmission(admission, requestSignal);
       const budget = options.budget(),
         limits = options.limits();
@@ -157,7 +178,7 @@ export function createCommands(options: CommandOptions) {
       if (options.commitAuthority !== undefined) {
         const control = createActionControl(authorization, budget.deadline)
         try {
-          const foreign = await options.commitAuthority({ request, admission: authorization,
+          const foreign = await options.commitAuthority({ request, requestId, admission: authorization,
             identity: { actor: admission.actor, opId, request: { kind: 'commit', changes: request.changes, expect: request.expect } },
             cost: readerOperationCost(createReaderLedger(budget, limits)), wait: control.wait, signal: control.signal })
           if (foreign !== undefined) return foreign
@@ -232,6 +253,7 @@ export function createCommands(options: CommandOptions) {
                 executor: admission.actor.principal,
                 caller: admission.actor.principal,
                 actor: admission.actor,
+                shard: authorization.shard,
                 expect: { ...request.expect, dependencies },
               },
             );

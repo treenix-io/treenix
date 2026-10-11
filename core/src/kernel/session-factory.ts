@@ -2,7 +2,7 @@ import { KernelError } from '#errors'
 import type { AuthAdmission, AuthFactory } from '#kernel/auth-factory'
 import { createNodeLane, type NodeLane, type NodeLaneOptions } from '#kernel/lane'
 import { networkAddress } from '#kernel/session-origin'
-import type { Credential, Limits, Path } from '#kernel/types'
+import type { Credential, Limits, Path, RightsPrefix, ShardEnvelope } from '#kernel/types'
 
 export interface OpenedSession {
   readonly session: NodeLane
@@ -88,6 +88,14 @@ export function createSessionFactory(options: SessionFactoryOptions) {
   }
 
   return {
+    /** Uses the same lane admission, quota and owned lifetime as local sessions. */
+    async openShard(envelope: ShardEnvelope) {
+      const accepted = options.auth.openShard(envelope)
+      try {
+        const opened = await open(() => Promise.resolve(accepted.admission), false, false)
+        return { ...opened, update(prefix: RightsPrefix) { accepted.update(prefix); opened.session.rightsChanged() } }
+      } catch (error) { accepted.admission.close(); throw error }
+    },
     /** Open an authenticated session, issuing a credential when the caller is anonymous. */
     openCredential(
       credential?: Credential,

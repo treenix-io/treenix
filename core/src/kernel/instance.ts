@@ -1,8 +1,12 @@
+import { ancestorPaths } from '#core/path'
 import { createForeignSubscription } from '#kernel/authority/subscription'
 import { runFederationCommit } from '#kernel/authority/commit'
 import { runFederationAction } from '#kernel/authority/action'
 import { createAuthorityNamespace } from '#kernel/authority/namespace'
 import { createFederationOwner } from '#kernel/authority/owner'
+import { createShardOwner } from '#kernel/authority/shard-owner'
+import { createShardRelay } from '#kernel/authority/shard-relay'
+import { runShardCommit, runShardAction } from '#kernel/authority/shard-mutation'
 import { observeCredential } from '#kernel/authority/credential-watch'
 import { ACTION_PUBLICATION_PREFIX, installPublishedAction, publishedAction, actionPublicationPath } from '#kernel/action-publication'
 import { installPublishedView, publishedView, PUBLICATION_PREFIX } from '#kernel/uix-publication'
@@ -41,6 +45,7 @@ import { createView, type ViewRead } from '#kernel/view'
 import { createActionControl } from '#kernel/action-context'
 import { drainSession } from '#kernel/session-delivery'
 import { runStoreQuery } from '#kernel/store/budget'
+import type { ShardConnection, ShardEnvelope } from '#kernel/types'
 import type { AuthReadSource, AuthSource } from '#kernel/session'
 import type { AuthAdmission } from '#kernel/auth-factory'
 import { A, R, W, DEFAULT_LIMITS, type FederationBinding, type ActionIoBinding, type AdminInput, type Budget, type ChangeMember, type Credential, type InstanceConfig, type InstanceId, type Limits, type ModuleManifest, type NodeId,
@@ -51,6 +56,7 @@ import { freeze } from '#util/freeze'
 
 export interface InstanceFoundationConfig {
   readonly federation?: FederationBinding
+  readonly shardPath?: Path
   readonly io?: ActionIoBinding
   readonly id: InstanceId
   readonly root: Store
@@ -100,6 +106,8 @@ export interface InstanceFoundationWithAuth extends InstanceFoundation {
   openSession(credential?: Credential, origin?: string): Promise<NodeLane>
   /** Open a lane authorized for the supplied node path. */
   openNodeSession(path: Path): Promise<NodeLane>
+  /** Trusted deployment transport opens this same-zone receiver with a Writer-owned envelope. */
+  openShard(envelope: ShardEnvelope, signal?: AbortSignal): Promise<ShardConnection>
 }
 export interface AuthInstanceFoundationConfig extends InstanceFoundationConfig { readonly initialCredential: { readonly ttlMs: number } }
 
@@ -169,6 +177,7 @@ async function buildCanonicalInstance(input: InstanceConfig): Promise<InstanceFo
   const config = Object.freeze({
     id: input.id,
     federation: input.federation,
+    shardPath: input.shardPath,
     root: Object.freeze({ ...input.root }),
     rootExternal: input.rootExternal,
     blobs: input.blobs,
@@ -214,6 +223,7 @@ async function buildCanonicalInstance(input: InstanceConfig): Promise<InstanceFo
     domains: config.domains,
     mounts: config.mounts,
     federation: config.federation,
+    shardPath: config.shardPath,
     blobs: config.blobs,
     io: config.io,
     gates: config.gates,
@@ -288,6 +298,7 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
   let mounts: MountTable | undefined
   let sessions: SessionFactory | undefined
   const mountDeliveries = new Set<Promise<void>>()
+  const shardOwners = new Map<string, ReturnType<typeof createShardOwner> & { readonly path: Path }>()
   const authorityOwners = new Map<string, ReturnType<typeof createFederationOwner> & { readonly path: Path; readonly namespace: ReturnType<typeof createAuthorityNamespace> }>()
   const viewOwners = new Map<string, { readonly view: ReturnType<typeof createView>; readonly close: () => void }>()
   let constructing = true
@@ -596,14 +607,14 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
         if (address === undefined || resolveStore(address.path) !== address.store) return null
         return readSource.node(address.path)
       },
-      shard() { check(); return false },
+      shard(path) { check(); return shardAt(path) },
     }
     return readSource
   }
   const source: AuthSource = {
     node: path => source.read(read => read.node(path)),
     nodeById: id => source.read(read => read.nodeById(id)),
-    shard() { available(); return false },
+    shard(path) { available(); return shardAt(path) },
     read(run) {
       let active = true
       const readSource = reader(budget(), () => active)
@@ -636,6 +647,7 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
   }
 
   const auth = config.initialCredential === undefined ? undefined : createAuthFactory({ instance: config.id, registry, source,
+    shardPath: config.shardPath,
     ttlMs: config.initialCredential.ttlMs, events: { subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener) } },
     issuer: { async issue(proof, credential) {
       await writer.commit(config.root, [], async pos => {
@@ -663,7 +675,7 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
       return prepared
     })
   }
-  /** Opens only selector ranges before their Writer barriers; reference includes may address any target. */
+  /** Opens explicit selector ranges before Writer barriers; projected references prepare their own targets. */
   async function prepareSource(allowance: Budget, selectors: readonly Selector[], signal: AbortSignal): Promise<void> {
     available()
     if (mounts === undefined) return
@@ -672,14 +684,8 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
       if ('node' in selector) ranges.push({ node: selector.node })
       else if ('children' in selector) ranges.push({ children: selector.children })
       else ranges.push({ subtree: selector.history })
-      const pending = 'include' in selector ? [...selector.include ?? []] : []
-      for (let include = pending.pop(); include !== undefined; include = pending.pop()) {
+      if ('include' in selector) for (const include of selector.include ?? [])
         if ('path' in include) ranges.push({ node: include.path })
-        else {
-          ranges.push({ subtree: '/' })
-          pending.push(...include.then ?? [])
-        }
-      }
     }
     await mounts.prepareRanges(ranges, allowance, signal)
     const querySources: ScanRange[] = []
@@ -699,7 +705,7 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
   }
   /** Composes accepted target metadata and Store reads under one caller budget. */
   /** Pins source routing and read accounting to the selected operation. */
-  function readerSource(allowance: Budget, ledger?: ReaderLedger): ReaderSource {
+  function readerSource(allowance: Budget, ledger?: ReaderLedger, selectors?: readonly Selector[]): ReaderSource {
     available();
     const rootTarget: ReaderTarget = {
       id: paths.get('/')!,
@@ -725,13 +731,14 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
     function rangeTargets(range: ScanRange): readonly ReaderTarget[] {
       const result = new Map<Store, ReaderTarget>();
       if ('node' in range) {
+        if (mounts?.resolve(range.node)?.target.kind === 'authority') return [];
         const found = resolve(range.node);
         return [found];
       }
       result.set(config.root, rootTarget);
       for (const claim of mounts?.ranges(range) ?? []) {
         const opened = mounts!.target(claim.key, claim.generation);
-        if (opened.kind === 'view') continue;
+        if (opened.kind === 'view' || opened.kind === 'authority') continue;
         const registered = registeredTargets.get(claim.key);
         if (
           claim.state !== 'active' ||
@@ -743,19 +750,67 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
       }
       return [...result.values()];
     }
+    const preparedSelectors: Selector[] = []
+    /** Pin selected ranges, encountered includes, and their authorization ancestors. */
+    function selectedDomains(): readonly string[] {
+      if (selectors === undefined) return addressedDomains()
+      const domains = new Set([config.root.domain])
+      function addDomain(path: Path): void {
+        if (mounts?.resolve(path)?.target.kind === 'authority') return;
+        domains.add(resolve(path).store.domain);
+      }
+      for (const selector of [...selectors, ...preparedSelectors]) {
+        const path = 'node' in selector ? selector.node : 'children' in selector ? selector.children : selector.history
+        for (const ancestor of [...ancestorPaths(path), path]) addDomain(ancestor)
+        const range = 'node' in selector ? { node: selector.node }
+          : 'children' in selector ? { children: selector.children } : { subtree: selector.history }
+        for (const target of rangeTargets(range)) domains.add(target.store.domain)
+        if ('include' in selector) for (const include of selector.include ?? []) {
+          if ('ref' in include) continue
+          for (const ancestor of [...ancestorPaths(include.path), include.path]) addDomain(ancestor)
+        }
+      }
+      return [...domains]
+    }
+
     return {
-      domains: addressedDomains(),
+      get domains() { return selectedDomains() },
+      async prepare(found, signal) {
+        await prepareSource(ledger === undefined ? allowance : readerOperationCost(ledger).budget(), found, signal);
+        preparedSelectors.push(...found);
+      },
       auth: reader(allowance, undefined, ledger),
       resolve,
       targets: rangeTargets,
       topology: (range) => (mounts === undefined ? '[]' : mounts.topology(range)),
     };
   }
+  /** Executor ownership remains local, including a configured shard receiver range. */
+  function shardAt(path: Path): boolean {
+    if (config.shardPath !== undefined && (path === config.shardPath || path.startsWith(`${config.shardPath === '/' ? '' : config.shardPath}/`))) return true
+    const target = mounts?.resolve(path)?.target
+    return target?.kind === 'authority' && target.authority.kind === 'shard'
+  }
+
+  /** Keeps same-zone reads on the accepted shard declaration and actual actor lane. */
+  function shardRoute(path: Path, children = false) {
+    const found = mounts?.resolve(path, children)
+    if (found?.target.kind !== 'authority' || found.target.authority.kind !== 'shard') return undefined
+    const owner = shardOwners.get(found.entry.key)
+    if (owner === undefined) throw new KernelError('UNAVAILABLE', 'Shard owner is unavailable')
+    return { found, owner,
+      active() {
+        available()
+        if (mounts?.resolve(path, children)?.target !== found.target)
+          throw new KernelError('CONFLICT', 'Shard target changed')
+      } }
+  }
+
   /** Keep all foreign operations on the same accepted mount and local rights fold. */
   function federationAt(path: Path, children = false) {
     const found = mounts?.resolve(path, children)
     if (found?.target.kind !== 'authority') return undefined
-    if (found.target.authority.kind !== 'federation') throw new KernelError('UNAVAILABLE', 'Shard routing is unavailable')
+    if (found.target.authority.kind !== 'federation') return undefined
     const owner = authorityOwners.get(found.entry.key)
     if (owner === undefined) throw new KernelError('UNAVAILABLE', 'Federation owner is unavailable')
     const declaration = componentEntries(found.entry.node).find(([name]) => name === found.entry.component)
@@ -777,9 +832,9 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
   }
 
   /** Binds commands to the current registry, source routing, and operation budget. */
-  function commandOptions(admission: AuthAdmission): CommandOptions {
+  function commandOptions(admission: AuthAdmission, relay = createShardRelay()): CommandOptions {
     available();
-    return {
+    const options: CommandOptions = {
       writer,
       registry,
       projector,
@@ -787,10 +842,44 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
       blobs: config.blobs,
       io: config.io,
       admission,
-      source: readerSource,
+      source(allowance, ledger, selectors) {
+        const physical = readerSource(allowance, ledger, selectors);
+        return { ...physical, get domains() { return physical.domains },
+          async projectedRead(selector, budget, observe, cost) {
+            const path = 'node' in selector ? selector.node : 'children' in selector ? selector.children : selector.history;
+            await prepareSource(budget, [{ node: path }], admission.signal);
+            const target = mounts?.resolve(path, 'children' in selector)?.target;
+            if (target?.kind !== 'authority') return undefined;
+            observe();
+            return options.readAuthority?.(selector, admission, budget, cost);
+          } };
+      },
       authority: path => mounts?.resolve(path)?.target.kind === 'authority',
       async commitAuthority(input) {
         await prepareSource(input.cost.budget(), changeSelectors(input.request.changes), input.signal)
+        const shards: (ReturnType<typeof shardRoute>)[] = []
+        for (const change of input.request.changes) {
+          switch (change.op) {
+            case 'put': shards.push(shardRoute(change.node.$path)); break
+            case 'patch': case 'remove': shards.push(shardRoute(change.path)); break
+            case 'move': shards.push(shardRoute(change.from), shardRoute(change.to)); break
+            case 'restore': case 'undo': {
+              const owner = [...shardOwners.values()].find(owner => owner.instance === change.record.pos.instance)
+              shards.push(owner === undefined ? undefined : shardRoute(owner.path, true))
+              break
+            }
+          }
+        }
+        const shard = shards.find(route => route !== undefined)
+        if (shard !== undefined) {
+          if (shards.some(route => route?.found.target !== shard.found.target))
+            throw new KernelError('CROSS_DOMAIN', 'Commit spans different mounted owners')
+          const found = shard.found
+          return runShardCommit({ input, writer, gates: config.gates ?? [],
+            mount: { id: found.entry.node.$id, component: found.entry.component, revision: found.entry.revision },
+            open: () => shard.owner.open(admission), active: shard.active,
+            own: (client, pending) => relay.track(client, pending, input.requestId ?? pending.id) })
+        }
         const routes: (ReturnType<typeof federationAt>)[] = []
         for (const change of input.request.changes) {
           input.cost.charge(0, 0, 1)
@@ -816,6 +905,14 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
       },
       async actAuthority(input) {
         await prepareSource(input.cost.budget(), [{ node: input.request.path }], input.signal)
+        const shard = shardRoute(input.request.path)
+        if (shard !== undefined) {
+          const found = shard.found
+          return runShardAction({ input, writer, gates: config.gates ?? [],
+            mount: { id: found.entry.node.$id, component: found.entry.component, revision: found.entry.revision },
+            open: () => shard.owner.open(admission), active: shard.active,
+            own: (client, pending) => relay.track(client, pending, input.requestId ?? pending.id) })
+        }
         const route = federationAt(input.request.path)
         if (route === undefined) return undefined
         const { found, owner, namespace } = route
@@ -823,8 +920,28 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
           mount: { id: found.entry.node.$id, component: found.entry.component, revision: found.entry.revision },
           open: () => owner.open(admission), authorize: required => { route.authorize(input.admission, required) } })
       },
-      async readAuthority(selector, request, allowance) {
+      async readAuthority(selector, request, allowance, cost) {
         const path = 'node' in selector ? selector.node : 'children' in selector ? selector.children : selector.history
+        const shard = shardRoute(path, 'children' in selector)
+        if (shard !== undefined) {
+          const control = createActionControl(request, allowance.deadline)
+          try {
+            shard.active()
+            const handle = await control.wait(shard.owner.open(admission))
+            await control.wait(handle.check())
+            shard.active()
+            const receipt = await control.wait(handle.connection.readOwned(selector, allowance, control.signal))
+            cost?.charge(receipt.cost.nodes, receipt.cost.bytes, receipt.cost.exprWork)
+            cost?.request(receipt.cost.requestBytes)
+            if ('error' in receipt) throw receipt.error
+            const result = receipt.result
+            await control.wait(handle.check())
+            shard.active()
+            if (result.copies.length > allowance.nodes || Buffer.byteLength(serializeKernel(result)) > allowance.bytes)
+              throw new KernelError('BUDGET', 'Shard read exceeded the operation budget')
+            return result
+          } finally { control.close() }
+        }
         const route = federationAt(path, 'children' in selector)
         if (route === undefined) return undefined
         const { owner, namespace } = route
@@ -908,7 +1025,8 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
         return { ...selector, children: source.children,
           where: selector.where === undefined ? source.where : { $and: [source.where, selector.where] } }
       },
-      withNodeExecutor,
+      withNodeExecutor: (target, allowance, signal, wait, run, ledger) =>
+        withNodeExecutor(target, allowance, signal, wait, run, ledger, relay),
       prepareSource,
       boundary: (path) => mounts?.boundary(path) ?? false,
       capabilities: (allowance, ledger) => {
@@ -932,6 +1050,7 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
           prepared.writes.length === 0 ? config.root : resolveStore(prepared.writes[0].path),
         ),
     };
+    return options;
   }
   /** Holds a genuine node session and pins its own configuration without requiring read grants. */
   async function withNodeExecutor<T>(
@@ -940,7 +1059,8 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
     signal: AbortSignal,
     wait: <V>(pending: Promise<V>) => Promise<V>,
     run: (binding: NodeActionBinding) => Promise<T>,
-    ledger?: ReaderLedger,
+    ledger: ReaderLedger | undefined,
+    relay: ReturnType<typeof createShardRelay>,
   ): Promise<T> {
     if (sessions === undefined)
       throw new KernelError('UNAUTHENTICATED', 'Node execution requires authentication');
@@ -995,7 +1115,7 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
       );
       return await run({
         admission: opened.admission,
-        options: commandOptions(opened.admission),
+        options: commandOptions(opened.admission, relay),
         get settings() {
           return settings;
         },
@@ -1080,10 +1200,27 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
           close() { subscription.close(); view.close() } })
   }
   function nodeLaneOptions(admission: AuthAdmission): NodeLaneOptions {
-    const options = commandOptions(admission);
+    const relay = createShardRelay();
+    const options = commandOptions(admission, relay);
     return {
       admission,
       commands: createCommands(options),
+      shard: relay,
+      async openShard(selector, id, generation) {
+        const allowance = budget()
+        await prepareSource(allowance, [selector], admission.signal)
+        const path = 'node' in selector ? selector.node : selector.children
+        const route = shardRoute(path, 'children' in selector)
+        if (route === undefined) return undefined
+        const control = createActionControl(admission, allowance.deadline)
+        try {
+          route.active()
+          const handle = await control.wait(route.owner.open(admission))
+          await control.wait(handle.check())
+          route.active()
+          return relay.subscribe(handle, id, generation, selector)
+        } finally { control.close() }
+      },
       async openAuthority(selector, changed) {
         const allowance = budget()
         await prepareSource(allowance, [selector], admission.signal)
@@ -1172,7 +1309,38 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
 
       async activate(entry, target, owner) {
         if (target.kind === 'authority') {
-          if (target.authority.kind !== 'federation') throw new KernelError('UNAVAILABLE', 'Shard activation is unavailable')
+          if (target.authority.kind === 'shard') {
+            const accepted = target
+            shardOwners.set(entry.key, Object.assign(createShardOwner({ authority: target.authority,
+              admission: owner.admission, limits: () => limits,
+              observe(listener) {
+                const above = (path: Path) => path === '/' || path === entry.node.$path || entry.node.$path.startsWith(`${path}/`)
+                const stopStream = writer.stream.observe(event => {
+                  if (event.t === 'reset' || event.t === 'commit' && event.record.entries.some(change =>
+                    above(change.path) || change.from !== undefined && above(change.from))) listener()
+                })
+                const receive = (event: AuthEvent) => { if (event.t === 'registry') listener() }
+                listeners.add(receive)
+                const stopTopology = topologyChanged(intersects => {
+                  if (intersects({ node: entry.node.$path })) listener()
+                })
+                return () => { stopStream(); listeners.delete(receive); stopTopology() }
+              },
+              async envelope(admission) {
+                admission.assertActive()
+                if (mounts?.resolve(entry.node.$path, true)?.target !== accepted)
+                  throw new KernelError('CONFLICT', 'Shard declaration changed')
+                const allowance = budget()
+                const query = createReader({ registry, writer, admission, source: readerSource(allowance),
+                  budget: allowance, limits, projector })
+                const prefix = await query.rightsPrefix(entry.node.$path)
+                if (mounts?.resolve(entry.node.$path, true)?.target !== accepted)
+                  throw new KernelError('CONFLICT', 'Shard declaration changed')
+                return { actor: admission.actor, modules: registry.digest, path: entry.node.$path, prefix }
+              } }), { path: entry.node.$path }))
+            mounts!.activated(entry.key, entry.revision, target)
+            return
+          }
           const declaration = componentEntries(entry.node).find(([component]) => component === entry.component)
           if (declaration === undefined || typeof declaration[1].credential !== 'string')
             throw new KernelError('INVALID', 'Federation credential declaration is absent')
@@ -1216,6 +1384,8 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
 
       async retire(entry, target) {
         if (target.kind === 'authority') {
+          await shardOwners.get(entry.key)?.close()
+          shardOwners.delete(entry.key)
           await authorityOwners.get(entry.key)?.close()
           authorityOwners.delete(entry.key)
           await target.close()
@@ -1395,6 +1565,47 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
           openSession: async (credential?: Credential, origin?: string) =>
             (await sessions.openCredential(credential, origin)).session,
           openNodeSession: async (path: Path) => (await sessions.openNode(path)).session,
+          async openShard(envelope: ShardEnvelope, signal?: AbortSignal): Promise<ShardConnection> {
+            signal?.throwIfAborted()
+            const opened = await sessions.openShard(envelope)
+            const close = () => opened.session.close()
+            signal?.addEventListener('abort', close, { once: true })
+            if (signal?.aborted) { close(); signal.throwIfAborted() }
+            /** Cancels only the real request while leaving its accepted native outcome intact. */
+            function ownPending(pending: ReturnType<typeof opened.session.commit>, requestSignal?: AbortSignal) {
+              const cancel = () => opened.session.cancel(pending.id)
+              requestSignal?.addEventListener('abort', cancel, { once: true })
+              if (requestSignal?.aborted) cancel()
+              const release = () => requestSignal?.removeEventListener('abort', cancel)
+              void pending.outcome.then(release, release)
+              return pending
+            }
+            return {
+              instance: config.id,
+              get intake() { opened.admission.assertActive(); return writer.intake.epoch },
+              read: opened.session.read,
+              readOwned: opened.session.readOwned,
+              commit(request, requestSignal) {
+                requestSignal?.throwIfAborted()
+                return ownPending(opened.session.commit(request), requestSignal)
+              },
+              act(request, requestSignal) {
+                requestSignal?.throwIfAborted()
+                return ownPending(opened.session.act(request), requestSignal)
+              },
+              cancel: opened.session.cancel,
+              frames: opened.session.frames,
+              poll: opened.session.poll,
+              observeReady: opened.session.observeReady,
+              update: opened.update,
+              send(request) {
+                opened.admission.assertActive()
+                if (request.t === 'hi') { opened.session.touch(); return }
+                opened.session.accept(request)
+              },
+              async close() { signal?.removeEventListener('abort', close); close() },
+            }
+          },
         }),
     commands: (admission) => createCommands(commandOptions(admission)),
     readerSource,
@@ -1455,6 +1666,9 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
       auth?.close()
       closing = (async () => {
         const errors: unknown[] = []
+        const shardClosures = await Promise.allSettled([...shardOwners.values()].map(owner => owner.close()))
+        shardOwners.clear()
+        for (const result of shardClosures) if (result.status === 'rejected') { console.error(result.reason); errors.push(result.reason) }
         const authorities = await Promise.allSettled([...authorityOwners.values()].map(owner => owner.close()))
         authorityOwners.clear()
         for (const result of authorities) if (result.status === 'rejected') { console.error(result.reason); errors.push(result.reason) }

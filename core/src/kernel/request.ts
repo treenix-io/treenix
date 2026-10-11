@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util'
 import { KernelError } from '#errors'
 import type { AuthAdmission } from '#kernel/auth-factory'
 
@@ -17,12 +18,15 @@ export function serializeRequest(value: unknown): string {
 }
 
 export function createRequestAdmission(admission: AuthAdmission, requestSignal?: AbortSignal): AuthAdmission {
-  if (requestSignal === undefined) return admission
+  if (requestSignal === undefined && admission.shard === undefined) return admission
+  const shard = admission.shard
   const cancellation = requestSignal
-  const signal = AbortSignal.any([admission.signal, cancellation])
+  const signal = cancellation === undefined ? admission.signal : AbortSignal.any([admission.signal, cancellation])
   function assertActive(): void {
     admission.assertActive()
-    if (cancellation.aborted) throw new KernelError('CANCELLED', 'Request ended')
+    if (shard !== undefined && !isDeepStrictEqual(shard, admission.shard))
+      throw new KernelError('CONFLICT', 'Shard prefix changed during the request')
+    if (cancellation?.aborted) throw new KernelError('CANCELLED', 'Request ended')
   }
   return { ...admission, signal, assertActive, async validate(source) {
     assertActive()

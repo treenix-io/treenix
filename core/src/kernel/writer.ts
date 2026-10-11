@@ -353,6 +353,18 @@ async function initializeWriter(options: WriterOptions) {
     await commit(options.root, [...domains], pos => ({ writes: [], transitions: [],
       record: { pos, kind: 'kernel', executor: 'kernel', caller: 'kernel', entries: [], intake: intake.next(pos, force) } }))
   }
+  /** Publishes remote intake under the actual local Writer before a shard mutation can be sent. */
+  async function publishShardIntake(instance: string, epoch: string | undefined): Promise<void> {
+    checkFailure()
+    if (instance === options.instance) throw new KernelError('INVALID', 'Shard intake refers to its origin')
+    await commit(options.root, [...domains], pos => {
+      const shards = { ...intake.state.shards }
+      if (epoch === undefined) delete shards[instance]
+      else shards[instance] = epoch
+      return { writes: [], transitions: [], record: { pos, kind: 'kernel', executor: 'kernel', caller: 'kernel',
+        entries: [], intake: intake.next(pos, false, undefined, false, shards) } }
+    })
+  }
   /** Release the resource exactly once, including concurrent failed-open and retirement paths. */
   function closeTarget(target: OpenedStoreMountTarget): Promise<void> {
     let pending = cleanup.get(target)
@@ -721,7 +733,7 @@ async function initializeWriter(options: WriterOptions) {
     return intake.previous(input, wait)
   }
   return { stream, cache, influence, get position(): Position { return { ...position } },
-    get intake() { return intake.state }, commit, read, mutate, forward, forwardAnchor, replay, refreshIntake, activateTarget, retireTarget, closeTargets }
+    get intake() { return intake.state }, commit, read, mutate, forward, forwardAnchor, replay, refreshIntake, publishShardIntake, activateTarget, retireTarget, closeTargets }
 }
 
 export type Writer = Awaited<ReturnType<typeof createWriter>>

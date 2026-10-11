@@ -1,6 +1,7 @@
+import type { ReadQueryCost, ReadReceipt } from '#kernel/types'
 import { KernelError } from '#errors'
 import type { AuthAdmission } from '#kernel/auth-factory'
-import type { NativeCommands } from '#kernel/commands'
+import type { NativeCommands, ReadAccounting } from '#kernel/commands'
 import type { BlobTransfers } from '#kernel/blobs'
 import type { createInstanceStream } from '#kernel/stream'
 import { comparePositions } from '#kernel/position'
@@ -78,6 +79,12 @@ export interface NodeLaneOptions {
   /** Kernel-owned node sessions can remain idle until their owner or authorization closes them. */
   readonly heartbeat?: boolean
   readonly transfers?: BlobTransfers
+  readonly shard?: {
+    poll(): Promise<NodeLaneFrame | undefined>
+    observe(listener: () => void): () => void
+    close(): void
+  }
+  readonly openShard?: (selector: SubSelector, id: string, generation: number) => Promise<{ close(): void } | undefined>
   readonly openAuthority?: (selector: SubSelector, changed: () => void) => Promise<LaneProjection | undefined>
   readonly openView?: (selector: SubSelector, changed: () => void) => Promise<ViewSubscription | undefined>
 }
@@ -87,7 +94,11 @@ export interface NodeLane extends Session {
   readonly actor: AuthAdmission['actor']
   readonly frames: AsyncIterableIterator<NodeLaneFrame, void, undefined>
   accept(command: NodeLaneCommand): void
-  read(selector: Selector): ReturnType<NativeCommands['read']>
+  rightsChanged(): void
+  poll(): Promise<NodeLaneFrame | undefined>
+  observeReady(listener: () => void): () => void
+  read(selector: Selector, signal?: AbortSignal): ReturnType<NativeCommands['read']>
+  readOwned(selector: Selector, budget: Budget, signal?: AbortSignal): Promise<ReadReceipt>
   sub(selector: NodeSubSelector): string
   unsub(sub: string): void
   commit(request: Parameters<NativeCommands['commit']>[0]): Pending
@@ -112,6 +123,7 @@ type CoverageChange = Extract<LaneChange, { readonly op: 'del' | 'list' }>
 interface Pull {
   readonly resolve: (result: IteratorResult<NodeLaneFrame>) => void
   readonly reject: (error: KernelError) => void
+  readonly empty?: () => void
 }
 const noChunks: AsyncIterable<unknown> = { async *[Symbol.asyncIterator]() {} }
 
@@ -132,6 +144,7 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
   const memberships: CoverageChange[] = [];
   const delivery = createLaneDelivery(options, subscriptions, registered, remove, () => foreignMetadataBytes);
   const pulls: Pull[] = [];
+  const readyListeners = new Set<() => void>();
   const prefix = crypto.randomUUID();
   let sequence = 0;
   let generation = 0;
@@ -177,6 +190,7 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
   /** Ends one subscription and queues releases of its shared coverage. */
   function remove(sub: NodeSubscription, reason?: KernelError): void {
     releaseForeignSub(sub);
+    sub.raw?.close();
     sub.view?.close();
     subscriptions.remove(sub);
     sub.controller.abort(reason ?? new KernelError('CANCELLED', 'Subscription ended'));
@@ -196,8 +210,11 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
     unsubscribeStream();
     unsubscribeRegistry();
     unsubscribeTopology();
+    stopShard();
+    options.shard?.close();
     admission.signal.removeEventListener('abort', revoked);
     for (const sub of subscriptions.entries.values()) {
+      sub.raw?.close();
       sub.view?.close();
       sub.controller.abort(reason);
       subscriptions.remove(sub);
@@ -226,6 +243,8 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
       }
     }
     admission.close(reason);
+    for (const listener of readyListeners) listener();
+    readyListeners.clear();
     for (const pull of pulls.splice(0))
       reason === undefined ? pull.resolve({ done: true, value: undefined }) : pull.reject(reason);
   }
@@ -266,6 +285,13 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
         subscriptions.dirty(sub, false);
         wake();
       };
+      const raw = await options.openShard?.(sub.selector, sub.id, sub.gen);
+      if (raw !== undefined) {
+        if (!registered(sub) || sub.gen !== gen) { raw.close(); return; }
+        sub.raw = raw;
+        wake();
+        return;
+      }
       const view = await options.openAuthority?.(sub.selector, changed) ?? await options.openView?.(sub.selector, changed);
       if (!registered(sub) || sub.gen !== gen) { view?.close(); return; }
       sub.view = view;
@@ -452,7 +478,7 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
         } else wake();
       },
     );
-    return { id: requestId, chunks: mutation.chunks?.chunks ?? noChunks, outcome };
+  return { id: requestId, chunks: mutation.chunks?.chunks ?? noChunks, outcome };
   }
   /** Cancels unfinished work without discarding an accepted mutation outcome. */
   function cancel(requestId: string): void {
@@ -472,6 +498,8 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
       releaseForeignSub(sub);
       sub.gen = ++generation;
       sub.initial = true;
+      sub.raw?.close();
+      sub.raw = undefined;
       sub.view?.invalidate();
       sub.view?.close();
       sub.view = undefined;
@@ -644,12 +672,34 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
         return { t: 'fail', req: requestId, error: error(caught) };
       }
     }
+    const shard = await options.shard?.poll();
+    if (shard !== undefined) {
+      if (shard.t === 'snap' || shard.t === 'result' || shard.t === 'reset') {
+        const sub = subscriptions.entries.get(shard.sub);
+        if (sub === undefined || sub.raw === undefined)
+          throw new KernelError('INVALID', 'Shard frame names an unbound subscription');
+        if (shard.gen < sub.gen) throw new KernelError('INVALID', 'Shard generation moved backwards');
+        sub.gen = shard.gen;
+        generation = Math.max(generation, shard.gen);
+        if (shard.t !== 'reset') for (const pos of shard.at) ownForeign({ sub: sub.id, gen: sub.gen }, pos);
+      } else if (shard.t === 'end') {
+        const sub = subscriptions.entries.get(shard.sub);
+        if (sub === undefined || sub.raw === undefined)
+          throw new KernelError('INVALID', 'Shard end names an unbound subscription');
+        remove(sub);
+      } else if (shard.t === 'pos' && shard.coverage !== true) {
+        if (shard.producer === undefined) throw new KernelError('INVALID', 'Shard position lacks a producer');
+        ownForeign(shard.producer, shard.pos);
+      }
+      return shard;
+    }
     if (reconnecting && mutations.size === 0) close();
     return undefined;
   }
   /** Drains only waiting pulls and rechecks notifications received during preparation. */
-  function wake(): void {
+  function wake(notify = true): void {
     notification++;
+    if (notify) for (const listener of readyListeners) listener();
     if (draining || closed || pulls.length === 0) return;
     draining = true;
     let observed = notification;
@@ -663,6 +713,8 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
           if (closed) break;
           if (frame === undefined) {
             if (observed !== notification) continue;
+            const pull = pulls[0];
+            if (pull.empty !== undefined) { pulls.shift(); pull.empty(); continue }
             break;
           }
           pulls.shift()!.resolve({ done: false, value: frame });
@@ -673,10 +725,11 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
         close(error(caught));
       } finally {
         draining = false;
-        if (observed !== notification) wake();
+        if (observed !== notification) wake(false);
       }
     })();
   }
+  const stopShard = options.shard?.observe(() => wake()) ?? (() => {});
   const frames: AsyncIterableIterator<NodeLaneFrame, void, undefined> = {
     /** Pulls one frame without retaining a queue of node payloads. */
     next() {
@@ -688,7 +741,7 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
         return Promise.reject(new KernelError('BUDGET', 'Lane pull limit exceeded'));
       return new Promise((resolve, reject) => {
         pulls.push({ resolve, reject });
-        wake();
+        wake(false);
       });
     },
     /** Ends the lane when its consumer stops pulling. */
@@ -745,12 +798,40 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
   admission.signal.addEventListener('abort', revoked, { once: true });
   admission.assertActive();
   if (options.heartbeat !== false) heartbeat();
+    /** Own a direct query slot and cancellation under the accepted lane lifetime. */
+  function directRead(selector: Selector, signal?: AbortSignal, accounting?: ReadAccounting) {
+      signal?.throwIfAborted();
+      touch();
+      reserve(id());
+      const controller = new AbortController();
+      directReads.add(controller);
+      return options.commands
+        .read(selector, signal === undefined ? controller.signal : AbortSignal.any([signal, controller.signal]), accounting)
+        .finally(() => directReads.delete(controller));
+  }
   return {
     actor: admission.actor,
     frames,
     lane: frames,
     close,
     reconnect,
+    rightsChanged() { reset(); wake() },
+    observeReady(listener) {
+      readyListeners.add(listener);
+      return () => readyListeners.delete(listener);
+    },
+    poll() {
+      if (closed) return Promise.reject(failure ?? new KernelError('CANCELLED', 'Lane is closed'));
+      if (pulls.length >= options.limits().laneRequests)
+        return Promise.reject(new KernelError('BUDGET', 'Lane pull limit exceeded'));
+      return new Promise((resolve, reject) => {
+        pulls.push({ resolve(result) {
+          if (result.done) reject(failure ?? new KernelError('CANCELLED', 'Lane is closed'));
+          else resolve(result.value);
+        }, reject, empty() { resolve(undefined) } });
+        wake(false);
+      });
+    },
     touch,
     cancel,
     /** Counts binary uploads in the same unfinished-request quota as commands. */
@@ -777,14 +858,17 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
       try { yield* producer.download(path, field, controller.signal); }
       finally { transfers.delete(controller); }
     },
-    read: (selector) => {
-      touch();
-      reserve(id());
-      const controller = new AbortController();
-      directReads.add(controller);
-      return options.commands
-        .read(selector, controller.signal)
-        .finally(() => directReads.delete(controller));
+    read: directRead,
+    async readOwned(selector, budget, signal) {
+      let cost: ReadQueryCost | undefined;
+      try {
+        const result = await directRead(selector, signal, { budget, spent: value => { cost = value } });
+        if (cost === undefined) throw new KernelError('INVALID', 'Native query cost is absent');
+        return { result, cost };
+      } catch (error) {
+        if (cost === undefined) throw error;
+        return { error, cost };
+      }
     },
     sub: (selector) => {
       touch();
@@ -799,11 +883,13 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
     },
     commit: (request) => {
       touch();
-      return start((signal) => options.commands.commit(request, signal), id());
+      const requestId = id();
+      return start((signal) => options.commands.commit(request, signal, requestId), requestId);
     },
     act: (request) => {
       touch();
-      return start((signal, deliver) => options.commands.act(request, signal, deliver), id(), 'pending');
+      const requestId = id();
+      return start((signal, deliver) => options.commands.act(request, signal, deliver, requestId), requestId, 'pending');
     },
     /** Preserves wire correlation while scheduling an admitted native command. */
     accept(command) {
@@ -815,9 +901,9 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
         const sub = subscriptions.entries.get(command.sub);
         if (sub !== undefined) remove(sub);
       } else if (command.t === 'commit')
-        start((signal) => options.commands.commit(command, signal), command.req);
+        start((signal) => options.commands.commit(command, signal, command.req), command.req);
       else if (command.t === 'act')
-        start((signal, deliver) => options.commands.act(command, signal, deliver), command.req, 'frames');
+        start((signal, deliver) => options.commands.act(command, signal, deliver, command.req), command.req, 'frames');
       else if (command.t === 'cancel') cancel(command.req);
       else {
         reserve(command.req);
