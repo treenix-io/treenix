@@ -1,4 +1,5 @@
 import { createLaneCache, type LaneCache } from '#client/lane-cache'
+export type { LaneMember } from '#client/lane-cache'
 import { KernelError } from '#errors'
 import { comparePositions } from '#kernel/position'
 import { isReadResult } from '#protocol/twp'
@@ -31,7 +32,7 @@ export function createTwpClient(connection: Connection, options: NativeClientOpt
   cache.attach(options.credential)
   const maxRequests = options.maxRequests ?? 8
   const controller = new AbortController()
-  let sequence = 0, welcome: Extract<Frame, { t: 'welcome' }> | undefined, failure: KernelError | undefined
+  let sequence = 0, subSequence = 0, welcome: Extract<Frame, { t: 'welcome' }> | undefined, failure: KernelError | undefined
   let intake: string | undefined
   let readyResolve: (frame: Extract<Frame, { t: 'welcome' }>) => void = () => {}, readyReject: (error: KernelError) => void = () => {}
   const ready = new Promise<Extract<Frame, { t: 'welcome' }>>((resolve, reject) => { readyResolve = resolve; readyReject = reject })
@@ -39,13 +40,14 @@ export function createTwpClient(connection: Connection, options: NativeClientOpt
     if (failure !== undefined) return
     const error = reason ?? new KernelError('CANCELLED', 'Client closed')
     failure = error
+    // Rejection callbacks may immediately attach the borrowed cache to a replacement transport.
+    cache.detach(options.cache !== undefined)
+    if (options.cache === undefined) cache.clear()
     readyReject(error)
     for (const request of waiting.values()) { request.chunks?.end(error); request.reject(error) }
     for (const sub of watching.values()) sub.reject(error)
     waiting.clear()
     watching.clear()
-    cache.detach(options.cache !== undefined)
-    if (options.cache === undefined) cache.clear()
     controller.abort(error)
     options.close?.()
     if (reason !== undefined) options.onError?.(error)
@@ -72,7 +74,8 @@ export function createTwpClient(connection: Connection, options: NativeClientOpt
   }
 
   /** Creates a correlated request with an optional single-consumer piece stream. */
-  function request(build: (req: string) => Request, pieces = false): Pending {
+  function request(build: (req: string) => Request, pieces = false, signal?: AbortSignal): Pending {
+    signal?.throwIfAborted()
     active()
     if (waiting.size >= maxRequests)
       throw new KernelError('BUDGET', 'Too many unfinished client requests')
@@ -88,9 +91,12 @@ export function createTwpClient(connection: Connection, options: NativeClientOpt
         reject(error)
       }
     })
+    const abort = () => { if (failure === undefined) cancel(id) }
+    signal?.addEventListener('abort', abort, { once: true })
+    const settled = outcome.finally(() => signal?.removeEventListener('abort', abort))
     // A pieces consumer may see the refusal before awaiting the unchanged outcome promise.
-    if (pieces) void outcome.catch(() => {})
-    return { id, outcome, chunks: chunks?.chunks ?? (async function* () {})() }
+    if (pieces) void settled.catch(() => {})
+    return { id, outcome: settled, chunks: chunks?.chunks ?? (async function* () {})() }
   }
   /** Routes incoming frames to their owning request, subscription, or lane cache. */
   async function consume(): Promise<void> {
@@ -111,6 +117,7 @@ export function createTwpClient(connection: Connection, options: NativeClientOpt
           const pending = waiting.get(frame.req)
           if (pending === undefined) throw new KernelError('INVALID', 'Unknown failed request')
           waiting.delete(frame.req)
+          cache.releaseProducer({ req: frame.req })
           pending.chunks?.end(error)
           pending.reject(error)
           continue
@@ -125,6 +132,7 @@ export function createTwpClient(connection: Connection, options: NativeClientOpt
               throw new KernelError('INVALID', 'Mutation completed before its position frame')
           }
           waiting.delete(frame.req)
+          cache.releaseProducer({ req: frame.req })
           pending.chunks?.end()
           pending.resolve({ pos: frame.pos, value: frame.value })
           continue
@@ -142,6 +150,25 @@ export function createTwpClient(connection: Connection, options: NativeClientOpt
               throw error
           }
           continue
+        }
+        if (frame.t === 'pos' && frame.coverage !== true && frame.producer !== undefined) {
+          const producer = frame.producer
+          if ('req' in producer) {
+            if (!waiting.has(producer.req)) throw new KernelError('INVALID', 'Foreign position has no pending request')
+          } else {
+            if (!watching.has(producer.sub)) {
+              const issued = Number(producer.sub.slice(4))
+              if (!/^sub:[1-9][0-9]*$/.test(producer.sub) || !Number.isSafeInteger(issued) || issued > subSequence || frame.changes.length !== 0)
+                throw new KernelError('INVALID', 'Foreign position has no subscription owner')
+              continue
+            }
+            const current = cache.list(producer.sub)
+            if (current === undefined || producer.gen > current.gen) throw new KernelError('INVALID', 'Foreign position generation is unavailable')
+            if (producer.gen < current.gen) {
+              if (frame.changes.length !== 0) throw new KernelError('INVALID', 'Obsolete producer contains data changes')
+              continue
+            }
+          }
         }
         cache.apply(frame)
         if (frame.t === 'pos' && frame.coverage !== true && frame.intake !== undefined) intake = frame.intake
@@ -174,25 +201,25 @@ export function createTwpClient(connection: Connection, options: NativeClientOpt
   }
   void consume()
   return { ready, cache, key, failure: () => failure,
-    read(selector: Selector): Promise<ReadResult> {
-      return request(req => ({ t: 'read', req, selector })).outcome.then(result => {
+    read(selector: Selector, signal?: AbortSignal): Promise<ReadResult> {
+      return request(req => ({ t: 'read', req, selector }), false, signal).outcome.then(result => {
         if (!isReadResult(result.value))
           throw new KernelError('INVALID', 'Malformed wire read result')
         return result.value
       })
     },
-    commit(input: Omit<CommitRequest, 'opId'> & { readonly opId?: OpId }): Pending {
+    commit(input: Omit<CommitRequest, 'opId'> & { readonly opId?: OpId }, signal?: AbortSignal): Pending {
       const opId = input.opId ?? key()
-      return request(req => ({ t: 'commit', req, changes: input.changes, expect: input.expect, opId }))
+      return request(req => ({ t: 'commit', req, changes: input.changes, expect: input.expect, opId }), false, signal)
     },
-    act(input: ActRequest): Pending {
+    act(input: ActRequest, signal?: AbortSignal): Pending {
       const opId = input.opId ?? key()
       return request(req => ({ t: 'act', req, path: input.path, component: input.component, action: input.action,
-        args: input.args, anchor: input.anchor, opId }), true)
+        args: input.args, anchor: input.anchor, pre: input.pre, opId }), true, signal)
     },
     sub(selector: SubSelector, changed: () => void, refused?: (error: KernelError) => void): NodeSubscription {
       active()
-      const id = `sub:${++sequence}`
+      const id = `sub:${++subSequence}`
       const ready = new Promise<void>((resolve, reject) => {
         watching.set(id, { resolve, reject(error) { reject(error); refused?.(error) }, changed })
         try { connection.send({ t: 'sub', sub: id, selector }) }

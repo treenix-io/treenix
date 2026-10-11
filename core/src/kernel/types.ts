@@ -137,6 +137,7 @@ export type NodeCopy =
       readonly path: Path
       readonly error: KernelError
       readonly sort?: { readonly [field: string]: unknown }
+      readonly query?: Readonly<Record<string, unknown>>
       readonly ver: ProjectionVersion
     }
 
@@ -168,12 +169,8 @@ export type IncludeSpec =
   | { readonly path: Path }
   | { readonly ref: string; readonly then?: readonly IncludeSpec[] }
 
-/**
- * Default order of children and components: (`$order`, name). Anything richer is a View; a query in
- * the mount target's own language is a `@read` action of its module, not a selector.
- */
 export type Selector =
-  | { readonly node: Path; readonly include?: readonly IncludeSpec[] }
+  | { readonly node: Path; readonly include?: readonly IncludeSpec[]; readonly action?: ActionQuery }
   /**
    * In a subscription the window becomes a (sort key, path) range at snapshot, up to the key of its last
    * element, which the kernel keeps; the client sorts and slices, and fetches the next page with a cursor.
@@ -184,6 +181,7 @@ export type Selector =
       readonly sort?: Sort
       readonly window?: Window
       readonly include?: readonly IncludeSpec[]
+      readonly queryFields?: readonly string[]
     }
   /** Journal records touching the path or its descendants; visible only to current A-holders. Read-only: a live history is a View. */
   | { readonly history: Path; readonly after?: Position; readonly window?: Window }
@@ -213,11 +211,15 @@ export interface Row {
 }
 
 export interface ReadResult {
+  readonly ownership?: LaneOwnership
+  readonly action?: ActionDescriptor
+  readonly viewOwner?: ViewOwner
   /** Members; the client orders them by the sort key. */
   readonly list: readonly NodeId[]
   /** Members and included nodes. */
   readonly copies: readonly NodeCopy[]
   /** Nodes of a View computed by a node executor, outside the lane. */
+  readonly viewErrors?: readonly ErrorCopy[]
   readonly computed?: readonly ComputedNode[]
   readonly rows?: readonly Row[]
   readonly history?: readonly HistoryEntry[]
@@ -373,7 +375,6 @@ export interface Delta {
 /** Members entering and leaving; the client keeps the order by the sort key itself. */
 export type ListDiff = readonly ({ readonly add: NodeId } | { readonly remove: NodeId })[]
 
-/** One copy of a node per lane, shared by all its subscriptions. */
 export type LaneChange =
   | { readonly op: 'put'; readonly copy: NodeCopy }
   /**
@@ -392,7 +393,7 @@ export type LaneChange =
   | { readonly op: 'del'; readonly id: NodeId }
   /** Membership of one subscription changed; membership never touches the node copies. */
   | { readonly op: 'list'; readonly sub: SubId; readonly gen: Generation; readonly diff: ListDiff;
-      readonly covered?: readonly NodeId[]; readonly next?: Cursor }
+      readonly covered?: readonly NodeId[]; readonly next?: Cursor; readonly ownership?: LaneOwnership }
 
 export type Frame =
   | {
@@ -406,32 +407,40 @@ export type Frame =
   /** First result of a generation. */
   | {
       readonly t: 'snap'
+      readonly viewOwner?: ViewOwner
       readonly sub: SubId
       readonly gen: Generation
       readonly list: readonly NodeId[]
       readonly covered?: readonly NodeId[]
+      readonly ownership?: LaneOwnership
       readonly copies: readonly NodeCopy[]
-      readonly computed?: readonly ComputedNode[]
+      readonly viewErrors?: readonly ErrorCopy[]
+  readonly computed?: readonly ComputedNode[]
       readonly rows?: readonly Row[]
       readonly at: readonly Position[]
+      readonly foreign?: readonly string[]
       readonly next?: Cursor
     }
   /** Every record of one position in one frame; a lagging client gets one merged frame up to `pos`. */
-  | { readonly t: 'pos'; readonly pos: Position; readonly changes: readonly LaneChange[]; readonly coverage?: false; readonly intake?: string }
+  | { readonly t: 'pos'; readonly pos: Position; readonly changes: readonly LaneChange[]; readonly coverage?: false; readonly intake?: string; readonly producer?: LaneProducer }
   /** Releasing coverage is not a Store write: repeat the delivered watermark without advancing mutation completion. */
   | { readonly t: 'pos'; readonly pos: Position; readonly coverage: true;
       readonly changes: readonly Extract<LaneChange, { readonly op: 'del' | 'list' }>[] }
   /** A View run as a difference; `rows`, when present, replace all rows of the subscription. */
   | {
       readonly t: 'result'
+      readonly viewOwner?: ViewOwner
       readonly sub: SubId
       readonly gen: Generation
       readonly diff: ListDiff
       readonly covered?: readonly NodeId[]
+      readonly ownership?: LaneOwnership
       readonly copies: readonly NodeCopy[]
-      readonly computed?: readonly ComputedNode[]
+      readonly viewErrors?: readonly ErrorCopy[]
+  readonly computed?: readonly ComputedNode[]
       readonly rows?: readonly Row[]
       readonly at: readonly Position[]
+      readonly foreign?: readonly string[]
       readonly next?: Cursor
     }
   /** The subscription's state is void; a new generation's `snap` follows. */
@@ -456,6 +465,7 @@ export interface Reader {
 }
 
 export interface ActRequest {
+  readonly pre?: ActionDescriptor
   readonly path: Path
   readonly component?: ComponentName
   readonly action: ActionName
@@ -1257,3 +1267,44 @@ export interface TestInstance<ActorName extends string = string> {
 }
 
 export type CreateTestInstance = <ActorName extends string>(config: TestInstanceConfig<ActorName>) => Promise<TestInstance<ActorName>>
+
+
+
+export type ErrorCopy = Extract<NodeCopy, { readonly error: KernelError }>
+
+
+/**
+ * Default order of children and components: (`$order`, name). Anything richer is a View; a query in
+ * the mount target's own language is a `@read` action of its module, not a selector.
+ */
+export interface ActionQuery {
+  readonly name: ActionName
+  readonly component?: ComponentName
+}
+
+
+/** Actual remote definition and target observed through the admitted Reader. */
+export interface ActionDescriptor {
+  readonly modules: ModuleDigest
+  readonly type: TypeName
+  readonly kind: ActionDef['kind']
+  readonly id: NodeId
+  readonly rev: Rev
+}
+
+
+/** Exact declaration that owns a View result; membership belongs to its subscription generation. */
+export interface ViewOwner {
+  readonly path: Path
+  readonly component: ComponentName
+}
+
+
+/** One copy of a node per lane, shared by all its subscriptions. */
+export interface LaneOwnership {
+  readonly roots: readonly { readonly id: NodeId; readonly covered: readonly NodeId[]; readonly cursor: Cursor; readonly query?: Readonly<Record<string, unknown>> }[]
+  readonly fixed: readonly NodeId[]
+}
+
+
+export type LaneProducer = { readonly req: RequestId } | { readonly sub: SubId; readonly gen: Generation }

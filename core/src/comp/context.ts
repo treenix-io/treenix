@@ -63,7 +63,9 @@ const neverAborted = new AbortController().signal;
  *  the action body mutates the draft, so the prediction skips cleanly
  *  instead of half-executing (core-anz4.18). deps stays undefined: actions
  *  with `needs` are skipped upstream, dep resolution is server-side. */
-export function predictionCtx(node: NodeData, comp?: object): ExecCtx {
+export function predictionCtx<Node extends { readonly $path: string; readonly $type: string }>(
+  node: Node, comp?: object,
+): Omit<ExecCtx, 'node'> & { node: Node } {
   return {
     node,
     comp,

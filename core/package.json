@@ -275,6 +275,21 @@
       "development": "./src/kernel/blob-store-memory.ts",
       "types": "./dist/kernel/blob-store-memory.d.ts",
       "default": "./dist/kernel/blob-store-memory.js"
+    },
+    "./kernel/update-ops": {
+      "development": "./src/kernel/update-ops.ts",
+      "types": "./src/kernel/update-ops.ts",
+      "default": "./dist/kernel/update-ops.js"
+    },
+    "./kernel/store/scan": {
+      "development": "./src/kernel/store/scan.ts",
+      "types": "./dist/kernel/store/scan.d.ts",
+      "default": "./dist/kernel/store/scan.js"
+    },
+    "./util/chunk-channel": {
+      "development": "./src/util/chunk-channel.ts",
+      "types": "./dist/util/chunk-channel.d.ts",
+      "default": "./dist/util/chunk-channel.js"
     }
   },
   "treenix": {
