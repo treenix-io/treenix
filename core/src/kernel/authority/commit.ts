@@ -57,6 +57,7 @@ export async function runFederationCommit(options: FederationCommitOptions): Pro
         ...(value.ops.$push === undefined ? {} : { $push: payload(value.ops.$push) }),
       } }
       case 'remove': return { ...value, path: namespace.foreignPath(value.path) }
+      case 'adopt':
       case 'move': return { ...value, from: namespace.foreignPath(value.from), to: namespace.foreignPath(value.to) }
       case 'restore': case 'undo': return { ...value, record: { id: namespace.foreignId(value.record.id), pos: namespace.foreignPosition(value.record.pos) } }
     }

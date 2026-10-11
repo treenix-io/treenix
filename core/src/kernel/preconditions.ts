@@ -10,6 +10,35 @@ export type ReadDependency =
 export interface ReadSet extends Preconditions {
   readonly dependencies?: readonly ReadDependency[]
 }
+
+/** Aliased selections retain every actual source proof, including hidden and absent sources. */
+export function combineReadSets(inputs: readonly ReadSet[]): ReadSet {
+  const nodes = new Map<string, string>(), absent = new Set<string>();
+  const dependencies = new Map<string, ReadDependency>();
+  const selectors: NonNullable<ReadSet['selectors']>[number][] = [];
+  for (const input of inputs) {
+    for (const node of input.nodes ?? []) {
+      if (absent.has(node.path) || nodes.has(node.path) && nodes.get(node.path) !== node.rev)
+        throw new KernelError('CONFLICT', 'A source observation changed during the operation');
+      nodes.set(node.path, node.rev);
+    }
+    for (const path of input.absent ?? []) {
+      if (nodes.has(path)) throw new KernelError('CONFLICT', 'A source observation changed during the operation');
+      absent.add(path);
+    }
+    for (const dependency of input.dependencies ?? []) {
+      const key = `${dependency.kind}:${dependency.key}`;
+      const previous = dependencies.get(key);
+      if (previous !== undefined && !isDeepStrictEqual(previous, dependency))
+        throw new KernelError('CONFLICT', 'A source dependency changed during the operation');
+      dependencies.set(key, dependency);
+    }
+    for (const selector of input.selectors ?? [])
+      if (!selectors.includes(selector)) selectors.push(selector);
+  }
+  return { nodes: [...nodes].map(([path, rev]) => ({ path, rev })), absent: [...absent],
+    dependencies: [...dependencies.values()], selectors };
+}
 export interface PreconditionOptions extends InfluenceContext {
   readonly index: InfluenceIndex
   /** Read-only steps include the actual current cursor; reserved writes remain exclusive. */

@@ -268,6 +268,7 @@ export type ChangeMember =
   | { readonly op: 'patch'; readonly path: Path; readonly ops: UpdateOps }
   | { readonly op: 'remove'; readonly path: Path }
   | { readonly op: 'move'; readonly from: Path; readonly to: Path }
+  | { readonly op: 'adopt'; readonly from: Path; readonly to: Path }
   | { readonly op: 'restore'; readonly record: JournalAddress }
   | { readonly op: 'undo'; readonly record: JournalAddress }
 
@@ -617,6 +618,7 @@ export interface ChangeBuilder {
   patch(path: Path, ops: UpdateOps): void
   remove(path: Path): void
   move(from: Path, to: Path): void
+  adopt(from: Path, to: Path): void
   restore(record: JournalAddress): void
   undo(record: JournalAddress): void
 }
@@ -792,7 +794,7 @@ export interface MountPreparation {
 }
 
 /** One declaration yields exactly one target instance. */
-export type MountHandler = ((decl: Node, session: Session, component: ComponentName) => Promise<OpenedMountTarget>) & {
+export type MountHandler = ((decl: Node, session: Session, component: ComponentName) => Promise<OpenedMountTarget | OpenedStoreBinding>) & {
   /** Physical storage may use an accepted before-session until the switch admits its final revision. */
   readonly prepare?: (decl: Node, component: ComponentName, owner?: MountPreparation) => Promise<OpenedStoreMountTarget>
 }
@@ -1348,6 +1350,39 @@ export type MountTarget =
 export type MountStoreResources = Pick<StreamDomain, 'epoch' | 'persistent'> & {
   readonly writerEpoch: number
   readonly decisionHistory: 'fresh' | 'retained' | 'unconfirmed'
+}
+
+export type StoreBindingBody = NodeInput & {
+  readonly $acl?: never
+  readonly $owner?: never
+}
+
+export interface StoreBindingProjection {
+  readonly node: StoreBindingBody | null
+  readonly source: 'lower' | 'upper'
+  readonly baseId: NodeId | null
+}
+
+export interface StoreBindingTransition {
+  readonly path: Path
+  readonly before: Node | null
+  readonly after: StoreBindingBody | null
+}
+
+/** The kernel borrows the upper's actual Store; a module owns only its scoped field mapping. */
+export interface StoreBinding {
+  readonly path: Path
+  readonly lower: Path
+  readonly upper: Path
+  describe(upper: Node): StoreBindingProjection | null
+  select(lower: Node | null, upper: Node | null): StoreBindingProjection | null
+  changes(transitions: readonly StoreBindingTransition[], reader: Reader): Promise<readonly ChangeMember[]>
+}
+
+export interface OpenedStoreBinding {
+  readonly kind: 'store'
+  readonly binding: StoreBinding
+  close(): Promise<void>
 }
 
 /** A handler owns its target's release; a Store supplies its actual continuity and fencing token. */

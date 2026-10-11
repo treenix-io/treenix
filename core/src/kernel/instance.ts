@@ -25,6 +25,7 @@ import { assertAdminPath, assertAuthKey, assertBootstrapState, bootstrap, bootst
 import { createProcessCache, type Image } from '#kernel/cache'
 import { createBlobTransfers } from '#kernel/blobs'
 import { createAcceptedTargets } from '#kernel/instance-targets'
+import { decodeChainNode } from '#kernel/chain-index'
 import { changeSelectors, prepareChangeSet, type ChangeExecutor } from '#kernel/changeset'
 import { type AcceptedTargetReplacement } from '#kernel/instance-targets'
 import { runBackfill } from '#kernel/backfill'
@@ -46,9 +47,11 @@ import { ownMountTarget } from '#kernel/mount-resource'
 import { createMountTable, type MountChange, type MountEntry, type MountRange, type MountStage, type MountTable, type PreparedMountReplacement } from '#kernel/mounts'
 import { transferSubtree as runSubtreeTransfer, type SubtreeTransfer } from '#kernel/transfer'
 import { readTransferProvenance, reopenTransferSource, type ReopenedTransferSource } from '#kernel/transfer-provenance'
+import { createStoreBindingOwner } from '#kernel/store-binding'
+import { createStoreChangeMapping } from '#kernel/store-binding-change'
 import { comparePositions, positionToRev } from '#kernel/position'
-import { createReader, createReaderLedger, readerOperationCost, type ReaderLedger, type ReaderSource, type ReaderTarget } from '#kernel/reader'
-import { computeRights } from '#kernel/rights'
+import { createReader, createReaderLedger, readerOperationCost, type ReaderBindingScope, type ReaderLedger, type ReaderSource, type ReaderTarget } from '#kernel/reader'
+import { computeAdmittedRights, computeRights, type ChainNode } from '#kernel/rights'
 import { createView, type ViewRead } from '#kernel/view'
 import { createActionControl } from '#kernel/action-context'
 import { drainSession } from '#kernel/session-delivery'
@@ -60,6 +63,7 @@ import { A, R, W, DEFAULT_LIMITS, type FederationBinding, type ActionIoBinding, 
 import type { StoreCommitGroup } from '#kernel/types'
 import type { OpenedStoreMountTarget } from '#kernel/types'
 import { assertWriterDomains, createWriter, type Writer } from '#kernel/writer'
+import { combineReadSets } from '#kernel/preconditions'
 import { stableJson } from '#util/stable-json'
 import { freeze } from '#util/freeze'
 interface PreparedTransferRoute {
@@ -372,6 +376,52 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
   const registeredTargets = new Map<string, { readonly store: Store; readonly range: MountRange; readonly target: ReaderTarget }>()
   const backfills = new Map<Store, Promise<void>>()
   let backfillReady = false
+  const storeBindings = new Map<OpenedStoreMountTarget, { readonly entry: MountEntry; readonly source: ReturnType<typeof createStoreBindingOwner>; stop?: () => void }>()
+  function bindingAt(path: Path, children = false) {
+    if (storeBindings.size === 0) return undefined
+    const found = mounts?.resolve(path, children)
+    if (found?.target.kind !== 'store') return undefined
+    const binding = storeBindings.get(found.target)
+    return binding === undefined ? undefined : { ...binding, target: found.target }
+  }
+
+  function bindingTarget(binding: NonNullable<ReturnType<typeof bindingAt>>): ReaderTarget {
+    const root = binding.source.binding.path
+    return { id: binding.entry.revision, store: binding.target.store,
+      chain(path) {
+        const result: ChainNode[] = root === binding.entry.node.$path
+          ? [...targets.chain(root).filter(node => node.path !== root), decodeChainNode(binding.entry.node)]
+          : [...targets.chain(root)]
+        for (const ancestor of ancestorPaths(path)) {
+          if (ancestor !== root && !ancestor.startsWith(`${root === '/' ? '' : root}/`)) continue
+          const upper = binding.source.metadata(ancestor)
+          if (upper === null) continue
+          let future = upper
+          if (future === undefined) {
+            const physical = binding.source.sources(ancestor, root).lower
+            const lower = targets.chain(physical).find(node => node.path === physical)
+            if (lower !== undefined) future = lower.invalid === 'chain'
+              ? { ...lower, path: ancestor, acl: [], hasAcl: false, hasOwner: false, owner: undefined }
+              : { ...lower, path: ancestor, id: binding.source.identity.id(lower.id),
+                acl: [], hasAcl: false, hasOwner: false, owner: undefined }
+          }
+          if (future === undefined) continue
+          if (ancestor === root) {
+            const declaration = result.find(node => node.path === root)
+            if (declaration !== undefined) {
+              result.splice(result.indexOf(declaration), 1, { ...declaration,
+                types: [...new Set([...declaration.types, ...future.types])] })
+              continue
+            }
+          }
+          result.push(future)
+        }
+        return result
+      },
+      children() { return [] },
+    }
+  }
+
   const journalOnlyStores = new Set(config.domains.map(domain => domain.store).filter(store => store !== config.root))
   const owners = new Map<string, TypeOwnership>()
   let identity: BootstrapIdentity | undefined
@@ -739,6 +789,32 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
     const readSource: AuthReadSource = {
       async node(path) {
         check()
+        const binding = bindingAt(path)
+        if (binding !== undefined) {
+          const physical = binding.source.sources(path, binding.source.binding.path)
+          const upper = await readSource.node(physical.upper)
+          let lower = await readSource.node(physical.lower)
+          const selected = binding.source.select({ lower, upper })
+          if (selected?.baseId !== null && selected?.baseId !== undefined && lower?.$id !== selected.baseId) {
+            const address = targets.address(selected.baseId), root = binding.source.binding.lower
+            if (address === undefined || address.path !== root && !address.path.startsWith(`${root === '/' ? '' : root}/`))
+              throw new KernelError('NOT_FOUND', 'Store binding lower identity left its declared range')
+            lower = await readSource.node(address.path)
+          }
+          check()
+          if (bindingAt(path)?.target !== binding.target)
+            throw new KernelError('CONFLICT', 'Store binding declaration changed')
+          const node = binding.source.project(path, { lower, upper })
+          if (node !== null) {
+            const work = Buffer.byteLength(serializeKernel(node))
+            bytes += work
+            exprWork += Math.ceil(work / 8)
+            cost?.charge(0, work, Math.ceil(work / 8))
+            if (bytes > allowance.bytes || exprWork > allowance.exprWork)
+              throw new KernelError('BUDGET', 'Read projection budget exceeded')
+          }
+          return node
+        }
         const store = resolveStore(path)
         const id = targets.target(store).paths.get(path)
         if (id === undefined) return null
@@ -781,9 +857,25 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
       async nodeById(id) {
         check()
         const address = targets.address(id)
-        if (address === undefined || resolveStore(address.path) !== address.store) return null
-        const node = await readSource.node(address.path)
-        return node === null || node.$id !== id ? null : node
+        if (address !== undefined && resolveStore(address.path) === address.store) {
+          const node = await readSource.node(address.path)
+          return node === null || node.$id !== id ? null : node
+        }
+        if (id.startsWith('p:')) {
+          const path = id.slice(2)
+          if (bindingAt(path) === undefined) return null
+          const node = await readSource.node(path)
+          return node?.$id === id ? node : null
+        }
+        for (const [target, binding] of storeBindings) {
+          if (!binding.source.identity.owns(id)) continue
+          const physical = targets.address(binding.source.identity.source(id))
+          const path = binding.source.address(id, physical?.path)
+          if (path === undefined || bindingAt(path)?.target !== target) return null
+          const node = await readSource.node(path)
+          return node?.$id === id ? node : null
+        }
+        return null
       },
       shard(path) { check(); return shardAt(path) },
     }
@@ -868,6 +960,16 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
         if ('path' in include) ranges.push({ node: include.path })
     }
     await mounts.prepareRanges(ranges, allowance, signal)
+    const bindingSources: ScanRange[] = []
+    for (const range of ranges) {
+      const path = 'node' in range ? range.node : 'children' in range ? range.children : range.subtree
+      const binding = bindingAt(path, !('node' in range))
+      if (binding === undefined) continue
+      const physical = binding.source.sources(path, binding.source.binding.path)
+      for (const source of Object.values(physical)) bindingSources.push('node' in range ? { node: source }
+        : 'children' in range ? { children: source } : { subtree: source })
+    }
+    if (bindingSources.length > 0) await mounts.prepareRanges(bindingSources, allowance, signal)
     const querySources: ScanRange[] = []
     for (const selector of selectors) if ('children' in selector) {
       const found = mounts.resolve(selector.children, true)
@@ -899,6 +1001,8 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
       const found = mounts?.resolve(path);
       if (found === undefined) return rootTarget;
       if (found.target.kind === 'view') throw new KernelError('READ_ONLY', 'A View has no writable Store');
+      const binding = bindingAt(path);
+      if (binding !== undefined) return bindingTarget(binding);
       const registered = registeredTargets.get(found.entry.key);
       if (
         registered === undefined ||
@@ -920,6 +1024,8 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
       for (const claim of mounts?.ranges(range) ?? []) {
         const opened = mounts!.target(claim.key, claim.generation);
         if (opened.kind === 'view' || opened.kind === 'authority') continue;
+        const bound = opened.kind === 'store' ? storeBindings.get(opened) : undefined;
+        if (bound !== undefined && opened.kind === 'store') { result.set(opened.store, bindingTarget({ ...bound, target: opened })); continue; }
         const registered = registeredTargets.get(claim.key);
         if (
           claim.state !== 'active' ||
@@ -939,6 +1045,9 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
       function addDomain(path: Path): void {
         if (mounts?.resolve(path)?.target.kind === 'authority') return;
         domains.add(resolve(path).store.domain);
+        const binding = bindingAt(path);
+        if (binding !== undefined) for (const physical of Object.values(binding.source.sources(path, binding.source.binding.path)))
+          domains.add(resolveStore(physical).domain);
       }
       for (const selector of [...selectors, ...preparedSelectors]) {
         const path = 'node' in selector ? selector.node : 'children' in selector ? selector.children : selector.history
@@ -1025,7 +1134,127 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
       admission,
       source(allowance, ledger, selectors) {
         const physical = readerSource(allowance, ledger, selectors);
-        return { ...physical, get domains() { return physical.domains },
+        const spans = new WeakMap<object, Map<OpenedStoreMountTarget, { query: ReturnType<typeof createReader>; coordinates: Map<Path, Path> }>>()
+        function boundReader(binding: NonNullable<ReturnType<typeof bindingAt>>, ownedLedger: ReaderLedger, scope: ReaderBindingScope) {
+          let readers = spans.get(scope.span)
+          if (readers === undefined) { readers = new Map(); spans.set(scope.span, readers) }
+          const existing = readers.get(binding.target)
+          if (existing !== undefined) return existing
+          const coordinates = new Map<Path, Path>()
+          const root = binding.source.binding.path
+          const roots = [binding.source.binding.lower, binding.source.binding.upper].sort((left, right) => right.length - left.length)
+          const query = createReader({ writer, registry, admission, projector, ledger: ownedLedger, scope,
+            budget: allowance, limits, source: readerSource(allowance, ownedLedger),
+            scopePath(path) {
+              const coordinate = coordinates.get(path)
+              if (coordinate !== undefined) return coordinate
+              for (const source of roots) if (path === source || path.startsWith(`${source === '/' ? '' : source}/`))
+                return `${root === '/' ? '' : root}${path.slice(source === '/' ? 0 : source.length)}` || '/'
+              return path
+            } })
+          const selected = { query, coordinates }
+          readers.set(binding.target, selected)
+          return selected
+        }
+        function bindingCurrent(binding: NonNullable<ReturnType<typeof bindingAt>>, path: Path): void {
+          admission.assertActive()
+          if (bindingAt(path)?.target !== binding.target)
+            throw new KernelError('CONFLICT', 'Store binding declaration changed')
+        }
+        const routed: ReaderSource = { ...physical, get domains() { return physical.domains },
+          async mappedNode(path, ownedLedger, scope) {
+            const binding = bindingAt(path)
+            if (binding === undefined) return undefined
+            bindingCurrent(binding, path)
+            const opened = binding
+            const { query, coordinates } = boundReader(binding, ownedLedger, scope)
+            const sources = binding.source.sources(path, binding.source.binding.path)
+            const pins: (() => void)[] = []
+            const relocated: ReturnType<typeof createReader>[] = []
+            function sourceReads() { return combineReadSets([query.expect(), ...relocated.map(reader => reader.expect())]) }
+            async function picked(at: Path) {
+              const point = at === sources.lower || at === sources.upper
+                ? { query, coordinates }
+                : boundReader(opened, ownedLedger, { span: {}, check: scope.check, hold: scope.hold })
+              point.coordinates.set(at, path)
+              if (point.query !== query) relocated.push(point.query)
+              let selection: Awaited<ReturnType<typeof point.query.selectInSpan>>
+              try { selection = await point.query.selectInSpan({ node: at }) }
+              catch (error) {
+                if (!(error instanceof KernelError) || error.code !== 'NOT_FOUND') throw error
+                scope.check()
+                return { node: null, bits: point.query.selectedRights(at) }
+              }
+              scope.check()
+              const image = selection.images[0]
+              if (image === undefined) return { node: null, bits: point.query.selectedRights(at) }
+              if ('error' in image.copy) throw image.copy.error
+              const store = resolveStore(at), raw = writer.cache.getAt(store, at)
+              if (raw === undefined || raw.node === null || raw.node.$id !== image.copy.node.$id)
+                throw new KernelError('INVALID', 'Selected physical source left its accepted cache image')
+              return { node: raw.node, bits: point.query.selectedRights(at), image }
+            }
+            const upper = await picked(sources.upper)
+            let lower = await picked(sources.lower)
+            if ((upper.bits & R) === 0 || (lower.bits & R) === 0)
+              return { node: null, reads: sourceReads() }
+            let selected = binding.source.select({ lower: lower.node, upper: upper.node })
+            if (selected?.baseId !== null && selected?.baseId !== undefined && lower.node?.$id !== selected.baseId) {
+              const address = targets.address(selected.baseId)
+              const root = binding.source.binding.lower
+              if (address === undefined || address.path !== root && !address.path.startsWith(`${root === '/' ? '' : root}/`))
+                throw new KernelError('NOT_FOUND', 'Store binding lower identity is no longer admitted')
+              lower = await picked(address.path)
+              if (lower.node?.$id !== selected.baseId || (lower.bits & R) === 0)
+                return { node: null, reads: sourceReads() }
+              selected = binding.source.select({ lower: lower.node, upper: upper.node })
+            }
+            bindingCurrent(binding, path)
+            const node = binding.source.project(path, { lower: lower.node, upper: upper.node })
+            if (node === null) return { node: null, reads: sourceReads() }
+            const chain = bindingTarget(binding).chain(path)
+            let bits = computeAdmittedRights(admission.actor, chain, registry, admission.shard).bits & upper.bits
+            if ((lower.bits & A) === 0) bits &= ~A
+            const bytes = Buffer.byteLength(serializeKernel(node))
+            readerOperationCost(ownedLedger).charge(0, bytes, Math.ceil(bytes / 8))
+            return { node, bits, bytes, reads: sourceReads(),
+              retain() {
+                scope.check()
+                for (const source of [lower, upper]) if (source.image !== undefined) pins.push(source.image.retain())
+                const owned = pins.splice(0)
+                return () => { for (const release of owned) release() }
+              } }
+          },
+          async mappedChildren(path, ownedLedger, scope) {
+            const binding = bindingAt(path, true)
+            if (binding === undefined) return undefined
+            bindingCurrent(binding, path)
+            const { query } = boundReader(binding, ownedLedger, scope)
+            const sources = binding.source.sources(path, binding.source.binding.path)
+            const paths = new Set<Path>(), sets = []
+            for (const source of [sources.lower, sources.upper]) {
+              const selection = await query.selectInSpan({ children: source })
+              sets.push(selection.reads)
+              for (const image of selection.images) {
+                if ('error' in image.copy) throw image.copy.error
+                const suffix = image.copy.node.$path.slice(source === '/' ? 0 : source.length)
+                paths.add(`${path === '/' ? '' : path}${suffix}` || '/')
+              }
+            }
+            bindingCurrent(binding, path)
+            return { paths: [...paths], reads: combineReadSets(sets) }
+          },
+          mapping(preparation, changes, position, executor) {
+            if (storeBindings.size === 0) return undefined
+            if (ledger === undefined) throw new KernelError('INVALID', 'Store mapping requires the operation ledger')
+            return createStoreChangeMapping({ source: routed, ledger, binding: bindingAt,
+              check() {
+                admission.assertActive()
+                readerOperationCost(ledger).budget()
+              },
+              physical(binding, scope) { return boundReader(binding, ledger, scope).query },
+            }, preparation, changes, position, executor)
+          },
           async projectedRead(selector, budget, observe, cost) {
             const path = 'node' in selector ? selector.node : 'children' in selector ? selector.children : selector.history;
             await prepareSource(budget, [{ node: path }], admission.signal);
@@ -1034,6 +1263,7 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
             observe();
             return options.readAuthority?.(selector, admission, budget, cost);
           } };
+        return routed;
       },
       authority: path => mounts?.resolve(path)?.target.kind === 'authority',
       async commitAuthority(input) {
@@ -1043,7 +1273,8 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
           switch (change.op) {
             case 'put': shards.push(shardRoute(change.node.$path)); break
             case 'patch': case 'remove': shards.push(shardRoute(change.path)); break
-            case 'move': shards.push(shardRoute(change.from), shardRoute(change.to)); break
+            case 'adopt':
+      case 'move': shards.push(shardRoute(change.from), shardRoute(change.to)); break
             case 'restore': case 'undo': {
               const owner = [...shardOwners.values()].find(owner => owner.instance === change.record.pos.instance)
               shards.push(owner === undefined ? undefined : shardRoute(owner.path, true))
@@ -1067,7 +1298,8 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
           switch (change.op) {
             case 'put': routes.push(federationAt(change.node.$path)); break
             case 'patch': case 'remove': routes.push(federationAt(change.path)); break
-            case 'move': routes.push(federationAt(change.from), federationAt(change.to)); break
+            case 'adopt':
+      case 'move': routes.push(federationAt(change.from), federationAt(change.to)); break
             case 'restore': case 'undo': {
               const owner = [...authorityOwners.values()].find(owner => owner.namespace.owns(change.record.pos.instance))
               routes.push(owner === undefined ? undefined : federationAt(owner.path, true))
@@ -1665,6 +1897,15 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
       registry,
       declarationTypes: mountTypes,
       observeCredential: observeStoreCredential,
+      async readDeclaration(node) {
+        const allowance = budget()
+        return writer.read(() => addressedDomains(), async () => {
+          const actual = await reader(allowance).node(node.$path)
+          if (actual === null || actual.$id !== node.$id || positionToRev(actual.$pos) !== node.$rev)
+            throw new KernelError('CONFLICT', 'Mount declaring node changed before opening')
+          return visibleNode(actual, A)
+        })
+      },
       async openSession(node) {
         if (sessions === undefined) throw new KernelError('UNAUTHENTICATED', 'Mount handlers require a node session')
         const opened = await sessions.openNode(node.$path, { heartbeat: false })
@@ -1688,6 +1929,30 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
         return { validate: reservation.validate,
           async open(owner) { return mountSession(await reservation.open(owner, { heartbeat: false })) },
           close: reservation.close }
+      },
+      async bindStore(entry, opened, owner) {
+        const root = opened.binding.path
+        if (entry.range.start(root) !== root)
+          throw new KernelError('INVALID', 'Store binding root differs from its declared mount range')
+        for (const path of [opened.binding.lower, opened.binding.upper]) {
+          if (path === root || path.startsWith(`${root === '/' ? '' : root}/`))
+            throw new KernelError('INVALID', 'Store binding sources recurse into their logical range')
+        }
+        await prepareSource(budget(), [{ node: opened.binding.lower }, { node: opened.binding.upper }], owner.admission.signal)
+        const store = resolveStore(opened.binding.upper)
+        const physical = mounts?.resolve(opened.binding.upper)?.target
+        const domain = config.domains.find(domain => domain.store === store)
+        const resources = physical?.kind === 'store' ? physical.resources : domain === undefined ? undefined
+          : { epoch: domain.epoch, persistent: domain.persistent, writerEpoch: config.writerEpoch, decisionHistory: 'retained' as const }
+        if (resources === undefined) throw new KernelError('UNAVAILABLE', 'Store binding upper owner is unavailable')
+        let target: OpenedStoreMountTarget
+        target = ownMountTarget({ kind: 'store', store, resources, async close() {
+          storeBindings.get(target)?.stop?.()
+          storeBindings.delete(target)
+          await opened.close()
+        } })
+        storeBindings.set(target, { entry, source: createStoreBindingOwner(config.id, entry.node, entry.component, opened.binding) })
+        return target
       },
 
       async activate(entry, target, owner) {
@@ -1761,6 +2026,29 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
           preparedTransferSources.set(target.store, recovered)
           if (recovered.opened !== undefined) writer.retainTarget(recovered.opened)
         }
+        const binding = storeBindings.get(target)
+        if (binding !== undefined) {
+          const rows = await runStoreQuery(budget(), limits.queryMs,
+            allowance => target.store.scan({ range: { subtree: binding.source.binding.upper }, budget: allowance }))
+          for (const node of rows.items) binding.source.accept(node, node.$path)
+          const root = binding.source.binding.upper
+          binding.stop = writer.stream.observe(event => {
+            if (event.t !== 'commit') return
+            const changed = new Set(event.record.entries.flatMap(entry => entry.from === undefined ? [entry.path] : [entry.from, entry.path]))
+            const updates = []
+            for (const path of changed) {
+              if (path !== root && !path.startsWith(`${root === '/' ? '' : root}/`)) continue
+              const image = writer.cache.getAt(target.store, path)
+              const accepted = targets.target(target.store).paths.get(path)
+              if (accepted !== undefined && (image?.node === null || image?.node === undefined || image.node.$id !== accepted))
+                throw new KernelError('INVALID', 'Accepted binding metadata left its canonical cache image')
+              updates.push({ node: image?.node ?? null, path })
+            }
+            binding.source.acceptBatch(updates)
+          })
+          mounts!.activated(entry.key, entry.revision, target)
+          return
+        }
         // Off-route rows must pass accepted identity checks before entering the shared cache.
         const nodes = preparedTargets.get(target.store) ?? targets.prepare(target.store, (await runStoreQuery(budget(), limits.queryMs,
           allowance => target.store.scan({ range: { census: '/' }, budget: allowance }))).items, recovered?.replacement)
@@ -1790,6 +2078,12 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
           viewOwners.get(entry.key)?.close()
           viewOwners.delete(entry.key)
           await target.close?.()
+          return
+        }
+        if (target.kind === 'store' && storeBindings.has(target)) {
+          storeBindings.get(target)!.stop?.()
+          storeBindings.delete(target)
+          await target.close()
           return
         }
         if (target.kind === 'store') {

@@ -5,21 +5,21 @@ import { KernelError } from '#errors'
 import { assertIncludeDepth, assertReadPath as path, followIncludes } from '#kernel/include'
 import type { AuthAdmission } from '#kernel/auth-factory'
 import type { CacheRead } from '#kernel/cache'
-import type { NodeChange } from '#kernel/changeset'
+import type { ChangeExecutor, ChangeSetMapping, ChangeSetOptions, NodeChange } from '#kernel/changeset'
 import { decodeChainNode } from '#kernel/chain-index'
 import type { ExprWork } from '#kernel/eval'
 import { assertSafePredicate, createSiftTest } from '#kernel/expr'
 import { applyFieldDeltas, applyJournalChange } from '#kernel/journal'
 import { selectionOwnership, type LaneBranch, LaneRange, LaneRoot, LaneSelection } from '#kernel/lane-selection'
 import { comparePositions, positionToRev } from '#kernel/position'
-import { checkPreconditions, typeReadVersion, type ReadDependency, type ReadSet } from '#kernel/preconditions'
+import { checkPreconditions, combineReadSets, typeReadVersion, type ReadDependency, type ReadSet } from '#kernel/preconditions'
 import { createProjector, visibleNode } from '#kernel/projection'
 import { computeAdmittedRights, computeRights, type ChainNode } from '#kernel/rights'
 import type { AuthReadSource } from '#kernel/session'
 import { mapNodeForSift } from '#kernel/store/keys'
 import { compareScanKeys, parseScanCursor, scanCursor, scanKey, scanPage, type ScanKey } from '#kernel/store/scan'
-import { A, DEFAULT_LIMITS, R, W, type Budget, type DomainId, type HistoryEntry, type IncludeSpec, type JournalImageTypes, type JournalVisibility, type Limits, type Node, type NodeCopy,
-  type JournalAddress, type JournalCommit, type JournalRange, type Path, type ReadResult, type Registry, type ScanRange,
+import { A, DEFAULT_LIMITS, R, W, type Budget, type ChangeMember, type DomainId, type HistoryEntry, type IncludeSpec, type JournalImageTypes, type JournalVisibility, type Limits, type Node, type NodeCopy,
+  type Position, type JournalAddress, type JournalCommit, type JournalRange, type Path, type ReadResult, type Registry, type ScanRange,
   type Selector, type Sort, type Store, type StoredNode, type SubSelector } from '#kernel/types'
 import { getByPath } from '#kernel/update-ops'
 import type { Writer } from '#kernel/writer'
@@ -40,11 +40,30 @@ export interface ReaderSource {
   prepare?(selectors: readonly Selector[], signal: AbortSignal): Promise<void>
   /** Read actual Authority projections without creating physical Store images. */
   projectedRead?(selector: Selector, budget: Budget, observe: () => void, cost: ReaderOperationCost): Promise<ReadResult | undefined>
+  mappedNode?(path: Path, ledger: ReaderLedger, scope: ReaderBindingScope): Promise<ReaderBindingNode | undefined>
+  mappedChildren?(path: Path, ledger: ReaderLedger, scope: ReaderBindingScope): Promise<ReaderBindingChildren | undefined>
+  mapping?(options: ChangeSetOptions, changes: readonly ChangeMember[], position: Position, executor: ChangeExecutor): ChangeSetMapping | undefined
   resolve(path: Path): ReaderTarget
   /** Canonical, unique Store owners intersecting the logical range. */
   targets(range: ScanRange): readonly ReaderTarget[]
   /** Semantic claim/generation stamp, including empty and unavailable intersections. */
   topology(range: ScanRange): string
+}
+
+export interface ReaderBindingScope {
+  readonly span: object
+  check(): void
+  hold(lease: CacheRead): void
+}
+
+export type ReaderBindingNode =
+  | { readonly node: null; readonly reads: ReadSet }
+  | { readonly node: StoredNode; readonly bits: number; readonly reads: ReadSet;
+      readonly bytes: number; retain(): () => void }
+
+export interface ReaderBindingChildren {
+  readonly paths: readonly Path[]
+  readonly reads: ReadSet
 }
 export interface ReaderOptions {
   readonly registry: Registry
@@ -56,10 +75,11 @@ export interface ReaderOptions {
   readonly limits?: Limits
   readonly alert?: (path: Path, error: unknown) => void
   readonly projector?: ReturnType<typeof createProjector>
-  readonly scope?: { check(): void; hold(lease: CacheRead): void }
+  readonly scope?: { readonly span?: object; check(): void; hold(lease: CacheRead): void }
   /** Check the owning lifetime without retaining images across ordered spans. */
   readonly check?: () => void
   /** Views install influence routes synchronously, before the source access they describe. */
+  readonly scopePath?: (path: Path) => Path
   readonly observeDependency?: (input: ReadDependency) => void
 }
 
@@ -157,6 +177,7 @@ interface Loaded {
   readonly store: Store;
   readonly bits: number;
   readonly sort: Sort;
+  readonly binding?: Extract<ReaderBindingNode, { readonly node: StoredNode }>;
 }
 
 /** Reads canonical projections and records the dependencies used by queries, actions and subscriptions. */
@@ -173,7 +194,21 @@ export function createReader(options: ReaderOptions) {
     absent = new Set<Path>();
   const dependencies = new Map<string, ReadDependency>(),
     selectors: NonNullable<ReadSet['selectors']>[number][] = [];
+  const bindingReads = new Map<Path, ReadSet>();
+
+  function retainReads(input: ReadSet): void {
+    for (const node of input.nodes ?? []) {
+      const previous = nodes.get(node.path);
+      if (previous !== undefined && previous !== node.rev)
+        throw new KernelError('CONFLICT', 'A Store binding source changed during its operation');
+      nodes.set(node.path, node.rev);
+    }
+    for (const path of input.absent ?? []) absent.add(path);
+    for (const selector of input.selectors ?? []) selectors.push(selector);
+    for (const dependency of input.dependencies ?? []) depend(dependency);
+  }
   const scopeLoaded = options.scope === undefined ? undefined : new Map<Path, Loaded | null>();
+  const scopeRights = options.scope === undefined ? undefined : new Map<Path, number>();
   const scopeCurrent = options.scope === undefined ? undefined : new Map<Path, { readonly store: Store; readonly node: StoredNode | null }>();
 
   /** Pin each genuinely fresh external body once, including its actual scanner work. */
@@ -269,7 +304,7 @@ export function createReader(options: ReaderOptions) {
         hasOwner: false,
         alerts: [],
       });
-    const result = computeAdmittedRights(admission.actor, ordered, registry, admission.shard);
+    const result = computeAdmittedRights(admission.actor, ordered, registry, admission.shard, options.scopePath);
     for (const failure of result.alerts) alert(failure.path, failure.error);
     active();
     return result;
@@ -331,6 +366,18 @@ export function createReader(options: ReaderOptions) {
   async function projectedNode(at: Path): Promise<Node | null> {
     active();
     path(at);
+    if (source.mappedNode !== undefined) {
+      const held: CacheRead[] = [];
+      try {
+        const mapped = await source.mappedNode(at, ledger, { span: held, check: active, hold(lease) { held.push(lease) } });
+        if (mapped !== undefined) {
+          retainReads(mapped.reads);
+          if (mapped.node === null) return null;
+          const copy = projectCopy(mapped.node, mapped.bits);
+          return copy === null ? null : 'node' in copy ? copy.node : visibleNode(mapped.node, mapped.bits);
+        }
+      } finally { for (const lease of held) lease.release(); }
+    }
     const found = source.resolve(at),
       chain = found.chain(at),
       bits = rights(at, found, undefined, false).bits;
@@ -567,6 +614,12 @@ export function createReader(options: ReaderOptions) {
     /** Captures dependency addresses for one include branch without retaining node bodies. */
     function branch(covered: readonly string[]): LaneBranch {
       const inputs = new Map<string, ReadDependency>();
+      const sourceSets = [...visited].flatMap(path => {
+        const reads = bindingReads.get(path);
+        return reads === undefined ? [] : [reads];
+      });
+      for (const reads of sourceSets)
+        for (const input of reads.dependencies ?? []) inputs.set(`${input.kind}:${input.key}`, input);
       for (const at of visited)
         for (const key of [
           `target:${at}`,
@@ -578,11 +631,12 @@ export function createReader(options: ReaderOptions) {
       return {
         covered,
         reads: {
-          nodes: [...visited].flatMap((path) => {
+          nodes: [...sourceSets.flatMap(reads => reads.nodes ?? []), ...[...visited].flatMap((path) => {
             const rev = nodes.get(path);
             return rev === undefined ? [] : [{ path, rev }];
-          }),
-          absent: [...visited].filter((at) => absent.has(at)),
+          })],
+          absent: [...sourceSets.flatMap(reads => reads.absent ?? []), ...[...visited].filter((at) => absent.has(at))],
+          selectors: sourceSets.flatMap(reads => reads.selectors ?? []),
           dependencies: [...inputs.values()],
         },
       };
@@ -617,8 +671,29 @@ export function createReader(options: ReaderOptions) {
         byId.set(value.visible.$id, value);
         return value;
       }
+      if (source.mappedNode !== undefined) {
+        const mapped = await source.mappedNode(at, ledger, { span: options.scope?.span ?? held, check: active,
+          hold(lease) { if (options.scope === undefined) held.push(lease); else options.scope.hold(lease); } });
+        if (mapped !== undefined) {
+          retainReads(mapped.reads);
+          bindingReads.set(at, mapped.reads);
+          target(at);
+          if (mapped.node === null || (mapped.bits & R) === 0) {
+            loaded.set(at, null); absent.add(at); return null;
+          }
+          const copy = project(mapped.node, mapped.bits);
+          if (copy === null) { loaded.set(at, null); absent.add(at); return null; }
+          for (const name of decodeChainNode(mapped.node).types)
+            depend({ kind: 'type', key: name, value: typeReadVersion(registry, name) });
+          if (!nodes.has(at)) nodes.set(at, positionToRev(mapped.node.$pos));
+          const value: Loaded = { copy, visible: 'node' in copy ? copy.node : visibleNode(mapped.node, mapped.bits),
+            stored: mapped.node, store: source.resolve(at).store, bits: mapped.bits, sort, binding: mapped };
+          loaded.set(at, value); byId.set(value.visible.$id, value); return value;
+        }
+      }
       const found = target(at), chain = await currentChain(at, found, current, held);
       let bits = rights(at, found, undefined, found.external !== 'trusted', chain).bits;
+      scopeRights?.set(at, bits);
       const expected = chain.find((node) => node.path === at);
       if (expected === undefined || (bits & R) === 0) {
         if (found.external === 'trusted') rights(at, found, undefined, true, chain);
@@ -630,6 +705,7 @@ export function createReader(options: ReaderOptions) {
         const stored = await currentBody(at, found, current, held);
         const fresh = await currentChain(at, found, current, held, true);
         bits = rights(at, found, undefined, true, fresh).bits;
+        scopeRights?.set(at, bits);
         if (stored === null || (bits & R) === 0) {
           loaded.set(at, null); absent.add(at); return null;
         }
@@ -694,7 +770,7 @@ export function createReader(options: ReaderOptions) {
     }
     try {
       const found = target(root);
-      let members: Loaded[], next: string | undefined;
+      let members: Loaded[], next: string | undefined, childrenReads: ReadSet | undefined;
       const scope = selectorScope(selector);
       if ('node' in selector) {
         const value = await load(root);
@@ -708,8 +784,15 @@ export function createReader(options: ReaderOptions) {
           selector.window?.after === undefined
             ? undefined
             : parseScanCursor(selector.window.after, scope, sort.length);
+        const mapped = candidates === undefined ? await source.mappedChildren?.(root, ledger, { span: options.scope?.span ?? held, check: active,
+          hold(lease) { if (options.scope === undefined) held.push(lease); else options.scope.hold(lease); } }) : undefined;
+        if (mapped !== undefined) {
+          retainReads(mapped.reads);
+          bindingReads.set(root, mapped.reads);
+          childrenReads = mapped.reads;
+        }
         const paths =
-          candidates ??
+          candidates ?? mapped?.paths ??
           (function* () {
             for (const child of found.children(root)) yield child.path;
           })();
@@ -746,7 +829,9 @@ export function createReader(options: ReaderOptions) {
         if ('path' in spec) await includes(undefined, [spec], fixed);
         else refs.push(spec);
       }
-      const fixedIncludes = branch([...fixed]),
+      const fixedBranch = branch([...fixed]);
+      const fixedIncludes = childrenReads === undefined ? fixedBranch
+        : { ...fixedBranch, reads: combineReadSets([fixedBranch.reads, childrenReads]) },
         roots: LaneRoot[] = [];
       const selected = new Map(members.map((member) => [member.visible.$path, member]));
       for (const at of candidates ?? members.map((member) => member.visible.$path)) {
@@ -778,6 +863,12 @@ export function createReader(options: ReaderOptions) {
 
       const images = [...copies].map(([id, copy]) => {
         const value = byId.get(id)!;
+        if (value.binding !== undefined) {
+          const image = value.binding;
+          return { copy, visible: value.visible, position: cursor.pos,
+            bytes: Math.max(image.bytes, Buffer.byteLength(serializeKernel(copy))),
+            retain() { active(); return image.retain(); } };
+        }
         const cached = writer.cache.getAt(value.store, value.visible.$path);
         if (cached === undefined)
           throw new KernelError('INVALID', 'Read image left its cache lease');
@@ -966,6 +1057,49 @@ export function createReader(options: ReaderOptions) {
     active();
     if (foreignRead) throw new KernelError('CROSS_DOMAIN', 'A local mutation depends on another Authority');
   }
+  /** Builds the native result under the span already owned by this operation. */
+  async function resultInSpan(owned: Selector): Promise<ReadResult> {
+    if ('history' in owned) return historyInSpan(owned);
+    const modules = registry.digest;
+    const ordinary = 'node' in owned ? { node: owned.node, include: owned.include } : owned;
+    const selection = await selectInSpan(ordinary);
+    let action: ReadResult['action'];
+    if ('node' in owned && owned.action !== undefined) {
+      if (registry.digest !== modules) throw new KernelError('CONFLICT', 'Action registry changed during metadata read');
+      const query = owned.action;
+      const copy = selection.images.find(({ copy }) => 'node' in copy ? copy.node.$path === owned.node : copy.path === owned.node)?.copy;
+      if (copy === undefined) throw new KernelError('NOT_FOUND', 'Action target is absent');
+      if (!('node' in copy)) throw copy.error;
+      const component = componentEntries(copy.node).find(([name]) => name === (query.component ?? ''));
+      if (component === undefined) throw new KernelError('NOT_FOUND', 'Action component is absent');
+      const definition = registry.type(component[1].$type);
+      if (!Object.hasOwn(definition.actions, query.name)) throw new KernelError('NOT_FOUND', 'Action is absent');
+      action = { modules, type: definition.name, kind: definition.actions[query.name].kind,
+        id: copy.node.$id, rev: copy.node.$rev };
+    }
+    const ownership = selectionOwnership(selection, key => cursor(ordinary, key));
+    readerOperationCost(ledger).charge(0, Buffer.byteLength(serializeKernel(ownership)));
+    return {
+      ownership,
+      ...(action === undefined ? {} : { action }),
+      list: selection.roots.flatMap((root) =>
+        root.member === undefined ? [] : [root.member.id],
+      ),
+      copies: selection.images.map((image) => image.copy),
+      at: [writer.stream.cursor().pos],
+      ...(selection.next === undefined ? {} : { next: selection.next }),
+    };
+  }
+
+  /** Module bindings borrow their enclosing Writer span instead of acquiring a nested read span. */
+  async function readInSpan(selector: Selector): Promise<ReadResult> {
+    if (options.scope === undefined) throw new KernelError('INVALID', 'A scoped Reader is required')
+    try {
+      active()
+      return await resultInSpan(structuredClone(selector))
+    } catch (error) { refuseBudget(error) }
+  }
+
   /** Owns the selector before waiting for the ordered span, then returns its projected snapshot. */
   async function read(selector: Selector): Promise<ReadResult> {
     try {
@@ -986,36 +1120,7 @@ export function createReader(options: ReaderOptions) {
       await prepare(owned);
       return await writer.read(source.domains, async () => {
         await validatePrepared();
-        if ('history' in owned) return historyInSpan(owned);
-        const modules = registry.digest;
-        const ordinary = 'node' in owned ? { node: owned.node, include: owned.include } : owned;
-        const selection = await selectInSpan(ordinary);
-        let action: ReadResult['action'];
-        if ('node' in owned && owned.action !== undefined) {
-          if (registry.digest !== modules) throw new KernelError('CONFLICT', 'Action registry changed during metadata read');
-          const query = owned.action;
-          const copy = selection.images.find(({ copy }) => 'node' in copy ? copy.node.$path === owned.node : copy.path === owned.node)?.copy;
-          if (copy === undefined) throw new KernelError('NOT_FOUND', 'Action target is absent');
-          if (!('node' in copy)) throw copy.error;
-          const component = componentEntries(copy.node).find(([name]) => name === (query.component ?? ''));
-          if (component === undefined) throw new KernelError('NOT_FOUND', 'Action component is absent');
-          const definition = registry.type(component[1].$type);
-          if (!Object.hasOwn(definition.actions, query.name)) throw new KernelError('NOT_FOUND', 'Action is absent');
-          action = { modules, type: definition.name, kind: definition.actions[query.name].kind,
-            id: copy.node.$id, rev: copy.node.$rev };
-        }
-        const ownership = selectionOwnership(selection, key => cursor(ordinary, key));
-        readerOperationCost(ledger).charge(0, Buffer.byteLength(serializeKernel(ownership)));
-        return {
-          ownership,
-          ...(action === undefined ? {} : { action }),
-          list: selection.roots.flatMap((root) =>
-            root.member === undefined ? [] : [root.member.id],
-          ),
-          copies: selection.images.map((image) => image.copy),
-          at: [writer.stream.cursor().pos],
-          ...(selection.next === undefined ? {} : { next: selection.next }),
-        };
+        return resultInSpan(owned);
       });
     } catch (error) {
       refuseBudget(error);
@@ -1290,6 +1395,7 @@ export function createReader(options: ReaderOptions) {
   }
   return {
     read,
+    readInSpan,
     prepare,
     validatePrepared,
     check: active,
@@ -1297,6 +1403,13 @@ export function createReader(options: ReaderOptions) {
     requireAdmin,
     rightsPrefix: (at: Path) => assertAuthorization(at, 0, 'rightsPrefix'),
     selectInSpan,
+    selectedRights(at: Path): number {
+      active();
+      const bits = scopeRights?.get(at);
+      if (bits === undefined)
+        throw new KernelError('INVALID', 'Rights require an operation-owned selected image');
+      return bits;
+    },
     cursor,
     projectedPage,
     projectedResult,

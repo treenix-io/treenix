@@ -20,9 +20,11 @@ export interface GuardOptions {
   readonly capabilities?: CapabilityState
   readonly expect?: Preconditions
   readonly action?: ActionProvenance
+  readonly actionChanges?: readonly NodeChange[]
+  readonly scopePath?: (path: string) => string
 }
 
-export function createGuard({ registry, executor, shard, readBefore, capabilities, expect, action, alert = value => console.error(value.error) }: GuardOptions) {
+export function createGuard({ registry, executor, shard, readBefore, capabilities, expect, action, actionChanges, scopePath, alert = value => console.error(value.error) }: GuardOptions) {
   const permissions = new Map<string, Promise<RightsResult>>()
   const actor = typeof executor === 'string' ? undefined : executor
   async function rights(path: string): Promise<RightsResult> {
@@ -36,7 +38,7 @@ export function createGuard({ registry, executor, shard, readBefore, capabilitie
         if (node !== null) chain.push(decodeChainNode(node))
       }
       if (chain.at(-1)?.path !== path) chain.push({ path, id: '', types: [], acl: [], hasAcl: false, hasOwner: false, alerts: [] })
-      const result = computeAdmittedRights(actor, chain, registry, shard)
+      const result = computeAdmittedRights(actor, chain, registry, shard, scopePath)
       for (const failure of result.alerts) alert(failure)
       return result
     })()
@@ -67,7 +69,7 @@ export function createGuard({ registry, executor, shard, readBefore, capabilitie
       const admin = (await rights('/')).prefix.admin
       await guardCapabilities(changes, { registry, state: capabilities, readBefore, expect,
         requireA: path => require(path, A), admin })
-      await guardAction(changes, { registry, source: action, admin, readBefore })
+      await guardAction(changes, { registry, source: action, postChanges: actionChanges, admin, readBefore })
     },
     async put(before: StoredNode | null, after: StoredNode): Promise<StoredNode> {
       if (actor === undefined || before === null || ((await rights(before.$path)).bits & A) !== 0) return after

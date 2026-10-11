@@ -5,7 +5,7 @@ import type { OperationReadCost } from '#kernel/store/budget'
 import { createActionRuntime } from '#kernel/actions'
 import type { AuthAdmission } from '#kernel/auth-factory'
 import type { CapabilityState } from '#kernel/capability'
-import { changeSelectors, selectChangeStore, prepareChangeSet, type PreparedChangeSet } from '#kernel/changeset'
+import { changeSelectors, selectChangeStore, prepareRoutedChangeSet, type PreparedChangeSet } from '#kernel/changeset'
 import { judgeGates } from '#kernel/gates'
 import type { createProjector } from '#kernel/projection'
 import { createReader, createReaderLedger, readerOperationCost, type ReaderLedger, type ReaderSource, type ReaderOperationCost } from '#kernel/reader'
@@ -163,6 +163,7 @@ export function createCommands(options: CommandOptions) {
       const serialized = serializeRequest(owned);
       if (Buffer.byteLength(serialized) > limits.requestBytes)
         throw new KernelError('BUDGET', 'Commit request budget exceeded');
+      const ledger = createReaderLedger(budget, limits);
       const request = freeze(owned),
         opId = request.opId;
       if (
@@ -180,7 +181,7 @@ export function createCommands(options: CommandOptions) {
         try {
           const foreign = await options.commitAuthority({ request, requestId, admission: authorization,
             identity: { actor: admission.actor, opId, request: { kind: 'commit', changes: request.changes, expect: request.expect } },
-            cost: readerOperationCost(createReaderLedger(budget, limits)), wait: control.wait, signal: control.signal })
+            cost: readerOperationCost(ledger), wait: control.wait, signal: control.signal })
           if (foreign !== undefined) return foreign
         } finally { control.close() }
       }
@@ -201,9 +202,9 @@ export function createCommands(options: CommandOptions) {
           active(budget, authorization);
           await options.prepareSource(budget, changeSelectors(request.changes), authorization.signal);
           active(budget, authorization);
-          const source = options.source(budget),
-            capabilities = options.capabilities(budget);
-          const ownership = reader(budget, source, authorization);
+          const source = options.source(budget, ledger, changeSelectors(request.changes)),
+            capabilities = options.capabilities(budget, ledger);
+          const ownership = reader(budget, source, authorization, ledger);
           let selectedStore: Store;
           if (request.changes.some((change) => change.op === 'restore' || change.op === 'undo'))
             selectedStore = await writer.read(source.domains, async () => {
@@ -223,14 +224,16 @@ export function createCommands(options: CommandOptions) {
             active(budget, authorization);
             await authorization.validate(source.auth);
             const revision = options.registryRevision(),
-              reads = reader(remaining, source, authorization);
-            const prepared = await prepareChangeSet(
+              reads = reader(remaining, source, authorization, ledger);
+            const prepared = await prepareRoutedChangeSet(
+              source,
               {
                 store: selectedStore,
                 cache: writer.cache,
                 registry,
                 limits,
                 budget: remaining,
+                readCost: readerOperationCost(ledger),
                 blobs: options.blobs,
                 resolve: (path) => source.resolve(path).store,
                 boundary: options.boundary,

@@ -7,8 +7,8 @@ import type { AcceptedNodeRead } from '#kernel/writer'
 import { componentEntries } from '#kernel/migrate'
 import { ownMountTarget } from '#kernel/mount-resource'
 import type {
-  Budget, Component, ComponentName, MountDecl, MountHandler, Node, NodeId, OpenedMountTarget,
-  NodeMeta, OpenedStoreMountTarget, Path, Registry, Rev, ScanRange, Session, TypeDef, TypeName,
+  Budget, Component, ComponentName, MountDecl, MountHandler, Node, NodeId, OpenedMountTarget, OpenedStoreBinding, OpenedStoreMountTarget,
+  NodeMeta, Path, Registry, Rev, ScanRange, Session, TypeDef, TypeName,
 } from '#kernel/types'
 import { stableJson } from '#util/stable-json'
 
@@ -76,9 +76,11 @@ export interface MountTableOptions {
   readonly registry: Registry
   /** Configured owners publish after bootstrap; their accepted claims must already block parent routing. */
   readonly declarationTypes?: ReadonlySet<TypeName>
+  readonly readDeclaration: (node: Node) => Promise<Node>
   readonly openSession: (node: Node) => Promise<MountSession>
   readonly reserveSession?: (node: Node) => MountSessionReservation
   readonly observeCredential?: (entry: MountEntry, target: OpenedStoreMountTarget) => void
+  readonly bindStore?: (entry: MountEntry, binding: OpenedStoreBinding, owner: MountSession) => Promise<OpenedStoreMountTarget>
   readonly activate: (entry: MountEntry, target: OpenedMountTarget, owner: MountSession) => Promise<void>
   /** Ordered Writer retirement owns release of a registered target. */
   readonly retire: (entry: MountEntry, target: OpenedMountTarget) => Promise<void>
@@ -400,6 +402,19 @@ export function createMountTable(options: MountTableOptions) {
   }
 
   /** Open and activate once; independent callers share this Promise and owner Session. */
+  /** Retain the same declaring Session when the kernel binds a module-owned Store mapping. */
+  async function ownOpened(entry: Entry, opened: OpenedMountTarget | OpenedStoreBinding,
+    session: MountSession): Promise<OpenedMountTarget> {
+    if (opened.kind !== 'store' || !('binding' in opened)) return ownMountTarget(opened)
+    try {
+      if (options.bindStore === undefined) throw new KernelError('INVALID', 'Store binding requires a kernel owner')
+      return ownMountTarget(await options.bindStore(entry, opened, session))
+    } catch (error) {
+      await opened.close()
+      throw error
+    }
+  }
+
   function open(entry: Entry): Promise<void> {
     if (openingContext.getStore()?.includes(entry.key)) {
       return Promise.reject(new KernelError('UNAVAILABLE', 'A mount cannot read its own unopened target'))
@@ -418,7 +433,12 @@ export function createMountTable(options: MountTableOptions) {
         if (entry.session.session.actor.principal !== `n:${entry.node.$id}`) {
           throw new KernelError('INVALID', 'Mount handler requires its declaring node session')
         }
-        entry.target = ownMountTarget(await handler(entry.node, entry.session.session, entry.component))
+        const declaration = await options.readDeclaration(entry.node)
+        validate(entry.key, entry.revision)
+        if (declaration.$id !== entry.node.$id || declaration.$rev !== entry.node.$rev)
+          throw new KernelError('CONFLICT', 'Mount declaration identity or revision changed')
+        const opened = await handler(declaration, entry.session.session, entry.component)
+        entry.target = await ownOpened(entry, opened, entry.session)
         validate(entry.key, entry.revision)
         if (entry.target.kind === 'store' && entry.declaration.external === 'trusted'
           && (entry.target.store.external === undefined || entry.target.store.readExternal === undefined)) {
@@ -593,7 +613,7 @@ export function createMountTable(options: MountTableOptions) {
           draft.session = await options.openSession(draft.node)
           if (draft.session.session.actor.principal !== `n:${draft.node.$id}`)
             throw new KernelError('INVALID', 'Mount handler requires its declaring node session')
-          draft.target = ownMountTarget(await draft.handler(draft.node, draft.session.session, draft.component))
+          draft.target = await ownOpened(draft, await draft.handler(draft.node, draft.session.session, draft.component), draft.session)
         }
         checkDraft()
         if (draft.target.kind !== 'store') throw new KernelError('INVALID', 'Subtree transfer requires a Store target')

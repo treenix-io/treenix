@@ -29,6 +29,7 @@ const context: WriteActionContext = {
     put: () => { throw new Error('unused') }, patch: () => { throw new Error('unused') },
     remove: () => { throw new Error('unused') }, move: () => { throw new Error('unused') }, restore: () => { throw new Error('unused') },
     undo: () => { throw new Error('unused') },
+    adopt: () => { throw new Error('unused') },
   },
 }
 const options = (schema: TypeSchema) => ({ name: 'test.counter', module: 'test', security: 'ordinary' as const, schema })

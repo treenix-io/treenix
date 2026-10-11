@@ -58,7 +58,9 @@ function rules(node: ChainNode & { readonly id: string }, registry: Registry, in
   return mask
 }
 
-export function computeRights(actor: Actor, chain: readonly ChainNode[], registry: Registry, prefix?: RightsPrefix): RightsResult {
+const actualPath = (path: Path): Path => path
+
+export function computeRights(actor: Actor, chain: readonly ChainNode[], registry: Registry, prefix?: RightsPrefix, scopePath: (path: Path) => Path = actualPath): RightsResult {
   let granted = prefix?.granted ?? 0, denied = prefix?.denied ?? 0
   let owner = prefix?.owner, aboveA = prefix?.aboveA ?? false, admin = prefix?.admin ?? false
   let bits = 0
@@ -83,7 +85,8 @@ export function computeRights(actor: Actor, chain: readonly ChainNode[], registr
       }
       else if (!aboveA) denied |= entry.deny
     }
-    const scoped = actor.scope === undefined || actor.scope.some(path => path === node.path || isChildPath(path, node.path, false))
+    const coordinate = actor.scope === undefined ? node.path : scopePath(node.path)
+    const scoped = actor.scope === undefined || actor.scope.some(path => path === coordinate || isChildPath(path, coordinate, false))
     bits = scoped ? granted & ~denied & ALL : 0
     const root = prefix === undefined && node.path === '/'
     const ruleMask = rules(node, registry, { id: node.id, owner, actor, principalGrant, admin: root ? (bits & A) !== 0 : admin }, alerts)
@@ -96,8 +99,8 @@ export function computeRights(actor: Actor, chain: readonly ChainNode[], registr
 }
 
 /** Continue the origin fold only through the receiving shard's bound logical range. */
-export function computeAdmittedRights(actor: Actor, chain: readonly ChainNode[], registry: Registry, shard?: ShardRights): RightsResult {
-  if (shard === undefined) return computeRights(actor, chain, registry)
+export function computeAdmittedRights(actor: Actor, chain: readonly ChainNode[], registry: Registry, shard?: ShardRights, scopePath?: (path: Path) => Path): RightsResult {
+  if (shard === undefined) return computeRights(actor, chain, registry, undefined, scopePath)
   const local = chain.filter(node => node.path === shard.path || isChildPath(shard.path, node.path, false))
-  return computeRights(actor, local, registry, shard.prefix)
+  return computeRights(actor, local, registry, shard.prefix, scopePath)
 }

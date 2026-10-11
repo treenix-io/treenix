@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { assertSafePath } from '#core/path'
 import { KernelError } from '#errors'
+import { createMountIdentity } from '#kernel/mount-identity'
 import { positionToRev, revToPosition } from '#kernel/position'
 import { A, type Bits, type Budget, type ActionDescriptor, type IncludeSpec, type Node, type NodeCopy, type OpId, type Outcome, type Position, type ReadResult, type LaneOwnership, type Selector, type SubSelector } from '#kernel/types'
 import { isRecord } from '#util/is-record'
@@ -9,16 +10,8 @@ import { isRecord } from '#util/is-record'
 export function createAuthorityNamespace(origin: string, node: string, component: string, base: string, remote: string) {
   assertSafePath(base)
   assertSafePath(remote)
-  const namespace = createHash('sha256').update(JSON.stringify([origin, node, component])).digest('hex')
-  const prefix = `f:${namespace}:`
-  const encode = (value: string) => Buffer.from(value).toString('base64url')
-
-  function decode(value: string): string {
-    if (!value.startsWith(prefix)) throw new KernelError('INVALID', 'Foreign identity belongs to another mount')
-    const encoded = value.slice(prefix.length), decoded = Buffer.from(encoded, 'base64url').toString()
-    if (encode(decoded) !== encoded) throw new KernelError('INVALID', 'Malformed foreign identity')
-    return decoded
-  }
+  const identity = createMountIdentity('f', origin, node, component)
+  const decode = identity.source
   function repath(path: string, from: string, to: string): string {
     assertSafePath(path)
     if (path !== from && !path.startsWith(from === '/' ? '/' : `${from}/`))
@@ -28,7 +21,7 @@ export function createAuthorityNamespace(origin: string, node: string, component
   }
   const path = (value: string) => repath(value, remote, base)
   const foreignPath = (value: string) => repath(value, base, remote)
-  const id = (value: string) => `${prefix}${encode(value)}`
+  const id = identity.id
   const position = (value: Position): Position => ({ ...value, instance: id(value.instance) })
   const foreignPosition = (value: Position): Position => ({ ...value, instance: decode(value.instance) })
 
@@ -229,5 +222,5 @@ export function createAuthorityNamespace(origin: string, node: string, component
     return createHash('sha256').update(JSON.stringify([origin, node, component, principal, opId])).digest('hex')
   }
   return { id, foreignId: decode, path, foreignPath, position, foreignPosition,
-    action, foreignAction, selector, result, outcome, ownership, nonce, foreignPayload, owns: (value: string) => value.startsWith(prefix), cursor, foreignCursor: decode }
+    action, foreignAction, selector, result, outcome, ownership, nonce, foreignPayload, owns: identity.owns, cursor, foreignCursor: decode }
 }

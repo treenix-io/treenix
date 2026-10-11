@@ -25,6 +25,11 @@ export interface NodeChange {
   readonly before: StoredNode | null
   readonly after: StoredNode | null
 }
+/** A mapped move preserves an already-issued identity after its genuine source leaves the decision. */
+export interface NodeRelocation {
+  readonly source: StoredNode
+  readonly id: string
+}
 export interface ChangeSetOptions {
   readonly store: Store
   readonly cache: ProcessCache
@@ -38,9 +43,23 @@ export interface ChangeSetOptions {
   readonly capabilities?: CapabilityState
   readonly preconditions?: Omit<PreconditionOptions, 'position'>
   readonly blobs?: BlobStore
+  readonly mapping?: ChangeSetMapping
+  readonly relocations?: ReadonlyMap<string, NodeRelocation>
+  readonly recreateBodies?: ReadonlyMap<string, StoredNode>
+  readonly actionChanges?: readonly NodeChange[]
+  readonly scopePath?: (path: string) => string
+}
+
+/** An operation-owned binding validates logical changes before producing physical Store writes. */
+export interface ChangeSetMapping {
+  close(): void
+  adopt(from: string, to: string): void
+  read(range: ScanRange): Promise<readonly StoredNode[] | undefined>
+  prepare(changes: readonly NodeChange[], budget: Budget): Promise<PreparedChangeSet | undefined>
 }
 export interface PreparedChangeSet extends PreparedCommit {
   readonly transitions: readonly NodeChange[]
+  readonly logicalWrites?: readonly { readonly path: string; readonly node: StoredNode | null }[]
 }
 import type { ShardRights } from '#kernel/auth-factory'
 
@@ -54,7 +73,7 @@ function component(input: Component, registry: Registry): Component {
   return { ...input, $type: def.name, $v: def.version }
 }
 
-function normalize(input: NodeInput, before: StoredNode | null, pos: Position, registry: Registry): StoredNode {
+function normalize(input: NodeInput, before: StoredNode | null, pos: Position, registry: Registry, relocated?: string): StoredNode {
   assertNoPrototypeKeys(input, input.$path)
   for (const field of ['$id', '$rev', '$pos']) {
     if (Object.hasOwn(input, field)) throw new KernelError('INVALID', `Kernel metadata in write input: ${field}`)
@@ -67,7 +86,14 @@ function normalize(input: NodeInput, before: StoredNode | null, pos: Position, r
     named[name] = component(input[name], registry)
   }
   return { ...input, ...main, ...named, $path: input.$path, $type: main.$type,
-    $id: before === null ? ulid() : before.$id, $pos: pos }
+    $id: before === null ? relocated ?? ulid() : before.$id, $pos: pos }
+}
+
+/** Installs only the source owner's operation-bound mapping before preparing one canonical decision. */
+export function prepareRoutedChangeSet(source: ReaderSource, options: ChangeSetOptions,
+  changes: readonly ChangeMember[], position: Position, executor: ChangeExecutor): Promise<PreparedChangeSet> {
+  const mapping = source.mapping?.(options, changes, position, executor)
+  return prepareChangeSet(mapping === undefined ? options : { ...options, mapping }, changes, position, executor)
 }
 
 /** Run inside the writer's prepare callback: the cache and same-domain reads then precede the commit. */
@@ -103,6 +129,8 @@ export async function prepareChangeSet(
     capabilities: options.capabilities,
     expect: 'actor' in who ? who.expect : undefined,
     action: 'actor' in who ? who.action : undefined,
+    actionChanges: options.actionChanges,
+    scopePath: options.scopePath,
   });
   const migrator = createMigrator((type) => ({
     version: registry.type(type).version,
@@ -134,12 +162,15 @@ export async function prepareChangeSet(
     states.set(at, after);
   }
   async function load(range: ScanRange): Promise<readonly StoredNode[]> {
-    const at = 'node' in range ? range.node : 'children' in range ? range.children : range.subtree;
-    const local = options.resolve?.(at) ?? store;
-    if (!sameStoreOwner(local, store)) throw new KernelError('CROSS_DOMAIN', 'ChangeSet spans atomic Store owners');
-    const lease = await cache.fill(local, range, options.readCost?.budget() ?? budget);
-    leases.push(lease);
-    const nodes = lease.nodes;
+    let nodes = await options.mapping?.read(range);
+    if (nodes === undefined) {
+      const at = 'node' in range ? range.node : 'children' in range ? range.children : range.subtree;
+      const local = options.resolve?.(at) ?? store;
+      if (!sameStoreOwner(local, store)) throw new KernelError('CROSS_DOMAIN', 'ChangeSet spans atomic Store owners');
+      const lease = await cache.fill(local, range, options.readCost?.budget() ?? budget);
+      leases.push(lease);
+      nodes = lease.nodes;
+    }
     if (options.readCost !== undefined)
       for (const node of nodes)
         options.readCost.charge(1, Buffer.byteLength(JSON.stringify(node)));
@@ -366,6 +397,21 @@ export async function prepareChangeSet(
         await undo(addresses);
         continue;
       }
+      if (change.op === 'adopt') {
+        path(change.from);
+        path(change.to);
+        if (options.mapping === undefined) throw new KernelError('INVALID', 'Publication requires an owning Store binding');
+        options.mapping.adopt(change.from, change.to);
+        const source = await get(change.from);
+        if (source === null) throw new KernelError('NOT_FOUND', 'Publication source is absent');
+        const destination = await get(change.to);
+        if (destination !== null && registry.type(destination.$type).name !== registry.type(source.$type).name)
+          throw new KernelError('CONFLICT', 'Publication destination has another type');
+        if (destination !== null) touch(destination, null, change.to);
+        states.set(change.from, null);
+        touch(source, { ...source, $path: change.to, $pos: pos }, change.to);
+        continue;
+      }
       if (change.op === 'move') {
         await move(change.from, change.to);
         continue;
@@ -380,12 +426,24 @@ export async function prepareChangeSet(
         await remove(at);
         continue;
       }
-      const before = await get(at);
+      let before = await get(at);
       if (change.op === 'put') {
+        const relocation = options.relocations?.get(at);
+        if (relocation !== undefined) {
+          const source = await original(relocation.source.$path);
+          if (source === null || !isDeepStrictEqual(source, relocation.source))
+            throw new KernelError('CONFLICT', 'Relocated identity source changed');
+          if (before !== null && before.$id !== relocation.id) {
+            if (registry.type(before.$type).name !== registry.type(change.node.$type).name)
+              throw new KernelError('CONFLICT', 'Relocated identity destination has another type');
+            touch(before, null, at);
+            before = null;
+          }
+        }
         const stored = before === null ? null : (initial.get(before.$id) ?? before);
         touch(
           before,
-          await guard.put(stored, normalize(structuredClone(change.node), before, pos, registry)),
+          await guard.put(stored, normalize(structuredClone(change.node), before, pos, registry, relocation?.id)),
           at,
         );
       } else {
@@ -405,16 +463,31 @@ export async function prepareChangeSet(
         touch(before, normalize(input, before, pos, registry), at);
       }
     }
+    for (const [at, accepted] of options.recreateBodies ?? []) {
+      const source = await original(at);
+      const current = await get(at);
+      if (source === null || !isDeepStrictEqual(source, accepted) || current === null
+        || current.$id !== source.$id || current.$type !== source.$type)
+        throw new KernelError('CONFLICT', 'Recreated body lost its accepted physical source');
+      const guarded = await guard.put(source, current);
+      const { $id, $pos, ...input } = guarded;
+      touch(source, null, at);
+      touch(null, normalize(input, null, pos, registry), at);
+    }
     const entries: JournalEntry[] = [],
       expanded: NodeChange[] = [];
     for (const [id, before] of initial) {
       const after = final.get(id)!;
       if (before === null && after === null) continue;
       await guard.transition(before, after);
-      const state =
-        before === null || after === null ? { bytes: 0, full: false } : await checkpoint(before);
-      entries.push(encodeJournalEntry(before, after, state.bytes, state.full).entry);
       expanded.push({ id, before, after });
+    }
+    for (const [destination, relocation] of options.relocations ?? []) {
+      const source = await get(relocation.source.$path);
+      if (relocation.source.$path !== destination && source?.$id === relocation.id)
+        throw new KernelError('INVALID', 'Relocated identity remains at its source');
+      if ((await get(destination))?.$id !== relocation.id)
+        throw new KernelError('INVALID', 'Relocated identity left its destination');
     }
     await guard.finish(expanded);
     const blobWork = await validateBlobReferences(
@@ -423,6 +496,14 @@ export async function prepareChangeSet(
       options.readCost?.budget() ?? budget,
     );
     options.readCost?.charge(0, 0, blobWork);
+    const remaining = options.readCost?.budget() ?? { ...budget, nodes: budget.nodes - loaded.size,
+      bytes: budget.bytes - readBytes, exprWork: budget.exprWork - blobWork };
+    const mapped = await options.mapping?.prepare(expanded, remaining);
+    if (mapped !== undefined) return mapped;
+    for (const { before, after } of expanded) {
+      const state = before === null || after === null ? { bytes: 0, full: false } : await checkpoint(before);
+      entries.push(encodeJournalEntry(before, after, state.bytes, state.full).entry);
+    }
     const paths = new Set(
       expanded.flatMap((change) => [
         ...(change.before === null ? [] : [change.before.$path]),
@@ -448,10 +529,10 @@ export async function prepareChangeSet(
       ...(groups === undefined ? {} : { groups }),
       record: { pos, kind: 'commit', executor: who.executor, caller: who.caller, entries },
       transitions: expanded,
-      budget: options.readCost?.budget() ?? { ...budget, nodes: budget.nodes - loaded.size, bytes: budget.bytes - readBytes,
-        exprWork: budget.exprWork - blobWork },
+      budget: remaining,
     };
   } finally {
+    options.mapping?.close();
     for (const lease of leases) lease.release();
   }
 }
@@ -459,7 +540,7 @@ export async function prepareChangeSet(
 /** Describe every route a change can affect before acquiring its atomic writer. */
 export function changeSelectors(changes: readonly ChangeMember[]): readonly Selector[] {
   return changes.flatMap<Selector>(change => change.op === 'restore' || change.op === 'undo' ? [{ history: '/' }]
-    : change.op === 'move' ? [{ node: change.from }, { node: change.to }]
+    : change.op === 'move' || change.op === 'adopt' ? [{ node: change.from }, { node: change.to }]
     : [{ node: change.op === 'put' ? change.node.$path : change.path }])
 }
 
@@ -468,14 +549,14 @@ export async function selectChangeStore(changes: readonly ChangeMember[], source
   ownership: Pick<ReturnType<typeof createReader>, 'pin' | 'journalTarget'>, fallback: Store): Promise<Store> {
   let store: Store | undefined
   for (const change of changes) {
-    const path = change.op === 'put' ? change.node.$path : change.op === 'move' ? change.from
+    const path = change.op === 'put' ? change.node.$path : change.op === 'move' || change.op === 'adopt' ? change.from
       : change.op === 'restore' || change.op === 'undo' ? '/' : change.path
     if (change.op !== 'restore' && change.op !== 'undo') ownership.pin({ node: path })
     const target = change.op === 'restore' || change.op === 'undo' ? await ownership.journalTarget(change.record) : source.resolve(path)
     if (store !== undefined && !sameStoreOwner(store, target.store))
       throw new KernelError('CROSS_DOMAIN', 'ChangeSet spans atomic Store owners')
     store = target.store
-    if (change.op === 'move') {
+    if (change.op === 'move' || change.op === 'adopt') {
       ownership.pin({ node: change.to })
       if (!sameStoreOwner(source.resolve(change.to).store, store))
         throw new KernelError('CROSS_DOMAIN', 'ChangeSet spans atomic Store owners')

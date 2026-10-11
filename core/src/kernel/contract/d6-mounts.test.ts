@@ -28,6 +28,7 @@ function preflight(declarationTypes?: ReadonlySet<string>) {
   const registry = createRegistry()
   registry.publish(createMemoryMountManifest(0))
   const table = createMountTable({ registry, declarationTypes,
+    readDeclaration: async () => { throw new Error('Preflight cannot read a declaring node') },
     openSession: async () => { throw new Error('Preflight cannot open a Session') },
     activate: async () => { throw new Error('Preflight cannot activate a target') },
     retire: async () => { throw new Error('Preflight has no registered resources') },
@@ -177,7 +178,8 @@ describe('native mount declaration preflight', { timeout: 10_000 }, () => {
     registry.publish(createMemoryMountManifest(0))
     let changed = 0
     const table = createMountTable({ registry,
-      openSession: async () => { throw new Error('Preflight cannot open a Session') },
+      readDeclaration: async () => { throw new Error('Preflight cannot read a declaring node') },
+    openSession: async () => { throw new Error('Preflight cannot open a Session') },
       activate: async () => { throw new Error('Preflight cannot activate a target') },
       retire: async () => { throw new Error('Preflight has no registered resources') },
       changed: () => { changed++ }, failed: error => { throw error },

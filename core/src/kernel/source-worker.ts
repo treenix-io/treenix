@@ -184,6 +184,7 @@ async function* execution(): AsyncGenerator<unknown, unknown, undefined> {
         ${configuration.writing ? `change: Object.freeze({
           put: node => __change(JSON.stringify({op:'put',node})), patch: (path,ops) => __change(JSON.stringify({op:'patch',path,ops})),
           remove: path => __change(JSON.stringify({op:'remove',path})), move: (from,to) => __change(JSON.stringify({op:'move',from,to})),
+          adopt: (from,to) => __change(JSON.stringify({op:'adopt',from,to})),
           restore: record => __change(JSON.stringify({op:'restore',record})),
           undo: record => __change(JSON.stringify({op:'undo',record})) }),` : ''}
         io: Object.freeze(Object.fromEntries(${JSON.stringify(sourcePorts)}.map(name => [name, input => call('io',[name,input])]))),

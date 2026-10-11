@@ -18,6 +18,7 @@ export interface ActionGuardOptions {
   readonly source?: ActionProvenance
   readonly admin: boolean
   readonly readBefore: (path: Path) => Promise<StoredNode | null>
+  readonly postChanges?: readonly NodeChange[]
 }
 
 function body(node: Readonly<Record<string, unknown>>, created: boolean): Record<string, unknown> {
@@ -26,7 +27,7 @@ function body(node: Readonly<Record<string, unknown>>, created: boolean): Record
   return fields
 }
 
-export async function guardAction(changes: readonly NodeChange[], { registry, source, admin, readBefore }: ActionGuardOptions): Promise<void> {
+export async function guardAction(changes: readonly NodeChange[], { registry, source, admin, readBefore, postChanges }: ActionGuardOptions): Promise<void> {
   const definition = source === undefined ? undefined : registry.type(source.type)
   const action = source !== undefined && definition !== undefined && Object.hasOwn(definition.actions, source.action)
     ? definition.actions[source.action] : undefined
@@ -57,12 +58,12 @@ export async function guardAction(changes: readonly NodeChange[], { registry, so
     }
   }
   const after = new Map<Path, StoredNode | null>()
-  for (const change of changes) {
+  for (const change of postChanges ?? changes) {
     const target = change.before?.$path ?? change.after!.$path
     if (!targets.has(target) || change.after === null) throw new KernelError('FORBIDDEN', 'A write is outside the declared post frame')
     if (change.before !== null) after.set(change.before.$path, null)
   }
-  for (const change of changes) if (change.after !== null) after.set(change.after.$path, change.after)
+  for (const change of postChanges ?? changes) if (change.after !== null) after.set(change.after.$path, change.after)
   const migrator = createMigrator(type => ({ version: registry.type(type).version, steps: registry.security(type, 'migrate') ?? [] }))
   for (const [path, updates] of targets) {
     const before = await readBefore(path)

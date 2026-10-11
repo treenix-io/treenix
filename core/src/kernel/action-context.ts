@@ -125,6 +125,7 @@ export function createWriteActionContext(
     patch: (path, ops) => changes().patch(path, ops),
     remove: (path) => changes().remove(path),
     move: (from, to) => changes().move(from, to),
+    adopt: (from, to) => changes().adopt(from, to),
     restore: (record) => changes().restore(record),
     undo: (record) => changes().undo(record),
   }

@@ -6,7 +6,7 @@ import { createActionControl, createReadActionContext, createWriteActionContext 
 import { createActionDraft } from '#kernel/action-draft'
 import { resolveActionNeeds, type ResolvedActionNeeds } from '#kernel/action-needs'
 import { createChangeBuilder } from '#kernel/change-builder'
-import { changeSelectors, selectChangeStore, prepareChangeSet, type ChangeExecutor, type ChangeSetOptions } from '#kernel/changeset'
+import { changeSelectors, selectChangeStore, prepareChangeSet, prepareRoutedChangeSet, type ChangeExecutor, type ChangeSetOptions } from '#kernel/changeset'
 import type { CommandOptions, NodeActionBinding } from '#kernel/commands'
 import { runWithActionContext } from '#kernel/current-action'
 import { createSiftTest } from '#kernel/expr'
@@ -493,8 +493,8 @@ export function createActionRuntime(options: CommandOptions) {
                     limits,
                   },
               };
-              const portPrepared = await prepareChangeSet(
-                preparation,
+              const portPrepared = await prepareRoutedChangeSet(
+                source, preparation,
                 accepted === undefined ? changes : accepted.portChange === undefined ? [] : [accepted.portChange],
                 pos,
                 {
@@ -532,7 +532,7 @@ export function createActionRuntime(options: CommandOptions) {
                 };
               }
               executorOptions.validate(prepared);
-              ownImage = prepared.writes.find((write) => write.path === request.path)?.node;
+              ownImage = (prepared.logicalWrites ?? prepared.writes).find((write) => write.path === request.path)?.node;
               frameActive();
               return { ...prepared, ...(accepted === undefined ? value === undefined ? {} : { value } : { value: accepted.value }), check: frameActive };
             };

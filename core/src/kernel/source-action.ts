@@ -138,6 +138,7 @@ async function* executeSource(
           case 'patch': context.change.patch(value.path, value.ops); break;
           case 'remove': context.change.remove(value.path); break;
           case 'move': context.change.move(value.from, value.to); break;
+          case 'adopt': context.change.adopt(value.from, value.to); break;
           case 'restore': context.change.restore(value.record); break;
           case 'undo': context.change.undo(value.record); break;
         }

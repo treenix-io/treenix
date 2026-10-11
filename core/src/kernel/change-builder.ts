@@ -31,6 +31,7 @@ export function createChangeBuilder(active: () => void, limits: Limits) {
     patch: (path: Path, ops: UpdateOps) => add({ op: 'patch', path, ops }),
     remove: (path: Path) => add({ op: 'remove', path }),
     move: (from: Path, to: Path) => add({ op: 'move', from, to }),
+    adopt: (from: Path, to: Path) => add({ op: 'adopt', from, to }),
     restore: (record: JournalAddress) => add({ op: 'restore', record }),
     undo: (record: JournalAddress) => add({ op: 'undo', record }),
   })

@@ -95,7 +95,8 @@ export function change(value: unknown): value is ChangeMember {
     case 'put': return keys(value, ['op', 'node']) && isNodeInput(value.node)
     case 'patch': return keys(value, ['op', 'path', 'ops']) && path(value.path) && update(value.ops)
     case 'remove': return keys(value, ['op', 'path']) && path(value.path)
-    case 'move': return keys(value, ['op', 'from', 'to']) && path(value.from) && path(value.to)
+    case 'adopt':
+      case 'move': return keys(value, ['op', 'from', 'to']) && path(value.from) && path(value.to)
     case 'restore': case 'undo': return keys(value, ['op', 'record']) && isRecord(value.record) && keys(value.record, ['pos', 'id'])
       && isPosition(value.record.pos) && text(value.record.id)
     default: return false
