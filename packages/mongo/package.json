@@ -1,7 +1,7 @@
 {
   "name": "@treenx/mongo",
   "version": "1.0.0",
-  "description": "Treenix MongoDB storage adapter — Layer 1",
+  "description": "Treenix MongoDB storage adapter \u2014 Layer 1",
   "type": "module",
   "publishConfig": {
     "access": "public"
@@ -47,7 +47,9 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json && fix-hash-imports",
     "prepack": "npm run build",
-    "test": "tsx --conditions development --test 'src/**/*.test.ts'"
+    "test": "tsx --conditions development --test 'src/**/*.test.ts'",
+    "upgrade:kernel": "tsx --conditions development src/upgrade-kernel-cli.ts",
+    "test:upgrade-kernel": "tsx --conditions development --test src/upgrade-kernel.integration.test.ts"
   },
   "peerDependencies": {
     "@treenx/core": "^3.0.0",
