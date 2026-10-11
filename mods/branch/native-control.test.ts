@@ -13,7 +13,7 @@ import { nativeBranchManifest } from './native';
 /** Rooted tool coordinates retain actual Session scope for both control and live publication. */
 test('native rooted MCP reads its branch control and refuses live merge outside its credential scope', { timeout: 10_000 }, async () => {
   const directory = await mkdtemp(resolve('temp/native-branch-control-'));
-  const runtime = await openNativeRuntime({ id: randomUUID(), directory, rootExternal: 'none', credentialTtlMs: 60_000,
+  const runtime = await openNativeRuntime({ id: randomUUID(), directory, credentialTtlMs: 60_000,
     firstAdmin: { path: '/admin', name: 'admin', password: 'branch-control-password' }, modules: [nativeBranchManifest()] });
   assert.ok(runtime.instance.setupCredential);
   const admin = await runtime.instance.openSession(runtime.instance.setupCredential);

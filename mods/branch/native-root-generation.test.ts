@@ -23,7 +23,7 @@ const fixture: ModuleManifest = { id: 'branch-generation', security: [], open: [
 
 test('future root recreation retires its issued identity and persists a fresh generation', { timeout: 10_000 }, async () => {
   const directory = await mkdtemp(resolve('temp/native-root-generation-'));
-  const config = { id: randomUUID(), directory, rootExternal: 'none' as const, credentialTtlMs: 60_000,
+  const config = { id: randomUUID(), directory, credentialTtlMs: 60_000,
     firstAdmin: { path: '/admin', name: 'admin', password: 'generation-test-password' }, modules: [fixture, nativeBranchManifest()] };
   const runtime = await openNativeRuntime(config);
   const credential = runtime.instance.setupCredential;
