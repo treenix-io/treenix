@@ -34,6 +34,39 @@ async function setup(t: TestContext) {
 }
 
 describe('native HTTP client', { timeout: 10_000 }, () => {
+  it('grows an underfilled child window while retaining a truncated page boundary', async t => {
+    const f = await setup(t); await f.client.ready
+    await f.client.commit({ changes: [
+      { op: 'put', node: { $path: '/members', $type: 't.dir' } },
+      ...Array.from({ length: 4 }, (_, index) => ({ op: 'put' as const,
+        node: { $path: `/members/p${String(index).padStart(3, '0')}`, $type: 't.dir' } })),
+    ] }).outcome
+
+    const growing = f.client.sub({ children: '/members', window: { limit: 500 } }, () => {})
+    const page = f.client.sub({ children: '/members', window: { limit: 2 } }, () => {})
+    t.after(() => { growing.close(); page.close() })
+    await Promise.all([growing.ready, page.ready])
+    const initialGrowing = f.client.cache.list(growing.id); assert.ok(initialGrowing)
+    assert.equal(initialGrowing.ids.length, 4)
+    const initialPage = f.client.cache.list(page.id); assert.ok(initialPage)
+    assert.equal(initialPage.ids.length, 2)
+    assert.ok(initialPage.next)
+
+    for (let start = 4; start < 51; start += 4) {
+      const count = Math.min(4, 51 - start)
+      await f.client.commit({ changes: Array.from({ length: count }, (_, index) => ({ op: 'put' as const,
+        node: { $path: `/members/p${String(start + index).padStart(3, '0')}`, $type: 't.dir' } })) }).outcome
+      const current = f.client.cache.list(growing.id); assert.ok(current)
+      assert.equal(current.ids.length, start + count)
+      assert.deepEqual(f.client.cache.list(page.id), initialPage)
+    }
+    const remaining = await f.client.read({ children: '/members', window: { limit: 2, after: initialPage.next } })
+    assert.equal(remaining.list.length, 2)
+    assert.ok(remaining.next)
+    assert.ok('node' in remaining.copies[0])
+    assert.equal(remaining.copies[0].node.$path, '/members/p002')
+  })
+
   it('carries an explicit credential through handshake, event stream and later mutations', async t => {
     const f = await setup(t), welcome = await f.client.ready
     assert.equal(welcome.principal, `u:${f.instance.bootstrap.adminId}`)

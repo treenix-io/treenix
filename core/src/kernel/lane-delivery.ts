@@ -302,7 +302,8 @@ export function createLaneDelivery(
             initial &&
             range === undefined &&
             'children' in sub.selector &&
-            sub.selector.window !== undefined
+            sub.selector.window !== undefined &&
+            selection.next !== undefined
           )
             range = { upper: selection.roots.at(-1)?.member?.key };
           const state = subscriptionState(
