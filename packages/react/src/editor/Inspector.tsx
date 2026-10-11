@@ -7,7 +7,7 @@ import { LegacyInspector } from './LegacyInspector';
 import './Inspector.css';
 import { ErrorBoundary } from '#app/ErrorBoundary';
 import { ScrollArea } from '#components/ui/scroll-area';
-import { Render, RenderContext } from '#context';
+import { NodeProvider, Render, RenderContext } from '#context';
 import { usePath } from '#hooks';
 import { pickDefaultContext } from '#mods/editor-ui/node-utils';
 import { useSave } from '#tree/auto-save';
@@ -26,7 +26,7 @@ type Props = {
 
 /** Present the selected canonical node and capture its actual native save owner. */
 function NativeInspector({ path, currentUserId, onDelete, onAddComponent, onSelect, onSetRoot }: Props) {
-  const { data: node } = usePath<Node>(path);
+  const { data: node, loading, error } = usePath<Node>(path);
   const save = useSave(path ?? '', { autoSave: true });
   const [propsOpen, setPropsOpen] = useState(false);
   const [context, setContext] = useState('react:layout');
@@ -37,6 +37,9 @@ function NativeInspector({ path, currentUserId, onDelete, onAddComponent, onSele
     setPrevPath(path);
     if (node) setContext(pickDefaultContext(node.$type));
   }
+
+  if (error !== null) return <div role="alert" className="p-4 text-destructive">{error.message}</div>;
+  if (loading) return <div className="p-4 text-muted-foreground">Loading node…</div>;
 
   if (!node) {
     return (
@@ -69,7 +72,7 @@ function NativeInspector({ path, currentUserId, onDelete, onAddComponent, onSele
           <ErrorBoundary key={node.$path}>
             <RenderContext name={context}>
               <div className="node-view">
-                <Render value={draftNode} onChange={save.onChange} />
+                <NodeProvider value={draftNode}><Render value={draftNode} onChange={save.onChange} /></NodeProvider>
               </div>
             </RenderContext>
           </ErrorBoundary>

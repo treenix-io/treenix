@@ -1,8 +1,9 @@
 // Fixed-top banner shown while the SSE stream is disconnected.
 
+import { useTreeEffects } from "#tree/effects";
 import { useSseStatus } from "#hooks/use-sse-status";
 
-export function ConnectionBanner() {
+function LegacyConnectionBanner() {
   const down = useSseStatus();
 
   if (!down) return null;
@@ -11,4 +12,10 @@ export function ConnectionBanner() {
       Reconnecting to server…
     </div>
   );
+}
+
+/** Native lane failures are presented by their owning source subscribers. */
+export function ConnectionBanner() {
+  const effects = useTreeEffects();
+  return effects.lane ? null : <LegacyConnectionBanner />;
 }

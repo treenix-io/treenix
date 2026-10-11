@@ -5,10 +5,13 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
+import { compKey, getDefaults } from '@treenx/core';
+import { KernelError } from '@treenx/core/errors';
 import {
   addComponent,
   removeNode,
   refreshChildren,
+  useTreeEffects,
   NavigateProvider,
   setEditorRoot,
   useLocation,
@@ -28,6 +31,7 @@ import { EditorShell } from './types';
 
 const EditorShellView: View<EditorShell> = ({ ctx }) => {
   const { authed, logout } = useAuthContext();
+  const effects = useTreeEffects();
   const { search } = useLocation();
 
   const { target: selected, nav } = useRouteShell(ctx!.node, { preserveQuery: { root: '/' } });
@@ -66,14 +70,21 @@ const EditorShellView: View<EditorShell> = ({ ctx }) => {
 
   const handleDelete = useCallback(
     async (path: string) => {
-      await removeNode(path);
+      const kernel = effects.kernel;
+      if (kernel === undefined) await removeNode(path);
+      else {
+        const copy = (await kernel.read({ node: path })).copies[0];
+        if ('error' in copy) throw new KernelError(copy.error.code, copy.error.message);
+        await kernel.commit({ changes: [{ op: 'remove', path }],
+          expect: { nodes: [{ path, rev: copy.node.$rev }] } });
+      }
       const parent = path === '/' ? null : path.slice(0, path.lastIndexOf('/')) || '/';
-      if (parent) {
+      if (parent && effects.kernel === undefined) {
         refreshChildren(parent);
       }
       nav(parent ?? '/');
     },
-    [nav],
+    [nav, effects],
   );
 
   const handleAddComponent = useCallback((path: string) => {
@@ -85,10 +96,22 @@ const EditorShellView: View<EditorShell> = ({ ctx }) => {
       const path = addingComponentAt;
       if (!path) return;
       setAddingComponentAt(null);
-      await addComponent(path, name, type);
+      const kernel = effects.kernel;
+      if (kernel === undefined) await addComponent(path, name, type);
+      else {
+        const copy = (await kernel.read({ node: path })).copies[0];
+        if ('error' in copy) throw new KernelError(copy.error.code, copy.error.message);
+        const description = await effects.execute(`/sys/types/${type}`, 'describe_type', {}, 't.type');
+        const defaults: Record<string, unknown> = {};
+        for (const [field, schema] of Object.entries(description.schema.properties ?? {}))
+          if (Object.hasOwn(schema, 'default')) defaults[field] = structuredClone(schema.default);
+        await kernel.commit({ changes: [{ op: 'patch', path, ops: { $set: {
+          [compKey(name)]: { ...getDefaults(type), ...defaults, $type: type, $v: description.version },
+        } } }], expect: { nodes: [{ path, rev: copy.node.$rev }] } });
+      }
       toast.success(`Added ${name}`);
     },
-    [addingComponentAt],
+    [addingComponentAt, effects],
   );
 
   const handleSetRoot = useCallback(

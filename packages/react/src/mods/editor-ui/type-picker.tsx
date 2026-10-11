@@ -123,7 +123,7 @@ export function TypePicker({
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onCancel(); }}>
-      <DialogContent className="p-0 gap-0 max-w-[380px] overflow-hidden" showCloseButton={false}>
+      <DialogContent className="p-0 gap-0 max-w-[380px] overflow-hidden" showCloseButton={false} aria-describedby={undefined}>
         <DialogHeader className="px-4 pt-4 pb-2">
           <DialogTitle className="text-[15px]">{title}</DialogTitle>
         </DialogHeader>
