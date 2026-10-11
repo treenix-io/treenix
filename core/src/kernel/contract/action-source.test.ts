@@ -349,3 +349,24 @@ it('allows a caught missing-node read followed by a genuine native change', { ti
   assert.equal((await f.caller.session.act({path:'/doc',action:'edit',args:{value:31},opId:f.caller.key()}).outcome).value, 'NOT_FOUND');
   assert.equal((await f.node('/doc')).count, 31);
 });
+
+
+it('reverses an accepted journal image through the published native source API', { timeout: 10_000 }, async t => {
+  const f = await fixture(t);
+  const before = await f.node('/doc');
+  await f.admin.session.commit({ opId: f.admin.key(), changes: [
+    { op: 'patch', path: '/doc', ops: { $set: { count: 1 } } },
+  ] }).outcome;
+  const history = await f.admin.session.read({ history: '/doc' });
+  const entry = history.history!.at(-1);
+  assert.ok(entry);
+  assert.equal(entry.kind, 'commit');
+  await f.draft(`ctx.change.undo(${JSON.stringify(entry.address)}); return ctx.node.$id;`);
+  await f.publish('edit');
+  const result = await f.admin.session.act({ path: '/doc', action: 'edit',
+    args: { value: 0 }, opId: f.admin.key() }).outcome;
+  const restored = await f.node('/doc');
+  assert.equal(result.value, before.$id);
+  assert.equal(restored.$id, before.$id);
+  assert.equal(restored.count, 0);
+});

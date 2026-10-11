@@ -425,7 +425,7 @@ export function createActionRuntime(options: CommandOptions) {
               projector: executorOptions.projector,
             });
             const targetStore = source.resolve(request.path).store;
-            const store = changes.some((change) => change.op === 'restore')
+            const store = changes.some((change) => change.op === 'restore' || change.op === 'undo')
               ? await writer.read(source.domains, async () => {
                   await executorAdmission.validate(source.auth);
                   return selectChangeStore(changes, source, ownership, targetStore);

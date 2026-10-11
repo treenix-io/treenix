@@ -1,5 +1,5 @@
-import { isDeepStrictEqual } from 'node:util'
 import { ancestorPaths, assertSafePath, dirname, isChildPath } from '#core/path'
+import { isDeepStrictEqual } from 'node:util'
 import { KernelError } from '#errors'
 import { validateBlobReferences } from '#kernel/blobs'
 import { runStoreScan, type OperationReadCost } from '#kernel/store/budget'
@@ -208,37 +208,47 @@ export async function prepareChangeSet(
       }
     }
   }
-  async function restore(address: JournalAddress): Promise<void> {
+  async function journal(address: JournalAddress) {
     const records = (
       await runStoreScan(
         budget,
         limits.queryMs,
         (queryBudget) =>
           store.scan({
-            range: { journal: '/' },
-            where: { 'entries.id': address.id },
+            range: { journal: '/', accept: entry => entry.address.id === address.id
+              && comparePositions(entry.address.pos, address.pos) === 0 },
             budget: queryBudget,
           }),
         options.readCost,
       )
     ).items;
     const images = readJournalImages(records, address);
-    const entry = records
-      .find((record) => comparePositions(record.pos, address.pos) === 0)!
-      .entries.find((entry) => entry.id === address.id)!;
+    const record = records.find((record) => comparePositions(record.pos, address.pos) === 0)!;
+    const entry = record.entries.find((entry) => entry.id === address.id)!;
     await guard.history(entry, [images.before, images.after]);
+    return { record, entry, images };
+  }
+  /** Restore a retained deletion after checking its path, identity, and parent. */
+  async function restore(address: JournalAddress): Promise<void> {
+    const { images } = await journal(address);
+
     const before = images.before;
     if (before === null || before === 'unknown')
       throw new KernelError('INVALID', 'The record has no known before-image');
     path(before.$path);
     if ((await get(before.$path)) !== null)
       throw new KernelError('CONFLICT', 'Restore address is occupied');
-    const staged = final.get(before.$id);
+    await absentIdentity(before.$id);
+    await restoreParent(before.$path);
+    touch(null, { ...migrator.migrate(before), $pos: pos }, before.$path);
+  }
+  async function absentIdentity(id: string): Promise<void> {
+    const staged = final.get(id);
     if (staged !== undefined && staged !== null)
       throw new KernelError('CONFLICT', 'Restore identity is alive');
     if (staged === undefined) {
       if (options.capabilities !== undefined) {
-        if ((await options.capabilities.node(before.$id)) !== null)
+        if ((await options.capabilities.node(id)) !== null)
           throw new KernelError('CONFLICT', 'Restore identity is alive');
       } else {
         const live = (
@@ -248,7 +258,7 @@ export async function prepareChangeSet(
             (queryBudget) =>
               store.scan({
                 range: { subtree: '/' },
-                where: { $id: before.$id },
+                where: { $id: id },
                 budget: queryBudget,
               }),
             options.readCost,
@@ -257,7 +267,9 @@ export async function prepareChangeSet(
         if (live.length !== 0) throw new KernelError('CONFLICT', 'Restore identity is alive');
       }
     }
-    const parent = dirname(before.$path);
+  }
+  async function restoreParent(at: string): Promise<void> {
+    const parent = dirname(at);
     if (parent !== null) {
       const parentStore = options.resolve?.(parent) ?? store;
       let parentNode: StoredNode | null;
@@ -269,7 +281,59 @@ export async function prepareChangeSet(
       }
       if (parentNode === null) throw new KernelError('NOT_FOUND', 'Restore parent is absent');
     }
-    touch(null, { ...migrator.migrate(before), $pos: pos }, before.$path);
+  }
+  /** Apply selected journal inverses atomically after validating their current images. */
+  async function undo(addresses: readonly JournalAddress[]): Promise<void> {
+    const inverses: NodeChange[] = [], selected = new Map<string, NodeChange>();
+
+    for (const address of addresses) {
+      const { record, images } = await journal(address);
+      if (record.kind !== 'commit' || images.before === 'unknown')
+        throw new KernelError('INVALID', 'Only retained kernel changes have an inverse');
+      if (selected.has(address.id)) throw new KernelError('INVALID', 'An inverse selects an identity twice');
+      const expected = images.after, prior = images.before;
+      if (expected !== null) {
+        path(expected.$path);
+        if (!isDeepStrictEqual(await get(expected.$path), expected))
+          throw new KernelError('CONFLICT', 'The accepted journal image changed');
+      } else if (prior !== null) {
+        path(prior.$path);
+        if (await get(prior.$path) !== null)
+          throw new KernelError('CONFLICT', 'Restore address is occupied');
+        await absentIdentity(prior.$id);
+      }
+      const inverse = { id: address.id, before: expected, after: prior };
+      inverses.push(inverse); selected.set(address.id, inverse);
+    }
+
+    for (const inverse of inverses) {
+      const current = inverse.before, prior = inverse.after;
+      if (current !== null && (prior === null || prior.$path !== current.$path)) {
+        for (const descendant of await subtree(current.$path))
+          if (!isDeepStrictEqual(selected.get(descendant.$id)?.before, descendant))
+            throw new KernelError('CONFLICT', 'The inverse would change an unselected descendant');
+      }
+      if (prior !== null) {
+        path(prior.$path);
+        const occupied = await get(prior.$path);
+        if (occupied !== null && !isDeepStrictEqual(selected.get(occupied.$id)?.before, occupied))
+          throw new KernelError('CONFLICT', 'Inverse destination is occupied');
+        if (current !== null && prior.$path !== current.$path)
+          for (const descendant of await subtree(prior.$path))
+            if (!isDeepStrictEqual(selected.get(descendant.$id)?.before, descendant))
+              throw new KernelError('CONFLICT', 'Inverse destination subtree is occupied');
+      }
+    }
+
+    for (const inverse of inverses) if (inverse.before !== null) states.set(inverse.before.$path, null);
+    for (const inverse of inverses) {
+      const prior = inverse.after;
+      if (prior !== null && inverse.before === null) {
+        await restoreParent(prior.$path);
+      }
+      touch(inverse.before, prior === null ? null : { ...migrator.migrate(prior), $pos: pos },
+        prior?.$path ?? inverse.before!.$path);
+    }
   }
   async function checkpoint(before: StoredNode): Promise<{ bytes: number; full: boolean }> {
     const known = cache.get(before.$id)?.journalBytes;
@@ -312,7 +376,17 @@ export async function prepareChangeSet(
         throw new KernelError('INVALID', 'The original read-set context is required');
       await checkPreconditions(who.expect, { ...options.preconditions, position: pos });
     }
-    for (const change of changes) {
+    for (let index = 0; index < changes.length; index++) {
+      const change = changes[index];
+      if (change.op === 'undo') {
+        const addresses = [change.record];
+        while (changes[index + 1]?.op === 'undo') {
+          const next = changes[++index];
+          if (next.op === 'undo') addresses.push(next.record);
+        }
+        await undo(addresses);
+        continue;
+      }
       if (change.op === 'move') {
         await move(change.from, change.to);
         continue;
@@ -389,7 +463,7 @@ export async function prepareChangeSet(
 
 /** Describe every route a change can affect before acquiring its atomic writer. */
 export function changeSelectors(changes: readonly ChangeMember[]): readonly Selector[] {
-  return changes.flatMap<Selector>(change => change.op === 'restore' ? [{ history: '/' }]
+  return changes.flatMap<Selector>(change => change.op === 'restore' || change.op === 'undo' ? [{ history: '/' }]
     : change.op === 'move' ? [{ node: change.from }, { node: change.to }]
     : [{ node: change.op === 'put' ? change.node.$path : change.path }])
 }
@@ -400,9 +474,9 @@ export async function selectChangeStore(changes: readonly ChangeMember[], source
   let store: Store | undefined
   for (const change of changes) {
     const path = change.op === 'put' ? change.node.$path : change.op === 'move' ? change.from
-      : change.op === 'restore' ? '/' : change.path
-    if (change.op !== 'restore') ownership.pin({ node: path })
-    const target = change.op === 'restore' ? await ownership.journalTarget(change.record) : source.resolve(path)
+      : change.op === 'restore' || change.op === 'undo' ? '/' : change.path
+    if (change.op !== 'restore' && change.op !== 'undo') ownership.pin({ node: path })
+    const target = change.op === 'restore' || change.op === 'undo' ? await ownership.journalTarget(change.record) : source.resolve(path)
     if (store !== undefined && store !== target.store)
       throw new KernelError('CROSS_DOMAIN', 'ChangeSet spans atomic Store owners')
     store = target.store

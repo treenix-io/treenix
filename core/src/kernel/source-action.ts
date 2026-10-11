@@ -139,6 +139,7 @@ async function* executeSource(
           case 'remove': context.change.remove(value.path); break;
           case 'move': context.change.move(value.from, value.to); break;
           case 'restore': context.change.restore(value.record); break;
+          case 'undo': context.change.undo(value.record); break;
         }
         reply = { value: null };
       }

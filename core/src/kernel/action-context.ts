@@ -126,6 +126,7 @@ export function createWriteActionContext(
     remove: (path) => changes().remove(path),
     move: (from, to) => changes().move(from, to),
     restore: (record) => changes().restore(record),
+    undo: (record) => changes().undo(record),
   }
   const context: WriteActionContext = {
     get node() {

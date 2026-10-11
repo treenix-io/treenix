@@ -133,7 +133,7 @@ export function createCommands(options: CommandOptions) {
             capabilities = options.capabilities(budget);
           const ownership = reader(budget, source, authorization);
           let selectedStore: Store;
-          if (request.changes.some((change) => change.op === 'restore'))
+          if (request.changes.some((change) => change.op === 'restore' || change.op === 'undo'))
             selectedStore = await writer.read(source.domains, async () => {
               await authorization.validate(source.auth);
               return selectChangeStore(request.changes, source, ownership, source.resolve('/').store);

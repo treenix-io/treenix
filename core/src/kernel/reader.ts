@@ -876,6 +876,7 @@ export function createReader(options: ReaderOptions) {
           }
           entries.set(journalKey(address), {
             address,
+            kind: record.kind,
             path: entry.path,
             executor: record.executor,
             caller: record.caller,

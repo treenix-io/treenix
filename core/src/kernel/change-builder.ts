@@ -32,6 +32,7 @@ export function createChangeBuilder(active: () => void, limits: Limits) {
     remove: (path: Path) => add({ op: 'remove', path }),
     move: (from: Path, to: Path) => add({ op: 'move', from, to }),
     restore: (record: JournalAddress) => add({ op: 'restore', record }),
+    undo: (record: JournalAddress) => add({ op: 'undo', record }),
   })
   return { change,
     /** Seal the complete owned change set for the native writer. */

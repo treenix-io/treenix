@@ -195,6 +195,7 @@ export interface JournalAddress {
 
 export interface HistoryEntry {
   readonly address: JournalAddress
+  readonly kind: JournalCommit['kind']
   readonly path: Path
   readonly executor: Executor
   readonly caller: Executor
@@ -251,6 +252,7 @@ export type ChangeMember =
   | { readonly op: 'remove'; readonly path: Path }
   | { readonly op: 'move'; readonly from: Path; readonly to: Path }
   | { readonly op: 'restore'; readonly record: JournalAddress }
+  | { readonly op: 'undo'; readonly record: JournalAddress }
 
 /**
  * What the caller read; the commit fails with CONFLICT if any of it changed. Evaluated in the
@@ -598,6 +600,7 @@ export interface ChangeBuilder {
   remove(path: Path): void
   move(from: Path, to: Path): void
   restore(record: JournalAddress): void
+  undo(record: JournalAddress): void
 }
 
 export interface ReadActionContext {
