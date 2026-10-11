@@ -13,6 +13,7 @@ export interface UpgradeDeployment {
   readonly registry: Registry
   readonly anonymous?: UpgradeOptions['anonymous']
   readonly mongoClusters?: UpgradeOptions['mongoClusters']
+  readonly mongoConnections?: UpgradeOptions['mongoConnections']
   readonly mongoPosition?: UpgradeOptions['mongoPosition']
   readonly resolveDeny?: UpgradeOptions['resolveDeny']
 }
@@ -22,6 +23,16 @@ function deployment(value: unknown): value is UpgradeDeployment {
   const input = upgradeObject(value)
   const registry = upgradeObject(input.registry)
   if (input.mongoPosition !== undefined && !isPosition(input.mongoPosition)) return false
+  if (input.mongoConnections !== undefined) {
+    const connections = upgradeObject(input.mongoConnections)
+    for (const [uri, value] of Object.entries(connections)) {
+      const binding = upgradeObject(value)
+      if (!uri.startsWith('mongodb://') && !uri.startsWith('mongodb+srv://')
+        || typeof binding.cluster !== 'string' || binding.cluster.length === 0
+        || typeof binding.path !== 'string' || !safePath(binding.path)
+        || Object.keys(binding).some(key => key !== 'cluster' && key !== 'path')) return false
+    }
+  }
   return typeof registry.digest === 'string' && ['module', 'publish', 'type', 'security', 'handler'].every(name => typeof registry[name] === 'function')
 }
 
