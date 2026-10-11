@@ -3,7 +3,7 @@ import { normalizeType } from '#core/component'
 import { passwordPath } from '#kernel/auth/crypto'
 import { isRecord } from '#util/is-record'
 import { assertSafePath } from '#core/path'
-import type { Position } from '#kernel/types'
+import type { AclEntry, Position } from '#kernel/types'
 
 export interface UpgradeDocument {
   readonly path: string
@@ -29,6 +29,7 @@ export interface UpgradeOptions {
   readonly validate: (component: Readonly<Record<string, unknown>>, path: string) => readonly string[]
   readonly anonymous?: { readonly instance: string; readonly key: string }
   readonly mongoClusters?: Readonly<Record<string, string>>
+  readonly mongoConnections?: Readonly<Record<string, { readonly cluster: string; readonly path: string }>>
   readonly mongoPosition?: Position
   readonly resolveDeny?: (path: string, group: string, permission: number) => 'retain' | 'remove' | undefined
 }
@@ -104,6 +105,7 @@ export function planKernelUpgrade(input: readonly UpgradeDocument[], options: Up
   const id = options.id ?? randomUUID
   const report = (path: string, code: string, severity: UpgradeFinding['severity']) => findings.push({ path, code, severity })
 
+  const mongoConnections = new Map<string, { readonly uri: string; readonly cluster: string; readonly acl: AclEntry[]; readonly principals: Set<string> }>()
   const byPath = new Map(documents.map(document => [document.path, document]))
   for (const document of documents) {
     if (document.body.$type !== 'moved' && document.body.$type !== 't.moved') continue
@@ -313,9 +315,33 @@ export function planKernelUpgrade(input: readonly UpgradeDocument[], options: Up
           if (component.watch === true) component.external = 'trusted'
           if ('watch' in component) { delete component.watch; report(path, 'CONVERTED_MONGO_WATCH_POLICY', 'change') }
           if (typeof component.uri === 'string' && component.uri.length > 0) {
-            const cluster = options.mongoClusters?.[component.uri]
+            const connection = options.mongoConnections?.[component.uri]
+            const cluster = connection?.cluster ?? options.mongoClusters?.[component.uri]
             if (cluster === undefined) report(path, 'MONGO_CLOSED_BINDING_REQUIRED', 'error')
-            else {
+            else if (connection !== undefined) {
+              assertSafePath(connection.path)
+              let prepared = mongoConnections.get(connection.path)
+              if (prepared === undefined && paths.has(connection.path)
+                || prepared !== undefined && (prepared.uri !== component.uri || prepared.cluster !== cluster))
+                report(path, 'MONGO_CONNECTION_TARGET_OCCUPIED', 'error')
+              else {
+                if (prepared === undefined) {
+                  const acl: AclEntry[] = [{ subject: { group: 'admins' }, grant: 7 }]
+                  prepared = { uri: component.uri, cluster, acl, principals: new Set<string>() }
+                  mongoConnections.set(connection.path, prepared)
+                  paths.add(connection.path)
+                  documents.push({ path: connection.path, body: { $type: 't.mongo.connection', $id: id(), uri: component.uri, $acl: acl } })
+                }
+                const principal = `n:${body.$id}`
+                if (!prepared.principals.has(principal)) {
+                  prepared.principals.add(principal)
+                  prepared.acl.push({ subject: { group: principal }, grant: 1 })
+                }
+                component.cluster = cluster
+                delete component.uri
+                report(path, 'SPLIT_CLOSED_MONGO_CONNECTION', 'change')
+              }
+            } else {
               component.cluster = cluster
               delete component.uri
               report(path, 'MONGO_SECRET_MOVED_TO_EXPLICIT_BINDING', 'change')
