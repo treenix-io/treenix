@@ -719,10 +719,12 @@ export interface TypeDef {
 }
 
 /**
- * Only rights inputs and immutable identity: a rule reading node fields or the address would make every
+ * Only rights metadata and immutable identity: a rule reading node fields or the address would make every
  * field, or a move, a rights input. Conditions on the place in the tree belong to the subtree's ACL.
  */
 export interface RuleInput {
+  /** Grants authored on this node for the exact actor principal. */
+  readonly principalGrant: Bits
   readonly id: NodeId
   /** The nearest `$owner` at the node or above. */
   readonly owner?: Principal
@@ -1346,6 +1348,12 @@ export type MountStoreResources = Pick<StreamDomain, 'epoch' | 'persistent'> & {
 /** A handler owns its target's release; a Store supplies its actual continuity and fencing token. */
 export type OpenedStoreMountTarget = Extract<MountTarget, { readonly kind: 'store' }> & {
   readonly resources: MountStoreResources
+  readonly credentialDependency?: {
+    readonly path: Path
+    check(): Promise<void>
+    invalidate(): void
+    ownObservation(stop: () => void): void
+  }
   close(): Promise<void>
 }
 

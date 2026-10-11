@@ -91,22 +91,34 @@ describe('node rights', () => {
     assert.equal(evaluate([input('/', {}, 'test.open')], actor(), types).bits, 0)
   })
 
-  it('gives rules only actor, admin, identity and the nearest owner', () => {
+  it('gives rules only actor, admin, identity, nearest owner and direct principal grants', () => {
     const who = actor(['readers'])
     let seen = 0
     const types = registry({ 'test.inspect': args => {
       seen++
-      assert.deepEqual(Object.keys(args).sort(), ['actor', 'admin', 'id', 'owner'])
+      assert.deepEqual(Object.keys(args).sort(), ['actor', 'admin', 'id', 'owner', 'principalGrant'])
       assert.equal(args.actor, who)
       assert.equal(args.admin, true)
       assert.equal(args.id, 'id:/p')
       assert.equal(args.owner, 'u:alice')
+      assert.equal(args.principalGrant, 0)
       return R
     } })
     const result = evaluate([input('/', { $owner: 'u:alice', $acl: [grant('readers', ALL)] }),
       input('/p', { private: 'data' }, 'test.inspect')], who, types)
     assert.equal(result.bits, R)
     assert.equal(seen, 1)
+  })
+
+  it('distinguishes direct principal grants from inherited groups without bypassing deny or scope', () => {
+    const who = actor(['readers'], 'n:executor')
+    const types = registry({ 'test.closed': args => args.principalGrant & R })
+    const root = input('/', { $acl: [grant('readers', R)] })
+    const closed = input('/closed', { $acl: [grant('n:executor', R)] }, 'test.closed')
+    assert.equal(evaluate([root, input('/closed', {}, 'test.closed')], who, types).bits, 0)
+    assert.equal(evaluate([root, closed], who, types).bits, R)
+    assert.equal(evaluate([input('/', { $acl: [deny('readers', R)] }), closed], who, types).bits, 0)
+    assert.equal(evaluate([root, closed], { ...who, scope: ['/other'] }, types).bits, 0)
   })
 
   it('narrows root A before passing the final admin flag to descendant rules', () => {

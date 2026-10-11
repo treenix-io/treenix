@@ -661,6 +661,19 @@ export function createMountTable(options: MountTableOptions) {
       })
       for (const entry of selected) await prepareEntry(entry, budget, signal)
     },
+    /** Re-admit an unchanged declaration when its closed credential generation retires. */
+    invalidateCredential(key: string, generation: string): void {
+      available()
+      const entry = entries.get(key)
+      if (entry === undefined || entry.range.generation !== generation || entry.retired) return
+      const before = acceptedRanges
+      entries = new Map(entries).set(key, entryOf(entry))
+      acceptedRanges = Object.freeze([...entries.values()].map(value => value.range)
+        .concat([...blocked.values()].map(value => value.range)))
+      version++
+      retire(entry)
+      options.changed(before, acceptedRanges)
+    },
     /** Rebind accepted declarations after owner publication without relinquishing their claimed ranges. */
     registryChanged(): void {
       available()

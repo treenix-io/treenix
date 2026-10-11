@@ -6,6 +6,7 @@ import { actorDependencyVersion, createActorResolver, type ActorDependency, type
   type AuthReadSource, type AuthSource } from '#kernel/session'
 import type { Actor, Credential, InstanceId, NodeId, Path, Registry, RightsPrefix, ShardEnvelope, StoredNode, StorageFaultChange } from '#kernel/types'
 import { stableJson } from '#util/stable-json'
+import { readAcceptedNode, type AcceptedNodeRead } from '#kernel/writer'
 
 export interface AuthChange { readonly id: NodeId; readonly node: StoredNode | null }
 export type AuthEvent = { readonly t: 'nodes'; readonly changes: readonly AuthChange[] } | { readonly t: 'registry' }
@@ -191,6 +192,18 @@ export function createAuthFactory(options: AuthFactoryOptions) {
     openNode(path: Path): Promise<AuthAdmission> {
       available()
       return source.read(async read => admit(await resolver.resolveNodeIn(read, path)))
+    },
+    /** The Writer may supply its already-held accepted read authority during a canonical switch. */
+    async openNodeIn(owner: AcceptedNodeRead): Promise<AuthAdmission> {
+      available()
+      return admit(await resolver.resolveNodeIn({
+        async node(path) {
+          if (path !== owner.path) throw new KernelError('INVALID', 'Accepted owner cannot read another executor')
+          return readAcceptedNode(owner)
+        },
+        async nodeById() { throw new KernelError('INVALID', 'Accepted owner does not expose an identity reader') },
+        shard: () => false,
+      }, owner.path))
     },
     close() {
       if (closed) return

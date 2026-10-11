@@ -73,16 +73,20 @@ export function computeRights(actor: Actor, chain: readonly ChainNode[], registr
       continue
     }
     if (node.owner !== undefined) owner = node.owner
+    let principalGrant = 0
     for (const entry of node.acl) {
       const matches = 'group' in entry.subject ? claims.has(entry.subject.group) : actor.principal === owner
       if (!matches) continue
-      if ('grant' in entry) granted |= entry.grant
+      if ('grant' in entry) {
+        granted |= entry.grant
+        if ('group' in entry.subject && entry.subject.group === actor.principal) principalGrant |= entry.grant
+      }
       else if (!aboveA) denied |= entry.deny
     }
     const scoped = actor.scope === undefined || actor.scope.some(path => path === node.path || isChildPath(path, node.path, false))
     bits = scoped ? granted & ~denied & ALL : 0
     const root = prefix === undefined && node.path === '/'
-    const ruleMask = rules(node, registry, { id: node.id, owner, actor, admin: root ? (bits & A) !== 0 : admin }, alerts)
+    const ruleMask = rules(node, registry, { id: node.id, owner, actor, principalGrant, admin: root ? (bits & A) !== 0 : admin }, alerts)
     bits &= ruleMask
     if (node.invalid === 'node') bits = 0
     if (root) admin = (bits & A) !== 0

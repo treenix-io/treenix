@@ -1660,6 +1660,14 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
         return { session: opened.session, admission: opened.admission, close: () => opened.session.close() }
       },
 
+      reserveSession(node) {
+        if (sessions === undefined) throw new KernelError('UNAUTHENTICATED', 'Mount handlers require a node session')
+        const reservation = sessions.reserveNode(node.$path, node.$id)
+        return { validate: reservation.validate,
+          async open(owner) { return mountSession(await reservation.open(owner, { heartbeat: false })) },
+          close: reservation.close }
+      },
+
       async activate(entry, target, owner) {
         if (target.kind === 'authority') {
           if (target.authority.kind === 'shard') {
@@ -1722,6 +1730,21 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
           return
         }
         if (target.kind !== 'store') throw new KernelError('UNAVAILABLE', 'Mount target is not a supported Store')
+        if (target.credentialDependency !== undefined) {
+          const dependency = target.credentialDependency
+          const stop = observeCredential({ path: dependency.path, registry,
+            source: () => readerSource(budget()),
+            observe(receive) { listeners.add(receive); return () => listeners.delete(receive) },
+            topology: topologyChanged }, () => {
+              dependency.invalidate()
+              mounts!.invalidateCredential(entry.key, entry.range.generation)
+            })
+          dependency.ownObservation(stop)
+          try { await dependency.check() } catch (error) {
+            stop()
+            throw error
+          }
+        }
         const recovered = await reopenTransferSource(config.root, config.writerEpoch, entry, target, mounts!, registry, budget())
         if (recovered !== undefined) {
           preparedTransferSources.set(target.store, recovered)
@@ -1758,7 +1781,10 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
           await target.close?.()
           return
         }
-        if (target.kind === 'store') await stopExternal(target.store)
+        if (target.kind === 'store') {
+          target.credentialDependency?.ownObservation(() => {})
+          await stopExternal(target.store)
+        }
         await writer.retireTarget(entry.key, entry.revision)
       },
       changed(before, after) {
