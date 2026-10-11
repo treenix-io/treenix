@@ -1,3 +1,4 @@
+import type { PresentationNode } from '@treenx/react';
 // MindMapBranch — recursive node component
 // Each instance calls useChildren when expanded, parent draws curves
 
@@ -45,7 +46,7 @@ function sCurve(dx: number, dy: number): string {
 }
 
 type BranchProps = {
-  node: NodeData;
+  node: PresentationNode;
   side: 'left' | 'right';
   color: string;
   depth: number;

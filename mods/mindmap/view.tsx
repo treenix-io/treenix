@@ -5,7 +5,7 @@ import type { NodeData } from '@treenx/core';
 import { register } from '@treenx/core';
 import type { View } from '@treenx/react';
 import { useChildren } from '@treenx/react';
-import { createNode, removeNode } from '@treenx/react';
+import { useTreeEffects } from '@treenx/react';
 import { select } from 'd3-selection';
 import 'd3-transition';
 import { zoom as d3zoom, type D3ZoomEvent, type ZoomBehavior, zoomIdentity } from 'd3-zoom';
@@ -35,6 +35,7 @@ function basename(path: string): string {
 }
 
 const MindMapView: View<MindMapConfig> = ({ value, ctx }) => {
+  const { createNode, removeNode } = useTreeEffects();
   const rootPath = value.root || ctx?.node?.$path || '/';
   const rootName = basename(rootPath);
 
@@ -129,7 +130,7 @@ const MindMapView: View<MindMapConfig> = ({ value, ctx }) => {
     const childPath = `${parentPath}/${name}`;
     createNode(childPath, 'dir');
     setEditingAt(null);
-  }, []);
+  }, [createNode]);
 
   const handleCancelAdd = useCallback(() => setEditingAt(null), []);
 
@@ -138,7 +139,7 @@ const MindMapView: View<MindMapConfig> = ({ value, ctx }) => {
     if (!confirm(`Delete ${basename(path)}?`)) return;
     removeNode(path);
     setSelectedPath(null);
-  }, [rootPath]);
+  }, [rootPath, removeNode]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {

@@ -1,7 +1,7 @@
 // Mind map sidebar — shows selected node details
 // Lightweight panel: path, type, components, fields, actions
 
-import { execute, usePath } from '@treenx/react';
+import { useTreeEffects, usePath } from '@treenx/react';
 import { getActions, getComponents, getPlainFields, getSchema } from '@treenx/react/mods/editor-ui/node-utils';
 import { Button } from '@treenx/react/ui/button';
 
@@ -17,6 +17,7 @@ function shortType(type: string): string {
 }
 
 export function MindMapSidebar({ path, onClose, onNavigate }: Props) {
+  const { execute } = useTreeEffects();
   const { data: node } = usePath(path);
 
   if (!node) {

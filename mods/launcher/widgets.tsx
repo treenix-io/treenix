@@ -1,3 +1,4 @@
+import type { PresentationNode } from '@treenx/react';
 // Launcher widgets — react:widget context for compact live views on the home screen
 
 import { type NodeData, register } from '@treenx/core';
@@ -27,7 +28,7 @@ function KanbanWidgetInner({ path }: { path: string }) {
   );
 }
 
-function ColumnRow({ col }: { col: NodeData }) {
+function ColumnRow({ col }: { col: PresentationNode }) {
   const { data: tasks } = useChildren(col.$path, { watch: true, watchNew: true });
   const label = typeof col.label === 'string' ? col.label : col.$path.split('/').at(-1) || '?';
   const color = typeof col.color === 'string' ? col.color : 'border-border';

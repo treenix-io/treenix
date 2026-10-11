@@ -1,23 +1,24 @@
+import type { PresentationNode } from '@treenx/react';
 import type { NodeData } from '@treenx/core';
 import { getComponents } from '@treenx/core';
 import { useMemo } from 'react';
 import { type QueryFilter } from './types';
 
-function f(node: NodeData, key: string): string {
+function f(node: PresentationNode, key: string): string {
   const v = node[key];
   if (typeof v === 'string') return v;
   if (typeof v === 'number' || typeof v === 'boolean') return String(v);
   return '';
 }
 
-function matchFilters(node: NodeData, filters: QueryFilter[]): boolean {
+function matchFilters(node: PresentationNode, filters: QueryFilter[]): boolean {
   return filters.every(({ field, value }) => {
     if (!field || !value) return true;
     return f(node, field).toLowerCase().includes(value.toLowerCase());
   });
 }
 
-export function useFiltered(children: NodeData[], typeFilter: string, filters: QueryFilter[]) {
+export function useFiltered(children: PresentationNode[], typeFilter: string, filters: QueryFilter[]) {
   return useMemo(() => {
     let result = children;
     if (typeFilter) result = result.filter(c =>
@@ -28,7 +29,7 @@ export function useFiltered(children: NodeData[], typeFilter: string, filters: Q
   }, [children, typeFilter, filters]);
 }
 
-export function useChildTypes(children: NodeData[]) {
+export function useChildTypes(children: PresentationNode[]) {
   return useMemo(() => {
     const types = new Set<string>();
     for (const c of children) {

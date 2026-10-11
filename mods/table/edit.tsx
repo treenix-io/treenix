@@ -1,3 +1,4 @@
+import type { PresentationNode } from '@treenx/react';
 import { type ComponentData, isComponent, type NodeData, register } from '@treenx/core';
 import type { TypeSchema } from '@treenx/core/schema/types';
 import { useCurrentNode } from '@treenx/react';
@@ -54,7 +55,7 @@ function buildFieldTree(schema: TypeSchema | null, sample: Record<string, unknow
 
 // ── Helpers ──
 
-function resolveDisplayType(child: NodeData, field: string): string {
+function resolveDisplayType(child: PresentationNode, field: string): string {
   if (!field) return child.$type;
   const val = (child as any)[field];
   return val?.$type ?? '';
@@ -74,7 +75,7 @@ function TableEditView({ value, onChange }: { value: ComponentData; onChange?: (
 
   // Detect types
   const { types, typeMap } = useMemo(() => {
-    const map = new Map<string, NodeData[]>();
+    const map = new Map<string, PresentationNode[]>();
     for (const child of children) {
       const dt = resolveDisplayType(child, state.field ?? '');
       if (!dt) continue;

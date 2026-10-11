@@ -1,8 +1,9 @@
+import type { PresentationNode } from '@treenx/react';
 // Universal component views — compact, embeddable in any node
 
 import { type NodeData, register } from '@treenx/core';
 import { type View, useActions } from '@treenx/react';
-import { patchNode } from '@treenx/react';
+import { useTreeEffects } from '@treenx/react';
 import { cn } from '@treenx/react';
 import { Button } from '@treenx/react/ui/button';
 import { Input } from '@treenx/react/ui/input';
@@ -578,7 +579,7 @@ register(TTimeTrack, 'react', TimeTrackRead);
 
 // ── AttachMenu — universal "add component" popover ──
 
-function getAttachedKeys(node: NodeData): Set<string> {
+function getAttachedKeys(node: PresentationNode): Set<string> {
   const keys = new Set<string>();
   for (const k of Object.keys(node)) {
     if (k.startsWith('$')) continue;
@@ -647,7 +648,8 @@ function AttachDropdown({ items, onSelect, onClose }: {
   );
 }
 
-export function AttachMenu({ node }: { node: NodeData }) {
+export function AttachMenu({ node }: { node: PresentationNode }) {
+  const { patchNode } = useTreeEffects();
   const [open, setOpen] = useState(false);
   const attached = getAttachedKeys(node);
 

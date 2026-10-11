@@ -6,7 +6,12 @@ import { foldPartial, mergeIntoNode, mergeToOps, type OnChange, scopeOnChange } 
 import type { NodeData } from '@treenx/core';
 import * as cache from '#tree/cache';
 import { useDebounce } from '#lib/use-debounce';
+import { KernelError } from '@treenx/core/errors';
+import { legacyTreeEffects } from '#hooks';
+import { READ_ONLY_EFFECTS, useTreeEffects } from '#tree/effects';
 import { treeClient } from '#tree/tree-client';
+import { useOptionalTreeSource } from '#tree/tree-source-context';
+import type { PresentationNode } from '#tree/presentation';
 
 export { type OnChange, mergeToOps, mergeIntoNode, scopeOnChange } from '#tree/on-change';
 export type { MutationOp } from '#tree/on-change';
@@ -51,16 +56,53 @@ export type SaveHandle<T = NodeData> = {
   stale: boolean;
 };
 
-export function useSave(path: string, options?: SaveOptions): SaveHandle {
+interface SaveOwner<T extends PresentationNode> {
+  readonly effects: typeof legacyTreeEffects;
+  readonly read: (path: string) => T | undefined;
+  readonly subscribe: (path: string, changed: () => void) => () => void;
+  readonly mount?: (path: string) => { dispose(): void };
+}
+
+const LEGACY_SAVE_OWNER: SaveOwner<NodeData> = {
+  effects: legacyTreeEffects, read: cache.get, subscribe: cache.subscribePath,
+};
+
+/** Keeps the legacy inspector on its existing cache and mutation owner. */
+export function useLegacySave(path: string, options?: SaveOptions): SaveHandle {
+  return useOwnedSave(path, options, LEGACY_SAVE_OWNER);
+}
+
+/** Owns local editor drafts through the selected source and its mutation capability. */
+export function useSave(path: string, options?: SaveOptions): SaveHandle<PresentationNode> {
+  const source = useOptionalTreeSource();
+  const owner = useMemo<SaveOwner<PresentationNode>>(() => source === null ? LEGACY_SAVE_OWNER : {
+    effects: source.effects ?? READ_ONLY_EFFECTS,
+    read: selected => source.getPathSnapshot(selected).data,
+    subscribe: (selected, changed) => source.subscribePath(selected, changed),
+    mount: selected => source.mountPath(selected),
+  }, [source]);
+  return useOwnedSave(path, options, owner);
+}
+
+/** Shares draft buffering while each caller supplies its actual read and mutation owner. */
+function useOwnedSave<T extends PresentationNode>(path: string, options: SaveOptions | undefined, owner: SaveOwner<T>): SaveHandle<T> {
+  const effects = owner.effects;
+  const legacy = effects === legacyTreeEffects;
+  const readNode = owner.read;
   const autoSave = options?.autoSave ?? false;
   const delay = options?.delay ?? DEFAULT_DELAY;
   const cacheThrottle = options?.cacheThrottle ?? DEFAULT_CACHE_THROTTLE;
 
   // Reactive read from cache — re-renders when path's cache entry changes
   const node = useSyncExternalStore(
-    useCallback((cb) => cache.subscribePath(path, cb), [path]),
-    useCallback(() => cache.get(path), [path]),
+    useCallback((cb) => owner.subscribe(path, cb), [path, owner]),
+    useCallback(() => readNode(path), [path, readNode]),
+    useCallback(() => readNode(path), [path, readNode]),
   );
+  useEffect(() => {
+    const handle = owner.mount?.(path);
+    return () => handle?.dispose();
+  }, [path, owner]);
 
   const pending = useRef<Record<string, unknown> | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -90,15 +132,24 @@ export function useSave(path: string, options?: SaveOptions): SaveHandle {
 
   // Debounced cache fanout — other path subscribers update after a typing pause
   useDebounce(() => {
-    if (!pending.current) return;
+    if (!legacy || !pending.current) return;
     const cached = cache.get(pathRef.current);
     if (cached) cache.put(mergeIntoNode(cached, pending.current));
   }, cacheThrottle, [version]);
 
   // Reset on path change
   const prevPathRef = useRef(path);
-  if (path !== prevPathRef.current) {
+  const prevEffectsRef = useRef(effects);
+  const prevOwnerRef = useRef(owner);
+  const mountedOwner = useRef(true);
+  useEffect(() => {
+    mountedOwner.current = true;
+    return () => { if (owner === prevOwnerRef.current) mountedOwner.current = false; };
+  }, [owner]);
+  if (path !== prevPathRef.current || owner !== prevOwnerRef.current) {
     prevPathRef.current = path;
+    prevEffectsRef.current = effects;
+    prevOwnerRef.current = owner;
     genRef.current++;
     pending.current = null;
     clearTimer();
@@ -106,8 +157,15 @@ export function useSave(path: string, options?: SaveOptions): SaveHandle {
     inflightRef.current = null;
     clearEdit();
   }
+  const ownerGeneration = genRef.current;
+  /** Refuses callbacks retained by an editor whose selected owner or path has changed. */
+  function assertOwner(): void {
+    if (owner !== prevOwnerRef.current || path !== pathRef.current || !legacy && (!mountedOwner.current || ownerGeneration !== genRef.current))
+      throw new KernelError('CANCELLED', 'Save owner changed');
+  }
 
   const flush = useCallback(async (): Promise<void> => {
+    assertOwner();
     // A flush called while another is inflight must await THAT request's real
     // outcome (rejecting if it rejects), then flush whatever accumulated —
     // resolving early made callers toast 'Saved' for an unfinished commit
@@ -136,14 +194,15 @@ export function useSave(path: string, options?: SaveOptions): SaveHandle {
     }
 
     // Final cache commit — single put before server send (also triggers re-render via subscription)
-    const cached = cache.get(pathRef.current);
+    const cached = legacy ? cache.get(pathRef.current) : undefined;
     if (cached) cache.put(mergeIntoNode(cached, partial));
 
     inflight.current = true;
     const gen = genRef.current;
     const run = (async () => {
       try {
-        await treeClient.commit([{ kind: 'patch', path: pathRef.current, ops }]);
+        if (legacy) await treeClient.commit([{ kind: 'patch', path: pathRef.current, ops }]);
+        else await effects.patchNode(pathRef.current, partial);
       } catch (e) {
         // Failed write: restore pending so the edits are NOT lost (dirty stays
         // true) and rethrow — a swallowed reject made 'flush then toast' callers
@@ -179,23 +238,26 @@ export function useSave(path: string, options?: SaveOptions): SaveHandle {
       // it resets the new path's timer (core-anz4.17).
       if (genRef.current === gen) bump();
     }
-  }, [autoSave, clearEdit, clearTimer, delay]);
+  }, [autoSave, clearEdit, clearTimer, delay, effects, legacy, path, owner, ownerGeneration]);
 
   const settle = useCallback(async (): Promise<void> => {
+    if (!legacy) assertOwner();
     const running = inflightRef.current;
     // allSettled: wait for the real outcome without re-throwing here — the
     // flush() that owns this promise already surfaces/logs any rejection.
     if (running) await Promise.allSettled([running]);
-  }, []);
+  }, [legacy, owner, path, ownerGeneration]);
 
   const onChange = useCallback((partial: OnChange) => {
+    assertOwner();
     // Folded first: an invalid partial throws INVALID to the caller before any edit state changes.
     const next = foldPartial(pending.current ?? {}, partial);
 
     // Track dirty state — capture snapshot + $rev on first edit for reset/stale detection
     if (!pending.current) {
-      const cached = cache.get(pathRef.current);
-      baseRef.current = cached ? structuredClone(cached) : null;
+      const cached = readNode(pathRef.current);
+      const legacyBase = legacy ? cache.get(pathRef.current) : undefined;
+      baseRef.current = legacyBase ? structuredClone(legacyBase) : null;
       editRevRef.current = cached?.$rev ?? null;
     }
 
@@ -210,36 +272,39 @@ export function useSave(path: string, options?: SaveOptions): SaveHandle {
     }
     // delay/autoSave captured transitively via flush — listing them here is redundant
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [flush]);
+  }, [flush, readNode, legacy]);
 
   const scope = useCallback((key: string) => scopeOnChange(onChange, key), [onChange]);
 
   const reset = useCallback(() => {
+    assertOwner();
     pending.current = null;
     clearTimer();
     if (baseRef.current) cache.put(baseRef.current);
     clearEdit();
     bump();
-  }, [clearEdit, clearTimer]);
+  }, [clearEdit, clearTimer, effects, path, owner, ownerGeneration]);
 
   const discard = useCallback(() => {
+    assertOwner();
     pending.current = null;
     clearTimer();
     clearEdit();
     bump();
-  }, [clearEdit, clearTimer]);
+  }, [clearEdit, clearTimer, effects, path, owner, ownerGeneration]);
 
   // Flush on unmount
   useEffect(() => () => {
+    if (owner !== prevOwnerRef.current) return;
     if (timer.current) clearTimeout(timer.current);
     const partial = pending.current;
     if (!partial) return;
     const ops = mergeToOps(partial);
     if (ops.length > 0) {
-      treeClient.commit([{ kind: 'patch', path: pathRef.current, ops }])
+      (legacy ? treeClient.commit([{ kind: 'patch', path: pathRef.current, ops }]) : effects.patchNode(pathRef.current, partial))
         .catch(e => console.error('[useSave] unmount flush failed:', e));
     }
-  }, []);
+  }, [effects, legacy, owner]);
 
   // Derived dirty — pending + inflight are the real sources of truth (bumps re-render)
   const dirty = !!pending.current || inflight.current;
@@ -265,7 +330,7 @@ export function useSave(path: string, options?: SaveOptions): SaveHandle {
 }
 
 /** useSave with autoSave enabled — throttled flush on every onChange */
-export function useAutoSave(path: string, options?: Omit<SaveOptions, 'autoSave'>): SaveHandle {
+export function useAutoSave(path: string, options?: Omit<SaveOptions, 'autoSave'>): SaveHandle<PresentationNode> {
   return useSave(path, { ...options, autoSave: true });
 }
 
@@ -287,6 +352,9 @@ export type PathSaveHandle = {
 };
 
 export function usePathSave(options?: { delay?: number; cacheThrottle?: number }): PathSaveHandle {
+  const effects = useTreeEffects();
+  const ownerRef = useRef(effects);
+  const generation = useRef(0);
   const delay = options?.delay ?? DEFAULT_DELAY;
   const cacheThrottle = options?.cacheThrottle ?? DEFAULT_CACHE_THROTTLE;
 
@@ -301,8 +369,17 @@ export function usePathSave(options?: { delay?: number; cacheThrottle?: number }
     timer.current = null;
   }, []);
 
+  if (ownerRef.current !== effects) {
+    ownerRef.current = effects;
+    generation.current++;
+    pending.current.clear(); handleCache.current.clear(); clearTimer();
+    inflight.current = null;
+  }
+  const ownerGeneration = generation.current;
+
   // Debounced cache fanout — all dirty paths committed to cache after a pause
   useDebounce(() => {
+    if (effects !== legacyTreeEffects) return;
     for (const [p, partial] of pending.current) {
       const cached = cache.get(p);
       if (cached) cache.put(mergeIntoNode(cached, partial));
@@ -310,26 +387,31 @@ export function usePathSave(options?: { delay?: number; cacheThrottle?: number }
   }, cacheThrottle, [version]);
 
   const flush = useCallback(async () => {
+    if (ownerRef.current !== effects || generation.current !== ownerGeneration) throw new KernelError('CANCELLED', 'Save owner was replaced');
     if (inflight.current) {
       await inflight.current;
       if (pending.current.size > 0) return flush();
       return;
     }
     clearTimer();
+    const epoch = generation.current;
     const entries = [...pending.current];
     pending.current.clear();
     if (entries.length === 0) return;
 
     // Final commit per path before server send
     for (const [p, partial] of entries) {
-      const cached = cache.get(p);
-      if (cached) cache.put(mergeIntoNode(cached, partial));
+      if (effects === legacyTreeEffects) {
+        const cached = cache.get(p);
+        if (cached) cache.put(mergeIntoNode(cached, partial));
+      }
     }
 
     const run = (async () => {
       const settled = await Promise.allSettled(entries.map(([path, partial]) => {
         const ops = mergeToOps(partial);
-        return ops.length > 0 ? treeClient.commit([{ kind: 'patch', path, ops }]) : Promise.resolve();
+        return ops.length === 0 ? Promise.resolve() : effects === legacyTreeEffects
+          ? treeClient.commit([{ kind: 'patch', path, ops }]) : effects.patchNode(path, partial);
       }));
 
       // A failed path keeps its edits pending under the ones made since, so the next change or flush resends them.
@@ -337,7 +419,7 @@ export function usePathSave(options?: { delay?: number; cacheThrottle?: number }
       settled.forEach((r, i) => {
         if (r.status === 'fulfilled') return;
         const [path, partial] = entries[i];
-        pending.current.set(path, foldPartial(partial, pending.current.get(path) ?? {}));
+        if (generation.current === epoch) pending.current.set(path, foldPartial(partial, pending.current.get(path) ?? {}));
         failures.push(r.reason);
       });
 
@@ -350,9 +432,10 @@ export function usePathSave(options?: { delay?: number; cacheThrottle?: number }
     } finally {
       if (inflight.current === run) inflight.current = null;
     }
-  }, [clearTimer]);
+  }, [clearTimer, effects, ownerGeneration]);
 
   const change = useCallback((path: string, partial: OnChange) => {
+    if (ownerRef.current !== effects || generation.current !== ownerGeneration) throw new KernelError('CANCELLED', 'Save owner was replaced');
     pending.current.set(path, foldPartial(pending.current.get(path) ?? {}, partial));
     bump();
 
@@ -363,37 +446,45 @@ export function usePathSave(options?: { delay?: number; cacheThrottle?: number }
         flush().catch((e: unknown) => console.error('[usePathSave] save failed; edits stay pending:', e));
       }, delay);
     }
-  }, [flush, delay]);
+  }, [flush, delay, effects, ownerGeneration]);
 
   // Ref so cached handles always call latest change (no stale closures)
   const changeRef = useRef(change);
   changeRef.current = change;
 
   const getHandle = useCallback((childPath: string): PathHandle => {
+    if (ownerRef.current !== effects || generation.current !== ownerGeneration) throw new KernelError('CANCELLED', 'Save owner was replaced');
     const cached = handleCache.current.get(childPath);
     if (cached) return cached;
 
+    const ownedChange = (partial: OnChange) => {
+      if (ownerRef.current !== effects || generation.current !== ownerGeneration) throw new KernelError('CANCELLED', 'Save owner was replaced');
+      changeRef.current(childPath, partial);
+    };
     const handle: PathHandle = {
-      onChange: (partial) => changeRef.current(childPath, partial),
-      scope: (key) => scopeOnChange((partial) => changeRef.current(childPath, partial), key),
+      onChange: ownedChange,
+      scope: (key) => scopeOnChange(ownedChange, key),
     };
     handleCache.current.set(childPath, handle);
     return handle;
-  }, []);
+  }, [effects, ownerGeneration]);
 
   // Flush on unmount
   useEffect(() => () => {
+    if (ownerRef.current !== effects || generation.current !== ownerGeneration) return;
     if (timer.current) clearTimeout(timer.current);
     for (const [path, partial] of pending.current) {
       const ops = mergeToOps(partial);
       if (ops.length > 0) {
-        treeClient.commit([{ kind: 'patch', path, ops }])
+        const saving = effects === legacyTreeEffects
+          ? treeClient.commit([{ kind: 'patch', path, ops }]) : effects.patchNode(path, partial);
+        saving
           .catch(e => console.error(`[usePathSave] unmount flush failed for ${path}:`, e));
       }
     }
     pending.current.clear();
     handleCache.current.clear();
-  }, []);
+  }, [effects, ownerGeneration]);
 
   return useMemo(
     () => ({ change, path: getHandle, flush }),

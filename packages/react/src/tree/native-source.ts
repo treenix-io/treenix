@@ -1,12 +1,20 @@
-import type { TwpClient } from '@treenx/core/client/twp'
+import type { LaneMember, TwpClient } from '@treenx/core/client/twp'
 import { KernelError } from '@treenx/core/errors'
-import type { Cursor, NodeCopy, NodeId, SubSelector } from '@treenx/core/kernel/types'
+import { comparePaths } from '@treenx/core'
+import type { ComputedNode, ErrorCopy, Cursor, NodeCopy, NodeId, Row, SubId, SubSelector, ViewOwner } from '@treenx/core/kernel/types'
 
 export interface NativeSnapshot {
+  readonly viewOwner?: ViewOwner
   readonly phase: 'loading' | 'ready' | 'error'
   readonly generations: readonly number[]
   readonly members: readonly NodeCopy[]
   readonly included: readonly NodeCopy[]
+  readonly computed?: readonly ComputedNode[]
+  readonly computedIncluded?: readonly ComputedNode[]
+  readonly viewErrors?: readonly ErrorCopy[]
+  readonly viewErrorsIncluded?: readonly ErrorCopy[]
+  readonly rows?: readonly Row[]
+  readonly output?: readonly LaneMember[]
   readonly next?: Cursor
   readonly error?: KernelError
 }
@@ -17,6 +25,12 @@ export interface NativeMount {
   loadMore(): void
   refetch(): void
   dispose(): void
+}
+
+interface ViewPages {
+  readonly ids: SubId[]
+  readonly included: Map<NodeId, ComputedNode>
+  readonly errors: Map<NodeId, ErrorCopy>
 }
 
 interface Page {
@@ -44,11 +58,23 @@ const identity = (copy: NodeCopy) => 'node' in copy ? copy.node.$id : copy.id
 const path = (copy: NodeCopy) => 'node' in copy ? copy.node.$path : copy.path
 
 /** Error metadata can change without a new version, so its immutable identity also matters. */
-const equalCopies = (a: readonly NodeCopy[], b: readonly NodeCopy[]) => a.length === b.length && a.every((copy, i) => {
-  const other = b[i]
-  return identity(copy) === identity(other) && copy.ver === other.ver
+const equalCopy = (copy: NodeCopy, other: NodeCopy) => identity(copy) === identity(other) && copy.ver === other.ver
     && ('node' in copy && 'node' in other ? copy.bits === other.bits : copy === other)
-})
+
+/** Compare canonical projections without allocating temporary member arrays. */
+const equalCopies = (a: readonly NodeCopy[], b: readonly NodeCopy[]) => a.length === b.length && a.every((copy, i) => equalCopy(copy, b[i]))
+
+/** Owned payload references survive unrelated frames without serializing declassified content. */
+const equalPayloads = <T>(a: readonly T[] | undefined, b: readonly T[] | undefined) => a === b
+  || (a !== undefined && b !== undefined && a.length === b.length && a.every((value, i) => value === b[i]))
+
+/** Presentation wrappers may change while their owned payloads remain identical. */
+const equalOutput = (a: readonly LaneMember[] | undefined, b: readonly LaneMember[] | undefined) => a === b
+  || (a !== undefined && b !== undefined && a.length === b.length && a.every((member, i) => {
+    const other = b[i]
+    return member.kind === 'computed' ? other.kind === 'computed' && member.node === other.node
+      : other.kind === 'copy' && equalCopy(member.copy, other.copy)
+  }))
 
 /** Keep the implicit page size in the selector used to issue and continue cursor pages. */
 const normalized = (selector: SubSelector): SubSelector => 'children' in selector && selector.window === undefined
@@ -79,8 +105,12 @@ export function createNativeTreeSource(client: TwpClient) {
   function publish(resource: Resource, next: NativeSnapshot): void {
     const previous = resource.snapshot
     if (previous.phase === next.phase && previous.error === next.error && previous.next === next.next
+      && previous.viewOwner?.path === next.viewOwner?.path && previous.viewOwner?.component === next.viewOwner?.component
       && previous.generations.length === next.generations.length && previous.generations.every((gen, i) => gen === next.generations[i])
-      && equalCopies(previous.members, next.members) && equalCopies(previous.included, next.included)) return
+      && equalCopies(previous.members, next.members) && equalCopies(previous.included, next.included)
+      && equalPayloads(previous.computed, next.computed) && equalPayloads(previous.computedIncluded, next.computedIncluded)
+      && equalPayloads(previous.viewErrors, next.viewErrors) && equalPayloads(previous.viewErrorsIncluded, next.viewErrorsIncluded)
+      && equalPayloads(previous.rows, next.rows) && equalOutput(previous.output, next.output)) return
 
     resource.snapshot = next
     notify(resource)
@@ -119,22 +149,80 @@ export function createNativeTreeSource(client: TwpClient) {
     if (resource.error !== undefined) return { phase: 'error', generations: resource.snapshot.generations, members: [], included: [], error: resource.error }
 
     const members = new Set<NodeId>(), included = new Set<NodeId>(), generations: number[] = []
-    let phase: NativeSnapshot['phase'] = 'ready', next: Cursor | undefined
+    let viewPages: ViewPages | undefined, rows: Row[] | undefined
+    let phase: NativeSnapshot['phase'] = 'ready', next: Cursor | undefined, viewOwner: ViewOwner | undefined
+    let ownedPages: boolean | undefined
+    let consistentOwner = true
 
     for (const page of resource.pages) {
-      const list = page.subscription === undefined ? undefined : client.cache.list(page.subscription.id)
+      const subscription = page.subscription
+      if (subscription === undefined) { phase = 'loading'; continue }
+      const list = client.cache.list(subscription.id)
       if (list === undefined) { phase = 'loading'; continue }
       generations.push(list.gen)
+      if (list.phase === 'ready') {
+        const owned = list.viewOwner !== undefined
+        if (ownedPages !== undefined && ownedPages !== owned)
+          consistentOwner = false
+        ownedPages = owned
+      }
+      if (list.viewOwner !== undefined) {
+        if (viewOwner !== undefined && (viewOwner.path !== list.viewOwner.path || viewOwner.component !== list.viewOwner.component))
+          consistentOwner = false
+        viewOwner = list.viewOwner
+      }
       if (list.phase === 'loading') phase = 'loading'
-      for (const id of list.ids) members.add(id)
-      for (const id of list.covered) included.add(id)
+      if (list.computed === undefined && list.viewErrors === undefined) {
+        for (const id of list.ids) members.add(id)
+        for (const id of list.covered) included.add(id)
+      } else {
+        viewPages ??= { ids: [], included: new Map(), errors: new Map() }
+        viewPages.ids.push(subscription.id)
+        const nodes = new Map(list.computed?.map(node => [node.$id, node]))
+        const errors = new Map(list.viewErrors?.map(error => [error.id, error]))
+        for (const id of list.ids) if (!nodes.has(id) && !errors.has(id)) {
+          if (list.computed !== undefined) throw new KernelError('INVALID', 'View member has no subscription-owned payload')
+          members.add(id)
+        }
+        for (const id of list.covered) if (!nodes.has(id) && !errors.has(id)) {
+          if (list.computed !== undefined) throw new KernelError('INVALID', 'View coverage has no subscription-owned payload')
+          included.add(id)
+        }
+        for (const node of nodes.values()) if (!viewPages.included.has(node.$id) && !viewPages.errors.has(node.$id)) viewPages.included.set(node.$id, node)
+        for (const error of errors.values()) if (!viewPages.errors.has(error.id) && !viewPages.included.has(error.id)) viewPages.errors.set(error.id, error)
+      }
+      if (list.rows !== undefined) { rows ??= []; rows.push(...list.rows) }
       next = list.next
+    }
+
+    // Page generations settle independently when a declaration is replaced.
+    if (!consistentOwner) {
+      if (phase === 'loading') return { phase, generations, members: [], included: [] }
+
+      const error = new KernelError('CONFLICT', 'Ready View pages have different owning declarations')
+      resource.error = error
+      return { phase: 'error', generations, members: [], included: [], error }
     }
 
     for (const id of members) included.delete(id)
     const sort = 'children' in resource.selector ? resource.selector.sort ?? [['$order', 1]] : []
+    let derived: Pick<NativeSnapshot, 'computed' | 'computedIncluded' | 'viewErrors' | 'viewErrorsIncluded' | 'output'> | undefined
+    if (viewPages !== undefined) {
+      const output = client.cache.orderedView(viewPages.ids, sort), computed: ComputedNode[] = [], viewErrors: ErrorCopy[] = []
+      for (const member of output) {
+        if (member.kind === 'computed') computed.push(member.node)
+        else if ('error' in member.copy) viewErrors.push(member.copy)
+        const id = member.kind === 'computed' ? member.node.$id : identity(member.copy)
+        viewPages.included.delete(id)
+        viewPages.errors.delete(id)
+      }
+      derived = { output, computed, viewErrors, viewErrorsIncluded: [...viewPages.errors.values()].sort((a, b) => comparePaths(a.path, b.path)), computedIncluded: [...viewPages.included.values()].sort((a, b) => comparePaths(a.$path, b.$path)) }
+    }
 
     return { phase, generations, members: client.cache.ordered([...members], sort), included: client.cache.ordered([...included], []),
+      ...(phase !== 'ready' || viewOwner === undefined ? {} : { viewOwner }),
+      ...(derived === undefined ? {} : derived),
+      ...(rows === undefined ? {} : { rows }),
       ...(next === undefined ? {} : { next }) }
   }
 

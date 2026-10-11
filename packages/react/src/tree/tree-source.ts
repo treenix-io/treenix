@@ -1,6 +1,7 @@
 // TreeSource — abstraction over the reactive node store consumed by hooks.
 //
-// Two implementations:
+// Source owners:
+//   LaneTreeSource (this package) — canonical TWP subscription resources.
 //   ClientTreeSource (this package) — wraps in-memory cache + tRPC + SSE.
 //   ServerTreeSource (@treenx/ssr)  — wraps an ACL-scoped Tree, no-op subscribe,
 //                                     synchronous reads, flush-pending render loop.
@@ -9,17 +10,20 @@
 // the @treenx/react bundle render server-side without dragging the tRPC client
 // or SSE plumbing into Node.
 
-import type { NodeData } from '@treenx/core';
+import type { PresentationNode } from '#tree/presentation';
 import type { ChildrenPhase, PathStatus } from './cache';
+import type { ErrorCopy, SubSelector } from '@treenx/core/kernel/types';
+import type { NativeMount, NativeSnapshot } from '#tree/native-source';
+import type { TreeEffects } from '#tree/effects';
 
 export type ChildrenOpts = {
-  /** Page size; absent = source default. First-caller-wins per parent. */
+  /** Page size; absent = source default. Legacy sources lock it per parent; native lanes own each exact window. */
   limit?: number;
   /** Caller predicate (callerWhere, core-92z). Server paginates query views by
    *  cursor and rejects watch/watchNew alongside query until Stage 6d.
    *  NOTE: children state is keyed by parent path — two mounts of the same
    *  parent with different queries share one collection (first-caller-wins,
-   *  same as `limit`). Per-query cache keying is future work. */
+   *  same as `limit`). Native lanes retain separate query windows and canonical live coverage. */
   query?: Record<string, unknown>;
   /** Subscribe to path updates server-side (ref-counted). */
   watch?: boolean;
@@ -28,22 +32,21 @@ export type ChildrenOpts = {
 };
 
 export type PathOpts = {
-  /** Skip server watch — one-shot fetch. */
+  /** Legacy sources fetch once without a watch. Native lanes retain subscription coverage until disposal. */
   once?: boolean;
 };
 
 export type PathSnapshot = {
-  data: NodeData | undefined;
+  data: PresentationNode | undefined;
   status: PathStatus | undefined;
   error: Error | null;
 };
 
 export type ChildrenSnapshot = {
-  data: NodeData[];
+  data: PresentationNode[];
+  /** Native per-node projection failures keep their identity and leave healthy rows available. */
+  errors?: readonly ErrorCopy[];
   phase: ChildrenPhase;
-  /** Number of items in the loaded window. */
-  total: number | null;
-  truncated: boolean | null;
   /** Resume token from the last page. Non-null means more items are available. */
   nextCursor: string | null;
   error: Error | null;
@@ -73,6 +76,7 @@ export type ChildrenHandle = {
 };
 
 export interface TreeSource {
+  readonly effects?: TreeEffects;
   // ── Reactive snapshots (stable references; only change when underlying data does) ──
 
   /** Snapshot for a single path. Returns the same object reference until the
@@ -80,8 +84,8 @@ export interface TreeSource {
   getPathSnapshot(path: string): PathSnapshot;
 
   /** Snapshot for a parent's children list. Returns the same reference until
-   *  any of (data, phase, total, truncated, error) for this parent changes. */
-  getChildrenSnapshot(path: string): ChildrenSnapshot;
+   *  data, phase, continuation, or error for this parent changes. */
+  getChildrenSnapshot(path: string, opts?: ChildrenOpts): ChildrenSnapshot;
 
   // ── Change notification ──
 
@@ -99,6 +103,9 @@ export interface TreeSource {
 
   mountPath(path: string, opts?: PathOpts): PathHandle;
   mountChildren(path: string, opts?: ChildrenOpts): ChildrenHandle;
+  /** Native selector coverage includes related copies in the same owned subscription. */
+  getSelectorSnapshot?(selector: SubSelector): NativeSnapshot;
+  mountSelector?(selector: SubSelector): NativeMount;
 }
 
 // ── Empty snapshots — used when path is null/empty ──
@@ -109,17 +116,15 @@ export const EMPTY_PATH_SNAPSHOT: PathSnapshot = Object.freeze({
   error: null,
 });
 
-const EMPTY_CHILDREN: NodeData[] = [];
+const EMPTY_CHILDREN: PresentationNode[] = [];
 
 // Outer object frozen so snapshot fields can't be reassigned. The empty `data`
-// array is intentionally left unfrozen — its type is NodeData[] (matching
+// array is intentionally left unfrozen — its type is PresentationNode[] (matching
 // cache.getChildren's mutable return), and a frozen array would force an
 // unsafe widening cast. The sentinel name signals "do not mutate".
 export const EMPTY_CHILDREN_SNAPSHOT: ChildrenSnapshot = Object.freeze({
   data: EMPTY_CHILDREN,
   phase: 'idle',
-  total: null,
-  truncated: null,
   nextCursor: null,
   error: null,
 });

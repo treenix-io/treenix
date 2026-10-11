@@ -1,3 +1,4 @@
+import type { PresentationNode } from '@treenx/react';
 // AgentSim views — World map + Agent card + Item card
 // WorldView: controls, spatial map with entities + proximity links, event log
 // AgentView: profile, editable prompt, memory, event inbox
@@ -6,7 +7,7 @@
 import { getComponent, type NodeData, register } from '@treenx/core';
 import { useCurrentNode } from '@treenx/react';
 import { useChildren } from '@treenx/react';
-import { execute } from '@treenx/react';
+import { useTreeEffects } from '@treenx/react';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   type EventEntry,
@@ -22,7 +23,7 @@ import {
 
 type Link = { x1: number; y1: number; x2: number; y2: number; opacity: number };
 
-function buildLinks(entities: NodeData[]): Link[] {
+function buildLinks(entities: PresentationNode[]): Link[] {
   const posByName = new Map<string, SimPosition & { $type: string }>();
   for (const a of entities) {
     const d = getComponent(a, SimDescriptive);
@@ -79,6 +80,7 @@ function errMsg(e: unknown): string {
 }
 
 function WorldView() {
+  const { execute } = useTreeEffects();
   const node = useCurrentNode();
   const { data: children } = useChildren(node.$path, { watchNew: true });
   const [selected, setSelected] = useState<string | null>(null);
@@ -88,11 +90,11 @@ function WorldView() {
   const call = useCallback((p: { path: string; action: string; data?: unknown }) => {
     setError(null);
     execute(p.path, p.action, p.data).catch((e) => setError(errMsg(e)));
-  }, []);
+  }, [execute]);
 
   const cfg = getComponent(node, SimConfig);
   const round = getComponent(node, SimRound);
-  const entities = children.filter((n: NodeData) => n.$type === 'sim.agent' || n.$type === 'sim.item');
+  const entities = children.filter((n: PresentationNode) => n.$type === 'sim.agent' || n.$type === 'sim.item');
   const W = cfg?.width ?? 600;
   const H = cfg?.height ?? 400;
   const log = round?.log ?? [];
@@ -197,7 +199,7 @@ function WorldView() {
           ))}
         </svg>
 
-        {entities.map((a: NodeData) => {
+        {entities.map((a: PresentationNode) => {
           const pos = getComponent(a, SimPosition);
           const desc = getComponent(a, SimDescriptive);
           if (!pos) return null;
@@ -307,6 +309,7 @@ function WorldView() {
 // ── AgentView ──
 
 function AgentView() {
+  const { execute } = useTreeEffects();
   const node = useCurrentNode();
   const desc = getComponent(node, SimDescriptive);
   const pos = getComponent(node, SimPosition);
@@ -323,7 +326,7 @@ function AgentView() {
     execute(node.$path, 'update', { systemPrompt: editPrompt })
       .catch((e) => setError(errMsg(e)));
     setEditPrompt(null);
-  }, [node.$path, editPrompt]);
+  }, [node.$path, editPrompt, execute]);
 
   return (
     <div style={{ fontFamily: 'var(--mono)', fontSize: 13, maxWidth: 500 }}>

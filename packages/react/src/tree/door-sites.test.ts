@@ -87,7 +87,7 @@ const {
   releaseWatchedListings,
   trackedWatchGet,
 } = await import('./client-tree-source');
-const { resolveRouteTracked } = await import('../app/RoutedPage');
+const { resolveRouteTracked } = await import('../app/LegacyRoutedPage');
 const { watch } = await import('#hooks');
 
 const node = (path: string, rev?: number, v?: string): NodeData =>

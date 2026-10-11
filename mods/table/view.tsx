@@ -1,3 +1,4 @@
+import type { PresentationNode } from '@treenx/react';
 import { type ComponentData, getComponent, isComponent, type NodeData, register } from '@treenx/core';
 import { parseURI } from '@treenx/core/uri';
 import type { TypeSchema } from '@treenx/core/schema/types';
@@ -21,7 +22,7 @@ import type { ColumnConfig, UITable } from './types';
 
 // ── Helpers ──
 
-function resolveField(child: NodeData, field: string): Record<string, unknown> {
+function resolveField(child: PresentationNode, field: string): Record<string, unknown> {
   if (!field) return child;
   const val = (child as any)[field];
   if (val && typeof val === 'object') return val;
@@ -86,7 +87,7 @@ function TableView({ ctx }: { value: ComponentData<UITable>; ctx?: ViewCtx | nul
 
   // Collect unique types from children (resolved through field)
   const { typeMap, types } = useMemo(() => {
-    const map = new Map<string, NodeData[]>();
+    const map = new Map<string, PresentationNode[]>();
     for (const child of children) {
       const resolved = resolveField(child, state.field);
       const dt = resolveDisplayType(state.field, resolved);

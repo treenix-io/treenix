@@ -10,6 +10,7 @@
 // tab-global holds registry (F5) — never released directly from here.
 
 import type { NodeData } from '@treenx/core';
+import { legacyTreeEffects } from '#hooks';
 // Use the package-internal alias (#tree/...) — NOT relative './cache' — so
 // Vite deduplicates with hooks.ts's import. Two URLs for the same file
 // produce two ESM module instances, two cache singletons, broken reactivity.
@@ -174,6 +175,8 @@ export async function loadListingOnce(parent: string): Promise<void> {
 }
 
 export class ClientTreeSource implements TreeSource {
+  /** Resolve after module initialization; this owner intentionally preserves the existing legacy client. */
+  get effects() { return legacyTreeEffects; }
   // Stable-reference snapshot caches. useSyncExternalStore requires the same
   // object identity until the underlying state actually changes.
   private pathSnaps = new Map<string, PathSnapshot>();
@@ -200,8 +203,6 @@ export class ClientTreeSource implements TreeSource {
   getChildrenSnapshot(path: string): ChildrenSnapshot {
     const data = cache.getChildren(path);
     const phase = cache.getChildrenPhase(path);
-    const total = cache.getChildrenTotal(path);
-    const truncated = cache.getChildrenTruncated(path);
     const nextCursor = cache.getChildrenNextCursor(path);
     const error = cache.getChildrenError(path);
     const prev = this.childSnaps.get(path);
@@ -209,14 +210,12 @@ export class ClientTreeSource implements TreeSource {
       prev
       && prev.data === data
       && prev.phase === phase
-      && prev.total === total
-      && prev.truncated === truncated
       && prev.nextCursor === nextCursor
       && prev.error === error
     ) {
       return prev;
     }
-    const next: ChildrenSnapshot = { data, phase, total, truncated, nextCursor, error };
+    const next: ChildrenSnapshot = { data, phase, nextCursor, error };
     this.childSnaps.set(path, next);
     return next;
   }
@@ -459,7 +458,7 @@ export class ClientTreeSource implements TreeSource {
     let localGen = 0;
 
     let snap: ChildrenSnapshot = {
-      data: [], phase: 'idle', total: null, truncated: null, nextCursor: null, error: null,
+      data: [], phase: 'idle', nextCursor: null, error: null,
     };
     const subs = new Set<() => void>();
     const publish = (next: Partial<ChildrenSnapshot>) => {
@@ -479,8 +478,6 @@ export class ClientTreeSource implements TreeSource {
             // ingest keeps payloads non-regressing vs cache/overlays without
             // touching membership (inv.18/28); plain map, no cache.put.
             data: result.items.map(ingestNode),
-            total: result.total,
-            truncated: !!result.truncated,
             nextCursor: result.nextCursor ?? null,
             error: null,
             phase: 'ready',
@@ -504,7 +501,7 @@ export class ClientTreeSource implements TreeSource {
           const seen = new Set(snap.data.map((n) => n.$path));
           const fresh = result.items.map(ingestNode).filter((n) => !seen.has(n.$path));
           const data = [...snap.data, ...fresh];
-          publish({ data, total: data.length, nextCursor: result.nextCursor ?? null, phase: 'ready' });
+          publish({ data, nextCursor: result.nextCursor ?? null, phase: 'ready' });
         })
         .catch((err: unknown) => {
           if (cancelled || gen !== localGen) return;

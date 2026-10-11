@@ -1,3 +1,4 @@
+import type { PresentationNode } from '#tree/presentation';
 // Pure URL → /sys/routes/* matching.
 //
 // Single source of truth for both:
@@ -24,7 +25,7 @@ export type Route = {
   public?: boolean;
 };
 
-export type ResolveResult = { node: NodeData; rest: string } | null;
+export type ResolveResult<N extends PresentationNode = PresentationNode> = { node: N; rest: string } | null;
 
 /** Drop leading + trailing slashes; "/foo/bar/" → "foo/bar"; "/" → "". */
 export function normalizeUrl(pathname: string | null | undefined): string {
@@ -42,11 +43,11 @@ export function urlKey(routePath: string | undefined): string | null {
 /** Read the t.route component off a node. Accessed via getComponent so the #
  *  namespace migration (core-gk8.21) — which stores it under '#route' — stays
  *  transparent here; the string type-id avoids importing the class from mods. */
-export function getRoute(node: NodeData): Route | undefined {
+export function getRoute(node: PresentationNode): Route | undefined {
   return getComponent<Route>(node, 't.route');
 }
 
-function isWildcard(node: NodeData): boolean {
+function isWildcard(node: PresentationNode): boolean {
   return !!getRoute(node)?.wildcard;
 }
 
@@ -54,7 +55,7 @@ function isWildcard(node: NodeData): boolean {
  *  - Exact match wins over any wildcard.
  *  - Among wildcards, the longest matching prefix wins.
  *  - "_index" matches the root URL ("" / "/"). */
-export function resolveRoute(pathname: string, routeNodes: readonly NodeData[]): ResolveResult {
+export function resolveRoute<N extends PresentationNode>(pathname: string, routeNodes: readonly N[]): ResolveResult<N> {
   const norm = normalizeUrl(pathname);
 
   // 1. Exact match
@@ -64,7 +65,7 @@ export function resolveRoute(pathname: string, routeNodes: readonly NodeData[]):
   }
 
   // 2. Wildcard fallback — longest-prefix wins. Empty-key wildcard catches all.
-  let best: { node: NodeData; key: string } | null = null;
+  let best: { node: N; key: string } | null = null;
   for (const n of routeNodes) {
     const key = urlKey(n.$path);
     if (key === null || !isWildcard(n)) continue;

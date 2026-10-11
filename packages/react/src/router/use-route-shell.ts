@@ -1,3 +1,4 @@
+import type { PresentationNode } from '#tree/presentation';
 // useRouteShell — shared shell hook. Reads route metadata (prefix/index) from
 // the route node and produces (target tree path, NavigateApi). Each shell view
 // calls it with `preserveQuery` describing which query keys it owns and their
@@ -58,7 +59,7 @@ export function buildHref(
 }
 
 export function useRouteShell(
-  routeNode: NodeData,
+  routeNode: PresentationNode,
   opts: RouteShellOpts = {},
 ): { target: string; nav: NavigateApi } {
   const { rest } = useRouteParams();

@@ -1,3 +1,4 @@
+import type { PresentationNode } from '@treenx/react';
 import { type ComponentData, getComponents, getContextsForType, type NodeData, register } from '@treenx/core'
 import { Render, RenderContext, type View } from '@treenx/react'
 import { useChildren } from '@treenx/react'
@@ -54,7 +55,7 @@ const RowColLayoutView: View<RowColLayout> = ({ value, onChange, ctx }) => {
   }
 
   const { data: children, loading: childrenLoading, error: childrenError } = useChildren(node.$path)
-  const childMap = new Map<string, NodeData>()
+  const childMap = new Map<string, PresentationNode>()
   for (const child of children) {
     const ref = childToRef(child.$path, node.$path)
     childMap.set(ref, child)

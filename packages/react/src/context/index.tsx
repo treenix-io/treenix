@@ -1,11 +1,13 @@
+import type { PresentationComponent, PresentationNode } from '#tree/presentation';
 // Treenix React Binding — Layer 2
 // <Render> + <RenderContext> + <NodeProvider>
 // Depends on: core (resolve), React
 
-import { execute } from '#hooks';
+import { execute, useTreeEffects } from '#hooks';
 import { $key, $node } from '#symbols';
 import { type OnChange, scopeOnChange } from '#tree/on-change';
 import {
+  getComponentByName,
   type ComponentData,
   type NodeData,
   resolve,
@@ -30,14 +32,14 @@ export function RenderContext({ name, children }: { name: string; children: Reac
 
 // ── Node context — gives any renderer access to the current node ──
 
-const NodeCtx = createContext<NodeData | null>(null);
+const NodeCtx = createContext<PresentationNode | null>(null);
 
-export function NodeProvider({ value, children }: { value: NodeData | null; children?: ReactNode }) {
+export function NodeProvider({ value, children }: { value: PresentationNode | null; children?: ReactNode }) {
   if (!value?.$path) return null;
   return <NodeCtx.Provider value={value}>{children}</NodeCtx.Provider>;
 }
 
-export function useCurrentNode(): NodeData {
+export function useCurrentNode(): PresentationNode {
   const n = useContext(NodeCtx);
   if (!n) throw new Error('useCurrentNode: no node in context');
   return n;
@@ -46,12 +48,12 @@ export function useCurrentNode(): NodeData {
 // ── viewCtx — derive location context from value's symbol metadata ──
 
 export type ViewCtx = {
-  node: NodeData;
+  node: PresentationNode;
   path: string;
   execute(action: string, data?: unknown): Promise<unknown>;
 };
 
-export function viewCtx(value: ComponentData): ViewCtx | null {
+export function viewCtx(value: PresentationComponent): ViewCtx | null {
   const node: NodeData | undefined = (value as any)[$node];
   if (!node) return null;
   const key: string = (value as any)[$key] ?? '';
@@ -65,7 +67,7 @@ export function viewCtx(value: ComponentData): ViewCtx | null {
 export type { OnChange };
 export { scopeOnChange };
 
-export type RenderProps<T = ComponentData> = {
+export type RenderProps<T = PresentationComponent> = {
   value: T;
   onChange?: (partial: OnChange<T>) => void;
   ctx?: ViewCtx | null;
@@ -87,15 +89,31 @@ type Actions<T> = {
         : () => Promise<unknown>;
 };
 
-export function useActions<T>(value: T): Actions<T> {
-  const node: NodeData | undefined = (value as any)[$node];
-  if (!node) throw new Error('useActions: value has no node context (missing $node symbol)');
-  const key: string = (value as any)[$key] ?? '';
-  const path = key ? `${node.$path}#${key}` : node.$path;
+export function useActions<T extends object>(value: T & { readonly [$node]?: NodeData; readonly [$key]?: string }): Actions<T> {
+  const effects = useTreeEffects();
+  const current = useContext(NodeCtx);
+  let nativePath: string | undefined;
+  if (effects.lane) {
+    if (current === null) throw new Error('useActions: no owning node context');
+    if (value === current) nativePath = current.$path;
+    else {
+      for (const name of Object.keys(current)) {
+        if (name.startsWith('#') && getComponentByName(current, name.slice(1)) === value) {
+          nativePath = `${current.$path}${name}`;
+          break;
+        }
+      }
+      if (nativePath === undefined) throw new Error('useActions: component does not belong to the current node');
+    }
+  }
+  const node = value[$node];
+  if (!effects.lane && !node) throw new Error('useActions: value has no node context (missing $node symbol)');
+  const key = value[$key] ?? '';
+  const path = nativePath ?? (key ? `${node!.$path}#${key}` : node!.$path);
 
   return useMemo(() => new Proxy({} as Actions<T>, {
-    get: (_target, prop: string) => (data?: unknown) => execute(path, prop, data),
-  }), [path]);
+    get: (_target, prop: string) => (data?: unknown) => effects.execute(path, prop, data),
+  }), [path, effects]);
 }
 
 declare module '@treenx/core' {
@@ -107,16 +125,16 @@ declare module '@treenx/core' {
 
 // ── UixNoView — registered by UIX when a type has no custom view yet ──
 // Renders default@context without going through type-specific resolve (avoids infinite loop).
-export const UixNoView: FC<RenderProps> = ({ value, onChange }) => {
+export const UixNoView: FC<RenderProps> = ({ value, onChange, ctx }) => {
   const context = useTreeContext();
   const def = resolve('default', context, false) as FC<RenderProps> | null;
   if (!def) return null;
-  return createElement(def, { value, onChange });
+  return createElement(def, { value, onChange, ...(ctx === undefined ? {} : { ctx }) });
 };
 
 // ── <Render> — component/node-level rendering ──
 
-export function Render<E extends Record<string, unknown> = {}>({ value, onChange, ...extra }: RenderProps & E) {
+export function Render<E extends Record<string, unknown> = {}>({ value, onChange, ctx: suppliedContext, ...extra }: RenderProps & E) {
   const context = useTreeContext();
   const type = value.$type;
 
@@ -152,7 +170,7 @@ export function Render<E extends Record<string, unknown> = {}>({ value, onChange
   const preset = entry.meta?.props;
   const regProps = preset && typeof preset === 'object' ? preset : undefined;
 
-  const ctx = viewCtx(value);
+  const ctx = suppliedContext === undefined ? viewCtx(value) : suppliedContext;
   const el = createElement(entry.handler, { value, onChange, ctx, ...extra, ...regProps } as RenderProps);
   return ctx?.node ? createElement(NodeProvider, { value: ctx.node }, el) : el;
 }

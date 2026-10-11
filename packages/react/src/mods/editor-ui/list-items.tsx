@@ -1,3 +1,4 @@
+import type { PresentationNode } from '#tree/presentation';
 // Default content-only views for react:list / react:card / react:icon, plus the observer-side
 // chrome wrapper <RenderChildren>. Convention: items render CONTENT only (no border, no click,
 // no fixed width) — chrome and navigation are the observer's responsibility.
@@ -31,7 +32,7 @@ export function pathName(p: string): string {
 
 // ── Item content (no chrome) ──
 
-function DirListItem({ value }: { value: NodeData }) {
+function DirListItem({ value }: { value: PresentationNode }) {
   const meta = value.metadata as { $type: string; title?: string; description?: string } | undefined;
   return (
     <>
@@ -51,7 +52,7 @@ function DirListItem({ value }: { value: NodeData }) {
 }
 register('dir', 'react:list', DirListItem as any);
 
-function DefaultListItem({ value }: { value: NodeData }) {
+function DefaultListItem({ value }: { value: PresentationNode }) {
   return (
     <>
       <span className="flex h-6 w-6 items-center justify-center rounded bg-secondary text-[11px] font-semibold text-muted-foreground">
@@ -68,7 +69,7 @@ function DefaultListItem({ value }: { value: NodeData }) {
 }
 register('default', 'react:list', DefaultListItem as any);
 
-function DefaultCard({ value }: { value: NodeData }) {
+function DefaultCard({ value }: { value: PresentationNode }) {
   return (
     <>
       <div className="flex items-center gap-2">
@@ -85,7 +86,7 @@ function DefaultCard({ value }: { value: NodeData }) {
 }
 register('default', 'react:card', DefaultCard as any);
 
-function DefaultIcon({ value }: { value: NodeData }) {
+function DefaultIcon({ value }: { value: PresentationNode }) {
   return (
     <>
       <span className="flex h-10 w-10 items-center justify-center rounded-md bg-secondary text-[14px] font-semibold text-muted-foreground">
@@ -124,7 +125,7 @@ const ITEM_CHROME: Record<ChildCtx, string> = {
   react: '',
 };
 
-function targetPath(item: NodeData): string {
+function targetPath(item: PresentationNode): string {
   return ((item as { $ref?: string }).$ref) ?? item.$path;
 }
 
@@ -133,7 +134,7 @@ export function RenderChildren({
   ctx,
   empty,
 }: {
-  items: NodeData[];
+  items: PresentationNode[];
   ctx: ChildCtx;
   empty?: ReactNode;
 }) {
@@ -162,7 +163,7 @@ export function RenderChildren({
 }
 
 // Single-item rendering with the same chrome convention.
-export function RenderItem({ value, ctx }: { value: NodeData; ctx: ChildCtx }) {
+export function RenderItem({ value, ctx }: { value: PresentationNode; ctx: ChildCtx }) {
   const navigate = useNavigate();
   if (ctx === 'react') {
     return (

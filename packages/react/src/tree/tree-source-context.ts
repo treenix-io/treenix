@@ -28,3 +28,8 @@ export function useTreeSource(): TreeSource {
   if (!source) throw new TreeSourceMissingError();
   return source;
 }
+
+/** Read-only action controls can render without installing a data or mutation source. */
+export function useOptionalTreeSource(): TreeSource | null {
+  return useContext(Ctx);
+}

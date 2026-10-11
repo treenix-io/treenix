@@ -1,3 +1,4 @@
+import type { PresentationNode } from '@treenx/react';
 // Board views — kanban board + task detail (editable)
 
 import {
@@ -16,7 +17,7 @@ import { arrayMove, horizontalListSortingStrategy, SortableContext, useSortable,
 import { CSS } from '@dnd-kit/utilities';
 import { getComponent, type NodeData, register } from '@treenx/core';
 import { Render, RenderContext, useActions, useDraft, type View } from '@treenx/react';
-import { createNode, execute, removeNode, useChildren, useNavigate, usePath } from '@treenx/react';
+import { useTreeEffects, useChildren, useNavigate, usePath } from '@treenx/react';
 import { usePathSave } from '@treenx/react';
 import { cleanSlug } from '@treenx/react/lib/string-utils';
 import { minimd } from '@treenx/react';
@@ -44,13 +45,13 @@ type TaskStatus = string;
 // Sort order lives in the shared `#order` component (getComponent by type).
 // Fallback keeps pre-existing nodes ordered: columns by legacy node-field,
 // tasks by createdAt — a distinct spread so a first drop can interleave cleanly.
-const orderValue = (node: NodeData, fallback: number): number => {
+const orderValue = (node: PresentationNode, fallback: number): number => {
   const o = getComponent(node, Order);
   return o && typeof o.order === 'number' ? o.order : fallback;
 };
-const columnOrder = (c: NodeData): number =>
+const columnOrder = (c: PresentationNode): number =>
   orderValue(c, typeof c.order === 'number' ? c.order : 0);
-const taskOrder = (t: NodeData): number =>
+const taskOrder = (t: PresentationNode): number =>
   orderValue(t, typeof t.createdAt === 'number' ? t.createdAt : 0);
 
 const orderComponent = (order: number) => ({ $type: 'board.order' as const, order });
@@ -219,7 +220,7 @@ const TaskEdit: View<BoardTask, { draft?: boolean }> = ({ value, onChange, ctx, 
 
 register(BoardTask, 'react:edit', TaskEdit);
 
-function NamedComponents({ node }: { node: NodeData }) {
+function NamedComponents({ node }: { node: PresentationNode }) {
   const entries = getNamedComponents(node);
   if (!entries.length) return null;
 
@@ -519,7 +520,7 @@ function TaskCard({
   onSelect,
   colStatus,
 }: {
-  task: NodeData;
+  task: PresentationNode;
   onSelect: (path: string) => void;
   colStatus: string;
 }) {
@@ -563,7 +564,7 @@ type ColumnExtra = {
   // subscription. Self-fetching via the query mount would miss status changes:
   // the client cache never re-evaluates query membership on an optimistic field
   // update, so a moved card stays linked to its old column until a refetch.
-  tasks: NodeData[];
+  tasks: PresentationNode[];
   onSelect: (path: string) => void;
   onCreate: (status: string) => void;
   editable?: boolean;
@@ -580,6 +581,7 @@ const KanbanColumn: View<BoardColumn, ColumnExtra> = ({
   editable = false,
   overStatus,
 }) => {
+  const { removeNode } = useTreeEffects();
   const path = ctx!.node.$path;
   const status = path.split('/').at(-1) ?? '';
   const { setNodeRef: setDropRef, isOver } = useDroppable({ id: `col:${status}`, data: { status } });
@@ -691,11 +693,12 @@ function TaskDialog({
   onClose,
   onSave,
 }: {
-  node: NodeData;
+  node: PresentationNode;
   onChange: (partial: Record<string, unknown>) => void;
   onClose: () => void;
   onSave?: () => void;
 }) {
+  const { removeNode } = useTreeEffects();
   return (
     <Dialog
       open
@@ -748,9 +751,10 @@ function TaskDialog({
 // ── Kanban Board ──
 
 const KanbanView: View<BoardKanban, { editable?: boolean }> = ({ value, ctx, editable = false }) => {
+  const { createNode, execute } = useTreeEffects();
   const [selectedTask, setSelectedTask] = useState<string | null>(null);
   const draft = useDraft('board.task');
-  const [activeTask, setActiveTask] = useState<NodeData | null>(null);
+  const [activeTask, setActiveTask] = useState<PresentationNode | null>(null);
   const [overStatus, setOverStatus] = useState<string | null>(null);
   const { data: selectedNode } = usePath(selectedTask || null);
   const basePath = ctx!.path;
@@ -792,7 +796,7 @@ const KanbanView: View<BoardKanban, { editable?: boolean }> = ({ value, ctx, edi
   // #order. Columns render from this — reacts to status changes (cross-column
   // moves) that the query-mount membership would miss until reload.
   const tasksByStatus = useMemo(() => {
-    const map = new Map<string, NodeData[]>();
+    const map = new Map<string, PresentationNode[]>();
     for (const task of allTasks) {
       const s = typeof task.status === 'string' ? task.status : '';
       (map.get(s) ?? map.set(s, []).get(s)!).push(task);

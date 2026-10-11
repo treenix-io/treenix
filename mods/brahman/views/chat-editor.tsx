@@ -1,3 +1,4 @@
+import type { PresentationNode } from '@treenx/react';
 // Chat editor — WYSIWYG Telegram-style editor for page actions
 // Registered as react:chat:edit for brahman.page
 // Same visual as PageChatPreview but with inline editing
@@ -25,7 +26,7 @@ import { Checkbox } from '@treenx/react/components/ui/checkbox';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@treenx/react/components/ui/dialog';
 import { Input } from '@treenx/react/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@treenx/react/components/ui/select';
-import { createNode, patchNode, removeNode, useSave, type View, useChildren, usePath } from '@treenx/react';
+import { useTreeEffects, useSave, type View, useChildren, usePath } from '@treenx/react';
 import { sanitizeHref } from '@treenx/react';
 import { Camera, File, GripVertical, Mic, MoreHorizontal, Plus, Trash2, Video } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -200,7 +201,7 @@ function SettingsDialog({
   onDelete,
   onClose,
 }: {
-  node: NodeData;
+  node: PresentationNode;
   onUpdate: (patch: Record<string, unknown>) => void;
   onDelete: () => void;
   onClose: () => void;
@@ -464,10 +465,11 @@ function SortableAction({
   isFirstBubble,
   onDelete,
 }: {
-  node: NodeData;
+  node: PresentationNode;
   isFirstBubble: boolean;
   onDelete: () => void;
 }) {
+  const { patchNode } = useTreeEffects();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: node.$path });
   const { data: n } = usePath(node.$path);
   const [showSettings, setShowSettings] = useState(false);
@@ -659,13 +661,14 @@ function ChatActionPalette({ onSelect }: { onSelect: (type: string) => void }) {
 // ── Main component ──
 
 export const PageChatEditor: View<PageConfig> = ({ value, ctx }) => {
+  const { createNode, removeNode } = useTreeEffects();
   const actionsPath = ctx!.path + '/_actions';
   const { data: children } = useChildren(actionsPath, { watch: true, watchNew: true });
 
   const positions = value.positions;
   const tracked = new Set(positions);
   const sorted = [
-    ...positions.map(p => children.find(c => c.$path === p)).filter((c): c is NodeData => !!c),
+    ...positions.map(p => children.find(c => c.$path === p)).filter((c): c is PresentationNode => !!c),
     ...children.filter(c => !tracked.has(c.$path) && c.$type?.startsWith('brahman.action.')),
   ];
 

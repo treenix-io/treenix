@@ -128,7 +128,7 @@ describe('read ordering — request generations (invariant 17)', () => {
     await flush();
 
     assert.deepEqual(members('/gen'), ['/gen/new'], 'stale response dropped, not last-settled-wins');
-    assert.equal(source.getChildrenSnapshot('/gen').total, 1);
+    assert.equal(source.getChildrenSnapshot('/gen').data.length, 1);
     assert.equal(source.getChildrenSnapshot('/gen').nextCursor, 'c2');
     h.dispose();
   });
@@ -433,10 +433,10 @@ describe('multi-query gate (ns6p.4 F5, §4.2)', () => {
     });
 
     assert.deepEqual(h2.getSnapshot!().data.map((n) => n.$path), ['/mq2/b1'], 'B renders ITS OWN result');
-    assert.equal(h2.getSnapshot!().total, 1);
+    assert.equal(h2.getSnapshot!().data.length, 1);
     // The round-1 miss: B's fetch must not overwrite A's shared collection.
     assert.deepEqual(members('/mq2'), ['/mq2/a1', '/mq2/a2'], "A's cached collection unchanged");
-    assert.equal(source.getChildrenSnapshot('/mq2').total, 2);
+    assert.equal(source.getChildrenSnapshot('/mq2').data.length, 2);
     assert.ok(errors.mock.calls.length >= 1, 'the gate stays loud');
 
     h1.dispose();

@@ -1,3 +1,4 @@
+import type { PresentationNode } from '@treenx/react/tree/presentation';
 // Action type views — full editors (react) + compact cards (react:list)
 // Each action type gets: icon helper, summary helper, full editor, list item
 
@@ -83,7 +84,7 @@ export function actionIcon(type: string): ReactNode {
 
 // ── Summary helpers for compact display ──
 
-export function actionSummary(node: NodeData): string {
+export function actionSummary(node: PresentationNode): string {
   const c = findActionComp(node) as any;
   if (!c) return '';
 
@@ -113,7 +114,7 @@ export function actionSummary(node: NodeData): string {
 }
 
 // Find the action component on a node (node itself if $type matches, then scan)
-function findActionComp(node: NodeData): Record<string, unknown> | undefined {
+function findActionComp(node: PresentationNode): Record<string, unknown> | undefined {
   if (node.$type?.startsWith('brahman.action.')) return node;
   for (const [k, v] of Object.entries(node)) {
     if (k.startsWith('$')) continue;
@@ -135,7 +136,7 @@ function FieldRow({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-function getLangs(node: NodeData): string[] {
+function getLangs(node: PresentationNode): string[] {
   // Walk up to find bot config's langs
   // Default fallback
   return ['ru', 'en'];

@@ -1,17 +1,19 @@
+import type { PresentationNode } from '@treenx/react/tree/presentation';
 // Whisper channel view — checklist of transcribed audio notes
 
 import * as React from 'react';
 import { getComponent, type NodeData, register } from '@treenx/core';
-import { patchNode, type View, useChildren } from '@treenx/react';
+import { useTreeEffects, type View, useChildren } from '@treenx/react';
 import { WhisperChannel, WhisperMeta, WhisperText } from './types';
 
-function transcriptionText(node: NodeData): string {
+function transcriptionText(node: PresentationNode): string {
   const text = getComponent(node, WhisperText);
   if (!text) throw new Error(`Transcription has no text component: ${node.$path}`);
   return text.content;
 }
 
 const ChannelView: View<WhisperChannel> = ({ value, ctx }) => {
+  const { patchNode } = useTreeEffects();
   const node = ctx!.node;
   const { data: children } = useChildren(ctx!.path, { watchNew: true });
   const checklist = value.checklist;

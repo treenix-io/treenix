@@ -1,3 +1,5 @@
+import type { PresentationNode } from '#tree/presentation';
+import type { ErrorCopy } from '@treenx/core/kernel/types';
 // Treenix Hooks — reactive node access with Query<T> shape
 // usePath:     reactive path read (URI or typed proxy) → Query<T>
 // useChildren: reactive children list with pagination → ChildrenQuery
@@ -26,8 +28,12 @@ import { type ClientIterator, clientIterator } from '#tree/client-stream';
 import { ensureType } from '#schema-loader';
 import { type ChildrenHandle, type ChildrenOpts, EMPTY_PATH_SNAPSHOT, type PathHandle } from '#tree/tree-source';
 import { useTreeSource } from '#tree/tree-source-context';
+import { useTreeEffects, type TreeEffects } from '#tree/effects';
+
+export { useTreeEffects } from '#tree/effects';
 
 const noopUnsub = () => {};
+const NO_CHILD_ERRORS: readonly ErrorCopy[] = [];
 export { useNavigate, useBeforeNavigate } from '#navigate';
 export { useTheme, type Theme, type UseThemeResult, type CustomThemeSpec } from '#hooks/use-theme';
 
@@ -43,11 +49,10 @@ export type Query<T> = {
   refetch(): void;                 // stable callback, coalesces if already in flight
 };
 
-export type ChildrenQuery = Query<NodeData[]> & {
-  readonly total: number | null;   // number of items in the loaded window
+export type ChildrenQuery = Query<PresentationNode[]> & {
+  readonly errors: readonly ErrorCopy[];
   readonly hasMore: boolean;       // nextCursor present
   readonly loadingMore: boolean;   // next page append in flight; mutually exclusive with stale
-  readonly truncated: boolean | null; // null until first response; true if server hit cap
   loadMore(): void;                // no-op if !hasMore or already loadingMore
 };
 
@@ -60,7 +65,7 @@ export type { ChildrenOpts } from '#tree/tree-source';
 //
 // URI mode:   usePath('/path#comp.field')      → Query<derived | undefined>
 // Typed mode: usePath('/path', MyClass)        → Query<TypeProxy<T>>
-// Options:    usePath('/path', { once: true })  → no server watch
+// Options:    usePath('/path', { once: true })  → legacy one-shot; native coverage remains owned until disposal
 //
 // Typed mode is the ONE semantic exception where `data` is not fetched content —
 // it's a façade proxy whose method calls always work (route to execute()) while
@@ -68,7 +73,7 @@ export type { ChildrenOpts } from '#tree/tree-source';
 
 type PathOpts = { once?: boolean };
 
-export function usePath<T = NodeData>(
+export function usePath<T = PresentationNode>(
   uri: string | null,
   opts?: PathOpts,
 ): Query<T | undefined>;
@@ -83,6 +88,7 @@ export function usePath<T extends object>(
   key?: string,
 ): Query<unknown> {
   const source = useTreeSource();
+  const effects = useTreeEffects();
   const isTyped = typeof clsOrOpts === 'function';
   const cls = isTyped ? clsOrOpts as Class<T> : undefined;
   const opts = isTyped ? undefined : clsOrOpts as PathOpts | undefined;
@@ -135,8 +141,8 @@ export function usePath<T extends object>(
   // Typed mode — façade proxy (method calls work regardless of data state)
   const proxy = useMemo(() => {
     if (!cls || !path) return undefined;
-    return makeProxy(path, cls, node, key);
-  }, [cls, path, node, key]);
+    return makeProxy(path, cls, node, effects, key);
+  }, [cls, path, node, effects, key]);
 
   return useMemo(() => {
     if (cls && path) {
@@ -160,39 +166,41 @@ export function useChildren(parentPath: string, opts?: ChildrenOpts): ChildrenQu
 
   // Gated multi-query mounts (§4.2, ns6p.4 F6) publish a per-handle snapshot
   // lane instead of the shared parent-keyed cache — consume it when present.
-  const [ownLane, setOwnLane] = useState<ChildrenHandle | null>(null);
+  const queryKey = opts?.query ? JSON.stringify(opts.query) : undefined;
+  const [ownedLane, setOwnLane] = useState<{ source: typeof source; path: string; limit?: number; watch?: boolean; watchNew?: boolean; queryKey?: string; handle: ChildrenHandle } | null>(null);
+  const ownLane = ownedLane?.source === source && ownedLane.path === parentPath
+    && ownedLane.limit === opts?.limit && ownedLane.watch === opts?.watch && ownedLane.watchNew === opts?.watchNew
+    && ownedLane.queryKey === queryKey ? ownedLane.handle : undefined;
 
-  // Single bundled snapshot — data + phase + total + truncated + error.
-  // Source merges all five into one stable reference; one subscribe channel.
+  // The owning source publishes data, phase, continuation, and failure atomically.
   const snap = useSyncExternalStore(
     useCallback(
       (cb: () => void) => ownLane?.subscribe ? ownLane.subscribe(cb) : source.subscribeChildren(parentPath, cb),
-      [source, parentPath, ownLane],
+      [source, parentPath, ownLane, opts?.limit, opts?.watch, opts?.watchNew, queryKey],
     ),
     useCallback(
-      () => ownLane?.getSnapshot ? ownLane.getSnapshot() : source.getChildrenSnapshot(parentPath),
-      [source, parentPath, ownLane],
+      () => ownLane?.getSnapshot ? ownLane.getSnapshot() : source.getChildrenSnapshot(parentPath, opts),
+      [source, parentPath, ownLane, opts?.limit, opts?.watch, opts?.watchNew, queryKey],
     ),
     useCallback(
-      () => ownLane?.getSnapshot ? ownLane.getSnapshot() : source.getChildrenSnapshot(parentPath),
-      [source, parentPath, ownLane],
+      () => ownLane?.getSnapshot ? ownLane.getSnapshot() : source.getChildrenSnapshot(parentPath, opts),
+      [source, parentPath, ownLane, opts?.limit, opts?.watch, opts?.watchNew, queryKey],
     ),
   );
 
   // Lifecycle — mountChildren owns fetch + retain/release + watch ref-counting +
   // page-size lock + SSE-reset re-fetch. dispose() reverses everything.
   // Query identity by value — callers pass fresh object literals every render.
-  const queryKey = opts?.query ? JSON.stringify(opts.query) : undefined;
   const handleRef = useRef<ChildrenHandle | null>(null);
   useEffect(() => {
     debugPath(parentPath, 'useChildren');
     const h = source.mountChildren(parentPath, opts);
     handleRef.current = h;
-    if (h.getSnapshot && h.subscribe) setOwnLane(h);
+    if (h.getSnapshot && h.subscribe) setOwnLane({ source, path: parentPath, limit: opts?.limit, watch: opts?.watch, watchNew: opts?.watchNew, queryKey, handle: h });
     return () => {
       h.dispose();
       handleRef.current = null;
-      setOwnLane((cur) => cur === h ? null : cur);
+      setOwnLane((cur) => cur?.handle === h ? null : cur);
     };
   }, [source, parentPath, opts?.limit, opts?.watch, opts?.watchNew, queryKey]);
 
@@ -207,13 +215,12 @@ export function useChildren(parentPath: string, opts?: ChildrenOpts): ChildrenQu
 
   return useMemo(() => ({
     data: snap.data,
-    total: snap.total,
+    errors: snap.errors ?? NO_CHILD_ERRORS,
     hasMore,
     loading,
     loadingMore,
     error: snap.error,
     stale,
-    truncated: snap.truncated,
     refetch,
     loadMore,
   }), [snap, hasMore, loading, loadingMore, stale, refetch, loadMore]);
@@ -369,6 +376,9 @@ export async function moveNode(fromPath: string, newPath: string): Promise<void>
 
 export interface ActionResults {}
 
+/** Named producers publish their exact piece type; dynamic action streams remain unknown. */
+export interface ActionChunks {}
+
 export function execute<T extends keyof ActionResults, A extends keyof ActionResults[T] & string>(
   pathOrUri: string, action: A, data: unknown, type: T, key?: string,
 ): Promise<ActionResults[T][A]>;
@@ -445,6 +455,13 @@ const permCache = new Map<string, { perm: number; ts: number }>();
 const PERM_TTL = 30_000; // 30s cache
 
 export function useCanWrite(path: string | null): boolean {
+  const source = useTreeSource();
+  const effects = useTreeEffects();
+  useSyncExternalStore(
+    callback => path === null ? () => {} : source.subscribePath(path, callback),
+    () => path === null ? undefined : source.getPathSnapshot(path),
+    () => path === null ? undefined : source.getPathSnapshot(path),
+  );
   // Key the perm to its path. After a path change React re-renders with the
   // NEW path but the OLD state until the effect commits — so we must derive
   // the effective perm from `state.path === path`, falling closed otherwise.
@@ -452,7 +469,7 @@ export function useCanWrite(path: string | null): boolean {
   const [state, setState] = useState<{ path: string | null; perm: number }>({ path: null, perm: 0 });
 
   useEffect(() => {
-    if (!path) { setState({ path: null, perm: 0 }); return; }
+    if (effects.lane || !path) { setState({ path: null, perm: 0 }); return; }
 
     const cached = permCache.get(path);
     if (cached && Date.now() - cached.ts < PERM_TTL) {
@@ -474,9 +491,10 @@ export function useCanWrite(path: string | null): boolean {
       setState({ path, perm: 0 });
     });
     return () => { cancelled = true; };
-  }, [path]);
+  }, [path, effects]);
 
-  const effectivePerm = state.path === path ? state.perm : 0;
+  const effectivePerm = effects.lane ? (path === null ? 0 : effects.bits(path) ?? 0)
+    : state.path === path ? state.perm : 0;
   return (effectivePerm & W) !== 0;
 }
 
@@ -492,8 +510,26 @@ function streamToAsyncIterable<T>(
   };
 }
 
+/** Retain the existing effects only on the explicitly legacy source owner. */
+function legacyStream<T extends keyof ActionChunks, A extends keyof ActionChunks[T] & string>(
+  action: ClientAction & { type: T; action: A },
+): AsyncIterableIterator<ActionChunks[T][A]>;
+function legacyStream(action: ClientAction): AsyncIterableIterator<unknown>;
+function legacyStream(action: ClientAction): AsyncIterableIterator<unknown> {
+  return streamToAsyncIterable(action)[Symbol.asyncIterator]();
+}
+
+export const legacyTreeEffects: TreeEffects = {
+  lane: false,
+  execute,
+  patchNode,
+  createNode, removeNode,
+  stream: legacyStream,
+  bits: () => undefined,
+};
+
 function makeProxy<T extends object>(
-  path: string, cls: Class<T>, node: NodeData | undefined, key?: string,
+  path: string, cls: Class<T>, node: PresentationNode | undefined, effects: TreeEffects, key?: string,
 ): TypeProxy<T> {
   const type = normalizeType(cls);
   const comp = node
@@ -507,9 +543,9 @@ function makeProxy<T extends object>(
       if (!meta) return (comp as any)?.[prop];
 
       if (meta.stream)
-        return (data?: unknown) => streamToAsyncIterable({ path, type, component: key, action: prop, args: data });
+        return (data?: unknown) => effects.stream({ path, type, component: key, action: prop, args: data });
 
-      return (data?: unknown) => execute(path, prop, data, type, key);
+      return (data?: unknown) => effects.execute(path, prop, data, type, key);
     },
   }) as TypeProxy<T>;
 }

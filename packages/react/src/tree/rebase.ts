@@ -6,6 +6,7 @@ import { getComponent, type NodeData } from '@treenx/core';
 import { type Class, predictionCtx } from '@treenx/core/comp';
 import { applyOps, type PatchOp } from '@treenx/core/tree';
 import * as cache from './cache';
+import { replayPredictions } from '#tree/replay-predictions';
 
 interface PendingOp {
   opId: string;
@@ -43,26 +44,12 @@ function replayAndPut(path: string, rs: RebaseState) {
 /** Pure replay half of replayAndPut — snapshot ingest needs the overlay image
  *  without an extra cache.put per node (pages batch through replaceChildren). */
 function replayDraft(path: string, rs: RebaseState): NodeData {
-  let draft = structuredClone(rs.confirmed);
-  for (const op of rs.pending) {
-    const candidate = structuredClone(draft);
-    try {
+  return replayPredictions(rs.confirmed, rs.pending, (candidate, op) => {
       const comp = getComponent(candidate, op.cls, op.key);
-      if (!comp) continue;
-      const result = op.handler(predictionCtx(candidate, comp), op.data) as unknown;
-      if (result && typeof (result as Promise<unknown>).then === 'function') {
-        // Promise.resolve wrap: a conforming PromiseLike guarantees only .then —
-        // calling .catch on it directly throws and orphans the rejection.
-        Promise.resolve(result).catch(err => reportReplayFailure(path, op, err));
-        logSkipOnce(op, 'async prediction');
-        continue;
-      }
-      draft = candidate;
-    } catch (err) {
-      reportReplayFailure(path, op, err);
-    }
-  }
-  return draft;
+      if (!comp) return;
+      return op.handler(predictionCtx(candidate, comp), op.data);
+    }, (op, error) => reportReplayFailure(path, op, error),
+    op => logSkipOnce(op, 'async prediction'));
 }
 
 // Skipped predictions are an EXPECTED lane (server event re-syncs) —

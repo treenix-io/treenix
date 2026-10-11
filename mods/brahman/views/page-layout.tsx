@@ -1,3 +1,4 @@
+import type { PresentationNode } from '@treenx/react/tree/presentation';
 // Page layout — DnD sortable list of actions
 // Data model: command & positions are TOP-LEVEL node fields (not in a component).
 // getComponent(node, PageConfig) returns the node itself when node.$type === 'brahman.page',
@@ -30,7 +31,7 @@ import {
 } from '@treenx/react/ui/dropdown-menu';
 import { Input } from '@treenx/react/ui/input';
 import { Render, type View } from '@treenx/react';
-import { createNode, removeNode, useChildren, useNavigate, useSave } from '@treenx/react';
+import { useTreeEffects, useChildren, useNavigate, useSave } from '@treenx/react';
 import type { PageConfig } from '../types';
 import { ChevronDown, ChevronRight, GripVertical, Plus, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
@@ -92,7 +93,7 @@ function SortableAction({
   expanded,
   onToggle,
 }: {
-  node: NodeData;
+  node: PresentationNode;
   onRemove: () => void;
   onSelect: () => void;
   expanded: boolean;
@@ -165,6 +166,7 @@ function SortableAction({
 // ── Page layout view (registered as 'brahman.page' react handler) ──
 
 export const PageLayoutView: View<PageConfig> = ({ value, ctx }) => {
+  const { createNode, removeNode } = useTreeEffects();
   const navigate = useNavigate();
   const node = ctx!.node;
   const actionsPath = ctx!.path + '/_actions';
@@ -189,7 +191,7 @@ export const PageLayoutView: View<PageConfig> = ({ value, ctx }) => {
   // Sort children by positions, append any untracked
   const tracked = new Set(positions);
   const sorted = [
-    ...positions.map(p => children.find(c => c.$path === p)).filter((c): c is NodeData => !!c),
+    ...positions.map(p => children.find(c => c.$path === p)).filter((c): c is PresentationNode => !!c),
     ...children.filter(c => !tracked.has(c.$path) && c.$type?.startsWith('brahman.action.')),
   ];
 

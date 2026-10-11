@@ -1,3 +1,4 @@
+import type { PresentationNode } from '@treenx/react';
 import type { NodeData } from '@treenx/core';
 import { register } from '@treenx/core';
 import { type View } from '@treenx/react';
@@ -17,14 +18,14 @@ const MODES: { id: Mode; icon: ReactNode; label: string }[] = [
   { id: 'kanban', icon: <Rows3 size={14} />, label: 'Kanban' },
 ];
 
-function f(node: NodeData, key: string): string {
+function f(node: PresentationNode, key: string): string {
   const v = node[key];
   if (typeof v === 'string') return v;
   if (typeof v === 'number' || typeof v === 'boolean') return String(v);
   return '';
 }
 
-function collectFields(nodes: NodeData[]): string[] {
+function collectFields(nodes: PresentationNode[]): string[] {
   const keys = new Set<string>();
   for (const node of nodes.slice(0, 30)) {
     for (const k of Object.keys(node)) {
@@ -34,8 +35,8 @@ function collectFields(nodes: NodeData[]): string[] {
   return [...keys].sort();
 }
 
-function groupItems(items: NodeData[], groupBy: string) {
-  const map = new Map<string, NodeData[]>();
+function groupItems(items: PresentationNode[], groupBy: string) {
+  const map = new Map<string, PresentationNode[]>();
   for (const node of items) {
     const key = f(node, groupBy) || 'empty';
     if (!map.has(key)) map.set(key, []);
@@ -46,7 +47,7 @@ function groupItems(items: NodeData[], groupBy: string) {
 
 // ── Renderers ──
 
-function ListView({ items }: { items: NodeData[] }) {
+function ListView({ items }: { items: PresentationNode[] }) {
   return (
     <div className="p-3">
       <RenderChildren items={items} ctx="list" />
@@ -54,7 +55,7 @@ function ListView({ items }: { items: NodeData[] }) {
   );
 }
 
-function MiniTable({ items, fields, title, count }: { items: NodeData[]; fields: string[]; title?: string; count?: number }) {
+function MiniTable({ items, fields, title, count }: { items: PresentationNode[]; fields: string[]; title?: string; count?: number }) {
   const navigate = useNavigate();
 
   return (
@@ -97,7 +98,7 @@ function MiniTable({ items, fields, title, count }: { items: NodeData[]; fields:
   );
 }
 
-function TableView({ items, groupBy }: { items: NodeData[]; groupBy: string }) {
+function TableView({ items, groupBy }: { items: PresentationNode[]; groupBy: string }) {
   const fields = useMemo(() => collectFields(items), [items]);
   const groups = useMemo(() => groupBy ? [...groupItems(items, groupBy).entries()] : null, [items, groupBy]);
 
@@ -114,7 +115,7 @@ function TableView({ items, groupBy }: { items: NodeData[]; groupBy: string }) {
   return <MiniTable items={items} fields={fields} />;
 }
 
-function KanbanView({ items, groupBy }: { items: NodeData[]; groupBy: string }) {
+function KanbanView({ items, groupBy }: { items: PresentationNode[]; groupBy: string }) {
   const groups = useMemo(() => [...groupItems(items, groupBy).entries()], [items, groupBy]);
 
   return (
@@ -134,7 +135,7 @@ function KanbanView({ items, groupBy }: { items: NodeData[]; groupBy: string }) 
   );
 }
 
-function Results({ items, mode, groupBy }: { items: NodeData[]; mode: Mode; groupBy: string }) {
+function Results({ items, mode, groupBy }: { items: PresentationNode[]; mode: Mode; groupBy: string }) {
   if (items.length === 0) {
     return (
       <div className="px-4 py-8 text-center text-xs text-muted-foreground">

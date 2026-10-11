@@ -1,3 +1,4 @@
+import type { PresentationNode } from '@treenx/react';
 // Launcher view — dashboard with drag-drop from tree + context switching
 
 import { isRef, type NodeData, register, resolveExact } from '@treenx/core';
@@ -102,7 +103,7 @@ function AppItem({
   onRemove,
   onContextChange,
 }: {
-  refNode: NodeData;
+  refNode: PresentationNode;
   context: string;
   stored: string;
   editing?: boolean;
@@ -219,7 +220,7 @@ const LauncherView: View<Launcher> = ({ value, ctx }) => {
   }
 
   // Build child map
-  const childMap = new Map<string, NodeData>();
+  const childMap = new Map<string, PresentationNode>();
   for (const c of children) {
     const id = c.$path.split('/').at(-1) || '';
     childMap.set(id, c);

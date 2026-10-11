@@ -1,11 +1,12 @@
+import type { PresentationNode } from '#tree/presentation';
 import { getComponents as getComps, getContextsForType, type NodeData, resolve } from '@treenx/core';
 import type { PropertySchema, TypeSchema } from '@treenx/core/schema/types';
 
-export function getComponents(node: NodeData): [string, Record<string, unknown>][] {
+export function getComponents(node: PresentationNode): [string, Record<string, unknown>][] {
   return getComps(node).slice(1);
 }
 
-export function getPlainFields(node: NodeData): Record<string, unknown> {
+export function getPlainFields(node: PresentationNode): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(node)) {
     if (k.startsWith('$')) continue;
@@ -22,7 +23,7 @@ export function getSchema(type: string): TypeSchema | null {
 
 const INTERNAL_CONTEXTS = new Set(['schema', 'mount', 'class']);
 
-export function getViewContexts(type: string, node?: NodeData): string[] {
+export function getViewContexts(type: string, node?: PresentationNode): string[] {
   const ctxs = getContextsForType(type).filter(
     (c) => !INTERNAL_CONTEXTS.has(c) && !c.startsWith('action:'),
   );

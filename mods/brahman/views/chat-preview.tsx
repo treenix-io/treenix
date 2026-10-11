@@ -1,3 +1,4 @@
+import type { PresentationNode } from '@treenx/react';
 // Chat preview — Telegram-style visualization of page actions
 // Registered as react:chat for brahman.page
 
@@ -59,7 +60,7 @@ function TgHtml({ text }: { text: string }) {
   return <>{Array.from(doc.body.childNodes).map(domToReact)}</>;
 }
 
-function getComponent(node: NodeData): Record<string, unknown> {
+function getComponent(node: PresentationNode): Record<string, unknown> {
   if (node.$type?.startsWith('brahman.action.')) return node;
   for (const [k, v] of Object.entries(node)) {
     if (k.startsWith('$')) continue;
@@ -140,7 +141,7 @@ const FILE_ICONS: Record<string, React.ReactNode> = {
 
 // ── Action renderers ──
 
-function renderAction(node: NodeData, index: number, isFirstBubble: boolean): React.ReactNode {
+function renderAction(node: PresentationNode, index: number, isFirstBubble: boolean): React.ReactNode {
   const c = getComponent(node);
   const type = node.$type;
 
@@ -224,7 +225,7 @@ export const PageChatPreview: View<PageConfig> = ({ value, ctx }) => {
   const positions = value.positions;
   const tracked = new Set(positions);
   const sorted = [
-    ...positions.map(p => children.find(c => c.$path === p)).filter((c): c is NodeData => !!c),
+    ...positions.map(p => children.find(c => c.$path === p)).filter((c): c is PresentationNode => !!c),
     ...children.filter(c => !tracked.has(c.$path) && c.$type?.startsWith('brahman.action.')),
   ];
 

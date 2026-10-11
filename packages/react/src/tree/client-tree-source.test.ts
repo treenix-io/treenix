@@ -86,7 +86,7 @@ describe('ClientTreeSource — cursor pagination (core-92z)', () => {
     assert.deepEqual(cache.getChildren('/q').map(n => n.$path), ['/q/a', '/q/b', '/q/c']);
     assert.equal(source.getChildrenSnapshot('/q').nextCursor, null);
     // total tracks loaded count, not a per-page value
-    assert.equal(source.getChildrenSnapshot('/q').total, 3);
+    assert.equal(source.getChildrenSnapshot('/q').data.length, 3);
 
     // Exhausted view: loadMore is a no-op.
     h.loadMore();

@@ -1,3 +1,4 @@
+import type { NodeData } from '@treenx/core';
 // Inspector — view + edit panel for selected node (Unity-style inspector)
 // Shell only: header, rendered view, delegates editing to NodeEditor
 
@@ -8,7 +9,7 @@ import { Render, RenderContext } from '#context';
 import { usePath } from '#hooks';
 import { useReactivePathEvents } from '#hooks/use-reactive-path-events';
 import { pickDefaultContext } from '#mods/editor-ui/node-utils';
-import { useAutoSave } from '#tree/auto-save';
+import { useLegacySave } from '#tree/auto-save';
 import { useState } from 'react';
 import { InspectorHeader } from './InspectorHeader';
 import { NodeEditor } from './NodeEditor';
@@ -24,8 +25,8 @@ type Props = {
 
 export function Inspector({ path, currentUserId, onDelete, onAddComponent, onSelect, onSetRoot }: Props) {
   useReactivePathEvents();
-  const { data: node } = usePath(path);
-  const save = useAutoSave(path ?? '');
+  const { data: node } = usePath<NodeData>(path);
+  const save = useLegacySave(path ?? '', { autoSave: true });
   const [propsOpen, setPropsOpen] = useState(false);
   const [context, setContext] = useState('react:layout');
 

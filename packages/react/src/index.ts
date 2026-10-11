@@ -18,3 +18,5 @@ export { minimd } from '#lib/minimd';
 export { stampNode, stampComponent } from '#symbols';
 export { useDraft, type DraftHandle } from './draft';
 export { useReactivePathEvents } from '#hooks/use-reactive-path-events';
+
+export type { PresentationNode, PresentationComponent } from '#tree/presentation';
