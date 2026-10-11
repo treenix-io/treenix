@@ -101,13 +101,13 @@ export async function openNativeRuntime(input: NativeRuntimeConfig) {
       federation: config.federation,
       shardPath: config.shardPath,
       root: { kind: 'store', store },
+      mountDirectories: config.mountDirectories,
       blobs: await createFsBlobStore(join(config.directory, '.treenix', 'blobs')),
       provisioning: {
         counter: lease,
         writerEpoch: lease.writerEpoch,
         domains: [{ store, epoch: lease.epoch, persistent: true }],
         mounts,
-      mountDirectories: config.mountDirectories,
         credentialTtlMs: config.credentialTtlMs,
         bootstrap: existing.items.length === 0 && firstAdmin !== undefined
           ? { kind: 'fresh', admin: firstAdmin }
