@@ -16,7 +16,8 @@ const forwarded = nativeServe ? [args[2]] : args;
 const dist = join(here, `../dist/server/${entry}.js`);
 if (nativeServe) process.argv = [process.argv[0], dist, ...forwarded];
 
-if (existsSync(dist)) {
+const sourceCheckout = nativeServe && existsSync(join(here, '../tsconfig.json'));
+if (!sourceCheckout && existsSync(dist)) {
   await import(pathToFileURL(dist).href);
 } else {
   const { spawnSync } = await import('node:child_process');
