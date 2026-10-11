@@ -10,7 +10,12 @@ interface DeployArguments {
 
 /** Decode deployment arguments received at the public action boundary. */
 function deployArguments(value: unknown): DeployArguments {
-  if (value === null || typeof value !== 'object' || !('target' in value) || typeof value.target !== 'string')
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    !('target' in value) ||
+    typeof value.target !== 'string'
+  )
     throw new KernelError('INVALID', 'Prefab deployment requires a target path');
   const allowAbsolute = 'allowAbsolute' in value ? value.allowAbsolute : undefined;
   if (allowAbsolute !== undefined && typeof allowAbsolute !== 'boolean')
@@ -32,20 +37,32 @@ async function exists(read: Reader, path: string): Promise<boolean> {
 
 export const deployPrefabAction: WriteAction = {
   kind: 'write',
-  args: { type: 'object', properties: { target: { type: 'string' }, allowAbsolute: { type: 'boolean' } },
-    required: ['target'], additionalProperties: false },
+  args: {
+    type: 'object',
+    properties: { target: { type: 'string' }, allowAbsolute: { type: 'boolean' } },
+    required: ['target'],
+    additionalProperties: false,
+  },
   /** Copy accepted source data in one atomic caller-authorized decision. */
   async handler(this: NativePrefabSource, ctx, args) {
     const input = deployArguments(args);
-    const nodes = this.nodes.map(node => prefabInput(node,
-      resolvePrefabPath(node.$path, input.target, input.allowAbsolute)));
-    const deployed: string[] = [], skipped: string[] = [];
+    const nodes = this.nodes.map((node) =>
+      prefabInput(node, resolvePrefabPath(node.$path, input.target, input.allowAbsolute)),
+    );
+    const deployed: string[] = [],
+      skipped: string[] = [];
     const seen = new Set<string>();
 
     for (const node of nodes) {
-      if (seen.has(node.$path)) { skipped.push(node.$path); continue; }
+      if (seen.has(node.$path)) {
+        skipped.push(node.$path);
+        continue;
+      }
       seen.add(node.$path);
-      if (await exists(ctx.read, node.$path)) { skipped.push(node.$path); continue; }
+      if (await exists(ctx.read, node.$path)) {
+        skipped.push(node.$path);
+        continue;
+      }
       await ctx.requireReadWrite(node.$path);
       ctx.change.put(node);
       deployed.push(node.$path);

@@ -7,7 +7,12 @@ import { assertPrefabPath, prefabInput, resolvePrefabPath } from '#mod/prefab-pa
 import { stableJson } from '#util/stable-json';
 
 export interface NativeSeedPrefab {
-  readonly source: NodeInput & { readonly $type: 't.prefab'; readonly mod: string; readonly name: string; readonly nodes: readonly CapturedSeedNode[] };
+  readonly source: NodeInput & {
+    readonly $type: 't.prefab';
+    readonly mod: string;
+    readonly name: string;
+    readonly nodes: readonly CapturedSeedNode[];
+  };
   readonly target: string;
   readonly allowAbsolute?: boolean;
   /** Legacy setup belongs to its old runtime and cannot receive a native Tree substitute. */
@@ -36,8 +41,10 @@ async function readNode(session: Session, path: string): Promise<Node> {
 
 /** Absence is the only read refusal that copy-if-absent can consume. */
 async function absent(session: Session, path: string): Promise<boolean> {
-  try { await readNode(session, path); return false; }
-  catch (error) {
+  try {
+    await readNode(session, path);
+    return false;
+  } catch (error) {
     if (error instanceof KernelError && error.code === 'NOT_FOUND') return true;
     throw error;
   }
@@ -50,7 +57,10 @@ function childKey(operation: OpId, owner: string, path: string): OpId {
 }
 
 /** Install native sources first, then copy accepted prefab data through bounded caller-owned requests. */
-export async function installNativeSeeds(session: Session, plan: NativeSeedPlan): Promise<NativeSeedResult> {
+export async function installNativeSeeds(
+  session: Session,
+  plan: NativeSeedPlan,
+): Promise<NativeSeedResult> {
   for (const prefab of plan.prefabs) {
     if (prefab.setup !== undefined)
       throw new KernelError('UNAVAILABLE', 'Legacy prefab setup requires its retiring runtime');
@@ -59,22 +69,33 @@ export async function installNativeSeeds(session: Session, plan: NativeSeedPlan)
       throw new KernelError('INVALID', 'Prefab source must belong to its declared module and name');
     assertPrefabPath(source.$path);
     assertPrefabPath(prefab.target);
-    for (const node of source.nodes) resolvePrefabPath(node.$path, prefab.target, prefab.allowAbsolute);
+    for (const node of source.nodes)
+      resolvePrefabPath(node.$path, prefab.target, prefab.allowAbsolute);
   }
   for (const source of plan.sources) assertPrefabPath(source.$path);
 
   const rootCopy = (await session.read({ node: '/' })).copies[0];
   if ('error' in rootCopy) throw new KernelError(rootCopy.error.code, rootCopy.error.message);
-  if ((rootCopy.bits & A) !== A) throw new KernelError('FORBIDDEN', 'Seed installation requires root administration');
+  if ((rootCopy.bits & A) !== A)
+    throw new KernelError('FORBIDDEN', 'Seed installation requires root administration');
   const admin = { path: '/', rev: rootCopy.node.$rev };
-  const installed: string[] = [], skipped: string[] = [];
+  const installed: string[] = [],
+    skipped: string[] = [];
 
   /** Each request contains one put; the kernel's saved read/write budgets remain authoritative. */
   async function put(node: NodeInput, owner: string, source?: Node): Promise<void> {
-    if (!(await absent(session, node.$path))) { skipped.push(node.$path); return; }
-    await session.commit({ opId: childKey(plan.opId, owner, node.$path),
-      changes: [{ op: 'put', node }], expect: { absent: [node.$path],
-        nodes: source === undefined ? [admin] : [admin, { path: source.$path, rev: source.$rev }] } }).outcome;
+    if (!(await absent(session, node.$path))) {
+      skipped.push(node.$path);
+      return;
+    }
+    await session.commit({
+      opId: childKey(plan.opId, owner, node.$path),
+      changes: [{ op: 'put', node }],
+      expect: {
+        absent: [node.$path],
+        nodes: source === undefined ? [admin] : [admin, { path: source.$path, rev: source.$rev }],
+      },
+    }).outcome;
     if (await absent(session, node.$path))
       throw new KernelError('CONFLICT', 'Replayed seed outcome no longer has its installed target');
     installed.push(node.$path);
@@ -82,15 +103,18 @@ export async function installNativeSeeds(session: Session, plan: NativeSeedPlan)
 
   for (const source of plan.sources) await put(source, 'catalog');
   for (const prefab of plan.prefabs) {
-    const source: NativePrefabSource = { ...prefab.source,
-      nodes: prefab.source.nodes.map(node => prefabInput(node, node.$path)) };
+    const source: NativePrefabSource = {
+      ...prefab.source,
+      nodes: prefab.source.nodes.map((node) => prefabInput(node, node.$path)),
+    };
     await put(source, 'source');
   }
 
   for (const prefab of plan.prefabs) {
     const accepted = await readNode(session, prefab.source.$path);
     const source = getComponent<NativePrefabSource>(accepted, 't.prefab');
-    if (source === undefined) throw new KernelError('INVALID', 'Accepted seed source has another type');
+    if (source === undefined)
+      throw new KernelError('INVALID', 'Accepted seed source has another type');
     const owner = stableJson({ id: accepted.$id, rev: accepted.$rev });
     for (const node of source.nodes) {
       const path = resolvePrefabPath(node.$path, prefab.target, prefab.allowAbsolute);

@@ -13,9 +13,22 @@ export type NativePrefabSource = NodeInput & {
 
 /** Publish the existing prefab owner's canonical schema without importing its retiring deploy executor. */
 export async function nativePrefabManifest(): Promise<ModuleManifest> {
-  const schema: TypeSchema = JSON.parse(await readFile(new URL('./schemas/t.prefab.json', import.meta.url), 'utf8'));
-  return { id: '@treenx/core/prefab', security: [], open: [], types: [
-    { name: 't.prefab', module: '@treenx/core/prefab', security: 'ordinary', version: 0,
-      schema: { ...schema, required: ['mod', 'name', 'nodes'] }, actions: { deploy: deployPrefabAction } },
-  ] };
+  const schema: TypeSchema = JSON.parse(
+    await readFile(new URL('./schemas/t.prefab.json', import.meta.url), 'utf8'),
+  );
+  return {
+    id: '@treenx/core/prefab',
+    security: [],
+    open: [],
+    types: [
+      {
+        name: 't.prefab',
+        module: '@treenx/core/prefab',
+        security: 'ordinary',
+        version: 0,
+        schema: { ...schema, required: ['mod', 'name', 'nodes'] },
+        actions: { deploy: deployPrefabAction },
+      },
+    ],
+  };
 }

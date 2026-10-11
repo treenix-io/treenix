@@ -13,14 +13,23 @@ export function resolvePrefabPath(nodePath: string, target: string, allowAbsolut
   assertPrefabPath(target);
   if (nodePath.startsWith('/') && !allowAbsolute)
     throw new KernelError('INVALID', 'Absolute prefab path requires allowAbsolute');
-  const path = nodePath === '.' ? target : nodePath.startsWith('/') ? nodePath
-    : target === '/' ? `/${nodePath}` : `${target}/${nodePath}`;
+  const path =
+    nodePath === '.'
+      ? target
+      : nodePath.startsWith('/')
+        ? nodePath
+        : target === '/'
+          ? `/${nodePath}`
+          : `${target}/${nodePath}`;
   assertPrefabPath(path);
   return path;
 }
 
 /** Give malformed deployment paths a transport-independent refusal. */
 export function assertPrefabPath(path: string): void {
-  try { assertSafePath(path); }
-  catch (error) { throw new KernelError('INVALID', error instanceof Error ? error.message : String(error)); }
+  try {
+    assertSafePath(path);
+  } catch (error) {
+    throw new KernelError('INVALID', error instanceof Error ? error.message : String(error));
+  }
 }
