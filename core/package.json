@@ -370,6 +370,16 @@
       "development": "./src/kernel/action-publication.ts",
       "types": "./dist/kernel/action-publication.d.ts",
       "default": "./dist/kernel/action-publication.js"
+    },
+    "./tools/upgrade-kernel": {
+      "development": "./src/tools/upgrade-kernel.ts",
+      "types": "./dist/tools/upgrade-kernel.d.ts",
+      "default": "./dist/tools/upgrade-kernel.js"
+    },
+    "./tools/upgrade-kernel-plan": {
+      "development": "./src/tools/upgrade-kernel-plan.ts",
+      "types": "./dist/tools/upgrade-kernel-plan.d.ts",
+      "default": "./dist/tools/upgrade-kernel-plan.js"
     }
   },
   "treenix": {
@@ -393,7 +403,9 @@
     "prepack": "npm run build",
     "test": "tsx --conditions development --test --test-concurrency=4 'src/**/*.test.ts'",
     "dev:server": "npm run schema && tsx --conditions development --watch src/server/main.ts ../root.json",
-    "schema": "tsx --conditions development src/schema/extract-schemas-oxc.ts src ../mods ../packages"
+    "schema": "tsx --conditions development src/schema/extract-schemas-oxc.ts src ../mods ../packages",
+    "upgrade:kernel": "tsx --conditions development src/tools/upgrade-kernel.ts",
+    "test:upgrade-kernel": "tsx --conditions development --test src/tools/upgrade-kernel.test.ts"
   },
   "dependencies": {
     "@trpc/client": "^11.17.0",
