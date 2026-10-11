@@ -1,11 +1,12 @@
 import { Button } from '#components/ui/button';
-import { Dialog, DialogContent } from '#components/ui/dialog';
+import { Dialog, DialogContent, DialogTitle } from '#components/ui/dialog';
 import { Input } from '#components/ui/input';
 import { Label } from '#components/ui/label';
-import { setToken, trpc } from '#tree/trpc';
+import { useAuthPort } from './auth-context';
 import { useState } from 'react';
 
 function LoginForm({ onLogin }: { onLogin: (userId: string) => void }) {
+  const port = useAuthPort();
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [userId, setUserId] = useState('');
   const [password, setPassword] = useState('');
@@ -18,15 +19,14 @@ function LoginForm({ onLogin }: { onLogin: (userId: string) => void }) {
     setLoading(true);
     setErr(null);
     try {
-      const fn = mode === 'register' ? trpc.register : trpc.login;
-      const res = await fn.mutate({ userId: userId.trim(), password });
+      const fn = mode === 'register' ? port.register : port.login;
+      if (fn === undefined) throw new Error('Registration is unavailable');
+      const res = await fn(userId.trim(), password);
       if ('pending' in res && res.pending) {
         setErr('Account created — waiting for admin approval');
         setMode('login');
         return;
       }
-      if (!res.token) throw new Error('No token received');
-      setToken(res.token);
       onLogin(res.userId);
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Failed');
@@ -39,8 +39,8 @@ function LoginForm({ onLogin }: { onLogin: (userId: string) => void }) {
     setLoading(true);
     setErr(null);
     try {
-      const res = await trpc.devLogin.mutate();
-      setToken(res.token);
+      if (port.devLogin === undefined) throw new Error('Development login is unavailable');
+      const res = await port.devLogin();
       onLogin(res.userId);
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Dev login failed');
@@ -84,13 +84,13 @@ function LoginForm({ onLogin }: { onLogin: (userId: string) => void }) {
         {loading ? '...' : mode === 'register' ? 'Create account' : 'Sign in'}
       </Button>
 
-      {import.meta.env.DEV && (
+      {import.meta.env.DEV && port.devLogin !== undefined && (
         <Button type="button" variant="secondary" onClick={handleDevLogin} disabled={loading}>
           Login as Dev
         </Button>
       )}
 
-      <Button
+      {port.register !== undefined && <Button
         type="button"
         variant="ghost"
         onClick={() => {
@@ -99,7 +99,7 @@ function LoginForm({ onLogin }: { onLogin: (userId: string) => void }) {
         }}
       >
         {mode === 'login' ? 'No account? Register' : 'Have an account? Sign in'}
-      </Button>
+      </Button>}
     </form>
   );
 }
@@ -115,7 +115,8 @@ export function LoginScreen({ onLogin }: { onLogin: (userId: string) => void }) 
 export function LoginModal({ onLogin, onClose }: { onLogin: (userId: string) => void; onClose?: () => void }) {
   return (
     <Dialog open onOpenChange={(open) => { if (!open && onClose) onClose(); }}>
-      <DialogContent className="w-fit max-w-fit p-0 border-none bg-transparent shadow-none" showCloseButton={!!onClose}>
+      <DialogContent className="w-fit max-w-fit p-0 border-none bg-transparent shadow-none" showCloseButton={!!onClose} aria-describedby={undefined}>
+        <DialogTitle className="sr-only">Sign in to Treenix</DialogTitle>
         <LoginForm onLogin={onLogin} />
       </DialogContent>
     </Dialog>

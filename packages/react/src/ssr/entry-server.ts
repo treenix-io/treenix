@@ -6,7 +6,7 @@
 // in the exports map.
 
 
-import { NativeRouter } from '#app/NativeRouter';
+import { NativeRoutePage } from '#app/NativeRouter';
 import { Toaster } from '#components/ui/sonner';
 import '#mods/servers';
 import { ServerLocationContext } from '#navigate';
@@ -55,7 +55,7 @@ export function render({ source, mode, pathname = '/', search = '' }: RenderArgs
           source,
           children: createElement(QueryClientProvider, {
             client: queryClient,
-            children: createElement(Fragment, null, createElement(NativeRouter), createElement(Toaster)),
+            children: createElement(Fragment, null, createElement(NativeRoutePage), createElement(Toaster)),
           }),
         },
       ),

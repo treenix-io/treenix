@@ -12,6 +12,10 @@ export async function boot(element: HTMLElement | string = '#root') {
     const { bootNative, decodeNativeHydration } = await import('#app/native-boot');
     return bootNative(root, decodeNativeHydration(value));
   }
+  if (import.meta.env.VITE_NATIVE === '1') {
+    const { bootNative } = await import('#app/native-boot');
+    return bootNative(root, { reads: [] });
+  }
   const legacy = await import('#app/legacy-boot');
   legacy.boot(root);
 }

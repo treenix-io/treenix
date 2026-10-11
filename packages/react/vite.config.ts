@@ -8,9 +8,12 @@ import { viteSsrPlugin } from '@treenx/ssr/vite-ssr';
 const repoRoot = resolve(import.meta.dirname, '../../..');
 const initCwd = process.env.INIT_CWD;
 const projectRoot = initCwd && existsSync(resolve(initCwd, 'node_modules')) ? initCwd : repoRoot;
-const apiPort = process.env.VITE_API_PORT || '3211';
+const native = process.env.TREENIX_NATIVE === '1';
+const apiPort = process.env.VITE_API_PORT || (native ? '4882' : '3211');
 
 export default defineConfig({
+  envDir: false,
+  define: { 'import.meta.env.VITE_NATIVE': JSON.stringify(native ? '1' : '0') },
   cacheDir: resolve(projectRoot, 'node_modules/.vite/treenx-react'),
   resolve: {
     conditions: ['development'],
@@ -35,6 +38,8 @@ export default defineConfig({
     host: process.env.HOST || '127.0.0.1',
     allowedHosts: ['treenix.pro', 'frp.treenix.pro', 'dev.treenix.pro'],
     proxy: {
+      '/auth/': { target: `http://127.0.0.1:${apiPort}`, changeOrigin: true },
+      '/twp': { target: `http://127.0.0.1:${apiPort}`, changeOrigin: true },
       '/trpc/': { target: `http://127.0.0.1:${apiPort}`, changeOrigin: true },
       '/api/': { target: `http://127.0.0.1:${apiPort}`, changeOrigin: true },
     },

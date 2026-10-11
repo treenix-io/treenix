@@ -8,6 +8,7 @@
 // whether the route is a shell ($type: 't.view.shell') or a ref.
 
 import { useMemo } from 'react';
+import { KernelError } from '@treenx/core/errors';
 import { useChildren } from '#hooks';
 import { getRoute, resolveRoute, resolveTarget, type ResolveResult } from './route-resolve';
 
@@ -21,12 +22,16 @@ export type RouteResolveQuery = {
   loading: boolean;
   /** Matched route opts in for unauthenticated rendering (t.route.public). */
   isPublic: boolean;
+  /** Admission or projection failure from the route directory. */
+  error: Error | null;
 };
 
 export function useRouteResolve(pathname: string): RouteResolveQuery {
-  const { data, loading } = useChildren('/sys/routes', { watch: true, watchNew: true });
+  const { data, loading, error, errors } = useChildren('/sys/routes', { watch: true, watchNew: true });
   const result = useMemo(() => resolveRoute(pathname, data), [pathname, data]);
   const target = result ? resolveTarget(getRoute(result.node), result.rest) : null;
   const isPublic = !!result && getRoute(result.node)?.public === true;
-  return { result, target, loading, isPublic };
+  const projectionError = errors[0];
+  const failure = error ?? (projectionError === undefined ? null : new KernelError(projectionError.error.code, projectionError.error.message));
+  return { result, target, loading, isPublic, error: failure };
 }

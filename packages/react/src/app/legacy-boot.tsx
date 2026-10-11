@@ -4,7 +4,7 @@ import { enablePatches } from 'immer';
 import { type ReactNode } from 'react';
 import { createRoot, hydrateRoot } from 'react-dom/client';
 import { App } from './App';
-import { AuthProvider } from './auth-context';
+import { AuthProvider } from './legacy-auth';
 import '#tree/load-client';
 import { hydrateFromServerSnapshot, type ServerHydrationState } from '#tree/cache';
 import { createClientTreeSource } from '#tree/client-tree-source';
