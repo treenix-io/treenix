@@ -10,6 +10,24 @@
     "name": {
       "type": "string",
       "default": ""
+    },
+    "nodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "$path",
+          "$type"
+        ],
+        "properties": {
+          "$path": {
+            "type": "string"
+          },
+          "$type": {
+            "type": "string"
+          }
+        }
+      }
     }
   },
   "required": [
@@ -18,7 +36,7 @@
   ],
   "methods": {
     "deploy": {
-      "description": "Deploy this prefab's nodes into target path. Idempotent — skips existing nodes",
+      "description": "Deploy this prefab's nodes into target path. Idempotent \u2014 skips existing nodes",
       "arguments": [
         {
           "name": "data",

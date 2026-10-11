@@ -1,4 +1,5 @@
 import { createNode, type NodeData } from '#core';
+import { KernelError } from '#errors';
 import { clearPrefabs, getModPrefabs, getPrefab, getRegisteredMods, getSeedPrefabs, registerPrefab } from '#mod/prefab';
 import '#mod/prefab-type';
 import { loadSchemasFromDir } from '#schema/load';
@@ -194,7 +195,7 @@ describe('deployPrefab', () => {
 
     await assert.rejects(
       () => deployPrefab(tree, '/sys/mods/test/prefabs/abs', '/app', {}),
-      (e: Error) => e.message.includes('not allowed'),
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
     );
   });
 
@@ -277,7 +278,7 @@ describe('deployPrefab', () => {
 
     await assert.rejects(
       () => deployPrefab(tree, '/sys/mods/test/prefabs/bad-node', '/app'),
-      (e: Error) => e.message.includes('Invalid prefab node path'),
+      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
     );
   });
 

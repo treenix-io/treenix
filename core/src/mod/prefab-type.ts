@@ -3,12 +3,14 @@
 // deploy() seeds the prefab's nodes into the target path.
 
 import { getCtx, registerType } from '#comp';
+import type { NodeInput } from '#kernel/types';
 import { loadSchemasFromDir } from '#schema/load';
 import { deployByKey } from '#server/prefab';
 
 export class Prefab {
   mod = '';
   name = '';
+  nodes?: readonly NodeInput[];
 
   /** @description Deploy this prefab's nodes into target path. Idempotent — skips existing nodes */
   async deploy(data: {

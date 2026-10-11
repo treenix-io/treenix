@@ -7,6 +7,7 @@ import { getPrefab, getSeedPrefabs, type PrefabEntry } from '#mod/prefab';
 import { type Tree } from '#tree';
 import { KernelError } from '#errors';
 import { assertSafePath } from '#core/path';
+import { resolvePrefabPath } from '#mod/prefab-path';
 
 export type DeployOpts = {
   allowAbsolute?: boolean;
@@ -17,12 +18,6 @@ export type DeployOpts = {
 function parseSourcePath(source: string): [string, string] | null {
   const m = source.match(/^\/sys\/mods\/([^/]+)\/prefabs\/([^/]+)$/);
   return m ? [m[1], m[2]] : null;
-}
-
-function resolvePath(nodePath: string, target: string): string {
-  if (nodePath === '.') return target;
-  if (nodePath.startsWith('/')) return nodePath;
-  return target === '/' ? `/${nodePath}` : `${target}/${nodePath}`;
 }
 
 function assertDeployPath(label: string, path: string): void {
@@ -51,14 +46,7 @@ async function deployNodes(
   const skipped: string[] = [];
 
   for (const node of nodes) {
-    const isAbsolute = node.$path.startsWith('/');
-
-    if (isAbsolute && !opts?.allowAbsolute) {
-      throw new KernelError('INVALID', `Absolute path "${node.$path}" not allowed without allowAbsolute`);
-    }
-
-    const resolvedPath = resolvePath(node.$path, target);
-    assertDeployPath('Invalid prefab node path', resolvedPath);
+    const resolvedPath = resolvePrefabPath(node.$path, target, opts?.allowAbsolute);
 
     // Idempotent: skip if exists
     if (await tree.get(resolvedPath)) {
