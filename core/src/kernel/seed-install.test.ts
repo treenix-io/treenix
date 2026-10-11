@@ -8,7 +8,7 @@ import { KernelError } from '#errors';
 import { openNativeRuntime } from '#kernel/runtime';
 import { drainSession } from '#kernel/session-delivery';
 import { installNativeSeeds, type NativeSeedPlan } from '#kernel/seed-install';
-import type { CommitRequest, ModuleManifest, OpId, Session } from '#kernel/types';
+import { R, W, type CommitRequest, type ModuleManifest, type OpId, type Session } from '#kernel/types';
 import { nativePrefabManifest, type NativePrefabSource } from '#mod/native-prefab';
 
 const module: ModuleManifest = { id: 'seed-fixture', security: [], open: [], types: [
@@ -149,4 +149,31 @@ it('refuses invalid public deployment paths before publishing any target', { tim
     action: 'deploy', args: { target: '/refused' } }).outcome,
     error => error instanceof KernelError && error.code === 'INVALID');
   await assert.rejects(read(f.session, '/refused'), error => error instanceof KernelError && error.code === 'NOT_FOUND');
+});
+
+it('uses the ordinary caller rights for every deployment destination and refuses the whole decision', { timeout: 10_000 }, async t => {
+  const f = await fixture(t);
+  const publicWrite = [{ subject: { group: 'public' }, grant: R | W }];
+  await f.session.commit({ opId: f.key(), changes: [
+    { op: 'put', node: { $path: '/prefab', $type: 't.prefab', mod: 'demo', name: 'copy', $acl: publicWrite,
+      nodes: [{ $path: 'first', $type: 'seed.fixture', value: 1 },
+        { $path: '/blocked/new', $type: 'seed.fixture', value: 2 }] } },
+    { op: 'put', node: { $path: '/allowed', $type: 't.dir', $acl: publicWrite } },
+    { op: 'put', node: { $path: '/blocked', $type: 't.dir' } },
+  ] }).outcome;
+  const caller = await f.runtime.instance.openSession();
+  const delivery = drainSession(caller);
+  t.after(async () => { caller.close(); await delivery; });
+  const invoke = () => caller.act({ opId: f.key(), path: '/prefab', action: 'deploy',
+    args: { target: '/allowed', allowAbsolute: true } }).outcome;
+
+  await assert.rejects(invoke(), error => error instanceof KernelError && error.code === 'FORBIDDEN');
+  await assert.rejects(read(f.session, '/allowed/first'), error => error instanceof KernelError && error.code === 'NOT_FOUND');
+  await assert.rejects(read(f.session, '/blocked/new'), error => error instanceof KernelError && error.code === 'NOT_FOUND');
+  await f.session.commit({ opId: f.key(), changes: [{ op: 'patch', path: '/blocked',
+    ops: { $set: { $acl: publicWrite } } }] }).outcome;
+  const result = await invoke();
+  assert.deepEqual(result.value, { deployed: ['/allowed/first', '/blocked/new'], skipped: [] });
+  assert.equal((await read(f.session, '/allowed/first')).value, 1);
+  assert.equal((await read(f.session, '/blocked/new')).value, 2);
 });
