@@ -14,7 +14,7 @@ import {
 } from '#kernel/subscription';
 import { computeDelta } from '#kernel/update-ops';
 import { stableJson } from '#util/stable-json';
-import type { ComputedNode, ErrorCopy, Frame, LaneChange, NodeCopy, NodeId, Path, Position, Row, Sort } from '#kernel/types';
+import type { ComputedNode, ErrorCopy, Frame, LaneChange, NodeCopy, NodeId, Path, Position, Row, Sort, ViewOwner } from '#kernel/types';
 
 interface Coverage {
   count: number;
@@ -24,7 +24,14 @@ interface Coverage {
   copy: NodeCopy;
   position?: Position;
 }
+interface ViewExtras {
+  readonly viewOwner?: ViewOwner;
+  readonly computed?: readonly ComputedNode[];
+  readonly viewErrors?: readonly ErrorCopy[];
+  readonly rows?: readonly Row[];
+}
 interface Stage {
+  readonly viewOwner?: ViewOwner;
   readonly sub: NodeSubscription;
   readonly gen: number;
   readonly stamp: number;
@@ -60,7 +67,7 @@ export function createLaneDelivery(
   remove: (sub: NodeSubscription, reason: KernelError) => void,
 ) {
   const coverage = new Map<NodeId, Coverage>();
-  const extras = new Map<NodeSubscription, { computed?: readonly ComputedNode[]; viewErrors?: readonly ErrorCopy[]; rows?: readonly Row[] }>();
+  const extras = new Map<NodeSubscription, ViewExtras>();
   const versions = new Map<NodeSubscription, Map<NodeId, string>>();
   function currentImage(image: NodeLaneImage, prior: Coverage | undefined): boolean {
     return prior?.position === undefined || image.position === undefined
@@ -69,10 +76,11 @@ export function createLaneDelivery(
   function extraCost(stages: readonly Stage[]): number {
     const current = new Map(extras);
     for (const stage of stages) if (registered(stage.sub))
-      current.set(stage.sub, { computed: stage.computed, viewErrors: stage.viewErrors, rows: stage.rows });
+      current.set(stage.sub, { computed: stage.computed, viewErrors: stage.viewErrors, rows: stage.rows, viewOwner: stage.viewOwner });
     const computed = new Map<string, ComputedNode>();
     let bytes = 0;
     for (const [sub, extra] of current) {
+      if (extra.viewOwner !== undefined) bytes += Buffer.byteLength(serializeKernel(extra.viewOwner));
       if (extra.rows !== undefined) bytes += Buffer.byteLength(serializeKernel(extra.rows));
       if (extra.viewErrors !== undefined) bytes += Buffer.byteLength(serializeKernel(extra.viewErrors));
       for (const node of extra.computed ?? []) computed.set(`${sub.view!.key}:${node.$id}`, node);
@@ -155,7 +163,7 @@ export function createLaneDelivery(
     const computedCounts = new Map<NodeId, number>();
     if (stage.computed !== undefined) {
       const current = new Map(extras);
-      for (const staged of stages) current.set(staged.sub, { computed: staged.computed, viewErrors: staged.viewErrors, rows: staged.rows });
+      for (const staged of stages) current.set(staged.sub, { computed: staged.computed, viewErrors: staged.viewErrors, rows: staged.rows, viewOwner: staged.viewOwner });
       for (const [sub, extra] of current) if (sub.view?.key === stage.sub.view?.key)
         for (const node of extra.computed ?? []) computedCounts.set(node.$id, (computedCounts.get(node.$id) ?? 0) + 1);
     }
@@ -259,7 +267,7 @@ export function createLaneDelivery(
             selection.reads.dependencies?.flatMap(input => input.kind === 'epoch' ? [input.key] : []) ?? [],
           );
           stages.push({ sub, gen, stamp, force, keys, state, changes: new Map(sub.changes),
-            computed: selection.computed, viewErrors: selection.viewErrors, rows: selection.rows, at: selection.at });
+            computed: selection.computed, viewErrors: selection.viewErrors, rows: selection.rows, at: selection.at, viewOwner: selection.viewOwner });
           for (const image of selection.images) {
             const id = copyId(image.copy);
             images.set(id, image);
@@ -390,7 +398,7 @@ export function createLaneDelivery(
           next: stage.state.next,
         });
       subscriptions.install(stage.sub, stage.state);
-      extras.set(stage.sub, { computed: stage.computed, viewErrors: stage.viewErrors, rows: stage.rows });
+      extras.set(stage.sub, { computed: stage.computed, viewErrors: stage.viewErrors, rows: stage.rows, viewOwner: stage.viewOwner });
       for (const id of stage.state.covered) claims?.delete(id);
       stage.sub.initial = false;
       if (stage.sub.view !== undefined) stage.sub.viewVersion = stage.sub.view.version;
@@ -479,6 +487,7 @@ export function createLaneDelivery(
           computed: stage.computed,
           viewErrors: stage.viewErrors,
           rows: stage.rows,
+          viewOwner: stage.viewOwner,
           at: stage.at ?? [result.pos],
           next: stage.state.next,
         };
@@ -522,7 +531,7 @@ export function createLaneDelivery(
           diff: [...[...before].filter(id => !after.has(id)).map(remove => ({ remove })),
             ...[...after].filter(id => !before.has(id)).map(add => ({ add }))],
           covered: [...stage.state.covered, ...stage.computed?.map(node => node.$id) ?? [], ...stage.viewErrors?.map(copy => copy.id) ?? []],
-          copies, computed, viewErrors, rows, at: stage.at ?? [result.pos], next: stage.state.next };
+          copies, computed, viewErrors, rows, viewOwner: stage.viewOwner, at: stage.at ?? [result.pos], next: stage.state.next };
         return { frame, removed };
       } finally { for (const release of result.held.values()) release(); }
     },

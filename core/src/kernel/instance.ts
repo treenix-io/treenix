@@ -720,6 +720,8 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
       }
       result.set(config.root, rootTarget);
       for (const claim of mounts?.ranges(range) ?? []) {
+        const opened = mounts!.target(claim.key, claim.generation);
+        if (opened.kind === 'view') continue;
         const registered = registeredTargets.get(claim.key);
         if (
           claim.state !== 'active' ||
@@ -772,6 +774,7 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
           if (selection === undefined) throw new KernelError('CONFLICT', 'View generation changed')
           const output = { list: selection.roots.flatMap(root => root.member === undefined ? [] : [root.member.id]),
             copies: selection.images.map(image => image.copy), computed: selection.computed, viewErrors: selection.viewErrors, rows: selection.rows,
+            viewOwner: selection.viewOwner,
             next: selection.next, at: selection.at ?? [writer.stream.cursor().pos] }
           if (Buffer.byteLength(serializeKernel(output)) > allowance.bytes)
             throw new KernelError('BUDGET', 'View read result exceeded byte budget')
@@ -938,10 +941,21 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
         if ('selector' in found.target) return undefined
         const rights = computeRights(admission.actor, targets.chain(found.entry.node.$path), registry)
         if ((rights.bits & 1) === 0) throw new KernelError('NOT_FOUND', 'View is not readable')
+        const viewOwner = { path: found.entry.node.$path, component: found.entry.component }
+        /** Bind the result to the exact declaration admitted for this subscription. */
+        function owned(subscription: import('#kernel/view').ViewSubscription) {
+          return { ...subscription, get version() { return subscription.version }, get ready() { return subscription.ready },
+            select(range?: import('#kernel/lane-selection').LaneRange) {
+              const current = mounts?.resolve(path, 'children' in selector)
+              if (current?.target !== found!.target) return undefined
+              const selection = subscription.select(range)
+              return selection === undefined ? undefined : { ...selection, viewOwner }
+            } }
+        }
         if (found.target.executor === 'node') {
           const owner = viewOwners.get(found.entry.key)
           if (owner === undefined) throw new KernelError('UNAVAILABLE', 'View executor is not available')
-          return owner.view.subscribe(selector, changed)
+          return owned(owner.view.subscribe(selector, changed))
         }
         const view = createView({ node: found.entry.node, admission, derive: found.target.derive, executor: 'reader',
           active() {
@@ -951,9 +965,9 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
           read: viewRead(admission), limits: () => limits, budget, observe: writer.stream.observe, topologyChanged, domainIntersects,
           position: () => writer.stream.cursor().pos })
         const subscription = view.subscribe(selector, changed)
-        return { key: subscription.key, get version() { return subscription.version }, get ready() { return subscription.ready }, select: subscription.select,
+        return owned({ key: subscription.key, get version() { return subscription.version }, get ready() { return subscription.ready }, select: subscription.select,
           intersects: subscription.intersects, invalidate: subscription.invalidate, cursor: subscription.cursor,
-          close() { subscription.close(); view.close() } }
+          close() { subscription.close(); view.close() } })
   }
   function nodeLaneOptions(admission: AuthAdmission): NodeLaneOptions {
     const options = commandOptions(admission);

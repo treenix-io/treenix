@@ -10,6 +10,27 @@ const snapshot = (sub = 'one', gen = 1): Frame => ({ t: 'snap', sub, gen, list: 
 const code = (expected: KernelError['code']) => (error: unknown) => error instanceof KernelError && error.code === expected
 
 describe('native lane cache', () => {
+  it('keeps View ownership inside its generation and clears it on reset, ordinary snapshots and end', () => {
+    const cache = createLaneCache()
+    const owner = { path: '/trash', component: '#deleted' }
+    cache.apply({ t: 'snap', sub: 'view', gen: 1, list: [], copies: [], rows: [], at: [pos(0)], viewOwner: owner })
+    assert.deepEqual(cache.list('view')?.viewOwner, owner)
+    cache.apply({ t: 'pos', pos: pos(1), changes: [{ op: 'list', sub: 'view', gen: 1, diff: [] }] })
+    assert.deepEqual(cache.list('view')?.viewOwner, owner)
+    cache.apply({ t: 'result', sub: 'view', gen: 1, diff: [], copies: [], at: [pos(1)] })
+    assert.equal(cache.list('view')?.viewOwner, undefined)
+    cache.apply({ t: 'result', sub: 'view', gen: 1, diff: [], copies: [], at: [pos(1)], viewOwner: owner })
+    assert.deepEqual(cache.list('view')?.viewOwner, owner)
+    cache.apply({ t: 'reset', sub: 'view', gen: 2 })
+    assert.equal(cache.list('view')?.viewOwner, undefined)
+    cache.apply({ t: 'result', sub: 'view', gen: 1, diff: [], copies: [], at: [pos(1)], viewOwner: owner })
+    assert.equal(cache.list('view')?.viewOwner, undefined)
+    cache.apply({ t: 'snap', sub: 'view', gen: 2, list: [], copies: [], at: [pos(1)] })
+    assert.equal(cache.list('view')?.viewOwner, undefined)
+    cache.apply({ t: 'end', sub: 'view', error: new KernelError('CANCELLED', 'Subscription closed') })
+    assert.equal(cache.list('view'), undefined)
+  })
+
   it('applies a patch once and rejects an ordinary duplicate position', () => {
     const cache = createLaneCache()
     cache.apply(snapshot())

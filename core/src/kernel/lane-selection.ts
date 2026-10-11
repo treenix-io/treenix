@@ -1,7 +1,7 @@
 import type { NodeLaneImage } from '#kernel/lane';
 import type { ReadSet } from '#kernel/preconditions';
 import type { ScanKey } from '#kernel/store/scan';
-import type { ComputedNode, Cursor, ErrorCopy, NodeId, Path, Position, Row, Sort, SubSelector } from '#kernel/types';
+import type { ComputedNode, Cursor, ErrorCopy, NodeId, Path, Position, Row, Sort, SubSelector, ViewOwner } from '#kernel/types';
 
 export interface LaneBranch {
   readonly covered: readonly NodeId[];
@@ -16,6 +16,7 @@ export interface LaneRoot extends LaneBranch {
 }
 
 export interface LaneSelection {
+  readonly viewOwner?: ViewOwner;
   readonly roots: readonly LaneRoot[];
   readonly fixedIncludes: LaneBranch;
   readonly images: readonly NodeLaneImage[];

@@ -550,6 +550,14 @@ export function createMountTable(options: MountTableOptions) {
       const address = addressOf(range)
       return [...entries.values()].flatMap(entry => intersects(entry.pattern, address) ? [entry.range] : [])
     },
+    target(key: string, generation: string): OpenedMountTarget {
+      available()
+      const entry = entries.get(key)
+      if (entry === undefined || entry.range.generation !== generation || !current(entry)
+        || entry.state !== 'active' || entry.target === undefined)
+        throw new KernelError('UNAVAILABLE', 'Mount target is not available')
+      return entry.target
+    },
     /** Pin semantic topology, including unavailable claims, for Reader and subscription dependencies. */
     topology(range: ScanRange): string {
       const address = addressOf(range)
