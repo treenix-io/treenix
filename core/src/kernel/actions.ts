@@ -109,6 +109,10 @@ export function createActionRuntime(options: CommandOptions) {
                 ...(request.anchor === undefined ? {} : { anchor: request.anchor }),
               },
             };
+      if (identity !== undefined && !parent?.onlyRead) assertMutationKey(opId);
+      const foreign = await options.actAuthority?.({ request, admission, cost: readerOperationCost(ledger), identity,
+        onlyRead: parent?.onlyRead ?? false, wait: control.wait, signal: control.signal, deliver });
+      if (foreign !== undefined) return foreign;
       if (identity !== undefined && !parent?.onlyRead) {
         assertMutationKey(opId);
         const replay = await writer.replay(identity, control.wait);

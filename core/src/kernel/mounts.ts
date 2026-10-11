@@ -373,7 +373,7 @@ export function createMountTable(options: MountTableOptions) {
         if (entry.session.session.actor.principal !== `n:${entry.node.$id}`) {
           throw new KernelError('INVALID', 'Mount handler requires its declaring node session')
         }
-        entry.target = ownMountTarget(await handler(entry.node, entry.session.session))
+        entry.target = ownMountTarget(await handler(entry.node, entry.session.session, entry.component))
         validate(entry.key, entry.revision)
         if (entry.target.kind === 'store' && entry.declaration.external === 'trusted'
           && entry.target.store.external === undefined) {

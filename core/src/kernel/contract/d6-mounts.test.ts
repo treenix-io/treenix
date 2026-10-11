@@ -225,9 +225,9 @@ describe('native memory targets through the canonical Instance', { timeout: 10_0
   it('rebinds a configured main mount on reopen before exposing any shadowed parent data', async () => {
     const memory = createMemoryMountHandler(1)
     let opened = 0
-    const f = await fixture(async (node, session) => {
+    const f = await fixture(async (node, session, component) => {
       opened++
-      return memory(node, session)
+      return memory(node, session, component)
     })
     assert.ok(f.instance.setupCredential)
     const credential = f.instance.setupCredential
@@ -259,9 +259,9 @@ describe('native memory targets through the canonical Instance', { timeout: 10_0
   it('opens one actual target for concurrent first access and every wildcard match', async t => {
     const memory = createMemoryMountHandler(1)
     let opened = 0, target: OpenedStoreMountTarget | undefined
-    const f = await fixture(async (node, session) => {
+    const f = await fixture(async (node, session, component) => {
       opened++
-      const created = await memory(node, session)
+      const created = await memory(node, session, component)
       assert.equal(created.kind, 'store')
       target = created
       return created
@@ -292,13 +292,13 @@ describe('native memory targets through the canonical Instance', { timeout: 10_0
   it('invokes the exact owner handler with the genuine declaring-node grants', async t => {
     const memory = createMemoryMountHandler(1)
     let seen: Session | undefined
-    const f = await fixture(async (node, session) => {
+    const f = await fixture(async (node, session, component) => {
       seen = session
       assert.equal(session.actor.principal, `n:${node.$id}`)
       assert.deepEqual(session.actor.claims, [session.actor.principal])
       assert.equal((await session.read({ node: '/allowed' })).list.length, 1)
       await assert.rejects(session.read({ node: '/other' }), code('NOT_FOUND'))
-      return memory(node, session)
+      return memory(node, session, component)
     })
     t.after(f.close)
     await f.mount()
@@ -316,10 +316,10 @@ describe('native memory targets through the canonical Instance', { timeout: 10_0
   it('evicts a failed opening and closes its Session before a successful retry', async t => {
     const memory = createMemoryMountHandler(1)
     const sessions: Session[] = []
-    const f = await fixture(async (node, session) => {
+    const f = await fixture(async (node, session, component) => {
       sessions.push(session)
       if (sessions.length === 1) throw new KernelError('UNAVAILABLE', 'Target initialization failed')
-      return memory(node, session)
+      return memory(node, session, component)
     })
     t.after(f.close)
     await f.mount()
@@ -353,10 +353,10 @@ describe('native memory targets through the canonical Instance', { timeout: 10_0
   it('refuses explicit handler reads of its own unopened target without a recursive wait', async t => {
     const memory = createMemoryMountHandler(1)
     let checked = false
-    const f = await fixture(async (node, session) => {
+    const f = await fixture(async (node, session, component) => {
       await assert.rejects(session.read({ node: '/data/a/stats' }), code('UNAVAILABLE'))
       checked = true
-      return memory(node, session)
+      return memory(node, session, component)
     })
     t.after(f.close)
     await f.mount()
@@ -408,8 +408,8 @@ describe('native memory targets through the canonical Instance', { timeout: 10_0
     const entered = latch(), release = latch()
     const memory = createMemoryMountHandler(1)
     let target: OpenedStoreMountTarget | undefined, closed = 0
-    const f = await fixture(async (node, session) => {
-      const opened = await memory(node, session)
+    const f = await fixture(async (node, session, component) => {
+      const opened = await memory(node, session, component)
       let released = false
       target = { ...opened, async close() {
         if (released) return
@@ -462,10 +462,10 @@ describe('native memory targets through the canonical Instance', { timeout: 10_0
   it('preserves target content and subscription generation when unrelated declaration fields change', async t => {
     const memory = createMemoryMountHandler(1)
     let opened = 0
-    const f = await fixture(async (node, session) => {
+    const f = await fixture(async (node, session, component) => {
       opened++
       assert.equal(node.unrelated, undefined)
-      return memory(node, session)
+      return memory(node, session, component)
     })
     t.after(f.close)
     await f.mount()
@@ -510,8 +510,8 @@ describe('native memory targets through the canonical Instance', { timeout: 10_0
   it('accepts actual in-process token zero and releases only its owned target on shutdown', async () => {
     const memory = createMemoryMountHandler(0)
     let target: OpenedStoreMountTarget | undefined
-    const f = await fixture(async (node, session) => {
-      const opened = await memory(node, session)
+    const f = await fixture(async (node, session, component) => {
+      const opened = await memory(node, session, component)
       target = opened
       return opened
     }, 0)

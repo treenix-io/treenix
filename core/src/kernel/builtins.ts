@@ -11,6 +11,14 @@ export const optionalKernelTypes: readonly TypeDef[] = [{
   name: 't.mount.memory', module: 'kernel', security: 'user-capability', version: 0, actions: {},
   schema: { type: 'object', required: ['pattern'], additionalProperties: false,
     properties: { pattern: { type: 'string' }, external: { enum: ['none', 'trusted'] } } },
+}, {
+  name: 't.mount.federation', module: 'kernel', security: 'privileged-capability', version: 0, actions: {},
+  schema: { type: 'object', required: ['pattern', 'url', 'credential'], additionalProperties: false,
+    properties: { pattern: { type: 'string' }, url: { type: 'string', minLength: 1 }, credential: { type: 'string', pattern: '^/' },
+      remote: { type: 'string', pattern: '^/' }, allowPrivate: { type: 'boolean' } } },
+}, {
+  name: 't.outbound-credential', module: 'kernel', security: 'ordinary', version: 0, actions: {},
+  schema: { type: 'object', required: ['token'], additionalProperties: false, properties: { token: { type: 'string', minLength: 1 } } },
 }, fsMountType, {
   name: 't.mount.query', module: 'kernel', security: 'user-capability', version: 0, actions: {},
   schema: { type: 'object', required: ['pattern', 'source', 'match'], additionalProperties: false,

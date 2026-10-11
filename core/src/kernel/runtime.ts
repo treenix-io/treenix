@@ -7,9 +7,10 @@ import { previewModules } from '#kernel/module-install'
 import { provisionFsMounts, type FsDirectoryBindings } from '#kernel/mount-fs-provider'
 import { createFsStore } from '#kernel/store/fs'
 import { createFsBlobStore } from '#kernel/blob-store-fs'
-import { DEFAULT_LIMITS, type ActionIoBinding, type AdminInput, type Credential, type Gate, type ModuleManifest, type ProvisionedStoreMount } from '#kernel/types'
+import { DEFAULT_LIMITS, type FederationBinding, type ActionIoBinding, type AdminInput, type Credential, type Gate, type ModuleManifest, type ProvisionedStoreMount } from '#kernel/types'
 
 export interface NativeRuntimeConfig {
+  readonly federation?: FederationBinding
   readonly io?: ActionIoBinding
   readonly id: string
   readonly directory: string
@@ -30,6 +31,7 @@ export async function openNativeRuntime(input: NativeRuntimeConfig) {
       input.firstAdmin === undefined ? undefined : Object.freeze({ ...input.firstAdmin });
   const config = Object.freeze({
     id: input.id,
+    federation: input.federation,
     io: input.io,
     directory: input.directory,
     credentialTtlMs: input.credentialTtlMs,
@@ -88,6 +90,7 @@ export async function openNativeRuntime(input: NativeRuntimeConfig) {
 
     foundation = await createInstance({
       id: config.id,
+      federation: config.federation,
       root: { kind: 'store', store },
       blobs: await createFsBlobStore(join(config.directory, '.treenix', 'blobs')),
       provisioning: {

@@ -167,7 +167,7 @@ export function createBlobTransfers(options: CommandOptions, store: BlobStore) {
         { signal: control.signal, deadline: budget.deadline },
       );
       const source = options.source(budget);
-      if (source.auth.shard(path))
+      if (options.authority?.(path) || source.auth.shard(path))
         throw new KernelError('INVALID', 'Authority blobs belong to their instance');
       const reader = createReader({
         admission: request,

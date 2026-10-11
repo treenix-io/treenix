@@ -1,14 +1,17 @@
 import { KernelError } from '#errors'
+import { createActionControl } from '#kernel/action-context'
+import type { MutationIdentity, MutationWaiter } from '#kernel/idempotency'
+import type { OperationReadCost } from '#kernel/store/budget'
 import { createActionRuntime } from '#kernel/actions'
 import type { AuthAdmission } from '#kernel/auth-factory'
 import type { CapabilityState } from '#kernel/capability'
 import { changeSelectors, selectChangeStore, prepareChangeSet, type PreparedChangeSet } from '#kernel/changeset'
 import { judgeGates } from '#kernel/gates'
 import type { createProjector } from '#kernel/projection'
-import { createReader, type ReaderLedger, type ReaderSource } from '#kernel/reader'
+import { createReader, createReaderLedger, readerOperationCost, type ReaderLedger, type ReaderSource } from '#kernel/reader'
 import { createRequestAdmission, serializeRequest } from '#kernel/request'
 import type { AuthReadSource } from '#kernel/session'
-import type { BlobStore, Budget, CommitRequest, Gate, ActionIoBinding, Limits, NodeId, Outcome, Path, ReadResult, Registry, Rev, Selector, SubSelector, Store, StoredNode } from '#kernel/types'
+import type { ActionPieceDelivery, ActRequest, BlobStore, Budget, CommitRequest, Gate, ActionIoBinding, Limits, NodeId, Outcome, Path, ReadResult, Registry, Rev, Selector, SubSelector, Store, StoredNode } from '#kernel/types'
 import type { Writer } from '#kernel/writer'
 import { freeze } from '#util/freeze'
 
@@ -28,6 +31,26 @@ export interface NodeActionBinding {
   acceptOwnStep(node: StoredNode): void
 }
 
+export interface ForeignActionInput {
+  readonly request: ActRequest
+  readonly admission: AuthAdmission
+  readonly cost: OperationReadCost
+  readonly identity?: MutationIdentity
+  readonly onlyRead: boolean
+  readonly wait: MutationWaiter
+  readonly signal: AbortSignal
+  readonly deliver?: ActionPieceDelivery
+}
+
+export interface ForeignCommitInput {
+  readonly request: CommitRequest
+  readonly admission: AuthAdmission
+  readonly cost: OperationReadCost
+  readonly identity: MutationIdentity
+  readonly wait: MutationWaiter
+  readonly signal: AbortSignal
+}
+
 export interface CommandOptions {
   readonly writer: Writer
   readonly registry: Registry
@@ -40,6 +63,11 @@ export interface CommandOptions {
   readonly resolveSelector?: (selector: Selector) => Selector
   readonly viewDefinition?: (selector: SubSelector) => Path | undefined
   readonly readView?: (selector: SubSelector, request: AuthAdmission, budget: Budget) => Promise<ReadResult | undefined>
+  /** Identifies foreign blob owners without reading their projected payloads. */
+  readonly authority?: (path: Path) => boolean
+  readonly readAuthority?: (selector: Selector, request: AuthAdmission, budget: Budget) => Promise<ReadResult | undefined>
+  readonly commitAuthority?: (input: ForeignCommitInput) => Promise<Outcome | undefined>
+  readonly actAuthority?: (input: ForeignActionInput) => Promise<Outcome | undefined>
   readonly capabilities: (budget: Budget, ledger?: ReaderLedger) => CapabilityState
   readonly gates: readonly Gate[]
   readonly limits: () => Limits
@@ -91,6 +119,8 @@ export function createCommands(options: CommandOptions) {
       active(budget, request)
       await options.prepareSource(budget, [owned], request.signal)
       active(budget, request)
+      const foreign = await options.readAuthority?.(owned, request, budget)
+      if (foreign !== undefined) return foreign
       if (!('history' in owned)) {
         const view = await options.readView?.(owned, request, budget)
         if (view !== undefined) return view
@@ -124,6 +154,15 @@ export function createCommands(options: CommandOptions) {
         opId.nonce.length === 0
       )
         throw new KernelError('INVALID', 'A mutation key is required');
+      if (options.commitAuthority !== undefined) {
+        const control = createActionControl(authorization, budget.deadline)
+        try {
+          const foreign = await options.commitAuthority({ request, admission: authorization,
+            identity: { actor: admission.actor, opId, request: { kind: 'commit', changes: request.changes, expect: request.expect } },
+            cost: readerOperationCost(createReaderLedger(budget, limits)), wait: control.wait, signal: control.signal })
+          if (foreign !== undefined) return foreign
+        } finally { control.close() }
+      }
       return writer.mutate(
         {
           actor: admission.actor,

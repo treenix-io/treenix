@@ -103,13 +103,13 @@ async function setup(t: TestContext, twoDeclarations = false) {
           increment: { kind: 'write', args: {}, post: { '': { $inc: { count: 1 } } } },
         } },
     ],
-    security: [{ type: 'startup.mount', context: 'mount', handler: async (decl, session) => {
+    security: [{ type: 'startup.mount', context: 'mount', handler: async (decl, session, component) => {
       control.actors.push(session.actor.principal)
       assert.equal(session.actor.principal, `n:${decl.$id}`)
       assert.equal((await readNode(session, decl.$path)).$id, decl.$id)
       if (control.failure !== undefined) throw control.failure
       assert.ok(control.target)
-      return control.replacement === undefined ? control.target : control.replacement(decl, session)
+      return control.replacement === undefined ? control.target : control.replacement(decl, session, component)
     } }],
     open: [],
   }
@@ -312,8 +312,8 @@ describe('canonical mounted filesystem startup', { timeout: 30_000 }, () => {
     const f = await setup(t)
     const factory = createMemoryMountHandler(18)
     let alternateCloses = 0
-    f.control.replacement = async (decl, session) => {
-      const actual = await factory(decl, session)
+    f.control.replacement = async (decl, session, component) => {
+      const actual = await factory(decl, session, component)
       const alternate = { ...actual, async close() { alternateCloses++; await actual.close() } }
       t.after(async () => { if (alternateCloses === 0) await alternate.close() })
       return alternate

@@ -4,7 +4,7 @@ import type { CacheRead } from '#kernel/cache'
 import type { CommandOptions } from '#kernel/commands'
 import type { NodeLaneRead } from '#kernel/lane'
 import { createReader } from '#kernel/reader'
-import type { Path, SubSelector } from '#kernel/types'
+import type { Budget, Path, SubSelector } from '#kernel/types'
 
 /** Shares one Reader and its cache leases across a lane's ordered delivery preparation. */
 export function createNodeLaneRead(options: CommandOptions, claimable: (path: Path) => boolean) {
@@ -15,8 +15,10 @@ export function createNodeLaneRead(options: CommandOptions, claimable: (path: Pa
   return async function read<T>(
       run: (source: NodeLaneRead) => Promise<T>,
       selectors: readonly SubSelector[] = [],
+      prepare?: (budget: Budget) => Promise<Budget>,
     ): Promise<T> {
-    const budget = options.budget()
+    let budget = options.budget()
+    if (prepare !== undefined) budget = await prepare(budget)
     await options.prepareSource(budget, selectors, admission.signal)
     const revision = options.registryRevision()
     const held: CacheRead[] = []

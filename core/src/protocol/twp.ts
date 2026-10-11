@@ -1,10 +1,11 @@
-import { viewOwner } from '#kernel/input-boundary'
+import { viewOwner, isSelector, change as nativeChange } from '#kernel/input-boundary'
+export { isSelector } from '#kernel/input-boundary'
 import { safeJsonParse } from '#core/json'
 import { assertSafePath } from '#core/path'
 import { KernelError } from '#errors'
 import { serializeKernel } from '#kernel/serialization'
 import type { AclEntry, ChangeMember, Component, ComputedNode, ErrorCopy, Credential, Frame, IncludeSpec, Node, NodeCopy, NodeInput,
-  OpId, Position, Preconditions, Principal, ReadResult, Request, Row, Selector, UpdateOps } from '#kernel/types'
+  ActionDescriptor, LaneOwnership, LaneProducer, OpId, Position, Preconditions, Principal, ReadResult, Request, Row, Selector, UpdateOps } from '#kernel/types'
 import { isRecord } from '#util/is-record'
 
 const text = (value: unknown): value is string => typeof value === 'string' && value.length > 0
@@ -45,16 +46,6 @@ function include(value: unknown): value is IncludeSpec {
 function window(value: unknown): value is NonNullable<Extract<Selector, { children: string }>['window']> {
   return isRecord(value) && keys(value, ['limit', 'after', 'evict']) && integer(value.limit) && value.limit > 0
     && optional(value.after, text) && (value.evict === undefined || value.evict === true)
-}
-export function isSelector(value: unknown): value is Selector {
-  if (!isRecord(value)) return false
-  if ('node' in value) return keys(value, ['node', 'include']) && path(value.node) && optional(value.include, input => array(input, include))
-  if ('history' in value) return keys(value, ['history', 'after', 'window']) && path(value.history)
-    && optional(value.after, isPosition) && optional(value.window, window)
-  return keys(value, ['children', 'where', 'sort', 'window', 'include']) && path(value.children)
-    && optional(value.where, isRecord) && optional(value.window, window) && optional(value.include, input => array(input, include))
-    && (value.sort === undefined || Array.isArray(value.sort) && value.sort.every(item => Array.isArray(item) && item.length === 2
-      && text(item[0]) && (item[1] === 1 || item[1] === -1)))
 }
 function acl(value: unknown): value is AclEntry {
   if (!isRecord(value) || !isRecord(value.subject)) return false
@@ -101,6 +92,11 @@ function preconditions(value: unknown): value is Preconditions {
     && (value.selectors === undefined || Array.isArray(value.selectors) && value.selectors.every(item => isRecord(item)
       && keys(item, ['selector', 'at']) && isSelector(item.selector) && array(item.at, isPosition)))
 }
+function actionDescriptor(value: unknown): value is ActionDescriptor {
+  return isRecord(value) && keys(value, ['modules', 'type', 'kind', 'id', 'rev']) && text(value.modules)
+    && text(value.type) && text(value.id) && text(value.rev)
+    && (value.kind === 'read' || value.kind === 'write' || value.kind === 'setuid')
+}
 export function isRequest(value: unknown): value is Request {
   if (!isRecord(value)) return false
   switch (value.t) {
@@ -111,12 +107,12 @@ export function isRequest(value: unknown): value is Request {
     case 'sub': return keys(value, ['t', 'sub', 'selector']) && text(value.sub) && isSelector(value.selector) && !('history' in value.selector)
     case 'unsub': return keys(value, ['t', 'sub']) && text(value.sub)
     case 'cancel': return keys(value, ['t', 'req']) && text(value.req)
-    case 'act': return keys(value, ['t', 'req', 'path', 'component', 'action', 'args', 'opId', 'anchor'])
+    case 'act': return keys(value, ['t', 'req', 'path', 'component', 'action', 'args', 'opId', 'anchor', 'pre'])
       && text(value.req) && path(value.path) && text(value.action) && (value.component === undefined || value.component === ''
         || typeof value.component === 'string' && /^#[^.#\0]+$/.test(value.component))
-      && 'args' in value && optional(value.opId, opId) && optional(value.anchor, opId)
+      && 'args' in value && optional(value.opId, opId) && optional(value.anchor, opId) && optional(value.pre, actionDescriptor)
     case 'commit': return keys(value, ['t', 'req', 'changes', 'expect', 'opId']) && text(value.req)
-      && array(value.changes, change) && optional(value.expect, preconditions) && opId(value.opId)
+      && array(value.changes, nativeChange) && optional(value.expect, preconditions) && opId(value.opId)
     default: return false
   }
 }
@@ -129,29 +125,40 @@ function error(value: unknown): value is Extract<Frame, { t: 'fail' }>['error'] 
 function copy(value: unknown): value is NodeCopy {
   if (!isRecord(value) || !text(value.ver)) return false
   return 'node' in value ? keys(value, ['node', 'bits', 'ver']) && node(value.node) && bits(value.bits)
-    : keys(value, ['id', 'path', 'error', 'sort', 'ver']) && text(value.id) && path(value.path) && error(value.error) && optional(value.sort, isRecord)
+    : keys(value, ['id', 'path', 'error', 'sort', 'query', 'ver']) && text(value.id) && path(value.path) && error(value.error) && optional(value.sort, isRecord) && optional(value.query, isRecord)
 }
 function viewError(value: unknown): value is ErrorCopy { return copy(value) && 'error' in value }
 function computed(value: unknown): value is ComputedNode { return node(value) && value.$acl === undefined && value.$owner === undefined }
 function row(value: unknown): value is Row { return isRecord(value) && text(value.key) }
 export function isReadResult(value: unknown): value is ReadResult {
-  return isRecord(value) && keys(value, ['list', 'copies', 'computed', 'viewErrors', 'rows', 'history', 'at', 'next', 'viewOwner'])
-    && optional(value.viewOwner, viewOwner)
+  return isRecord(value) && keys(value, ['list', 'copies', 'computed', 'viewErrors', 'rows', 'history', 'at', 'next', 'viewOwner', 'action', 'ownership'])
+    && optional(value.viewOwner, viewOwner) && optional(value.action, actionDescriptor) && optional(value.ownership, laneOwnership)
     && array(value.list, text) && array(value.copies, copy) && array(value.at, isPosition) && optional(value.next, text)
     && optional(value.viewErrors, input => array(input, viewError)) && optional(value.computed, input => array(input, computed)) && optional(value.rows, input => array(input, row))
     && (value.history === undefined || Array.isArray(value.history) && value.history.every(item => isRecord(item)
-      && keys(item, ['address', 'path', 'executor', 'caller', 'opId', 'before', 'after']) && path(item.path)
+      && keys(item, ['address', 'path', 'executor', 'caller', 'opId', 'before', 'after', 'kind']) && path(item.path)
+      && (item.kind === 'commit' || item.kind === 'reconcile' || item.kind === 'kernel')
       && isRecord(item.address) && keys(item.address, ['pos', 'id']) && isPosition(item.address.pos) && text(item.address.id)
       && typeof item.executor === 'string' && /^(kernel$|(?:u:|n:|anon:|external:).+)/.test(item.executor)
       && typeof item.caller === 'string' && /^(kernel$|(?:u:|n:|anon:|external:).+)/.test(item.caller) && optional(item.opId, opId)
       && (item.before === null || item.before === 'unknown' || node(item.before)) && (item.after === null || node(item.after))))
 }
+function laneOwnership(value: unknown): value is LaneOwnership {
+  return isRecord(value) && keys(value, ['roots', 'fixed']) && array(value.fixed, text)
+    && array(value.roots, (root): root is LaneOwnership['roots'][number] => isRecord(root) && keys(root, ['id', 'covered', 'cursor', 'query'])
+      && text(root.id) && text(root.cursor) && array(root.covered, text) && optional(root.query, isRecord))
+}
+function laneProducer(value: unknown): value is LaneProducer {
+  return isRecord(value) && ('req' in value ? keys(value, ['req']) && text(value.req)
+    : keys(value, ['sub', 'gen']) && text(value.sub) && integer(value.gen))
+}
+
 function laneChange(value: unknown): boolean {
   if (!isRecord(value)) return false
   switch (value.op) {
     case 'put': return keys(value, ['op', 'copy']) && copy(value.copy)
     case 'del': return keys(value, ['op', 'id']) && text(value.id)
-    case 'list': return keys(value, ['op', 'sub', 'gen', 'diff', 'covered', 'next']) && text(value.sub) && integer(value.gen) && listDiff(value.diff)
+    case 'list': return optional(value.ownership, laneOwnership) && keys(value, ['op', 'sub', 'gen', 'diff', 'covered', 'next', 'ownership']) && text(value.sub) && integer(value.gen) && listDiff(value.diff)
       && optional(value.covered, input => array(input, text)) && optional(value.next, text)
     case 'patch': return keys(value, ['op', 'id', 'base', 'delta', 'ver', 'bits']) && text(value.id) && text(value.base)
       && text(value.ver) && bits(value.bits) && isRecord(value.delta) && keys(value.delta, ['set', 'unset'])
@@ -174,7 +181,7 @@ export function isFrame(value: unknown): value is Frame {
     case 'reset': return keys(value, ['t', 'sub', 'gen']) && text(value.sub) && integer(value.gen)
     case 'pos':
       return (
-        keys(value, ['t', 'pos', 'changes', 'coverage', 'intake']) &&
+        keys(value, ['t', 'pos', 'changes', 'coverage', 'intake', 'producer']) && optional(value.producer, laneProducer) &&
         isPosition(value.pos) &&
         Array.isArray(value.changes) &&
         value.changes.every(laneChange) &&
@@ -182,12 +189,14 @@ export function isFrame(value: unknown): value is Frame {
           ? optional(value.intake, text)
           : value.coverage === true &&
             value.intake === undefined &&
+            value.producer === undefined &&
             value.changes.every(
               (item) => isRecord(item) && (item.op === 'del' || item.op === 'list'),
             ))
       )
-    case 'snap': case 'result': return keys(value, ['t', 'sub', 'gen', value.t === 'snap' ? 'list' : 'diff', 'covered', 'copies', 'computed', 'viewErrors', 'rows', 'at', 'next', 'viewOwner'])
-      && optional(value.viewOwner, viewOwner)
+    case 'snap': case 'result': return keys(value, ['t', 'sub', 'gen', value.t === 'snap' ? 'list' : 'diff', 'covered', 'copies', 'computed', 'viewErrors', 'rows', 'at', 'next', 'viewOwner', 'action', 'ownership', 'foreign'])
+      && optional(value.foreign, input => array(input, text))
+      && optional(value.ownership, laneOwnership) && optional(value.viewOwner, viewOwner) && optional(value.action, actionDescriptor)
       && text(value.sub) && integer(value.gen) && (value.t === 'snap' ? array(value.list, text) : listDiff(value.diff))
       && array(value.copies, copy) && array(value.at, isPosition) && optional(value.next, text) && optional(value.covered, input => array(input, text))
       && optional(value.viewErrors, input => array(input, viewError)) && optional(value.computed, input => array(input, computed)) && optional(value.rows, input => array(input, row))

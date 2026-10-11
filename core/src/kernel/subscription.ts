@@ -1,7 +1,6 @@
 import { assertSafePath, dirname } from '#core/path';
-import type { LaneBranch, LaneRange, LaneRoot } from '#kernel/lane-selection';
+import type { LaneBranch, LaneRange, LaneRoot, LaneProjection } from '#kernel/lane-selection';
 import type { Cursor, DomainId, NodeId, Path, ScanRange, SubSelector } from '#kernel/types';
-import type { ViewSubscription } from '#kernel/view';
 
 export interface SubscriptionBranch {
   readonly covered: readonly NodeId[];
@@ -14,6 +13,8 @@ export interface SubscriptionBranch {
 export interface SubscriptionRoot extends SubscriptionBranch {
   readonly path: Path;
   readonly member?: NodeId;
+  readonly cursor?: Cursor;
+  readonly query?: Readonly<Record<string, unknown>>;
 }
 export interface SubscriptionState {
   readonly roots: ReadonlyMap<Path, SubscriptionRoot>;
@@ -38,7 +39,7 @@ export interface NodeSubscription {
   state: SubscriptionState;
   readonly candidates: Set<Path>;
   readonly changes: Map<Path, { count: number; force: boolean }>;
-  view?: ViewSubscription;
+  view?: LaneProjection;
   viewVersion?: number;
 }
 type Route = {
@@ -61,9 +62,9 @@ export function subscriptionBranch(branch: LaneBranch): SubscriptionBranch {
     ranges: branch.reads.dependencies?.flatMap(input => input.kind === 'topology' ? [input.range] : []) };
 }
 /** Stores direct membership separately from include coverage. */
-export function subscriptionRoot(root: LaneRoot): SubscriptionRoot {
+export function subscriptionRoot(root: LaneRoot, cursor?: Cursor): SubscriptionRoot {
   return {
-    path: root.path,
+    path: root.path, cursor, query: root.member?.query,
     ...subscriptionBranch(root),
     ...(root.member === undefined ? {} : { member: root.member.id }),
   };

@@ -13,7 +13,12 @@ export function ownMountTarget(target: OpenedMountTarget): OpenedMountTarget {
   const close = () => closing ??= Promise.resolve().then(() => target.close())
   let result: OpenedMountTarget
   if (target.kind === 'store') result = { kind: 'store', store: target.store, resources: Object.freeze({ ...target.resources }), close }
-  else if (target.kind === 'authority') result = { kind: 'authority', authority: target.authority, close }
+  else if (target.kind === 'authority') {
+    const authority = target.authority
+    result = { kind: 'authority', authority: authority.kind === 'federation'
+      ? Object.freeze({ kind: 'federation', connect: credential => authority.connect(credential), open: signal => authority.open(signal) })
+      : authority, close }
+  }
   else if ('selector' in target) result = { kind: 'view', selector: target.selector, executor: 'reader', close }
   else if (target.executor === 'reader') result = { kind: 'view', derive: target.derive, executor: 'reader', close }
   else result = { kind: 'view', derive: target.derive, executor: 'node', close,

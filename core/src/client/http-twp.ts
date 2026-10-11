@@ -1,6 +1,6 @@
 import type { CacheClaimLimits, LaneCache } from '#client/lane-cache'
 import { KernelError } from '#errors'
-import type { Connection, Credential, Frame, Request } from '#kernel/types'
+import type { Connection, Credential, FederationBinding, Frame, Request } from '#kernel/types'
 import { decodeFrame } from '#protocol/twp'
 import { isRecord } from '#util/is-record'
 
@@ -14,8 +14,48 @@ export interface TwpHttpClientOptions {
   readonly limits?: CacheClaimLimits
   readonly headers?: HeadersInit
   readonly signal?: AbortSignal
-  readonly frameBytes?: number
+  readonly frameBytes?: number | (() => number)
   readonly heartbeatMs?: number
+}
+
+/** Bind the existing HTTP lane transport to a mount-owned federation resource. */
+export function createTwpHttpFederation(options: Omit<TwpHttpClientOptions, 'url' | 'credential' | 'cache'> = {}): FederationBinding {
+  return async (url, limits) => {
+    const connections = new Set<Awaited<ReturnType<typeof openTwpHttp>>>()
+    const controller = new AbortController()
+    const signal = options.signal === undefined ? controller.signal : AbortSignal.any([controller.signal, options.signal])
+    let closed = false
+    return {
+      authority: {
+        kind: 'federation',
+        async connect(credential) {
+          if (closed) throw new KernelError('CANCELLED', 'Federation transport is closed')
+          const connection = await openTwpHttp({ ...options, url, credential, signal, frameBytes: () => Math.min(limits().readBytes,
+            typeof options.frameBytes === 'function' ? options.frameBytes() : options.frameBytes ?? 40 * 1024 * 1024) })
+          if (closed) {
+            connection.close()
+            throw new KernelError('CANCELLED', 'Federation transport is closed')
+          }
+          connections.add(connection)
+          return {
+            send: request => connection.send(request),
+            frames: {
+              async *[Symbol.asyncIterator]() {
+                try { yield* connection.frames }
+                finally { connections.delete(connection); connection.close() }
+              },
+            },
+          }
+        },
+      },
+      async close() {
+        closed = true
+        controller.abort(new KernelError('CANCELLED', 'Federation transport is closed'))
+        for (const connection of connections) connection.close()
+        connections.clear()
+      },
+    }
+  }
 }
 
 async function refusal(response: Response): Promise<never> {
@@ -85,7 +125,8 @@ export async function openTwpHttp(options: TwpHttpClientOptions) {
       if (!response.ok) await refusal(response)
       if (response.body === null) throw new KernelError('INVALID', 'Missing HTTP event stream')
       reader = response.body.getReader()
-      const decoder = new TextDecoder('utf-8', { fatal: true }), limit = options.frameBytes ?? 40 * 1024 * 1024
+      const decoder = new TextDecoder('utf-8', { fatal: true })
+      const currentLimit = () => typeof options.frameBytes === 'function' ? options.frameBytes() : options.frameBytes ?? 40 * 1024 * 1024
       let parts: Uint8Array[] = [], length = 0, bytes = 0, data: string[] = []
       while (true) {
         const { done, value } = await reader.read()
@@ -95,6 +136,7 @@ export async function openTwpHttp(options: TwpHttpClientOptions) {
           const newline = value.indexOf(10, start), end = newline < 0 ? value.length : newline
           const part = value.subarray(start, end)
           parts.push(part); length += part.length
+          const limit = currentLimit()
           if (bytes + length > limit) throw new KernelError('BUDGET', 'HTTP event frame budget exceeded')
           if (newline < 0) break
           const lineBytes = new Uint8Array(length)

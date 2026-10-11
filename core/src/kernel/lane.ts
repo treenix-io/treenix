@@ -4,12 +4,14 @@ import type { NativeCommands } from '#kernel/commands'
 import type { BlobTransfers } from '#kernel/blobs'
 import type { createInstanceStream } from '#kernel/stream'
 import { comparePositions } from '#kernel/position'
+import { serializeKernel } from '#kernel/serialization'
 import { createSubscriptions, type NodeSubscription } from '#kernel/subscription'
 import { createLaneDelivery } from '#kernel/lane-delivery'
-import type { LaneSelectionSource } from '#kernel/lane-selection'
+import type { LaneSelectionSource, LaneProjection } from '#kernel/lane-selection'
 import type { ViewSubscription } from '#kernel/view'
 import { createChunkChannel } from '#util/chunk-channel'
 import type {
+  Budget,
   ActionPiece,
   ActionPieceDelivery,
   CacheClaim,
@@ -17,6 +19,7 @@ import type {
   DomainId,
   Frame,
   LaneChange,
+  LaneProducer,
   Limits,
   Node,
   NodeCopy,
@@ -63,7 +66,7 @@ export interface NodeLaneOptions {
   readonly stream: Pick<ReturnType<typeof createInstanceStream>, 'cursor' | 'observe'>
   readonly limits: () => Limits
   readonly intake: () => string
-  readonly read: <T>(run: (source: NodeLaneRead) => Promise<T>, selectors?: readonly SubSelector[]) => Promise<T>
+  readonly read: <T>(run: (source: NodeLaneRead) => Promise<T>, selectors?: readonly SubSelector[], prepare?: (budget: Budget) => Promise<Budget>) => Promise<T>
   readonly gateSub: (selector: NodeSubSelector, signal: AbortSignal) => Promise<void>
   readonly registryChanged: (listener: () => void) => () => void
   /** Reports changed target ranges when the source supports dynamic mounts. */
@@ -75,6 +78,7 @@ export interface NodeLaneOptions {
   /** Kernel-owned node sessions can remain idle until their owner or authorization closes them. */
   readonly heartbeat?: boolean
   readonly transfers?: BlobTransfers
+  readonly openAuthority?: (selector: SubSelector, changed: () => void) => Promise<LaneProjection | undefined>
   readonly openView?: (selector: SubSelector, changed: () => void) => Promise<ViewSubscription | undefined>
 }
 export type NodeLaneFrame = Extract<Frame, { readonly t: 'welcome' | 'snap' | 'result' | 'pos' | 'chunk' | 'done' | 'fail' | 'end' | 'reset' }>
@@ -126,7 +130,7 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
   const controls: Control[] = [];
   const removals = new Map<NodeId, CoverageChange>();
   const memberships: CoverageChange[] = [];
-  const delivery = createLaneDelivery(options, subscriptions, registered, remove);
+  const delivery = createLaneDelivery(options, subscriptions, registered, remove, () => foreignMetadataBytes);
   const pulls: Pull[] = [];
   const prefix = crypto.randomUUID();
   let sequence = 0;
@@ -137,6 +141,9 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
   let draining = false;
   let notification = 0;
   let watermark: Position | undefined;
+  const foreignOwners = new Map<string, { readonly owner: LaneProducer; readonly positions: Map<string, Position>; bytes: number }>();
+  let foreignMetadataBytes = 0;
+  let foreignResult: { readonly sub: NodeSubscription; readonly frame: Extract<NodeLaneFrame, { t: 'result' }>; readonly pending: readonly Position[]; index: number } | undefined;
   let deliveredIntake: string | undefined;
   let failure: KernelError | undefined;
   let takePiece: (() => void) | undefined;
@@ -169,6 +176,7 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
   }
   /** Ends one subscription and queues releases of its shared coverage. */
   function remove(sub: NodeSubscription, reason?: KernelError): void {
+    releaseForeignSub(sub);
     sub.view?.close();
     subscriptions.remove(sub);
     sub.controller.abort(reason ?? new KernelError('CANCELLED', 'Subscription ended'));
@@ -195,6 +203,9 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
       subscriptions.remove(sub);
     }
     delivery.close();
+    foreignOwners.clear();
+    foreignMetadataBytes = 0;
+    foreignResult = undefined;
     controls.length = 0;
     memberships.length = 0;
     removals.clear();
@@ -250,11 +261,12 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
   async function prepareSubscription(sub: NodeSubscription): Promise<void> {
     const gen = sub.gen;
     try {
-      const view = await options.openView?.(sub.selector, () => {
+      const changed = () => {
         if (!registered(sub) || sub.gen !== gen) return;
         subscriptions.dirty(sub, false);
         wake();
-      });
+      };
+      const view = await options.openAuthority?.(sub.selector, changed) ?? await options.openView?.(sub.selector, changed);
       if (!registered(sub) || sub.gen !== gen) { view?.close(); return; }
       sub.view = view;
       sub.ready = true;
@@ -304,8 +316,71 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
     }
   }
   /** Requires a covering ordinary frame before a piece or its final outcome is delivered. */
+  function foreign(pos: Position): boolean {
+    return pos.instance !== options.stream.cursor().pos.instance;
+  }
+  function foreignKey(owner: LaneProducer): string {
+    return 'req' in owner ? `req:${owner.req}` : `sub:${owner.sub}:${owner.gen}`;
+  }
+  function foreignWatermark(instance: string): Position | undefined {
+    let current: Position | undefined;
+    for (const owner of foreignOwners.values()) {
+      const position = owner.positions.get(instance);
+      if (position !== undefined && (current === undefined || comparePositions(position, current) > 0)) current = position;
+    }
+    return current;
+  }
+  function ownForeign(owner: LaneProducer, position: Position): void {
+    const key = foreignKey(owner);
+    let found = foreignOwners.get(key);
+    if (found === undefined) { found = { owner, positions: new Map(), bytes: 0 }; foreignOwners.set(key, found); }
+    if (!found.positions.has(position.instance)) {
+      let count = 0;
+      for (const producer of foreignOwners.values()) count += producer.positions.size;
+      if (count >= options.limits().readNodes) throw new KernelError('BUDGET', 'Foreign producer metadata exceeds its allowance');
+    }
+    const previous = found.positions.get(position.instance);
+    const bytes = Buffer.byteLength(serializeKernel({ owner, position }));
+    const prior = previous === undefined ? 0 : Buffer.byteLength(serializeKernel({ owner, position: previous }));
+    const next = foreignMetadataBytes + bytes - prior;
+    if (next + delivery.retainedBytes > options.limits().laneCoverageBytes) throw new KernelError('BUDGET', 'Foreign producer metadata exceeds its byte allowance');
+    found.positions.set(position.instance, position);
+    found.bytes += bytes - prior;
+    foreignMetadataBytes = next;
+  }
+  function releaseForeignOwner(key: string): void {
+    const found = foreignOwners.get(key);
+    if (found !== undefined) foreignMetadataBytes -= found.bytes;
+    foreignOwners.delete(key);
+  }
+  function releaseForeignSub(sub: NodeSubscription): void {
+    releaseForeignOwner(foreignKey({ sub: sub.id, gen: sub.gen }));
+    if (foreignResult?.sub === sub) foreignResult = undefined;
+  }
+  function forgetMutation(id: string): void {
+    releaseForeignOwner(foreignKey({ req: id }));
+    mutations.delete(id);
+  }
+  function nextForeignResult(): NodeLaneFrame | undefined {
+    const held = foreignResult;
+    if (held === undefined) return undefined;
+    try { held.sub.view?.authority?.check(); }
+    catch (caught) {
+      if (registered(held.sub)) remove(held.sub, error(caught));
+      return undefined;
+    }
+    const owner = { sub: held.sub.id, gen: held.frame.gen };
+    while (held.index < held.pending.length) {
+      const pos = held.pending[held.index++];
+      const previous = foreignWatermark(pos.instance);
+      ownForeign(owner, pos);
+      if (previous === undefined || comparePositions(pos, previous) > 0) return { t: 'pos', pos, producer: owner, changes: [] };
+    }
+    foreignResult = undefined;
+    return held.frame;
+  }
   function uncovered(pos: Position | undefined): boolean {
-    return pos !== undefined && (watermark === undefined || comparePositions(pos, watermark) > 0);
+    return pos !== undefined && !foreign(pos) && (watermark === undefined || comparePositions(pos, watermark) > 0);
   }
   /** Starts a cancellable mutation whose outcome settles after its completion frame. */
   function start(
@@ -394,6 +469,7 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
   function reset(affected: (sub: NodeSubscription) => boolean = () => true): void {
     for (const sub of subscriptions.entries.values()) {
       if (!affected(sub)) continue;
+      releaseForeignSub(sub);
       sub.gen = ++generation;
       sub.initial = true;
       sub.view?.invalidate();
@@ -441,7 +517,9 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
       if (result !== undefined) {
         for (const id of result.removed) removals.set(id, { op: 'del', id });
         for (const id of result.frame.covered ?? result.frame.list) if (delivery.covers(id)) removals.delete(id);
-        watermark ??= result.frame.at[0];
+        watermark ??= result.frame.at.find(pos => !foreign(pos));
+        releaseForeignSub(sub);
+        for (const pos of result.frame.at) if (foreign(pos)) ownForeign({ sub: sub.id, gen: sub.gen }, pos);
       }
       return result?.frame;
     } catch (caught) {
@@ -507,6 +585,7 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
       return { t: 'pos', pos: watermark, coverage: true, changes };
     }
     if (ordinaryNeeded()) return flush();
+    if (foreignResult !== undefined) return nextForeignResult();
     for (const sub of subscriptions.entries.values()) {
       try {
         if (sub.ready && sub.initial && (sub.view === undefined || sub.view.ready)) return snapshot(sub);
@@ -515,11 +594,21 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
           if (result === undefined) continue;
           for (const id of result.removed) removals.set(id, { op: 'del', id });
           for (const id of result.frame.covered ?? []) if (delivery.covers(id)) removals.delete(id);
-          return result.frame;
+          const pending = result.frame.at.filter(foreign);
+          releaseForeignSub(sub);
+          foreignResult = { sub, frame: result.frame, pending, index: 0 };
+          return nextForeignResult();
         }
       } catch (caught) { if (registered(sub)) remove(sub, error(caught)); }
     }
     for (const request of mutations.values()) {
+      const pos = request.piece?.value.pos ?? request.outcome?.pos;
+      const covered = pos !== undefined && foreign(pos) ? foreignWatermark(pos.instance) : undefined;
+      if (pos !== undefined && foreign(pos) && (covered === undefined || comparePositions(pos, covered) > 0)) {
+        const producer = { req: request.id };
+        ownForeign(producer, pos);
+        return { t: 'pos', pos, producer, changes: [] };
+      }
       if (request.piece !== undefined) {
         const held = request.piece;
         request.piece = undefined;
@@ -530,13 +619,13 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
         }
       }
       if (request.error !== undefined) {
-        mutations.delete(request.id);
+        forgetMutation(request.id);
         request.chunks?.end(request.error);
         request.reject(request.error);
         return { t: 'fail', req: request.id, error: request.error };
       }
       if (request.outcome !== undefined) {
-        mutations.delete(request.id);
+        forgetMutation(request.id);
         request.chunks?.end();
         request.resolve(request.outcome);
         return { t: 'done', req: request.id, ...request.outcome };
@@ -642,6 +731,7 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
         if (entry.from !== undefined)
           subscriptions.changed(entry.from, true, options.limits().readNodes);
       }
+    }
     wake();
   });
   unsubscribeRegistry = options.registryChanged(() => {

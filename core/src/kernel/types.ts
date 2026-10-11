@@ -768,7 +768,7 @@ export interface MountDecl extends Component {
 }
 
 /** One declaration yields exactly one target instance. */
-export type MountHandler = (decl: Node, session: Session) => Promise<OpenedMountTarget>
+export type MountHandler = (decl: Node, session: Session, component: ComponentName) => Promise<OpenedMountTarget>
 
 export interface SecurityHandlers {
   readonly acl: RightsRule
@@ -891,6 +891,15 @@ export interface JournalEntry {
   readonly change: NodeTransition
 }
 
+/** Retains the first foreign request so reconnects cannot refresh its key or precondition. */
+export interface FederationForward {
+  readonly principal: Principal
+  readonly mount: { readonly id: NodeId; readonly component: ComponentName; readonly revision: string }
+  readonly request:
+    | { readonly kind: 'act'; readonly value: ActRequest & { readonly opId: OpId; readonly pre: ActionDescriptor } }
+    | { readonly kind: 'commit'; readonly value: CommitRequest }
+}
+
 /** Idempotency decision, stored in the commit's own record: the journal outlives the opId window. */
 export interface OpDecision {
   readonly opId: OpId
@@ -899,6 +908,7 @@ export interface OpDecision {
   /** Absent: a stream started under this key and has not finished — a replay gets UNKNOWN_OUTCOME. */
   readonly outcome?: Outcome
   readonly stream?: { readonly executor: Principal; readonly target: NodeId }
+  readonly forward?: FederationForward
 }
 
 export interface IntakeState {
@@ -1040,6 +1050,25 @@ export type Authority =
    */
   | { readonly kind: 'shard'; connect(envelope: ShardEnvelope): Promise<ShardConnection> }
 
+/** The declaring mount session supplies the closed credential for each connection. */
+export type OpenedAuthority =
+  | (Extract<Authority, { readonly kind: 'federation' }> & { open(signal?: AbortSignal): Promise<OpenedFederationConnection> })
+  | Extract<Authority, { readonly kind: 'shard' }>
+
+/** A retained connection checks its own credential generation, never a later open's stamp. */
+export interface OpenedFederationConnection extends Connection {
+  check(): Promise<void>
+  close(): Promise<void>
+}
+
+/** Deployment transport ownership stays outside the closed credential node. */
+export interface FederationTransport {
+  readonly authority: Extract<Authority, { readonly kind: 'federation' }>
+  close(): Promise<void>
+}
+
+export type FederationBinding = (url: string, limits: () => Limits) => Promise<FederationTransport>
+
 export interface ShardConnection {
   send(request: Request): void
   /**
@@ -1070,7 +1099,7 @@ export type MountTarget =
        */
       readonly sources?: readonly Path[]
     }
-  | { readonly kind: 'authority'; readonly authority: Authority }
+  | { readonly kind: 'authority'; readonly authority: OpenedAuthority }
 
 /** Acquired resources and verified decision continuity belong to the target's constructor. */
 export type MountStoreResources = Pick<StreamDomain, 'epoch' | 'persistent'> & {
@@ -1243,6 +1272,7 @@ export interface InstanceProvisioning {
 }
 
 export interface InstanceConfig {
+  readonly federation?: FederationBinding
   /** Deployment capabilities are bound separately to each declared writing action. */
   readonly io?: ActionIoBinding
   readonly id: InstanceId

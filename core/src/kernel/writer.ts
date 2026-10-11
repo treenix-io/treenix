@@ -1,4 +1,5 @@
 import { KernelError } from '#errors'
+import type { OperationReadCost } from '#kernel/store/budget'
 import { createProcessCache, type CacheRead, type Image, type ProcessCache } from '#kernel/cache'
 import type { NodeChange } from '#kernel/changeset'
 import { createInfluenceIndex, type InfluenceOptions } from '#kernel/influence'
@@ -6,7 +7,7 @@ import { createIdempotency, type IdempotencyOptions, type MutationIdentity, type
 import { comparePositions } from '#kernel/position'
 import { matchingDecision } from '#kernel/journal'
 import { createInstanceStream, streamDomainEpochs } from '#kernel/stream'
-import { DEFAULT_LIMITS, type Budget, type DomainId, type JournalCommit, type OpDecision, type OpenedStoreMountTarget, type Outcome, type Position, type PositionCounter, type Rev, type Store, type StoreCommit, type StoredWrite, type StreamDomain, type StreamEvent } from '#kernel/types'
+import { DEFAULT_LIMITS, type Budget, type DomainId, type FederationForward, type OpId, type Principal, type JournalCommit, type OpDecision, type OpenedStoreMountTarget, type Outcome, type Position, type PositionCounter, type Rev, type Store, type StoreCommit, type StoredWrite, type StreamDomain, type StreamEvent } from '#kernel/types'
 
 export interface StoreTargetRegistration {
   readonly key: string
@@ -58,6 +59,15 @@ export interface MutationSpan {
   validateAnchor(): Promise<void>
   step(store: Store, reads: readonly DomainId[], prepare: (position: Position) => PreparedCommit | Promise<PreparedCommit>): Promise<Position>
   finish(store: Store, reads: readonly DomainId[], prepare: (position: Position) => PreparedMutation | Promise<PreparedMutation>): Promise<Outcome>
+}
+
+export interface ForwardMutation {
+  readonly identity: MutationIdentity
+  readonly cost: OperationReadCost
+  readonly check: (forward?: FederationForward) => void
+  readonly prepare: () => Promise<FederationForward>
+  readonly execute: (forward: FederationForward) => Promise<Outcome>
+  readonly wait?: MutationWaiter
 }
 
 type Applied =
@@ -254,7 +264,8 @@ async function initializeWriter(options: WriterOptions) {
           assertPin()
           prepared.check?.()
           await store.commit(commit)
-          return { t: 'committed', pos, domain: store.domain, store, commit, changes, event: { t: 'commit', domain: store.domain, record: commit.record } }
+          return { t: 'committed', pos, domain: store.domain, store, commit, changes, event: commit.record.decision?.forward === undefined
+            ? { t: 'commit', domain: store.domain, record: commit.record } : { t: 'gap', pos } }
         } catch (error) {
           if (pos === undefined) return { t: 'refused', error }
           console.error(error)
@@ -659,12 +670,58 @@ async function initializeWriter(options: WriterOptions) {
       wait,
     );
   }
+  /** A continuation translates only an admitted original caller's durable forwarding anchor. */
+  async function forwardAnchor(principal: Principal, opId: OpId, cost: OperationReadCost, wait: MutationWaiter): Promise<FederationForward> {
+    checkFailure()
+    if (opId.time < intake.boundary()) throw new KernelError('EXPIRED', 'Forwarding anchor has expired')
+    const record = await wait(intake.lookup(principal, opId, cost))
+    if (record === undefined) {
+      intake.checkAdmitted(opId)
+      throw new KernelError('INVALID', 'Forwarding anchor is absent')
+    }
+    const decision = matchingDecision(record, principal, opId)
+    if (decision.forward === undefined || decision.outcome !== undefined)
+      throw new KernelError('INVALID', 'Forwarding anchor does not name an unfinished execution')
+    return structuredClone(decision.forward)
+  }
+  /** Persist the exact foreign request before sending and resume only that accepted request. */
+  async function forward(input: ForwardMutation): Promise<Outcome> {
+    checkFailure()
+    input.check()
+    async function persist(decision: OpDecision): Promise<void> {
+      input.check(decision.forward)
+      const bytes = Buffer.byteLength(JSON.stringify(decision))
+      input.cost.charge(1, bytes)
+      const allowance = input.cost.budget()
+      await commit(options.root, [options.root.domain], pos => ({ writes: [], budget: allowance, check: () => input.check(decision.forward),
+        record: { pos, kind: 'kernel', caller: input.identity.actor.principal,
+          executor: input.identity.actor.principal, entries: [], decision } }))
+    }
+    async function resume(decision: OpDecision): Promise<Outcome> {
+      const saved = decision.forward
+      if (saved === undefined) throw new KernelError('INVALID', 'Forwarding request is absent')
+      input.check(saved)
+      const outcome = await input.execute(structuredClone(saved))
+      input.check(saved)
+      await persist({ ...decision, outcome })
+      return structuredClone(outcome)
+    }
+    return intake.run({ ...input.identity, lookupCost: input.cost }, () => refreshIntake(), async decision => {
+      const request = await input.prepare()
+      input.check(request)
+      if (request.request.kind === 'act' && request.request.value.pre.kind === 'read')
+        return input.execute(request)
+      const prepared = { ...decision, forward: structuredClone(request) }
+      await persist(prepared)
+      return resume(prepared)
+    }, input.wait, resume, input.check)
+  }
   function replay(input: MutationIdentity, wait?: MutationWaiter): Promise<Outcome | undefined> {
     checkFailure()
     return intake.previous(input, wait)
   }
   return { stream, cache, influence, get position(): Position { return { ...position } },
-    get intake() { return intake.state }, commit, read, mutate, replay, refreshIntake, activateTarget, retireTarget, closeTargets }
+    get intake() { return intake.state }, commit, read, mutate, forward, forwardAnchor, replay, refreshIntake, activateTarget, retireTarget, closeTargets }
 }
 
 export type Writer = Awaited<ReturnType<typeof createWriter>>

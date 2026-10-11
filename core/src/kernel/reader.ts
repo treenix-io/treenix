@@ -1,4 +1,5 @@
 import { serializeKernel } from '#kernel/serialization'
+import { componentEntries } from '#kernel/migrate'
 import { ancestorPaths, isChildPath } from '#core/path'
 import { KernelError } from '#errors'
 import { assertIncludeDepth, assertReadPath as path, followIncludes } from '#kernel/include'
@@ -7,9 +8,9 @@ import type { CacheRead } from '#kernel/cache'
 import type { NodeChange } from '#kernel/changeset'
 import { decodeChainNode } from '#kernel/chain-index'
 import type { ExprWork } from '#kernel/eval'
-import { createSiftTest } from '#kernel/expr'
+import { assertSafePredicate, createSiftTest } from '#kernel/expr'
 import { applyFieldDeltas, applyJournalChange } from '#kernel/journal'
-import type { LaneBranch, LaneRange, LaneRoot, LaneSelection } from '#kernel/lane-selection'
+import { selectionOwnership, type LaneBranch, LaneRange, LaneRoot, LaneSelection } from '#kernel/lane-selection'
 import { comparePositions, positionToRev } from '#kernel/position'
 import { typeReadVersion, type ReadDependency, type ReadSet } from '#kernel/preconditions'
 import { createProjector, visibleNode } from '#kernel/projection'
@@ -63,6 +64,17 @@ export interface ReaderLedger {
   bytes: number
   requestBytes: number
   failure?: KernelError
+}
+
+export interface ProjectedQueryRow {
+  readonly id: string
+  readonly path: Path
+  readonly fields: Record<string, unknown>
+}
+
+export interface ProjectedQueryOwner {
+  readonly target: string
+  readonly topology: string
 }
 
 /** Own one cumulative allowance for caller, executor and nested action frames. */
@@ -287,14 +299,14 @@ export function createReader(options: ReaderOptions) {
     return 'children' in selector ? (selector.sort ?? [['$order', 1]]) : [];
   }
   /** Binds pagination to the actor, target and selector while excluding the changing page cursor. */
-  function selectorScope(selector: SubSelector): string {
+  function selectorScope(selector: SubSelector, owner?: ProjectedQueryOwner): string {
     const root = 'node' in selector ? selector.node : selector.children;
     return createHash('sha256')
       .update(
         stableJson([
           admission.actor,
-          source.resolve(root).id,
-          'children' in selector ? source.topology({ children: root }) : undefined,
+          owner === undefined ? source.resolve(root).id : owner.target,
+          'children' in selector ? (owner === undefined ? source.topology({ children: root }) : owner.topology) : undefined,
           {
             ...selector,
             ...('children' in selector
@@ -309,9 +321,134 @@ export function createReader(options: ReaderOptions) {
       .digest('hex');
   }
   /** Encodes a continuation using the same scope as the original selection. */
-  function cursor(selector: SubSelector, key: ScanKey): string {
+  function cursor(selector: SubSelector, key: ScanKey, owner?: ProjectedQueryOwner): string {
     active();
-    return scanCursor(selectorScope(selector), key);
+    return scanCursor(selectorScope(selector, owner), key);
+  }
+
+  /** Requests only the visible field roots needed by the unchanged projected predicate and sort. */
+  function projectedFields(selector: Extract<SubSelector, { children: Path }>): readonly string[] {
+    const cost = readerOperationCost(ledger), fields = new Set<string>();
+    function add(field: string, predicate: boolean): void {
+      cost.charge(0, 0, Math.ceil(field.length / 8) + 1);
+      const root = field.split('.')[0];
+      const aliases: Readonly<Record<string, string>> = { _tid: '$id', _path: '$path', _type: '$type', _rev: '$rev', _ref: '$ref', _refId: '$refId' };
+      fields.add(predicate && Object.hasOwn(aliases, root) ? aliases[root] : root);
+    }
+    if (selector.where !== undefined) {
+      assertSafePredicate(selector.where, limits, 'callerWhere');
+      const pending: unknown[] = [selector.where];
+      while (pending.length !== 0) {
+        const current = pending.pop();
+        if (typeof current !== 'object' || current === null || Array.isArray(current)) throw new KernelError('INVALID', 'Predicate branch is invalid');
+        for (const field in current) {
+          const value = Reflect.get(current, field);
+          if (field === '$and' || field === '$or' || field === '$nor') {
+            if (!Array.isArray(value)) throw new KernelError('INVALID', 'Predicate group is invalid');
+            cost.charge(0, 0, value.length);
+            pending.push(...value);
+          } else add(field, true);
+        }
+      }
+    }
+    for (const [field] of selectorSort(selector)) add(field, false);
+    return [...fields];
+  }
+
+  /** Evaluates already projected candidates with the same expression, ordering and cursor owner as native reads. */
+  function projectedPage(selector: Extract<SubSelector, { children: Path }>, rows: readonly ProjectedQueryRow[], owner: ProjectedQueryOwner, range?: LaneRange) {
+    active();
+    const cost = readerOperationCost(ledger), sort = selectorSort(selector), scope = selectorScope(selector, owner);
+    cost.charge(0, 0, rows.length + sort.length);
+    if (selector.where !== undefined) assertSafePredicate(selector.where, limits, 'callerWhere');
+    const test = selector.where === undefined ? undefined : createSiftTest(selector.where, limits);
+    const after = selector.window?.after === undefined ? undefined : parseScanCursor(selector.window.after, scope, sort.length);
+    const matching: { readonly row: ProjectedQueryRow; readonly key: ScanKey }[] = [];
+    function chargeValue(value: unknown): void {
+      const stack: unknown[] = [value];
+      while (stack.length !== 0) {
+        const current = stack.pop();
+        cost.charge(0, 0, typeof current === 'string' ? Math.ceil(current.length / 8) + 1 : 1);
+        if (typeof current !== 'object' || current === null) continue;
+        for (const key in current) {
+          cost.charge(0, 0, Math.ceil(key.length / 8) + 1);
+          stack.push(Reflect.get(current, key));
+        }
+      }
+    }
+    for (const row of rows) {
+      active();
+      if (test !== undefined) {
+        for (const field in row.fields) cost.charge(0, 0, Math.ceil(field.length / 8) + 1);
+        if (!test(mapNodeForSift(row.fields), work)) continue;
+      }
+      for (const [field] of sort) chargeValue(getByPath(row.fields, field));
+      const key = scanKey(row.fields, sort, row.path);
+      if (after !== undefined && compareScanKeys(key, after, sort) <= 0) continue;
+      if (range?.upper === null || (range?.upper !== undefined && compareScanKeys(key, range.upper, sort) > 0)) continue;
+      matching.push({ row, key });
+    }
+    matching.sort((a, b) => { active(); cost.charge(0, 0, 1); return compareScanKeys(a.key, b.key, sort); });
+    const limit = range === undefined ? selector.window?.limit : undefined;
+    if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1)) throw new KernelError('INVALID', 'Scan limit must be positive');
+    const selected = limit === undefined ? matching : matching.slice(0, limit);
+    const last = selected.at(-1);
+    active();
+    return { items: selected, next: last !== undefined && selected.length < matching.length ? scanCursor(scope, last.key) : undefined };
+  }
+
+  /** Retains the exact include branches selected from an origin-visible foreign result. */
+  function projectedResult(selector: Extract<SubSelector, { children: Path }>, value: ReadResult, owner: ProjectedQueryOwner, range?: LaneRange): ReadResult {
+    const ownership = value.ownership;
+    if (ownership === undefined) throw new KernelError('UNAVAILABLE', 'Projected selection ownership is absent');
+    const cost = readerOperationCost(ledger);
+    cost.charge(0, 0, value.copies.length + (value.computed?.length ?? 0) + (value.viewErrors?.length ?? 0) + value.list.length + ownership.roots.length);
+    const branches = new Map(ownership.roots.map(root => {
+      cost.charge(0, 0, Math.ceil(root.id.length / 8));
+      return [root.id, root];
+    }));
+    const rows = new Map<string, ProjectedQueryRow>();
+    for (const copy of value.copies) {
+      const id = 'node' in copy ? copy.node.$id : copy.id;
+      const branch = branches.get(id);
+      if (branch === undefined) continue;
+      const row = 'node' in copy ? { id: copy.node.$id, path: copy.node.$path, fields: copy.node }
+        : { id: copy.id, path: copy.path, fields: { ...branch.query, $id: copy.id, $path: copy.path } };
+      if (!('node' in copy) && branch.query === undefined) throw new KernelError('UNAVAILABLE', 'Foreign query field projection is absent');
+      cost.charge(0, 0, Math.ceil(row.id.length / 8));
+      rows.set(row.id, row);
+    }
+    for (const node of value.computed ?? []) rows.set(node.$id, { id: node.$id, path: node.$path, fields: node });
+    for (const copy of value.viewErrors ?? []) {
+      const branch = branches.get(copy.id);
+      if (branch === undefined) continue;
+      if (branch.query === undefined) throw new KernelError('UNAVAILABLE', 'Foreign query field projection is absent');
+      rows.set(copy.id, { id: copy.id, path: copy.path, fields: { ...branch.query, $id: copy.id, $path: copy.path } });
+    }
+    const candidates = value.list.map(id => {
+      const row = rows.get(id);
+      if (row === undefined) throw new KernelError('INVALID', 'Projected direct member is absent');
+      return row;
+    });
+    const page = projectedPage(selector, candidates, owner, range);
+    const selected = page.items.map(item => {
+      const branch = branches.get(item.row.id);
+      if (branch === undefined) throw new KernelError('INVALID', 'Projected branch ownership is absent');
+      cost.charge(0, 0, branch.covered.length);
+      return { ...branch, cursor: cursor(selector, item.key, owner) };
+    });
+    cost.charge(0, 0, ownership.fixed.length);
+    const covered = new Set([...ownership.fixed, ...selected.flatMap(root => root.covered)]);
+    return { ...value, list: page.items.map(item => item.row.id), next: page.next,
+      ownership: { roots: selected, fixed: ownership.fixed },
+      copies: value.copies.filter(copy => covered.has('node' in copy ? copy.node.$id : copy.id)).map(copy => {
+        if ('node' in copy) return copy;
+        const row = rows.get(copy.id);
+        if (row === undefined) return copy;
+        return { ...copy, sort: Object.fromEntries(selectorSort(selector).map(([field]) => [field, getByPath(row.fields, field)])) };
+      }),
+      computed: value.computed?.filter(node => covered.has(node.$id)),
+      viewErrors: value.viewErrors?.filter(copy => covered.has(copy.id)) };
   }
   /** Selects projected members and includes inside an already held Writer read span. */
   async function selectInSpan(
@@ -330,6 +467,21 @@ export function createReader(options: ReaderOptions) {
     topology('node' in selector ? { node: root } : { children: root });
     assertIncludeDepth(selector.include, limits.includeDepth);
     const sort = projectionSort ?? selectorSort(selector);
+    function project(stored: StoredNode, bits: number): NodeCopy | null {
+      const copy = projectCopy(stored, bits, sort);
+      if (copy === null || 'node' in copy || !('children' in selector) || selector.queryFields === undefined) return copy;
+      const cost = readerOperationCost(ledger), fields: Record<string, unknown> = {};
+      const visible = visibleNode(stored, bits);
+      cost.charge(0, 0, selector.queryFields.length);
+      for (const field of selector.queryFields) {
+        cost.charge(0, 0, Math.ceil(field.length / 8));
+        if (field.includes('.') || field.length === 0) throw new KernelError('INVALID', 'Query field must name a root');
+        if (Object.hasOwn(visible, field)) Object.defineProperty(fields, field, { value: Reflect.get(visible, field), enumerable: true });
+      }
+      const bytes = Buffer.byteLength(serializeKernel(fields));
+      cost.charge(0, bytes, Math.ceil(bytes / 8));
+      return { ...copy, query: structuredClone(fields) };
+    }
     if (candidates !== undefined)
       for (const candidate of candidates) {
         if ('node' in selector ? candidate !== root : !isChildPath(root, candidate))
@@ -394,7 +546,7 @@ export function createReader(options: ReaderOptions) {
           byId.set(previous.visible.$id, previous);
           return previous;
         }
-        const copy = projectCopy(previous.stored, previous.bits, sort);
+        const copy = project(previous.stored, previous.bits);
         if (copy === null)
           throw new KernelError('CONFLICT', 'Projection changed within a read span');
         const value = {
@@ -432,7 +584,7 @@ export function createReader(options: ReaderOptions) {
       for (const name of decodeChainNode(stored).types)
         depend({ kind: 'type', key: name, value: typeReadVersion(registry, name) });
       if (!nodes.has(at)) nodes.set(at, positionToRev(stored.$pos));
-      const copy = projectCopy(stored, bits, sort);
+      const copy = project(stored, bits);
       active();
       if (copy === null) {
         loaded.set(at, null);
@@ -538,6 +690,7 @@ export function createReader(options: ReaderOptions) {
                 member: {
                   id: member.visible.$id,
                   key: scanKey(member.visible, sort, member.visible.$path),
+                  query: 'node' in member.copy ? undefined : member.copy.query,
                 },
               }),
         });
@@ -553,7 +706,7 @@ export function createReader(options: ReaderOptions) {
         const before =
           cached.delta === undefined
             ? undefined
-            : projectCopy(applyFieldDeltas(value.stored, cached.delta, 'from'), value.bits, sort);
+            : project(applyFieldDeltas(value.stored, cached.delta, 'from'), value.bits);
         return {
           copy,
           visible: value.visible,
@@ -595,8 +748,28 @@ export function createReader(options: ReaderOptions) {
       const owned = structuredClone(selector);
       return await writer.read(source.domains, async () => {
         if ('history' in owned) return historyInSpan(owned);
-        const selection = await selectInSpan(owned);
+        const modules = registry.digest;
+        const ordinary = 'node' in owned ? { node: owned.node, include: owned.include } : owned;
+        const selection = await selectInSpan(ordinary);
+        let action: ReadResult['action'];
+        if ('node' in owned && owned.action !== undefined) {
+          if (registry.digest !== modules) throw new KernelError('CONFLICT', 'Action registry changed during metadata read');
+          const query = owned.action;
+          const copy = selection.images.find(({ copy }) => 'node' in copy ? copy.node.$path === owned.node : copy.path === owned.node)?.copy;
+          if (copy === undefined) throw new KernelError('NOT_FOUND', 'Action target is absent');
+          if (!('node' in copy)) throw copy.error;
+          const component = componentEntries(copy.node).find(([name]) => name === (query.component ?? ''));
+          if (component === undefined) throw new KernelError('NOT_FOUND', 'Action component is absent');
+          const definition = registry.type(component[1].$type);
+          if (!Object.hasOwn(definition.actions, query.name)) throw new KernelError('NOT_FOUND', 'Action is absent');
+          action = { modules, type: definition.name, kind: definition.actions[query.name].kind,
+            id: copy.node.$id, rev: copy.node.$rev };
+        }
+        const ownership = selectionOwnership(selection, key => cursor(ordinary, key));
+        readerOperationCost(ledger).charge(0, Buffer.byteLength(serializeKernel(ownership)));
         return {
+          ownership,
+          ...(action === undefined ? {} : { action }),
           list: selection.roots.flatMap((root) =>
             root.member === undefined ? [] : [root.member.id],
           ),
@@ -880,6 +1053,9 @@ export function createReader(options: ReaderOptions) {
     requireAdmin,
     selectInSpan,
     cursor,
+    projectedPage,
+    projectedResult,
+    projectedFields,
     work,
     project,
     historyVisible,

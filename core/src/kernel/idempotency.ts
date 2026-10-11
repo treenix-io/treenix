@@ -18,6 +18,7 @@ export interface MutationIdentity {
   readonly stream?: OpDecision['stream']
   readonly anchor?: OpId
   readonly anchorLookupCost?: OperationReadCost
+  readonly lookupCost?: OperationReadCost
 }
 export type MutationWaiter = <T>(pending: Promise<T>) => Promise<T>
 export interface IdempotencyOptions {
@@ -140,7 +141,7 @@ export async function createIdempotency(options: IdempotencyOptions) {
 
   /** Bound the initial wait; recovery has its own query budget to find accepted success. */
   async function lookupPrevious(input: MutationIdentity, wait?: MutationWaiter): Promise<JournalCommit | undefined> {
-    const pending = lookup(input.actor.principal, input.opId)
+    const pending = lookup(input.actor.principal, input.opId, input.lookupCost)
     return (wait === undefined ? pending : wait(pending)).catch(async error => {
       if (wait === undefined) throw error
       const accepted = await lookup(input.actor.principal, input.opId)
@@ -192,7 +193,9 @@ export async function createIdempotency(options: IdempotencyOptions) {
       state = freeze(structuredClone(next))
     },
     /** Reserve one flight per actor and key, executing only without an accepted prior decision. */
-    run(input: MutationIdentity, advance: () => Promise<void>, execute: (decision: OpDecision) => Promise<Outcome>, wait?: MutationWaiter): Promise<Outcome> {
+    run(input: MutationIdentity, advance: () => Promise<void>, execute: (decision: OpDecision) => Promise<Outcome>, wait?: MutationWaiter,
+      resumeForward?: (decision: OpDecision) => Promise<Outcome>,
+      authorizeForward?: (forward: NonNullable<OpDecision['forward']>) => void): Promise<Outcome> {
       const caller = input.actor.principal
       const hash = requestHash(input.request, input.actor)
       const key = stableJson([caller, input.opId])
@@ -203,10 +206,23 @@ export async function createIdempotency(options: IdempotencyOptions) {
         if (input.opId.time < expires && expires > current().boundary) await advance()
         if (input.opId.time < current().boundary) throw new KernelError('EXPIRED', 'Mutation key has expired')
         if (prior !== undefined) {
-          return recover(input, prior, hash, wait)
+          const outcome = await recover(input, prior, hash, wait)
+          if (authorizeForward !== undefined) {
+            const accepted = await lookupPrevious(input, wait)
+            const forward = accepted === undefined ? undefined : matchingDecision(accepted, caller, input.opId).forward
+            if (forward !== undefined) authorizeForward(forward)
+          }
+          return outcome
         }
         const record = await lookupPrevious(input, wait)
-        if (record !== undefined) return replay(record, input, hash)
+        if (record !== undefined) {
+          const decision = matchingDecision(record, input.actor.principal, input.opId)
+          if (decision.requestHash !== hash) throw new KernelError('KEY_REUSED', 'Mutation key was used by another request or actor')
+          if (decision.forward !== undefined) authorizeForward?.(decision.forward)
+          if (decision.forward !== undefined && decision.outcome === undefined && resumeForward !== undefined)
+            return resumeForward(decision)
+          return replay(record, input, hash)
+        }
         checkNew(input.opId)
         return execute({ opId: { ...input.opId }, requestHash: hash, ...(input.stream === undefined ? {} : { stream: input.stream }) })
       })()

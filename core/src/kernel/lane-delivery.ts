@@ -1,8 +1,10 @@
+import { createReaderLedger, readerOperationCost } from '#kernel/reader'
+import type { LaneDeliveryImage } from '#kernel/lane-selection'
 import { serializeKernel, kernelErrorData } from '#kernel/serialization'
 import { KernelError } from '#errors';
 import { comparePositions } from '#kernel/position';
 import { createHash } from 'node:crypto';
-import type { NodeLaneImage, NodeLaneOptions, NodeLaneRead } from '#kernel/lane';
+import type { NodeLaneOptions, NodeLaneRead } from '#kernel/lane';
 import { compareScanKeys, type ScanKey } from '#kernel/store/scan';
 import {
   subscriptionBranch,
@@ -14,7 +16,7 @@ import {
 } from '#kernel/subscription';
 import { computeDelta } from '#kernel/update-ops';
 import { stableJson } from '#util/stable-json';
-import type { ComputedNode, ErrorCopy, Frame, LaneChange, NodeCopy, NodeId, Path, Position, Row, Sort, ViewOwner } from '#kernel/types';
+import type { ComputedNode, ErrorCopy, Frame, LaneOwnership, LaneChange, NodeCopy, NodeId, Path, Position, Row, Sort, ViewOwner } from '#kernel/types';
 
 interface Coverage {
   count: number;
@@ -29,6 +31,7 @@ interface ViewExtras {
   readonly computed?: readonly ComputedNode[];
   readonly viewErrors?: readonly ErrorCopy[];
   readonly rows?: readonly Row[];
+  readonly queryRoots?: SubscriptionState['roots'];
 }
 interface Stage {
   readonly viewOwner?: ViewOwner;
@@ -59,34 +62,75 @@ const version = (value: unknown): string => createHash('sha256').update(value ==
 const sortOf = (sub: NodeSubscription): Sort =>
   'children' in sub.selector ? (sub.selector.sort ?? [['$order', 1]]) : [];
 
+function ownership(state: SubscriptionState): LaneOwnership {
+  function covered(branch: SubscriptionState['fixed']): readonly NodeId[] {
+    return [...branch.covered, ...branch.computed ?? [], ...branch.viewErrors ?? []];
+  }
+  return { fixed: covered(state.fixed), roots: [...state.roots.values()].map(root => {
+    if (root.member === undefined || root.cursor === undefined)
+      throw new KernelError('INVALID', 'Subscription root ownership is incomplete');
+    return { id: root.member, covered: covered(root), cursor: root.cursor, query: root.query };
+  }) };
+}
+
+function sameOwnership(before: SubscriptionState, after: SubscriptionState): boolean {
+  function same(a: readonly NodeId[] = [], b: readonly NodeId[] = []): boolean {
+    return a.length === b.length && a.every((id, index) => id === b[index]);
+  }
+  function branch(a: SubscriptionState['fixed'], b: SubscriptionState['fixed']): boolean {
+    return same(a.covered, b.covered) && same(a.computed, b.computed) && same(a.viewErrors, b.viewErrors);
+  }
+  if (!branch(before.fixed, after.fixed) || before.roots.size !== after.roots.size) return false;
+  for (const [path, root] of before.roots) {
+    const current = after.roots.get(path);
+    if (current === undefined || root.member !== current.member || root.cursor !== current.cursor ||
+      (root.query !== current.query && version(root.query) !== version(current.query)) || !branch(root, current)) return false;
+  }
+  return true;
+}
+
 /** Shares cache pins across subscriptions and stages delivery inside one read barrier. */
 export function createLaneDelivery(
   options: Pick<NodeLaneOptions, 'read' | 'limits' | 'cache'>,
   subscriptions: ReturnType<typeof createSubscriptions>,
   registered: (sub: NodeSubscription) => boolean,
   remove: (sub: NodeSubscription, reason: KernelError) => void,
+  metadataBytes: () => number,
 ) {
   const coverage = new Map<NodeId, Coverage>();
   const extras = new Map<NodeSubscription, ViewExtras>();
   const versions = new Map<NodeSubscription, Map<NodeId, string>>();
-  function currentImage(image: NodeLaneImage, prior: Coverage | undefined): boolean {
+  let retainedBytes = 0;
+  function retainedCost(): number {
+    let bytes = extraCost([]);
+    for (const held of coverage.values()) bytes += held.bytes;
+    return bytes;
+  }
+  function currentImage(image: LaneDeliveryImage, prior: Coverage | undefined): boolean {
     return prior?.position === undefined || image.position === undefined
       || comparePositions(image.position, prior.position) >= 0;
   }
   function extraCost(stages: readonly Stage[]): number {
     const current = new Map(extras);
     for (const stage of stages) if (registered(stage.sub))
-      current.set(stage.sub, { computed: stage.computed, viewErrors: stage.viewErrors, rows: stage.rows, viewOwner: stage.viewOwner });
+      current.set(stage.sub, { computed: stage.computed, viewErrors: stage.viewErrors, rows: stage.rows, viewOwner: stage.viewOwner,
+        queryRoots: queryRoots(stage) });
     const computed = new Map<string, ComputedNode>();
     let bytes = 0;
     for (const [sub, extra] of current) {
       if (extra.viewOwner !== undefined) bytes += Buffer.byteLength(serializeKernel(extra.viewOwner));
       if (extra.rows !== undefined) bytes += Buffer.byteLength(serializeKernel(extra.rows));
       if (extra.viewErrors !== undefined) bytes += Buffer.byteLength(serializeKernel(extra.viewErrors));
+      for (const root of extra.queryRoots?.values() ?? []) if (root.query !== undefined)
+        bytes += Buffer.byteLength(serializeKernel(root.query));
       for (const node of extra.computed ?? []) computed.set(`${sub.view!.key}:${node.$id}`, node);
     }
     for (const node of computed.values()) bytes += Buffer.byteLength(serializeKernel(node));
     return bytes;
+  }
+  function queryRoots(stage: Stage): SubscriptionState['roots'] | undefined {
+    return stage.sub.view?.authority !== undefined || ('children' in stage.sub.selector && stage.sub.selector.queryFields !== undefined)
+      ? stage.state.roots : undefined;
   }
   const claims =
     options.cache === undefined || options.cache.length === 0
@@ -97,7 +141,7 @@ export function createLaneDelivery(
     extras.delete(sub);
     versions.delete(sub);
     const changes: LaneChange[] = [];
-    if (sub.state.covered.size === 0) return changes;
+    if (sub.state.covered.size === 0) { retainedBytes = retainedCost(); return changes; }
     for (const id of sub.state.covered) {
       const held = coverage.get(id)!;
       if (--held.count === 0) {
@@ -118,10 +162,11 @@ export function createLaneDelivery(
       { covered: [], paths: [], rights: [] },
       sub.state.range,
     );
+    retainedBytes = retainedCost();
     return changes;
   }
   /** Estimates lane coverage after all live staged changes are applied together. */
-  function estimate(stages: readonly Stage[], images: ReadonlyMap<NodeId, NodeLaneImage>) {
+  function estimate(stages: readonly Stage[], images: ReadonlyMap<NodeId, LaneDeliveryImage>) {
     const counts = new Map([...coverage].map(([id, held]) => [id, held.count]));
     for (const stage of stages)
       if (registered(stage.sub) && stage.sub.gen === stage.gen) {
@@ -204,7 +249,7 @@ export function createLaneDelivery(
     try {
       const result = await options.read(async (source) => {
         if (ready?.(source.pos, source.intake) === false) return undefined;
-        const images = new Map<NodeId, NodeLaneImage>();
+        const images = new Map<NodeId, LaneDeliveryImage>();
         const reusable =
           initial && claims !== undefined && claims.size > 0
             ? new Set<NodeId>()
@@ -225,6 +270,7 @@ export function createLaneDelivery(
           const gen = sub.gen;
           const stamp = sub.stamp;
           const force = sub.forcePut;
+          sub.view?.authority?.check();
           await source.authorizeView?.(sub.selector);
           let candidates: readonly Path[] | undefined;
           if (!initial) {
@@ -240,14 +286,14 @@ export function createLaneDelivery(
           source.check();
           if (!registered(sub) || sub.gen !== gen) continue;
           const roots =
-            candidates === undefined
+            sub.view !== undefined || candidates === undefined
               ? new Map<Path, ReturnType<typeof subscriptionRoot>>()
               : new Map(sub.state.roots);
           const keys = new Map<Path, ScanKey>();
           for (const root of selection.roots) {
             if (root.member === undefined) roots.delete(root.path);
             else {
-              roots.set(root.path, subscriptionRoot(root));
+              roots.set(root.path, subscriptionRoot(root, sub.view?.cursor(root.member.key) ?? source.cursor(sub.selector, root.member.key)));
               keys.set(root.path, root.member.key);
             }
           }
@@ -301,13 +347,15 @@ export function createLaneDelivery(
               if ((staged.get(sub) ?? sub.state).covered.has(id))
                 for (const [field] of sortOf(sub)) fields.add(field);
             const sort: Sort = [...fields].map((field) => [field, 1]);
-            const combined = await source.image(copyPath(image.copy), sort);
+            const projection = stages.find(stage => stage.state.covered.has(id))?.sub.view;
+            const combined = projection?.authority === undefined ? await source.image(copyPath(image.copy), sort)
+              : projection.authority.image(copyPath(image.copy), sort);
             if (combined === null)
               throw new KernelError('CONFLICT', 'Error copy disappeared during delivery');
             images.set(id, combined);
           }
         let estimated = estimate(stages, images);
-        while (estimated.bytes + extraCost(stages) > options.limits().laneCoverageBytes) {
+        while (estimated.bytes + extraCost(stages) + metadataBytes() > options.limits().laneCoverageBytes) {
           const expanded = new Set<NodeId>();
           for (const [id, image] of images)
             if (!coverage.has(id) || image.bytes > coverage.get(id)!.bytes) expanded.add(id);
@@ -327,11 +375,16 @@ export function createLaneDelivery(
           estimated = estimate(stages, images);
         }
         source.check();
+        for (const stage of stages) stage.sub.view?.authority?.check();
         for (const stage of stages) subscriptions.capture(stage.sub, stage.state);
         for (const [id, image] of images)
           if ((estimated.counts.get(id) ?? 0) > 0) held.set(id, image.retain());
         return { stages, images, reusable, pos: source.pos, intake: source.intake, interrupted };
-      }, subs.map(sub => sub.selector));
+      }, subs.map(sub => sub.selector), subs.some(sub => sub.view?.authority !== undefined) ? async budget => {
+        const cost = readerOperationCost(createReaderLedger(budget, options.limits()));
+        for (const sub of subs) if (registered(sub)) await sub.view?.authority?.validate(cost);
+        return cost.budget();
+      } : undefined);
       return result === undefined ? undefined : { ...result, held };
     } catch (error) {
       for (const release of held.values()) release();
@@ -387,7 +440,7 @@ export function createLaneDelivery(
         !initial &&
         (diff.length > 0 ||
           !sameIds(before.covered, stage.state.covered) ||
-          before.next !== stage.state.next)
+          before.next !== stage.state.next || !sameOwnership(before, stage.state))
       )
         lists.push({
           op: 'list',
@@ -395,10 +448,11 @@ export function createLaneDelivery(
           gen: stage.gen,
           diff,
           covered: [...stage.state.covered],
+          ownership: ownership(stage.state),
           next: stage.state.next,
         });
       subscriptions.install(stage.sub, stage.state);
-      extras.set(stage.sub, { computed: stage.computed, viewErrors: stage.viewErrors, rows: stage.rows, viewOwner: stage.viewOwner });
+      extras.set(stage.sub, { computed: stage.computed, viewErrors: stage.viewErrors, rows: stage.rows, viewOwner: stage.viewOwner, queryRoots: queryRoots(stage) });
       for (const id of stage.state.covered) claims?.delete(id);
       stage.sub.initial = false;
       if (stage.sub.view !== undefined) stage.sub.viewVersion = stage.sub.view.version;
@@ -444,9 +498,11 @@ export function createLaneDelivery(
       }
     }
     changes.push(...lists);
+    retainedBytes = retainedCost();
     return { changes, removed };
   }
   return {
+    get retainedBytes() { return retainedBytes; },
     release,
     covers: (id: NodeId) => coverage.has(id),
     /** Releases every shared cache pin owned by the lane. */
@@ -479,6 +535,8 @@ export function createLaneDelivery(
         ]));
         const frame: Extract<Frame, { t: 'snap' }> = {
           t: 'snap',
+          ...(sub.view?.authority === undefined ? {} : { foreign: stage.at?.filter(pos => pos.instance !== result.pos.instance).map(pos => pos.instance) }),
+          ownership: ownership(stage.state),
           sub: sub.id,
           gen: stage.gen,
           list: members(stage.state),
@@ -488,7 +546,8 @@ export function createLaneDelivery(
           viewErrors: stage.viewErrors,
           rows: stage.rows,
           viewOwner: stage.viewOwner,
-          at: stage.at ?? [result.pos],
+          at: stage.sub.view?.authority === undefined ? stage.at ?? [result.pos]
+            : [result.pos, ...stage.at?.filter(pos => pos.instance !== result.pos.instance) ?? []],
           next: stage.state.next,
         };
         return { frame, removed };
@@ -527,11 +586,13 @@ export function createLaneDelivery(
           ? undefined : stage.rows;
         const { removed } = apply(result, false);
         versions.set(sub, current);
-        const frame: Extract<Frame, { t: 'result' }> = { t: 'result', sub: sub.id, gen: stage.gen,
+        const frame: Extract<Frame, { t: 'result' }> = { t: 'result', ownership: ownership(stage.state), sub: sub.id, gen: stage.gen,
+          ...(sub.view?.authority === undefined ? {} : { foreign: stage.at?.filter(pos => pos.instance !== result.pos.instance).map(pos => pos.instance) }),
           diff: [...[...before].filter(id => !after.has(id)).map(remove => ({ remove })),
             ...[...after].filter(id => !before.has(id)).map(add => ({ add }))],
           covered: [...stage.state.covered, ...stage.computed?.map(node => node.$id) ?? [], ...stage.viewErrors?.map(copy => copy.id) ?? []],
-          copies, computed, viewErrors, rows, viewOwner: stage.viewOwner, at: stage.at ?? [result.pos], next: stage.state.next };
+          copies, computed, viewErrors, rows, viewOwner: stage.viewOwner, at: stage.sub.view?.authority === undefined ? stage.at ?? [result.pos]
+            : [result.pos, ...stage.at?.filter(pos => pos.instance !== result.pos.instance) ?? []], next: stage.state.next };
         return { frame, removed };
       } finally { for (const release of result.held.values()) release(); }
     },

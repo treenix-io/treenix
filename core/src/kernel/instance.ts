@@ -1,3 +1,9 @@
+import { createForeignSubscription } from '#kernel/authority/subscription'
+import { runFederationCommit } from '#kernel/authority/commit'
+import { runFederationAction } from '#kernel/authority/action'
+import { createAuthorityNamespace } from '#kernel/authority/namespace'
+import { createFederationOwner } from '#kernel/authority/owner'
+import { observeCredential } from '#kernel/authority/credential-watch'
 import { ACTION_PUBLICATION_PREFIX, installPublishedAction, publishedAction, actionPublicationPath } from '#kernel/action-publication'
 import { installPublishedView, publishedView, PUBLICATION_PREFIX } from '#kernel/uix-publication'
 import { verifyActionSource } from '#kernel/source-action'
@@ -12,7 +18,7 @@ import { assertAdminPath, assertAuthKey, assertBootstrapState, bootstrap, bootst
 import { createProcessCache, type Image } from '#kernel/cache'
 import { createBlobTransfers } from '#kernel/blobs'
 import { createAcceptedTargets } from '#kernel/instance-targets'
-import { prepareChangeSet, type ChangeExecutor } from '#kernel/changeset'
+import { changeSelectors, prepareChangeSet, type ChangeExecutor } from '#kernel/changeset'
 import { createCommands, type CommandOptions, type NativeCommands, type NodeActionBinding, type NodeActionTarget } from '#kernel/commands'
 import { judgeGates } from '#kernel/gates'
 import type { NodeLaneOptions } from '#kernel/lane'
@@ -29,7 +35,7 @@ import { withTypeDescriptions } from '#kernel/type-description'
 import { ownMountTarget } from '#kernel/mount-resource'
 import { createMountTable, type MountChange, type MountEntry, type MountRange, type MountTable } from '#kernel/mounts'
 import { comparePositions, positionToRev } from '#kernel/position'
-import { createReader, readerOperationCost, type ReaderLedger, type ReaderSource, type ReaderTarget } from '#kernel/reader'
+import { createReader, createReaderLedger, readerOperationCost, type ReaderLedger, type ReaderSource, type ReaderTarget } from '#kernel/reader'
 import { computeRights } from '#kernel/rights'
 import { createView, type ViewRead } from '#kernel/view'
 import { createActionControl } from '#kernel/action-context'
@@ -37,13 +43,14 @@ import { drainSession } from '#kernel/session-delivery'
 import { runStoreQuery } from '#kernel/store/budget'
 import type { AuthReadSource, AuthSource } from '#kernel/session'
 import type { AuthAdmission } from '#kernel/auth-factory'
-import { DEFAULT_LIMITS, type ActionIoBinding, type AdminInput, type Budget, type ChangeMember, type Credential, type InstanceConfig, type InstanceId, type Limits, type ModuleManifest, type NodeId,
+import { A, R, W, DEFAULT_LIMITS, type FederationBinding, type ActionIoBinding, type AdminInput, type Budget, type ChangeMember, type Credential, type InstanceConfig, type InstanceId, type Limits, type ModuleManifest, type NodeId,
   type BlobStore, type Gate, type InstanceStream, type Node, type Path, type Position, type PositionCounter, type ProvisionedStoreMount, type Registry, type ScanRange, type Selector, type SubSelector, type Store, type StoreCommit, type StoredNode, type StreamCursor, type StreamDomain } from '#kernel/types'
 import { assertWriterDomains, createWriter, type Writer } from '#kernel/writer'
 import { stableJson } from '#util/stable-json'
 import { freeze } from '#util/freeze'
 
 export interface InstanceFoundationConfig {
+  readonly federation?: FederationBinding
   readonly io?: ActionIoBinding
   readonly id: InstanceId
   readonly root: Store
@@ -161,6 +168,7 @@ async function buildCanonicalInstance(input: InstanceConfig): Promise<InstanceFo
       }
   const config = Object.freeze({
     id: input.id,
+    federation: input.federation,
     root: Object.freeze({ ...input.root }),
     rootExternal: input.rootExternal,
     blobs: input.blobs,
@@ -205,6 +213,7 @@ async function buildCanonicalInstance(input: InstanceConfig): Promise<InstanceFo
     writerEpoch: config.writerEpoch,
     domains: config.domains,
     mounts: config.mounts,
+    federation: config.federation,
     blobs: config.blobs,
     io: config.io,
     gates: config.gates,
@@ -220,7 +229,7 @@ async function buildCanonicalInstance(input: InstanceConfig): Promise<InstanceFo
       installBuiltins ? [...bootstrapModules, ...modules] : modules,
       bootstrapPolicy.kind === 'reopen' ? bootstrapPolicy.installerCredential : undefined,
     )
-    if (installBuiltins) instance.registry.publish(withTypeDescriptions(createNativeMountManifest(config.writerEpoch, config.mounts), instance.registry))
+    if (installBuiltins) instance.registry.publish(withTypeDescriptions(createNativeMountManifest(config.writerEpoch, config.mounts, instance.limits, config.federation), instance.registry))
     if (discovered === undefined) for (const module of modules) instance.registry.publish(instance.bindAutostartModule(module))
     else await publishLoadedModules(instance.registry, { ...discovered, manifests: discovered.manifests.map(module => ({
       ...module, security: instance.bindAutostartModule(module).security,
@@ -279,6 +288,7 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
   let mounts: MountTable | undefined
   let sessions: SessionFactory | undefined
   const mountDeliveries = new Set<Promise<void>>()
+  const authorityOwners = new Map<string, ReturnType<typeof createFederationOwner> & { readonly path: Path; readonly namespace: ReturnType<typeof createAuthorityNamespace> }>()
   const viewOwners = new Map<string, { readonly view: ReturnType<typeof createView>; readonly close: () => void }>()
   let constructing = true
   let closed = false
@@ -461,7 +471,7 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
     }
     const manifests = [
       ...bootstrapModules.map(module => module.id === 'kernel'
-        ? withTypeDescriptions(createNativeMountManifest(config.writerEpoch, config.mounts), registry)
+        ? withTypeDescriptions(createNativeMountManifest(config.writerEpoch, config.mounts, () => limits, config.federation), registry)
         : module),
       ...config.modules ?? [],
     ]
@@ -618,7 +628,7 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
   }
   if (identity === undefined) throw new KernelError('INVALID', 'Instance bootstrap identity is absent')
   for (const module of bootstrapModules) {
-    const manifest = module.id === 'kernel' ? withTypeDescriptions(createNativeMountManifest(config.writerEpoch, config.mounts), registry) : module
+    const manifest = module.id === 'kernel' ? withTypeDescriptions(createNativeMountManifest(config.writerEpoch, config.mounts, () => limits, config.federation), registry) : module
     // An older instance keeps optional builtins uninstalled until its admin installs their ownership.
     const installed = manifest.types.filter(type => owners.has(type.name))
     const names = new Set(installed.flatMap(type => [type.name, ...type.aliases ?? []]))
@@ -741,6 +751,31 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
       topology: (range) => (mounts === undefined ? '[]' : mounts.topology(range)),
     };
   }
+  /** Keep all foreign operations on the same accepted mount and local rights fold. */
+  function federationAt(path: Path, children = false) {
+    const found = mounts?.resolve(path, children)
+    if (found?.target.kind !== 'authority') return undefined
+    if (found.target.authority.kind !== 'federation') throw new KernelError('UNAVAILABLE', 'Shard routing is unavailable')
+    const owner = authorityOwners.get(found.entry.key)
+    if (owner === undefined) throw new KernelError('UNAVAILABLE', 'Federation owner is unavailable')
+    const declaration = componentEntries(found.entry.node).find(([name]) => name === found.entry.component)
+    if (declaration === undefined) throw new KernelError('INVALID', 'Federation declaration is absent')
+    const remote = declaration[1].remote
+    if (remote !== undefined && typeof remote !== 'string') throw new KernelError('INVALID', 'Malformed federation range')
+    const namespace = owner.namespace
+    function authorize(request: AuthAdmission, required = R): number {
+      request.assertActive()
+      available()
+      if (mounts?.resolve(path, children)?.target !== found!.target)
+        throw new KernelError('CONFLICT', 'Federation target changed')
+      const rights = computeRights(request.actor, targets.chain(found!.entry.node.$path), registry)
+      if ((rights.bits & R) === 0) throw new KernelError('NOT_FOUND', 'Federation mount is not readable')
+      if ((rights.bits & required) !== required) throw new KernelError('FORBIDDEN', 'Federation mount rights are insufficient')
+      return rights.bits
+    }
+    return { found, owner, namespace, authorize }
+  }
+
   /** Binds commands to the current registry, source routing, and operation budget. */
   function commandOptions(admission: AuthAdmission): CommandOptions {
     available();
@@ -753,6 +788,81 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
       io: config.io,
       admission,
       source: readerSource,
+      authority: path => mounts?.resolve(path)?.target.kind === 'authority',
+      async commitAuthority(input) {
+        await prepareSource(input.cost.budget(), changeSelectors(input.request.changes), input.signal)
+        const routes: (ReturnType<typeof federationAt>)[] = []
+        for (const change of input.request.changes) {
+          input.cost.charge(0, 0, 1)
+          switch (change.op) {
+            case 'put': routes.push(federationAt(change.node.$path)); break
+            case 'patch': case 'remove': routes.push(federationAt(change.path)); break
+            case 'move': routes.push(federationAt(change.from), federationAt(change.to)); break
+            case 'restore': case 'undo': {
+              const owner = [...authorityOwners.values()].find(owner => owner.namespace.owns(change.record.pos.instance))
+              routes.push(owner === undefined ? undefined : federationAt(owner.path, true))
+              break
+            }
+          }
+        }
+        const route = routes.find(route => route !== undefined)
+        if (route === undefined) return undefined
+        if (routes.some(current => current?.found.target !== route.found.target))
+          throw new KernelError('CROSS_DOMAIN', 'Commit spans different mounted owners')
+        const { found, owner, namespace } = route
+        return runFederationCommit({ input, writer, namespace, gates: config.gates ?? [],
+          mount: { id: found.entry.node.$id, component: found.entry.component, revision: found.entry.revision },
+          open: () => owner.open(admission), authorize: () => { route.authorize(input.admission, R | W) } })
+      },
+      async actAuthority(input) {
+        await prepareSource(input.cost.budget(), [{ node: input.request.path }], input.signal)
+        const route = federationAt(input.request.path)
+        if (route === undefined) return undefined
+        const { found, owner, namespace } = route
+        return runFederationAction({ input, writer, namespace, gates: config.gates ?? [],
+          mount: { id: found.entry.node.$id, component: found.entry.component, revision: found.entry.revision },
+          open: () => owner.open(admission), authorize: required => { route.authorize(input.admission, required) } })
+      },
+      async readAuthority(selector, request, allowance) {
+        const path = 'node' in selector ? selector.node : 'children' in selector ? selector.children : selector.history
+        const route = federationAt(path, 'children' in selector)
+        if (route === undefined) return undefined
+        const { owner, namespace } = route
+        const control = createActionControl(request, allowance.deadline)
+        let handle: Awaited<ReturnType<typeof owner.open>> | undefined
+        function authorize(): number {
+          control.active()
+          const required = 'history' in selector ? R | A : R
+          return route!.authorize(request, required)
+        }
+        try {
+          authorize()
+          const opening = owner.open(admission)
+          try { handle = await control.wait(opening) }
+          catch (error) { void opening.catch(error => console.error(error)); throw error }
+          await control.wait(handle.check())
+          authorize()
+          const ledger = createReaderLedger(allowance, limits)
+          const cost = readerOperationCost(ledger)
+          const query = createReader({ registry, writer, admission: request, source: readerSource(allowance, ledger),
+            budget: allowance, ledger, limits, projector })
+          const delegated = 'children' in selector
+            ? { children: selector.children, include: selector.include, queryFields: query.projectedFields(selector) }
+            : selector
+          const response = await control.wait(handle.client.read(namespace.selector(delegated), control.signal))
+          await control.wait(handle.check())
+          const mapped = namespace.result(response, authorize(), cost.budget(), (nodes, work) => cost.charge(nodes, 0, work))
+          cost.charge(0, Buffer.byteLength(serializeKernel(mapped)))
+          const output = 'children' in selector
+            ? query.projectedResult(selector, mapped,
+                { target: route.found.entry.range.generation, topology: mounts!.topology({ children: selector.children }) })
+            : mapped
+          if (output.copies.length > allowance.nodes || Buffer.byteLength(serializeKernel(output)) > allowance.bytes)
+            throw new KernelError('BUDGET', 'Federation read exceeded the operation budget')
+          return output
+        } finally { control.close() }
+      },
+
       async readView(selector, request, allowance) {
         let changed: () => void = () => {}
         let pending = new Promise<void>(resolve => { changed = resolve })
@@ -974,6 +1084,40 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
     return {
       admission,
       commands: createCommands(options),
+      async openAuthority(selector, changed) {
+        const allowance = budget()
+        await prepareSource(allowance, [selector], admission.signal)
+        const path = 'node' in selector ? selector.node : selector.children
+        const route = federationAt(path, 'children' in selector)
+        if (route === undefined) return undefined
+        route.authorize(admission)
+        const reads = createReader({ registry, writer, admission, source: readerSource(allowance),
+          budget: allowance, limits, projector })
+        await reads.read({ node: route.found.entry.node.$path })
+        const control = createActionControl(admission, allowance.deadline)
+        try {
+          const handle = await control.wait(route.owner.open(admission))
+          await control.wait(handle.check())
+          route.authorize(admission)
+          return createForeignSubscription({ selector, admission, handle, namespace: route.namespace,
+            reads: reads.expect(), authorize: () => route.authorize(admission), changed,
+            queryFields: 'children' in selector ? reads.projectedFields(selector) : [],
+            project(value, operation) {
+              route.authorize(admission)
+              if (!('children' in selector)) return value
+              const allowance = operation.budget()
+              const ledger = createReaderLedger(allowance, limits)
+              const query = createReader({ registry, writer, admission, source: readerSource(allowance, ledger),
+                budget: allowance, ledger, limits, projector })
+              const selected = query.projectedResult(selector, value,
+                { target: route.found.entry.range.generation, topology: mounts!.topology({ children: selector.children }) }, {})
+              const remaining = readerOperationCost(ledger).budget()
+              operation.charge(allowance.nodes - remaining.nodes, allowance.bytes - remaining.bytes,
+                allowance.exprWork - remaining.exprWork)
+              return selected
+            } })
+        } finally { control.close() }
+      },
       openView: (selector, changed) => openView(admission, selector, changed),
       stream: writer.stream,
       limits: () => limits,
@@ -1027,6 +1171,25 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
       },
 
       async activate(entry, target, owner) {
+        if (target.kind === 'authority') {
+          if (target.authority.kind !== 'federation') throw new KernelError('UNAVAILABLE', 'Shard activation is unavailable')
+          const declaration = componentEntries(entry.node).find(([component]) => component === entry.component)
+          if (declaration === undefined || typeof declaration[1].credential !== 'string')
+            throw new KernelError('INVALID', 'Federation credential declaration is absent')
+          const credential = declaration[1].credential
+          const remote = declaration[1].remote
+          if (remote !== undefined && typeof remote !== 'string') throw new KernelError('INVALID', 'Malformed federation range')
+          authorityOwners.set(entry.key, { path: entry.node.$path,
+            namespace: createAuthorityNamespace(config.id, entry.node.$id, entry.component, entry.node.$path, remote ?? '/'),
+            ...createFederationOwner({ authority: target.authority, admission: owner.admission,
+              limits: () => limits, observe: changed => observeCredential({ path: credential, registry,
+                source: () => readerSource(budget()),
+                observe(receive) { listeners.add(receive); return () => listeners.delete(receive) },
+                topology: topologyChanged }, changed) }) })
+          mounts!.activated(entry.key, entry.revision, target)
+          return
+        }
+
         if (target.kind === 'view') {
           if (target.executor === 'node') {
             const view = createView({ node: entry.node, admission: owner.admission, derive: target.derive, executor: 'node', sources: target.sources,
@@ -1052,6 +1215,13 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
       },
 
       async retire(entry, target) {
+        if (target.kind === 'authority') {
+          await authorityOwners.get(entry.key)?.close()
+          authorityOwners.delete(entry.key)
+          await target.close()
+          return
+        }
+
         if (target.kind === 'view') {
           viewOwners.get(entry.key)?.close()
           viewOwners.delete(entry.key)
@@ -1285,6 +1455,10 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
       auth?.close()
       closing = (async () => {
         const errors: unknown[] = []
+        const authorities = await Promise.allSettled([...authorityOwners.values()].map(owner => owner.close()))
+        authorityOwners.clear()
+        for (const result of authorities) if (result.status === 'rejected') { console.error(result.reason); errors.push(result.reason) }
+
         try { await services?.close() } catch (error) { console.error(error); errors.push(error) }
         try { await mounts!.close() } catch (error) { console.error(error); errors.push(error) }
         try { await writer.closeTargets() } catch (error) { console.error(error); errors.push(error) }

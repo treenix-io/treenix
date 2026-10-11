@@ -45,7 +45,7 @@ it('refuses unsupported roots and an absent root binding without accepting effec
   let effects = 0
   const options: readonly { config: InstanceConfig; error: KernelError['code'] }[] = [
     { config: { ...f.fresh, root: { kind: 'view', executor: 'reader', derive: async () => { effects++; return { members: [] } } } }, error: 'UNAVAILABLE' },
-    { config: { ...f.fresh, root: { kind: 'authority', authority: { kind: 'federation', connect: async () => { effects++; throw new Error('Unexpected connection') } } } }, error: 'UNAVAILABLE' },
+    { config: { ...f.fresh, root: { kind: 'authority', authority: { kind: 'federation', connect: async () => { effects++; throw new Error('Unexpected connection') }, open: async () => { effects++; throw new Error('Unexpected connection') } } } }, error: 'UNAVAILABLE' },
     { config: { ...f.fresh, rootExternal: 'trusted' }, error: 'UNAVAILABLE' },
     { config: { ...f.fresh, provisioning: { ...f.fresh.provisioning, domains: [{ store: createMemoryStore({ domain: 'foreign' }), epoch: 'foreign', persistent: false }] } }, error: 'INVALID' },
   ]

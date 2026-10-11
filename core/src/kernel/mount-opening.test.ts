@@ -32,9 +32,9 @@ async function fixture() {
     id: 'mount-opening',
     types: [{ name: 'test.mount.opening', module: 'mount-opening', security: 'user-capability',
       version: 0, schema: {}, actions: {} }],
-    security: [{ type: 'test.mount.opening', context: 'mount', async handler(node, session) {
+    security: [{ type: 'test.mount.opening', context: 'mount', async handler(node, session, component) {
       opened++
-      const created = await memory(node, session)
+      const created = await memory(node, session, component)
       const pos = instance.writer.stream.cursor().pos
       const value: StoredNode = { $path: '/mount/doc', $id: randomUUID(), $type: 't.dir',
         $pos: pos, value: 'owned-target-value' }
