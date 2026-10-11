@@ -7,6 +7,9 @@ import { join, relative, resolve } from 'node:path'
 import { afterEach, describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
 
+import { openNativeRuntime } from '#kernel/runtime'
+import { drainSession } from '#kernel/session-delivery'
+
 import { openTwpHttp } from '#client/http-twp'
 import { createTwpClient } from '#client/twp'
 import type { Credential } from '#kernel/types'
@@ -274,5 +277,64 @@ describe('native CLI action I/O configuration', { timeout: 45_000 }, () => {
       client.close();
       await running.close();
     }
+  });
+});
+
+
+describe('native CLI readonly base configuration', { timeout: 20_000 }, () => {
+  it('rejects a malformed readonly base capability before acquiring persistent resources', async () => {
+    for (const baseDirectory of [null, 1, '']) {
+      const directory = await scratch(), configPath = join(directory, 'config.json');
+      await writeFile(configPath, JSON.stringify({ id: 'cli-base-invalid', directory: './work', baseDirectory,
+        credentialTtlMs: 60_000, allowedOrigins: [], modules: [], port: 0 }));
+      const running = run(configPath), error = await report(running);
+      assert.equal(error.type, 'error');
+      assert.equal(error.code, 'INVALID');
+      assert.deepEqual(await running.exited, [1, null]);
+      assert.deepEqual(await readdir(directory), ['config.json']);
+    }
+  });
+
+  it('binds a relative readonly base capability through the actual CLI across upper writes and restart', async () => {
+    const directory = await scratch(), configuration = join(directory, 'configuration'), base = join(directory, 'base');
+    await mkdir(configuration);
+    const prepared = await openNativeRuntime({ id: 'cli-base', directory: base, credentialTtlMs: 60_000, modules: [],
+      firstAdmin: { path: '/admin', name: 'admin', password: 'cli-password' } });
+    assert.ok(prepared.instance.setupCredential);
+    const session = await prepared.instance.openSession(prepared.instance.setupCredential), delivery = drainSession(session);
+    let identity: string;
+    try {
+      await session.commit({ opId: { epoch: prepared.instance.writer.intake.epoch, time: Date.now(), nonce: crypto.randomUUID() },
+        changes: [{ op: 'put', node: { $path: '/doc', $type: 't.dir', count: 1 } }] }).outcome;
+      const copy = (await session.read({ node: '/doc' })).copies[0];
+      if ('error' in copy) throw copy.error;
+      identity = copy.node.$id;
+    } finally { session.close(); await delivery; await prepared.close(); }
+    const before = await readFile(join(base, 'doc', '$'), 'utf8'), configPath = join(configuration, 'config.json');
+    await writeFile(configPath, JSON.stringify({ id: 'cli-base', directory: '../work', baseDirectory: '../base',
+      credentialTtlMs: 60_000, allowedOrigins: [], modules: [], port: 0 }));
+    const first = await start(configPath), connection = await openTwpHttp({ url: first.address, credential: await login(first.address) });
+    const errors: unknown[] = [], client = createTwpClient(connection, { close: connection.close, onError: error => errors.push(error) });
+    await client.ready;
+    try {
+      const copy = (await client.read({ node: '/doc' })).copies[0];
+      if ('error' in copy) throw copy.error;
+      assert.equal(copy.node.$id, identity);
+      assert.equal(copy.node.count, 1);
+      assert.ok((await client.commit({ changes: [{ op: 'patch', path: '/doc', ops: { $inc: { count: 1 } } }] }).outcome).pos);
+      assert.equal(errors.length, 0);
+    } finally { client.close(); await first.close(); }
+    const second = await start(configPath), reopenedConnection = await openTwpHttp({ url: second.address, credential: await login(second.address) });
+    const reopened = createTwpClient(reopenedConnection, { close: reopenedConnection.close, onError: error => errors.push(error) });
+    await reopened.ready;
+    try {
+      const copy = (await reopened.read({ node: '/doc' })).copies[0];
+      if ('error' in copy) throw copy.error;
+      assert.equal(copy.node.$id, identity);
+      assert.equal(copy.node.count, 2);
+      assert.equal(errors.length, 0);
+      assert.equal(await readFile(join(base, 'doc', '$'), 'utf8'), before);
+      assert.equal(typeof await readFile(join(directory, 'work', 'doc', '$'), 'utf8'), 'string');
+    } finally { reopened.close(); await second.close(); }
   });
 });

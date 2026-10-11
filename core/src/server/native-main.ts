@@ -42,6 +42,7 @@ async function main(): Promise<void> {
     || config.firstAdmin !== undefined && !adminInput(config.firstAdmin)
     || config.installerCredential !== undefined && !credentialInput(config.installerCredential)
     || config.io !== undefined && !ioEntry(config.io)
+    || config.baseDirectory !== undefined && (typeof config.baseDirectory !== 'string' || config.baseDirectory.length === 0)
     || config.mountDirectories !== undefined && !directoryBindings(config.mountDirectories)
     || config.modules !== undefined && (!Array.isArray(config.modules) || !config.modules.every(moduleEntry)))
     throw new KernelError('INVALID', 'Malformed native server configuration')
@@ -71,6 +72,7 @@ async function main(): Promise<void> {
           ]),
         )
   const runtime = await openNativeDeployment({ runtime: { id: config.id, directory: resolve(dirname(configPath), config.directory),
+    baseDirectory: config.baseDirectory === undefined ? undefined : resolve(dirname(configPath), config.baseDirectory),
     credentialTtlMs: config.credentialTtlMs, firstAdmin: config.firstAdmin, installerCredential: config.installerCredential, mountDirectories }, modules, io })
   const binding = createTwpHttpServer({ instance: runtime.instance, routes: runtime.httpRoutes, allowedOrigins: config.allowedOrigins, credentialTtlMs: config.credentialTtlMs })
   try {
