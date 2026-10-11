@@ -1,110 +1,134 @@
-// @treenx/agent-client — agent-port connection SDK.
-// Connect an external agent to a Treenix server after operator-initialized pairing.
-// All paths are relative to agent's subtree — agent writes "config", gets /agents/bot/config.
+import { openTwpHttp } from '@treenx/core/client/http-twp';
+import { createTwpClient, type TwpClient } from '@treenx/core/client/twp';
+import { KernelError } from '@treenx/core/errors';
+import type { Credential, Principal } from '@treenx/core/kernel';
 
-import { createTrpcTransport, type TreenixClient } from '@treenx/core/client';
-
-export type AgentOpts = {
-  url: string;   // Treenix server URL, e.g. 'http://localhost:3211'
-  path: string;  // agent port path, e.g. '/agents/my-bot'
-  key: string;   // secret key for TOFU authentication
-};
+export type AgentOpts =
+  | { readonly url: string; readonly credential: Credential }
+  | { readonly url: string; readonly path: string; readonly key: string };
 
 export type ConnectResult =
-  | { status: 'pending' }
-  | { status: 'approved'; client: TreenixClient; token: string; userId: string };
+  | { readonly status: 'pending' }
+  | {
+      readonly status: 'approved';
+      readonly client: TwpClient;
+      readonly credential: Credential;
+      readonly principal: Principal;
+    };
 
-export type WaitOpts = {
-  interval?: number;  // poll interval in ms (default: 5000)
-  timeout?: number;   // total timeout in ms (default: 300000 = 5 min)
-};
-
-/** Resolve relative path to absolute. "config" → "/agents/bot/config", "" → "/agents/bot" */
-function scopePath(base: string, rel: string): string {
-  if (rel.startsWith('/')) return rel; // escape hatch: absolute path
-  const clean = rel.replace(/^\.\//, '').replace(/^\.?$/, '');
-  return clean ? `${base}/${clean}` : base;
+export interface WaitOpts {
+  readonly timeout?: number;
+  readonly signal?: AbortSignal;
 }
 
-/** Wrap TreenixClient so all paths are relative to agent's subtree */
-function scopeClient(raw: TreenixClient, base: string): TreenixClient {
-  return {
-    tree: {
-      get: (path, ctx) => raw.tree.get(scopePath(base, path), ctx),
-      getChildren: (path, opts, ctx) => raw.tree.getChildren(scopePath(base, path), opts, ctx),
-      set: (node, ctx) => raw.tree.set({ ...node, $path: scopePath(base, node.$path) }, ctx),
-      remove: (path, ctx) => raw.tree.remove(scopePath(base, path), ctx),
-      patch: (path, ops, ctx) => raw.tree.patch(scopePath(base, path), ops, ctx),
-    },
-    execute: (path, action, data, o) => raw.execute(scopePath(base, path), action, data, o),
-    watch: raw.watch,
-    watchPath: (path, onEvent) => raw.watchPath(scopePath(base, path), onEvent),
-    // A scoped client shares the parent connection — destroy() tears down the
-    // parent (there is no scoped-only transport to release). Callers holding
-    // both must not destroy the scope independently of the parent (core-8uy).
-    destroy: () => raw.destroy(),
-  };
+/** Opens a real native client whose close releases its HTTP lane. */
+async function openClient(url: string, credential?: Credential): Promise<TwpClient> {
+  const connection = await openTwpHttp({ url, credential, credentials: 'omit' });
+  const client = createTwpClient(connection, { credential, close: connection.close });
+  try {
+    await client.ready;
+    return client;
+  } catch (error) {
+    client.close();
+    throw error;
+  }
 }
 
+/** Decode the pairing action's published result at the SDK's wire boundary. */
+function pairingResult(value: unknown):
+  | { readonly status: 'pending' }
+  | { readonly status: 'approved'; readonly credential: Credential; readonly principal: Principal } {
+  if (typeof value !== 'object' || value === null || !('status' in value))
+    throw new KernelError('INVALID', 'Malformed pairing result');
+  if (value.status === 'pending') return { status: 'pending' };
+  if (value.status !== 'approved' || !('credential' in value) || !('principal' in value)
+    || typeof value.principal !== 'string' || !value.principal.startsWith('u:')
+    || typeof value.credential !== 'object' || value.credential === null
+    || !('token' in value.credential) || typeof value.credential.token !== 'string')
+    throw new KernelError('INVALID', 'Malformed approved pairing result');
+  const principal: Principal = `u:${value.principal.slice(2)}`;
+  return { status: 'approved', credential: { token: value.credential.token }, principal };
+}
+
+/** Connect through an issued credential or the port's native pairing action. */
 export function createAgentClient(opts: AgentOpts) {
-  const { url, path, key } = opts;
+  const config: AgentOpts = 'credential' in opts
+    ? { url: opts.url, credential: Object.freeze({ ...opts.credential }) }
+    : { url: opts.url, path: opts.path, key: opts.key };
 
-  /** Single connect attempt. Returns status — caller decides what to do. */
-  async function connect(): Promise<ConnectResult> {
-    const anon = createTrpcTransport({ url });
-    let res;
-    try {
-      res = await anon.trpc.agentConnect.mutate({ path, key });
-    } catch (e: any) {
-      // R4-AUTH-1: server now rejects unauth idle→pending self-claims. Operator must call
-      // `agentInitPair` (authed) once to seed the expected key on the port. Surface this
-      // clearly so the agent operator knows what to do.
-      const msg = String(e?.message ?? e);
-      if (msg.includes('Port not initialized')) {
-        throw new Error(
-          `[agent] port ${path} is idle. Operator must run agentInitPair(path, key) ` +
-          `from an authenticated admin session before this agent can connect. Original error: ${msg}`,
-        );
-      }
-      throw e;
-    }
-
-    if (res.status === 'pending') {
-      return { status: 'pending' };
-    }
-
-    if (res.status === 'approved') {
-      const raw = createTrpcTransport({ url, token: res.token });
-      const client = scopeClient(raw, path);
-      return { status: 'approved', client, token: res.token, userId: res.userId };
-    }
-
-    throw new Error(`Unexpected agent status: ${(res as any).status}`);
+  /** Replace the pairing lane with the approved account's authenticated lane. */
+  async function approve(result: Extract<ReturnType<typeof pairingResult>, { status: 'approved' }>): Promise<Extract<ConnectResult, { status: 'approved' }>> {
+    const client = await openClient(config.url, result.credential);
+    return { ...result, client };
   }
 
-  /** Poll until admin approves. Throws on timeout. */
-  async function waitForApproval(waitOpts?: WaitOpts): Promise<TreenixClient> {
-    const interval = waitOpts?.interval ?? 5000;
-    const timeout = waitOpts?.timeout ?? 5 * 60 * 1000;
-    const deadline = Date.now() + timeout;
-
-    while (Date.now() < deadline) {
-      const result = await connect();
-
-      if (result.status === 'approved') {
-        console.log(`[agent] connected as ${result.userId}`);
-        return result.client;
-      }
-
-      console.log(`[agent] pending approval, retrying in ${interval / 1000}s...`);
-      await new Promise(r => setTimeout(r, interval));
+  /** Perform one native connection attempt and release the temporary pairing lane. */
+  async function connect(): Promise<ConnectResult> {
+    if ('credential' in config) {
+      const client = await openClient(config.url, config.credential);
+      const welcome = await client.ready;
+      return { status: 'approved', client, credential: config.credential, principal: welcome.principal };
     }
+    const client = await openClient(config.url);
+    try {
+      const result = pairingResult((await client.act({ path: config.path, action: 'connect', args: { key: config.key } }).outcome).value);
+      return result.status === 'pending' ? result : await approve(result);
+    } finally {
+      client.close();
+    }
+  }
 
-    throw new Error(`[agent] timeout waiting for approval (${timeout / 1000}s)`);
+  /** Wait on the port's native subscription until an operator approves pairing. */
+  async function waitForApproval(options: WaitOpts = {}): Promise<TwpClient> {
+    if ('credential' in config) {
+      const result = await connect();
+      if (result.status !== 'approved') throw new KernelError('INVALID', 'Credential connection stayed pending');
+      return result.client;
+    }
+    const deadline = AbortSignal.timeout(options.timeout ?? 5 * 60 * 1000);
+    const signal = options.signal === undefined ? deadline : AbortSignal.any([deadline, options.signal]);
+    signal.throwIfAborted();
+    const client = await openClient(config.url);
+    try {
+      const result = pairingResult((await client.act({ path: config.path, action: 'connect', args: { key: config.key } }, signal).outcome).value);
+      if (result.status === 'approved') {
+        const approved = await approve(result);
+        if (approved.status !== 'approved') throw new KernelError('INVALID', 'Approved connection stayed pending');
+        return approved.client;
+      }
+      const path = config.path;
+      let subscription: ReturnType<TwpClient['sub']> | undefined;
+      let aborted: () => void = () => {};
+      await new Promise<void>((resolve, reject) => {
+        /** Inspect only accepted subscription state; no retry timer reads the server. */
+        function changed(): void {
+          const copy = client.cache.at(path);
+          if (copy === undefined) return;
+          if ('error' in copy) { reject(copy.error); return; }
+          if (copy.node.status === 'approved') resolve();
+          else if (copy.node.status === 'revoked' || copy.node.status === 'idle')
+            reject(new KernelError('FORBIDDEN', 'Agent pairing ended'));
+        }
+        aborted = () => reject(signal.reason);
+        signal.addEventListener('abort', aborted, { once: true });
+        subscription = client.sub({ node: path }, changed, reject);
+        subscription.ready.then(changed, reject);
+        signal.throwIfAborted();
+      }).finally(() => {
+        signal.removeEventListener('abort', aborted);
+        subscription?.close();
+      });
+      const approved = pairingResult((await client.act({ path: config.path, action: 'connect', args: { key: config.key } }, signal).outcome).value);
+      if (approved.status !== 'approved') throw new KernelError('CONFLICT', 'Agent approval changed');
+      const connection = await approve(approved);
+      if (connection.status !== 'approved') throw new KernelError('INVALID', 'Approved connection stayed pending');
+      return connection.client;
+    } finally {
+      client.close();
+    }
   }
 
   return { connect, waitForApproval };
 }
 
-export type { TreenixClient } from '@treenx/core/client';
-export { createNodeClient } from '@treenx/core/client';
+export type { TwpClient } from '@treenx/core/client/twp';

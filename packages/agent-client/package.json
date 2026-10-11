@@ -1,7 +1,7 @@
 {
   "name": "@treenx/agent-client",
   "version": "1.0.1",
-  "description": "Treenix agent client — TOFU connection to a Treenix server",
+  "description": "Treenix agent client \u2014 TOFU connection to a Treenix server",
   "type": "module",
   "publishConfig": {
     "access": "public"
@@ -46,7 +46,8 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json && fix-hash-imports",
-    "prepack": "npm run build"
+    "prepack": "npm run build",
+    "test": "tsx --conditions development --test 'src/**/*.test.ts'"
   },
   "peerDependencies": {
     "@treenx/core": "^3.0.0"
