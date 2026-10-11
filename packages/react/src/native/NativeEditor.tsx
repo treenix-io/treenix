@@ -7,6 +7,7 @@ import { isNodeInput, isSelector } from '@treenx/core/protocol/twp'
 import { createNativeTreeSource } from '#tree/native-source'
 import { NativeSourceProvider, useNativeSource } from '#tree/native-source-context'
 import { useNativeChildren, useNativeNode } from '#tree/native-hooks'
+import { NativeViewOutput } from '#native/ViewOutput'
 
 /** Render transport and application failures as user-facing text. */
 const message = (error: unknown) =>
@@ -241,7 +242,7 @@ export function NativeTreeBrowser() {
             {message(children.error)}
           </p>
         )}
-        {children.members.map((copy) =>
+        {children.output === undefined && children.members.map((copy) =>
           'node' in copy ? (
             <div key={copy.node.$id} className="flex gap-2">
               <button
@@ -267,6 +268,7 @@ export function NativeTreeBrowser() {
             </p>
           ),
         )}
+        {children.output === undefined && children.rows !== undefined && <NativeViewOutput snapshot={children} />}
         {children.next !== undefined && (
           <button
             className={buttonClass}
@@ -277,7 +279,9 @@ export function NativeTreeBrowser() {
           </button>
         )}
       </aside>
-      <NodeEditor key={path} path={path} onAccepted={refreshChildren} />
+      {children.output === undefined
+        ? <NodeEditor key={path} path={path} onAccepted={refreshChildren} />
+        : <NativeViewOutput key={parent} snapshot={children} title={parent} />}
     </div>
   );
 }
