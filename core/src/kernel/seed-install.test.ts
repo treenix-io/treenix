@@ -124,3 +124,29 @@ it('reuses the durable accepted source and preserves installed identities after 
     assert.deepEqual(await read(session, '/seed'), target);
   } finally { session.close(); await delivery; await reopened.close(); }
 });
+
+it('deploys accepted prefab data through its public action and skips installed nodes on repeat', { timeout: 10_000 }, async t => {
+  const f = await fixture(t), input = plan(f.key());
+  await installNativeSeeds(f.session, input);
+  const source = input.prefabs[0].source.$path;
+  const outcome = await f.session.act({ opId: f.key(), path: source, action: 'deploy',
+    args: { target: '/public-copy', allowAbsolute: true } }).outcome;
+  assert.deepEqual(outcome.value, { deployed: ['/public-copy', '/public-copy/child'], skipped: ['/absolute'] });
+  const target = await read(f.session, '/public-copy');
+  assert.equal(target.value, 1);
+  assert.notEqual(target.$id, 'captured-id');
+  assert.equal((await read(f.session, '/public-copy/child')).value, 2);
+  const repeat = await f.session.act({ opId: f.key(), path: source, action: 'deploy',
+    args: { target: '/public-copy', allowAbsolute: true } }).outcome;
+  assert.deepEqual(repeat.value, { deployed: [], skipped: ['/public-copy', '/public-copy/child', '/absolute'] });
+  assert.deepEqual(await read(f.session, '/public-copy'), target);
+});
+
+it('refuses invalid public deployment paths before publishing any target', { timeout: 10_000 }, async t => {
+  const f = await fixture(t), input = plan(f.key());
+  await installNativeSeeds(f.session, input);
+  await assert.rejects(f.session.act({ opId: f.key(), path: input.prefabs[0].source.$path,
+    action: 'deploy', args: { target: '/refused' } }).outcome,
+    error => error instanceof KernelError && error.code === 'INVALID');
+  await assert.rejects(read(f.session, '/refused'), error => error instanceof KernelError && error.code === 'NOT_FOUND');
+});

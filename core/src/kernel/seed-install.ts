@@ -3,7 +3,7 @@ import { getComponent } from '#core';
 import { KernelError } from '#errors';
 import { A, type Node, type NodeInput, type OpId, type Session } from '#kernel/types';
 import type { CapturedSeedNode, NativePrefabSource } from '#mod/native-prefab';
-import { assertPrefabPath, resolvePrefabPath } from '#mod/prefab-path';
+import { assertPrefabPath, prefabInput, resolvePrefabPath } from '#mod/prefab-path';
 import { stableJson } from '#util/stable-json';
 
 export interface NativeSeedPrefab {
@@ -25,12 +25,6 @@ export interface NativeSeedPlan {
 export interface NativeSeedResult {
   readonly installed: readonly string[];
   readonly skipped: readonly string[];
-}
-
-/** Strip captured identity and revision before either source publication or instance creation. */
-function seedInput(node: CapturedSeedNode, path: string): NodeInput {
-  const { $id, $rev, $refId, $path, ...fields } = node;
-  return { ...fields, $path: path };
 }
 
 /** Read an accepted projection; malformed or refused copies remain loud failures. */
@@ -89,7 +83,7 @@ export async function installNativeSeeds(session: Session, plan: NativeSeedPlan)
   for (const source of plan.sources) await put(source, 'catalog');
   for (const prefab of plan.prefabs) {
     const source: NativePrefabSource = { ...prefab.source,
-      nodes: prefab.source.nodes.map(node => seedInput(node, node.$path)) };
+      nodes: prefab.source.nodes.map(node => prefabInput(node, node.$path)) };
     await put(source, 'source');
   }
 
@@ -100,7 +94,7 @@ export async function installNativeSeeds(session: Session, plan: NativeSeedPlan)
     const owner = stableJson({ id: accepted.$id, rev: accepted.$rev });
     for (const node of source.nodes) {
       const path = resolvePrefabPath(node.$path, prefab.target, prefab.allowAbsolute);
-      await put(seedInput(node, path), owner, accepted);
+      await put(prefabInput(node, path), owner, accepted);
     }
   }
   return { installed, skipped };

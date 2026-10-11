@@ -1,5 +1,12 @@
 import { assertSafePath } from '#core/path';
 import { KernelError } from '#errors';
+import type { Node, NodeInput } from '#kernel/types';
+
+/** Copy prefab data without reusing captured instance identity or revision. */
+export function prefabInput(node: NodeInput | Node, path: string): NodeInput {
+  const { $id, $rev, $refId, $path, ...fields } = node;
+  return { ...fields, $path: path };
+}
 
 /** Resolve a prefab address using its explicit deployment target and absolute-path permission. */
 export function resolvePrefabPath(nodePath: string, target: string, allowAbsolute = false): string {
