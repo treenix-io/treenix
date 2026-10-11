@@ -265,6 +265,16 @@
       "development": "./src/mods/autostart/service.ts",
       "types": "./dist/mods/autostart/service.d.ts",
       "default": "./dist/mods/autostart/service.js"
+    },
+    "./kernel/store/memory": {
+      "development": "./src/kernel/store/memory.ts",
+      "types": "./dist/kernel/store/memory.d.ts",
+      "default": "./dist/kernel/store/memory.js"
+    },
+    "./kernel/blob-store-memory": {
+      "development": "./src/kernel/blob-store-memory.ts",
+      "types": "./dist/kernel/blob-store-memory.d.ts",
+      "default": "./dist/kernel/blob-store-memory.js"
     }
   },
   "treenix": {
