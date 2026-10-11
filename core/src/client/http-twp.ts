@@ -7,6 +7,8 @@ import { isRecord } from '#util/is-record'
 export interface TwpHttpClientOptions {
   readonly url: string
   readonly credential?: Credential
+  /** Explicit anonymous owners omit ambient cookies; the default preserves existing cookie sessions. */
+  readonly credentials?: RequestCredentials
   /** Supplies claims from the same borrowed cache and credential passed to the native client. */
   readonly cache?: LaneCache
   readonly limits?: CacheClaimLimits
@@ -39,7 +41,7 @@ export async function openTwpHttp(options: TwpHttpClientOptions) {
     headers.set('Authorization', bearer)
   }
   headers.set('Content-Type', 'application/json')
-  const credentials = headers.has('Authorization') ? 'omit' : 'include'
+  const credentials = headers.has('Authorization') ? 'omit' : options.credentials ?? 'include'
   const cache = options.cache?.reconnectClaims(options.credential, options.limits)
   const hello: Request = {
     t: 'hi',
@@ -52,6 +54,11 @@ export async function openTwpHttp(options: TwpHttpClientOptions) {
   if (!isRecord(locator) || typeof locator.lane !== 'string' || locator.lane.length === 0)
     throw new KernelError('INVALID', 'Malformed HTTP lane locator')
   const lane = locator.lane
+  if (options.credentials === 'omit' && !headers.has('Authorization')) {
+    if (!isRecord(locator.credential) || typeof locator.credential.token !== 'string' || locator.credential.token.length === 0)
+      throw new KernelError('INVALID', 'Missing HTTP admission credential')
+    headers.set('Authorization', `Bearer ${locator.credential.token}`)
+  }
   headers.set('TWP-Lane', lane)
   let send = Promise.resolve(), outstanding = 0
   function post(request: Request | readonly Request[]): void {

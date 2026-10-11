@@ -110,7 +110,7 @@ export function createTwpHttpServer(input: TwpHttpOptions) {
         if (requests.length !== 1 || requests[0].t !== 'hi') throw new KernelError('INVALID', 'Open with one hi request')
         const opened = await serving.open(requests[0], credential, network)
         if (opened.credential !== undefined) response.setHeader('Set-Cookie', buildSessionCookie(opened.credential.token, Math.floor(credentialTtlMs / 1000)))
-        json(response, 201, { lane: opened.id })
+        json(response, 201, { lane: opened.id, ...(opened.credential === undefined ? {} : { credential: opened.credential }) })
       } else {
         if (typeof laneHeader !== 'string') throw new KernelError('INVALID', 'Malformed lane header')
         serving.dispatch(laneHeader, credential, network, requests)

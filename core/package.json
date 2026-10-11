@@ -290,6 +290,11 @@
       "development": "./src/util/chunk-channel.ts",
       "types": "./dist/util/chunk-channel.d.ts",
       "default": "./dist/util/chunk-channel.js"
+    },
+    "./kernel/serialization": {
+      "development": "./src/kernel/serialization.ts",
+      "types": "./dist/kernel/serialization.d.ts",
+      "default": "./dist/kernel/serialization.js"
     }
   },
   "treenix": {
