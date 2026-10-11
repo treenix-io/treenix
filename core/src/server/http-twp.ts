@@ -9,12 +9,14 @@ import { decodeJson, decodeRequests, encodeFrame } from '#protocol/twp'
 import { buildClearSessionCookie, buildSessionCookie, parseSessionCookie, SESSION_COOKIE } from '#security/cookies'
 import { isRecord } from '#util/is-record'
 import { assertSafePath } from '#core/path'
+import { createTwpHttpRoutes, type TwpHttpRoutes } from '#server/http-routes'
 
 export interface TwpHttpOptions {
   readonly instance: InstanceFoundationWithAuth
   readonly allowedOrigins: readonly string[]
   readonly credentialTtlMs: number
   readonly trustProxy?: boolean
+  readonly routes?: TwpHttpRoutes
 }
 
 function credentials(request: IncomingMessage): Credential | undefined {
@@ -81,6 +83,9 @@ export function createTwpHttpServer(input: TwpHttpOptions) {
   const { instance, credentialTtlMs, trustProxy = false } = input
   if (!Number.isFinite(credentialTtlMs) || credentialTtlMs <= 0) throw new KernelError('INVALID', 'Credential lifetime must be positive')
   const allowedOrigins = Object.freeze([...input.allowedOrigins]), serving = createTwpServing(instance)
+  const routes = (input.routes ?? createTwpHttpRoutes()).bind()
+  const routeSessions = new Set<() => void>()
+  let closing = false
   async function handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const origin = request.headers.origin
     if (origin !== undefined && !allowedOrigins.includes(origin)) throw new KernelError('REFUSED', 'HTTP origin refused')
@@ -94,9 +99,35 @@ export function createTwpHttpServer(input: TwpHttpOptions) {
     if (request.method === 'OPTIONS') { response.writeHead(204); response.end(); return }
     const url = new URL(request.url ?? '/', 'http://localhost')
     if (url.search !== '') throw new KernelError('INVALID', 'TWP does not accept query credentials or commands')
+    const route = routes.get(url.pathname)
     const network = clientOrigin(request, trustProxy), credential = credentials(request)
     if (request.method === 'POST' && request.headers.cookie !== undefined && request.headers.authorization === undefined && origin === undefined)
       throw new KernelError('REFUSED', 'Cookie requests need an allowed origin')
+    if (route !== undefined) {
+      route.signal.throwIfAborted()
+      const opened = await instance.sessionFactory.openCredential(credential, network)
+      const closed = () => opened.session.close(new KernelError('CANCELLED', 'HTTP route ended'))
+      const disconnected = () => { if (!response.writableEnded) closed() }
+      routeSessions.add(closed)
+      request.once('aborted', closed)
+      response.once('close', disconnected)
+      route.signal.addEventListener('abort', closed, { once: true })
+      try {
+        if (closing || request.aborted || response.destroyed) throw new KernelError('CANCELLED', 'HTTP route ended before admission')
+        route.signal.throwIfAborted()
+        opened.admission.assertActive()
+        if (opened.issuedCredential !== undefined)
+          response.setHeader('Set-Cookie', buildSessionCookie(opened.issuedCredential.token, Math.floor(credentialTtlMs / 1000)))
+        await route.handler(request, response, opened.session)
+      } finally {
+        routeSessions.delete(closed)
+        request.removeListener('aborted', closed)
+        response.removeListener('close', disconnected)
+        route.signal.removeEventListener('abort', closed)
+        closed()
+      }
+      return
+    }
     if (request.method === 'POST' && url.pathname === '/auth/login') {
       const token = await instance.auth.login(login(decodeJson(await body(request, instance.limits().requestBytes), instance.limits().requestBytes)))
       response.setHeader('Set-Cookie', buildSessionCookie(token.token, Math.floor(credentialTtlMs / 1000)))
@@ -152,6 +183,9 @@ export function createTwpHttpServer(input: TwpHttpOptions) {
   })
   return { server,
     async close(): Promise<void> {
+      closing = true
+      routes.close()
+      for (const close of routeSessions) close()
       serving.close()
       server.closeAllConnections()
       if (server.listening) await new Promise<void>((resolve, reject) => server.close(error => error === undefined ? resolve() : reject(error)))

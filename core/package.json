@@ -1,7 +1,7 @@
 {
   "name": "@treenx/core",
   "version": "3.0.19",
-  "description": "Composable typed tree engine — three primitives, everything else composes. Nodes, components, contexts.",
+  "description": "Composable typed tree engine \u2014 three primitives, everything else composes. Nodes, components, contexts.",
   "type": "module",
   "publishConfig": {
     "access": "public"
@@ -295,6 +295,31 @@
       "development": "./src/kernel/serialization.ts",
       "types": "./dist/kernel/serialization.d.ts",
       "default": "./dist/kernel/serialization.js"
+    },
+    "./kernel/auth/credentials": {
+      "development": "./src/kernel/auth/credentials.ts",
+      "types": "./dist/kernel/auth/credentials.d.ts",
+      "default": "./dist/kernel/auth/credentials.js"
+    },
+    "./system/native-actions": {
+      "development": "./src/system/native-actions.ts",
+      "types": "./dist/system/native-actions.d.ts",
+      "default": "./dist/system/native-actions.js"
+    },
+    "./client/lane-cache": {
+      "development": "./src/client/lane-cache.ts",
+      "types": "./dist/client/lane-cache.d.ts",
+      "default": "./dist/client/lane-cache.js"
+    },
+    "./server/http-routes": {
+      "development": "./src/server/http-routes.ts",
+      "types": "./dist/server/http-routes.d.ts",
+      "default": "./dist/server/http-routes.js"
+    },
+    "./util/stable-json": {
+      "development": "./src/util/stable-json.ts",
+      "types": "./dist/util/stable-json.d.ts",
+      "default": "./dist/util/stable-json.js"
     }
   },
   "treenix": {
