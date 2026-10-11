@@ -29,7 +29,8 @@ export type ClassOverride = {
 };
 
 // PropertySchema extended with slotType for component slot fields
-type SlottedPropertySchema = PropertySchema & { slotType?: string };
+export type SlottedPropertySchema = Omit<PropertySchema, 'items'> & { slotType?: string; items?: SlottedPropertySchema };
+export type TranslatedClassSchema = Omit<TypeSchema, 'properties'> & { $id: string; properties: Record<string, SlottedPropertySchema> };
 
 const PREFIX = 'jsonld.schema-org.';
 
@@ -90,7 +91,7 @@ export function translateClass(
   snapshot: JsonLdSnapshot,
   className: string,
   overrides: ClassOverride,
-): TypeSchema & { $id: string } {
+): TranslatedClassSchema {
   const classNode = findClass(snapshot, className); // throws on unknown class
 
   // Collect all properties whose domainIncludes covers this class or any ancestor
@@ -143,7 +144,7 @@ export function translateClass(
     properties[name] = buildFieldSchema(fieldOverride, propNode);
   }
 
-  const schema: TypeSchema & { $id: string } = {
+  const schema: TranslatedClassSchema = {
     $id: `${PREFIX}${className}`,
     type: 'object',
     properties,

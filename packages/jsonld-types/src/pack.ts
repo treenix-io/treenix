@@ -1,7 +1,9 @@
 import { onResolveMiss, register } from '@treenx/core';
+import { KernelError } from '@treenx/core/errors';
+import type { JsonSchema, ModuleManifest } from '@treenx/core/kernel/types';
 import { addTypeValidator } from '@treenx/core/comp/validate';
 import schemaOrgV29 from './packs/schemaorg-v29.json';
-import { type ClassOverride, type JsonLdSnapshot, translateClass } from './translate';
+import { type ClassOverride, type JsonLdSnapshot, type SlottedPropertySchema, translateClass } from './translate';
 import { refOrComponentValidator } from './validator';
 
 // Snapshot is bundled at build time via ESM JSON import — works in Node and the browser
@@ -73,4 +75,28 @@ export function loadSchemaOrgV29Pack(): void {
   //   (a) a centralized 'schema' dispatcher that fans out to per-prefix sub-resolvers, or
   //   (b) a chained resolver API in core registry.
   onResolveMiss('schema', missResolver);
+}
+
+/** Publish slots as standard native schemas without consulting the legacy validator map. */
+function nativeProperty(property: SlottedPropertySchema): JsonSchema {
+  const { items, slotType, ...shape } = property;
+  if (property.type === 'jsonld.refOrComponent') {
+    if (slotType === undefined) throw new KernelError('INVALID', 'JSON-LD slot has no declared component type');
+    return { anyOf: [
+      { type: 'object', required: ['$ref'], properties: { $ref: { type: 'string' } } },
+      { type: 'object', required: ['$type'], properties: { $type: { type: 'string', enum: [slotType] } } },
+    ] };
+  }
+  return { ...shape, ...(items === undefined ? {} : { items: nativeProperty(items) }) };
+}
+
+/** Install the complete curated pack before writes; native lookup never lazily publishes mid-operation. */
+export function schemaOrgV29NativeManifest(): ModuleManifest {
+  const module = '@treenx/jsonld-types/schema-org-v29';
+  return { id: module, security: [], open: [], types: Object.entries(OVERRIDES).map(([name, override]) => {
+    const translated = translateClass(SNAPSHOT, name, override);
+    return { name: `${PREFIX}${name}`, module, security: 'ordinary' as const, version: 0, actions: {},
+      schema: { ...translated, properties: Object.fromEntries(Object.entries(translated.properties).map(([key, property]) => [key, nativeProperty(property)])) },
+    };
+  }) };
 }
