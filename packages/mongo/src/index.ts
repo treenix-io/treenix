@@ -29,21 +29,22 @@ const fromStorage = (doc: Record<string, unknown>) => fromStorageKeys(doc) as No
 // Shared MongoClient pool — one client per URI, reused across mounts
 const clientPool = new Map<string, { client: MongoClient; refCount: number; ready: Promise<MongoClient> }>();
 
-export function getSharedClient(uri: string): { client: MongoClient; ready: Promise<MongoClient>; release: () => Promise<void> } {
-  let entry = clientPool.get(uri);
+export function getSharedClient(uri: string, monitorCommands = false): { client: MongoClient; ready: Promise<MongoClient>; release: () => Promise<void> } {
+  const key = monitorCommands ? JSON.stringify([uri, 'monitorCommands']) : uri;
+  let entry = clientPool.get(key);
   if (!entry) {
-    const client = new MongoClient(uri);
+    const client = monitorCommands ? new MongoClient(uri, { monitorCommands: true }) : new MongoClient(uri);
     const ready = client.connect();
     entry = { client, refCount: 0, ready };
-    clientPool.set(uri, entry);
+    clientPool.set(key, entry);
   }
   entry.refCount++;
   const release = async () => {
-    const e = clientPool.get(uri);
+    const e = clientPool.get(key);
     if (!e) return;
     e.refCount--;
     if (e.refCount <= 0) {
-      clientPool.delete(uri);
+      clientPool.delete(key);
       await e.client.close();
     }
   };

@@ -9,6 +9,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { Collection } from 'mongodb';
+import type { NodeData } from '@treenx/core';
 import { KernelError } from '@treenx/core/errors';
 import { mongoSet } from './index';
 
@@ -39,7 +40,7 @@ describe('mongoSet — rev contract (ns6p.4 invariant 24)', () => {
     const stored = { _id: 'x', _path: '/p', _type: 'item', name: 'old', _rev: 47 };
     const { col, calls } = mockCol({ findOneAndUpdate: () => stored });
 
-    const node = { $path: '/p', $type: 'item', name: 'new' };
+    const node: NodeData = { $path: '/p', $type: 'item', name: 'new' };
     const receipt = await mongoSet(col, node);
 
     const { filter, update, options } = calls[0].captured;
@@ -67,7 +68,7 @@ describe('mongoSet — rev contract (ns6p.4 invariant 24)', () => {
   it('blind set on a fresh path: upsert creates at rev 1', async () => {
     const { col } = mockCol({ findOneAndUpdate: () => null });
 
-    const node = { $path: '/fresh', $type: 'item' };
+    const node: NodeData = { $path: '/fresh', $type: 'item' };
     const receipt = await mongoSet(col, node);
 
     assert.equal(node.$rev, 1);
@@ -84,7 +85,7 @@ describe('mongoSet — rev contract (ns6p.4 invariant 24)', () => {
       },
     });
 
-    const node = { $path: '/raced', $type: 'item' };
+    const node: NodeData = { $path: '/raced', $type: 'item' };
     await mongoSet(col, node);
 
     assert.equal(calls.length, 2);
