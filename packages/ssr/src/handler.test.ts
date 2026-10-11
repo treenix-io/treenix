@@ -2,7 +2,7 @@ import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { register } from '@treenx/core';
 import type { NodeData } from '@treenx/core';
-import type { Tree, Page } from '@treenx/core/tree';
+import type { Reader } from '@treenx/core/kernel/types';
 import { createElement } from 'react';
 import './types/index';
 import { RouteIndex } from './route-index';
@@ -11,18 +11,14 @@ import { ssrHandler, type SsrRequest, type RenderFn } from './handler';
 
 // Tests inject this minimal render — entry-server itself can't be imported
 // here because it does `import 'virtual:mod-site-views'` (Vite-only).
-const testRender: RenderFn = ({ node }) =>
-  renderToStaticMarkup(createElement('main', { 'data-page': (node as any).heading }, (node as any).heading ?? 'untitled'));
-
-const deps = (routes: RouteIndex, tree: Tree) => ({ routes, tree, render: testRender });
-
-const emptyTree: Tree = {
-  async get() { return undefined; },
-  async getChildren(): Promise<Page<NodeData>> { return { items: [], total: 0 }; },
-  async set() { return { changes: [] }; },
-  async remove() { return { changes: [] }; },
-  async patch() { return { changes: [] }; },
+const testRender: RenderFn = ({ node }) => {
+  const heading = typeof node.heading === 'string' ? node.heading : 'untitled';
+  return renderToStaticMarkup(createElement('main', { 'data-page': heading }, heading));
 };
+
+const deps = (routes: RouteIndex, reader: Reader) => ({ routes, reader, render: testRender });
+
+const emptyTree: Reader = { async read() { return { list: [], copies: [], at: [] }; } };
 
 before(() => {
   // Register a minimal site view for the test type.

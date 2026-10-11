@@ -1,3 +1,4 @@
+import { serializeKernel } from '@treenx/core/kernel/serialization';
 // HTML shell + escape utilities for the SSR pipeline.
 //
 // Why each escape exists:
@@ -43,7 +44,7 @@ export function escapeUrl(s: string | undefined | null): string {
  *  - `</` → `<\/` (avoid premature `</script>` close).
  *  - U+2028 / U+2029 → `\u2028` / `\u2029` (JSON allows them; JS parsers don't). */
 export function escapeJson(value: unknown): string {
-  return JSON.stringify(value)
+  return serializeKernel(value)
     .replace(/<\//g, '<\\/')
     .replace(/\u2028/g, '\\u2028')
     .replace(/\u2029/g, '\\u2029');

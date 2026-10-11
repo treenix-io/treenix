@@ -1,196 +1,116 @@
-// ServerTreeSource — TreeSource implementation for SSR.
-//
-// Hooks call mountPath / mountChildren synchronously while React renders.
-// On the server we can't actually fetch in those calls — we record the
-// requested paths as PENDING and return inert handles. After React's render
-// pass returns a string, the SSR pipeline calls flushPending() which awaits
-// the underlying tree.get / tree.getChildren for every recorded path and
-// stores results locally. Then the next render pass sees data.
-//
-// Render-loop bound: handler.ts caps at N passes; if pendingCount stays
-// nonzero after the budget, throws SsrDataUnresolved.
+import { KernelError } from '@treenx/core/errors';
+import type { ErrorCopy, Reader, ReadResult, SubSelector } from '@treenx/core/kernel/types';
+import { readSnapshot, type NativeHydrationState } from '@treenx/react/tree/read-snapshot';
+import type { NativeMount, NativeSnapshot } from '@treenx/react/tree/native-source';
+import type { ChildrenOpts, ChildrenSnapshot, PathSnapshot, TreeSource } from '@treenx/react/tree/tree-source';
 
-import type { NodeData } from '@treenx/core';
-import type { Page, Tree } from '@treenx/core/tree';
-import { stampNode } from '@treenx/react/symbols';
-import {
-  EMPTY_PATH_SNAPSHOT,
-  EMPTY_CHILDREN_SNAPSHOT,
-  NOOP_PATH_HANDLE,
-  NOOP_CHILDREN_HANDLE,
-  type ChildrenSnapshot,
-  type ChildrenHandle,
-  type PathHandle,
-  type PathSnapshot,
-  type TreeSource,
-} from '@treenx/react/tree/tree-source';
+interface Resource {
+  readonly selector: SubSelector;
+  result?: ReadResult;
+  snapshot: NativeSnapshot;
+  path?: PathSnapshot;
+  children?: ChildrenSnapshot;
+}
+const LOADING: NativeSnapshot = { phase: 'loading', generations: [], members: [], included: [] };
+const noop = () => {};
 
-const LOADING_PATH: PathSnapshot = Object.freeze({ data: undefined, status: 'loading', error: null });
-
-const LOADING_CHILDREN: ChildrenSnapshot = Object.freeze({
-  data: [],
-  phase: 'initial',
-  total: null,
-  truncated: null,
-  nextCursor: null,
-  error: null,
-});
-
+/** Own the request's native reads across bounded server render passes. */
 export class ServerTreeSource implements TreeSource {
-  private paths = new Map<string, PathSnapshot>();
-  private children = new Map<string, ChildrenSnapshot>();
-  private pendingPaths = new Set<string>();
-  private pendingChildren = new Set<string>();
+  private readonly resources = new Map<string, Resource>();
+  private readonly pendingReads = new Set<Resource>();
 
-  constructor(private tree: Tree, private ctx?: unknown) {}
+  constructor(private readonly reader: Reader) {}
 
-  // ── snapshots ──
+  private resource(selector: SubSelector): Resource {
+    const key = JSON.stringify(selector);
+    let resource = this.resources.get(key);
+    if (resource === undefined) {
+      resource = { selector: structuredClone(selector), snapshot: LOADING };
+      this.resources.set(key, resource);
+      this.pendingReads.add(resource);
+    }
+    return resource;
+  }
+
+  private childSelector(path: string, options?: ChildrenOpts): SubSelector {
+    return { children: path, window: { limit: options?.limit ?? 100 },
+      ...(options?.query === undefined ? {} : { where: options.query }) };
+  }
 
   getPathSnapshot(path: string): PathSnapshot {
-    if (!path) return EMPTY_PATH_SNAPSHOT;
-    const cached = this.paths.get(path);
-    if (cached) return cached;
-    this.pendingPaths.add(path);
-    this.paths.set(path, LOADING_PATH);
-    return LOADING_PATH;
+    const resource = this.resource({ node: path });
+    if (resource.path !== undefined) return resource.path;
+    const snapshot = resource.snapshot;
+    const member = snapshot.output?.[0];
+    if (member?.kind === 'copy' && 'error' in member.copy)
+      return resource.path = { data: undefined, status: 'error', error: new KernelError(member.copy.error.code, member.copy.error.message) };
+    const data = member?.kind === 'computed' ? member.node
+      : member !== undefined && 'node' in member.copy ? member.copy.node : undefined;
+    return resource.path = { data, error: snapshot.error ?? null, status: snapshot.phase === 'loading' ? 'loading'
+      : snapshot.error !== undefined ? 'error' : data === undefined ? 'not_found' : 'ready' };
   }
 
-  getChildrenSnapshot(path: string): ChildrenSnapshot {
-    if (!path) return EMPTY_CHILDREN_SNAPSHOT;
-    const cached = this.children.get(path);
-    if (cached) return cached;
-    this.pendingChildren.add(path);
-    this.children.set(path, LOADING_CHILDREN);
-    return LOADING_CHILDREN;
+  getChildrenSnapshot(path: string, options?: ChildrenOpts): ChildrenSnapshot {
+    const resource = this.resource(this.childSelector(path, options));
+    if (resource.children !== undefined) return resource.children;
+    const snapshot = resource.snapshot;
+    const data: ChildrenSnapshot['data'] = [];
+    const errors: ErrorCopy[] = [];
+    for (const member of snapshot.output ?? []) {
+      if (member.kind === 'computed') data.push(member.node);
+      else if ('error' in member.copy) errors.push(member.copy);
+      else data.push(member.copy.node);
+    }
+    return resource.children = { data, errors, phase: snapshot.phase === 'loading' ? 'initial' : snapshot.phase,
+      error: snapshot.error ?? null, nextCursor: snapshot.next ?? null };
   }
 
-  // ── change notification (no-op on server) ──
-
-  subscribePath(_path: string, _cb: () => void): () => void {
-    return noop;
+  subscribePath() { return noop; }
+  subscribeChildren() { return noop; }
+  mountPath(path: string) { this.resource({ node: path }); return { refetch: noop, dispose: noop }; }
+  mountChildren(path: string, options?: ChildrenOpts) {
+    this.resource(this.childSelector(path, options));
+    return { getSnapshot: () => this.getChildrenSnapshot(path, options), subscribe: () => noop,
+      loadMore: noop, refetch: noop, dispose: noop };
+  }
+  getSelectorSnapshot(selector: SubSelector) { return this.resource(selector).snapshot; }
+  mountSelector(selector: SubSelector): NativeMount {
+    const resource = this.resource(selector);
+    return { getSnapshot: () => resource.snapshot, subscribe: () => noop,
+      loadMore: noop, refetch: noop, dispose: noop };
   }
 
-  subscribeChildren(_path: string, _cb: () => void): () => void {
-    return noop;
+  /** Return how many reads still need to be flushed. */
+  pendingCount() { return this.pendingReads.size; }
+
+  /** List pending path and child reads for the unresolved-render error. */
+  pending() {
+    const paths: string[] = [], children: string[] = [];
+    for (const resource of this.pendingReads)
+      if ('node' in resource.selector) paths.push(resource.selector.node);
+      else children.push(resource.selector.children);
+    return { paths, children };
   }
 
-  // ── lifecycle (record pending; never effectful) ──
-
-  mountPath(path: string): PathHandle {
-    if (path) this.getPathSnapshot(path);
-    return NOOP_PATH_HANDLE;
-  }
-
-  mountChildren(path: string): ChildrenHandle {
-    if (path) this.getChildrenSnapshot(path);
-    return NOOP_CHILDREN_HANDLE;
-  }
-
-  // ── render-loop driver ──
-
-  pendingCount(): number {
-    return this.pendingPaths.size + this.pendingChildren.size;
-  }
-
-  /** Return the still-pending paths/children for diagnostics. */
-  pending(): { paths: string[]; children: string[] } {
-    return { paths: [...this.pendingPaths], children: [...this.pendingChildren] };
-  }
-
-  /** True iff any flushed path/children read failed with a FORBIDDEN error.
-   *  SSR is anonymous-only — auth-protected nodes mean we should hand the
-   *  request back to the SPA (which can drive the login flow). */
-  hasForbidden(): boolean {
-    const isForbidden = (e: Error | null) =>
-      !!e && (((e as { code?: string }).code === 'FORBIDDEN')
-        || ((e as { data?: { code?: string } }).data?.code === 'FORBIDDEN'));
-    for (const v of this.paths.values()) if (isForbidden(v.error)) return true;
-    for (const v of this.children.values()) if (isForbidden(v.error)) return true;
-    return false;
-  }
-
-  /** Resolve every recorded pending entry concurrently and store results. */
+  /** Native failures remain visible to the render owner; no partial hydration is published. */
   async flushPending(): Promise<void> {
-    const paths = [...this.pendingPaths];
-    const children = [...this.pendingChildren];
-    this.pendingPaths.clear();
-    this.pendingChildren.clear();
-    await Promise.all([
-      ...paths.map(p => this.loadPath(p)),
-      ...children.map(p => this.loadChildren(p)),
-    ]);
+    const pending = [...this.pendingReads];
+    this.pendingReads.clear();
+    await Promise.all(pending.map(async resource => {
+      const result = await this.reader.read(resource.selector);
+      resource.snapshot = readSnapshot(result);
+      resource.result = result;
+      resource.path = undefined; resource.children = undefined;
+    }));
   }
 
-  private async loadPath(path: string): Promise<void> {
-    try {
-      const data = await this.tree.get(path, this.ctx);
-      if (data) stampNode(data);
-      this.paths.set(path, Object.freeze({
-        data,
-        status: data ? 'ready' : 'not_found',
-        error: null,
-      }));
-    } catch (err) {
-      this.paths.set(path, Object.freeze({
-        data: undefined,
-        status: 'error',
-        error: err instanceof Error ? err : new Error(String(err)),
-      }));
+  /** Serialize completed native reads for the client hydration cache. */
+  serialize(): NativeHydrationState {
+    const reads: NativeHydrationState['reads'][number][] = [];
+    for (const resource of this.resources.values()) {
+      if (resource.result === undefined) throw new KernelError('INVALID', 'Hydration contains an unresolved read');
+      reads.push({ selector: resource.selector, result: resource.result });
     }
-  }
-
-  private async loadChildren(path: string): Promise<void> {
-    try {
-      const page = await this.tree.getChildren(path, undefined, this.ctx);
-      for (const item of page.items) stampNode(item);
-      this.children.set(path, Object.freeze({
-        data: page.items,
-        phase: 'ready',
-        total: page.total,
-        truncated: page.truncated ?? false,
-        nextCursor: page.nextCursor ?? null,
-        error: null,
-      }));
-    } catch (err) {
-      this.children.set(path, Object.freeze({
-        data: [],
-        phase: 'error',
-        total: null,
-        truncated: null,
-        nextCursor: null,
-        error: err instanceof Error ? err : new Error(String(err)),
-      }));
-    }
-  }
-
-  /** Snapshot for hydration: what we ended up with.
-   *  paths — array of resolved nodes, each carries its own $path (no redundant map keys).
-   *  notFound — paths that resolved to missing.
-   *  children — Page per parent path. */
-  serialize(): {
-    paths: NodeData[];
-    notFound: string[];
-    children: Record<string, Page<NodeData>>;
-  } {
-    const paths: NodeData[] = [];
-    const notFound: string[] = [];
-    for (const [k, v] of this.paths) {
-      if (v.status === 'ready' && v.data) paths.push(v.data);
-      else if (v.status === 'not_found') notFound.push(k);
-    }
-    const children: Record<string, Page<NodeData>> = {};
-    for (const [k, v] of this.children) {
-      if (v.phase === 'ready') {
-        children[k] = {
-          items: v.data,
-          total: v.total ?? v.data.length,
-          truncated: v.truncated ?? false,
-          ...(v.nextCursor ? { nextCursor: v.nextCursor } : {}),
-        };
-      }
-    }
-    return { paths, notFound, children };
+    return { reads };
   }
 }
-
-const noop = () => {};

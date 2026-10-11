@@ -1,169 +1,75 @@
-import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import type { NodeData } from '@treenx/core';
-import type { Tree, Page, ChildrenOpts } from '@treenx/core/tree';
-import { $node } from '@treenx/react/symbols';
-import { ServerTreeSource } from './server-tree-source';
+import { it } from 'node:test';
+import { createElement } from 'react';
+import { renderToString } from 'react-dom/server';
+import { KernelError } from '@treenx/core/errors';
+import { R } from '@treenx/core/kernel/types';
+import { ServerTreeSource } from '#server-tree-source';
+import { nativeFixture } from '#native-fixture.test';
+import { ssrHandler } from '#handler';
+import { RouteIndex, fetchRouteNodes } from '#route-index';
 
-function fakeTree(seed: NodeData[]): Tree {
-  const map = new Map(seed.map(n => [n.$path, n]));
-  const tree: Tree = {
-    async get(path) { return map.get(path); },
-    async getChildren(parent: string, _opts?: ChildrenOpts): Promise<Page<NodeData>> {
-      const items = [...map.values()].filter(n =>
-        n.$path !== parent && n.$path.startsWith(parent === '/' ? '/' : parent + '/'));
-      return { items, total: items.length };
+it('renders credential-specific native reads and retains exact selectors/results for hydration', async t => {
+  const { instance, admin, key } = await nativeFixture(t);
+  await admin.commit({ opId: key(), changes: [
+    { op: 'put', node: { $path: '/public', $type: 't.dir', title: 'visible', $acl: [{ subject: { group: 'public' }, grant: R }] } },
+    { op: 'put', node: { $path: '/private', $type: 't.dir', title: 'secret' } },
+  ] });
+  const anonymous = instance.commands(await instance.auth.openCredential()); t.after(() => anonymous.close());
+  const source = new ServerTreeSource(anonymous);
+  assert.equal(source.getPathSnapshot('/public').status, 'loading');
+  await source.flushPending();
+  assert.equal(source.getPathSnapshot('/public').data?.title, 'visible');
+  const hidden = new ServerTreeSource(anonymous); hidden.getPathSnapshot('/private');
+  await assert.rejects(hidden.flushPending(), error => error instanceof KernelError && error.code === 'NOT_FOUND');
+  const snapshot = source.serialize();
+  assert.equal(snapshot.reads.length, 1);
+  assert.deepEqual(snapshot.reads[0].selector, { node: '/public' });
+  assert.equal(snapshot.reads[0].result.copies.length, 1);
+  const html = renderToString(createElement('main', null, String(source.getPathSnapshot('/public').data?.title)));
+  assert.ok(html.includes('visible'));
+  const privileged = new ServerTreeSource(admin);
+  privileged.getPathSnapshot('/private'); await privileged.flushPending();
+  assert.equal(privileged.getPathSnapshot('/private').data?.title, 'secret');
+});
+
+it('preserves native include membership and propagates an actual read budget refusal', async t => {
+  const { admin, key } = await nativeFixture(t);
+  await admin.commit({ opId: key(), changes: [
+    { op: 'put', node: { $path: '/target', $type: 't.dir', body: 'x'.repeat(10_000) } },
+    { op: 'put', node: { $path: '/route', $type: 't.ref', $ref: '/target' } },
+  ] });
+  const source = new ServerTreeSource(admin);
+  const handle = source.mountSelector({ node: '/route', include: [{ ref: '$ref' }] });
+  await source.flushPending();
+  assert.equal(handle.getSnapshot().members.length, 1);
+  assert.equal(handle.getSnapshot().included.length, 1);
+  assert.equal(source.serialize().reads[0].result.copies.length, 2);
+  await admin.commit({ opId: key(), changes: [{ op: 'patch', path: '/sys/limits', ops: { $set: { readBytes: 4096 } } }] });
+  const bounded = new ServerTreeSource(admin); bounded.getPathSnapshot('/target');
+  await assert.rejects(bounded.flushPending(), error => error instanceof KernelError && error.code === 'BUDGET');
+  assert.throws(() => bounded.serialize(), error => error instanceof KernelError && error.code === 'INVALID');
+});
+
+it('renders native route data with actual hydration reads and private cache policy', async t => {
+  const { admin, key } = await nativeFixture(t);
+  await admin.commit({ opId: key(), changes: [
+    { op: 'put', node: { $path: '/sys/routes', $type: 't.dir' } },
+    { op: 'put', node: { $path: '/sys/routes/private', $type: 't.dir', title: 'private-page',
+      '#site': { $type: 't.site', state: 'published', mode: 'hydrate' } } },
+  ] });
+  const routes = new RouteIndex(); routes.hydrate(await fetchRouteNodes(admin));
+  const result = await ssrHandler({ pathname: '/private', query: new URLSearchParams(), isAdmin: true, private: true }, {
+    routes, reader: admin,
+    render({ source }) {
+      const snapshot = source.getPathSnapshot('/sys/routes/private');
+      return renderToString(createElement('main', null, snapshot.status === 'loading' ? 'loading' : String(snapshot.data?.title)));
     },
-    async set() { return { changes: [] }; },
-    async remove() { return { changes: [] }; },
-    async patch() { return { changes: [] }; },
-  };
-  return tree;
-}
-
-describe('ServerTreeSource', () => {
-  it('first read records pending and returns loading snapshot', () => {
-    const src = new ServerTreeSource(fakeTree([{ $path: '/a', $type: 'x' }]));
-    const snap = src.getPathSnapshot('/a');
-    assert.equal(snap.status, 'loading');
-    assert.equal(snap.data, undefined);
-    assert.equal(src.pendingCount(), 1);
   });
-
-  it('flushPending resolves recorded paths to ready', async () => {
-    const src = new ServerTreeSource(fakeTree([{ $path: '/a', $type: 'x' }]));
-    src.getPathSnapshot('/a');
-    await src.flushPending();
-    const snap = src.getPathSnapshot('/a');
-    assert.equal(snap.status, 'ready');
-    assert.equal(snap.data?.$type, 'x');
-    assert.equal(src.pendingCount(), 0);
-  });
-
-  it('missing path resolves to not_found, not error', async () => {
-    const src = new ServerTreeSource(fakeTree([]));
-    src.getPathSnapshot('/missing');
-    await src.flushPending();
-    const snap = src.getPathSnapshot('/missing');
-    assert.equal(snap.status, 'not_found');
-  });
-
-  it('tree.get throwing surfaces as error snapshot', async () => {
-    const tree: Tree = {
-      async get() { throw new Error('boom'); },
-      async getChildren() { return { items: [], total: 0 }; },
-      async set() { return { changes: [] }; }, async remove() { return { changes: [] }; }, async patch() { return { changes: [] }; },
-    };
-    const src = new ServerTreeSource(tree);
-    src.getPathSnapshot('/x');
-    await src.flushPending();
-    const snap = src.getPathSnapshot('/x');
-    assert.equal(snap.status, 'error');
-    assert.equal(snap.error?.message, 'boom');
-  });
-
-  it('children flush populates list and total', async () => {
-    const src = new ServerTreeSource(fakeTree([
-      { $path: '/p', $type: 'dir' },
-      { $path: '/p/a', $type: 'x' },
-      { $path: '/p/b', $type: 'x' },
-    ]));
-    src.getChildrenSnapshot('/p');
-    await src.flushPending();
-    const snap = src.getChildrenSnapshot('/p');
-    assert.equal(snap.phase, 'ready');
-    assert.equal(snap.data.length, 2);
-    assert.equal(snap.total, 2);
-  });
-
-  it('subscribe* / mount* are no-ops on server', () => {
-    const src = new ServerTreeSource(fakeTree([]));
-    const unsub = src.subscribePath('/a', () => assert.fail('should not fire'));
-    const handle = src.mountPath('/a');
-    assert.equal(typeof unsub, 'function');
-    unsub();
-    handle.refetch();
-    handle.dispose();
-  });
-
-  it('mountPath records the path for flush', () => {
-    const src = new ServerTreeSource(fakeTree([]));
-    src.mountPath('/a');
-    assert.equal(src.pendingCount(), 1);
-  });
-
-  it('serialize emits ready snapshots for hydration', async () => {
-    const src = new ServerTreeSource(fakeTree([
-      { $path: '/a', $type: 'x' },
-      { $path: '/p', $type: 'dir' },
-      { $path: '/p/c', $type: 'x' },
-    ]));
-    src.getPathSnapshot('/a');
-    src.getChildrenSnapshot('/p');
-    await src.flushPending();
-    const out = src.serialize();
-    assert.equal(out.paths.length, 1);
-    assert.equal(out.paths[0]?.$path, '/a');
-    assert.equal(out.paths[0]?.$type, 'x');
-    assert.equal(out.children['/p']?.items.length, 1);
-    assert.equal(out.children['/p']?.total, 1);
-  });
-
-  it('serialize preserves the next page cursor', async () => {
-    const tree = fakeTree([{ $path: '/p/a', $type: 'x' }]);
-    tree.getChildren = async () => ({
-      items: [{ $path: '/p/a', $type: 'x' }],
-      total: 1,
-      nextCursor: 'next-page',
-    });
-    const src = new ServerTreeSource(tree);
-    src.getChildrenSnapshot('/p');
-    await src.flushPending();
-
-    assert.equal(src.serialize().children['/p']?.nextCursor, 'next-page');
-  });
-
-  it('serialize emits notFound for missing paths', async () => {
-    const src = new ServerTreeSource(fakeTree([]));
-    src.getPathSnapshot('/missing');
-    await src.flushPending();
-    const out = src.serialize();
-    assert.deepEqual(out.notFound, ['/missing']);
-    assert.equal(out.paths.length, 0);
-  });
-
-  it('flushed paths are stamped with $node so useActions/viewCtx work in SSR', async () => {
-    const src = new ServerTreeSource(fakeTree([{ $path: '/a', $type: 'x' }]));
-    src.getPathSnapshot('/a');
-    await src.flushPending();
-    const data = src.getPathSnapshot('/a').data;
-    assert.ok(data, 'expected ready snapshot');
-    assert.equal((data as any)[$node], data);
-  });
-
-  it('flushed children are stamped with $node', async () => {
-    const src = new ServerTreeSource(fakeTree([
-      { $path: '/p', $type: 'dir' },
-      { $path: '/p/a', $type: 'x' },
-    ]));
-    src.getChildrenSnapshot('/p');
-    await src.flushPending();
-    const items = src.getChildrenSnapshot('/p').data;
-    assert.equal(items.length, 1);
-    assert.equal((items[0] as any)[$node], items[0]);
-  });
-
-  it('multi-pass: leaf added during pass-2 takes pass-3 to resolve', async () => {
-    const src = new ServerTreeSource(fakeTree([
-      { $path: '/a', $type: 'x' },
-      { $path: '/b', $type: 'x' },
-    ]));
-    src.getPathSnapshot('/a');
-    await src.flushPending();
-    src.getPathSnapshot('/b');
-    assert.equal(src.pendingCount(), 1);
-    await src.flushPending();
-    assert.equal(src.pendingCount(), 0);
-    assert.equal(src.getPathSnapshot('/b').status, 'ready');
-  });
+  assert.ok(result);
+  assert.equal(result.headers['Cache-Control'], 'private, no-store');
+  assert.ok(result.bodyContent.includes('private-page'));
+  assert.equal(result.initialState.reads.length, 1);
+  assert.equal(result.initialState.reads[0].result.copies.length, 1);
+  assert.ok(result.body.includes('treenix-initial'));
 });

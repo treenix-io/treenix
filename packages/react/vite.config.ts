@@ -20,7 +20,7 @@ export default defineConfig({
     treenixPlugin({ modsDirs: [resolve(projectRoot, 'mods')] }),
     // tailwindcss(), // disabled — using CDN in index.html
     react({ babel: { plugins: ['babel-plugin-react-compiler'] } }),
-    viteSsrPlugin({ trpcUrl: `http://127.0.0.1:${apiPort}/trpc` }),
+    viteSsrPlugin({ apiUrl: `http://127.0.0.1:${apiPort}` }),
   ],
   publicDir: 'public',
   optimizeDeps: {

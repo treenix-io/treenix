@@ -12,15 +12,14 @@ import type { IncomingMessage } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { Plugin, ViteDevServer } from 'vite';
-import type { NodeData } from '@treenx/core';
-import type { Tree, ChildrenOpts, Page } from '@treenx/core/tree';
+import { openSsrSession } from '#native-session';
 import { RouteIndex, fetchRouteNodes } from '#route-index';
 import { ssrHandler, type RenderFn } from '#handler';
 import { escape, escapeAttr, escapeUrl, escapeJson, extractBodyHeadHints } from '#template';
 
 export type ViteSsrOpts = {
   /** Backend tRPC URL. Default: http://127.0.0.1:${VITE_API_PORT|3211}/trpc */
-  trpcUrl?: string;
+  apiUrl?: string;
 };
 
 const ASSET_EXT = /\.(js|mjs|css|map|svg|png|jpg|jpeg|gif|ico|webp|avif|woff|woff2|ttf|otf|json|wasm|txt|xml)(\?|$)/i;
@@ -39,25 +38,14 @@ function isHtmlRequest(req: IncomingMessage): boolean {
 }
 
 export function viteSsrPlugin(opts: ViteSsrOpts = {}): Plugin {
-  const trpcUrl = opts.trpcUrl
-    ?? `http://127.0.0.1:${process.env.VITE_API_PORT ?? '3211'}/trpc`;
+  const apiUrl = opts.apiUrl
+    ?? `http://127.0.0.1:${process.env.VITE_API_PORT ?? '3211'}`;
 
   return {
     name: 'treenix-ssr',
     enforce: 'pre',
     apply: 'serve',
     configureServer(vite: ViteDevServer) {
-      const tree = createTrpcTree(trpcUrl);
-      const routes = new RouteIndex();
-
-      async function rebuildRoutes() {
-        try {
-          routes.hydrate(await fetchRouteNodes(tree));
-        } catch (err) {
-          vite.config.logger.warn(`[ssr] route hydrate failed: ${(err as Error).message}`);
-        }
-      }
-
       // PRE-hook: register before Vite's internal SPA-fallback so we see original URLs.
       // Vite still handles assets/HMR/etc. via its own middlewares — we just delegate via next().
       vite.middlewares.use(async (req, res, next) => {
@@ -65,14 +53,17 @@ export function viteSsrPlugin(opts: ViteSsrOpts = {}): Plugin {
           const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
           if (url.searchParams.get('ssr') === '0') return next();
 
+          let session: Awaited<ReturnType<typeof openSsrSession>> | undefined;
           try {
-            await rebuildRoutes();
+            session = await openSsrSession(apiUrl, req, res);
+            const routes = new RouteIndex();
+            routes.hydrate(await fetchRouteNodes(session.reader));
             const mod = await vite.ssrLoadModule('@treenx/react/ssr/entry-server');
             const render = mod.render as RenderFn;
 
             const result = await ssrHandler(
-              { pathname: url.pathname, query: url.searchParams, isAdmin: false },
-              { routes, tree, render },
+              { pathname: url.pathname, query: url.searchParams, isAdmin: false, private: session.private },
+              { routes, reader: session.reader, render },
             );
             if (!result) return next();
 
@@ -91,7 +82,7 @@ export function viteSsrPlugin(opts: ViteSsrOpts = {}): Plugin {
           } catch (err) {
             vite.ssrFixStacktrace(err as Error);
             next(err as Error);
-          }
+          } finally { session?.close(); }
         });
     },
   };
@@ -131,35 +122,3 @@ function injectSsrIntoTemplate(
   return html;
 }
 
-// ── tRPC-backed Tree adapter (read-only — SSR doesn't mutate) ──
-
-function createTrpcTree(url: string): Tree {
-  let client: any;
-  async function getClient() {
-    if (!client) {
-      const { createClient } = await import('@treenx/core/server/client');
-      client = createClient(url);
-    }
-    return client;
-  }
-  return {
-    async get(path: string) {
-      const c = await getClient();
-      return c.get.query({ path }) as Promise<NodeData | undefined>;
-    },
-    async getChildren(path: string, copts?: ChildrenOpts): Promise<Page<NodeData>> {
-      const c = await getClient();
-      const items = await c.getChildren.query({
-        path,
-        limit: copts?.limit ?? 1000,
-        depth: copts?.depth,
-        query: copts?.query,
-        cursor: copts?.cursor,
-      });
-      return items as Page<NodeData>;
-    },
-    async set() { throw new Error('ssr tree is read-only'); },
-    async remove() { throw new Error('ssr tree is read-only'); },
-    async patch() { throw new Error('ssr tree is read-only'); },
-  };
-}

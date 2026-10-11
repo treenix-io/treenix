@@ -1,19 +1,9 @@
-// ssrHandler — orchestrates URL → tree-resolved node → SSR HTML response.
-//
-// Flow per request:
-//   1. RouteIndex.resolve(url) → route node (or null → null response, falls through to SPA).
-//   2. Read t.site off route node.
-//        - missing → null (no SSR for this route).
-//        - mode='spa' → null.
-//        - state='draft' && !preview → 404.
-//        - state='draft' && preview → render with no-store + force noindex.
-//   3. Wrap caller's tree in ServerTreeSource.
-//   4. Render loop: render() → if pendingCount → flushPending() → re-render. Bounded.
-//   5. Read t.seo (route node first, then target node), build HTML shell.
-//   6. Return { status, headers, body }.
+// Request flow: resolve the route, render native reads to completion, then build the response.
+// Draft pages require an authorized preview; hydration state contains the reads used during SSR.
 
 import type { NodeData } from '@treenx/core';
-import type { Tree } from '@treenx/core/tree';
+import type { Reader } from '@treenx/core/kernel/types';
+import type { NativeHydrationState } from '@treenx/react/tree/read-snapshot';
 import { getComponent } from '@treenx/core';
 import { Site } from './types/site';
 import { Seo } from './types/seo';
@@ -38,9 +28,8 @@ export type SsrResponse = {
    *  Vite-side hosts inject this into the SPA index.html so client `main.tsx`
    *  can `hydrateRoot()` over the existing markup. */
   bodyContent: string;
-  /** Pre-fetched tree data the client should pre-seed into ClientTreeSource
-   *  (so the first paint after hydration doesn't re-fetch). */
-  initialState: unknown;
+  /** Native reads to seed client hydration so the first paint reuses SSR data. */
+  initialState: NativeHydrationState;
   /** SEO metadata extracted from the route node — caller injects into <head>. */
   seo?: { title?: string; description?: string; canonical?: string; ogImage?: string };
 };
@@ -52,12 +41,13 @@ export type SsrRequest = {
   query: URLSearchParams;
   /** True iff caller has admin claim (preview gate). */
   isAdmin: boolean;
+  private?: boolean;
 };
 
 export type SsrHandlerDeps = {
   routes: RouteIndex;
-  /** ACL-scoped Tree wrapping the request's user. */
-  tree: Tree;
+  /** ACL-scoped reader for this request. */
+  reader: Reader;
   /** Tailwind JIT — given the rendered HTML, returns the page's CSS. Phase 5 wires the real one. */
   tailwindJit?: (html: string) => Promise<string> | string;
   /** Render-loop budget. */
@@ -89,13 +79,13 @@ export async function ssrHandler(
       headers: { 'Content-Type': 'text/html; charset=utf-8' },
       body: '',
       bodyContent: '',
-      initialState: {},
+      initialState: { reads: [] },
     };
   }
 
-  const source = new ServerTreeSource(deps.tree);
+  const source = new ServerTreeSource(deps.reader);
   // Make the route's target node available immediately — most renders read it.
-  const targetNode: NodeData = routeNode;
+  const targetNode = routeNode;
 
   const maxPasses = deps.maxPasses ?? DEFAULT_PASSES;
   const render = deps.render;
@@ -113,11 +103,7 @@ export async function ssrHandler(
     });
     if (source.pendingCount() === 0) break;
     await source.flushPending();
-    // SSR is anonymous — if any read needed auth, bail out so the SPA shell
-    // takes over and the user gets the login flow instead of an SSR'd 404.
-    if (source.hasForbidden()) return null;
   }
-  if (source.hasForbidden()) return null;
   if (source.pendingCount() > 0) {
     const { paths, children } = source.pending();
     throw new SsrDataUnresolved([...paths, ...children.map(c => `children:${c}`)]);
@@ -141,8 +127,8 @@ export async function ssrHandler(
   const headers: Record<string, string> = {
     'Content-Type': 'text/html; charset=utf-8',
   };
-  if (isPreview) {
-    headers['Cache-Control'] = 'no-store';
+  if (isPreview || req.private) {
+    headers['Cache-Control'] = req.private ? 'private, no-store' : 'no-store';
   } else if (site.cache?.maxAge != null) {
     const swr = site.cache.staleWhileRevalidate;
     headers['Cache-Control'] = `public, max-age=${site.cache.maxAge}` +

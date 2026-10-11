@@ -22,14 +22,13 @@ import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, resolve, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
-import type { NodeData } from '@treenx/core';
-import type { Tree, ChildrenOpts, Page } from '@treenx/core/tree';
+import { openSsrSession } from '#native-session';
 import { RouteIndex, fetchRouteNodes } from './route-index.ts';
 import { ssrHandler, type RenderFn } from './handler.ts';
 import { escape, escapeAttr, escapeUrl, escapeJson, extractBodyHeadHints } from './template.ts';
 
 const port = Number(process.env.PORT ?? 3210);
-const apiUrl = process.env.API_URL ?? 'http://127.0.0.1:3211/trpc';
+const apiUrl = process.env.API_URL ?? 'http://127.0.0.1:3211';
 const routeTtlMs = Number(process.env.ROUTE_TTL_MS ?? 30_000);
 
 // Defaults resolve relative to THIS file (works for src/dev, dist/, and
@@ -54,24 +53,6 @@ if (!existsSync(ssrBundle)) {
 
 const indexHtml = readFileSync(indexHtmlPath, 'utf-8');
 const { render } = (await import(pathToFileURL(ssrBundle).href)) as { render: RenderFn };
-const tree = createTrpcTree(apiUrl);
-const routes = new RouteIndex();
-
-let lastRouteRebuild = 0;
-async function rebuildRoutes() {
-  if (Date.now() - lastRouteRebuild < routeTtlMs) return;
-  try {
-    routes.hydrate(await fetchRouteNodes(tree));
-    lastRouteRebuild = Date.now();
-  } catch (err) {
-    console.warn(`[front] route hydrate failed: ${(err as Error).message}`);
-  }
-}
-
-// HTML cache — keyed by URL (excluding ?preview because that path bypasses cache).
-type Cached = { html: string; status: number; headers: Record<string, string>; expires: number };
-const htmlCache = new Map<string, Cached>();
-
 const MIME: Record<string, string> = {
   '.html': 'text/html', '.js': 'application/javascript', '.mjs': 'application/javascript',
   '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml',
@@ -126,13 +107,6 @@ function injectSsrIntoTemplate(
   return html.replace(HEAD_CLOSE, headBits.join('\n') + '\n</head>');
 }
 
-function maxAgeFromHeaders(headers: Record<string, string>): number {
-  const cc = headers['Cache-Control'] ?? '';
-  if (!cc || cc.includes('no-store')) return 0;
-  const m = /max-age=(\d+)/.exec(cc);
-  return m ? Number(m[1]) * 1000 : 0;
-}
-
 const apiOrigin = new URL(apiUrl);
 const apiHost = apiOrigin.hostname;
 const apiPort = Number(apiOrigin.port || (apiOrigin.protocol === 'https:' ? 443 : 80));
@@ -164,7 +138,7 @@ const server = http.createServer(async (req, res) => {
 
   // 0. tRPC + REST API — proxy straight to backend so the SPA's existing
   //    transport works through :3210 without an extra origin / CORS dance.
-  if (url.startsWith('/trpc/') || url.startsWith('/api/')) {
+  if (url.startsWith('/trpc/') || url.startsWith('/api/') || url.startsWith('/twp') || url.startsWith('/auth/')) {
     proxyToApi(req, res);
     return;
   }
@@ -176,33 +150,28 @@ const server = http.createServer(async (req, res) => {
 
   // 2. SSR for HTML requests — serve cached if fresh.
   if (isHtmlRequest(req)) {
-    const cached = htmlCache.get(url);
-    if (cached && cached.expires > Date.now()) {
-      res.writeHead(cached.status, cached.headers);
-      res.end(cached.html);
-      return;
-    }
-
+    let session: Awaited<ReturnType<typeof openSsrSession>> | undefined;
     try {
-      await rebuildRoutes();
+      session = await openSsrSession(apiUrl, req, res);
+      const routes = new RouteIndex();
+      routes.hydrate(await fetchRouteNodes(session.reader));
       const parsed = new URL(url, `http://${req.headers.host ?? 'localhost'}`);
       const ssr = await ssrHandler(
-        { pathname: parsed.pathname, query: parsed.searchParams, isAdmin: false },
-        { routes, tree, render },
+        { pathname: parsed.pathname, query: parsed.searchParams, isAdmin: false, private: session.private },
+        { routes, reader: session.reader, render },
       );
       if (ssr) {
         const html = injectSsrIntoTemplate(indexHtml, ssr);
-        const ttlMs = maxAgeFromHeaders(ssr.headers);
-        if (ttlMs > 0) {
-          htmlCache.set(url, { html, status: ssr.status, headers: ssr.headers, expires: Date.now() + ttlMs });
-        }
         res.writeHead(ssr.status, ssr.headers);
         res.end(html);
         return;
       }
     } catch (err) {
-      console.error(`[front] ssr ${url}: ${(err as Error).stack ?? (err as Error).message}`);
-    }
+      console.error('[front] SSR failed', err);
+      res.writeHead(503, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' });
+      res.end('Rendering unavailable');
+      return;
+    } finally { session?.close(); }
 
     // SPA fallback — serve plain index.html, client takes over.
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
@@ -220,32 +189,3 @@ server.listen(port, () => {
 
 process.on('SIGTERM', () => { server.close(); process.exit(0); });
 
-// ── tRPC-backed Tree adapter (read-only — same as vite-ssr's) ──
-
-function createTrpcTree(url: string): Tree {
-  let client: any;
-  async function getClient() {
-    if (!client) {
-      const { createClient } = await import('@treenx/core/server/client');
-      client = createClient(url);
-    }
-    return client;
-  }
-  return {
-    async get(path: string) {
-      const c = await getClient();
-      return c.get.query({ path }) as Promise<NodeData | undefined>;
-    },
-    async getChildren(path: string, copts?: ChildrenOpts): Promise<Page<NodeData>> {
-      const c = await getClient();
-      const items = await c.getChildren.query({
-        path, limit: copts?.limit ?? 1000, depth: copts?.depth,
-        query: copts?.query, cursor: copts?.cursor,
-      });
-      return items as Page<NodeData>;
-    },
-    async set() { throw new Error('ssr tree is read-only'); },
-    async remove() { throw new Error('ssr tree is read-only'); },
-    async patch() { throw new Error('ssr tree is read-only'); },
-  };
-}

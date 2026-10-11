@@ -9,29 +9,44 @@
 // remove(path) on tree mutations. Wiring to a watcher is a Phase 5 concern.
 
 import type { NodeData } from '@treenx/core';
-import type { Tree } from '@treenx/core/tree';
+import type { Reader } from '@treenx/core/kernel/types';
+import type { PresentationNode } from '@treenx/react/tree/presentation';
+import { KernelError } from '@treenx/core/errors';
 import { resolveRoute, type ResolveResult } from '@treenx/react/router/route-resolve';
 
-/** Fetch every /sys/routes descendant for hydration.
- *  Routes nest (e.g. /sys/routes/v/admin), so a deep scan is required.
- *  `depth: -1` is the deep sentinel — every store treats negative depth as
- *  "all descendants" (Infinity can't cross JSON, so -1 is the wire-safe value). */
-export async function fetchRouteNodes(tree: Tree): Promise<NodeData[]> {
-  const page = await tree.getChildren('/sys/routes', { depth: -1 });
-  return page.items as NodeData[];
+/** Traverse native immediate-child pages under a bounded route inventory. */
+export async function fetchRouteNodes(reader: Reader): Promise<PresentationNode[]> {
+  const nodes: PresentationNode[] = [], pending = ['/sys/routes'];
+  for (let index = 0; index < pending.length; index++) {
+    let after: string | undefined;
+    do {
+      const result = await reader.read({ children: pending[index], window: { limit: 100, ...(after === undefined ? {} : { after }) } });
+      const copies = new Map(result.copies.map(copy => ['node' in copy ? copy.node.$id : copy.id, copy]));
+      for (const id of result.list) {
+        const copy = copies.get(id);
+        if (copy === undefined) throw new KernelError('INVALID', 'Route member has no native copy');
+        if ('error' in copy) throw copy.error;
+        if (nodes.length >= 1000) throw new KernelError('BUDGET', 'Route inventory exceeds its bound');
+        nodes.push(copy.node);
+        pending.push(copy.node.$path);
+      }
+      after = result.next;
+    } while (after !== undefined);
+  }
+  return nodes;
 }
 
 export class RouteIndex {
-  private byPath = new Map<string, NodeData>();
+  private byPath = new Map<string, PresentationNode>();
 
   /** Replace all known routes (initial build / full rebuild). */
-  hydrate(nodes: readonly NodeData[]): void {
+  hydrate(nodes: readonly PresentationNode[]): void {
     this.byPath.clear();
     for (const n of nodes) this.ingest(n);
   }
 
   /** Insert or replace a single route node. No-op for non-/sys/routes paths. */
-  ingest(node: NodeData): void {
+  ingest(node: PresentationNode): void {
     if (!node.$path?.startsWith('/sys/routes/')) return;
     this.byPath.set(node.$path, node);
   }
@@ -47,7 +62,7 @@ export class RouteIndex {
   }
 
   /** Resolve a URL against the index. */
-  resolve(urlPath: string): ResolveResult {
+  resolve(urlPath: string): ResolveResult<PresentationNode> {
     return resolveRoute(urlPath, [...this.byPath.values()]);
   }
 }

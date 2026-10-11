@@ -5,15 +5,15 @@
 // .ts (not .tsx) so cross-package importers don't need .ts→.tsx fallback
 // in the exports map.
 
-import { AuthProvider } from '#app/auth-context';
-import { Router } from '#app/Router';
+
+import { NativeRouter } from '#app/NativeRouter';
 import { Toaster } from '#components/ui/sonner';
 import '#mods/servers';
 import { ServerLocationContext } from '#navigate';
 import type { TreeSource } from '#tree/tree-source';
 import { TreeSourceProvider } from '#tree/tree-source-context';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import type { NodeData } from '@treenx/core';
+import type { PresentationNode } from '#tree/presentation';
 import { createElement, Fragment } from 'react';
 import { renderToStaticMarkup, renderToString } from 'react-dom/server';
 // Side-effect: scan engine/mods for view-site.ts and register them in the
@@ -27,7 +27,7 @@ export type RenderArgs = {
   source: TreeSource;
   /** The route node — passed for parity with previous API; Router resolves it
    *  again from `pathname` so the rendered tree matches the client's. */
-  node: NodeData;
+  node: PresentationNode;
   /** URL tail after the matched route prefix. Unused — Router computes it. */
   rest: string;
   mode: RenderMode;
@@ -53,21 +53,10 @@ export function render({ source, mode, pathname = '/', search = '' }: RenderArgs
         TreeSourceProvider,
         {
           source,
-          children: createElement(
-            AuthProvider,
-            {
-              children: createElement(
-                QueryClientProvider,
-                {
-                  client: queryClient,
-                  children: createElement(Fragment, null,
-                    createElement(Router),
-                    createElement(Toaster),
-                  ),
-                },
-              ),
-            },
-          ),
+          children: createElement(QueryClientProvider, {
+            client: queryClient,
+            children: createElement(Fragment, null, createElement(NativeRouter), createElement(Toaster)),
+          }),
         },
       ),
     },

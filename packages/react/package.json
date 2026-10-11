@@ -48,6 +48,22 @@
         "./src/*.tsx"
       ],
       "default": "./dist/*.js"
+    },
+    "#app/NativeRouter": {
+      "development": "./src/app/NativeRouter.tsx",
+      "default": "./dist/app/NativeRouter.js"
+    },
+    "#app/native-boot": {
+      "development": "./src/app/native-boot.tsx",
+      "default": "./dist/app/native-boot.js"
+    },
+    "#app/legacy-boot": {
+      "development": "./src/app/legacy-boot.tsx",
+      "default": "./dist/app/legacy-boot.js"
+    },
+    "#app/RoutedPage": {
+      "development": "./src/app/RoutedPage.tsx",
+      "default": "./dist/app/RoutedPage.js"
     }
   },
   "exports": {

@@ -1,7 +1,12 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "types": ["node"]
+    "types": [
+      "node"
+    ],
+    "module": "ESNext"
   },
-  "include": ["src"]
+  "include": [
+    "src"
+  ]
 }
