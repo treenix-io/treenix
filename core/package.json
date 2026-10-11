@@ -131,6 +131,11 @@
       "types": "./dist/kernel/types.d.ts",
       "default": "./dist/kernel/types.js"
     },
+    "./kernel/typedef": {
+      "development": "./src/kernel/typedef.ts",
+      "types": "./dist/kernel/typedef.d.ts",
+      "default": "./dist/kernel/typedef.js"
+    },
     "./server/http-twp": {
       "development": "./src/server/http-twp.ts",
       "types": "./dist/server/http-twp.d.ts",
