@@ -4,7 +4,7 @@ import { dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { safeJsonParse } from '#core/json'
 import { KernelError } from '#errors'
-import { openNativeDeployment, type NativeModuleLocation } from '#server/native-deployment'
+import { openNativeDeployment, type NativeModuleLocation, type PersistentLogsConfig } from '#server/native-deployment'
 import type { FsDirectoryBindings } from '#kernel/mount-fs-provider'
 import type { Credential } from '#kernel/types'
 import { createTwpHttpServer } from '#server/http-twp'
@@ -14,6 +14,10 @@ interface IoEntry { readonly entry: string }
 /** Decode the deployment entry before acquiring persistent runtime resources. */
 function ioEntry(value: unknown): value is IoEntry {
   return isRecord(value) && typeof value.entry === 'string' && value.entry.length > 0
+}
+
+function persistentLogsInput(value: unknown): value is PersistentLogsConfig {
+  return isRecord(value) && typeof value.directory === 'string' && value.directory.length > 0
 }
 
 interface ModuleEntry { readonly id: string; readonly entry: string }
@@ -41,6 +45,7 @@ async function main(): Promise<void> {
     || !Array.isArray(config.allowedOrigins) || !config.allowedOrigins.every((value: unknown): value is string => typeof value === 'string')
     || config.firstAdmin !== undefined && !adminInput(config.firstAdmin)
     || config.installerCredential !== undefined && !credentialInput(config.installerCredential)
+    || config.persistentLogs !== undefined && !persistentLogsInput(config.persistentLogs)
     || config.io !== undefined && !ioEntry(config.io)
     || config.baseDirectory !== undefined && (typeof config.baseDirectory !== 'string' || config.baseDirectory.length === 0)
     || config.mountDirectories !== undefined && !directoryBindings(config.mountDirectories)
@@ -73,7 +78,7 @@ async function main(): Promise<void> {
         )
   const runtime = await openNativeDeployment({ runtime: { id: config.id, directory: resolve(dirname(configPath), config.directory),
     baseDirectory: config.baseDirectory === undefined ? undefined : resolve(dirname(configPath), config.baseDirectory),
-    credentialTtlMs: config.credentialTtlMs, firstAdmin: config.firstAdmin, installerCredential: config.installerCredential, mountDirectories }, modules, io })
+    credentialTtlMs: config.credentialTtlMs, firstAdmin: config.firstAdmin, installerCredential: config.installerCredential, mountDirectories }, modules, io, persistentLogs: config.persistentLogs })
   const binding = createTwpHttpServer({ instance: runtime.instance, routes: runtime.httpRoutes, allowedOrigins: config.allowedOrigins, credentialTtlMs: config.credentialTtlMs })
   try {
     await new Promise<void>((done, reject) => { binding.server.once('error', reject); binding.server.listen(port, host, () => { binding.server.off('error', reject); done() }) })
