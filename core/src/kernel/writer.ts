@@ -575,17 +575,19 @@ async function initializeWriter(options: WriterOptions) {
 
   /** Copy native images under their off-route physical owner's fence and the ordinary Writer order. */
   async function copyTarget(target: OpenedStoreMountTarget, writes: readonly StoredWrite[], allowance: Budget, ownership: TransferOwnership, copies: readonly TransferCopy[], retry?: TransferProvenance,
-    conditions?: Pick<StoreCommit, 'transferBefore' | 'transferAbsent'>): Promise<Position> {
+    conditions?: Pick<StoreCommit, 'transferBefore' | 'transferAbsent'> & { readonly check?: () => void; readonly begun?: () => void }): Promise<Position> {
     let remaining = { ...allowance }
     ownedTargets.add(target)
     if (!Number.isSafeInteger(target.resources.writerEpoch) || target.resources.writerEpoch < 0)
       throw new KernelError('INVALID', 'Target writer token is invalid')
     if (!copyingTargets.has(target)) await lifecycle(async () => {
+      conditions?.check?.()
       const active = carrierInventory(inventory), pending = new Map<BlobCarrier, Position>()
       if (active.has(target.store.blobOwner)) throw new KernelError('CONFLICT', 'Physical destination is already active')
       copyingTargets.set(target, { carriers: pending,
         firstPage: retry === undefined ? 0 : retry.intent.firstPage + retry.pages.length,
         nextPage: retry === undefined ? 0 : retry.intent.firstPage + retry.pages.length, sealed: false })
+      conditions?.begun?.()
       for (const carrier of referenceCarriers(target.store)) if (!active.has(carrier.blobOwner)) {
         if (remaining.nodes < 1) throw new KernelError('BUDGET', 'Copy ownership exceeds its allowance')
         let generation: Position
@@ -641,7 +643,10 @@ async function initializeWriter(options: WriterOptions) {
         throw new KernelError('BUDGET', 'Copy identity metadata exceeds its allowance')
       const unit: Extract<BlobArchiveMutation, { t: 'copyPage' }> = { t: 'copyPage', owner: target.store.blobOwner,
         generation, page: copying.nextPage, copies: [...copies] }
-      await lifecycle(() => archiveUnit([unit], remaining))
+      await lifecycle(() => {
+        conditions?.check?.()
+        return archiveUnit([unit], remaining)
+      })
       remaining = { ...remaining, nodes: remaining.nodes - copies.length,
         bytes: remaining.bytes - Buffer.byteLength(JSON.stringify(unit)), exprWork: remaining.exprWork - copies.length }
       copying.nextPage++

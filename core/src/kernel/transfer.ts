@@ -78,7 +78,7 @@ export async function transferSubtree(options: TransferOptions, input: SubtreeTr
     if (source.kind !== 'store') throw new KernelError('READ_ONLY', 'Transfer source is not a Store')
     sourceStore = source.store
   }
-  const replacement = await mounts.prepareReplacement(chosen, operation)
+  const replacement = await mounts.prepareReplacement(chosen, operation, publicNode(before))
   options.retain(replacement)
   const target = replacement.target
   const destination = await target.store.scan({ range: { census: '/' }, budget: operation })
@@ -135,6 +135,7 @@ export async function transferSubtree(options: TransferOptions, input: SubtreeTr
 
   /** Include every descendant and the declaring node, including accepted deletions and identity changes. */
   function check(): void {
+    replacement.check()
     mounts.validateStage(stage)
     writer.influence.check({ history: input.path }, [captured.cursor], writer.stream.cursor().pos, domains, context, true)
   }
@@ -155,9 +156,8 @@ export async function transferSubtree(options: TransferOptions, input: SubtreeTr
   /** Use the remaining source-read allowance for the same physical destination commit. */
   async function publishBatch(): Promise<void> {
     if (!started) options.handoff(replacement)
-    started = true
     await writer.copyTarget(target, batch, allowance, ownership, copies, retry,
-      { transferBefore: [...originals], transferAbsent: [...absent] })
+      { transferBefore: [...originals], transferAbsent: [...absent], check, begun() { started = true } })
     if (copies.length !== 0) removed.push([...copies])
     batch.length = 0
     copies.length = 0

@@ -1,6 +1,6 @@
 import { KernelError } from '@treenx/core/errors';
 import { componentEntries } from '@treenx/core/kernel/migrate';
-import { A, R, W, type Session, type ComponentName, type ModuleManifest, type MountHandler, type Node, type OpenedStoreMountTarget } from '@treenx/core/kernel/types';
+import { A, R, W, type Session, type MountPreparation, type ComponentName, type ModuleManifest, type MountHandler, type Node, type OpenedStoreMountTarget } from '@treenx/core/kernel/types';
 import type { MongoTransactionOwner } from '#owner';
 import type { MongoHandleOptions } from '#store';
 import type { IndexDescription } from 'mongodb';
@@ -38,7 +38,7 @@ export function createMongoManifest(bindings: Readonly<Record<string, MongoTrans
   const closed = createMongoClosedProvider();
 
   /** Acquire one exact physical collection before its declaring Session is accepted. */
-  async function prepare(node: Node, name: ComponentName, session?: Session): Promise<OpenedStoreMountTarget> {
+  async function prepare(node: Node, name: ComponentName, session?: Session, owner?: MountPreparation): Promise<OpenedStoreMountTarget> {
     const component = componentEntries(node).find(([component]) => component === name);
     if (component === undefined || component[1].$type !== 't.mount.mongo')
       throw new KernelError('INVALID', 'Mongo mount declaration is missing');
@@ -52,8 +52,9 @@ export function createMongoManifest(bindings: Readonly<Record<string, MongoTrans
     const options: MongoHandleOptions = { db, collection, logicalBase: node.$path,
       indexes: declaredIndexes(component[1].indexes), ...(external === undefined ? {} : { external }) };
     if ('connection' in binding) {
-      if (session === undefined) throw new KernelError('UNAVAILABLE', 'Closed Mongo connection requires its declaring Session');
-      return closed.open(cluster, binding, session, options);
+      const admitted = session ?? await owner?.openSession();
+      if (admitted === undefined) throw new KernelError('UNAVAILABLE', 'Closed Mongo connection requires its declaring Session');
+      return closed.open(cluster, binding, admitted, options);
     }
     return openMongoMountTarget(binding, options);
   }
@@ -75,6 +76,6 @@ export function createMongoManifest(bindings: Readonly<Record<string, MongoTrans
       if (session.actor.principal !== `n:${node.$id}`)
         throw new KernelError('FORBIDDEN', 'Mongo mount requires its declaring node session');
       return prepare(node, name, session);
-    }, { prepare }) }],
+    }, { prepare: (node: Node, name: ComponentName, owner?: MountPreparation) => prepare(node, name, undefined, owner) }) }],
   };
 }

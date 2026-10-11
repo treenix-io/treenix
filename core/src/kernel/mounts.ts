@@ -61,6 +61,7 @@ export interface MountSessionReservation {
 export interface PreparedMountReplacement {
   readonly entry: MountEntry
   readonly target: OpenedStoreMountTarget
+  check(): void
   authorize(read: AcceptedNodeRead): Promise<void>
   cancelSession(): void
   /** Bind the opened physical owner to its final canonical declaring-node revision. */
@@ -77,6 +78,7 @@ export interface MountTableOptions {
   readonly declarationTypes?: ReadonlySet<TypeName>
   readonly openSession: (node: Node) => Promise<MountSession>
   readonly reserveSession?: (node: Node) => MountSessionReservation
+  readonly observeCredential?: (entry: MountEntry, target: OpenedStoreMountTarget) => void
   readonly activate: (entry: MountEntry, target: OpenedMountTarget, owner: MountSession) => Promise<void>
   /** Ordered Writer retirement owns release of a registered target. */
   readonly retire: (entry: MountEntry, target: OpenedMountTarget) => Promise<void>
@@ -544,7 +546,7 @@ export function createMountTable(options: MountTableOptions) {
       return entry
     },
     /** Open a replacement off-route while retaining the accepted declaration's routing authority. */
-    async prepareReplacement(input: MountDeclaration, budget: Budget): Promise<PreparedMountReplacement> {
+    async prepareReplacement(input: MountDeclaration, budget: Budget, acceptedNode: Node): Promise<PreparedMountReplacement> {
       check(budget)
       const draft = entryOf(input)
       const before = entries.get(draft.key)
@@ -552,10 +554,15 @@ export function createMountTable(options: MountTableOptions) {
       let bound: Entry | undefined
       let accepted = false
       let reservation: MountSessionReservation | undefined
+      let preparingSession: Promise<MountSession> | undefined
+      let beforeSession: MountSession | undefined
 
       /** Keep topology and the exact owner handler pinned while the physical copy is prepared. */
       function checkDraft(): void {
         check(budget)
+        beforeSession?.admission.assertActive()
+        draft.session?.admission.assertActive()
+        if (draft.target?.kind === 'store') draft.target.credentialDependency?.validate()
         if (version !== preparedVersion || entries.get(draft.key) !== before
           || options.registry.type(draft.declaration.$type) !== draft.type
           || options.registry.security(draft.declaration.$type, 'mount') !== draft.handler) {
@@ -570,7 +577,18 @@ export function createMountTable(options: MountTableOptions) {
         if (draft.handler.prepare !== undefined) {
           if (options.reserveSession === undefined) throw new KernelError('UNAVAILABLE', 'Physical mount preparation requires reserved Session ownership')
           reservation = options.reserveSession(draft.node)
-          draft.target = ownMountTarget(await draft.handler.prepare(draft.node, draft.component))
+          draft.target = ownMountTarget(await draft.handler.prepare(draft.node, draft.component, {
+            async openSession() {
+              preparingSession ??= options.openSession(acceptedNode)
+              beforeSession = await preparingSession
+              const dependency = beforeSession.admission.resolution.sources.find(source => source.kind === 'executor')
+              if (beforeSession.session.actor.principal !== `n:${acceptedNode.$id}`
+                || dependency?.id !== acceptedNode.$id || dependency.rev !== acceptedNode.$rev)
+                throw new KernelError('CONFLICT', 'Prepared declaring admission changed')
+              checkDraft()
+              return beforeSession.session
+            },
+          }))
         } else {
           draft.session = await options.openSession(draft.node)
           if (draft.session.session.actor.principal !== `n:${draft.node.$id}`)
@@ -579,13 +597,19 @@ export function createMountTable(options: MountTableOptions) {
         }
         checkDraft()
         if (draft.target.kind !== 'store') throw new KernelError('INVALID', 'Subtree transfer requires a Store target')
+        if (draft.target.credentialDependency !== undefined) {
+          if (options.observeCredential === undefined) throw new KernelError('UNAVAILABLE', 'Prepared credential observation is unavailable')
+          options.observeCredential(draft, draft.target)
+          await draft.target.credentialDependency.check()
+          checkDraft()
+        }
         if (draft.declaration.external === 'trusted'
           && (draft.target.store.external === undefined || draft.target.store.readExternal === undefined))
           throw new KernelError('INVALID', 'Trusted mount Store must report external edits')
       } catch (error) {
         try { await draft.target?.close() }
         catch (closeError) { throw new AggregateError([error, closeError], 'Mount preparation and resource release failed') }
-        finally { draft.session?.close(); reservation?.close() }
+        finally { beforeSession?.close(); draft.session?.close(); reservation?.close() }
         throw error
       }
       const target = draft.target
@@ -605,8 +629,8 @@ export function createMountTable(options: MountTableOptions) {
       }
 
       return {
-        entry: draft, target,
-        cancelSession() { draft.session?.close(); reservation?.close() },
+        entry: draft, target, check: checkDraft,
+        cancelSession() { beforeSession?.close(); draft.session?.close(); reservation?.close() },
         async authorize(read) {
           if (draft.session === undefined) {
             if (reservation === undefined) throw new KernelError('INVALID', 'Replacement has no reserved Session')
@@ -614,6 +638,10 @@ export function createMountTable(options: MountTableOptions) {
           }
           if (draft.session.session.actor.principal !== `n:${draft.node.$id}`)
             throw new KernelError('INVALID', 'Mount handler requires its declaring node session')
+          target.credentialDependency?.rebind(draft.session.session)
+          if (bound !== undefined && target.credentialDependency !== undefined) options.observeCredential!(bound, target)
+          beforeSession?.close()
+          beforeSession = undefined
           if (bound !== undefined) bound.session = draft.session
         },
         bind(stage) {
@@ -637,7 +665,7 @@ export function createMountTable(options: MountTableOptions) {
         async close() {
           if (accepted) return
           try { await target.close() }
-          finally { draft.session?.close(); reservation?.close() }
+          finally { beforeSession?.close(); draft.session?.close(); reservation?.close() }
         },
       }
     },

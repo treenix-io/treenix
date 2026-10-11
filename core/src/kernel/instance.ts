@@ -526,6 +526,12 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
         claims.set(fault.id, fault)
       const transferred = transferPublications.get(positionToRev(commit.pos))
       const stage = transferred?.stage ?? mounts?.stage([...claims.values()])
+      if (transferred !== undefined) {
+        const nodes = preparedTargets.get(transferred.target.store)
+        if (nodes === undefined) throw new KernelError('INVALID', 'Transfer metadata is not prepared')
+        installTarget(transferred.entry, transferred.target, nodes, transferred.source)
+        transferred.installed = true
+      }
       for (const write of commit.writes) remove(write.path, store)
       for (const image of images) if (image.node !== null) put(image.node, store)
       if (mounts !== undefined && stage !== undefined) {
@@ -1638,11 +1644,26 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
     return { session: opened.session, admission: opened.admission, close: () => opened.session.close() }
   }
 
+  /** Prepared and active targets retain the same accepted credential observation owner. */
+  function observeStoreCredential(entry: MountEntry, target: OpenedStoreMountTarget): void {
+    const dependency = target.credentialDependency
+    if (dependency === undefined) return
+    const stop = observeCredential({ path: dependency.path, registry,
+      source: () => readerSource(budget()),
+      observe(receive) { listeners.add(receive); return () => listeners.delete(receive) },
+      topology: topologyChanged }, () => {
+        dependency.invalidate()
+        mounts!.invalidateCredential(entry.key, entry.range.generation)
+      })
+    dependency.ownObservation(stop)
+  }
+
   /** Stages root claims before Writer effects; handlers open after the real session factory exists. */
   function buildMountTable(): MountTable {
     return createMountTable({
       registry,
       declarationTypes: mountTypes,
+      observeCredential: observeStoreCredential,
       async openSession(node) {
         if (sessions === undefined) throw new KernelError('UNAUTHENTICATED', 'Mount handlers require a node session')
         const opened = await sessions.openNode(node.$path, { heartbeat: false })
@@ -1731,19 +1752,8 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
         }
         if (target.kind !== 'store') throw new KernelError('UNAVAILABLE', 'Mount target is not a supported Store')
         if (target.credentialDependency !== undefined) {
-          const dependency = target.credentialDependency
-          const stop = observeCredential({ path: dependency.path, registry,
-            source: () => readerSource(budget()),
-            observe(receive) { listeners.add(receive); return () => listeners.delete(receive) },
-            topology: topologyChanged }, () => {
-              dependency.invalidate()
-              mounts!.invalidateCredential(entry.key, entry.range.generation)
-            })
-          dependency.ownObservation(stop)
-          try { await dependency.check() } catch (error) {
-            stop()
-            throw error
-          }
+          observeStoreCredential(entry, target)
+          await target.credentialDependency.check()
         }
         const recovered = await reopenTransferSource(config.root, config.writerEpoch, entry, target, mounts!, registry, budget())
         if (recovered !== undefined) {

@@ -786,10 +786,15 @@ export interface MountDecl extends Component {
   readonly external?: ExternalEdits
 }
 
+/** Opens only the actually accepted declaring node during off-route preparation. */
+export interface MountPreparation {
+  openSession(): Promise<Session>
+}
+
 /** One declaration yields exactly one target instance. */
 export type MountHandler = ((decl: Node, session: Session, component: ComponentName) => Promise<OpenedMountTarget>) & {
-  /** Kernel transfer preparation acquires physical storage before the declaring Session can exist. */
-  readonly prepare?: (decl: Node, component: ComponentName) => Promise<OpenedStoreMountTarget>
+  /** Physical storage may use an accepted before-session until the switch admits its final revision. */
+  readonly prepare?: (decl: Node, component: ComponentName, owner?: MountPreparation) => Promise<OpenedStoreMountTarget>
 }
 
 export interface SecurityHandlers {
@@ -1351,6 +1356,8 @@ export type OpenedStoreMountTarget = Extract<MountTarget, { readonly kind: 'stor
   readonly credentialDependency?: {
     readonly path: Path
     check(): Promise<void>
+    validate(): void
+    rebind(session: Session): void
     invalidate(): void
     ownObservation(stop: () => void): void
   }

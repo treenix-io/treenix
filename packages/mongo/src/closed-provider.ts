@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import { KernelError } from '@treenx/core/errors';
 import type { OpenedStoreMountTarget, Session } from '@treenx/core/kernel/types';
 import { openMongoTransactionOwner, type MongoOwnerOptions, type MongoTransactionOwner } from '#owner';
@@ -40,7 +41,8 @@ export function createMongoClosedProvider() {
 
   async function open(cluster: string, binding: MongoClosedBinding, session: Session,
     options: MongoHandleOptions): Promise<OpenedStoreMountTarget> {
-    const image = await connectionImage(session, binding.connection);
+    let declaringSession = session;
+    const image = await connectionImage(declaringSession, binding.connection);
     let generation = generations.get(cluster);
     if (generation !== undefined && (generation.binding.connection !== binding.connection
       || generation.binding.instance !== binding.instance || generation.binding.domain !== binding.domain
@@ -61,9 +63,13 @@ export function createMongoClosedProvider() {
     let stopObservation: (() => void) | undefined;
     let store: Awaited<ReturnType<MongoTransactionOwner['openCollection']>> | undefined;
 
-    async function check(): Promise<void> {
+    function validate(): void {
       if (released || captured.invalid) throw new KernelError('UNAUTHENTICATED', 'Mongo connection generation retired');
-      const current = await connectionImage(session, binding.connection);
+    }
+
+    async function check(): Promise<void> {
+      validate();
+      const current = await connectionImage(declaringSession, binding.connection);
       if (current.id !== image.id || current.rev !== image.rev || current.ver !== image.ver)
         throw new KernelError('UNAUTHENTICATED', 'Mongo connection generation changed');
       if (released || captured.invalid) throw new KernelError('UNAUTHENTICATED', 'Mongo connection generation retired');
@@ -88,7 +94,13 @@ export function createMongoClosedProvider() {
       store = await owner.openCollection(options);
       await check();
       return { kind: 'store', store, resources: owner.resources, close,
-        credentialDependency: { path: binding.connection, check,
+        credentialDependency: { path: binding.connection, check, validate,
+          rebind(next) {
+            validate();
+            if (!isDeepStrictEqual(next.actor, declaringSession.actor))
+              throw new KernelError('CONFLICT', 'Prepared Mongo executor admission changed');
+            declaringSession = next;
+          },
           invalidate() { captured.invalid = true; },
           ownObservation(stop) {
             if (released) { stop(); return; }

@@ -88,6 +88,50 @@ it('admits each closed Mongo sibling and retires the shared generation on rotati
   console.log('closed-provider: move');
   await admin.commit({ opId: key(), changes: [{ op: 'move', from: '/dual/left/a', to: '/dual/right/a' }] }).outcome;
   assert.equal((await admin.read({ node: '/dual/right/a' })).copies.length, 1);
+  const previousDeclaration = (await admin.read({ node: '/dual' })).copies[0];
+  assert.ok('node' in previousDeclaration);
+  await runtime.instance.transferSubtree({ path: '/dual', component: '#right', declaration: {
+    $type: 't.mount.mongo', pattern: 'right', cluster: 'cluster', db: `right_${suffix}`, collection: 'replacement',
+  } });
+  const replacementDeclaration = (await admin.read({ node: '/dual' })).copies[0];
+  assert.ok('node' in replacementDeclaration);
+  assert.equal(replacementDeclaration.node.$id, previousDeclaration.node.$id);
+  assert.notEqual(replacementDeclaration.node.$rev, previousDeclaration.node.$rev);
+  assert.equal((await admin.read({ node: '/dual/right/a' })).copies.length, 1);
+  await runtime.instance.transferSubtree({ path: '/dual', component: '#third', declaration: {
+    $type: 't.mount.mongo', pattern: 'third', cluster: 'cluster', db: `third_${suffix}`, collection: 'nodes',
+  } });
+  await admin.commit({ opId: key(), changes: [{ op: 'put', node: {
+    $path: '/dual/third/c', $type: 't.dir', value: 3,
+  } }] }).outcome;
+  assert.equal((await admin.read({ node: '/dual/third/c' })).copies.length, 1);
+  const copying = runtime.instance.writer.copyTarget;
+  let entered!: () => void;
+  let release!: () => void;
+  const reached = new Promise<void>(resolve => { entered = resolve; });
+  const continueCopy = new Promise<void>(resolve => { release = resolve; });
+  runtime.instance.writer.copyTarget = async (...args: Parameters<typeof copying>) => {
+    entered();
+    await continueCopy;
+    return copying(...args);
+  };
+  const refused = assert.rejects(runtime.instance.transferSubtree({ path: '/dual', component: '#fourth', declaration: {
+    $type: 't.mount.mongo', pattern: 'fourth', cluster: 'cluster', db: `fourth_${suffix}`, collection: 'nodes',
+  } }), (error: unknown) => error instanceof KernelError
+    && (error.code === 'UNAUTHENTICATED' || error.code === 'CONFLICT'));
+  try {
+    await reached;
+    rotated.searchParams.set('appName', 'changed-during-copy');
+    await admin.commit({ opId: key(), changes: [{ op: 'patch', path: '/connection',
+      ops: { $set: { uri: rotated.href } } }] }).outcome;
+  } finally {
+    release();
+    runtime.instance.writer.copyTarget = copying;
+  }
+  await refused;
+  const unchangedDeclaration = (await admin.read({ node: '/dual' })).copies[0];
+  assert.ok('node' in unchangedDeclaration);
+  assert.equal('#fourth' in unchangedDeclaration.node, false);
   console.log('closed-provider: deny');
   await admin.commit({ opId: key(), changes: [{ op: 'patch', path: '/connection',
     ops: { $set: { $acl: [{ subject: { group: 'mongo' }, deny: 1 }] } } }] }).outcome;
