@@ -73,17 +73,6 @@ function required(type: string, field: string, at: string): never {
   throw new KernelError('INVALID', `${type} at ${at}: ${field} required`);
 }
 
-register(MountMongo, 'mount', async (mount, ctx) => {
-  const uri = mount.uri || process.env.MONGO_URI;
-  if (!uri) required('t.mount.mongo', 'uri (or MONGO_URI env)', ctx.path);
-  const { createMongoTree } = await import('@treenx/mongo');
-  const tree = await createMongoTree(uri, mount.db, mount.collection, { nsMigrate: mount.nsMigrate });
-  const wrapped = mount.shared ? tree : createRepathTree(tree, ctx.path, '/');
-
-
-  return wrapped;
-});
-
 register(MountTypes, 'mount', (_mount, ctx) => createTypesTree(ctx.parentStore));
 
 register(MountMods, 'mount', () => createModsTree());
