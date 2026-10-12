@@ -445,6 +445,11 @@
       "development": "./src/kernel/chain-index.ts",
       "types": "./dist/kernel/chain-index.d.ts",
       "default": "./dist/kernel/chain-index.js"
+    },
+    "./kernel/watched-service": {
+      "development": "./src/kernel/watched-service.ts",
+      "types": "./dist/kernel/watched-service.d.ts",
+      "default": "./dist/kernel/watched-service.js"
     }
   },
   "treenix": {
