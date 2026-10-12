@@ -12,7 +12,7 @@ function tupleItems(items: JsonSchema | readonly JsonSchema[]): items is readonl
 }
 
 /** Select the existing form widgets without changing the kernel's full validation schema. */
-function fieldWidget(schema: JsonSchema): PropertySchema | undefined {
+export function fieldWidget(schema: JsonSchema): PropertySchema | undefined {
   if (schema.type !== undefined && typeof schema.type !== 'string') return undefined;
   if (schema.anyOf !== undefined || schema.oneOf !== undefined || schema.allOf !== undefined)
     return undefined;

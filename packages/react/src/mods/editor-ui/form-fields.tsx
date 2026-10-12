@@ -4,18 +4,27 @@
 import { Button } from '#components/ui/button';
 import { Input } from '#components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '#components/ui/popover';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '#components/ui/select';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '#components/ui/select';
 import { Switch } from '#components/ui/switch';
 import { Textarea } from '#components/ui/textarea';
 import { DraftTextarea } from '#mods/editor-ui/DraftTextarea';
 import { useSchema } from '#schema-loader';
-import * as cache from '#tree/cache';
-import { tree as clientStore } from '#tree/client';
-import { loadListingOnce } from '#tree/client-tree-source';
+import { useTreeEffects } from '#hooks';
+import { useTreeSource } from '#tree/tree-source-context';
+import type { PresentationNode } from '#tree/presentation';
+import { KernelError } from '@treenx/core/errors';
+import { fieldWidget, NativeSchemaForm } from '#editor/NativeSchemaFields';
+import type { OnChange } from '#context';
 import { register, resolve as resolveHandler } from '@treenx/core';
 import dayjs from 'dayjs';
 import { X } from 'lucide-react';
-import { createElement, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { createElement, useCallback, useEffect, useRef, useState } from 'react';
 
 type FP = {
   value: {
@@ -858,30 +867,54 @@ function PathView({ value }: FP) {
 }
 
 // Compact tree picker dropdown for selecting a node path
-// Lazy-loads children via trpc on expand, caches into front/cache
+// Expanded branches retain their selected-source coverage until the picker closes.
 export function MiniTree({ onSelect }: { onSelect: (path: string) => void }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set(['/']));
   const [loaded, setLoaded] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState('');
 
-  // subscribe to cache changes for reactivity
-  useSyncExternalStore(
-    useCallback((cb: () => void) => cache.subscribeGlobal(cb), []),
-    useCallback(() => cache.getVersion(), []),
+  const source = useTreeSource();
+  const [coverage] = useState(() => new Map<string, { dispose(): void }>());
+  const [, changed] = useState(0);
+
+  /** Retain live copies and every page of an expanded branch under this picker owner. */
+  const fetchChildren = useCallback(
+    (path: string) => {
+      if (coverage.has(path)) return;
+      const node = source.mountPath(path);
+      const children = source.mountChildren(path);
+
+      function update(): void {
+        const snapshot = source.getChildrenSnapshot(path);
+        if (snapshot.phase === 'ready' && snapshot.nextCursor !== null) children.loadMore();
+        if (snapshot.phase === 'ready')
+          setLoaded((previous) => (previous.has(path) ? previous : new Set(previous).add(path)));
+        changed((previous) => previous + 1);
+      }
+      const unsubscribeNode = source.subscribePath(path, update);
+      const unsubscribeChildren = source.subscribeChildren(path, update);
+      coverage.set(path, {
+        dispose() {
+          unsubscribeNode();
+          unsubscribeChildren();
+          children.dispose();
+          node.dispose();
+        },
+      });
+      update();
+    },
+    [source, coverage],
   );
 
   // Load root children on mount
   useEffect(() => {
+    setLoaded(new Set());
     fetchChildren('/');
-  }, []);
-
-  async function fetchChildren(path: string) {
-    if (loaded.has(path)) return;
-    // r3-F1b: through the door — a raw replaceChildren of an old page could
-    // erase a create already applied to a co-mounted live listing.
-    await loadListingOnce(path);
-    setLoaded((prev) => new Set(prev).add(path));
-  }
+    return () => {
+      for (const owner of coverage.values()) owner.dispose();
+      coverage.clear();
+    };
+  }, [fetchChildren, coverage]);
 
   function toggleExpand(path: string) {
     setExpanded((prev) => {
@@ -896,13 +929,23 @@ export function MiniTree({ onSelect }: { onSelect: (path: string) => void }) {
     });
   }
 
-  const nodes = cache.raw();
+  const nodes = new Map<string, PresentationNode>();
+  const errors: string[] = [];
+  for (const path of coverage.keys()) {
+    const node = source.getPathSnapshot(path);
+    const children = source.getChildrenSnapshot(path);
+    if (node.data !== undefined) nodes.set(path, node.data);
+    for (const child of children.data) nodes.set(child.$path, child);
+    if (node.error !== null) errors.push(`${path}: ${node.error.message}`);
+    if (children.error !== null) errors.push(`${path}: ${children.error.message}`);
+    for (const copy of children.errors ?? []) errors.push(`${path}: ${copy.error.message}`);
+  }
   const lf = filter.toLowerCase();
 
   function getKids(path: string): string[] {
-    return cache
-      .getChildren(path)
-      .map((n) => n.$path)
+    return source
+      .getChildrenSnapshot(path)
+      .data.map((n) => n.$path)
       .filter((p) => p !== path)
       .sort();
   }
@@ -977,6 +1020,11 @@ export function MiniTree({ onSelect }: { onSelect: (path: string) => void }) {
         />
       </div>
       <div className="p-1">
+        {errors.map((error, index) => (
+          <p key={index} role="alert" className="text-xs text-destructive">
+            {error}
+          </p>
+        ))}
         {rootNode && renderNode('/', 0)}
         {!rootNode && rootKids.map((r) => renderNode(r, 0))}
       </div>
@@ -997,25 +1045,25 @@ function EmbeddedFields({
   const schema = useSchema(type);
   if (schema === undefined) return null; // loading
 
-  if (schema && Object.keys(schema.properties).length > 0) {
+  if (schema?.properties !== undefined && Object.keys(schema.properties).length > 0) {
     return (
       <div className="space-y-1.5">
         {Object.entries(schema.properties).map(([field, prop]) => {
-          const p = prop as {
-            type: string;
-            title: string;
-            format?: string;
-            description?: string;
-            readOnly?: boolean;
-            enum?: (string | number)[];
-            enumNames?: string[];
-            items?: { type?: string };
-          };
+          const p = fieldWidget(prop);
+          if (p === undefined)
+            return (
+              <NativeSchemaForm
+                key={field}
+                schema={{ properties: { [field]: prop } }}
+                value={data}
+                onChange={(name, value) => setData((previous) => ({ ...previous, [name]: value }))}
+              />
+            );
           // Resolve: format widget → base type → generic string. Unknown format must
           // not mask the underlying structural type.
           const resolvedType =
             (p.format && resolveHandler(p.format, 'react:form') ? p.format : null) ??
-            (resolveHandler(p.type, 'react:form') ? p.type : null) ??
+            (p.type !== undefined && resolveHandler(p.type, 'react:form') ? p.type : null) ??
             'string';
           if (resolvedType === 'path') return null; // avoid infinite nesting for now
           const handler = resolveHandler(resolvedType, 'react:form');
@@ -1032,12 +1080,11 @@ function EmbeddedFields({
           return (
             <div key={field} className="field">
               <label title={p.title ?? p.description}>{field}</label>
-              {createElement(handler as any, {
+              {createElement(handler, {
                 value: fieldData,
                 onChange: p.readOnly
                   ? undefined
-                  : (next: { value: unknown }) =>
-                      setData((prev) => ({ ...prev, [field]: next.value })),
+                  : (next: OnChange) => setData((prev) => ({ ...prev, [field]: next.value })),
               })}
             </div>
           );
@@ -1066,6 +1113,8 @@ function EmbeddedFields({
 }
 
 function PathForm({ value, onChange }: FP) {
+  const effects = useTreeEffects();
+  const [error, setError] = useState<string>();
   const raw = value.value;
   const refType = value.refType; // expected component type from schema
   const isValue = typeof raw === 'object' && raw !== null;
@@ -1084,8 +1133,13 @@ function PathForm({ value, onChange }: FP) {
   }
 
   async function setByValue(p: string) {
-    const node = await clientStore.get(p);
-    if (!node) return;
+    const kernel = effects.kernel;
+    if (kernel === undefined)
+      throw new KernelError('UNAVAILABLE', 'Copying a node requires a native source');
+    const result = await kernel.read({ node: p });
+    const admitted = result.copies[0];
+    if ('error' in admitted) throw new KernelError(admitted.error.code, admitted.error.message);
+    const node = admitted.node;
     const copy: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(node)) {
       if (k === '$rev') continue;
@@ -1101,8 +1155,16 @@ function PathForm({ value, onChange }: FP) {
   }
 
   function applyNode(path: string) {
-    if (mode === 'val') setByValue(path);
+    if (mode === 'val') copyByValue(path);
     else setRef(path);
+  }
+
+  /** Report a failed native read in the field that owns the requested copy. */
+  function copyByValue(path: string): void {
+    void setByValue(path).then(
+      () => setError(undefined),
+      (reason) => setError(reason instanceof Error ? reason.message : String(reason)),
+    );
   }
 
   function updateEmbedded(fn: (prev: Record<string, unknown>) => Record<string, unknown>) {
@@ -1115,6 +1177,11 @@ function PathForm({ value, onChange }: FP) {
 
   return (
     <div ref={wrapRef} className="relative">
+      {error !== undefined && (
+        <p role="alert" className="text-xs text-destructive">
+          {error}
+        </p>
+      )}
       <div
         className={`rounded border transition-colors ${
           dragOver ? 'border-primary ring-2 ring-primary/30 bg-primary/5' : 'border-border'
@@ -1147,7 +1214,7 @@ function PathForm({ value, onChange }: FP) {
             onClick={() => {
               if (mode === 'ref') {
                 setMode('val');
-                if (refPath) setByValue(refPath);
+                if (refPath) copyByValue(refPath);
                 else if (!isValue) createEmpty();
               } else {
                 setMode('ref');

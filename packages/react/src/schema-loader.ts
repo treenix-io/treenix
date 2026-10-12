@@ -2,7 +2,8 @@
 import { type ContextHandlers, getComponent, type NodeData, register, resolve } from '@treenx/core';
 import type { TypeSchema } from '@treenx/core/schema/types';
 import { useEffect, useState } from 'react';
-import { useTreeEffects } from '#hooks';
+import { usePath, useTreeEffects } from '#hooks';
+import type { JsonSchema, Node } from '@treenx/core/kernel/types';
 import type { NativeTypeDescription } from '@treenx/core/kernel/type-description';
 import { treeClient } from '#tree/tree-client';
 
@@ -12,8 +13,15 @@ const fetched = new Set<string>();
 const inflight = new Map<string, Promise<void>>();
 
 function isNotFound(e: unknown): boolean {
-  return typeof e === 'object' && e !== null && 'data' in e
-    && typeof e.data === 'object' && e.data !== null && 'code' in e.data && e.data.code === 'NOT_FOUND';
+  return (
+    typeof e === 'object' &&
+    e !== null &&
+    'data' in e &&
+    typeof e.data === 'object' &&
+    e.data !== null &&
+    'code' in e.data &&
+    e.data.code === 'NOT_FOUND'
+  );
 }
 
 /** Fetch /sys/types/{type} and register its contexts into the core registry. A failed fetch rejects and
@@ -76,9 +84,15 @@ export function useReg(type: string | null | undefined, context: string) {
   const [failed, setFailed] = useState<{ error: unknown } | null>(null);
 
   useEffect(() => {
-    if (!type) { setHandler(null); return; }
+    if (!type) {
+      setHandler(null);
+      return;
+    }
     const h = resolve(type, context);
-    if (h) { setHandler(() => h); return; }
+    if (h) {
+      setHandler(() => h);
+      return;
+    }
     setHandler(undefined);
     let cancelled = false;
     ensureType(type).then(
@@ -91,7 +105,9 @@ export function useReg(type: string | null | undefined, context: string) {
         if (!cancelled) setFailed({ error });
       },
     );
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [type, context]);
 
   if (failed) throw failed.error;
@@ -100,11 +116,10 @@ export function useReg(type: string | null | undefined, context: string) {
 
 // ── Schema convenience ────────────────────────────────────────────────────────
 
-/** undefined = loading, null = no schema, TypeSchema = ready */
-export function useSchema(type: string | null | undefined): TypeSchema | null | undefined {
-  const getter = useReg(type, 'schema');
-  if (getter === undefined) return undefined;
-  return (getter as (() => TypeSchema) | null)?.() ?? null;
+/** Read the selected owner's full native schema; an unselected type has no schema. */
+export function useSchema(type: string | null | undefined): JsonSchema | null | undefined {
+  const description = useNativeTypeDescription(type);
+  return type ? description?.schema : null;
 }
 
 declare module '#hooks' {
@@ -114,24 +129,48 @@ declare module '#hooks' {
 }
 
 /** Read the actual registry description through the selected source and live caller. */
-export function useNativeTypeDescription(type: string, revision?: string): NativeTypeDescription | undefined {
+export function useNativeTypeDescription(
+  type: string | null | undefined,
+  revision?: string,
+): NativeTypeDescription | undefined {
   const effects = useTreeEffects();
-  const [loaded, setLoaded] = useState<{ effects: typeof effects; type: string; revision?: string; value: NativeTypeDescription }>();
-  const [failure, setFailure] = useState<{ effects: typeof effects; type: string; revision?: string; error: unknown }>();
+  const { data: ownership, error } = usePath<Node>(type ? `/sys/types/${type}` : null);
+  const generation = revision ?? ownership?.$rev;
+  const [loaded, setLoaded] = useState<{
+    effects: typeof effects;
+    type: string;
+    generation?: string;
+    value: NativeTypeDescription;
+  }>();
+  const [failure, setFailure] = useState<{
+    effects: typeof effects;
+    type: string;
+    generation?: string;
+    error: unknown;
+  }>();
 
   useEffect(() => {
+    if (!type || ownership === undefined || error !== null) return;
     let active = true;
     const kernel = effects.kernel;
     if (kernel === undefined) throw new Error('Native schema description requires a native source');
     effects.execute(`/sys/types/${type}`, 'describe_type', {}, 't.type').then(
-      result => {
-        if (active) setLoaded({ effects, type, revision, value: result });
+      (result) => {
+        if (active) setLoaded({ effects, type, generation, value: result });
       },
-      error => { if (active) setFailure({ effects, type, revision, error }); },
+      (error) => {
+        if (active) setFailure({ effects, type, generation, error });
+      },
     );
-    return () => { active = false; };
-  }, [effects, type, revision]);
+    return () => {
+      active = false;
+    };
+  }, [effects, type, generation, ownership === undefined, error]);
 
-  if (failure?.effects === effects && failure.type === type && failure.revision === revision) throw failure.error;
-  return loaded?.effects === effects && loaded.type === type && loaded.revision === revision ? loaded.value : undefined;
+  if (error !== null) throw error;
+  if (failure?.effects === effects && failure.type === type && failure.generation === generation)
+    throw failure.error;
+  return loaded?.effects === effects && loaded.type === type && loaded.generation === generation
+    ? loaded.value
+    : undefined;
 }

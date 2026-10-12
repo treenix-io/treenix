@@ -1,7 +1,13 @@
 import type { PresentationNode } from '@treenx/react';
-import { type ComponentData, getComponent, isComponent, type NodeData, register } from '@treenx/core';
+import {
+  type ComponentData,
+  getComponent,
+  isComponent,
+  type NodeData,
+  register,
+} from '@treenx/core';
 import { parseURI } from '@treenx/core/uri';
-import type { TypeSchema } from '@treenx/core/schema/types';
+import type { JsonSchema } from '@treenx/core/kernel/types';
 import { Render, RenderContext, type ViewCtx } from '@treenx/react';
 import { useChildren, useSave } from '@treenx/react';
 import { useSchema } from '@treenx/react/schema-loader';
@@ -16,7 +22,14 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from '@treenx/react/ui/pagination';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@treenx/react/ui/table';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@treenx/react/ui/table';
 import { useMemo } from 'react';
 import type { ColumnConfig, UITable } from './types';
 
@@ -51,13 +64,13 @@ function CellValue({ value }: { value: unknown }) {
   return <>{formatCell(value)}</>;
 }
 
-function buildColumnsFromSchema(schema: TypeSchema): ColumnConfig[] {
+function buildColumnsFromSchema(schema: JsonSchema): ColumnConfig[] {
   if (!schema.properties) return [];
   return Object.entries(schema.properties)
     .filter(([k]) => !k.startsWith('$'))
     .map(([field, prop]) => ({
       field,
-      label: (prop as any).title || field,
+      label: prop.title ?? field,
       visible: true,
     }));
 }
@@ -69,19 +82,30 @@ function buildColumnsFromData(rows: Record<string, unknown>[]): ColumnConfig[] {
       if (!k.startsWith('$')) keys.add(k);
     }
   }
-  return [...keys].map(field => ({ field, label: field, visible: true }));
+  return [...keys].map((field) => ({ field, label: field, visible: true }));
 }
 
 // ── Table View ──
 
-const TABLE_DEFAULTS: UITable = { displayType: '', field: '', pageSize: 25, page: 0, sort: '', sortDir: 'asc', columns: {} };
+const TABLE_DEFAULTS: UITable = {
+  displayType: '',
+  field: '',
+  pageSize: 25,
+  page: 0,
+  sort: '',
+  sortDir: 'asc',
+  columns: {},
+};
 
 function TableView({ ctx }: { value: ComponentData<UITable>; ctx?: ViewCtx | null }) {
   if (!ctx?.node) throw new Error('TableView: no node context');
   const node = ctx.node;
   const componentKey = parseURI(ctx.path).key ?? '';
   const save = useSave(node.$path, { autoSave: true, delay: 500 });
-  const state: UITable = { ...TABLE_DEFAULTS, ...getComponent<UITable>(save.value ?? node, 'ui.table', componentKey) };
+  const state: UITable = {
+    ...TABLE_DEFAULTS,
+    ...getComponent<UITable>(save.value ?? node, 'ui.table', componentKey),
+  };
   const update = componentKey ? save.scope(componentKey) : save.onChange;
   const { data: children } = useChildren(node.$path, { watch: true, limit: 1000 });
 
@@ -100,14 +124,13 @@ function TableView({ ctx }: { value: ComponentData<UITable>; ctx?: ViewCtx | nul
   }, [children, state.field]);
 
   // Active display type
-  const activeType = state.displayType && types.includes(state.displayType)
-    ? state.displayType
-    : types[0] ?? '';
+  const activeType =
+    state.displayType && types.includes(state.displayType) ? state.displayType : (types[0] ?? '');
 
   // Rows for active type
   const rawRows = useMemo(() => {
     const matched = typeMap.get(activeType) ?? [];
-    return matched.map(child => ({
+    return matched.map((child) => ({
       $path: child.$path,
       data: resolveField(child, state.field),
     }));
@@ -117,16 +140,16 @@ function TableView({ ctx }: { value: ComponentData<UITable>; ctx?: ViewCtx | nul
   const schema = useSchema(activeType);
   const columns = useMemo(() => {
     const saved = state.columns[activeType];
-    if (saved?.length) return saved.filter(c => c.visible !== false);
+    if (saved?.length) return saved.filter((c) => c.visible !== false);
 
     if (schema) return buildColumnsFromSchema(schema);
-    if (rawRows.length) return buildColumnsFromData(rawRows.map(r => r.data));
+    if (rawRows.length) return buildColumnsFromData(rawRows.map((r) => r.data));
     return [];
   }, [state.columns, activeType, schema, rawRows]);
 
   // Filter
   const filtered = useMemo(() => {
-    return rawRows.filter(row => {
+    return rawRows.filter((row) => {
       for (const col of columns) {
         if (!col.filter) continue;
         const val = formatCell(cellValue(row.data, col.field));
@@ -167,8 +190,11 @@ function TableView({ ctx }: { value: ComponentData<UITable>; ctx?: ViewCtx | nul
 
   const setColumnFilter = (field: string, filter: string) => {
     const current = (state.columns ?? {})[activeType] ?? columns;
-    const next = current.map(c => c.field === field ? { ...c, filter } : c);
-    update({ columns: { ...(state.columns ?? {}), [activeType]: next }, page: 0 } as Partial<UITable>);
+    const next = current.map((c) => (c.field === field ? { ...c, filter } : c));
+    update({
+      columns: { ...(state.columns ?? {}), [activeType]: next },
+      page: 0,
+    } as Partial<UITable>);
   };
 
   const setPage = (p: number) => update({ page: p } as Partial<UITable>);
@@ -181,17 +207,19 @@ function TableView({ ctx }: { value: ComponentData<UITable>; ctx?: ViewCtx | nul
     <div className="flex flex-col gap-2 text-sm">
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2">
-        {types.length > 1 && types.map(t => (
-          <Button
-            key={t}
-            variant={t === activeType ? 'default' : 'outline'}
-            size="sm"
-            className="h-6 text-xs"
-            onClick={() => setDisplayType(t)}
-          >
-            {t} <span className="ml-1 text-muted-foreground">({typeMap.get(t)?.length ?? 0})</span>
-          </Button>
-        ))}
+        {types.length > 1 &&
+          types.map((t) => (
+            <Button
+              key={t}
+              variant={t === activeType ? 'default' : 'outline'}
+              size="sm"
+              className="h-6 text-xs"
+              onClick={() => setDisplayType(t)}
+            >
+              {t}{' '}
+              <span className="ml-1 text-muted-foreground">({typeMap.get(t)?.length ?? 0})</span>
+            </Button>
+          ))}
 
         <span className="ml-auto text-xs text-muted-foreground">
           {sorted.length} row{sorted.length !== 1 ? 's' : ''}
@@ -205,7 +233,7 @@ function TableView({ ctx }: { value: ComponentData<UITable>; ctx?: ViewCtx | nul
             <Table className="text-xs">
               <TableHeader>
                 <TableRow>
-                  {columns.map(col => (
+                  {columns.map((col) => (
                     <TableHead
                       key={col.field}
                       className="h-8 cursor-pointer select-none text-xs hover:text-foreground"
@@ -221,23 +249,23 @@ function TableView({ ctx }: { value: ComponentData<UITable>; ctx?: ViewCtx | nul
                   ))}
                 </TableRow>
                 <TableRow className="hover:bg-transparent">
-                  {columns.map(col => (
+                  {columns.map((col) => (
                     <TableHead key={col.field} className="h-auto px-1 py-1">
                       <Input
                         type="text"
                         placeholder="filter"
                         className="h-6 text-xs"
                         value={col.filter ?? ''}
-                        onChange={e => setColumnFilter(col.field, e.target.value)}
+                        onChange={(e) => setColumnFilter(col.field, e.target.value)}
                       />
                     </TableHead>
                   ))}
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {pageRows.map(row => (
+                {pageRows.map((row) => (
                   <TableRow key={row.$path}>
-                    {columns.map(col => (
+                    {columns.map((col) => (
                       <TableCell key={col.field} className="max-w-[300px] truncate">
                         <CellValue value={cellValue(row.data, col.field)} />
                       </TableCell>
@@ -246,7 +274,10 @@ function TableView({ ctx }: { value: ComponentData<UITable>; ctx?: ViewCtx | nul
                 ))}
                 {pageRows.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={columns.length} className="py-4 text-center text-muted-foreground">
+                    <TableCell
+                      colSpan={columns.length}
+                      className="py-4 text-center text-muted-foreground"
+                    >
                       No data
                     </TableCell>
                   </TableRow>
@@ -285,7 +316,11 @@ function pageRange(current: number, total: number): (number | 'ellipsis')[] {
   return pages;
 }
 
-function TablePagination({ page, totalPages, onPageChange }: {
+function TablePagination({
+  page,
+  totalPages,
+  onPageChange,
+}: {
   page: number;
   totalPages: number;
   onPageChange: (p: number) => void;

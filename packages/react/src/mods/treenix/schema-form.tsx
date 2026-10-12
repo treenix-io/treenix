@@ -1,16 +1,14 @@
 // Default react:form handler — renders form from type schema automatically
 // Any type without a specific react:form handler falls here via resolve('default', 'react:form')
 
-import { type RenderProps } from '#context';
-import { useTreeEffects } from '#hooks';
-import { NativeSchemaFields } from '#editor/NativeSchemaFields';
+import { type OnChange, type RenderProps } from '#context';
+import { fieldWidget, NativeSchemaForm } from '#editor/NativeSchemaFields';
 import { useSchema } from '#schema-loader';
 import { register, resolve } from '@treenx/core';
 import { createElement } from 'react';
 
-function LegacySchemaForm({ value, onChange }: RenderProps) {
-  // useSchema lazy-fetches /sys/types/{type} and registers the schema.
-  // undefined = loading, null = type has no schema.
+/** Keep the original form layout while its selected native owner supplies schema metadata. */
+function DefaultSchemaForm({ value, onChange }: RenderProps) {
   const schema = useSchema(value.$type);
   if (schema === undefined) {
     return <div className="text-xs text-muted-foreground italic">Loading schema…</div>;
@@ -27,10 +25,21 @@ function LegacySchemaForm({ value, onChange }: RenderProps) {
 
   return (
     <div className="flex flex-col gap-3">
-      {Object.entries(properties).map(([name, fieldSchema]) => {
+      {Object.entries(properties).map(([name, schema]) => {
+        const fieldSchema = fieldWidget(schema);
+        if (fieldSchema === undefined)
+          return (
+            <NativeSchemaForm
+              key={name}
+              schema={{ properties: { [name]: schema } }}
+              value={value}
+              readOnly={onChange === undefined}
+              onChange={(name, field) => onChange?.({ [name]: field })}
+            />
+          );
         const rawType = String(fieldSchema.type ?? 'string');
         const rawFormat = fieldSchema.format ? String(fieldSchema.format) : undefined;
-        const isReadOnly = !!fieldSchema.readOnly;
+        const isReadOnly = fieldSchema.readOnly || onChange === undefined;
         const ctx = isReadOnly ? 'react' : 'react:form';
         // Resolve: format widget → base type → generic string. Unknown format must
         // not mask the underlying structural type.
@@ -47,29 +56,31 @@ function LegacySchemaForm({ value, onChange }: RenderProps) {
           );
         }
 
-        const fieldData: Record<string, unknown> = {
+        const fieldData = {
           $type: resolvedType,
-          value: (value as any)[name],
+          value: value[name],
           label: String(fieldSchema.title ?? name),
           placeholder: fieldSchema.description ? String(fieldSchema.description) : undefined,
+          ...(fieldSchema.items === undefined ? {} : { items: fieldSchema.items }),
+          ...(fieldSchema.enum === undefined ? {} : { enum: fieldSchema.enum }),
+          ...(fieldSchema.enumNames === undefined ? {} : { enumNames: fieldSchema.enumNames }),
         };
-        if (fieldSchema.items) fieldData.items = fieldSchema.items;
-        if (fieldSchema.enum) fieldData.enum = fieldSchema.enum;
-        if (fieldSchema.enumNames) fieldData.enumNames = fieldSchema.enumNames;
 
         return (
           <div key={name} className="flex flex-col gap-1">
             {resolvedType !== 'boolean' && (
               <label
                 className="text-xs font-medium text-muted-foreground block overflow-hidden text-ellipsis"
-                title={fieldData.label as string}
+                title={fieldData.label}
               >
-                {fieldData.label as string}
+                {fieldData.label}
               </label>
             )}
-            {createElement(handler as any, {
+            {createElement(handler, {
               value: fieldData,
-              onChange: (next: any) => onChange?.({ [name]: next.value }),
+              onChange: isReadOnly
+                ? undefined
+                : (next: OnChange) => onChange?.({ [name]: next.value }),
             })}
           </div>
         );
@@ -78,11 +89,4 @@ function LegacySchemaForm({ value, onChange }: RenderProps) {
   );
 }
 
-/** Preserve legacy forms while native sources read their actual full schema descriptor. */
-function DefaultSchemaForm(props: RenderProps) {
-  const effects = useTreeEffects();
-  return effects.kernel === undefined ? <LegacySchemaForm {...props} />
-    : <NativeSchemaFields value={props.value} onChange={(name, value) => props.onChange?.({ [name]: value })} />;
-}
-
-register('default', 'react:form', DefaultSchemaForm as any);
+register('default', 'react:form', DefaultSchemaForm);

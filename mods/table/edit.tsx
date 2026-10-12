@@ -1,13 +1,19 @@
 import type { PresentationNode } from '@treenx/react';
 import { type ComponentData, isComponent, type NodeData, register } from '@treenx/core';
-import type { TypeSchema } from '@treenx/core/schema/types';
+import type { JsonSchema } from '@treenx/core/kernel/types';
 import { useCurrentNode } from '@treenx/react';
 import { useChildren } from '@treenx/react';
 import { useSchema } from '@treenx/react/schema-loader';
 import { Button } from '@treenx/react/ui/button';
 import { Checkbox } from '@treenx/react/ui/checkbox';
 import { Input } from '@treenx/react/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@treenx/react/ui/select';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@treenx/react/ui/select';
 import { useMemo, useState } from 'react';
 import type { UITable } from './types';
 
@@ -22,7 +28,7 @@ type FieldNode = {
 
 // ── Build field tree from schema + data sample ──
 
-function buildFieldTree(schema: TypeSchema | null, sample: Record<string, unknown>[]): FieldNode[] {
+function buildFieldTree(schema: JsonSchema | null, sample: Record<string, unknown>[]): FieldNode[] {
   const nodes: FieldNode[] = [];
   const seen = new Set<string>();
 
@@ -30,7 +36,7 @@ function buildFieldTree(schema: TypeSchema | null, sample: Record<string, unknow
     for (const [key, prop] of Object.entries(schema.properties)) {
       if (key.startsWith('$')) continue;
       seen.add(key);
-      nodes.push({ key, label: (prop as any).title || key });
+      nodes.push({ key, label: prop.title ?? key });
     }
   }
 
@@ -41,8 +47,8 @@ function buildFieldTree(schema: TypeSchema | null, sample: Record<string, unknow
 
       if (isComponent(val)) {
         const children = Object.keys(val)
-          .filter(k => !k.startsWith('$'))
-          .map(k => ({ key: `${key}.${k}`, label: k }));
+          .filter((k) => !k.startsWith('$'))
+          .map((k) => ({ key: `${key}.${k}`, label: k }));
         nodes.push({ key, label: key, type: val.$type, children });
       } else {
         nodes.push({ key, label: key });
@@ -63,7 +69,13 @@ function resolveDisplayType(child: PresentationNode, field: string): string {
 
 // ── Edit View ──
 
-function TableEditView({ value, onChange }: { value: ComponentData; onChange?: (next: Record<string, unknown>) => void }) {
+function TableEditView({
+  value,
+  onChange,
+}: {
+  value: ComponentData;
+  onChange?: (next: Record<string, unknown>) => void;
+}) {
   const node = useCurrentNode();
   const { data: children } = useChildren(node.$path, { watch: true, limit: 1000 });
 
@@ -86,9 +98,8 @@ function TableEditView({ value, onChange }: { value: ComponentData; onChange?: (
     return { typeMap: map, types: [...map.keys()] };
   }, [children, state.field]);
 
-  const activeType = state.displayType && types.includes(state.displayType)
-    ? state.displayType
-    : types[0] ?? '';
+  const activeType =
+    state.displayType && types.includes(state.displayType) ? state.displayType : (types[0] ?? '');
 
   const sample = useMemo(() => {
     const matched = typeMap.get(activeType) ?? [];
@@ -102,8 +113,11 @@ function TableEditView({ value, onChange }: { value: ComponentData; onChange?: (
   const hasCustomColumns = savedColumns.length > 0;
 
   const toggleField = (key: string, label: string) => {
-    let cols = savedColumns.length > 0 ? [...savedColumns] : fieldTree.map(f => ({ field: f.key, label: f.label, visible: true }));
-    const idx = cols.findIndex(c => c.field === key);
+    let cols =
+      savedColumns.length > 0
+        ? [...savedColumns]
+        : fieldTree.map((f) => ({ field: f.key, label: f.label, visible: true }));
+    const idx = cols.findIndex((c) => c.field === key);
     if (idx >= 0) {
       cols[idx] = { ...cols[idx], visible: !cols[idx].visible };
     } else {
@@ -120,13 +134,13 @@ function TableEditView({ value, onChange }: { value: ComponentData; onChange?: (
 
   const isFieldVisible = (key: string) => {
     if (!hasCustomColumns) return true;
-    const col = savedColumns.find(c => c.field === key);
+    const col = savedColumns.find((c) => c.field === key);
     return col?.visible !== false;
   };
 
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const toggleExpand = (key: string) => {
-    setExpanded(prev => {
+    setExpanded((prev) => {
       const next = new Set(prev);
       next.has(key) ? next.delete(key) : next.add(key);
       return next;
@@ -144,7 +158,7 @@ function TableEditView({ value, onChange }: { value: ComponentData; onChange?: (
             max={1000}
             className="h-7 w-20 text-xs"
             value={state.pageSize ?? 25}
-            onChange={e => emit({ pageSize: Number(e.target.value) || 25 })}
+            onChange={(e) => emit({ pageSize: Number(e.target.value) || 25 })}
           />
         </label>
 
@@ -155,20 +169,22 @@ function TableEditView({ value, onChange }: { value: ComponentData; onChange?: (
             placeholder="(node itself)"
             className="h-7 flex-1 text-xs"
             value={state.field ?? ''}
-            onChange={e => emit({ field: e.target.value })}
+            onChange={(e) => emit({ field: e.target.value })}
           />
         </label>
 
         {types.length > 1 && (
           <div className="flex items-center gap-2">
             <span className="w-20 text-muted-foreground">Type</span>
-            <Select value={activeType} onValueChange={v => emit({ displayType: v })}>
+            <Select value={activeType} onValueChange={(v) => emit({ displayType: v })}>
               <SelectTrigger className="h-7 flex-1 text-xs">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {types.map(t => (
-                  <SelectItem key={t} value={t}>{t} ({typeMap.get(t)?.length ?? 0})</SelectItem>
+                {types.map((t) => (
+                  <SelectItem key={t} value={t}>
+                    {t} ({typeMap.get(t)?.length ?? 0})
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -178,7 +194,9 @@ function TableEditView({ value, onChange }: { value: ComponentData; onChange?: (
 
       <div className="flex flex-col gap-1">
         <div className="flex items-center justify-between">
-          <span className="font-medium text-muted-foreground">Columns{activeType ? ` — ${activeType}` : ''}</span>
+          <span className="font-medium text-muted-foreground">
+            Columns{activeType ? ` — ${activeType}` : ''}
+          </span>
           {hasCustomColumns && (
             <Button variant="ghost" size="sm" className="h-5 text-[10px]" onClick={resetColumns}>
               reset
@@ -191,7 +209,7 @@ function TableEditView({ value, onChange }: { value: ComponentData; onChange?: (
         )}
 
         <div className="flex flex-col gap-0.5">
-          {fieldTree.map(field => (
+          {fieldTree.map((field) => (
             <div key={field.key}>
               <div className="flex items-center gap-1.5 rounded px-1 py-0.5 hover:bg-muted/50">
                 {field.children ? (
@@ -220,8 +238,11 @@ function TableEditView({ value, onChange }: { value: ComponentData; onChange?: (
 
               {field.children && expanded.has(field.key) && (
                 <div className="ml-5 flex flex-col gap-0.5">
-                  {field.children.map(sub => (
-                    <label key={sub.key} className="flex cursor-pointer items-center gap-1.5 rounded px-1 py-0.5 hover:bg-muted/50">
+                  {field.children.map((sub) => (
+                    <label
+                      key={sub.key}
+                      className="flex cursor-pointer items-center gap-1.5 rounded px-1 py-0.5 hover:bg-muted/50"
+                    >
                       <Checkbox
                         checked={isFieldVisible(sub.key)}
                         onChange={() => toggleField(sub.key, sub.label)}
