@@ -5,7 +5,7 @@ import { Label } from '#components/ui/label';
 import { useAuthPort } from './auth-context';
 import { useState } from 'react';
 
-function LoginForm({ onLogin }: { onLogin: (userId: string) => void }) {
+function LoginForm({ onLogin, error }: { onLogin: (userId: string) => void; error?: string }) {
   const port = useAuthPort();
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [userId, setUserId] = useState('');
@@ -50,7 +50,10 @@ function LoginForm({ onLogin }: { onLogin: (userId: string) => void }) {
   }
 
   return (
-    <form className="flex flex-col gap-4 w-80 p-8 rounded-lg border border-border bg-card" onSubmit={handleSubmit}>
+    <form
+      className="flex flex-col gap-4 w-80 p-8 rounded-lg border border-border bg-card"
+      onSubmit={handleSubmit}
+    >
       <div className="flex items-center justify-center gap-2 mb-2">
         <img src="/treenix.svg" alt="" width="32" height="32" />
         <span className="text-lg font-semibold">Treenix</span>
@@ -78,7 +81,7 @@ function LoginForm({ onLogin }: { onLogin: (userId: string) => void }) {
         />
       </div>
 
-      {err && <p className="text-sm text-destructive">{err}</p>}
+      {(err ?? error) && <p className="text-sm text-destructive">{err ?? error}</p>}
 
       <Button type="submit" disabled={loading || !userId.trim() || !password}>
         {loading ? '...' : mode === 'register' ? 'Create account' : 'Sign in'}
@@ -90,16 +93,18 @@ function LoginForm({ onLogin }: { onLogin: (userId: string) => void }) {
         </Button>
       )}
 
-      {port.register !== undefined && <Button
-        type="button"
-        variant="ghost"
-        onClick={() => {
-          setMode((m) => (m === 'login' ? 'register' : 'login'));
-          setErr(null);
-        }}
-      >
-        {mode === 'login' ? 'No account? Register' : 'Have an account? Sign in'}
-      </Button>}
+      {port.register !== undefined && (
+        <Button
+          type="button"
+          variant="ghost"
+          onClick={() => {
+            setMode((m) => (m === 'login' ? 'register' : 'login'));
+            setErr(null);
+          }}
+        >
+          {mode === 'login' ? 'No account? Register' : 'Have an account? Sign in'}
+        </Button>
+      )}
     </form>
   );
 }
@@ -112,12 +117,29 @@ export function LoginScreen({ onLogin }: { onLogin: (userId: string) => void }) 
   );
 }
 
-export function LoginModal({ onLogin, onClose }: { onLogin: (userId: string) => void; onClose?: () => void }) {
+export function LoginModal({
+  onLogin,
+  onClose,
+  error,
+}: {
+  onLogin: (userId: string) => void;
+  onClose?: () => void;
+  error?: string;
+}) {
   return (
-    <Dialog open onOpenChange={(open) => { if (!open && onClose) onClose(); }}>
-      <DialogContent className="w-fit max-w-fit p-0 border-none bg-transparent shadow-none" showCloseButton={!!onClose} aria-describedby={undefined}>
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open && onClose) onClose();
+      }}
+    >
+      <DialogContent
+        className="w-fit max-w-fit p-0 border-none bg-transparent shadow-none"
+        showCloseButton={!!onClose}
+        aria-describedby={undefined}
+      >
         <DialogTitle className="sr-only">Sign in to Treenix</DialogTitle>
-        <LoginForm onLogin={onLogin} />
+        <LoginForm onLogin={onLogin} error={error} />
       </DialogContent>
     </Dialog>
   );
