@@ -10,6 +10,7 @@ import { buildClearSessionCookie, buildSessionCookie, parseSessionCookie, SESSIO
 import { isRecord } from '#util/is-record'
 import { assertSafePath } from '#core/path'
 import { createTwpHttpRoutes, type TwpHttpRoutes } from '#server/http-routes'
+import { createStaticHandler } from '#server/static'
 
 export interface TwpHttpOptions {
   readonly instance: InstanceFoundationWithAuth
@@ -17,6 +18,7 @@ export interface TwpHttpOptions {
   readonly credentialTtlMs: number
   readonly trustProxy?: boolean
   readonly routes?: TwpHttpRoutes
+  readonly staticDir?: string
 }
 
 function credentials(request: IncomingMessage): Credential | undefined {
@@ -84,6 +86,7 @@ export function createTwpHttpServer(input: TwpHttpOptions) {
   if (!Number.isFinite(credentialTtlMs) || credentialTtlMs <= 0) throw new KernelError('INVALID', 'Credential lifetime must be positive')
   const allowedOrigins = Object.freeze([...input.allowedOrigins]), serving = createTwpServing(instance)
   const routes = (input.routes ?? createTwpHttpRoutes()).bind()
+  const staticHandler = input.staticDir === undefined ? undefined : createStaticHandler(input.staticDir)
   const routeSessions = new Set<() => void>()
   let closing = false
   async function handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -99,6 +102,9 @@ export function createTwpHttpServer(input: TwpHttpOptions) {
     if (request.method === 'OPTIONS') { response.writeHead(204); response.end(); return }
     const url = new URL(request.url ?? '/', 'http://localhost')
     const route = routes.get(url.pathname)
+    if (route === undefined && !url.pathname.startsWith('/twp') && !url.pathname.startsWith('/auth/')
+      && !url.pathname.startsWith('/api/') && staticHandler !== undefined
+      && await staticHandler(request, response, url.pathname)) return
     const network = clientOrigin(request, trustProxy), credential = credentials(request)
     if (request.method === 'POST' && request.headers.cookie !== undefined && request.headers.authorization === undefined && origin === undefined)
       throw new KernelError('REFUSED', 'Cookie requests need an allowed origin')

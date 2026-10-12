@@ -166,6 +166,11 @@
       "types": "./dist/server/http-twp.d.ts",
       "default": "./dist/server/http-twp.js"
     },
+    "./server/native-deployment": {
+      "development": "./src/server/native-deployment.ts",
+      "types": "./dist/server/native-deployment.d.ts",
+      "default": "./dist/server/native-deployment.js"
+    },
     "./kernel/store/keys": {
       "development": "./src/kernel/store/keys.ts",
       "types": "./dist/kernel/store/keys.d.ts",

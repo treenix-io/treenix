@@ -30,6 +30,8 @@ export interface NativeDeploymentConfig {
   /** External capabilities supplement the deployment-owned HTTP routes and log input. */
   readonly host?: NativeDeploymentHost;
   readonly modsDir?: string;
+  /** Explicit host-package module directories supplement the selected data folder. */
+  readonly moduleDirectories?: readonly string[];
   readonly io?: ActionIoBinding;
   readonly seeds?: NativeSeedDefinition;
   readonly seedFilter?: readonly string[];
@@ -61,7 +63,9 @@ export async function openNativeDeployment(config: NativeDeploymentConfig) {
   const host: NativeModuleHost = { ...config.host, httpRoutes, logs };
   let loaded: LoadResult;
   if (config.modules === undefined) {
-    loaded = await loadAllMods('kernel', { host, extraDirs: config.modsDir === undefined ? [] : [config.modsDir] });
+    loaded = await loadAllMods('kernel', { host, extraDirs: [
+      ...(config.moduleDirectories ?? []), ...(config.modsDir === undefined ? [] : [config.modsDir]),
+    ] });
   } else {
     const manifests: CollectedModule[] = [];
     for (const location of config.modules) manifests.push(await explicitModule(location, host));

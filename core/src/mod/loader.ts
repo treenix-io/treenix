@@ -146,6 +146,7 @@ function basenameNoExt(p: string): string {
 // Vite's hooks entirely.
 let _tsxRegistered: Promise<void> | null = null;
 async function ensureTsxRegistered(): Promise<void> {
+  if (process.versions.bun !== undefined) return;
   _tsxRegistered ??= import('tsx/esm/api').then(({ register }) => { register(); });
   return _tsxRegistered;
 }
