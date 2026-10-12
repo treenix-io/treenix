@@ -101,6 +101,11 @@
       "types": "./dist/mod/native-prefab.d.ts",
       "default": "./dist/mod/native-prefab.js"
     },
+    "./mod/prefab-path": {
+      "development": "./src/mod/prefab-path.ts",
+      "types": "./dist/mod/prefab-path.d.ts",
+      "default": "./dist/mod/prefab-path.js"
+    },
     "./mount": {
       "development": "./src/mount.ts",
       "types": "./dist/mount.d.ts",
