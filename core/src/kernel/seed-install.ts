@@ -188,6 +188,8 @@ export async function installNativeSeeds(
       await session.commit({ opId: childKey(plan.opId, stableJson({ source: sourceNode.$id, executor: executor.$id }), target.$path),
         expect: { nodes: [...pins].map(([path, rev]) => ({ path, rev })) },
         changes: [{ op: 'patch', path: target.$path, ops: { $set: { $acl: updated } } }] }).outcome;
+      // A declared root grant advances our own administrator pin before later seed steps.
+      if (target.$path === admin.path) admin.rev = (await readNode(session, admin.path)).$rev;
     }
   }
   for (const entry of activation) await put(entry.node, entry.owner, entry.source);
