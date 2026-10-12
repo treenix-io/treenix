@@ -595,6 +595,8 @@ export type JsonSchema = {
   readonly default?: unknown
   readonly readOnly?: boolean
   readonly enum?: readonly unknown[]
+  readonly enumNames?: readonly string[]
+  readonly refType?: string
   readonly properties?: Readonly<Record<string, JsonSchema>>
   readonly required?: readonly string[]
   readonly items?: JsonSchema | readonly JsonSchema[]

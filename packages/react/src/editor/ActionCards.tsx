@@ -1,15 +1,10 @@
 // ActionCards — action pill buttons with expandable params, run, and results
 
-import { NativeActionCards } from './NativeActionCards';
 import { Button } from '#components/ui/button';
 import { Render } from '#context';
-import { legacyTreeEffects, useTreeEffects } from '#hooks';
-import { renderField } from '#mods/editor-ui/form-field';
-import { getActions, getActionSchema } from '#mods/editor-ui/node-utils';
-import { useSchema } from '#schema-loader';
-import { refreshWatchedNode } from '#tree/client-tree-source';
-import type { ComponentData } from '@treenx/core';
-import type { PropertySchema } from '@treenx/core/schema/types';
+import { useTreeEffects } from '#hooks';
+import { useNativeTypeDescription } from '#schema-loader';
+import { NativeSchemaForm } from './NativeSchemaFields';
 import { useState } from 'react';
 import { toast } from 'sonner';
 
@@ -18,11 +13,11 @@ function ResultView({ value }: { value: unknown }) {
   if (typeof value !== 'object')
     return <span className="font-mono text-[11px]">{String(value)}</span>;
 
-  if ('$type' in (value as Record<string, unknown>)) {
-    return <Render value={value as ComponentData} />;
+  if ('$type' in value && typeof value.$type === 'string') {
+    return <Render value={{ ...value, $type: value.$type }} />;
   }
 
-  const entries = Object.entries(value as Record<string, unknown>);
+  const entries = Object.entries(value);
   if (entries.length === 0) return <span className="text-muted-foreground text-[11px]">empty</span>;
 
   return (
@@ -39,7 +34,7 @@ function ResultView({ value }: { value: unknown }) {
   );
 }
 
-function LegacyActionCardList({
+export function ActionCardList({
   path,
   componentName,
   compType,
@@ -52,7 +47,7 @@ function LegacyActionCardList({
   onActionComplete?: () => void;
 }) {
   const effects = useTreeEffects();
-  const schema = useSchema(compType);
+  const description = useNativeTypeDescription(compType);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [paramsText, setParamsText] = useState<Record<string, string>>({});
   const [schemaData, setSchemaData] = useState<Record<string, Record<string, unknown>>>({});
@@ -60,30 +55,32 @@ function LegacyActionCardList({
   const [results, setResults] = useState<Record<string, { ok: boolean; value: unknown }>>({});
   const [resultMode, setResultMode] = useState<Record<string, 'pretty' | 'json'>>({});
 
-  if (schema === undefined) return null;
+  if (description === undefined) return null;
 
-  const actions = getActions(compType, schema);
+  const definitions = description.actions;
+  const actions = Object.keys(definitions);
   if (actions.length === 0) return null;
 
   async function run(a: string) {
     setRunning(a);
     try {
-      const actionSchema = getActionSchema(compType, a);
+      const actionSchema = definitions[a].args;
       let data: unknown = {};
-      if (actionSchema) {
+      if (actionSchema.type === 'object' && actionSchema.properties !== undefined) {
         data = schemaData[a] ?? {};
       } else {
         const raw = (paramsText[a] ?? '').trim();
         if (raw && raw !== '{}') {
-          try { data = JSON.parse(raw); }
-          catch { toast.error('Invalid JSON params'); setRunning(null); return; }
+          try {
+            data = JSON.parse(raw);
+          } catch {
+            toast.error('Invalid JSON params');
+            setRunning(null);
+            return;
+          }
         }
       }
-      const result = await effects.execute(path, a, data, undefined, componentName);
-      // Door-routed refresh with transient hold accounting (ns6p.4 F1/F5) —
-      // the raw watch-get + cache.put here used to clobber overlays and leak
-      // its registration.
-      if (effects === legacyTreeEffects) await refreshWatchedNode(path);
+      const result = await effects.execute(path, a, data, compType, componentName || undefined);
       onActionComplete?.();
       setResults((prev) => ({ ...prev, [a]: { ok: true, value: result } }));
       setExpanded(a);
@@ -113,107 +110,110 @@ function LegacyActionCardList({
             {results[a] && !results[a].ok && expanded !== a && (
               <span className="ml-1 text-destructive">!</span>
             )}
-            {results[a]?.ok && expanded !== a && (
-              <span className="ml-1 text-primary/60">✓</span>
-            )}
+            {results[a]?.ok && expanded !== a && <span className="ml-1 text-primary/60">✓</span>}
           </Button>
         ))}
       </div>
 
-      {expanded && (() => {
-        const a = expanded;
-        const actionSchema = getActionSchema(compType, a);
-        const hasParams = actionSchema !== null && Object.keys(actionSchema.properties).length > 0;
-        const noParams = actionSchema !== null && Object.keys(actionSchema.properties).length === 0;
-        const result = results[a];
-        const mode = resultMode[a] ?? 'pretty';
+      {expanded &&
+        (() => {
+          const a = expanded;
+          const actionSchema = description.actions[a].args;
+          const hasParams =
+            actionSchema.type === 'object' &&
+            actionSchema.properties !== undefined &&
+            Object.keys(actionSchema.properties).length > 0;
+          const noParams =
+            actionSchema.type === 'object' &&
+            actionSchema.properties !== undefined &&
+            Object.keys(actionSchema.properties).length === 0;
+          const result = results[a];
+          const mode = resultMode[a] ?? 'pretty';
 
-        return (
-          <div className="mt-2 p-2 px-2.5 border border-border rounded-md bg-card">
-            {hasParams && (
-              <div className="mb-2">
-                {Object.entries(actionSchema!.properties).map(([field, prop]) =>
-                  renderField(
-                    field,
-                    prop as PropertySchema,
-                    schemaData[a] ?? {},
-                    (k, v) =>
-                      setSchemaData((prev) => ({
-                        ...prev,
-                        [a]: { ...(prev[a] ?? {}), [k]: v },
-                      })),
-                  ),
-                )}
-              </div>
-            )}
+          return (
+            <div className="mt-2 p-2 px-2.5 border border-border rounded-md bg-card">
+              {hasParams && (
+                <div className="mb-2">
+                  <NativeSchemaForm
+                    schema={actionSchema}
+                    value={schemaData[a] ?? {}}
+                    onChange={(k, v) =>
+                      setSchemaData((prev) => ({ ...prev, [a]: { ...(prev[a] ?? {}), [k]: v } }))
+                    }
+                  />
+                </div>
+              )}
 
-            {!hasParams && !noParams && (
-              <textarea
-                className="min-h-12 text-[11px] mb-2"
-                value={paramsText[a] ?? '{}'}
-                onChange={(e) => setParamsText((prev) => ({ ...prev, [a]: e.target.value }))}
-                spellCheck={false}
-                rows={2}
-              />
-            )}
+              {!hasParams && !noParams && (
+                <textarea
+                  className="min-h-12 text-[11px] mb-2"
+                  value={paramsText[a] ?? '{}'}
+                  onChange={(e) => setParamsText((prev) => ({ ...prev, [a]: e.target.value }))}
+                  spellCheck={false}
+                  rows={2}
+                />
+              )}
 
-            <Button
-              size="sm"
-              className="h-6 rounded-full text-[11px] font-medium"
-              disabled={running !== null}
-              onClick={() => run(a)}
-            >
-              {running === a ? '...' : '▶'} {a}
-            </Button>
+              <Button
+                size="sm"
+                className="h-6 rounded-full text-[11px] font-medium"
+                disabled={running !== null}
+                onClick={() => run(a)}
+              >
+                {running === a ? '...' : '▶'} {a}
+              </Button>
 
-            {result && (
-              <div className={`mt-2 p-1.5 px-2 rounded-md bg-background border ${result.ok ? 'border-border' : 'border-destructive/40 bg-destructive/5'}`}>
-                {!result.ok ? (
-                  <span className="text-destructive font-mono text-[11px]">{String(result.value)}</span>
-                ) : result.value === undefined || result.value === null ? (
-                  <span className="text-primary text-[11px]">✓ done</span>
-                ) : (
-                  <>
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Result</span>
-                      {typeof result.value === 'object' && (
-                        <div className="flex gap-0.5">
-                          <Button
-                            variant={mode === 'pretty' ? 'secondary' : 'ghost'}
-                            size="sm"
-                            className="h-5 px-1.5 text-[10px] rounded-full"
-                            onClick={() => setResultMode((p) => ({ ...p, [a]: 'pretty' }))}
-                          >View</Button>
-                          <Button
-                            variant={mode === 'json' ? 'secondary' : 'ghost'}
-                            size="sm"
-                            className="h-5 px-1.5 text-[10px] rounded-full"
-                            onClick={() => setResultMode((p) => ({ ...p, [a]: 'json' }))}
-                          >JSON</Button>
-                        </div>
+              {result && (
+                <div
+                  className={`mt-2 p-1.5 px-2 rounded-md bg-background border ${result.ok ? 'border-border' : 'border-destructive/40 bg-destructive/5'}`}
+                >
+                  {!result.ok ? (
+                    <span className="text-destructive font-mono text-[11px]">
+                      {String(result.value)}
+                    </span>
+                  ) : result.value === undefined || result.value === null ? (
+                    <span className="text-primary text-[11px]">✓ done</span>
+                  ) : (
+                    <>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                          Result
+                        </span>
+                        {typeof result.value === 'object' && (
+                          <div className="flex gap-0.5">
+                            <Button
+                              variant={mode === 'pretty' ? 'secondary' : 'ghost'}
+                              size="sm"
+                              className="h-5 px-1.5 text-[10px] rounded-full"
+                              onClick={() => setResultMode((p) => ({ ...p, [a]: 'pretty' }))}
+                            >
+                              View
+                            </Button>
+                            <Button
+                              variant={mode === 'json' ? 'secondary' : 'ghost'}
+                              size="sm"
+                              className="h-5 px-1.5 text-[10px] rounded-full"
+                              onClick={() => setResultMode((p) => ({ ...p, [a]: 'json' }))}
+                            >
+                              JSON
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                      {mode === 'json' ? (
+                        <pre className="text-[11px] font-mono text-foreground/60 whitespace-pre-wrap break-all leading-relaxed">
+                          {JSON.stringify(result.value, null, 2)}
+                        </pre>
+                      ) : (
+                        <ResultView value={result.value} />
                       )}
-                    </div>
-                    {mode === 'json' ? (
-                      <pre className="text-[11px] font-mono text-foreground/60 whitespace-pre-wrap break-all leading-relaxed">
-                        {JSON.stringify(result.value, null, 2)}
-                      </pre>
-                    ) : (
-                      <ResultView value={result.value} />
-                    )}
-                  </>
-                )}
-              </div>
-            )}
-          </div>
-        );
-      })()}
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })()}
     </div>
   );
-}
-
-/** Keep actual native action metadata separate from the retiring legacy registry owner. */
-export function ActionCardList(props: Parameters<typeof LegacyActionCardList>[0]) {
-  const effects = useTreeEffects();
-  return effects.kernel === undefined ? <LegacyActionCardList {...props} />
-    : <NativeActionCards path={props.path} type={props.compType} component={props.componentName || undefined} />;
 }

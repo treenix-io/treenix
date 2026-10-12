@@ -4,14 +4,18 @@
 import { ConfirmPopover } from '#components/ConfirmPopover';
 import { Button } from '#components/ui/button';
 import { NodeProvider, Render, RenderContext, type OnChange } from '#context';
-import type { ComponentData, NodeData } from '@treenx/core';
+import type { PresentationComponent, PresentationNode } from '#tree/presentation';
 import { Trash2 } from 'lucide-react';
 import { ActionCardList } from './ActionCards';
 import { ErrorBoundary } from '#app/ErrorBoundary';
 
-function EditPanel({ node, value, onChange }: {
-  node: NodeData;
-  value: ComponentData;
+function EditPanel({
+  node,
+  value,
+  onChange,
+}: {
+  node: PresentationNode;
+  value: PresentationComponent;
   onChange?: (partial: OnChange) => void;
 }) {
   return (
@@ -24,9 +28,9 @@ function EditPanel({ node, value, onChange }: {
 }
 
 export type ComponentSectionProps = {
-  node: NodeData;
+  node: PresentationNode;
   name: string;
-  value: ComponentData;
+  value: PresentationComponent;
   onChange?: (partial: OnChange) => void;
   collapsed?: boolean;
   onToggle?: () => void;
