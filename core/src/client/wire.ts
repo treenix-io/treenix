@@ -5,10 +5,28 @@
 // (the core-m77 class). Events arrive as TWP EventFrames.
 
 import type { NodeData } from '#core';
-import type { ChildrenOpts, Page } from '#tree';
+import type { ChildrenOpts, Page, Tree } from '#tree';
 import type { EventFrame, ResumeCursor } from '#protocol/frames';
 import { createPeer, type Conn, type Peer } from '#protocol/peer';
-import type { TreenixClient } from './index';
+
+export type WatchSub = { unsubscribe(): void };
+
+export type TreenixClient = {
+  /** Transport tree — exec-capable (core-pxlu): `tree.execute` delegates to the
+   *  server side. Mount adapters take this tree and get federation for free. */
+  tree: Tree;
+  // kriz: should accept ExecuteData
+  /** Sugar over `tree.execute` — the public API stays stable. */
+  execute(path: string, action: string, data?: unknown, opts?: { type?: string; key?: string; opId?: string }): Promise<unknown>;
+  // TODO: merge watch + watch path via setting `/` or `*` as path.
+  /** Global SSE stream — all events for this user */
+  watch(onEvent: (e: any) => void): WatchSub;
+  /** Watch specific path — registers watch + filters events. Returns initial node + subscription. */
+  // kriz: return promise { node: any } & WatchSub, or even WatchSub & { node: Promise<any> } ? discuss
+  watchPath(path: string, onEvent: (e: any) => void): Promise<{ node: any; unsubscribe(): void }>;
+  /** Tear down transport — unsubscribe SSE, clear all watchers */
+  destroy(): void;
+};
 
 export type WireClient = TreenixClient & {
   /** Underlying peer — actStream, sub/unsub, symmetric serving (advanced consumers). */

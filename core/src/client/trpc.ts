@@ -13,7 +13,7 @@ import type { NodeData } from '#core';
 import type { PatchOp } from '#tree';
 import type { TreeRouter } from '#server/trpc';
 import { createTRPCClient, httpBatchLink, httpSubscriptionLink, splitLink } from '@trpc/client';
-import type { TreenixClient, WatchSub } from './index';
+import type { TreenixClient, WatchSub } from './wire';
 
 export type TrpcTransportOpts = {
   url: string;

@@ -2,7 +2,7 @@
 // Naming: t.mount.{name} — system infrastructure adapters
 // Each adapter receives its mount component + MountCtx (not the whole node).
 
-import { createTrpcTransport } from '#client';
+import { createTrpcTransport } from '#client/trpc';
 import { registerType } from '#comp';
 import { getComponentByName, register } from '#core';
 import { KernelError } from '#errors';

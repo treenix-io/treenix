@@ -6,7 +6,7 @@
 import { TRPCClientError } from '@trpc/client';
 import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
-import type { TreenixClient } from './index';
+import type { TreenixClient } from './wire';
 import { createTrpcTransport, ThrottledEventSource } from './trpc';
 
 class FakeES {

@@ -6,9 +6,7 @@ import { it, type TestContext } from 'node:test';
 import { createInstanceFoundation } from '#kernel/instance';
 import { createMemoryStore } from '#kernel/store/memory';
 import { createTwpHttpServer } from '#server/http-twp';
-import { openTwpHttp } from './http-twp';
-import { createTwpClient } from './twp';
-import { createNodeClient } from './handle';
+import { openTwpHttp, createTwpClient, createNodeClient } from '@treenx/core/client';
 import type { ModuleManifest, Position } from '#kernel/types';
 
 class Doc {
