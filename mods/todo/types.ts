@@ -1,4 +1,4 @@
-import { getCtx, registerType } from '@treenx/core/comp';
+import { registerType } from '@treenx/core/comp';
 
 /** Single checklist item with a title and completion flag. */
 class TodoItem {
@@ -14,22 +14,14 @@ class TodoItem {
 /** Container that creates todo.item children from add action calls. */
 class TodoList {
   title = 'My Todos';
-
-  /** @description Add a new todo item */
-  async add(data: { title: string }) {
-    if (!data.title?.trim()) throw new Error('Title required');
-    const { node, tree } = getCtx();
-    const id = Date.now().toString(36);
-    await tree.set({
-      $path: `${node.$path}/${id}`,
-      $type: 'todo.item',
-      title: data.title.trim(),
-      done: false,
-    });
-  }
 }
 
 registerType('todo.item', TodoItem);
-// add() creates a child via getCtx().tree — no client-side optimistic prediction possible.
+// Native child creation has no client-side prediction.
 registerType('todo.list', TodoList, { noOptimistic: ['add'] });
 export { TodoItem, TodoList };
+
+interface TodoList {
+  /** @description Add a new todo item */
+  add(data: { title: string }): Promise<void>;
+}
