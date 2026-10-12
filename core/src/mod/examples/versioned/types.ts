@@ -6,12 +6,10 @@
 //   v1: { body }            — field renamed
 //   v2: { body, words }     — derived word count added
 //
-// Steps are registered next to the type via the ordinary context registry and
-// run on read by the storage policy's migration step (tree/policy.ts): a stored
-// v0 node arrives to callers as v2 (in memory); the migrated shape converges on
-// disk when the node is next written (core-anz4.9 — reads never write back).
+// The owning native manifest declares each ladder. The kernel upgrades reads
+// in memory; the migrated shape is saved only with the next authorized write.
 import { registerType } from '#comp';
-import { register } from '#core';
+import type { Migration } from '#kernel/types';
 
 /**
  * Versioned document — demonstrates per-type schema migrations
@@ -23,7 +21,7 @@ export class VersionedDoc {
 }
 registerType('example.versioned.doc', VersionedDoc);
 
-register('example.versioned.doc', 'migrate', () => [
+export const documentMigrations: readonly Migration[] = [
   { from: 0, to: 1, up: n => {
     const { text, ...fields } = n;
     return { ...fields, body: typeof text === 'string' ? text : '' };
@@ -32,7 +30,7 @@ register('example.versioned.doc', 'migrate', () => [
     const body = String(n.body ?? '').trim();
     return { ...n, words: body ? body.split(/\s+/).length : 0 };
   } },
-]);
+];
 
 /**
  * Attachable note component with its own migration ladder (v1 renames txt → note)
@@ -43,9 +41,9 @@ export class VersionedNote {
 }
 registerType('example.versioned.note', VersionedNote);
 
-register('example.versioned.note', 'migrate', () => [
+export const noteMigrations: readonly Migration[] = [
   { from: 0, to: 1, up: n => {
     const { txt, ...fields } = n;
     return { ...fields, note: typeof txt === 'string' ? txt : '' };
   } },
-]);
+];

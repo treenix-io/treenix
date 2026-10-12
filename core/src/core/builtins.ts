@@ -7,7 +7,7 @@ import { registerLegacy } from './registry';
 // kriz: should be 't.dir', 't.root', and so on
 // kriz: should be revised and reviewed
 const builtins = [
-  'dir', 'root', 'ref', 'moved', 'type', 'mount-point', 'session',
+  'dir', 'root', 'ref', 'type', 'mount-point', 'session',
 ];
 
 export function registerBuiltins() {

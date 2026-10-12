@@ -2,7 +2,7 @@
 // Storage interface + in-memory implementation
 // Depends only on core types.
 
-import { comparePaths, isRef, type NodeData, type Ref } from '#core';
+import { comparePaths, type NodeData } from '#core';
 import { KernelError } from '#errors';
 import { createSiftTest } from '#kernel/expr';
 import { type ExprWork, exprWork } from '#kernel/eval';
@@ -11,7 +11,6 @@ import { mapNodeForSift } from '#kernel/store/keys';
 import { treeEnsure, treeNavigate, type TreeNode } from '#kernel/store/nested-map';
 import { scanFromCollected } from './fs-common';
 import { applyOps, type CommitChange, type CommitReceipt, hasMutationOps, type PatchOp, PatchTestError } from './patch';
-import { isMoved } from './refs';
 import type { TreeEvent, TreeWatchOpts, TreeWatchScope } from './watch';
 
 // ── Pagination ──
@@ -246,79 +245,7 @@ export function asTreeSource(tree: Tree): TreeSource {
   return tree as TreeSource;
 }
 
-// ── Ref resolution (id-first, core-gk8.10 stage 2) ──
-// $ref path is a resolvable cache; $refId is the identity. Resolution follows
-// 'moved' tombstone chains left by move(), verifies identity when both sides
-// carry ids, and self-repairs standalone ref NODES: collapses the chain into
-// $ref and adopts $refId — lazy adoption IS the migration of the legacy
-// path-ref corpus.
 
-const MAX_MOVED_HOPS = 8;
-
-/** Follow tombstone redirects from `path` to the live node. `expectId` guards
- *  chain identity: a tombstone carrying a DIFFERENT $id means the path was
- *  reused by another node's move — that chain is not ours. */
-export async function followMoved(
-  tree: Tree,
-  path: string,
-  expectId?: string,
-  ctx?: unknown,
-): Promise<{ target: NodeData | undefined; hops: number }> {
-  let target = await tree.get(path, ctx);
-  let hops = 0;
-  const seen = new Set<string>([path]);
-
-  while (target && isMoved(target)) {
-    if (expectId && target.$id && target.$id !== expectId) {
-      throw new KernelError('NOT_FOUND', `Ref identity mismatch at ${path}: tombstone for ${target.$id}, expected ${expectId}`);
-    }
-    if (++hops > MAX_MOVED_HOPS) {
-      throw new KernelError('INVALID', `Tombstone chain from ${path} exceeds ${MAX_MOVED_HOPS} hops`);
-    }
-    const next = target.$ref;
-    if (seen.has(next)) throw new KernelError('INVALID', `Tombstone cycle at ${next}`);
-    seen.add(next);
-    target = await tree.get(next, ctx);
-  }
-
-  return { target, hops };
-}
-
-export async function resolveRef(tree: Tree, node: NodeData | Ref): Promise<NodeData> {
-  if (!isRef(node)) return node;
-
-  // A standalone ref NODE (came from the tree, carries $path) can be
-  // repaired; an embedded ref object cannot — nothing to patch.
-  const selfPath = '$path' in node && typeof node.$path === 'string' ? node.$path : undefined;
-  const selfRev = '$rev' in node && typeof node.$rev === 'number' ? node.$rev : undefined;
-
-  const expectId = node.$refId;
-  const { target, hops } = await followMoved(tree, node.$ref, expectId);
-  if (!target) throw new KernelError('NOT_FOUND', `Ref target not found: ${node.$ref}`);
-  if (expectId && target.$id && target.$id !== expectId) {
-    throw new KernelError('NOT_FOUND', `Ref identity mismatch: ${node.$ref} → ${target.$path} carries ${target.$id}, expected ${expectId}`);
-  }
-
-  // Self-repair: collapse a followed chain into $ref, adopt the target's id
-  // ($refId adoption IS the lazy migration of the path-ref corpus).
-  const adoptId = expectId === undefined && target.$id !== undefined;
-  if ((hops > 0 || adoptId) && selfPath) {
-    const ops: PatchOp[] = [];
-    if (selfRev != null) ops.push(['t', '$rev', selfRev]);
-    if (hops > 0) ops.push(['r', '$ref', target.$path]);
-    if (adoptId) ops.push(['a', '$refId', target.$id]);
-    try {
-      await tree.patch(selfPath, ops);
-    } catch (e) {
-      // Repair is cache maintenance — the resolution above is already correct.
-      // Read-only surfaces, ACL denials and concurrent edits are expected
-      // here; the next resolve through a writable surface retries.
-      console.error(`resolveRef: self-repair of ${selfPath} failed:`, e);
-    }
-  }
-
-  return target;
-}
 
 // ── Filter tree ──
 // Like overlay, but set() routes to upper only when filter matches, else lower.
@@ -693,8 +620,4 @@ export function createMemoryTree(): TreeSource {
 
 export { type CommitChange, type CommitReceipt, type PatchOp, PatchTestError, applyOps, hasMutationOps, patchViaSet } from './patch';
 export { assertSafePatchPath } from '#kernel/update-ops';
-// Curated door for trusted in-process relocation (core-anz4.2): mods that
-// legitimately carry $id to a new path (branch merge) import it here — the
-// policy module itself stays private.
-export { relocateCtx } from './policy';
 export { type TreeEvent, type TreeWatchScope, type TreeWatchOpts, subscriptionToAsyncIterable } from './watch';

@@ -15,7 +15,6 @@ import { mkdir, readdir, readFile, realpath, rmdir, unlink } from 'node:fs/promi
 import { dirname, join, resolve } from 'node:path';
 import { atomicWrite } from './fs-atomic';
 import { scanFromCollected } from './fs-common';
-import { ensureMigrated } from './migrate-component-namespace';
 import { assertPathSafe } from '#util/path-safety';
 import { applyPatchManyEntry, assertPatchManyBatch, assertSetEntryOcc, isSetEntry, paginate, readWork, type TreeSource } from './index';
 import { type CommitChange, type CommitReceipt, hasMutationOps, patchViaSet } from './patch';
@@ -30,9 +29,6 @@ function assertFsPath(path: string): void {
 export async function createFsTree(rootDir: string): Promise<TreeSource> {
   await mkdir(resolve(rootDir), { recursive: true });
   rootDir = await realpath(resolve(rootDir));
-
-  // Data-format gate: strict '#' readers must never see a pre-namespace root.
-  await ensureMigrated(rootDir);
 
   // Serialize ALL mutations on one chain. promote/demote/leaf-cleanup mutate a node's
   // parent and child paths, so per-path locking can't prevent set/set and set/remove races.

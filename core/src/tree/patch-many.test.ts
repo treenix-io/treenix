@@ -12,8 +12,6 @@ import { join } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 import { createFsTree } from './fs';
 import { createFilterTree, createMemoryTree, createOverlayTree, type Tree, type TreeSource } from './index';
-import { withStoragePolicy } from './policy';
-import { refsOf } from './refs';
 import { createRepathTree } from './repath';
 
 const code = (expected: string) => (e: unknown) =>
@@ -401,96 +399,5 @@ describe('patchMany: repath', () => {
     const created = await inner.get('/data/p/new');
     assert.equal(created?.n, 7);
     assert.equal(created?.$path, '/data/p/new');
-  });
-});
-
-// ── storage policy: validation + $refs ──
-
-const META = 'pm.test.meta';
-
-describe('patchMany: storage policy', () => {
-  afterEach(() => {
-    try { unregister(META, 'schema'); } catch { /* not registered in this test */ }
-  });
-
-  function setupValidated() {
-    register(META, 'schema', () => ({
-      title: 'PM',
-      type: 'object',
-      properties: { count: { type: 'number' } },
-    }));
-    const inner = createMemoryTree();
-    const { tree } = withStoragePolicy(inner);
-    return { inner, tree };
-  }
-
-  it('one invalid member denies the whole batch with INVALID, nothing written', async () => {
-    const { inner, tree } = setupValidated();
-    await tree.set({ $path: '/v', $type: 'dir' });
-    await tree.set({ $path: '/v/a', $type: 'item', '#meta': { $type: META, count: 1 } });
-    await tree.set({ $path: '/v/b', $type: 'item', '#meta': { $type: META, count: 2 } });
-
-    await assert.rejects(
-      tree.patchMany!('/v', [
-        { path: '/v/a', ops: [['r', '#meta.count', 10]] },
-        { path: '/v/b', ops: [['r', '#meta.count', 'not-a-number']] },
-      ]),
-      code('INVALID'),
-    );
-
-    assert.deepEqual((await inner.get('/v/a'))?.['#meta'], { $type: META, count: 1 });
-    assert.deepEqual((await inner.get('/v/b'))?.['#meta'], { $type: META, count: 2 });
-  });
-
-  it('all invalid members are collected into ONE rejection', async () => {
-    const { inner, tree } = setupValidated();
-    await tree.set({ $path: '/v', $type: 'dir' });
-    await tree.set({ $path: '/v/a', $type: 'item', '#meta': { $type: META, count: 1 } });
-    await tree.set({ $path: '/v/b', $type: 'item', '#meta': { $type: META, count: 2 } });
-
-    await assert.rejects(
-      tree.patchMany!('/v', [
-        { path: '/v/a', ops: [['r', '#meta.count', 'bad-a']] },
-        { path: '/v/b', ops: [['r', '#meta.count', 'bad-b']] },
-      ]),
-      code('INVALID'),
-    );
-    assert.equal((await inner.get('/v/a'))?.$rev, 1);
-    assert.equal((await inner.get('/v/b'))?.$rev, 1);
-  });
-
-  it('$refs re-derived per member: added ref lands in the same commit, cleared ref drops the index', async () => {
-    const { tree } = withStoragePolicy(createMemoryTree());
-    await tree.set({ $path: '/r', $type: 'dir' });
-    await tree.set({ $path: '/r/plain', $type: 'item' });
-    await tree.set({ $path: '/r/linked', $type: 'item', friend: { $type: 'ref', $ref: '/r/plain' } });
-    assert.ok((await tree.get('/r/linked'))?.$refs, 'sanity: set() derived the index');
-
-    await tree.patchMany!('/r', [
-      { path: '/r/plain', ops: [['a', 'friend', { $type: 'ref', $ref: '/r/linked' }]] },
-      { path: '/r/linked', ops: [['d', 'friend']] },
-    ]);
-
-    const plain = await tree.get('/r/plain');
-    assert.ok(plain && refsOf(plain)?.some(r => r.t === '/r/linked' && r.f === 'friend'));
-    const linked = await tree.get('/r/linked');
-    assert.equal(linked?.$refs, undefined);
-  });
-
-  it('test-only member through the policy neither writes nor bumps $rev', async () => {
-    const { inner, tree } = setupValidated();
-    await tree.set({ $path: '/v', $type: 'dir' });
-    await tree.set({ $path: '/v/a', $type: 'item', '#meta': { $type: META, count: 1 } });
-    await tree.set({ $path: '/v/b', $type: 'item', '#meta': { $type: META, count: 2 } });
-
-    await tree.patchMany!('/v', [
-      { path: '/v/a', ops: [['t', '#meta.count', 1]] },
-      { path: '/v/b', ops: [['r', '#meta.count', 20]] },
-    ]);
-
-    assert.equal((await inner.get('/v/a'))?.$rev, 1, 'test-only member untouched');
-    const b = await inner.get('/v/b');
-    assert.deepEqual(b?.['#meta'], { $type: META, count: 20 });
-    assert.equal(b?.$rev, 2);
   });
 });

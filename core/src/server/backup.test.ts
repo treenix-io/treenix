@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it, mock } from 'node:test';
 import { createNode } from '#core';
 import { createFsTree } from '#tree/fs';
-import { NS_VERSION, VERSION_FILE } from '#tree/migrate-component-namespace';
+import { SUPPORTED_DATA_VERSION, DATA_VERSION_FILE } from '#server/backup-version';
 import { backupInstance, BackupError, restoreArtifact, verifyArtifact } from '#server/backup';
 
 const silent = () => {};
@@ -213,9 +213,9 @@ describe('instance backup/restore (gk8.9)', () => {
     await assert.rejects(() => verifyArtifact(artifactDir, silent), (e: BackupError) => e.code === 'COUNT_MISMATCH');
     await writeFile(mPath, mRaw);
 
-    await writeFile(join(dir0, VERSION_FILE), `${NS_VERSION + 1}\n`);
+    await writeFile(join(dir0, DATA_VERSION_FILE), `${SUPPORTED_DATA_VERSION + 1}\n`);
     await assert.rejects(() => verifyArtifact(artifactDir, silent), (e: BackupError) => e.code === 'VERSION_AHEAD');
-    await writeFile(join(dir0, VERSION_FILE), `${NS_VERSION}\n`);
+    await writeFile(join(dir0, DATA_VERSION_FILE), `${SUPPORTED_DATA_VERSION}\n`);
 
     await rm(mPath);
     await assert.rejects(() => verifyArtifact(artifactDir, silent), (e: BackupError) => e.code === 'NOT_A_BACKUP');

@@ -8,7 +8,7 @@
 import { assertValidType, isCompKey, safeJsonParse } from '#core';
 import { cp, mkdir, mkdtemp, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve } from 'node:path';
-import { NS_VERSION, readDataVersion, VERSION_FILE } from '#tree/migrate-component-namespace';
+import { SUPPORTED_DATA_VERSION, readDataVersion, DATA_VERSION_FILE } from '#server/backup-version';
 
 export class BackupError extends Error {
   constructor(public code: string, message: string) {
@@ -259,7 +259,7 @@ async function verifyFsDir(dir: string): Promise<{ nodes: number; files: number 
   }
 
   const v = await readDataVersion(dir);
-  if (v > NS_VERSION) throw new BackupError('VERSION_AHEAD', `${dir}: ${VERSION_FILE} is ${v}, this engine supports ${NS_VERSION} — upgrade the engine before restoring`);
+  if (v > SUPPORTED_DATA_VERSION) throw new BackupError('VERSION_AHEAD', `${dir}: ${DATA_VERSION_FILE} is ${v}, this engine supports ${SUPPORTED_DATA_VERSION} — upgrade the engine before restoring`);
   return { nodes, files };
 }
 

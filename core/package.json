@@ -61,21 +61,6 @@
       "types": "./dist/tree/branch.d.ts",
       "default": "./dist/tree/branch.js"
     },
-    "./tree/migrate-component-namespace": {
-      "development": "./src/tree/migrate-component-namespace.ts",
-      "types": "./dist/tree/migrate-component-namespace.d.ts",
-      "default": "./dist/tree/migrate-component-namespace.js"
-    },
-    "./tree/trash-exempt": {
-      "development": "./src/tree/trash-exempt.ts",
-      "types": "./dist/tree/trash-exempt.d.ts",
-      "default": "./dist/tree/trash-exempt.js"
-    },
-    "./tree/cache": {
-      "development": "./src/tree/cache.ts",
-      "types": "./dist/tree/cache.d.ts",
-      "default": "./dist/tree/cache.js"
-    },
     "./util/inflight": {
       "development": "./src/util/inflight.ts",
       "types": "./dist/util/inflight.d.ts",
