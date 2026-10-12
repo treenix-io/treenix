@@ -261,7 +261,9 @@ export function createStoreChangeMapping(owner: StoreChangeMappingOptions, optio
       const reads = combineReadSets([...proofs, ...[...physical.values()].map(reader => reader.expect()), executor.expect ?? {}])
       const bindings = [...groups.values()].map(group => group.binding).sort((left, right) =>
         right.source.binding.upper.length - left.source.binding.upper.length)
+      /** Keep logical proofs projected when a root-based future also contains their paths. */
       function proofReader(path: Path) {
+        if (owner.binding(path) !== undefined) return undefined
         for (const { binding } of groups.values()) {
           if (contains(binding.source.binding.lower, path) || contains(binding.source.binding.upper, path))
             return query(binding)
