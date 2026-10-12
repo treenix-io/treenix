@@ -19,10 +19,18 @@ export interface ReferenceMap {
 
 export const SOURCE_TYPE = 't.prefab.source';
 
-export type PrefabInput = NodeInput & { readonly $prefab?: PrefabState };
+export type PrefabChildren = Readonly<
+  Record<string, { readonly src: string; readonly removed?: true }>
+>;
+
+export type PrefabInput = NodeInput & {
+  readonly $prefab?: PrefabState;
+  readonly $prefabChildren?: PrefabChildren;
+};
 
 export interface PrefabNode extends Node {
   readonly $prefab?: PrefabState;
+  readonly $prefabChildren?: PrefabChildren;
 }
 
 /** A source record holds inert node input, so storing a template never starts a mount or service. */
@@ -42,7 +50,7 @@ export async function readNode(read: Reader, path: string): Promise<PrefabNode> 
 
 /** Identity and provenance belong to the copy; they are never propagated as data. */
 export function fields(node: Node | NodeInput): Record<string, unknown> {
-  const { $path, $id, $rev, $type, $v, $refId, $prefab, ...data } = node;
+  const { $path, $id, $rev, $type, $v, $refId, $prefab, $prefabChildren, ...data } = node;
   return data;
 }
 

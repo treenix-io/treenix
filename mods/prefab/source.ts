@@ -31,7 +31,8 @@ export function prefabCopy(
 ): NodeInput {
   const body = sourceBody(source);
   const base = translatedFields(body, state.sourceRoot, state.targetRoot, state.maps);
-  return { ...prefabInput(body, path), ...base, $prefab: { ...state, src: source.$path, base } };
+  const { $prefabChildren, ...input } = prefabInput(body, path);
+  return { ...input, ...base, $prefab: { ...state, src: source.$path, base } };
 }
 
 /** Materialize each declaration as inert data and redirect its internal references to source records. */
@@ -85,6 +86,7 @@ export function updatedSource(source: PrefabNode, data: Record<string, unknown>)
     ...(body.$v === undefined ? {} : { $v: body.$v }),
     ...data,
     ...(body.$prefab === undefined ? {} : { $prefab: body.$prefab }),
+    ...(body.$prefabChildren === undefined ? {} : { $prefabChildren: body.$prefabChildren }),
   };
   return source.$type === SOURCE_TYPE
     ? { ...prefabInput(source, source.$path), body: input }

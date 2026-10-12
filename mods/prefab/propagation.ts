@@ -5,6 +5,7 @@ import type { WriteAction, WriteActionContext } from '@treenx/core/kernel/types'
 import { mergeFields } from '#prefab/merge';
 import { assertChain, fields, readNode, sourceBody, translatedFields } from '#prefab/data';
 import { prefabCopy, updatedSource } from '#prefab/source';
+import { children, markChild, optionalNode, retireBranch } from '#prefab/structure';
 
 /** Decode public action arguments; internal nodes follow the prefab contract. */
 function argumentsFor(value: unknown): { target: string; source?: string; field?: string } {
@@ -39,26 +40,27 @@ const argumentsSchema = {
   additionalProperties: false,
 };
 
-/** Copy one source node with a persistent per-field base through the caller's ChangeSet. */
+/** Copy a source subtree in bounded steps, retaining child marks with each accepted copy. */
 export const instantiate: WriteAction = {
   kind: 'write',
   args: argumentsSchema,
-  async handler(ctx, args) {
+  async *handler(ctx, args) {
     const input = argumentsFor(args);
     if (input.source === undefined)
       throw new KernelError('INVALID', 'Prefab instantiation requires a source');
     const source = await readNode(ctx.read, input.source);
     await assertChain(ctx.read, source, input.target);
-    try {
-      await readNode(ctx.read, input.target);
-      throw new KernelError('CONFLICT', 'Prefab target already exists');
-    } catch (error) {
-      if (!(error instanceof KernelError && error.code === 'NOT_FOUND')) throw error;
-    }
+    const existing = await optionalNode(ctx.read, input.target);
+    if (existing !== undefined && existing.$prefab?.src !== source.$path)
+      throw new KernelError('CONFLICT', 'Prefab target belongs to another source');
     await ctx.requireReadWrite(input.target);
-    ctx.change.put(
-      prefabCopy(source, input.target, { sourceRoot: input.source, targetRoot: input.target }),
-    );
+    if (existing === undefined) {
+      ctx.change.put(
+        prefabCopy(source, input.target, { sourceRoot: input.source, targetRoot: input.target }),
+      );
+    } else await pullFields(ctx, input.target);
+    yield { target: input.target };
+    yield* copyChildren(ctx, input.target);
     return { target: input.target };
   },
 };
@@ -75,29 +77,101 @@ async function instanceSource(ctx: WriteActionContext, target: string) {
   return { node, state, source };
 }
 
-/** Propagate unchanged fields and keep each override's previous base in the same atomic write. */
+/** Advance each node's fields and base together, preserving its structural bookkeeping. */
+async function pullFields(ctx: WriteActionContext, target: string) {
+  const { node, state, source } = await instanceSource(ctx, target);
+  const next = mergeFields(
+    fields(node),
+    state.base,
+    translatedFields(sourceBody(source), state.sourceRoot, state.targetRoot, state.maps),
+  );
+  if (isDeepStrictEqual(next.value, fields(node)) && isDeepStrictEqual(next.base, state.base))
+    return false;
+  const identity = prefabInput(node, node.$path);
+  ctx.change.put({
+    $path: identity.$path,
+    $type: identity.$type,
+    $v: identity.$v,
+    ...next.value,
+    $prefab: { ...state, base: next.base },
+    ...(node.$prefabChildren === undefined ? {} : { $prefabChildren: node.$prefabChildren }),
+  });
+  return true;
+}
+
+/** Synchronize direct children, recording local deletions before considering source additions. */
+async function* copyChildren(ctx: WriteActionContext, root: string) {
+  const pending = [root];
+  let changed = false;
+  for (const target of pending) {
+    const parent = await readNode(ctx.read, target);
+    const state = parent.$prefab;
+    if (state === undefined) throw new KernelError('INVALID', 'Node has no prefab provenance');
+    yield { inspected: target };
+    const seen = new Set<string>();
+    for await (const source of children(ctx.read, state.src)) {
+      const name = source.$path.slice(state.src === '/' ? 1 : state.src.length + 1);
+      const path = target === '/' ? `/${name}` : `${target}/${name}`;
+      seen.add(name);
+      const currentParent = await readNode(ctx.read, target);
+      const mark = currentParent.$prefabChildren?.[name];
+      const own = await optionalNode(ctx.read, path);
+      if (own === undefined) {
+        if (mark !== undefined) {
+          if (mark.removed !== true) {
+            await markChild(ctx, currentParent, name, mark.src, true);
+            changed = true;
+          }
+        } else {
+          await assertChain(ctx.read, source, path);
+          await ctx.requireReadWrite(path);
+          ctx.change.put(prefabCopy(source, path, state));
+          await markChild(ctx, currentParent, name, source.$path);
+          changed = true;
+          pending.push(path);
+        }
+      } else if (own.$prefab?.src === source.$path && mark?.removed !== true) {
+        if (mark === undefined) {
+          await markChild(ctx, currentParent, name, source.$path);
+          changed = true;
+        }
+        if (await pullFields(ctx, path)) changed = true;
+        pending.push(path);
+      }
+      yield { child: path };
+    }
+
+    const currentParent = await readNode(ctx.read, target);
+    yield { inspected: target };
+    for (const [name, mark] of Object.entries(currentParent.$prefabChildren ?? {})) {
+      if (seen.has(name) || mark.removed === true) continue;
+      const path = target === '/' ? `/${name}` : `${target}/${name}`;
+      const own = await optionalNode(ctx.read, path);
+      if (own?.$prefab?.src === mark.src) {
+        yield* retireBranch(ctx, path);
+      }
+      const latest = await readNode(ctx.read, target);
+      const marks = { ...latest.$prefabChildren };
+      delete marks[name];
+      await ctx.requireReadWrite(target);
+      ctx.change.patch(target, { $set: { $prefabChildren: marks } });
+      changed = true;
+      yield { retired: path };
+    }
+  }
+  return changed;
+}
+
+/** Pull fields and structure under the editor's rights; each streamed step keeps its own base atomic. */
 export const pull: WriteAction = {
   kind: 'write',
   args: argumentsSchema,
-  async handler(ctx, args) {
-    const input = argumentsFor(args),
-      { node, state, source } = await instanceSource(ctx, input.target);
-    const next = mergeFields(
-      fields(node),
-      state.base,
-      translatedFields(sourceBody(source), state.sourceRoot, state.targetRoot, state.maps),
-    );
-    if (isDeepStrictEqual(next.value, fields(node)) && isDeepStrictEqual(next.base, state.base))
-      return { changed: false };
-    const identity = prefabInput(node, node.$path);
-    ctx.change.put({
-      $path: identity.$path,
-      $type: identity.$type,
-      $v: identity.$v,
-      ...next.value,
-      $prefab: { ...state, base: next.base },
-    });
-    return { changed: true };
+  async *handler(ctx, args) {
+    const input = argumentsFor(args);
+    const changed = await pullFields(ctx, input.target);
+    yield { pulled: input.target };
+    const structureChanged = yield* copyChildren(ctx, input.target);
+    return { changed: changed || structureChanged };
   },
 };
 
@@ -130,6 +204,7 @@ export const revert: WriteAction = {
       $v: node.$v,
       ...data,
       $prefab: { ...state, base },
+      ...(node.$prefabChildren === undefined ? {} : { $prefabChildren: node.$prefabChildren }),
     });
     return { field: input.field };
   },

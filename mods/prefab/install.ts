@@ -9,6 +9,7 @@ import {
   type NodeInput,
   type OpId,
   type Session,
+  type ChangeMember,
 } from '@treenx/core/kernel/types';
 import type {
   NativePrefabSource,
@@ -19,7 +20,8 @@ import type {
 import { assertPrefabPath, prefabInput, resolvePrefabPath } from '@treenx/core/mod/prefab-path';
 import { stableJson } from '@treenx/core/util/stable-json';
 import { prefabCopy, sourceMaps, sourcePath, sourceRecords } from '#prefab/source';
-import { readNode as readPrefabNode } from '#prefab/data';
+import { readNode as readPrefabNode, SOURCE_TYPE } from '#prefab/data';
+import { childMarks, optionalNode } from '#prefab/structure';
 
 export type {
   NativeSeedDefinition,
@@ -128,20 +130,68 @@ export async function installNativeSeeds(
   const installed: string[] = [],
     skipped: string[] = [];
 
-  /** Each request contains one put; the kernel's saved read/write budgets remain authoritative. */
+  /** A copy and its parent mark share one bounded commit; raw source records remain single puts. */
   async function put(node: NodeInput, owner: string, source?: Node): Promise<void> {
     if (!(await absent(session, node.$path))) {
       skipped.push(node.$path);
       return;
     }
+    const separator = node.$path.lastIndexOf('/');
+    const parent =
+      source?.$type === SOURCE_TYPE && node.$path !== '/'
+        ? await optionalNode(session, node.$path.slice(0, separator) || '/')
+        : undefined;
+    const name = node.$path.slice(separator + 1);
+    const mark = parent?.$prefabChildren?.[name];
+    if (mark !== undefined) {
+      if (mark.removed !== true && parent !== undefined) {
+        await session.commit({
+          opId: childKey(plan.opId, owner, `removed:${node.$path}`),
+          expect: {
+            absent: [node.$path],
+            nodes: [admin, { path: parent.$path, rev: parent.$rev }],
+          },
+          changes: [
+            {
+              op: 'patch',
+              path: parent.$path,
+              ops: {
+                $set: {
+                  $prefabChildren: childMarks(parent, name, mark.src, true),
+                },
+              },
+            },
+          ],
+        }).outcome;
+        if (parent.$path === '/') admin.rev = (await readNode(session, '/')).$rev;
+      }
+      skipped.push(node.$path);
+      return;
+    }
+    const changes: ChangeMember[] = [{ op: 'put', node }];
+    const pins = new Map([[admin.path, admin.rev]]);
+    if (source !== undefined) pins.set(source.$path, source.$rev);
+    if (parent !== undefined && source !== undefined) {
+      changes.push({
+        op: 'patch',
+        path: parent.$path,
+        ops: {
+          $set: {
+            $prefabChildren: childMarks(parent, name, source.$path),
+          },
+        },
+      });
+      pins.set(parent.$path, parent.$rev);
+    }
     await session.commit({
       opId: childKey(plan.opId, owner, node.$path),
-      changes: [{ op: 'put', node }],
+      changes,
       expect: {
         absent: [node.$path],
-        nodes: source === undefined ? [admin] : [admin, { path: source.$path, rev: source.$rev }],
+        nodes: [...pins].map(([path, rev]) => ({ path, rev })),
       },
     }).outcome;
+    if (parent?.$path === '/') admin.rev = (await readNode(session, '/')).$rev;
     if (await absent(session, node.$path))
       throw new KernelError('CONFLICT', 'Replayed seed outcome no longer has its installed target');
     installed.push(node.$path);

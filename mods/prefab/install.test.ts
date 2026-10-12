@@ -139,13 +139,17 @@ it(
         { op: 'patch', path: record.$path, ops: { $set: { body: { ...source.body, value: 4 } } } },
       ],
     }).outcome;
-    const invoke = (action: string, field?: string) =>
-      f.session.act({
+    const invoke = async (action: string, field?: string) => {
+      const pending = f.session.act({
         opId: f.key(),
         path: input.prefabs[0].source.$path,
         action,
         args: { target: instance.$path, ...(field === undefined ? {} : { field }) },
-      }).outcome;
+      });
+      for await (const _chunk of pending.chunks) {
+      }
+      return pending.outcome;
+    };
     await invoke('pull');
     assert.equal((await read(f.session, instance.$path)).value, 4);
 
@@ -186,7 +190,7 @@ it(
       assert.equal(node.$rev, undefined);
       assert.equal(node.$refId, undefined);
     }
-    assert.ok(f.requests.every((request) => request.changes.length === 1));
+    assert.ok(f.requests.every((request) => request.changes.length <= 2));
     const before = f.requests.length;
     assert.deepEqual(
       (await installNativeSeeds(f.session, { ...first, opId: f.key() })).installed,
@@ -209,7 +213,11 @@ it(
       })),
     };
     await installNativeSeeds(f.session, changedInput);
-    assert.equal((await read(f.session, '/seed/child')).value, 2);
+    await assert.rejects(
+      read(f.session, '/seed/child'),
+      (error) => error instanceof KernelError && error.code === 'NOT_FOUND',
+    );
+    assert.equal((await readPrefabNode(f.session, '/seed')).$prefabChildren?.child.removed, true);
     assert.equal((await read(f.session, '/seed')).value, 1);
     assert.deepEqual(await read(f.session, source.$path), source);
   },
