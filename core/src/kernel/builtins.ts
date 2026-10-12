@@ -1,4 +1,5 @@
 import { normalizeType } from '#core/component'
+import { rawFsTypes } from '#kernel/rawfs-types'
 import { A, DEFAULT_LIMITS, R, W, type ModuleManifest, type TypeDef } from '#kernel/types'
 
 export const fsMountType: TypeDef = {
@@ -19,7 +20,7 @@ export const optionalKernelTypes: readonly TypeDef[] = [{
 }, {
   name: 't.outbound-credential', module: 'kernel', security: 'ordinary', version: 0, actions: {},
   schema: { type: 'object', required: ['token'], additionalProperties: false, properties: { token: { type: 'string', minLength: 1 } } },
-}, fsMountType, {
+}, fsMountType, ...rawFsTypes, {
   name: 't.mount.query', module: 'kernel', security: 'user-capability', version: 0, actions: {},
   schema: { type: 'object', required: ['pattern', 'source', 'match'], additionalProperties: false,
     properties: { pattern: { type: 'string' }, source: { type: 'string' }, match: { type: 'object' } } },

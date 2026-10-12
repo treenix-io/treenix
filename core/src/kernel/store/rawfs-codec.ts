@@ -20,6 +20,8 @@ const MIME: Record<string, string> = {
   '.env': 'application/x-env',
 };
 
+export const rawFsMimeTypes = [...new Set(Object.values(MIME)), 'application/octet-stream'];
+
 export function getMime(filename: string): string {
   return MIME[extname(filename).toLowerCase()] ?? 'application/octet-stream';
 }
@@ -30,6 +32,8 @@ export type RawFsCodecNode = Pick<NodeData, '$path' | '$type'> & Readonly<Record
 
 export interface RawFsTextCodec {
   readonly type: string;
+  /** Fields stored in the authored file; other components retain their own metadata. */
+  readonly fields: readonly string[];
   decode(text: string, path: string, outerPath: string): RawFsCodecNode | Promise<RawFsCodecNode>;
   encode(node: RawFsCodecNode, outerPath: string): string | Promise<string>;
 }

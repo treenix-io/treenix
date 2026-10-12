@@ -283,7 +283,7 @@ async function buildCanonicalInstance(input: InstanceConfig): Promise<InstanceFo
       installBuiltins ? [...bootstrapModules, ...modules] : modules,
       bootstrapPolicy.kind === 'reopen' ? bootstrapPolicy.installerCredential : undefined,
     )
-    if (installBuiltins) instance.registry.publish(withTypeDescriptions(createNativeMountManifest(config.writerEpoch, config.mounts, instance.limits, config.federation, { instance: config.id, directories: config.mountDirectories ?? {} }), instance.registry))
+    if (installBuiltins) instance.registry.publish(withTypeDescriptions(createNativeMountManifest(config.writerEpoch, config.mounts, instance.limits, config.federation, { instance: config.id, directories: config.mountDirectories ?? {}, rawfsCodecs: config.rawfsCodecs }), instance.registry))
     if (discovered === undefined) for (const module of modules) instance.registry.publish(instance.bindAutostartModule(module))
     else await publishLoadedModules(instance.registry, { ...discovered, manifests: discovered.manifests.map(module => ({
       ...module, security: instance.bindAutostartModule(module).security,
@@ -679,7 +679,7 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
     }
     const manifests = [
       ...bootstrapModules.map(module => module.id === 'kernel'
-        ? withTypeDescriptions(createNativeMountManifest(config.writerEpoch, config.mounts, () => limits, config.federation, { instance: config.id, directories: config.mountDirectories ?? {} }), registry)
+        ? withTypeDescriptions(createNativeMountManifest(config.writerEpoch, config.mounts, () => limits, config.federation, { instance: config.id, directories: config.mountDirectories ?? {}, rawfsCodecs: config.rawfsCodecs }), registry)
         : module),
       ...config.modules ?? [],
     ]
@@ -909,7 +909,7 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
   }
   if (identity === undefined) throw new KernelError('INVALID', 'Instance bootstrap identity is absent')
   for (const module of bootstrapModules) {
-    const manifest = module.id === 'kernel' ? withTypeDescriptions(createNativeMountManifest(config.writerEpoch, config.mounts, () => limits, config.federation, { instance: config.id, directories: config.mountDirectories ?? {} }), registry) : module
+    const manifest = module.id === 'kernel' ? withTypeDescriptions(createNativeMountManifest(config.writerEpoch, config.mounts, () => limits, config.federation, { instance: config.id, directories: config.mountDirectories ?? {}, rawfsCodecs: config.rawfsCodecs }), registry) : module
     // An older instance keeps optional builtins uninstalled until its admin installs their ownership.
     const installed = manifest.types.filter(type => owners.has(type.name))
     const names = new Set(installed.flatMap(type => [type.name, ...type.aliases ?? []]))

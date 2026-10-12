@@ -73,7 +73,12 @@ export async function openNativeDeployment(config: NativeDeploymentConfig) {
   const bindings: ActionIoBinding[] = [];
   if (loaded.io !== undefined) bindings.push(loaded.io);
   if (config.io !== undefined) bindings.push(config.io);
-  const runtime = await openNativeRuntime({ ...config.runtime, modules: loaded.manifests, io: bindModuleIo(bindings),
+  const rawfsCodecs = { ...config.runtime.rawfsCodecs };
+  for (const module of loaded.manifests) for (const [mime, codec] of Object.entries(module.rawfsCodecs ?? {})) {
+    if (Object.hasOwn(rawfsCodecs, mime)) throw new KernelError('CONFLICT', `Raw file codec has multiple owners: ${mime}`);
+    rawfsCodecs[mime] = codec;
+  }
+  const runtime = await openNativeRuntime({ ...config.runtime, rawfsCodecs, modules: loaded.manifests, io: bindModuleIo(bindings),
     gates: [...(loaded.gates ?? []), ...(config.runtime.gates ?? [])] });
   try {
     if (seeds !== undefined || config.persistentLogs !== undefined) {

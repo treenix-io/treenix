@@ -6,6 +6,7 @@ import { copyManifest } from '#kernel/registry'
 import { previewModules } from '#kernel/module-install'
 import { provisionFsMounts, type FsDirectoryBindings } from '#kernel/mount-fs-provider'
 import { createFsStore } from '#kernel/store/fs'
+import type { RawFsCodecs } from '#kernel/store/rawfs-codec'
 import { createFsOverlayLayout } from '#kernel/store/fs-overlay'
 import { createFsBlobStore } from '#kernel/blob-store-fs'
 import { DEFAULT_LIMITS, type FederationBinding, type ActionIoBinding, type AdminInput, type Credential, type Gate, type ModuleManifest, type ProvisionedStoreMount } from '#kernel/types'
@@ -25,6 +26,7 @@ export interface NativeRuntimeConfig {
   readonly gates?: readonly Gate[]
   /** Named host-directory capabilities; declarations hold names rather than filesystem paths. */
   readonly mountDirectories?: FsDirectoryBindings
+  readonly rawfsCodecs?: RawFsCodecs
 }
 
 /** Opens a filesystem-backed instance, installs its modules, and owns its resources. */
@@ -46,6 +48,7 @@ export async function openNativeRuntime(input: NativeRuntimeConfig) {
         : Object.freeze({ ...input.installerCredential }),
     gates: Object.freeze([...(input.gates ?? [])]),
     mountDirectories: Object.freeze({ ...input.mountDirectories }),
+    rawfsCodecs: Object.freeze({ ...input.rawfsCodecs }),
   });
   if (!Number.isFinite(config.credentialTtlMs) || config.credentialTtlMs <= 0)
     throw new KernelError('INVALID', 'Credential lifetime must be positive and finite');
@@ -92,7 +95,7 @@ export async function openNativeRuntime(input: NativeRuntimeConfig) {
       },
     });
 
-    mounts = await provisionFsMounts(store, config.id, config.mountDirectories);
+    mounts = await provisionFsMounts(store, config.id, config.mountDirectories, config.rawfsCodecs);
     // A retained tail cannot prove that every earlier accepted decision still exists.
     await lease.renewContinuity();
 
@@ -102,6 +105,7 @@ export async function openNativeRuntime(input: NativeRuntimeConfig) {
       shardPath: config.shardPath,
       root: { kind: 'store', store },
       mountDirectories: config.mountDirectories,
+      rawfsCodecs: config.rawfsCodecs,
       blobs: await createFsBlobStore(join(config.directory, '.treenix', 'blobs')),
       provisioning: {
         counter: lease,

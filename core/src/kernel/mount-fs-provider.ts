@@ -2,6 +2,8 @@ import { KernelError } from '#errors'
 import { getComponent } from '#core'
 import { assertBootstrapState, ownershipRecord, TYPE_PATH } from '#kernel/bootstrap'
 import { fsMountType, kernelManifest } from '#kernel/builtins'
+import { rawFsMountType } from '#kernel/rawfs-types'
+import type { RawFsCodecs } from '#kernel/store/rawfs-codec'
 import { componentEntries } from '#kernel/migrate'
 import { assertTypeOwner } from '#kernel/module-install'
 import { openFsMountTarget } from '#kernel/mount-fs'
@@ -20,16 +22,18 @@ interface PreparedDeclaration {
   readonly component: ComponentName
   readonly directory: string
   readonly external?: ExternalEdits
+  readonly rawfs: boolean
 }
 
 /** Adopt only the accepted startup resource through its declaring node's session. */
 export interface FsMountDeployment {
   readonly instance: InstanceId
   readonly directories: FsDirectoryBindings
+  readonly rawfsCodecs?: RawFsCodecs
 }
 
 /** Adopt startup resources unchanged; later declarations use only this deployment's directory capabilities. */
-export function createFsMountHandler(mounts: readonly ProvisionedStoreMount[], deployment?: FsMountDeployment): MountHandler {
+export function createFsMountHandler(mounts: readonly ProvisionedStoreMount[], deployment?: FsMountDeployment, type = fsMountType): MountHandler {
   const prepared = new Map(mounts.map(mount => [stableJson([mount.node, mount.component]), mount]))
 
   async function open(node: Node, session: Session, component: ComponentName) {
@@ -39,12 +43,13 @@ export function createFsMountHandler(mounts: readonly ProvisionedStoreMount[], d
       if (mount.revision !== node.$rev) throw new KernelError('CONFLICT', 'Filesystem mount declaration changed')
       return mount.target
     }
-    const declaration = getComponent<{ directory: string; external?: ExternalEdits }>(node, fsMountType.name, component)
+    const declaration = getComponent<{ directory: string; external?: ExternalEdits }>(node, type.name, component)
     if (declaration === undefined) throw new KernelError('INVALID', 'Filesystem mount declaration is absent')
     if (deployment === undefined || !Object.hasOwn(deployment.directories, declaration.directory))
       throw new KernelError('UNAVAILABLE', 'Filesystem directory capability is unavailable')
     return openFsMountTarget({ directory: deployment.directories[declaration.directory], instance: deployment.instance,
-      logicalBase: node.$path, external: declaration.external })
+      logicalBase: node.$path, external: declaration.external,
+      rawfsCodecs: type === rawFsMountType ? deployment.rawfsCodecs ?? {} : undefined })
   }
 
   return Object.assign(open, { async prepare(node: Node, component: ComponentName, owner?: import('#kernel/types').MountPreparation) {
@@ -58,6 +63,7 @@ export async function provisionFsMounts(
   root: Store,
   instance: InstanceId,
   bindings: FsDirectoryBindings,
+  rawfsCodecs: RawFsCodecs = {},
 ): Promise<readonly ProvisionedStoreMount[]> {
   const budget = {
     nodes: DEFAULT_LIMITS.readNodes,
@@ -77,15 +83,16 @@ export async function provisionFsMounts(
   const declarations: PreparedDeclaration[] = []
 
   for (const node of scanned.items) for (const [component, value] of componentEntries(node)) {
-    if (value.$type !== fsMountType.name) continue
-    const owner = nodes.get(`${TYPE_PATH}/${fsMountType.name}`)
+    if (value.$type !== fsMountType.name && value.$type !== rawFsMountType.name) continue
+    const type = value.$type === fsMountType.name ? fsMountType : rawFsMountType
+    const owner = nodes.get(`${TYPE_PATH}/${type.name}`)
     if (owner === undefined) throw new KernelError('UNAVAILABLE', 'Filesystem mount type is not installed')
-    assertTypeOwner(ownershipRecord(owner), fsMountType)
+    assertTypeOwner(ownershipRecord(owner), type)
     assertNodeSchema(value, registry)
     const directory = value.directory
     if (typeof directory !== 'string') throw new KernelError('INVALID', 'Malformed filesystem mount directory binding')
     if (!Object.hasOwn(bindings, directory)) throw new KernelError('UNAVAILABLE', 'Filesystem directory capability is unavailable')
-    declarations.push({ node, component, directory: bindings[directory], external: value.external === 'trusted' ? 'trusted' : undefined })
+    declarations.push({ node, component, directory: bindings[directory], external: value.external === 'trusted' ? 'trusted' : undefined, rawfs: type === rawFsMountType })
   }
 
   const mounts: ProvisionedStoreMount[] = []
@@ -96,6 +103,7 @@ export async function provisionFsMounts(
         instance,
         logicalBase: declaration.node.$path,
         external: declaration.external,
+        rawfsCodecs: declaration.rawfs ? rawfsCodecs : undefined,
       }))
       mounts.push(Object.freeze({ node: declaration.node.$id, component: declaration.component,
         revision: positionToRev(declaration.node.$pos), target }))

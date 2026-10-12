@@ -1,5 +1,6 @@
 import { createFederationMountHandler } from '#kernel/mount-federation'
 import { createFsMountHandler, type FsMountDeployment } from '#kernel/mount-fs-provider'
+import { rawFsMountType } from '#kernel/rawfs-types'
 import { createMemoryMountManifest } from '#kernel/mount-memory'
 import { queryMountHandler } from '#kernel/query'
 import type { FederationBinding, Limits, ModuleManifest, ProvisionedStoreMount } from '#kernel/types'
@@ -14,6 +15,7 @@ export function createNativeMountManifest(writerEpoch: number, mounts: readonly 
       { type: 't.mount.federation', context: 'mount', handler: createFederationMountHandler(federation, limits) },
       { type: 't.mount.query', context: 'mount', handler: queryMountHandler },
       { type: 't.mount.fs', context: 'mount', handler: createFsMountHandler(mounts, filesystem) },
+      { type: 't.mount.rawfs', context: 'mount', handler: createFsMountHandler(mounts, filesystem, rawFsMountType) },
     ],
   }
 }

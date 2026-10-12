@@ -450,6 +450,11 @@
       "development": "./src/kernel/watched-service.ts",
       "types": "./dist/kernel/watched-service.d.ts",
       "default": "./dist/kernel/watched-service.js"
+    },
+    "./kernel/store/rawfs-codec": {
+      "development": "./src/kernel/store/rawfs-codec.ts",
+      "types": "./dist/kernel/store/rawfs-codec.d.ts",
+      "default": "./dist/kernel/store/rawfs-codec.js"
     }
   },
   "treenix": {
