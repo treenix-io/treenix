@@ -14,6 +14,7 @@ import { openNativeRuntime } from '@treenx/core/kernel/runtime';
 import { nativeSystemManifest } from '@treenx/core/system/native-actions';
 import { createMcpSession } from '#mcp/mcp-session';
 import { createNativeMcpServer } from '#mcp/native-tools';
+import prefabModule from '#prefab/kernel';
 
 /** Exercise tool operations against the actual credential/session and native registry owners. */
 test('native MCP reads acts commits and reflects visible types', async () => {
@@ -26,7 +27,7 @@ test('native MCP reads acts commits and reflects visible types', async () => {
   const register = routes.register;
   routes.register = (path, handler) => { const retire = register(path, handler); registeredResolve(); return retire; };
   const runtime = await openNativeRuntime({ id: 'native-mcp', directory, credentialTtlMs: 60_000,
-    firstAdmin: { path: '/admin', name: 'admin', password: 'smoke-password' }, modules: [nativeSystemManifest(), nativeMcpManifest(routes)] });
+    firstAdmin: { path: '/admin', name: 'admin', password: 'smoke-password' }, modules: [nativeSystemManifest(), nativeMcpManifest(routes), (await prefabModule()).manifest] });
   try {
     const session = await runtime.instance.openSession(runtime.instance.setupCredential);
     const tools = await createMcpSession(session);
@@ -34,6 +35,10 @@ test('native MCP reads acts commits and reflects visible types', async () => {
     try {
       await tools.set_node({ node: { $path: '/sys/mcp/catalog', $type: 't.system' } });
       await tools.set_node({ node: { $path: '/mcp-data', $type: 't.dir' } });
+      await tools.set_node({ node: { $path: '/mcp-prefab', $type: 't.prefab', mod: 'demo', name: 'sample', nodes: [
+        { $path: '.', $type: 't.dir', label: 'template' },
+        { $path: 'child', $type: 't.dir', label: 'child' },
+      ] } });
       assert.equal((await tools.get_node({ path: '/mcp-data' })).copies.length, 1);
       assert.equal((await tools.list_children({ path: '/' })).list.length > 0, true);
       const catalog = await tools.catalog();
@@ -61,6 +66,13 @@ test('native MCP reads acts commits and reflects visible types', async () => {
         await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${address.port}/mcp`), { requestInit: { headers: { authorization: `Bearer ${credential.token}` } } }));
         const listed = await client.listTools();
         assert.equal(listed.tools.some(tool => tool.name === 'get_node'), true);
+        assert.equal(listed.tools.some(tool => tool.name === 'deploy_prefab'), true);
+        assert.equal((await client.callTool({ name: 'deploy_prefab', arguments: { source: '/mcp-prefab', target: '/mcp-data/copy' } })).isError, undefined);
+        const copied = (await tools.get_node({ path: '/mcp-data/copy/child' })).copies[0];
+        if ('error' in copied) throw copied.error;
+        assert.equal(copied.node.label, 'child');
+        assert.ok(copied.node.$prefab);
+        assert.equal((await client.callTool({ name: 'execute', arguments: { path: '/mcp-prefab', action: 'pull', args: { target: '/mcp-data/copy' } } })).isError, undefined);
         const read = await client.callTool({ name: 'get_node', arguments: { path: '/mcp-data' } });
         assert.equal(read.isError, undefined);
         assert.equal((await client.callTool({ name: 'execute', arguments: { path: '/sys/mcp/catalog', action: 'catalog', args: {} } })).isError, undefined);

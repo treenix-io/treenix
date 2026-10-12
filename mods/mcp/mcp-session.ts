@@ -109,6 +109,13 @@ export async function createMcpSession(session: Session, systemPath = '/sys/mcp/
     return { epoch: intake, time: Date.now(), nonce: randomUUID() };
   }
 
+  /** Consume streamed action pieces so an MCP call can return its final outcome. */
+  async function execute(input: NativeMcpToolInputs['execute']) {
+    const pending = session.act({ ...input, path: actual(input.path), opId: input.opId ?? key() });
+    for await (const _piece of pending.chunks) {}
+    return pending.outcome;
+  }
+
   return {
     done,
     async get_node(input: NativeMcpToolInputs['get_node']) {
@@ -117,8 +124,11 @@ export async function createMcpSession(session: Session, systemPath = '/sys/mcp/
     async list_children(input: NativeMcpToolInputs['list_children']) {
       return result(await session.read({ children: actual(input.path) }));
     },
-    async execute(input: NativeMcpToolInputs['execute']) {
-      return session.act({ ...input, path: actual(input.path), opId: input.opId ?? key() }).outcome;
+    execute,
+    async deploy_prefab(input: NativeMcpToolInputs['deploy_prefab']) {
+      return (await execute({ path: input.source, action: 'deploy', args: {
+        target: actual(input.target), ...(input.allowAbsolute === undefined ? {} : { allowAbsolute: input.allowAbsolute }),
+      } })).value;
     },
     async commit(input: Omit<CommitRequest, 'opId'> & { opId?: OpId }) {
       return session.commit({ ...input, changes: input.changes.map(change), expect: expect(input.expect), opId: input.opId ?? key() }).outcome;

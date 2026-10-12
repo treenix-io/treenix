@@ -11,6 +11,7 @@ export interface NativeMcpToolInputs {
   readonly get_node: { path: string };
   readonly list_children: { path: string };
   readonly execute: ActRequest;
+  readonly deploy_prefab: { source: string; target: string; allowAbsolute?: boolean };
   readonly set_node: { node: NodeInput; expect?: CommitRequest['expect']; opId?: OpId };
   readonly remove_node: { path: string; expect?: CommitRequest['expect']; opId?: OpId };
   readonly describe_type: { type: string };

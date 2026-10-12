@@ -20,6 +20,7 @@ export function createNativeMcpServer(session: McpSession): McpServer {
   server.registerTool('get_node', { inputSchema: { path } }, async input => tool(session.get_node(input)));
   server.registerTool('list_children', { inputSchema: { path } }, async input => tool(session.list_children(input)));
   server.registerTool('execute', { inputSchema: { path, action: z.string(), component: z.string().optional(), args: z.unknown() } }, async input => tool(session.execute(input)));
+  server.registerTool('deploy_prefab', { inputSchema: { source: path, target: path, allowAbsolute: z.boolean().optional() } }, async input => tool(session.deploy_prefab(input)));
   server.registerTool('set_node', { inputSchema: { path, type: z.string(), fields: z.record(z.unknown()) } }, async input => tool(session.set_node({ node: { ...input.fields, $path: input.path, $type: input.type } })));
   server.registerTool('remove_node', { inputSchema: { path } }, async input => tool(session.remove_node(input)));
   server.registerTool('catalog', { inputSchema: {} }, async () => tool(session.catalog()));
