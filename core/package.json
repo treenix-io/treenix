@@ -286,11 +286,6 @@
       "types": "./dist/server/server.d.ts",
       "default": "./dist/server/server.js"
     },
-    "./server/client": {
-      "development": "./src/server/client.ts",
-      "types": "./dist/server/client.d.ts",
-      "default": "./dist/server/client.js"
-    },
     "./server/prefab": {
       "development": "./src/server/prefab.ts",
       "types": "./dist/server/prefab.d.ts",
