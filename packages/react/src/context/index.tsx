@@ -130,19 +130,12 @@ function isPresentationNode(value: PresentationComponent): value is Presentation
   return typeof value.$path === 'string';
 }
 
-export function useActions<T extends object>(
-  value: T & { readonly [$node]?: NodeData; readonly [$key]?: string },
-): Actions<T> {
+export function useActions<T extends object>(value: T): Actions<T> {
   const effects = useTreeEffects();
   const current = useContext(NodeCtx);
-  const nativePath = effects.lane ? nativeLocation(value, current) : undefined;
-  if (effects.lane && nativePath === undefined)
+  const path = nativeLocation(value, current);
+  if (path === undefined)
     throw new Error('useActions: component does not belong to the current node');
-  const node = value[$node];
-  if (!effects.lane && !node)
-    throw new Error('useActions: value has no node context (missing $node symbol)');
-  const key = value[$key] ?? '';
-  const path = nativePath ?? (key ? `${node!.$path}#${key}` : node!.$path);
 
   return useMemo(
     () =>

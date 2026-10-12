@@ -1,6 +1,6 @@
 // TreeSourceProvider — mandatory. Hooks (usePath, useChildren) throw a
 // TreeSourceMissingError when no Provider is in the tree. Tests that mount
-// hooks must wrap; the SPA root mounts a single ClientTreeSource here, and
+// hooks must wrap; the SPA root mounts a principal-owned LaneTreeSource here, and
 // the SSR entry mounts a per-request ServerTreeSource.
 //
 // Implementation note: this file is .ts (not .tsx) so the tsx-runner-based

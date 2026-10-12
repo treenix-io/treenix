@@ -1,6 +1,5 @@
 import { KernelError } from '@treenx/core/errors';
-import type { ActionChunks } from '#hooks';
-import type { ClientAction } from '#tree/tree-client';
+import type { ActionChunks, ActionResults } from '#hooks';
 import type { OnChange } from '#tree/on-change';
 import { useOptionalTreeSource } from '#tree/tree-source-context';
 import type { CommitRequest, Outcome, ReadResult, Selector, Node } from '@treenx/core/kernel/types';
@@ -10,12 +9,34 @@ export interface KernelEffects {
   read(selector: Selector): Promise<ReadResult>;
 }
 
+export interface ClientAction {
+  path: string;
+  action: string;
+  args?: unknown;
+  type?: string;
+  component?: string;
+  opId?: string;
+}
+
 export interface TreeEffects {
   readonly kernel?: KernelEffects;
   readonly lane: boolean;
-  readonly execute: typeof import('#hooks').execute;
-  readonly createNode: typeof import('#hooks').createNode;
-  readonly removeNode: typeof import('#hooks').removeNode;
+  execute<T extends keyof ActionResults, A extends keyof ActionResults[T] & string>(
+    pathOrUri: string,
+    action: A,
+    data: unknown,
+    type: T,
+    key?: string,
+  ): Promise<ActionResults[T][A]>;
+  execute(
+    pathOrUri: string,
+    action: string,
+    data?: unknown,
+    type?: string,
+    key?: string,
+  ): Promise<unknown>;
+  createNode(path: string, type: string, data?: Record<string, unknown>): Promise<void>;
+  removeNode(path: string): Promise<void>;
   patchNode(path: string, partial: OnChange): Promise<void>;
   stream<T extends keyof ActionChunks, A extends keyof ActionChunks[T] & string>(
     action: ClientAction & { type: T; action: A },
@@ -39,8 +60,11 @@ export const READ_ONLY_EFFECTS: TreeEffects = {
   lane: false,
   execute: unavailable,
   patchNode: unavailable,
-  createNode: unavailable, removeNode: unavailable,
-  async *stream() { await unavailable(); },
+  createNode: unavailable,
+  removeNode: unavailable,
+  async *stream() {
+    await unavailable();
+  },
   bits: () => undefined,
 };
 

@@ -8,6 +8,13 @@ export interface LaneTreeClientOptions {
   readonly reconnect?: () => Promise<TwpClient>;
 }
 
+export type LaneConnectionState = 'connecting' | 'connected' | 'disconnected';
+
+export interface LaneConnection {
+  getSnapshot(): LaneConnectionState;
+  subscribe(listener: () => void): () => void;
+}
+
 interface Operation {
   readonly id: string;
   readonly input: { readonly act: ActRequest } | { readonly commit: CommitRequest };
@@ -27,7 +34,10 @@ interface Watch {
 }
 
 /** Retain exact mutation keys across lost answers while sharing the one authenticated canonical cache. */
-export function createLaneTreeClient(initial: TwpClient, options: LaneTreeClientOptions = {}): TwpClient {
+export function createLaneTreeClient(
+  initial: TwpClient,
+  options: LaneTreeClientOptions = {},
+): TwpClient & { readonly connection: LaneConnection } {
   const cache = initial.cache;
   const operations = new Map<string, Operation>();
   const watches = new Set<Watch>();
@@ -36,6 +46,24 @@ export function createLaneTreeClient(initial: TwpClient, options: LaneTreeClient
   let connecting: Promise<TwpClient> | undefined;
   let closed: KernelError | undefined;
   let sequence = 0;
+  let state: LaneConnectionState = 'connecting';
+  const listeners = new Set<() => void>();
+
+  /** Expose admission and reconnect state from the owner that replaces the transport. */
+  function publish(next: LaneConnectionState): void {
+    if (state === next) return;
+    state = next;
+    for (const listener of listeners) listener();
+  }
+
+  void initial.ready.then(
+    () => {
+      if (closed === undefined && connecting === undefined) publish('connected');
+    },
+    () => {
+      if (closed === undefined) publish('disconnected');
+    },
+  );
 
   /** Reject use of a disposed owner, including event callbacks retained by a prior principal. */
   function available(): void {
@@ -56,6 +84,7 @@ export function createLaneTreeClient(initial: TwpClient, options: LaneTreeClient
     if (client !== failed) return client;
 
     if (connecting === undefined) {
+      publish('connecting');
       const open = options.reconnect;
       connecting = (async () => {
         const next = await open();
@@ -68,20 +97,31 @@ export function createLaneTreeClient(initial: TwpClient, options: LaneTreeClient
           next.close();
           throw new KernelError('UNAUTHENTICATED', 'Reconnect changed the authenticated principal');
         }
-        if (closed !== undefined) { next.close(); throw closed; }
+        if (closed !== undefined) {
+          next.close();
+          throw closed;
+        }
 
         client = next;
-        for (const watch of watches) if (!watch.closed) {
-          startWatch(watch);
-          watch.changed();
-        }
+        publish('connected');
+        for (const watch of watches)
+          if (!watch.closed) {
+            startWatch(watch);
+            watch.changed();
+          }
         return next;
       })();
     }
 
     const pending = connecting;
-    try { return await pending; }
-    finally { if (connecting === pending) connecting = undefined; }
+    try {
+      return await pending;
+    } catch (received) {
+      publish('disconnected');
+      throw received;
+    } finally {
+      if (connecting === pending) connecting = undefined;
+    }
   }
 
   /** Await the actual admission before issuing new work; never predict the intake epoch. */
@@ -97,9 +137,11 @@ export function createLaneTreeClient(initial: TwpClient, options: LaneTreeClient
   async function pieces(operation: Operation, pending: Pending): Promise<void> {
     for await (const chunk of pending.chunks) {
       if (operation.cancelled) continue;
-      try { await operation.channel.deliver(chunk, lifetime.signal); }
-      catch (error) {
-        if (!operation.cancelled || !(error instanceof KernelError && error.code === 'CANCELLED')) throw error;
+      try {
+        await operation.channel.deliver(chunk, lifetime.signal);
+      } catch (error) {
+        if (!operation.cancelled || !(error instanceof KernelError && error.code === 'CANCELLED'))
+          throw error;
       }
     }
   }
@@ -109,7 +151,10 @@ export function createLaneTreeClient(initial: TwpClient, options: LaneTreeClient
     try {
       while (true) {
         const current = await admitted();
-        const pending = 'act' in operation.input ? current.act(operation.input.act) : current.commit(operation.input.commit);
+        const pending =
+          'act' in operation.input
+            ? current.act(operation.input.act)
+            : current.commit(operation.input.commit);
         operation.pending = { request: pending, client: current };
         if (operation.cancelled) current.cancel(pending.id);
 
@@ -119,7 +164,12 @@ export function createLaneTreeClient(initial: TwpClient, options: LaneTreeClient
           operation.resolve(outcome);
           return;
         } catch (error) {
-          if (!(error instanceof KernelError) || error.code !== 'UNAVAILABLE' || current.failure()?.code !== 'UNAVAILABLE') throw error;
+          if (
+            !(error instanceof KernelError) ||
+            error.code !== 'UNAVAILABLE' ||
+            current.failure()?.code !== 'UNAVAILABLE'
+          )
+            throw error;
           await reconnect(error, current);
         }
       }
@@ -140,8 +190,18 @@ export function createLaneTreeClient(initial: TwpClient, options: LaneTreeClient
     const channel = createChunkChannel(() => cancel(id));
     let resolve: Operation['resolve'] = () => {};
     let reject: Operation['reject'] = () => {};
-    const outcome = new Promise<Outcome>((accepted, refused) => { resolve = accepted; reject = refused; });
-    const operation: Operation = { id, input: structuredClone(input), channel, resolve, reject, cancelled: false };
+    const outcome = new Promise<Outcome>((accepted, refused) => {
+      resolve = accepted;
+      reject = refused;
+    });
+    const operation: Operation = {
+      id,
+      input: structuredClone(input),
+      channel,
+      resolve,
+      reject,
+      cancelled: false,
+    };
     operations.set(id, operation);
     void run(operation);
 
@@ -157,19 +217,25 @@ export function createLaneTreeClient(initial: TwpClient, options: LaneTreeClient
     operation.cancelled = true;
     operation.channel.end(new KernelError('CANCELLED', 'Request cancelled'));
     const pending = operation.pending;
-    if (pending !== undefined && pending.client.failure() === undefined) pending.client.cancel(pending.request.id);
+    if (pending !== undefined && pending.client.failure() === undefined)
+      pending.client.cancel(pending.request.id);
   }
 
   /** Reopen coverage from its actual selector after a resumable transport loss. */
   function startWatch(watch: Watch): void {
     const current = client;
-    watch.subscription = current.sub(watch.selector, watch.changed, error => {
+    watch.subscription = current.sub(watch.selector, watch.changed, (error) => {
       if (watch.closed || closed !== undefined) return;
-      if (error.code !== 'UNAVAILABLE' || current.failure()?.code !== 'UNAVAILABLE' || options.reconnect === undefined) {
+      if (
+        error.code !== 'UNAVAILABLE' ||
+        current.failure()?.code !== 'UNAVAILABLE' ||
+        options.reconnect === undefined
+      ) {
+        if (current.failure() !== undefined) publish('disconnected');
         watch.refused?.(error);
         return;
       }
-      void reconnect(error, current).catch(received => {
+      void reconnect(error, current).catch((received) => {
         if (!(received instanceof KernelError)) throw received;
         watch.refused?.(received);
       });
@@ -183,10 +249,18 @@ export function createLaneTreeClient(initial: TwpClient, options: LaneTreeClient
     while (!watch.closed) {
       const current = client;
       const subscription = watch.subscription;
-      if (subscription === undefined) throw new KernelError('INVALID', 'Missing owned subscription');
-      try { await subscription.ready; return; }
-      catch (error) {
-        if (!(error instanceof KernelError) || error.code !== 'UNAVAILABLE' || current.failure()?.code !== 'UNAVAILABLE') throw error;
+      if (subscription === undefined)
+        throw new KernelError('INVALID', 'Missing owned subscription');
+      try {
+        await subscription.ready;
+        return;
+      } catch (error) {
+        if (
+          !(error instanceof KernelError) ||
+          error.code !== 'UNAVAILABLE' ||
+          current.failure()?.code !== 'UNAVAILABLE'
+        )
+          throw error;
         await reconnect(error, current);
       }
     }
@@ -194,23 +268,41 @@ export function createLaneTreeClient(initial: TwpClient, options: LaneTreeClient
   }
 
   return {
+    connection: {
+      getSnapshot: () => state,
+      subscribe(listener) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    },
     cache,
-    get ready() { return admitted().then(current => current.ready); },
+    get ready() {
+      return admitted().then((current) => current.ready);
+    },
     key,
     failure: () => closed ?? (options.reconnect === undefined ? client.failure() : undefined),
-    read(selector) { return admitted().then(current => current.read(selector)); },
-    act(input) { return request({ act: { ...input, opId: input.opId ?? key() } }); },
-    commit(input) { return request({ commit: { ...input, opId: input.opId ?? key() } }); },
+    read(selector) {
+      return admitted().then((current) => current.read(selector));
+    },
+    act(input) {
+      return request({ act: { ...input, opId: input.opId ?? key() } });
+    },
+    commit(input) {
+      return request({ commit: { ...input, opId: input.opId ?? key() } });
+    },
     sub(selector, changed, refused) {
       available();
       const watch: Watch = { selector: structuredClone(selector), changed, refused, closed: false };
       watches.add(watch);
       startWatch(watch);
       const subscription = watch.subscription;
-      if (subscription === undefined) throw new KernelError('INVALID', 'Missing owned subscription');
+      if (subscription === undefined)
+        throw new KernelError('INVALID', 'Missing owned subscription');
 
       return {
-        get id() { return watch.subscription?.id ?? subscription.id; },
+        get id() {
+          return watch.subscription?.id ?? subscription.id;
+        },
         ready: watchReady(watch),
         close() {
           if (watch.closed) return;
@@ -224,10 +316,17 @@ export function createLaneTreeClient(initial: TwpClient, options: LaneTreeClient
     close(reason) {
       if (closed !== undefined) return;
       closed = reason ?? new KernelError('CANCELLED', 'Lane owner closed');
+      publish('disconnected');
       lifetime.abort(closed);
-      for (const watch of watches) { watch.closed = true; watch.subscription?.close(); }
+      for (const watch of watches) {
+        watch.closed = true;
+        watch.subscription?.close();
+      }
       watches.clear();
-      for (const operation of operations.values()) { operation.channel.end(closed); operation.reject(closed); }
+      for (const operation of operations.values()) {
+        operation.channel.end(closed);
+        operation.reject(closed);
+      }
       operations.clear();
       client.close(closed);
     },

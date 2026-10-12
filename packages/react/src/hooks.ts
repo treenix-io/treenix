@@ -3,30 +3,18 @@ import type { ErrorCopy } from '@treenx/core/kernel/types';
 // Treenix Hooks — reactive node access with Query<T> shape
 // usePath:     reactive path read (URI or typed proxy) → Query<T>
 // useChildren: reactive children list with pagination → ChildrenQuery
-// set:         persist node (optimistic + server)
-// execute:     action caller
-// watch:       universal async generator
 
-import { AnyType, compKey, getComponent, getComponentByName, getComponents, getMeta, type NodeData, normalizeType, resolve } from '@treenx/core';
-import { type Class, getDefaults, type TypeProxy } from '@treenx/core/comp';
+import { getComponent, getMeta, normalizeType } from '@treenx/core';
+import { type Class, type TypeProxy } from '@treenx/core/comp';
 import { deriveURI, parseURI } from '@treenx/core/uri';
-import type { ChildrenOpts as TreeChildrenOpts } from '@treenx/core/tree';
-import { mergeIntoNode, mergeToOps, type OnChange } from '#tree/on-change';
-import { trackedGet } from '#tree/read-track';
-import { confirmFromResponse, hasPending, pushOptimistic, rollback } from '#tree/rebase';
+import { mergeIntoNode, type OnChange } from '#tree/on-change';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from 'react';
-import * as cache from '#tree/cache';
-import { type ClientAction, treeClient } from '#tree/tree-client';
-import { type ClientIterator, clientIterator } from '#tree/client-stream';
-import { ensureType } from '#schema-loader';
-import { type ChildrenHandle, type ChildrenOpts, EMPTY_PATH_SNAPSHOT, type PathHandle } from '#tree/tree-source';
+  type ChildrenHandle,
+  type ChildrenOpts,
+  EMPTY_PATH_SNAPSHOT,
+  type PathHandle,
+} from '#tree/tree-source';
 import { useTreeSource } from '#tree/tree-source-context';
 import { useTreeEffects, type TreeEffects } from '#tree/effects';
 
@@ -43,23 +31,23 @@ export { useTheme, type Theme, type UseThemeResult, type CustomThemeSpec } from 
 
 export type Query<T> = {
   readonly data: T;
-  readonly loading: boolean;       // initial fetch in flight, data not yet valid
-  readonly error: Error | null;    // last error; cleared on refetch success
-  readonly stale: boolean;         // have data, background revalidate in flight
-  refetch(): void;                 // stable callback, coalesces if already in flight
+  readonly loading: boolean; // initial fetch in flight, data not yet valid
+  readonly error: Error | null; // last error; cleared on refetch success
+  readonly stale: boolean; // have data, background revalidate in flight
+  refetch(): void; // stable callback, coalesces if already in flight
 };
 
 export type ChildrenQuery = Query<PresentationNode[]> & {
   readonly errors: readonly ErrorCopy[];
-  readonly hasMore: boolean;       // nextCursor present
-  readonly loadingMore: boolean;   // next page append in flight; mutually exclusive with stale
-  loadMore(): void;                // no-op if !hasMore or already loadingMore
+  readonly hasMore: boolean; // nextCursor present
+  readonly loadingMore: boolean; // next page append in flight; mutually exclusive with stale
+  loadMore(): void; // no-op if !hasMore or already loadingMore
 };
 
 // Single source of truth — the TreeSource contract (limit/query/watch/watchNew).
 export type { ChildrenOpts } from '#tree/tree-source';
 
-// Watch ref-counting + page-size tracking now live in ClientTreeSource.
+// Subscription coverage and pagination belong to the selected TreeSource.
 
 // ── usePath: reactive path read → Query<T> ──
 //
@@ -90,11 +78,11 @@ export function usePath<T extends object>(
   const source = useTreeSource();
   const effects = useTreeEffects();
   const isTyped = typeof clsOrOpts === 'function';
-  const cls = isTyped ? clsOrOpts as Class<T> : undefined;
-  const opts = isTyped ? undefined : clsOrOpts as PathOpts | undefined;
+  const cls = isTyped ? (clsOrOpts as Class<T>) : undefined;
+  const opts = isTyped ? undefined : (clsOrOpts as PathOpts | undefined);
 
   const parsed = useMemo(
-    () => pathOrUri && !isTyped ? parseURI(pathOrUri) : null,
+    () => (pathOrUri && !isTyped ? parseURI(pathOrUri) : null),
     [pathOrUri, isTyped],
   );
   const path = isTyped ? pathOrUri : (parsed?.path ?? null);
@@ -103,34 +91,36 @@ export function usePath<T extends object>(
   // stable until any of those three change. Source owns the merge.
   const snap = useSyncExternalStore(
     useCallback(
-      (cb: () => void) => path ? source.subscribePath(path, cb) : noopUnsub,
+      (cb: () => void) => (path ? source.subscribePath(path, cb) : noopUnsub),
       [source, path],
     ),
-    useCallback(
-      () => path ? source.getPathSnapshot(path) : EMPTY_PATH_SNAPSHOT,
-      [source, path],
-    ),
-    useCallback(
-      () => path ? source.getPathSnapshot(path) : EMPTY_PATH_SNAPSHOT,
-      [source, path],
-    ),
+    useCallback(() => (path ? source.getPathSnapshot(path) : EMPTY_PATH_SNAPSHOT), [source, path]),
+    useCallback(() => (path ? source.getPathSnapshot(path) : EMPTY_PATH_SNAPSHOT), [source, path]),
   );
 
-  // Lifecycle — mountPath owns fetch + watch ref-counting + SSE-reset re-fetch.
+  // Lifecycle — mountPath owns reads and native subscription coverage.
   // dispose() reverses everything.
   const handleRef = useRef<PathHandle | null>(null);
   useEffect(() => {
-    if (!path) { handleRef.current = null; return; }
+    if (!path) {
+      handleRef.current = null;
+      return;
+    }
     debugPath(path, 'usePath');
     const h = source.mountPath(path, opts);
     handleRef.current = h;
-    return () => { h.dispose(); handleRef.current = null; };
+    return () => {
+      h.dispose();
+      handleRef.current = null;
+    };
   }, [source, path, opts?.once]);
 
-  const refetch = useCallback(() => { handleRef.current?.refetch(); }, []);
+  const refetch = useCallback(() => {
+    handleRef.current?.refetch();
+  }, []);
 
   // Derived flags — `loading` is status-driven, NOT presence-driven.
-  // A null tRPC response settles to 'not_found' → loading flips to false
+  // A completed empty snapshot settles to 'not_found' → loading flips to false
   // with data:undefined.
   const loading = !path || snap.status === undefined || snap.status === 'loading';
   // Path mode: refetch re-enters 'loading' fully; no background revalidate layer.
@@ -167,45 +157,75 @@ export function useChildren(parentPath: string, opts?: ChildrenOpts): ChildrenQu
   // Gated multi-query mounts (§4.2, ns6p.4 F6) publish a per-handle snapshot
   // lane instead of the shared parent-keyed cache — consume it when present.
   const queryKey = opts?.query ? JSON.stringify(opts.query) : undefined;
-  const [ownedLane, setOwnLane] = useState<{ source: typeof source; path: string; limit?: number; watch?: boolean; watchNew?: boolean; queryKey?: string; handle: ChildrenHandle } | null>(null);
-  const ownLane = ownedLane?.source === source && ownedLane.path === parentPath
-    && ownedLane.limit === opts?.limit && ownedLane.watch === opts?.watch && ownedLane.watchNew === opts?.watchNew
-    && ownedLane.queryKey === queryKey ? ownedLane.handle : undefined;
+  const [ownedLane, setOwnLane] = useState<{
+    source: typeof source;
+    path: string;
+    limit?: number;
+    watch?: boolean;
+    watchNew?: boolean;
+    queryKey?: string;
+    handle: ChildrenHandle;
+  } | null>(null);
+  const ownLane =
+    ownedLane?.source === source &&
+    ownedLane.path === parentPath &&
+    ownedLane.limit === opts?.limit &&
+    ownedLane.watch === opts?.watch &&
+    ownedLane.watchNew === opts?.watchNew &&
+    ownedLane.queryKey === queryKey
+      ? ownedLane.handle
+      : undefined;
 
   // The owning source publishes data, phase, continuation, and failure atomically.
   const snap = useSyncExternalStore(
     useCallback(
-      (cb: () => void) => ownLane?.subscribe ? ownLane.subscribe(cb) : source.subscribeChildren(parentPath, cb),
+      (cb: () => void) =>
+        ownLane?.subscribe ? ownLane.subscribe(cb) : source.subscribeChildren(parentPath, cb),
       [source, parentPath, ownLane, opts?.limit, opts?.watch, opts?.watchNew, queryKey],
     ),
     useCallback(
-      () => ownLane?.getSnapshot ? ownLane.getSnapshot() : source.getChildrenSnapshot(parentPath, opts),
+      () =>
+        ownLane?.getSnapshot ? ownLane.getSnapshot() : source.getChildrenSnapshot(parentPath, opts),
       [source, parentPath, ownLane, opts?.limit, opts?.watch, opts?.watchNew, queryKey],
     ),
     useCallback(
-      () => ownLane?.getSnapshot ? ownLane.getSnapshot() : source.getChildrenSnapshot(parentPath, opts),
+      () =>
+        ownLane?.getSnapshot ? ownLane.getSnapshot() : source.getChildrenSnapshot(parentPath, opts),
       [source, parentPath, ownLane, opts?.limit, opts?.watch, opts?.watchNew, queryKey],
     ),
   );
 
   // Lifecycle — mountChildren owns fetch + retain/release + watch ref-counting +
-  // page-size lock + SSE-reset re-fetch. dispose() reverses everything.
+  // the requested page window. dispose() reverses everything.
   // Query identity by value — callers pass fresh object literals every render.
   const handleRef = useRef<ChildrenHandle | null>(null);
   useEffect(() => {
     debugPath(parentPath, 'useChildren');
     const h = source.mountChildren(parentPath, opts);
     handleRef.current = h;
-    if (h.getSnapshot && h.subscribe) setOwnLane({ source, path: parentPath, limit: opts?.limit, watch: opts?.watch, watchNew: opts?.watchNew, queryKey, handle: h });
+    if (h.getSnapshot && h.subscribe)
+      setOwnLane({
+        source,
+        path: parentPath,
+        limit: opts?.limit,
+        watch: opts?.watch,
+        watchNew: opts?.watchNew,
+        queryKey,
+        handle: h,
+      });
     return () => {
       h.dispose();
       handleRef.current = null;
-      setOwnLane((cur) => cur?.handle === h ? null : cur);
+      setOwnLane((cur) => (cur?.handle === h ? null : cur));
     };
   }, [source, parentPath, opts?.limit, opts?.watch, opts?.watchNew, queryKey]);
 
-  const refetch = useCallback(() => { handleRef.current?.refetch(); }, []);
-  const loadMore = useCallback(() => { handleRef.current?.loadMore(); }, []);
+  const refetch = useCallback(() => {
+    handleRef.current?.refetch();
+  }, []);
+  const loadMore = useCallback(() => {
+    handleRef.current?.loadMore();
+  }, []);
 
   // Derived flags — each state derives from exactly one source.
   const loading = snap.phase === 'idle' || snap.phase === 'initial';
@@ -213,238 +233,26 @@ export function useChildren(parentPath: string, opts?: ChildrenOpts): ChildrenQu
   const loadingMore = snap.phase === 'append';
   const hasMore = snap.nextCursor !== null;
 
-  return useMemo(() => ({
-    data: snap.data,
-    errors: snap.errors ?? NO_CHILD_ERRORS,
-    hasMore,
-    loading,
-    loadingMore,
-    error: snap.error,
-    stale,
-    refetch,
-    loadMore,
-  }), [snap, hasMore, loading, loadingMore, stale, refetch, loadMore]);
-}
-
-// ── set: optimistic update + server persist ──
-// Returns the fresh node from server (with bumped $rev) so callers that hold
-// a local copy of the saved node — e.g. JSON editor — can reflect the new
-// $rev. Without this, a second save reuses the stale OCC token and trips
-// CONFLICT (Expected $rev N+1, got N).
-
-export async function set(next: NodeData): Promise<NodeData> {
-  const prev = cache.get(next.$path);
-  cache.put(next);
-  try {
-    const { $v, ...input } = next;
-    for (const [name, component] of getComponents(next, AnyType)) if (name !== '') {
-      const { $v, ...fields } = component;
-      input[name] = fields;
-    }
-    await treeClient.commit([{ kind: 'put', node: input }]);
-  } catch (err) {
-    // F15: rollback optimistic cache on server reject (validation, ACL, OCC)
-    if (prev) cache.put(prev); else cache.remove(next.$path);
-    throw err;
-  }
-  // r3-F1a: post-commit refresh through the door — a newer set/remove event
-  // landing first must win (a raw cache.put overwrote fresher images and
-  // resurrected removes). Server paths refetch via trpc directly: the remote
-  // withCache layer never sees SSE invalidations, so a cached hit could feed
-  // the door a stale image; /local stays on the FilterTree (memory).
-  const o = await trackedGet(
-    next.$path,
-    () => treeClient.read({ kind: 'node', path: next.$path }),
+  return useMemo(
+    () => ({
+      data: snap.data,
+      errors: snap.errors ?? NO_CHILD_ERRORS,
+      hasMore,
+      loading,
+      loadingMore,
+      error: snap.error,
+      stale,
+      refetch,
+      loadMore,
+    }),
+    [snap, hasMore, loading, loadingMore, stale, refetch, loadMore],
   );
-  if (o.error !== undefined) {
-    // Refresh failure is NOT a write failure — the commit stands; rolling back
-    // here would diverge from the server permanently once the commit event
-    // lands. Loud, non-rolling; the event/door lane owns convergence now.
-    console.error('[treenix] set: post-commit refresh failed for', next.$path, o.error);
-  }
-  return o.node ?? cache.get(next.$path) ?? next;
 }
-
-// ── createNode: optimistic create + server persist ──
-
-export async function createNode(path: string, type: string, data?: Record<string, unknown>) {
-  // Lazy-load schema so getDefaults can fill required fields for types not
-  // yet registered on the client. Caller data overrides defaults.
-  await ensureType(type);
-  const node: NodeData = { $path: path, $type: type, ...getDefaults(type), ...data };
-  cache.put(node);
-  try {
-    await treeClient.commit([{ kind: 'put', node }]);
-  } catch (err) {
-    cache.remove(path);
-    throw err;
-  }
-}
-
-// ── addComponent: attach a typed component to a node (optimistic + patch) ──
-
-export async function addComponent(path: string, name: string, type: string) {
-  // Lazy-load schema so getDefaults can fill required fields for types not
-  // yet registered on the client.
-  await ensureType(type);
-  const comp = { $type: type, ...getDefaults(type) };
-  const key = compKey(name);
-  const prev = cache.get(path);
-  if (prev) cache.put({ ...prev, [key]: comp });
-  try {
-    await treeClient.commit([{ kind: 'patch', path, ops: [['r', key, comp]] }]);
-  } catch (err) {
-    // F15: rollback optimistic cache on server reject — a failed write emits no
-    // SSE event, so a phantom component would persist (incl. IndexedDB) forever.
-    if (prev) cache.put(prev);
-    throw err;
-  }
-}
-
-// ── removeComponent: detach a named component from a node (optimistic + patch) ──
-
-export async function removeComponent(path: string, name: string) {
-  const key = compKey(name);
-  const prev = cache.get(path);
-  if (prev) {
-    const next = { ...prev };
-    delete next[key];
-    cache.put(next);
-  }
-  try {
-    await treeClient.commit([{ kind: 'patch', path, ops: [['d', key]] }]);
-  } catch (err) {
-    // F15: rollback — same contract as addComponent/set.
-    if (prev) cache.put(prev);
-    throw err;
-  }
-}
-
-export async function patchNode(path: string, partial: OnChange): Promise<void> {
-  const ops = mergeToOps(partial);
-  if (!ops.length) return;
-  await treeClient.commit([{ kind: 'patch', path, ops }]);
-  // Editors with R+W and no S must see their accepted edit; ordered reads preserve newer events.
-  const result = await trackedGet(path, () => treeClient.read({ kind: 'node', path }));
-  if (result.error !== undefined) {
-    console.error('[treenix] patch: post-commit refresh failed for', path, result.error);
-  }
-}
-
-export function readNode(path: string): Promise<NodeData | undefined> {
-  return treeClient.read({ kind: 'node', path });
-}
-
-export function readChildren(path: string, options?: TreeChildrenOpts) {
-  return treeClient.read({ kind: 'children', path, options });
-}
-
-export function refreshChildren(path: string): void {
-  cache.signalChildrenDirty(path);
-}
-
-// ── removeNode: optimistic delete + server persist ──
-
-export async function removeNode(path: string) {
-  const prev = cache.get(path);
-  cache.remove(path);
-  try {
-    await treeClient.commit([{ kind: 'remove', path }]);
-  } catch (err) {
-    if (prev) cache.put(prev);
-    throw err;
-  }
-}
-
-// ── moveNode: relocate a node to a new path ──
-// Mirrors the core relocate contract (FilterTree.patch, core-yje): strip $rev —
-// the destination path has no stored node, so a carried rev deterministically
-// throws OCC — and write the destination BEFORE removing the source, so a
-// rejected write can't lose the node (remove-then-set was cnr.5 C47).
-
-export async function moveNode(fromPath: string, newPath: string): Promise<void> {
-  const fromNode = cache.get(fromPath);
-  if (!fromNode) throw new Error(`moveNode: ${fromPath} is not in cache`);
-
-  const { $rev, ...body } = fromNode;
-  await treeClient.commit([{ kind: 'put', node: { ...body, $path: newPath } }]);
-  await treeClient.commit([{ kind: 'remove', path: fromPath }]);
-  cache.remove(fromPath);
-}
-
-// ── execute: action caller ──
 
 export interface ActionResults {}
 
 /** Named producers publish their exact piece type; dynamic action streams remain unknown. */
 export interface ActionChunks {}
-
-export function execute<T extends keyof ActionResults, A extends keyof ActionResults[T] & string>(
-  pathOrUri: string, action: A, data: unknown, type: T, key?: string,
-): Promise<ActionResults[T][A]>;
-export function execute(
-  pathOrUri: string, action: string, data?: unknown, type?: string, key?: string,
-): Promise<unknown>;
-export function execute(
-  pathOrUri: string, action: string, data?: unknown, type?: string, key?: string,
-) {
-  let path = pathOrUri;
-  if (!key && pathOrUri.includes('#')) {
-    const parsed = parseURI(pathOrUri);
-    path = parsed.path;
-    key = parsed.key;
-  }
-
-  // opId — idempotency key + ack correlator (core-gk8.1). The server threads it
-  // to the write and echoes it as `by` on the resulting event, so rebase can tell
-  // our own ack from a foreign write. Generated unconditionally: even when local
-  // prediction is skipped, the server still dedups replays on it.
-  const opId = crypto.randomUUID();
-
-  // Optimistic: resolve class from cache + registry, predict locally
-  const cached = cache.get(path);
-  if (cached) {
-    const compType = type ?? (key ? getComponentByName(cached, key)?.$type : undefined) ?? cached.$type;
-    const meta = getMeta(compType, `action:${action}`);
-    // needs → deps are injected server-side only; prediction would run the
-    // method with undefined deps (core-anz4.18) — skip, server result syncs.
-    if (!meta?.noOptimistic && !meta?.needs) {
-      const cls = resolve(compType, 'class');
-      const actionFn = resolve(compType, `action:${action}`, false);
-      if (cls && actionFn) pushOptimistic(path, cls, key, actionFn, data, opId, { type: compType, action });
-    }
-  }
-
-  return treeClient.act({ path, type, component: key, action, args: data, opId }).then(
-    async result => {
-      // Ack-via-response (core-anz4.13): a caller with R+W but no S never gets
-      // the `by`-matched event — the overlay would hang forever. The response
-      // proves commit; confirm against an authoritative refetch. S callers pass
-      // here too — rebase suppresses the later event so it isn't double-applied.
-      if (hasPending(path, opId)) await confirmPending(path, opId);
-      return result;
-    },
-    err => {
-      rollback(path, opId);
-      throw err;
-    },
-  );
-}
-
-async function confirmPending(path: string, opId: string): Promise<void> {
-  try {
-    const fresh = await treeClient.read({ kind: 'node', path });
-    confirmFromResponse(path, opId, fresh ?? undefined);
-  } catch (err) {
-    const code = (err as { data?: { code?: string }; code?: string }).data?.code
-      ?? (err as { code?: string }).code;
-    // No R on the result — the action still succeeded; overlay and cache entry
-    // are unverifiable now, drop both (confirmFromResponse undefined branch).
-    if (code === 'FORBIDDEN') { confirmFromResponse(path, opId, undefined); return; }
-    console.warn('[treenix] ack refetch failed — dropping optimistic op for', path, err);
-    rollback(path, opId);
-  }
-}
 
 // ── useCanWrite: ACL-based write permission check ──
 // Returns plain boolean — NOT wrapped in Query<T>. See plan §2.4:
@@ -456,50 +264,24 @@ export function useCanWrite(path: string | null): boolean {
   const source = useTreeSource();
   const effects = useTreeEffects();
   useSyncExternalStore(
-    callback => path === null ? () => {} : source.subscribePath(path, callback),
-    () => path === null ? undefined : source.getPathSnapshot(path),
-    () => path === null ? undefined : source.getPathSnapshot(path),
+    (callback) => (path === null ? () => {} : source.subscribePath(path, callback)),
+    () => (path === null ? undefined : source.getPathSnapshot(path)),
+    () => (path === null ? undefined : source.getPathSnapshot(path)),
   );
   return path !== null && ((effects.bits(path) ?? 0) & W) !== 0;
 }
 
 // ── Internals ──
 
-function streamToAsyncIterable<T>(
-  action: ClientAction,
-) {
-  return {
-    [Symbol.asyncIterator](): ClientIterator<T> {
-      return clientIterator(observer => treeClient.sub({ kind: 'action', action, observer }));
-    },
-  };
-}
-
-/** Retain the existing effects only on the explicitly legacy source owner. */
-function legacyStream<T extends keyof ActionChunks, A extends keyof ActionChunks[T] & string>(
-  action: ClientAction & { type: T; action: A },
-): AsyncIterableIterator<ActionChunks[T][A]>;
-function legacyStream(action: ClientAction): AsyncIterableIterator<unknown>;
-function legacyStream(action: ClientAction): AsyncIterableIterator<unknown> {
-  return streamToAsyncIterable(action)[Symbol.asyncIterator]();
-}
-
-export const legacyTreeEffects: TreeEffects = {
-  lane: false,
-  execute,
-  patchNode,
-  createNode, removeNode,
-  stream: legacyStream,
-  bits: () => undefined,
-};
-
 function makeProxy<T extends object>(
-  path: string, cls: Class<T>, node: PresentationNode | undefined, effects: TreeEffects, key?: string,
+  path: string,
+  cls: Class<T>,
+  node: PresentationNode | undefined,
+  effects: TreeEffects,
+  key?: string,
 ): TypeProxy<T> {
   const type = normalizeType(cls);
-  const comp = node
-    ? getComponent(node, cls, key)
-    : undefined;
+  const comp = node ? getComponent(node, cls, key) : undefined;
 
   return new Proxy(comp ?? {}, {
     get: (_target, prop) => {
@@ -508,35 +290,12 @@ function makeProxy<T extends object>(
       if (!meta) return (comp as any)?.[prop];
 
       if (meta.stream)
-        return (data?: unknown) => effects.stream({ path, type, component: key, action: prop, args: data });
+        return (data?: unknown) =>
+          effects.stream({ path, type, component: key, action: prop, args: data });
 
       return (data?: unknown) => effects.execute(path, prop, data, type, key);
     },
   }) as TypeProxy<T>;
-}
-
-// ── watch: universal async generator ──
-
-export function watch<T = unknown>(uri: string): ClientIterator<T | undefined> {
-  const parsed = parseURI(uri);
-
-  if (parsed.action) {
-    return streamToAsyncIterable<T>({
-      path: parsed.path,
-      component: parsed.key,
-      action: parsed.action,
-      args: parsed.data,
-    })[Symbol.asyncIterator]();
-  }
-
-  return clientIterator(observer => treeClient.sub({
-    kind: 'path', path: parsed.path,
-    observer: {
-      next(node) { observer.next(deriveURI<T>(node, parsed)); },
-      error: observer.error,
-      complete: observer.complete,
-    },
-  }), true);
 }
 
 // ── useValue: useState with OnChange-shaped setter, resets when input identity changes ──
@@ -561,7 +320,9 @@ export function useValue<T extends object>(
   const sinkRef = useRef(onSink);
   sinkRef.current = onSink;
   const onChange = useCallback((partial: OnChange<T>) => {
-    setState(p => mergeIntoNode(p as Record<string, unknown>, partial as Record<string, unknown>) as T);
+    setState(
+      (p) => mergeIntoNode(p as Record<string, unknown>, partial as Record<string, unknown>) as T,
+    );
     sinkRef.current?.(partial);
   }, []);
   return [state, onChange];

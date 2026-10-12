@@ -2,8 +2,7 @@
 //
 // Source owners:
 //   LaneTreeSource (this package) — canonical TWP subscription resources.
-//   ClientTreeSource (this package) — wraps in-memory cache + tRPC + SSE.
-//   ServerTreeSource (@treenx/ssr)  — wraps an ACL-scoped Tree, no-op subscribe,
+//   ServerTreeSource (@treenx/ssr)  — wraps a request-scoped Reader, no-op subscribe,
 //                                     synchronous reads, flush-pending render loop.
 //
 // Hooks consume only this interface (via TreeSourceProvider). The split lets
@@ -11,10 +10,13 @@
 // or SSE plumbing into Node.
 
 import type { PresentationNode } from '#tree/presentation';
-import type { ChildrenPhase, PathStatus } from './cache';
 import type { ErrorCopy, SubSelector } from '@treenx/core/kernel/types';
 import type { NativeMount, NativeSnapshot } from '#tree/native-source';
 import type { TreeEffects } from '#tree/effects';
+import type { LaneConnection } from '#tree/lane-tree-client';
+
+export type PathStatus = 'loading' | 'ready' | 'not_found' | 'error';
+export type ChildrenPhase = 'idle' | 'initial' | 'refetch' | 'append' | 'ready' | 'error';
 
 export type ChildrenOpts = {
   /** Page size; absent = source default. Legacy sources lock it per parent; native lanes own each exact window. */
@@ -77,6 +79,7 @@ export type ChildrenHandle = {
 
 export interface TreeSource {
   readonly effects?: TreeEffects;
+  readonly connection?: LaneConnection;
   // ── Reactive snapshots (stable references; only change when underlying data does) ──
 
   /** Snapshot for a single path. Returns the same object reference until the
@@ -95,8 +98,8 @@ export interface TreeSource {
   // ── Lifecycle (ownership of fetch + watch + reset-handling) ──
   //
   // `mountPath` / `mountChildren` are the ONLY effectful entry points hooks
-  // use. They encapsulate fetch, watch ref-counting, SSE-reset re-fetch, and
-  // page-size lock release. `dispose()` reverses everything mount allocated.
+// use. They acquire native subscription coverage and pagination resources.
+// `dispose()` reverses everything mount allocated.
   //
   // For SSR (ServerTreeSource): mountPath / mountChildren record the path as
   // pending and return inert handles; the next render pass flushes pending.
@@ -141,7 +144,7 @@ export class TreeSourceMissingError extends Error {
   constructor() {
     super(
       'No <TreeSourceProvider> found. Wrap your app with ' +
-      '<TreeSourceProvider source={createClientTreeSource()}>.',
+        '<TreeSourceProvider source={createLaneTreeSource(client)}>.',
     );
     this.name = 'TreeSourceMissingError';
   }

@@ -17,12 +17,7 @@ import { useAuthContext } from './auth-context';
 import { Render, RenderContext } from '#context';
 import { RouteParamsContext } from '#context/route-params';
 import { makeNavigateApi, NavigateProvider, navigateTo, useLocation } from '#navigate';
-import * as cache from '#tree/cache';
 import { useRouteResolve } from '#router/use-route-resolve';
-
-// Hydrate cache from IDB before first render — RoutedPage relies on this.
-// The IDB copy only paints stale data early; without it the session reads from the server alone.
-cache.hydrate().catch((e: unknown) => console.error('[cache] IndexedDB hydrate failed; running without the offline copy:', e));
 
 export function Router() {
   const { authed, authChecked, showLoginModal, setAuthed, closeLoginModal } = useAuthContext();
@@ -33,7 +28,10 @@ export function Router() {
   const seoTitle = result?.node ? getComponent(result.node, Seo)?.title : undefined;
 
   useEffect(() => {
-    if (seoTitle) { document.title = seoTitle; return; }
+    if (seoTitle) {
+      document.title = seoTitle;
+      return;
+    }
     const trimmed = (target || pathname || '/').replace(/^\/+/, '');
     document.title = trimmed ? `${trimmed} | Treenix` : 'Treenix';
   }, [seoTitle, target, pathname]);
@@ -41,7 +39,11 @@ export function Router() {
   // Default identity nav for catch-all / login modal. Shell views override
   // this via inner <NavigateProvider> with route-aware makeHref.
   const defaultNav = useMemo(
-    () => makeNavigateApi(p => navigateTo(p), p => p),
+    () =>
+      makeNavigateApi(
+        (p) => navigateTo(p),
+        (p) => p,
+      ),
     [],
   );
 
@@ -54,7 +56,12 @@ export function Router() {
   if (!authed && !isPublic) {
     return (
       <NavigateProvider value={defaultNav}>
-        <LoginModal onLogin={(uid) => { setAuthed(uid); closeLoginModal(); }} />
+        <LoginModal
+          onLogin={(uid) => {
+            setAuthed(uid);
+            closeLoginModal();
+          }}
+        />
       </NavigateProvider>
     );
   }
@@ -63,7 +70,10 @@ export function Router() {
   const modalCloseable = !!authed && !isAnon;
   const modal = showLoginModal && (
     <LoginModal
-      onLogin={(uid) => { setAuthed(uid); closeLoginModal(); }}
+      onLogin={(uid) => {
+        setAuthed(uid);
+        closeLoginModal();
+      }}
       onClose={modalCloseable ? closeLoginModal : undefined}
     />
   );

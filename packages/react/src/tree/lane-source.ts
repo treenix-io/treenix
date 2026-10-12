@@ -1,13 +1,18 @@
 import { readSnapshot, type NativeHydrationState } from '#tree/read-snapshot';
 import { createLaneEffects } from '#tree/lane-effects';
+import type { LaneConnection } from '#tree/lane-tree-client';
 import type { PresentationNode } from '#tree/presentation';
 import type { TwpClient } from '@treenx/core/client/twp';
 import { KernelError } from '@treenx/core/errors';
 import type { ErrorCopy, Node, NodeCopy, SubSelector } from '@treenx/core/kernel/types';
 import { createNativeTreeSource, type NativeSnapshot, type NativeMount } from '#tree/native-source';
 import {
-  EMPTY_CHILDREN_SNAPSHOT, EMPTY_PATH_SNAPSHOT,
-  type ChildrenOpts, type ChildrenSnapshot, type PathSnapshot, type TreeSource,
+  EMPTY_CHILDREN_SNAPSHOT,
+  EMPTY_PATH_SNAPSHOT,
+  type ChildrenOpts,
+  type ChildrenSnapshot,
+  type PathSnapshot,
+  type TreeSource,
 } from '#tree/tree-source';
 
 interface Resource {
@@ -27,13 +32,24 @@ function node(copy: NodeCopy): Node {
 }
 
 /** Adapt canonical lane resources to the public hooks while retaining their actual cache ownership. */
-export function createLaneTreeSource(client: TwpClient, initial?: NativeHydrationState): TreeSource & { readonly effects: ReturnType<typeof createLaneEffects>['effects']; getSelectorSnapshot(selector: SubSelector): NativeSnapshot; mountSelector(selector: SubSelector): NativeMount; close(): void } {
+export function createLaneTreeSource(
+  client: TwpClient & { readonly connection?: LaneConnection },
+  initial?: NativeHydrationState,
+): TreeSource & {
+  readonly effects: ReturnType<typeof createLaneEffects>['effects'];
+  getSelectorSnapshot(selector: SubSelector): NativeSnapshot;
+  mountSelector(selector: SubSelector): NativeMount;
+  close(): void;
+} {
   const native = createNativeTreeSource(client);
   const mutations = createLaneEffects(client);
   const presentation = mutations.presentation;
   const resources = new Map<string, Resource>();
-  const hydrated = new Map(initial?.reads.map(read => [JSON.stringify(read.selector), readSnapshot(read.result)]));
-  for (const read of initial?.reads ?? []) resources.set(JSON.stringify(read.selector), { selector: read.selector, owners: 0 });
+  const hydrated = new Map(
+    initial?.reads.map((read) => [JSON.stringify(read.selector), readSnapshot(read.result)]),
+  );
+  for (const read of initial?.reads ?? [])
+    resources.set(JSON.stringify(read.selector), { selector: read.selector, owners: 0 });
 
   /** Real admission replaces temporary server presentation, including refusal or absence. */
   function visible(selector: SubSelector): NativeSnapshot {
@@ -46,19 +62,34 @@ export function createLaneTreeSource(client: TwpClient, initial?: NativeHydratio
   const childListeners = new Map<string, Set<() => void>>();
   const closedError = new KernelError('CANCELLED', 'Lane source is closed');
   const closedPath: PathSnapshot = { data: undefined, status: 'error', error: closedError };
-  const closedChildren: ChildrenSnapshot = { data: [], phase: 'error', nextCursor: null, error: closedError };
+  const closedChildren: ChildrenSnapshot = {
+    data: [],
+    phase: 'error',
+    nextCursor: null,
+    error: closedError,
+  };
   let closed = false;
 
   /** Keep query and page-size resources separate; watch flags share the same canonical live subscription. */
   function childSelector(path: string, options?: ChildrenOpts): SubSelector {
-    return { children: path, window: { limit: options?.limit ?? 100 },
-      ...(options?.query === undefined ? {} : { where: options.query }) };
+    return {
+      children: path,
+      window: { limit: options?.limit ?? 100 },
+      ...(options?.query === undefined ? {} : { where: options.query }),
+    };
   }
 
   /** Register a passive listener; mounting owns all subscription side effects. */
-  function listen(listeners: Map<string, Set<() => void>>, path: string, callback: () => void): () => void {
+  function listen(
+    listeners: Map<string, Set<() => void>>,
+    path: string,
+    callback: () => void,
+  ): () => void {
     let active = listeners.get(path);
-    if (active === undefined) { active = new Set(); listeners.set(path, active); }
+    if (active === undefined) {
+      active = new Set();
+      listeners.set(path, active);
+    }
     active.add(callback);
     return () => {
       active!.delete(callback);
@@ -68,8 +99,10 @@ export function createLaneTreeSource(client: TwpClient, initial?: NativeHydratio
 
   /** Notify legacy hook subscriptions after canonical resource snapshots have settled. */
   function notify(resource: Resource): void {
-    const callbacks = 'node' in resource.selector
-      ? pathListeners.get(resource.selector.node) : childListeners.get(resource.selector.children);
+    const callbacks =
+      'node' in resource.selector
+        ? pathListeners.get(resource.selector.node)
+        : childListeners.get(resource.selector.children);
     for (const callback of callbacks ?? []) callback();
   }
 
@@ -77,7 +110,12 @@ export function createLaneTreeSource(client: TwpClient, initial?: NativeHydratio
   function childrenSnapshot(resource: Resource): ChildrenSnapshot {
     if (closed) return closedChildren;
     const snapshot = visible(resource.selector);
-    if (resource.observed === snapshot && resource.presentationVersion === presentation.version && resource.children !== undefined) return resource.children;
+    if (
+      resource.observed === snapshot &&
+      resource.presentationVersion === presentation.version &&
+      resource.children !== undefined
+    )
+      return resource.children;
     resource.observed = snapshot;
     resource.presentationVersion = presentation.version;
     if (snapshot.phase === 'ready') resource.operation = undefined;
@@ -89,11 +127,16 @@ export function createLaneTreeSource(client: TwpClient, initial?: NativeHydratio
       else data.push(presentation.project(copy.node));
     }
     if (snapshot.output === undefined) for (const copy of snapshot.members) present(copy);
-    else for (const member of snapshot.output)
-      if (member.kind === 'computed') data.push(member.node);
-      else present(member.copy);
-    const phase = error !== null ? 'error' : snapshot.phase === 'ready' ? 'ready'
-      : resource.operation ?? 'initial';
+    else
+      for (const member of snapshot.output)
+        if (member.kind === 'computed') data.push(member.node);
+        else present(member.copy);
+    const phase =
+      error !== null
+        ? 'error'
+        : snapshot.phase === 'ready'
+          ? 'ready'
+          : (resource.operation ?? 'initial');
     resource.children = { data, errors, phase, error, nextCursor: snapshot.next ?? null };
     return resource.children;
   }
@@ -102,20 +145,38 @@ export function createLaneTreeSource(client: TwpClient, initial?: NativeHydratio
   function pathSnapshot(resource: Resource): PathSnapshot {
     if (closed) return closedPath;
     const snapshot = visible(resource.selector);
-    if (resource.observed === snapshot && resource.presentationVersion === presentation.version && resource.path !== undefined) return resource.path;
+    if (
+      resource.observed === snapshot &&
+      resource.presentationVersion === presentation.version &&
+      resource.path !== undefined
+    )
+      return resource.path;
     resource.observed = snapshot;
     resource.presentationVersion = presentation.version;
-    let data: PresentationNode | undefined, error: Error | null = snapshot.error ?? null;
+    let data: PresentationNode | undefined,
+      error: Error | null = snapshot.error ?? null;
     try {
       const member = snapshot.output?.[0];
-      if (member !== undefined) data = member.kind === 'computed' ? member.node : presentation.project(node(member.copy));
-      else if (snapshot.members[0] !== undefined) data = presentation.project(node(snapshot.members[0]));
+      if (member !== undefined)
+        data = member.kind === 'computed' ? member.node : presentation.project(node(member.copy));
+      else if (snapshot.members[0] !== undefined)
+        data = presentation.project(node(snapshot.members[0]));
     } catch (received) {
       if (!(received instanceof KernelError)) throw received;
       error = received;
     }
-    resource.path = { data, error, status: error !== null ? 'error'
-      : snapshot.phase === 'loading' ? 'loading' : data === undefined ? 'not_found' : 'ready' };
+    resource.path = {
+      data,
+      error,
+      status:
+        error !== null
+          ? 'error'
+          : snapshot.phase === 'loading'
+            ? 'loading'
+            : data === undefined
+              ? 'not_found'
+              : 'ready',
+    };
     return resource.path;
   }
 
@@ -134,7 +195,9 @@ export function createLaneTreeSource(client: TwpClient, initial?: NativeHydratio
     const unsubscribe = handle.subscribe(() => notify(owned));
     notify(owned);
     let disposed = false;
-    return { resource: owned, handle,
+    return {
+      resource: owned,
+      handle,
       dispose() {
         if (disposed) return;
         disposed = true;
@@ -142,7 +205,8 @@ export function createLaneTreeSource(client: TwpClient, initial?: NativeHydratio
         handle.dispose();
         if (--owned.owners === 0) resources.delete(key);
         notify(owned);
-      } };
+      },
+    };
   }
 
   const unsubscribePresentation = presentation.subscribe(() => {
@@ -150,6 +214,7 @@ export function createLaneTreeSource(client: TwpClient, initial?: NativeHydratio
   });
 
   return {
+    connection: client.connection,
     effects: mutations.effects,
     getPathSnapshot(path) {
       if (closed) return closedPath;
@@ -171,8 +236,11 @@ export function createLaneTreeSource(client: TwpClient, initial?: NativeHydratio
       const owned = acquire(childSelector(path, options));
       return {
         getSnapshot: () => childrenSnapshot(owned.resource),
-        subscribe: listener => owned.handle.subscribe(listener),
-        refetch() { owned.resource.operation = 'refetch'; owned.handle.refetch(); },
+        subscribe: (listener) => owned.handle.subscribe(listener),
+        refetch() {
+          owned.resource.operation = 'refetch';
+          owned.handle.refetch();
+        },
         loadMore() {
           const snapshot = owned.handle.getSnapshot();
           if (snapshot.phase !== 'ready' || snapshot.next === undefined) return;
@@ -185,8 +253,14 @@ export function createLaneTreeSource(client: TwpClient, initial?: NativeHydratio
     getSelectorSnapshot: visible,
     mountSelector(selector) {
       const handle = native.mount(selector);
-      return { ...handle, getSnapshot: () => visible(selector),
-        dispose() { hydrated.delete(JSON.stringify(selector)); handle.dispose(); } };
+      return {
+        ...handle,
+        getSnapshot: () => visible(selector),
+        dispose() {
+          hydrated.delete(JSON.stringify(selector));
+          handle.dispose();
+        },
+      };
     },
     /** Notify mounted readers of cancellation before releasing all cached presentation references. */
     close() {

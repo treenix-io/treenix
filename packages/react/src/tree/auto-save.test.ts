@@ -9,8 +9,14 @@ import assert from 'node:assert/strict';
 
 import { createElement, type ReactNode } from 'react';
 import type { RenderHookOptions } from '@testing-library/react';
+import type { NodeData } from '@treenx/core';
 import { TreeSourceProvider } from '#tree/tree-source-context';
-import { EMPTY_CHILDREN_SNAPSHOT, NOOP_CHILDREN_HANDLE, NOOP_PATH_HANDLE, type TreeSource } from '#tree/tree-source';
+import {
+  EMPTY_CHILDREN_SNAPSHOT,
+  NOOP_CHILDREN_HANDLE,
+  NOOP_PATH_HANDLE,
+  type TreeSource,
+} from '#tree/tree-source';
 import { READ_ONLY_EFFECTS } from '#tree/effects';
 
 type Op = ['r', string, unknown] | ['d', string];
@@ -18,12 +24,36 @@ type PatchArg = { path: string; ops: Op[] };
 const patchMutate = mock.fn(async (_: PatchArg) => {});
 
 const { renderHook: testingRenderHook, act } = await import('@testing-library/react');
-const { mergeToOps, mergeIntoNode, useSave, useAutoSave, usePathSave } = await import('./auto-save');
+const { mergeToOps, mergeIntoNode, useSave, useAutoSave, usePathSave } = await import(
+  './auto-save'
+);
 const { foldPartial } = await import('./on-change');
-const cache = await import('#tree/cache');
 const { makeNode } = await import('@treenx/core');
 const { KernelError } = await import('@treenx/core/errors');
-const { $key, $node } = await import('#symbols');
+const { $key, $node, stampNode } = await import('#symbols');
+
+const nodes = new Map<string, NodeData>();
+const listeners = new Map<string, Set<() => void>>();
+const cache = {
+  get: (path: string) => nodes.get(path),
+  put(node: NodeData) {
+    stampNode(node);
+    nodes.set(node.$path, node);
+    for (const listener of listeners.get(node.$path) ?? []) listener();
+  },
+  clear() {
+    nodes.clear();
+  },
+  subscribePath(path: string, listener: () => void) {
+    let selected = listeners.get(path);
+    if (selected === undefined) {
+      selected = new Set();
+      listeners.set(path, selected);
+    }
+    selected.add(listener);
+    return () => selected.delete(listener);
+  },
+};
 
 const source: TreeSource = {
   effects: {
@@ -35,19 +65,23 @@ const source: TreeSource = {
       cache.put(mergeIntoNode(node, partial));
     },
   },
-  getPathSnapshot: path => ({ data: cache.get(path), status: 'ready', error: null }),
+  getPathSnapshot: (path) => ({ data: cache.get(path), status: 'ready', error: null }),
   getChildrenSnapshot: () => EMPTY_CHILDREN_SNAPSHOT,
   subscribePath: cache.subscribePath,
-  subscribeChildren: cache.subscribeChildren,
+  subscribeChildren: () => () => {},
   mountPath: () => NOOP_PATH_HANDLE,
   mountChildren: () => NOOP_CHILDREN_HANDLE,
 };
 
 /** Mount the draft hooks with their explicit read and mutation owner. */
-function renderHook<Result, Props>(callback: (props: Props) => Result, options?: RenderHookOptions<Props>) {
+function renderHook<Result, Props>(
+  callback: (props: Props) => Result,
+  options?: RenderHookOptions<Props>,
+) {
   return testingRenderHook(callback, {
     ...options,
-    wrapper: ({ children }: { children: ReactNode }) => createElement(TreeSourceProvider, { source, children }),
+    wrapper: ({ children }: { children: ReactNode }) =>
+      createElement(TreeSourceProvider, { source, children }),
   });
 }
 
@@ -115,7 +149,11 @@ describe('mergeToOps', () => {
   });
 
   it('sibling keys sharing a name prefix are independent', () => {
-    assert.deepEqual(mergeToOps({ meta: 1, metadata: 2, 'meta2.a': 3 }), [['r', 'meta', 1], ['r', 'metadata', 2], ['r', 'meta2.a', 3]]);
+    assert.deepEqual(mergeToOps({ meta: 1, metadata: 2, 'meta2.a': 3 }), [
+      ['r', 'meta', 1],
+      ['r', 'metadata', 2],
+      ['r', 'meta2.a', 3],
+    ]);
   });
 
   it('empty partial → empty ops', () => {
@@ -125,17 +163,28 @@ describe('mergeToOps', () => {
 
 describe('foldPartial', () => {
   it('a later key replaces the accumulated keys under it', () => {
-    assert.deepEqual(foldPartial({ 'meta.title': 'x', other: 1 }, { meta: { count: 2 } }), { other: 1, meta: { count: 2 } });
+    assert.deepEqual(foldPartial({ 'meta.title': 'x', other: 1 }, { meta: { count: 2 } }), {
+      other: 1,
+      meta: { count: 2 },
+    });
   });
 
   it('a later key under an accumulated one writes into its value', () => {
     const acc = { meta: { title: 'a', count: 1 } };
-    assert.deepEqual(foldPartial(acc, { 'meta.title': 'b', 'meta.count': undefined }), { meta: { title: 'b' } });
-    assert.deepEqual(acc, { meta: { title: 'a', count: 1 } }, 'the accumulated partial is not changed');
+    assert.deepEqual(foldPartial(acc, { 'meta.title': 'b', 'meta.count': undefined }), {
+      meta: { title: 'b' },
+    });
+    assert.deepEqual(
+      acc,
+      { meta: { title: 'a', count: 1 } },
+      'the accumulated partial is not changed',
+    );
   });
 
   it('a later key under a pending delete starts a fresh object', () => {
-    assert.deepEqual(foldPartial({ meta: undefined }, { 'meta.title': 'b' }), { meta: { title: 'b' } });
+    assert.deepEqual(foldPartial({ meta: undefined }, { 'meta.title': 'b' }), {
+      meta: { title: 'b' },
+    });
   });
 
   it('a later key under a scalar is INVALID', () => {
@@ -174,12 +223,18 @@ describe('mergeIntoNode', () => {
   });
 
   it('deletes a nested field via undefined', () => {
-    const result = mergeIntoNode({ $path: '/x', $type: 'y', meta: { title: 't', count: 0 } }, { 'meta.title': undefined });
+    const result = mergeIntoNode(
+      { $path: '/x', $type: 'y', meta: { title: 't', count: 0 } },
+      { 'meta.title': undefined },
+    );
     assert.deepEqual(result.meta, { count: 0 });
   });
 
   it('a system field is INVALID', () => {
-    assert.throws(() => mergeIntoNode({ $path: '/x', $type: 'y' }, { $path: '/hacked' }), isInvalid);
+    assert.throws(
+      () => mergeIntoNode({ $path: '/x', $type: 'y' }, { $path: '/hacked' }),
+      isInvalid,
+    );
   });
 });
 
@@ -264,9 +319,10 @@ describe('useSave: onChange', () => {
     });
     await act(() => result.current.flush());
 
-    assert.deepEqual(patchMutate.mock.calls[0].arguments[0].ops, [['r', 'meta', { title: 'C', count: 1 }]]);
+    assert.deepEqual(patchMutate.mock.calls[0].arguments[0].ops, [
+      ['r', 'meta', { title: 'C', count: 1 }],
+    ]);
   });
-
 });
 
 // ── useSave: flush ──
@@ -310,10 +366,14 @@ describe('useSave: flush', () => {
     const { result } = renderHook(() => useSave('/fail'));
 
     act(() => result.current.onChange({ title: 'New' }));
-    patchMutate.mock.mockImplementationOnce(async () => { throw new Error('FORBIDDEN'); });
+    patchMutate.mock.mockImplementationOnce(async () => {
+      throw new Error('FORBIDDEN');
+    });
 
     let err: unknown;
-    await act(async () => { err = await result.current.flush().catch(e => e); });
+    await act(async () => {
+      err = await result.current.flush().catch((e) => e);
+    });
 
     assert.ok(err instanceof Error, 'flush rejected — caller must not toast Saved');
     assert.equal(result.current.dirty, true, 'pending restored, still dirty');
@@ -332,14 +392,20 @@ describe('useSave: flush', () => {
     act(() => result.current.onChange({ title: 'B', count: 1 }));
 
     let failFlush: () => void;
-    const gate = new Promise<void>((_, rej) => { failFlush = () => rej(new Error('boom')); });
+    const gate = new Promise<void>((_, rej) => {
+      failFlush = () => rej(new Error('boom'));
+    });
     patchMutate.mock.mockImplementationOnce(async () => gate);
 
     let flushed: Promise<unknown>;
-    act(() => { flushed = result.current.flush().catch(e => e); });
+    act(() => {
+      flushed = result.current.flush().catch((e) => e);
+    });
     act(() => result.current.onChange({ title: 'C' }));
     failFlush!();
-    await act(async () => { await flushed; });
+    await act(async () => {
+      await flushed;
+    });
 
     // Restored pending: in-flight fields merged back, newer edit wins
     const v = result.current.value!;
@@ -355,8 +421,12 @@ describe('useSave: flush', () => {
     act(() => result.current.onChange({ title: 'B' }));
 
     let flushDone: () => void;
-    const slowPatch = new Promise<void>(r => { flushDone = r; });
-    patchMutate.mock.mockImplementationOnce(async () => { await slowPatch; });
+    const slowPatch = new Promise<void>((r) => {
+      flushDone = r;
+    });
+    patchMutate.mock.mockImplementationOnce(async () => {
+      await slowPatch;
+    });
 
     const flushPromise = act(() => result.current.flush());
 
@@ -378,9 +448,9 @@ describe('useSave: cancel pending auto-save (core-anz4.17)', () => {
     const { result } = renderHook(() => useAutoSave('/cancel', { delay: 100 }));
 
     act(() => result.current.onChange({ title: 'B' })); // arms the debounced auto-save
-    act(() => result.current.discard());                // JSON-tab open / explicit JSON Save cancels it
+    act(() => result.current.discard()); // JSON-tab open / explicit JSON Save cancels it
 
-    act(() => t.mock.timers.tick(500));                 // well past the delay
+    act(() => t.mock.timers.tick(500)); // well past the delay
     assert.equal(patchMutate.mock.callCount(), 0, 'canceled auto-save must not flush');
     assert.equal(result.current.dirty, false);
   });
@@ -405,22 +475,43 @@ describe('useSave: flush during inflight (verify-index 27)', () => {
     act(() => result.current.onChange({ title: 'B' }));
 
     let release: () => void;
-    const gate = new Promise<void>((r) => { release = r; });
-    patchMutate.mock.mockImplementationOnce(async () => { await gate; });
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    patchMutate.mock.mockImplementationOnce(async () => {
+      await gate;
+    });
 
     let flush1: Promise<unknown> | undefined;
     let flush2: Promise<unknown> | undefined;
-    act(() => { flush1 = result.current.flush(); });
-    act(() => { flush2 = result.current.flush(); });
+    act(() => {
+      flush1 = result.current.flush();
+    });
+    act(() => {
+      flush2 = result.current.flush();
+    });
 
     let flush2Settled = false;
-    flush2!.then(() => { flush2Settled = true; }, () => { flush2Settled = true; });
+    flush2!.then(
+      () => {
+        flush2Settled = true;
+      },
+      () => {
+        flush2Settled = true;
+      },
+    );
     await Promise.resolve();
     await Promise.resolve();
-    assert.equal(flush2Settled, false, 'flush() during inflight must await the real commit, not resolve early');
+    assert.equal(
+      flush2Settled,
+      false,
+      'flush() during inflight must await the real commit, not resolve early',
+    );
 
     release!();
-    await act(async () => { await Promise.all([flush1, flush2]); });
+    await act(async () => {
+      await Promise.all([flush1, flush2]);
+    });
     assert.equal(flush2Settled, true);
     assert.equal(patchMutate.mock.callCount(), 1, 'the second flush chained, did not re-send');
   });
@@ -431,18 +522,27 @@ describe('useSave: flush during inflight (verify-index 27)', () => {
     act(() => result.current.onChange({ title: 'B' }));
 
     let fail: () => void;
-    const gate = new Promise<void>((_, rej) => { fail = () => rej(new Error('boom')); });
+    const gate = new Promise<void>((_, rej) => {
+      fail = () => rej(new Error('boom'));
+    });
     patchMutate.mock.mockImplementationOnce(async () => gate);
 
     let flush1: Promise<unknown> | undefined;
     let flush2: Promise<unknown> | undefined;
-    act(() => { flush1 = result.current.flush().catch((e) => e); });
-    act(() => { flush2 = result.current.flush(); });
+    act(() => {
+      flush1 = result.current.flush().catch((e) => e);
+    });
+    act(() => {
+      flush2 = result.current.flush();
+    });
 
     fail!();
     await act(async () => {
       await flush1;
-      await assert.rejects(() => flush2!, (e) => e instanceof Error);
+      await assert.rejects(
+        () => flush2!,
+        (e) => e instanceof Error,
+      );
     });
   });
 });
@@ -455,7 +555,9 @@ describe('useSave: stale badge (core-anz4.17)', () => {
     const { result } = renderHook(() => useSave('/foreign'));
 
     act(() => result.current.onChange({ title: 'B' })); // editing at rev 1, dirty
-    act(() => { cache.put({ ...makeNode('/foreign', 'task', { title: 'X' }), $rev: 2 }); });
+    act(() => {
+      cache.put({ ...makeNode('/foreign', 'task', { title: 'X' }), $rev: 2 });
+    });
 
     assert.equal(result.current.dirty, true);
     assert.equal(result.current.stale, true, 'external change surfaces as stale');
@@ -473,23 +575,39 @@ describe('useSave: stale badge (core-anz4.17)', () => {
     act(() => result.current.onChange({ title: 'B' })); // edit at rev 1, editRev=1, dirty
 
     let commit: () => void;
-    const gate = new Promise<void>((r) => { commit = r; });
-    patchMutate.mock.mockImplementationOnce(async () => { await gate; });
+    const gate = new Promise<void>((r) => {
+      commit = r;
+    });
+    patchMutate.mock.mockImplementationOnce(async () => {
+      await gate;
+    });
 
     let flushing: Promise<unknown> | undefined;
-    act(() => { flushing = result.current.flush(); });
+    act(() => {
+      flushing = result.current.flush();
+    });
     act(() => result.current.onChange({ title: 'C' })); // pending accumulates → stays dirty
 
     // Own write's SSE echo arrives BEFORE the mutate response resolves.
-    act(() => { cache.put({ ...makeNode('/noswallow', 'task', { title: 'B' }), $rev: 2 }); });
+    act(() => {
+      cache.put({ ...makeNode('/noswallow', 'task', { title: 'B' }), $rev: 2 });
+    });
     commit!();
-    await act(async () => { await flushing; });
+    await act(async () => {
+      await flushing;
+    });
 
     // Genuine foreign write bumps rev again.
-    act(() => { cache.put({ ...makeNode('/noswallow', 'task', { title: 'X' }), $rev: 3 }); });
+    act(() => {
+      cache.put({ ...makeNode('/noswallow', 'task', { title: 'X' }), $rev: 3 });
+    });
 
     assert.equal(result.current.dirty, true);
-    assert.equal(result.current.stale, true, 'foreign rev after own echo must still surface — not swallowed');
+    assert.equal(
+      result.current.stale,
+      true,
+      'foreign rev after own echo must still surface — not swallowed',
+    );
   });
 });
 
@@ -503,71 +621,114 @@ describe('useSave: settle vs in-flight patch (core-anz4.17)', () => {
     act(() => result.current.onChange({ title: 'B' }));
 
     let land: () => void;
-    const gate = new Promise<void>((r) => { land = r; });
-    patchMutate.mock.mockImplementationOnce(async () => { await gate; });
+    const gate = new Promise<void>((r) => {
+      land = r;
+    });
+    patchMutate.mock.mockImplementationOnce(async () => {
+      await gate;
+    });
 
     let flushing: Promise<unknown> | undefined;
-    act(() => { flushing = result.current.flush().catch((e) => e); }); // patch parked in flight
-    act(() => result.current.onChange({ title: 'B2' }));               // pending accumulates during round-trip
+    act(() => {
+      flushing = result.current.flush().catch((e) => e);
+    }); // patch parked in flight
+    act(() => result.current.onChange({ title: 'B2' })); // pending accumulates during round-trip
 
     let settled = false;
     let settleP: Promise<void> | undefined;
-    act(() => { settleP = result.current.settle().then(() => { settled = true; }); });
+    act(() => {
+      settleP = result.current.settle().then(() => {
+        settled = true;
+      });
+    });
     await Promise.resolve();
     await Promise.resolve();
     assert.equal(settled, false, 'settle must not resolve while the patch is still in flight');
 
     land!();
-    await act(async () => { await flushing; await settleP; });
+    await act(async () => {
+      await flushing;
+      await settleP;
+    });
     assert.equal(settled, true);
     assert.equal(patchMutate.mock.callCount(), 1, 'only the in-flight patch was sent');
 
     // JSON Save: drop parked pending, then full-set the whole node.
     act(() => result.current.discard());
-    act(() => { cache.put(makeNode('/jsonrace', 'task', { title: 'JSON' })); });
+    act(() => {
+      cache.put(makeNode('/jsonrace', 'task', { title: 'JSON' }));
+    });
 
     assert.equal(cache.get('/jsonrace')!.title, 'JSON', 'full-set is the final stored state');
-    assert.equal(patchMutate.mock.callCount(), 1, 'discard prevented a parked patch from clobbering the set');
+    assert.equal(
+      patchMutate.mock.callCount(),
+      1,
+      'discard prevented a parked patch from clobbering the set',
+    );
     assert.equal(result.current.dirty, false);
   });
 
   it('a stale settle on an old path does not wipe the new path in-flight patch', async () => {
     seed('/pa', 'task', { title: 'A' });
     seed('/pb', 'task', { title: 'B' });
-    const { result, rerender } = renderHook(
-      ({ path }: { path: string }) => useSave(path),
-      { initialProps: { path: '/pa' } },
-    );
+    const { result, rerender } = renderHook(({ path }: { path: string }) => useSave(path), {
+      initialProps: { path: '/pa' },
+    });
 
     act(() => result.current.onChange({ title: 'A2' }));
     let landA: () => void;
-    const gateA = new Promise<void>((r) => { landA = r; });
-    patchMutate.mock.mockImplementationOnce(async () => { await gateA; });
+    const gateA = new Promise<void>((r) => {
+      landA = r;
+    });
+    patchMutate.mock.mockImplementationOnce(async () => {
+      await gateA;
+    });
     let flushA: Promise<unknown> | undefined;
-    act(() => { flushA = result.current.flush().catch((e) => e); }); // runA in flight on /pa
+    act(() => {
+      flushA = result.current.flush().catch((e) => e);
+    }); // runA in flight on /pa
 
     rerender({ path: '/pb' });
 
     act(() => result.current.onChange({ title: 'B2' }));
     let landB: () => void;
-    const gateB = new Promise<void>((r) => { landB = r; });
-    patchMutate.mock.mockImplementationOnce(async () => { await gateB; });
+    const gateB = new Promise<void>((r) => {
+      landB = r;
+    });
+    patchMutate.mock.mockImplementationOnce(async () => {
+      await gateB;
+    });
     let flushB: Promise<unknown> | undefined;
-    act(() => { flushB = result.current.flush().catch((e) => e); }); // runB in flight on /pb
+    act(() => {
+      flushB = result.current.flush().catch((e) => e);
+    }); // runB in flight on /pb
 
     // Old path's patch settles — its finally must NOT null the new path's slot.
     landA!();
-    await act(async () => { await flushA; });
+    await act(async () => {
+      await flushA;
+    });
 
     let bSettled = false;
     let settleP: Promise<void> | undefined;
-    act(() => { settleP = result.current.settle().then(() => { bSettled = true; }); });
+    act(() => {
+      settleP = result.current.settle().then(() => {
+        bSettled = true;
+      });
+    });
     await Promise.resolve();
     await Promise.resolve();
-    assert.equal(bSettled, false, 'settle must still await /pb in-flight patch — stale settle must not have wiped it');
+    assert.equal(
+      bSettled,
+      false,
+      'settle must still await /pb in-flight patch — stale settle must not have wiped it',
+    );
 
     landB!();
-    await act(async () => { await flushB; await settleP; });
+    await act(async () => {
+      await flushB;
+      await settleP;
+    });
     assert.equal(bSettled, true);
     assert.equal(patchMutate.mock.callCount(), 2, 'one patch per path — no re-send');
   });
@@ -575,122 +736,185 @@ describe('useSave: settle vs in-flight patch (core-anz4.17)', () => {
   it('a stale /a run rejecting does not pollute /b pending nor drop /b in-flight (r2)', async () => {
     seed('/ra', 'task', { title: 'A' });
     seed('/rb', 'task', { title: 'B' });
-    const { result, rerender } = renderHook(
-      ({ path }: { path: string }) => useSave(path),
-      { initialProps: { path: '/ra' } },
-    );
+    const { result, rerender } = renderHook(({ path }: { path: string }) => useSave(path), {
+      initialProps: { path: '/ra' },
+    });
 
     act(() => result.current.onChange({ title: 'A2', fromA: 'leak' }));
     let failA: () => void;
-    const gateA = new Promise<void>((_, rej) => { failA = () => rej(new Error('boom')); });
+    const gateA = new Promise<void>((_, rej) => {
+      failA = () => rej(new Error('boom'));
+    });
     patchMutate.mock.mockImplementationOnce(async () => gateA);
     let flushA: Promise<unknown> | undefined;
-    act(() => { flushA = result.current.flush().catch((e) => e); }); // runA in flight on /ra
+    act(() => {
+      flushA = result.current.flush().catch((e) => e);
+    }); // runA in flight on /ra
 
     rerender({ path: '/rb' });
 
     act(() => result.current.onChange({ title: 'B2' }));
     let landB: () => void;
-    const gateB = new Promise<void>((r) => { landB = r; });
-    patchMutate.mock.mockImplementationOnce(async () => { await gateB; });
+    const gateB = new Promise<void>((r) => {
+      landB = r;
+    });
+    patchMutate.mock.mockImplementationOnce(async () => {
+      await gateB;
+    });
     let flushB: Promise<unknown> | undefined;
-    act(() => { flushB = result.current.flush().catch((e) => e); }); // runB in flight on /rb
-    act(() => result.current.onChange({ extra: 'B3' }));             // /rb pending accumulates
+    act(() => {
+      flushB = result.current.flush().catch((e) => e);
+    }); // runB in flight on /rb
+    act(() => result.current.onChange({ extra: 'B3' })); // /rb pending accumulates
 
     // Stale /ra run rejects — must NOT restore /ra's partial into /rb pending.
     failA!();
-    await act(async () => { await flushA; });
+    await act(async () => {
+      await flushA;
+    });
 
     const v = result.current.value!;
     assert.equal(v.title, 'B2', "/rb value keeps its own title, not /ra's A2");
-    assert.equal('fromA' in v, false, "/ra fields must not leak into /rb pending");
+    assert.equal('fromA' in v, false, '/ra fields must not leak into /rb pending');
     assert.equal(v.extra, 'B3');
     assert.equal(result.current.dirty, true, '/rb stays dirty (pending + in-flight)');
 
     // settle must still await /rb — the stale reject must not have cleared inflight.
     let bSettled = false;
     let settleP: Promise<void> | undefined;
-    act(() => { settleP = result.current.settle().then(() => { bSettled = true; }); });
+    act(() => {
+      settleP = result.current.settle().then(() => {
+        bSettled = true;
+      });
+    });
     await Promise.resolve();
     await Promise.resolve();
-    assert.equal(bSettled, false, 'settle awaits /rb — stale reject did not drop its in-flight patch');
+    assert.equal(
+      bSettled,
+      false,
+      'settle awaits /rb — stale reject did not drop its in-flight patch',
+    );
 
     landB!();
-    await act(async () => { await flushB; await settleP; });
+    await act(async () => {
+      await flushB;
+      await settleP;
+    });
     assert.equal(bSettled, true);
   });
 
   it('a stale /a run succeeding does not clearEdit for /b — stale detection survives (r2)', async () => {
     cache.put({ ...makeNode('/sa', 'task', { title: 'A' }), $rev: 1 });
     cache.put({ ...makeNode('/sb', 'task', { title: 'B' }), $rev: 1 });
-    const { result, rerender } = renderHook(
-      ({ path }: { path: string }) => useSave(path),
-      { initialProps: { path: '/sa' } },
-    );
+    const { result, rerender } = renderHook(({ path }: { path: string }) => useSave(path), {
+      initialProps: { path: '/sa' },
+    });
 
     act(() => result.current.onChange({ title: 'A2' }));
     let landA: () => void;
-    const gateA = new Promise<void>((r) => { landA = r; });
-    patchMutate.mock.mockImplementationOnce(async () => { await gateA; });
+    const gateA = new Promise<void>((r) => {
+      landA = r;
+    });
+    patchMutate.mock.mockImplementationOnce(async () => {
+      await gateA;
+    });
     let flushA: Promise<unknown> | undefined;
-    act(() => { flushA = result.current.flush().catch((e) => e); }); // runA in flight on /sa
+    act(() => {
+      flushA = result.current.flush().catch((e) => e);
+    }); // runA in flight on /sa
 
     rerender({ path: '/sb' });
 
-    act(() => result.current.onChange({ title: 'B2' }));             // edits /sb at rev 1, editRev=1
+    act(() => result.current.onChange({ title: 'B2' })); // edits /sb at rev 1, editRev=1
     let landB: () => void;
-    const gateB = new Promise<void>((r) => { landB = r; });
-    patchMutate.mock.mockImplementationOnce(async () => { await gateB; });
+    const gateB = new Promise<void>((r) => {
+      landB = r;
+    });
+    patchMutate.mock.mockImplementationOnce(async () => {
+      await gateB;
+    });
     let flushB: Promise<unknown> | undefined;
-    act(() => { flushB = result.current.flush().catch((e) => e); }); // runB in flight on /sb, pending null
+    act(() => {
+      flushB = result.current.flush().catch((e) => e);
+    }); // runB in flight on /sb, pending null
 
     // Stale /sa run SUCCEEDS — its success branch must not clearEdit() for /sb.
     landA!();
-    await act(async () => { await flushA; });
+    await act(async () => {
+      await flushA;
+    });
 
     // Genuine foreign write on /sb bumps rev — must still surface as stale.
-    act(() => { cache.put({ ...makeNode('/sb', 'task', { title: 'X' }), $rev: 2 }); });
+    act(() => {
+      cache.put({ ...makeNode('/sb', 'task', { title: 'X' }), $rev: 2 });
+    });
 
     assert.equal(result.current.dirty, true, '/sb still dirty (in-flight)');
-    assert.equal(result.current.stale, true, 'editRev intact — stale detection not wiped by stale run');
+    assert.equal(
+      result.current.stale,
+      true,
+      'editRev intact — stale detection not wiped by stale run',
+    );
 
     landB!();
-    await act(async () => { await flushB; });
+    await act(async () => {
+      await flushB;
+    });
   });
 
   it('a flush chained behind an inflight run does not fire for the new path after a switch (r2)', async () => {
     seed('/ca', 'task', { title: 'A' });
     seed('/cb', 'task', { title: 'B' });
-    const { result, rerender } = renderHook(
-      ({ path }: { path: string }) => useSave(path),
-      { initialProps: { path: '/ca' } },
-    );
+    const { result, rerender } = renderHook(({ path }: { path: string }) => useSave(path), {
+      initialProps: { path: '/ca' },
+    });
 
     act(() => result.current.onChange({ title: 'A2' }));
     let landA: () => void;
-    const gateA = new Promise<void>((r) => { landA = r; });
-    patchMutate.mock.mockImplementationOnce(async () => { await gateA; }); // runA (patch #1)
+    const gateA = new Promise<void>((r) => {
+      landA = r;
+    });
+    patchMutate.mock.mockImplementationOnce(async () => {
+      await gateA;
+    }); // runA (patch #1)
     let flushA: Promise<unknown> | undefined;
-    act(() => { flushA = result.current.flush().catch((e) => e); });        // runA in flight on /ca
+    act(() => {
+      flushA = result.current.flush().catch((e) => e);
+    }); // runA in flight on /ca
     // Second flush parks on the inflight run — captures /ca's generation.
     let flush2: Promise<unknown> | undefined;
-    act(() => { flush2 = result.current.flush().catch((e) => e); });
+    act(() => {
+      flush2 = result.current.flush().catch((e) => e);
+    });
 
-    rerender({ path: '/cb' });                                              // genRef++
-    act(() => result.current.onChange({ title: 'B2' }));                    // /cb pending
+    rerender({ path: '/cb' }); // genRef++
+    act(() => result.current.onChange({ title: 'B2' })); // /cb pending
 
-    landA!();                                                              // runA settles
-    await act(async () => { await flushA; await flush2; });
+    landA!(); // runA settles
+    await act(async () => {
+      await flushA;
+      await flush2;
+    });
 
     // The chained flush2 belongs to /ca — it must NOT have sent /cb's pending.
-    assert.equal(patchMutate.mock.calls.length, 1, 'stale chained flush must not fire a patch for /cb');
+    assert.equal(
+      patchMutate.mock.calls.length,
+      1,
+      'stale chained flush must not fire a patch for /cb',
+    );
     assert.equal(result.current.dirty, true, '/cb pending is still unsent');
     assert.equal(result.current.value!.title, 'B2', '/cb keeps its own pending edit');
 
     // An explicit /cb flush now genuinely sends it.
-    const gateB = new Promise<void>((r) => { r(); });
-    patchMutate.mock.mockImplementationOnce(async () => { await gateB; });
-    await act(async () => { await result.current.flush(); });
+    const gateB = new Promise<void>((r) => {
+      r();
+    });
+    patchMutate.mock.mockImplementationOnce(async () => {
+      await gateB;
+    });
+    await act(async () => {
+      await result.current.flush();
+    });
     assert.equal(patchMutate.mock.calls.length, 2, 'explicit /cb flush sends the pending patch');
   });
 });
@@ -730,12 +954,18 @@ describe('useSave: discard', () => {
     act(() => result.current.onChange({ title: 'New' }));
 
     // Another channel persisted the draft (e.g. full-node set) — cache holds fresh state.
-    act(() => { cache.put(makeNode('/dc', 'task', { title: 'New' })); });
+    act(() => {
+      cache.put(makeNode('/dc', 'task', { title: 'New' }));
+    });
 
     act(() => result.current.discard());
 
     assert.equal(result.current.dirty, false);
-    assert.equal(cache.get('/dc')!.title, 'New', 'freshly-saved state NOT rolled back (reset() would restore Old)');
+    assert.equal(
+      cache.get('/dc')!.title,
+      'New',
+      'freshly-saved state NOT rolled back (reset() would restore Old)',
+    );
   });
 });
 
@@ -761,10 +991,9 @@ describe('useSave: path change', () => {
     seed('/k1', 'task', { title: 'K1' });
     seed('/k2', 'task', { title: 'K2' });
 
-    const { result, rerender } = renderHook(
-      ({ path }: { path: string }) => useSave(path),
-      { initialProps: { path: '/k1' } },
-    );
+    const { result, rerender } = renderHook(({ path }: { path: string }) => useSave(path), {
+      initialProps: { path: '/k1' },
+    });
 
     act(() => result.current.onChange({ title: 'Changed' }));
     assert.equal(result.current.dirty, true);
@@ -866,15 +1095,21 @@ describe('usePathSave: flush', () => {
     const { result } = renderHook(() => usePathSave({ delay: 0 }));
     const failure = new KernelError('UNAVAILABLE', 'down');
     let reject!: (error: unknown) => void;
-    const gate = new Promise<void>((_, rej) => { reject = rej; });
+    const gate = new Promise<void>((_, rej) => {
+      reject = rej;
+    });
     patchMutate.mock.mockImplementationOnce(() => gate);
 
     act(() => result.current.change('/s/concurrent', { label: 'B' }));
     let first!: Promise<void>;
-    act(() => { first = result.current.flush(); });
+    act(() => {
+      first = result.current.flush();
+    });
     act(() => result.current.change('/s/concurrent', { label: 'C' }));
     let second!: Promise<void>;
-    act(() => { second = result.current.flush(); });
+    act(() => {
+      second = result.current.flush();
+    });
     const firstRejected = assert.rejects(first, (error) => error === failure);
     const secondRejected = assert.rejects(second, (error) => error === failure);
     assert.equal(patchMutate.mock.callCount(), 1);
@@ -882,7 +1117,10 @@ describe('usePathSave: flush', () => {
     reject(failure);
     await act(() => Promise.all([firstRejected, secondRejected]));
     await act(() => result.current.flush());
-    assert.deepEqual(patchMutate.mock.calls[1].arguments[0], { path: '/s/concurrent', ops: [['r', 'label', 'C']] });
+    assert.deepEqual(patchMutate.mock.calls[1].arguments[0], {
+      path: '/s/concurrent',
+      ops: [['r', 'label', 'C']],
+    });
   });
 
   it('sends ops for all accumulated paths', async () => {
@@ -919,14 +1157,19 @@ describe('usePathSave: flush', () => {
       result.current.change('/s/ok', { label: 'A2' });
       result.current.change('/s/bad', { label: 'B2' });
     });
-    patchMutate.mock.mockImplementation(async ({ path }) => { if (path === '/s/bad') throw conflict; });
+    patchMutate.mock.mockImplementation(async ({ path }) => {
+      if (path === '/s/bad') throw conflict;
+    });
 
     await act(() => assert.rejects(result.current.flush(), (e) => e === conflict));
 
     patchMutate.mock.mockImplementation(async () => {});
     patchMutate.mock.resetCalls();
     await act(() => result.current.flush());
-    assert.deepEqual(patchMutate.mock.calls.map((c) => c.arguments[0]), [{ path: '/s/bad', ops: [['r', 'label', 'B2']] }]);
+    assert.deepEqual(
+      patchMutate.mock.calls.map((c) => c.arguments[0]),
+      [{ path: '/s/bad', ops: [['r', 'label', 'B2']] }],
+    );
   });
 
   it('several failed patches reject together, each path pending again under its newer edits', async () => {
@@ -939,40 +1182,58 @@ describe('usePathSave: flush', () => {
       result.current.change('/s/y', { label: 'Y2' });
     });
     let fail!: () => void;
-    const gate = new Promise<void>((_, reject) => { fail = () => reject(new KernelError('UNAVAILABLE', 'down')); });
+    const gate = new Promise<void>((_, reject) => {
+      fail = () => reject(new KernelError('UNAVAILABLE', 'down'));
+    });
     patchMutate.mock.mockImplementation(async () => gate);
 
     let flushed!: Promise<unknown>;
-    act(() => { flushed = result.current.flush().catch((e: unknown) => e); });
+    act(() => {
+      flushed = result.current.flush().catch((e: unknown) => e);
+    });
     act(() => result.current.change('/s/x', { label: 'X3' }));
     fail();
     let err: unknown;
-    await act(async () => { err = await flushed; });
+    await act(async () => {
+      err = await flushed;
+    });
     assert.ok(err instanceof AggregateError && err.errors.length === 2);
 
     patchMutate.mock.mockImplementation(async () => {});
     patchMutate.mock.resetCalls();
     await act(() => result.current.flush());
-    const sent = new Map(patchMutate.mock.calls.map((c) => [c.arguments[0].path, c.arguments[0].ops]));
-    assert.deepEqual(sent.get('/s/x'), [['r', 'label', 'X3'], ['r', 'rank', 1]]);
+    const sent = new Map(
+      patchMutate.mock.calls.map((c) => [c.arguments[0].path, c.arguments[0].ops]),
+    );
+    assert.deepEqual(sent.get('/s/x'), [
+      ['r', 'label', 'X3'],
+      ['r', 'rank', 1],
+    ]);
     assert.deepEqual(sent.get('/s/y'), [['r', 'label', 'Y2']]);
   });
 
   it('a timed flush that fails keeps its edits pending', async (t) => {
     t.mock.timers.enable({ apis: ['setTimeout'] });
     let reported!: () => void;
-    const failureReported = new Promise<void>((resolve) => { reported = resolve; });
+    const failureReported = new Promise<void>((resolve) => {
+      reported = resolve;
+    });
     t.mock.method(console, 'error', () => reported());
     seed('/s/t', 'col', { label: 'T' });
     const { result } = renderHook(() => usePathSave({ delay: 100 }));
 
-    patchMutate.mock.mockImplementationOnce(async () => { throw new KernelError('UNAVAILABLE', 'down'); });
+    patchMutate.mock.mockImplementationOnce(async () => {
+      throw new KernelError('UNAVAILABLE', 'down');
+    });
     act(() => result.current.change('/s/t', { label: 'T2' }));
     act(() => t.mock.timers.tick(100));
     await act(() => failureReported);
     assert.equal(patchMutate.mock.callCount(), 1);
 
     await act(() => result.current.flush());
-    assert.deepEqual(patchMutate.mock.calls[1].arguments[0], { path: '/s/t', ops: [['r', 'label', 'T2']] });
+    assert.deepEqual(patchMutate.mock.calls[1].arguments[0], {
+      path: '/s/t',
+      ops: [['r', 'label', 'T2']],
+    });
   });
 });

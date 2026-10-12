@@ -7,7 +7,13 @@ export * from './hooks';
 export * from './navigate';
 export { view } from './view';
 export { useSave, useAutoSave, usePathSave, scopeOnChange } from '#tree/auto-save';
-export type { SaveHandle, SaveOptions, PathSaveHandle, PathHandle, OnChange } from '#tree/auto-save';
+export type {
+  SaveHandle,
+  SaveOptions,
+  PathSaveHandle,
+  PathHandle,
+  OnChange,
+} from '#tree/auto-save';
 export { cn } from '#lib/utils';
 export { sanitizeHref } from '#lib/sanitize-href';
 export { minimd } from '#lib/minimd';
@@ -21,6 +27,5 @@ export { createLaneTreeSource } from '#tree/lane-source';
 export { createLaneTreeClient } from '#tree/lane-tree-client';
 export { createLaneEffects } from '#tree/lane-effects';
 export { TreeSourceProvider } from '#tree/tree-source-context';
-export type { ClientAction } from '#tree/tree-client';
-export type { TreeEffects, KernelEffects } from '#tree/effects';
+export type { ClientAction, TreeEffects, KernelEffects } from '#tree/effects';
 export type { TreeSource } from '#tree/tree-source';
