@@ -6,7 +6,8 @@ import { backupInstance, restoreArtifact, verifyArtifact } from './backup';
 
 const USAGE = `treenix — instance backup/restore (stop the server first)
 
-  treenix backup  [root.json] [outDir]      create artifact dir (default: ./root.json → ./backups/)
+  treenix backup  [root.json] [outDir] [--deployment config.json]
+                                            create artifact dir with named directory bindings
   treenix verify  <artifactDir>             check artifact coherence (read-only)
   treenix restore <artifactDir> [--into d] [--replace]
                                             restore dirs + config; --replace moves
@@ -17,7 +18,11 @@ const [cmd, ...rest] = process.argv.slice(2);
 
 try {
   if (cmd === 'backup') {
-    await backupInstance(rest[0] ?? 'root.json', rest[1] ?? 'backups');
+    const index = rest.indexOf('--deployment');
+    const deployment = index < 0 ? undefined : rest[index + 1];
+    if (index >= 0 && (!deployment || deployment.startsWith('--'))) throw new Error(USAGE);
+    const paths = index < 0 ? rest : [...rest.slice(0, index), ...rest.slice(index + 2)];
+    await backupInstance(paths[0] ?? 'root.json', paths[1] ?? 'backups', console.log, { deployment });
   } else if (cmd === 'verify') {
     if (!rest[0]) throw new Error(USAGE);
     const m = await verifyArtifact(rest[0]);

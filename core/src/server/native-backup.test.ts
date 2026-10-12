@@ -21,7 +21,7 @@ async function controlFiles(directory: string): Promise<Record<string, string>> 
 }
 
 it(
-  'backs up native control files and reopens the restored accepted node',
+  'backs up native controls and named directory data, then reopens restored nodes',
   { timeout: 15000 },
   async (t) => {
     const parent = resolve(import.meta.dirname, '../../../../temp/native-backup-first-pass');
@@ -35,6 +35,7 @@ it(
       credentialTtlMs: 60000,
       firstAdmin: { path: '/admin', name: 'admin', password: randomUUID() },
       modules: [],
+      mountDirectories: { extra: join(fixture, 'extra') },
     };
     const runtime = await openNativeRuntime(config);
     assert.ok(runtime.instance.setupCredential);
@@ -51,8 +52,30 @@ it(
       opId: { epoch: runtime.instance.writer.intake.epoch, time: Date.now(), nonce: randomUUID() },
       changes: [{ op: 'put', node: { $path: '/kept', $type: 't.dir', title: 'preserved' } }],
     }).outcome;
+    await session.commit({
+      opId: { epoch: runtime.instance.writer.intake.epoch, time: Date.now(), nonce: randomUUID() },
+      changes: [
+        {
+          op: 'put',
+          node: {
+            $path: '/mounted',
+            $type: 't.mount-point',
+            '#mount': { $type: 't.mount.fs', pattern: '', directory: 'extra' },
+          },
+        },
+      ],
+    }).outcome;
+    await session.read({ children: '/mounted' });
+    await session.commit({
+      opId: { epoch: runtime.instance.writer.intake.epoch, time: Date.now(), nonce: randomUUID() },
+      changes: [
+        { op: 'put', node: { $path: '/mounted/child', $type: 't.dir', title: 'mounted data' } },
+      ],
+    }).outcome;
     const before = (await session.read({ node: '/kept' })).copies[0];
     if ('error' in before) throw before.error;
+    const beforeChild = (await session.read({ node: '/mounted/child' })).copies[0];
+    if ('error' in beforeChild) throw beforeChild.error;
     session.close();
     await delivery;
     await runtime.close();
@@ -71,7 +94,12 @@ it(
     const cwd = process.cwd();
     process.chdir(fixture);
     t.after(() => process.chdir(cwd));
-    const artifact = await backupInstance(rootConfig, join(fixture, 'backups'));
+    const deployment = join(fixture, 'kernel.json');
+    await writeFile(deployment, JSON.stringify({ mountDirectories: { extra: 'extra' } }));
+    const artifact = await backupInstance(rootConfig, join(fixture, 'backups'), console.log, {
+      deployment,
+    });
+    assert.equal(artifact.manifest.dirs.length, 2);
     assert.ok(artifact.manifest.dirs[0].nodes > 0);
     assert.deepEqual(await verifyArtifact(artifact.artifactDir), artifact.manifest);
 
@@ -80,14 +108,25 @@ it(
     const restoredDirectory = join(target, 'source');
     assert.deepEqual(await controlFiles(restoredDirectory), controls);
     assert.deepEqual(await controlFiles(directory), controls);
+    assert.equal(
+      await readFile(join(target, 'kernel.json'), 'utf8'),
+      await readFile(deployment, 'utf8'),
+    );
 
-    const restored = await openNativeRuntime({ ...config, directory: restoredDirectory });
+    const restored = await openNativeRuntime({
+      ...config,
+      directory: restoredDirectory,
+      mountDirectories: { extra: join(target, 'extra') },
+    });
     const reader = await restored.instance.openSession(credential);
     const restoredDelivery = drainSession(reader);
     try {
       const after = (await reader.read({ node: '/kept' })).copies[0];
       if ('error' in after) throw after.error;
       assert.deepEqual(after.node, before.node);
+      const afterChild = (await reader.read({ node: '/mounted/child' })).copies[0];
+      if ('error' in afterChild) throw afterChild.error;
+      assert.deepEqual(afterChild.node, beforeChild.node);
     } finally {
       reader.close();
       await restoredDelivery;

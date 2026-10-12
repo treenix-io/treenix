@@ -9,6 +9,7 @@ import { assertValidType, isCompKey, safeJsonParse } from '#core';
 import { cp, mkdir, mkdtemp, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { SUPPORTED_DATA_VERSION, readDataVersion, DATA_VERSION_FILE } from '#server/backup-version';
+import { isRecord } from '#util/is-record';
 
 export class BackupError extends Error {
   constructor(public code: string, message: string) {
@@ -44,6 +45,8 @@ export interface BackupManifest {
   rootConfig: string;
   /** Config path as given to backup (CWD-relative or absolute) — in-place restore targets it. */
   rootConfigPath: string;
+  /** Deployment bindings are restored beside the root configuration at their original relative path. */
+  deploymentConfig?: { artifactPath: string; originalPath: string; relativePath: string };
   dirs: BackupDirEntry[];
   /** Mounts whose data lives elsewhere (mongo, federation) — NOT in this artifact. */
   external: ExternalMount[];
@@ -51,6 +54,10 @@ export interface BackupManifest {
 }
 
 type Log = (line: string) => void;
+
+export interface BackupOptions {
+  readonly deployment?: string;
+}
 
 const MANIFEST = 'manifest.json';
 
@@ -89,11 +96,20 @@ function nodeFile(root: string, file: string): boolean {
     && !file.startsWith(join(root, '.treenix') + sep);
 }
 
-function classifyMount(mount: Record<string, unknown>, at: string, queue: DirJob[], external: ExternalMount[]): void {
+function classifyMount(mount: Record<string, unknown>, at: string, queue: DirJob[], external: ExternalMount[], directories: Readonly<Record<string, string>>): void {
   const type = mount.$type as string;
   if (type === 't.mount.fs' || type === 't.mount.rawfs') {
-    if (typeof mount.root !== 'string' || !mount.root) throw new BackupError('BAD_MOUNT', `${at}: ${type} without root`);
-    queue.push({ root: mount.root, kind: type === 't.mount.fs' ? 'fs' : 'rawfs' });
+    let root: string;
+    if (typeof mount.directory === 'string') {
+      if (!Object.hasOwn(directories, mount.directory))
+        throw new BackupError('BAD_MOUNT', `${at}: directory capability ${mount.directory} is not configured`);
+      root = directories[mount.directory];
+    } else if (typeof mount.root === 'string' && mount.root.length > 0) {
+      root = mount.root;
+    } else {
+      throw new BackupError('BAD_MOUNT', `${at}: ${type} without a directory binding or root`);
+    }
+    queue.push({ root, kind: type === 't.mount.fs' ? 'fs' : 'rawfs' });
   } else if (type === 't.mount.mongo' || type === 't.mount.tree.trpc') {
     external.push({ at, type, detail: externalDetail(mount) });
   }
@@ -105,6 +121,7 @@ function classifyMount(mount: Record<string, unknown>, at: string, queue: DirJob
 async function copyFsDir(
   src: string, dest: string, dirRoot: string,
   queue: DirJob[], external: ExternalMount[], warnings: string[],
+  directories: Readonly<Record<string, string>>,
 ): Promise<{ nodes: number; files: number }> {
   let nodes = 0;
   let files = 0;
@@ -127,7 +144,7 @@ async function copyFsDir(
         const body = safeJsonParse(raw.toString('utf-8'));
         if (nodeFile(src, full)) {
           assertValidType(body.$type);
-          for (const m of mountsIn(body)) classifyMount(m, `${dirRoot}:${relative(src, full)}`, queue, external);
+          for (const m of mountsIn(body)) classifyMount(m, `${dirRoot}:${relative(src, full)}`, queue, external, directories);
           nodes++;
         } else {
           files++;
@@ -164,7 +181,7 @@ async function engineVersion(): Promise<string> {
   return pkg.version;
 }
 
-export async function backupInstance(rootJsonPath: string, outParent: string, log: Log = console.log): Promise<{ artifactDir: string; manifest: BackupManifest }> {
+export async function backupInstance(rootJsonPath: string, outParent: string, log: Log = console.log, options: BackupOptions = {}): Promise<{ artifactDir: string; manifest: BackupManifest }> {
   let configRaw: string;
   try {
     configRaw = await readFile(resolve(rootJsonPath), 'utf-8');
@@ -172,17 +189,43 @@ export async function backupInstance(rootJsonPath: string, outParent: string, lo
     throw new BackupError('NO_CONFIG', `cannot read config ${rootJsonPath}: ${(e as Error).message}`);
   }
   const rootNode = safeJsonParse(configRaw);
+  const directories: Record<string, string> = {};
+  let deploymentRaw: string | undefined;
+  let deploymentConfig: BackupManifest['deploymentConfig'];
+  if (options.deployment !== undefined) {
+    const path = resolve(options.deployment);
+    deploymentRaw = await readFile(path, 'utf8');
+    const deployment = safeJsonParse(deploymentRaw);
+    if (deployment.mountDirectories !== undefined) {
+      if (!isRecord(deployment.mountDirectories))
+        throw new BackupError('BAD_MOUNT', 'Deployment directory bindings must be an object');
+      for (const [name, directory] of Object.entries(deployment.mountDirectories)) {
+        if (typeof directory !== 'string' || directory.length === 0)
+          throw new BackupError('BAD_MOUNT', `Directory capability ${name} has no path`);
+        directories[name] = relative(process.cwd(), resolve(dirname(path), directory)) || '.';
+      }
+    }
+    deploymentConfig = {
+      artifactPath: 'configuration/deployment.json',
+      originalPath: path,
+      relativePath: relative(dirname(resolve(rootJsonPath)), path),
+    };
+  }
 
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   await mkdir(resolve(outParent), { recursive: true });
   const artifactDir = await mkdtemp(resolve(outParent, `treenix-backup-${stamp}-`)); // exclusive artifact dir, never merge
 
   await writeFile(join(artifactDir, basename(rootJsonPath)), configRaw);
+  if (deploymentConfig !== undefined && deploymentRaw !== undefined) {
+    await mkdir(dirname(join(artifactDir, deploymentConfig.artifactPath)), { recursive: true });
+    await writeFile(join(artifactDir, deploymentConfig.artifactPath), deploymentRaw);
+  }
 
   const queue: DirJob[] = [];
   const external: ExternalMount[] = [];
   const warnings: string[] = [];
-  for (const m of mountsIn(rootNode)) classifyMount(m, basename(rootJsonPath), queue, external);
+  for (const m of mountsIn(rootNode)) classifyMount(m, basename(rootJsonPath), queue, external, directories);
   if (queue.length === 0) warnings.push('config declares no fs/rawfs mounts — artifact contains config only');
 
   const dirs: BackupDirEntry[] = [];
@@ -206,7 +249,7 @@ export async function backupInstance(rootJsonPath: string, outParent: string, lo
     log(`[backup] ${job.kind} ${job.root} → ${artifactPath}`);
 
     if (job.kind === 'fs') {
-      const { nodes, files } = await copyFsDir(src, dest, job.root, queue, external, warnings);
+      const { nodes, files } = await copyFsDir(src, dest, job.root, queue, external, warnings, directories);
       dirs.push({ root: job.root, kind: 'fs', artifactPath, nodes, files });
     } else {
       await cp(src, dest, { recursive: true, verbatimSymlinks: true });
@@ -225,6 +268,7 @@ export async function backupInstance(rootJsonPath: string, outParent: string, lo
     engineVersion: await engineVersion(),
     rootConfig: basename(rootJsonPath),
     rootConfigPath: rootJsonPath,
+    ...(deploymentConfig === undefined ? {} : { deploymentConfig }),
     dirs,
     external,
     warnings,
@@ -276,6 +320,9 @@ async function verifyFsDir(dir: string): Promise<{ nodes: number; files: number 
 
 export async function verifyArtifact(artifactDir: string, log: Log = console.log): Promise<BackupManifest> {
   const manifest = await readManifest(artifactDir);
+  if (manifest.deploymentConfig !== undefined) {
+    safeJsonParse(await readFile(join(artifactDir, manifest.deploymentConfig.artifactPath), 'utf8'));
+  }
 
   for (const d of manifest.dirs) {
     const dir = join(artifactDir, d.artifactPath);
@@ -347,6 +394,26 @@ export async function restoreArtifact(artifactDir: string, opts: RestoreOpts = {
     log(`[restore] config → ${configTarget}`);
   } else if (existing !== await readFile(configSrc, 'utf-8')) {
     log(`[restore] WARNING: ${configTarget} differs from the artifact's config — kept the existing file, artifact copy at ${configSrc}`);
+  }
+
+  if (manifest.deploymentConfig !== undefined) {
+    const deployment = manifest.deploymentConfig;
+    const target = opts.into
+      ? resolve(base, deployment.relativePath)
+      : deployment.originalPath;
+    const source = join(artifactDir, deployment.artifactPath);
+    let current: string | undefined;
+    try {
+      current = await readFile(target, 'utf8');
+    } catch (error) {
+      if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
+    }
+    if (current === undefined) {
+      await mkdir(dirname(target), { recursive: true });
+      await cp(source, target);
+    } else if (current !== await readFile(source, 'utf8')) {
+      log(`[restore] WARNING: ${target} differs from the deployment config — kept the existing file`);
+    }
   }
 
   // Coherence check on the RESTORED data — proves the server will read what we wrote.
