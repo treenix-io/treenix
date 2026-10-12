@@ -451,9 +451,7 @@ async function confirmPending(path: string, opId: string): Promise<void> {
 // derived ACL bit, false-until-loaded is the safe conservative default.
 
 const W = 2;
-const permCache = new Map<string, { perm: number; ts: number }>();
-const PERM_TTL = 30_000; // 30s cache
-
+/** Derive write permission from the copy admitted by the current source. */
 export function useCanWrite(path: string | null): boolean {
   const source = useTreeSource();
   const effects = useTreeEffects();
@@ -462,40 +460,7 @@ export function useCanWrite(path: string | null): boolean {
     () => path === null ? undefined : source.getPathSnapshot(path),
     () => path === null ? undefined : source.getPathSnapshot(path),
   );
-  // Key the perm to its path. After a path change React re-renders with the
-  // NEW path but the OLD state until the effect commits — so we must derive
-  // the effective perm from `state.path === path`, falling closed otherwise.
-  // Without this gate the hook returns the previous `true` for one render.
-  const [state, setState] = useState<{ path: string | null; perm: number }>({ path: null, perm: 0 });
-
-  useEffect(() => {
-    if (effects.lane || !path) { setState({ path: null, perm: 0 }); return; }
-
-    const cached = permCache.get(path);
-    if (cached && Date.now() - cached.ts < PERM_TTL) {
-      setState({ path, perm: cached.perm });
-      return;
-    }
-    // Set the key immediately so the next render fails closed for this path
-    // while the request is in flight (rather than carrying the prior path's perm).
-    setState({ path, perm: 0 });
-
-    let cancelled = false;
-    treeClient.read({ kind: 'permission', path }).then((p) => {
-      if (cancelled) return;
-      permCache.set(path, { perm: p, ts: Date.now() });
-      setState({ path, perm: p });
-    }).catch((e) => {
-      if (cancelled) return;
-      console.warn('[useCanWrite] getPerm failed for', path, e);
-      setState({ path, perm: 0 });
-    });
-    return () => { cancelled = true; };
-  }, [path, effects]);
-
-  const effectivePerm = effects.lane ? (path === null ? 0 : effects.bits(path) ?? 0)
-    : state.path === path ? state.perm : 0;
-  return (effectivePerm & W) !== 0;
+  return path !== null && ((effects.bits(path) ?? 0) & W) !== 0;
 }
 
 // ── Internals ──

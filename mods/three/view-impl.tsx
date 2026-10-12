@@ -7,7 +7,7 @@ import { getComponent, type NodeData } from '@treenx/core';
 import { useResolvedNode } from '@treenx/react/bind/hook';
 import { useTreeSource } from '@treenx/react/tree/tree-source-context';
 import { type View, useCurrentNode } from '@treenx/react';
-import { execute, useChildren, usePath } from '@treenx/react';
+import { useTreeEffects, useChildren, usePath } from '@treenx/react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import {
@@ -330,6 +330,8 @@ function ScriptRunner({ path, code, groupRef }: {
   code: string;
   groupRef: React.RefObject<THREE.Group | null>;
 }) {
+  const { execute } = useTreeEffects();
+
   const source = useTreeSource();
   const fnRef = useRef<((ctx: unknown) => void) | null>(null);
   const { data: node } = usePath(path);

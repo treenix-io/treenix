@@ -3,7 +3,7 @@
 import { type ComponentData, getComponent, register } from '@treenx/core';
 import {
   cn,
-  execute,
+  useActions,
   minimd,
   Render,
   RenderContext,
@@ -183,6 +183,8 @@ const AgentRow: View<AiAgent> = ({ value, ctx }) => {
 // ── AgentView (ai.agent detail) ──
 
 const AgentView: View<AiAgent> = ({ value, ctx }) => {
+  const actions = useActions(value);
+
   const path = ctx!.node.$path;
   const status = value.status || 'offline';
   const s = statusStyle(status);
@@ -244,13 +246,13 @@ const AgentView: View<AiAgent> = ({ value, ctx }) => {
 
       <div className="flex gap-2 pt-2">
         {status === 'offline' && (
-          <ActionBtn label="Bring Online" color="emerald" onClick={() => execute(path, 'online')} />
+          <ActionBtn label="Bring Online" color="emerald" onClick={() => actions.online()} />
         )}
         {status === 'idle' && (
-          <ActionBtn label="Take Offline" color="zinc" onClick={() => execute(path, 'offline')} />
+          <ActionBtn label="Take Offline" color="zinc" onClick={() => actions.offline()} />
         )}
         {status === 'error' && (
-          <ActionBtn label="Bring Online" color="emerald" onClick={() => execute(path, 'online')} />
+          <ActionBtn label="Bring Online" color="emerald" onClick={() => actions.online()} />
         )}
       </div>
     </div>
@@ -321,6 +323,8 @@ const ApprovalsView: View<AiApprovals> = ({ value, ctx }) => {
 // ── ApprovalView (ai.approval) ──
 
 const ApprovalView: View<AiApproval> = ({ value, ctx }) => {
+  const actions = useActions(value);
+
   const path = ctx!.node.$path;
   const status = value.status || 'pending';
   const s = APPROVAL_STATUS[status] ?? APPROVAL_STATUS.pending;
@@ -358,11 +362,11 @@ const ApprovalView: View<AiApproval> = ({ value, ctx }) => {
         </div>
       ) : isPending && (
         <div className="flex items-center gap-2 pt-1 flex-wrap">
-          <ActionBtn label="Approve" color="emerald" onClick={() => execute(path, 'approve')} />
-          <ActionBtn label="Deny" color="red" onClick={() => execute(path, 'deny')} />
+          <ActionBtn label="Approve" color="emerald" onClick={() => actions.approve()} />
+          <ActionBtn label="Deny" color="red" onClick={() => actions.deny()} />
           <span className="text-[10px] text-muted-foreground/60 mx-1">|</span>
-          <ActionBtn label="Approve + remember (agent)" color="emerald" onClick={() => execute(path, 'approve', { remember: 'agent' })} />
-          <ActionBtn label="Approve + remember (global)" color="emerald" onClick={() => execute(path, 'approve', { remember: 'global' })} />
+          <ActionBtn label="Approve + remember (agent)" color="emerald" onClick={() => actions.approve({ remember: 'agent' })} />
+          <ActionBtn label="Approve + remember (global)" color="emerald" onClick={() => actions.approve({ remember: 'global' })} />
         </div>
       )}
     </div>

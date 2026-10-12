@@ -1,7 +1,7 @@
 import type { Editor, Range } from '@tiptap/core';
 import { getRegisteredTypes } from '@treenx/core';
 import { getDefaults } from '@treenx/core/comp';
-import { createNode } from '@treenx/react/hooks';
+import { useTreeEffects } from '@treenx/react/hooks';
 import { MiniTree } from '@treenx/react/mods/editor-ui/form-fields';
 import {
   type FormEvent,
@@ -49,6 +49,8 @@ function normalizeLinkHref(value: string): string {
 }
 
 export const SlashMenu = forwardRef<unknown, Props>(({ items, command, editor, range, docPath }, ref) => {
+  const { createNode } = useTreeEffects();
+
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [pickerMode, setPickerMode] = useState<PickerMode | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);

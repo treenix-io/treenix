@@ -2,7 +2,7 @@
 
 import { getComponent, register } from '@treenx/core';
 import { type View } from '@treenx/react';
-import { execute } from '@treenx/react';
+import { useTreeEffects } from '@treenx/react';
 import { cn } from '@treenx/react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
@@ -13,6 +13,8 @@ import { formatTime, StatusBadge, StatusDot } from './shared';
 // ── Stop button ──
 
 function StopButton({ runPath }: { runPath: string }) {
+  const { execute } = useTreeEffects();
+
   const [stopping, setStopping] = useState(false);
 
   const handleStop = useCallback(async (e: React.MouseEvent) => {
@@ -23,7 +25,7 @@ function StopButton({ runPath }: { runPath: string }) {
     } finally {
       setStopping(false);
     }
-  }, [runPath]);
+  }, [runPath, execute]);
 
   return (
     <button
