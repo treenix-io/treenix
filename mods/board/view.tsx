@@ -38,6 +38,7 @@ import { useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { AttachMenu } from '../simple-components/view';
 import { getNamedComponents } from './named-components';
+import { columnData, orderComponent } from './data';
 import { BoardColumn, BoardKanban, BoardTask, Order } from './types';
 
 type TaskStatus = string;
@@ -53,8 +54,6 @@ const columnOrder = (c: PresentationNode): number =>
   orderValue(c, typeof c.order === 'number' ? c.order : 0);
 const taskOrder = (t: PresentationNode): number =>
   orderValue(t, typeof t.createdAt === 'number' ? t.createdAt : 0);
-
-const orderComponent = (order: number) => ({ $type: 'board.order' as const, order });
 
 // Fractional position between two neighbor orders (either may be absent at an edge).
 const between = (prev: number | null, next: number | null): number =>
@@ -812,12 +811,8 @@ const KanbanView: View<BoardKanban, { editable?: boolean }> = ({ value, ctx, edi
     const maxOrder = Math.max(0, ...columns.map(columnOrder));
 
     await withToast(async () => {
-      await createNode(`${basePath}/${slug}`, 'board.column', {
-        label: label.trim(),
-        color: 'border-border',
-        '#order': orderComponent(maxOrder + 1),
-        '#mount': { $type: 't.mount.query', source: `${basePath}/data`, match: { status: slug } },
-      });
+      await createNode(`${basePath}/${slug}`, 'board.column',
+        columnData(label.trim(), maxOrder + 1, `${basePath}/data`, slug));
     }, `Column "${label.trim()}" created`);
   };
 
