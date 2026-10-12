@@ -13,7 +13,7 @@ class CafeMailService {
 registerType('cafe.mail', CafeMailService);
 
 /** Contact form use case — receives form submissions, logs them */
-class CafeContact {
+export class CafeContact {
   /** @title Recipient @format email */
   recipient = '';
   /** @title Mail service */

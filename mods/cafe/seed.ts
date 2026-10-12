@@ -1,7 +1,5 @@
 import { registerPrefab } from '@treenx/core/mod';
 
-registerPrefab('cafe', 'seed', [
-  { $path: 'cafe', $type: 'dir' },
-  { $path: 'cafe/contact', $type: 'cafe.contact', recipient: 'owner@cafe.example' },
-  { $path: 'cafe/pages', $type: 'dir' },
-]);
+import { cafeSeed } from './seed-data';
+
+registerPrefab('cafe', 'seed', cafeSeed);
