@@ -4,6 +4,7 @@
 
 import { getComponent } from '@treenx/core';
 import { getCtx, registerType } from '@treenx/core/comp';
+import { agentMethods } from '#agent/methods';
 
 // ── Active query registry ──
 // Server-only runtime state: tracks running Claude queries so AiRun.stop()
@@ -43,15 +44,15 @@ export function isQueryRunning(key: string): boolean {
 // ── Structured log entry — atomic unit of observability ──
 
 export type LogEntry = {
-  ts: number
-  type: 'text' | 'tool_call' | 'tool_result' | 'thinking' | 'approval' | 'embed'
-  tool?: string
-  input?: Record<string, unknown>
-  output?: string
-  duration?: number
-  approved?: boolean
+  ts: number;
+  type: 'text' | 'tool_call' | 'tool_result' | 'thinking' | 'approval' | 'embed';
+  tool?: string;
+  input?: Record<string, unknown>;
+  output?: string;
+  duration?: number;
+  approved?: boolean;
   /** Treenix node path — UI can render via <Render /> */
-  ref?: string
+  ref?: string;
 };
 
 // ── Reusable ECS components ──
@@ -129,44 +130,32 @@ export class AiAgent {
 
   /** @description Bring agent online */
   online() {
-    this.status = 'idle';
-    this.currentTask = '';
+    return agentMethods['ai.agent'].online.call(this);
   }
 
   /** @description Take agent offline */
   offline() {
-    if (this.status === 'working')
-      throw new Error('cannot go offline while working');
-    this.status = 'offline';
+    return agentMethods['ai.agent'].offline.call(this);
   }
 
   /** @description Assign a board task to this agent */
   assign(data: { /** Path to board.task */ task: string }) {
-    if (this.status !== 'idle')
-      throw new Error(`cannot assign: agent is ${this.status}`);
-    if (!data.task?.trim()) throw new Error('task path required');
-    this.currentTask = data.task.trim();
-    this.status = 'working';
+    return agentMethods['ai.agent'].assign.call(this, data);
   }
 
   /** @description Agent finished current task */
   complete() {
-    if (this.status !== 'working')
-      throw new Error(`cannot complete: agent is ${this.status}`);
-    this.currentTask = '';
-    this.status = 'idle';
-    this.lastRunAt = Date.now();
+    return agentMethods['ai.agent'].complete.call(this);
   }
 
   /** @description Agent is blocked */
   block(data?: { /** Reason */ reason?: string }) {
-    this.status = 'blocked';
+    return agentMethods['ai.agent'].block.call(this, data);
   }
 
   /** @description Agent hit an error */
   fail(data?: { /** Error message */ error?: string }) {
-    this.status = 'error';
-    this.currentTask = '';
+    return agentMethods['ai.agent'].fail.call(this, data);
   }
 }
 
@@ -195,8 +184,7 @@ export class AiThread {
 
   /** @description Post a message to the discussion */
   post(data: { role: string; from: string; text: string }) {
-    if (!data.text?.trim()) throw new Error('empty message');
-    this.messages.push({ role: data.role, from: data.from, text: data.text, ts: Date.now() });
+    return agentMethods['ai.thread'].post.call(this, data);
   }
 }
 
@@ -219,17 +207,12 @@ export class AiPlan {
 
   /** @description Approve the plan — agent will proceed to execute */
   approvePlan(data?: { /** Optional feedback/adjustments for the agent */ feedback?: string }) {
-    if (this.approved) throw new Error('plan already approved');
-    if (!this.text) throw new Error('no plan to approve');
-    this.approved = true;
-    if (data?.feedback) this.feedback = data.feedback;
+    return agentMethods['ai.plan'].approvePlan.call(this, data);
   }
 
   /** @description Reject the plan — agent will re-plan with feedback */
   rejectPlan(data?: { /** What to change */ feedback?: string }) {
-    if (!this.text) throw new Error('no plan to reject');
-    this.approved = false;
-    if (data?.feedback) this.feedback = data.feedback;
+    return agentMethods['ai.plan'].rejectPlan.call(this, data);
   }
 }
 
@@ -260,7 +243,7 @@ export class AiApproval {
   /** @description Approve this tool usage */
   approve(data?: {
     /** Remember this decision for future calls */
-    remember?: 'agent' | 'global'
+    remember?: 'agent' | 'global';
   }) {
     if (this.status !== 'pending') throw new Error('already resolved');
     this.status = 'approved';
@@ -271,7 +254,7 @@ export class AiApproval {
   /** @description Deny this tool usage */
   deny(data?: {
     /** Remember this decision for future calls */
-    remember?: 'agent' | 'global'
+    remember?: 'agent' | 'global';
   }) {
     if (this.status !== 'pending') throw new Error('already resolved');
     this.status = 'denied';
@@ -289,38 +272,22 @@ export class AiPolicy {
   escalate: string[] = [];
   /** @description Add a tool to allow list */
   addAllow(data: { /** Tool name or glob pattern */ pattern: string }) {
-    if (!data.pattern?.trim()) throw new Error('pattern required');
-    const p = data.pattern.trim();
-    if (!this.allow.includes(p)) this.allow.push(p);
-    this.deny = this.deny.filter(d => d !== p);
-    this.escalate = this.escalate.filter(e => e !== p);
+    return agentMethods['ai.policy'].addAllow.call(this, data);
   }
 
   /** @description Add a tool to deny list */
   addDeny(data: { /** Tool name or glob pattern */ pattern: string }) {
-    if (!data.pattern?.trim()) throw new Error('pattern required');
-    const p = data.pattern.trim();
-    if (!this.deny.includes(p)) this.deny.push(p);
-    this.allow = this.allow.filter(a => a !== p);
-    this.escalate = this.escalate.filter(e => e !== p);
+    return agentMethods['ai.policy'].addDeny.call(this, data);
   }
 
   /** @description Add a tool to escalate list (requires human approval) */
   addEscalate(data: { /** Tool name or glob pattern */ pattern: string }) {
-    if (!data.pattern?.trim()) throw new Error('pattern required');
-    const p = data.pattern.trim();
-    if (!this.escalate.includes(p)) this.escalate.push(p);
-    this.allow = this.allow.filter(a => a !== p);
-    this.deny = this.deny.filter(d => d !== p);
+    return agentMethods['ai.policy'].addEscalate.call(this, data);
   }
 
   /** @description Remove a rule from all lists */
   removeRule(data: { /** Pattern to remove */ pattern: string }) {
-    if (!data.pattern?.trim()) throw new Error('pattern required');
-    const p = data.pattern.trim();
-    this.allow = this.allow.filter(a => a !== p);
-    this.deny = this.deny.filter(d => d !== p);
-    this.escalate = this.escalate.filter(e => e !== p);
+    return agentMethods['ai.policy'].removeRule.call(this, data);
   }
 }
 
@@ -349,6 +316,14 @@ export class AiChat {
     this.sessionId = '';
     this.streaming = false;
   }
+}
+
+export type ChatChunk = { type: 'chunk' | 'done'; text: string };
+
+/** These actions are registered outside the data class in both server implementations. */
+export interface AiChat {
+  send(data: { text: string }): AsyncGenerator<ChatChunk>;
+  stop(): void;
 }
 
 // New ECS components + node types
