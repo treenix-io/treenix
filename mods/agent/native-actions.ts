@@ -155,8 +155,7 @@ export function agentActions(type: string): Readonly<Record<string, ActionDef>> 
           await ctx.requireReadWrite(path);
           const owner = (await ctx.read.read({ node: path })).copies[0];
           if ('error' in owner) throw owner.error;
-          if (getComponent<AiAgent>(owner.node, 'ai.agent') === undefined)
-            throw new KernelError('INVALID', 'Run has no owning agent');
+          // Runs can belong to a native controller; cancellation requires rights on that actual owner.
           const provider = ctx.io?.agent;
           if (provider === undefined)
             throw new KernelError('UNAVAILABLE', 'Native agent inference is not bound');
