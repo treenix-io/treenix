@@ -4,7 +4,7 @@ import { assertPrefabPath, prefabInput } from '@treenx/core/mod/prefab-path';
 import type { WriteAction, WriteActionContext } from '@treenx/core/kernel/types';
 import { mergeFields } from '#prefab/merge';
 import { assertChain, fields, readNode, sourceBody, translatedFields } from '#prefab/data';
-import { prefabCopy, updatedSource } from '#prefab/source';
+import { inverseMaps, prefabCopy, updatedSource } from '#prefab/source';
 import { children, markChild, optionalNode, retireBranch } from '#prefab/structure';
 
 /** Decode public action arguments; internal nodes follow the prefab contract. */
@@ -27,7 +27,7 @@ function argumentsFor(value: unknown): { target: string; source?: string; field?
   if (source !== undefined) assertPrefabPath(source);
   if (
     field !== undefined &&
-    ['$path', '$id', '$rev', '$type', '$v', '$prefab', '$refId'].includes(field)
+    ['$path', '$id', '$rev', '$type', '$v', '$prefab', '$prefabChildren', '$refId'].includes(field)
   )
     throw new KernelError('INVALID', 'Prefab identity cannot be applied or reverted');
   return { target: value.target, source, field };
@@ -220,11 +220,12 @@ export const apply: WriteAction = {
     if (input.field === undefined)
       throw new KernelError('INVALID', 'Prefab apply requires a field');
     const data = fields(sourceBody(source)),
+      own = fields(node),
       current = translatedFields(
         node,
         state.targetRoot,
         state.sourceRoot,
-        state.maps?.map(({ from, to }) => ({ from: to, to: from })),
+        await inverseMaps(ctx.read, state, { [input.field]: own[input.field] }),
       );
     if (Object.hasOwn(current, input.field)) data[input.field] = current[input.field];
     else delete data[input.field];

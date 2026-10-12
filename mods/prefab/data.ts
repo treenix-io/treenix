@@ -1,6 +1,9 @@
 import { getComponent } from '@treenx/core';
 import { KernelError } from '@treenx/core/errors';
 import type { Node, NodeInput, Reader } from '@treenx/core/kernel/types';
+import type { NativePrefabSource } from '@treenx/core/mod/native-prefab';
+
+export type PrefabCatalog = NativePrefabSource & { readonly materialized?: boolean };
 
 export interface PrefabState {
   readonly src: string;
@@ -65,6 +68,19 @@ function translatePath(path: string, maps: readonly ReferenceMap[]): string {
     return to === '/' ? `/${suffix}` : `${to}/${suffix}`;
   }
   return path;
+}
+
+/** Collect reference targets without treating ordinary string fields as addresses. */
+export function referencePaths(value: unknown): ReadonlySet<string> {
+  const paths = new Set<string>();
+  function visit(item: unknown): void {
+    if (item === null || typeof item !== 'object') return;
+    const reference: unknown = Reflect.get(item, '$ref');
+    if (typeof reference === 'string') paths.add(reference);
+    for (const nested of Object.values(item)) visit(nested);
+  }
+  visit(value);
+  return paths;
 }
 
 /** Translate only references inside the copied subtree, including references in named components. */

@@ -14,6 +14,7 @@ import {
   type CommitRequest,
   type ModuleManifest,
   type OpId,
+  type Pending,
   type Session,
 } from '@treenx/core/kernel/types';
 import type { NativePrefabSource } from '@treenx/core/mod/native-prefab';
@@ -80,6 +81,13 @@ async function read(session: Session, path: string) {
   return copy.node;
 }
 
+/** Own streamed pieces until the final action outcome arrives. */
+async function finish(pending: Pending) {
+  for await (const _chunk of pending.chunks) {
+  }
+  return pending.outcome;
+}
+
 /** Build the shared catalog and prefab input for installation tests. */
 function plan(opId: OpId, target = '/seed'): NativeSeedPlan {
   return {
@@ -88,6 +96,7 @@ function plan(opId: OpId, target = '/seed'): NativeSeedPlan {
       { $path: '/sys/mods', $type: 't.dir' },
       { $path: '/sys/mods/demo', $type: 't.dir' },
       { $path: '/sys/mods/demo/prefabs', $type: 't.dir' },
+      { $path: '/outside', $type: 'seed.fixture', value: 4 },
     ],
     prefabs: [
       {
@@ -103,6 +112,7 @@ function plan(opId: OpId, target = '/seed'): NativeSeedPlan {
               $path: '.',
               $type: 'seed.fixture',
               value: 1,
+              links: [{ $ref: '/child' }, { $ref: '/absolute' }, { $ref: '/outside' }],
               $id: 'captured-id',
               $rev: 'captured-rev',
               $refId: 'captured-ref',
@@ -132,6 +142,24 @@ it(
     const source = getComponent<{ readonly body: PrefabInput }>(record, SOURCE_TYPE);
     assert.ok(source);
     assert.equal(source.body.value, 2);
+    const root = await readPrefabNode(f.session, '/seed');
+    const absolute = await readPrefabNode(f.session, '/absolute');
+    assert.ok(root.$prefab);
+    assert.ok(absolute.$prefab);
+    await f.session.act({
+      opId: f.key(),
+      path: input.prefabs[0].source.$path,
+      action: 'apply',
+      args: { target: root.$path, field: 'links' },
+    }).outcome;
+    const rootSource = getComponent<{
+      readonly body: { readonly links: readonly { readonly $ref: string }[] };
+    }>(await read(f.session, root.$prefab.src), SOURCE_TYPE);
+    assert.ok(rootSource);
+    assert.deepEqual(
+      rootSource.body.links.map((link) => link.$ref),
+      [instance.$prefab.src, absolute.$prefab.src, '/outside'],
+    );
 
     await f.session.commit({
       opId: f.key(),
@@ -311,12 +339,18 @@ it(
       input = plan(f.key());
     await installNativeSeeds(f.session, input);
     const source = input.prefabs[0].source.$path;
-    const outcome = await f.session.act({
+    await f.session.commit({
       opId: f.key(),
-      path: source,
-      action: 'deploy',
-      args: { target: '/public-copy', allowAbsolute: true },
+      changes: [{ op: 'patch', path: '/sys/limits', ops: { $set: { changeSet: 2 } } }],
     }).outcome;
+    const outcome = await finish(
+      f.session.act({
+        opId: f.key(),
+        path: source,
+        action: 'deploy',
+        args: { target: '/public-copy', allowAbsolute: true },
+      }),
+    );
     assert.deepEqual(outcome.value, {
       deployed: ['/public-copy', '/public-copy/child'],
       skipped: ['/absolute'],
@@ -325,12 +359,17 @@ it(
     assert.equal(target.value, 1);
     assert.notEqual(target.$id, 'captured-id');
     assert.equal((await read(f.session, '/public-copy/child')).value, 2);
-    const repeat = await f.session.act({
-      opId: f.key(),
-      path: source,
-      action: 'deploy',
-      args: { target: '/public-copy', allowAbsolute: true },
-    }).outcome;
+    const provenance = await readPrefabNode(f.session, '/public-copy');
+    assert.ok(provenance.$prefab);
+    assert.equal((await read(f.session, provenance.$prefab.src)).$type, SOURCE_TYPE);
+    const repeat = await finish(
+      f.session.act({
+        opId: f.key(),
+        path: source,
+        action: 'deploy',
+        args: { target: '/public-copy', allowAbsolute: true },
+      }),
+    );
     assert.deepEqual(repeat.value, {
       deployed: [],
       skipped: ['/public-copy', '/public-copy/child', '/absolute'],
@@ -396,12 +435,14 @@ it(
       await delivery;
     });
     const invoke = () =>
-      caller.act({
-        opId: f.key(),
-        path: '/prefab',
-        action: 'deploy',
-        args: { target: '/allowed', allowAbsolute: true },
-      }).outcome;
+      finish(
+        caller.act({
+          opId: f.key(),
+          path: '/prefab',
+          action: 'deploy',
+          args: { target: '/allowed', allowAbsolute: true },
+        }),
+      );
 
     await assert.rejects(
       invoke(),

@@ -1,7 +1,9 @@
-import type { NodeInput } from '@treenx/core/kernel/types';
+import type { NodeInput, Reader } from '@treenx/core/kernel/types';
 import { prefabInput, resolvePrefabPath } from '@treenx/core/mod/prefab-path';
 import {
   SOURCE_TYPE,
+  readNode,
+  referencePaths,
   sourceBody,
   translatedFields,
   type PrefabNode,
@@ -21,6 +23,35 @@ export function sourceMaps(catalog: string, target: string): readonly ReferenceM
     { from: `${catalog}/source/relative`, to: target },
     { from: `${catalog}/source/absolute`, to: '/' },
   ];
+}
+
+/** Resolve each copied reference by provenance when relative and absolute targets share a namespace. */
+export async function inverseMaps(
+  read: Reader,
+  state: PrefabState,
+  value: unknown,
+): Promise<readonly ReferenceMap[]> {
+  const maps = state.maps ?? [{ from: state.sourceRoot, to: state.targetRoot }];
+  const inverse: ReferenceMap[] = [];
+  for (const path of referencePaths(value)) {
+    if (!maps.some(({ to, exact }) => contains(path, to, exact))) continue;
+    const node = await readNode(read, path);
+    const origin = node.$prefab;
+    if (
+      origin !== undefined &&
+      origin.catalog === state.catalog &&
+      maps.some(
+        ({ from, to, exact }) => contains(path, to, exact) && contains(origin.src, from, exact),
+      )
+    )
+      inverse.push({ from: path, to: origin.src, exact: true });
+  }
+  return inverse;
+}
+
+/** Match roots and descendants without overlapping sibling names. */
+function contains(path: string, root: string, exact = false): boolean {
+  return path === root || (!exact && path.startsWith(root === '/' ? '/' : `${root}/`));
 }
 
 /** Build an instance from accepted source data and retain its translated per-field base. */

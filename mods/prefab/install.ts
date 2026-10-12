@@ -20,7 +20,7 @@ import type {
 import { assertPrefabPath, prefabInput, resolvePrefabPath } from '@treenx/core/mod/prefab-path';
 import { stableJson } from '@treenx/core/util/stable-json';
 import { prefabCopy, sourceMaps, sourcePath, sourceRecords } from '#prefab/source';
-import { readNode as readPrefabNode, SOURCE_TYPE } from '#prefab/data';
+import { readNode as readPrefabNode, SOURCE_TYPE, type PrefabCatalog } from '#prefab/data';
 import { childMarks, optionalNode } from '#prefab/structure';
 
 export type {
@@ -28,10 +28,6 @@ export type {
   NativeSeedPlan,
   NativeSeedPrefab,
 } from '@treenx/core/mod/native-prefab';
-
-interface MaterializedPrefab extends NativePrefabSource {
-  readonly materialized?: boolean;
-}
 
 /** Select the root's named seeds from native module declarations before opening storage. */
 export function selectNativeSeeds(
@@ -210,7 +206,7 @@ export async function installNativeSeeds(
 
   for (const prefab of plan.prefabs) {
     let accepted = await readNode(session, prefab.source.$path);
-    const source = getComponent<MaterializedPrefab>(accepted, 't.prefab');
+    const source = getComponent<PrefabCatalog>(accepted, 't.prefab');
     if (source === undefined)
       throw new KernelError('INVALID', 'Accepted seed source has another type');
     const owner = stableJson({ id: accepted.$id, rev: accepted.$rev });
