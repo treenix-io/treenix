@@ -19,6 +19,7 @@ import {
 } from '@treenx/core/kernel/types';
 import type { NativePrefabSource } from '@treenx/core/mod/native-prefab';
 import prefabModule from '#prefab/kernel';
+import { nativeSystemManifest } from '@treenx/core/system/native-actions';
 import { readNode as readPrefabNode, SOURCE_TYPE, type PrefabInput } from '#prefab/data';
 
 const module: ModuleManifest = {
@@ -48,7 +49,7 @@ async function fixture(t: TestContext) {
     rootExternal: 'none' as const,
     credentialTtlMs: 60_000,
     firstAdmin: { path: '/admin', name: 'admin', password: 'seed-fixture-password' },
-    modules: [module, (await prefabModule()).manifest],
+    modules: [module, (await prefabModule()).manifest, nativeSystemManifest()],
   };
   const runtime = await openNativeRuntime(config);
   assert.ok(runtime.instance.setupCredential);
@@ -375,6 +376,39 @@ it(
       skipped: ['/public-copy', '/public-copy/child', '/absolute'],
     });
     assert.deepEqual(await read(f.session, '/public-copy'), target);
+  },
+);
+
+it(
+  'deploys through the system entry point using the prefab owner',
+  { timeout: 10_000 },
+  async (t) => {
+    const f = await fixture(t),
+      input = plan(f.key());
+    await installNativeSeeds(f.session, input);
+    await f.session.commit({
+      opId: f.key(),
+      changes: [{ op: 'put', node: { $path: '/system', $type: 't.system' } }],
+    }).outcome;
+
+    const outcome = await finish(
+      f.session.act({
+        path: '/system',
+        action: 'deploy_prefab',
+        args: {
+          source: input.prefabs[0].source.$path,
+          target: '/system-copy',
+          allowAbsolute: true,
+        },
+        opId: f.key(),
+      }),
+    );
+
+    assert.deepEqual(outcome.value, {
+      deployed: ['/system-copy', '/system-copy/child'],
+      skipped: ['/absolute'],
+    });
+    assert.equal((await read(f.session, '/system-copy/child')).value, 2);
   },
 );
 

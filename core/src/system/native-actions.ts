@@ -24,6 +24,44 @@ export function nativeSystemManifest(): ModuleManifest {
       name: 't.system', module: 'treenix.system', security: 'ordinary', version: 1,
       schema: { type: 'object', additionalProperties: false },
       actions: {
+        deploy_prefab: {
+          kind: 'write',
+          args: {
+            type: 'object',
+            required: ['source', 'target'],
+            additionalProperties: false,
+            properties: {
+              source: { type: 'string' },
+              target: { type: 'string' },
+              allowAbsolute: { type: 'boolean' },
+            },
+          },
+          /** Keep the system entry point on the prefab owner's bounded native deployment. */
+          async handler(context, input) {
+            if (
+              input === null ||
+              typeof input !== 'object' ||
+              !('source' in input) ||
+              typeof input.source !== 'string' ||
+              !('target' in input) ||
+              typeof input.target !== 'string'
+            )
+              throw new KernelError('INVALID', 'Prefab source and target are required');
+            const allowAbsolute = 'allowAbsolute' in input ? input.allowAbsolute : undefined;
+            if (allowAbsolute !== undefined && typeof allowAbsolute !== 'boolean')
+              throw new KernelError('INVALID', 'Absolute-path permission must be boolean');
+
+            return context.act({
+              path: input.source,
+              action: 'deploy',
+              key: 'deploy',
+              args: {
+                target: input.target,
+                ...(allowAbsolute === undefined ? {} : { allowAbsolute }),
+              },
+            });
+          },
+        },
         catalog: { kind: 'read', args: { type: 'object', additionalProperties: false }, handler: context => catalog(context) },
         describe_type: { kind: 'read', args: { type: 'object', required: ['type'], additionalProperties: false, properties: { type: { type: 'string' } } }, handler: (context, input) => {
           if (typeof input !== 'object' || input === null || !('type' in input) || typeof input.type !== 'string') throw new KernelError('INVALID', 'Type name is required');
