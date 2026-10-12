@@ -13,6 +13,7 @@ export interface AgentRequest {
   readonly systemPrompt: string;
   readonly prompt: string;
   readonly sessionId?: string;
+  readonly forkSession?: boolean;
 }
 
 export interface AgentPorts {
