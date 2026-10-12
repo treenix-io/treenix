@@ -120,6 +120,7 @@ export function createStoreChangeMapping(owner: StoreChangeMappingOptions, optio
       }
       if (groups.size === 0) return undefined
       const changes: ChangeMember[] = []
+      const updates = new Map<Path, Path>()
       const relocations = new Map<Path, NodeRelocation>()
       const recreateBodies = new Map<Path, StoredNode>()
       const outbound = new Map<Path, { binding: StoreChangeBinding; change: NodeChange }>()
@@ -165,6 +166,8 @@ export function createStoreChangeMapping(owner: StoreChangeMappingOptions, optio
         }
         const futureByPath = new Map(logical.flatMap(change => change.after === null
           || outbound.has(change.after.$path) ? [] : [[change.after.$path, change.after] as const]))
+        const existing = new Set(logical.flatMap(change => change.before !== null && change.after !== null
+          && change.before.$path === change.after.$path ? [change.after.$path] : []))
         for (const change of logical) {
           const path = change.before?.$path ?? change.after!.$path
           const bits = await lowerRights(binding, path)
@@ -192,6 +195,7 @@ export function createStoreChangeMapping(owner: StoreChangeMappingOptions, optio
           if (change.op === 'put') {
             const suffix = change.node.$path.slice(binding.source.binding.upper === '/' ? 0 : binding.source.binding.upper.length)
             const logicalPath = `${binding.source.binding.path === '/' ? '' : binding.source.binding.path}${suffix}` || '/'
+            if (existing.has(logicalPath)) updates.set(change.node.$path, logicalPath)
             const future = futureByPath.get(logicalPath)
             changes.push(future === undefined || future === null ? change : { ...change, node: { ...change.node,
               ...(future.$acl === undefined ? {} : { $acl: future.$acl }),
@@ -272,9 +276,16 @@ export function createStoreChangeMapping(owner: StoreChangeMappingOptions, optio
         } }
       const prepared = await prepareChangeSet({ ...options, mapping: undefined, budget: remaining, preconditions,
         readCost: readerOperationCost(owner.ledger), actionChanges: transitions, relocations, recreateBodies,
+        // Updating existing future data allocates a delta record, without widening the logical write mask.
+        creationScopePath: path => updates.get(path),
         scopePath(path) {
           for (const binding of bindings) if (contains(binding.source.binding.upper, path)) {
             const suffix = path.slice(binding.source.binding.upper === '/' ? 0 : binding.source.binding.upper.length)
+            // A binding's private header records the already-authorized logical frame.
+            if (suffix === '') {
+              const change = groups.get(binding.source)!.changes[0]
+              return change.before?.$path ?? change.after!.$path
+            }
             return `${binding.source.binding.path === '/' ? '' : binding.source.binding.path}${suffix}` || '/'
           }
           return options.scopePath?.(path) ?? path

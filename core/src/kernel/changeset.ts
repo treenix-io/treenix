@@ -48,6 +48,7 @@ export interface ChangeSetOptions {
   readonly recreateBodies?: ReadonlyMap<string, StoredNode>
   readonly actionChanges?: readonly NodeChange[]
   readonly scopePath?: (path: string) => string
+  readonly creationScopePath?: (path: string) => string | undefined
 }
 
 /** An operation-owned binding validates logical changes before producing physical Store writes. */
@@ -131,6 +132,7 @@ export async function prepareChangeSet(
     action: 'actor' in who ? who.action : undefined,
     actionChanges: options.actionChanges,
     scopePath: options.scopePath,
+    creationScopePath: options.creationScopePath,
   });
   const migrator = createMigrator((type) => ({
     version: registry.type(type).version,

@@ -22,14 +22,17 @@ export interface GuardOptions {
   readonly action?: ActionProvenance
   readonly actionChanges?: readonly NodeChange[]
   readonly scopePath?: (path: string) => string
+  /** Scope coordinate for physical allocation of an already-authorized logical update. */
+  readonly creationScopePath?: (path: string) => string | undefined
 }
 
-export function createGuard({ registry, executor, shard, readBefore, capabilities, expect, action, actionChanges, scopePath, alert = value => console.error(value.error) }: GuardOptions) {
+export function createGuard({ registry, executor, shard, readBefore, capabilities, expect, action, actionChanges, scopePath, creationScopePath, alert = value => console.error(value.error) }: GuardOptions) {
   const permissions = new Map<string, Promise<RightsResult>>()
   const actor = typeof executor === 'string' ? undefined : executor
-  async function rights(path: string): Promise<RightsResult> {
+  async function rights(path: string, coordinate?: string): Promise<RightsResult> {
     if (actor === undefined) throw new KernelError('INVALID', 'An internal executor has no ACL subject')
-    const previous = permissions.get(path)
+    const key = coordinate === undefined ? path : `${path}\0${coordinate}`
+    const previous = permissions.get(key)
     if (previous !== undefined) return previous
     const pending = (async () => {
       const chain: ChainNode[] = []
@@ -38,15 +41,17 @@ export function createGuard({ registry, executor, shard, readBefore, capabilitie
         if (node !== null) chain.push(decodeChainNode(node))
       }
       if (chain.at(-1)?.path !== path) chain.push({ path, id: '', types: [], acl: [], hasAcl: false, hasOwner: false, alerts: [] })
-      const result = computeAdmittedRights(actor, chain, registry, shard, scopePath)
+      const scoped = coordinate === undefined ? scopePath
+        : (at: string) => at === path ? coordinate : scopePath?.(at) ?? at
+      const result = computeAdmittedRights(actor, chain, registry, shard, scoped)
       for (const failure of result.alerts) alert(failure)
       return result
     })()
-    permissions.set(path, pending)
+    permissions.set(key, pending)
     return pending
   }
-  async function require(path: string, bit: number): Promise<void> {
-    if (((await rights(path)).bits & bit) === 0) throw new KernelError('FORBIDDEN', 'ChangeSet lacks the required rights')
+  async function require(path: string, bit: number, coordinate?: string): Promise<void> {
+    if (((await rights(path, coordinate)).bits & bit) === 0) throw new KernelError('FORBIDDEN', 'ChangeSet lacks the required rights')
   }
   function ruleTypes(node: StoredNode): Set<string> {
     const types = new Set<string>()
@@ -102,8 +107,9 @@ export function createGuard({ registry, executor, shard, readBefore, capabilitie
         if (before !== null) await require(before.$path, W)
         if (after !== null && (before === null || before.$path !== after.$path)) {
           const parent = dirname(after.$path) ?? '/'
-          await require(parent, W)
-          if (after.$acl !== undefined || after.$owner !== undefined) await require(parent, A)
+          const coordinate = creationScopePath?.(after.$path)
+          await require(parent, W, coordinate)
+          if (after.$acl !== undefined || after.$owner !== undefined) await require(parent, A, coordinate)
         }
         if (before !== null && after !== null && (!isDeepStrictEqual(before.$acl, after.$acl)
           || before.$owner !== after.$owner || !isDeepStrictEqual(ruleTypes(before), ruleTypes(after)))) await require(before.$path, A)

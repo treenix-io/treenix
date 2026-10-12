@@ -4,6 +4,7 @@ import type { ChangeMember, ModuleManifest, MountHandler, Node, Reader, StoreBin
 
 import { branchActions, branchContainerActions } from './native-actions';
 import type { NativeBranchDelta, NativeBranchWrapper } from './native-types';
+import { nativeBranchPaths } from '#branch/native-index';
 import branchSchema from './schemas/t.branch.json' with { type: 'json' };
 import branchesSchema from './schemas/t.branches.json' with { type: 'json' };
 
@@ -80,12 +81,18 @@ export function createNativeBranchBinding(view: string, lower: string, upper: st
     },
     async changes(transitions, reader) {
       const changes: ChangeMember[] = [];
+      const header = await nodeAt(reader, upper);
+      if (header === null) throw new KernelError('CONFLICT', 'Branch has no delta header');
+      const previous = await nativeBranchPaths(header, reader);
+      const paths = new Set(previous);
       for (const transition of transitions) {
         const suffix = relative(transition.path, view), path = at(upper, suffix), lowerPath = at(lower, suffix);
+        paths.add(suffix);
         if (denied(lowerPath)) throw new KernelError('FORBIDDEN', 'Branch cannot expose its control namespace as future data');
         const existing = await nodeAt(reader, path), live = await nodeAt(reader, lowerPath);
         if (transition.before !== null && transition.before.$path !== transition.path && transition.after !== null) {
           const originalSuffix = relative(transition.before.$path, view);
+          paths.add(originalSuffix);
           const originalPath = at(upper, originalSuffix), originalLowerPath = at(lower, originalSuffix);
           if (denied(originalLowerPath)) throw new KernelError('FORBIDDEN', 'Branch cannot move its control namespace as future data');
           const original = await nodeAt(reader, originalPath), originalLower = await nodeAt(reader, originalLowerPath);
@@ -123,6 +130,8 @@ export function createNativeBranchBinding(view: string, lower: string, upper: st
             ...(existing?.$type === WHITEOUT ? { baseId: null } : {}), node: transition.after } });
         }
       }
+      if (paths.size !== previous.length)
+        changes.push({ op: 'patch', path: upper, ops: { $set: { '#changes': { $type: 't.branch.index', paths: [...paths] } } } });
       return changes;
     },
   };
@@ -155,6 +164,8 @@ export function nativeBranchManifest(): ModuleManifest {
         required: ['baseId', 'baseRev', 'node'] } },
     { name: WHITEOUT, module: '@treenx/mods/branch', security: 'ordinary', version: 0, actions: {},
       schema: { type: 'object', properties: metadata, required: ['baseId', 'baseRev'] } },
+    { name: 't.branch.index', module: '@treenx/mods/branch', security: 'ordinary', version: 0, actions: {},
+      schema: { type: 'object', additionalProperties: false, properties: { paths: { type: 'array', uniqueItems: true, items: { type: 'string' } } }, required: ['paths'] } },
     { name: 't.mount.branch', module: '@treenx/mods/branch', security: 'user-capability', version: 0, actions: {},
       schema: { type: 'object', properties: {} } },
   ], security: [{ type: 't.mount.branch', context: 'mount', handler: nativeBranchMount }] };

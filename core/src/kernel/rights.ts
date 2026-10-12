@@ -85,7 +85,7 @@ export function computeRights(actor: Actor, chain: readonly ChainNode[], registr
       }
       else if (!aboveA) denied |= entry.deny
     }
-    const coordinate = actor.scope === undefined ? node.path : scopePath(node.path)
+    const coordinate = actor.scope === undefined && actor.writeScope === undefined ? node.path : scopePath(node.path)
     const scoped = actor.scope === undefined || actor.scope.some(path => path === coordinate || isChildPath(path, coordinate, false))
     bits = scoped ? granted & ~denied & ALL : 0
     if (actor.writeScope !== undefined && !actor.writeScope.some(path => path === coordinate || isChildPath(path, coordinate, false)))

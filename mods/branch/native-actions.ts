@@ -3,6 +3,7 @@ import { getComponent, isRef } from '@treenx/core';
 import { KernelError } from '@treenx/core/errors';
 import { A, R, W, type ActionDef, type Node, type NodeInput, type Reader, type ReadActionContext, type WriteActionContext } from '@treenx/core/kernel/types';
 import type { NativeBranchConflict, NativeBranchDelta, NativeBranchDiff, NativeBranchState, NativeBranchWrapper } from './native-types';
+import { nativeBranchPaths } from '#branch/native-index';
 
 function at(root: string, suffix: string): string { return `${root === '/' ? '' : root}${suffix}` || '/'; }
 function state(node: Node): NativeBranchState {
@@ -51,7 +52,7 @@ function rewriteRefs(node: NodeInput, view: string, base: string, path: string):
 }
 
 async function diff(ctx: ReadActionContext): Promise<NativeBranchDiff[]> {
-  const config = state(ctx.node), root = `${ctx.node.$path}/delta`, entries: NativeBranchDiff[] = [], pending = [root];
+  const config = state(ctx.node), root = `${ctx.node.$path}/delta`, entries: NativeBranchDiff[] = [];
   function append(stored: Node, type: 't.branch.delta' | 't.branch.whiteout'): void {
     const path = at(config.base, stored.$path.slice(root.length));
     const wrapper = getComponent<NativeBranchWrapper>(stored, type);
@@ -73,23 +74,17 @@ async function diff(ctx: ReadActionContext): Promise<NativeBranchDiff[]> {
   const rootDelta = getComponent(container, 't.branch.delta'), rootWhiteout = getComponent(container, 't.branch.whiteout');
   if (rootDelta !== undefined && rootWhiteout !== undefined)
     throw new KernelError('CONFLICT', 'Branch root has competing future components');
-  if (rootDelta !== undefined) append(container, 't.branch.delta');
-  if (rootWhiteout !== undefined) append(container, 't.branch.whiteout');
-  for (let index = 0; index < pending.length; index++) {
-    const parent = pending[index];
-    let after: string | undefined;
-    do {
-      const page = await ctx.read.read({ children: parent, window: { limit: 100, ...(after === undefined ? {} : { after }) } });
-      for (const copy of page.copies) {
-        if ('error' in copy) throw copy.error;
-        const stored = copy.node;
-        if (stored.$type !== 't.branch.delta' && stored.$type !== 't.branch.whiteout')
-          throw new KernelError('CONFLICT', 'Branch upper contains a foreign wrapper');
-        append(stored, stored.$type);
-        pending.push(stored.$path);
-      }
-      after = page.next;
-    } while (after !== undefined);
+  for (const suffix of await nativeBranchPaths(container, ctx.read)) {
+    const stored = suffix === '' ? container : await read(ctx.read, at(root, suffix));
+    if (stored === null) {
+      if (config.status === 'merged' || config.status === 'abandoned') continue;
+      throw new KernelError('CONFLICT', 'Branch index lost its future wrapper');
+    }
+    const delta = getComponent(stored, 't.branch.delta');
+    const whiteout = getComponent(stored, 't.branch.whiteout');
+    if (delta === undefined && whiteout === undefined || delta !== undefined && whiteout !== undefined)
+      throw new KernelError('CONFLICT', 'Branch index requires one future wrapper');
+    append(stored, delta === undefined ? 't.branch.whiteout' : 't.branch.delta');
   }
   return entries;
 }
@@ -117,7 +112,7 @@ export function branchContainerActions(): Readonly<Record<string, ActionDef>> {
       title: text(data, 'title') ?? '', createdAt: Date.now(), mergedAt: 0, conflicts: [],
       '#mount': { $type: 't.mount.branch', pattern: 'tree' },
       $acl: [{ subject: { group: 'admins' }, grant: R | W | A }, { subject: { group: owner.startsWith('n:') ? owner : `u:${owner}` }, grant: R | W | A }] });
-    ctx.change.put({ $path: `${path}/delta`, $type: 't.dir' });
+    ctx.change.put({ $path: `${path}/delta`, $type: 't.dir', '#changes': { $type: 't.branch.index', paths: [] } });
     ctx.change.put({ $path: `${path}/tree`, $type: 't.dir' });
     return { path };
   } } };
