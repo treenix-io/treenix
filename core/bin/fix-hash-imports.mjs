@@ -114,7 +114,8 @@ if (rewrites) console.log(`fix-hash-imports: ${rewrites} imports in ${files} fil
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const full = join(dir, entry.name);
       if (entry.isDirectory()) { if (!SKIP_DIRS.has(entry.name)) copyAssets(full); continue; }
-      if (entry.name.endsWith('.ts') || entry.name.endsWith('.tsx') || entry.name.endsWith('.json')) continue;
+      if (entry.name.endsWith('.ts') || entry.name.endsWith('.tsx')
+        || entry.name.endsWith('.json') && !/(^|[\\/])schemas([\\/]|$)/.test(dir)) continue;
       const rel = relative(srcDir, full);
       const dest = join(distDir, rel);
       mkdirSync(dirname(dest), { recursive: true });

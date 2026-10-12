@@ -1,6 +1,7 @@
 {
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
+    "module": "ESNext",
     "noEmit": false,
     "allowImportingTsExtensions": false,
     "rewriteRelativeImportExtensions": true,
@@ -13,5 +14,5 @@
     "customConditions": []
   },
   "include": ["**/*.ts", "**/*.tsx"],
-  "exclude": ["dist", "**/*.test.ts"]
+  "exclude": ["dist", "temp", "**/*.test.ts"]
 }
