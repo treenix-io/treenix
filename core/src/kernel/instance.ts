@@ -1043,7 +1043,9 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
       if (selectors === undefined) return addressedDomains()
       const domains = new Set([config.root.domain])
       function addDomain(path: Path): void {
-        if (mounts?.resolve(path)?.target.kind === 'authority') return;
+        const target = mounts?.resolve(path)?.target;
+        // View output has no Store; its executor retains the domains of its source reads.
+        if (target?.kind === 'authority' || target?.kind === 'view') return;
         domains.add(resolve(path).store.domain);
         const binding = bindingAt(path);
         if (binding !== undefined) for (const physical of Object.values(binding.source.sources(path, binding.source.binding.path)))
