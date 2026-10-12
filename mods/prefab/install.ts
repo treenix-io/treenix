@@ -1,16 +1,41 @@
 import { createHash } from 'node:crypto';
-import { getComponent } from '#core';
-import { KernelError } from '#errors';
-import { A, R, W, type Node, type NodeInput, type OpId, type Session } from '#kernel/types';
-import type { NativePrefabSource, NativeSeedDefinition, NativeSeedPlan, NativeSeedPrefab } from '#mod/native-prefab';
-import { assertPrefabPath, prefabInput, resolvePrefabPath } from '#mod/prefab-path';
-import { stableJson } from '#util/stable-json';
-import type { CollectedModule } from '#kernel/manifest';
+import { getComponent } from '@treenx/core';
+import { KernelError } from '@treenx/core/errors';
+import {
+  A,
+  R,
+  W,
+  type Node,
+  type NodeInput,
+  type OpId,
+  type Session,
+} from '@treenx/core/kernel/types';
+import type {
+  NativePrefabSource,
+  NativeSeedDefinition,
+  NativeSeedPlan,
+  NativeSeedPrefab,
+} from '@treenx/core/mod/native-prefab';
+import { assertPrefabPath, prefabInput, resolvePrefabPath } from '@treenx/core/mod/prefab-path';
+import { stableJson } from '@treenx/core/util/stable-json';
+import { prefabCopy, sourceMaps, sourcePath, sourceRecords } from '#prefab/source';
+import { readNode as readPrefabNode } from '#prefab/data';
 
-export type { NativeSeedDefinition, NativeSeedPlan, NativeSeedPrefab } from '#mod/native-prefab';
+export type {
+  NativeSeedDefinition,
+  NativeSeedPlan,
+  NativeSeedPrefab,
+} from '@treenx/core/mod/native-prefab';
+
+interface MaterializedPrefab extends NativePrefabSource {
+  readonly materialized?: boolean;
+}
 
 /** Select the root's named seeds from native module declarations before opening storage. */
-export function selectNativeSeeds(modules: readonly Pick<CollectedModule, 'seeds'>[], names: readonly string[]): NativeSeedDefinition {
+export function selectNativeSeeds(
+  modules: readonly { readonly seeds?: NativeSeedDefinition }[],
+  names: readonly string[],
+): NativeSeedDefinition {
   const sources = new Map<string, NodeInput>();
   const prefabs: NativeSeedPrefab[] = [];
 
@@ -18,7 +43,7 @@ export function selectNativeSeeds(modules: readonly Pick<CollectedModule, 'seeds
     let found = false;
     for (const module of modules) {
       if (module.seeds === undefined) continue;
-      const selected = module.seeds.prefabs.filter(prefab => prefab.source.mod === name);
+      const selected = module.seeds.prefabs.filter((prefab) => prefab.source.mod === name);
       if (selected.length === 0) continue;
       if (found) throw new KernelError('CONFLICT', `Seed has multiple native owners: ${name}`);
       found = true;
@@ -134,38 +159,76 @@ export async function installNativeSeeds(
   }
 
   for (const prefab of plan.prefabs) {
-    const accepted = await readNode(session, prefab.source.$path);
-    const source = getComponent<NativePrefabSource>(accepted, 't.prefab');
+    let accepted = await readNode(session, prefab.source.$path);
+    const source = getComponent<MaterializedPrefab>(accepted, 't.prefab');
     if (source === undefined)
       throw new KernelError('INVALID', 'Accepted seed source has another type');
     const owner = stableJson({ id: accepted.$id, rev: accepted.$rev });
     acceptedSeeds.push({ prefab, node: accepted, source });
+    if (source.materialized !== true) {
+      for (const record of sourceRecords(accepted.$path, source.nodes))
+        await put(record, owner, accepted);
+      await session.commit({
+        opId: childKey(plan.opId, owner, 'materialized'),
+        expect: { nodes: [admin, { path: accepted.$path, rev: accepted.$rev }] },
+        changes: [{ op: 'patch', path: accepted.$path, ops: { $set: { materialized: true } } }],
+      }).outcome;
+      accepted = await readNode(session, accepted.$path);
+      acceptedSeeds[acceptedSeeds.length - 1] = { prefab, node: accepted, source };
+    }
+
+    const maps = sourceMaps(accepted.$path, prefab.target);
     for (const node of source.nodes) {
       const path = resolvePrefabPath(node.$path, prefab.target, prefab.allowAbsolute);
-      const input = prefabInput(node, path);
+      const template = await readPrefabNode(session, sourcePath(accepted.$path, node.$path));
+      const input = prefabCopy(template, path, {
+        sourceRoot: `${accepted.$path}/source/relative`,
+        targetRoot: prefab.target,
+        maps,
+        catalog: accepted.$path,
+      });
       if (path.startsWith('/sys/autostart/') && (input.$type === 'ref' || input.$type === 't.ref'))
-        activation.push({ node: input, owner, source: accepted });
-      else await put(input, owner, accepted);
+        activation.push({ node: input, owner, source: template });
+      else await put(input, owner, template);
     }
   }
 
   for (const { prefab, node: sourceNode, source } of acceptedSeeds) {
     for (const grant of source.grants ?? []) {
-      const executor = await readNode(session, resolvePrefabPath(grant.executor, prefab.target, prefab.allowAbsolute));
-      const target = await readNode(session, resolvePrefabPath(grant.target, prefab.target, prefab.allowAbsolute));
+      const executor = await readNode(
+        session,
+        resolvePrefabPath(grant.executor, prefab.target, prefab.allowAbsolute),
+      );
+      const target = await readNode(
+        session,
+        resolvePrefabPath(grant.target, prefab.target, prefab.allowAbsolute),
+      );
       const principal = `n:${executor.$id}`;
       const acl = target.$acl ?? [];
-      const previous = acl.find(entry => 'group' in entry.subject && entry.subject.group === principal && 'grant' in entry);
+      const previous = acl.find(
+        (entry) =>
+          'group' in entry.subject && entry.subject.group === principal && 'grant' in entry,
+      );
       const bits = previous !== undefined && 'grant' in previous ? previous.grant : 0;
       if ((bits & grant.grant) === grant.grant) continue;
       const subject = { group: principal };
-      const updated = previous === undefined ? [...acl, { subject, grant: grant.grant }]
-        : acl.map(entry => entry === previous ? { ...entry, grant: bits | grant.grant } : entry);
-      const pins = new Map([sourceNode, executor, target].map(node => [node.$path, node.$rev]));
+      const updated =
+        previous === undefined
+          ? [...acl, { subject, grant: grant.grant }]
+          : acl.map((entry) =>
+              entry === previous ? { ...entry, grant: bits | grant.grant } : entry,
+            );
+      const pins = new Map([sourceNode, executor, target].map((node) => [node.$path, node.$rev]));
       pins.set(admin.path, admin.rev);
-      await session.commit({ opId: childKey(plan.opId, stableJson({ source: sourceNode.$id, executor: executor.$id }), target.$path),
+      await session.commit({
+        opId: childKey(
+          plan.opId,
+          stableJson({ source: sourceNode.$id, executor: executor.$id }),
+          target.$path,
+        ),
         expect: { nodes: [...pins].map(([path, rev]) => ({ path, rev })) },
-        changes: [{ op: 'patch', path: target.$path, ops: { $set: { $acl: updated } } }] }).outcome;
+        changes: [{ op: 'patch', path: target.$path, ops: { $set: { $acl: updated } } }],
+      }).outcome;
       // A declared root grant advances our own administrator pin before later seed steps.
       if (target.$path === admin.path) admin.rev = (await readNode(session, admin.path)).$rev;
     }

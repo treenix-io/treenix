@@ -1,7 +1,7 @@
 import { createTwpHttpRoutes } from '#server/http-routes';
 import { randomUUID } from 'node:crypto';
 import { assertModuleSchema, collectModule, evaluateModuleFactory, getCollectedModule, getModuleDefinition, instantiateModule, type CollectedModule, type NativeModuleDeployment, type NativeModuleExports, type NativeModuleFactory, type NativeModuleHost } from '#kernel/manifest';
-import { assertNativeSeeds, installNativeSeeds, selectNativeSeeds, type NativeSeedDefinition } from '#kernel/seed-install';
+import type { NativeSeedDefinition } from '#mod/native-prefab';
 import { openNativeRuntime, type NativeRuntimeConfig } from '#kernel/runtime';
 import { bindModuleIo, loadAllMods, moduleGates, type LoadResult } from '#mod/loader';
 import { KernelError } from '#errors';
@@ -81,8 +81,18 @@ export async function openNativeDeployment(config: NativeDeploymentConfig) {
   loaded.gates = moduleGates(loaded.manifests);
   if (config.seeds !== undefined && config.seedFilter !== undefined)
     throw new KernelError('INVALID', 'Choose an explicit seed plan or named module seeds');
-  const seeds = config.seedFilter === undefined ? config.seeds : selectNativeSeeds(loaded.manifests, config.seedFilter);
-  if (seeds !== undefined) assertNativeSeeds(seeds);
+  const installers = loaded.manifests.flatMap(module => module.seedInstaller === undefined ? [] : [module.seedInstaller]);
+  if (installers.length > 1) throw new KernelError('CONFLICT', 'Seed installation has multiple module owners');
+  const installer = installers[0];
+
+  /** Require the module-owned installer only when this deployment selects seed data. */
+  function seedOwner() {
+    if (installer === undefined) throw new KernelError('UNAVAILABLE', 'Seed installation requires its native module');
+    return installer;
+  }
+
+  const seeds = config.seedFilter === undefined ? config.seeds : seedOwner().select(loaded.manifests, config.seedFilter);
+  if (seeds !== undefined) seedOwner().assert(seeds);
 
   const bindings: ActionIoBinding[] = [];
   if (loaded.io !== undefined) bindings.push(loaded.io);
@@ -114,7 +124,7 @@ export async function openNativeDeployment(config: NativeDeploymentConfig) {
         }
       })();
       try {
-        if (seeds !== undefined) await installNativeSeeds(session, { ...seeds,
+        if (seeds !== undefined) await seedOwner().install(session, { ...seeds,
           opId: { epoch: intake, time: Date.now(), nonce: randomUUID() } });
         if (config.persistentLogs !== undefined) await provisionLogs(session, config.persistentLogs.directory,
           () => ({ epoch: intake, time: Date.now(), nonce: randomUUID() }));

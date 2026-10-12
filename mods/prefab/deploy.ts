@@ -1,7 +1,7 @@
-import { KernelError } from '#errors';
-import type { Reader, WriteAction } from '#kernel/types';
-import type { NativePrefabSource } from '#mod/native-prefab';
-import { prefabInput, resolvePrefabPath } from '#mod/prefab-path';
+import { KernelError } from '@treenx/core/errors';
+import type { Reader, WriteAction } from '@treenx/core/kernel/types';
+import type { NativePrefabSource } from '@treenx/core/mod/native-prefab';
+import { prefabInput, resolvePrefabPath } from '@treenx/core/mod/prefab-path';
 
 interface DeployArguments {
   readonly target: string;

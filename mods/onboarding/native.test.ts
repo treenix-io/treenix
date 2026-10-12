@@ -4,11 +4,11 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { it } from 'node:test';
-import { nativePrefabManifest } from '@treenx/core/mod/native-prefab';
+import prefabModule from '@treenx/mods/prefab/kernel';
 import { drainSession } from '@treenx/core/kernel/session-delivery';
 import type { Node, Session } from '@treenx/core/kernel/types';
 import { openNativeRuntime } from '../../core/src/kernel/runtime';
-import { installNativeSeeds } from '../../core/src/kernel/seed-install';
+import { installNativeSeeds } from '@treenx/mods/prefab/install';
 import createNativeDoc from '../doc/kernel';
 import createNativeOnboarding from './kernel';
 
@@ -52,7 +52,7 @@ it(
       directory: join(directory, 'root'),
       credentialTtlMs: 60000,
       firstAdmin: { path: '/admin', name: 'admin', password: 'fixture-password' },
-      modules: [document.manifest, onboarding.manifest, await nativePrefabManifest()],
+      modules: [document.manifest, onboarding.manifest, (await prefabModule()).manifest],
       mountDirectories: { docs },
       rawfsCodecs: document.rawfsCodecs,
     };

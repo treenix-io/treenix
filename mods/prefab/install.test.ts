@@ -3,11 +3,11 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { it, type TestContext } from 'node:test';
-import { getComponent } from '#core';
-import { KernelError } from '#errors';
-import { openNativeRuntime } from '#kernel/runtime';
-import { drainSession } from '#kernel/session-delivery';
-import { installNativeSeeds, type NativeSeedPlan } from '#kernel/seed-install';
+import { getComponent } from '@treenx/core';
+import { KernelError } from '@treenx/core/errors';
+import { openNativeRuntime } from '@treenx/core/kernel/runtime';
+import { drainSession } from '@treenx/core/kernel/session-delivery';
+import { installNativeSeeds, type NativeSeedPlan } from '#prefab/install';
 import {
   R,
   W,
@@ -15,8 +15,10 @@ import {
   type ModuleManifest,
   type OpId,
   type Session,
-} from '#kernel/types';
-import { nativePrefabManifest, type NativePrefabSource } from '#mod/native-prefab';
+} from '@treenx/core/kernel/types';
+import type { NativePrefabSource } from '@treenx/core/mod/native-prefab';
+import prefabModule from '#prefab/kernel';
+import { readNode as readPrefabNode, SOURCE_TYPE, type PrefabInput } from '#prefab/data';
 
 const module: ModuleManifest = {
   id: 'seed-fixture',
@@ -36,7 +38,7 @@ const module: ModuleManifest = {
 
 /** Open an isolated native runtime and record its installation requests. */
 async function fixture(t: TestContext) {
-  const fixtures = resolve(import.meta.dirname, '../../../../temp/native-seed-fixtures');
+  const fixtures = resolve(import.meta.dirname, '../../../temp/native-seed-fixtures');
   await mkdir(fixtures, { recursive: true });
   const directory = await mkdtemp(resolve(fixtures, 'dataset-'));
   const config = {
@@ -45,7 +47,7 @@ async function fixture(t: TestContext) {
     rootExternal: 'none' as const,
     credentialTtlMs: 60_000,
     firstAdmin: { path: '/admin', name: 'admin', password: 'seed-fixture-password' },
-    modules: [module, await nativePrefabManifest()],
+    modules: [module, (await prefabModule()).manifest],
   };
   const runtime = await openNativeRuntime(config);
   assert.ok(runtime.instance.setupCredential);
@@ -113,6 +115,57 @@ function plan(opId: OpId, target = '/seed'): NativeSeedPlan {
     ],
   };
 }
+
+it(
+  'links seeded copies to an editable source and propagates fields through native actions',
+  { timeout: 10_000 },
+  async (t) => {
+    const f = await fixture(t);
+    const input = plan(f.key());
+    await installNativeSeeds(f.session, input);
+
+    const instance = await readPrefabNode(f.session, '/seed/child');
+    assert.ok(instance.$prefab);
+    assert.equal(instance.$prefab.base.value, 2);
+    const record = await read(f.session, instance.$prefab.src);
+    assert.equal(record.$type, SOURCE_TYPE);
+    const source = getComponent<{ readonly body: PrefabInput }>(record, SOURCE_TYPE);
+    assert.ok(source);
+    assert.equal(source.body.value, 2);
+
+    await f.session.commit({
+      opId: f.key(),
+      changes: [
+        { op: 'patch', path: record.$path, ops: { $set: { body: { ...source.body, value: 4 } } } },
+      ],
+    }).outcome;
+    const invoke = (action: string, field?: string) =>
+      f.session.act({
+        opId: f.key(),
+        path: input.prefabs[0].source.$path,
+        action,
+        args: { target: instance.$path, ...(field === undefined ? {} : { field }) },
+      }).outcome;
+    await invoke('pull');
+    assert.equal((await read(f.session, instance.$path)).value, 4);
+
+    await f.session.commit({
+      opId: f.key(),
+      changes: [{ op: 'patch', path: instance.$path, ops: { $set: { value: 7 } } }],
+    }).outcome;
+    await invoke('apply', 'value');
+    const changed = getComponent<{ readonly body: PrefabInput }>(
+      await read(f.session, record.$path),
+      SOURCE_TYPE,
+    );
+    assert.ok(changed);
+    assert.equal(changed.body.value, 7);
+    await invoke('pull');
+    assert.equal((await readPrefabNode(f.session, instance.$path)).$prefab?.base.value, 4);
+    await invoke('revert', 'value');
+    assert.equal((await readPrefabNode(f.session, instance.$path)).$prefab?.base.value, 7);
+  },
+);
 
 it(
   'installs accepted prefab data through bounded requests and preserves it on repeat',

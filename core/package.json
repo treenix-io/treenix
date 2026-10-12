@@ -106,6 +106,11 @@
       "types": "./dist/mod/prefab-path.d.ts",
       "default": "./dist/mod/prefab-path.js"
     },
+    "./util/stable-json": {
+      "development": "./src/util/stable-json.ts",
+      "types": "./dist/util/stable-json.d.ts",
+      "default": "./dist/util/stable-json.js"
+    },
     "./mount": {
       "development": "./src/mount.ts",
       "types": "./dist/mount.d.ts",
@@ -155,6 +160,11 @@
       "development": "./src/kernel/runtime.ts",
       "types": "./dist/kernel/runtime.d.ts",
       "default": "./dist/kernel/runtime.js"
+    },
+    "./kernel/session-delivery": {
+      "development": "./src/kernel/session-delivery.ts",
+      "types": "./dist/kernel/session-delivery.d.ts",
+      "default": "./dist/kernel/session-delivery.js"
     },
     "./kernel/read-children": {
       "development": "./src/kernel/read-children.ts",

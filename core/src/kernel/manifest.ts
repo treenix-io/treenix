@@ -8,15 +8,22 @@ import { KernelError } from '#errors'
 import type { TypeSchema } from '#schema/types'
 import { copyManifest } from '#kernel/registry'
 import { buildRegisteredTypeDef } from '#kernel/typedef'
-import type { ActionDef, ActionIoBinding, Gate, ModuleManifest, OpenRegistration, Registry, SecurityContext, SecurityHandlers, SecurityRegistration, TypeDef } from '#kernel/types'
-import type { NativeSeedDefinition } from '#kernel/seed-install'
+import type { ActionDef, ActionIoBinding, Gate, ModuleManifest, OpenRegistration, Registry, SecurityContext, SecurityHandlers, SecurityRegistration, Session, TypeDef } from '#kernel/types'
+import type { NativeSeedDefinition, NativeSeedPlan } from '#mod/native-prefab'
 import type { RawFsCodecs } from '#kernel/store/rawfs-codec'
+
+export interface NativeSeedInstaller {
+  select(modules: readonly { readonly seeds?: NativeSeedDefinition }[], names: readonly string[]): NativeSeedDefinition;
+  assert(plan: NativeSeedDefinition): void;
+  install(session: Session, plan: NativeSeedPlan): Promise<{ readonly installed: readonly string[]; readonly skipped: readonly string[] }>;
+}
 
 export interface NativeModuleDeployment {
   readonly manifest: ModuleManifest
   readonly io?: ActionIoBinding
   readonly gates?: readonly Gate[]
   readonly seeds?: NativeSeedDefinition
+  readonly seedInstaller?: NativeSeedInstaller
   readonly rawfsCodecs?: RawFsCodecs
 }
 /** Host capabilities are declared by their owning deployment bindings. */
@@ -38,6 +45,7 @@ export interface CollectedModule extends ModuleManifest {
   readonly io?: ActionIoBinding
   readonly gates?: readonly Gate[]
   readonly seeds?: NativeSeedDefinition
+  readonly seedInstaller?: NativeSeedInstaller
   readonly rawfsCodecs?: RawFsCodecs
   readonly legacySecurity: readonly { readonly type: string; readonly context: SecurityContext }[]
   readonly legacyActions: readonly { readonly type: string; readonly name: string }[]
@@ -193,7 +201,8 @@ export async function collectModule(id: string, importModule: () => Promise<unkn
       if (compiled !== undefined && declared === undefined)
         throw new KernelError('INVALID', 'Native module factory returned no deployment');
       const manifest: CollectedModule = declared === undefined ? finish(active) : Object.freeze({
-        ...copyManifest(declared.manifest), collectionId: id, io: declared.io, seeds: declared.seeds, rawfsCodecs: declared.rawfsCodecs,
+        ...copyManifest(declared.manifest), collectionId: id, io: declared.io, seeds: declared.seeds,
+        seedInstaller: declared.seedInstaller, rawfsCodecs: declared.rawfsCodecs,
         gates: declared.gates === undefined ? undefined : Object.freeze([...declared.gates]),
         legacySecurity: Object.freeze([]), legacyActions: Object.freeze([]),
       })

@@ -3,9 +3,9 @@ import { randomUUID } from 'node:crypto';
 import { it } from 'node:test';
 import type { Position } from '@treenx/core/kernel/types';
 import { collectModule } from '@treenx/core/kernel/manifest';
-import { nativePrefabManifest } from '@treenx/core/mod/native-prefab';
+import prefabModule from '@treenx/mods/prefab/kernel';
 import { createInstance } from '../../core/src/kernel/instance';
-import { installNativeSeeds } from '../../core/src/kernel/seed-install';
+import { installNativeSeeds } from '@treenx/mods/prefab/install';
 import { createMemoryStore } from '@treenx/core/kernel/store/memory';
 import { createMemoryBlobStore } from '@treenx/core/kernel/blob-store-memory';
 import { createLaneCache } from '@treenx/core/client/lane-cache';
@@ -54,7 +54,7 @@ it(
       id,
       root: { kind: 'store', store },
       blobs: createMemoryBlobStore(),
-      modules: [sim.manifest, autostart, await nativePrefabManifest()],
+      modules: [sim.manifest, autostart, (await prefabModule()).manifest],
       io: sim.io,
       provisioning: {
         writerEpoch: 1,
