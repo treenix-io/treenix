@@ -2,34 +2,12 @@ import { createHash } from 'node:crypto';
 import { getComponent } from '#core';
 import { KernelError } from '#errors';
 import { A, R, W, type Node, type NodeInput, type OpId, type Session } from '#kernel/types';
-import type { CapturedSeedNode, NativePrefabSource, NativeSeedGrant } from '#mod/native-prefab';
+import type { NativePrefabSource, NativeSeedDefinition, NativeSeedPlan, NativeSeedPrefab } from '#mod/native-prefab';
 import { assertPrefabPath, prefabInput, resolvePrefabPath } from '#mod/prefab-path';
 import { stableJson } from '#util/stable-json';
 import type { CollectedModule } from '#kernel/manifest';
 
-export interface NativeSeedPrefab {
-  readonly source: NodeInput & {
-    readonly $type: 't.prefab';
-    readonly mod: string;
-    readonly name: string;
-    readonly nodes: readonly CapturedSeedNode[];
-    readonly grants?: readonly NativeSeedGrant[];
-  };
-  readonly target: string;
-  readonly allowAbsolute?: boolean;
-  /** Legacy setup belongs to its old runtime and cannot receive a native Tree substitute. */
-  readonly setup?: unknown;
-}
-
-export interface NativeSeedPlan {
-  /** Explicit native module/catalog parents; no ambient discovery or manufactured defaults. */
-  readonly sources: readonly NodeInput[];
-  readonly prefabs: readonly NativeSeedPrefab[];
-  /** Owned by the caller from the actual current intake; retain it unchanged when retrying. */
-  readonly opId: OpId;
-}
-
-export type NativeSeedDefinition = Omit<NativeSeedPlan, 'opId'>;
+export type { NativeSeedDefinition, NativeSeedPlan, NativeSeedPrefab } from '#mod/native-prefab';
 
 /** Select the root's named seeds from native module declarations before opening storage. */
 export function selectNativeSeeds(modules: readonly Pick<CollectedModule, 'seeds'>[], names: readonly string[]): NativeSeedDefinition {
