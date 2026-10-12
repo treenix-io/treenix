@@ -3,7 +3,8 @@ import type { PresentationComponent, PresentationNode } from '#tree/presentation
 // <Render> + <RenderContext> + <NodeProvider>
 // Depends on: core (resolve), React
 
-import { execute, useTreeEffects } from '#hooks';
+import { useTreeEffects } from '#hooks';
+import { READ_ONLY_EFFECTS, type TreeEffects } from '#tree/effects';
 import { $key, $node } from '#symbols';
 import { type OnChange, scopeOnChange } from '#tree/on-change';
 import {
@@ -16,7 +17,16 @@ import {
   type ResolvedEntry,
   subscribeRegistry,
 } from '@treenx/core';
-import { createContext, createElement, type FC, type ReactNode, useContext, useEffect, useMemo, useState } from 'react';
+import {
+  createContext,
+  createElement,
+  type FC,
+  type ReactNode,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 
 // ── Tree context (rendering context string) ──
 
@@ -34,7 +44,13 @@ export function RenderContext({ name, children }: { name: string; children: Reac
 
 const NodeCtx = createContext<PresentationNode | null>(null);
 
-export function NodeProvider({ value, children }: { value: PresentationNode | null; children?: ReactNode }) {
+export function NodeProvider({
+  value,
+  children,
+}: {
+  value: PresentationNode | null;
+  children?: ReactNode;
+}) {
   if (!value?.$path) return null;
   return <NodeCtx.Provider value={value}>{children}</NodeCtx.Provider>;
 }
@@ -53,12 +69,22 @@ export type ViewCtx = {
   execute(action: string, data?: unknown): Promise<unknown>;
 };
 
-export function viewCtx(value: PresentationComponent): ViewCtx | null {
+/** Derive an action context from an explicit source owner; detached metadata carries no mutation capability. */
+export function viewCtx(
+  value: PresentationComponent,
+  owner?: { readonly node: PresentationNode; readonly execute: TreeEffects['execute'] },
+): ViewCtx | null {
+  if (owner !== undefined) {
+    const path = nativeLocation(value, owner.node);
+    return path === undefined
+      ? null
+      : { node: owner.node, path, execute: (action, data) => owner.execute(path, action, data) };
+  }
   const node: NodeData | undefined = (value as any)[$node];
   if (!node) return null;
   const key: string = (value as any)[$key] ?? '';
   const path = key ? `${node.$path}#${key}` : node.$path;
-  return { node, path, execute: (action, data?) => execute(path, action, data) };
+  return { node, path, execute: (action, data?) => READ_ONLY_EFFECTS.execute(path, action, data) };
 }
 
 // ── Handler type for React context ──
@@ -81,12 +107,11 @@ export type View<T, Extra = {}> = FC<RenderProps<T> & Extra>;
 // ── useActions — proxy that turns value's symbol metadata into action calls ──
 
 type Actions<T> = {
-  [K in keyof T as T[K] extends (...args: any[]) => any ? K : never]:
-    T[K] extends () => any
-      ? () => Promise<unknown>
-      : T[K] extends (data: infer D) => any
-        ? (data: D) => Promise<unknown>
-        : () => Promise<unknown>;
+  [K in keyof T as T[K] extends (...args: any[]) => any ? K : never]: T[K] extends () => any
+    ? () => Promise<unknown>
+    : T[K] extends (data: infer D) => any
+      ? (data: D) => Promise<unknown>
+      : () => Promise<unknown>;
 };
 
 /** Finds an admitted node or its exact named component without decorating the payload. */
@@ -105,20 +130,27 @@ function isPresentationNode(value: PresentationComponent): value is Presentation
   return typeof value.$path === 'string';
 }
 
-export function useActions<T extends object>(value: T & { readonly [$node]?: NodeData; readonly [$key]?: string }): Actions<T> {
+export function useActions<T extends object>(
+  value: T & { readonly [$node]?: NodeData; readonly [$key]?: string },
+): Actions<T> {
   const effects = useTreeEffects();
   const current = useContext(NodeCtx);
   const nativePath = effects.lane ? nativeLocation(value, current) : undefined;
   if (effects.lane && nativePath === undefined)
     throw new Error('useActions: component does not belong to the current node');
   const node = value[$node];
-  if (!effects.lane && !node) throw new Error('useActions: value has no node context (missing $node symbol)');
+  if (!effects.lane && !node)
+    throw new Error('useActions: value has no node context (missing $node symbol)');
   const key = value[$key] ?? '';
   const path = nativePath ?? (key ? `${node!.$path}#${key}` : node!.$path);
 
-  return useMemo(() => new Proxy({} as Actions<T>, {
-    get: (_target, prop: string) => (data?: unknown) => effects.execute(path, prop, data),
-  }), [path, effects]);
+  return useMemo(
+    () =>
+      new Proxy({} as Actions<T>, {
+        get: (_target, prop: string) => (data?: unknown) => effects.execute(path, prop, data),
+      }),
+    [path, effects],
+  );
 }
 
 declare module '@treenx/core' {
@@ -139,7 +171,12 @@ export const UixNoView: FC<RenderProps> = ({ value, onChange, ctx }) => {
 
 // ── <Render> — component/node-level rendering ──
 
-export function Render<E extends Record<string, unknown> = {}>({ value, onChange, ctx: suppliedContext, ...extra }: RenderProps & E) {
+export function Render<E extends Record<string, unknown> = {}>({
+  value,
+  onChange,
+  ctx: suppliedContext,
+  ...extra
+}: RenderProps & E) {
   const context = useTreeContext();
   const effects = useTreeEffects();
   const current = useContext(NodeCtx);
@@ -177,14 +214,16 @@ export function Render<E extends Record<string, unknown> = {}>({ value, onChange
   const preset = entry.meta?.props;
   const regProps = preset && typeof preset === 'object' ? preset : undefined;
 
-  const owner = effects.lane && isPresentationNode(value) ? value : current;
-  const path = effects.lane ? nativeLocation(value, owner) : undefined;
-  const derived = effects.lane
-    ? path === undefined || owner === null ? null
-      : { node: owner, path, execute: (action: string, data?: unknown) => effects.execute(path, action, data) }
-    : viewCtx(value);
+  const owner = isPresentationNode(value) ? value : current;
+  const derived = owner === null ? null : viewCtx(value, { node: owner, execute: effects.execute });
   const ctx = suppliedContext === undefined ? derived : suppliedContext;
-  const el = createElement(entry.handler, { value, onChange, ctx, ...extra, ...regProps } as RenderProps);
+  const el = createElement(entry.handler, {
+    value,
+    onChange,
+    ctx,
+    ...extra,
+    ...regProps,
+  } as RenderProps);
   return ctx?.node ? createElement(NodeProvider, { value: ctx.node }, el) : el;
 }
 
@@ -192,19 +231,38 @@ export function Render<E extends Record<string, unknown> = {}>({ value, onChange
 // Bridge between block renderers (primitive values) and form-field handlers ({ $type, value }).
 // Wraps primitive → component shape on the way in, extracts .value on the way out.
 
-export function RenderField({ type = 'string', value, onChange, ...rest }: { type?: string; value?: unknown; onChange?: (v: unknown) => void; [k: string]: unknown }) {
+export function RenderField({
+  type = 'string',
+  value,
+  onChange,
+  ...rest
+}: {
+  type?: string;
+  value?: unknown;
+  onChange?: (v: unknown) => void;
+  [k: string]: unknown;
+}) {
   const ctx = useTreeContext();
   const handler = resolve(type, ctx);
   if (!handler) return value != null ? <span>{String(value)}</span> : null;
 
   // Already component-shaped? pass through. Otherwise wrap primitive.
-  const wrapped = value && typeof value === 'object' && '$type' in (value as object)
-    ? value
-    : { $type: type, value, ...rest };
+  const wrapped =
+    value && typeof value === 'object' && '$type' in (value as object)
+      ? value
+      : { $type: type, value, ...rest };
 
   const handleChange = onChange
-    ? (next: unknown) => onChange(next && typeof next === 'object' && 'value' in (next as object) ? (next as any).value : next)
+    ? (next: unknown) =>
+        onChange(
+          next && typeof next === 'object' && 'value' in (next as object)
+            ? (next as any).value
+            : next,
+        )
     : undefined;
 
-  return createElement(handler as FC<Record<string, unknown>>, { value: wrapped, onChange: handleChange });
+  return createElement(handler as FC<Record<string, unknown>>, {
+    value: wrapped,
+    onChange: handleChange,
+  });
 }

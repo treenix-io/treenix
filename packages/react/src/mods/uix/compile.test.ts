@@ -7,10 +7,34 @@ import { beforeEach, describe, it } from 'node:test';
 import React from 'react';
 import { renderToString } from 'react-dom/server';
 import { compileComponent, invalidateCache } from './compile';
+import { cleanup, fireEvent, render } from '@testing-library/react';
 
 beforeEach(() => invalidateCache());
 
 describe('compileComponent', () => {
+  it('keeps compiled capabilities with their owning scope', () => {
+    const calls: string[] = [];
+    const source =
+      'export default function View() { return <button onClick={() => execute("/document", "inspect", {})}>Inspect</button>; }';
+    const first = compileComponent('test.owned', source, {
+      skipRegister: true,
+      extraScope: { execute: () => calls.push('first') },
+    });
+    const second = compileComponent('test.owned', source, {
+      skipRegister: true,
+      extraScope: { execute: () => calls.push('second') },
+    });
+    try {
+      const one = render(React.createElement(first));
+      fireEvent.click(one.getByRole('button', { name: 'Inspect' }));
+      one.unmount();
+      const two = render(React.createElement(second));
+      fireEvent.click(two.getByRole('button', { name: 'Inspect' }));
+      assert.deepEqual(calls, ['first', 'second']);
+    } finally {
+      cleanup();
+    }
+  });
 
   it('simple component renders to HTML', () => {
     const code = `
@@ -59,7 +83,9 @@ function TypedView({ value }: Props) {
 export default TypedView;`;
 
     const Comp = compileComponent('test.typed', code);
-    const html = renderToString(React.createElement(Comp, { value: { title: 'Typed', count: 42 } }));
+    const html = renderToString(
+      React.createElement(Comp, { value: { title: 'Typed', count: 42 } }),
+    );
     assert.ok(html.includes('Typed'), `Title missing. Got: ${html}`);
     assert.ok(html.includes('42'), `Count missing. Got: ${html}`);
     assert.ok(!html.includes('interface'), `TS not stripped. Got: ${html}`);
@@ -104,9 +130,16 @@ export default List;`;
     assert.ok(empty.includes('Empty'), `Should show empty state. Got: ${empty}`);
 
     // With items
-    const full = renderToString(React.createElement(Comp, {
-      value: { items: [{ id: '1', name: 'A' }, { id: '2', name: 'B' }] }
-    }));
+    const full = renderToString(
+      React.createElement(Comp, {
+        value: {
+          items: [
+            { id: '1', name: 'A' },
+            { id: '2', name: 'B' },
+          ],
+        },
+      }),
+    );
     assert.ok(full.includes('>A<'), `Item A missing. Got: ${full}`);
     assert.ok(full.includes('>B<'), `Item B missing. Got: ${full}`);
   });
@@ -216,9 +249,11 @@ function TaskCard({ value }: CardProps) {
 export default TaskCard;`;
 
     const Comp = compileComponent('test.taskcard', code);
-    const html = renderToString(React.createElement(Comp, {
-      value: { title: 'Fix bug', tags: ['urgent', 'backend'], priority: 8 }
-    }));
+    const html = renderToString(
+      React.createElement(Comp, {
+        value: { title: 'Fix bug', tags: ['urgent', 'backend'], priority: 8 },
+      }),
+    );
     assert.ok(html.includes('Fix bug'), `Title missing. Got: ${html}`);
     assert.ok(html.includes('high'), `Priority missing. Got: ${html}`);
     assert.ok(html.includes('More'), `Button missing (collapsed by default). Got: ${html}`);

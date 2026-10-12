@@ -1,20 +1,6 @@
-import { useEffect } from 'react';
+import { useTreeSource } from '#tree/tree-source-context';
 
-/** Opens the shared tree event stream. Mounted usePath/useChildren own watches. */
+/** The selected native source owns the stream; mounted reads retain their subscriptions. */
 export function useReactivePathEvents(): void {
-  useEffect(() => {
-    let cancelled = false;
-    let cleanup: (() => void) | undefined;
-
-    import('#tree/events').then(({ startEvents, stopEvents }) => {
-      if (cancelled) return;
-      startEvents();
-      cleanup = stopEvents;
-    });
-
-    return () => {
-      cancelled = true;
-      cleanup?.();
-    };
-  }, []);
+  useTreeSource();
 }

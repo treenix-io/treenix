@@ -1,40 +1,57 @@
-import assert from 'node:assert/strict'
-import { describe, it } from 'node:test'
-import { act, cleanup, fireEvent, render } from '@testing-library/react'
-import { createElement, type ReactNode } from 'react'
-import { createTwpClient } from '@treenx/core/client/twp'
-import { KernelError } from '@treenx/core/errors'
-import { A, R, W, type Connection, type ModuleManifest, type Position, type Request } from '@treenx/core/kernel/types'
-import { createInstanceFoundation } from '../../../../core/src/kernel/instance'
-import { createMemoryStore } from '../../../../core/src/kernel/store/memory'
-import { Render } from '#context'
-import { unregister } from '@treenx/core'
-import '../mods/uix/client'
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+import { act, cleanup, fireEvent, render } from '@testing-library/react';
+import { createElement, type ReactNode } from 'react';
+import { createTwpClient } from '@treenx/core/client/twp';
+import { KernelError } from '@treenx/core/errors';
+import {
+  A,
+  R,
+  W,
+  type Connection,
+  type ModuleManifest,
+  type Position,
+  type Request,
+} from '@treenx/core/kernel/types';
+import { createInstanceFoundation } from '../../../../core/src/kernel/instance';
+import { createMemoryStore } from '../../../../core/src/kernel/store/memory';
+import { Render } from '#context';
+import { unregister } from '@treenx/core';
+import '../mods/uix/client';
 import { PUBLICATION_PREFIX } from '@treenx/core/kernel/uix-publication';
 import { collectModule } from '@treenx/core/kernel/manifest';
 import { loadSchemasRecursive } from '../../../../core/src/schema/load';
 import { fileURLToPath } from 'node:url';
-import { moveBefore } from '#editor/native-tree-mutations'
-import { NodeEditor } from '#editor/NodeEditor'
-import { usePath } from '#hooks'
-import type { Node } from '@treenx/core/kernel/types'
-import { createLaneTreeSource } from '#tree/lane-source'
-import { TreeSourceProvider } from '#tree/tree-source-context'
-import type { PathSnapshot } from '#tree/tree-source'
-
+import { moveBefore } from '#editor/native-tree-mutations';
+import { NodeEditor } from '#editor/NodeEditor';
+import { usePath } from '#hooks';
+import type { Node } from '@treenx/core/kernel/types';
+import { createLaneTreeSource } from '#tree/lane-source';
+import { TreeSourceProvider } from '#tree/tree-source-context';
+import type { PathSnapshot } from '#tree/tree-source';
 
 /** Wait for an actual public path publication. */
-function until(source: ReturnType<typeof createLaneTreeSource>, predicate: (snapshot: PathSnapshot) => boolean): Promise<void> {
+function until(
+  source: ReturnType<typeof createLaneTreeSource>,
+  predicate: (snapshot: PathSnapshot) => boolean,
+): Promise<void> {
   if (predicate(source.getPathSnapshot('/document'))) return Promise.resolve();
-  return new Promise(resolve => {
+  return new Promise((resolve) => {
     const unsubscribe = source.subscribePath('/document', () => {
-      if (predicate(source.getPathSnapshot('/document'))) { unsubscribe(); resolve(); }
+      if (predicate(source.getPathSnapshot('/document'))) {
+        unsubscribe();
+        resolve();
+      }
     });
   });
 }
 
 /** Opens the production admitted lane, client, and source with either public R or admin rights. */
-async function fixture(id: string, administrator: boolean, holdCommit?: { started: (request: Request) => void; release: Promise<void> }) {
+async function fixture(
+  id: string,
+  administrator: boolean,
+  holdCommit?: { started: (request: Request) => void; release: Promise<void> },
+) {
   let complete: (args: unknown) => void = () => {};
   const invoked = new Promise<unknown>((resolve) => {
     complete = resolve;
@@ -47,7 +64,11 @@ async function fixture(id: string, administrator: boolean, holdCommit?: { starte
         module: 'native-editor-actions',
         security: 'ordinary',
         version: 0,
-        schema: { type: 'object', properties: { value: { type: 'number' } }, additionalProperties: false },
+        schema: {
+          type: 'object',
+          properties: { value: { type: 'number' } },
+          additionalProperties: false,
+        },
         actions: {
           inspect: {
             kind: 'read',
@@ -66,9 +87,15 @@ async function fixture(id: string, administrator: boolean, holdCommit?: { starte
   const root = createMemoryStore({ domain: id });
   let saved: Position | undefined;
   const counter = {
-    async load() { return saved; },
-    async save(pos: Position) { saved = pos; },
-    async freshEpoch(floor: number) { return floor + 1; },
+    async load() {
+      return saved;
+    },
+    async save(pos: Position) {
+      saved = pos;
+    },
+    async freshEpoch(floor: number) {
+      return floor + 1;
+    },
   };
   const instance = await createInstanceFoundation({
     id,
@@ -143,7 +170,12 @@ async function fixture(id: string, administrator: boolean, holdCommit?: { starte
 
   return {
     source,
-    admin, instance, client, root, counter, module,
+    admin,
+    instance,
+    client,
+    root,
+    counter,
+    module,
     sent,
     invoked,
     wrapper: ({ children }: { children: ReactNode }) =>
@@ -159,7 +191,6 @@ async function fixture(id: string, administrator: boolean, holdCommit?: { starte
   };
 }
 
-
 /** Render the public editor on actual selected canonical node coverage. */
 function PublicEditor() {
   const { data: node } = usePath<Node>('/document');
@@ -167,11 +198,13 @@ function PublicEditor() {
 }
 
 describe('public canonical editor', { timeout: 10_000 }, () => {
-  it('saves a full put with the loaded revision while preserving hidden ACL and owner', async t => {
+  it('saves a full put with the loaded revision while preserving hidden ACL and owner', async (t) => {
     const f = await fixture('public-editor-hidden-admin', false);
     t.after(f.close);
     const ui = render(createElement(PublicEditor), { wrapper: f.wrapper });
-    await act(async () => { await until(f.source, snap => snap.data !== undefined); });
+    await act(async () => {
+      await until(f.source, (snap) => snap.data !== undefined);
+    });
     assert.equal(ui.queryByLabelText('Access control'), null);
     fireEvent.click(ui.getByRole('button', { name: 'JSON' }));
     const textarea = ui.getByRole('textbox');
@@ -183,9 +216,9 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
     fireEvent.change(textarea, { target: { value: JSON.stringify({ ...value, value: 9 }) } });
     await act(async () => {
       fireEvent.click(ui.getByRole('button', { name: 'Save node' }));
-      await until(f.source, snap => snap.data?.value === 9);
+      await until(f.source, (snap) => snap.data?.value === 9);
     });
-    const request = f.sent.find(request => request.t === 'commit');
+    const request = f.sent.find((request) => request.t === 'commit');
     assert.ok(request?.t === 'commit');
     assert.deepEqual(request.expect, { nodes: [{ path: '/document', rev: loadedRev }] });
     const change = request.changes[0];
@@ -201,11 +234,13 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
     assert.deepEqual(copy.node.$acl, [{ subject: { group: 'public' }, grant: R | W }]);
     assert.equal(ui.queryByRole('alert'), null);
   });
-  it('retains the stale full-node draft when the expected native revision conflicts', async t => {
+  it('retains the stale full-node draft when the expected native revision conflicts', async (t) => {
     const f = await fixture('public-editor-stale-draft', false);
     t.after(f.close);
     const ui = render(createElement(PublicEditor), { wrapper: f.wrapper });
-    await act(async () => { await until(f.source, snap => snap.data !== undefined); });
+    await act(async () => {
+      await until(f.source, (snap) => snap.data !== undefined);
+    });
     fireEvent.click(ui.getByRole('button', { name: 'JSON' }));
     const textarea = ui.getByRole('textbox');
     assert.ok(textarea instanceof window.HTMLTextAreaElement);
@@ -213,21 +248,28 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
     const draft = JSON.stringify({ ...value, value: 9 });
     fireEvent.change(textarea, { target: { value: draft } });
     await act(async () => {
-      await f.admin.commit({ opId: { epoch: f.instance.writer.intake.epoch, time: Date.now(), nonce: 'foreign-edit' },
-        changes: [{ op: 'patch', path: '/document', ops: { $set: { value: 2 } } }] });
-      await until(f.source, snap => snap.data?.value === 2);
+      await f.admin.commit({
+        opId: { epoch: f.instance.writer.intake.epoch, time: Date.now(), nonce: 'foreign-edit' },
+        changes: [{ op: 'patch', path: '/document', ops: { $set: { value: 2 } } }],
+      });
+      await until(f.source, (snap) => snap.data?.value === 2);
     });
     const currentCopy = f.source.getPathSnapshot('/document').data;
     assert.ok(currentCopy);
     const editedDraft = JSON.stringify({ ...value, $rev: currentCopy.$rev, value: 9 });
     fireEvent.change(textarea, { target: { value: editedDraft } });
-    const refused = new Promise<void>(resolve => {
+    const refused = new Promise<void>((resolve) => {
       const observer = new window.MutationObserver(() => {
-        if (ui.queryByRole('alert') !== null) { observer.disconnect(); resolve(); }
+        if (ui.queryByRole('alert') !== null) {
+          observer.disconnect();
+          resolve();
+        }
       });
       observer.observe(ui.container, { childList: true, subtree: true });
     });
-    await act(async () => { fireEvent.click(ui.getByRole('button', { name: 'Save node' })); });
+    await act(async () => {
+      fireEvent.click(ui.getByRole('button', { name: 'Save node' }));
+    });
     await refused;
     assert.equal(ui.getByRole('alert').getAttribute('data-error-code'), 'CONFLICT');
     assert.equal(textarea.value, editedDraft);
@@ -236,16 +278,22 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
     assert.equal(stored.copies[0].node.value, 2);
   });
 
-  it('keeps reset and a second save closed while the actual first commit is paused', async t => {
+  it('keeps reset and a second save closed while the actual first commit is paused', async (t) => {
     let release: () => void = () => {};
-    const released = new Promise<void>(resolve => { release = resolve; });
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
     let started: (request: Request) => void = () => {};
-    const paused = new Promise<Request>(resolve => { started = resolve; });
+    const paused = new Promise<Request>((resolve) => {
+      started = resolve;
+    });
     const f = await fixture('public-editor-paused-save', false, { started, release: released });
     t.after(f.close);
     t.after(release);
     const ui = render(createElement(PublicEditor), { wrapper: f.wrapper });
-    await act(async () => { await until(f.source, snap => snap.data !== undefined); });
+    await act(async () => {
+      await until(f.source, (snap) => snap.data !== undefined);
+    });
     fireEvent.click(ui.getByRole('button', { name: 'JSON' }));
     const textarea = ui.getByRole('textbox');
     assert.ok(textarea instanceof window.HTMLTextAreaElement);
@@ -266,58 +314,97 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
     fireEvent.click(reset);
     fireEvent.click(save);
     assert.equal(textarea.value, draft);
-    assert.equal(f.sent.filter(request => request.t === 'commit').length, 1);
-    await act(async () => { release(); await until(f.source, snap => snap.data?.value === 9); });
+    assert.equal(f.sent.filter((request) => request.t === 'commit').length, 1);
+    await act(async () => {
+      release();
+      await until(f.source, (snap) => snap.data?.value === 9);
+    });
     assert.equal(reset.disabled, false);
-    assert.equal(f.sent.filter(request => request.t === 'commit').length, 1);
+    assert.equal(f.sent.filter((request) => request.t === 'commit').length, 1);
     fireEvent.click(ui.getByRole('button', { name: 'JSON' }));
     const nextTextarea = ui.getByRole('textbox');
     assert.ok(nextTextarea instanceof window.HTMLTextAreaElement);
     const accepted: Node = JSON.parse(nextTextarea.value);
-    fireEvent.change(nextTextarea, { target: { value: JSON.stringify({ ...accepted, value: 10 }) } });
+    fireEvent.change(nextTextarea, {
+      target: { value: JSON.stringify({ ...accepted, value: 10 }) },
+    });
     await act(async () => {
       fireEvent.click(save);
-      await until(f.source, snap => snap.data?.value === 10);
+      await until(f.source, (snap) => snap.data?.value === 10);
     });
-    assert.equal(f.sent.filter(request => request.t === 'commit').length, 2);
+    assert.equal(f.sent.filter((request) => request.t === 'commit').length, 2);
   });
 
-  it('exposes administration controls only with actual A and reads full metadata through the real read action', async t => {
+  it('exposes administration controls only with actual A and reads full metadata through the real read action', async (t) => {
     const f = await fixture('public-editor-described-admin', true);
     t.after(f.close);
     const ui = render(createElement(PublicEditor), { wrapper: f.wrapper });
-    await act(async () => { await until(f.source, snap => snap.data !== undefined); });
+    await act(async () => {
+      await until(f.source, (snap) => snap.data !== undefined);
+    });
     assert.ok(ui.getByLabelText('Access control'));
     assert.equal(f.source.effects.bits('/document'), R | W | A);
-    const description = await f.source.effects.execute('/sys/types/editor.document', 'describe_type', {}, 't.type');
+    const description = await f.source.effects.execute(
+      '/sys/types/editor.document',
+      'describe_type',
+      {},
+      't.type',
+    );
     assert.equal(description.name, 'editor.document');
-    assert.deepEqual(description.schema, { type: 'object', properties: { value: { type: 'number' } }, additionalProperties: false });
+    assert.deepEqual(description.schema, {
+      type: 'object',
+      properties: { value: { type: 'number' } },
+      additionalProperties: false,
+    });
     assert.equal(description.actions.inspect.kind, 'read');
     assert.equal('handler' in description.actions.inspect, false);
     assert.equal('handler' in description, false);
   });
 
-  it('refuses schema introspection when current R is absent', async t => {
+  it('refuses schema introspection when current R is absent', async (t) => {
     const f = await fixture('public-editor-description-no-read', false);
     t.after(f.close);
-    await f.admin.commit({ opId: { epoch: f.instance.writer.intake.epoch, time: Date.now(), nonce: 'hide-type' },
-      changes: [{ op: 'patch', path: '/sys/types/editor.document', ops: { $set: { $acl: [{ subject: { group: 'public' }, deny: R }] } } }] });
-    await assert.rejects(f.source.effects.execute('/sys/types/editor.document', 'describe_type', {}, 't.type'),
-      error => error instanceof KernelError && error.code === 'NOT_FOUND');
+    await f.admin.commit({
+      opId: { epoch: f.instance.writer.intake.epoch, time: Date.now(), nonce: 'hide-type' },
+      changes: [
+        {
+          op: 'patch',
+          path: '/sys/types/editor.document',
+          ops: { $set: { $acl: [{ subject: { group: 'public' }, deny: R }] } },
+        },
+      ],
+    });
+    await assert.rejects(
+      f.source.effects.execute('/sys/types/editor.document', 'describe_type', {}, 't.type'),
+      (error) => error instanceof KernelError && error.code === 'NOT_FOUND',
+    );
   });
 
-  it('uses actual move/remove members and fractional order under source-owned native commits', async t => {
+  it('uses actual move/remove members and fractional order under source-owned native commits', async (t) => {
     const f = await fixture('public-editor-tree-members', true);
     t.after(f.close);
-    await f.admin.commit({ opId: { epoch: f.instance.writer.intake.epoch, time: Date.now(), nonce: 'tree-seed' }, changes: [
-      { op: 'put', node: { $path: '/folder', $type: 't.dir', $acl: [{ subject: { group: 'public' }, grant: R | W }] } },
-      { op: 'put', node: { $path: '/folder/reference', $type: 'editor.document', value: 2, $order: 'M' } },
-    ] });
+    await f.admin.commit({
+      opId: { epoch: f.instance.writer.intake.epoch, time: Date.now(), nonce: 'tree-seed' },
+      changes: [
+        {
+          op: 'put',
+          node: {
+            $path: '/folder',
+            $type: 't.dir',
+            $acl: [{ subject: { group: 'public' }, grant: R | W }],
+          },
+        },
+        {
+          op: 'put',
+          node: { $path: '/folder/reference', $type: 'editor.document', value: 2, $order: 'M' },
+        },
+      ],
+    });
     const fromRead = await f.client.read({ node: '/document' });
     const toRead = await f.client.read({ children: '/folder', sort: [['$order', 1]] });
     const fromCopy = fromRead.copies[0];
     assert.ok('node' in fromCopy);
-    const siblings = toRead.copies.map(copy => {
+    const siblings = toRead.copies.map((copy) => {
       assert.ok('node' in copy);
       return copy.node;
     });
@@ -325,47 +412,75 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
     assert.ok(kernel);
     await kernel.commit(moveBefore(fromCopy.node, siblings[0], siblings, true));
     const ordered = await f.client.read({ children: '/folder', sort: [['$order', 1]] });
-    const paths = ordered.list.map(id => {
-      const copy = ordered.copies.find(copy => 'node' in copy && copy.node.$id === id);
+    const paths = ordered.list.map((id) => {
+      const copy = ordered.copies.find((copy) => 'node' in copy && copy.node.$id === id);
       assert.ok(copy && 'node' in copy);
       return copy.node.$path;
     });
     assert.deepEqual(paths, ['/folder/document', '/folder/reference']);
-    const moved = ordered.copies.find(copy => 'node' in copy && copy.node.$path === '/folder/document');
+    const moved = ordered.copies.find(
+      (copy) => 'node' in copy && copy.node.$path === '/folder/document',
+    );
     assert.ok(moved && 'node' in moved);
     assert.equal(moved.node.$id, fromCopy.node.$id);
     assert.ok(moved.node.$order !== undefined && moved.node.$order < 'M');
-    await kernel.commit({ changes: [{ op: 'remove', path: moved.node.$path }],
-      expect: { nodes: [{ path: moved.node.$path, rev: moved.node.$rev }] } });
-    await assert.rejects(f.client.read({ node: '/folder/document' }),
-      error => error instanceof KernelError && error.code === 'NOT_FOUND');
-    assert.ok(f.sent.some(request => request.t === 'commit' && request.changes.some(change => change.op === 'move')));
-    assert.ok(f.sent.some(request => request.t === 'commit' && request.changes.some(change => change.op === 'remove')));
+    await kernel.commit({
+      changes: [{ op: 'remove', path: moved.node.$path }],
+      expect: { nodes: [{ path: moved.node.$path, rev: moved.node.$rev }] },
+    });
+    await assert.rejects(
+      f.client.read({ node: '/folder/document' }),
+      (error) => error instanceof KernelError && error.code === 'NOT_FOUND',
+    );
+    assert.ok(
+      f.sent.some(
+        (request) =>
+          request.t === 'commit' && request.changes.some((change) => change.op === 'move'),
+      ),
+    );
+    assert.ok(
+      f.sent.some(
+        (request) =>
+          request.t === 'commit' && request.changes.some((change) => change.op === 'remove'),
+      ),
+    );
   });
 
-  it('owns and releases a real native type-ownership subscription without publishing draft code', async t => {
+  it('owns and releases a real native type-ownership subscription without publishing draft code', async (t) => {
     const f = await fixture('public-editor-uix-type-coverage', false);
     t.after(f.close);
     t.after(() => unregister('editor.document', 'react'));
     const body = await f.client.read({ node: '/document' });
     const copy = body.copies[0];
     assert.ok('node' in copy);
-    const ready = new Promise<void>(resolve => {
+    const ready = new Promise<void>((resolve) => {
       const unsubscribe = f.source.subscribePath('/sys/types/editor.document', () => {
-        if (f.source.getPathSnapshot('/sys/types/editor.document').data !== undefined) { unsubscribe(); resolve(); }
+        if (f.source.getPathSnapshot('/sys/types/editor.document').data !== undefined) {
+          unsubscribe();
+          resolve();
+        }
       });
     });
     const ui = render(createElement(Render, { value: copy.node }), { wrapper: f.wrapper });
-    await act(async () => { await ready; });
-    const subscription = f.sent.find(request => request.t === 'sub' && 'node' in request.selector
-      && request.selector.node === '/sys/types/editor.document');
+    await act(async () => {
+      await ready;
+    });
+    const subscription = f.sent.find(
+      (request) =>
+        request.t === 'sub' &&
+        'node' in request.selector &&
+        request.selector.node === '/sys/types/editor.document',
+    );
     assert.ok(subscription?.t === 'sub');
-    assert.equal(f.source.getPathSnapshot('/sys/types/editor.document').data?.name, 'editor.document');
+    assert.equal(
+      f.source.getPathSnapshot('/sys/types/editor.document').data?.name,
+      'editor.document',
+    );
     ui.unmount();
-    assert.ok(f.sent.some(request => request.t === 'unsub' && request.sub === subscription.sub));
+    assert.ok(f.sent.some((request) => request.t === 'unsub' && request.sub === subscription.sub));
   });
 
-  it('keeps writable drafts inactive until an admin publishes a protected live generation', async t => {
+  it('keeps writable drafts inactive until an admin publishes a protected live generation', async (t) => {
     const uixManifest = await collectModule('@treenx/react/uix', async () => {
       await import('../mods/uix/kernel');
       loadSchemasRecursive(fileURLToPath(new URL('../mods/uix/', import.meta.url)));
@@ -374,47 +489,151 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
     t.after(f.close);
     t.after(() => unregister('editor.document', 'react'));
     let ordinal = 0;
-    const key = () => ({ epoch: f.instance.writer.intake.epoch, time: Date.now(), nonce: `publication-${ordinal++}` });
-    await f.admin.commit({ opId: key(), changes: uixManifest.types.map(type => ({ op: 'put' as const,
-      node: { $path: `/sys/types/${type.name}`, $type: 't.type', name: type.name, module: type.module, security: type.security } })) });
+    const key = () => ({
+      epoch: f.instance.writer.intake.epoch,
+      time: Date.now(),
+      nonce: `publication-${ordinal++}`,
+    });
+    await f.admin.commit({
+      opId: key(),
+      changes: uixManifest.types.map((type) => ({
+        op: 'put' as const,
+        node: {
+          $path: `/sys/types/${type.name}`,
+          $type: 't.type',
+          name: type.name,
+          module: type.module,
+          security: type.security,
+        },
+      })),
+    });
     f.instance.registry.publish(uixManifest);
-    await f.admin.commit({ opId: key(), changes: [{ op: 'put', node: { $path: '/draft', $type: 'uix.source', source: '',
-      $acl: [{ subject: { group: 'public' }, grant: R | W }] } }, { op: 'put', node: { $path: '/uix-tools', $type: 'uix.mcp',
-      $acl: [{ subject: { group: 'public' }, grant: R | W }] } }] });
+    await f.admin.commit({
+      opId: key(),
+      changes: [
+        {
+          op: 'put',
+          node: {
+            $path: '/draft',
+            $type: 'uix.source',
+            source: '',
+            $acl: [{ subject: { group: 'public' }, grant: R | W }],
+          },
+        },
+        {
+          op: 'put',
+          node: {
+            $path: '/uix-tools',
+            $type: 'uix.mcp',
+            $acl: [{ subject: { group: 'public' }, grant: R | W }],
+          },
+        },
+      ],
+    });
     const digest = f.instance.registry.digest;
     const one = 'export default function View() { return <p>Published one</p>; }';
-    const saved = await f.client.act({ path: '/uix-tools', action: 'compile_view', args: { path: '/draft', source: one },
-      opId: f.client.key() }).outcome;
+    const saved = await f.client.act({
+      path: '/uix-tools',
+      action: 'compile_view',
+      args: { path: '/draft', source: one },
+      opId: f.client.key(),
+    }).outcome;
     assert.deepEqual(saved.value, { ok: true, saved: '/draft' });
     assert.equal(f.instance.registry.digest, digest);
-    await f.client.commit({ opId: f.client.key(), changes: [{ op: 'put', node: { $path: '/draft', $type: 'uix.source',
-      source: one, published: { source: 'forged' } } }] }).outcome;
+    await f.client.commit({
+      opId: f.client.key(),
+      changes: [
+        {
+          op: 'put',
+          node: {
+            $path: '/draft',
+            $type: 'uix.source',
+            source: one,
+            published: { source: 'forged' },
+          },
+        },
+      ],
+    }).outcome;
     assert.equal(f.instance.registry.digest, digest);
-    await assert.rejects(f.client.act({ path: '/sys/types/editor.document', action: 'publish_view', args: { draft: '/draft' },
-      opId: f.client.key() }).outcome, error => error instanceof KernelError && error.code === 'FORBIDDEN');
+    await assert.rejects(
+      f.client.act({
+        path: '/sys/types/editor.document',
+        action: 'publish_view',
+        args: { draft: '/draft' },
+        opId: f.client.key(),
+      }).outcome,
+      (error) => error instanceof KernelError && error.code === 'FORBIDDEN',
+    );
     const body = await f.client.read({ node: '/document' });
-    const copy = body.copies[0]; assert.ok('node' in copy);
+    const copy = body.copies[0];
+    assert.ok('node' in copy);
     const ui = render(createElement(Render, { value: copy.node }), { wrapper: f.wrapper });
-    await act(async () => { await f.admin.act({ path: '/sys/types/editor.document', action: 'publish_view', args: { draft: '/draft' }, opId: key() }); });
+    await act(async () => {
+      await f.admin.act({
+        path: '/sys/types/editor.document',
+        action: 'publish_view',
+        args: { draft: '/draft' },
+        opId: key(),
+      });
+    });
     await ui.findByText('Published one');
     assert.notEqual(f.instance.registry.digest, digest);
     const accepted = f.instance.registry.module('native-editor-actions').views?.['editor.document'];
     assert.equal(accepted?.source, one);
     assert.ok(accepted);
-    await assert.rejects(f.client.commit({ opId: f.client.key(), changes: [{ op: 'put',
-      node: { $path: `${PUBLICATION_PREFIX}editor.document`, $type: 'uix.publication', ...accepted, source: 'forged' } }] }).outcome,
-      error => error instanceof KernelError && error.code === 'FORBIDDEN');
+    await assert.rejects(
+      f.client.commit({
+        opId: f.client.key(),
+        changes: [
+          {
+            op: 'put',
+            node: {
+              $path: `${PUBLICATION_PREFIX}editor.document`,
+              $type: 'uix.publication',
+              ...accepted,
+              source: 'forged',
+            },
+          },
+        ],
+      }).outcome,
+      (error) => error instanceof KernelError && error.code === 'FORBIDDEN',
+    );
     const two = 'export default function View() { return <p>Published two</p>; }';
-    await act(async () => { await f.client.commit({ opId: f.client.key(), changes: [{ op: 'put', node: { $path: '/draft', $type: 'uix.source', source: two } }] }).outcome; });
+    await act(async () => {
+      await f.client.commit({
+        opId: f.client.key(),
+        changes: [{ op: 'put', node: { $path: '/draft', $type: 'uix.source', source: two } }],
+      }).outcome;
+    });
     assert.ok(ui.getByText('Published one'));
     assert.equal(ui.queryByText('Published two'), null);
-    await act(async () => { await f.admin.act({ path: '/sys/types/editor.document', action: 'publish_view', args: { draft: '/draft' }, opId: key() }); });
+    await act(async () => {
+      await f.admin.act({
+        path: '/sys/types/editor.document',
+        action: 'publish_view',
+        args: { draft: '/draft' },
+        opId: key(),
+      });
+    });
     assert.ok(await ui.findByText('Published two'));
-    assert.ok(f.sent.some(request => request.t === 'sub' && 'node' in request.selector && request.selector.node === '/sys/types/editor.document'));
+    assert.ok(
+      f.sent.some(
+        (request) =>
+          request.t === 'sub' &&
+          'node' in request.selector &&
+          request.selector.node === '/sys/types/editor.document',
+      ),
+    );
     const view = f.instance.registry.module(f.module.id).views?.['editor.document'];
     await f.close();
-    const reopened = await createInstanceFoundation({ id: f.instance.id, root: f.root, counter: f.counter, writerEpoch: 2,
-      domains: [{ store: f.root, epoch: `${f.instance.id}:memory`, persistent: false }], initialCredential: { ttlMs: 60_000 } });
+    const reopened = await createInstanceFoundation({
+      id: f.instance.id,
+      root: f.root,
+      counter: f.counter,
+      writerEpoch: 2,
+      domains: [{ store: f.root, epoch: `${f.instance.id}:memory`, persistent: false }],
+      initialCredential: { ttlMs: 60_000 },
+    });
     t.after(() => reopened.close());
     reopened.registry.publish(f.module);
     reopened.registry.publish(uixManifest);
@@ -423,4 +642,75 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
     assert.deepEqual(reopened.registry.module(f.module.id).views?.['editor.document'], view);
   });
 
+  it('a published view uses its source and retains local state through native updates', async (t) => {
+    const manifest = await collectModule('@treenx/react/uix', async () => {
+      await import('../mods/uix/kernel');
+      loadSchemasRecursive(fileURLToPath(new URL('../mods/uix/', import.meta.url)));
+    });
+    const f = await fixture('published-view-native-owner', false);
+    t.after(f.close);
+    t.after(() => unregister('editor.document', 'react'));
+    let nonce = 0;
+    const key = () => ({
+      epoch: f.instance.writer.intake.epoch,
+      time: Date.now(),
+      nonce: `view-${nonce++}`,
+    });
+    await f.admin.commit({
+      opId: key(),
+      changes: manifest.types.map((type) => ({
+        op: 'put' as const,
+        node: {
+          $path: `/sys/types/${type.name}`,
+          $type: 't.type',
+          name: type.name,
+          module: type.module,
+          security: type.security,
+        },
+      })),
+    });
+    f.instance.registry.publish(manifest);
+    const source = `export default function View({ value }) {
+      const [count, setCount] = useState(0);
+      const ctx = viewCtx(value);
+      return <div><p>{'Value ' + value.value}</p><p>{'Clicks ' + count}</p>
+        <button onClick={async () => { await execute(ctx.path, 'inspect', { tag: 'native-view' }); setCount(c => c + 1); }}>Inspect owner</button>
+      </div>;
+    }`;
+    await f.admin.commit({
+      opId: key(),
+      changes: [{ op: 'put', node: { $path: '/draft', $type: 'uix.source', source } }],
+    });
+    await f.admin.act({
+      path: '/sys/types/editor.document',
+      action: 'publish_view',
+      args: { draft: '/draft' },
+      opId: key(),
+    });
+
+    function Document() {
+      const { data, loading, error } = usePath<Node>('/document');
+      if (error !== null) throw error;
+      if (loading) return null;
+      if (data === undefined) throw new Error('Published document is absent');
+      return createElement(Render, { value: data });
+    }
+
+    const ui = render(createElement(Document), { wrapper: f.wrapper });
+    await ui.findByText('Value 1');
+    await act(async () => {
+      fireEvent.click(ui.getByRole('button', { name: 'Inspect owner' }));
+      assert.deepEqual(await f.invoked, { tag: 'native-view' });
+    });
+    await ui.findByText('Clicks 1');
+    await act(async () => {
+      await f.admin.commit({
+        opId: key(),
+        changes: [{ op: 'patch', path: '/document', ops: { $set: { value: 2 } } }],
+      });
+      await until(f.source, (snapshot) => snapshot.data?.value === 2);
+    });
+    assert.ok(ui.getByText('Value 2'));
+    assert.ok(ui.getByText('Clicks 1'));
+  });
 });

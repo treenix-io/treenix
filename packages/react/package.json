@@ -96,6 +96,26 @@
     "#app/LaneSessionProvider": {
       "development": "./src/app/LaneSessionProvider.tsx",
       "default": "./dist/app/LaneSessionProvider.js"
+    },
+    "#app/Login": {
+      "development": "./src/app/Login.tsx",
+      "default": "./dist/app/Login.js"
+    },
+    "#mods/editor-ui/FieldLabel": {
+      "development": "./src/mods/editor-ui/FieldLabel.tsx",
+      "default": "./dist/mods/editor-ui/FieldLabel.js"
+    },
+    "#components/ConfirmPopover": {
+      "development": "./src/components/ConfirmPopover.tsx",
+      "default": "./dist/components/ConfirmPopover.js"
+    },
+    "#app/ErrorBoundary": {
+      "development": "./src/app/ErrorBoundary.tsx",
+      "default": "./dist/app/ErrorBoundary.js"
+    },
+    "#components/PathBreadcrumb": {
+      "development": "./src/components/PathBreadcrumb.tsx",
+      "default": "./dist/components/PathBreadcrumb.js"
     }
   },
   "exports": {
@@ -139,6 +159,7 @@
     "build:front": "npm run build:spa && npm run build:ssr",
     "prepack": "npm run build",
     "test": "tsx --conditions development --experimental-test-module-mocks --import ./test/register-dom.mjs --import ./test/register-css.mjs --test 'src/**/*.test.ts'",
+    "test:published-views": "tsx --conditions development --experimental-test-module-mocks --import ./test/register-dom.mjs --import ./test/register-css.mjs --test --test-name-pattern='published view uses its source|compiled capabilities' src/editor/native-editor.test.ts src/mods/uix/compile.test.ts",
     "dev": "NODE_OPTIONS=\"$NODE_OPTIONS --import tsx --conditions=development\" vite",
     "dev:native": "NODE_OPTIONS='--import tsx --conditions=development' vite --config vite.native.config.ts",
     "build:native": "NODE_OPTIONS='--import tsx --conditions=development' vite build --config vite.native.config.ts",

@@ -3,7 +3,8 @@
 
 import { getComponent, onResolveMiss, register, type NodeData } from '@treenx/core';
 import type { Node } from '@treenx/core/kernel/types';
-import type { RenderProps } from '#context';
+import { viewCtx, type RenderProps } from '#context';
+import type { PresentationComponent } from '#tree/presentation';
 import { usePath, useTreeEffects } from '#hooks';
 import { useNativeTypeDescription } from '#schema-loader';
 import { UixNoView } from '#context';
@@ -20,7 +21,11 @@ export { compileComponent, invalidateCache };
 function LegacyUixView({ value, onChange }: { value: any; onChange?: (next: any) => void }) {
   const source = value.code?.source;
   if (!source || typeof source !== 'string') {
-    return React.createElement('div', { className: 'p-4 text-gray-400' }, 'uix.view — no code.source');
+    return React.createElement(
+      'div',
+      { className: 'p-4 text-gray-400' },
+      'uix.view — no code.source',
+    );
   }
 
   const id = value.$path || 'uix.anon';
@@ -29,8 +34,11 @@ function LegacyUixView({ value, onChange }: { value: any; onChange?: (next: any)
     const Comp = compileComponent(id, source, { skipRegister: true });
     return React.createElement(Comp, { value, onChange });
   } catch (err: any) {
-    return React.createElement('pre', { className: 'p-4 text-red-500 text-sm whitespace-pre-wrap' },
-      `UIX compile error:\n${err.message}`);
+    return React.createElement(
+      'pre',
+      { className: 'p-4 text-red-500 text-sm whitespace-pre-wrap' },
+      `UIX compile error:\n${err.message}`,
+    );
   }
 }
 
@@ -48,21 +56,49 @@ register('uix.view', 'react', UixView);
 
 /** Keep canonical ownership under a real subscription without treating drafts as published handlers. */
 function NativeTypeView({ type, ...props }: RenderProps & { type: string }) {
+  const effects = useTreeEffects();
   const { data: ownership, loading, error } = usePath<Node>(`/sys/types/${type}`);
   const description = useNativeTypeDescription(type, ownership?.$rev);
+  const context = React.useRef(props.ctx);
+  context.current = props.ctx;
+  const scope = React.useMemo(
+    () => ({
+      execute: effects.execute,
+      viewCtx: (value: PresentationComponent) => {
+        const owner = context.current;
+        return owner == null
+          ? null
+          : viewCtx(value, { node: owner.node, execute: effects.execute });
+      },
+    }),
+    [effects],
+  );
+  const published = description?.view?.source;
+  const Component = React.useMemo(
+    () =>
+      published === undefined
+        ? undefined
+        : compileComponent(type, published, { skipRegister: true, extraScope: scope }),
+    [type, published, scope],
+  );
   if (error !== null) return React.createElement('p', { role: 'alert' }, error.message);
   if (loading) return React.createElement('p', null, 'Loading type ownership…');
-  if (ownership === undefined || description === undefined) return React.createElement(UixNoView, props);
+  if (ownership === undefined || description === undefined)
+    return React.createElement(UixNoView, props);
   const view = description.view;
   if (view === undefined) return React.createElement(UixNoView, props);
 
-  const Component = compileComponent(type, view.source, { skipRegister: true });
+  if (Component === undefined) throw new Error('Published view has no compiled component');
   return React.createElement(Component, props);
 }
 
 /** Existing legacy type-node code remains owned by its actual mounted legacy source. */
 function LegacyTypeView({ type, ...props }: RenderProps & { type: string }) {
-  const { data: node, loading, error } = usePath<NodeData>(`/sys/types/${type.replace(/\./g, '/')}`);
+  const {
+    data: node,
+    loading,
+    error,
+  } = usePath<NodeData>(`/sys/types/${type.replace(/\./g, '/')}`);
   if (error !== null) return React.createElement('p', { role: 'alert' }, error.message);
   if (loading) return React.createElement('p', null, 'Loading type view…');
   const source = node === undefined ? undefined : getComponent(node, UixSource, 'view')?.source;
@@ -72,7 +108,11 @@ function LegacyTypeView({ type, ...props }: RenderProps & { type: string }) {
     const Component = compileComponent(type, source, { skipRegister: true });
     return React.createElement(Component, props);
   } catch (reason) {
-    return React.createElement('p', { role: 'alert' }, reason instanceof Error ? reason.message : String(reason));
+    return React.createElement(
+      'p',
+      { role: 'alert' },
+      reason instanceof Error ? reason.message : String(reason),
+    );
   }
 }
 
@@ -80,10 +120,15 @@ function LegacyTypeView({ type, ...props }: RenderProps & { type: string }) {
 function typeView(type: string): React.FC<RenderProps> {
   function OwnedTypeView(props: RenderProps) {
     const effects = useTreeEffects();
-    return React.createElement(effects.kernel === undefined ? LegacyTypeView : NativeTypeView, { ...props, type });
+    return React.createElement(effects.kernel === undefined ? LegacyTypeView : NativeTypeView, {
+      ...props,
+      type,
+    });
   }
 
   return OwnedTypeView;
 }
 
-onResolveMiss('react', type => register(type, 'react', type.includes('.') ? typeView(type) : UixNoView));
+onResolveMiss('react', (type) =>
+  register(type, 'react', type.includes('.') ? typeView(type) : UixNoView),
+);

@@ -2,8 +2,9 @@
 // Turns raw JSX/TSX code string into a React component
 
 import { register } from '@treenx/core';
-import { Render, RenderContext, RenderField, viewCtx } from '#context';
-import { execute, useChildren, usePath } from '#hooks';
+import { Render, RenderContext, RenderField, useActions, viewCtx } from '#context';
+import { useChildren, usePath, useTreeEffects } from '#hooks';
+import { READ_ONLY_EFFECTS } from '#tree/effects';
 import React from 'react';
 import { compileJSX } from './jsx-parser';
 
@@ -22,11 +23,24 @@ const SCOPE: Record<string, unknown> = {
   RenderField,
   usePath,
   useChildren,
-  execute,
+  execute: READ_ONLY_EFFECTS.execute,
+  useActions,
+  useTreeEffects,
   viewCtx,
 };
 
 const cache = new Map<string, React.FC<any>>();
+let scopedCaches = new WeakMap<Record<string, unknown>, Map<string, React.FC<any>>>();
+
+/** Compiled closures belong to their injected capabilities, even when their source text is identical. */
+function scopeCache(owner: Record<string, unknown>): Map<string, React.FC<any>> {
+  let owned = scopedCaches.get(owner);
+  if (owned === undefined) {
+    owned = new Map();
+    scopedCaches.set(owner, owned);
+  }
+  return owned;
+}
 
 // Strip import lines (resolved from scope), extract export default name
 function prepareCode(code: string): { body: string; exportName: string | null } {
@@ -70,7 +84,9 @@ export function compileComponent(
   opts?: { extraScope?: Record<string, unknown>; skipRegister?: boolean },
 ): React.FC<any> {
   const cacheKey = type + '\0' + rawCode;
-  const cached = cache.get(cacheKey);
+  const scopeOwner = opts?.extraScope;
+  const ownedCache = scopeOwner === undefined ? cache : scopeCache(scopeOwner);
+  const cached = ownedCache.get(cacheKey);
   if (cached) return cached;
 
   const { body, exportName } = prepareCode(rawCode);
@@ -80,28 +96,34 @@ export function compileComponent(
 
   // uix.add() capture for inline mode
   let captured: React.FC<any> | null = null;
-  const uix = { add: (comp: React.FC<any>) => { captured = comp; } };
+  const uix = {
+    add: (comp: React.FC<any>) => {
+      captured = comp;
+    },
+  };
 
   const allScope = { ...scope, uix };
   const keys = Object.keys(allScope);
   const vals = Object.values(allScope);
 
-  const fnBody = exportName
-    ? `${jsCode}\nreturn ${exportName};`
-    : `${jsCode}\nreturn null;`;
+  const fnBody = exportName ? `${jsCode}\nreturn ${exportName};` : `${jsCode}\nreturn null;`;
 
   const fn = new Function(...keys, fnBody);
   const result = fn(...vals);
 
   const Component = captured || result;
-  if (!Component) throw new Error(`No component found in code for type "${type}". Use uix.add(Comp) or export default.`);
+  if (!Component)
+    throw new Error(
+      `No component found in code for type "${type}". Use uix.add(Comp) or export default.`,
+    );
 
-  cache.set(cacheKey, Component);
+  ownedCache.set(cacheKey, Component);
   if (!opts?.skipRegister) register(type, 'react', Component);
   return Component;
 }
 
 export function invalidateCache(type?: string): void {
+  scopedCaches = new WeakMap();
   if (type) {
     for (const [k] of cache) {
       if (k.startsWith(type + '\0')) cache.delete(k);
