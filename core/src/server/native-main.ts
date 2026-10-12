@@ -4,16 +4,19 @@ import { dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { safeJsonParse } from '#core/json'
 import { KernelError } from '#errors'
-import { openNativeDeployment, type NativeModuleLocation, type PersistentLogsConfig } from '#server/native-deployment'
+import { openNativeDeployment, type NativeDeploymentHost, type NativeModuleLocation, type PersistentLogsConfig } from '#server/native-deployment'
 import type { FsDirectoryBindings } from '#kernel/mount-fs-provider'
 import type { Credential } from '#kernel/types'
 import { createTwpHttpServer } from '#server/http-twp'
 import { isRecord } from '#util/is-record'
 import { nativeRootStorage } from '#server/native-root'
 
-interface IoEntry { readonly entry: string }
+interface DeploymentEntry { readonly entry: string }
+interface CapabilityEntry {
+  createModuleHost(instance: string): NativeDeploymentHost | Promise<NativeDeploymentHost>;
+}
 /** Decode the deployment entry before acquiring persistent runtime resources. */
-function ioEntry(value: unknown): value is IoEntry {
+function deploymentEntry(value: unknown): value is DeploymentEntry {
   return isRecord(value) && typeof value.entry === 'string' && value.entry.length > 0
 }
 
@@ -59,7 +62,8 @@ async function main(): Promise<void> {
     || config.firstAdmin !== undefined && !adminInput(config.firstAdmin)
     || config.installerCredential !== undefined && !credentialInput(config.installerCredential)
     || config.persistentLogs !== undefined && !persistentLogsInput(config.persistentLogs)
-    || config.io !== undefined && !ioEntry(config.io)
+    || config.io !== undefined && !deploymentEntry(config.io)
+    || config.capabilities !== undefined && !deploymentEntry(config.capabilities)
     || config.baseDirectory !== undefined && (typeof config.baseDirectory !== 'string' || config.baseDirectory.length === 0)
     || config.mountDirectories !== undefined && !directoryBindings(config.mountDirectories)
     || config.seedFilter !== undefined && (!Array.isArray(config.seedFilter)
@@ -80,6 +84,15 @@ async function main(): Promise<void> {
   }
   const modules = moduleLocations(config.modules)
   const additionalModules = moduleLocations(config.additionalModules)
+  let moduleHost: NativeDeploymentHost | undefined;
+  if (config.capabilities !== undefined) {
+    const target = pathToFileURL(resolve(dirname(configPath), config.capabilities.entry)).href;
+    const deployment: CapabilityEntry = await import(target);
+    if (typeof deployment.createModuleHost !== 'function')
+      throw new KernelError('INVALID', 'Native capability entry must export createModuleHost');
+    moduleHost = await deployment.createModuleHost(config.id);
+  }
+
   let io: ActionIoBinding | undefined;
   if (config.io !== undefined) {
     const target = pathToFileURL(resolve(dirname(configPath), config.io.entry)).href;
@@ -99,7 +112,7 @@ async function main(): Promise<void> {
         )
   const runtime = await openNativeDeployment({ seedFilter: config.seedFilter, runtime: { id: config.id, directory: resolve(dirname(configPath), config.directory),
     baseDirectory: config.baseDirectory === undefined ? undefined : resolve(dirname(configPath), config.baseDirectory),
-    credentialTtlMs: config.credentialTtlMs, firstAdmin: config.firstAdmin, installerCredential: config.installerCredential, mountDirectories }, modules, additionalModules, io, persistentLogs: config.persistentLogs })
+    credentialTtlMs: config.credentialTtlMs, firstAdmin: config.firstAdmin, installerCredential: config.installerCredential, mountDirectories }, modules, additionalModules, host: moduleHost, io, persistentLogs: config.persistentLogs })
   const binding = createTwpHttpServer({ instance: runtime.instance, routes: runtime.httpRoutes, allowedOrigins: config.allowedOrigins, credentialTtlMs: config.credentialTtlMs })
   try {
     await new Promise<void>((done, reject) => { binding.server.once('error', reject); binding.server.listen(port, host, () => { binding.server.off('error', reject); done() }) })

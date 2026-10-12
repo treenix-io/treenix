@@ -19,12 +19,16 @@ export interface NativeModuleLocation {
 
 export interface PersistentLogsConfig { readonly directory: string }
 
+export type NativeDeploymentHost = Omit<NativeModuleHost, 'httpRoutes' | 'logs'>;
+
 export interface NativeDeploymentConfig {
   readonly runtime: Omit<NativeRuntimeConfig, 'modules' | 'io'>;
   /** An explicit list, including an empty list, replaces default discovery. */
   readonly modules?: readonly NativeModuleLocation[];
   /** Package entries supplement module discovery without replacing its owners. */
   readonly additionalModules?: readonly NativeModuleLocation[];
+  /** External capabilities supplement the deployment-owned HTTP routes and log input. */
+  readonly host?: NativeDeploymentHost;
   readonly modsDir?: string;
   readonly io?: ActionIoBinding;
   readonly seeds?: NativeSeedDefinition;
@@ -54,7 +58,7 @@ async function explicitModule(location: NativeModuleLocation, host: NativeModule
 export async function openNativeDeployment(config: NativeDeploymentConfig) {
   const httpRoutes = createTwpHttpRoutes();
   const logs = createLogsInput();
-  const host: NativeModuleHost = { httpRoutes, logs };
+  const host: NativeModuleHost = { ...config.host, httpRoutes, logs };
   let loaded: LoadResult;
   if (config.modules === undefined) {
     loaded = await loadAllMods('kernel', { host, extraDirs: config.modsDir === undefined ? [] : [config.modsDir] });
