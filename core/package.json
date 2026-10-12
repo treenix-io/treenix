@@ -131,6 +131,16 @@
       "types": "./dist/kernel/runtime.d.ts",
       "default": "./dist/kernel/runtime.js"
     },
+    "./kernel/read-children": {
+      "development": "./src/kernel/read-children.ts",
+      "types": "./dist/kernel/read-children.d.ts",
+      "default": "./dist/kernel/read-children.js"
+    },
+    "./kernel/periodic-service": {
+      "development": "./src/kernel/periodic-service.ts",
+      "types": "./dist/kernel/periodic-service.d.ts",
+      "default": "./dist/kernel/periodic-service.js"
+    },
     "./kernel/session-delivery": {
       "development": "./src/kernel/session-delivery.ts",
       "types": "./dist/kernel/session-delivery.d.ts",
