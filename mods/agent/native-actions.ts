@@ -31,6 +31,12 @@ function feedback(args: unknown): { feedback?: string } {
 
 /** Reuses the component-local state machines under native draft and schema ownership. */
 export function agentActions(type: string): Readonly<Record<string, ActionDef>> {
+  if (type === 'ai.pool') return {
+    scan: { kind: 'read', args: {}, async handler(ctx) {
+      if (typeof ctx.node.servicePath !== 'string') throw new KernelError('INVALID', 'Pool has no native service path');
+      return ctx.act({ path: ctx.node.servicePath, action: 'select', args: {} });
+    } },
+  };
   if (type === 'ai.agent')
     return {
       online: {

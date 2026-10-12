@@ -5,8 +5,10 @@ import { z } from 'zod/v3';
 import type { AiAgent } from '#agent/types';
 import type { AgentPorts, AgentResult } from '#agent/native-io';
 import { stageNativeBranchControl } from '#branch/native-actions';
+import { patchAgentComponent } from '#agent/native-chat';
+import type { AiLog } from '#agent/types';
 
-interface WorkerConfig {
+export interface WorkerConfig {
   readonly poolPath: string;
   readonly agentPath: string;
 }
@@ -17,6 +19,8 @@ const input = z
     mode: z.enum(['plan', 'work', 'discuss']),
     workspace: z.string().optional(),
     sessionId: z.string().optional(),
+    runPath: z.string().optional(),
+    deferBranchControl: z.boolean().optional(),
   })
   .strict();
 
@@ -82,6 +86,9 @@ async function* invokeWorker(this: WorkerConfig, ctx: WriteActionContext, args: 
     throw new KernelError('INVALID', 'Work requires a branch workspace');
   const workspace = request.mode === 'work' ? request.workspace : undefined;
   const branch = workspace?.slice(0, -5);
+  let branchRequest: { action: 'requestMerge' | 'abandon'; args: unknown } | undefined;
+  if (request.runPath !== undefined && agent.currentRun !== request.runPath)
+    throw new KernelError('INVALID', 'Worker log differs from its owning run');
   let calls = 0;
   const ports: AgentPorts = {
     read: ctx.read,
@@ -90,6 +97,13 @@ async function* invokeWorker(this: WorkerConfig, ctx: WriteActionContext, args: 
       if (workspace !== undefined) {
         if (call.path === branch && (call.action === 'requestMerge' || call.action === 'abandon')) {
           if (call.component !== undefined && call.component !== '') refuse();
+          if (request.deferBranchControl) {
+            branchRequest = { action: call.action, args: call.args };
+            return {
+              status: call.action === 'requestMerge' ? 'review' : 'abandoned',
+              staged: true,
+            };
+          }
           return {
             ...(await stageNativeBranchControl(ctx, call.path, call.action, call.args)),
             staged: true,
@@ -131,12 +145,22 @@ async function* invokeWorker(this: WorkerConfig, ctx: WriteActionContext, args: 
     },
     ports,
   )) {
-    if (event.type === 'chunk') yield event;
-    else result = event.result;
+    if (event.type === 'chunk') {
+      if (request.runPath !== undefined) {
+        const run = (await ctx.read.read({ node: request.runPath })).copies[0];
+        if ('error' in run) throw run.error;
+        const log = getComponent<AiLog>(run.node, 'ai.log');
+        if (log === undefined) throw new KernelError('INVALID', 'Worker run has no activity log');
+        patchAgentComponent(ctx, run.node, 'ai.log', {
+          entries: [...log.entries, { ts: Date.now(), type: 'text', output: event.text }],
+        });
+      }
+      yield event;
+    } else result = event.result;
   }
   if (result === undefined)
     throw new KernelError('UNAVAILABLE', 'Agent provider ended without a result');
-  return result;
+  return { ...result, ...(branchRequest === undefined ? {} : { branchRequest }) };
 }
 
 /** Publishes an immutable worker capability without changing the ordinary agent configuration type. */
@@ -168,6 +192,8 @@ export function nativeWorkerType(owner: string): TypeDef {
                 mode: { enum: ['plan', 'work', 'discuss'] },
                 workspace: { type: 'string' },
                 sessionId: { type: 'string' },
+                runPath: { type: 'string' },
+                deferBranchControl: { type: 'boolean' },
               },
               required: ['prompt', 'mode'],
             },
@@ -186,6 +212,8 @@ export function nativeWorkerType(owner: string): TypeDef {
             mode: { enum: ['plan', 'work', 'discuss'] },
             workspace: { type: 'string' },
             sessionId: { type: 'string' },
+            runPath: { type: 'string' },
+            deferBranchControl: { type: 'boolean' },
           },
           required: ['prompt', 'mode'],
           additionalProperties: false,
