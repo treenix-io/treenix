@@ -71,11 +71,14 @@ export async function guardCapabilities(changes: readonly NodeChange[], options:
     for (const ancestor of ancestorPaths(path)) value = (await read(ancestor))?.$owner ?? value
     return value
   }
+  /** Group grants do not require ancestor ownership reads. */
   async function nodeGrants(node: StoredNode | null, read: typeof readBefore): Promise<Map<Principal, number>> {
     const result = new Map<Principal, number>()
     if (node === null) return result
-    const currentOwner = await owner(node.$path, read)
-    for (const entry of decodeChainNode(node).acl) {
+    const acl = decodeChainNode(node).acl
+    const currentOwner = acl.some(entry => 'grant' in entry && entry.grant !== 0 && 'owner' in entry.subject)
+      ? await owner(node.$path, read) : undefined
+    for (const entry of acl) {
       if (!('grant' in entry) || entry.grant === 0) continue
       const principal = 'owner' in entry.subject ? currentOwner : entry.subject.group
       if (principal === undefined || !principal.startsWith('n:')) continue
