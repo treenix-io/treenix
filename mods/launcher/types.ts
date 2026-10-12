@@ -2,6 +2,7 @@
 
 import type { NodeData } from '@treenx/core';
 import { getCtx, registerType } from '@treenx/core/comp';
+import { appendLauncherItem, removeLauncherItem } from '#launcher/layout';
 
 /** Home screen with icon grid + widgets. Layout via react-grid-layout. */
 export class Launcher {
@@ -20,17 +21,7 @@ export class Launcher {
     await ctx.tree.set({ $path: refPath, $type: 'ref', $ref: data.path } as NodeData);
 
     // Auto-place in layout as 1×1
-    const items: { i: string; x: number; y: number; w: number; h: number }[] = JSON.parse(this.layout || '[]');
-    const maxY = items.reduce((m, it) => Math.max(m, it.y + it.h), 0);
-    const lastRowItems = items.filter(it => it.y + it.h === maxY);
-    const nextX = lastRowItems.reduce((m, it) => Math.max(m, it.x + it.w), 0);
-
-    if (nextX < this.columns) {
-      items.push({ i: id, x: nextX, y: maxY > 0 ? maxY - 1 : 0, w: 1, h: 1 });
-    } else {
-      items.push({ i: id, x: 0, y: maxY, w: 1, h: 1 });
-    }
-    this.layout = JSON.stringify(items);
+    this.layout = appendLauncherItem(this.layout, this.columns, id);
   }
 
   /** Remove an app from the launcher */
@@ -39,8 +30,7 @@ export class Launcher {
     const ctx = getCtx();
     await ctx.tree.remove(`${ctx.node.$path}/${data.id}`);
 
-    const items: { i: string }[] = JSON.parse(this.layout || '[]');
-    this.layout = JSON.stringify(items.filter(it => it.i !== data.id));
+    this.layout = removeLauncherItem(this.layout, data.id);
   }
 
   /** Persist layout after drag/resize */
