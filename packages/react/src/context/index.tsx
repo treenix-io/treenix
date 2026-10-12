@@ -100,6 +100,11 @@ function nativeLocation(value: object, current: PresentationNode | null): string
   return undefined;
 }
 
+/** Distinguishes a whole node from a named component for render ownership. */
+function isPresentationNode(value: PresentationComponent): value is PresentationNode {
+  return typeof value.$path === 'string';
+}
+
 export function useActions<T extends object>(value: T & { readonly [$node]?: NodeData; readonly [$key]?: string }): Actions<T> {
   const effects = useTreeEffects();
   const current = useContext(NodeCtx);
@@ -172,10 +177,11 @@ export function Render<E extends Record<string, unknown> = {}>({ value, onChange
   const preset = entry.meta?.props;
   const regProps = preset && typeof preset === 'object' ? preset : undefined;
 
-  const path = effects.lane ? nativeLocation(value, current) : undefined;
+  const owner = effects.lane && isPresentationNode(value) ? value : current;
+  const path = effects.lane ? nativeLocation(value, owner) : undefined;
   const derived = effects.lane
-    ? path === undefined || current === null ? null
-      : { node: current, path, execute: (action: string, data?: unknown) => effects.execute(path, action, data) }
+    ? path === undefined || owner === null ? null
+      : { node: owner, path, execute: (action: string, data?: unknown) => effects.execute(path, action, data) }
     : viewCtx(value);
   const ctx = suppliedContext === undefined ? derived : suppliedContext;
   const el = createElement(entry.handler, { value, onChange, ctx, ...extra, ...regProps } as RenderProps);

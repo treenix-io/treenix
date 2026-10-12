@@ -5,7 +5,7 @@
 
 import { makeNode, type NodeData } from '@treenx/core';
 import { stampNode } from '#symbols';
-import { createNode } from '#hooks';
+import { useTreeEffects } from '#tree/effects';
 import { proxy, useSnapshot } from 'valtio';
 import { useCallback, useMemo } from 'react';
 
@@ -25,6 +25,7 @@ export type DraftHandle = {
 let draftSeq = 0;
 
 export function useDraft(type: string): DraftHandle {
+  const { createNode } = useTreeEffects();
   const state = useMemo(() => proxy<{ node: NodeData | null }>({ node: null }), []);
   const snap = useSnapshot(state);
 
@@ -47,7 +48,7 @@ export function useDraft(type: string): DraftHandle {
     }
     await createNode(realPath, type, data);
     state.node = null;
-  }, [type, state]);
+  }, [createNode, type, state]);
 
   const close = useCallback(() => { state.node = null; }, [state]);
 
