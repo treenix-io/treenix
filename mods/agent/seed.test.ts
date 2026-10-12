@@ -5,8 +5,6 @@
 
 import { getComponent } from '@treenx/core';
 import { getPrefab } from '@treenx/core/mod';
-import { deployByKey } from '@treenx/core/server/prefab';
-import { createMemoryTree } from '@treenx/core/tree';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import './seed';
@@ -58,11 +56,8 @@ describe('agent seed (core-1prz)', () => {
     assert.ok(!('chat' in qa) && !('thread' in qa));
   });
 
-  it('deployed qa agent resolves policy and chat via getComponent', async () => {
-    const tree = createMemoryTree();
-    await deployByKey(tree, 'agent', 'seed', '/', { allowAbsolute: true });
-
-    const qa = await tree.get('/agents/qa');
+  it('qa agent seed resolves policy and chat via getComponent', () => {
+    const qa = byPath('agents/qa');
     assert.ok(qa);
     const policy = getComponent(qa!, AiPolicy);
     assert.ok(policy, 'AiPolicy visible to getComponent (regression: bare key was invisible)');

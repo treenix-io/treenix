@@ -241,11 +241,6 @@
       "types": "./dist/contexts/text.d.ts",
       "default": "./dist/contexts/text.js"
     },
-    "./server/prefab": {
-      "development": "./src/server/prefab.ts",
-      "types": "./dist/server/prefab.d.ts",
-      "default": "./dist/server/prefab.js"
-    },
     "./util/safe-timers": {
       "development": "./src/util/safe-timers.ts",
       "types": "./dist/util/safe-timers.d.ts",
