@@ -2,13 +2,14 @@
 // Resolves source from $ref, applies $map pipeline
 // #field (self) and #/path.field (external) args resolved from context
 
-import type { NodeData, Ref } from '@treenx/core';
+import type { Ref } from '@treenx/core';
+import type { PresentationNode } from '#tree/presentation';
 import { isRefArg, type MapExpr, parseMapExpr, type PipeArg } from './parse';
 import { getPipe } from './pipes';
 
 export type BindCtx = {
-  getNode: (path: string) => NodeData | undefined;
-  getChildren: (path: string) => NodeData[];
+  getNode: (path: string) => PresentationNode | undefined;
+  getChildren: (path: string) => PresentationNode[];
 };
 
 // Collection pipe names — when first step is one of these, resolve source as children

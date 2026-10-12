@@ -17,6 +17,7 @@ import { useNativeChildren, useNativeNode } from '#tree/native-hooks'
 import { createNativeTreeSource, type NativeSnapshot, type NativeTreeSource } from '#tree/native-source'
 import { NativeSourceProvider } from '#tree/native-source-context'
 import { NativeTreeBrowser } from '#native/NativeEditor'
+import { useResolvedNode } from '#bind/hook'
 
 async function fixture(id: string) {
   const root = createMemoryStore({ domain: id })
@@ -63,6 +64,35 @@ function textarea(element: HTMLElement): HTMLTextAreaElement {
 }
 
 describe('native React hooks over an actual admitted kernel lane', { timeout: 10_000 }, () => {
+  it('resolves a field binding and follows its native source updates', async t => {
+    const f = await fixture('react-field-binding'); t.after(f.close)
+    const source = createLaneTreeSource(f.client); t.after(() => source.close())
+    await f.admin.commit({ opId: f.key(), changes: [{ op: 'put', node: {
+      $path: '/bound', $type: 't.dir', value: { $ref: '/item', $map: '.value | mul(3)' },
+    } }] })
+    const hook = renderHook(() => useResolvedNode('/bound'), {
+      wrapper: ({ children }: { children: ReactNode }) => createElement(TreeSourceProvider, { source, children }),
+    })
+
+    function ready(path: string, predicate: (node: ReturnType<typeof source.getPathSnapshot>['data']) => boolean): Promise<void> {
+      if (predicate(source.getPathSnapshot(path).data)) return Promise.resolve()
+      return new Promise(resolve => {
+        const unsubscribe = source.subscribePath(path, () => {
+          if (predicate(source.getPathSnapshot(path).data)) { unsubscribe(); resolve() }
+        })
+      })
+    }
+    await act(async () => { await ready('/bound', node => node !== undefined) })
+    await act(async () => { await ready('/item', node => node?.value === 1) })
+    assert.equal(hook.result.current[0]?.value, 3)
+
+    await act(async () => {
+      await f.admin.commit({ opId: f.key(), changes: [{ op: 'patch', path: '/item', ops: { $set: { value: 2 } } }] })
+      await ready('/item', node => node?.value === 2)
+    })
+    assert.equal(hook.result.current[0]?.value, 6)
+  })
+
   it('renders admitted nodes through the registered view with native context on client and server', async t => {
     const f = await fixture('react-render-context'); t.after(f.close)
     const source = createLaneTreeSource(f.client); t.after(() => source.close())

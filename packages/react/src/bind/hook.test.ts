@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { afterEach, it } from 'node:test';
 import { cleanup, renderHook } from '@testing-library/react';
 import { Component, createElement, type ReactNode } from 'react';
-import * as cache from '#tree/cache';
+import { TreeSourceProvider } from '#tree/tree-source-context';
+import { EMPTY_CHILDREN_SNAPSHOT, NOOP_CHILDREN_HANDLE, NOOP_PATH_HANDLE, type TreeSource } from '#tree/tree-source';
 import { useEvalRef } from './hook';
 
 class Boundary extends Component<{ onError: (e: unknown) => void; children?: ReactNode }, { failed: boolean }> {
@@ -12,14 +13,23 @@ class Boundary extends Component<{ onError: (e: unknown) => void; children?: Rea
   render() { return this.state.failed ? null : this.props.children; }
 }
 
-afterEach(() => { cleanup(); cache.clear(); });
+afterEach(() => cleanup());
 
 it('useEvalRef delivers a pipe failure to the error boundary', (t) => {
   t.mock.method(console, 'error', () => {});
-  cache.put({ $path: '/binding', $type: 't.dir', value: 1n });
+  const snapshot = { data: { $path: '/binding', $type: 't.dir', value: 1n }, status: 'ready' as const, error: null };
+  const source: TreeSource = {
+    getPathSnapshot: () => snapshot,
+    getChildrenSnapshot: () => EMPTY_CHILDREN_SNAPSHOT,
+    subscribePath: () => () => {},
+    subscribeChildren: () => () => {},
+    mountPath: () => NOOP_PATH_HANDLE,
+    mountChildren: () => NOOP_CHILDREN_HANDLE,
+  };
   const caught: unknown[] = [];
   const wrapper = ({ children }: { children: ReactNode }) =>
-    createElement(Boundary, { onError: (e) => caught.push(e) }, children);
+    createElement(Boundary, { onError: (e) => caught.push(e) },
+      createElement(TreeSourceProvider, { source, children }));
 
   renderHook(() => useEvalRef('/binding', '.value | round'), { wrapper });
 
