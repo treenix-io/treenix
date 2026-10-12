@@ -2,6 +2,7 @@ import { openTwpHttp } from '@treenx/core/client/http-twp';
 import { createTwpClient, type TwpClient } from '@treenx/core/client/twp';
 import { KernelError } from '@treenx/core/errors';
 import type { Credential, Principal } from '@treenx/core/kernel';
+import { scopeAgentClient } from '#scoped-client';
 
 export type AgentOpts =
   | { readonly url: string; readonly credential: Credential }
@@ -35,16 +36,29 @@ async function openClient(url: string, credential?: Credential): Promise<TwpClie
 }
 
 /** Decode the pairing action's published result at the SDK's wire boundary. */
-function pairingResult(value: unknown):
+function pairingResult(
+  value: unknown,
+):
   | { readonly status: 'pending' }
-  | { readonly status: 'approved'; readonly credential: Credential; readonly principal: Principal } {
+  | {
+      readonly status: 'approved';
+      readonly credential: Credential;
+      readonly principal: Principal;
+    } {
   if (typeof value !== 'object' || value === null || !('status' in value))
     throw new KernelError('INVALID', 'Malformed pairing result');
   if (value.status === 'pending') return { status: 'pending' };
-  if (value.status !== 'approved' || !('credential' in value) || !('principal' in value)
-    || typeof value.principal !== 'string' || !value.principal.startsWith('u:')
-    || typeof value.credential !== 'object' || value.credential === null
-    || !('token' in value.credential) || typeof value.credential.token !== 'string')
+  if (
+    value.status !== 'approved' ||
+    !('credential' in value) ||
+    !('principal' in value) ||
+    typeof value.principal !== 'string' ||
+    !value.principal.startsWith('u:') ||
+    typeof value.credential !== 'object' ||
+    value.credential === null ||
+    !('token' in value.credential) ||
+    typeof value.credential.token !== 'string'
+  )
     throw new KernelError('INVALID', 'Malformed approved pairing result');
   const principal: Principal = `u:${value.principal.slice(2)}`;
   return { status: 'approved', credential: { token: value.credential.token }, principal };
@@ -52,13 +66,17 @@ function pairingResult(value: unknown):
 
 /** Connect through an issued credential or the port's native pairing action. */
 export function createAgentClient(opts: AgentOpts) {
-  const config: AgentOpts = 'credential' in opts
-    ? { url: opts.url, credential: Object.freeze({ ...opts.credential }) }
-    : { url: opts.url, path: opts.path, key: opts.key };
+  const config: AgentOpts =
+    'credential' in opts
+      ? { url: opts.url, credential: Object.freeze({ ...opts.credential }) }
+      : { url: opts.url, path: opts.path, key: opts.key };
 
   /** Replace the pairing lane with the approved account's authenticated lane. */
-  async function approve(result: Extract<ReturnType<typeof pairingResult>, { status: 'approved' }>): Promise<Extract<ConnectResult, { status: 'approved' }>> {
-    const client = await openClient(config.url, result.credential);
+  async function approve(
+    result: Extract<ReturnType<typeof pairingResult>, { status: 'approved' }>,
+  ): Promise<Extract<ConnectResult, { status: 'approved' }>> {
+    const opened = await openClient(config.url, result.credential);
+    const client = 'path' in config ? scopeAgentClient(opened, config.path) : opened;
     return { ...result, client };
   }
 
@@ -67,11 +85,21 @@ export function createAgentClient(opts: AgentOpts) {
     if ('credential' in config) {
       const client = await openClient(config.url, config.credential);
       const welcome = await client.ready;
-      return { status: 'approved', client, credential: config.credential, principal: welcome.principal };
+      return {
+        status: 'approved',
+        client,
+        credential: config.credential,
+        principal: welcome.principal,
+      };
     }
     const client = await openClient(config.url);
     try {
-      const result = pairingResult((await client.act({ path: config.path, action: 'connect', args: { key: config.key } }).outcome).value);
+      const result = pairingResult(
+        (
+          await client.act({ path: config.path, action: 'connect', args: { key: config.key } })
+            .outcome
+        ).value,
+      );
       return result.status === 'pending' ? result : await approve(result);
     } finally {
       client.close();
@@ -82,18 +110,28 @@ export function createAgentClient(opts: AgentOpts) {
   async function waitForApproval(options: WaitOpts = {}): Promise<TwpClient> {
     if ('credential' in config) {
       const result = await connect();
-      if (result.status !== 'approved') throw new KernelError('INVALID', 'Credential connection stayed pending');
+      if (result.status !== 'approved')
+        throw new KernelError('INVALID', 'Credential connection stayed pending');
       return result.client;
     }
     const deadline = AbortSignal.timeout(options.timeout ?? 5 * 60 * 1000);
-    const signal = options.signal === undefined ? deadline : AbortSignal.any([deadline, options.signal]);
+    const signal =
+      options.signal === undefined ? deadline : AbortSignal.any([deadline, options.signal]);
     signal.throwIfAborted();
     const client = await openClient(config.url);
     try {
-      const result = pairingResult((await client.act({ path: config.path, action: 'connect', args: { key: config.key } }, signal).outcome).value);
+      const result = pairingResult(
+        (
+          await client.act(
+            { path: config.path, action: 'connect', args: { key: config.key } },
+            signal,
+          ).outcome
+        ).value,
+      );
       if (result.status === 'approved') {
         const approved = await approve(result);
-        if (approved.status !== 'approved') throw new KernelError('INVALID', 'Approved connection stayed pending');
+        if (approved.status !== 'approved')
+          throw new KernelError('INVALID', 'Approved connection stayed pending');
         return approved.client;
       }
       const path = config.path;
@@ -104,7 +142,10 @@ export function createAgentClient(opts: AgentOpts) {
         function changed(): void {
           const copy = client.cache.at(path);
           if (copy === undefined) return;
-          if ('error' in copy) { reject(copy.error); return; }
+          if ('error' in copy) {
+            reject(copy.error);
+            return;
+          }
           if (copy.node.status === 'approved') resolve();
           else if (copy.node.status === 'revoked' || copy.node.status === 'idle')
             reject(new KernelError('FORBIDDEN', 'Agent pairing ended'));
@@ -118,10 +159,19 @@ export function createAgentClient(opts: AgentOpts) {
         signal.removeEventListener('abort', aborted);
         subscription?.close();
       });
-      const approved = pairingResult((await client.act({ path: config.path, action: 'connect', args: { key: config.key } }, signal).outcome).value);
-      if (approved.status !== 'approved') throw new KernelError('CONFLICT', 'Agent approval changed');
+      const approved = pairingResult(
+        (
+          await client.act(
+            { path: config.path, action: 'connect', args: { key: config.key } },
+            signal,
+          ).outcome
+        ).value,
+      );
+      if (approved.status !== 'approved')
+        throw new KernelError('CONFLICT', 'Agent approval changed');
       const connection = await approve(approved);
-      if (connection.status !== 'approved') throw new KernelError('INVALID', 'Approved connection stayed pending');
+      if (connection.status !== 'approved')
+        throw new KernelError('INVALID', 'Approved connection stayed pending');
       return connection.client;
     } finally {
       client.close();

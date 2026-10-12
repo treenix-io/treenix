@@ -10,15 +10,23 @@ import { createAgentClient } from '#index';
 import { KernelError } from '@treenx/core/errors';
 import { R, W, A } from '@treenx/core/kernel';
 
-
 /** Exercise SDK pairing and scope through the deployed native HTTP owner. */
 test('native agent pairing issues scoped account credentials and revokes them', async () => {
   const temporary = new URL('../../../../temp/', import.meta.url);
   await mkdir(temporary, { recursive: true });
   const directory = await mkdtemp(new URL('native-agent-data-', temporary));
-  const runtime = await openNativeRuntime({ id: 'native-agent-smoke', directory, credentialTtlMs: 60_000,
-    firstAdmin: { path: '/admin', name: 'admin', password: 'smoke-password' }, modules: [] });
-  const http = createTwpHttpServer({ instance: runtime.instance, allowedOrigins: [], credentialTtlMs: 60_000 });
+  const runtime = await openNativeRuntime({
+    id: 'native-agent-smoke',
+    directory,
+    credentialTtlMs: 60_000,
+    firstAdmin: { path: '/admin', name: 'admin', password: 'smoke-password' },
+    modules: [],
+  });
+  const http = createTwpHttpServer({
+    instance: runtime.instance,
+    allowedOrigins: [],
+    credentialTtlMs: 60_000,
+  });
   http.server.listen(0, '127.0.0.1');
   await once(http.server, 'listening');
   const address = http.server.address();
@@ -31,17 +39,40 @@ test('native agent pairing issues scoped account credentials and revokes them', 
   let agent: ReturnType<typeof createTwpClient> | undefined;
   try {
     await admin.ready;
-    await admin.commit({ changes: [
-      { op: 'put', node: { $path: '/agents/bot', $type: 't.agent.port', status: 'idle', label: 'bot' } },
-      { op: 'put', node: { $path: '/agents/bot/data', $type: 't.dir' } },
-      { op: 'put', node: { $path: '/agents/bot/other', $type: 't.dir' } },
-    ] }).outcome;
+    await admin.commit({
+      changes: [
+        {
+          op: 'put',
+          node: { $path: '/agents/bot', $type: 't.agent.port', status: 'idle', label: 'bot' },
+        },
+        { op: 'put', node: { $path: '/agents/bot/data', $type: 't.dir' } },
+        { op: 'put', node: { $path: '/agents/bot/other', $type: 't.dir' } },
+      ],
+    }).outcome;
     const port = (await admin.read({ node: '/agents/bot' })).copies[0];
     if ('error' in port) throw port.error;
-    await admin.commit({ expect: { nodes: [{ path: port.node.$path, rev: port.node.$rev }] }, changes: [{ op: 'patch', path: port.node.$path,
-      ops: { $set: { $acl: [{ subject: { group: 'public' }, grant: R },
-        { subject: { group: `n:${port.node.$id}` }, grant: R | W | A }] } } }] }).outcome;
-    await admin.act({ path: port.node.$path, action: 'initPair', args: { key: 'agent-key', scope: ['/agents/bot/data'] } }).outcome;
+    await admin.commit({
+      expect: { nodes: [{ path: port.node.$path, rev: port.node.$rev }] },
+      changes: [
+        {
+          op: 'patch',
+          path: port.node.$path,
+          ops: {
+            $set: {
+              $acl: [
+                { subject: { group: 'public' }, grant: R },
+                { subject: { group: `n:${port.node.$id}` }, grant: R | W | A },
+              ],
+            },
+          },
+        },
+      ],
+    }).outcome;
+    await admin.act({
+      path: port.node.$path,
+      action: 'initPair',
+      args: { key: 'agent-key', scope: ['/agents/bot/data'] },
+    }).outcome;
     const sdk = createAgentClient({ url, path: port.node.$path, key: 'agent-key' });
     assert.deepEqual(await sdk.connect(), { status: 'pending' });
     const approved = sdk.waitForApproval({ timeout: 5000 });
@@ -59,15 +90,49 @@ test('native agent pairing issues scoped account credentials and revokes them', 
     } finally {
       direct.client.close();
     }
-    assert.equal((await agent.read({ node: '/agents/bot/data' })).copies.length, 1);
-    await assert.rejects(agent.read({ node: '/agents/bot/other' }), error => error instanceof KernelError && error.code === 'NOT_FOUND');
+    const relative = (await agent.read({ node: './data' })).copies[0];
+    if ('error' in relative) throw relative.error;
+    assert.equal(relative.node.$path, '/agents/bot/data');
+    await agent.commit({
+      changes: [{ op: 'put', node: { $path: 'data/item', $type: 't.dir', value: 7 } }],
+      expect: { absent: ['data/item'] },
+    }).outcome;
+    const written = (await agent.read({ node: 'data/item' })).copies[0];
+    if ('error' in written) throw written.error;
+    assert.equal(written.node.value, 7);
+    await agent.commit({
+      changes: [{ op: 'patch', path: 'data/item', ops: { $set: { value: 8 } } }],
+      expect: { nodes: [{ path: 'data/item', rev: written.node.$rev }] },
+    }).outcome;
+    const included = await agent.read({ children: 'data', include: [{ path: './data' }] });
+    assert.equal(included.list.length, 1);
+    assert.equal(included.copies.length, 2);
+    const subscription = agent.sub({ node: 'data/item' }, () => {});
+    await subscription.ready;
+    const cached = agent.cache.at('/agents/bot/data/item');
+    assert.ok(cached !== undefined && 'node' in cached);
+    assert.equal(cached.node.value, 8);
+    subscription.close();
+    await assert.rejects(
+      agent.read({ node: '/agents/bot/other' }),
+      (error) => error instanceof KernelError && error.code === 'NOT_FOUND',
+    );
     await admin.act({ path: port.node.$path, action: 'revoke', args: {} }).outcome;
-    await assert.rejects(async () => {
-      if (agent === undefined) throw Error('Missing agent');
-      return agent.read({ node: '/agents/bot/data' });
-    }, error => error instanceof KernelError);
-    await assert.rejects(sdk.connect(), error => error instanceof KernelError && error.code === 'FORBIDDEN');
+    await assert.rejects(
+      async () => {
+        if (agent === undefined) throw Error('Missing agent');
+        return agent.read({ node: '/agents/bot/data' });
+      },
+      (error) => error instanceof KernelError,
+    );
+    await assert.rejects(
+      sdk.connect(),
+      (error) => error instanceof KernelError && error.code === 'FORBIDDEN',
+    );
   } finally {
-    agent?.close(); admin.close(); await http.close(); await runtime.close();
+    agent?.close();
+    admin.close();
+    await http.close();
+    await runtime.close();
   }
 });
