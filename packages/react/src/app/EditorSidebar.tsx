@@ -11,7 +11,6 @@ import type { NavigateFn } from '#navigate';
 import type { NativeMount, NativeSnapshot } from '#tree/native-source';
 import { useTreeSource } from '#tree/tree-source-context';
 import type { TreeEffects } from '#tree/effects';
-import { LegacyEditorSidebar } from './LegacyEditorSidebar';
 
 interface EditorSidebarProps {
   authed: string;
@@ -96,7 +95,7 @@ function NativeChildren({ path, selected, onSelect, filter, drag, onDrag, onErro
 }
 
 /** Native sidebar state and mutations belong to the captured source, never the legacy path cache. */
-function NativeEditorSidebar({ authed, root, selected, onSelect, onSetRoot, onLogout }: EditorSidebarProps) {
+export function EditorSidebar({ authed, root, selected, onSelect, onSetRoot, onLogout }: EditorSidebarProps) {
   const effects = useTreeEffects();
   const [filter, setFilter] = useState('');
   const [drag, setDrag] = useState<Drag>();
@@ -125,10 +124,4 @@ function NativeEditorSidebar({ authed, root, selected, onSelect, onSetRoot, onLo
       drag={drag?.effects === effects ? drag : undefined} onDrag={setDrag} onError={failed} onCreate={path => setCreating({ effects, path })} /></div>
     {creating?.effects === effects && <TypePicker onSelect={(name, type) => { void create(name, type).catch(failed); }} onCancel={() => setCreating(undefined)} />}
   </ResizablePanel>;
-}
-
-/** Keep the live legacy boot owner explicit until native boot selects canonical effects. */
-export function EditorSidebar(props: EditorSidebarProps) {
-  const effects = useTreeEffects();
-  return effects.kernel === undefined ? <LegacyEditorSidebar {...props} /> : <NativeEditorSidebar {...props} />;
 }

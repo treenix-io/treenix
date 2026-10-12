@@ -1,16 +1,11 @@
-// useSave: onChange partial → pending state → throttled cache.put → flush patch
-// Phase 2-3 of mutation pipeline.
+// Editor drafts stay local until the selected source commits their partial changes.
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useSyncExternalStore } from 'react';
 import { foldPartial, mergeIntoNode, mergeToOps, type OnChange, scopeOnChange } from '#tree/on-change';
 import type { NodeData } from '@treenx/core';
-import * as cache from '#tree/cache';
-import { useDebounce } from '#lib/use-debounce';
 import { KernelError } from '@treenx/core/errors';
-import { legacyTreeEffects } from '#hooks';
-import { READ_ONLY_EFFECTS, useTreeEffects } from '#tree/effects';
-import { treeClient } from '#tree/tree-client';
-import { useOptionalTreeSource } from '#tree/tree-source-context';
+import { READ_ONLY_EFFECTS, useTreeEffects, type TreeEffects } from '#tree/effects';
+import { useTreeSource } from '#tree/tree-source-context';
 import type { PresentationNode } from '#tree/presentation';
 
 export { type OnChange, mergeToOps, mergeIntoNode, scopeOnChange } from '#tree/on-change';
@@ -19,15 +14,12 @@ export type { MutationOp } from '#tree/on-change';
 // ── useSave hook ──
 
 const DEFAULT_DELAY = 2000;
-const DEFAULT_CACHE_THROTTLE = 500;
 
 export type SaveOptions = {
   /** Auto-flush on change after delay (default: false) */
   autoSave?: boolean;
   /** Throttle delay in ms when autoSave is on (default 500) */
   delay?: number;
-  /** Throttle ms for cache.put fanout to other path subscribers. 0 = sync. Default 500. */
-  cacheThrottle?: number;
 };
 
 export type SaveHandle<T = NodeData> = {
@@ -57,43 +49,32 @@ export type SaveHandle<T = NodeData> = {
 };
 
 interface SaveOwner<T extends PresentationNode> {
-  readonly effects: typeof legacyTreeEffects;
+  readonly effects: TreeEffects;
   readonly read: (path: string) => T | undefined;
   readonly subscribe: (path: string, changed: () => void) => () => void;
   readonly mount?: (path: string) => { dispose(): void };
 }
 
-const LEGACY_SAVE_OWNER: SaveOwner<NodeData> = {
-  effects: legacyTreeEffects, read: cache.get, subscribe: cache.subscribePath,
-};
-
-/** Keeps the legacy inspector on its existing cache and mutation owner. */
-export function useLegacySave(path: string, options?: SaveOptions): SaveHandle {
-  return useOwnedSave(path, options, LEGACY_SAVE_OWNER);
-}
-
 /** Owns local editor drafts through the selected source and its mutation capability. */
 export function useSave(path: string, options?: SaveOptions): SaveHandle<PresentationNode> {
-  const source = useOptionalTreeSource();
-  const owner = useMemo<SaveOwner<PresentationNode>>(() => source === null ? LEGACY_SAVE_OWNER : {
+  const source = useTreeSource();
+  const owner = useMemo<SaveOwner<PresentationNode>>(() => ({
     effects: source.effects ?? READ_ONLY_EFFECTS,
     read: selected => source.getPathSnapshot(selected).data,
     subscribe: (selected, changed) => source.subscribePath(selected, changed),
     mount: selected => source.mountPath(selected),
-  }, [source]);
+  }), [source]);
   return useOwnedSave(path, options, owner);
 }
 
 /** Shares draft buffering while each caller supplies its actual read and mutation owner. */
 function useOwnedSave<T extends PresentationNode>(path: string, options: SaveOptions | undefined, owner: SaveOwner<T>): SaveHandle<T> {
   const effects = owner.effects;
-  const legacy = effects === legacyTreeEffects;
   const readNode = owner.read;
   const autoSave = options?.autoSave ?? false;
   const delay = options?.delay ?? DEFAULT_DELAY;
-  const cacheThrottle = options?.cacheThrottle ?? DEFAULT_CACHE_THROTTLE;
 
-  // Reactive read from cache — re-renders when path's cache entry changes
+  // The selected source publishes the committed node independently of the local draft.
   const node = useSyncExternalStore(
     useCallback((cb) => owner.subscribe(path, cb), [path, owner]),
     useCallback(() => readNode(path), [path, readNode]),
@@ -119,7 +100,6 @@ function useOwnedSave<T extends PresentationNode>(path: string, options: SaveOpt
 
   const [version, bump] = useReducer((v: number) => v + 1, 0);
   const editRevRef = useRef<unknown>(null);
-  const baseRef = useRef<NodeData | null>(null);
 
   const clearTimer = useCallback(() => {
     if (timer.current) clearTimeout(timer.current);
@@ -127,15 +107,7 @@ function useOwnedSave<T extends PresentationNode>(path: string, options: SaveOpt
   }, []);
   const clearEdit = useCallback(() => {
     editRevRef.current = null;
-    baseRef.current = null;
   }, []);
-
-  // Debounced cache fanout — other path subscribers update after a typing pause
-  useDebounce(() => {
-    if (!legacy || !pending.current) return;
-    const cached = cache.get(pathRef.current);
-    if (cached) cache.put(mergeIntoNode(cached, pending.current));
-  }, cacheThrottle, [version]);
 
   // Reset on path change
   const prevPathRef = useRef(path);
@@ -160,7 +132,7 @@ function useOwnedSave<T extends PresentationNode>(path: string, options: SaveOpt
   const ownerGeneration = genRef.current;
   /** Refuses callbacks retained by an editor whose selected owner or path has changed. */
   function assertOwner(): void {
-    if (owner !== prevOwnerRef.current || path !== pathRef.current || !legacy && (!mountedOwner.current || ownerGeneration !== genRef.current))
+    if (owner !== prevOwnerRef.current || path !== pathRef.current || !mountedOwner.current || ownerGeneration !== genRef.current)
       throw new KernelError('CANCELLED', 'Save owner changed');
   }
 
@@ -193,16 +165,11 @@ function useOwnedSave<T extends PresentationNode>(path: string, options: SaveOpt
       return;
     }
 
-    // Final cache commit — single put before server send (also triggers re-render via subscription)
-    const cached = legacy ? cache.get(pathRef.current) : undefined;
-    if (cached) cache.put(mergeIntoNode(cached, partial));
-
     inflight.current = true;
     const gen = genRef.current;
     const run = (async () => {
       try {
-        if (legacy) await treeClient.commit([{ kind: 'patch', path: pathRef.current, ops }]);
-        else await effects.patchNode(pathRef.current, partial);
+        await effects.patchNode(pathRef.current, partial);
       } catch (e) {
         // Failed write: restore pending so the edits are NOT lost (dirty stays
         // true) and rethrow — a swallowed reject made 'flush then toast' callers
@@ -238,15 +205,15 @@ function useOwnedSave<T extends PresentationNode>(path: string, options: SaveOpt
       // it resets the new path's timer (core-anz4.17).
       if (genRef.current === gen) bump();
     }
-  }, [autoSave, clearEdit, clearTimer, delay, effects, legacy, path, owner, ownerGeneration]);
+  }, [autoSave, clearEdit, clearTimer, delay, effects, path, owner, ownerGeneration]);
 
   const settle = useCallback(async (): Promise<void> => {
-    if (!legacy) assertOwner();
+    assertOwner();
     const running = inflightRef.current;
     // allSettled: wait for the real outcome without re-throwing here — the
     // flush() that owns this promise already surfaces/logs any rejection.
     if (running) await Promise.allSettled([running]);
-  }, [legacy, owner, path, ownerGeneration]);
+  }, [owner, path, ownerGeneration]);
 
   const onChange = useCallback((partial: OnChange) => {
     assertOwner();
@@ -256,8 +223,6 @@ function useOwnedSave<T extends PresentationNode>(path: string, options: SaveOpt
     // Track dirty state — capture snapshot + $rev on first edit for reset/stale detection
     if (!pending.current) {
       const cached = readNode(pathRef.current);
-      const legacyBase = legacy ? cache.get(pathRef.current) : undefined;
-      baseRef.current = legacyBase ? structuredClone(legacyBase) : null;
       editRevRef.current = cached?.$rev ?? null;
     }
 
@@ -272,7 +237,7 @@ function useOwnedSave<T extends PresentationNode>(path: string, options: SaveOpt
     }
     // delay/autoSave captured transitively via flush — listing them here is redundant
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [flush, readNode, legacy]);
+  }, [flush, readNode]);
 
   const scope = useCallback((key: string) => scopeOnChange(onChange, key), [onChange]);
 
@@ -280,7 +245,6 @@ function useOwnedSave<T extends PresentationNode>(path: string, options: SaveOpt
     assertOwner();
     pending.current = null;
     clearTimer();
-    if (baseRef.current) cache.put(baseRef.current);
     clearEdit();
     bump();
   }, [clearEdit, clearTimer, effects, path, owner, ownerGeneration]);
@@ -301,10 +265,10 @@ function useOwnedSave<T extends PresentationNode>(path: string, options: SaveOpt
     if (!partial) return;
     const ops = mergeToOps(partial);
     if (ops.length > 0) {
-      (legacy ? treeClient.commit([{ kind: 'patch', path: pathRef.current, ops }]) : effects.patchNode(pathRef.current, partial))
+      effects.patchNode(pathRef.current, partial)
         .catch(e => console.error('[useSave] unmount flush failed:', e));
     }
-  }, [effects, legacy, owner]);
+  }, [effects, owner]);
 
   // Derived dirty — pending + inflight are the real sources of truth (bumps re-render)
   const dirty = !!pending.current || inflight.current;
@@ -351,18 +315,16 @@ export type PathSaveHandle = {
   flush: () => Promise<void>;
 };
 
-export function usePathSave(options?: { delay?: number; cacheThrottle?: number }): PathSaveHandle {
+export function usePathSave(options?: { delay?: number }): PathSaveHandle {
   const effects = useTreeEffects();
   const ownerRef = useRef(effects);
   const generation = useRef(0);
   const delay = options?.delay ?? DEFAULT_DELAY;
-  const cacheThrottle = options?.cacheThrottle ?? DEFAULT_CACHE_THROTTLE;
 
   const pending = useRef(new Map<string, Record<string, unknown>>());
   const inflight = useRef<Promise<void> | null>(null);
   const handleCache = useRef(new Map<string, PathHandle>());
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [version, bump] = useReducer((v: number) => v + 1, 0);
 
   const clearTimer = useCallback(() => {
     if (timer.current) clearTimeout(timer.current);
@@ -377,15 +339,6 @@ export function usePathSave(options?: { delay?: number; cacheThrottle?: number }
   }
   const ownerGeneration = generation.current;
 
-  // Debounced cache fanout — all dirty paths committed to cache after a pause
-  useDebounce(() => {
-    if (effects !== legacyTreeEffects) return;
-    for (const [p, partial] of pending.current) {
-      const cached = cache.get(p);
-      if (cached) cache.put(mergeIntoNode(cached, partial));
-    }
-  }, cacheThrottle, [version]);
-
   const flush = useCallback(async () => {
     if (ownerRef.current !== effects || generation.current !== ownerGeneration) throw new KernelError('CANCELLED', 'Save owner was replaced');
     if (inflight.current) {
@@ -399,19 +352,10 @@ export function usePathSave(options?: { delay?: number; cacheThrottle?: number }
     pending.current.clear();
     if (entries.length === 0) return;
 
-    // Final commit per path before server send
-    for (const [p, partial] of entries) {
-      if (effects === legacyTreeEffects) {
-        const cached = cache.get(p);
-        if (cached) cache.put(mergeIntoNode(cached, partial));
-      }
-    }
-
     const run = (async () => {
       const settled = await Promise.allSettled(entries.map(([path, partial]) => {
         const ops = mergeToOps(partial);
-        return ops.length === 0 ? Promise.resolve() : effects === legacyTreeEffects
-          ? treeClient.commit([{ kind: 'patch', path, ops }]) : effects.patchNode(path, partial);
+        return ops.length === 0 ? Promise.resolve() : effects.patchNode(path, partial);
       }));
 
       // A failed path keeps its edits pending under the ones made since, so the next change or flush resends them.
@@ -437,7 +381,6 @@ export function usePathSave(options?: { delay?: number; cacheThrottle?: number }
   const change = useCallback((path: string, partial: OnChange) => {
     if (ownerRef.current !== effects || generation.current !== ownerGeneration) throw new KernelError('CANCELLED', 'Save owner was replaced');
     pending.current.set(path, foldPartial(pending.current.get(path) ?? {}, partial));
-    bump();
 
     // Shared timer for all paths (delay=0 → no auto-flush). A timed flush has no caller to reject to;
     // its failed edits are pending again.
@@ -476,8 +419,7 @@ export function usePathSave(options?: { delay?: number; cacheThrottle?: number }
     for (const [path, partial] of pending.current) {
       const ops = mergeToOps(partial);
       if (ops.length > 0) {
-        const saving = effects === legacyTreeEffects
-          ? treeClient.commit([{ kind: 'patch', path, ops }]) : effects.patchNode(path, partial);
+        const saving = effects.patchNode(path, partial);
         saving
           .catch(e => console.error(`[usePathSave] unmount flush failed for ${path}:`, e));
       }

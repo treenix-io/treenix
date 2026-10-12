@@ -1,6 +1,4 @@
 import type { Node } from '@treenx/core/kernel/types';
-import { useTreeEffects } from '#hooks';
-import { LegacyInspector } from './LegacyInspector';
 // Inspector — view + edit panel for selected node (Unity-style inspector)
 // Shell only: header, rendered view, delegates editing to NodeEditor
 
@@ -25,7 +23,7 @@ type Props = {
 };
 
 /** Present the selected canonical node and capture its actual native save owner. */
-function NativeInspector({ path, currentUserId, onDelete, onAddComponent, onSelect, onSetRoot }: Props) {
+function SelectedInspector({ path, currentUserId, onDelete, onAddComponent, onSelect, onSetRoot }: Props) {
   const { data: node, loading, error } = usePath<Node>(path);
   const save = useSave(path ?? '', { autoSave: true });
   const [propsOpen, setPropsOpen] = useState(false);
@@ -92,8 +90,7 @@ function NativeInspector({ path, currentUserId, onDelete, onAddComponent, onSele
   );
 }
 
-/** Keep retiring legacy presentation explicit while native providers own their editor effects. */
+/** Release the departing editor's draft before mounting the next selected path. */
 export function Inspector(props: Props) {
-  const effects = useTreeEffects();
-  return effects.kernel === undefined ? <LegacyInspector {...props} /> : <NativeInspector {...props} />;
+  return <SelectedInspector key={props.path} {...props} />;
 }

@@ -7,28 +7,49 @@
 import { describe, it, beforeEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 
-// Mock trpc before importing module under test
+import { createElement, type ReactNode } from 'react';
+import type { RenderHookOptions } from '@testing-library/react';
+import { TreeSourceProvider } from '#tree/tree-source-context';
+import { EMPTY_CHILDREN_SNAPSHOT, NOOP_CHILDREN_HANDLE, NOOP_PATH_HANDLE, type TreeSource } from '#tree/tree-source';
+import { READ_ONLY_EFFECTS } from '#tree/effects';
+
 type Op = ['r', string, unknown] | ['d', string];
 type PatchArg = { path: string; ops: Op[] };
 const patchMutate = mock.fn(async (_: PatchArg) => {});
-mock.module('./trpc', {
-  namedExports: {
-    trpc: { patch: { mutate: patchMutate } },
-    getToken: () => null,
-    setToken: () => {},
-    clearToken: () => {},
-    AUTH_EXPIRED_EVENT: 'trpc:auth-expired',
-    tabTokenInput: { token: 'test-tab' },
-  },
-});
 
-const { renderHook, act } = await import('@testing-library/react');
+const { renderHook: testingRenderHook, act } = await import('@testing-library/react');
 const { mergeToOps, mergeIntoNode, useSave, useAutoSave, usePathSave } = await import('./auto-save');
 const { foldPartial } = await import('./on-change');
 const cache = await import('#tree/cache');
 const { makeNode } = await import('@treenx/core');
 const { KernelError } = await import('@treenx/core/errors');
 const { $key, $node } = await import('#symbols');
+
+const source: TreeSource = {
+  effects: {
+    ...READ_ONLY_EFFECTS,
+    async patchNode(path, partial) {
+      await patchMutate({ path, ops: mergeToOps(partial) });
+      const node = cache.get(path);
+      if (node === undefined) throw new KernelError('NOT_FOUND', path);
+      cache.put(mergeIntoNode(node, partial));
+    },
+  },
+  getPathSnapshot: path => ({ data: cache.get(path), status: 'ready', error: null }),
+  getChildrenSnapshot: () => EMPTY_CHILDREN_SNAPSHOT,
+  subscribePath: cache.subscribePath,
+  subscribeChildren: cache.subscribeChildren,
+  mountPath: () => NOOP_PATH_HANDLE,
+  mountChildren: () => NOOP_CHILDREN_HANDLE,
+};
+
+/** Mount the draft hooks with their explicit read and mutation owner. */
+function renderHook<Result, Props>(callback: (props: Props) => Result, options?: RenderHookOptions<Props>) {
+  return testingRenderHook(callback, {
+    ...options,
+    wrapper: ({ children }: { children: ReactNode }) => createElement(TreeSourceProvider, { source, children }),
+  });
+}
 
 const isInvalid = (e: unknown) => e instanceof KernelError && e.code === 'INVALID';
 
@@ -173,7 +194,7 @@ describe('useSave: onChange', () => {
 
     // Form sees draft immediately via value (cached + pending merge)
     assert.equal(result.current.value!.title, 'New');
-    // Cache stays at original until debounce fires or flush
+    // The source keeps the committed value until flush.
     assert.equal(cache.get('/a')!.title, 'Old');
   });
 
@@ -251,7 +272,7 @@ describe('useSave: onChange', () => {
 // ── useSave: flush ──
 
 describe('useSave: flush', () => {
-  it('sends ops via trpc.patch', async () => {
+  it('sends the partial through the selected mutation owner', async () => {
     seed('/e', 'task', { title: 'Old' });
     const { result } = renderHook(() => useSave('/e'));
 
@@ -759,7 +780,7 @@ describe('useSave: path change', () => {
 // ── usePathSave: change ──
 
 describe('usePathSave: change', () => {
-  it('cache updates after flush — debounced fanout otherwise', async () => {
+  it('publishes changed paths after their commits settle', async () => {
     seed('/p/a', 'col', { label: 'A' });
     seed('/p/b', 'col', { label: 'B' });
     const { result } = renderHook(() => usePathSave({ delay: 0 }));
@@ -769,7 +790,7 @@ describe('usePathSave: change', () => {
       result.current.change('/p/b', { label: 'B2' });
     });
 
-    // Cache unchanged until debounce fires or flush
+    // Each path keeps its committed value until flush.
     assert.equal(cache.get('/p/a')!.label, 'A');
     assert.equal(cache.get('/p/b')!.label, 'B');
 
