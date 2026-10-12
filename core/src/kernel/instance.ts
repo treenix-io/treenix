@@ -1125,6 +1125,7 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
   function commandOptions(admission: AuthAdmission, relay = createShardRelay()): CommandOptions {
     available();
     const options: CommandOptions = {
+      withAdmission: narrowed => commandOptions(narrowed, relay),
       writer,
       registry,
       projector,

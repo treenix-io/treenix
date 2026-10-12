@@ -2,6 +2,7 @@ import { isDeepStrictEqual } from 'node:util'
 import { KernelError } from '#errors'
 import { decodeChainNode } from '#kernel/chain-index'
 import type { InfluenceContext, InfluenceIndex } from '#kernel/influence'
+import { revToPosition } from '#kernel/position'
 import type { DomainId, Node, Position, Preconditions, Registry, ScanRange, Selector, StoredNode } from '#kernel/types'
 
 export type ReadDependency =
@@ -54,15 +55,19 @@ export async function checkPreconditions(expect: ReadSet, options: PreconditionO
   for (const input of expect.dependencies ?? []) {
     if (!isDeepStrictEqual(input.value, await options.dependency(input))) throw new KernelError('CONFLICT', 'A read dependency changed')
   }
+  const pins = new Map<string, string>()
   for (const input of expect.nodes ?? []) {
     const node = await options.read(input.path)
     if (node === null || node.$rev !== input.rev) throw new KernelError('CONFLICT', 'A read node changed')
+    pins.set(input.path, input.rev)
   }
   for (const path of expect.absent ?? []) {
     if (await options.read(path) !== null) throw new KernelError('CONFLICT', 'A read absence changed')
   }
   for (const input of expect.selectors ?? []) {
-    options.index.check(input.selector, input.at, options.position, options.domains(input.selector), options, options.inclusivePosition)
+    const pin = 'node' in input.selector ? pins.get(input.selector.node) : undefined
+    options.index.check(input.selector, input.at, options.position, options.domains(input.selector), options,
+      options.inclusivePosition, pin === undefined ? undefined : revToPosition(pin))
   }
 }
 

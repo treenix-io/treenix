@@ -139,9 +139,12 @@ export const nativeBranchMount: MountHandler = async declaration => {
 
 export function nativeBranchManifest(): ModuleManifest {
   const metadata = { baseId: { anyOf: [{ type: 'string' }, { type: 'null' }] }, baseRev: { anyOf: [{ type: 'string' }, { type: 'null' }] } };
+  const containerActions = branchContainerActions();
   return { id: '@treenx/mods/branch', open: [], types: [
     { name: 't.branches', module: '@treenx/mods/branch', security: 'ordinary', version: 0,
-      schema: branchesSchema, actions: branchContainerActions() },
+      schema: { ...branchesSchema, methods: { ...branchesSchema.methods, create: {
+        ...branchesSchema.methods.create, kind: 'write', arguments: [{ name: 'data', ...containerActions.create.args }],
+      } } }, actions: containerActions },
     { name: 't.branch', module: '@treenx/mods/branch', security: 'ordinary', version: 0, actions: branchActions(),
       schema: { ...branchSchema, properties: { ...branchSchema.properties, conflicts: { type: 'array', items: {
         type: 'object', properties: { path: { type: 'string' }, expectedRev: { anyOf: [{ type: 'string' }, { type: 'null' }] },

@@ -132,15 +132,18 @@ export function createInfluenceIndex(options: InfluenceOptions) {
       for (const [write, size] of rows) if (write.domain === domain) { rows.delete(write); bytes -= size }
     },
     /** Reject intervals that are unknown, truncated, or affected by a retained write. */
-    check(selector: Selector, cursors: readonly Position[], before: Position, domains: readonly DomainId[], context: InfluenceContext, inclusive = false): void {
+    check(selector: Selector, cursors: readonly Position[], before: Position, domains: readonly DomainId[], context: InfluenceContext, inclusive = false, pinnedNode?: Position): void {
       let from: Position | undefined
       for (const cursor of cursors) if (cursor.instance === before.instance
         && (from === undefined || comparePositions(cursor, from) < 0)) from = cursor
       if (from === undefined || (inclusive ? comparePositions(from, before) > 0 : comparePositions(from, before) >= 0) || comparePositions(from, position) > 0) throw new KernelError('CONFLICT', 'The selector interval is not known')
+      // An unchanged point version proves its body across unrelated mount-history resets.
+      const pinned = 'node' in selector && selector.include === undefined && selector.action === undefined
+        && pinnedNode !== undefined && pinnedNode.instance === from.instance && comparePositions(pinnedNode, from) <= 0
       for (const domain of domains) {
         const floor = floors.get(domain)
         if (floor === undefined) throw new KernelError('INVALID', 'Unknown influence domain')
-        if (comparePositions(from, floor) < 0) throw new KernelError('CONFLICT', 'The selector interval was truncated')
+        if (comparePositions(from, floor) < 0 && !pinned) throw new KernelError('CONFLICT', 'The selector interval was truncated')
       }
       const selected = new Set(domains), affects = createInfluenceTest(selector, context)
       for (const write of rows.keys()) if (selected.has(write.domain) && comparePositions(write.pos, from) > 0

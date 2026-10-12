@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { getComponent, isRef } from '@treenx/core';
 import { KernelError } from '@treenx/core/errors';
-import { A, R, W, type ActionDef, type Node, type NodeInput, type Reader, type ReadActionContext } from '@treenx/core/kernel/types';
+import { A, R, W, type ActionDef, type Node, type NodeInput, type Reader, type ReadActionContext, type WriteActionContext } from '@treenx/core/kernel/types';
 import type { NativeBranchConflict, NativeBranchDelta, NativeBranchDiff, NativeBranchState, NativeBranchWrapper } from './native-types';
 
 function at(root: string, suffix: string): string { return `${root === '/' ? '' : root}${suffix}` || '/'; }
@@ -96,35 +96,60 @@ async function diff(ctx: ReadActionContext): Promise<NativeBranchDiff[]> {
 
 export function branchContainerActions(): Readonly<Record<string, ActionDef>> {
   return { create: { kind: 'write', args: { properties: {
-    title: { type: 'string' }, owner: { type: 'string' }, base: { type: 'string' },
+    title: { type: 'string' }, owner: { type: 'string' }, ownerPath: { type: 'string' }, base: { type: 'string' },
   } }, async handler(ctx, args) {
     const data = input(args), caller = ctx.caller.principal;
-    const owner = text(data, 'owner') ?? (caller.startsWith('u:') ? caller.slice(2) : undefined);
+    let owner = text(data, 'owner') ?? (caller.startsWith('u:') ? caller.slice(2) : caller.startsWith('n:') ? caller : undefined);
+    const ownerPath = text(data, 'ownerPath');
+    if (ownerPath !== undefined) {
+      const executor = (await ctx.read.read({ node: ownerPath })).copies[0];
+      if ('error' in executor) throw executor.error;
+      const principal = `n:${executor.node.$id}`;
+      if (text(data, 'owner') !== undefined && owner !== principal)
+        throw new KernelError('INVALID', 'Branch owner differs from its executor');
+      owner = principal;
+    } else if (owner?.startsWith('n:')) {
+      throw new KernelError('INVALID', 'Node-owned branch requires its executor path');
+    }
     if (owner === undefined || owner.length === 0) throw new KernelError('INVALID', 'Branch requires an owning account');
     const path = `${ctx.node.$path}/b-${randomUUID()}`;
     ctx.change.put({ $path: path, $type: 't.branch', base: text(data, 'base') ?? '/', owner, status: 'open',
       title: text(data, 'title') ?? '', createdAt: Date.now(), mergedAt: 0, conflicts: [],
       '#mount': { $type: 't.mount.branch', pattern: 'tree' },
-      $acl: [{ subject: { group: 'admins' }, grant: R | W | A }, { subject: { group: `u:${owner}` }, grant: R | W | A }] });
+      $acl: [{ subject: { group: 'admins' }, grant: R | W | A }, { subject: { group: owner.startsWith('n:') ? owner : `u:${owner}` }, grant: R | W | A }] });
     ctx.change.put({ $path: `${path}/delta`, $type: 't.dir' });
     ctx.change.put({ $path: `${path}/tree`, $type: 't.dir' });
     return { path };
   } } };
 }
 
+/** Keeps lifecycle transitions in the caller's frame when model reads already depend on the branch. */
+export async function stageNativeBranchControl(ctx: WriteActionContext, path: string,
+  action: 'requestMerge' | 'abandon', args: unknown) {
+  await ctx.requireReadWrite(path);
+  const copy = (await ctx.read.read({ node: path })).copies[0];
+  if ('error' in copy) throw copy.error;
+  const config = state(copy.node);
+  if (action === 'abandon') {
+    if (config.status === 'merged') throw new KernelError('CONFLICT', 'Merged branch cannot be abandoned');
+    ctx.change.patch(path, { $set: { status: 'abandoned' } });
+    return { status: 'abandoned' };
+  }
+  const note = text(input(args), 'note');
+  if (config.status !== 'open') throw new KernelError('CONFLICT', 'Branch is not open for review');
+  const title = note ? (config.title ? `${config.title} — ${note}` : note) : config.title;
+  ctx.change.patch(path, { $set: { status: 'review', title } });
+  return { status: 'review' };
+}
+
 export function branchActions(): Readonly<Record<string, ActionDef>> {
   return {
     diff: { kind: 'read', args: {}, async handler(ctx) { return { entries: await diff(ctx) }; } },
     abandon: { kind: 'write', args: {}, async handler(ctx) {
-      if (state(ctx.node).status === 'merged') throw new KernelError('CONFLICT', 'Merged branch cannot be abandoned');
-      ctx.change.patch(ctx.node.$path, { $set: { status: 'abandoned' } });
+      return stageNativeBranchControl(ctx, ctx.node.$path, 'abandon', {});
     } },
     requestMerge: { kind: 'write', args: { properties: { note: { type: 'string' } } }, async handler(ctx, args) {
-      const config = state(ctx.node), note = text(input(args), 'note');
-      if (config.status !== 'open') throw new KernelError('CONFLICT', 'Branch is not open for review');
-      const title = note ? (config.title ? `${config.title} — ${note}` : note) : config.title;
-      ctx.change.patch(ctx.node.$path, { $set: { status: 'review', title } });
-      return { status: 'review' };
+      return stageNativeBranchControl(ctx, ctx.node.$path, 'requestMerge', args);
     } },
     merge: { kind: 'write', args: {}, async handler(ctx) {
       const config = state(ctx.node);

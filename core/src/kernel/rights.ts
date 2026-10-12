@@ -88,6 +88,8 @@ export function computeRights(actor: Actor, chain: readonly ChainNode[], registr
     const coordinate = actor.scope === undefined ? node.path : scopePath(node.path)
     const scoped = actor.scope === undefined || actor.scope.some(path => path === coordinate || isChildPath(path, coordinate, false))
     bits = scoped ? granted & ~denied & ALL : 0
+    if (actor.writeScope !== undefined && !actor.writeScope.some(path => path === coordinate || isChildPath(path, coordinate, false)))
+      bits &= R
     const root = prefix === undefined && node.path === '/'
     const ruleMask = rules(node, registry, { id: node.id, owner, actor, principalGrant, admin: root ? (bits & A) !== 0 : admin }, alerts)
     bits &= ruleMask

@@ -4,6 +4,7 @@ import { assertSafeSchema, validateValue, type ValidationError } from '#comp/val
 import { KernelError } from '#errors'
 import { createActionControl, createReadActionContext, createWriteActionContext } from '#kernel/action-context'
 import { createActionDraft } from '#kernel/action-draft'
+import { intersectActionScope, scopedActionAdmission } from '#kernel/action-scope'
 import { resolveActionNeeds, type ResolvedActionNeeds } from '#kernel/action-needs'
 import { createChangeBuilder } from '#kernel/change-builder'
 import { changeSelectors, selectChangeStore, prepareChangeSet, prepareRoutedChangeSet, type ChangeExecutor, type ChangeSetOptions } from '#kernel/changeset'
@@ -18,12 +19,14 @@ import { visibleNode } from '#kernel/projection'
 import { assertPost } from '#kernel/post'
 import { createReader, createReaderLedger, readerOperationCost, type ReaderLedger } from '#kernel/reader'
 import { createRequestAdmission, serializeRequest } from '#kernel/request'
-import { R, W, type ActRequest, type Io, type ActionDef, type ActionPieceDelivery, type ActionResult, type NestedActRequest, type OpId, type Outcome, type Position, type Principal, type StoredNode } from '#kernel/types'
+import { R, W, type ActRequest, type Io, type ActionDef, type ActionPieceDelivery, type ActionResult, type NestedActRequest, type OpId, type Outcome, type Path, type Position, type Principal, type StoredNode } from '#kernel/types'
 import type { MutationSpan } from '#kernel/writer'
 import { freeze } from '#util/freeze'
 import { stableJson } from '#util/stable-json'
 
 interface ParentAction {
+  readonly scope?: readonly Path[]
+  readonly writeScope?: readonly Path[]
   readonly depth: number
   readonly deadline: number
   readonly active: () => void
@@ -65,7 +68,9 @@ export function createActionRuntime(options: CommandOptions) {
     deliver?: ActionPieceDelivery,
     requestId?: string,
   ): Promise<Outcome> {
-    const admission = createRequestAdmission(options.admission, requestSignal);
+    const admission = scopedActionAdmission(createRequestAdmission(options.admission, requestSignal), parent?.scope, parent?.writeScope);
+    if (parent?.scope !== undefined || parent?.writeScope !== undefined)
+      options = options.withAdmission(admission);
     const limits = options.limits();
     const allowance = options.budget('action');
     const depth = parent?.depth ?? 0;
@@ -262,11 +267,13 @@ export function createActionRuntime(options: CommandOptions) {
 
       /** Keep one admitted executor and live draft while each resumption owns fresh reads and changes. */
       async function perform(span?: MutationSpan, binding?: NodeActionBinding): Promise<Outcome> {
-        const executorAdmission =
+        const executorAdmission = scopedActionAdmission(
           binding === undefined
             ? admission
-            : createRequestAdmission(binding.admission, control.signal);
-        const executorOptions = binding?.options ?? options;
+            : createRequestAdmission(binding.admission, control.signal), parent?.scope, parent?.writeScope);
+        const executorOptions = binding === undefined ? options
+          : parent?.scope === undefined && parent?.writeScope === undefined ? binding.options
+          : binding.options.withAdmission(executorAdmission);
         const executorControl =
           binding === undefined
             ? control
@@ -316,6 +323,10 @@ export function createActionRuntime(options: CommandOptions) {
               throw new KernelError('INVALID', 'Nested mutation keys belong to the runtime');
             serializeRequest(input);
             const nestedRequest = freeze(structuredClone(input));
+            const constrained = parent?.scope !== undefined || parent?.writeScope !== undefined
+              || nestedRequest.scope !== undefined || nestedRequest.writeScope !== undefined;
+            const scope = constrained ? intersectActionScope(executorAdmission.actor.scope, nestedRequest.scope) : undefined;
+            const writeScope = constrained ? intersectActionScope(executorAdmission.actor.writeScope, nestedRequest.writeScope) : undefined;
             const key = nestedRequest.key;
             if (key !== undefined) {
               if (typeof key !== 'string' || key.length === 0 || keys.has(key))
@@ -332,7 +343,7 @@ export function createActionRuntime(options: CommandOptions) {
                     nonce:
                       'nested:' +
                       createHash('sha256')
-                        .update(stableJson([keyNamespace, parentKey, key]))
+                        .update(stableJson([keyNamespace, parentKey, key, ...(constrained ? [scope, writeScope] : [])]))
                         .digest('hex'),
                   }
                 : undefined;
@@ -347,6 +358,8 @@ export function createActionRuntime(options: CommandOptions) {
                 },
                 executorControl.signal,
                 {
+                  scope,
+                  writeScope,
                   depth: depth + 1,
                   deadline: budget.deadline,
                   active: frameActive,

@@ -78,6 +78,8 @@ export interface Actor {
   readonly claims: readonly Group[]
   /** Mask on every bit: outside these subtrees the actor has no R, W or A. Carried by the credential. */
   readonly scope?: readonly Path[]
+  /** Internal delegation mask for W and A; reads can cover a wider set of subtrees. */
+  readonly writeScope?: readonly Path[]
 }
 
 /** Server-issued and opaque. An anonymous credential carries its stable `anon:` id. */
@@ -497,7 +499,13 @@ export interface ActRequest {
 }
 
 /** Nested keys are derived by the kernel; the handler supplies only the stable logical call name. */
-export type NestedActRequest = Omit<ActRequest, 'opId' | 'anchor'> & { key?: string }
+export type NestedActRequest = Omit<ActRequest, 'opId' | 'anchor'> & {
+  key?: string
+  /** Narrows this call and its descendants, including node executors, to these subtrees. */
+  scope?: readonly Path[]
+  /** Narrows mutation authority separately from the call's read scope. */
+  writeScope?: readonly Path[]
+}
 
 export interface CommitRequest {
   readonly changes: readonly ChangeMember[]

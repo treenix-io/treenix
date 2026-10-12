@@ -60,6 +60,8 @@ export interface ForeignCommitInput {
 }
 
 export interface CommandOptions {
+  /** Rebinds native routing and projections to an admitted request with narrower rights. */
+  readonly withAdmission: (admission: AuthAdmission) => CommandOptions
   readonly writer: Writer
   readonly registry: Registry
   readonly registryRevision: () => number
