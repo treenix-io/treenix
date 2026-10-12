@@ -36,9 +36,7 @@ async function openClient(url: string, credential?: Credential): Promise<TwpClie
 }
 
 /** Decode the pairing action's published result at the SDK's wire boundary. */
-function pairingResult(
-  value: unknown,
-):
+function pairingResult(value: unknown):
   | { readonly status: 'pending' }
   | {
       readonly status: 'approved';
@@ -182,3 +180,4 @@ export function createAgentClient(opts: AgentOpts) {
 }
 
 export type { TwpClient } from '@treenx/core/client/twp';
+export { createNodeClient } from '@treenx/core/client/handle';

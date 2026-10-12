@@ -6,9 +6,14 @@ import { openNativeRuntime } from '@treenx/core/kernel/runtime';
 import { createTwpHttpServer } from '@treenx/core/server/http-twp';
 import { openTwpHttp } from '@treenx/core/client/http-twp';
 import { createTwpClient } from '@treenx/core/client/twp';
-import { createAgentClient } from '#index';
+import { createAgentClient, createNodeClient } from '#index';
 import { KernelError } from '@treenx/core/errors';
 import { R, W, A } from '@treenx/core/kernel';
+
+class Item {
+  static $type = 't.dir';
+  value = 0;
+}
 
 /** Exercise SDK pairing and scope through the deployed native HTTP owner. */
 test('native agent pairing issues scoped account credentials and revokes them', async () => {
@@ -113,6 +118,12 @@ test('native agent pairing issues scoped account credentials and revokes them', 
     assert.ok(cached !== undefined && 'node' in cached);
     assert.equal(cached.node.value, 8);
     subscription.close();
+    const handle = createNodeClient(agent)('data/item');
+    assert.equal((await handle.fetch(Item)).value, 8);
+    const values: number[] = [];
+    const typed = await handle.sub(Item, (value) => values.push(value.value));
+    assert.deepEqual(values, [8]);
+    typed.unsubscribe();
     await assert.rejects(
       agent.read({ node: '/agents/bot/other' }),
       (error) => error instanceof KernelError && error.code === 'NOT_FOUND',

@@ -116,6 +116,11 @@
       "types": "./dist/client/twp.d.ts",
       "default": "./dist/client/twp.js"
     },
+    "./client/handle": {
+      "development": "./src/client/handle.ts",
+      "types": "./dist/client/handle.d.ts",
+      "default": "./dist/client/handle.js"
+    },
     "./client/http-twp": {
       "development": "./src/client/http-twp.ts",
       "types": "./dist/client/http-twp.d.ts",
@@ -477,6 +482,7 @@
     "build": "tsc -p tsconfig.build.json && fix-hash-imports",
     "prepack": "npm run build",
     "test": "tsx --conditions development --test --test-concurrency=4 'src/**/*.test.ts'",
+    "test:client": "tsx --conditions development --test src/client/handle.test.ts",
     "dev:server": "npm run schema && tsx --conditions development --watch src/server/main.ts ../root.json",
     "schema": "tsx --conditions development src/schema/extract-schemas-oxc.ts src ../mods ../packages",
     "upgrade:kernel": "tsx --conditions development src/tools/upgrade-kernel.ts",
