@@ -7,12 +7,12 @@
 //   2. HTML  → SSR via the prebuilt entry-server bundle, inject into index.html
 //   3. miss  → SPA fallback (serve index.html as-is, client routes itself)
 //
-// Tree data comes from the backend over tRPC (read-only, anonymous).
+// Tree data comes from a request-owned native backend session.
 // HTML cache: Map<url, {html, expires}> driven by t.site.cache.maxAge.
 //
 // Env:
 //   PORT            front-server bind port (default 3210)
-//   API_URL         backend tRPC base (default http://127.0.0.1:3211/trpc)
+//   API_URL         backend TWP origin (default http://127.0.0.1:4882)
 //   CLIENT_DIR      built SPA assets (default: @treenx/react/dist-spa via require.resolve)
 //   SSR_BUNDLE      prebuilt SSR entry-server (default: <pkg>/dist-ssr/entry-server.js)
 //   ROUTE_TTL_MS    how long the in-memory RouteIndex is reused before refetch (default 30000)
@@ -28,7 +28,7 @@ import { ssrHandler, type RenderFn } from './handler.ts';
 import { escape, escapeAttr, escapeUrl, escapeJson, extractBodyHeadHints } from './template.ts';
 
 const port = Number(process.env.PORT ?? 3210);
-const apiUrl = process.env.API_URL ?? 'http://127.0.0.1:3211';
+const apiUrl = process.env.API_URL ?? 'http://127.0.0.1:4882';
 const routeTtlMs = Number(process.env.ROUTE_TTL_MS ?? 30_000);
 
 // Defaults resolve relative to THIS file (works for src/dev, dist/, and
@@ -136,9 +136,9 @@ function proxyToApi(req: http.IncomingMessage, res: http.ServerResponse) {
 const server = http.createServer(async (req, res) => {
   const url = req.url ?? '/';
 
-  // 0. tRPC + REST API — proxy straight to backend so the SPA's existing
+  // 0. TWP, credentials and REST API — proxy straight to the backend so the SPA's
   //    transport works through :3210 without an extra origin / CORS dance.
-  if (url.startsWith('/trpc/') || url.startsWith('/api/') || url.startsWith('/twp') || url.startsWith('/auth/')) {
+  if (url.startsWith('/api/') || url.startsWith('/twp') || url.startsWith('/auth/')) {
     proxyToApi(req, res);
     return;
   }

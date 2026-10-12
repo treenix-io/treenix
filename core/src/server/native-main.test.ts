@@ -31,7 +31,7 @@ function run(configPath: string, deployment?: string) {
     execArgv: ['--conditions=development', '--import', 'tsx'],
     stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
     signal: AbortSignal.timeout(10_000),
-    env: { ...process.env, TREENIX_KERNEL: '1', NODE_OPTIONS: '', VSCODE_INSPECTOR_OPTIONS: '' },
+    env: { ...process.env, NODE_OPTIONS: '', VSCODE_INSPECTOR_OPTIONS: '' },
   })
   children.push(child)
   let stderr = ''

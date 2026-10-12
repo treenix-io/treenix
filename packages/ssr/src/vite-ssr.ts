@@ -2,7 +2,7 @@
 // no separate dev-server process. Pipeline per HTML request:
 //   1. Vite's own middlewares run first (assets, HMR, /@id, /@fs, /src, etc.)
 //   2. Our middleware catches non-asset HTML requests, resolves URL against
-//      /sys/routes (read from backend over tRPC), renders SSR if matched route
+//      /sys/routes (read from backend through a native session), renders SSR if matched route
 //      has `t.site`, otherwise next().
 //   3. Default Vite SPA index.html serves whatever falls through (appType: 'spa').
 //
@@ -18,7 +18,7 @@ import { ssrHandler, type RenderFn } from '#handler';
 import { escape, escapeAttr, escapeUrl, escapeJson, extractBodyHeadHints } from '#template';
 
 export type ViteSsrOpts = {
-  /** Backend tRPC URL. Default: http://127.0.0.1:${VITE_API_PORT|3211}/trpc */
+  /** Backend TWP origin. Default: http://127.0.0.1:${VITE_API_PORT|4882} */
   apiUrl?: string;
 };
 
@@ -30,16 +30,16 @@ function isHtmlRequest(req: IncomingMessage): boolean {
   if (url.startsWith('/@')) return false;
   if (url.startsWith('/node_modules/')) return false;
   if (url.startsWith('/src/')) return false;
-  if (url.startsWith('/trpc/') || url.startsWith('/api/')) return false;
+  if (url.startsWith('/twp') || url.startsWith('/auth/') || url.startsWith('/api/')) return false;
   if (ASSET_EXT.test(url)) return false;
-  // Only honest "give me HTML" requests. tRPC etc. ask for application/json.
+  // Only HTML requests reach rendering; protocol traffic uses the proxy.
   const accept = req.headers.accept ?? '';
   return accept.includes('text/html');
 }
 
 export function viteSsrPlugin(opts: ViteSsrOpts = {}): Plugin {
   const apiUrl = opts.apiUrl
-    ?? `http://127.0.0.1:${process.env.VITE_API_PORT ?? '3211'}`;
+    ?? `http://127.0.0.1:${process.env.VITE_API_PORT ?? '4882'}`;
 
   return {
     name: 'treenix-ssr',
