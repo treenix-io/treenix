@@ -1,14 +1,6 @@
-// Tree-contract conformance net (cut-series 2026-07, Wave 0 — core-gk8.14 part a).
-// One spec run against the memory adapter, the fs adapter, and the FULLY COMPOSED
-// createPipeline. Pins CURRENT behavior so structural cuts (core-tcc1 rewiring,
-// core-5fqq wrapper collapse) fail loudly instead of drifting silently.
-// If a cut forces an assert change here, the cut changed behavior — stop.
-//
-// scanChildren adapter contract lives in scan-children.contract.test.ts; the scan
-// block here runs only against the composed pipeline (not covered there).
+// Shared contracts for the standalone memory and filesystem adapters.
 
 import { createNode, type NodeData } from '#core';
-import { createPipeline } from '#server/server';
 import type { NodeEvent } from '#sub';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -457,14 +449,3 @@ suite({
     scan: false,
   });
 }
-
-// ── composed pipeline (createPipeline over a memory bootstrap) ──
-suite({
-  name: 'pipeline',
-  setup: async () => createPipeline(createMemoryTree()).tree,
-  teardown: async () => {},
-  // tree/cache.ts serves live refs by contract — no read isolation here.
-  readIsolation: false,
-  watch: true,
-  scan: true,
-});

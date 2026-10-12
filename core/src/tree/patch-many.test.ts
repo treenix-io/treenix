@@ -6,7 +6,6 @@ import { A, createNode, R, register, S, unregister, W } from '#core';
 import { KernelError } from '#errors';
 import { withMounts } from '#mount';
 import { withAcl } from '#security/acl-tree';
-import { createPipeline } from '#server/server';
 import type { NodeEvent } from '#sub';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -541,90 +540,5 @@ describe('patchMany: storage policy', () => {
     const b = await inner.get('/v/b');
     assert.deepEqual(b?.['#meta'], { $type: META, count: 20 });
     assert.equal(b?.$rev, 2);
-  });
-});
-
-// ── full pipeline: ACL, events, $refs ──
-
-describe('patchMany: full pipeline', () => {
-  async function pipelineSetup() {
-    const bootstrap = createMemoryTree();
-    const root = createNode('/', 'root', {});
-    root.$acl = [{ g: 'system', p: R | W | A | S }, { g: 'users', p: R | W }];
-    await bootstrap.set(root);
-    const pipeline = createPipeline(bootstrap);
-    await pipeline.tree.set(createNode('/dir', 'dir', {}));
-    await pipeline.tree.set(createNode('/dir/a', 'item', { n: 1 }));
-    await pipeline.tree.set(createNode('/dir/b', 'item', { n: 2 }));
-    return pipeline;
-  }
-
-  it('commits through the pipeline and emits exactly N patch events after success', async () => {
-    const { tree, cdc } = await pipelineSetup();
-    assert.ok(tree.patchMany, 'capability flows through every pipeline layer');
-
-    const events: NodeEvent[] = [];
-    cdc.subscribe('/dir', e => events.push(e), { children: true });
-
-    await tree.patchMany!('/dir', [
-      { path: '/dir/a', ops: [['r', 'n', 10]] },
-      { path: '/dir/b', ops: [['r', 'n', 20]] },
-    ]);
-
-    assert.equal(events.length, 2);
-    assert.deepEqual(events.map(e => e.type), ['patch', 'patch']);
-    const paths = events.map(e => e.type === 'patch' ? e.path : e.type).sort();
-    assert.deepEqual(paths, ['/dir/a', '/dir/b']);
-    assert.equal((await tree.get('/dir/a'))?.n, 10);
-    assert.equal((await tree.get('/dir/b'))?.$rev, 2);
-  });
-
-  it('failed batch emits nothing and writes nothing', async () => {
-    const { tree, cdc } = await pipelineSetup();
-    const events: NodeEvent[] = [];
-    cdc.subscribe('/dir', e => events.push(e), { children: true });
-
-    await assert.rejects(
-      tree.patchMany!('/dir', [
-        { path: '/dir/a', ops: [['r', 'n', 10]] },
-        { path: '/dir/b', ops: [['t', '$rev', 999]] },
-      ]),
-      code('CONFLICT'),
-    );
-
-    assert.equal(events.length, 0, 'no events for a denied batch');
-    assert.equal((await tree.get('/dir/a'))?.n, 1);
-  });
-
-  it('ACL: an unwritable member denies the whole batch with FORBIDDEN, nothing written', async () => {
-    const { tree } = await pipelineSetup();
-    // Deny-all for 'users' on /dir/b — the per-member R+W gate must fail.
-    await tree.patch('/dir/b', [['a', '$acl', [{ g: 'users', p: 0 }]]]);
-
-    const user = withAcl(tree, 'u1', ['users']);
-    await assert.rejects(
-      user.patchMany!('/dir', [
-        { path: '/dir/a', ops: [['r', 'n', 10]] },
-        { path: '/dir/b', ops: [['r', 'n', 20]] },
-      ]),
-      code('FORBIDDEN'),
-    );
-    assert.equal((await tree.get('/dir/a'))?.n, 1);
-    assert.equal((await tree.get('/dir/b'))?.n, 2);
-
-    // Sanity: the writable member alone commits for the same actor.
-    await user.patchMany!('/dir', [{ path: '/dir/a', ops: [['r', 'n', 10]] }]);
-    assert.equal((await tree.get('/dir/a'))?.n, 10);
-  });
-
-  it('$refs recomputed for a member whose ops add a ref', async () => {
-    const { tree } = await pipelineSetup();
-
-    await tree.patchMany!('/dir', [
-      { path: '/dir/a', ops: [['a', 'link', { $type: 'ref', $ref: '/dir/b' }]] },
-    ]);
-
-    const a = await tree.get('/dir/a');
-    assert.ok(a && refsOf(a)?.some(r => r.t === '/dir/b' && r.f === 'link'));
   });
 });

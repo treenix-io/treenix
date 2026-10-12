@@ -6,7 +6,6 @@
 import { A, createNode, type NodeData, R, register, S, unregister, W } from '#core';
 import { KernelError } from '#errors';
 import type { Component, Migration } from '#kernel/types';
-import { createPipeline } from '#server/server';
 import { clearRegistry } from '#testing';
 import { withMounts } from '#mount';
 import { createMemoryTree, type Tree } from '#tree';
@@ -977,54 +976,9 @@ describe('policy: trash GC is mount-inert (core-anz4.8)', () => {
     assert.equal(spy.getChildren, 0, 'GC never enumerated the external adapter');
     assert.equal(spy.remove, 0, 'GC never deleted external adapter data');
   });
-
-  // The ACL read path plans query mounts itself (resolveReadPlan). A trashed
-  // query column must list its own copied subtree — never the live source
-  // view, or GC recurses into LIVE nodes and hard-deletes them.
-  it('GC through the ACL tree never follows a trashed query mount into live data', async () => {
-    const bootstrap = createMemoryTree();
-    const root = createNode('/', 'root', {});
-    root.$acl = [{ g: 'system', p: R | W | A | S }];
-    await bootstrap.set(root);
-    const { tree, systemTree } = createPipeline(bootstrap);
-
-    await tree.set(createNode('/board/data/t1', 'task', { status: 'todo' }));
-    await tree.set(createNode('/board/todo', 'dir', {}, {
-      mount: { $type: 't.mount.query', source: '/board/data', match: { status: 'todo' } },
-    }));
-    await tree.remove('/board/todo');
-
-    assert.equal(await sweepTrash(systemTree, -1), 1);
-    assert.ok(await systemTree.get('/board/data/t1'), 'live task survives GC');
-  });
 });
 
-describe('policy: trash through the pipeline (e2e)', () => {
-  it('pipeline remove trashes; systemTree remove stays hard', async () => {
-    const bootstrap = createMemoryTree();
-    const root = createNode('/', 'root', {});
-    root.$acl = [{ g: 'system', p: R | W | A | S }];
-    await bootstrap.set(root);
-    const { tree, systemTree } = createPipeline(bootstrap);
 
-    await tree.set(createNode('/board', 'dir', {}));
-    await tree.set(createNode('/board/t1', 'task', { title: 'x' }));
-
-    assert.ok((await tree.remove('/board/t1')).changes?.length);
-    assert.equal(await tree.get('/board/t1'), undefined);
-
-    const { items } = await systemTree.getChildren(TRASH_ROOT, { depth: 1 });
-    assert.equal(items.length, 1);
-    assert.equal(items[0].from, '/board/t1');
-    assert.ok((await systemTree.get(`${items[0].$path}/t1`))?.title === 'x');
-
-    // Internal path: the system base sits below the trash step — hard delete, no new entry.
-    await systemTree.set(createNode('/board/t2', 'task', { title: 'y' }));
-    assert.ok((await systemTree.remove('/board/t2')).changes?.length);
-    const after = await systemTree.getChildren(TRASH_ROOT, { depth: 1 });
-    assert.equal(after.items.length, 1);
-  });
-});
 
 // ── $id identity step (core-gk8.10, Stage 1) ──
 

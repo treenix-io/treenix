@@ -281,11 +281,6 @@
       "types": "./dist/server/jobs.d.ts",
       "default": "./dist/server/jobs.js"
     },
-    "./server/server": {
-      "development": "./src/server/server.ts",
-      "types": "./dist/server/server.d.ts",
-      "default": "./dist/server/server.js"
-    },
     "./server/prefab": {
       "development": "./src/server/prefab.ts",
       "types": "./dist/server/prefab.d.ts",
