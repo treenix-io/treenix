@@ -2,10 +2,14 @@ import { randomUUID } from 'node:crypto';
 import { getComponent } from '@treenx/core';
 import { KernelError } from '@treenx/core/errors';
 import type { NativeModuleHost } from '@treenx/core/kernel/manifest';
+import type { TwpHttpRoutes } from '@treenx/core/server/http-routes';
 import type { Node, ServiceHandler, WriteAction } from '@treenx/core/kernel/types';
-import { drainSession } from '@treenx/core/kernel/session-delivery';
 import type { WhisperConfig } from './types';
 import { ingestNativeAudio } from './native-ingest';
+
+declare module '@treenx/core/kernel/manifest' {
+  interface NativeModuleHost { readonly httpRoutes?: TwpHttpRoutes; }
+}
 
 /** Select the actual stored config without importing legacy service registrations. */
 export function whisperConfig(node: Node): WhisperConfig {
@@ -54,22 +58,28 @@ export function whisperService(host: NativeModuleHost): ServiceHandler {
       }
       const lane = caller.lane[Symbol.asyncIterator](), welcome = await lane.next();
       if (welcome.done || welcome.value.t !== 'welcome') throw new KernelError('UNAVAILABLE', 'Upload session did not open');
+      const intake = welcome.value.intake;
       const delivery = (async () => { for await (const frame of { [Symbol.asyncIterator]: () => lane }) {
         if (frame.t === 'end') throw frame.error;
       } })();
-      try {
+      const action = (async () => {
         const pending = caller.act({ path: node.$path, action: 'ingest', args: { channel, mime, audio: Buffer.concat(chunks).toString('base64') },
-          opId: { epoch: welcome.value.intake, time: Date.now(), nonce: randomUUID() } });
+          opId: { epoch: intake, time: Date.now(), nonce: randomUUID() } });
         for await (const chunk of pending.chunks) {
           // The first accepted piece already contains the pending node; the request retains its action lifetime.
           void chunk;
         }
         const outcome = await pending.outcome;
-        response.writeHead(200, { 'Content-Type': 'application/json' });
-        response.end(JSON.stringify(outcome.value));
-      } finally { caller.close(); await delivery; }
+        return outcome.value;
+      })();
+      const result = await Promise.race([action, delivery.then(() => { throw new KernelError('CANCELLED', 'Upload session ended'); })]);
+      response.writeHead(200, { 'Content-Type': 'application/json' });
+      response.end(JSON.stringify(result));
     });
-    const done = drainSession(session);
+    const done = (async () => {
+      for await (const frame of session.lane)
+        if (frame.t === 'end' || frame.t === 'fail' && frame.req === undefined) throw frame.error;
+    })();
     return { done, async stop() { dispose(); await done; } };
   };
 }
