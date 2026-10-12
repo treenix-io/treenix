@@ -13,6 +13,7 @@ export interface Branches {
 
 /** Native actions use the UI's data class without adding executable methods to snapshots. */
 export interface Branch {
+  /** @read @description List the native future's changes against live. */
   diff(): Promise<{ entries: NativeBranchDiff[] }>;
   merge(): Promise<{ merged: number; applied: string[]; conflicts: NativeBranchConflict[]; status?: string }>;
 }

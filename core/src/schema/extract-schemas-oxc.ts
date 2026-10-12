@@ -669,11 +669,30 @@ function declaredNeeds(opts: N | undefined): Set<string> {
   return names;
 }
 
+/** Attach same-file action declarations while keeping implemented methods authoritative. */
 function findClasses(ast: N): Map<string, N> {
   const classes = new Map<string, N>();
+  const declarations = new Map<string, N[]>();
   walk(ast, (node) => {
     if (node.type === 'ClassDeclaration' && node.id?.name) classes.set(node.id.name, node);
+    if (node.type === 'TSInterfaceDeclaration' && node.id?.name) {
+      const members = declarations.get(node.id.name) ?? [];
+      members.push(...node.body.body);
+      declarations.set(node.id.name, members);
+    }
   });
+
+  for (const [name, node] of classes) {
+    const members: N[] = node.body.body;
+    const implemented = new Set(members.map(member => member.key?.name));
+    for (const member of declarations.get(name) ?? []) {
+      if (member.type === 'TSMethodSignature' && !implemented.has(member.key?.name)) {
+        members.push(member);
+        implemented.add(member.key?.name);
+      }
+    }
+  }
+
   return classes;
 }
 
@@ -1055,8 +1074,10 @@ function generateClassSchema(
       if (!member.optional && !hasUndef) required.push(name);
     }
 
-    if (member.type === 'MethodDefinition' && member.key?.name && member.kind === 'method') {
-      const m = buildMethodFromFn(member.key.name, member.value, member.start);
+    if ((member.type === 'MethodDefinition' || member.type === 'TSMethodSignature')
+      && member.key?.name && member.kind === 'method') {
+      const fn = member.type === 'MethodDefinition' ? member.value : member;
+      const m = buildMethodFromFn(member.key.name, fn, member.start);
       if (m) methods[member.key.name] = m;
     }
   }
