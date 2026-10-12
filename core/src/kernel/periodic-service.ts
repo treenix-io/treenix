@@ -6,6 +6,8 @@ import type { Node, ServiceRun, Session } from '#kernel/types';
 export interface PeriodicAction {
   readonly path: string;
   readonly action: string;
+  /** Configuration can remain editable while the scheduled action belongs to an immutable controller. */
+  readonly configPath?: string;
   readonly interval: (node: Node) => number;
   readonly enabled: (node: Node) => boolean;
   readonly immediate?: boolean;
@@ -16,8 +18,9 @@ export async function runPeriodicAction(
   session: Session,
   options: PeriodicAction,
 ): Promise<ServiceRun> {
+  const configPath = options.configPath ?? options.path;
   const cache = createLaneCache(),
-    sub = session.sub({ node: options.path });
+    sub = session.sub({ node: configPath });
   let epoch: string | undefined,
     stopping = false,
     enabled = false,
@@ -81,7 +84,7 @@ export async function runPeriodicAction(
 
   /** React only to scheduling settings, so an action's own state updates cannot create a busy loop. */
   function refresh(): void {
-    const copy = cache.at(options.path);
+    const copy = cache.at(configPath);
     if (copy === undefined)
       throw new KernelError('NOT_FOUND', 'Periodic service configuration disappeared');
     if ('error' in copy) throw copy.error;
