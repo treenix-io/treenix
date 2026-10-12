@@ -64,16 +64,22 @@ async function main(): Promise<void> {
     || config.mountDirectories !== undefined && !directoryBindings(config.mountDirectories)
     || config.seedFilter !== undefined && (!Array.isArray(config.seedFilter)
       || !config.seedFilter.every((name: unknown): name is string => typeof name === 'string'))
-    || config.modules !== undefined && (!Array.isArray(config.modules) || !config.modules.every(moduleEntry)))
+    || config.modules !== undefined && (!Array.isArray(config.modules) || !config.modules.every(moduleEntry))
+    || config.additionalModules !== undefined && (!Array.isArray(config.additionalModules) || !config.additionalModules.every(moduleEntry)))
     throw new KernelError('INVALID', 'Malformed native server configuration')
   const port = config.port ?? 4882, host = config.host ?? '127.0.0.1'
   if (typeof port !== 'number' || !Number.isSafeInteger(port) || port < 0 || port > 65535 || typeof host !== 'string')
     throw new KernelError('INVALID', 'Malformed native listen address')
-  const modules: readonly NativeModuleLocation[] | undefined = config.modules?.map(entry => ({
-    id: entry.id,
-    entry: entry.entry.startsWith('.') || entry.entry.startsWith('/')
-      ? pathToFileURL(resolve(dirname(configPath), entry.entry)).href : entry.entry,
-  }))
+  /** Resolve deployment-owned package locations from the configuration directory. */
+  function moduleLocations(entries: ModuleEntry[] | undefined): readonly NativeModuleLocation[] | undefined {
+    return entries?.map(entry => ({
+      id: entry.id,
+      entry: entry.entry.startsWith('.') || entry.entry.startsWith('/')
+        ? pathToFileURL(resolve(dirname(configPath), entry.entry)).href : entry.entry,
+    }))
+  }
+  const modules = moduleLocations(config.modules)
+  const additionalModules = moduleLocations(config.additionalModules)
   let io: ActionIoBinding | undefined;
   if (config.io !== undefined) {
     const target = pathToFileURL(resolve(dirname(configPath), config.io.entry)).href;
@@ -93,7 +99,7 @@ async function main(): Promise<void> {
         )
   const runtime = await openNativeDeployment({ seedFilter: config.seedFilter, runtime: { id: config.id, directory: resolve(dirname(configPath), config.directory),
     baseDirectory: config.baseDirectory === undefined ? undefined : resolve(dirname(configPath), config.baseDirectory),
-    credentialTtlMs: config.credentialTtlMs, firstAdmin: config.firstAdmin, installerCredential: config.installerCredential, mountDirectories }, modules, io, persistentLogs: config.persistentLogs })
+    credentialTtlMs: config.credentialTtlMs, firstAdmin: config.firstAdmin, installerCredential: config.installerCredential, mountDirectories }, modules, additionalModules, io, persistentLogs: config.persistentLogs })
   const binding = createTwpHttpServer({ instance: runtime.instance, routes: runtime.httpRoutes, allowedOrigins: config.allowedOrigins, credentialTtlMs: config.credentialTtlMs })
   try {
     await new Promise<void>((done, reject) => { binding.server.once('error', reject); binding.server.listen(port, host, () => { binding.server.off('error', reject); done() }) })

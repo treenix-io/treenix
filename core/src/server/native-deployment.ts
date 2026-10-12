@@ -23,6 +23,8 @@ export interface NativeDeploymentConfig {
   readonly runtime: Omit<NativeRuntimeConfig, 'modules' | 'io'>;
   /** An explicit list, including an empty list, replaces default discovery. */
   readonly modules?: readonly NativeModuleLocation[];
+  /** Package entries supplement module discovery without replacing its owners. */
+  readonly additionalModules?: readonly NativeModuleLocation[];
   readonly modsDir?: string;
   readonly io?: ActionIoBinding;
   readonly seeds?: NativeSeedDefinition;
@@ -59,12 +61,16 @@ export async function openNativeDeployment(config: NativeDeploymentConfig) {
   } else {
     const manifests: CollectedModule[] = [];
     for (const location of config.modules) manifests.push(await explicitModule(location, host));
-    const bindings: ActionIoBinding[] = [];
-    for (const manifest of manifests) if (manifest.io !== undefined) bindings.push(manifest.io);
-    loaded = { loaded: config.modules.map(location => location.id), failed: [], manifests, io: bindModuleIo(bindings), gates: moduleGates(manifests) };
+    loaded = { loaded: config.modules.map(location => location.id), failed: [], manifests };
   }
   if (loaded.failed.length > 0)
     throw new AggregateError(loaded.failed.map(failure => failure.error), 'Native module discovery failed');
+  for (const location of config.additionalModules ?? []) {
+    loaded.manifests.push(await explicitModule(location, host));
+    loaded.loaded.push(location.id);
+  }
+  loaded.io = bindModuleIo(loaded.manifests.flatMap(module => module.io === undefined ? [] : [module.io]));
+  loaded.gates = moduleGates(loaded.manifests);
   if (config.seeds !== undefined && config.seedFilter !== undefined)
     throw new KernelError('INVALID', 'Choose an explicit seed plan or named module seeds');
   const seeds = config.seedFilter === undefined ? config.seeds : selectNativeSeeds(loaded.manifests, config.seedFilter);

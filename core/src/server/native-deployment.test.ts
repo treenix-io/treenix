@@ -41,6 +41,8 @@ test('native deployment cold boots accepted seeds, HTTP actions and an owned ser
       firstAdmin: { path: '/admin', name: 'admin', password: 'native-boot-password' } },
     modules: [
       { id: 'boot-fixture', entry: new URL('./native-deployment-fixture.ts', import.meta.url).href },
+    ],
+    additionalModules: [
       { id: 'boot-prefab', entry: new URL('./native-deployment-prefab-fixture.ts', import.meta.url).href },
     ],
     seeds: { sources: [
