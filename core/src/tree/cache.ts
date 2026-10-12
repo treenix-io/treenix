@@ -4,7 +4,7 @@
 
 import type { NodeData } from '#core';
 import { createBoundedCache } from '#util/bounded-cache';
-import { type CommitReceipt, type PatchManyEntry, type Tree, type TreeEvent, type TreeWatchOpts, type TreeWatchScope } from './index';
+import { type CommitReceipt, type PatchManyEntry, type Tree } from './index';
 import { createInflight } from '#util/inflight';
 import { patchViaSet } from './patch';
 
@@ -105,26 +105,7 @@ export function withCache(tree: Tree, max = DEFAULT_MAX): CachedTree {
       },
     } : {}),
 
-    // Federation-client case: withCache wraps a remote Tree.watch source.
-    // Route through wrapper.invalidate so the epoch counter bumps too —
-    // raw cache.delete would leave in-flight reads free to repopulate
-    // the just-cleared slot.
-    ...(tree.watch ? {
-      watch(scope: TreeWatchScope, opts?: TreeWatchOpts, ctx?: unknown): AsyncIterable<TreeEvent> {
-        const inner = tree.watch!(scope, opts, ctx);
-        async function* wrapped(): AsyncIterable<TreeEvent> {
-          for await (const event of inner) {
-            if (event.type === 'reconnect') {
-              if (!event.preserved) wrapper.invalidateAll();
-            } else {
-              wrapper.invalidate(event.path);
-            }
-            yield event;
-          }
-        }
-        return wrapped();
-      },
-    } : {}),
+
   };
   return wrapper;
 }

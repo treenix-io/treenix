@@ -1,7 +1,7 @@
 // Shared contracts for the standalone memory and filesystem adapters.
 
 import { createNode, type NodeData } from '#core';
-import type { NodeEvent } from '#sub';
+import type { TreeEvent } from '#tree';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -30,20 +30,20 @@ const code = (expected: string) => (e: unknown) =>
  *  are never lost. take() resolves with the next event in FIFO order. */
 function pump(tree: Tree, scope: TreeWatchScope) {
   const iter = tree.watch!(scope)[Symbol.asyncIterator]();
-  const queue: NodeEvent[] = [];
-  const waiters: ((e: NodeEvent) => void)[] = [];
-  const feed = (r: IteratorResult<NodeEvent>): void => {
+  const queue: TreeEvent[] = [];
+  const waiters: ((e: TreeEvent) => void)[] = [];
+  const feed = (r: IteratorResult<TreeEvent>): void => {
     if (r.done) return;
     const w = waiters.shift();
-    if (w) w(r.value as NodeEvent);
-    else queue.push(r.value as NodeEvent);
+    if (w) w(r.value as TreeEvent);
+    else queue.push(r.value as TreeEvent);
     void iter.next().then(feed);
   };
   void iter.next().then(feed);
   return {
-    async take(): Promise<NodeEvent> {
+    async take(): Promise<TreeEvent> {
       if (queue.length) return queue.shift()!;
-      return new Promise<NodeEvent>(res => waiters.push(res));
+      return new Promise<TreeEvent>(res => waiters.push(res));
     },
     stop: () => iter.return?.(),
   };

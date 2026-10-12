@@ -35,23 +35,6 @@ export type MountCtx = {
   path: string;
   parentStore: Tree;
   globalStore?: Tree;
-  /** Mount adapter callback: wire an external watch source (Mongo change
-   *  stream, FS watch, REST webhook) into the subscription bus. Available
-   *  only when the host pipeline supplied a `startExternalWatch` to
-   *  `withMounts`. The adapter is responsible for computing `pathPrefix`
-   *  (mount root for non-shared mounts, '/' for shared). Returns an abort
-   *  function — withMounts tracks it per mount and calls it when the mount
-   *  is invalidated. */
-  startExternalWatch?: ExternalWatchStarter;
-};
-
-export type ExternalWatchStarter = (
-  tree: Tree,
-  opts: { pathPrefix: string; dedupWindowMs?: number; source: string },
-) => () => void;
-
-export type WithMountsOpts = {
-  startExternalWatch?: ExternalWatchStarter;
 };
 
 export type ActionTarget = { tree: Tree; mountPath: string };
@@ -99,53 +82,32 @@ function mountCandidates(path: string, withSelf: boolean): string[] {
 
 // ── Mountable Tree ──
 
-type MountEntry = { tree: Promise<Tree>; release(): void };
+type MountEntry = { tree: Promise<Tree> };
 
-export function withMounts(rootStore: Tree, opts?: WithMountsOpts): MountableTree {
+export function withMounts(rootStore: Tree): MountableTree {
   // One entry per mount-point path. Adapters are caller-blind (they never see
   // the requester), so the path alone is the key. The PROMISE is cached:
   // concurrent first accesses share one instance — two instances of a stateful
   // adapter (memory, external watch) would split writes or leak watches.
   const mounts = new Map<string, MountEntry>();
 
-  /** Drop the mount at `path` and every mount below it (their configs were
-   *  read through it). Release aborts the external watches they started. */
+  /** Drop the mount and descendants whose configuration was read through it. */
   function invalidateMount(path: string): void {
     for (const [key, entry] of mounts) {
       if (path !== '/' && key !== path && !key.startsWith(path + '/')) continue;
       mounts.delete(key);
-      entry.release();
     }
   }
 
   function open(path: string, node: NodeData, mount: ComponentData, parentStore: Tree): MountEntry {
-    const aborts: (() => void)[] = [];
-    let released = false;
-    const release = () => {
-      released = true;
-      for (const abort of aborts.splice(0)) abort();
-    };
-
-    const start = opts?.startExternalWatch;
-    const startExternalWatch: ExternalWatchStarter | undefined = start && ((tree, watchOpts) => {
-      const abort = start(tree, watchOpts);
-      // Invalidated while the adapter was still resolving — nothing will
-      // release this entry again.
-      if (released) abort();
-      else aborts.push(abort);
-      return abort;
-    });
-
     const entry: MountEntry = {
-      tree: resolveAdapter(mount, { node, path, parentStore, globalStore: self, startExternalWatch }),
-      release,
+      tree: resolveAdapter(mount, { node, path, parentStore, globalStore: self }),
     };
     mounts.set(path, entry);
     // A failed adapter must not stay cached: the config stays editable and the
     // next access retries. Callers still get the rejection through entry.tree.
     entry.tree.catch(() => {
       if (mounts.get(path) === entry) mounts.delete(path);
-      release();
     });
     return entry;
   }

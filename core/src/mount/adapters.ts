@@ -26,29 +26,6 @@ export class MountMongo {
   uri = '';
   db = 'treenix';
   collection = 'nodes';
-  /** Enable `tree.watch` via Mongo change streams. OFF by default — change
-   *  streams require a replica set (single-node `mongod` lacks them), and
-   *  enabling pre-images via `collMod` needs admin permission. Turn on only
-   *  when you need to observe out-of-band writes (manual mongo writes, other
-   *  apps sharing the DB, migrations). When OFF, `tree.watch` is undefined
-   *  on the wrapped adapter, and any caller invoking it gets a clean
-   *  TypeError ("watch is not a function") instead of a silent stall. */
-  watch = false;
-  /** Dedup TTL (ms) for self-write suppression in the external-watch loop.
-   *  Default 0 = OFF (every external event forwarded, including echoes of
-   *  in-pipeline writes — idempotent, just doubles event volume per write).
-   *
-   *  Turn on (e.g. 5_000) ONLY when you accept the documented race window:
-   *  the dedup heuristic uses (path, $rev) keys, which cannot distinguish
-   *  a delayed change-stream echo of an OLD remove from a CURRENT external
-   *  remove. Under a self-remove → self-recreate sequence within the
-   *  window, a delayed remove echo can leave client state inconsistent with
-   *  the storage. Operation-identity dedup (preimage `$rev` / writer token)
-   *  would close this; not implemented yet.
-   *
-   *  Effective TTL when enabled is [dedupWindowMs, 2 * dedupWindowMs] due
-   *  to two-bucket rotation. */
-  dedupWindowMs = 0;
   /** Component-namespace boot policy (core-r096): 'rename' auto-migrates bare
    *  component keys at boot, 'stamp' declares the collection's $type-carriers
    *  legitimate data snapshots (e.g. audit before/after). The judgment is
@@ -100,18 +77,9 @@ register(MountMongo, 'mount', async (mount, ctx) => {
   const uri = mount.uri || process.env.MONGO_URI;
   if (!uri) required('t.mount.mongo', 'uri (or MONGO_URI env)', ctx.path);
   const { createMongoTree } = await import('@treenx/mongo');
-  const tree = await createMongoTree(uri, mount.db, mount.collection, { watch: mount.watch, nsMigrate: mount.nsMigrate });
+  const tree = await createMongoTree(uri, mount.db, mount.collection, { nsMigrate: mount.nsMigrate });
   const wrapped = mount.shared ? tree : createRepathTree(tree, ctx.path, '/');
 
-  if (mount.watch && tree.watch && ctx.startExternalWatch) {
-    // shared = tree uses outer (global) paths; non-shared = mount-local.
-    const pathPrefix = mount.shared ? '/' : ctx.path;
-    ctx.startExternalWatch(tree, {
-      pathPrefix,
-      dedupWindowMs: mount.dedupWindowMs,
-      source: `mongo@${ctx.path}`,
-    });
-  }
 
   return wrapped;
 });

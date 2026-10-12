@@ -6,7 +6,6 @@ import { A, createNode, R, register, S, unregister, W } from '#core';
 import { KernelError } from '#errors';
 import { withMounts } from '#mount';
 import { withAcl } from '#security/acl-tree';
-import type { NodeEvent } from '#sub';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
