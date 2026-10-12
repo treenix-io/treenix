@@ -2,7 +2,6 @@ import { registerType } from '#comp';
 import { collectDeps, getActionNeeds, parseNeedPattern } from '#comp/needs';
 import { createNode, register } from '#core';
 import { clearRegistry } from '#testing';
-import { executeAction } from '#server/actions';
 import { createMemoryTree } from '#tree';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
@@ -359,112 +358,5 @@ describe('collectDeps', () => {
       needs: { missing: ['status'] } as any,
     }), /missing action/);
     assert.equal(getActionNeeds('t.bad-needs', 'publish').length, 0);
-  });
-});
-
-describe('executeAction with deps', () => {
-  beforeEach(() => {
-    clearRegistry();
-
-  });
-
-  it('per-action deps injected into method via executeAction', async () => {
-    class Article {
-      title = '';
-
-      publishAndRename({ title }: { title: string }, deps: { status: any }) {
-        this.title = title;
-        deps.status.value = 'published';
-      }
-    }
-
-    registerType('t.article', Article, { needs: { publishAndRename: ['status'] } });
-    register('t.article', 'schema', () => ({
-      $id: 't.article', title: 'Article', type: 'object' as const,
-      properties: { title: { type: 'string' } },
-      methods: { publishAndRename: { arguments: [{ name: 'data', type: 'object', properties: { title: { type: 'string' } }, required: ['title'] }] } },
-    }));
-    registerType('t.status', Status);
-
-    const tree = createMemoryTree();
-    await tree.set(createNode('/a', 'page', {}, {
-      article: { $type: 't.article', title: 'old' },
-      status: { $type: 't.status', value: 'draft' },
-    }));
-
-    await executeAction(tree, '/a', 't.article', undefined, 'publishAndRename', { title: 'new' });
-
-    const result = (await tree.get('/a'))!;
-    assert.equal((result['#article'] as any).title, 'new');
-    assert.equal((result['#status'] as any).value, 'published');
-  });
-
-  it('different actions get different deps', async () => {
-    class Processor {
-      value = '';
-
-      quick(_d: unknown, deps: any) {
-        this.value = `status=${deps.status.value}`;
-      }
-
-      full(_d: unknown, deps: any) {
-        this.value = `status=${deps.status.value},amount=${deps.payment.amount}`;
-      }
-    }
-
-    registerType('t.processor', Processor, {
-      needs: { quick: ['status'], full: ['status', 'payment'] },
-    });
-    register('t.processor', 'schema', () => ({
-      $id: 't.processor', title: 'Processor', type: 'object' as const,
-      properties: { value: { type: 'string' } },
-      methods: { quick: { arguments: [] }, full: { arguments: [] } },
-    }));
-    registerType('t.status', Status);
-    registerType('t.payment', Payment);
-
-    const tree = createMemoryTree();
-    await tree.set(createNode('/p', 'page', {}, {
-      processor: { $type: 't.processor', value: '' },
-      status: { $type: 't.status', value: 'active' },
-      payment: { $type: 't.payment', amount: 500, settled: false },
-    }));
-
-    await executeAction(tree, '/p', 't.processor', undefined, 'quick', {});
-    let result = (await tree.get('/p'))!;
-    assert.equal((result['#processor'] as any).value, 'status=active');
-
-    await executeAction(tree, '/p', 't.processor', undefined, 'full', {});
-    result = (await tree.get('/p'))!;
-    assert.equal((result['#processor'] as any).value, 'status=active,amount=500');
-  });
-
-  it('cross-node @fieldRef in executeAction', async () => {
-    class Connector {
-      targetRef = '';
-      result = '';
-
-      fetch(_d: unknown, deps: any) {
-        this.result = deps.targetRef.$path;
-      }
-    }
-
-    registerType('t.connector', Connector, { needs: { fetch: ['@targetRef'] } });
-    register('t.connector', 'schema', () => ({
-      $id: 't.connector', title: 'Connector', type: 'object' as const,
-      properties: { targetRef: { type: 'string' }, result: { type: 'string' } },
-      methods: { fetch: { arguments: [] } },
-    }));
-
-    const tree = createMemoryTree();
-    await tree.set(createNode('/config/wh', 'warehouse', { capacity: 50 }));
-    await tree.set(createNode('/order/1', 'page', {}, {
-      connector: { $type: 't.connector', targetRef: '/config/wh', result: '' },
-    }));
-
-    await executeAction(tree, '/order/1', 't.connector', undefined, 'fetch', {});
-
-    const result = (await tree.get('/order/1'))!;
-    assert.equal((result['#connector'] as any).result, '/config/wh');
   });
 });

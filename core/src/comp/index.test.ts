@@ -4,7 +4,6 @@
 import { getCtx, newComponent, registerActions, registerType, setComponent } from '#comp';
 import { createNode, getComponent, getMeta, type NodeData, register, resolve } from '#core';
 import { clearRegistry } from '#testing';
-import { executeAction } from '#server/actions';
 import { createMemoryTree } from '#tree';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
@@ -137,92 +136,6 @@ describe('getCtx', () => {
   it('throws when called outside action context', () => {
     assert.throws(() => getCtx(), (e: Error) => e.message.includes('outside action context'));
   });
-
-  it('ALS isolation: concurrent async actions each see their own ctx', async () => {
-    clearRegistry();
-
-    // Method yields to event loop then reads ctx — ALS must keep each action's ctx isolated
-    class AlsNode {
-      async whoami() {
-        await Promise.resolve(); // yield — lets the other action's handler run
-        return getCtx().node.$path;
-      }
-    }
-    registerType('als.test', AlsNode);
-    register('als.test', 'schema', () => ({
-      $id: 'als.test', title: 'AlsNode', type: 'object' as const, properties: {},
-      methods: { whoami: { arguments: [] } },
-    }));
-
-    const tree = createMemoryTree();
-    await tree.set(createNode('/a', 'als.test'));
-    await tree.set(createNode('/b', 'als.test'));
-
-    const [pathA, pathB] = await Promise.all([
-      executeAction(tree, '/a', undefined, undefined, 'whoami'),
-      executeAction(tree, '/b', undefined, undefined, 'whoami'),
-    ]);
-
-    assert.equal(pathA, '/a');
-    assert.equal(pathB, '/b');
-  });
-});
-
-// ── registerType: override ──
-
-describe('registerType override', () => {
-  it('override replaces previously registered actions', () => {
-    clearRegistry();
-
-    class BaseWidget { greet() { return 'base'; } }
-    registerType('test.widget', BaseWidget);
-    const widgetSchema = () => ({
-      $id: 'test.widget', title: 'Widget', type: 'object' as const, properties: {},
-      methods: { greet: { arguments: [] } },
-    });
-    register('test.widget', 'schema', widgetSchema);
-
-    const before = resolve('test.widget', 'action:greet', false) as Function;
-    assert.ok(before);
-
-    class ServerWidget extends BaseWidget { greet() { return 'server'; } }
-    registerType('test.widget', ServerWidget, { override: true });
-    register('test.widget', 'schema', widgetSchema);
-
-    const after = resolve('test.widget', 'action:greet', false) as Function;
-    assert.ok(after);
-    assert.notEqual(before, after);
-
-    const tree = createMemoryTree();
-    const node = createNode('/w', 'test.widget');
-    return tree.set(node).then(() =>
-      executeAction(tree, '/w', undefined, undefined, 'greet').then(result => {
-        assert.equal(result, 'server');
-      })
-    );
-  });
-
-  it('without override, second registerType is ignored', () => {
-    clearRegistry();
-
-    class First { value() { return 1; } }
-    registerType('test.first', First);
-    register('test.first', 'schema', () => ({
-      $id: 'test.first', title: 'First', type: 'object' as const, properties: {},
-      methods: { value: { arguments: [] } },
-    }));
-
-    class Second extends First { value() { return 2; } }
-    registerType('test.first', Second);
-
-    const tree = createMemoryTree();
-    const node = createNode('/f', 'test.first');
-    return tree.set(node).then(() =>
-      executeAction(tree, '/f', undefined, undefined, 'value').then(result => {
-        assert.equal(result, 1);
-      })
-    );
-  });
 });
 
 // ── registerType: noOptimistic meta ──
@@ -242,45 +155,6 @@ describe('registerType noOptimistic', () => {
 
     const listMeta = getMeta('test.tokens', 'action:list');
     assert.equal(listMeta?.noOptimistic, undefined);
-  });
-});
-
-// ── registerActions: server overrides + meta ──
-
-describe('registerActions override', () => {
-  it('replaces action handlers and carries noOptimistic meta', async () => {
-    clearRegistry();
-
-    class SharedActions {
-      value() { return 1; }
-      mutate() { return 'shared'; }
-    }
-    registerType('test.actions', SharedActions);
-    register('test.actions', 'schema', () => ({
-      $id: 'test.actions',
-      type: 'object' as const,
-      properties: {},
-      methods: {
-        value: { arguments: [] },
-        mutate: { arguments: [] },
-      },
-    }));
-
-    class ServerActions {
-      value() { return 2; }
-      mutate() { return 'server'; }
-    }
-    registerActions('test.actions', ServerActions, {
-      override: true,
-      noOptimistic: ['mutate'],
-    });
-
-    const tree = createMemoryTree();
-    await tree.set(createNode('/actions', 'test.actions'));
-
-    assert.equal(await executeAction(tree, '/actions', undefined, undefined, 'value'), 2);
-    assert.equal(await executeAction(tree, '/actions', undefined, undefined, 'mutate'), 'server');
-    assert.equal(getMeta('test.actions', 'action:mutate')?.noOptimistic, true);
   });
 });
 

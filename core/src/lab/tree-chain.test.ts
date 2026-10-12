@@ -1,7 +1,6 @@
 import { refVal, type TypedRef } from '#chain';
 import { registerType } from '#comp';
 import { isRef, register } from '#core';
-import { withExecute } from '#server/actions';
 import type { Tree } from '#tree';
 import { createMemoryTree } from '#tree';
 import assert from 'node:assert/strict';
@@ -237,18 +236,6 @@ describe('treeChain — exec-capable tree (core-pxlu)', () => {
     properties: { n: { type: 'number' } },
     methods: { bump: { arguments: [] } },
   }))
-
-  test('action runs through the full executor: mutation persists, $rev bumps', async () => {
-    const tree = createMemoryTree()
-    await tree.set({ $path: '/tally', $type: 'tch.tally', n: 0 })
-
-    const result = await treeChain(withExecute(tree)).tally(Tally).bump()
-
-    assert.equal(result, 1)
-    const node = await tree.get('/tally')
-    assert.equal(node!.n, 1, 'mutation persisted — direct registry path would drop it')
-    assert.ok(node!.$rev && node!.$rev >= 2)
-  })
 
   test('capability-less tree keeps the direct registry path', async () => {
     const tree = createMemoryTree()

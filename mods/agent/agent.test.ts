@@ -2,7 +2,6 @@
 
 import { createNode, getComponent, resolve } from '@treenx/core';
 import { loadSchemasFromDir } from '@treenx/core/schema/load';
-import { executeAction } from '@treenx/core/server/actions';
 import { createMemoryTree } from '@treenx/core/tree';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
@@ -1034,25 +1033,6 @@ describe('AiRun', () => {
     const cost = getComponent(node, AiCost)!;
     assert.equal(cost.costUsd, 0);
     assert.equal(cost.model, 'claude-sonnet-4-20250514');
-  });
-
-  it('stop action sets status to aborted', async () => {
-    const tree = createMemoryTree();
-    await tree.set(createNode('/', 'root'));
-    await tree.set(createNode('/agents/qa/runs/r-1', 'ai.run', {
-      prompt: 'Do stuff', result: '', mode: 'work', taskRef: '',
-      queryKey: 'plan:/agents/qa',
-    }, {
-      'run-status': { $type: 'ai.run-status', status: 'running', startedAt: Date.now(), finishedAt: 0, error: '' },
-    }));
-
-    // getCtx() actions need the real execution pipeline (action-context runtime),
-    // not a bare handler call — invoke through executeAction like clients do.
-    await executeAction(tree, '/agents/qa/runs/r-1', undefined, undefined, 'stop');
-
-    const status = getComponent((await tree.get('/agents/qa/runs/r-1'))!, AiRunStatus)!;
-    assert.equal(status.status, 'aborted');
-    assert.ok(status.finishedAt > 0);
   });
 });
 

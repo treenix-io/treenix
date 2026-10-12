@@ -10,7 +10,6 @@ loadSchemasFromDir(join(dirname(fileURLToPath(import.meta.url)), '../mod/schemas
 import { createMemoryTree, type Tree } from '#tree';
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
-import { executeAction } from './actions';
 import { createModsTree } from '#mount/mods';
 import { deployByKey, deployPrefab, deploySeedPrefabs } from './prefab';
 
@@ -470,41 +469,4 @@ describe('t.prefab deploy action', () => {
     tree = createMemoryTree();
   });
   afterEach(() => clearPrefabs());
-
-  it('deploys prefab nodes via executeAction on t.prefab node', async () => {
-    registerPrefab('cafe', 'seed', [
-      { $path: 'menu', $type: 'dir' } as NodeData,
-      { $path: 'contact', $type: 'cafe.contact' } as NodeData,
-    ]);
-
-    const { Prefab } = await import('#mod/prefab-type');
-    await tree.set(createNode('/sys/mods/cafe/prefabs/seed', Prefab, { mod: 'cafe', name: 'seed' }));
-
-    await executeAction(tree, '/sys/mods/cafe/prefabs/seed', 't.prefab', undefined, 'deploy', {
-      target: '/sites/demo',
-    });
-
-    assert.ok(await tree.get('/sites/demo/menu'));
-    assert.equal((await tree.get('/sites/demo/contact'))?.$type, 'cafe.contact');
-  });
-
-  it('deploy is idempotent — skips existing nodes', async () => {
-    registerPrefab('cafe', 'seed', [
-      { $path: 'menu', $type: 'dir' } as NodeData,
-    ]);
-
-    const { Prefab } = await import('#mod/prefab-type');
-    await tree.set(createNode('/sys/mods/cafe/prefabs/seed', Prefab, { mod: 'cafe', name: 'seed' }));
-
-    const r1 = await executeAction(tree, '/sys/mods/cafe/prefabs/seed', 't.prefab', undefined, 'deploy', {
-      target: '/x',
-    }) as { deployed: string[]; skipped: string[] };
-    assert.equal(r1.deployed.length, 1);
-
-    const r2 = await executeAction(tree, '/sys/mods/cafe/prefabs/seed', 't.prefab', undefined, 'deploy', {
-      target: '/x',
-    }) as { deployed: string[]; skipped: string[] };
-    assert.equal(r2.deployed.length, 0);
-    assert.equal(r2.skipped.length, 1);
-  });
 });

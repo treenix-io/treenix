@@ -271,25 +271,10 @@
       "types": "./dist/contexts/text.d.ts",
       "default": "./dist/contexts/text.js"
     },
-    "./server/actions": {
-      "development": "./src/server/actions.ts",
-      "types": "./dist/server/actions.d.ts",
-      "default": "./dist/server/actions.js"
-    },
-    "./server/jobs": {
-      "development": "./src/server/jobs.ts",
-      "types": "./dist/server/jobs.d.ts",
-      "default": "./dist/server/jobs.js"
-    },
     "./server/prefab": {
       "development": "./src/server/prefab.ts",
       "types": "./dist/server/prefab.d.ts",
       "default": "./dist/server/prefab.js"
-    },
-    "./server/readonly-tree": {
-      "development": "./src/server/readonly-tree.ts",
-      "types": "./dist/server/readonly-tree.d.ts",
-      "default": "./dist/server/readonly-tree.js"
     },
     "./util/safe-timers": {
       "development": "./src/util/safe-timers.ts",
