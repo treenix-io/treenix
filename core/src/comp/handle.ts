@@ -25,20 +25,28 @@ export function makeTypedProxy<T extends object>(
   execute: ExecuteFn,
   stream?: StreamFn,
   key?: string,
-): TypeProxy<T> {
+): TypeProxy<T>;
+export function makeTypedProxy(
+  node: Parameters<typeof getComponent>[0] | undefined,
+  cls: Class<object>,
+  path: string,
+  execute: ExecuteFn,
+  stream?: StreamFn,
+  key?: string,
+): object {
   const type = normalizeType(cls);
   const comp = node ? getComponent(node, cls, key) : undefined;
 
-  return new Proxy(comp ?? ({} as T), {
+  return new Proxy(comp ?? {}, {
     get: (_t, prop: string) => {
-      const fn = (cls.prototype as any)[prop];
+      const fn = Reflect.get(cls.prototype, prop);
       if (typeof fn === 'function') {
         // kriz: what if it is AsyncGenFn, but no stream present?
         if (stream && fn instanceof AsyncGenFn)
           return (data?: unknown) => stream({ path, type, key, action: prop, data });
         return (data?: unknown) => execute({ path, type, key, action: prop, data });
       }
-      return (comp as any)?.[prop];
+      return comp === undefined ? undefined : Reflect.get(comp, prop);
     },
-  }) as TypeProxy<T>;
+  });
 }
