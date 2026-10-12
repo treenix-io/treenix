@@ -1,127 +1,448 @@
-import { useEffect, useState, useSyncExternalStore } from 'react';
-import { KernelError } from '@treenx/core/errors';
-import { W, type Node } from '@treenx/core/kernel/types';
+import { toast } from 'sonner';
 import { Button } from '#components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '#components/ui/dropdown-menu';
 import { Input } from '#components/ui/input';
 import { ResizablePanel } from '#components/ui/resizable';
-import { TypePicker } from '#mods/editor-ui/type-picker';
+import { Tree } from '#editor/Tree';
 import { useTreeEffects } from '#hooks';
-import { moveBefore, parentOf } from '#editor/native-tree-mutations';
-import type { NavigateFn } from '#navigate';
-import type { NativeMount, NativeSnapshot } from '#tree/native-source';
 import { useTreeSource } from '#tree/tree-source-context';
-import type { TreeEffects } from '#tree/effects';
+import { KernelError } from '@treenx/core/errors';
+import { TypePicker } from '#mods/editor-ui/type-picker';
+import type { NavigateFn } from '#navigate';
+import { ChevronDown, Eye, EyeOff, LogIn, LogOut, RotateCcw } from 'lucide-react';
+import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
+import type { PanelImperativeHandle, PanelSize } from 'react-resizable-panels';
 
-interface EditorSidebarProps {
+const SIDEBAR_EXPAND_MS = 200;
+const SIDEBAR_COLLAPSE_MS = 500;
+const SIDEBAR_COLLAPSED_WIDTH = 50;
+const SIDEBAR_MIN_WIDTH = 240;
+const SIDEBAR_RESIZE_COLLAPSE_WIDTH = (SIDEBAR_COLLAPSED_WIDTH + SIDEBAR_MIN_WIDTH) / 2;
+
+type SidebarPhase = 'expanded' | 'expanding' | 'collapsing' | 'collapsed';
+
+type EditorSidebarProps = {
   authed: string;
   root: string;
   selected: string | null;
   onSelect: NavigateFn;
   onSetRoot: (path: string) => void;
   onLogout: () => void;
-}
-interface Drag { readonly effects: TreeEffects; readonly node: Node }
-const LOADING: NativeSnapshot = { phase: 'loading', generations: [], members: [], included: [] };
-const subscribeLoading = () => () => {};
-const loadingSnapshot = () => LOADING;
+};
 
-/** Own real canonical child coverage for exactly this expanded parent and selected source. */
-function NativeChildren({ path, selected, onSelect, filter, drag, onDrag, onError, onCreate }: {
-  path: string; selected: string | null; onSelect: NavigateFn; filter: string;
-  onCreate: (path: string) => void; drag?: Drag; onDrag: (drag: Drag | undefined) => void; onError: (error: unknown) => void;
-}) {
+function SidebarToggleIcon({ collapsed }: { collapsed: boolean }) {
+  return (
+    <svg viewBox="0 0 16 16" className="size-4" fill="none" aria-hidden="true">
+      <rect x="2.25" y="2.5" width="11.5" height="11" rx="2.25" stroke="currentColor" strokeWidth="1.4" />
+      <path d="M6.25 3.25v9.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" opacity="0.55" />
+      <path
+        d={collapsed ? 'M9 6.25 11 8l-2 1.75' : 'M11 6.25 9 8l2 1.75'}
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function MenuItemIcon({ children }: { children: ReactNode }) {
+  return (
+    <span className="flex size-4 items-center justify-center">
+      {children}
+    </span>
+  );
+}
+
+/** Keep the existing sidebar while the selected native source owns all live coverage and writes. */
+export function EditorSidebar({
+  authed,
+  root,
+  selected,
+  onSelect,
+  onSetRoot,
+  onLogout,
+}: EditorSidebarProps) {
+  const panelRef = useRef<PanelImperativeHandle | null>(null);
+  const animationTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const [phase, setPhase] = useState<SidebarPhase>('expanded');
+  const [filter, setFilter] = useState('');
+  const [showHidden, setShowHidden] = useState(false);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [loaded, setLoaded] = useState<Set<string>>(new Set());
+  const [creatingAt, setCreatingAt] = useState<string | null>(null);
   const source = useTreeSource();
   const effects = useTreeEffects();
-  const [owned, setOwned] = useState<{ source: typeof source; path: string; handle: NativeMount }>();
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
-  const handle = owned?.source === source && owned.path === path ? owned.handle : undefined;
-  const snapshot = useSyncExternalStore(handle?.subscribe ?? subscribeLoading, handle?.getSnapshot ?? loadingSnapshot, loadingSnapshot);
+  const [watchedItems] = useState(() => new Map<string, { dispose(): void }>());
+  const [nodeCount, setNodeCount] = useState(0);
+  const selectedRef = useRef(selected);
+  const phaseRef = useRef(phase);
 
+  selectedRef.current = selected;
+  phaseRef.current = phase;
+
+  const roots = [root, '/local'];
+
+  /** Mount each expanded collection once and retain its actual native subscription lifetime. */
+  const loadChildren = useCallback(async (path: string) => {
+    if (watchedItems.has(path)) return;
+    const node = source.mountPath(path);
+    const children = source.mountChildren(path);
+
+    function changed(): void {
+      const snapshot = source.getChildrenSnapshot(path);
+      if (snapshot.phase === 'ready' && snapshot.nextCursor !== null) {
+        children.loadMore();
+        return;
+      }
+      if (snapshot.phase === 'ready') setLoaded(previous => new Set(previous).add(path));
+
+      const paths = new Set<string>();
+      for (const parent of watchedItems.keys()) {
+        if (source.getPathSnapshot(parent).data !== undefined) paths.add(parent);
+        for (const child of source.getChildrenSnapshot(parent).data) paths.add(child.$path);
+      }
+      setNodeCount(paths.size);
+    }
+    const unsubscribe = source.subscribeChildren(path, changed);
+    watchedItems.set(path, { dispose() { unsubscribe(); children.dispose(); node.dispose(); } });
+    changed();
+  }, [source, watchedItems]);
+
+  // Loads ancestor children for `selected` within `root` and merges those ancestors
+  // into `expanded`. Idempotent via loadChildren's early-return.
+  const ensurePathVisible = useCallback(async (rootPath: string, target: string | null) => {
+    if (!target || target === rootPath) return;
+    const insideRoot = target.startsWith(rootPath === '/' ? '/' : `${rootPath}/`);
+    if (!insideRoot) return;
+    const rel = rootPath === '/' ? target : target.slice(rootPath.length);
+    const parts = rel.split('/').filter(Boolean);
+    const ancestors: string[] = [];
+    let cur = rootPath === '/' ? '' : rootPath;
+    for (let i = 0; i < parts.length - 1; i++) {
+      cur += `/${parts[i]}`;
+      ancestors.push(cur);
+    }
+    for (const a of ancestors) await loadChildren(a);
+    if (ancestors.length) {
+      setExpanded((prev) => {
+        const next = new Set(prev);
+        for (const a of ancestors) next.add(a);
+        return next;
+      });
+    }
+  }, [loadChildren]);
+
+  useEffect(() => () => {
+    if (animationTimer.current) clearTimeout(animationTimer.current);
+  }, []);
+
+  // Each root retains its own coverage; switching roots releases only these owners.
   useEffect(() => {
-    if (source.mountSelector === undefined) throw new KernelError('UNAVAILABLE', 'Native tree requires selector coverage');
-    const mounted = source.mountSelector({ children: path, sort: [['$order', 1]], window: { limit: 50 } });
-    setOwned({ source, path, handle: mounted });
-    return () => mounted.dispose();
-  }, [source, path]);
+    setLoaded(new Set());
+    setExpanded(new Set([root]));
+    void loadChildren(root).then(() => ensurePathVisible(root, selectedRef.current)).catch((e: unknown) => {
+      toast.error(e instanceof Error ? e.message : 'Failed to connect to server');
+    });
+    return () => {
+      for (const owner of watchedItems.values()) owner.dispose();
+      watchedItems.clear();
+    };
+  }, [root, loadChildren, ensurePathVisible, watchedItems]);
 
-  const nodes = snapshot.members.map(copy => {
-    if ('error' in copy) throw new KernelError(copy.error.code, copy.error.message);
-    return copy.node;
-  });
+  // Selected change (e.g. browser back/forward, deep link inside same root):
+  // merge ancestors of the new selection into `expanded` without disturbing user-expanded nodes.
+  useEffect(() => {
+    ensurePathVisible(root, selected).catch((e: unknown) => {
+      toast.error(e instanceof Error ? e.message : String(e));
+    });
+  }, [selected, root, ensurePathVisible]);
 
-  /** Commit the actual drop source and current target under their loaded revisions. */
-  async function drop(target: Node): Promise<void> {
-    const kernel = effects.kernel;
-    if (kernel === undefined || drag === undefined) throw new KernelError('UNAVAILABLE', 'No owned native drag');
-    if (drag.effects !== effects) throw new KernelError('CANCELLED', 'The drag source changed');
-    if (drag.node.$id === target.$id) return;
-    await kernel.commit(moveBefore(drag.node, target, nodes, snapshot.next === undefined));
-    onDrag(undefined);
-  }
+  const toggleSidebar = useCallback(() => {
+    if (animationTimer.current) clearTimeout(animationTimer.current);
 
-  /** Canonical removal invalidates every existing subscriber without a local cache mutation. */
-  async function remove(node: Node): Promise<void> {
-    const kernel = effects.kernel;
-    if (kernel === undefined) throw new KernelError('UNAVAILABLE', 'Native removal requires canonical effects');
-    await kernel.commit({ changes: [{ op: 'remove', path: node.$path }], expect: { nodes: [{ path: node.$path, rev: node.$rev }] } });
-    onSelect(parentOf(node.$path));
-  }
+    if (phase === 'collapsed') {
+      setPhase('expanding');
+      panelRef.current?.expand();
+      animationTimer.current = setTimeout(() => {
+        setPhase('expanded');
+        animationTimer.current = undefined;
+      }, SIDEBAR_EXPAND_MS);
+      return;
+    }
 
-  if (snapshot.error !== undefined) return <p role="alert">{snapshot.error.message}</p>;
-  if (snapshot.phase === 'loading') return <p>Loading children…</p>;
-  return <ul className="space-y-1 pl-3">
-    {snapshot.computed?.map(node => <li key={node.$path}><Button onClick={() => onSelect(node.$path)}>{node.$path} · computed</Button></li>)}
-    {snapshot.rows?.map(row => <li key={row.key}><pre>{JSON.stringify(row)}</pre></li>)}
-    {snapshot.viewErrors?.map(copy => <li key={copy.id} role="alert">{copy.error.code}: {copy.error.message}</li>)}
-    {nodes.map((node, index) => {
-    const copy = snapshot.members[index];
-    if ('error' in copy) throw new KernelError(copy.error.code, copy.error.message);
-    if (filter !== '' && !node.$path.includes(filter)) return null;
-    const open = expanded.has(node.$id);
-    return <li key={node.$id}>
-      <div className="flex items-center gap-1" draggable={(copy.bits & W) !== 0}
-        onDragStart={() => onDrag({ effects, node })} onDragEnd={() => onDrag(undefined)}
-        onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); event.stopPropagation(); void drop(node).catch(onError); }}>
-        <Button aria-label={`Expand ${node.$path}`} variant="ghost" onClick={() => setExpanded(previous => {
-          const next = new Set(previous); if (open) next.delete(node.$id); else next.add(node.$id); return next;
-        })}>{open ? '−' : '+'}</Button>
-        <Button variant={selected === node.$path ? 'secondary' : 'ghost'} onClick={() => onSelect(node.$path)}>{node.$path.slice(node.$path.lastIndexOf('/') + 1)}</Button>
-        {(copy.bits & W) !== 0 && <Button aria-label={`Create child of ${node.$path}`} onClick={() => onCreate(node.$path)}>Add child</Button>}
-        {(copy.bits & W) !== 0 && <Button aria-label={`Remove ${node.$path}`} variant="ghost" onClick={() => { void remove(node).catch(onError); }}>Remove</Button>}
+    flushSync(() => setPhase('collapsing'));
+    panelRef.current?.collapse();
+    animationTimer.current = setTimeout(() => {
+      setPhase('collapsed');
+      animationTimer.current = undefined;
+    }, SIDEBAR_COLLAPSE_MS);
+  }, [phase]);
+
+  const handlePanelResize = useCallback((size: PanelSize) => {
+    const currentPhase = phaseRef.current;
+    if (currentPhase === 'expanding' || currentPhase === 'collapsing') return;
+
+    const isCollapsedSize =
+      panelRef.current?.isCollapsed() || size.inPixels <= SIDEBAR_RESIZE_COLLAPSE_WIDTH;
+
+    if (isCollapsedSize && currentPhase !== 'collapsed') {
+      setPhase('collapsed');
+      return;
+    }
+
+    if (!isCollapsedSize && currentPhase === 'collapsed') {
+      setPhase('expanded');
+    }
+  }, []);
+
+  const handleSelect = useCallback(
+    async (path: string) => {
+      if (!onSelect(path)) return;
+    },
+    [onSelect],
+  );
+
+  const handleExpand = useCallback(
+    async (path: string) => {
+      const wasExpanded = expanded.has(path);
+      setExpanded((prev) => {
+        const next = new Set(prev);
+        if (next.has(path)) next.delete(path);
+        else next.add(path);
+        return next;
+      });
+      if (!wasExpanded) {
+        await loadChildren(path);
+        for (const child of expanded) if (child.startsWith(`${path}/`)) await loadChildren(child);
+      } else {
+        for (const [parent, owner] of watchedItems) {
+          if (parent === path || parent.startsWith(`${path}/`)) {
+            owner.dispose();
+            watchedItems.delete(parent);
+          }
+        }
+
+      }
+    },
+    [expanded, loadChildren, watchedItems],
+  );
+
+  const handleCreateChild = useCallback((parentPath: string) => {
+    setCreatingAt(parentPath);
+  }, []);
+
+  const handlePickType = useCallback(
+    async (name: string, type: string) => {
+      const parentPath = creatingAt;
+      if (!parentPath) return;
+      setCreatingAt(null);
+
+      const childPath = parentPath === '/' ? `/${name}` : `${parentPath}/${name}`;
+      try {
+        await effects.createNode(childPath, type);
+        await loadChildren(parentPath);
+        setExpanded((prev) => new Set(prev).add(parentPath));
+        await onSelect(childPath);
+
+        toast.success(`Created ${name}`);
+      } catch (e: unknown) {
+        toast.error(e instanceof Error ? e.message : `Failed to create ${name}`);
+      }
+    },
+    [creatingAt, loadChildren, onSelect, effects],
+  );
+
+  const handleDelete = useCallback(
+    async (path: string) => {
+      try {
+        const kernel = effects.kernel;
+        if (kernel === undefined) throw new KernelError('UNAVAILABLE', 'Removal requires a native source');
+        const copy = (await kernel.read({ node: path })).copies[0];
+        if ('error' in copy) throw new KernelError(copy.error.code, copy.error.message);
+        await kernel.commit({ changes: [{ op: 'remove', path }], expect: { nodes: [{ path, rev: copy.node.$rev }] } });
+        const parent = path === '/' ? null : path.slice(0, path.lastIndexOf('/')) || '/';
+        if (parent) {
+          await loadChildren(parent);
+          await onSelect(parent);
+        } else {
+          await onSelect('/');
+        }
+      } catch (e: unknown) {
+        toast.error(e instanceof Error ? e.message : `Failed to delete ${path}`);
+      }
+    },
+    [loadChildren, onSelect, effects],
+  );
+
+  const handleMove = useCallback(
+    async (fromPath: string, toPath: string) => {
+      const toParent = toPath === '/' ? '/' : toPath.slice(0, toPath.lastIndexOf('/')) || '/';
+      const fromName = fromPath.slice(fromPath.lastIndexOf('/') + 1);
+      const newPath = toParent === '/' ? `/${fromName}` : `${toParent}/${fromName}`;
+      if (newPath === fromPath) return;
+
+      try {
+        const kernel = effects.kernel;
+        if (kernel === undefined) throw new KernelError('UNAVAILABLE', 'Moving requires a native source');
+        const copy = (await kernel.read({ node: fromPath })).copies[0];
+        if ('error' in copy) throw new KernelError(copy.error.code, copy.error.message);
+        await kernel.commit({ changes: [{ op: 'move', from: fromPath, to: newPath }],
+          expect: { nodes: [{ path: fromPath, rev: copy.node.$rev }] } });
+        const oldParent = fromPath === '/' ? '/' : fromPath.slice(0, fromPath.lastIndexOf('/')) || '/';
+        await loadChildren(oldParent);
+        await loadChildren(toParent);
+        await onSelect(newPath);
+        toast.success(`Moved to ${newPath}`);
+      } catch (e: unknown) {
+        toast.error(e instanceof Error ? e.message : `Failed to move ${fromPath}`);
+      }
+    },
+    [loadChildren, onSelect, effects],
+  );
+
+  const handleClearCache = useCallback(() => {
+    toast.success('Cache cleared');
+    location.reload();
+  }, []);
+
+  const collapsed = phase === 'collapsed';
+  const compact = phase !== 'expanded';
+  const buttonCompact = phase === 'collapsed' || phase === 'collapsing';
+  const buttonHidden = phase === 'expanding';
+  const contentClass = compact ? 'opacity-0 pointer-events-none' : 'opacity-100';
+  const animationMode = phase === 'expanding' || phase === 'collapsing' ? phase : undefined;
+
+  return (
+    <ResizablePanel
+      data-editor-sidebar-panel
+      data-sidebar-animation={animationMode}
+      panelRef={panelRef}
+      onResize={handlePanelResize}
+      defaultSize="28%"
+      minSize={`${SIDEBAR_MIN_WIDTH}px`}
+      maxSize="450px"
+      collapsible
+      collapsedSize={`${SIDEBAR_COLLAPSED_WIDTH}px`}
+      className="flex flex-col border-r border-border"
+    >
+      <div className={`relative shrink-0 overflow-hidden border-b border-border ${compact ? 'h-[74px]' : 'h-[44px]'}`}>
+        <div className="absolute left-0 top-1">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className={`group relative flex h-9 min-w-0 shrink-0 select-none items-center overflow-hidden rounded-lg text-left outline-none transition-colors focus-visible:ring-1 focus-visible:ring-primary/50 ${compact ? 'w-[50px] hover:bg-white/[0.035]' : 'w-auto pr-3 before:absolute before:inset-y-0 before:left-2 before:right-0 before:rounded-lg before:transition-colors hover:before:bg-white/[0.035]'}`}
+                title="System menu"
+              >
+                <span className="relative z-10 flex h-9 w-[50px] shrink-0 items-center justify-center">
+                  <img src="/treenix.svg" alt="" width="22" height="22" className="shrink-0" />
+                </span>
+                {!compact && (
+                  <>
+                    <span className={`relative z-10 -ml-1 text-[17px] font-semibold leading-none tracking-tight ${contentClass}`}>Treenix</span>
+                    <ChevronDown className={`relative z-10 ml-2 size-3 self-center text-muted-foreground transition-[color,opacity] group-hover:text-primary ${contentClass}`} />
+                  </>
+                )}
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" side="bottom" className="inspector-debug-menu">
+              <DropdownMenuLabel className="px-2 py-1.5">
+                <div className="truncate text-[11px] font-normal text-muted-foreground">
+                  {authed.startsWith('anon:') ? `anon:${authed.slice(5, 13)}` : authed} · {nodeCount} nodes
+                </div>
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={() => setShowHidden(!showHidden)}
+                className={showHidden ? 'bg-accent text-accent-foreground font-medium' : ''}
+              >
+                <MenuItemIcon>
+                  {showHidden ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+                </MenuItemIcon>
+                <span className="truncate">Show hidden</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleClearCache}>
+                <MenuItemIcon>
+                  <RotateCcw className="size-3.5" />
+                </MenuItemIcon>
+                <span className="truncate">Clear cache</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={onLogout}>
+                <MenuItemIcon>
+                  {authed.startsWith('anon:') ? <LogIn className="size-3.5" /> : <LogOut className="size-3.5" />}
+                </MenuItemIcon>
+                <span className="truncate">{authed.startsWith('anon:') ? 'Login' : 'Logout'}</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+
+        {!compact && root !== '/' && (
+          <div className="absolute left-[148px] right-12 top-1/2 flex -translate-y-1/2 items-center gap-2 overflow-hidden">
+            <Button variant="ghost" size="sm" className="h-5 px-1.5 font-mono text-[10px] text-muted-foreground" onClick={() => onSetRoot('/')}>
+              &#8962; {root}
+            </Button>
+          </div>
+        )}
+
+        <button
+          type="button"
+          className={`absolute flex items-center justify-center rounded-lg text-muted-foreground outline-none transition-colors hover:bg-white/[0.04] hover:text-foreground focus-visible:ring-1 focus-visible:ring-primary/50 ${buttonHidden ? 'opacity-0 pointer-events-none' : 'opacity-100'} ${buttonCompact ? 'left-1/2 top-[40px] size-8 -translate-x-1/2' : 'right-3 top-1/2 size-8 -translate-y-1/2'}`}
+          onClick={toggleSidebar}
+          title={buttonCompact ? 'Expand sidebar' : 'Collapse sidebar'}
+        >
+          <SidebarToggleIcon collapsed={buttonCompact} />
+        </button>
       </div>
-      {open && <NativeChildren path={node.$path} selected={selected} onSelect={onSelect} filter={filter} drag={drag} onDrag={onDrag} onError={onError} onCreate={onCreate} />}
-    </li>;
-  })}{snapshot.next !== undefined && <li><Button onClick={() => handle?.loadMore()}>Load more children</Button></li>}</ul>;
-}
 
-/** Native sidebar state and mutations belong to the captured source, never the legacy path cache. */
-export function EditorSidebar({ authed, root, selected, onSelect, onSetRoot, onLogout }: EditorSidebarProps) {
-  const effects = useTreeEffects();
-  const [filter, setFilter] = useState('');
-  const [drag, setDrag] = useState<Drag>();
-  const [error, setError] = useState<string>();
-  const [creating, setCreating] = useState<{ effects: TreeEffects; path: string }>();
+      {!collapsed && (
+        <div className={`flex items-center gap-1 px-2 pt-2 pb-1.5 shrink-0 overflow-hidden ${contentClass}`}>
+          <Input
+            ref={searchRef}
+            placeholder="Search nodes..."
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            className="h-7 text-xs bg-muted/50 border-border"
+          />
+        </div>
+      )}
 
-  /** Surface canonical refusals at the actual editor boundary. */
-  function failed(reason: unknown): void { setError(reason instanceof Error ? reason.message : String(reason)); }
+      {!collapsed && (
+        <>
+          <div className={`flex-1 overflow-y-auto overflow-x-hidden ${contentClass}`}>
+            <Tree
+              roots={roots}
+              expanded={expanded}
+              loaded={loaded}
+              selected={selected}
+              filter={filter}
+              showHidden={showHidden}
+              onSelect={handleSelect}
+              onExpand={handleExpand}
+              onCreateChild={handleCreateChild}
+              onDelete={handleDelete}
+              onMove={handleMove}
+            />
+          </div>
 
-  /** Create through the selected canonical owner and let live child coverage publish the new member. */
-  async function create(name: string, type: string): Promise<void> {
-    if (creating?.effects !== effects) throw new KernelError('CANCELLED', 'The creation source changed');
-    const path = creating.path === '/' ? `/${name}` : `${creating.path}/${name}`;
-    await effects.createNode(path, type);
-    setCreating(undefined);
-    onSelect(path);
-  }
-
-  return <ResizablePanel defaultSize="28%" minSize="240px" maxSize="450px" className="flex flex-col border-r border-border">
-    <div className="flex items-center justify-between p-2"><strong>Treenix · {authed}</strong><Button onClick={onLogout}>Logout</Button></div>
-    <Button variant="ghost" onClick={() => onSetRoot('/')}>{root}</Button>
-    <Button onClick={() => setCreating({ effects, path: root })}>Add child to {root}</Button>
-    <Input aria-label="Search nodes" value={filter} onChange={event => setFilter(event.target.value)} />
-    {error !== undefined && <p role="alert">{error}</p>}
-    <div className="flex-1 overflow-auto"><NativeChildren key={root} path={root} selected={selected} onSelect={onSelect} filter={filter}
-      drag={drag?.effects === effects ? drag : undefined} onDrag={setDrag} onError={failed} onCreate={path => setCreating({ effects, path })} /></div>
-    {creating?.effects === effects && <TypePicker onSelect={(name, type) => { void create(name, type).catch(failed); }} onCancel={() => setCreating(undefined)} />}
-  </ResizablePanel>;
+          <div className={`flex items-center overflow-hidden px-3 py-1.5 border-t border-border/50 text-[11px] text-muted-foreground shrink-0 ${contentClass}`}>
+            <span className="truncate">
+              {authed.startsWith('anon:') ? `anon:${authed.slice(5, 13)}` : authed} &middot; {nodeCount} nodes
+            </span>
+          </div>
+        </>
+      )}
+      {creatingAt && <TypePicker onSelect={handlePickType} onCancel={() => setCreatingAt(null)} />}
+    </ResizablePanel>
+  );
 }

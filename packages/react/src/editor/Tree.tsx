@@ -9,7 +9,11 @@ import {
 } from '#components/ui/dropdown-menu';
 import { ChevronRightIcon } from 'lucide-react';
 import { useCallback, useRef, useState, useSyncExternalStore } from 'react';
-import * as cache from '#tree/cache';
+import { usePath } from '#hooks';
+import { useTreeSource } from '#tree/tree-source-context';
+import type { TreeSource } from '#tree/tree-source';
+import type { PresentationNode } from '#tree/presentation';
+import { KernelError } from '@treenx/core/errors';
 
 type TreeProps = {
   roots: string[];
@@ -35,11 +39,9 @@ function matchesFilter(name: string, type: string, filter: string): boolean {
   return name.toLowerCase().includes(lf) || type.toLowerCase().includes(lf);
 }
 
-function hasMatchingDescendant(path: string, filter: string): boolean {
-  const nodes = cache.raw();
-  const prefix = path === '/' ? '/' : path + '/';
-  for (const [k, v] of nodes) {
-    if (k.startsWith(prefix) && matchesFilter(nodeName(k), v.$type, filter)) return true;
+function hasMatchingDescendant(source: TreeSource, path: string, filter: string): boolean {
+  for (const child of source.getChildrenSnapshot(path).data) {
+    if (matchesFilter(nodeName(child.$path), child.$type, filter) || hasMatchingDescendant(source, child.$path, filter)) return true;
   }
   return false;
 }
@@ -101,6 +103,7 @@ function BadgeMenu({
 
 function TreeNode({
   path,
+  node,
   expanded,
   loaded = new Set<string>(),
   selected,
@@ -112,35 +115,28 @@ function TreeNode({
   onCreateChild,
   onDelete,
   onMove,
-}: Omit<TreeProps, 'roots'> & { path: string; depth: number }) {
-  // Granular subscriptions — only re-render when THIS node or ITS children change
-  const node = useSyncExternalStore(
-    useCallback((cb: () => void) => cache.subscribePath(path, cb), [path]),
-    useCallback(() => cache.get(path), [path]),
+}: Omit<TreeProps, 'roots'> & { path: string; node: PresentationNode; depth: number }) {
+  const source = useTreeSource();
+  const childrenSnapshot = useSyncExternalStore(
+    useCallback((cb: () => void) => source.subscribeChildren(path, cb), [source, path]),
+    useCallback(() => source.getChildrenSnapshot(path), [source, path]),
+    useCallback(() => source.getChildrenSnapshot(path), [source, path]),
   );
-  const childrenNodes = useSyncExternalStore(
-    useCallback((cb: () => void) => cache.subscribeChildren(path, cb), [path]),
-    useCallback(() => cache.getChildren(path), [path]),
-  );
+  const childrenNodes = childrenSnapshot.data;
 
   const rowRef = useRef<HTMLDivElement>(null);
   const [dragOver, setDragOver] = useState<'above' | 'below' | null>(null);
 
-  if (!node) return null;
-
   const name = nodeName(path);
   const isExp = expanded.has(path);
-  const allChildren = childrenNodes.map(n => n.$path).filter(p => p !== path);
+  const allChildren = childrenNodes;
   const knownChildren = showHidden
     ? allChildren
-    : allChildren.filter(p => !nodeName(p).startsWith('_'));
+    : allChildren.filter(child => !nodeName(child.$path).startsWith('_'));
   const showChildren = filter ? knownChildren : isExp ? knownChildren : [];
   const filteredChildren = filter
-    ? showChildren.filter((c) => {
-        const cn = cache.get(c);
-        if (!cn) return false;
-        return matchesFilter(nodeName(c), cn.$type, filter) || hasMatchingDescendant(c, filter);
-      })
+    ? showChildren.filter(child => matchesFilter(nodeName(child.$path), child.$type, filter)
+      || hasMatchingDescendant(source, child.$path, filter))
     : showChildren;
 
   if (filter && !matchesFilter(name, node.$type, filter) && filteredChildren.length === 0) {
@@ -216,12 +212,15 @@ function TreeNode({
           onDelete={onDelete}
         />
       </div>
+      {isExp && childrenSnapshot.error !== null && <p role="alert">{childrenSnapshot.error.message}</p>}
+      {isExp && childrenSnapshot.errors?.map(copy => <p key={copy.id} role="alert">{copy.error.message}</p>)}
       {(isExp || filter) && filteredChildren.length > 0 && (
         <div className="tree-children">
           {filteredChildren.map((c) => (
             <TreeNode
-              key={c}
-              path={c}
+              key={c.$path}
+              path={c.$path}
+              node={c}
               depth={depth + 1}
               expanded={expanded}
               loaded={loaded}
@@ -241,11 +240,19 @@ function TreeNode({
   );
 }
 
+/** Root nodes mount exact reads; descendant rows retain the owning parent's admitted copies. */
+function RootNode({ path, ...props }: TreeProps & { path: string }) {
+  const { data: node, error } = usePath(path);
+  if (path === '/local' && error instanceof KernelError && error.code === 'NOT_FOUND') return null;
+  if (error !== null) return <p role="alert">{error.message}</p>;
+  return node === undefined ? null : <TreeNode path={path} node={node} depth={0} {...props} />;
+}
+
 export function Tree(props: TreeProps) {
   return (
     <div className="tree-root" role="tree">
       {props.roots.map((r) => (
-        <TreeNode key={r} path={r} depth={0} {...props} />
+        <RootNode key={r} path={r} {...props} />
       ))}
     </div>
   );
