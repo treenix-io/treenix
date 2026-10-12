@@ -72,9 +72,13 @@ export async function poolAgents(read: Reader, config: PoolConfig): Promise<Node
     (node) => node.$type === 'ai.agent',
   );
   if ((await optionalPoolNode(read, config.orgPath)) === undefined) return agents;
-  for (const division of await poolChildren(read, config.orgPath)) {
-    if (division.$type !== 'org.division') continue;
-    for (const post of await poolChildren(read, division.$path))
+  for (const child of await poolChildren(read, config.orgPath)) {
+    const posts = child.$type === 'org.post'
+      ? [child]
+      : child.$type === 'org.division'
+        ? await poolChildren(read, child.$path)
+        : [];
+    for (const post of posts)
       if (post.$type === 'org.post' && getComponent<AiAgent>(post, 'ai.agent') !== undefined)
         agents.push(post);
   }

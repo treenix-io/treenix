@@ -2,7 +2,7 @@
 
 import type { Component } from '@treenx/core/kernel/types';
 
-interface AgentSeedNode {
+export interface AgentSeedNode {
   readonly $path: string;
   readonly $type: string;
   readonly $acl?: { g: string; p: number }[];
