@@ -6,45 +6,28 @@ import { Command, CommandGroup, CommandInput, CommandItem, CommandList } from '#
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '#components/ui/dialog';
 import { Input } from '#components/ui/input';
 import { typeFilter } from '#lib/string-utils';
-import { trpc } from '#tree/trpc';
-import { isOfType, type NodeData } from '@treenx/core';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 export type TypeInfo = { type: string; label: string; description: string };
 
-export async function loadTypes(effects?: TreeEffects): Promise<TypeInfo[]> {
-  const kernel = effects?.kernel;
-  if (kernel !== undefined && effects !== undefined) {
-    const types: TypeInfo[] = [];
-    let after: string | undefined;
-    do {
-      const page = await kernel.read({ children: '/sys/types', window: { limit: 50, ...(after === undefined ? {} : { after }) } });
-      for (const copy of page.copies) {
-        if ('error' in copy) throw new KernelError(copy.error.code, copy.error.message);
-        const description = await effects.execute(copy.node.$path, 'describe_type', {}, 't.type');
-        types.push({ type: description.name, label: description.schema.title ?? description.name,
-          description: description.schema.description ?? '' });
-      }
-      after = page.next;
-    } while (after !== undefined);
-    return types;
-  }
+/** Read the admitted type catalog through the selected source and its described schemas. */
+export async function loadTypes(effects: TreeEffects): Promise<TypeInfo[]> {
+  const kernel = effects.kernel;
+  if (kernel === undefined) throw new KernelError('UNAVAILABLE', 'Type selection requires a native source');
 
-  const { items } = (await trpc.getChildren.query({ path: '/sys/types', limit: 0, depth: 99 })) as {
-    items: NodeData[];
-    total: number;
-  };
-  return items
-    .filter((n) => isOfType(n, 'type'))
-    .map((n) => {
-      const schema = n.schema as { $type: string; title?: string; description?: string } | undefined;
-      const typeName = n.$path.slice('/sys/types/'.length).replace(/\//g, '.');
-      return {
-        type: typeName,
-        label: schema?.title ?? typeName,
-        description: schema?.description ?? '',
-      };
-    });
+  const types: TypeInfo[] = [];
+  let after: string | undefined;
+  do {
+    const page = await kernel.read({ children: '/sys/types', window: { limit: 50, ...(after === undefined ? {} : { after }) } });
+    for (const copy of page.copies) {
+      if ('error' in copy) throw new KernelError(copy.error.code, copy.error.message);
+      const description = await effects.execute(copy.node.$path, 'describe_type', {}, 't.type');
+      types.push({ type: description.name, label: description.schema.title ?? description.name,
+        description: description.schema.description ?? '' });
+    }
+    after = page.next;
+  } while (after !== undefined);
+  return types;
 }
 
 function groupByNamespace(types: TypeInfo[]): Map<string, TypeInfo[]> {

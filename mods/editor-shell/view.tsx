@@ -8,9 +8,6 @@ import { toast } from 'sonner';
 import { compKey, getDefaults } from '@treenx/core';
 import { KernelError } from '@treenx/core/errors';
 import {
-  addComponent,
-  removeNode,
-  refreshChildren,
   useTreeEffects,
   NavigateProvider,
   setEditorRoot,
@@ -71,17 +68,12 @@ const EditorShellView: View<EditorShell> = ({ ctx }) => {
   const handleDelete = useCallback(
     async (path: string) => {
       const kernel = effects.kernel;
-      if (kernel === undefined) await removeNode(path);
-      else {
-        const copy = (await kernel.read({ node: path })).copies[0];
-        if ('error' in copy) throw new KernelError(copy.error.code, copy.error.message);
-        await kernel.commit({ changes: [{ op: 'remove', path }],
-          expect: { nodes: [{ path, rev: copy.node.$rev }] } });
-      }
+      if (kernel === undefined) throw new KernelError('UNAVAILABLE', 'Removal requires a native source');
+      const copy = (await kernel.read({ node: path })).copies[0];
+      if ('error' in copy) throw new KernelError(copy.error.code, copy.error.message);
+      await kernel.commit({ changes: [{ op: 'remove', path }],
+        expect: { nodes: [{ path, rev: copy.node.$rev }] } });
       const parent = path === '/' ? null : path.slice(0, path.lastIndexOf('/')) || '/';
-      if (parent && effects.kernel === undefined) {
-        refreshChildren(parent);
-      }
       nav(parent ?? '/');
     },
     [nav, effects],
@@ -97,18 +89,16 @@ const EditorShellView: View<EditorShell> = ({ ctx }) => {
       if (!path) return;
       setAddingComponentAt(null);
       const kernel = effects.kernel;
-      if (kernel === undefined) await addComponent(path, name, type);
-      else {
-        const copy = (await kernel.read({ node: path })).copies[0];
-        if ('error' in copy) throw new KernelError(copy.error.code, copy.error.message);
-        const description = await effects.execute(`/sys/types/${type}`, 'describe_type', {}, 't.type');
-        const defaults: Record<string, unknown> = {};
-        for (const [field, schema] of Object.entries(description.schema.properties ?? {}))
-          if (Object.hasOwn(schema, 'default')) defaults[field] = structuredClone(schema.default);
-        await kernel.commit({ changes: [{ op: 'patch', path, ops: { $set: {
-          [compKey(name)]: { ...getDefaults(type), ...defaults, $type: type, $v: description.version },
-        } } }], expect: { nodes: [{ path, rev: copy.node.$rev }] } });
-      }
+      if (kernel === undefined) throw new KernelError('UNAVAILABLE', 'Component editing requires a native source');
+      const copy = (await kernel.read({ node: path })).copies[0];
+      if ('error' in copy) throw new KernelError(copy.error.code, copy.error.message);
+      const description = await effects.execute(`/sys/types/${type}`, 'describe_type', {}, 't.type');
+      const defaults: Record<string, unknown> = {};
+      for (const [field, schema] of Object.entries(description.schema.properties ?? {}))
+        if (Object.hasOwn(schema, 'default')) defaults[field] = structuredClone(schema.default);
+      await kernel.commit({ changes: [{ op: 'patch', path, ops: { $set: {
+        [compKey(name)]: { ...getDefaults(type), ...defaults, $type: type, $v: description.version },
+      } } }], expect: { nodes: [{ path, rev: copy.node.$rev }] } });
       toast.success(`Added ${name}`);
     },
     [addingComponentAt, effects],

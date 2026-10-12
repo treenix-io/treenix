@@ -18,7 +18,8 @@ import { Button } from '@treenx/react/ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@treenx/react/ui/dialog';
 import { Input } from '@treenx/react/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@treenx/react/ui/select';
-import { readNode } from '@treenx/react';
+import { useTreeEffects } from '@treenx/react';
+import { KernelError } from '@treenx/core/errors';
 import { ArrowRight, Plus, X } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { ACTION_TYPES, MENU_TYPES, type MenuButton, type MenuRow, type MenuType, type TString } from '../types';
@@ -161,6 +162,7 @@ function SortableButton({
   isOver: boolean;
   isCrossRow: boolean;
 }) {
+  const effects = useTreeEffects();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: `btn-${button.id}`,
   });
@@ -193,8 +195,11 @@ function SortableButton({
         setTreeDragOver(false);
         if (!path) return;
         e.preventDefault();
-        const node = await readNode(path);
-        if (node?.$type === 'brahman.page') onPageDrop(path);
+        const kernel = effects.kernel;
+        if (kernel === undefined) throw new KernelError('UNAVAILABLE', 'Page selection requires a native source');
+        const copy = (await kernel.read({ node: path })).copies[0];
+        if ('error' in copy) throw new KernelError(copy.error.code, copy.error.message);
+        if (copy.node.$type === 'brahman.page') onPageDrop(path);
       }}
     >
       {showIndicator && (

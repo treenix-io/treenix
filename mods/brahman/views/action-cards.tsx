@@ -8,7 +8,8 @@ import { Checkbox } from '@treenx/react/ui/checkbox';
 import { Input } from '@treenx/react/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@treenx/react/ui/select';
 import { Textarea } from '@treenx/react/ui/textarea';
-import { readNode, useSave, type View, usePath } from '@treenx/react';
+import { useTreeEffects, useSave, type View, usePath } from '@treenx/react';
+import { KernelError } from '@treenx/core/errors';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -244,6 +245,7 @@ export const IfElseEditor: View<IfElseAction> = ({ value, ctx }) => {
 }
 
 export const PageNavEditor: View<PageNavAction> = ({ value, ctx }) => {
+  const effects = useTreeEffects();
   const { comp, update } = useActionComp(ctx!.path);
   const [dragOver, setDragOver] = useState(false);
   if (!comp) return null;
@@ -266,8 +268,11 @@ export const PageNavEditor: View<PageNavAction> = ({ value, ctx }) => {
             setDragOver(false);
             if (!path) return;
             e.preventDefault();
-            const node = await readNode(path);
-            if (node?.$type === 'brahman.page') update({ targetPage: path });
+            const kernel = effects.kernel;
+            if (kernel === undefined) throw new KernelError('UNAVAILABLE', 'Page selection requires a native source');
+            const copy = (await kernel.read({ node: path })).copies[0];
+            if ('error' in copy) throw new KernelError(copy.error.code, copy.error.message);
+            if (copy.node.$type === 'brahman.page') update({ targetPage: path });
           }}
         >
           <Input className="font-mono" placeholder="Drop a page here or type path"
