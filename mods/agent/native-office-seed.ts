@@ -1,6 +1,5 @@
 import { A, R, W, type AclEntry, type NodeInput } from '@treenx/core/kernel/types';
 import { nativeSeed } from '#prefab/seed';
-import { A as LegacyAdmin, R as LegacyRead, W as LegacyWrite } from '@treenx/core';
 import type { AgentSeedNode } from '#agent/seed-data';
 import type { PoolConfig } from '#agent/native-pool';
 import { nativeWorkerPath } from '#agent/native-pool-manifest';
@@ -13,9 +12,9 @@ function acl(entries: readonly { g: string; p: number }[]): readonly AclEntry[] 
       : {
           subject: { group: entry.g },
           grant:
-            (entry.p & LegacyRead ? R : 0) |
-            (entry.p & LegacyWrite ? W : 0) |
-            (entry.p & LegacyAdmin ? A : 0),
+            (entry.p & R ? R : 0) |
+            (entry.p & W ? W : 0) |
+            (entry.p & A ? A : 0),
         },
   );
 }

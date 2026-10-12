@@ -1,9 +1,10 @@
+import { A, R, W } from '#kernel/types';
 // Storage-policy step tests (core-5fqq). The per-wrapper unit suites
 // (migration/validation/refs/trash) became policy-step tests against the one
 // implementation — owner decision 2026-07-03: independent composability was
 // never exercised. Contracts are unchanged; only the composition surface is.
 
-import { A, createNode, type NodeData, R, register, S, unregister, W } from '#core';
+import { createNode, type NodeData, register, unregister } from '#core';
 import { KernelError } from '#errors';
 import type { Component, Migration } from '#kernel/types';
 import { clearRegistry } from '#testing';

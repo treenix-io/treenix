@@ -1,11 +1,12 @@
-import { A, R, S, W } from '#core';
+import { A, R, W } from '#kernel/types';
+
 import { registerPrefab } from '#mod';
 
 // Universal infra — works with any storage backend (FS, memory, Mongo)
 registerPrefab('core', 'seed', [
   { $path: 'sys', $type: 't.system',
     $acl: [
-      { g: 'admins', p: R | W | A | S },
+      { g: 'admins', p: R | W | A },
       { g: 'authenticated', p: R },
       { g: 'public', p: R },
     ],
@@ -22,7 +23,7 @@ registerPrefab('core', 'seed', [
   // the explicit hard delete.
   { $path: 'sys/trash', $type: 'dir',
     $acl: [
-      { g: 'admins', p: R | W | A | S },
+      { g: 'admins', p: R | W | A },
       { g: 'authenticated', p: 0 },
       { g: 'public', p: 0 },
     ],

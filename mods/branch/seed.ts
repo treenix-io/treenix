@@ -1,10 +1,11 @@
+import { A, R, W } from '@treenx/core/kernel/types';
 // /branches root — branches are created via the `create` action on it.
 // Two-layer isolation model: ACL is coarse (agents may write only under
-// /branches — root grant drops to R+S in S3), capability narrows a workload
+// /branches), capability narrows a workload
 // session to ITS branch (writePaths=['/branches/<id>/**']). Per-branch nodes
 // additionally grant `u:<owner>` full bits at create time.
 
-import { A, makeNode, R, S, W } from '@treenx/core';
+import { makeNode } from '@treenx/core';
 import { registerPrefab } from '@treenx/core/mod';
 
 // The description is THE onboarding text for agents: prompt composers inject
@@ -21,12 +22,14 @@ Workflow:
 4. finish: execute 'requestMerge' with a note — flips the branch to review; a human reviews the diff and merges.
    Watch status and conflicts on the branch node.`;
 
-const branchesRoot = makeNode('branches', 't.branches', {}, {
-  description: { $type: 't.description', text: WORKFLOW },
-});
-branchesRoot.$acl = [
-  { g: 'admins', p: R | W | A | S },
-  { g: 'agents', p: R | W | A | S },
-];
+const branchesRoot = {
+  ...makeNode('branches', 't.branches', {}, {
+    description: { $type: 't.description', text: WORKFLOW },
+  }),
+  $acl: [
+    { g: 'admins', p: R | W | A },
+    { g: 'agents', p: R | W | A },
+  ],
+};
 
 registerPrefab('branch', 'seed', [branchesRoot]);

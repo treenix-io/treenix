@@ -1,16 +1,7 @@
-// ── ACL ──
-
-export type GroupPerm = { g: string; p: number };
-export const R = 1,
-  W = 2,
-  A = 4,
-  S = 8;
-
 // TODO: K extends `$${infer N}` ? never : K
 // TODO: fix ComponentData and NodeData types. it should be generic types of its contents
 export type ComponentData<T = Record<string, unknown>> = T & {
   $type: string;
-  $acl?: GroupPerm[];
   /** Schema version stamped by migrations (tree/migration.ts). Absent = 0. */
   $v?: number;
   /** Fractional key (kernel/order.ts): a node's place among its siblings, a component's among the node's. */

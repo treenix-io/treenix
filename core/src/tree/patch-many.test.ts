@@ -1,8 +1,9 @@
+import { A, R, W } from '#kernel/types';
 // patchMany contract (core-gk8.15) — atomic multi-node patch under one
 // ancestor. Contract suite runs against every concrete adapter (memory, fs);
 // combinator/policy/pipeline semantics follow in their own describes.
 
-import { A, createNode, R, register, S, unregister, W } from '#core';
+import { createNode, register, unregister } from '#core';
 import { KernelError } from '#errors';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
