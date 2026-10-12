@@ -14,6 +14,7 @@ export type { StoreContractOptions } from '#kernel/store/contract'
 
 export interface NativeTestInstance<ActorName extends string = string>
   extends TestInstance<ActorName> {
+  readonly instance: Awaited<ReturnType<typeof createInstance>>;
   readonly initialCursor: StreamCursor;
   /** Close actor lanes and drain their pending deliveries. */
   close(): Promise<void>;

@@ -131,6 +131,21 @@
       "types": "./dist/protocol/twp.d.ts",
       "default": "./dist/protocol/twp.js"
     },
+    "./protocol/twp-loopback": {
+      "development": "./src/protocol/twp-loopback.ts",
+      "types": "./dist/protocol/twp-loopback.d.ts",
+      "default": "./dist/protocol/twp-loopback.js"
+    },
+    "./protocol/serve-port": {
+      "development": "./src/protocol/serve-port.ts",
+      "types": "./dist/protocol/serve-port.d.ts",
+      "default": "./dist/protocol/serve-port.js"
+    },
+    "./protocol/twp-port": {
+      "development": "./src/protocol/twp-port.ts",
+      "types": "./dist/protocol/twp-port.d.ts",
+      "default": "./dist/protocol/twp-port.js"
+    },
     "./kernel/runtime": {
       "development": "./src/kernel/runtime.ts",
       "types": "./dist/kernel/runtime.d.ts",
