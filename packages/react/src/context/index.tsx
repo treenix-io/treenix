@@ -7,6 +7,7 @@ import { useTreeEffects } from '#hooks';
 import { READ_ONLY_EFFECTS, type TreeEffects } from '#tree/effects';
 import { $key, $node } from '#symbols';
 import { type OnChange, scopeOnChange } from '#tree/on-change';
+import type { Actions as CoreActions } from '@treenx/core/comp';
 import {
   getComponentByName,
   type ComponentData,
@@ -107,11 +108,8 @@ export type View<T, Extra = {}> = FC<RenderProps<T> & Extra>;
 // ── useActions — proxy that turns value's symbol metadata into action calls ──
 
 type Actions<T> = {
-  [K in keyof T as T[K] extends (...args: any[]) => any ? K : never]: T[K] extends () => any
-    ? () => Promise<unknown>
-    : T[K] extends (data: infer D) => any
-      ? (data: D) => Promise<unknown>
-      : () => Promise<unknown>;
+  [K in keyof CoreActions<T>]: CoreActions<T>[K] extends (...args: infer A) => unknown
+    ? (...args: A) => Promise<unknown> : never;
 };
 
 /** Finds an admitted node or its exact named component without decorating the payload. */

@@ -32,7 +32,7 @@ export type Raw<T> = { [K in keyof T as T[K] extends Function ? never : K]: T[K]
 
 // Actions<T>: map class methods to typed async client signatures
 // Uses Parameters<>/ReturnType<> to avoid TypeScript's "() => T extends (x: D) => T" false-match.
-// Arity: Parameters<fn> extends [infer D, ...] → (data: D); else → ()
+// Arity: retain the first argument's optionality and omit internal dependency arguments.
 // Internal `deps` second-arg is absorbed by `...any[]` and dropped from client type.
 // Generator methods (async *) → AsyncIterable<Y>; regular → Promise<R>
 // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
@@ -40,16 +40,16 @@ type _AnyFn = (...args: any[]) => any;
 // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
 type _ToFn<T> = T extends _AnyFn ? T : never;
 
+type _ActionArgs<T extends _AnyFn> = Parameters<T> extends []
+  ? []
+  : Parameters<T> extends [infer D, ...any[]] ? [data: D] : [data?: Parameters<T>[0]];
+
 // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
 export type Actions<T> = {
   [K in keyof T as T[K] extends Function ? K : never]:
-    ReturnType<_ToFn<T[K]>> extends AsyncGenerator<infer Y, any, any>
-      ? Parameters<_ToFn<T[K]>> extends [infer D, ...any[]]
-        ? (data: D) => AsyncIterable<Y>
-        : () => AsyncIterable<Y>
-    : Parameters<_ToFn<T[K]>> extends [infer D, ...any[]]
-      ? (data: D) => Promise<Awaited<ReturnType<_ToFn<T[K]>>>>
-      : () => Promise<Awaited<ReturnType<_ToFn<T[K]>>>>
+    (...args: _ActionArgs<_ToFn<T[K]>>) =>
+      ReturnType<_ToFn<T[K]>> extends AsyncGenerator<infer Y, any, any>
+        ? AsyncIterable<Y> : Promise<Awaited<ReturnType<_ToFn<T[K]>>>>
 };
 
 // TypeProxy<T>: readonly data fields + async action methods
