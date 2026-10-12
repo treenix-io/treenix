@@ -1,13 +1,20 @@
-// Sensor generator — on-demand scan, streams results via streamAction subscription
+// Sensor generator — on-demand scan, streams results through the selected native lane
 
 import { type NodeData, register } from '@treenx/core';
-import { treeClient, useCurrentNode } from '@treenx/react';
+import { useCurrentNode, useTreeEffects } from '@treenx/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 type Reading = NodeData<{ value: number; seq: number; ts: number }>;
 
+declare module '@treenx/react/hooks' {
+  interface ActionChunks {
+    'examples.demo.generator': { scan: Reading };
+  }
+}
+
 function GeneratorDemo() {
   const node = useCurrentNode();
+  const effects = useTreeEffects();
   const [items, setItems] = useState<Reading[]>([]);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -18,19 +25,25 @@ function GeneratorDemo() {
     setItems([]);
     setError(null);
     setRunning(true);
-    const id = treeClient.sub<Reading>({
-      kind: 'action', action: { path: node.$path, action: 'scan', args: { count: 10, delay: 500 } },
-      observer: {
-        next: reading => setItems(prev => [...prev, reading]),
-        complete: () => setRunning(false),
-        error: reason => {
-          setRunning(false);
-          setError(reason instanceof Error ? reason.message : String(reason));
-        },
-      },
+    const pieces = effects.stream({
+      path: node.$path, type: 'examples.demo.generator', action: 'scan', args: { count: 10, delay: 500 },
     });
-    unsubRef.current = () => treeClient.cancel(id);
-  }, [node.$path]);
+    let cancelled = false;
+    void (async () => {
+      try {
+        for await (const reading of pieces)
+          if (!cancelled) setItems(prev => [...prev, reading]);
+      } catch (reason) {
+        if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason));
+      } finally {
+        if (!cancelled) setRunning(false);
+      }
+    })();
+    unsubRef.current = () => {
+      cancelled = true;
+      void pieces.return?.().catch(reason => console.error('Sensor scan cancellation failed', reason));
+    };
+  }, [node.$path, effects]);
 
   useEffect(() => () => { unsubRef.current?.(); unsubRef.current = null; }, [node.$path]);
 
