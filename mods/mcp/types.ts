@@ -16,31 +16,35 @@ export class McpConfig {
 registerType('mcp.server', McpConfig);
 
 /** API token manager for creating and revoking machine access credentials. */
-export class ApiTokenManager {
-  /**
-   * Create API token for an agent. Token returned ONCE — server stores only sha256(token). Groups go on the user (no allowlist — admin trust).
-   * @write
-   */
-  async create(_data: { name: string; groups?: string[] }) {
-    return { token: '', userId: '' };
-  }
-  /**
-   * Revoke an API token by name
-   * @write
-   */
-  async revoke(_data: { name: string }) {}
+export class ApiTokenManager {}
+
+export interface ApiTokenCreated {
+  id: string;
+  token: string;
+  userId: string;
+}
+
+export interface ApiTokenManager {
+  /** @write Create a scoped machine credential; its token is returned once. */
+  create(data: { name: string; groups?: string[]; scope: string[] }): Promise<ApiTokenCreated>;
+  /** @write Revoke the credential identified by its token record. */
+  revoke(data: { id: string }): Promise<{ revoked: boolean }>;
 }
 registerType('t.api.tokens', ApiTokenManager, { noOptimistic: ['create', 'revoke'] });
 
-/** Single API token. Plaintext token is NEVER stored — sessionRef points to /auth/sessions/<sha256(token)>. Groups live on the user. */
+/** Single API token. Plaintext is never stored; groups live on its account.
+ * @version 1
+ * @actionsOnly */
 export class ApiToken {
   /** @title Token name */
   name = '';
-  /** @title Authenticates as this user id */
-  userId = '';
+  /** @title Account node @format path */
+  accountPath = '';
+  /** @title Authenticates as this principal */
+  principal = '';
   /** @title Session node path @format path */
   sessionRef = '';
-  /** @title Token fingerprint (first6…last8) for visual identification */
+  /** @title Token fingerprint for visual identification */
   preview = '';
   /** @title Created at (epoch ms) */
   createdAt = 0;

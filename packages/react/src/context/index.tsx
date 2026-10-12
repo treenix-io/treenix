@@ -108,8 +108,10 @@ export type View<T, Extra = {}> = FC<RenderProps<T> & Extra>;
 // ── useActions — proxy that turns value's symbol metadata into action calls ──
 
 type Actions<T> = {
-  [K in keyof CoreActions<T>]: CoreActions<T>[K] extends (...args: infer A) => unknown
-    ? (...args: A) => Promise<unknown> : never;
+  [K in keyof CoreActions<T>]: CoreActions<T>[K] extends (...args: infer A) => Promise<infer R>
+    ? (...args: A) => Promise<R>
+    : CoreActions<T>[K] extends (...args: infer A) => unknown
+      ? (...args: A) => Promise<unknown> : never;
 };
 
 /** Finds an admitted node or its exact named component without decorating the payload. */

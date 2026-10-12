@@ -3,6 +3,7 @@ import { z } from 'zod/v3';
 import { KernelError } from '@treenx/core/errors';
 import { prepareCredential } from '@treenx/core/kernel/auth/credentials';
 import type { ModuleManifest } from '@treenx/core/kernel/types';
+import type { ApiTokenCreated } from './types';
 
 const createInput = z.object({ name: z.string().min(1), groups: z.array(z.string()).default(['agent']), scope: z.array(z.string().startsWith('/')).min(1) }).strict();
 const accountInput = z.object({ id: z.string().uuid(), name: z.string().min(1), groups: z.array(z.string()) }).strict();
@@ -23,7 +24,7 @@ export function nativeApiTokenManifest(): ModuleManifest {
         },
         create: { kind: 'write', args: { type: 'object', required: ['name', 'scope'], additionalProperties: false,
           properties: { name: { type: 'string' }, groups: { type: 'array', items: { type: 'string' } }, scope: { type: 'array', items: { type: 'string' }, minItems: 1 } } },
-          async handler(context, args) {
+          async handler(context, args): Promise<ApiTokenCreated> {
             await context.requireAdmin();
             const input = createInput.parse(args);
             const id = randomUUID();
