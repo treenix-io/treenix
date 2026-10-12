@@ -54,7 +54,8 @@ export function createLaneEffects(client: TwpClient) {
     available();
     const parsed = parseURI(pathOrUri);
     const component = key ?? parsed.key;
-    const opId = client.key(), args = structuredClone(data);
+    // Zero-argument UI methods still need an explicit JSON payload on the native wire.
+    const opId = client.key(), args = data === undefined ? {} : structuredClone(data);
     const predicted = prediction(parsed.path, action, args, component, opId);
     try {
       const outcome = await client.act({ path: parsed.path, action, args,
@@ -116,7 +117,7 @@ export function createLaneEffects(client: TwpClient) {
       available();
       if (cancelled) return;
       const parsed = parseURI(action.path), component = action.component ?? parsed.key;
-      pending = client.act({ path: parsed.path, action: action.action, args: action.args,
+      pending = client.act({ path: parsed.path, action: action.action, args: action.args === undefined ? {} : action.args,
         ...(component === undefined ? {} : { component: compKey(component) }) });
       void pending.outcome.then(() => { finished = true; }, () => { finished = true; });
       try {
