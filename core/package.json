@@ -504,8 +504,6 @@
     "test:upgrade-kernel": "tsx --conditions development --test src/tools/upgrade-kernel.test.ts"
   },
   "dependencies": {
-    "@trpc/client": "^11.17.0",
-    "@trpc/server": "^11.17.0",
     "fast-json-patch": "^3.1.1",
     "immer": "^11.1.4",
     "zod": "^4.3.6"

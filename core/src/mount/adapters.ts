@@ -2,7 +2,6 @@
 // Naming: t.mount.{name} — system infrastructure adapters
 // Each adapter receives its mount component + MountCtx (not the whole node).
 
-import { createTrpcTransport } from '#client/trpc';
 import { registerType } from '#comp';
 import { getComponentByName, register } from '#core';
 import { KernelError } from '#errors';
@@ -91,16 +90,6 @@ export class MountOverlay {
 }
 registerType('t.mount.overlay', MountOverlay);
 
-export class MountTreeTrpc {
-  url = '';
-  path = '/';
-  token = '';
-  /** Allow a loopback/private/link-local host (local peers, tests). Off by
-   *  default: guards admin typos against internal endpoints (F3). */
-  allowPrivate = false;
-}
-registerType('t.mount.tree.trpc', MountTreeTrpc);
-
 // ── Adapters ──
 
 function required(type: string, field: string, at: string): never {
@@ -152,38 +141,6 @@ register(MountRawFs, 'mount', async (mount, ctx) => {
   // (e.g. relative markdown links → absolute outer tree paths).
   const tree = await createRawFsTree(mount.root, mount.shared ? '' : ctx.path);
   return mount.shared ? tree : createRepathTree(tree, ctx.path, '/');
-});
-
-// F3: WHATWG URL normalizes every IPv4 spelling (0x7f000001, 2130706433, 127.1
-// → 127.0.0.1) and IPv6 literals, so the check runs on `hostname`, never on the
-// raw string. DNS names resolving to private addresses stay out of scope —
-// authoring is admin-only (F4); this only catches typos.
-function isPrivateHost(hostname: string): boolean {
-  const host = hostname.toLowerCase().replace(/\.$/, '');
-  if (host.startsWith('[')) {
-    const v6 = host.slice(1, -1);
-    return v6 === '::' || v6 === '::1' || v6.startsWith('::ffff:') || /^(f[cd]|fe[89ab])/.test(v6);
-  }
-  if (host === 'localhost' || host.endsWith('.localhost')) return true;
-  const v4 = /^(\d+)\.(\d+)\.\d+\.\d+$/.exec(host);
-  if (!v4) return false;
-  const a = Number(v4[1]);
-  const b = Number(v4[2]);
-  return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254)
-    || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
-}
-
-// Federation: mount a remote Treenix instance's tree via tRPC.
-register(MountTreeTrpc, 'mount', async (mount, ctx) => {
-  if (!mount.url) required('t.mount.tree.trpc', 'url', ctx.path);
-  // The URL may carry credentials — never echo it into errors.
-  if (!URL.canParse(mount.url)) throw new KernelError('INVALID', `t.mount.tree.trpc at ${ctx.path}: invalid url`);
-  const { hostname } = new URL(mount.url);
-  if (!mount.allowPrivate && isPrivateHost(hostname)) {
-    throw new KernelError('INVALID', `t.mount.tree.trpc at ${ctx.path}: private host ${hostname} needs allowPrivate`);
-  }
-  const { tree } = createTrpcTransport({ url: mount.url, token: mount.token || undefined });
-  return createRepathTree(tree, ctx.path, mount.path || '/');
 });
 
 register(MountOverlay, 'mount', async (mount, ctx) => {
