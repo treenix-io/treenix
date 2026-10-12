@@ -5,10 +5,6 @@ import type { NativeModuleDeployment, NativeModuleHost } from '#kernel/manifest'
 import { A, R, W, type ServiceHandler } from '#kernel/types';
 import type { LogsInput } from './input';
 
-declare module '#kernel/manifest' {
-  interface NativeModuleHost { readonly logs?: LogsInput; }
-}
-
 /** Only the admitted service Session writes persistent entries; every batch receives ordinary Writer limits. */
 function writer(input: LogsInput): ServiceHandler {
   return async (node, session) => {

@@ -7,6 +7,10 @@ export interface LogsInput {
   subscribe(receive: (entry: LogEntry) => void): () => void;
 }
 
+declare module '#kernel/manifest' {
+  interface NativeModuleHost { readonly logs?: LogsInput; }
+}
+
 /** Retain bounded startup messages until this deployment's writer has admitted its input. */
 export function createLogsInput(): LogsInput {
   let receive: ((entry: LogEntry) => void) | undefined;
