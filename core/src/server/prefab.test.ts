@@ -10,7 +10,6 @@ loadSchemasFromDir(join(dirname(fileURLToPath(import.meta.url)), '../mod/schemas
 import { createMemoryTree, type Tree } from '#tree';
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
-import { createModsTree } from '#mount/mods';
 import { deployByKey, deployPrefab, deploySeedPrefabs } from './prefab';
 
 describe('Prefab registry', () => {
@@ -54,97 +53,6 @@ describe('Prefab registry', () => {
 
   it('getPrefab returns undefined for missing', () => {
     assert.equal(getPrefab('nope', 'nope'), undefined);
-  });
-});
-
-describe('Mods mount', () => {
-  let backing: Tree;
-
-  beforeEach(() => {
-    clearPrefabs();
-    backing = createMemoryTree();
-  });
-  afterEach(() => clearPrefabs());
-
-  it('get /sys/mods returns dir', async () => {
-    const ms = createModsTree();
-    const node = await ms.get('/sys/mods');
-    assert.equal(node?.$type, 't.dir');
-  });
-
-  it('get /sys/mods/{mod} returns t.mod for registered mod', async () => {
-    registerPrefab('orders', 'infra', [{ $path: 'data', $type: 'dir' } as NodeData]);
-    const ms = createModsTree();
-    const node = await ms.get('/sys/mods/orders');
-    assert.equal(node?.$type, 't.mod');
-    assert.equal((node as any).name, 'orders');
-    assert.deepEqual((node as any).prefabs, ['infra']);
-  });
-
-  it('get returns undefined for unregistered mod', async () => {
-    const ms = createModsTree();
-    const node = await ms.get('/sys/mods/nope');
-    assert.equal(node, undefined);
-  });
-
-  it('getChildren /sys/mods lists all mods', async () => {
-    registerPrefab('orders', 'infra', [{ $path: '.', $type: 'dir' } as NodeData]);
-    registerPrefab('sim', 'world', [{ $path: '.', $type: 'dir' } as NodeData]);
-    const ms = createModsTree();
-    const { items } = await ms.getChildren('/sys/mods');
-    assert.equal(items.length, 2);
-    const paths = items.map(n => n.$path).sort();
-    assert.deepEqual(paths, ['/sys/mods/orders', '/sys/mods/sim']);
-  });
-
-  it('getChildren /sys/mods/{mod} lists prefabs dir', async () => {
-    registerPrefab('orders', 'infra', [{ $path: 'data', $type: 'dir' } as NodeData]);
-    const ms = createModsTree();
-    const { items } = await ms.getChildren('/sys/mods/orders');
-    assert.ok(items.some(n => n.$path === '/sys/mods/orders/prefabs'));
-  });
-
-  it('getChildren /sys/mods/{mod}/prefabs lists prefab names', async () => {
-    registerPrefab('orders', 'infra', [{ $path: 'data', $type: 'dir' } as NodeData]);
-    registerPrefab('orders', 'demo', [{ $path: 'x', $type: 'dir' } as NodeData]);
-    const ms = createModsTree();
-    const { items } = await ms.getChildren('/sys/mods/orders/prefabs');
-    assert.equal(items.length, 2);
-    const paths = items.map(n => n.$path).sort();
-    assert.deepEqual(paths, ['/sys/mods/orders/prefabs/demo', '/sys/mods/orders/prefabs/infra']);
-  });
-
-  it('getChildren lists prefab nodes (direct children only)', async () => {
-    registerPrefab('orders', 'infra', [
-      { $path: '.', $type: 'dir' } as NodeData,
-      { $path: 'data', $type: 'mount-point' } as NodeData,
-      { $path: 'kitchen', $type: 'mount-point' } as NodeData,
-      { $path: 'nested/deep', $type: 'dir' } as NodeData, // skipped — not direct
-      { $path: '/sys/autostart/x', $type: 'ref' } as NodeData, // skipped — absolute
-    ]);
-    const ms = createModsTree();
-    const { items } = await ms.getChildren('/sys/mods/orders/prefabs/infra');
-    assert.equal(items.length, 2); // data + kitchen
-    assert.deepEqual(items.map(n => n.$path).sort(), [
-      '/sys/mods/orders/prefabs/infra/data',
-      '/sys/mods/orders/prefabs/infra/kitchen',
-    ]);
-  });
-
-  it('set throws (read-only)', async () => {
-    const ms = createModsTree();
-    await assert.rejects(
-      () => ms.set(createNode('/sys/mods/x', 'dir')),
-      (e: Error) => e.message.includes('read-only'),
-    );
-  });
-
-  it('remove throws (read-only)', async () => {
-    const ms = createModsTree();
-    await assert.rejects(
-      () => ms.remove('/sys/mods/x'),
-      (e: Error) => e.message.includes('read-only'),
-    );
   });
 });
 

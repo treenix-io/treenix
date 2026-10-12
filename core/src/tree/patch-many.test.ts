@@ -4,8 +4,6 @@
 
 import { A, createNode, R, register, S, unregister, W } from '#core';
 import { KernelError } from '#errors';
-import { withMounts } from '#mount';
-import { withAcl } from '#security/acl-tree';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -402,52 +400,6 @@ describe('patchMany: repath', () => {
     const created = await inner.get('/data/p/new');
     assert.equal(created?.n, 7);
     assert.equal(created?.$path, '/data/p/new');
-  });
-});
-
-// ── mounts: set-member boundary guard ──
-// A set-member under a NESTED mount below the batch ancestor must be denied:
-// the dispatcher resolves ONE tree at the ancestor, so forwarding would
-// silently create a shadowed node in the outer store.
-
-describe('patchMany: mounts', () => {
-  const MOUNT = 'pm.test.mount';
-
-  afterEach(() => {
-    try { unregister(MOUNT, 'mount'); } catch { /* not registered in this test */ }
-  });
-
-  it('set-member under a nested mount is rejected — no shadow node in the outer store', async () => {
-    const outer = createMemoryTree();
-    const nested = createMemoryTree();
-    register(MOUNT, 'mount', () => nested);
-    await outer.set(createNode('/p', 'dir'));
-    await outer.set(createNode('/p/m', 'dir', {}, { mount: { $type: MOUNT } }));
-    const ms = withMounts(outer);
-
-    await assert.rejects(
-      ms.patchMany!('/p', [
-        { path: '/p/m/x', node: createNode('/p/m/x', 'item', { n: 1 }) },
-      ]),
-      code('INVALID'),
-    );
-    assert.equal(await outer.get('/p/m/x'), undefined, 'no shadow node in the outer store');
-    assert.equal(await nested.get('/p/m/x'), undefined);
-  });
-
-  it('set-member fully inside the mounted subtree forwards to the nested store', async () => {
-    const outer = createMemoryTree();
-    const nested = createMemoryTree();
-    register(MOUNT, 'mount', () => nested);
-    await outer.set(createNode('/p', 'dir'));
-    await outer.set(createNode('/p/m', 'dir', {}, { mount: { $type: MOUNT } }));
-    const ms = withMounts(outer);
-
-    await ms.patchMany!('/p/m/x', [
-      { path: '/p/m/x', node: createNode('/p/m/x', 'item', { n: 1 }) },
-    ]);
-    assert.equal((await nested.get('/p/m/x'))?.n, 1);
-    assert.equal(await outer.get('/p/m/x'), undefined);
   });
 });
 

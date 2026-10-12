@@ -4,7 +4,6 @@ export * from './claims.ts';
 export * from './anon.ts';
 export * from './sessions.ts';
 export * from './acl.ts';
-export * from './acl-tree.ts';
 export * from './ops.ts';
 export * from './agent.ts';
 export * from './rate-limit.ts';

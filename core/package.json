@@ -111,11 +111,6 @@
       "types": "./dist/util/stable-json.d.ts",
       "default": "./dist/util/stable-json.js"
     },
-    "./mount": {
-      "development": "./src/mount.ts",
-      "types": "./dist/mount.d.ts",
-      "default": "./dist/mount.js"
-    },
     "./client": {
       "development": "./src/client.ts",
       "types": "./dist/client.d.ts",
@@ -255,11 +250,6 @@
       "development": "./src/security.ts",
       "types": "./dist/security.d.ts",
       "default": "./dist/security.js"
-    },
-    "./security/projector": {
-      "development": "./src/security/projector.ts",
-      "types": "./dist/security/projector.d.ts",
-      "default": "./dist/security/projector.js"
     },
     "./contexts/text": {
       "development": "./src/contexts/text.ts",

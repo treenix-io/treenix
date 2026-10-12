@@ -6,7 +6,6 @@
 import { createNode, register } from '#core';
 import { KernelError } from '#errors';
 import { clearRegistry } from '#testing';
-import { withMounts } from '#mount';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -172,36 +171,3 @@ suite({
     },
   });
 }
-
-// mimefs is covered separately in mimefs.test.ts — it uses a different
-// path model (extensions are preserved on $path; nodes are real files).
-
-// ── mount Tree-only fallback: cyclic-cursor guard (core-anz4.16) ──
-// The withMounts.scanChildren fallback pages a legacy Tree-only adapter via
-// nextCursor. A misbehaving adapter that returns a repeating/cyclic nextCursor
-// must make the scan REJECT loudly, never loop forever.
-describe('scanChildren mount fallback: cyclic nextCursor', () => {
-  afterEach(() => clearRegistry());
-
-  it('rejects when a Tree-only adapter returns a repeating nextCursor', async () => {
-    const stuck: Tree = {
-      async get() { return undefined; },
-      async getChildren() {
-        return { items: [createNode('/users/alice', 'item')], total: 1, nextCursor: 'STUCK' };
-      },
-      async set() { return { changes: [] }; },
-      async remove() { return { changes: [] }; },
-      async patch() { return { changes: [] }; },
-    };
-    register('test.mount.cyclic', 'mount', () => stuck);
-    const rootStore = createMemoryTree();
-    await rootStore.set(
-      createNode('/users', 'collection', {}, { mount: { $type: 'test.mount.cyclic' } }),
-    );
-    const ms = withMounts(rootStore);
-    await assert.rejects(
-      async () => { for await (const _ of ms.scanChildren!('/users')) { /* drain */ } },
-      (e: unknown) => e instanceof KernelError && e.code === 'INVALID',
-    );
-  });
-});

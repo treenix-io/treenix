@@ -7,7 +7,6 @@ import { A, createNode, type NodeData, R, register, S, unregister, W } from '#co
 import { KernelError } from '#errors';
 import type { Component, Migration } from '#kernel/types';
 import { clearRegistry } from '#testing';
-import { withMounts } from '#mount';
 import { createMemoryTree, type Tree } from '#tree';
 import { createFsTree } from '#tree/fs';
 import { isUlid, ulid } from '#util/ulid';
@@ -923,58 +922,6 @@ describe('policy: sweepTrash', () => {
     const inner = createMemoryTree();
     await inner.set(createNode('/', 'root', {}));
     assert.equal(await sweepTrash(inner, DAY), 0);
-  });
-});
-
-// core-anz4.8: a trashed MOUNT POINT keeps its mount component in its
-// /sys/trash copy. If GC resolved that mount it would activate the adapter,
-// enumerate EXTERNAL content, and delete data in the external store. Trash must
-// be mount-inert — the copied subtree is plain rootStore data.
-describe('policy: trash GC is mount-inert (core-anz4.8)', () => {
-  const FAKE_MOUNT = 't.mount.fake.anz48';
-
-  afterEach(() => {
-    try { unregister(FAKE_MOUNT, 'mount'); } catch { /* not registered in this test */ }
-  });
-
-  it('purging a trashed mount point never touches the external adapter', async () => {
-    const spy = { getChildren: 0, remove: 0 };
-    const fake: Tree = {
-      async get() { return undefined; },
-      async getChildren(path: string) {
-        spy.getChildren++;
-        // One synthetic external child at the enumerated leaf so a buggy GC
-        // would recurse into it and issue a remove against this adapter.
-        const items: NodeData[] = path.endsWith('/ext')
-          ? [createNode(`${path}/EXTERNAL`, 'ext.doc', {})]
-          : [];
-        return { items, total: items.length };
-      },
-      async set() { return { changes: [] }; },
-      async remove() { spy.remove++; return { changes: [] }; },
-      async patch() { return { changes: [] }; },
-    };
-    register(FAKE_MOUNT, 'mount', () => fake);
-
-    const inner = createMemoryTree();
-    await inner.set(createNode('/', 'root', {}));
-    const { base, tree } = withStoragePolicy(withMounts(inner));
-
-    // A live mount point in the business tree, then soft-delete it: the copy
-    // under /sys/trash carries the #mount component.
-    await tree.set(createNode('/ext', 'dir', {}, { mount: { $type: FAKE_MOUNT } }));
-    assert.ok((await tree.remove('/ext')).changes?.length, 'remove reported the change');
-
-    const [entry] = (await base.getChildren(TRASH_ROOT, { depth: 1 })).items;
-    assert.ok(entry, 'a trash entry exists');
-
-    // Future cutoff → the entry is stale → subtree purge runs.
-    assert.equal(await sweepTrash(base, -1), 1);
-
-    const { items: leftovers } = await base.getChildren(TRASH_ROOT, { depth: -1 });
-    assert.deepEqual(leftovers, [], 'the local trash copy is gone');
-    assert.equal(spy.getChildren, 0, 'GC never enumerated the external adapter');
-    assert.equal(spy.remove, 0, 'GC never deleted external adapter data');
   });
 });
 

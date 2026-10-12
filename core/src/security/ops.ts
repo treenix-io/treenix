@@ -110,5 +110,3 @@ export async function devLogin(store: Tree) {
   const token = await createSession(store, userId);
   return { token, userId };
 }
-
-export { agentConnect, agentInitPair } from '#agent-port/ops';
