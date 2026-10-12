@@ -311,11 +311,6 @@
       "types": "./dist/vite-plugin.d.ts",
       "default": "./dist/vite-plugin.js"
     },
-    "./mods/autostart/service": {
-      "development": "./src/mods/autostart/service.ts",
-      "types": "./dist/mods/autostart/service.d.ts",
-      "default": "./dist/mods/autostart/service.js"
-    },
     "./kernel/store/memory": {
       "development": "./src/kernel/store/memory.ts",
       "types": "./dist/kernel/store/memory.d.ts",
