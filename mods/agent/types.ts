@@ -2,8 +2,7 @@
 // Role determines prompt + tool policy. Uses metatron's invokeClaude for LLM.
 // Agent = node, tree = protocol.
 
-import { getComponent } from '@treenx/core';
-import { getCtx, registerType } from '@treenx/core/comp';
+import { registerType } from '@treenx/core/comp';
 import { agentMethods } from '#agent/methods';
 
 // ── Active query registry ──
@@ -94,16 +93,6 @@ export class AiRun {
   mode: 'plan' | 'work' | 'discuss' | 'chat' = 'work';
   /** Key used by invokeClaude — needed to abort the correct query */
   queryKey = '';
-
-  /** @description Stop the running task */
-  stop() {
-    const { node } = getCtx();
-    const status = getComponent(node, AiRunStatus);
-    if (!status || status.status !== 'running') throw new Error('run is not running');
-    status.status = 'aborted';
-    status.finishedAt = Date.now();
-    abortQuery(this.queryKey || node.$path.split('/').slice(0, -2).join('/'));
-  }
 }
 
 export type AgentStatus = 'idle' | 'working' | 'blocked' | 'error' | 'offline';
@@ -307,20 +296,11 @@ registerType('ai.thread', AiThread);
 export class AiChat {
   streaming = false;
   sessionId = '';
-
-  /** @description Clear chat history and reset session */
-  clear() {
-    const { node } = getCtx();
-    const thread = getComponent(node, AiThread);
-    if (thread) thread.messages = [];
-    this.sessionId = '';
-    this.streaming = false;
-  }
 }
 
 export type ChatChunk = { type: 'chunk' | 'done'; text: string };
 
-/** These actions are registered outside the data class in both server implementations. */
+/** Chat actions are supplied by the owning native module. */
 export interface AiChat {
   send(data: { text: string }): AsyncGenerator<ChatChunk>;
   stop(): void;
@@ -332,3 +312,13 @@ registerType('ai.log', AiLog);
 registerType('ai.run-status', AiRunStatus);
 registerType('ai.cost', AiCost);
 registerType('ai.run', AiRun);
+
+export interface AiRun {
+  /** @description Stop the running task */
+  stop(): Promise<void>;
+}
+
+export interface AiChat {
+  /** @description Clear chat history and reset session */
+  clear(): Promise<void>;
+}
