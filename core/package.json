@@ -261,11 +261,6 @@
       "types": "./dist/security/projector.d.ts",
       "default": "./dist/security/projector.js"
     },
-    "./contexts/service": {
-      "development": "./src/contexts/service.ts",
-      "types": "./dist/contexts/service.d.ts",
-      "default": "./dist/contexts/service.js"
-    },
     "./contexts/text": {
       "development": "./src/contexts/text.ts",
       "types": "./dist/contexts/text.d.ts",
