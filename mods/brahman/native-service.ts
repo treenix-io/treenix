@@ -30,6 +30,13 @@ export async function createNativeBrahman(options: NativeBrahmanOptions = {}): P
     const key = (): OpId => ({ epoch: intake, time: Date.now(), nonce: randomUUID() });
     const conversation = new NativeConversation(session, key);
     let config = component(node, BotConfig);
+    if (!config.running) {
+      const done = (async () => {
+        for await (const frame of { [Symbol.asyncIterator]: () => lane })
+          if (frame.t === 'end' || frame.t === 'fail' && frame.req === undefined) throw frame.error;
+      })();
+      return { done, async stop() { await done; } };
+    }
     if (config.token === '') throw new KernelError('INVALID', 'Bot token is not configured');
     const bot = options.bot === undefined ? new Bot(config.token) : options.bot(config.token);
     const unregister = owner.register(node.$path, session.actor.principal, bot);

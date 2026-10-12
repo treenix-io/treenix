@@ -31,5 +31,8 @@ export default function createNativeWhisper(host: NativeModuleHost = {}): Native
       url: '/api/notice/audio', channels: { default: '/whisper/default' }, keepDays: 0 } },
     { $path: 'whisper/default', $type: 'whisper.channel' },
     { $path: '/sys/autostart/whisper', $type: 'ref', $ref: '/whisper' },
+  ], [], [
+    { executor: 'whisper', target: 'whisper', grant: R },
+    { executor: '/sys/autostart', target: 'whisper', grant: R },
   ]) };
 }
