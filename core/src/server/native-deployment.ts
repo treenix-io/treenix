@@ -1,6 +1,6 @@
 import { createTwpHttpRoutes } from '#server/http-routes';
 import { randomUUID } from 'node:crypto';
-import { collectModule, evaluateModuleFactory, getCollectedModule, getModuleDefinition, instantiateModule, type CollectedModule, type NativeModuleDeployment, type NativeModuleExports, type NativeModuleFactory, type NativeModuleHost } from '#kernel/manifest';
+import { assertModuleSchema, collectModule, evaluateModuleFactory, getCollectedModule, getModuleDefinition, instantiateModule, type CollectedModule, type NativeModuleDeployment, type NativeModuleExports, type NativeModuleFactory, type NativeModuleHost } from '#kernel/manifest';
 import { assertNativeSeeds, installNativeSeeds, selectNativeSeeds, type NativeSeedDefinition } from '#kernel/seed-install';
 import { openNativeRuntime, type NativeRuntimeConfig } from '#kernel/runtime';
 import { bindModuleIo, loadAllMods, moduleGates, type LoadResult } from '#mod/loader';
@@ -8,6 +8,9 @@ import { KernelError } from '#errors';
 import { createLogsInput } from '#mods/logs/input';
 import { provisionLogs } from '#mods/logs/provision';
 import type { ActionIoBinding } from '#kernel/types';
+import { dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { loadSchemasRecursive } from '#schema/load';
 
 export interface NativeModuleLocation {
   readonly id: string;
@@ -40,6 +43,8 @@ async function explicitModule(location: NativeModuleLocation, host: NativeModule
     const entry: NativeModuleExports = await import(location.entry);
     factory = entry.default;
     deployment = await evaluateModuleFactory(entry, host);
+    if (deployment === undefined)
+      loadSchemasRecursive(dirname(fileURLToPath(import.meta.resolve(location.entry))), assertModuleSchema);
   }, location.entry, () => deployment, () => factory);
 }
 
