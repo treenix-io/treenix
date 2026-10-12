@@ -1,6 +1,6 @@
 import { A, R, W, type ModuleManifest, type TypeDef } from '@treenx/core/kernel/types';
 import type { NativeModuleDeployment, NativeModuleHost } from '@treenx/core/kernel/manifest';
-import { nativeSeed } from '@treenx/core/mod/native-prefab';
+import { nativeSeed } from '#prefab/seed';
 import { ingestAction, whisperService } from './native-http';
 import config from './schemas/whisper.config.json' with { type: 'json' };
 import audio from './schemas/whisper.audio.json' with { type: 'json' };

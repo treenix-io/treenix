@@ -1,6 +1,6 @@
 import type { ModuleManifest } from '@treenx/core/kernel/types';
 import type { NativeModuleDeployment } from '@treenx/core/kernel/manifest';
-import { nativeSeed } from '@treenx/core/mod/native-prefab';
+import { nativeSeed } from '#prefab/seed';
 import { seedNodes } from './seed-data';
 import schema0 from './schemas/t.view.shell.json' with { type: 'json' };
 

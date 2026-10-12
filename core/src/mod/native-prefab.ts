@@ -1,4 +1,3 @@
-import { normalizeType } from '#core/component';
 import type { Node, NodeInput, OpId } from '#kernel/types';
 
 export interface NativeSeedPrefab {
@@ -38,21 +37,3 @@ export type NativePrefabSource = NodeInput & {
   readonly nodes: readonly NodeInput[];
   readonly grants?: readonly NativeSeedGrant[];
 };
-
-/** Declare a module's seed source and its catalog parents for administrator installation. */
-export function nativeSeed(
-  mod: string, nodes: readonly NodeInput[], parents: readonly NodeInput[] = [], grants: readonly NativeSeedGrant[] = [],
-): NativeSeedDefinition {
-  return {
-    sources: [
-      { $path: '/sys/mods', $type: 't.dir' },
-      { $path: `/sys/mods/${mod}`, $type: 't.dir' },
-      { $path: `/sys/mods/${mod}/prefabs`, $type: 't.dir' },
-      ...parents,
-    ],
-    prefabs: [{ target: '/', allowAbsolute: true, source: {
-      $path: `/sys/mods/${mod}/prefabs/seed`, $type: 't.prefab', mod, name: 'seed',
-      nodes: nodes.map(node => ({ ...node, $type: normalizeType(node.$type) })), grants,
-    } }],
-  };
-}

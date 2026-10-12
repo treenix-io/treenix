@@ -1,6 +1,6 @@
 import { registerNativeTodo } from './native';
 import { registerKernelSeeds } from '@treenx/core/kernel';
-import { nativeSeed } from '@treenx/core/mod/native-prefab';
+import { nativeSeed } from '#prefab/seed';
 import { todoSeed } from './seed-data';
 
 registerNativeTodo();

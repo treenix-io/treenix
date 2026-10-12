@@ -1,6 +1,6 @@
 import type { ModuleManifest } from '@treenx/core/kernel/types';
 import type { NativeModuleDeployment } from '@treenx/core/kernel/manifest';
-import { nativeSeed } from '@treenx/core/mod/native-prefab';
+import { nativeSeed } from '#prefab/seed';
 import { boardSeed } from './seed-data';
 
 const manifest: ModuleManifest = { id: '@treenx/mods/board', types: [], security: [], open: [] };

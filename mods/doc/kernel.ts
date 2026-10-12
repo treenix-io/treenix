@@ -1,6 +1,6 @@
 import type { NativeModuleDeployment } from '@treenx/core/kernel/manifest';
 import type { TypeDef } from '@treenx/core/kernel/types';
-import { nativeSeed } from '@treenx/core/mod/native-prefab';
+import { nativeSeed } from '#prefab/seed';
 import { mdToTiptap, tiptapToMd, type TiptapNode } from './markdown';
 import { markdownCodec } from './native-codec';
 import page from './schemas/doc.page.json' with { type: 'json' };

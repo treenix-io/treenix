@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { KernelError } from '@treenx/core/errors';
 import type { NativeModuleDeployment } from '@treenx/core/kernel/manifest';
 import type { WriteAction, ModuleManifest } from '@treenx/core/kernel/types';
-import { nativeSeed } from '@treenx/core/mod/native-prefab';
+import { nativeSeed } from '#prefab/seed';
 import { appendLauncherItem, removeLauncherItem } from '#launcher/layout';
 import { launcherSeed } from '#launcher/seed-data';
 import schema from './schemas/launcher.json';

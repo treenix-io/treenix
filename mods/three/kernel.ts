@@ -1,6 +1,6 @@
 import { T3dObject, T3dMesh, T3dLight, T3dScript } from '#three/types';
 import { registerKernelSeeds } from '@treenx/core/kernel';
-import { nativeSeed } from '@treenx/core/mod/native-prefab';
+import { nativeSeed } from '#prefab/seed';
 import { threeSeed } from '#three/seed-data';
 
 registerKernelSeeds(

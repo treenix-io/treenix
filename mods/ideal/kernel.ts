@@ -1,6 +1,6 @@
 import { registerNativeIdeal } from './native';
 import { R, W, registerKernelSeeds } from '@treenx/core/kernel';
-import { nativeSeed } from '@treenx/core/mod/native-prefab';
+import { nativeSeed } from '#prefab/seed';
 import { idealSeed } from './seed-data';
 
 registerNativeIdeal();

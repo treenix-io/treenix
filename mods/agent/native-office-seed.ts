@@ -1,5 +1,5 @@
 import { A, R, W, type AclEntry, type NodeInput } from '@treenx/core/kernel/types';
-import { nativeSeed } from '@treenx/core/mod/native-prefab';
+import { nativeSeed } from '#prefab/seed';
 import { A as LegacyAdmin, R as LegacyRead, W as LegacyWrite } from '@treenx/core';
 import type { AgentSeedNode } from '#agent/seed-data';
 import type { PoolConfig } from '#agent/native-pool';

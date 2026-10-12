@@ -2,7 +2,7 @@ import { registerType } from '@treenx/core/comp';
 import { R, W, type ActionDef, type TypeDef } from '@treenx/core/kernel/types';
 import type { NativeModuleDeployment, NativeModuleHost } from '@treenx/core/kernel/manifest';
 import type { TypeSchema } from '@treenx/core/schema/types';
-import { nativeSeed } from '@treenx/core/mod/native-prefab';
+import { nativeSeed } from '#prefab/seed';
 import { runPeriodicAction } from '@treenx/core/kernel/periodic-service';
 import { worldActions, agentActions, itemActions } from './native-actions';
 import { createSimIo } from './native-io';

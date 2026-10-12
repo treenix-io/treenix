@@ -1,5 +1,5 @@
 import type { NativeModuleDeployment } from '@treenx/core/kernel/manifest';
-import { nativeSeed } from '@treenx/core/mod/native-prefab';
+import { nativeSeed } from '#prefab/seed';
 
 /** Mount the deployment's named documentation directory and retain the existing welcome route. */
 export default function createNativeOnboarding(): NativeModuleDeployment {

@@ -1,5 +1,5 @@
 import type { NativeModuleDeployment } from '@treenx/core/kernel/manifest';
-import { nativeSeed } from '@treenx/core/mod/native-prefab';
+import { nativeSeed } from '#prefab/seed';
 import { metatronSeed } from '#metatron/seed-data';
 import template from './schemas/metatron.template.json';
 import skill from './schemas/metatron.skill.json';

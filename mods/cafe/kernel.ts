@@ -1,6 +1,6 @@
 import { CafeContact } from '#cafe/types';
 import { registerKernelSeeds } from '@treenx/core/kernel';
-import { nativeSeed } from '@treenx/core/mod/native-prefab';
+import { nativeSeed } from '#prefab/seed';
 import { cafeSeed } from '#cafe/seed-data';
 
 registerKernelSeeds(
