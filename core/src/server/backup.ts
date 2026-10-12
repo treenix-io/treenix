@@ -7,7 +7,7 @@
 
 import { assertValidType, isCompKey, safeJsonParse } from '#core';
 import { cp, mkdir, mkdtemp, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
-import { basename, dirname, join, relative, resolve } from 'node:path';
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { SUPPORTED_DATA_VERSION, readDataVersion, DATA_VERSION_FILE } from '#server/backup-version';
 
 export class BackupError extends Error {
@@ -83,6 +83,12 @@ function externalDetail(mount: Record<string, unknown>): string {
 
 interface DirJob { root: string; kind: 'fs' | 'rawfs' }
 
+/** Native control JSON belongs to the physical snapshot, rather than its addressed nodes. */
+function nodeFile(root: string, file: string): boolean {
+  return (basename(file) === '$' || file.endsWith('.json'))
+    && !file.startsWith(join(root, '.treenix') + sep);
+}
+
 function classifyMount(mount: Record<string, unknown>, at: string, queue: DirJob[], external: ExternalMount[]): void {
   const type = mount.$type as string;
   if (type === 't.mount.fs' || type === 't.mount.rawfs') {
@@ -94,8 +100,8 @@ function classifyMount(mount: Record<string, unknown>, at: string, queue: DirJob
   // overlay/query/types/mods/memory: derived or volatile — nothing to copy
 }
 
-// Copy an fs-adapter dir byte-faithfully while validating every *.json with the
-// real parser and collecting mounts declared by the copied nodes.
+// Copy filesystem data and native controls byte-for-byte, validating addressed
+// node bodies and collecting the mounts they declare.
 async function copyFsDir(
   src: string, dest: string, dirRoot: string,
   queue: DirJob[], external: ExternalMount[], warnings: string[],
@@ -116,14 +122,18 @@ async function copyFsDir(
       if (e.isDirectory()) {
         await mkdir(destFull, { recursive: true });
         await walk(full);
-      } else if (e.name.endsWith('.json')) {
+      } else if (e.name.endsWith('.json') || nodeFile(src, full)) {
         const raw = await readFile(full);
         const body = safeJsonParse(raw.toString('utf-8'));
-        assertValidType(body.$type);
-        for (const m of mountsIn(body)) classifyMount(m, `${dirRoot}:${relative(src, full)}`, queue, external);
+        if (nodeFile(src, full)) {
+          assertValidType(body.$type);
+          for (const m of mountsIn(body)) classifyMount(m, `${dirRoot}:${relative(src, full)}`, queue, external);
+          nodes++;
+        } else {
+          files++;
+        }
         await mkdir(dirname(destFull), { recursive: true });
         await writeFile(destFull, raw);
-        nodes++;
       } else {
         await mkdir(dirname(destFull), { recursive: true });
         await cp(full, destFull);
@@ -143,7 +153,7 @@ async function countDir(dir: string): Promise<{ nodes: number; files: number }> 
   const entries = await readdir(dir, { recursive: true, withFileTypes: true });
   for (const e of entries) {
     if (!e.isFile()) continue;
-    if (e.name.endsWith('.json')) nodes++;
+    if (nodeFile(dir, join(e.parentPath, e.name))) nodes++;
     else files++;
   }
   return { nodes, files };
@@ -237,7 +247,7 @@ async function readManifest(artifactDir: string): Promise<BackupManifest> {
   return m as BackupManifest;
 }
 
-// Re-parse every node file in a dir tree with the real parser. Read-only.
+// Validate addressed node bodies and control JSON without changing the artifact.
 async function verifyFsDir(dir: string): Promise<{ nodes: number; files: number }> {
   let nodes = 0;
   let files = 0;
@@ -245,14 +255,15 @@ async function verifyFsDir(dir: string): Promise<{ nodes: number; files: number 
   for (const e of entries) {
     if (!e.isFile()) continue;
     const full = join(e.parentPath, e.name);
-    if (e.name.endsWith('.json')) {
+    if (e.name.endsWith('.json') || nodeFile(dir, full)) {
       try {
         const body = safeJsonParse(await readFile(full, 'utf-8'));
-        assertValidType(body.$type);
+        if (nodeFile(dir, full)) assertValidType(body.$type);
       } catch (err) {
         throw new BackupError('CORRUPT_NODE', `${full}: ${(err as Error).message}`);
       }
-      nodes++;
+      if (nodeFile(dir, full)) nodes++;
+      else files++;
     } else {
       files++;
     }
