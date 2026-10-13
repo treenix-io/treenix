@@ -1,4 +1,4 @@
-import { isSafeKey } from '#core/json'
+import { isSafeKey } from '#core/component';
 import { KernelError } from '#errors'
 import { isRecord } from '#util/is-record'
 import type { Delta, UpdateOps } from './types'

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { open, realpath, stat } from 'node:fs/promises'
 import { basename, dirname, join, resolve } from 'node:path'
 import { KernelError } from '#errors'
-import { safeJsonParse } from '#core/json'
+import { safeJsonParse } from '#util/json';
 import { isRecord } from '#util/is-record'
 import { assertPathSafe } from '#util/path-safety'
 import { DEFAULT_LIMITS, type Budget, type Path, type StoreCommit } from '#kernel/types'

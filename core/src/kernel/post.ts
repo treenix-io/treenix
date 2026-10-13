@@ -1,7 +1,7 @@
 // A post (T13) declares, per target, the update operators an action applies: `''` is the action's own node, any
 // other key one of its `needs`. The guard holds the action to it (A5) and the planner reads it as the effect.
 
-import { isSafeKey } from '#core/json'
+import { isSafeKey } from '#core/component';
 import { KernelError } from '#errors'
 import { isQueryObject } from './eval-compile'
 import type { Post } from './types'

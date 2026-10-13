@@ -1,6 +1,6 @@
 import { viewOwner, isSelector, change as nativeChange } from '#kernel/input-boundary'
 export { isSelector } from '#kernel/input-boundary'
-import { safeJsonParse } from '#core/json'
+import { safeJsonParse } from '#util/json';
 import { assertSafePath } from '#core/path'
 import { KernelError } from '#errors'
 import { serializeKernel } from '#kernel/serialization'

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { lstat, open, opendir, rmdir, unlink } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { KernelError } from '#errors';
-import { safeJsonParse } from '#core/json';
+import { safeJsonParse } from '#util/json';
 import { isRecord } from '#util/is-record';
 import { assertPathSafe } from '#util/path-safety';
 import { stableJson } from '#util/stable-json';

@@ -5,7 +5,8 @@
 // Unlike mods/backup (logical export, credentials stripped), this copies bytes
 // faithfully: node files keep their connection URIs — treat artifacts as secrets.
 
-import { assertValidType, isCompKey, safeJsonParse } from '#core';
+import { assertValidType, isCompKey } from '#core';
+import { safeJsonParse } from '#util/json';
 import { cp, mkdir, mkdtemp, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { SUPPORTED_DATA_VERSION, readDataVersion, DATA_VERSION_FILE } from '#server/backup-version';

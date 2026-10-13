@@ -1,4 +1,5 @@
-import { assertValidType, safeJsonParse } from '#core/json';
+import { assertValidType } from '#core/component';
+import { safeJsonParse } from '#util/json';
 import { isRecord } from '#util/is-record';
 import { KernelError } from '#errors';
 import type { NodeData } from '#core';

@@ -1,6 +1,7 @@
 // Read colocated JSON schemas for publication by the owning module.
 
-import { normalizeType, safeJsonParse } from '#core';
+import { normalizeType } from '#core';
+import { safeJsonParse } from '#util/json';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { TypeSchema } from './types';

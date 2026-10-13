@@ -9,3 +9,4 @@ export {
   type Actions,
   type TypeProxy,
 } from './comp/index';
+export { safeJsonParse } from './util/json';

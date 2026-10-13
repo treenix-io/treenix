@@ -13,8 +13,8 @@ import {
   isSafeKey,
   ref,
   removeComponent,
-  safeJsonParse,
 } from './index';
+import { safeJsonParse } from '#util/json';
 
 describe('Node', () => {
   it('creates with type and path', () => {

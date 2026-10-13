@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { open, readFile, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
-import { isSafeKey, safeJsonParse } from '#core/json'
+import { isSafeKey } from '#core/component';
+import { safeJsonParse } from '#util/json';
 import { KernelError } from '#errors'
 import { isBlobHoldSnapshot, type BlobHoldSnapshot } from '#kernel/blob-holds'
 import { isBlobArchiveMutation } from '#kernel/blob-archives'

@@ -2,7 +2,7 @@ import type { ActionIoBinding, AdminInput } from '#kernel/types'
 import { readFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { safeJsonParse } from '#core/json'
+import { safeJsonParse } from '#util/json';
 import { KernelError } from '#errors'
 import { openNativeDeployment, type NativeDeploymentHost, type PersistentLogsConfig } from '#server/native-deployment'
 import type { FsDirectoryBindings } from '#kernel/mount-fs-provider'

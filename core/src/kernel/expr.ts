@@ -2,7 +2,7 @@
 // primitive operands. Its size and shape are judged at parse, before the kernel's evaluator compiles it or a
 // database receives it; its work is counted as the evaluator tests each node (eval).
 
-import { isSafeKey } from '#core/json'
+import { isSafeKey } from '#core/component';
 import { KernelError } from '#errors'
 import type { ExprWork } from './eval'
 import { compileQuery, isQueryObject } from './eval-compile'

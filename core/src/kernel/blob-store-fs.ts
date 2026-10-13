@@ -1,6 +1,6 @@
 import { link, mkdir, open, opendir, readFile, realpath, stat as fileStat, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
-import { safeJsonParse } from '#core/json';
+import { safeJsonParse } from '#util/json';
 import { KernelError } from '#errors';
 import type { BlobBirth, BlobRef, BlobStore } from '#kernel/types';
 import { isRecord } from '#util/is-record';

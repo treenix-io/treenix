@@ -3,7 +3,7 @@
 import { parseSync } from 'oxc-parser';
 import fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { assertValidType } from '#core/json';
+import { assertValidType } from '#core/component';
 import { KernelError } from '#errors';
 import { assertSafeSiftQuery } from '#kernel/expr';
 import { assertPost } from '#kernel/post';

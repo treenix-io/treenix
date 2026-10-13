@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { lstat, open, opendir, readFile, unlink } from 'node:fs/promises'
 import type { Stats } from 'node:fs'
 import { dirname, join, relative } from 'node:path'
-import { safeJsonParse } from '#core/json'
+import { safeJsonParse } from '#util/json';
 import { assertSafePath } from '#core/path'
 import { KernelError } from '#errors'
 import type { Budget, Path, ScanRange, Position, StoredNode, StoredWrite, StorageFaultChange } from '#kernel/types'

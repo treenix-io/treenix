@@ -1,7 +1,7 @@
 // Treenix Module Loader — explicit native factories and client convention discovery
 
 import { isInsideRoot } from '#core/path';
-import { safeJsonParse } from '#core/json';
+import { safeJsonParse } from '#util/json';
 import { createLogger } from '#log';
 import { KernelError } from '#errors';
 import { readdir, readFile, realpath, stat } from 'node:fs/promises';
