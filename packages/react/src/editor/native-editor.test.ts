@@ -198,6 +198,42 @@ function PublicEditor() {
 }
 
 describe('public canonical editor', { timeout: 10_000 }, () => {
+  it('calls an interface-only action through the public typed path hook', async (t) => {
+    class Document {
+      static $type = 'editor.document';
+      value = 0;
+    }
+    interface Document {
+      inspect(data: { message: string }): Promise<{ message: string }>;
+    }
+
+    const f = await fixture('typed-native-hook', false);
+    t.after(f.close);
+    let accepted!: (value: { message: string }) => void;
+    let refused!: (error: unknown) => void;
+    const result = new Promise<{ message: string }>((resolve, reject) => {
+      accepted = resolve;
+      refused = reject;
+    });
+
+    /** Exercise the action through the same typed hook used by existing views. */
+    function Probe() {
+      const { data, loading } = usePath('/document', Document);
+      return createElement('button', {
+        disabled: loading,
+        onClick: () => data!.inspect({ message: 'native owner' }).then(accepted, refused),
+      }, 'Inspect native action');
+    }
+
+    const ui = render(createElement(Probe), { wrapper: f.wrapper });
+    await act(() => until(f.source, snapshot => snapshot.data !== undefined));
+    await act(async () => {
+      fireEvent.click(ui.getByText('Inspect native action'));
+      assert.deepEqual(await result, { message: 'native owner' });
+    });
+    assert.deepEqual(await f.invoked, { message: 'native owner' });
+  });
+
   it('saves a full put with the loaded revision while preserving hidden ACL and owner', async (t) => {
     const f = await fixture('public-editor-hidden-admin', false);
     t.after(f.close);

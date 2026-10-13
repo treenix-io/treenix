@@ -4,7 +4,7 @@ import type { ErrorCopy } from '@treenx/core/kernel/types';
 // usePath:     reactive path read (URI or typed proxy) → Query<T>
 // useChildren: reactive children list with pagination → ChildrenQuery
 
-import { getComponent, getMeta, normalizeType } from '@treenx/core';
+import { makeTypedProxy } from '@treenx/core/comp/handle';
 import { type Class, type TypeProxy } from '@treenx/core/comp';
 import { deriveURI, parseURI } from '@treenx/core/uri';
 import { mergeIntoNode, type OnChange } from '#tree/on-change';
@@ -273,6 +273,7 @@ export function useCanWrite(path: string | null): boolean {
 
 // ── Internals ──
 
+/** Dispatch interface-only actions through the native owner using the shared typed proxy. */
 function makeProxy<T extends object>(
   path: string,
   cls: Class<T>,
@@ -280,22 +281,20 @@ function makeProxy<T extends object>(
   effects: TreeEffects,
   key?: string,
 ): TypeProxy<T> {
-  const type = normalizeType(cls);
-  const comp = node ? getComponent(node, cls, key) : undefined;
-
-  return new Proxy(comp ?? {}, {
-    get: (_target, prop) => {
-      if (typeof prop === 'symbol') return (comp as Record<symbol, unknown>)?.[prop];
-      const meta = getMeta(type, `action:${prop}`);
-      if (!meta) return (comp as any)?.[prop];
-
-      if (meta.stream)
-        return (data?: unknown) =>
-          effects.stream({ path, type, component: key, action: prop, args: data });
-
-      return (data?: unknown) => effects.execute(path, prop, data, type, key);
-    },
-  }) as TypeProxy<T>;
+  return makeTypedProxy(
+    node,
+    cls,
+    path,
+    input => effects.execute(input.path, input.action, input.data, input.type, input.key),
+    input => effects.stream({
+      path: input.path,
+      type: input.type,
+      component: input.key,
+      action: input.action,
+      args: input.data,
+    }),
+    key,
+  );
 }
 
 // ── useValue: useState with OnChange-shaped setter, resets when input identity changes ──

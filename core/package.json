@@ -46,6 +46,11 @@
       "types": "./dist/comp.d.ts",
       "default": "./dist/comp.js"
     },
+    "./comp/handle": {
+      "development": "./src/comp/handle.ts",
+      "types": "./dist/comp/handle.d.ts",
+      "default": "./dist/comp/handle.js"
+    },
     "./comp/validate": {
       "development": "./src/comp/validate.ts",
       "types": "./dist/comp/validate.d.ts",
