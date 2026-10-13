@@ -10,8 +10,6 @@ import { join } from 'node:path';
 import { createServer } from 'node:http';
 import { describe, it, type TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { registerType } from '#comp';
-import { register, unregister } from '#core/registry';
 import { KernelError } from '#errors';
 import { createMemoryBlobStore } from '#kernel/blob-store-memory';
 import { createInstance } from '#kernel/instance';
@@ -147,11 +145,6 @@ async function moduleFor(
       return { manifest: nativeDeclaredModule(owner, schemas, declaredActions, classes, security) };
     } }, {});
   })();
-  t.after(() => {
-    unregister(workerType, 'schema');
-    unregister(formType, 'schema');
-    unregister(formType, 'class');
-  });
   return module;
 }
 

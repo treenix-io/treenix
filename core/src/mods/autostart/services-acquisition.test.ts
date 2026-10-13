@@ -6,8 +6,6 @@ import type { ActionDef, SecurityRegistration } from '@treenx/core/kernel/types'
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { it, type TestContext } from 'node:test'
-import { registerType } from '#comp'
-import { register, unregister } from '#core/registry'
 import { createMemoryBlobStore } from '#kernel/blob-store-memory'
 import { createInstance } from '#kernel/instance'
 import { type CollectedModule } from '#kernel/manifest'
@@ -93,8 +91,6 @@ async function fixture(t: TestContext, discoveryAdmin = false) {
     for (const restore of cleanup) restore()
     await instance.close()
     await delivery
-    unregister(type, 'class')
-    unregister(type, 'schema')
   })
 
   /** Publish one accepted atomic declaration change. */

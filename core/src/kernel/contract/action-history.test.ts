@@ -9,8 +9,6 @@ import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, it, type TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { registerType } from '#comp';
-import { register, unregister } from '#core/registry';
 import { KernelError } from '#errors';
 import { createMemoryBlobStore } from '#kernel/blob-store-memory';
 import { createInstance } from '#kernel/instance';
@@ -128,10 +126,6 @@ async function fixture(
   t.after(async () => {
     await instance.close();
     await Promise.all(deliveries);
-    unregister(workerType, 'schema');
-    unregister(recordType, 'schema');
-    unregister(formType, 'schema');
-    unregister(formType, 'class');
   });
 
   /** Captures the real welcome intake before pumping ordinary frames and completion. */
@@ -691,7 +685,6 @@ describe('history reads through native actions', { timeout: 10_000 }, () => {
     t.after(async () => {
       await runtime.close();
       await Promise.all(pumps);
-      unregister(type, 'schema');
     });
 
     /** Reads the actual durable welcome and owns its completion pump. */

@@ -9,8 +9,6 @@ import { mkdir, mkdtemp, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { it, type TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { registerType } from '#comp';
-import { register, unregister } from '#core/registry';
 import { type CollectedModule } from '#kernel/manifest';
 import { openNativeRuntime } from '#kernel/runtime';
 import { drainSession } from '#kernel/session-delivery';
@@ -74,10 +72,6 @@ it('starts the registered discovery service on canonical filesystem reopen', { t
   t.after(async () => {
     await runtime.close();
     await Promise.all(deliveries);
-    unregister(type, 'class');
-    unregister(type, 'schema');
-    unregister('autostart', 'class');
-    unregister('autostart', 'schema');
   });
   assert.ok(runtime.instance.setupCredential);
   const admin = await runtime.instance.openSession(runtime.instance.setupCredential);
@@ -149,10 +143,6 @@ it('starts a canonical bound child service on filesystem reopen', { timeout: 10_
   t.after(async () => {
     await runtime.close();
     await Promise.all(deliveries);
-    unregister(type, 'class');
-    unregister(type, 'schema');
-    unregister('autostart', 'class');
-    unregister('autostart', 'schema');
   });
   assert.ok(runtime.instance.setupCredential);
   const admin = await runtime.instance.openSession(runtime.instance.setupCredential);
@@ -240,10 +230,6 @@ async function assertPausedDeclarationChange(t: TestContext, retarget: boolean):
     finish();
     await runtime.close();
     await Promise.all(deliveries);
-    unregister(type, 'class');
-    unregister(type, 'schema');
-    unregister('autostart', 'class');
-    unregister('autostart', 'schema');
   });
   assert.ok(runtime.instance.setupCredential);
   const admin = await runtime.instance.openSession(runtime.instance.setupCredential);

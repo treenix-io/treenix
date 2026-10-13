@@ -6,8 +6,6 @@ import type { ActionDef, SecurityRegistration } from '@treenx/core/kernel/types'
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { it, type TestContext } from 'node:test'
-import { registerType } from '#comp'
-import { register, unregister } from '#core/registry'
 import { KernelError } from '#errors'
 import { createMemoryBlobStore } from '#kernel/blob-store-memory'
 import { createInstance } from '#kernel/instance'
@@ -74,8 +72,6 @@ async function fixture(t: TestContext, handler: ServiceHandler) {
   function close() { return closing ??= instance.close().then(() => delivery) }
   t.after(async () => {
     await close()
-    unregister('autostart', 'class')
-    unregister('autostart', 'schema')
   })
   const key = () => ({ epoch: instance.writer.intake.epoch, time: Date.now(), nonce: randomUUID() })
 
