@@ -15,7 +15,9 @@ import {
 } from '@treenx/core/kernel/types';
 import { createInstanceFoundation } from '../../../../core/src/kernel/instance';
 import { createMemoryStore } from '../../../../core/src/kernel/store/memory';
-import { Render, RenderContext } from '#context';
+import { Render, RenderContext, RenderField } from '#context';
+import { clientModules as primitiveTextModules } from '@treenx/core/contexts/text';
+import { MindMapSidebar } from '../../../../mods/mindmap/sidebar';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { ServerTreeSource } from '@treenx/ssr/server-tree-source';
 import { ServerLocationContext } from '#navigate';
@@ -219,6 +221,29 @@ function PublicEditor() {
 }
 
 describe('public canonical editor', { timeout: 10_000 }, () => {
+  it('renders owned text and discovers a server-only native action in the original mindmap sidebar', async t => {
+    const registry = createClientRegistry([...clientModules, ...primitiveTextModules]);
+    const f = await fixture('owned-text-native-description', true, undefined, registry);
+    t.after(f.close);
+    const ui = render(createElement('div', null,
+      createElement(RenderContext, { name: 'text', children:
+        createElement(RenderField, { type: 'string', value: 'Authored text binding' }) }),
+      createElement(MindMapSidebar, { path: '/document', onClose() {}, onNavigate() {} }),
+    ), { wrapper: f.wrapper });
+    assert.ok(ui.getByText('Authored text binding'));
+    await act(async () => {
+      await until(f.source, snapshot => snapshot.data !== undefined);
+    });
+    await act(async () => {
+      await until(f.source, snapshot => snapshot.data !== undefined, '/sys/types/editor.document');
+    });
+    await act(async () => {
+      fireEvent.click(ui.getByRole('button', { name: 'inspect' }));
+      assert.deepEqual(await f.invoked, {});
+    });
+    assert.ok(f.sent.some(request => request.t === 'act' && request.action === 'inspect'));
+  });
+
   it('selects the source-owned document component menu and creates native authored defaults', async t => {
     const todo = await collectModule('@treenx/mods/todo', async () => {
       await import('../../../../mods/todo/kernel');

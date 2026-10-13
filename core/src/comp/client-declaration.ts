@@ -4,6 +4,7 @@ import { normalizeType, type Class, type NodeData } from '#core/component';
 
 interface ClientTypeBehavior {
   readonly type: string;
+  readonly contexts: readonly string[];
   readonly defaults: () => Record<string, unknown>;
   readonly predictions: Readonly<Record<string, (node: Pick<NodeData, '$path' | '$type'>, component: object, data: unknown) => unknown>>;
 }
@@ -34,6 +35,7 @@ export function declareClientType<T extends object>(type: string, cls: Class<T>,
       runWithExecCtx(predictionCtx(node, component), () => method.call(component, data, undefined));
   }
   return Object.freeze({ type: normalizeType(type), kind: 'class',
+    contexts: Object.freeze(['class', ...methods.map(method => `action:${method.name}`)]),
     defaults: () => Object.fromEntries(Object.entries(new cls())),
     predictions: Object.freeze(predictions) });
 }
@@ -51,6 +53,7 @@ export function declareClientSchema(type: string, schema: () => ClientDefaultSch
     };
   };
   return Object.freeze({ type: normalizeType(type), kind: 'schema',
+    contexts: Object.freeze(['schema']),
     defaults: createDefaults(), createDefaults,
     predictions: Object.freeze({}),
   });

@@ -5,13 +5,15 @@ import { normalizeType, type Class, type ContextHandler, type Handler, type Type
 import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 import type { OpenModule, OpenRegistration } from '@treenx/core/kernel/types';
 import type { ClientTypeDeclaration } from '@treenx/core/comp/client-declaration';
+import type { TextHandler, TextOpenRegistration } from '@treenx/core/contexts/text';
 
 export interface ClientViewDeclaration extends OpenRegistration<ReactHandler> {
+  readonly binding?: 'react';
   readonly meta?: Record<string, unknown>;
 }
 
-export interface ClientModule extends OpenModule<ReactHandler> {
-  readonly open: readonly ClientViewDeclaration[];
+export interface ClientModule extends OpenModule<ReactHandler | TextHandler> {
+  readonly open: readonly (ClientViewDeclaration | TextOpenRegistration)[];
   readonly resolveMissing?: (type: string, context: string) => ClientViewDeclaration | undefined;
   readonly types?: readonly ClientTypeDeclaration[];
 }
@@ -67,7 +69,10 @@ export function createClientRegistry(initial: readonly ClientModule[] = []) {
     for (const module of modules.values()) for (const entry of module.open) {
       const key = `${normalizeType(entry.type)}@${entry.context}`;
       if (next.has(key)) throw new Error(`Duplicate client view: ${key}`);
-      next.set(key, entry);
+      if (entry.binding === 'text') {
+        const text = entry.handler;
+        next.set(key, { type: entry.type, context: entry.context, handler: ({ value }) => text(value) });
+      } else next.set(key, entry);
     }
     entries = next;
     types = nextTypes;
@@ -105,6 +110,17 @@ export function createClientRegistry(initial: readonly ClientModule[] = []) {
       for (const entry of entries.values())
         if (entry.context === context) names.push(normalizeType(entry.type));
       return names;
+    },
+    allContexts(type: string): string[] {
+      const normalized = normalizeType(type);
+      const declared = types.get(normalized);
+      const result = declared === undefined ? [] : [...declared.contexts];
+      for (const entry of entries.values())
+        if (normalizeType(entry.type) === normalized && !result.includes(entry.context)) result.push(entry.context);
+      const schema = schemas.get(normalized);
+      if (schema !== undefined) for (const context of schema.declaration.contexts)
+        if (!result.includes(context)) result.push(context);
+      return result;
     },
     contexts(type: string): string[] {
       const normalized = normalizeType(type);

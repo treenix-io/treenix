@@ -1,7 +1,7 @@
 import { declareClientType } from '@treenx/core/comp/client-declaration';
 import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 import { getComponent, type NodeData, register } from '@treenx/core';
-import '@treenx/core/contexts/text';
+import { declareText, clientModules as primitiveTextModules } from '@treenx/core/contexts/text';
 import { registerType } from '@treenx/core/comp';
 
 /** Speech-to-text config — Whisper model, language, audio path */
@@ -63,14 +63,15 @@ registerType('whisper.transcription', WhisperTranscription);
 
 // 'text' context: readable content for consumers ('' = transcription pending).
 // Registry erases types (system boundary) — data is the node.
-register('whisper.transcription', 'text', (data) => {
+const declaredText = declareText('whisper.transcription', (data) => {
   const node = data as NodeData;
   const text = getComponent(node, WhisperText);
   if (!text) throw new Error(`whisper.transcription without #text: ${node.$path}`);
   return text.content === '...' ? '' : text.content;
 });
+register(declaredText.type, declaredText.context, declaredText.handler);
 
-export const clientModules = [declareOpenModule('@treenx/mods/whisper/types', [], [
+export const clientModules = [...primitiveTextModules, declareOpenModule('@treenx/mods/whisper/types', [declaredText], [
   declareClientType('whisper.config', WhisperConfig),
   declareClientType('whisper.audio', WhisperAudio),
   declareClientType('whisper.text', WhisperText),

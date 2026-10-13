@@ -4,7 +4,7 @@ import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 // Component types for bot config, pages, actions, users, sessions
 
 import { getComponent, type NodeData, register } from '@treenx/core';
-import '@treenx/core/contexts/text';
+import { declareText, clientModules as primitiveTextModules } from '@treenx/core/contexts/text';
 import { registerType } from '@treenx/core/comp';
 
 // ── Shared types ──
@@ -374,14 +374,15 @@ registerType('brahman.message', BrahmanMessage);
 
 // 'text' context = readable content extractor; consumers resolve(type, 'text') without importing this mod.
 // Registry erases types (system boundary) — data is the node.
-register('brahman.message', 'text', (data) => {
+const declaredText = declareText('brahman.message', (data) => {
   const node = data as NodeData;
   const msg = getComponent(node, BrahmanMessage);
   if (!msg) throw new Error(`brahman.message without message data: ${node.$path}`);
   return msg.text;
 });
+register(declaredText.type, declaredText.context, declaredText.handler);
 
-export const clientModules = [declareOpenModule('@treenx/mods/brahman/types', [], [
+export const clientModules = [...primitiveTextModules, declareOpenModule('@treenx/mods/brahman/types', [declaredText], [
   declareClientType('brahman.bot', BotConfig),
   declareClientType('brahman.page', PageConfig),
   declareClientType('brahman.action.message', MessageAction),

@@ -1,6 +1,7 @@
 import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
 import type { PresentationNode } from '@treenx/react';
-import { type ComponentData, getComponents, getContextsForType, type NodeData } from '@treenx/core'
+import { type ComponentData, getComponents, type NodeData } from '@treenx/core'
+import { useClientRegistry } from '@treenx/react/context/client-registry-context'
 import { Render, RenderContext, type View } from '@treenx/react'
 import { useChildren } from '@treenx/react'
 import {
@@ -42,6 +43,7 @@ function reconcile(discoveredRefs: Set<string>, rows: LayoutRow[], hidden: strin
 }
 
 const RowColLayoutView: View<RowColLayout> = ({ value, onChange, ctx }) => {
+  const registry = useClientRegistry()
   const [editable, setEditable] = useState(false)
 
   const node = ctx?.node
@@ -147,7 +149,7 @@ const RowColLayoutView: View<RowColLayout> = ({ value, onChange, ctx }) => {
   function renderItemMenuExtras(item: LayoutItem) {
     const type = resolveRefType(item.ref)
     if (!type) return null
-    const contexts = getContextsForType(type)
+    const contexts = registry.allContexts(type)
     if (!contexts.length) return null
 
     return (
@@ -185,7 +187,7 @@ const RowColLayoutView: View<RowColLayout> = ({ value, onChange, ctx }) => {
       for (const item of row.items) {
         const type = resolveRefType(item.ref)
         if (!type) continue
-        for (const c of getContextsForType(type)) discovered.add(c)
+        for (const c of registry.allContexts(type)) discovered.add(c)
       }
     }
     const contexts = [...discovered].sort()

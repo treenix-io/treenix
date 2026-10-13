@@ -2,8 +2,10 @@
 // Lightweight panel: path, type, components, fields, actions
 
 import { useTreeEffects, usePath } from '@treenx/react';
-import { getActions, getComponents, getPlainFields, getSchema } from '@treenx/react/mods/editor-ui/node-utils';
+import { getActions, getComponents, getPlainFields } from '@treenx/react/mods/editor-ui/node-utils';
+import { useNativeTypeDescription } from '@treenx/react/schema-loader';
 import { Button } from '@treenx/react/ui/button';
+import React from 'react';
 
 type Props = {
   path: string;
@@ -19,6 +21,7 @@ function shortType(type: string): string {
 export function MindMapSidebar({ path, onClose, onNavigate }: Props) {
   const { execute } = useTreeEffects();
   const { data: node } = usePath(path);
+  const description = useNativeTypeDescription(node?.$type);
 
   if (!node) {
     return (
@@ -33,8 +36,7 @@ export function MindMapSidebar({ path, onClose, onNavigate }: Props) {
 
   const components = getComponents(node);
   const fields = getPlainFields(node);
-  const schema = getSchema(node.$type);
-  const actions = getActions(node.$type, schema);
+  const actions = getActions(description);
 
   return (
     <div className="mm-sidebar">

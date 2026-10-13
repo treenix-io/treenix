@@ -1,7 +1,8 @@
 import { declareClientModule } from '#context/client-registry';
 // Type node views — react + react:list + live preview
 
-import { getContextsForType, type NodeData } from '@treenx/core';
+import { type NodeData } from '@treenx/core';
+import { useClientRegistry } from '#context/client-registry-context';
 import { TypePreview } from './preview';
 
 // ── Helpers ──
@@ -29,7 +30,7 @@ function TypeNodeView({ value }: { value: NodeData }) {
   const schema = value.schema as Record<string, unknown> | undefined;
   const title = schema?.title ? String(schema.title) : null;
   const props = (schema?.properties ?? {}) as Record<string, Record<string, unknown>>;
-  const contexts = getContextsForType(name);
+  const contexts = useClientRegistry().allContexts(name);
   const components = Object.keys(value).filter(k => !k.startsWith('$') && k !== 'schema');
 
   return (

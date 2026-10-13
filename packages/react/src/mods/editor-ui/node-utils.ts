@@ -1,5 +1,6 @@
 import type { PresentationNode } from '#tree/presentation';
-import { getComponents as getComps, getContextsForType, type ComponentData, type NodeData, resolve } from '@treenx/core';
+import { getComponents as getComps, type ComponentData, type NodeData, resolve } from '@treenx/core';
+import type { NativeTypeDescription } from '@treenx/core/kernel/type-description';
 import type { ClientRegistry } from '#context/client-registry';
 import type { PropertySchema, TypeSchema } from '@treenx/core/schema/types';
 
@@ -41,21 +42,8 @@ export function getViewContexts(registry: ClientRegistry, type: string, node?: P
   return ctxs;
 }
 
-export function getActions(type: string, schema?: TypeSchema | null): string[] {
-  const actions = getContextsForType(type)
-    .filter((c) => c.startsWith('action:') && !c.includes(':', 'action:'.length))
-    .map((c) => c.slice('action:'.length))
-    .filter((a) => !a.startsWith('_'));
-
-  // Schema is the client-side contract: server-only actions declared in schema.methods
-  // are discoverable by all clients (browser, MCP, external) without the implementation
-  if (schema?.methods) {
-    for (const name of Object.keys(schema.methods)) {
-      if (!name.startsWith('_') && !actions.includes(name)) actions.push(name);
-    }
-  }
-
-  return actions;
+export function getActions(description: NativeTypeDescription | undefined): string[] {
+  return description === undefined ? [] : Object.keys(description.actions).filter(name => !name.startsWith('_'));
 }
 
 // Returns action param schema from generated schema.methods[action].arguments[0].
