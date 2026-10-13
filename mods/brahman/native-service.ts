@@ -71,6 +71,7 @@ export async function createNativeBrahman(options: NativeBrahmanOptions = {}): P
     async function update(context: Context): Promise<void> {
       if (!active) throw new KernelError('UNAVAILABLE', 'Bot service stopped');
       if (context.from === undefined || context.chat === undefined) return;
+      if (config.maintenance !== '') { await context.reply(config.maintenance); return; }
       const textInput = context.message?.text;
       const messageId = context.msg?.message_id;
       const photo = context.message?.photo?.at(-1)?.file_id;
@@ -90,7 +91,6 @@ export async function createNativeBrahman(options: NativeBrahmanOptions = {}): P
       if (user.banned) return;
       const current = { ...args, lang: user.lang };
       try {
-        if (config.maintenance !== '') { await context.reply(config.maintenance); return; }
         if (await conversation.resume(current)) return;
         const data = current.update.callbackData;
         if (data !== undefined) {
@@ -117,6 +117,7 @@ export async function createNativeBrahman(options: NativeBrahmanOptions = {}): P
           return;
         }
         const text = current.update.text;
+        if (text === undefined && current.update.voice === undefined && current.update.audio === undefined) return;
         if (text !== undefined) {
           await conversation.act(`${node.$path}/sessions/${args.userId}`, 'saveResult', { field: 'text', value: text });
           if (!text.startsWith('/')) {
