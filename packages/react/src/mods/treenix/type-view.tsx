@@ -1,6 +1,7 @@
+import { declareClientModule } from '#context/client-registry';
 // Type node views — react + react:list + live preview
 
-import { getContextsForType, type NodeData, register } from '@treenx/core';
+import { getContextsForType, type NodeData } from '@treenx/core';
 import { TypePreview } from './preview';
 
 // ── Helpers ──
@@ -120,5 +121,7 @@ function TypeListItem({ value }: { value: NodeData }) {
 
 // ── Registration ──
 
-register('type', 'react', TypeNodeView as any);
-register('type', 'react:list', TypeListItem as any);
+export default declareClientModule('@treenx/react/treenix/type-view', [
+  { type: 'type', context: 'react', handler: TypeNodeView },
+  { type: 'type', context: 'react:list', handler: TypeListItem }
+]);

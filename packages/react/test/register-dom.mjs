@@ -9,4 +9,5 @@ for (const key of ['window', 'document', 'navigator', 'HTMLElement', 'MutationOb
 }
 globalThis.requestAnimationFrame ??= (cb) => setTimeout(cb, 0);
 globalThis.cancelAnimationFrame ??= clearTimeout;
+globalThis.getComputedStyle ??= win.getComputedStyle.bind(win);
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;

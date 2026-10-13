@@ -1,4 +1,6 @@
-import { createDeclaredClientRegistry } from '#context/client-registry';
+import { createDeclaredClientRegistry, publishClientExports } from '#context/client-registry';
+import defaultView from './default-view';
+import listItems from './list-items';
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -19,6 +21,8 @@ import {
 } from './default-view';
 
 afterEach(() => cleanup());
+
+publishClientExports({ clientModules: [defaultView, listItems] });
 
 describe('splitRecord', () => {
   it('respects schema order and hides undeclared plain fields (schema-strict)', () => {

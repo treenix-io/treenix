@@ -826,10 +826,15 @@ export type SecurityRegistration = {
 }[SecurityContext]
 
 /** Open contexts such as `react`, on any type; a security context name here is rejected. */
-export interface OpenRegistration {
+export interface OpenRegistration<H = unknown> {
   readonly type: TypeName
   readonly context: string
-  readonly handler: unknown
+  readonly handler: H
+}
+
+export interface OpenModule<H = unknown> {
+  readonly id: ModuleId
+  readonly open: readonly OpenRegistration<H>[]
 }
 
 /** Immutable client view source accepted by the administrator into its owning module generation. */
@@ -841,11 +846,9 @@ export interface PublishedView {
   readonly draftRev: Rev
 }
 
-export interface ModuleManifest {
-  readonly id: ModuleId
+export interface ModuleManifest extends OpenModule {
   readonly types: readonly TypeDef[]
   readonly security: readonly SecurityRegistration[]
-  readonly open: readonly OpenRegistration[]
   readonly views?: Readonly<Record<TypeName, PublishedView>>
   readonly actionSources?: readonly PublishedActionSource[]
   readonly sourceIo?: Readonly<Record<string, (io: Io, input: unknown) => Promise<unknown>>>

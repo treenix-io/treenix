@@ -1,9 +1,10 @@
+import { declareClientModule } from '#context/client-registry';
 // Ref node/component view — shows target path, resolve button, inline preview
 
 import { Button } from '#components/ui/button';
 import { NodeProvider, Render, RenderContext } from '#context';
 import { usePath, useTreeEffects } from '#hooks';
-import { type NodeData, register } from '@treenx/core';
+import { type NodeData } from '@treenx/core';
 import { useState } from 'react';
 
 // ── Node-level view (for ref nodes like /sys/autostart/xxx) ──
@@ -109,6 +110,8 @@ function RefRouteView({ value }: { value: { readonly $ref: string } }) {
 
 // ── Registration ──
 
-register('ref', 'react', RefNodeView as any);
-register('ref', 'react:list', RefListItem as any);
-register('ref', 'react:route', RefRouteView);
+export default declareClientModule('@treenx/react/treenix/ref-view', [
+  { type: 'ref', context: 'react', handler: RefNodeView },
+  { type: 'ref', context: 'react:list', handler: RefListItem },
+  { type: 'ref', context: 'react:route', handler: RefRouteView }
+]);

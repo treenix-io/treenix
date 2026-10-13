@@ -1,4 +1,5 @@
-import { type NodeData, register } from '@treenx/core';
+import { declareClientModule } from '#context/client-registry';
+import { type NodeData } from '@treenx/core';
 import { pathName } from './list-items';
 import { getComponents, getSchema } from './node-utils';
 
@@ -77,4 +78,6 @@ function UserView({ value }: { value: NodeData }) {
   );
 }
 
-register('user', 'react', UserView as any);
+export default declareClientModule('@treenx/react/editor-ui/user-view', [
+  { type: 'user', context: 'react', handler: UserView }
+]);

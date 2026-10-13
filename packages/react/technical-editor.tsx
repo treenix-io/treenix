@@ -9,12 +9,12 @@ import { LaneSessionProvider } from './src/app/LaneSessionProvider';
 import { NodeEditor } from './src/editor/NodeEditor';
 import { EditorSidebar } from './src/app/EditorSidebar';
 import { ResizablePanel, ResizablePanelGroup } from './src/components/ui/resizable';
-import { registerFormFields } from './src/mods/editor-ui/form-fields';
-import './src/mods/uix/client';
+import { clientModules } from './src/mods/clients';
+import { publishClientExports } from './src/context/client-registry';
 import './src/native/style.css';
 import { Render } from './src/context';
 
-registerFormFields();
+publishClientExports({ clientModules });
 const server = new URLSearchParams(location.search).get('server');
 if (server === null) throw new Error('Technical server address is required');
 const session = createLaneSession(server, createLanePersistence(`technical-editor-${crypto.randomUUID()}`));

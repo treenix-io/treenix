@@ -338,12 +338,13 @@ export default function treenixPlugin(opts?: { modsDirs?: string[]; clientFiles?
 
       // Dynamic imports — each mod loads independently, failures don't crash the app
       const lines = allMods.map(mod => {
-        const imports = mod.files.map(f => `import('${f}')`).join(', ');
+        const imports = mod.files.map(f => `import('${f}').then(publishClientExports)`).join(', ');
         return `  loadMod('${mod.name}', async () => { await Promise.all([${imports}]); })`;
       });
 
       return [
         `import { loadMod } from '@treenx/react/mod-errors';`,
+        `import { publishClientExports } from '@treenx/react/context/client-registry';`,
         'await Promise.allSettled([',
         lines.join(',\n'),
         ']);',

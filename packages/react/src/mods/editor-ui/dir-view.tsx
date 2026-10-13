@@ -1,5 +1,6 @@
+import { declareClientModule } from '#context/client-registry';
 import { useChildren } from '#hooks';
-import { register, type NodeData } from '@treenx/core';
+import { type NodeData } from '@treenx/core';
 import { useState } from 'react';
 import { RenderChildren, type ChildCtx } from './list-items';
 
@@ -78,4 +79,6 @@ function FolderView({ value }: { value: NodeData }) {
   );
 }
 
-register('dir', 'react', FolderView);
+export default declareClientModule('@treenx/react/editor-ui/dir-view', [
+  { type: 'dir', context: 'react', handler: FolderView }
+]);

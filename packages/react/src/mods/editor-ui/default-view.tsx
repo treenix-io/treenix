@@ -1,8 +1,9 @@
+import { declareClientModule } from '#context/client-registry';
 import './editor-ui.css';
 import { HoverTooltip } from '#components/ui/tooltip';
 import { Render, type View } from '#context';
 import { useChildren } from '#hooks';
-import { type ComponentData, isComponent, isRef, register } from '@treenx/core';
+import { type ComponentData, isComponent, isRef } from '@treenx/core';
 import type { ClientRegistry } from '#context/client-registry';
 import { useClientRegistry } from '#context/client-registry-context';
 import type { PropertySchema, TypeSchema } from '@treenx/core/schema/types';
@@ -203,4 +204,6 @@ export const TypedRecordView: View<ComponentData> = ({ value }) => {
   );
 };
 
-register('default', 'react', TypedRecordView);
+export default declareClientModule('@treenx/react/editor-ui/default-view', [
+  { type: 'default', context: 'react', handler: TypedRecordView }
+]);

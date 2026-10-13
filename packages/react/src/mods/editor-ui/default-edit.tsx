@@ -1,6 +1,7 @@
+import { declareClientModule } from '#context/client-registry';
 import { NativeSchemaForm } from '#editor/NativeSchemaFields';
 import { useClientRegistry } from '#context/client-registry-context';
-import { type ComponentData, isComponent, isRef, register } from '@treenx/core';
+import { type ComponentData, isComponent, isRef } from '@treenx/core';
 import type { View } from '#context';
 import { useNativeTypeDescription } from '#schema-loader';
 import { Checkbox } from '#components/ui/checkbox';
@@ -96,7 +97,10 @@ const DefaultEditForm: View<ComponentData> = ({ value, onChange }) => {
   );
 };
 
-register('default', 'react:edit', DefaultEditForm);
 // Inspector props drawer renders under 'react:edit:props' (ComponentSection). Without this exact
 // default, resolve strips ':props' and full-page react:edit views (kanban, canvas) leak into the drawer.
-register('default', 'react:edit:props', DefaultEditForm);
+
+export default declareClientModule('@treenx/react/editor-ui/default-edit', [
+  { type: 'default', context: 'react:edit', handler: DefaultEditForm },
+  { type: 'default', context: 'react:edit:props', handler: DefaultEditForm }
+]);

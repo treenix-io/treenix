@@ -1,10 +1,10 @@
+import { declareClientModule } from '#context/client-registry';
 // Default react:form handler — renders form from type schema automatically
 // Any type without a specific react:form handler falls here via resolve('default', 'react:form')
 
 import { type OnChange, type RenderProps } from '#context';
 import { fieldWidget, NativeSchemaForm } from '#editor/NativeSchemaFields';
 import { useSchema } from '#schema-loader';
-import { register } from '@treenx/core';
 import { useClientRegistry } from '#context/client-registry-context';
 import { createElement } from 'react';
 
@@ -91,4 +91,6 @@ function DefaultSchemaForm({ value, onChange }: RenderProps) {
   );
 }
 
-register('default', 'react:form', DefaultSchemaForm);
+export default declareClientModule('@treenx/react/treenix/schema-form', [
+  { type: 'default', context: 'react:form', handler: DefaultSchemaForm }
+]);

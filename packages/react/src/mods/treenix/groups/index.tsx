@@ -3,7 +3,7 @@
 import { Badge } from '#components/ui/badge';
 import { Button } from '#components/ui/button';
 import { Input } from '#components/ui/input';
-import { register } from '@treenx/core';
+import { declareClientModule } from '#context/client-registry';
 import { X } from 'lucide-react';
 import { useState } from 'react';
 
@@ -75,8 +75,6 @@ function TagsView({ value }: FP) {
   );
 }
 
-export function registerGroups() {
-  register('tags', 'react:form', TagsForm as any);
-  register('tags', 'react:compact', TagsView as any);
-  register('tags', 'react', TagsView as any);
-}
+export default declareClientModule('@treenx/react/treenix/groups', [
+  { type: 'tags', context: 'react:compact', handler: TagsView },
+]);

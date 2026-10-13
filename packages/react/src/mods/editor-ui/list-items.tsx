@@ -1,3 +1,4 @@
+import { declareClientModule } from '#context/client-registry';
 import type { PresentationNode } from '#tree/presentation';
 // Default content-only views for react:list / react:card / react:icon, plus the observer-side
 // chrome wrapper <RenderChildren>. Convention: items render CONTENT only (no border, no click,
@@ -6,7 +7,6 @@ import type { PresentationNode } from '#tree/presentation';
 import { Render, RenderContext } from '#context';
 import { useNavigate } from '#navigate';
 import type { NodeData } from '@treenx/core';
-import { register } from '@treenx/core';
 import type { ReactNode } from 'react';
 
 const TYPE_ICONS: Record<string, string> = {
@@ -50,7 +50,6 @@ function DirListItem({ value }: { value: PresentationNode }) {
     </>
   );
 }
-register('dir', 'react:list', DirListItem as any);
 
 function DefaultListItem({ value }: { value: PresentationNode }) {
   return (
@@ -67,7 +66,6 @@ function DefaultListItem({ value }: { value: PresentationNode }) {
     </>
   );
 }
-register('default', 'react:list', DefaultListItem as any);
 
 function DefaultCard({ value }: { value: PresentationNode }) {
   return (
@@ -84,7 +82,6 @@ function DefaultCard({ value }: { value: PresentationNode }) {
     </>
   );
 }
-register('default', 'react:card', DefaultCard as any);
 
 function DefaultIcon({ value }: { value: PresentationNode }) {
   return (
@@ -98,7 +95,6 @@ function DefaultIcon({ value }: { value: PresentationNode }) {
     </>
   );
 }
-register('default', 'react:icon', DefaultIcon as any);
 
 // ── Observer-side chrome ──
 
@@ -180,3 +176,10 @@ export function RenderItem({ value, ctx }: { value: PresentationNode; ctx: Child
     </RenderContext>
   );
 }
+
+export default declareClientModule('@treenx/react/editor-ui/list-items', [
+  { type: 'dir', context: 'react:list', handler: DirListItem },
+  { type: 'default', context: 'react:list', handler: DefaultListItem },
+  { type: 'default', context: 'react:card', handler: DefaultCard },
+  { type: 'default', context: 'react:icon', handler: DefaultIcon }
+]);

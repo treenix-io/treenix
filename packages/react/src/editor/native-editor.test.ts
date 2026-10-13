@@ -16,9 +16,9 @@ import {
 import { createInstanceFoundation } from '../../../../core/src/kernel/instance';
 import { createMemoryStore } from '../../../../core/src/kernel/store/memory';
 import { Render } from '#context';
-import { createClientRegistry } from '#context/client-registry';
+import { createClientRegistry, publishClientExports } from '#context/client-registry';
 import { unregister } from '@treenx/core';
-import '../mods/uix/client';
+import { clientModules } from '../mods/clients';
 import { PUBLICATION_PREFIX } from '@treenx/core/kernel/uix-publication';
 import { collectModule } from '@treenx/core/kernel/manifest';
 import { loadSchemasRecursive } from '../../../../core/src/schema/load';
@@ -30,6 +30,9 @@ import type { Node } from '@treenx/core/kernel/types';
 import { createLaneTreeSource } from '#tree/lane-source';
 import { TreeSourceProvider } from '#tree/tree-source-context';
 import type { PathSnapshot } from '#tree/tree-source';
+import { TooltipProvider } from '#components/ui/tooltip';
+
+publishClientExports({ clientModules });
 
 /** Wait for an actual public path publication. */
 function until(
@@ -180,7 +183,8 @@ async function fixture(
     sent,
     invoked,
     wrapper: ({ children }: { children: ReactNode }) =>
-      createElement(TreeSourceProvider, { source, children }),
+      createElement(TreeSourceProvider, { source,
+        children: createElement(TooltipProvider, { children }) }),
     /** Releases the native editor fixture's owned resources. */
     async close() {
       cleanup();
@@ -210,7 +214,7 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
       return createElement('button', { onClick: () => setCount(count + 1) },
         `${label}:${value.value}:${count}`);
     }
-    const module = (label: string) => ({ id: 'document-view', views: [{
+    const module = (label: string) => ({ id: 'document-view', open: [{
       type: 'editor.document', context: 'react', handler: OwnedView, meta: { props: { label } },
     }] });
     const firstRegistry = createClientRegistry([module('first')]);
@@ -280,7 +284,7 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
       await until(f.source, (snap) => snap.data !== undefined);
     });
     assert.equal(ui.queryByLabelText('Access control'), null);
-    fireEvent.click(ui.getByRole('button', { name: 'JSON' }));
+    fireEvent.mouseDown(ui.getByRole('tab', { name: 'JSON' }), { button: 0, ctrlKey: false });
     const textarea = ui.getByRole('textbox');
     assert.ok(textarea instanceof window.HTMLTextAreaElement);
     const value: Node = JSON.parse(textarea.value);
@@ -289,7 +293,7 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
     assert.equal(value.$acl, undefined);
     fireEvent.change(textarea, { target: { value: JSON.stringify({ ...value, value: 9 }) } });
     await act(async () => {
-      fireEvent.click(ui.getByRole('button', { name: 'Save node' }));
+      fireEvent.click(ui.getByRole('button', { name: 'Save JSON' }));
       await until(f.source, (snap) => snap.data?.value === 9);
     });
     const request = f.sent.find((request) => request.t === 'commit');
@@ -307,6 +311,22 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
     assert.equal(copy.node.$owner, 'u:retained-owner');
     assert.deepEqual(copy.node.$acl, [{ subject: { group: 'public' }, grant: R | W }]);
     assert.equal(ui.queryByRole('alert'), null);
+  });
+  it('edits the native schema through declared number widgets and saves the original node', async t => {
+    const f = await fixture('declared-native-number-form', false);
+    t.after(f.close);
+    const ui = render(createElement(PublicEditor), { wrapper: f.wrapper });
+    const input = await ui.findByRole('spinbutton');
+    fireEvent.change(input, { target: { value: '7' } });
+    await act(async () => {
+      fireEvent.click(ui.getByRole('button', { name: 'Save' }));
+      await until(f.source, snapshot => snapshot.data?.value === 7);
+    });
+    const stored = (await f.admin.read({ node: '/document' })).copies[0];
+    assert.ok('node' in stored);
+    assert.equal(stored.node.value, 7);
+    assert.equal(stored.node.$owner, 'u:retained-owner');
+    assert.deepEqual(stored.node.$acl, [{ subject: { group: 'public' }, grant: R | W }]);
   });
   it('retains the stale full-node draft when the expected native revision conflicts', async (t) => {
     const f = await fixture('public-editor-stale-draft', false);

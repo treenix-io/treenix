@@ -116,7 +116,7 @@ describe('Render — sub-context loader (C38)', () => {
   it('fires the base-context miss resolver when rendering at a sub-context', () => {
     const T = 'uix.lazy.test';
     let fired = false;
-    const registry = createClientRegistry([{ id: 'lazy-view', views: [], resolveMissing(type, context) {
+    const registry = createClientRegistry([{ id: 'lazy-view', open: [], resolveMissing(type, context) {
       if (type !== T || context !== 'react') return undefined;
       fired = true;
       return { type, context, handler: () => createElement('span', null, 'loaded') };

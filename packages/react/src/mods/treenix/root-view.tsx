@@ -1,7 +1,7 @@
+import { declareClientModule } from '#context/client-registry';
 import type { View } from '#context';
 import { Render } from '#context';
 import { usePath } from '#hooks';
-import { register } from '@treenx/core';
 
 const RootView: View<{ $type: 'root' }> = () => {
   const { data: page, loading } = usePath('/home');
@@ -23,4 +23,6 @@ const RootView: View<{ $type: 'root' }> = () => {
   );
 };
 
-register('root', 'react', RootView);
+export default declareClientModule('@treenx/react/treenix/root-view', [
+  { type: 'root', context: 'react', handler: RootView }
+]);

@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { createRegistryMap } from '#core/registry-map'
 import { KernelError } from '#errors'
 import { stableJson } from '#util/stable-json'
+import { declareOpenModule } from './module-declaration'
 import type { ActionDef, BackfillGeneration, ModuleId, ModuleManifest, Registry, SecurityClass, SecurityContext, SecurityHandlers, SecurityRegistration, TypeDef, TypeName } from './types'
 
 export interface TypeOwnership {
@@ -41,7 +42,7 @@ export function copyManifest(manifest: ModuleManifest): ModuleManifest {
     }))),
     security: Object.freeze(manifest.security.map(entry => entry.context === 'migrate'
       ? freezeData({ ...entry, handler: entry.handler.map(step => ({ ...step })) }) : Object.freeze({ ...entry }))),
-    open: Object.freeze(manifest.open.map(entry => Object.freeze({ ...entry }))),
+    open: declareOpenModule(manifest.id, manifest.open).open,
   })
 }
 

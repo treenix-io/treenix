@@ -2,18 +2,27 @@ import { observeRegistrations } from '@treenx/core/core/registration';
 import type { Registration } from '@treenx/core/core/registration';
 import type { ReactHandler } from '#context';
 import { normalizeType } from '@treenx/core';
+import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
+import type { OpenModule, OpenRegistration } from '@treenx/core/kernel/types';
 
-export interface ClientViewDeclaration {
-  readonly type: string;
-  readonly context: string;
-  readonly handler: ReactHandler;
+export interface ClientViewDeclaration extends OpenRegistration<ReactHandler> {
   readonly meta?: Record<string, unknown>;
 }
 
-export interface ClientModule {
-  readonly id: string;
-  readonly views: readonly ClientViewDeclaration[];
+export interface ClientModule extends OpenModule<ReactHandler> {
+  readonly open: readonly ClientViewDeclaration[];
   readonly resolveMissing?: (type: string, context: string) => ClientViewDeclaration | undefined;
+}
+
+export function declareClientModule(id: string, open: readonly ClientViewDeclaration[],
+  resolveMissing?: ClientModule['resolveMissing']): ClientModule {
+  return { ...declareOpenModule(id, open), ...(resolveMissing === undefined ? {} : { resolveMissing }) };
+}
+
+/** Legacy packages can omit declarations until their side-effect producers are migrated. */
+export function publishClientExports(entry: { readonly clientModules?: readonly ClientModule[] }): void {
+  if (entry.clientModules !== undefined)
+    for (const module of entry.clientModules) publishClientModule(module);
 }
 
 /** Module declarations contain code; each rendering owner owns its mutable publication. */
@@ -25,7 +34,7 @@ export function createClientRegistry(initial: readonly ClientModule[] = []) {
 
   function rebuild(): void {
     const next = new Map<string, ClientViewDeclaration>();
-    for (const module of modules.values()) for (const entry of module.views) {
+    for (const module of modules.values()) for (const entry of module.open) {
       const key = `${normalizeType(entry.type)}@${entry.context}`;
       if (next.has(key)) throw new Error(`Duplicate client view: ${key}`);
       next.set(key, entry);
@@ -113,9 +122,10 @@ export function mountClientRegistry(registry: ClientRegistry): () => void {
 // Existing UI modules still emit declarations through the core registration producer.
 const importedViews = new Map<string, Registration>();
 observeRegistrations(registration => {
-  if (registration.context !== 'react' && !registration.context.startsWith('react:')) return;
+  const context = registration.context;
+  if (context !== 'react' && !context.startsWith('react:') && context !== 'site' && !context.startsWith('site:')) return;
   const key = `${registration.type}@${registration.context}`;
   if ('remove' in registration) importedViews.delete(key);
   else if (!importedViews.has(key)) importedViews.set(key, registration);
-  publishClientModule({ id: 'imported-views', views: [...importedViews.values()] });
+  publishClientModule(declareClientModule('imported-views', [...importedViews.values()]));
 });

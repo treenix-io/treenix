@@ -20,8 +20,8 @@ import { useTreeSource } from '#tree/tree-source-context';
 import type { PresentationNode } from '#tree/presentation';
 import { KernelError } from '@treenx/core/errors';
 import { fieldWidget, NativeSchemaForm } from '#editor/NativeSchemaFields';
-import type { OnChange } from '#context';
-import { register } from '@treenx/core';
+import type { OnChange, ReactHandler } from '#context';
+import { declareClientModule, type ClientViewDeclaration } from '#context/client-registry';
 import { useClientRegistry } from '#context/client-registry-context';
 import dayjs from 'dayjs';
 import { X } from 'lucide-react';
@@ -1304,7 +1304,7 @@ function PathForm({ value, onChange }: FP) {
 // ── Registration ──
 // Each entry: [type, viewHandler, formHandler]
 
-const fields: [string, Function, Function][] = [
+const fields: [string, ReactHandler, ReactHandler][] = [
   ['string', StringView, StringForm],
   ['text', StringView, TextForm],
   ['textarea', StringView, TextForm],
@@ -1329,9 +1329,9 @@ const fields: [string, Function, Function][] = [
   ['tstring', TstringView, TstringForm],
 ];
 
-export function registerFormFields() {
-  for (const [type, view, form] of fields) {
-    register(type, 'react', view as any);
-    register(type, 'react:form', form as any);
-  }
+const open: ClientViewDeclaration[] = [];
+for (const [type, view, form] of fields) {
+  open.push({ type, context: 'react', handler: view }, { type, context: 'react:form', handler: form });
 }
+
+export default declareClientModule('@treenx/react/editor-ui/form-fields', open);

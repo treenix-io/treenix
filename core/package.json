@@ -36,6 +36,11 @@
     }
   },
   "exports": {
+    "./kernel/module-declaration": {
+      "development": "./src/kernel/module-declaration.ts",
+      "types": "./dist/kernel/module-declaration.d.ts",
+      "default": "./dist/kernel/module-declaration.js"
+    },
     "./core/registration": {
       "development": "./src/core/registration.ts",
       "types": "./dist/core/registration.d.ts",
