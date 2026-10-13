@@ -456,6 +456,8 @@ export function createReader(options: ReaderOptions) {
       }
     }
     for (const [field] of selectorSort(selector)) add(field, false);
+    for (const field of selector.queryFields ?? []) add(field, false);
+    for (const spec of selector.include ?? []) if ('ref' in spec) add(spec.ref, false);
     return [...fields];
   }
 
@@ -949,13 +951,19 @@ export function createReader(options: ReaderOptions) {
     if ('history' in selector || !selector.include?.some(spec => 'ref' in spec)) return;
     assertIncludeDepth(selector.include, limits.includeDepth);
     const discovery = createReader({ ...options, ledger, scope: undefined, check: active });
-    const base = { ...selector, include: undefined };
+    const base = 'children' in selector
+      ? { ...selector, include: undefined, queryFields: projectedFields(selector) }
+      : { ...selector, include: undefined };
 
     const selected = await writer.read(source.domains, async () => {
       await validatePrepared(false);
       const selection = await discovery.selectInSpan(base);
-      const projected: Node[] = [];
-      for (const image of selection.images) if ('node' in image.copy) projected.push(image.copy.node);
+      const projected: Readonly<Record<string, unknown>>[] = [];
+      for (const image of selection.images) {
+        const visible = 'node' in image.copy ? image.copy.node : image.copy.query;
+        if (visible === undefined) throw new KernelError('UNAVAILABLE', 'Include preparation query projection is absent');
+        projected.push(visible);
+      }
       return projected;
     });
     const preparation = preparedSets.length;
@@ -996,7 +1004,9 @@ export function createReader(options: ReaderOptions) {
   /** Keep included projections actor-local while every physical read retains its canonical dependencies. */
   async function readIncludes(selector: SubSelector): Promise<ReadResult> {
     assertIncludeDepth(selector.include, limits.includeDepth);
-    const result = await read({ ...selector, include: undefined });
+    const result = await read('children' in selector
+      ? { ...selector, include: undefined, queryFields: projectedFields(selector) }
+      : { ...selector, include: undefined });
     const ownership = result.ownership;
     if (ownership === undefined) throw new KernelError('INVALID', 'Included selection ownership is absent');
     const copies = new Map(result.copies.map(copy => ['node' in copy ? copy.node.$id : copy.id, copy]));
@@ -1035,8 +1045,11 @@ export function createReader(options: ReaderOptions) {
     for (const root of roots) {
       const copy = copies.get(root.id);
       if (copy === undefined) throw new KernelError('INVALID', 'Included root projection is absent');
-      if ('node' in copy) for (const spec of selector.include ?? []) {
-        if ('ref' in spec) await followIncludes({ visible: copy.node }, [spec], at => include(at, root.covered), () => {}, active);
+      const visible = 'node' in copy ? copy.node : copy.query;
+      if ('children' in selector && visible === undefined)
+        throw new KernelError('UNAVAILABLE', 'Included query field projection is absent');
+      if (visible !== undefined) for (const spec of selector.include ?? []) {
+        if ('ref' in spec) await followIncludes({ visible }, [spec], at => include(at, root.covered), () => {}, active);
       }
     }
     await writer.read(source.domains, async () => {

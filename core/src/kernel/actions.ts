@@ -1,3 +1,4 @@
+import { getComponentField } from '#core/component'
 import { pairingOperation, preparePairing } from '#kernel/auth-pairing'
 import { createHash } from 'node:crypto'
 import { assertSafeSchema, validateValue, type ValidationError } from '#comp/validate'
@@ -61,7 +62,7 @@ export function createActionRuntime(options: CommandOptions) {
 
   /** Own one request deadline and read set, including its nested action calls. */
   async function run(
-    input: ActRequest,
+    input: ActRequest & Pick<NestedActRequest, 'targetType'>,
     requestSignal?: AbortSignal,
     parent?: ParentAction,
     options: CommandOptions = initialOptions,
@@ -97,7 +98,7 @@ export function createActionRuntime(options: CommandOptions) {
         throw new KernelError('BUDGET', 'Action request budget exceeded');
       const request = freeze(owned);
       const opId = request.opId;
-      const component = request.component ?? '';
+      let component = request.component ?? '';
       if (request.anchor !== undefined) assertMutationKey(request.anchor);
 
       const identity =
@@ -110,13 +111,15 @@ export function createActionRuntime(options: CommandOptions) {
                 kind: 'act',
                 path: request.path,
                 component,
+                ...(request.targetType === undefined ? {} : { targetType: request.targetType }),
                 action: request.action,
                 args: request.args,
                 ...(request.anchor === undefined ? {} : { anchor: request.anchor }),
               },
             };
       if (identity !== undefined && !parent?.onlyRead) assertMutationKey(opId);
-      const foreign = await options.actAuthority?.({ request, requestId, admission, cost: readerOperationCost(ledger), identity,
+      const { targetType, ...publicRequest } = request;
+      const foreign = await options.actAuthority?.({ request: publicRequest, targetType, requestId, admission, cost: readerOperationCost(ledger), identity,
         onlyRead: parent?.onlyRead ?? false, wait: control.wait, signal: control.signal, deliver });
       if (foreign !== undefined) return foreign;
       if (identity !== undefined && !parent?.onlyRead) {
@@ -124,7 +127,7 @@ export function createActionRuntime(options: CommandOptions) {
         const replay = await writer.replay(identity, control.wait);
         if (replay !== undefined) return replay;
       }
-      await options.prepareSource(budget, [{ history: '/' }], admission.signal);
+      await options.prepareSource(budget, [{ node: request.path }], control.signal);
       assertActive();
 
       const revision = options.registryRevision();
@@ -156,6 +159,11 @@ export function createActionRuntime(options: CommandOptions) {
 
         const node = copy.node;
         const bits = copy.bits;
+        if (request.targetType !== undefined) {
+          const selected = getComponentField(node, request.targetType, request.component);
+          if (selected === undefined) throw new KernelError('NOT_FOUND', 'Action target type is absent');
+          component = selected[1];
+        }
         const target = componentEntries(node).find(([name]) => name === component);
         if (target === undefined) throw new KernelError('NOT_FOUND', 'Action component is absent');
         const ownComponent = target[1];
@@ -252,6 +260,10 @@ export function createActionRuntime(options: CommandOptions) {
           { signal: control.signal, deadline: budget.deadline },
         );
         assertActionCurrent();
+        const current = (await callerReads.read({ node: request.path })).copies[0];
+        if (!('node' in current)) throw current.error;
+        if (current.node.$id !== node.$id || current.node.$rev !== node.$rev)
+          throw new KernelError('CONFLICT', 'Action target changed during admission');
         if (action.kind === 'setuid') {
           return options.withNodeExecutor(
             { path: node.$path, id: node.$id, rev: node.$rev },
@@ -352,6 +364,7 @@ export function createActionRuntime(options: CommandOptions) {
                 {
                   path: nestedRequest.path,
                   component: nestedRequest.component,
+                  targetType: nestedRequest.targetType,
                   action: nestedRequest.action,
                   args: nestedRequest.args,
                   opId: nestedOpId,
@@ -750,7 +763,8 @@ export function createActionRuntime(options: CommandOptions) {
           request: {
             kind: 'act',
             path: request.path,
-            component,
+            component: request.component ?? '',
+            ...(request.targetType === undefined ? {} : { targetType: request.targetType }),
             action: request.action,
             args: request.args,
             ...(request.anchor === undefined ? {} : { anchor: request.anchor }),

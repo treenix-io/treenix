@@ -6,7 +6,6 @@ import { createMemoryBlobStore } from '#kernel/blob-store-memory'
 import { createInstance } from '#kernel/instance'
 import { drainSession } from '#kernel/session-delivery'
 import { createMemoryStore } from '#kernel/store/memory'
-import { storeCommit } from '#kernel/store/contract'
 import { R, type ModuleManifest, type Position, type StoredNode } from '#kernel/types'
 
 const code = (expected: KernelError['code']) => (error: unknown) => error instanceof KernelError && error.code === expected
@@ -46,7 +45,10 @@ async function fixture(onOpen?: (path: string) => Promise<void>) {
     if (path === '/failed') throw new KernelError('UNAVAILABLE', 'Target is unavailable')
     if (path === '/stalled') { await stalled; throw new KernelError('UNAVAILABLE', 'Target is stalled') }
     const store = createMemoryStore({ domain: path })
-    await store.commit(storeCommit(1, [node(path)]))
+    const image = node(path), pos = image.$pos
+    await store.commit({ pos, writerEpoch: 1, writes: [{ path: image.$path, node: image }],
+      record: { pos, kind: 'commit', executor: 'kernel', caller: 'kernel',
+        entries: [{ id: image.$id, path: image.$path, change: { t: 'create', after: image } }] } })
     return { kind: 'store', store, resources: { writerEpoch: 1, epoch: randomUUID(), persistent: false, decisionHistory: 'fresh' }, async close() { store.close() } }
   } }], open: [] }
   let saved: Position | undefined
@@ -130,7 +132,10 @@ it('keeps explicit includes independent of reference preparation across sequenti
       const paths = []
       for (const selector of [ref, fixed, fixed, ref]) {
         const result = await ctx.read.read(selector)
-        paths.push(result.copies.map(copy => 'node' in copy ? copy.node.$path : copy.path))
+        const primary = result.copies.find(copy => 'node' in copy && copy.node.$path === '/reference')
+        assert.ok(primary && 'node' in primary)
+        assert.deepEqual(result.list, [primary.node.$id])
+        paths.push(result.copies.map(copy => 'node' in copy ? copy.node.$path : copy.path).sort())
       }
       return paths
     } },
@@ -138,7 +143,7 @@ it('keeps explicit includes independent of reference preparation across sequenti
   f.instance.registry.publish(module)
   await f.admin.commit({ opId: f.key(), changes: [{ op: 'put', node: { $path: '/reference', $type: 't.dir', target: '/needed/file' } }] }).outcome
   const result = await f.admin.act({ path: '/worker', action: 'references', args: {} }).outcome
-  assert.deepEqual(result.value, [['/reference', '/needed/file'], ['/dynamic/file', '/reference'], ['/dynamic/file', '/reference'], ['/reference', '/needed/file']])
+  assert.deepEqual(result.value, [['/needed/file', '/reference'], ['/dynamic/file', '/reference'], ['/dynamic/file', '/reference'], ['/needed/file', '/reference']])
   assert.deepEqual(f.opened, ['/needed', '/dynamic'])
 })
 

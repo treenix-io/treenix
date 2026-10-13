@@ -37,8 +37,10 @@ export function createNodeLaneRead(options: CommandOptions, claimable: (path: Pa
     for (const selector of selectors) {
       const resolved = options.resolveSelector?.(selector) ?? selector
       if ('history' in resolved) throw new KernelError('INVALID', 'A subscription cannot select history')
-      // Native Views prepare projected includes through their executor reads.
-      if (options.viewDefinition?.(resolved) === undefined) await reads.prepare(resolved)
+      // Views and Authorities prepare includes through their owning projected selections.
+      const path = 'node' in resolved ? resolved.node : resolved.children
+      if (options.viewDefinition?.(resolved) === undefined && options.authority?.(path) !== true)
+        await reads.prepare(resolved)
     }
     return writer.read(() => input.domains, async () => {
       check()

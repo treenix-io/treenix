@@ -1,7 +1,7 @@
 import { assertSafePath } from '#core/path'
 import { KernelError } from '#errors'
 import { getByPath } from '#kernel/update-ops'
-import type { IncludeSpec, Node, Path } from '#kernel/types'
+import type { IncludeSpec, Path } from '#kernel/types'
 
 /** Reject paths that cannot be used as reader selectors. */
 export function assertReadPath(value: Path): void {
@@ -25,7 +25,7 @@ export function assertIncludeDepth(include: readonly IncludeSpec[] | undefined, 
 }
 
 /** Resolve a projected reference field while enforcing the path boundary. */
-function reference(node: Node, field: string): Path | undefined {
+function reference(node: Readonly<Record<string, unknown>>, field: string): Path | undefined {
   const value = getByPath(node, field)
   if (value === undefined || value === null) return undefined
   if (typeof value === 'string') { assertReadPath(value); return value }
@@ -37,7 +37,7 @@ function reference(node: Node, field: string): Path | undefined {
 }
 
 /** Follow projected references; absent and unreadable targets still pass through the owning reader. */
-export async function followIncludes<T extends { readonly visible: Node }>(
+export async function followIncludes<T extends { readonly visible: Readonly<Record<string, unknown>> }>(
   base: T | undefined, specs: readonly IncludeSpec[], read: (path: Path) => Promise<T | null>,
   accept: (value: T) => void, check: () => void,
 ): Promise<void> {

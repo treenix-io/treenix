@@ -500,6 +500,8 @@ export interface ActRequest {
 
 /** Nested keys are derived by the kernel; the handler supplies only the stable logical call name. */
 export type NestedActRequest = Omit<ActRequest, 'opId' | 'anchor'> & {
+  /** Resolves the main or first ordered named component in this child's caller projection. */
+  readonly targetType?: TypeName
   key?: string
   /** Narrows this call and its descendants, including node executors, to these subtrees. */
   scope?: readonly Path[]

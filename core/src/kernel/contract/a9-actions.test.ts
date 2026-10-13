@@ -578,6 +578,9 @@ describe('native action handlers', { timeout: 10_000 }, () => {
     assert.ok(escaped); release.resolve(); await assert.rejects(escaped, code('INVALID'))
   })
 
+})
+
+describe('native action replay probes', { timeout: 10_000 }, () => {
   it('rechecks a durable outcome when a duplicate probe misses just before its target is removed', async t => {
     const entered = signal(), release = signal(); let calls = 0, probes = 0
     const f = await setup({ remove: { kind: 'write', args: {}, handler: async ctx => {
@@ -616,3 +619,62 @@ describe('native action handlers', { timeout: 10_000 }, () => {
     assert.equal(writes, 1); assert.equal(reads, 0)
   })
 })
+
+
+describe('nested action type selection', { timeout: 10_000 }, () => {
+  it('selects the main component before ordered named components and honors an explicit component', async t => {
+    const selected: (string | undefined)[] = [];
+    const f = await setup({ inspect: { kind: 'read', args: {}, handler: async function(this: { count: number }) { return this.count } },
+      dispatch: { kind: 'read', args: {}, handler: async ctx => ctx.act({ path: ctx.node.$path,
+        targetType: 'actions.document', action: 'inspect', args: {} }) },
+      named: { kind: 'read', args: {}, handler: async ctx => ctx.act({ path: '/work/named',
+        targetType: 'actions.document', action: 'inspect', args: {} }) },
+      explicit: { kind: 'read', args: {}, handler: async ctx => ctx.act({ path: '/work/named', component: '#later',
+        targetType: 'actions.document', action: 'inspect', args: {} }) } }, [async operation => {
+      if (operation.kind === 'act' && operation.action === 'inspect') {
+        selected.push(operation.component);
+        assert.equal(Object.hasOwn(operation, 'targetType'), false);
+      }
+      return 'pass';
+    }]);
+    t.after(() => f.instance.auth.close());
+    await f.admin.commit({ opId: f.key(), changes: [{ op: 'put', node: { $path: '/work/named', $type: 't.dir',
+      '#later': { $type: 'actions.document', $order: 'z', count: 2 }, '#named': { $type: 'actions.document', $order: 'a', count: 1 } } }] });
+    assert.deepEqual(await f.commands.act({ ...f.request('dispatch'), opId: undefined }), { value: 0 });
+    assert.deepEqual(await f.commands.act({ ...f.request('named'), opId: undefined }), { value: 1 });
+    assert.deepEqual(await f.commands.act({ ...f.request('explicit'), opId: undefined }), { value: 2 });
+    assert.deepEqual(selected, ['', '#named', '#later']);
+  });
+
+  it('refuses missing types, explicit component mismatches and writes nested under a read action', async t => {
+    let writes = 0;
+    const f = await setup({ write: { kind: 'write', args: {}, handler: async () => ++writes },
+      missing: { kind: 'read', args: {}, handler: async ctx => ctx.act({ path: ctx.node.$path,
+        targetType: 'missing.type', action: 'write', args: {} }) },
+      mismatch: { kind: 'read', args: {}, handler: async ctx => ctx.act({ path: ctx.node.$path, component: '',
+        targetType: 't.dir', action: 'write', args: {} }) },
+      readonly: { kind: 'read', args: {}, handler: async ctx => ctx.act({ path: ctx.node.$path,
+        targetType: 'actions.document', action: 'write', args: {}, key: 'write' }) } });
+    t.after(() => f.instance.auth.close());
+    await assert.rejects(f.commands.act({ ...f.request('missing'), opId: undefined }), code('NOT_FOUND'));
+    await assert.rejects(f.commands.act({ ...f.request('mismatch'), opId: undefined }), code('NOT_FOUND'));
+    await assert.rejects(f.commands.act({ ...f.request('readonly'), opId: undefined }), code('FORBIDDEN'));
+    assert.equal(writes, 0);
+  });
+
+  it('refuses replaying a stable nested key for a different requested type', async t => {
+    let targetType = 'actions.document', writes = 0;
+    const f = await setup({ write: { kind: 'write', args: {}, handler: async () => ++writes },
+      dispatch: { kind: 'write', args: {}, handler: async ctx => {
+        await ctx.act({ path: ctx.node.$path, targetType, action: 'write', args: {}, key: 'child' });
+        throw new KernelError('INVALID', 'Outer action is unfinished');
+      } } });
+    t.after(() => f.instance.auth.close());
+    const request = f.request('dispatch');
+    await assert.rejects(f.commands.act(request), code('INVALID'));
+    await assert.rejects(f.commands.act(request), code('INVALID'));
+    targetType = 't.dir';
+    await assert.rejects(f.commands.act(request), code('KEY_REUSED'));
+    assert.equal(writes, 1);
+  });
+});

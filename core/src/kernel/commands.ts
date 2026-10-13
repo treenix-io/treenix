@@ -11,7 +11,7 @@ import type { createProjector } from '#kernel/projection'
 import { createReader, createReaderLedger, readerOperationCost, type ReaderLedger, type ReaderSource, type ReaderOperationCost } from '#kernel/reader'
 import { createRequestAdmission, serializeRequest } from '#kernel/request'
 import type { AuthReadSource } from '#kernel/session'
-import type { ActionPieceDelivery, ActRequest, BlobStore, Budget, CommitRequest, Gate, ActionIoBinding, Limits, NodeId, Outcome, Path, ReadResult, ReadQueryCost, Registry, Rev, Selector, SubSelector, Store, StoredNode } from '#kernel/types'
+import type { ActionPieceDelivery, ActRequest, BlobStore, Budget, CommitRequest, Gate, ActionIoBinding, Limits, NodeId, Outcome, Path, TypeName, ReadResult, ReadQueryCost, Registry, Rev, Selector, SubSelector, Store, StoredNode } from '#kernel/types'
 import type { Writer } from '#kernel/writer'
 import { freeze } from '#util/freeze'
 
@@ -38,6 +38,7 @@ export interface NodeActionBinding {
 }
 
 export interface ForeignActionInput {
+  readonly targetType?: TypeName
   readonly requestId?: string
   readonly request: ActRequest
   readonly admission: AuthAdmission

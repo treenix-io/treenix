@@ -1,3 +1,4 @@
+import { getComponentField } from '#core/component'
 import { isDeepStrictEqual } from 'node:util'
 import { KernelError } from '#errors'
 import type { ShardClient } from '#kernel/authority/shard-owner'
@@ -71,6 +72,14 @@ export async function runShardCommit(options: ShardMutationOptions & { readonly 
 export async function runShardAction(options: ShardMutationOptions & { readonly input: ForeignActionInput }): Promise<Outcome> {
   const { input } = options
   let handle: ShardClient | undefined
+  let component = input.request.component, judged = false
+  async function judge(selected = component): Promise<void> {
+    if (judged) return
+    await judgeGates(options.gates, { kind: 'act', path: input.request.path, component: selected ?? '',
+      action: input.request.action, args: input.request.args, origin: input.admission.origin }, input.admission.actor,
+      { signal: input.signal, deadline: input.cost.budget().deadline })
+    judged = true
+  }
   function check(saved?: FederationForward): void {
     input.signal.throwIfAborted()
     input.cost.budget()
@@ -89,8 +98,22 @@ export async function runShardAction(options: ShardMutationOptions & { readonly 
   }
   async function describe() {
     const current = await connection()
+    if (input.targetType !== undefined) {
+      const receipt = await input.wait(current.connection.readOwned({ node: input.request.path }, input.cost.budget(), input.signal))
+      input.cost.charge(receipt.cost.nodes, receipt.cost.bytes, receipt.cost.exprWork)
+      input.cost.request(receipt.cost.requestBytes)
+      if ('error' in receipt) throw receipt.error
+      const response = receipt.result
+      const copy = response.copies[0]
+      if (copy === undefined) throw new KernelError('NOT_FOUND', 'Action target is absent')
+      if ('error' in copy) throw copy.error
+      const selected = getComponentField(copy.node, input.targetType, input.request.component)
+      if (selected === undefined) throw new KernelError('NOT_FOUND', 'Action target type is absent')
+      component = selected[1]
+    }
+
     const receipt = await input.wait(current.connection.readOwned({ node: input.request.path,
-      action: { name: input.request.action, component: input.request.component } }, input.cost.budget(), input.signal))
+      action: { name: input.request.action, component } }, input.cost.budget(), input.signal))
     input.cost.charge(receipt.cost.nodes, receipt.cost.bytes, receipt.cost.exprWork)
     input.cost.request(receipt.cost.requestBytes)
     if ('error' in receipt) throw receipt.error
@@ -137,6 +160,7 @@ export async function runShardAction(options: ShardMutationOptions & { readonly 
   }
   async function prepare(): Promise<FederationForward> {
     const pre = await describe()
+    await judge()
     const current = handle
     if (current === undefined || input.identity === undefined) throw new KernelError('INVALID', 'Shard mutation identity is absent')
     const anchor = input.request.anchor === undefined ? undefined :
@@ -149,17 +173,16 @@ export async function runShardAction(options: ShardMutationOptions & { readonly 
     await input.wait(current.check())
     check(anchor)
     return { mount: options.mount, principal: input.admission.actor.principal, request: { kind: 'act', value: {
-      ...input.request, pre, opId: { ...input.identity.opId, epoch: options.writer.intake.epoch },
+      ...input.request, component, pre, opId: { ...input.identity.opId, epoch: options.writer.intake.epoch },
       ...(anchor === undefined || anchor.request.kind !== 'act' ? {} : { anchor: anchor.request.value.opId }) } } }
   }
   check()
-  await judgeGates(options.gates, { kind: 'act', path: input.request.path, component: input.request.component ?? '',
-    action: input.request.action, args: input.request.args, origin: input.admission.origin }, input.admission.actor,
-    { signal: input.signal, deadline: input.cost.budget().deadline })
+  if (input.targetType === undefined) await judge()
   if (input.identity === undefined) {
     const pre = await describe()
+    await judge()
     if (pre.kind !== 'read') throw new KernelError('INVALID', 'A mutation key is required')
-    return execute({ ...input.request, pre })
+    return execute({ ...input.request, component, pre })
   }
   return options.writer.forward({ identity: input.identity, cost: input.cost, check, prepare,
     execute(saved) {

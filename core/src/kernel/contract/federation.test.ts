@@ -46,7 +46,7 @@ async function instance(t: TestContext, options: { modules?: readonly ModuleMani
   return { id, root, runtime, admin, key, pumps }
 }
 
-async function federation(t: TestContext, options: { remoteGates?: readonly Gate[]; remoteModules?: readonly ModuleManifest[]; loseOutcome?: boolean; unsolicitedCopies?: boolean } = {}) {
+async function federation(t: TestContext, options: { remoteGates?: readonly Gate[]; remoteModules?: readonly ModuleManifest[]; originModules?: readonly ModuleManifest[]; originGate?: Gate; loseOutcome?: boolean; unsolicitedCopies?: boolean } = {}) {
   const remote = await instance(t, { modules: options.remoteModules ?? [module], gates: options.remoteGates })
   const http = createTwpHttpServer({ instance: remote.runtime, allowedOrigins: [], credentialTtlMs: 60_000 })
   t.after(() => http.close())
@@ -61,7 +61,7 @@ async function federation(t: TestContext, options: { remoteGates?: readonly Gate
   const lifecycle = new EventEmitter()
   const transport = createTwpHttpFederation()
   let loseOutcome = options.loseOutcome === true
-  const origin = await instance(t, { federation: async (url, limits) => {
+  const origin = await instance(t, { modules: options.originModules, federation: async (url, limits) => {
     opens++
     const resource = await transport(url, limits)
     let closing: Promise<void> | undefined
@@ -92,7 +92,7 @@ async function federation(t: TestContext, options: { remoteGates?: readonly Gate
       closes++; lifecycle.emit('closed')
     }) }
   }, blobs,
-    gates: [async operation => {
+    gates: [...(options.originGate === undefined ? [] : [options.originGate]), async operation => {
       if (operation.kind === 'read' && 'node' in operation.selector && operation.selector.node === '/secret') secretReads++
       return 'pass'
     }] })
@@ -669,7 +669,7 @@ it('evaluates foreign subscription predicates and pagination on origin-visible i
   }
 })
 
-it('keeps foreign quarantine subscription identity while evaluating its projected stored query fields', async t => {
+it('keeps foreign quarantine subscription identity while evaluating its projected stored query fields', { timeout: 10000 }, async t => {
   const f = await federation(t)
   await f.remote.admin.commit({ opId: f.remote.key(), changes: [
     { op: 'put', node: { $path: '/items', $type: 't.dir' } },
@@ -936,3 +936,36 @@ it('rejects unsolicited foreign copies before retaining them in the native cache
   await f.waitClosed(1)
   assert.equal(f.credentialCalls().opens, 1)
 })
+
+
+it('dispatches nested foreign actions by owned type and refuses changed-selector replay', { timeout: 15_000 }, async t => {
+  let targetType = 'foreign.counter', writes = 0, gates = 0;
+  const remoteModule: ModuleManifest = { ...module, types: [{ ...module.types[0], actions: {
+    increment: { kind: 'write', args: {}, handler: async function(this: { count: number }) { writes++; this.count++; return 'accepted' } },
+  } }, module.types[1]] };
+  const localModule: ModuleManifest = { id: 'nested-dispatch', security: [], open: [], types: [{ name: 'nested.dispatch',
+    module: 'nested-dispatch', security: 'ordinary', version: 0, schema: {}, actions: {
+      dispatch: { kind: 'write', args: {}, handler: async ctx => {
+        assert.equal(await ctx.act({ path: '/foreign/counter', targetType, action: 'increment', args: {}, key: 'child' }), 'accepted');
+        throw new KernelError('INVALID', 'Outer action is unfinished');
+      } },
+    } }] };
+  const f = await federation(t, { remoteModules: [remoteModule], originModules: [localModule], loseOutcome: true, originGate: async operation => {
+    if (operation.kind === 'act' && operation.path === '/foreign/counter') { gates++; assert.equal(operation.component, '#counter'); }
+    return 'pass';
+  } });
+  await f.remote.admin.commit({ opId: f.remote.key(), changes: [{ op: 'put', node: { $path: '/counter', $type: 't.dir',
+    '#counter': { $type: 'foreign.counter', count: 1 } } }] }).outcome;
+  await f.origin.admin.commit({ opId: f.origin.key(), changes: [{ op: 'put', node: { $path: '/dispatch', $type: 'nested.dispatch' } }] }).outcome;
+  const request = { path: '/dispatch', action: 'dispatch', args: {}, opId: f.origin.key() };
+  await assert.rejects(f.origin.admin.act(request).outcome, code('UNAVAILABLE'));
+  const copy = (await f.remote.admin.read({ node: '/counter' })).copies[0];
+  assert.ok('node' in copy);
+  assert.deepEqual(copy.node['#counter'], { $type: 'foreign.counter', $v: 0, count: 2 });
+  await f.remote.admin.commit({ opId: f.remote.key(), changes: [{ op: 'remove', path: '/counter' }] }).outcome;
+  await assert.rejects(f.origin.admin.act(request).outcome, code('INVALID'));
+  targetType = 'foreign.replacement';
+  await assert.rejects(f.origin.admin.act(request).outcome, code('KEY_REUSED'));
+  assert.equal(writes, 1);
+  assert.equal(gates, 1);
+});

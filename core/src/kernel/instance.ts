@@ -1435,6 +1435,7 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
           const selection = view.select()
           if (selection === undefined) throw new KernelError('CONFLICT', 'View generation changed')
           const output = { list: selection.roots.flatMap(root => root.member === undefined ? [] : [root.member.id]),
+            ownership: selectionOwnership(selection, key => view.cursor(key)),
             copies: selection.images.map(image => image.copy), computed: selection.computed, viewErrors: selection.viewErrors, rows: selection.rows,
             viewOwner: selection.viewOwner,
             next: selection.next, at: selection.at ?? [writer.stream.cursor().pos] }

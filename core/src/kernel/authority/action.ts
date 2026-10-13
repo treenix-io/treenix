@@ -1,3 +1,4 @@
+import { getComponentField } from '#core/component'
 import { isDeepStrictEqual } from 'node:util'
 import { KernelError } from '#errors'
 import type { FederationClient } from '#kernel/authority/owner'
@@ -23,6 +24,14 @@ interface FederationActionOptions {
 export async function runFederationAction(options: FederationActionOptions): Promise<Outcome> {
   const { input, namespace } = options
   let handle: FederationClient | undefined
+  let component = input.request.component, judged = false
+  async function judge(selected = component): Promise<void> {
+    if (judged) return
+    await judgeGates(options.gates, { kind: 'act', path: input.request.path, component: selected ?? '',
+      action: input.request.action, args: input.request.args, origin: input.admission.origin }, input.admission.actor,
+      { signal: input.signal, deadline: input.cost.budget().deadline })
+    judged = true
+  }
   function check(forward?: FederationForward): void {
     input.signal.throwIfAborted()
     input.cost.budget()
@@ -43,8 +52,19 @@ export async function runFederationAction(options: FederationActionOptions): Pro
   }
   async function describe(): Promise<ActionDescriptor> {
     const current = await connection()
+    if (input.targetType !== undefined) {
+      const response = await input.wait(current.client.read(namespace.selector({ node: input.request.path }), input.signal))
+      input.cost.charge(response.copies.length, Buffer.byteLength(serializeKernel(response)))
+      const copy = response.copies[0]
+      if (copy === undefined) throw new KernelError('NOT_FOUND', 'Action target is absent')
+      if ('error' in copy) throw copy.error
+      const selected = getComponentField(copy.node, input.targetType, input.request.component)
+      if (selected === undefined) throw new KernelError('NOT_FOUND', 'Action target type is absent')
+      component = selected[1]
+    }
+
     const response = await input.wait(current.client.read(namespace.selector({ node: input.request.path,
-      action: { name: input.request.action, component: input.request.component } }), input.signal))
+      action: { name: input.request.action, component } }), input.signal))
     input.cost.charge(response.copies.length, Buffer.byteLength(serializeKernel(response)))
     await input.wait(current.check())
     check()
@@ -64,6 +84,7 @@ export async function runFederationAction(options: FederationActionOptions): Pro
         throw new KernelError('INVALID', 'Forwarding anchor names another action')
     }
     const pre = await describe()
+    await judge()
     const current = handle
     if (current === undefined) throw new KernelError('INVALID', 'Foreign action connection is absent')
     const welcome = await input.wait(current.client.ready)
@@ -71,7 +92,7 @@ export async function runFederationAction(options: FederationActionOptions): Pro
     const identity = input.identity
     const opId = identity === undefined ? key : { ...key, nonce: namespace.nonce(identity.actor.principal, identity.opId) }
     return { mount: options.mount, principal: welcome.principal,
-      request: { kind: 'act', value: { ...input.request,
+      request: { kind: 'act', value: { ...input.request, component,
         args: namespace.foreignPayload({ args: input.request.args }, input.cost.budget(), work => input.cost.charge(0, 0, work)).args,
         path: namespace.foreignPath(input.request.path), opId, pre,
         ...(anchor === undefined ? {} : { anchor: anchor.request.value.opId }) } } }
@@ -112,9 +133,7 @@ export async function runFederationAction(options: FederationActionOptions): Pro
     }
   }
   check()
-  await judgeGates(options.gates, { kind: 'act', path: input.request.path, component: input.request.component ?? '',
-    action: input.request.action, args: input.request.args, origin: input.admission.origin }, input.admission.actor,
-  { signal: input.signal, deadline: input.cost.budget().deadline })
+  if (input.targetType === undefined) await judge()
   check()
   if (input.identity === undefined) {
     const request = await prepare()

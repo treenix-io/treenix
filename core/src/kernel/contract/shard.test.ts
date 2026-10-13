@@ -11,7 +11,7 @@ import { createShardOwner } from '#kernel/authority/shard-owner'
 import { drainSession } from '#kernel/session-delivery'
 import { createMemoryStore } from '#kernel/store/memory'
 import { createMemoryBlobStore } from '#kernel/blob-store-memory'
-import { R, W, DEFAULT_LIMITS, type ModuleManifest, type Position, type PositionCounter } from '#kernel/types'
+import { R, W, DEFAULT_LIMITS, type Gate, type ModuleManifest, type Position, type PositionCounter } from '#kernel/types'
 
 const module: ModuleManifest = { id: 'shard-example', security: [], open: [], types: [{ name: 'shard.counter',
   module: 'shard-example', security: 'ordinary', version: 0, schema: {}, actions: {
@@ -38,12 +38,12 @@ const module: ModuleManifest = { id: 'shard-example', security: [], open: [], ty
 const code = (expected: KernelError['code']) => (error: unknown) => error instanceof KernelError && error.code === expected
 
 /** Construct actual native actors, Writer decisions and ordered client lanes in each instance. */
-async function instance(t: TestContext, shardPath?: string, modules: readonly ModuleManifest[] = [module]) {
+async function instance(t: TestContext, shardPath?: string, modules: readonly ModuleManifest[] = [module], gates?: readonly Gate[]) {
   const id = randomUUID(), root = createMemoryStore({ domain: id })
   let saved: Position | undefined, epoch = 0
   const counter: PositionCounter = { async load() { return saved }, async save(pos) { saved = pos },
     async freshEpoch(floor) { epoch = Math.max(epoch, floor) + 1; return epoch } }
-  const runtime = await createInstance({ id, shardPath, root: { kind: 'store', store: root }, modules,
+  const runtime = await createInstance({ id, shardPath, root: { kind: 'store', store: root }, modules, gates,
     blobs: createMemoryBlobStore(), provisioning: { counter, writerEpoch: 1,
       domains: [{ store: root, epoch: randomUUID(), persistent: false }], credentialTtlMs: 60_000,
       bootstrap: { kind: 'fresh', admin: { path: '/admin', name: 'admin', password: randomUUID() } } } })
@@ -289,4 +289,63 @@ it('charges actual filtered shard scans cumulatively to the native action allowa
   const retained = await origin.admin.read({ node: '/remote/scan/item-0' });
   assert.ok('node' in retained.copies[0]);
   assert.equal(retained.copies[0].node.count, 1);
+});
+
+
+it('dispatches nested shard actions by owned type and refuses changed-selector replay', { timeout: 15_000 }, async t => {
+  let targetType = 'shard.counter', writes = 0, gates = 0, loseOutcome = true;
+  let receiver: Awaited<ReturnType<typeof instance>> | undefined;
+  const mountModule: ModuleManifest = { id: 'nested-shard-mount', open: [], types: [{ name: 'nested.shard-mount',
+    module: 'nested-shard-mount', version: 0, security: 'privileged-capability', schema: {}, actions: {} }],
+    security: [{ type: 'nested.shard-mount', context: 'mount', async handler() {
+      assert.ok(receiver !== undefined);
+      const accepted = receiver;
+      return { kind: 'authority', authority: { kind: 'shard', async connect(envelope, signal) {
+        const connection = await accepted.runtime.openShard(envelope, signal);
+        return { ...connection, act(request, signal) {
+          const pending = connection.act(request, signal);
+          return { ...pending, outcome: pending.outcome.then(outcome => {
+            if (loseOutcome && outcome.value === 'accepted') { loseOutcome = false; throw new KernelError('UNAVAILABLE', 'Accepted response was lost'); }
+            return outcome;
+          }) };
+        } };
+      } },
+        async close() {} };
+    } }] };
+  const dispatchModule: ModuleManifest = { id: 'nested-shard-dispatch', security: [], open: [], types: [{ name: 'nested.dispatch',
+    module: 'nested-shard-dispatch', security: 'ordinary', version: 0, schema: {}, actions: {
+      dispatch: { kind: 'write', args: {}, handler: async ctx => {
+        assert.equal(await ctx.act({ path: '/remote/item', targetType, action: 'increment', args: {}, key: 'child' }), 'accepted');
+        throw new KernelError('INVALID', 'Outer action is unfinished');
+      } },
+    } }] };
+  const counterModule: ModuleManifest = { ...module, types: [{ ...module.types[0], actions: {
+    increment: { kind: 'write', args: {}, handler: async function(this: { count: number }) { writes++; this.count++; return 'accepted' } },
+  } }] };
+  const modules = [counterModule, mountModule, dispatchModule];
+  receiver = await instance(t, '/remote', modules);
+  const origin = await instance(t, undefined, modules, [async operation => {
+    if (operation.kind === 'act' && operation.path === '/remote/item') { gates++; assert.equal(operation.component, '#counter'); }
+    return 'pass';
+  }]);
+  await receiver.admin.commit({ opId: receiver.key(), changes: [
+    { op: 'put', node: { $path: '/remote', $type: 't.dir' } },
+    { op: 'put', node: { $path: '/remote/item', $type: 't.dir', '#counter': { $type: 'shard.counter', count: 1 } } },
+  ] }).outcome;
+  await origin.admin.commit({ opId: origin.key(), changes: [
+    { op: 'put', node: { $path: '/remote', $type: 't.dir', '#shard': { $type: 'nested.shard-mount', pattern: '' } } },
+    { op: 'put', node: { $path: '/dispatch', $type: 'nested.dispatch' } },
+  ] }).outcome;
+  await origin.admin.commit({ opId: origin.key(), changes: [{ op: 'patch', path: '/remote/item', ops: { $set: { ready: true } } }] }).outcome;
+  const request = { path: '/dispatch', action: 'dispatch', args: {}, opId: origin.key() };
+  await assert.rejects(origin.admin.act(request).outcome, code('UNAVAILABLE'));
+  const copy = (await receiver.admin.read({ node: '/remote/item' })).copies[0];
+  assert.ok('node' in copy);
+  assert.deepEqual(copy.node['#counter'], { $type: 'shard.counter', $v: 0, count: 2 });
+  await receiver.admin.commit({ opId: receiver.key(), changes: [{ op: 'remove', path: '/remote/item' }] }).outcome;
+  await assert.rejects(origin.admin.act(request).outcome, code('INVALID'));
+  targetType = 't.dir';
+  await assert.rejects(origin.admin.act(request).outcome, code('KEY_REUSED'));
+  assert.equal(writes, 1);
+  assert.equal(gates, 1);
 });
