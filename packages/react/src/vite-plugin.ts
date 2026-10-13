@@ -6,8 +6,8 @@
 
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import type { Plugin } from 'vite';
-import { readSchemasFromDir, visitSchemaDirectories } from '@treenx/core/schema/load';
+import { parseSync, type Plugin } from 'vite';
+import { readSchemasFromDir } from '@treenx/core/schema/load';
 
 // ── Package.json resolution ──
 
@@ -128,18 +128,60 @@ const DEFAULT_CLIENT_FILES = ['types.ts', 'react.tsx', 'view.tsx'];
 
 type ModEntry = { name: string; files: string[] };
 
+/** The same authored source resolution serves schema discovery and Vite imports. */
+function resolveAuthoredImport(id: string, importer: string, conditions: string[]): string | undefined {
+  if (id.startsWith('.')) return tryResolve([resolve(dirname(importer), id)]);
+  if (id.startsWith('#')) {
+    const pkg = readPkg(dirname(importer));
+    if (pkg?.imports) return matchPattern(id, pkg.imports, pkg.dir,
+      importer.includes('/node_modules/') ? conditions.filter(condition => condition !== 'development') : conditions);
+  }
+  if (id.startsWith('@treenx/')) {
+    const parts = id.split('/');
+    const pkg = findTreenixPkg(parts.slice(0, 2).join('/'));
+    if (pkg?.exports) return matchPattern(parts.length > 2 ? './' + parts.slice(2).join('/') : '.', pkg.exports, pkg.dir, conditions);
+  }
+}
+
+/** Source imports own schemas beside their module; package barrels do not own every descendant. */
+function clientSchemaRoots(files: readonly string[], conditions: string[]): string[] {
+  const seen = new Set<string>();
+  const roots = new Set<string>();
+  const pending = [...files];
+  while (pending.length > 0) {
+    const file = realpathSync(pending.pop()!);
+    if (seen.has(file)) continue;
+    seen.add(file);
+    roots.add(dirname(file));
+    const parsed = parseSync(file, readFileSync(file, 'utf-8'));
+    if (parsed.errors.length > 0) throw new Error(`Client import graph parse failed: ${file}: ${parsed.errors.map(error => error.message).join('; ')}`);
+    const imports = parsed.module.staticImports.map(entry => ({ source: entry.moduleRequest.value, typeOnly: entry.entries.length > 0 && entry.entries.every(binding => binding.isType) }));
+    for (const exported of parsed.module.staticExports) for (const entry of exported.entries)
+      if (entry.moduleRequest !== null) imports.push({ source: entry.moduleRequest.value, typeOnly: entry.isType });
+    for (const { source, typeOnly } of imports) {
+      if (!source.startsWith('.') && !source.startsWith('#') && !source.startsWith('@treenx/')) continue;
+      const imported = resolveAuthoredImport(source, file, conditions) ??
+        (typeOnly && source.startsWith('.') ? tryResolve([resolve(dirname(file), source) + '.d.ts']) : undefined);
+      if (imported === undefined) throw new Error(`Client import graph cannot resolve ${source} from ${file}`);
+      if (/\.(?:[cm]?[jt]s|[jt]sx)$/.test(imported)) pending.push(imported);
+    }
+  }
+  return [...roots];
+}
+
 function schemaPublications(roots: readonly string[]): string[] {
   const lines: string[] = [];
   const seen = new Set<string>();
-  for (const root of roots) visitSchemaDirectories(root, directory => {
+  for (const root of roots) {
+    const directory = join(root, 'schemas');
+    if (!existsSync(directory)) continue;
     const owner = realpathSync(directory);
-    if (seen.has(owner)) return 0;
+    if (seen.has(owner)) continue;
     seen.add(owner);
     const schemas = readSchemasFromDir(directory);
     lines.push(`declareOpenModule(${JSON.stringify(owner)}, [], [${schemas.map(schema =>
       `declareClientSchema(${JSON.stringify(schema.$id)}, () => (${JSON.stringify(schema)}))`).join(',')} ])`);
-    return schemas.length;
-  });
+  }
   return [`export const schemaModules = [${lines.join(',')}];`,
     `for (const module of schemaModules) publishClientModule(module);`];
 }
@@ -281,28 +323,7 @@ export default function treenixPlugin(opts?: { modsDirs?: string[]; clientFiles?
         }
       }
 
-      // Resolve # imports via nearest package.json imports field
-      if (id.startsWith('#')) {
-        const pkg = readPkg(dirname(importer));
-        if (pkg?.imports) {
-          // Inside node_modules: skip 'development' condition to stay in dist/
-          // (dist files use relative ./hooks, # must resolve to same dist files)
-          const isNm = importer.includes('/node_modules/');
-          const conds = isNm ? conditions.filter(c => c !== 'development') : conditions;
-          return matchPattern(id, pkg.imports, pkg.dir, conds);
-        }
-      }
-
-      // Resolve @treenx/* exports (Vite doesn't handle array conditions)
-      if (id.startsWith('@treenx/')) {
-        const parts = id.split('/');
-        const pkgName = parts.slice(0, 2).join('/');
-        const subpath = './' + parts.slice(2).join('/');
-        const pkg = findTreenixPkg(pkgName);
-        if (pkg?.exports) {
-          return matchPattern(parts.length > 2 ? subpath : '.', pkg.exports, pkg.dir, conditions);
-        }
-      }
+      if (id.startsWith('#') || id.startsWith('@treenx/')) return resolveAuthoredImport(id, importer, conditions);
     },
 
     load(id) {
@@ -327,10 +348,14 @@ export default function treenixPlugin(opts?: { modsDirs?: string[]; clientFiles?
           `import { declareOpenModule } from '@treenx/core/kernel/module-declaration';`,
           ...lines,
           ...files.map((_, index) => `publishClientExports(site${index});`),
-          ...schemaPublications([...(inNodeModules ? [] : [resolve(engineRoot, 'core/src/mods'),
-            ...scanClients(resolve(engineRoot, 'mods'), clientFiles, false).flatMap(mod => mod.files.map(file => dirname(file)))]),
-            ...(opts?.modsDirs ?? []).flatMap(directory => scanClients(resolve(directory), clientFiles)
-              .flatMap(mod => mod.files.map(file => dirname(file)))), ...files.map(file => dirname(file))]),
+          ...schemaPublications([
+            ...(inNodeModules ? [] : scanClients(resolve(engineRoot, 'core/src/mods'), ['kernel.ts'], false).flatMap(mod => mod.files.map(file => dirname(file)))),
+            ...clientSchemaRoots([
+              ...(inNodeModules ? [] : scanClients(resolve(engineRoot, 'mods'), clientFiles, false).flatMap(mod => mod.files)),
+              ...(opts?.modsDirs ?? []).flatMap(directory => scanClients(resolve(directory), clientFiles).flatMap(mod => mod.files)),
+              ...files,
+            ], conditions),
+          ]),
           '',
         ].join('\n');
       }
@@ -379,8 +404,10 @@ export default function treenixPlugin(opts?: { modsDirs?: string[]; clientFiles?
         'await Promise.allSettled([',
         lines.join(',\n'),
         ']);',
-        ...schemaPublications([...(inNodeModules ? [] : [resolve(engineRoot, 'core/src/mods')]),
-          ...allMods.flatMap(mod => mod.files.map(file => dirname(file)))]),
+        ...schemaPublications([
+          ...(inNodeModules ? [] : scanClients(resolve(engineRoot, 'core/src/mods'), ['kernel.ts'], false).flatMap(mod => mod.files.map(file => dirname(file)))),
+          ...clientSchemaRoots(allMods.flatMap(mod => mod.files), conditions),
+        ]),
         '',
       ].join('\n');
     },
