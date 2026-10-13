@@ -2419,10 +2419,10 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
       await services.ready()
       available()
     },
-    /** Opens configured mount keys before the native runtime returns the instance. */
+    /** Opens current accepted mounts before startup exposes mutation intake to callers. */
     async prepareMounts() {
       available()
-      await mounts!.prepareKeys((config.mounts ?? []).map(mount => stableJson([mount.node, mount.component])), budget())
+      await mounts!.prepareRanges([{ subtree: '/' }], budget())
     },
     /** Close the sessions and authentication factory owned by this foundation. */
     close() {

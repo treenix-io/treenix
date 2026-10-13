@@ -118,6 +118,7 @@ export async function openNativeDeployment(config: NativeDeploymentConfig) {
           () => ({ epoch: intake, time: Date.now(), nonce: randomUUID() }));
       } finally { session.close(); await delivery; }
     }
+    await runtime.instance.prepareMounts();
     logs.emit({ t: Date.now(), level: 'info', sub: 'native-deployment', msg: 'Native deployment opened' });
     return { ...runtime, httpRoutes, logs };
   } catch (error) {
