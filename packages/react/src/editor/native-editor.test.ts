@@ -22,7 +22,8 @@ import { ServerLocationContext } from '#navigate';
 import { RouteParamsContext } from '#context/route-params';
 import { clientModules as todoClientModules } from '../../../../mods/todo/client';
 import { TodoItem } from '../../../../mods/todo/types';
-import { declareClientType } from '@treenx/core/comp/client-declaration';
+import { declareClientType, declareClientSchema } from '@treenx/core/comp/client-declaration';
+import { clientModules as simpleClientModules } from '../../../../mods/simple-components/client';
 import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 import { clientModules as siteModules } from '../../../../mods/view-shell/view-site';
 import { createClientRegistry, publishClientExports, type ClientRegistry } from '#context/client-registry';
@@ -81,7 +82,7 @@ async function fixture(
         version: 0,
         schema: {
           type: 'object',
-          properties: { value: { type: 'number' } },
+          properties: { value: { type: 'number', default: 7 } },
           additionalProperties: false,
         },
         actions: {
@@ -256,6 +257,55 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
     assert.ok('node' in created);
     assert.equal(created.node.title, '');
     assert.equal(created.node.done, false);
+  });
+
+  it('creates declared class and schema-only defaults before an ordinary native tags action', async t => {
+    publishClientExports({ clientModules: simpleClientModules });
+    const simple = await collectModule('@treenx/mods/simple-components', async () => {
+      await import('../../../../mods/simple-components/kernel');
+      loadSchemasRecursive(fileURLToPath(new URL('../../../../mods/simple-components/', import.meta.url)));
+    });
+    const f = await fixture('declared-native-creation', true);
+    t.after(f.close);
+    const key = (nonce: string) => ({ epoch: f.instance.writer.intake.epoch, time: Date.now(), nonce });
+    await f.admin.commit({ opId: key('simple-types'), changes: simple.types.map(type => ({
+      op: 'put' as const, node: { $path: `/sys/types/${type.name}`, $type: 't.type', name: type.name,
+        module: type.module, security: type.security },
+    })) });
+    f.instance.registry.publish(simple);
+    let schemaReads = 0;
+    f.source.clientRegistry.publish(declareOpenModule('creation-schemas', [], [
+      declareClientSchema('editor.document', () => { schemaReads++; return f.module.types[0].schema; }),
+      declareClientSchema('simple.tags', () => ({ properties: { items: { default: ['schema fallback'] } } })),
+    ]));
+    assert.equal(schemaReads, 0);
+    await f.source.effects.createNode('/from-schema', 'editor.document');
+    assert.equal(schemaReads, 1);
+    const fromSchema = (await f.client.read({ node: '/from-schema' })).copies[0];
+    assert.ok('node' in fromSchema);
+    assert.equal(fromSchema.node.value, 7);
+    await f.source.effects.createNode('/from-schema-again', 'editor.document');
+    assert.equal(schemaReads, 1);
+    f.source.clientRegistry.publish(declareOpenModule('creation-schemas', [], [
+      declareClientSchema('editor.document', () => {
+        schemaReads++;
+        return { properties: { value: { default: 8 } } };
+      }),
+      declareClientSchema('simple.tags', () => ({ properties: { items: { default: ['schema fallback'] } } })),
+    ]));
+    await f.source.effects.createNode('/after-schema-publication', 'editor.document');
+    assert.equal(schemaReads, 2);
+    const republished = (await f.client.read({ node: '/after-schema-publication' })).copies[0];
+    assert.ok('node' in republished);
+    assert.equal(republished.node.value, 8);
+    await f.source.effects.createNode('/tags', 'simple.tags');
+    const tags = (await f.client.read({ node: '/tags' })).copies[0];
+    assert.ok('node' in tags);
+    assert.deepEqual(tags.node.items, []);
+    await f.source.effects.execute('/tags', 'add', { tag: 'ordinary' });
+    const changed = (await f.client.read({ node: '/tags' })).copies[0];
+    assert.ok('node' in changed);
+    assert.deepEqual(changed.node.items, ['ordinary']);
   });
 
   it('renders declared external views through the original site shell and request-owned native reads', async t => {

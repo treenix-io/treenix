@@ -1,3 +1,5 @@
+import { declareClientType } from '@treenx/core/comp/client-declaration';
+import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 // Universal ECS components — attach to any node via named key
 // Pattern: node.checklist = { $type: 'simple.checklist', items: [...] }
 
@@ -166,3 +168,13 @@ export const ATTACHABLE_COMPONENTS: AttachableComponent[] = [
   { type: 'simple.comments', key: 'comments', label: 'Comments', description: 'Discussion thread', icon: '💬', defaults: { items: [] } },
   { type: 'simple.time-track', key: 'timeTrack', label: 'Time Track', description: 'Start/stop timer with history', icon: '⏲', defaults: { entries: [], running: false } },
 ];
+
+export const clientModules = [declareOpenModule('@treenx/mods/simple-components/types', [], [
+  declareClientType('simple.checklist', TChecklist),
+  declareClientType('simple.tags', TTags),
+  declareClientType('simple.estimate', TEstimate),
+  declareClientType('simple.links', TLinks),
+  declareClientType('simple.comments', TComments),
+  declareClientType('simple.time-track', TTimeTrack),
+  declareClientType('t.description', TDescription),
+])];

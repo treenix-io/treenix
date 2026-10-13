@@ -1,3 +1,4 @@
+import { clientModules as declaredOwner0 } from './types';
 import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
 import type { PresentationNode } from '@treenx/react';
 import type { NodeData } from '@treenx/core';
@@ -309,7 +310,7 @@ const QueryEditView: View<QueryView> = ({ value, onChange }) => {
   );
 };
 
-export const clientModules = [
+export const clientModules = [...declaredOwner0,
   declareClientModule('@treenx/mods/query/view', [
     declareView('t.query', 'react', QueryViewComponent),
     declareView('t.query', 'react:edit', QueryEditView)

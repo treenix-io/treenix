@@ -1,3 +1,4 @@
+import { clientModules as declaredOwner0 } from './types';
 import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
 import { useActions, useChildren, view } from '@treenx/react';
 import { RenderChildren } from '@treenx/react/mods/editor-ui/list-items';
@@ -13,7 +14,7 @@ import { Idea, IdeasBoard } from './types';
 
 // ── Idea — compact list row ──
 
-export const clientModules = [
+export const clientModules = [...declaredOwner0,
   declareClientModule('@treenx/mods/ideal/view', [
     view(IdeasBoard, ({ value, ctx }) => {
   const { data: children } = useChildren(ctx.path);

@@ -1,3 +1,5 @@
+import { declareClientType } from '@treenx/core/comp/client-declaration';
+import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 // Cafe use cases — domain types for a cafe landing page
 import { registerType } from '@treenx/core/comp';
 
@@ -30,3 +32,8 @@ export class CafeContact {
   }
 }
 registerType('cafe.contact', CafeContact);
+
+export const clientModules = [declareOpenModule('@treenx/mods/cafe/types', [], [
+  declareClientType('cafe.mail', CafeMailService),
+  declareClientType('cafe.contact', CafeContact),
+])];

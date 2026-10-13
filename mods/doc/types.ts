@@ -1,3 +1,5 @@
+import { declareClientType } from '@treenx/core/comp/client-declaration';
+import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 import { registerType } from '@treenx/core/comp';
 
 /** Rich document — Tiptap JSON with embedded Treenix components */
@@ -25,3 +27,8 @@ export class DocFrontmatter {
   /** @title Extra */ extra?: Record<string, unknown>;
 }
 registerType('doc.frontmatter', DocFrontmatter);
+
+export const clientModules = [declareOpenModule('@treenx/mods/doc/types', [], [
+  declareClientType('doc.page', DocPage),
+  declareClientType('doc.frontmatter', DocFrontmatter),
+])];

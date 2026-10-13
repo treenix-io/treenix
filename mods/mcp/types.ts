@@ -1,3 +1,5 @@
+import { declareClientType } from '@treenx/core/comp/client-declaration';
+import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 import { registerType } from '@treenx/core/comp';
 
 /** Local MCP server binding used by agent clients and external tools. */
@@ -50,3 +52,9 @@ export class ApiToken {
   createdAt = 0;
 }
 registerType('t.api.token', ApiToken);
+
+export const clientModules = [declareOpenModule('@treenx/mods/mcp/types', [], [
+  declareClientType('mcp.server', McpConfig),
+  declareClientType('t.api.tokens', ApiTokenManager, { noOptimistic: ['create', 'revoke'] }),
+  declareClientType('t.api.token', ApiToken),
+])];

@@ -5,6 +5,8 @@ import { addTypeValidator } from '@treenx/core/comp/validate';
 import schemaOrgV29 from './packs/schemaorg-v29.json';
 import { type ClassOverride, type JsonLdSnapshot, type SlottedPropertySchema, translateClass } from './translate';
 import { refOrComponentValidator } from './validator';
+import { declareClientSchema } from '@treenx/core/comp/client-declaration';
+import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 
 // Snapshot is bundled at build time via ESM JSON import — works in Node and the browser
 // without fs/crypto. Tampering protection has shifted from runtime SHA verification to
@@ -54,6 +56,10 @@ const OVERRIDES: Record<string, ClassOverride> = {
 };
 
 const PREFIX = 'jsonld.schema-org.';
+
+export const clientModules = [declareOpenModule('@treenx/jsonld-types/schema-org-v29/defaults', [],
+  Object.entries(OVERRIDES).map(([name, override]) =>
+    declareClientSchema(`${PREFIX}${name}`, () => translateClass(SNAPSHOT, name, override))))];
 
 function missResolver(type: string): void {
   if (!type.startsWith(PREFIX)) return;

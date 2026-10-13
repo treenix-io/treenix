@@ -1,3 +1,5 @@
+import { declareClientType } from '@treenx/core/comp/client-declaration';
+import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 import { registerType } from '@treenx/core/comp';
 
 /** @title 3D Scene — root container for the Three.js viewport */
@@ -236,3 +238,22 @@ registerType('t3d.lod', T3dLod);
 registerType('t3d.trail', T3dTrail);
 registerType('t3d.line', T3dLine);
 registerType('t3d.script', T3dScript);
+
+export const clientModules = [declareOpenModule('@treenx/mods/three/types', [], [
+  declareClientType('t3d.scene', T3dScene),
+  declareClientType('t3d.object', T3dObject),
+  declareClientType('t3d.mesh', T3dMesh),
+  declareClientType('t3d.material', T3dMaterial),
+  declareClientType('t3d.light', T3dLight),
+  declareClientType('t3d.camera', T3dCamera),
+  declareClientType('t3d.rigidbody', T3dRigidbody),
+  declareClientType('t3d.collider', T3dCollider),
+  declareClientType('t3d.audio', T3dAudio),
+  declareClientType('t3d.particles', T3dParticles),
+  declareClientType('t3d.text', T3dText),
+  declareClientType('t3d.animator', T3dAnimator),
+  declareClientType('t3d.lod', T3dLod),
+  declareClientType('t3d.trail', T3dTrail),
+  declareClientType('t3d.line', T3dLine),
+  declareClientType('t3d.script', T3dScript),
+])];

@@ -1,3 +1,5 @@
+import { declareClientType } from '@treenx/core/comp/client-declaration';
+import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 // Brahman — Telegram bot constructor
 // Component types for bot config, pages, actions, users, sessions
 
@@ -378,3 +380,32 @@ register('brahman.message', 'text', (data) => {
   if (!msg) throw new Error(`brahman.message without message data: ${node.$path}`);
   return msg.text;
 });
+
+export const clientModules = [declareOpenModule('@treenx/mods/brahman/types', [], [
+  declareClientType('brahman.bot', BotConfig),
+  declareClientType('brahman.page', PageConfig),
+  declareClientType('brahman.action.message', MessageAction),
+  declareClientType('brahman.action.question', QuestionAction),
+  declareClientType('brahman.action.ifelse', IfElseAction),
+  declareClientType('brahman.action.page', PageNavAction),
+  declareClientType('brahman.action.back', BackAction),
+  declareClientType('brahman.action.tag', TagAction),
+  declareClientType('brahman.action.broadcast', BroadcastAction),
+  declareClientType('brahman.action.getvalue', GetValueAction),
+  declareClientType('brahman.action.setvalue', SetValueAction),
+  declareClientType('brahman.action.params', ParamsAction),
+  declareClientType('brahman.action.file', FileAction),
+  declareClientType('brahman.action.eval', EvalAction),
+  declareClientType('brahman.action.remove', RemoveAction),
+  declareClientType('brahman.action.emittext', EmitTextAction),
+  declareClientType('brahman.action.forward', ForwardAction),
+  declareClientType('brahman.action.resetsession', ResetSessionAction),
+  declareClientType('brahman.action.resethistory', ResetHistoryAction),
+  declareClientType('brahman.action.onerror', OnErrorAction),
+  declareClientType('brahman.action.keywordselect', KeywordSelectAction),
+  declareClientType('brahman.action.call', CallAction),
+  declareClientType('brahman.action.selectlang', SelectLanguageAction),
+  declareClientType('brahman.user', BrahmanUser),
+  declareClientType('brahman.session', BrahmanSession),
+  declareClientType('brahman.message', BrahmanMessage),
+])];

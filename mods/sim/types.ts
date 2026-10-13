@@ -1,3 +1,5 @@
+import { declareClientType } from '@treenx/core/comp/client-declaration';
+import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 // AgentSim shared types — used by both service (backend) and view (frontend)
 // Classes per CLAUDE.md: "Exception: for entity definition could be used"
 
@@ -96,3 +98,17 @@ export class SimItem {}
 registerType('sim.world', SimWorld);
 registerType('sim.agent', SimAgent);
 registerType('sim.item', SimItem);
+
+export const clientModules = [declareOpenModule('@treenx/mods/sim/types', [], [
+  declareClientType('sim.position', SimPosition),
+  declareClientType('sim.descriptive', SimDescriptive),
+  declareClientType('sim.memory', SimMemory),
+  declareClientType('sim.config', SimConfig),
+  declareClientType('sim.round', SimRound),
+  declareClientType('sim.events', SimEvents),
+  declareClientType('sim.ai', SimAi),
+  declareClientType('sim.nearby', SimNearby),
+  declareClientType('sim.world', SimWorld),
+  declareClientType('sim.agent', SimAgent),
+  declareClientType('sim.item', SimItem),
+])];

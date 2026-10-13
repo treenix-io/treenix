@@ -1,3 +1,5 @@
+import { declareClientType } from '@treenx/core/comp/client-declaration';
+import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 import { registerType } from '@treenx/core/comp';
 
 export type QueryFilter = { field: string; value: string };
@@ -17,3 +19,7 @@ export class QueryView {
 }
 
 registerType('t.query', QueryView);
+
+export const clientModules = [declareOpenModule('@treenx/mods/query/types', [], [
+  declareClientType('t.query', QueryView),
+])];

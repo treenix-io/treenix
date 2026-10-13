@@ -1,3 +1,5 @@
+import { declareClientType } from '@treenx/core/comp/client-declaration';
+import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 import { getComponent, type NodeData, register } from '@treenx/core';
 import '@treenx/core/contexts/text';
 import { registerType } from '@treenx/core/comp';
@@ -67,3 +69,13 @@ register('whisper.transcription', 'text', (data) => {
   if (!text) throw new Error(`whisper.transcription without #text: ${node.$path}`);
   return text.content === '...' ? '' : text.content;
 });
+
+export const clientModules = [declareOpenModule('@treenx/mods/whisper/types', [], [
+  declareClientType('whisper.config', WhisperConfig),
+  declareClientType('whisper.audio', WhisperAudio),
+  declareClientType('whisper.text', WhisperText),
+  declareClientType('whisper.meta', WhisperMeta),
+  declareClientType('whisper.checklist', WhisperChecklist),
+  declareClientType('whisper.channel', WhisperChannel),
+  declareClientType('whisper.transcription', WhisperTranscription),
+])];

@@ -1,3 +1,5 @@
+import { declareClientType } from '@treenx/core/comp/client-declaration';
+import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 import { registerType } from '@treenx/core/comp';
 
 /** @description Fake sensor that generates readings around a base value */
@@ -18,3 +20,8 @@ export class SensorReading {
   seq = 0;
 }
 registerType('examples.demo.sensor.reading', SensorReading);
+
+export const clientModules = [declareOpenModule('@treenx/mods/sensor-demo/types', [], [
+  declareClientType('examples.demo.sensor', SensorDemo),
+  declareClientType('examples.demo.sensor.reading', SensorReading),
+])];

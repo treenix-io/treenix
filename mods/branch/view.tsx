@@ -1,3 +1,4 @@
+import { clientModules as declaredOwner0 } from './types';
 import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
 import { useActions, type View } from '@treenx/react';
 import { Button } from '@treenx/react/ui/button';
@@ -100,7 +101,7 @@ const BranchView: View<Branch> = ({ value, ctx }) => {
   );
 };
 
-export const clientModules = [
+export const clientModules = [...declaredOwner0,
   declareClientModule('@treenx/mods/branch/view', [
     declareView(Branch, 'react', BranchView)
   ])

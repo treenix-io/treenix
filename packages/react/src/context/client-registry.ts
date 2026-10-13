@@ -16,6 +16,11 @@ export interface ClientModule extends OpenModule<ReactHandler> {
   readonly types?: readonly ClientTypeDeclaration[];
 }
 
+interface OwnedSchema {
+  readonly declaration: ClientTypeDeclaration;
+  readonly value: ClientTypeDeclaration;
+}
+
 export function declareView<T>(type: Class<T>, context: string, handler: ContextHandler<'react', T>, meta?: Record<string, unknown>): ClientViewDeclaration;
 export function declareView(type: string, context: string, handler: ContextHandler<'react'>, meta?: Record<string, unknown>): ClientViewDeclaration;
 export function declareView(type: TypeId, context: string, handler: ContextHandler<'react'>, meta?: Record<string, unknown>): ClientViewDeclaration;
@@ -41,13 +46,23 @@ export function createClientRegistry(initial: readonly ClientModule[] = []) {
   let revision = {};
   let entries = new Map<string, ClientViewDeclaration>();
   let types = new Map<string, ClientTypeDeclaration>();
+  let schemas = new Map<string, OwnedSchema>();
 
   function rebuild(): void {
     const next = new Map<string, ClientViewDeclaration>();
     const nextTypes = new Map<string, ClientTypeDeclaration>();
+    const nextSchemas = new Map<string, OwnedSchema>();
     for (const module of modules.values()) for (const type of module.types ?? []) {
-      if (nextTypes.has(type.type)) throw new Error(`Duplicate client type: ${type.type}`);
-      nextTypes.set(type.type, type);
+      if (type.kind === 'class') {
+        if (nextTypes.has(type.type)) throw new Error(`Duplicate client class: ${type.type}`);
+        nextTypes.set(type.type, type);
+      } else {
+        if (nextSchemas.has(type.type)) throw new Error(`Duplicate client schema: ${type.type}`);
+        const previous = schemas.get(type.type);
+        nextSchemas.set(type.type, previous?.declaration === type ? previous : {
+          declaration: type, value: { ...type, defaults: type.createDefaults() },
+        });
+      }
     }
     for (const module of modules.values()) for (const entry of module.open) {
       const key = `${normalizeType(entry.type)}@${entry.context}`;
@@ -56,6 +71,7 @@ export function createClientRegistry(initial: readonly ClientModule[] = []) {
     }
     entries = next;
     types = nextTypes;
+    schemas = nextSchemas;
   }
 
   rebuild();
@@ -81,7 +97,8 @@ export function createClientRegistry(initial: readonly ClientModule[] = []) {
       return entries.get(`${normalizeType(type)}@${context}`) ?? null;
     },
     type(type: string): ClientTypeDeclaration | undefined {
-      return types.get(normalizeType(type));
+      const normalized = normalizeType(type);
+      return types.get(normalized) ?? schemas.get(normalized)?.value;
     },
     contexts(type: string): string[] {
       const normalized = normalizeType(type);

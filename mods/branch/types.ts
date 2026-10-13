@@ -1,3 +1,5 @@
+import { declareClientType } from '@treenx/core/comp/client-declaration';
+import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 import { registerType } from '@treenx/core/comp';
 import { KernelError } from '@treenx/core/errors';
 import type { NativeBranchConflict, NativeBranchDiff, NativeBranchState } from './native-types';
@@ -57,3 +59,9 @@ registerType('t.branch', Branch);
 // The client class identifies the native mount declaration.
 export class MountBranch {}
 registerType('t.mount.branch', MountBranch);
+
+export const clientModules = [declareOpenModule('@treenx/mods/branch/types', [], [
+  declareClientType('t.branches', Branches),
+  declareClientType('t.branch', Branch),
+  declareClientType('t.mount.branch', MountBranch),
+])];

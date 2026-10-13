@@ -1,3 +1,5 @@
+import { declareClientType } from '@treenx/core/comp/client-declaration';
+import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 // t.route — routing metadata on a node under /sys/routes.
 // Presence is what marks a node as a route entry; wildcard catches descendant
 // URL paths. prefix/index let a route mount a tree subtree under a custom URL
@@ -19,3 +21,7 @@ export class Route {
 }
 
 registerType('t.route', Route);
+
+export const clientModules = [declareOpenModule('@treenx/mods/router/types', [], [
+  declareClientType('t.route', Route),
+])];

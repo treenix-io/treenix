@@ -2,11 +2,7 @@ import {
   compKey,
   getComponent,
   getComponentByName,
-  getDefaults,
-  getMeta,
-  resolve,
 } from '@treenx/core';
-import { predictionCtx } from '@treenx/core/comp';
 import { createDeclaredClientRegistry, type ClientRegistry } from '#context/client-registry';
 import type { TwpClient } from '@treenx/core/client/twp';
 import { KernelError } from '@treenx/core/errors';
@@ -48,20 +44,7 @@ export function createLaneEffects(client: TwpClient, registry: ClientRegistry = 
     const type = key === undefined ? copy.node.$type : getComponentByName(copy.node, key)?.$type;
     if (type === undefined) return undefined;
     const declaration = registry.type(type);
-    // Unmigrated producers retain their existing behavior until they declare an owner.
-    if (declaration === undefined) {
-      const metadata = getMeta(type, `action:${action}`);
-      if (metadata?.noOptimistic || metadata?.needs || metadata?.stream) return undefined;
-      const cls = resolve(type, 'class');
-      const handler = resolve(type, `action:${action}`, false);
-      if (cls === null || handler === null) return undefined;
-      return groups.push(copy.node, JSON.stringify(opId), candidate => {
-        const component = getComponent(candidate, cls, key);
-        if (component === undefined) throw new KernelError('INVALID', 'Prediction lost its owning component');
-        return handler(predictionCtx(candidate, component), data);
-      });
-    }
-    const predict = declaration.predictions[action];
+    const predict = declaration?.predictions[action];
     if (predict === undefined) return undefined;
 
     return groups.push(copy.node, JSON.stringify(opId), (candidate) => {
@@ -234,7 +217,7 @@ export function createLaneEffects(client: TwpClient, registry: ClientRegistry = 
     available();
     await client.commit({
       changes: [{ op: 'put', node: { $path: path, $type: type,
-        ...(registry.type(type)?.defaults() ?? getDefaults(type)), ...data } }],
+        ...registry.type(type)?.defaults(), ...data } }],
     }).outcome;
     available();
   }

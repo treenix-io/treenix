@@ -1,3 +1,5 @@
+import { declareClientType } from '@treenx/core/comp/client-declaration';
+import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 import { registerType } from '@treenx/core/comp'
 import { templates } from './lib/templates'
 import type { LayoutRow } from './lib/types'
@@ -18,3 +20,7 @@ export class RowColLayout {
 }
 
 registerType('layout.row-col', RowColLayout)
+
+export const clientModules = [declareOpenModule('@treenx/mods/row-layout/types', [], [
+  declareClientType('layout.row-col', RowColLayout),
+])];
