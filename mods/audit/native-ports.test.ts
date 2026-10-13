@@ -36,6 +36,7 @@ test('native audit JSON-LD and context ports use accepted owners', async () => {
   try {
     const session = await runtime.instance.openSession(runtime.instance.setupCredential);
     const admin = await createMcpSession(session);
+    assert.equal(await resolveNativeContext(session, ['No references here']), '');
     await admin.set_node({ node: { $path: '/records/one', $type: 't.dir', value: 1 } });
     await admin.commit({ changes: [{ op: 'patch', path: '/records/one', ops: { $set: { value: 2 } } }, { op: 'put', node: { $path: '/records/two', $type: 't.dir' } }] });
     const rows = await readAuditHistory(session, '/records');
@@ -50,7 +51,22 @@ test('native audit JSON-LD and context ports use accepted owners', async () => {
     const owner = (await admin.get_node({ path: '/context-owner' })).copies[0];
     if ('error' in owner) throw owner.error;
     const self = `n:${owner.node.$id}`;
-    await admin.set_node({ expect: { nodes: [{ path: owner.node.$path, rev: owner.node.$rev }] }, node: { $path: '/allowed', $type: 't.dir', note: 'visible context', password: 'private-password', $acl: [{ subject: { group: self }, grant: R }] } });
+    await admin.set_node({
+      expect: { nodes: [{ path: owner.node.$path, rev: owner.node.$rev }] },
+      node: {
+        $path: '/allowed',
+        $type: 't.dir',
+        note: 'visible context',
+        password: 'private-password',
+        details: {
+          $type: 't.dir',
+          note: 'named-visible',
+          apiKey: 'named-secret',
+          nested: { token: 'nested-secret', title: 'nested-visible' },
+        },
+        $acl: [{ subject: { group: self }, grant: R }],
+      },
+    });
     await admin.set_node({ node: { $path: '/private', $type: 't.dir', note: 'private-marker' } });
     await admin.commit({ expect: { nodes: [{ path: owner.node.$path, rev: owner.node.$rev }] }, changes: [{ op: 'patch', path: owner.node.$path, ops: { $set: { $acl: [{ subject: { group: self }, grant: R }] } } }] });
     await admin.commit({ changes: [{ op: 'move', from: owner.node.$path, to: '/sys/autostart' }] });
@@ -58,6 +74,12 @@ test('native audit JSON-LD and context ports use accepted owners', async () => {
     assert.equal(output.principal, self);
     assert.equal(output.context.includes('visible context'), true);
     assert.equal(output.context.includes('private-password'), false);
+    assert.equal(output.context.includes('named-visible'), true);
+    assert.equal(output.context.includes('nested-visible'), true);
+    assert.equal(output.context.includes('named-secret'), false);
+    assert.equal(output.context.includes('nested-secret'), false);
+    assert.equal(output.context.includes('$acl'), false);
+    assert.equal(output.context.includes('$owner'), false);
     assert.equal(output.context.includes('private-marker'), false);
     assert.equal(output.context.includes('(not found or access denied)'), true);
     await admin.remove_node({ path: '/sys/autostart' });
