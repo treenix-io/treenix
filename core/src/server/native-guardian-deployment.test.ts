@@ -22,8 +22,9 @@ test('native Guardian deployment refuses, requests approval and retries with bot
     ] });
   try {
     const admin = await createMcpSession(await runtime.instance.openSession(runtime.instance.setupCredential));
-    await admin.set_node({ node: { $path: '/guardian', $type: 'ai.guardian', $acl: [{ subject: { group: 'public' }, grant: R }] } });
-    const owner = (await admin.get_node({ path: '/guardian' })).copies[0];
+    await admin.set_node({ node: { $path: '/guardian', $type: 't.dir', $acl: [{ subject: { group: 'public' }, grant: R }] } });
+    await admin.set_node({ node: { $path: '/guardian/service', $type: 'ai.guardian', $acl: [{ subject: { group: 'public' }, grant: R }] } });
+    const owner = (await admin.get_node({ path: '/guardian/service' })).copies[0];
     if ('error' in owner) throw owner.error;
     const self = `n:${owner.node.$id}`;
     await admin.set_node({ expect: { nodes: [{ path: owner.node.$path, rev: owner.node.$rev }] }, node: { $path: '/guardian/approvals', $type: 't.dir', $acl: [{ subject: { group: self }, grant: R | W }] } });
@@ -37,11 +38,11 @@ test('native Guardian deployment refuses, requests approval and retries with bot
     if ('error' in starter) throw starter.error;
     await admin.commit({ expect: { nodes: [{ path: starter.node.$path, rev: starter.node.$rev }, { path: owner.node.$path, rev: owner.node.$rev }] }, changes: [
       { op: 'patch', path: '/starter', ops: { $set: { $acl: [{ subject: { group: `n:${starter.node.$id}` }, grant: R }] } } },
-      { op: 'patch', path: '/guardian', ops: { $set: { $acl: [
+      { op: 'patch', path: '/guardian/service', ops: { $set: { $acl: [
         { subject: { group: 'public' }, grant: R }, { subject: { group: self }, grant: R },
         { subject: { group: `n:${starter.node.$id}` }, grant: R },
       ] } } },
-      { op: 'put', node: { $path: '/starter/guardian', $type: 't.ref', $ref: '/guardian', $refId: owner.node.$id } },
+      { op: 'put', node: { $path: '/starter/guardian', $type: 't.ref', $ref: '/guardian/service', $refId: owner.node.$id } },
     ] });
     await admin.commit({ changes: [{ op: 'move', from: '/starter', to: '/sys/autostart' }] });
     const issued = prepareCredential(account.node.$id, { expiresAt: Date.now() + 60_000, scope: ['/work', '/guardian'] });
@@ -52,7 +53,7 @@ test('native Guardian deployment refuses, requests approval and retries with bot
       { op: 'put', node: { $path: '/work/accepted', $type: 't.dir' } },
     ] };
     await assert.rejects(agent.commit({ changes: operation.changes }), error => error instanceof KernelError && error.code === 'REFUSED');
-    await agent.execute({ path: '/guardian', action: 'request_approval', args: { operation } });
+    await agent.execute({ path: '/guardian/service', action: 'request_approval', args: { operation } });
     await admin.execute({ path: `/guardian/approvals/${approvalKey(session.actor.principal, operation)}`, action: 'approve', args: {} });
     await agent.commit({ changes: operation.changes });
     assert.equal((await agent.get_node({ path: '/work/accepted' })).copies.length, 1);
