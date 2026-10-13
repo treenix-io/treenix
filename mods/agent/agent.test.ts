@@ -1,9 +1,13 @@
 // Agent Office tests — types (state machine) + guardian (policy registry)
 
-import { createNode, getComponent, resolve } from '@treenx/core';
-import { loadSchemasFromDir } from '@treenx/core/schema/load';
+import { createNode, getComponent, compKey } from '@treenx/core';
+import { createInstance } from '../../core/src/kernel/instance';
+import { createMemoryBlobStore } from '@treenx/core/kernel/blob-store-memory';
+import { createMemoryStore } from '@treenx/core/kernel/store/memory';
+import type { NativeCommands, Position } from '@treenx/core/kernel/types';
+import { nativeAgentTypes } from './native-manifest';
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { after, before, describe, it } from 'node:test';
 
 import './types';
 import { buildPermissionRules, classifyBashCommand, resolveVerdict, splitBashParts } from './guardian';
@@ -21,91 +25,113 @@ import {
   type ThreadMessage,
 } from './types';
 
-// Action args are schema-validated fail-closed — load the generated schemas
-// the way the mod loader does at boot.
-loadSchemasFromDir(new URL('./schemas', import.meta.url).pathname);
+const manifest = { id: 'agent-contract', types: nativeAgentTypes('agent-contract'), security: [], open: [] };
+let commands: NativeCommands;
+let instance: Awaited<ReturnType<typeof createInstance>>;
+let sequence = 0;
+
+before(async () => {
+  const root = createMemoryStore({ domain: 'agent-contract' });
+  let saved: Position | undefined;
+  instance = await createInstance({ id: 'agent-contract', root: { kind: 'store', store: root },
+    modules: [manifest], blobs: createMemoryBlobStore(), provisioning: {
+      writerEpoch: 1, credentialTtlMs: 60_000,
+      counter: { async load() { return saved; }, async save(value) { saved = value; }, async freshEpoch(floor) { return floor + 1; } },
+      domains: [{ store: root, epoch: 'agent-contract1', persistent: false }],
+      bootstrap: { kind: 'fresh', admin: { path: '/admin', name: 'admin', password: 'agent-contract-password' } },
+    } });
+  assert.ok(instance.setupCredential);
+  commands = instance.commands(await instance.auth.openCredential(instance.setupCredential));
+});
+
+after(() => instance.close());
+
+/** Exercise the real native draft and copy its accepted data back to the existing fixture assertions. */
+async function callAction(node: ReturnType<typeof createNode>, action: string, args: unknown = {}, component?: string) {
+  const key = () => ({ epoch: instance.writer.intake.epoch, time: Date.now(), nonce: String(++sequence) });
+  await commands.commit({ opId: key(), changes: [{ op: 'put', node }] });
+  await commands.act({ path: node.$path, action, args, opId: key(),
+    ...(component === undefined ? {} : { component: compKey(component) }) });
+  const accepted = await instance.source.node(node.$path);
+  assert.ok(accepted);
+  if (component === undefined) Object.assign(node, accepted);
+  else Object.assign(getComponent(node, 'ai.plan')!, getComponent(accepted, 'ai.plan')!);
+}
 
 // ── AiAgent state machine (via action handlers) ──
 
 describe('AiAgent', () => {
   function makeAgent(overrides?: Partial<AiAgent>) {
     return createNode('/agents/test', 'ai.agent', {
-      role: 'qa', status: 'offline', currentTask: '', currentRun: '',
+      model: 'claude-opus-4-6', systemPrompt: '', role: 'qa', status: 'offline', currentTask: '', currentRun: '',
       lastRunAt: 0, totalTokens: 0,
       ...overrides,
     });
   }
 
-  function callAction(node: ReturnType<typeof makeAgent>, action: string, data?: unknown) {
-    const handler = resolve(node.$type, `action:${action}`);
-    if (!handler) throw new Error(`no action: ${action}`);
-    // Actions run with comp as `this` via Immer draft — simulate by calling on comp
-    return (handler as any)({ node, comp: getComponent(node, AiAgent), store: {} }, data);
-  }
-
-  it('online() transitions offline → idle', () => {
+  it('online() transitions offline → idle', async () => {
     const node = makeAgent({ status: 'offline' });
-    callAction(node, 'online');
+    await callAction(node, 'online');
     assert.equal(node.status, 'idle');
   });
 
-  it('offline() transitions idle → offline', () => {
+  it('offline() transitions idle → offline', async () => {
     const node = makeAgent({ status: 'idle' });
-    callAction(node, 'offline');
+    await callAction(node, 'offline');
     assert.equal(node.status, 'offline');
   });
 
-  it('offline() throws when working', () => {
+  it('offline() throws when working', async () => {
     const node = makeAgent({ status: 'working' });
-    assert.throws(() => callAction(node, 'offline'), (e: Error) => e.message.includes('cannot'));
+    await assert.rejects(() => callAction(node, 'offline'), (e: Error) => e.message.includes('cannot'));
   });
 
-  it('assign() transitions idle → working with task', () => {
+  it('assign() transitions idle → working with task', async () => {
     const node = makeAgent({ status: 'idle' });
-    callAction(node, 'assign', { task: '/board/data/task-1' });
+    await callAction(node, 'assign', { task: '/board/data/task-1' });
     assert.equal(node.status, 'working');
     assert.equal(node.currentTask, '/board/data/task-1');
   });
 
-  it('assign() throws when not idle', () => {
+  it('assign() throws when not idle', async () => {
     const node = makeAgent({ status: 'working' });
-    assert.throws(() => callAction(node, 'assign', { task: '/board/data/x' }), (e: Error) => e.message.includes('cannot'));
+    await assert.rejects(() => callAction(node, 'assign', { task: '/board/data/x' }), (e: Error) => e.message.includes('cannot'));
   });
 
-  it('assign() throws on empty task', () => {
+  it('assign() throws on empty task', async () => {
     const node = makeAgent({ status: 'idle' });
-    assert.throws(() => callAction(node, 'assign', { task: '' }), (e: Error) => e.message.includes('task'));
+    await assert.rejects(() => callAction(node, 'assign', { task: '' }), (e: Error) => e.message.includes('task'));
   });
 
-  it('complete() transitions working → idle', () => {
+  it('complete() transitions working → idle', async () => {
     const node = makeAgent({ status: 'working', currentTask: '/board/data/t' });
-    callAction(node, 'complete');
+    await callAction(node, 'complete');
     assert.equal(node.status, 'idle');
     assert.equal(node.currentTask, '');
     assert.ok(node.lastRunAt > 0);
   });
 
-  it('complete() throws when not working', () => {
+  it('complete() throws when not working', async () => {
     const node = makeAgent({ status: 'idle' });
-    assert.throws(() => callAction(node, 'complete'), (e: Error) => e.message.includes('cannot'));
+    await assert.rejects(() => callAction(node, 'complete'), (e: Error) => e.message.includes('cannot'));
   });
 
-  it('block() sets status to blocked', () => {
+  it('block() sets status to blocked', async () => {
     const node = makeAgent({ status: 'working' });
-    callAction(node, 'block');
+    await callAction(node, 'block');
     assert.equal(node.status, 'blocked');
   });
 
-  it('fail() sets status to error and clears task', () => {
+  it('fail() sets status to error and clears task', async () => {
     const node = makeAgent({ status: 'working', currentTask: '/board/data/t' });
-    callAction(node, 'fail');
+    await callAction(node, 'fail');
     assert.equal(node.status, 'error');
     assert.equal(node.currentTask, '');
   });
 
-  it('has all expected actions registered', () => {
+  it('declares all expected native actions', () => {
     for (const action of ['online', 'offline', 'assign', 'complete', 'block', 'fail']) {
-      assert.ok(resolve('ai.agent', `action:${action}`), `missing action:${action}`);
+      assert.ok(manifest.types.find(type => type.name === 'ai.agent')!.actions[action], `missing action:${action}`);
     }
   });
 });
@@ -113,21 +139,19 @@ describe('AiAgent', () => {
 // ── AiThread ──
 
 describe('AiThread', () => {
-  it('post() action adds message', () => {
+  it('post() action adds message', async () => {
     const node = createNode('/tasks/t1', 'ai.thread', { messages: [] as ThreadMessage[] });
-    const handler = resolve('ai.thread', 'action:post');
-    assert.ok(handler);
-    (handler as any)({ node, comp: getComponent(node, AiThread), store: {} }, { role: 'qa', from: '/agents/qa', text: 'looks good' });
+    assert.ok(manifest.types.find(type => type.name === 'ai.thread')!.actions.post);
+    await callAction(node, 'post', { role: 'qa', from: '/agents/qa', text: 'looks good' });
     assert.equal(node.messages.length, 1);
     assert.equal(node.messages[0].role, 'qa');
     assert.ok(node.messages[0].ts > 0);
   });
 
-  it('post() throws on empty text', () => {
+  it('post() throws on empty text', async () => {
     const node = createNode('/tasks/t1', 'ai.thread', { messages: [] as ThreadMessage[] });
-    const handler = resolve('ai.thread', 'action:post')!;
-    assert.throws(
-      () => (handler as any)({ node, comp: getComponent(node, AiThread), store: {} }, { role: 'qa', from: '/agents/qa', text: '' }),
+    await assert.rejects(
+      () => callAction(node, 'post', { role: 'qa', from: '/agents/qa', text: '' }),
       (e: Error) => e.message.includes('empty'),
     );
   });
@@ -282,50 +306,46 @@ describe('fail-closed mutating verdicts (core-1prz)', () => {
 // ── AiPlan ──
 
 describe('AiPlan', () => {
-  it('approvePlan sets approved flag', () => {
-    const node = createNode('/board/data/t1', 'board.task', undefined, {
+  it('approvePlan sets approved flag', async () => {
+    const node = createNode('/board/data/t1', 't.dir', undefined, {
       plan: { $type: 'ai.plan', text: 'Step 1: do X\nStep 2: do Y', approved: false, feedback: '', createdAt: Date.now() },
     });
     const plan = getComponent(node, AiPlan)!;
     assert.ok(plan);
     assert.equal(plan.approved, false);
 
-    const handler = resolve('ai.plan', 'action:approvePlan')!;
-    (handler as any)({ node, comp: plan, store: {} }, {});
+    await callAction(node, 'approvePlan', {}, 'plan');
     assert.equal(plan.approved, true);
   });
 
-  it('approvePlan with feedback', () => {
-    const node = createNode('/board/data/t1', 'board.task', undefined, {
+  it('approvePlan with feedback', async () => {
+    const node = createNode('/board/data/t1', 't.dir', undefined, {
       plan: { $type: 'ai.plan', text: 'Some plan', approved: false, feedback: '', createdAt: Date.now() },
     });
     const plan = getComponent(node, AiPlan)!;
-    const handler = resolve('ai.plan', 'action:approvePlan')!;
-    (handler as any)({ node, comp: plan, store: {} }, { feedback: 'Also handle edge case X' });
+    await callAction(node, 'approvePlan', { feedback: 'Also handle edge case X' }, 'plan');
     assert.equal(plan.approved, true);
     assert.equal(plan.feedback, 'Also handle edge case X');
   });
 
-  it('rejectPlan keeps text for re-planning and saves feedback', () => {
-    const node = createNode('/board/data/t1', 'board.task', undefined, {
+  it('rejectPlan keeps text for re-planning and saves feedback', async () => {
+    const node = createNode('/board/data/t1', 't.dir', undefined, {
       plan: { $type: 'ai.plan', text: 'Bad plan', approved: false, feedback: '', createdAt: Date.now() },
     });
     const plan = getComponent(node, AiPlan)!;
-    const handler = resolve('ai.plan', 'action:rejectPlan')!;
-    (handler as any)({ node, comp: plan, store: {} }, { feedback: 'Too risky, simplify' });
+    await callAction(node, 'rejectPlan', { feedback: 'Too risky, simplify' }, 'plan');
     assert.equal(plan.text, 'Bad plan', 'text preserved for agent to see what was rejected');
     assert.equal(plan.approved, false);
     assert.equal(plan.feedback, 'Too risky, simplify');
   });
 
-  it('approvePlan throws on empty plan', () => {
-    const node = createNode('/board/data/t1', 'board.task', undefined, {
+  it('approvePlan throws on empty plan', async () => {
+    const node = createNode('/board/data/t1', 't.dir', undefined, {
       plan: { $type: 'ai.plan', text: '', approved: false, feedback: '', createdAt: 0 },
     });
     const plan = getComponent(node, AiPlan)!;
-    const handler = resolve('ai.plan', 'action:approvePlan')!;
-    assert.throws(
-      () => (handler as any)({ node, comp: plan, store: {} }, {}),
+    await assert.rejects(
+      () => callAction(node, 'approvePlan', {}, 'plan'),
       (e: Error) => e.message.includes('no plan'),
     );
   });
@@ -392,34 +412,30 @@ describe('AiPolicy', () => {
     assert.deepEqual(g.escalate, []);
   });
 
-  it('addAllow action appends rule', () => {
+  it('addAllow action appends rule', async () => {
     const node = createNode('/guardian', 'ai.policy', { allow: [], deny: [], escalate: [] });
-    const handler = resolve('ai.policy', 'action:addAllow')!;
-    assert.ok(handler);
-    (handler as any)({ node, comp: getComponent(node, AiPolicy), store: {} }, { pattern: 'mcp__treenix__*' });
+    assert.ok(manifest.types.find(type => type.name === 'ai.policy')!.actions.addAllow);
+    await callAction(node, 'addAllow', { pattern: 'mcp__treenix__*' });
     assert.deepEqual(node.allow, ['mcp__treenix__*']);
   });
 
-  it('addDeny action appends rule', () => {
+  it('addDeny action appends rule', async () => {
     const node = createNode('/guardian', 'ai.policy', { allow: [], deny: [], escalate: [] });
-    const handler = resolve('ai.policy', 'action:addDeny')!;
-    (handler as any)({ node, comp: getComponent(node, AiPolicy), store: {} }, { pattern: 'rm -rf' });
+    await callAction(node, 'addDeny', { pattern: 'rm -rf' });
     assert.deepEqual(node.deny, ['rm -rf']);
   });
 
-  it('addEscalate action appends rule', () => {
+  it('addEscalate action appends rule', async () => {
     const node = createNode('/guardian', 'ai.policy', { allow: [], deny: [], escalate: [] });
-    const handler = resolve('ai.policy', 'action:addEscalate')!;
-    (handler as any)({ node, comp: getComponent(node, AiPolicy), store: {} }, { pattern: 'git push' });
+    await callAction(node, 'addEscalate', { pattern: 'git push' });
     assert.deepEqual(node.escalate, ['git push']);
   });
 
-  it('removeRule action removes from correct list', () => {
+  it('removeRule action removes from correct list', async () => {
     const node = createNode('/guardian', 'ai.policy', {
       allow: ['mcp__treenix__*'], deny: ['rm -rf'], escalate: ['git push'],
     });
-    const handler = resolve('ai.policy', 'action:removeRule')!;
-    (handler as any)({ node, comp: getComponent(node, AiPolicy), store: {} }, { pattern: 'rm -rf' });
+    await callAction(node, 'removeRule', { pattern: 'rm -rf' });
     assert.deepEqual(node.deny, []);
     assert.deepEqual(node.allow, ['mcp__treenix__*'], 'other lists untouched');
   });
