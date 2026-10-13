@@ -3,6 +3,7 @@ import type { PresentationNode } from '@treenx/react/tree/presentation';
 // Whisper channel view — checklist of transcribed audio notes
 
 import * as React from 'react';
+import dayjs from 'dayjs';
 import { getComponent, type NodeData } from '@treenx/core';
 import { useTreeEffects, type View, useChildren } from '@treenx/react';
 import { WhisperChannel, WhisperMeta, WhisperText } from './types';
@@ -82,8 +83,33 @@ const ChannelView: View<WhisperChannel> = ({ value, ctx }) => {
   );
 }
 
+const TranscriptionRow: View<object> = ({ ctx }) => {
+  const node = ctx!.node;
+  const text = getComponent(node, WhisperText);
+  const meta = getComponent(node, WhisperMeta);
+  const pending = !text || text.content === '...';
+
+  return (
+    <div className="flex items-start gap-3 px-3 py-2 rounded-lg border border-border/60 hover:border-border">
+      <span className="text-sm shrink-0">🎙</span>
+      <div className="flex-1 min-w-0">
+        {meta?.error
+          ? <div className="text-sm text-destructive">Ошибка расшифровки: {meta.error}</div>
+          : pending
+            ? <div className="text-sm text-muted-foreground animate-pulse">Расшифровка…</div>
+            : <div className="text-sm text-foreground whitespace-pre-wrap break-words">{text.content}</div>}
+        <div className="text-[11px] text-muted-foreground mt-0.5">
+          {meta?.transcribedAt ? dayjs(meta.transcribedAt).format('MMM D HH:mm') : ''}
+          {meta?.duration ? ` · ${Math.round(meta.duration)}с` : ''}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export const clientModules = [
   declareClientModule('@treenx/mods/whisper/react', [
-    declareView('whisper.channel', 'react', ChannelView)
+    declareView('whisper.channel', 'react', ChannelView),
+    declareView('whisper.transcription', 'react:list', TranscriptionRow)
   ])
 ];

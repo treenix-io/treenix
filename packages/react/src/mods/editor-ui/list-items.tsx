@@ -4,7 +4,9 @@ import type { PresentationNode } from '#tree/presentation';
 // chrome wrapper <RenderChildren>. Convention: items render CONTENT only (no border, no click,
 // no fixed width) — chrome and navigation are the observer's responsibility.
 
-import { Render, RenderContext } from '#context';
+import { NodeProvider, Render, RenderContext } from '#context';
+import { useClientRegistry } from '#context/client-registry-context';
+import { componentEntries } from '@treenx/core/kernel/migrate';
 import { useNavigate } from '#navigate';
 import type { NodeData } from '@treenx/core';
 import type { ReactNode } from 'react';
@@ -125,6 +127,31 @@ function targetPath(item: PresentationNode): string {
   return ((item as { $ref?: string }).$ref) ?? item.$path;
 }
 
+/** Compose each component's own list view; explicit wrappers receive the combined content. */
+export function RenderListItem({ value }: { value: PresentationNode }) {
+  const registry = useClientRegistry();
+  const components = componentEntries(value).slice(1).map(([name, component]) => ({
+    name,
+    component,
+    view: registry.exact(component.$type, 'react:list'),
+  }));
+
+  let content: ReactNode = (
+    <>
+      <Render value={value} />
+      {components.map(({ name, component, view }) =>
+        view !== null && view.meta?.wrap !== true ? <Render key={name} value={component} /> : null,
+      )}
+    </>
+  );
+
+  for (const { name, component, view } of components) {
+    if (view?.meta?.wrap === true) content = <Render key={name} value={component}>{content}</Render>;
+  }
+
+  return <NodeProvider value={value}><RenderContext name="react:list">{content}</RenderContext></NodeProvider>;
+}
+
 export function RenderChildren({
   items,
   ctx,
@@ -149,7 +176,7 @@ export function RenderChildren({
               onClick={() => navigate(targetPath(item))}
               className={ITEM_CHROME[ctx]}
             >
-              <Render value={item} />
+              {ctx === 'list' ? <RenderListItem value={item} /> : <Render value={item} />}
             </div>
           ),
         )}
@@ -171,7 +198,7 @@ export function RenderItem({ value, ctx }: { value: PresentationNode; ctx: Child
   return (
     <RenderContext name={CTX_NAME[ctx]}>
       <div onClick={() => navigate(targetPath(value))} className={ITEM_CHROME[ctx]}>
-        <Render value={value} />
+        {ctx === 'list' ? <RenderListItem value={value} /> : <Render value={value} />}
       </div>
     </RenderContext>
   );
