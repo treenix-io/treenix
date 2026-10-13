@@ -140,6 +140,16 @@ export async function installNativeSeeds(
     const name = node.$path.slice(separator + 1);
     const mark = parent?.$prefabChildren?.[name];
     if (mark !== undefined) {
+      const key = childKey(plan.opId, owner, node.$path);
+      let after: string | undefined;
+      do {
+        const result = await session.read({ history: node.$path, window: { limit: 100, after } });
+        if (result.history === undefined) throw new KernelError('INVALID', 'Installation history is absent');
+        if (result.history.some(entry => entry.path === node.$path && entry.caller === session.actor.principal
+          && entry.opId?.epoch === key.epoch && entry.opId.time === key.time && entry.opId.nonce === key.nonce))
+          throw new KernelError('CONFLICT', 'Replayed seed outcome no longer has its installed target');
+        after = result.next;
+      } while (after !== undefined);
       if (mark.removed !== true && parent !== undefined) {
         await session.commit({
           opId: childKey(plan.opId, owner, `removed:${node.$path}`),
@@ -209,7 +219,7 @@ export async function installNativeSeeds(
     const source = getComponent<PrefabCatalog>(accepted, 't.prefab');
     if (source === undefined)
       throw new KernelError('INVALID', 'Accepted seed source has another type');
-    const owner = stableJson({ id: accepted.$id, rev: accepted.$rev });
+    let owner = stableJson({ id: accepted.$id, rev: accepted.$rev });
     acceptedSeeds.push({ prefab, node: accepted, source });
     if (source.materialized !== true) {
       for (const record of sourceRecords(accepted.$path, source.nodes))
@@ -220,6 +230,7 @@ export async function installNativeSeeds(
         changes: [{ op: 'patch', path: accepted.$path, ops: { $set: { materialized: true } } }],
       }).outcome;
       accepted = await readNode(session, accepted.$path);
+      owner = stableJson({ id: accepted.$id, rev: accepted.$rev });
       acceptedSeeds[acceptedSeeds.length - 1] = { prefab, node: accepted, source };
     }
 

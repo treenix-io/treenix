@@ -72,6 +72,14 @@ export const deployPrefabAction: WriteAction = {
           throw new KernelError('INVALID', 'Prefab source tree requires inert records');
         const body = sourceBody(source);
         const path = resolvePrefabPath(body.$path, input.target, input.allowAbsolute);
+        // The synthetic absolute root indexes source children; it is not a deployment destination.
+        if (source.implicit === true && path === '/') {
+          for await (const child of children(ctx.read, source.$path)) {
+            pending.push(child.$path);
+            yield { source: child.$path };
+          }
+          continue;
+        }
         const own = await optionalNode(ctx.read, path);
         if (own === undefined) {
           const separator = path.lastIndexOf('/');
