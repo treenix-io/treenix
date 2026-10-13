@@ -50,6 +50,10 @@ it('reads newly present optional bodies freshly and refuses dangling body symlin
       )
       assert.equal(present.cost.nodes, 1)
       assert.equal(present.cost.bytes, Buffer.byteLength(body))
+      await assert.rejects(
+        scanFsNodes(directory, position, { node: '/doc' }, { ...scanBudget(), nodes: 0 }, true),
+        error => error instanceof KernelError && error.code === 'BUDGET',
+      )
     }
 
     await unlink(file)
