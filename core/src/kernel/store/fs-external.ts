@@ -18,8 +18,10 @@ export function createFsExternalWatcher(directory: string | readonly string[], l
       const observedMetadata = metadata.some(prefix => path === prefix || path.startsWith(`${prefix}/`))
       if (parts[0] === '.git' || parts[0] === '.treenix' && !observedMetadata) return
       const name = parts.at(-1)!
-      if (name.startsWith('.') && name.endsWith('.tmp')) return
-      const address = filename === null || observedMetadata ? '/' : name === '$' || name === '$.json' ? `/${parts.slice(0, -1).join('/')}`
+      const temporary = name.startsWith('.') && name.endsWith('.tmp')
+      if (temporary && _event !== 'rename') return
+      // Recursive watch may report an atomic replacement's source name instead of its destination.
+      const address = filename === null || observedMetadata ? '/' : temporary || name === '$' || name === '$.json' ? `/${parts.slice(0, -1).join('/')}`
         : name.endsWith('.json') ? `/${path.slice(0, -5)}` : `/${path}`
       fsAddress(address)
       const mapped = logical(address)
