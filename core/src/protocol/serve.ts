@@ -129,6 +129,13 @@ export function createTwpServing(instance: InstanceFoundationWithAuth) {
       found.attached = true; found.lane.touch()
       return { frames: found.lane.frames, close: found.close }
     },
+    /** Binary requests retain the credential and origin admission of their actual lane. */
+    upload(id: string, credential: Credential | undefined, origin: string, parts: AsyncIterable<Uint8Array>, type: string, signal?: AbortSignal) {
+      return authorized(id, credential, origin).lane.upload(parts, type, signal)
+    },
+    download(id: string, credential: Credential | undefined, origin: string, path: string, field: string, signal?: AbortSignal) {
+      return authorized(id, credential, origin).lane.download(path, field, signal)
+    },
     close() {
       if (closed) return
       closed = true

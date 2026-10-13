@@ -98,7 +98,7 @@ export function createTwpHttpServer(input: TwpHttpOptions) {
       response.setHeader('Vary', 'Origin')
     }
     response.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-    response.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, TWP-Lane')
+    response.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, TWP-Lane, TWP-Path, TWP-Field')
     if (request.method === 'OPTIONS') { response.writeHead(204); response.end(); return }
     const url = new URL(request.url ?? '/', 'http://localhost')
     const route = routes.get(url.pathname)
@@ -152,6 +152,50 @@ export function createTwpHttpServer(input: TwpHttpOptions) {
         if (typeof laneHeader !== 'string') throw new KernelError('INVALID', 'Malformed lane header')
         serving.dispatch(laneHeader, credential, network, requests)
         json(response, 202, { accepted: true })
+      }
+      return
+    }
+    if (url.pathname === '/twp/blob' && (request.method === 'POST' || request.method === 'GET')) {
+      const lane = request.headers['twp-lane']
+      if (typeof lane !== 'string') throw new KernelError('INVALID', 'Binary transfer lane is absent')
+      if (request.method === 'POST') {
+        const type = request.headers['content-type']
+        if (typeof type !== 'string') throw new KernelError('INVALID', 'Blob content type is absent')
+        async function* parts(): AsyncGenerator<Uint8Array> {
+          for await (const chunk of request) {
+            const part: Buffer = chunk
+            yield part
+          }
+        }
+        const controller = new AbortController()
+        const disconnected = () => { if (!response.writableEnded) controller.abort(new KernelError('CANCELLED', 'Blob uploader disconnected')) }
+        request.once('aborted', disconnected); response.once('close', disconnected)
+        try { json(response, 201, await serving.upload(lane, credential, network, parts(), type, controller.signal)) }
+        finally { request.removeListener('aborted', disconnected); response.removeListener('close', disconnected) }
+        return
+      }
+      const path = request.headers['twp-path'], field = request.headers['twp-field']
+      if (typeof path !== 'string' || typeof field !== 'string') throw new KernelError('INVALID', 'Blob address is absent')
+      assertSafePath(path)
+      const controller = new AbortController()
+      const iterator = serving.download(lane, credential, network, path, field, controller.signal)[Symbol.asyncIterator]()
+      const disconnected = () => controller.abort(new KernelError('CANCELLED', 'Blob reader disconnected'))
+      response.once('close', disconnected)
+      try {
+        const first = await iterator.next()
+        controller.signal.throwIfAborted()
+        response.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Disposition': 'attachment',
+          'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' })
+        let next = first
+        while (!next.done) {
+          controller.signal.throwIfAborted()
+          if (!response.write(next.value)) await once(response, 'drain', { signal: controller.signal })
+          next = await iterator.next()
+        }
+        response.end()
+      } finally {
+        response.removeListener('close', disconnected)
+        await iterator.return?.()
       }
       return
     }

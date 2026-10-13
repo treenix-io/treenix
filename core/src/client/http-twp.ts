@@ -1,6 +1,7 @@
 import type { CacheClaimLimits, LaneCache } from '#client/lane-cache'
+import { DEFAULT_LIMITS } from '#kernel/types'
 import { KernelError } from '#errors'
-import type { Connection, Credential, FederationBinding, Frame, Request } from '#kernel/types'
+import type { BlobRef, Connection, Credential, FederationBinding, Frame, Request } from '#kernel/types'
 import { decodeFrame } from '#protocol/twp'
 import { isRecord } from '#util/is-record'
 
@@ -15,6 +16,7 @@ export interface TwpHttpClientOptions {
   readonly headers?: HeadersInit
   readonly signal?: AbortSignal
   readonly frameBytes?: number | (() => number)
+  readonly blobBytes?: number
   readonly heartbeatMs?: number
 }
 
@@ -160,5 +162,59 @@ export async function openTwpHttp(options: TwpHttpClientOptions) {
     }
   }
   const connection: Connection = { send: post, frames: { [Symbol.asyncIterator]: frames } }
-  return { ...connection, close, lane }
+  /** Browsers buffer within the transfer cap because HTTP/1 does not support fetch streaming requests. */
+  async function upload(parts: AsyncIterable<Uint8Array>, type: string): Promise<BlobRef> {
+    const iterator = parts[Symbol.asyncIterator]()
+    const transferHeaders = new Headers(headers)
+    transferHeaders.set('Content-Type', type)
+    try {
+      let init: RequestInit & { duplex?: 'half' }
+      if (typeof document !== 'undefined') {
+        const bodies: ArrayBuffer[] = []
+        let bytes = 0
+        for (;;) {
+          signal.throwIfAborted()
+          const next = await iterator.next()
+          if (next.done) break
+          bytes += next.value.byteLength
+          if (bytes > (options.blobBytes ?? DEFAULT_LIMITS.blobBytes))
+            throw new KernelError('BUDGET', 'HTTP blob upload exceeded its body cap')
+          bodies.push(new Uint8Array(next.value).buffer)
+        }
+        init = { method: 'POST', headers: transferHeaders, credentials, signal, body: new Blob(bodies, { type }) }
+      } else {
+        const body = new ReadableStream<Uint8Array>({
+          async pull(controller) {
+            const next = await iterator.next()
+            if (next.done) controller.close()
+            else controller.enqueue(next.value)
+          },
+          async cancel() { await iterator.return?.() },
+        })
+        init = { method: 'POST', headers: transferHeaders, credentials, signal, body, duplex: 'half' }
+      }
+      const response = await fetch(`${url}/twp/blob`, init)
+      if (!response.ok) return refusal(response)
+      const ref: BlobRef = await response.json()
+      return ref
+    } finally { await iterator.return?.() }
+  }
+  /** Download preserves socket pull and releases the response body when abandoned. */
+  async function* download(path: string, field: string): AsyncGenerator<Uint8Array> {
+    const transferHeaders = new Headers(headers)
+    transferHeaders.set('TWP-Path', path)
+    transferHeaders.set('TWP-Field', field)
+    const response = await fetch(`${url}/twp/blob`, { headers: transferHeaders, credentials, signal })
+    if (!response.ok) await refusal(response)
+    if (response.body === null) throw new KernelError('INVALID', 'Missing HTTP blob body')
+    const reader = response.body.getReader()
+    try {
+      while (true) {
+        const next = await reader.read()
+        if (next.done) return
+        yield next.value
+      }
+    } finally { try { await reader.cancel() } finally { reader.releaseLock() } }
+  }
+  return { ...connection, close, lane, upload, download }
 }

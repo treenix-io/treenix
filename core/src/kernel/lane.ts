@@ -104,6 +104,8 @@ export interface NodeLane extends Session {
   commit(request: Parameters<NativeCommands['commit']>[0]): Pending
   act(request: Parameters<NativeCommands['act']>[0]): Pending
   cancel(id: string): void
+  upload(parts: AsyncIterable<Uint8Array>, type: string, signal?: AbortSignal): ReturnType<Session['upload']>
+  download(path: Path, field: string, signal?: AbortSignal): ReturnType<Session['download']>
   touch(): void
   close(reason?: KernelError): void
   reconnect(): void
@@ -837,7 +839,7 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
     touch,
     cancel,
     /** Counts binary uploads in the same unfinished-request quota as commands. */
-    async upload(parts, type) {
+    async upload(parts, type, signal) {
       touch();
       reserve(id());
       const producer = options.transfers;
@@ -845,11 +847,11 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
       const controller = new AbortController();
       transfers.add(controller);
 
-      try { return await producer.upload(parts, type, controller.signal); }
+      try { return await producer.upload(parts, type, signal === undefined ? controller.signal : AbortSignal.any([controller.signal, signal])); }
       finally { transfers.delete(controller); }
     },
     /** Holds one request slot while the consumer pulls binary content. */
-    async *download(path, field) {
+    async *download(path, field, signal) {
       touch();
       reserve(id());
       const producer = options.transfers;
@@ -857,7 +859,7 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
       const controller = new AbortController();
       transfers.add(controller);
 
-      try { yield* producer.download(path, field, controller.signal); }
+      try { yield* producer.download(path, field, signal === undefined ? controller.signal : AbortSignal.any([controller.signal, signal])); }
       finally { transfers.delete(controller); }
     },
     read: directRead,
