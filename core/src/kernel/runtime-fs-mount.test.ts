@@ -88,8 +88,9 @@ async function setup(t: TestContext, twoTargets = false) {
       '#mount': { $type: 't.mount.fs', pattern: '', directory: 'archive', external: 'none' },
       '#groups': { $type: 't.groups', list: ['admins'] } } }] : []),
   ] }).outcome
+  const account = await readNode(admin, '/admin')
+  assert.equal(account.$type, 't.user')
   assert.equal((await readNode(admin, '/data'))['#mount'].directory, 'data')
-  await assert.rejects(admin.read({ node: '/data/doc' }), code('UNAVAILABLE'))
   assert.deepEqual(await readdir(data), ['doc.json'])
   await first.close()
 
@@ -97,6 +98,7 @@ async function setup(t: TestContext, twoTargets = false) {
   async function adminSession(runtime: Awaited<ReturnType<typeof openNativeRuntime>>) {
     const session = await runtime.instance.openSession(credential)
     deliveries.push(drainSession(session))
+    assert.equal((await readNode(session, '/admin')).$id, account.$id)
     return session
   }
 

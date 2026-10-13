@@ -31,10 +31,16 @@ it(
         credentialTtlMs: 60000,
         firstAdmin: { path: '/admin', name: 'admin', password: 'fixture-password' },
       },
-      modules: ['platform', 'auth', 'prefab', 'autostart'].map((name) => ({
-        id: `@treenx/core/${name}`,
-        entry: new URL(`../mods/${name}/kernel.ts`, import.meta.url).href,
-      })),
+      modules: [
+        ...['platform', 'auth', 'autostart'].map((name) => ({
+          id: `@treenx/core/${name}`,
+          entry: new URL(`../mods/${name}/kernel.ts`, import.meta.url).href,
+        })),
+        {
+          id: '@treenx/core/prefab',
+          entry: new URL('../../../mods/prefab/kernel.ts', import.meta.url).href,
+        },
+      ],
       seedFilter: ['core', 'auth'],
     };
     const runtimes: Awaited<ReturnType<typeof openNativeDeployment>>[] = [];
