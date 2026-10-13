@@ -83,6 +83,40 @@ test('full caller-visible type catalog fits default read limits across 306 modul
   } finally { await admin.close(); await runtime.close(); }
 });
 
+test('fresh seeded service first mutation follows accepted mount preparation', async () => {
+  const temporary = new URL('../../../../temp/native-seeded-service/', import.meta.url);
+  await mkdir(temporary, { recursive: true });
+  const directory = await mkdtemp(fileURLToPath(new URL('dataset-', temporary)));
+  await mkdir(join(directory, 'documents'));
+  const runtime = await openNativeDeployment({
+    runtime: { id: randomUUID(), directory: join(directory, 'root'), credentialTtlMs: 60_000,
+      firstAdmin: { path: '/admin', name: 'admin', password: 'fixture-password' },
+      mountDirectories: { documents: join(directory, 'documents') } },
+    modules: [{ id: 'boot-fixture', entry: new URL('./native-deployment-fixture.ts', import.meta.url).href }],
+    additionalModules: [{ id: '@treenx/mods/prefab', entry: new URL('../../../mods/prefab/kernel.ts', import.meta.url).href }],
+    seeds: { sources: [
+      { $path: '/sys/mods', $type: 't.dir' },
+      { $path: '/sys/mods/boot', $type: 't.dir' },
+      { $path: '/sys/mods/boot/prefabs', $type: 't.dir' },
+    ], prefabs: [{ target: '/', source: {
+      $path: '/sys/mods/boot/prefabs/seed', $type: 't.prefab', mod: 'boot', name: 'seed',
+      nodes: [
+        { $path: 'sys/autostart', $type: 'boot.worker' },
+        { $path: 'sys/autostart/state', $type: 'boot.state', label: '' },
+        { $path: 'documents', $type: 't.mount-point',
+          '#groups': { $type: 't.groups', list: ['admins'] },
+          '#mount': { $type: 't.mount.rawfs', directory: 'documents', pattern: '', external: 'none' } },
+      ], grants: [{ executor: 'sys/autostart', target: 'sys/autostart', grant: R | W }],
+    } }] },
+  });
+  const connection = await http(runtime, runtime.instance.setupCredential);
+  try {
+    const state = (await connection.client.read({ node: '/sys/autostart/state' })).copies[0];
+    assert.ok('node' in state);
+    assert.equal(state.node.label, 'ecivres');
+  } finally { await connection.close(); await runtime.close(); }
+});
+
 test('fresh seeded filesystem mounts preserve the public HTTP key for the first action', async () => {
   const temporary = new URL('../../../../temp/native-seeded-intake/', import.meta.url);
   await mkdir(temporary, { recursive: true });

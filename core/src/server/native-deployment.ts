@@ -2,6 +2,7 @@ import { createTwpHttpRoutes } from '#server/http-routes';
 import { randomUUID } from 'node:crypto';
 import { evaluateModuleFactory, materializeModule, type CollectedModule, type NativeModuleDeployment, type NativeModuleExports, type NativeModuleHost } from '#kernel/manifest';
 import type { NativeSeedDefinition } from '#mod/native-prefab';
+import type { InstanceFoundationWithAuth } from '#kernel/instance';
 import { openNativeRuntime, type NativeRuntimeConfig } from '#kernel/runtime';
 import { bindModuleIo, loadAllMods, moduleGates, type LoadResult } from '#mod/loader';
 import { KernelError } from '#errors';
@@ -21,7 +22,7 @@ export interface PersistentLogsConfig { readonly directory: string }
 export type NativeDeploymentHost = Omit<NativeModuleHost, 'httpRoutes' | 'logs'>;
 
 export interface NativeDeploymentConfig {
-  readonly runtime: Omit<NativeRuntimeConfig, 'modules' | 'io'>;
+  readonly runtime: Omit<NativeRuntimeConfig, 'modules' | 'io' | 'initialize'>;
   /** An explicit list, including an empty list, replaces default discovery. */
   readonly modules?: readonly NativeModuleLocation[];
   /** Package entries supplement module discovery without replacing its owners. */
@@ -90,15 +91,15 @@ export async function openNativeDeployment(config: NativeDeploymentConfig) {
     if (Object.hasOwn(rawfsCodecs, mime)) throw new KernelError('CONFLICT', `Raw file codec has multiple owners: ${mime}`);
     rawfsCodecs[mime] = codec;
   }
-  const runtime = await openNativeRuntime({ ...config.runtime, rawfsCodecs, modules: loaded.manifests, io: bindModuleIo(bindings),
-    gates: [...(loaded.gates ?? []), ...(config.runtime.gates ?? [])] });
-  try {
+
+  /** Publish seed state before any autostart session captures its mutation intake. */
+  async function initialize(instance: InstanceFoundationWithAuth): Promise<void> {
     if (seeds !== undefined || config.persistentLogs !== undefined) {
-      const credential = runtime.instance.setupCredential ?? config.runtime.installerCredential
-        ?? (config.runtime.firstAdmin === undefined ? undefined : await runtime.instance.auth.login({
+      const credential = instance.setupCredential ?? config.runtime.installerCredential
+        ?? (config.runtime.firstAdmin === undefined ? undefined : await instance.auth.login({
           account: config.runtime.firstAdmin.path, password: config.runtime.firstAdmin.password }));
       if (credential === undefined) throw new KernelError('FORBIDDEN', 'Seed installation requires the deployment administrator credential');
-      const session = await runtime.instance.openSession(credential);
+      const session = await instance.openSession(credential);
       const lane = session.lane[Symbol.asyncIterator]();
       const welcome = await lane.next();
       if (welcome.done || welcome.value.t !== 'welcome') throw new Error('Installer lane did not open');
@@ -118,7 +119,11 @@ export async function openNativeDeployment(config: NativeDeploymentConfig) {
           () => ({ epoch: intake, time: Date.now(), nonce: randomUUID() }));
       } finally { session.close(); await delivery; }
     }
-    await runtime.instance.prepareMounts();
+  }
+
+  const runtime = await openNativeRuntime({ ...config.runtime, initialize, rawfsCodecs, modules: loaded.manifests, io: bindModuleIo(bindings),
+    gates: [...(loaded.gates ?? []), ...(config.runtime.gates ?? [])] });
+  try {
     logs.emit({ t: Date.now(), level: 'info', sub: 'native-deployment', msg: 'Native deployment opened' });
     return { ...runtime, httpRoutes, logs };
   } catch (error) {

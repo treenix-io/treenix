@@ -141,6 +141,9 @@ export interface InstanceFoundationWithAuth extends InstanceFoundation {
   /** Trusted deployment transport opens this same-zone receiver with a Writer-owned envelope. */
   openShard(envelope: ShardEnvelope, signal?: AbortSignal): Promise<ShardConnection>
 }
+/** Install deployment-owned state before mount preparation and service admission. */
+export type InstanceInitializer = (instance: InstanceFoundationWithAuth) => Promise<void>
+
 export interface AuthInstanceFoundationConfig extends InstanceFoundationConfig { readonly initialCredential: { readonly ttlMs: number } }
 
 /** Checks deployment identity and credential policy before module loading or storage work. */
@@ -154,12 +157,12 @@ function assertInstanceOptions(
 }
 
 /** Composes an instance from borrowed deployment resources and publishes only owned native types. */
-export async function createInstance(input: InstanceConfig): Promise<InstanceFoundationWithAuth> {
+export async function createInstance(input: InstanceConfig, initialize?: InstanceInitializer): Promise<InstanceFoundationWithAuth> {
   const mounts = captureMounts(input.provisioning.mounts)
   const borrowed = new Set(input.provisioning.domains.map(domain => domain.store))
   if (input.root.kind === 'store') borrowed.add(input.root.store)
   try {
-    return await buildCanonicalInstance({ ...input, provisioning: { ...input.provisioning, mounts } })
+    return await buildCanonicalInstance({ ...input, provisioning: { ...input.provisioning, mounts } }, initialize)
   } catch (error) {
     return closeStartupAfterFailure(mounts, borrowed, error)
   }
@@ -195,7 +198,7 @@ async function closeStartupAfterFailure(
 }
 
 /** Publishes owned modules only after the accepted root and startup inventory are initialized. */
-async function buildCanonicalInstance(input: InstanceConfig): Promise<InstanceFoundationWithAuth> {
+async function buildCanonicalInstance(input: InstanceConfig, initialize?: InstanceInitializer): Promise<InstanceFoundationWithAuth> {
   const provisioning = input.provisioning
   const policy = provisioning.bootstrap
   const bootstrapPolicy = policy.kind === 'fresh'
@@ -288,6 +291,7 @@ async function buildCanonicalInstance(input: InstanceConfig): Promise<InstanceFo
     else await publishLoadedModules(instance.registry, { ...discovered, manifests: discovered.manifests.map(module => ({
       ...module, ...instance.bindAutostartModule(module),
     })) }, { allowPartialMods: config.allowPartialMods })
+    await initialize?.(instance)
     await instance.preparePublications()
     await instance.prepareMounts()
     await instance.preparePublications()

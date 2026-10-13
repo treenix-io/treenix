@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import { KernelError } from '#errors'
-import { createInstance, type InstanceFoundationWithAuth } from '#kernel/instance'
+import { createInstance, type InstanceFoundationWithAuth, type InstanceInitializer } from '#kernel/instance'
 import { openPersistentWriter } from '#kernel/persistence'
 import { copyManifest } from '#kernel/registry'
 import { previewModules } from '#kernel/module-install'
@@ -12,6 +12,8 @@ import { createFsBlobStore } from '#kernel/blob-store-fs'
 import { DEFAULT_LIMITS, type FederationBinding, type ActionIoBinding, type AdminInput, type Credential, type Gate, type ModuleManifest, type ProvisionedStoreMount } from '#kernel/types'
 
 export interface NativeRuntimeConfig {
+  /** Deployment installation completes before mounts and background services start. */
+  readonly initialize?: InstanceInitializer
   readonly shardPath?: string
   readonly federation?: FederationBinding
   readonly io?: ActionIoBinding
@@ -35,6 +37,7 @@ export async function openNativeRuntime(input: NativeRuntimeConfig) {
     firstAdmin =
       input.firstAdmin === undefined ? undefined : Object.freeze({ ...input.firstAdmin });
   const config = Object.freeze({
+    initialize: input.initialize,
     id: input.id,
     shardPath: input.shardPath,
     federation: input.federation,
@@ -120,7 +123,7 @@ export async function openNativeRuntime(input: NativeRuntimeConfig) {
       gates: config.gates,
       io: config.io,
       modules,
-    });
+    }, config.initialize);
     let closing: Promise<void> | undefined;
     return {
       instance: foundation,
