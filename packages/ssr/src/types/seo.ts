@@ -1,7 +1,8 @@
 // t.seo — page metadata for SSR-rendered nodes (title, description, OG, JSON-LD).
 // Route-node seo wins over target-node seo — see SSR design spec §SEO Precedence.
 
-import { registerType } from '@treenx/core/comp';
+import { declareClientType } from '@treenx/core/comp/client-declaration';
+import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 
 /** Page metadata for SSR. Title required; everything else optional. */
 export class Seo {
@@ -25,4 +26,4 @@ export class Seo {
   jsonLd?: Record<string, unknown>;
 }
 
-registerType('t.seo', Seo);
+export const clientModules = [declareOpenModule('@treenx/ssr/seo', [], [declareClientType('t.seo', Seo)])];

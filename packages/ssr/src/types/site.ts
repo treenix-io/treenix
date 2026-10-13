@@ -1,7 +1,8 @@
 // t.site — SSR marker component. Presence + state='published' makes a route
 // node renderable to HTML. Defaults are safe: draft + spa = opt-in publish/SSR.
 
-import { registerType } from '@treenx/core/comp';
+import { declareClientType } from '@treenx/core/comp/client-declaration';
+import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 
 export type SiteMode = 'static' | 'hydrate' | 'spa';
 
@@ -21,4 +22,4 @@ export class Site {
   };
 }
 
-registerType('t.site', Site);
+export const clientModules = [declareOpenModule('@treenx/ssr/site', [], [declareClientType('t.site', Site)])];

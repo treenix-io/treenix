@@ -44,6 +44,9 @@ import createNativeSimpleComponents from '../../../../mods/simple-components/ker
 import { collectModule } from '@treenx/core/kernel/manifest';
 import { loadSchemasRecursive } from '../../../../core/src/schema/load';
 import { fileURLToPath } from 'node:url';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { loadLocalMods } from '@treenx/core/mod';
 import { moveBefore } from '#editor/native-tree-mutations';
 import { NodeEditor } from '#editor/NodeEditor';
 import { usePath } from '#hooks';
@@ -54,6 +57,22 @@ import type { PathSnapshot } from '#tree/tree-source';
 import { TooltipProvider } from '#components/ui/tooltip';
 
 publishClientExports({ clientModules });
+
+async function loadNativeUix() {
+  const parent = fileURLToPath(new URL('../../../../../temp/native-uix-bootstrap/', import.meta.url));
+  await mkdir(parent, { recursive: true });
+  const directory = await mkdtemp(join(parent, 'modules-'));
+  await writeFile(join(directory, 'package.json'), JSON.stringify({ name: '@treenx/react', type: 'module' }));
+  await mkdir(join(directory, 'uix'));
+  await writeFile(join(directory, 'uix', 'kernel.ts'),
+    `export { default } from ${JSON.stringify(new URL('../mods/uix/kernel.ts', import.meta.url).href)};\n`);
+  const loaded = await loadLocalMods(directory, 'kernel');
+  assert.deepEqual(loaded.failed, []);
+  assert.deepEqual(loaded.loaded, ['uix']);
+  assert.equal(loaded.manifests.length, 1);
+  return loaded.manifests[0];
+}
+
 
 /** Wait for an actual public path publication. */
 function until(
@@ -824,10 +843,7 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
   });
 
   it('keeps writable drafts inactive until an admin publishes a protected live generation', async (t) => {
-    const uixManifest = await collectModule('@treenx/react/uix', async () => {
-      await import('../mods/uix/kernel');
-      loadSchemasRecursive(fileURLToPath(new URL('../mods/uix/', import.meta.url)));
-    });
+    const uixManifest = await loadNativeUix();
     const f = await fixture('public-editor-admin-publication', false);
     t.after(f.close);
     t.after(() => unregister('editor.document', 'react'));
@@ -986,10 +1002,7 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
   });
 
   it('a published view uses its source and retains local state through native updates', async (t) => {
-    const manifest = await collectModule('@treenx/react/uix', async () => {
-      await import('../mods/uix/kernel');
-      loadSchemasRecursive(fileURLToPath(new URL('../mods/uix/', import.meta.url)));
-    });
+    const manifest = await loadNativeUix();
     const f = await fixture('published-view-native-owner', false);
     t.after(f.close);
     t.after(() => unregister('editor.document', 'react'));

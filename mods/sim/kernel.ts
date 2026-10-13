@@ -1,4 +1,4 @@
-import { registerType } from '@treenx/core/comp';
+import { declareClientType } from '@treenx/core/comp/client-declaration';
 import { R, W, type ActionDef, type TypeDef } from '@treenx/core/kernel/types';
 import type { NativeModuleDeployment, NativeModuleHost } from '@treenx/core/kernel/manifest';
 import type { TypeSchema } from '@treenx/core/schema/types';
@@ -26,7 +26,7 @@ const owner = '@treenx/mods/sim';
 class SimService {
   worldPath = '/sim/world';
 }
-registerType('sim.service', SimService);
+const serviceDeclaration = declareClientType('sim.service', SimService);
 const schemas: readonly TypeSchema[] = [
   { ...schema0, type: 'object' },
   { ...schema1, type: 'object' },
@@ -90,7 +90,7 @@ export default function createNativeSim(host: NativeModuleHost = {}): NativeModu
     manifest: {
       id: owner,
       types,
-      open: [],
+      open: [{ type: serviceDeclaration.type, context: 'class', handler: SimService }],
       security: [
         {
           type: 'sim.service',

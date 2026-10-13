@@ -1,7 +1,8 @@
 // UIX source component + server-safe compile verification (no React dependency).
 // Used by MCP to let LLMs attach JSX to nodes and verify that it compiles.
 
-import { registerType } from '@treenx/core/comp';
+import { declareClientType } from '@treenx/core/comp/client-declaration';
+import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 import { compileJSX } from './jsx-parser';
 
 /** Inline JSX/TSX source attached to a node as a `view` component. */
@@ -9,7 +10,7 @@ export class UixSource {
   /** @description JSX/TSX source code. */
   source = '';
 }
-registerType('uix.source', UixSource);
+export const clientModules = [declareOpenModule('@treenx/react/uix/source', [], [declareClientType('uix.source', UixSource)])];
 
 // Mirrors prepareCode from compile.ts but kept here to avoid React imports
 function prepareCode(code: string): { body: string; exportName: string | null } {

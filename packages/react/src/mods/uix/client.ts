@@ -1,3 +1,5 @@
+import { clientModules as sourceDeclarations } from './uix-source';
+import { clientModules as mcpDeclarations } from './mcp';
 // UIX mod — dynamic JSX component engine
 // Auto-discovered via import.meta.glob('../mods/*/client.ts')
 
@@ -83,4 +85,4 @@ const module = declareClientModule('@treenx/react/uix',
   },
 );
 
-export const clientModules = [module];
+export const clientModules = [...sourceDeclarations, ...mcpDeclarations, module];
