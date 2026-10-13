@@ -1,5 +1,5 @@
 // Markdown ↔ Tiptap JSON converters
-// Used by: text.ts (Tiptap→md), fs-codec decode/encode (.md files ↔ doc.page nodes)
+// Used by: types.ts text rendering and native-codec.ts (.md files ↔ doc.page nodes)
 
 import { emitYaml, parseYaml, yamlScalar } from '@treenx/core/util/yaml';
 

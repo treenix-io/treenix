@@ -1,5 +1,7 @@
 import { declareClientType } from '@treenx/core/comp/client-declaration';
 import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
+import { declareText } from '@treenx/core/contexts/text';
+import { tiptapToMd } from './markdown';
 
 
 /** Rich document — Tiptap JSON with embedded Treenix components */
@@ -28,7 +30,17 @@ export class DocFrontmatter {
 }
 const declaredDocFrontmatter = declareClientType('doc.frontmatter', DocFrontmatter);
 
-export const clientModules = [declareOpenModule('@treenx/mods/doc/types', [], [
+const declaredText = declareText(DocPage, (data: Partial<DocPage>) => {
+  const lines: string[] = [];
+  if (data.title) lines.push(`# ${data.title}`);
+  if (data.content) {
+    const text = tiptapToMd(data.content);
+    if (text) lines.push(text);
+  }
+  return lines.join('\n\n');
+});
+
+export const clientModules = [declareOpenModule('@treenx/mods/doc/types', [declaredText], [
   declaredDocPage,
   declaredDocFrontmatter,
 ])];

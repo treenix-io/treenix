@@ -2,7 +2,8 @@
 // Layer 2 binding. Declares "text" context handlers for primitive types.
 // Block-type text handlers belong in their mods
 
-import { normalizeType } from '#core/component';
+import { normalizeType, type Class, type TypeId } from '#core/component';
+import type { Handler } from '#core/context';
 import { declareOpenModule } from '#kernel/module-declaration';
 import type { OpenRegistration } from '#kernel/types';
 
@@ -14,7 +15,10 @@ export interface TextOpenRegistration extends OpenRegistration<TextHandler> {
   readonly binding: 'text';
 }
 
-export function declareText(type: string, handler: TextHandler): TextOpenRegistration {
+/** Bind a text extractor to its component type without publishing global state. */
+export function declareText<T>(type: Class<T>, handler: (data: T) => string): TextOpenRegistration;
+export function declareText(type: string, handler: TextHandler): TextOpenRegistration;
+export function declareText(type: TypeId, handler: Handler): TextOpenRegistration {
   return { type: normalizeType(type), context: 'text', binding: 'text', handler };
 }
 

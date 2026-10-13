@@ -3,7 +3,7 @@ import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 // Brahman — Telegram bot constructor
 // Component types for bot config, pages, actions, users, sessions
 
-import { getComponent, type NodeData, register } from '@treenx/core';
+import { getComponent, type NodeData } from '@treenx/core';
 import { declareText, clientModules as primitiveTextModules } from '@treenx/core/contexts/text';
 
 
@@ -380,7 +380,6 @@ const declaredText = declareText('brahman.message', (data) => {
   if (!msg) throw new Error(`brahman.message without message data: ${node.$path}`);
   return msg.text;
 });
-register(declaredText.type, declaredText.context, declaredText.handler);
 
 export const clientModules = [...primitiveTextModules, declareOpenModule('@treenx/mods/brahman/types', [declaredText], [
   declaredBrahmanBot,
