@@ -1,4 +1,3 @@
-import { onResolveMiss, register } from '@treenx/core';
 import { KernelError } from '@treenx/core/errors';
 import type { JsonSchema, ModuleManifest } from '@treenx/core/kernel/types';
 import { addTypeValidator } from '@treenx/core/comp/validate';
@@ -61,26 +60,9 @@ export const clientModules = [declareOpenModule('@treenx/jsonld-types/schema-org
   Object.entries(OVERRIDES).map(([name, override]) =>
     declareClientSchema(`${PREFIX}${name}`, () => translateClass(SNAPSHOT, name, override))))];
 
-function missResolver(type: string): void {
-  if (!type.startsWith(PREFIX)) return;
-  const className = type.slice(PREFIX.length);
-  const override = OVERRIDES[className];
-  if (!override) return;
-  const schema = translateClass(SNAPSHOT, className, override);
-  register(type, 'schema', () => schema);
-}
-
-/** Loads the schema.org v29 pack — registers slot validator and lazy schema resolver.
- *  Iso: works in Node (server) and browser (client). Safe to call multiple times
- *  (addTypeValidator + onResolveMiss are last-writer-wins; missResolver is a stable ref). */
+/** Initialize the slot validator. Schemas are published by each owning client module or native manifest. */
 export function loadSchemaOrgV29Pack(): void {
   addTypeValidator('jsonld.refOrComponent', refOrComponentValidator);
-  // KNOWN v1 LIMITATION: onResolveMiss is singleton-per-context. This pack owns
-  // 'schema' miss resolution. A future second pack (e.g., GS1, FHIR, ActivityStreams)
-  // would clobber this resolver — last-writer-wins. Plan #3+ must add either:
-  //   (a) a centralized 'schema' dispatcher that fans out to per-prefix sub-resolvers, or
-  //   (b) a chained resolver API in core registry.
-  onResolveMiss('schema', missResolver);
 }
 
 /** Publish slots as standard native schemas without consulting the legacy validator map. */
