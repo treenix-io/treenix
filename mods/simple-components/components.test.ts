@@ -2,19 +2,8 @@
 
 import { createNode, resolve } from '@treenx/core';
 import './types';
-import { createMemoryTree } from '@treenx/core/tree';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-
-async function execComp(tree: ReturnType<typeof createMemoryTree>, path: string, compType: string, action: string, data?: unknown) {
-  const handler = resolve(compType, `action:${action}`) as any;
-  assert.ok(handler, `action:${action} must be registered for ${compType}`);
-  const node = await tree.get(path);
-  assert.ok(node, `node at ${path} must exist`);
-  await handler({ node, comp: node, tree, signal: AbortSignal.timeout(5000) }, data);
-  await tree.set(node);
-  return node;
-}
 
 // ── simple.checklist ──
 

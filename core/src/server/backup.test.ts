@@ -1,14 +1,29 @@
 import assert from 'node:assert/strict';
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, it, mock } from 'node:test';
-import { createNode } from '#core';
-import { createFsTree } from '#tree/fs';
+import { createNode, type NodeData } from '#core';
 import { SUPPORTED_DATA_VERSION, DATA_VERSION_FILE } from '#server/backup-version';
 import { backupInstance, BackupError, restoreArtifact, verifyArtifact } from '#server/backup';
 
 const silent = () => {};
+
+/** Keep legacy backup-format fixtures as plain files, independent of retired storage adapters. */
+async function jsonFixture(directory: string) {
+  await mkdir(directory, { recursive: true });
+  return {
+    async set(node: NodeData) {
+      const file = node.$path === '/'
+        ? join(directory, '$.json')
+        : join(directory, node.$path.slice(1) + '.json');
+      await mkdir(dirname(file), { recursive: true });
+      await writeFile(file, JSON.stringify({ ...node, $rev: 1 }));
+    },
+    async get(path: string) {
+      return JSON.parse(await readFile(join(directory, path.slice(1) + '.json'), 'utf8'));
+    },
+  };
+}
 
 describe('instance backup/restore (gk8.9)', () => {
   let tmp: string;
@@ -18,14 +33,19 @@ describe('instance backup/restore (gk8.9)', () => {
   let out: string;
   let cwd: string;
 
-  // Real fs-adapter data: version marker, leaf and dir node forms.
+  // Legacy JSON data remains supported alongside canonical native node files.
   async function seedInstance() {
-    const base = await createFsTree(baseDir);
+    const base = await jsonFixture(baseDir);
+    await writeFile(join(baseDir, DATA_VERSION_FILE), String(SUPPORTED_DATA_VERSION));
     await base.set(createNode('/', 'root'));
-    await base.set(createNode('/app', 'dir', { title: 'App' }));
+    await mkdir(join(baseDir, 'app'), { recursive: true });
+    await writeFile(join(baseDir, 'app', '$.json'), JSON.stringify({
+      ...createNode('/app', 'dir', { title: 'App' }), $rev: 1,
+    }));
     await base.set(createNode('/app/config', 'dir', { theme: 'dark' }));
 
-    const work = await createFsTree(workDir);
+    const work = await jsonFixture(workDir);
+    await writeFile(join(workDir, DATA_VERSION_FILE), String(SUPPORTED_DATA_VERSION));
     await work.set(createNode('/', 'root'));
     await work.set(createNode('/notes', 'dir', { body: 'hello' }));
 
@@ -39,7 +59,9 @@ describe('instance backup/restore (gk8.9)', () => {
 
   beforeEach(async () => {
     cwd = process.cwd();
-    tmp = await mkdtemp(join(tmpdir(), 'treenix-gk89-'));
+    const parent = resolve(import.meta.dirname, '../../../../temp/backup-json-fixtures');
+    await mkdir(parent, { recursive: true });
+    tmp = await mkdtemp(join(parent, 'dataset-'));
     baseDir = join(tmp, 'tree', 'base');
     workDir = join(tmp, 'tree', 'work');
     rootJson = join(tmp, 'root.json');
@@ -50,7 +72,6 @@ describe('instance backup/restore (gk8.9)', () => {
   afterEach(async () => {
     process.chdir(cwd);
     mock.restoreAll();
-    await rm(tmp, { recursive: true, force: true });
   });
 
   it('backup produces one artifact: config + dirs + manifest with counts', async () => {
@@ -89,7 +110,7 @@ describe('instance backup/restore (gk8.9)', () => {
     const savedNode = join(first.artifactDir, baseEntry.artifactPath, 'app', 'config.json');
     const oldNode = await readFile(savedNode);
 
-    const base = await createFsTree(baseDir);
+    const base = await jsonFixture(baseDir);
     await base.set(createNode('/app/config', 'dir', { theme: 'light' }));
     const second = await backupInstance(rootJson, out, silent);
 
@@ -131,7 +152,7 @@ describe('instance backup/restore (gk8.9)', () => {
     await restoreArtifact(artifactDir, {}, silent);
 
     assert.equal(await readFile(rootJson, 'utf-8'), configBytes, 'config restored at its original path');
-    const base = await createFsTree(baseDir);
+    const base = await jsonFixture(baseDir);
     const node = await base.get('/app/config');
     assert.ok(node);
     assert.equal((node as Record<string, unknown>).theme, 'dark');
@@ -140,11 +161,11 @@ describe('instance backup/restore (gk8.9)', () => {
 
   it('discovers fs mounts declared by nodes inside the data (fixpoint)', async () => {
     const extraDir = join(tmp, 'tree', 'extra');
-    const extra = await createFsTree(extraDir);
+    const extra = await jsonFixture(extraDir);
     await extra.set(createNode('/', 'root'));
     await extra.set(createNode('/deep', 'dir', { v: 1 }));
 
-    const work = await createFsTree(workDir);
+    const work = await jsonFixture(workDir);
     await work.set(createNode('/mnt', 'mount-point', {}, { mount: { $type: 't.mount.fs', root: extraDir } }));
 
     const { manifest } = await backupInstance(rootJson, out, silent);
@@ -153,7 +174,7 @@ describe('instance backup/restore (gk8.9)', () => {
   });
 
   it('lists mongo mounts as external — db/collection in manifest, URI only in data files', async () => {
-    const work = await createFsTree(workDir);
+    const work = await jsonFixture(workDir);
     await work.set(createNode('/db', 'mount-point', {}, {
       mount: { $type: 't.mount.mongo', uri: 'mongodb://admin:s3cret@host/x', db: 'mydb', collection: 'data' },
     }));
@@ -231,7 +252,7 @@ describe('instance backup/restore (gk8.9)', () => {
     await chmod(parent, 0o555);
     try {
       await restoreArtifact(artifactDir, {}, silent);
-      const base = await createFsTree(baseDir), work = await createFsTree(workDir);
+      const base = await jsonFixture(baseDir), work = await jsonFixture(workDir);
       assert.equal((await base.get('/app/config'))?.theme, 'dark');
       assert.equal((await work.get('/notes'))?.body, 'hello');
       await verifyArtifact(artifactDir, silent);
@@ -243,7 +264,7 @@ describe('instance backup/restore (gk8.9)', () => {
   it('restore refuses a non-empty target; --replace moves it aside instead of deleting', async () => {
     const { artifactDir } = await backupInstance(rootJson, out, silent);
 
-    const work = await createFsTree(workDir);
+    const work = await jsonFixture(workDir);
     await work.set(createNode('/newer', 'dir', { v: 'post-backup' }));
 
     await assert.rejects(() => restoreArtifact(artifactDir, {}, silent), (e: BackupError) => e.code === 'TARGET_NOT_EMPTY');
@@ -255,7 +276,7 @@ describe('instance backup/restore (gk8.9)', () => {
     assert.ok(aside, 'previous data moved aside, not deleted');
     assert.ok((await readdir(join(tmp, 'tree', aside!))).includes('newer.json'));
 
-    const restored = await createFsTree(workDir);
+    const restored = await jsonFixture(workDir);
     assert.equal(await restored.get('/newer'), undefined, 'restored state is the backup, not the newer write');
     assert.ok(await restored.get('/notes'));
   });
@@ -285,7 +306,7 @@ describe('instance backup/restore (gk8.9)', () => {
     process.chdir(tmp);
     const relBase = 'relative';
     const relWork = join(relBase, 'work');
-    const t = await createFsTree(relWork);
+    const t = await jsonFixture(relWork);
     await t.set(createNode('/x', 'dir', { ok: true }));
     const relRoot = join(tmp, 'rel-root.json');
     await writeFile(relRoot, JSON.stringify({ $path: '/', $type: 'root', '#m': { $type: 't.mount.fs', root: relWork } }));
@@ -294,7 +315,7 @@ describe('instance backup/restore (gk8.9)', () => {
     const into = join(tmp, 'elsewhere');
     await restoreArtifact(artifactDir, { into }, silent);
 
-    const restored = await createFsTree(join(into, relWork));
+    const restored = await jsonFixture(join(into, relWork));
     assert.ok(await restored.get('/x'));
     assert.equal(JSON.parse(await readFile(join(into, 'rel-root.json'), 'utf-8')).$type, 'root');
   });

@@ -2,7 +2,7 @@ import { refVal, type TypedRef } from '#chain';
 import { registerType } from '#comp';
 import { isRef, register } from '#core';
 import type { Tree } from '#tree';
-import { createMemoryTree } from '#tree';
+import { createLabFixtureTree } from './tree-chain-store.test-support';
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { treeChain } from './tree-chain';
@@ -45,7 +45,7 @@ registerType('tch.wallet', Wallet)
 // ── Seed ──
 
 async function seed(): Promise<Tree> {
-  const tree = createMemoryTree()
+  const tree = createLabFixtureTree()
 
   await tree.set({ $path: '/services', $type: 'dir' })
   await tree.set({
@@ -238,7 +238,7 @@ describe('treeChain — exec-capable tree (core-pxlu)', () => {
   }))
 
   test('capability-less tree keeps the direct registry path', async () => {
-    const tree = createMemoryTree()
+    const tree = createLabFixtureTree()
     await tree.set({ $path: '/tally', $type: 'tch.tally', n: 0 })
 
     const result = await treeChain(tree).tally(Tally).bump()
@@ -343,7 +343,7 @@ class BrahmanBot {
 registerType('tch.brahman.bot', BrahmanBot)
 
 async function seedRealWorld(): Promise<Tree> {
-  const tree = createMemoryTree()
+  const tree = createLabFixtureTree()
 
   // /board — kanban with task children
   await tree.set({ $path: '/board', $type: 'tch.board.kanban' })
@@ -520,7 +520,7 @@ describe('real-world: ergonomics comparison', () => {
 
 describe('treeChain — $set', () => {
   test('creates node with type from class', async () => {
-    const tree = createMemoryTree()
+    const tree = createLabFixtureTree()
     await treeChain(tree).status.$set(LivePrices, { feederUrl: 'ws://example.com' })
     const node = await tree.get('/status')
     assert.ok(node)
@@ -537,7 +537,7 @@ describe('treeChain — $set', () => {
   })
 
   test('deep path via dot navigation', async () => {
-    const tree = createMemoryTree()
+    const tree = createLabFixtureTree()
     await treeChain(tree).a.b.c.$set(Profile, { name: 'Deep', balance: 42 })
     const node = await tree.get('/a/b/c')
     assert.ok(node)
@@ -547,7 +547,7 @@ describe('treeChain — $set', () => {
   })
 
   test('no data — creates node with just type', async () => {
-    const tree = createMemoryTree()
+    const tree = createLabFixtureTree()
     await treeChain(tree).board.$set(BoardKanban)
     const node = await tree.get('/board')
     assert.ok(node)
@@ -555,7 +555,7 @@ describe('treeChain — $set', () => {
   })
 
   test('$set then read back via chain', async () => {
-    const tree = createMemoryTree()
+    const tree = createLabFixtureTree()
     const t = treeChain(tree)
     await t.users.bob.$set(Profile, { name: 'Bob', balance: 250 })
     const bob = await t.users.bob
@@ -564,7 +564,7 @@ describe('treeChain — $set', () => {
   })
 
   test('$set with ref field', async () => {
-    const tree = createMemoryTree()
+    const tree = createLabFixtureTree()
     await treeChain(tree).brahman.$set(BrahmanBot, { alias: '@bot', running: true })
     await treeChain(tree).agent.$set(AgentConfig, {
       model: 'opus',
@@ -649,7 +649,7 @@ describe('treeChain — error paths', () => {
   })
 
   test('await root of empty tree throws', async () => {
-    const tree = createMemoryTree()
+    const tree = createLabFixtureTree()
     await assert.rejects(async () => { await treeChain(tree) })
   })
 })
@@ -669,7 +669,7 @@ describe('treeChain — (Class) where node.$type matches', () => {
 
 describe('treeChain — ref edge cases', () => {
   test('ref without $type field is still followed', async () => {
-    const tree = createMemoryTree()
+    const tree = createLabFixtureTree()
     await tree.set({
       $path: '/target',
       $type: 'tch.live-prices',
@@ -696,7 +696,7 @@ describe('treeChain — ref edge cases', () => {
 
 describe('treeChain — multiple ops chain', () => {
   test('field → field reads chain correctly', async () => {
-    const tree = createMemoryTree()
+    const tree = createLabFixtureTree()
     await tree.set({
       $path: '/config',
       $type: 'tch.scanner',

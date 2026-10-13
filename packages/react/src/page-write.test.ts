@@ -6,11 +6,10 @@ import type { TreeSource } from '#tree/tree-source';
 const React = await import('react');
 const { act, cleanup, fireEvent, render } = await import('@testing-library/react');
 const { createNode, register } = await import('@treenx/core');
-const { applyOps } = await import('@treenx/core/tree');
 const { Render } = await import('./context/index.tsx');
 const { NavigateProvider, makeNavigateApi } = await import('#navigate');
 const { READ_ONLY_EFFECTS } = await import('#tree/effects');
-const { mergeToOps } = await import('#tree/on-change');
+const { mergeIntoNode } = await import('#tree/on-change');
 const { TreeSourceProvider } = await import('#tree/tree-source-context');
 const { EMPTY_PATH_SNAPSHOT, EMPTY_CHILDREN_SNAPSHOT, NOOP_PATH_HANDLE, NOOP_CHILDREN_HANDLE } =
   await import('#tree/tree-source');
@@ -39,7 +38,7 @@ for (const legacy of [false, true]) {
       });
       const { PageLayoutView } = await import('../../../mods/brahman/views/page-layout');
       register('brahman.page', 'react', PageLayoutView);
-      const persisted: NodeData = createNode('/page', 'brahman.page', {
+      let persisted: NodeData = createNode('/page', 'brahman.page', {
         command: '/start',
         positions: [],
         retained: 7,
@@ -60,7 +59,7 @@ for (const legacy of [false, true]) {
           ...READ_ONLY_EFFECTS,
           async patchNode(path, partial) {
             assert.equal(path, persisted.$path);
-            applyOps(persisted, mergeToOps(partial));
+            persisted = mergeIntoNode(persisted, partial);
             node = structuredClone(persisted);
             for (const listener of listeners) listener();
             saved();

@@ -1,6 +1,6 @@
 // treenix backup|verify|restore — stop-the-world instance backup (core-gk8.9).
 // Run from the server's CWD: mount roots in root.json are CWD-relative, exactly
-// as createFsTree resolves them. Contract: docs/deployment.md "Backup & restore".
+// as the filesystem mounts resolve them. Contract: docs/deployment.md "Backup & restore".
 
 import { backupInstance, restoreArtifact, verifyArtifact } from './backup';
 

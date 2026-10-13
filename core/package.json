@@ -51,25 +51,10 @@
       "types": "./dist/comp/validate.d.ts",
       "default": "./dist/comp/validate.js"
     },
-    "./tree": {
-      "development": "./src/tree.ts",
-      "types": "./dist/tree.d.ts",
-      "default": "./dist/tree.js"
-    },
     "./util/inflight": {
       "development": "./src/util/inflight.ts",
       "types": "./dist/util/inflight.d.ts",
       "default": "./dist/util/inflight.js"
-    },
-    "./tree/mimefs": {
-      "development": "./src/tree/mimefs.ts",
-      "types": "./dist/tree/mimefs.d.ts",
-      "default": "./dist/tree/mimefs.js"
-    },
-    "./tree/patch": {
-      "development": "./src/tree/patch.ts",
-      "types": "./dist/tree/patch.d.ts",
-      "default": "./dist/tree/patch.js"
     },
     "./mod": {
       "development": "./src/mod.ts",

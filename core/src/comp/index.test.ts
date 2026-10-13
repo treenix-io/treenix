@@ -4,7 +4,6 @@
 import { getCtx, newComponent, registerActions, registerType, setComponent } from '#comp';
 import { createNode, getComponent, getMeta, type NodeData, register, resolve } from '#core';
 import { clearRegistry } from '#testing';
-import { createMemoryTree } from '#tree';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
