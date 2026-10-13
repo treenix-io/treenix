@@ -63,6 +63,7 @@ describe('native action handlers', { timeout: 10_000 }, () => {
   it('lets an unkeyed read handler use the executor Reader without changes or I/O', async t => {
     const f = await setup({ inspect: { kind: 'read', args: {}, handler: async ctx => {
       assert.equal('change' in ctx, false); assert.equal('io' in ctx, false)
+      assert.equal('invocation' in ctx, false)
       const result = await ctx.read.read({ node: '/work/stock' })
       assert.ok('node' in result.copies[0])
       assert.equal(Reflect.set(result.copies[0].node, 'count', 100), false)

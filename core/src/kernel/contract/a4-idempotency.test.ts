@@ -359,3 +359,55 @@ describe('journal-backed mutation identity', { timeout: 10_000 }, () => {
     assert.deepEqual(expired[1].intake, f.writer.intake)
   })
 })
+
+
+describe('ordinary external admission', { timeout: 10_000 }, () => {
+  it('retains a root admission decision while one alternate Store owns the complete effect and accepted replay', async () => {
+    const f = await fixture(),
+      input = f.identity('external');
+    const outcome = await f.writer.mutate(input, async (span) => {
+      await span.beginIo(actor.principal, () => {});
+      return span.finish(f.data, [], (pos) =>
+        prepared(pos, actor.principal, '/items/one', 'external-result'),
+      );
+    });
+    assert.equal(outcome.value, 'external-result');
+    const rootRows = await journal(f.root),
+      dataRows = await journal(f.data);
+    const marker = rootRows.find(
+      (record) => record.decision?.opId.nonce === input.opId.nonce,
+    );
+    assert.ok(marker);
+    assert.equal(marker.entries.length, 0);
+    assert.equal(marker.decision?.stream, undefined);
+    assert.equal(marker.decision?.outcome, undefined);
+    assert.equal(
+      (
+        await f.data.scan({
+          range: { node: '/items/one' },
+          budget: scanBudget(),
+        })
+      ).items.length,
+      1,
+    );
+    assert.equal(
+      (
+        await f.root.scan({
+          range: { node: '/items/one' },
+          budget: scanBudget(),
+        })
+      ).items.length,
+      0,
+    );
+    assert.equal(
+      dataRows.find(
+        (record) => record.decision?.opId.nonce === input.opId.nonce,
+      )?.entries.length,
+      1,
+    );
+    const reopened = await f.open();
+    const beforeReplay = await journal(f.data);
+    assert.deepEqual(await reopened.mutate(input, noExecution), outcome);
+    assert.deepEqual(await journal(f.data), beforeReplay);
+  });
+});

@@ -102,6 +102,7 @@ export interface PreparedCommit {
 export interface PreparedMutation extends PreparedCommit { readonly value?: unknown }
 export interface MutationSpan {
   readonly anchor: OpDecision
+  beginIo(executor: Principal, check: () => void): Promise<void>
   beginStream(stream: NonNullable<OpDecision['stream']>): Promise<void>
   validateAnchor(): Promise<void>
   step(store: Store, reads: readonly DomainId[], prepare: (position: Position) => PreparedCommit | Promise<PreparedCommit>): Promise<Position>
@@ -1369,6 +1370,7 @@ async function initializeWriter(options: WriterOptions) {
       input,
       () => refreshIntake(),
       async (decision) => {
+        let ioStarted = false;
         let started = false,
           pending = false,
           outcome: Outcome | undefined;
@@ -1457,21 +1459,55 @@ async function initializeWriter(options: WriterOptions) {
           get anchor() {
             return anchor;
           },
+          async beginIo(executor, check) {
+            if (ioStarted) return;
+            if (pending || outcome !== undefined)
+              throw new KernelError(
+                'INVALID',
+                'I/O admission must precede mutation completion',
+              );
+            await commit(options.root, [options.root.domain], (pos) => {
+              check();
+              intake.checkAdmitted(input.opId);
+              return {
+                writes: [],
+                budget: input.anchorLookupCost?.budget() ?? budget(),
+                check,
+                record: {
+                  pos,
+                  kind: 'kernel',
+                  caller: input.actor.principal,
+                  executor,
+                  entries: [],
+                  decision: currentDecision,
+                },
+              };
+            });
+            ioStarted = true;
+          },
           async beginStream(metadata) {
             if (
               stream !== undefined &&
-              (stream.executor !== metadata.executor || stream.target !== metadata.target)
+              (stream.executor !== metadata.executor ||
+                stream.target !== metadata.target)
             )
-              throw new KernelError('INVALID', 'Stream execution identity changed');
+              throw new KernelError(
+                'INVALID',
+                'Stream execution identity changed',
+              );
             stream = metadata;
             currentDecision = { ...decision, stream: metadata };
-            if (input.anchor === undefined && !started) anchor = currentDecision;
+            if (input.anchor === undefined && !started)
+              anchor = currentDecision;
             await validateAnchor();
           },
           validateAnchor,
           async step(store, reads, prepare) {
             if (stream === undefined)
-              throw new KernelError('INVALID', 'Only a stream has intermediate mutation steps');
+              throw new KernelError(
+                'INVALID',
+                'Only a stream has intermediate mutation steps',
+              );
             const pos = await apply(store, reads, prepare, false);
             started = true;
             return pos;

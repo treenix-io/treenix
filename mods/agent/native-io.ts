@@ -4,7 +4,7 @@ import type {
   ChangeBuilder,
   NodeId,
   Reader,
-  ReadActionContext,
+  NestedActRequest,
 } from '@treenx/core/kernel/types';
 
 export interface AgentRequest {
@@ -18,7 +18,7 @@ export interface AgentRequest {
 
 export interface AgentPorts {
   readonly read: Reader;
-  readonly act: ReadActionContext['act'];
+  readonly act: (request: NestedActRequest) => Promise<unknown>;
   readonly change: ChangeBuilder;
 }
 

@@ -12,23 +12,58 @@ import { DEFAULT_LIMITS, type Position, type ReadActionContext, type WriteAction
 
 const invalid = (error: unknown) => error instanceof KernelError && error.code === 'INVALID'
 const context: WriteActionContext = {
-  node: { $path: '/counter', $id: 'counter', $type: 'test.counter', $rev: '0', value: 1 },
+  invocation: Object.freeze({
+    id: Object.freeze({ epoch: 'typedef', time: 0, nonce: 'counter' }),
+    continuation: false,
+  }),
+  node: {
+    $path: '/counter',
+    $id: 'counter',
+    $type: 'test.counter',
+    $rev: '0',
+    value: 1,
+  },
   needs: {},
   read: { read: async () => ({ list: [], copies: [], at: [] }) },
   caller: { principal: 'u:alice', claims: ['u:alice'] },
   executor: { principal: 'u:alice', claims: ['u:alice'] },
-  act: async () => { throw new Error('unused') },
+  act: async () => {
+    throw new Error('unused')
+  },
   requireReadWrite: async () => {
-    throw new KernelError('UNAVAILABLE', 'Metadata fixture cannot authorize writes')
+    throw new KernelError(
+      'UNAVAILABLE',
+      'Metadata fixture cannot authorize writes',
+    )
   },
   requireAdmin: async () => {
-    throw new KernelError('UNAVAILABLE', 'Metadata fixture cannot authorize administration')
+    throw new KernelError(
+      'UNAVAILABLE',
+      'Metadata fixture cannot authorize administration',
+    )
   },
   change: {
-    put: () => { throw new Error('unused') }, patch: () => { throw new Error('unused') },
-    remove: () => { throw new Error('unused') }, move: () => { throw new Error('unused') }, restore: () => { throw new Error('unused') },
-    undo: () => { throw new Error('unused') },
-    adopt: () => { throw new Error('unused') },
+    put: () => {
+      throw new Error('unused')
+    },
+    patch: () => {
+      throw new Error('unused')
+    },
+    remove: () => {
+      throw new Error('unused')
+    },
+    move: () => {
+      throw new Error('unused')
+    },
+    restore: () => {
+      throw new Error('unused')
+    },
+    undo: () => {
+      throw new Error('unused')
+    },
+    adopt: () => {
+      throw new Error('unused')
+    },
   },
 }
 const options = (schema: TypeSchema) => ({ name: 'test.counter', module: 'test', security: 'ordinary' as const, schema })

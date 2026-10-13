@@ -520,18 +520,21 @@ describe('native action I/O', { timeout: 10_000 }, () => {
       { adapter },
     );
     const caller = await f.open();
-    const pending = caller.session.act({
+    const request = {
       path: workerPath,
       action: 'run',
       args: {},
       opId: caller.key(),
-    });
+    };
+    const pending = caller.session.act(request);
     const refused = assert.rejects(pending.outcome, code('CANCELLED'));
     await reached(pending, entered);
     caller.session.cancel(pending.id);
     await refused;
     await disconnected.promise;
     assert.equal(adapter.scopes[0].signal.aborted, true);
+    assert.deepEqual(adapter.calls, ['held']);
+    await assert.rejects(caller.session.act(request).outcome, code('UNKNOWN_OUTCOME'));
     assert.deepEqual(adapter.calls, ['held']);
     await assert.rejects(f.admin.read({ node: '/work/effect' }), code('NOT_FOUND'));
   });
@@ -900,6 +903,18 @@ describe('native action I/O', { timeout: 10_000 }, () => {
 
   it('replays the accepted external outcome after a real filesystem restart without invoking a fresh provider', async (t) => {
     const module = await moduleFor(t, {
+      uncertain: {
+        kind: 'write',
+        io: true,
+        args: {},
+        handler: async (ctx) => {
+          await external(ctx).exchange('uncertain');
+          throw new KernelError(
+            'UNAVAILABLE',
+            'External result was not accepted',
+          );
+        },
+      },
       run: {
         kind: 'write',
         io: true,
@@ -964,6 +979,17 @@ describe('native action I/O', { timeout: 10_000 }, () => {
     });
     assert.deepEqual(decision.items[0].decision?.outcome, outcome);
     assert.deepEqual(adapter.calls, ['persisted']);
+    const uncertain = { ...request, action: 'uncertain', opId: key() };
+    await assert.rejects(caller.act(uncertain).outcome, code('UNAVAILABLE'));
+    assert.deepEqual(adapter.calls, ['persisted', 'uncertain']);
+    const unfinished = await runtime.store.scan({
+      range: {
+        decision: { caller: caller.actor.principal, opId: uncertain.opId },
+      },
+      budget: scanBudget(),
+    });
+    assert.equal(unfinished.items[0].decision?.outcome, undefined);
+    assert.equal(unfinished.items[0].decision?.stream, undefined);
     await runtime.close();
     await Promise.all(deliveries);
     const fresh = provider(async () => {
@@ -973,6 +999,7 @@ describe('native action I/O', { timeout: 10_000 }, () => {
     const reopened = await runtime.instance.openSession(credential);
     deliveries.push(drainSession(reopened));
     assert.deepEqual(await reopened.act(request).outcome, outcome);
+    await assert.rejects(reopened.act(uncertain).outcome, code('UNKNOWN_OUTCOME'));
     await assert.rejects(
       reopened.act({ ...request, args: { changed: true } }).outcome,
       code('KEY_REUSED'),
@@ -982,5 +1009,83 @@ describe('native action I/O', { timeout: 10_000 }, () => {
     assert.equal(copy.node.value, 'persisted');
     assert.equal(fresh.scopes.length, 0);
     assert.equal(fresh.calls.length, 0);
+  });
+});
+
+
+describe('ordinary I/O Store ownership', { timeout: 10_000 }, () => {
+  it('publishes an ordinary bound-I/O action effect wholly in another native Store without becoming a stream', async (t) => {
+    const f = await fixture(t, {
+      run: {
+        kind: 'write',
+        io: true,
+        args: {},
+        handler: async (ctx) => {
+          const value = await external(ctx).exchange('alternate');
+          ctx.change.put({
+            $path: '/work/alternate/effect',
+            $type: 't.dir',
+            value,
+          });
+          return value;
+        },
+      },
+    });
+    await f.admin.commit({
+      opId: f.key(),
+      changes: [
+        {
+          op: 'patch',
+          path: '/work',
+          ops: {
+            $set: {
+              '#alternate': { $type: 't.mount.memory', pattern: 'alternate' },
+            },
+          },
+        },
+      ],
+    }).outcome;
+    await f.admin.commit({
+      opId: f.key(),
+      changes: [
+        { op: 'put', node: { $path: '/work/alternate', $type: 't.dir' } },
+      ],
+    }).outcome;
+    const caller = await f.open();
+    const request = {
+      path: workerPath,
+      action: 'run',
+      args: {},
+      opId: caller.key(),
+    };
+    const pending = caller.session.act(request);
+    const pieces: unknown[] = [];
+    for await (const piece of pending.chunks) pieces.push(piece);
+    const outcome = await pending.outcome;
+    assert.deepEqual(pieces, []);
+    assert.equal(outcome.value, 'alternate');
+    assert.equal((await f.node('/work/alternate/effect')).value, 'alternate');
+    assert.equal(
+      (
+        await f.root.scan({
+          range: { node: '/work/alternate/effect' },
+          budget: scanBudget(),
+        })
+      ).items.length,
+      0,
+    );
+    assert.deepEqual(await caller.session.act(request).outcome, outcome);
+    assert.deepEqual(f.adapter.calls, ['alternate']);
+    const decision = await f.root.scan({
+      range: {
+        decision: {
+          caller: caller.session.actor.principal,
+          opId: request.opId,
+        },
+      },
+      budget: scanBudget(),
+    });
+    assert.equal(decision.items[0].decision?.stream, undefined);
+    assert.equal(decision.items[0].decision?.outcome, undefined);
   });
 });

@@ -109,9 +109,10 @@ describe('exports map (qvrt)', () => {
     const kernel = await import('@treenx/core/kernel');
     assert.deepEqual(Object.keys(kernel).sort(), [
       'A', 'DEFAULT_LIMITS', 'R', 'W', 'createInstance',
-      'getActionContext', 'instantiateModule',
+      'getActionContext', 'getActionLifetime', 'instantiateModule',
     ]);
     assert.equal(kernel.createInstance, createInstance);
+    assert.equal(typeof kernel.getActionLifetime, 'function');
   });
 
   it('internals do not resolve — pipeline wrappers and infra are private', async () => {

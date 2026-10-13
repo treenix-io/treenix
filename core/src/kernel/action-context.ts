@@ -1,7 +1,20 @@
 import { KernelError } from '#errors'
 import type { AuthAdmission } from '#kernel/auth-factory'
 import type { createReader } from '#kernel/reader'
-import type { Actor, ChangeBuilder, Io, NestedActRequest, Node, Path, ReadActionContext, ReadResult, Selector, WriteActionContext } from '#kernel/types'
+import type {
+  Actor,
+  ActionInvocation,
+  ChangeBuilder,
+  Io,
+  NativeActionResults,
+  NestedActRequest,
+  Node,
+  Path,
+  ReadActionContext,
+  ReadResult,
+  Selector,
+  WriteActionContext,
+} from '#kernel/types'
 import { freeze } from '#util/freeze'
 
 /** Bind pre-effect waits and escaped context access to the request and parent lifetime. */
@@ -80,6 +93,16 @@ export type ActionContextSource = ActionContextOptions | (() => ActionContextOpt
 /** Expose immutable data through the same executor Reader and action lifetime. */
 export function createReadActionContext(source: ActionContextSource): ReadActionContext {
   const current = typeof source === 'function' ? source : () => source
+  function act<
+    T extends keyof NativeActionResults & string,
+    A extends keyof NativeActionResults[T] & string,
+  >(
+    request: NestedActRequest & { readonly targetType: T; readonly action: A },
+  ): Promise<NativeActionResults[T][A]>
+  function act(request: NestedActRequest): Promise<unknown>
+  function act(request: NestedActRequest): Promise<unknown> {
+    return current().nested(request)
+  }
   return Object.freeze({
     get node() {
       const options = current()
@@ -107,7 +130,7 @@ export function createReadActionContext(source: ActionContextSource): ReadAction
         return freeze(result)
       },
     }),
-    act: (request: NestedActRequest) => current().nested(request),
+    act,
   })
 }
 
@@ -115,11 +138,13 @@ export function createReadActionContext(source: ActionContextSource): ReadAction
 export function createWriteActionContext(
   source: ActionContextSource,
   change: ChangeBuilder | (() => ChangeBuilder),
+  invocation: ActionInvocation,
   io?: () => Io,
 ): WriteActionContext {
   const current = typeof source === 'function' ? source : () => source
   const changes = typeof change === 'function' ? change : () => change
   const read = createReadActionContext(current)
+  const identity = freeze(structuredClone(invocation))
   const stableChange: ChangeBuilder = {
     put: (node) => changes().put(node),
     patch: (path, ops) => changes().patch(path, ops),
@@ -130,6 +155,10 @@ export function createWriteActionContext(
     undo: (record) => changes().undo(record),
   }
   const context: WriteActionContext = {
+    get invocation() {
+      current().active()
+      return identity
+    },
     get node() {
       return read.node
     },

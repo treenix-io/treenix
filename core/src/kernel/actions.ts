@@ -361,7 +361,7 @@ export function createActionRuntime(options: CommandOptions) {
               keys.add(key);
             }
             const onlyRead = action.kind === 'read' || action.post !== undefined;
-            const parentKey = streaming && span !== undefined ? span.anchor.opId : opId;
+            const parentKey = span?.anchor.opId ?? opId;
             const nestedOpId =
               !onlyRead && key !== undefined && parentKey !== undefined
                 ? {
@@ -420,14 +420,24 @@ export function createActionRuntime(options: CommandOptions) {
           });
           let boundIo: Io | undefined;
           const bindIo = executorOptions.io;
+          if (action.kind !== 'read' && span === undefined)
+            throw new KernelError('INVALID', 'Writing invocation has no mutation span');
           const writeContext =
             action.kind === 'read'
               ? undefined
               : createWriteActionContext(
                   contextOptions,
                   () => builder.change,
+                  {
+                    id: span!.anchor.opId,
+                    continuation: request.anchor !== undefined,
+                  },
                   action.io === true && bindIo !== undefined
-                    ? () => boundIo ??= bindIo({ signal: executorControl.signal, assertActive: frameActive })
+                    ? () =>
+                        (boundIo ??= bindIo({
+                          signal: executorControl.signal,
+                          assertActive: frameActive,
+                        }))
                     : undefined,
                 );
           const context = writeContext ?? createReadActionContext(contextOptions);
@@ -675,6 +685,9 @@ export function createActionRuntime(options: CommandOptions) {
               );
             resolved = await resolveActionNeeds(action.needs, request.path, reads, limits);
             checkPre();
+            if (action.kind !== 'read' && action.io === true && span !== undefined)
+              await span.beginIo(executorAdmission.actor.principal, frameActive);
+            frameActive();
             let value: unknown;
             if (action.handler !== undefined && pairingOperation(definition, action) === undefined) {
               let pending: ActionResult;

@@ -11,6 +11,7 @@ import {
   R,
   W,
   type AclEntry,
+  type ActionInvocation,
   type Credential,
   type Frame,
   type ModuleManifest,
@@ -627,13 +628,17 @@ describe('native streaming action contracts', { timeout: 30_000 }, () => {
   it('finishes a continued stream and its original key atomically while deduplicating its inner charge', async (t) => {
     let charged = 0;
     let invoked = 0;
+    const identities: ActionInvocation[] = [];
     const f = await fixture(
       t,
       {
         charge: {
           kind: 'write',
           args: {},
-          handler: async function (this: { count: number }) {
+          handler: async function (this: { count: number }, ctx) {
+            assert.equal(ctx.invocation.continuation, false);
+            assert.ok(Object.isFrozen(ctx.invocation));
+            assert.ok(Object.isFrozen(ctx.invocation.id));
             charged++;
             this.count++;
             return this.count;
@@ -646,6 +651,9 @@ describe('native streaming action contracts', { timeout: 30_000 }, () => {
           args: {},
           handler: async function* (ctx, args) {
             invoked++;
+            identities.push(ctx.invocation);
+            assert.ok(Object.isFrozen(ctx.invocation));
+            assert.equal(Reflect.set(ctx.invocation.id, 'nonce', 'changed'), false);
             const value = await ctx.act({
               path: workerPath,
               action: 'charge',
@@ -677,6 +685,10 @@ describe('native streaming action contracts', { timeout: 30_000 }, () => {
     assert.equal(final.outcome.value, 1);
     assert.equal(charged, 1);
     assert.equal(invoked, 2);
+    assert.deepEqual(identities, [
+      { id: original.opId, continuation: false },
+      { id: original.opId, continuation: true },
+    ]);
     assert.deepEqual(await caller.session.act(original).outcome, final.outcome);
     assert.deepEqual(await caller.session.act(continuation).outcome, final.outcome);
     assert.equal(charged, 1);
@@ -1266,5 +1278,50 @@ describe('native streaming action contracts', { timeout: 30_000 }, () => {
       ).length,
       0,
     );
+  });
+});
+
+
+describe('continuation prelude identity', { timeout: 10_000 }, () => {
+  it('deduplicates a keyed child started while constructing the next stream before its first yield', async (t) => {
+    let charged = 0;
+    const f = await fixture(t, {
+      charge: { kind: 'write', args: {}, handler: async () => ++charged },
+      run: {
+        kind: 'write',
+        args: {},
+        handler: (ctx) => {
+          const child = ctx.act({
+            path: workerPath,
+            action: 'charge',
+            args: {},
+            key: 'charge',
+          });
+          return (async function* () {
+            yield await child;
+            return 'finished';
+          })();
+        },
+      },
+    });
+    const caller = await f.open();
+    const original = {
+      path: workerPath,
+      action: 'run',
+      args: {},
+      opId: f.key(),
+    };
+    const accepted = started(t, f.root, original.opId);
+    const first = caller.session.act(original);
+    await reached(first, accepted);
+    caller.session.cancel(first.id);
+    await assert.rejects(first.outcome, code('CANCELLED'));
+    assert.equal(charged, 1);
+    const continued = await completed(
+      caller.session.act({ ...original, opId: f.key(), anchor: original.opId }),
+    );
+    assert.deepEqual(continued.pieces, [1]);
+    assert.equal(continued.outcome.value, 'finished');
+    assert.equal(charged, 1);
   });
 });

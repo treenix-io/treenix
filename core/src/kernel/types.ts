@@ -316,7 +316,7 @@ export type ErrorCode =
   /** A gate refused. */
   | 'REFUSED'
   /**
-   * The key's outcome is unknown: its intake epoch's decisions are lost, or a stream started under it has
+   * The key's outcome is unknown: its intake epoch's decisions are lost, or a stream or external I/O started under it has
    * not finished. Re-execution is forbidden.
    */
   | 'UNKNOWN_OUTCOME'
@@ -498,6 +498,9 @@ export interface ActRequest {
   readonly anchor?: OpId
 }
 
+/** Authored modules declare their owned target/action result contracts here. */
+export interface NativeActionResults {}
+
 /** Nested keys are derived by the kernel; the handler supplies only the stable logical call name. */
 export type NestedActRequest = Omit<ActRequest, 'opId' | 'anchor'> & {
   /** Resolves the main or first ordered named component in this child's caller projection. */
@@ -646,7 +649,19 @@ export interface ReadActionContext {
   readonly caller: Actor
   readonly executor: Actor
   /** Separate call through the executor's session; an inner stream resolves to its final value. */
+  act<
+    T extends keyof NativeActionResults & string,
+    A extends keyof NativeActionResults[T] & string,
+  >(
+    request: NestedActRequest & { readonly targetType: T; readonly action: A },
+  ): Promise<NativeActionResults[T][A]>
   act(request: NestedActRequest): Promise<unknown>
+}
+
+/** Kernel-owned identity retained across every continuation of a writing invocation. */
+export interface ActionInvocation {
+  readonly id: OpId
+  readonly continuation: boolean
 }
 
 /**
@@ -654,6 +669,7 @@ export interface ReadActionContext {
  * commits the changes built before each yielded piece as one step instead.
  */
 export interface WriteActionContext extends ReadActionContext {
+  readonly invocation: ActionInvocation
   readonly change: ChangeBuilder
   /** Require both destination rights and retain their inputs as commit preconditions, without reading its data. */
   requireReadWrite(path: Path): Promise<void>
@@ -695,7 +711,7 @@ export interface ReadAction extends ActionBase {
 /** `write` — call: W and R, executor: the caller. `setuid` — call: R, executor: the node principal `n:<$id>`. */
 interface WriteActionBase extends ActionBase {
   readonly kind: 'write' | 'setuid'
-  /** External effects (API, LLM, network); the kernel does not deduplicate them. */
+  /** External effects require durable handler admission; replaying an unfinished key refuses UNKNOWN_OUTCOME. */
   readonly io?: boolean
 }
 
@@ -1023,7 +1039,8 @@ export interface JournalCommit {
   readonly executor: Executor
   readonly caller: Executor
   /**
-   * Present for an applied client mutation; a failed request leaves no effect and may be retried.
+   * Present for an applied client mutation or durable admission of external I/O. A request that
+   * fails before durable admission leaves no decision and may be retried.
    * A `write`/`setuid` action without writes still leaves a commit with only this decision, in the target node's domain.
    */
   readonly decision?: OpDecision
