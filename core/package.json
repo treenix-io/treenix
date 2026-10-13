@@ -217,9 +217,9 @@
       "default": "./dist/security.js"
     },
     "./contexts/text": {
-      "development": "./src/contexts/text.ts",
-      "types": "./dist/contexts/text.d.ts",
-      "default": "./dist/contexts/text.js"
+      "development": "./src/contexts/text/index.ts",
+      "types": "./dist/contexts/text/index.d.ts",
+      "default": "./dist/contexts/text/index.js"
     },
     "./util/safe-timers": {
       "development": "./src/util/safe-timers.ts",
@@ -403,7 +403,6 @@
     }
   },
   "treenix": {
-    "clients": "./src/mods/clients.ts",
     "servers": "./src/mods/servers.ts"
   },
   "bin": {
