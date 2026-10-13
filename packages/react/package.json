@@ -130,6 +130,11 @@
       "default": "./dist/components/ui/*.js"
     },
     "./*.css": "./src/*.css",
+    "./mods/editor-ui/form-fields": {
+      "development": "./src/mods/editor-ui/form-fields.tsx",
+      "types": "./dist/mods/editor-ui/form-fields.d.ts",
+      "default": "./dist/mods/editor-ui/form-fields.js"
+    },
     "./*": {
       "development": [
         "./src/*.ts",

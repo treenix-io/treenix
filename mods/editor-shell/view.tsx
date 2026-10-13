@@ -6,7 +6,8 @@ import { declareClientModule, declareView } from '@treenx/react/context/client-r
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { compKey, getDefaults } from '@treenx/core';
+import { compKey } from '@treenx/core';
+import { useClientRegistry } from '@treenx/react/context/client-registry-context';
 import { KernelError } from '@treenx/core/errors';
 import {
   useTreeEffects,
@@ -30,6 +31,7 @@ import { EditorShell } from './types';
 const EditorShellView: View<EditorShell> = ({ ctx }) => {
   const { authed, logout } = useAuthContext();
   const effects = useTreeEffects();
+  const registry = useClientRegistry();
   const { search } = useLocation();
 
   const { target: selected, nav } = useRouteShell(ctx!.node, { preserveQuery: { root: '/' } });
@@ -98,11 +100,11 @@ const EditorShellView: View<EditorShell> = ({ ctx }) => {
       for (const [field, schema] of Object.entries(description.schema.properties ?? {}))
         if (Object.hasOwn(schema, 'default')) defaults[field] = structuredClone(schema.default);
       await kernel.commit({ changes: [{ op: 'patch', path, ops: { $set: {
-        [compKey(name)]: { ...getDefaults(type), ...defaults, $type: type, $v: description.version },
+        [compKey(name)]: { ...registry.type(type)?.defaults(), ...defaults, $type: type, $v: description.version },
       } } }], expect: { nodes: [{ path, rev: copy.node.$rev }] } });
       toast.success(`Added ${name}`);
     },
-    [addingComponentAt, effects],
+    [addingComponentAt, effects, registry],
   );
 
   const handleSetRoot = useCallback(

@@ -26,6 +26,10 @@ import { declareClientType, declareClientSchema } from '@treenx/core/comp/client
 import { clientModules as simpleClientModules } from '../../../../mods/simple-components/client';
 import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 import { clientModules as siteModules } from '../../../../mods/view-shell/view-site';
+import { SlashMenu } from '../../../../mods/doc/slash-menu';
+import { TreenixBlock } from '../../../../mods/doc/treenix-block';
+import { Editor } from '@tiptap/core';
+import StarterKit from '@tiptap/starter-kit';
 import { createClientRegistry, publishClientExports, type ClientRegistry } from '#context/client-registry';
 import { unregister } from '@treenx/core';
 import { clientModules } from '../mods/clients';
@@ -215,6 +219,47 @@ function PublicEditor() {
 }
 
 describe('public canonical editor', { timeout: 10_000 }, () => {
+  it('selects the source-owned document component menu and creates native authored defaults', async t => {
+    const todo = await collectModule('@treenx/mods/todo', async () => {
+      await import('../../../../mods/todo/kernel');
+      loadSchemasRecursive(fileURLToPath(new URL('../../../../mods/todo/', import.meta.url)));
+    });
+    const registry = createClientRegistry(todoClientModules);
+    const f = await fixture('declared-document-picker', true, undefined, registry);
+    t.after(f.close);
+    await f.admin.commit({ opId: { epoch: f.instance.writer.intake.epoch, time: Date.now(), nonce: 'todo-types' },
+      changes: todo.types.map(type => ({ op: 'put' as const, node: {
+        $path: `/sys/types/${type.name}`, $type: 't.type', name: type.name, module: type.module, security: type.security,
+      } })) });
+    f.instance.registry.publish(todo);
+    const editor = new Editor({ extensions: [StarterKit, TreenixBlock], content: {
+      type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: '/component' }] }],
+    } });
+    t.after(() => editor.destroy());
+    let closed: () => void = () => {};
+    const completion = new Promise<void>(resolve => { closed = resolve; });
+    const ui = render(createElement(SlashMenu, {
+      items: [{ title: 'Component', group: 'Tree', picker: 'component', command() {} }],
+      editor, range: { from: 1, to: 11 }, docPath: '/document', command: closed,
+    }), { wrapper: f.wrapper });
+    fireEvent.mouseDown(ui.getByRole('button', { name: 'Component Tree' }));
+    assert.deepEqual(ui.getAllByRole('button').map(button => button.textContent), ['todo.item', 'todo.list']);
+    await act(async () => {
+      fireEvent.mouseDown(ui.getByRole('button', { name: 'todo.item' }));
+      await completion;
+    });
+    const children = await f.client.read({ children: '/document' });
+    assert.equal(children.copies.length, 1);
+    const child = children.copies[0];
+    assert.ok('node' in child);
+    assert.equal(child.node.$type, 'todo.item');
+    assert.equal(child.node.title, '');
+    assert.equal(child.node.done, false);
+    const block = editor.getJSON().content?.find(node => node.type === 'treenixBlock');
+    assert.ok(block);
+    assert.equal(block.attrs?.ref, child.node.$path);
+  });
+
   it('uses declared todo predictions and defaults on the native source without sharing presentation', async t => {
     publishClientExports({ clientModules: todoClientModules });
     const todo = await collectModule('@treenx/mods/todo', async () => {

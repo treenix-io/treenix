@@ -1,9 +1,9 @@
 import type { Editor, Range } from '@tiptap/core';
-import { getRegisteredTypes } from '@treenx/core';
-import { getDefaults } from '@treenx/core/comp';
+import type {} from './slash-command';
+import { useClientRegistry } from '@treenx/react/context/client-registry-context';
 import { useTreeEffects } from '@treenx/react/hooks';
 import { MiniTree } from '@treenx/react/mods/editor-ui/form-fields';
-import {
+import React, {
   type FormEvent,
   forwardRef,
   type ReactNode,
@@ -136,7 +136,7 @@ export const SlashMenu = forwardRef<unknown, Props>(({ items, command, editor, r
     const childPath = `${dp}/${short}-${Date.now().toString(36)}`;
 
     try {
-      await createNode(childPath, typeName, getDefaults(typeName));
+      await createNode(childPath, typeName);
       editor.chain().focus().deleteRange(range).insertContent({
         type: 'treenixBlock',
         attrs: { ref: childPath, type: null, props: {} },
@@ -255,12 +255,14 @@ function LinkPicker({ onSubmit }: { onSubmit: (value: { href: string; text: stri
 /* ── Type picker for /component ── */
 
 function TypePicker({ onSelect }: { onSelect: (type: string) => void }) {
+  const registry = useClientRegistry();
+  const declarations = registry.getSnapshot();
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
-  const allTypes = useMemo(() => getRegisteredTypes('react').sort(), []);
+  const allTypes = useMemo(() => registry.typesForContext('react').sort(), [registry, declarations]);
 
   const filtered = useMemo(() => {
     if (!query) return allTypes;

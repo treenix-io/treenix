@@ -3,7 +3,8 @@
 import { Button } from '#components/ui/button';
 import { Render, RenderContext } from '#context';
 import { stampNode } from '#symbols';
-import { type ComponentData, getContextsForType, type NodeData } from '@treenx/core';
+import { type ComponentData, type NodeData } from '@treenx/core';
+import { useClientRegistry } from '#context/client-registry-context';
 import { useMemo, useState } from 'react';
 
 // ── Mock data generator (by JSON Schema field type) ──
@@ -74,7 +75,7 @@ export function TypePreview({ typeName, properties }: {
   typeName: string;
   properties: Record<string, Record<string, unknown>>;
 }) {
-  const contexts = getContextsForType(typeName);
+  const contexts = useClientRegistry().contexts(typeName);
   const reactContexts = contexts.filter(c => c.startsWith('react'));
 
   const initial = useMemo(() => {

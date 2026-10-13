@@ -100,6 +100,12 @@ export function createClientRegistry(initial: readonly ClientModule[] = []) {
       const normalized = normalizeType(type);
       return types.get(normalized) ?? schemas.get(normalized)?.value;
     },
+    typesForContext(context: string): string[] {
+      const names: string[] = [];
+      for (const entry of entries.values())
+        if (entry.context === context) names.push(normalizeType(entry.type));
+      return names;
+    },
     contexts(type: string): string[] {
       const normalized = normalizeType(type);
       const result: string[] = [];
