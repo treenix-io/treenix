@@ -354,7 +354,7 @@ describe('native browser listing refresh', { timeout: 30_000 }, () => {
     assert.equal(browser.queryByRole('alert'), null);
   });
 
-  it('preserves the dirty draft and old window when a concurrent edit makes JSON save conflict', async (t) => {
+  it('preserves the dirty draft and live window when a concurrent edit makes JSON save conflict', async (t) => {
     const f = await fixture('browser-list-save-conflict');
     t.after(f.close);
     const browser = render(createElement(NativeTreeBrowser), { wrapper: f.wrapper });
@@ -392,7 +392,7 @@ describe('native browser listing refresh', { timeout: 30_000 }, () => {
     assert.equal(browser.getByRole('alert').textContent?.startsWith('CONFLICT:'), true);
     assert.equal(f.sent.filter((request) => request.t === 'sub').length, before);
     assert.equal(JSON.parse(editor.value).value, 'unsaved');
-    assert.equal(browser.queryByRole('button', { name: '/items/z' }), null);
+    assert.ok(browser.queryByRole('button', { name: '/items/z' }));
     const saved = (await f.client.read({ node: '/items/a' })).copies[0];
     assert.ok('node' in saved);
     assert.equal(saved.node.value, 2);
@@ -471,23 +471,29 @@ describe('native browser listing refresh', { timeout: 30_000 }, () => {
     await act(async () => {
       await until(f.source, '/items', 1);
     });
-    await f.admin.commit({
-      opId: f.key(),
-      changes: [{ op: 'put', node: { $path: '/items/z', $type: 't.dir' } }],
+    await act(async () => {
+      await f.admin.commit({
+        opId: f.key(),
+        changes: [{ op: 'put', node: { $path: '/items/z', $type: 't.dir' } }],
+      });
+      await until(f.source, '/items', 2);
     });
     assert.equal((await f.client.read({ children: '/items' })).list.length, 2);
     assert.equal(
       f.source.getSnapshot({ children: '/items', window: { limit: 100 } }).members.length,
-      1,
+      2,
     );
     await act(async () => {
       fireEvent.click(browser.getByRole('button', { name: 'Обновить список' }));
       await until(f.source, '/items', 2);
     });
     assert.ok(browser.getByRole('button', { name: '/items/z' }));
-    await f.admin.commit({
-      opId: f.key(),
-      changes: [{ op: 'put', node: { $path: '/items/zz', $type: 't.dir' } }],
+    await act(async () => {
+      await f.admin.commit({
+        opId: f.key(),
+        changes: [{ op: 'put', node: { $path: '/items/zz', $type: 't.dir' } }],
+      });
+      await until(f.source, '/items', 3);
     });
     assert.equal((await f.client.read({ children: '/items' })).list.length, 3);
     await act(async () => {

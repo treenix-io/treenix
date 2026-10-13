@@ -94,7 +94,7 @@ function until(
 async function fixture(
   id: string,
   administrator: boolean,
-  holdCommit?: { started: (request: Request) => void; release: Promise<void> },
+  holdCommit?: { matches: (request: Request) => boolean; started: (request: Request) => void; release: Promise<void> },
   registry?: ClientRegistry,
 ) {
   let complete: (args: unknown) => void = () => {};
@@ -192,18 +192,18 @@ async function fixture(
     frames: lane.frames,
     send(request) {
       sent.push(request);
-      if (request.t === 'commit' && holdCommit !== undefined && !held) {
-        held = true;
-        holdCommit.started(request);
-        void holdCommit.release.then(() => lane.accept(request));
-        return;
-      }
       if (request.t === 'hi')
         throw new KernelError('UNAVAILABLE', 'The admitted loopback is already open');
       if (request.t === 'read') {
         if ('history' in request.selector)
           throw new KernelError('UNAVAILABLE', 'History reads are unavailable on this lane');
         lane.accept({ t: 'read', req: request.req, selector: request.selector });
+        return;
+      }
+      if (holdCommit !== undefined && !held && holdCommit.matches(request)) {
+        held = true;
+        holdCommit.started(request);
+        void holdCommit.release.then(() => lane.accept(request));
         return;
       }
       lane.accept(request);
@@ -243,8 +243,8 @@ function PublicEditor() {
   return node === undefined ? null : createElement(NodeEditor, { node, open: true, onClose() {} });
 }
 
-describe('public canonical editor', { timeout: 10_000 }, () => {
-  it('uses native schemas when mounted and loader-owned generated schemas for reader-only rendering', async t => {
+describe('public canonical editor', () => {
+  it('uses native schemas when mounted and loader-owned generated schemas for reader-only rendering', { timeout: 10_000 }, async t => {
     const server = await createServer({ configFile: false, plugins: [treenixPlugin()],
       resolve: { conditions: ['development'], dedupe: ['react', 'react-dom'] },
       cacheDir: fileURLToPath(new URL('../../../../../temp/schema-render-vite-cache', import.meta.url)),
@@ -287,7 +287,7 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
     assert.equal(source.pendingCount(), 0);
   });
 
-  it('renders owned text and discovers a server-only native action in the original mindmap sidebar', async t => {
+  it('renders owned text and discovers a server-only native action in the original mindmap sidebar', { timeout: 10_000 }, async t => {
     const registry = createClientRegistry([...clientModules, ...primitiveTextModules]);
     const f = await fixture('owned-text-native-description', true, undefined, registry);
     t.after(f.close);
@@ -310,7 +310,7 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
     assert.ok(f.sent.some(request => request.t === 'act' && request.action === 'inspect'));
   });
 
-  it('selects the source-owned document component menu and creates native authored defaults', async t => {
+  it('selects the source-owned document component menu and creates native authored defaults', { timeout: 10_000 }, async t => {
     const todo = createNativeTodo().manifest;
     const registry = createClientRegistry(todoClientModules);
     const f = await fixture('declared-document-picker', true, undefined, registry);
@@ -348,14 +348,14 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
     assert.equal(block.attrs?.ref, child.node.$path);
   });
 
-  it('uses declared todo predictions and defaults on the native source without sharing presentation', async t => {
+  it('uses declared todo predictions and defaults on the native source without sharing presentation', { timeout: 10_000 }, async t => {
     publishClientExports({ clientModules: todoClientModules });
     const todo = createNativeTodo().manifest;
     let release: () => void = () => {};
     const released = new Promise<void>(resolve => { release = resolve; });
     let started: (request: Request) => void = () => {};
     const paused = new Promise<Request>(resolve => { started = resolve; });
-    const f = await fixture('declared-native-prediction', true, { started, release: released });
+    const f = await fixture('declared-native-prediction', true, { matches: request => request.t === 'act' && request.action === 'toggle', started, release: released });
     t.after(f.close);
     t.after(release);
     const key = (nonce: string) => ({ epoch: f.instance.writer.intake.epoch, time: Date.now(), nonce });
@@ -389,7 +389,7 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
     assert.equal(created.node.done, false);
   });
 
-  it('creates declared class and schema-only defaults before an ordinary native tags action', async t => {
+  it('creates declared class and schema-only defaults before an ordinary native tags action', { timeout: 10_000 }, async t => {
     publishClientExports({ clientModules: simpleClientModules });
     const simple = createNativeSimpleComponents().manifest;
     const f = await fixture('declared-native-creation', true);
@@ -435,7 +435,7 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
     assert.deepEqual(changed.node.items, ['ordinary']);
   });
 
-  it('renders declared external views through the original site shell and request-owned native reads', async t => {
+  it('renders declared external views through the original site shell and request-owned native reads', { timeout: 10_000 }, async t => {
     const todo = createNativeTodo().manifest;
     const id = '@treenx/view-shell';
     const schemas = readSchemasFromDir(fileURLToPath(new URL('../../../../mods/view-shell/schemas/', import.meta.url)));
@@ -476,7 +476,7 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
     assert.ok(html.includes('What needs to be done?'));
   });
 
-  it('renders native source-owned modules independently and republishes without resetting local state', async t => {
+  it('renders native source-owned modules independently and republishes without resetting local state', { timeout: 10_000 }, async t => {
     function OwnedView({ value, label }: { value: Node; label?: string }) {
       const [count, setCount] = useState(0);
       return createElement('button', { onClick: () => setCount(count + 1) },
@@ -512,7 +512,7 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
     assert.ok(ui.getByText('second:1:0'));
   });
 
-  it('calls an interface-only action through the public typed path hook', async (t) => {
+  it('calls an interface-only action through the public typed path hook', { timeout: 10_000 }, async (t) => {
     class Document {
       static $type = 'editor.document';
       value = 0;
@@ -548,7 +548,7 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
     assert.deepEqual(await f.invoked, { message: 'native owner' });
   });
 
-  it('saves a full put with the loaded revision while preserving hidden ACL and owner', async (t) => {
+  it('saves a full put with the loaded revision while preserving hidden ACL and owner', { timeout: 10_000 }, async (t) => {
     const f = await fixture('public-editor-hidden-admin', false);
     t.after(f.close);
     const ui = render(createElement(PublicEditor), { wrapper: f.wrapper });
@@ -584,7 +584,7 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
     assert.deepEqual(copy.node.$acl, [{ subject: { group: 'public' }, grant: R | W }]);
     assert.equal(ui.queryByRole('alert'), null);
   });
-  it('edits the native schema through declared number widgets and saves the original node', async t => {
+  it('edits the native schema through declared number widgets and saves the original node', { timeout: 10_000 }, async t => {
     const f = await fixture('declared-native-number-form', false);
     t.after(f.close);
     const ui = render(createElement(PublicEditor), { wrapper: f.wrapper });
@@ -600,7 +600,7 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
     assert.equal(stored.node.$owner, 'u:retained-owner');
     assert.deepEqual(stored.node.$acl, [{ subject: { group: 'public' }, grant: R | W }]);
   });
-  it('retains the stale full-node draft when the expected native revision conflicts', async (t) => {
+  it('retains the stale full-node draft when the expected native revision conflicts', { timeout: 10_000 }, async (t) => {
     const f = await fixture('public-editor-stale-draft', false);
     t.after(f.close);
     const ui = render(createElement(PublicEditor), { wrapper: f.wrapper });
@@ -644,7 +644,7 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
     assert.equal(stored.copies[0].node.value, 2);
   });
 
-  it('keeps reset and a second save closed while the actual first commit is paused', async (t) => {
+  it('keeps reset and a second save closed while the actual first commit is paused', { timeout: 10_000 }, async (t) => {
     let release: () => void = () => {};
     const released = new Promise<void>((resolve) => {
       release = resolve;
@@ -653,7 +653,7 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
     const paused = new Promise<Request>((resolve) => {
       started = resolve;
     });
-    const f = await fixture('public-editor-paused-save', false, { started, release: released });
+    const f = await fixture('public-editor-paused-save', false, { matches: request => request.t === 'commit', started, release: released });
     t.after(f.close);
     t.after(release);
     const ui = render(createElement(PublicEditor), { wrapper: f.wrapper });
@@ -701,7 +701,7 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
     assert.equal(f.sent.filter((request) => request.t === 'commit').length, 2);
   });
 
-  it('exposes administration controls only with actual A and reads full metadata through the real read action', async (t) => {
+  it('exposes administration controls only with actual A and reads full metadata through the real read action', { timeout: 10_000 }, async (t) => {
     const f = await fixture('public-editor-described-admin', true);
     t.after(f.close);
     const ui = render(createElement(PublicEditor), { wrapper: f.wrapper });
@@ -727,7 +727,7 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
     assert.equal('handler' in description, false);
   });
 
-  it('refuses schema introspection when current R is absent', async (t) => {
+  it('refuses schema introspection when current R is absent', { timeout: 10_000 }, async (t) => {
     const f = await fixture('public-editor-description-no-read', false);
     t.after(f.close);
     await f.admin.commit({
@@ -746,7 +746,7 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
     );
   });
 
-  it('uses actual move/remove members and fractional order under source-owned native commits', async (t) => {
+  it('uses actual move/remove members and fractional order under source-owned native commits', { timeout: 10_000 }, async (t) => {
     const f = await fixture('public-editor-tree-members', true);
     t.after(f.close);
     await f.admin.commit({
@@ -812,7 +812,7 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
     );
   });
 
-  it('owns and releases a real native type-ownership subscription without publishing draft code', async (t) => {
+  it('owns and releases a real native type-ownership subscription without publishing draft code', { timeout: 10_000 }, async (t) => {
     const f = await fixture('public-editor-uix-type-coverage', false);
     t.after(f.close);
     const body = await f.client.read({ node: '/document' });
@@ -845,7 +845,7 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
     assert.ok(f.sent.some((request) => request.t === 'unsub' && request.sub === subscription.sub));
   });
 
-  it('keeps writable drafts inactive until an admin publishes a protected live generation', async (t) => {
+  it('keeps writable drafts inactive until an admin publishes a protected live generation', { timeout: 10_000 }, async (t) => {
     const uixManifest = await loadNativeUix();
     const f = await fixture('public-editor-admin-publication', false);
     t.after(f.close);
@@ -1003,7 +1003,7 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
     assert.deepEqual(reopened.registry.module(f.module.id).views?.['editor.document'], view);
   });
 
-  it('a published view uses its source and retains local state through native updates', async (t) => {
+  it('a published view uses its source and retains local state through native updates', { timeout: 10_000 }, async (t) => {
     const manifest = await loadNativeUix();
     const f = await fixture('published-view-native-owner', false);
     t.after(f.close);

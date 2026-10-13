@@ -63,8 +63,8 @@ function textarea(element: HTMLElement): HTMLTextAreaElement {
   return element
 }
 
-describe('native React hooks over an actual admitted kernel lane', { timeout: 10_000 }, () => {
-  it('resolves a field binding and follows its native source updates', async t => {
+describe('native React hooks over an actual admitted kernel lane', () => {
+  it('resolves a field binding and follows its native source updates', { timeout: 10_000 }, async t => {
     const f = await fixture('react-field-binding'); t.after(f.close)
     const source = createLaneTreeSource(f.client); t.after(() => source.close())
     await f.admin.commit({ opId: f.key(), changes: [{ op: 'put', node: {
@@ -93,7 +93,7 @@ describe('native React hooks over an actual admitted kernel lane', { timeout: 10
     assert.equal(hook.result.current[0]?.value, 6)
   })
 
-  it('renders admitted nodes through the registered view with native context on client and server', async t => {
+  it('renders admitted nodes through the registered view with native context on client and server', { timeout: 10_000 }, async t => {
     const f = await fixture('react-render-context'); t.after(f.close)
     const registry = createClientRegistry()
     const source = createLaneTreeSource(f.client, undefined, registry); t.after(() => source.close())
@@ -127,7 +127,7 @@ describe('native React hooks over an actual admitted kernel lane', { timeout: 10
     assert.equal(observed.at(-1), null)
   })
 
-  it('appends actual cursor pages and preserves included copies through live membership updates', async t => {
+  it('appends actual cursor pages and preserves included copies through live membership updates', { timeout: 10_000 }, async t => {
     const f = await fixture('react-children'); t.after(f.close)
     await f.admin.commit({ opId: f.key(), changes: [
       { op: 'put', node: { $path: '/items', $type: 't.dir' } },
@@ -154,7 +154,7 @@ describe('native React hooks over an actual admitted kernel lane', { timeout: 10
     hook.unmount(); assert.deepEqual(f.source.getSnapshot(selector).included, [])
   })
 
-  it('keeps path drafts local until validation and shows a live node removal', async t => {
+  it('keeps path drafts local until validation and shows a live node removal', { timeout: 10_000 }, async t => {
     const f = await fixture('react-browser'); t.after(f.close)
     const browser = render(createElement(NativeTreeBrowser), { wrapper: f.wrapper })
     await act(async () => { await until(f.source, { children: '/', window: { limit: 100 } }, snapshot => snapshot.phase === 'ready') })
@@ -176,7 +176,7 @@ describe('native React hooks over an actual admitted kernel lane', { timeout: 10
     assert.equal(browser.getByRole('status').textContent, 'Узел отсутствует')
   })
 
-  it('owns editable drafts and action inputs by the selected node across repeated navigation', async t => {
+  it('owns editable drafts and action inputs by the selected node across repeated navigation', { timeout: 10_000 }, async t => {
     const f = await fixture('react-drafts'); t.after(f.close)
     const browser = render(createElement(NativeTreeBrowser), { wrapper: f.wrapper })
     await act(async () => { await until(f.source, { node: '/' }, snapshot => snapshot.phase === 'ready') })
@@ -206,7 +206,7 @@ describe('native React hooks over an actual admitted kernel lane', { timeout: 10
     assert.equal(save.disabled, true)
   })
 
-  it('presents accepted copies and settles the real Pending only after the updated snapshot', async t => {
+  it('presents accepted copies and settles the real Pending only after the updated snapshot', { timeout: 10_000 }, async t => {
     const f = await fixture('react-read'); t.after(f.close)
     const hook = renderHook(() => useNativeNode('/item'), { wrapper: f.wrapper })
     await act(async () => { await until(f.source, { node: '/item' }, snapshot => snapshot.phase === 'ready') })
@@ -225,7 +225,7 @@ describe('native React hooks over an actual admitted kernel lane', { timeout: 10
     assert.equal(f.sent.filter(request => request.t === 'sub').length, 1)
   })
 
-  it('switches paths without retaining the old copy and keeps unrelated writes from changing the current snapshot', async t => {
+  it('switches paths without retaining the old copy and keeps unrelated writes from changing the current snapshot', { timeout: 10_000 }, async t => {
     const f = await fixture('react-switch'); t.after(f.close)
     const hook = renderHook(({ path }) => useNativeNode(path), { wrapper: f.wrapper, initialProps: { path: '/item' } })
     await act(async () => { await until(f.source, { node: '/item' }, snapshot => snapshot.phase === 'ready') })
@@ -240,7 +240,7 @@ describe('native React hooks over an actual admitted kernel lane', { timeout: 10
     hook.unmount(); assert.equal(f.source.getSnapshot({ node: '/other' }).members.length, 0)
   })
 
-  it('clears a mounted hook on source close and tolerates its later React cleanup', async t => {
+  it('clears a mounted hook on source close and tolerates its later React cleanup', { timeout: 10_000 }, async t => {
     const f = await fixture('react-close'); t.after(f.close)
     const hook = renderHook(() => useNativeNode('/item'), { wrapper: f.wrapper })
     await act(async () => { await until(f.source, { node: '/item' }, snapshot => snapshot.phase === 'ready') })
@@ -250,7 +250,7 @@ describe('native React hooks over an actual admitted kernel lane', { timeout: 10
     assert.doesNotThrow(() => hook.unmount())
   })
 
-  it('binds identical paths under different providers to independent actual instances', async t => {
+  it('binds identical paths under different providers to independent actual instances', { timeout: 10_000 }, async t => {
     const first = await fixture('react-first'), second = await fixture('react-second'); t.after(() => { first.close(); second.close() })
     const one = renderHook(() => useNativeNode('/item'), { wrapper: first.wrapper })
     const two = renderHook(() => useNativeNode('/item'), { wrapper: second.wrapper })
