@@ -36,12 +36,6 @@ export function loadSchemasFromDir(dir: string, accept?: (type: string) => void)
 
 const SCHEMA_RECURSE_SKIP = new Set(['node_modules', 'dist', 'build', '.git']);
 
-/** Walk `root` recursively; for every directory named `schemas`, call loadSchemasFromDir.
- * Skips node_modules, dist, build, hidden dirs. */
-export function loadSchemasRecursive(root: string, accept?: (type: string) => void): number {
-  return visitSchemaDirectories(root, dir => loadSchemasFromDir(dir, accept));
-}
-
 export function visitSchemaDirectories(root: string, visit: (directory: string) => number): number {
   if (!fs.existsSync(root)) return 0;
   let total = 0;

@@ -4,10 +4,8 @@ import { isInsideRoot } from '#core/path';
 import { safeJsonParse } from '#core/json';
 import { createLogger } from '#log';
 import { KernelError } from '#errors';
-import { loadSchemasRecursive } from '#schema/load';
 import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
-import { setCurrentMod } from './tracking';
 import type { LoadedMod } from './types';
 import type { CollectedModule, NativeModuleExports, NativeModuleHost } from '#kernel/manifest';
 import type { ActionIoBinding, Gate, Io, Registry } from '#kernel/types';
@@ -54,7 +52,7 @@ export function clearModRegistry(): void {
   loaded.clear();
 }
 
-export type LoadTarget = 'server' | 'client' | 'kernel';
+export type LoadTarget = 'kernel';
 
 export interface ModuleLoadOptions {
   readonly host?: NativeModuleHost;
@@ -74,9 +72,7 @@ export interface LoadResult {
 // Convention files for auto-discovery when server/client entry is absent.
 // Each bare name is tried with both .ts (source-shipped packages) and .js (dist-shipped).
 const SERVER_CONVENTION = ['types', 'seed', 'service'];
-const CLIENT_CONVENTION = ['types', 'view'];
 const SERVER_EXT = ['.ts', '.js'];
-const CLIENT_EXT = ['.tsx', '.ts', '.jsx', '.js'];
 
 async function exists(path: string): Promise<boolean> {
   try { await stat(path); return true; } catch (error) {
@@ -155,9 +151,6 @@ async function ensureTsxRegistered(): Promise<void> {
 /** Loads target entries and collects manifests when running in the native kernel. */
 export async function loadLocalMods(modsDir: string, target: LoadTarget, options: ModuleLoadOptions = {}): Promise<LoadResult> {
   const result: LoadResult = { loaded: [], failed: [], manifests: [] };
-  const entryBase = target === 'kernel' ? 'kernel' : target === 'client' ? 'client' : 'server';
-  const exts = target === 'client' ? CLIENT_EXT : SERVER_EXT;
-  const convention = target === 'kernel' ? [] : target === 'client' ? CLIENT_CONVENTION : SERVER_CONVENTION;
   let entries: import('node:fs').Dirent[];
 
   try {
@@ -167,7 +160,7 @@ export async function loadLocalMods(modsDir: string, target: LoadTarget, options
     throw error;
   }
   entries.sort((a, b) => a.name.localeCompare(b.name));
-  const native = target === 'kernel' ? { api: await import('#kernel/manifest'), package: await modulePackageAt(modsDir) } : undefined;
+  const native = { api: await import('#kernel/manifest'), package: await modulePackageAt(modsDir) };
 
   // Inside node_modules, prefer importing through the package specifier so the package's
   // `exports` map picks the compiled .js by default (and the .ts source under `development`).
@@ -178,51 +171,24 @@ export async function loadLocalMods(modsDir: string, target: LoadTarget, options
     if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
 
     const modDir = join(modsDir, entry.name);
-    const entryPath = await resolveFirst(modDir, [entryBase], exts);
-    const legacyEntry = target === 'kernel' && entryPath === null
+    const entryPath = await resolveFirst(modDir, ['kernel'], SERVER_EXT);
+    const legacyEntry = entryPath === null
       ? await resolveFirst(modDir, ['server', ...SERVER_CONVENTION], SERVER_EXT) : null;
 
-    // Discover convention files if no explicit entry
-    const filesToImport: string[] = [];
-    if (entryPath) {
-      filesToImport.push(entryPath);
-    } else {
-      for (const base of convention) {
-        const p = await resolveFirst(modDir, [base], exts);
-        if (p) filesToImport.push(p);
-      }
-    }
-
-    if (filesToImport.length === 0 && legacyEntry === null) continue;
+    if (entryPath === null && legacyEntry === null) continue;
 
     const modEntry: LoadedMod = { name: entry.name, state: 'loading' };
     loaded.set(entry.name, modEntry);
 
     try {
       // Refuse before importing: legacy entries can start services or register process-wide handlers.
-      if (legacyEntry !== null) throw Object.assign(new KernelError('INVALID', 'Module requires a native kernel entry'), { entry: legacyEntry });
-      // R4-BOOT-4: reset currentMod even on import-throw — prevents cross-attribution
-      // of the next mod's register() calls to this failed mod.
-      // R4-BOOT-2: realpath-confine each file inside modDir — symlinked entry files inside
-      // a real mod dir would otherwise import code outside the mod root.
-      if (native !== undefined) {
-        const id = `${native.package}/${entry.name}`;
-        const real = await confineReal(modDir, filesToImport[0]);
-        if (real.endsWith('.ts') || real.endsWith('.tsx')) await ensureTsxRegistered();
-        const imported: NativeModuleExports = await import(pkgName ? `${pkgName}/${entry.name}/${basenameNoExt(real)}` : real);
-        const deployment = await native.api.evaluateModuleFactory(imported, options.host);
-        result.manifests.push(native.api.materializeModule(id, deployment));
-      } else {
-        setCurrentMod(entry.name);
-        try {
-          for (const file of filesToImport) {
-            const real = await confineReal(modDir, file);
-            if (real.endsWith('.ts') || real.endsWith('.tsx')) await ensureTsxRegistered();
-            await import(pkgName ? `${pkgName}/${entry.name}/${basenameNoExt(real)}` : real);
-          }
-          loadSchemasRecursive(modDir);
-        } finally { setCurrentMod(null); }
-      }
+      if (entryPath === null) throw Object.assign(new KernelError('INVALID', 'Module requires a native kernel entry'), { entry: legacyEntry });
+      const id = `${native.package}/${entry.name}`;
+      const real = await confineReal(modDir, entryPath);
+      if (real.endsWith('.ts')) await ensureTsxRegistered();
+      const imported: NativeModuleExports = await import(pkgName ? `${pkgName}/${entry.name}/${basenameNoExt(real)}` : real);
+      const deployment = await native.api.evaluateModuleFactory(imported, options.host);
+      result.manifests.push(native.api.materializeModule(id, deployment));
       modEntry.state = 'loaded';
       modEntry.loadedAt = Date.now();
       result.loaded.push(entry.name);
