@@ -5,7 +5,6 @@ import {
   getComponent,
   isComponent,
   type NodeData,
-  register,
 } from '@treenx/core';
 import { parseURI } from '@treenx/core/uri';
 import type { JsonSchema } from '@treenx/core/kernel/types';

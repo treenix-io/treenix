@@ -1,19 +1,14 @@
-// Treenix Component Registration — between core and server
-// registerType(type, cls) → stamps $type, registers class, auto-registers actions from methods
+// Component declarations and typed client action helpers.
 
 import { parseNeeds, type NeedSpec } from '#comp/needs';
-import { CtxUnavailableError, currentExecCtx, runWithExecCtx, type ExecCtx } from '#comp/context';
+import { CtxUnavailableError, currentExecCtx, type ExecCtx } from '#comp/context';
 import {
   type Class,
   ComponentData,
   getComponent,
-  getContextsForType,
   compKey,
   NodeData,
   normalizeType,
-  register,
-  type TypeId,
-  unregister,
 } from '#core';
 import type { SecurityClass } from '#kernel/types';
 
@@ -66,25 +61,17 @@ export function getCtx(): ExecCtx {
   return ctx;
 }
 
-// ── Registration ──
+// ── Declarations ──
 
-// Port declaration: which component fields an action reads (pre) and writes (post).
-// Stored as registry meta on action:* contexts. Queried via comp/ports.ts and comp/planner.ts.
-// kriz: what is port, why is in core?
-export type PortDecl = { pre?: string[]; post?: string[] };
 type ActionName<T> = Extract<{
   [K in keyof T]: T[K] extends (...args: any[]) => any ? K : never;
 }[keyof T], string>;
 export type CompOptions<T> = {
   security?: SecurityClass;
   needs?: Partial<Record<ActionName<T> | '*', readonly string[]>>;
-  ports?: Record<string, PortDecl>;
-  override?: boolean;
   noOptimistic?: string[];
 };
 export const AsyncGenFn = Object.getPrototypeOf(async function* () { }).constructor;
-
-type ActionExecCtx = ExecCtx & { comp?: object; deps?: unknown };
 
 export type ActionMethod = { name: string; method: (...args: any[]) => unknown };
 
@@ -116,54 +103,6 @@ export function compileNeeds<T>(methods: ActionMethod[], opts?: CompOptions<T>):
     if (patterns) compiled.set(name, parseNeeds(patterns));
   }
   return compiled;
-}
-
-function registerMethods<T>(
-  type: TypeId,
-  cls: Class<T>,
-  opts: CompOptions<T> | undefined,
-  methods = actionMethods(cls),
-  needs = compileNeeds(methods, opts),
-): void {
-  const normalizedType = normalizeType(type);
-  for (const { name, method } of methods) {
-
-    const context = `action:${name}`;
-    const meta: Record<string, unknown> = { ...opts?.ports?.[name] };
-    const actionNeeds = needs.get(name);
-    if (actionNeeds) meta.needs = actionNeeds;
-    if (opts?.noOptimistic?.includes(name)) meta.noOptimistic = true;
-    if (method instanceof AsyncGenFn) meta.stream = true;
-    if (opts?.override) unregister(normalizedType, context);
-
-    const handler = (ctx: ActionExecCtx, data: unknown) => {
-      const target = ctx.comp ?? ctx.node;
-      return runWithExecCtx(ctx, () => method.call(target, data, ctx.deps));
-    };
-    register(normalizedType, context, handler, Object.keys(meta).length ? meta : undefined);
-  }
-}
-
-export function registerType<T extends object>(type: string, cls: Class<T>, opts?: CompOptions<T>): TypeClass<T> {
-  // Compile registration metadata before publishing any registry entries.
-  const methods = actionMethods(cls);
-  const needs = compileNeeds(methods, opts);
-  if (opts?.override) {
-    const n = normalizeType(type);
-    // kriz: why unregister ALL contexts? and not only needed?
-    for (const ctx of getContextsForType(n)) unregister(n, ctx);
-  }
-
-  const compClass = Object.assign(cls, { $type: normalizeType(type) });
-  register(type, 'class', cls, opts);
-
-  registerMethods(type, cls, opts, methods, needs);
-  return compClass;
-}
-
-// Register server-only actions from a class. _ prefixed = internal (hidden from clients).
-export function registerActions<T>(type: TypeId, cls: Class<T>, opts?: CompOptions<T>): void {
-  registerMethods(type, cls, opts);
 }
 
 // ── Type-safe component access ──

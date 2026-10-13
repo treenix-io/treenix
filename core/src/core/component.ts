@@ -23,7 +23,7 @@ export type NodeData<T = Record<string, unknown>> = ComponentData<T> & {
 // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
 export type Class<T = unknown> = new (...args: any[]) => T;
 
-// Accept string or registered class (registerType stamps $type on constructor)
+// Accept a string or a class with a declared $type on its constructor.
 export type TypeId<T = unknown> = string | Class<T>;
 
 // ── Type normalization ──

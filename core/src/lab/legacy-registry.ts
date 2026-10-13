@@ -1,6 +1,6 @@
-import { type Class, ComponentData, normalizeType, type TypeId } from './component';
-import { ContextHandler, Handler } from './context';
-import { createRegistryMap } from './registry-map';
+import { type Class, ComponentData, normalizeType, type TypeId } from '../core/component';
+import { ContextHandler, Handler } from '../core/context';
+import { createRegistryMap } from '../core/registry-map';
 
 type Entry = { handler: Handler; meta?: Record<string, unknown> };
 

@@ -1,0 +1,30 @@
+{
+  "private": true,
+  "type": "module",
+  "imports": {
+    "#core": {
+      "development": "./legacy-core.ts",
+      "default": "./legacy-core.js"
+    },
+    "#comp": {
+      "development": "./legacy-comp.ts",
+      "default": "./legacy-comp.js"
+    },
+    "#tree": {
+      "development": "./legacy-tree.ts",
+      "default": "./legacy-tree.js"
+    },
+    "#chain": {
+      "development": "./tree-chain-support.ts",
+      "default": "./tree-chain-support.js"
+    },
+    "#errors": {
+      "development": "./legacy-errors.ts",
+      "default": "./legacy-errors.js"
+    },
+    "#kernel/*": {
+      "development": "./kernel/*.ts",
+      "default": "./kernel/*.js"
+    }
+  }
+}

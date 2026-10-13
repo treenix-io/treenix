@@ -1,10 +1,8 @@
-// Load JSON schemas into core registry
-// Per-mod: each mod has schemas/ dir next to its source, loaded by mod loader
+// Read colocated JSON schemas for publication by the owning module.
 
-import { normalizeType, register, safeJsonParse } from '#core';
+import { normalizeType, safeJsonParse } from '#core';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import type { TypeSchema } from './types';
 
 type LoadedSchema = TypeSchema & { $id: string };
@@ -25,15 +23,6 @@ export function readSchemasFromDir(dir: string): LoadedSchema[] {
   return schemas;
 }
 
-export function loadSchemasFromDir(dir: string, accept?: (type: string) => void): number {
-  const schemas = readSchemasFromDir(dir);
-  for (const schema of schemas) {
-    accept?.(schema.$id);
-    register(schema.$id, 'schema', () => schema);
-  }
-  return schemas.length;
-}
-
 const SCHEMA_RECURSE_SKIP = new Set(['node_modules', 'dist', 'build', '.git']);
 
 export function visitSchemaDirectories(root: string, visit: (directory: string) => number): number {
@@ -49,8 +38,3 @@ export function visitSchemaDirectories(root: string, visit: (directory: string) 
   return total;
 }
 
-/** Load `./schemas/*.json` relative to caller's module — for tests that bypass mod loader.
- * Usage: `loadTestSchemas(import.meta.url)` */
-export function loadTestSchemas(metaUrl: string): number {
-  return loadSchemasFromDir(path.join(path.dirname(fileURLToPath(metaUrl)), 'schemas'));
-}
