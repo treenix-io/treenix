@@ -12,14 +12,12 @@ import {
   NodeData,
   normalizeType,
   register,
-  resolve,
   type TypeId,
   unregister,
 } from '#core';
 import { trackType } from '#mod/tracking';
 import { recordClass, recordMethod } from '#comp/registration';
 import type { SecurityClass } from '#kernel/types';
-import { type TypeSchema } from '#schema/types';
 
 export type { Class };
 export type TypeClass<T> = Class<T> & {
@@ -193,32 +191,4 @@ export function setComponent<T>(node: NodeData, cls: Class<T>, data: Partial<Raw
 export function newComponent<T>(cls: Class<T>, data: Partial<Raw<T>>): ComponentData<T> {
   const $type = normalizeType(cls);
   return Object.assign({ $type }, data, { $type }) as ComponentData<T>;
-}
-
-// Get default field values for a type: class instance fields → schema defaults → {}
-// kriz: this should be somewhere near the schema.
-// kriz: isn't schema should be preferred?
-export function getDefaults<T = any>(type: TypeId<T>): Partial<Raw<T>> {
-  // 1. Try registered class — new Class() gives field initializers
-  const cls = resolve(type, 'class');
-  if (cls) {
-    const inst = new cls();
-    return Object.assign({}, inst) as Partial<Raw<T>>;
-  }
-
-  // kriz: how will we resolve non-primitive types here?
-  // 2. Fall back to JSON schema defaults
-  const schemaHandler = resolve(type, 'schema');
-  if (schemaHandler) {
-    const schema = schemaHandler() as Partial<TypeSchema>;
-    if (schema?.properties) {
-      const out: Record<string, unknown> = {};
-      for (const [k, prop] of Object.entries(schema.properties)) {
-        if ('default' in prop) out[k] = prop.default;
-      }
-      return out as Partial<Raw<T>>;
-    }
-  }
-
-  return {};
 }

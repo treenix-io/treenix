@@ -8,7 +8,8 @@
 //
 // The owning native manifest declares each ladder. The kernel upgrades reads
 // in memory; the migrated shape is saved only with the next authorized write.
-import { registerType } from '#comp';
+import { declareClientType } from '#comp/client-declaration';
+import { declareOpenModule } from '#kernel/module-declaration';
 import type { Migration } from '#kernel/types';
 
 /**
@@ -19,7 +20,7 @@ export class VersionedDoc {
   body = '';
   words = 0;
 }
-registerType('example.versioned.doc', VersionedDoc);
+const documentDeclaration = declareClientType('example.versioned.doc', VersionedDoc);
 
 export const documentMigrations: readonly Migration[] = [
   { from: 0, to: 1, up: n => {
@@ -39,7 +40,7 @@ export const documentMigrations: readonly Migration[] = [
 export class VersionedNote {
   note = '';
 }
-registerType('example.versioned.note', VersionedNote);
+const noteDeclaration = declareClientType('example.versioned.note', VersionedNote);
 
 export const noteMigrations: readonly Migration[] = [
   { from: 0, to: 1, up: n => {
@@ -47,3 +48,5 @@ export const noteMigrations: readonly Migration[] = [
     return { ...fields, note: typeof txt === 'string' ? txt : '' };
   } },
 ];
+
+export const clientModules = [declareOpenModule('example.versioned/types', [], [documentDeclaration, noteDeclaration])];

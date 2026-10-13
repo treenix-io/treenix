@@ -37,7 +37,8 @@
       "development": "./src/*.ts",
       "types": "./dist/*.d.ts",
       "default": "./dist/*.js"
-    }
+    },
+    "./mount": null
   },
   "files": [
     "dist",

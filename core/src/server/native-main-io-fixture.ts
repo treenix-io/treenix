@@ -1,7 +1,8 @@
-import { register } from '#core/registry';
 import { KernelError } from '#errors';
-import { registerKernelAction } from '#kernel/manifest';
-import type { ActionIoBinding } from '#kernel/types';
+import type { NativeModuleDeployment } from '#kernel/manifest';
+import { buildRegisteredTypeDef } from '#kernel/typedef';
+import { declareOpenModule } from '#kernel/module-declaration';
+import type { ActionDef, ActionIoBinding } from '#kernel/types';
 import { isRecord } from '#util/is-record';
 
 declare module '#kernel/types' {
@@ -24,8 +25,7 @@ export const bindIo: ActionIoBinding = (scope) => ({
   },
 });
 
-register('cli.io', 'schema', () => ({ $id: 'cli.io', type: 'object', properties: {} }));
-registerKernelAction('cli.io', 'exchange', {
+const exchange: ActionDef = {
   kind: 'write',
   io: true,
   args: { endpoint: { type: 'string' }, input: { type: 'string' } },
@@ -38,4 +38,14 @@ registerKernelAction('cli.io', 'exchange', {
       throw new KernelError('UNAVAILABLE', 'HTTP exchange is not configured');
     return provider.exchange(input.endpoint, input.input);
   },
-});
+};
+
+export default function cliIoModule(): NativeModuleDeployment {
+  const id = 'cli-io-fixture';
+  const schema = { $id: 'cli.io', type: 'object' as const, properties: {} };
+  return { manifest: { ...declareOpenModule(id, [
+    { type: 'cli.io', context: 'schema', handler: () => schema },
+    { type: 'cli.io', context: 'action:exchange', handler: exchange },
+  ]), types: [buildRegisteredTypeDef({ name: 'cli.io', module: id, security: 'ordinary',
+    schema, methods: [], actions: { exchange } })], security: [] } };
+}

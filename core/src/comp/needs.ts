@@ -1,4 +1,3 @@
-import { getMeta, type TypeId } from '#core';
 import { basename } from '#core/path';
 
 // ── Types ──
@@ -17,10 +16,6 @@ export function parseNeeds(patterns: readonly string[]): NeedSpec[] {
     seen.add(s.key);
   }
   return specs;
-}
-
-export function getActionNeeds(type: TypeId, action: string): NeedSpec[] {
-  return (getMeta(type, `action:${action}`)?.needs as NeedSpec[] | undefined) ?? [];
 }
 
 // ── Pattern parsing ──

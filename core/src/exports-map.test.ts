@@ -28,7 +28,6 @@ const PUBLIC_DOORS = [
   './log',
   './mod',
   './protocol/twp',
-  './schema/catalog',
   './schema/load',
   './schema/types',
   './security',

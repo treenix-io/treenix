@@ -226,11 +226,6 @@
       "types": "./dist/schema/load.d.ts",
       "default": "./dist/schema/load.js"
     },
-    "./schema/catalog": {
-      "development": "./src/schema/catalog.ts",
-      "types": "./dist/schema/catalog.d.ts",
-      "default": "./dist/schema/catalog.js"
-    },
     "./security": {
       "development": "./src/security.ts",
       "types": "./dist/security.d.ts",

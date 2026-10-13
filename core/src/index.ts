@@ -5,7 +5,6 @@ export {
   registerActions,
   setComponent,
   newComponent,
-  getDefaults,
   type ExecCtx,
   type TypeClass,
   type Raw,

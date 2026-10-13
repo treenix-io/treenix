@@ -1,5 +1,5 @@
 import type { NativeModuleDeployment } from '#kernel/manifest';
-import { documentMigrations, noteMigrations } from './types';
+import { VersionedDoc, VersionedNote, documentMigrations, noteMigrations } from './types';
 import document from './schemas/example.versioned.doc.json';
 import note from './schemas/example.versioned.note.json';
 
@@ -13,7 +13,10 @@ export default function versionedModule(): NativeModuleDeployment {
         { type: document.$id, context: 'migrate', handler: documentMigrations },
         { type: note.$id, context: 'migrate', handler: noteMigrations },
       ],
-      open: [],
+      open: [
+        { type: document.$id, context: 'class', handler: VersionedDoc },
+        { type: note.$id, context: 'class', handler: VersionedNote },
+      ],
       types: [
         {
           name: document.$id,
