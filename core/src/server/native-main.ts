@@ -4,12 +4,12 @@ import { dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { safeJsonParse } from '#core/json'
 import { KernelError } from '#errors'
-import { openNativeDeployment, type NativeDeploymentHost, type NativeModuleLocation, type PersistentLogsConfig } from '#server/native-deployment'
+import { openNativeDeployment, type NativeDeploymentHost, type PersistentLogsConfig } from '#server/native-deployment'
 import type { FsDirectoryBindings } from '#kernel/mount-fs-provider'
 import type { Credential } from '#kernel/types'
 import { createTwpHttpServer } from '#server/http-twp'
 import { isRecord } from '#util/is-record'
-import { nativeRootStorage } from '#server/native-root'
+import { nativeRootStorage, nativeModuleEntry, resolveNativeModuleLocations } from '#server/native-root'
 
 interface DeploymentEntry { readonly entry: string }
 interface CapabilityEntry {
@@ -24,10 +24,6 @@ function persistentLogsInput(value: unknown): value is PersistentLogsConfig {
   return isRecord(value) && typeof value.directory === 'string' && value.directory.length > 0
 }
 
-interface ModuleEntry { readonly id: string; readonly entry: string }
-function moduleEntry(value: unknown): value is ModuleEntry {
-  return isRecord(value) && typeof value.id === 'string' && typeof value.entry === 'string'
-}
 function adminInput(value: unknown): value is AdminInput {
   return isRecord(value) && typeof value.path === 'string' && typeof value.name === 'string' && typeof value.password === 'string'
 }
@@ -56,7 +52,7 @@ async function main(): Promise<void> {
   if (storage !== undefined && (input.directory !== undefined || input.baseDirectory !== undefined || input.seedFilter !== undefined))
     throw new KernelError('INVALID', 'Root storage and seeds must be configured only in root.json')
 
-  const config: Record<string, unknown> = { ...input, ...storage }
+  const config: Record<string, unknown> = { ...input, ...storage, additionalModules: input.additionalModules }
   if (typeof config.id !== 'string' || typeof config.directory !== 'string' || typeof config.credentialTtlMs !== 'number'
     || !Array.isArray(config.allowedOrigins) || !config.allowedOrigins.every((value: unknown): value is string => typeof value === 'string')
     || config.firstAdmin !== undefined && !adminInput(config.firstAdmin)
@@ -68,22 +64,17 @@ async function main(): Promise<void> {
     || config.mountDirectories !== undefined && !directoryBindings(config.mountDirectories)
     || config.seedFilter !== undefined && (!Array.isArray(config.seedFilter)
       || !config.seedFilter.every((name: unknown): name is string => typeof name === 'string'))
-    || config.modules !== undefined && (!Array.isArray(config.modules) || !config.modules.every(moduleEntry))
-    || config.additionalModules !== undefined && (!Array.isArray(config.additionalModules) || !config.additionalModules.every(moduleEntry)))
+    || config.modules !== undefined && (!Array.isArray(config.modules) || !config.modules.every(nativeModuleEntry))
+    || config.additionalModules !== undefined && (!Array.isArray(config.additionalModules) || !config.additionalModules.every(nativeModuleEntry)))
     throw new KernelError('INVALID', 'Malformed native server configuration')
   const port = config.port ?? 4882, host = config.host ?? '127.0.0.1'
   if (typeof port !== 'number' || !Number.isSafeInteger(port) || port < 0 || port > 65535 || typeof host !== 'string')
     throw new KernelError('INVALID', 'Malformed native listen address')
-  /** Resolve deployment-owned package locations from the configuration directory. */
-  function moduleLocations(entries: ModuleEntry[] | undefined): readonly NativeModuleLocation[] | undefined {
-    return entries?.map(entry => ({
-      id: entry.id,
-      entry: entry.entry.startsWith('.') || entry.entry.startsWith('/')
-        ? pathToFileURL(resolve(dirname(configPath), entry.entry)).href : entry.entry,
-    }))
-  }
-  const modules = moduleLocations(config.modules)
-  const additionalModules = moduleLocations(config.additionalModules)
+  const modules = resolveNativeModuleLocations(config.modules, dirname(configPath))
+  const additionalModules = [
+    ...(resolveNativeModuleLocations(config.additionalModules, dirname(configPath)) ?? []),
+    ...(storage?.additionalModules ?? []),
+  ]
   let moduleHost: NativeDeploymentHost | undefined;
   if (config.capabilities !== undefined) {
     const target = pathToFileURL(resolve(dirname(configPath), config.capabilities.entry)).href;
