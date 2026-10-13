@@ -38,6 +38,7 @@
   "files": [
     "dist",
     "clients.ts",
+    "native-module.ts",
     "agent",
     "audit",
     "board",

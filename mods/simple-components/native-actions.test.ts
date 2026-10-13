@@ -1,13 +1,12 @@
 import descriptionSchema from './schemas/t.description.json';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdir, mkdtemp } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { describe, it, type TestContext } from 'node:test';
 import { createNode } from '@treenx/core';
 import { KernelError } from '@treenx/core/errors';
 import {
-  collectModule,
   R,
   W,
   type Node,
@@ -23,10 +22,31 @@ import estimateSchema from './schemas/simple.estimate.json';
 import linksSchema from './schemas/simple.links.json';
 import tagsSchema from './schemas/simple.tags.json';
 import timeTrackSchema from './schemas/simple.time-track.json';
+import { loadLocalMods } from '@treenx/core/mod';
 
 const hostPath = '/work/card';
 const componentKeys = ['#checklist', '#tags', '#estimate', '#links', '#comments', '#timeTrack'] as const;
-const collected = collectModule('@treenx/mods/simple-components', () => import('./kernel'));
+const composition = (async () => {
+  const parent = resolve(import.meta.dirname, '../../../temp/native-components-contract');
+  await mkdir(parent, { recursive: true });
+  const directory = await mkdtemp(join(parent, 'bootstrap-'));
+  await writeFile(join(directory, 'package.json'), JSON.stringify({ name: '@treenx/mods', type: 'module' }));
+  const names = ['tasks', 'ideal', 'row-layout', 'simple-components', 'three', 'cafe'];
+  for (const name of names) {
+    await mkdir(join(directory, name));
+    await writeFile(join(directory, name, 'kernel.ts'),
+      `export { default } from ${JSON.stringify(new URL(`../${name}/kernel.ts`, import.meta.url).href)};\n`);
+  }
+  const loaded = await loadLocalMods(directory, 'kernel');
+  assert.deepEqual(loaded.failed, []);
+  assert.deepEqual(loaded.loaded, [...names].sort());
+  return loaded.manifests;
+})();
+const collected = composition.then(modules => {
+  const module = modules.find(module => module.id === '@treenx/mods/simple-components');
+  assert.ok(module);
+  return module;
+});
 
 /** Matches one expected kernel error code without depending on its wording. */
 const code = (expected: KernelError['code']) => (error: unknown) =>
@@ -86,7 +106,7 @@ async function fixture(t: TestContext, grant = R | W) {
     directory,
     credentialTtlMs: 60_000,
     firstAdmin: { path: '/admin', name: 'admin', password: `simple-components-${randomUUID()}` },
-    modules: [await collected],
+    modules: await composition,
   };
   let runtime = await openNativeRuntime(config);
   const runtimes = [runtime];

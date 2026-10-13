@@ -4,7 +4,7 @@ import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 import { registerType } from '@treenx/core/comp';
 
 /** Mail delivery settings */
-class CafeMailService {
+export class CafeMailService {
   /** @title SMTP host */
   host = 'smtp.example.com';
   /** @title Port */

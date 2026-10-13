@@ -1,3 +1,6 @@
-import { registerNativeSimpleComponents } from './native';
+import { nativeSimpleComponentsManifest } from './native';
+import type { NativeModuleDeployment } from '@treenx/core/kernel/manifest';
 
-registerNativeSimpleComponents();
+export default function createNativeSimpleComponents(): NativeModuleDeployment {
+  return { manifest: nativeSimpleComponentsManifest() };
+}

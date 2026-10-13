@@ -1,6 +1,5 @@
-import { registerType } from '@treenx/core/comp';
-import { register } from '@treenx/core';
-import { registerKernel, registerKernelAction } from '@treenx/core/kernel';
+import { nativeSchemaModule } from '#native-module';
+import type { ModuleManifest } from '@treenx/core/kernel/types';
 import type { TypeSchema } from '@treenx/core/schema/types';
 import { nativeIdealService } from './native-service';
 import type { Idea } from './types';
@@ -13,28 +12,31 @@ const ideaSchema: TypeSchema = { ...ideaSchemaJson, type: 'object' };
 class IdealBoardType {}
 class IdealIdeaType {}
 
-/** Registers the ideal schemas, ordinary idea actions, and board service. */
-export function registerNativeIdeal(): void {
-  registerType('ideal.board', IdealBoardType, { security: 'user-capability' });
-  registerType('ideal.idea', IdealIdeaType);
-  register('ideal.board', 'schema', () => boardSchema);
-  register('ideal.idea', 'schema', () => ideaSchema);
-  registerKernel('ideal.board', 'service', nativeIdealService);
-  registerKernelAction('ideal.idea', 'upvote', {
+/** Own the ideal schemas, ordinary idea actions, and board service. */
+export function nativeIdealManifest(): ModuleManifest {
+  return nativeSchemaModule('@treenx/mods/ideal', [
+    { name: 'ideal.board', security: 'user-capability', schema: boardSchema, methods: [] },
+    { name: 'ideal.idea', security: 'ordinary', schema: ideaSchema, methods: [], actions: {
+      upvote: {
     kind: 'write',
     args: {},
     handler: nativeUpvote,
-  });
-  registerKernelAction('ideal.idea', 'approve', {
+  },
+      approve: {
     kind: 'write',
     args: {},
     handler: nativeApprove,
-  });
-  registerKernelAction('ideal.idea', 'reject', {
+  },
+      reject: {
     kind: 'write',
     args: {},
     handler: nativeReject,
-  });
+  }
+    } },
+  ], [{ type: 'ideal.board', context: 'service', handler: nativeIdealService }], [
+    { type: 'ideal.board', context: 'class', handler: { handler: IdealBoardType, meta: { security: 'user-capability' } } },
+    { type: 'ideal.idea', context: 'class', handler: IdealIdeaType },
+  ]);
 }
 
 /** Applies the existing caller-authorized vote transition. */

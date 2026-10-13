@@ -1,6 +1,7 @@
-import { register } from '@treenx/core';
 import { KernelError } from '@treenx/core/errors';
-import { registerKernelAction, type WriteActionContext } from '@treenx/core/kernel';
+import { type WriteActionContext } from '@treenx/core/kernel';
+import { nativeSchemaModule } from '#native-module';
+import type { ModuleManifest } from '@treenx/core/kernel/types';
 import type { TypeSchema } from '@treenx/core/schema/types';
 import descriptionSchemaJson from './schemas/t.description.json';
 import checklistSchemaJson from './schemas/simple.checklist.json';
@@ -35,71 +36,61 @@ const { name: _linksRemoveName, ...linksRemoveArgs } = linksSchemaJson.methods.r
 const { name: _tagsAddName, ...tagsAddArgs } = tagsSchemaJson.methods.add.arguments[0];
 const { name: _tagsRemoveName, ...tagsRemoveArgs } = tagsSchemaJson.methods.remove.arguments[0];
 
-/** Registers the existing attachable schemas and all of their local native actions. */
-export function registerNativeSimpleComponents(): void {
-  register('t.description', 'schema', () => ({ ...descriptionSchemaJson, type: 'object' }));
-  register('simple.checklist', 'schema', () => checklistSchema);
-  register('simple.comments', 'schema', () => commentsSchema);
-  register('simple.estimate', 'schema', () => estimateSchema);
-  register('simple.links', 'schema', () => linksSchema);
-  register('simple.tags', 'schema', () => tagsSchema);
-  register('simple.time-track', 'schema', () => timeTrackSchema);
-
-  registerKernelAction('simple.checklist', 'add', {
+/** Own the existing attachable schemas and native actions without registration capture. */
+export function nativeSimpleComponentsManifest(): ModuleManifest {
+  return nativeSchemaModule('@treenx/mods/simple-components', [
+    { name: 't.description', security: 'ordinary', schema: { ...descriptionSchemaJson, type: 'object' }, methods: [], actions: {  } },
+    { name: 'simple.checklist', security: 'ordinary', schema: checklistSchema, methods: [], actions: { add: {
     kind: 'write',
     args: { ...checklistAddArgs, type: 'object' },
     handler: checklistAdd,
-  });
-  registerKernelAction('simple.checklist', 'toggle', {
+  }, toggle: {
     kind: 'write',
     args: { ...checklistToggleArgs, type: 'object' },
     handler: checklistToggle,
-  });
-  registerKernelAction('simple.checklist', 'remove', {
+  }, remove: {
     kind: 'write',
     args: { ...checklistRemoveArgs, type: 'object' },
     handler: checklistRemove,
-  });
-  registerKernelAction('simple.comments', 'add', {
+  } } },
+    { name: 'simple.comments', security: 'ordinary', schema: commentsSchema, methods: [], actions: { add: {
     kind: 'write',
     args: { ...commentsAddArgs, type: 'object' },
     handler: commentsAdd,
-  });
-  registerKernelAction('simple.estimate', 'update', {
+  } } },
+    { name: 'simple.estimate', security: 'ordinary', schema: estimateSchema, methods: [], actions: { update: {
     kind: 'write',
     args: { ...estimateUpdateArgs, type: 'object' },
     handler: estimateUpdate,
-  });
-  registerKernelAction('simple.links', 'add', {
+  } } },
+    { name: 'simple.links', security: 'ordinary', schema: linksSchema, methods: [], actions: { add: {
     kind: 'write',
     args: { ...linksAddArgs, type: 'object' },
     handler: linksAdd,
-  });
-  registerKernelAction('simple.links', 'remove', {
+  }, remove: {
     kind: 'write',
     args: { ...linksRemoveArgs, type: 'object' },
     handler: linksRemove,
-  });
-  registerKernelAction('simple.tags', 'add', {
+  } } },
+    { name: 'simple.tags', security: 'ordinary', schema: tagsSchema, methods: [], actions: { add: {
     kind: 'write',
     args: { ...tagsAddArgs, type: 'object' },
     handler: tagsAdd,
-  });
-  registerKernelAction('simple.tags', 'remove', {
+  }, remove: {
     kind: 'write',
     args: { ...tagsRemoveArgs, type: 'object' },
     handler: tagsRemove,
-  });
-  registerKernelAction('simple.time-track', 'start', {
+  } } },
+    { name: 'simple.time-track', security: 'ordinary', schema: timeTrackSchema, methods: [], actions: { start: {
     kind: 'write',
     args: {},
     handler: timeTrackStart,
-  });
-  registerKernelAction('simple.time-track', 'stop', {
+  }, stop: {
     kind: 'write',
     args: {},
     handler: timeTrackStop,
-  });
+  } } },
+  ]);
 }
 
 /** Decodes one JSON object supplied at the external action boundary. */

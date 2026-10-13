@@ -40,6 +40,7 @@ import { unregister } from '@treenx/core';
 import { clientModules } from '../mods/clients';
 import { PUBLICATION_PREFIX } from '@treenx/core/kernel/uix-publication';
 import createNativeTodo from '../../../../mods/todo/kernel';
+import createNativeSimpleComponents from '../../../../mods/simple-components/kernel';
 import { collectModule } from '@treenx/core/kernel/manifest';
 import { loadSchemasRecursive } from '../../../../core/src/schema/load';
 import { fileURLToPath } from 'node:url';
@@ -371,10 +372,7 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
 
   it('creates declared class and schema-only defaults before an ordinary native tags action', async t => {
     publishClientExports({ clientModules: simpleClientModules });
-    const simple = await collectModule('@treenx/mods/simple-components', async () => {
-      await import('../../../../mods/simple-components/kernel');
-      loadSchemasRecursive(fileURLToPath(new URL('../../../../mods/simple-components/', import.meta.url)));
-    });
+    const simple = createNativeSimpleComponents().manifest;
     const f = await fixture('declared-native-creation', true);
     t.after(f.close);
     const key = (nonce: string) => ({ epoch: f.instance.writer.intake.epoch, time: Date.now(), nonce });

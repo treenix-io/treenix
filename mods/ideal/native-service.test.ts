@@ -9,7 +9,7 @@ import { KernelError } from '@treenx/core/errors';
 import { collectModule } from '@treenx/core/kernel';
 import { openNativeRuntime } from '@treenx/core/kernel/runtime';
 import { R, W, type Gate, type ModuleManifest, type Node, type Path, type Session } from '@treenx/core/kernel';
-import { registerNativeIdeal } from './native';
+import createNativeIdeal from './kernel';
 
 let collected: Promise<readonly ModuleManifest[]> | undefined;
 
@@ -17,7 +17,7 @@ let collected: Promise<readonly ModuleManifest[]> | undefined;
 function modules(): Promise<readonly ModuleManifest[]> {
   return collected ??= (async () => [
     await collectModule('@treenx/core/autostart', () => import('../../core/src/mods/autostart/kernel')),
-    await collectModule('@treenx/mods/ideal', registerNativeIdeal),
+    createNativeIdeal().manifest,
   ])();
 }
 
