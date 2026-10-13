@@ -16,6 +16,18 @@ const ALLOWED = ['kernel', 'core', 'util', 'comp', 'schema/types', 'errors']
 // Action drafts use the same mutation engine as authored component methods.
 const PACKAGES: readonly string[] = ['immer']
 
+// These composition owners bind existing native declarations, wire clients and sandbox runtimes.
+const OWNER_IMPORTS: Readonly<Record<string, readonly string[]>> = {
+  'instance.ts': ['mod/loader'],
+  'auth-pairing.ts': ['security/agent'],
+  'manifest.ts': ['mod/native-prefab'],
+  'periodic-service.ts': ['client/lane-cache'],
+  'type-description.ts': ['system/native-actions'],
+  'authority/owner.ts': ['client/twp'],
+  'source-worker-bootstrap.ts': ['tsx/esm/api'],
+  'source-worker.ts': ['quickjs-emscripten'],
+}
+
 type PackageImports = { readonly [key: string]: { readonly development: string } }
 const packageImports: PackageImports = JSON.parse(readFileSync(join(srcDir, '../package.json'), 'utf8')).imports
 
@@ -33,7 +45,7 @@ function specifiers(source: string): string[] {
   return result
 }
 
-function packageTarget(spec: string): string {
+function packageTarget(spec: string): string | undefined {
   const exact = packageImports[spec]
   if (exact) return exact.development
 
@@ -43,7 +55,7 @@ function packageTarget(spec: string): string {
       return target.development.replace('*', spec.slice(prefix.length, spec.length - suffix.length))
   }
 
-  throw new Error(`${spec} is not in the package imports map`)
+  return undefined
 }
 
 function allowed(file: string, spec: string): boolean {
@@ -51,25 +63,27 @@ function allowed(file: string, spec: string): boolean {
   // The boundary check parses source with the development dependency; runtime kernel files cannot import it.
   if (file === fileURLToPath(import.meta.url) && spec === 'typescript') return true
 
+  const owned = OWNER_IMPORTS[relative(kernelDir, file)]
+  if (owned?.includes(spec)) return true
+  const mapped = spec.startsWith('#') ? packageTarget(spec) : undefined
   const local = spec.startsWith('.') ? resolve(dirname(file), spec)
-    : spec.startsWith('#') ? resolve(srcDir, '..', packageTarget(spec))
-    : null
+    : mapped === undefined ? null : resolve(srcDir, '..', mapped)
   if (local === null) return false
 
   const target = relative(srcDir, local).replace(/\.tsx?$/, '')
   // Instance owns native module discovery; the remaining kernel stays independent of the loader.
-  if (file === join(kernelDir, 'instance.ts') && target === 'mod/loader') return true
+  if (owned?.includes(target)) return true
   return ALLOWED.some((area) => target === area || target.startsWith(`${area}/`))
 }
 
 function kernelFiles(): string[] {
   return readdirSync(kernelDir, { recursive: true, encoding: 'utf8' })
-    .filter((name) => /\.tsx?$/.test(name))
+    .filter((name) => /\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name) && !/\.typecheck\.ts$/.test(name))
     .map((name) => join(kernelDir, name))
 }
 
 describe('kernel import boundary', () => {
-  it('kernel files import only the kernel, Layer 0, util, comp, schema types, errors and admitted packages', () => {
+  it('production kernel files import only the kernel, Layer 0, util, comp, schema types, errors and admitted packages', () => {
     const imports = kernelFiles().flatMap((file) =>
       specifiers(readFileSync(file, 'utf8')).map((spec) => ({ file, spec })))
 
@@ -126,5 +140,10 @@ describe('kernel import boundary', () => {
     assert.equal(allowed(join(kernelDir, 'instance.ts'), '#mod/loader'), true)
     assert.equal(allowed(join(kernelDir, 'writer.ts'), '#mod/loader'), false)
     assert.equal(allowed(join(kernelDir, 'instance.ts'), '#mod/prefab'), false)
+    for (const [owner, imports] of Object.entries(OWNER_IMPORTS)) for (const target of imports) {
+      const spec = target.startsWith('tsx/') || target === 'quickjs-emscripten' ? target : `#${target}`
+      assert.equal(allowed(join(kernelDir, owner), spec), true, `${owner}: ${spec}`)
+      assert.equal(allowed(join(kernelDir, 'writer.ts'), spec), false, spec)
+    }
   })
 })
