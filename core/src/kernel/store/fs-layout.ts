@@ -137,9 +137,10 @@ export async function scanFsNodes(root: string, pos: Position, range: ScanRange,
     for (const name of ['$', '$.json']) {
       cost.exprWork++; check()
       const file = join(directory, name)
-      await assertPathSafe(root, file)
       let entry: Stats | undefined
       try { entry = await lstat(file) } catch (error) { if (!missing(error)) throw error }
+      // Absent optional bodies need their existing parent checked, not a failed realpath first.
+      await assertPathSafe(root, entry === undefined ? directory : file)
       if (entry?.isSymbolicLink()) throw new KernelError('FORBIDDEN', 'Filesystem node symlinks are not allowed')
       if (entry?.isFile()) await body(file, path)
     }
