@@ -1,22 +1,19 @@
-import { getCtx, predictionCtx, registerType } from '#comp';
-import { resolve, type NodeData } from '#core';
-import { clearRegistry } from '#testing';
+import { CtxUnavailableError, getCtx } from '#comp';
+import { declareClientType } from '#comp/client-declaration';
+import type { NodeData } from '#core';
 import assert from 'node:assert/strict';
-import { beforeEach, describe, it } from 'node:test';
+import { describe, it } from 'node:test';
 
 describe('component actions without a server context runtime', () => {
-  beforeEach(() => clearRegistry());
-
   it('runs context-free actions for optimistic prediction', () => {
     class Counter {
       count = 0;
       increment() { this.count++; }
     }
-    registerType('browser.counter', Counter);
-    const action = resolve('browser.counter', 'action:increment', false)!;
+    const action = declareClientType('browser.counter', Counter).predictions.increment;
     const node: NodeData = { $path: '/counter', $type: 'browser.counter', count: 0 };
 
-    action({ node }, {});
+    action(node, node, {});
 
     assert.equal(node.count, 1);
   });
@@ -30,11 +27,10 @@ describe('component actions without a server context runtime', () => {
         node.title = data.title;
       }
     }
-    registerType('browser.renamer', Renamer);
-    const action = resolve('browser.renamer', 'action:rename', false)!;
+    const action = declareClientType('browser.renamer', Renamer).predictions.rename;
     const node: NodeData = { $path: '/doc', $type: 'browser.renamer' };
 
-    action(predictionCtx(node, node), { title: 'renamed' });
+    action(node, node, { title: 'renamed' });
 
     assert.equal(node.title, 'renamed');
   });
@@ -46,13 +42,12 @@ describe('component actions without a server context runtime', () => {
         void tree;
       }
     }
-    registerType('browser.saver', Saver);
-    const action = resolve('browser.saver', 'action:save', false)!;
+    const action = declareClientType('browser.saver', Saver).predictions.save;
     const node: NodeData = { $path: '/doc', $type: 'browser.saver' };
 
     assert.throws(
-      () => action(predictionCtx(node, node), {}),
-      (e: unknown) => e instanceof Error && 'code' in e && e.code === 'CTX_UNAVAILABLE',
+      () => action(node, node, {}),
+      (e: unknown) => e instanceof CtxUnavailableError && e.code === 'CTX_UNAVAILABLE',
     );
   });
 
@@ -63,10 +58,10 @@ describe('component actions without a server context runtime', () => {
         return getCtx().node.$path;
       }
     }
-    registerType('browser.context-reader', ContextReader);
-    const action = resolve('browser.context-reader', 'action:read', false)!;
+    const action = declareClientType('browser.context-reader', ContextReader).predictions.read;
     const node: NodeData = { $path: '/reader', $type: 'browser.context-reader' };
 
-    await assert.rejects(() => action({ node }, {}), /outside action context/);
+    await assert.rejects(async () => await action(node, node, {}),
+      (e: unknown) => e instanceof CtxUnavailableError && e.code === 'CTX_UNAVAILABLE');
   });
 });

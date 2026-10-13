@@ -28,16 +28,20 @@ const options = (root: Store, saved = counter(), writerEpoch = 1) => ({ id: 'fou
   counter: saved, writerEpoch, domains: [{ store: root, epoch: 'root1', persistent: true }], budget: scanBudget })
 
 describe('native instance bootstrap', { timeout: 10_000 }, () => {
-  it('loads and bootstraps without registering legacy built-ins', () => {
+  it('loads and bootstraps with independently owned native registries', () => {
     const script = `
       import assert from 'node:assert/strict'
-      assert.equal(globalThis.__treenxCoreRegistry, undefined)
-      await import('#kernel/builtins')
-      assert.equal(globalThis.__treenxCoreRegistry, undefined)
-      const legacy = await import('#core/registry')
+      const { createRegistry } = await import('#kernel/registry')
+      const { KernelError } = await import('#errors')
+      const independent = createRegistry(), declared = createRegistry()
+      const initialGeneration = independent.digest
+      const { kernelManifest } = await import('#kernel/builtins')
+      assert.equal(independent.digest, initialGeneration)
+      declared.publish(kernelManifest)
+      assert.equal(declared.type('t.dir').module, 'kernel')
       const { createInstanceFoundation } = await import('#kernel/instance')
       const { createMemoryStore } = await import('#kernel/store/memory')
-      assert.deepEqual(legacy.mapRegistry((type, context) => [type, context]), [])
+      assert.equal(independent.digest, initialGeneration)
       let saved
       const root = createMemoryStore({ domain: 'isolated' })
       const instance = await createInstanceFoundation({ id: 'isolated', root, writerEpoch: 1,
@@ -45,8 +49,9 @@ describe('native instance bootstrap', { timeout: 10_000 }, () => {
         domains: [{ store: root, epoch: 'isolated1', persistent: false }],
         firstAdmin: { path: '/admin', name: 'admin', password: 'isolated-password' } })
       assert.equal(instance.registry.type('t.dir').module, 'kernel')
-      assert.equal(legacy.resolveExact('t.dir', 'schema'), null)
-      assert.deepEqual(legacy.mapRegistry((type, context) => [type, context]), [])
+      assert.notEqual(instance.registry, declared)
+      assert.throws(() => independent.type('t.dir'), error => error instanceof KernelError && error.code === 'UNKNOWN_TYPE')
+      assert.equal(independent.digest, initialGeneration)
       process.stdout.write('isolated')
     `
     const output = execFileSync(process.execPath, ['--conditions=development', '--import', 'tsx', '--input-type=module', '--eval', script],

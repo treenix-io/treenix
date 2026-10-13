@@ -1,9 +1,6 @@
 import { assertSafePath, basename, dirname, isChildPath, join } from '#core/path';
-// Registry test helpers live in #testing (public `@treenx/core/testing`, qvrt) —
-// importing it also registers the shared test.* schema types.
-import { clearRegistry, restoreRegistrySnapshot, saveRegistrySnapshot } from '#testing';
 import assert from 'node:assert/strict';
-import { afterEach, describe, it } from 'node:test';
+import { describe, it } from 'node:test';
 import {
   assertSafeKey,
   assertValidType,
@@ -11,20 +8,12 @@ import {
   getComponent,
   getComponentByName,
   getComponents,
-  getMeta,
   isComponent,
   isRef,
   isSafeKey,
   ref,
-  register,
   removeComponent,
-  onResolveMiss,
-  replaceHandler,
-  resolve,
-  resolveEntry,
-  resolveExactEntry,
   safeJsonParse,
-  unregister,
 } from './index';
 
 describe('Node', () => {
@@ -209,126 +198,7 @@ describe('Path utils', () => {
   });
 });
 
-describe('Context', () => {
-  it('register and resolve exact', () => {
-    clearRegistry();
-    register('task', 'test', (data) => `<Task ${(data as any).status} />`);
-    const handler = resolve('task', 'test');
-    assert.ok(handler);
-    assert.equal(handler({ $type: 'task', status: 'open' }), '<Task open />');
-  });
 
-  it('fallback from specific to general', () => {
-    clearRegistry();
-    register('task', 'test', () => 'general');
-    register('task', 'test:compact', () => 'compact');
-
-    assert.equal(resolve('task', 'test:compact')?.({} as any), 'compact');
-    assert.equal(resolve('task', 'test:compact:mini')?.({} as any), 'compact');
-    assert.equal(resolve('task', 'test')?.({} as any), 'general');
-  });
-
-  it('default wins over stripped context', () => {
-    clearRegistry();
-    register('default', 'test:compact:mini', () => 'default:mini');
-    register('default', 'test', () => 'default');
-    register('task', 'test', () => 'general');
-    register('task', 'test:compact', () => 'compact');
-
-    assert.equal(resolve('task', 'test:compact')?.({} as any), 'compact');
-    assert.equal(resolve('task', 'test:compact:mini')?.({} as any), 'default:mini');
-    assert.equal(resolve('task', 'test')?.({} as any), 'general');
-    assert.equal(resolve('unknown', 'test:compact:mini')?.({} as any), 'default:mini');
-    assert.equal(resolve('unknown', 'test:compact')?.({} as any), 'default');
-  });
-
-  it('fallback to default', () => {
-    clearRegistry();
-    register('default', 'test', () => 'default');
-    assert.equal(resolve('task', 'test')?.({} as any), 'default');
-    assert.equal(resolve('task', 'test:compact')?.({} as any), 'default');
-  });
-
-  it('strip still works without default', () => {
-    clearRegistry();
-    register('task', 'react', () => 'react');
-    assert.equal(resolve('task', 'react:edit:inline')?.({} as any), 'react');
-    assert.equal(resolve('task', 'react:edit')?.({} as any), 'react');
-  });
-
-  it('returns null when nothing found', () => {
-    clearRegistry();
-    assert.equal(resolve('unknown', 'test'), null);
-  });
-
-  it('resolveEntry carries meta of the MATCHED registration through fallback', () => {
-    clearRegistry();
-    const view = () => 'view';
-    register('task', 'test', view, { props: { editing: false } });
-    register('task', 'test:edit', view, { props: { editing: true } });
-
-    assert.deepEqual(resolveEntry('task', 'test:edit')?.meta, { props: { editing: true } });
-    assert.deepEqual(resolveEntry('task', 'test')?.meta, { props: { editing: false } });
-    // no exact 'test:edit:sub' → falls back to 'test:edit' WITH its meta
-    assert.deepEqual(resolveEntry('task', 'test:edit:sub')?.meta, { props: { editing: true } });
-    assert.equal(resolveEntry('task', 'test:edit:sub')?.handler, view);
-  });
-
-  it('resolveExactEntry: exact-only, meta optional', () => {
-    clearRegistry();
-    register('task', 'test', () => 'x');
-    assert.equal(resolveExactEntry('task', 'test')?.meta, undefined);
-    assert.equal(resolveExactEntry('task', 'test:edit'), null);
-  });
-});
-
-describe('Context + missResolver fallback', () => {
-  it('resolve returns default handler when miss resolver exists but no exact match', () => {
-    clearRegistry();
-    const missed: string[] = [];
-    onResolveMiss('test-miss', (type: string) => missed.push(type));
-    register('default', 'test-miss', () => 'fallback');
-
-    const handler = resolve('unknown.type', 'test-miss');
-    assert.equal(handler?.({} as any), 'fallback', 'should return default handler');
-    assert.deepEqual(missed, ['unknown.type'], 'should have triggered miss resolver');
-
-    unregister('default', 'test-miss');
-    onResolveMiss('test-miss', () => {});
-  });
-
-  it('resolve prefers exact match over default even with miss resolver', () => {
-    clearRegistry();
-    onResolveMiss('test-miss2', () => {});
-    register('default', 'test-miss2', () => 'fallback');
-    register('exact.type', 'test-miss2', () => 'exact');
-
-    const handler = resolve('exact.type', 'test-miss2');
-    assert.equal(handler?.({} as any), 'exact', 'exact match wins');
-
-    unregister('default', 'test-miss2');
-    unregister('exact.type', 'test-miss2');
-    onResolveMiss('test-miss2', () => {});
-  });
-
-  it('fires the base-context miss resolver when resolving a sub-context', () => {
-    clearRegistry();
-    const missed: string[] = [];
-    onResolveMiss('test-base', (type: string) => {
-      missed.push(type);
-      register(type, 'test-base', () => 'lazy-loaded');
-    });
-
-    // Sub-context lookup: the base 'test-base' loader must fire and its freshly
-    // registered handler must be returned via the strip-suffix fallback.
-    const handler = resolve('lazy.type', 'test-base:compact');
-    assert.deepEqual(missed, ['lazy.type'], 'base-context loader should fire for a sub-context miss');
-    assert.equal(handler?.({} as any), 'lazy-loaded');
-
-    unregister('lazy.type', 'test-base');
-    onResolveMiss('test-base', () => {});
-  });
-});
 
 describe('assertSafePath (F03)', () => {
   it('accepts valid paths', () => {
@@ -378,133 +248,7 @@ describe('assertSafePath (F03)', () => {
   });
 });
 
-describe('Lazy resolver semantics (sync miss)', () => {
-  afterEach(() => {
-    // onResolveMiss is singleton-per-context; reset to noop so this describe block
-    // does not leak a 'schema' resolver into other test suites.
-    onResolveMiss('schema', () => {});
-  });
 
-  it('returns handler registered synchronously by miss resolver in same resolve() call', () => {
-    const snap = saveRegistrySnapshot();
-    try {
-      const TYPE = 'lazy.synctest.A';
-      let parseCount = 0;
-
-      onResolveMiss('schema', (type) => {
-        if (type !== TYPE) return;
-        parseCount++;
-        register(type, 'schema', () => ({ $id: type, type: 'object' as const, title: 'A', properties: {} }));
-      });
-
-      const handler = resolve(TYPE, 'schema');
-      assert.ok(handler, 'sync miss resolver registered handler — resolve must return it on first call, not null');
-      assert.equal(parseCount, 1, 'resolver must run exactly once');
-      const schema = (handler as any)();
-      assert.equal(schema.$id, TYPE);
-    } finally {
-      restoreRegistrySnapshot(snap);
-    }
-  });
-
-  it('async miss resolver still uses bump+re-render path (returns null first call, handler after)', async () => {
-    const snap = saveRegistrySnapshot();
-    try {
-      const TYPE = 'lazy.async.B';
-      let resolved: (() => void) | null = null;
-      const work = new Promise<void>((res) => { resolved = res; });
-
-      onResolveMiss('schema', (type) => {
-        if (type !== TYPE) return;
-        // Simulate async fetch — register on next tick
-        Promise.resolve().then(() => {
-          register(type, 'schema', () => ({ $id: type, type: 'object' as const, title: 'B', properties: {} }));
-          resolved!();
-        });
-      });
-
-      const first = resolve(TYPE, 'schema');
-      assert.equal(first, null, 'async path: first resolve returns null while resolver runs in background');
-
-      await work;
-      const second = resolve(TYPE, 'schema');
-      assert.ok(second, 'async path: second resolve returns the handler registered in background');
-    } finally {
-      restoreRegistrySnapshot(snap);
-    }
-  });
-
-  it('miss resolver that does not register: resolve falls through to default/null', () => {
-    const snap = saveRegistrySnapshot();
-    try {
-      const TYPE = 'lazy.noop.C';
-      let invoked = 0;
-
-      onResolveMiss('schema', (type) => {
-        if (type !== TYPE) return;
-        invoked++;
-        // Deliberately do NOT register — simulate "not my prefix" early-return
-      });
-
-      const handler = resolve(TYPE, 'schema');
-      assert.equal(invoked, 1, 'resolver was invoked');
-      assert.equal(handler, null, 'no registration → resolve returns null');
-    } finally {
-      restoreRegistrySnapshot(snap);
-    }
-  });
-});
-
-describe('replaceHandler', () => {
-  it('overrides an existing handler atomically', () => {
-    const snap = saveRegistrySnapshot();
-    try {
-      const TYPE = 'replace.test.D';
-      const first = () => 'first';
-      const second = () => 'second';
-
-      register(TYPE, 'schema', first as any);
-      assert.equal((resolve(TYPE, 'schema') as any)?.(), 'first');
-
-      // Plain register() must be a no-op (silent dedup)
-      register(TYPE, 'schema', second as any);
-      assert.equal((resolve(TYPE, 'schema') as any)?.(), 'first', 'plain register no-ops on duplicate');
-
-      // replaceHandler must override
-      replaceHandler(TYPE, 'schema', second as any);
-      assert.equal((resolve(TYPE, 'schema') as any)?.(), 'second', 'replaceHandler overrides');
-    } finally {
-      restoreRegistrySnapshot(snap);
-    }
-  });
-
-  it('registers cleanly when no prior entry exists', () => {
-    const snap = saveRegistrySnapshot();
-    try {
-      const TYPE = 'replace.fresh.E';
-      const handler = () => 'fresh';
-
-      replaceHandler(TYPE, 'schema', handler as any);
-      assert.equal((resolve(TYPE, 'schema') as any)?.(), 'fresh');
-    } finally {
-      restoreRegistrySnapshot(snap);
-    }
-  });
-
-  it('preserves meta when replacing', () => {
-    const snap = saveRegistrySnapshot();
-    try {
-      const TYPE = 'replace.meta.F';
-      const handler = () => 'with-meta';
-
-      replaceHandler(TYPE, 'schema', handler as any, { source: 'test' });
-      const meta = getMeta(TYPE, 'schema');
-      assert.deepEqual(meta, { source: 'test' });
-    } finally {
-      restoreRegistrySnapshot(snap);
-    }
-  });
-});
 
 // F7: prototype-pollution defense — assertSafeKey/isSafeKey/safeJsonParse + createNode
 describe('isSafeKey / assertSafeKey', () => {

@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { mapRegistry, resolveExactEntry } from '#core/registry'
 import { KernelError } from '#errors'
 import type { TypeSchema } from '#schema/types'
 import { createInstanceFoundation } from './instance'
@@ -51,8 +50,9 @@ const schema: TypeSchema = {
 }
 
 describe('class type definitions', () => {
-  it('uses generated field, argument and type metadata without publishing globally', () => {
-    const before = mapRegistry((type, context) => ({ type, context, entry: resolveExactEntry(type, context) }))
+  it('uses generated field, argument and type metadata with explicit registry ownership', () => {
+    const independent = createRegistry(), declared = createRegistry()
+    const before = independent.digest
     const generated: TypeSchema = { ...schema, version: 3, actionsOnly: true, aliases: ['test.old'] }
     const def = buildTypeDef(Counter, options(generated))
     assert.equal(def.name, 'test.counter')
@@ -67,7 +67,11 @@ describe('class type definitions', () => {
     assert.equal(def.actions.increment.kind, 'write')
     assert.equal(def.actions.read.kind, 'read')
     assert.deepEqual(Object.keys(def.actions).sort(), ['count', 'increment', 'read'])
-    assert.deepEqual(mapRegistry((type, context) => ({ type, context, entry: resolveExactEntry(type, context) })), before)
+    assert.equal(independent.digest, before)
+    declared.publish({ id: 'test', types: [def], security: [], open: [] })
+    assert.equal(declared.type(def.name).version, 3)
+    assert.equal(independent.digest, before)
+    assert.throws(() => independent.type(def.name), error => error instanceof KernelError && error.code === 'UNKNOWN_TYPE')
   })
 
   it('invokes a method with the supplied component receiver, including named components', async () => {

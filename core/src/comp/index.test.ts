@@ -1,9 +1,9 @@
 // Tests for setComponent, newComponent, getCtx
 // Key behavior: when node.$type matches component $type, node itself IS the component.
 
-import { getCtx, newComponent, registerActions, registerType, setComponent } from '#comp';
-import { createNode, getComponent, getMeta, type NodeData, register, resolve } from '#core';
-import { clearRegistry } from '#testing';
+import { getCtx, newComponent, setComponent } from '#comp';
+import { getComponent, type NodeData } from '#core';
+import { declareClientType } from '#comp/client-declaration';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
@@ -11,13 +11,13 @@ class TestItem {
   name = '';
   quantity = 0;
 }
-registerType('test.item', TestItem);
+declareClientType('test.item', TestItem);
 
 class TestMeta {
   title = '';
   description = '';
 }
-registerType('test.meta', TestMeta);
+declareClientType('test.meta', TestMeta);
 
 // ── getComponent ──
 
@@ -134,45 +134,5 @@ describe('newComponent', () => {
 describe('getCtx', () => {
   it('throws when called outside action context', () => {
     assert.throws(() => getCtx(), (e: Error) => e.message.includes('outside action context'));
-  });
-});
-
-// ── registerType: noOptimistic meta ──
-
-describe('registerType noOptimistic', () => {
-  it('sets noOptimistic meta on specified actions', () => {
-    clearRegistry();
-
-    class TokenMgr {
-      create() {}
-      list() { return []; }
-    }
-    registerType('test.tokens', TokenMgr, { noOptimistic: ['create'] });
-
-    const createMeta = getMeta('test.tokens', 'action:create');
-    assert.ok(createMeta?.noOptimistic);
-
-    const listMeta = getMeta('test.tokens', 'action:list');
-    assert.equal(listMeta?.noOptimistic, undefined);
-  });
-});
-
-// ── registerType: stream meta ──
-
-describe('registerType stream', () => {
-  it('sets stream meta on async generator methods', () => {
-    clearRegistry();
-
-    class Streamer {
-      async *follow() { yield 1; }
-      ping() { return 'pong'; }
-    }
-    registerType('test.streamer', Streamer);
-
-    const followMeta = getMeta('test.streamer', 'action:follow');
-    assert.ok(followMeta?.stream);
-
-    const pingMeta = getMeta('test.streamer', 'action:ping');
-    assert.equal(pingMeta?.stream, undefined);
   });
 });
