@@ -954,6 +954,10 @@ export function createReader(options: ReaderOptions) {
     const base = 'children' in selector
       ? { ...selector, include: undefined, queryFields: projectedFields(selector) }
       : { ...selector, include: undefined };
+    if ('children' in base && 'children' in selector && selector.window?.after !== undefined) {
+      const key = parseScanCursor(selector.window.after, selectorScope(selector), selectorSort(selector).length);
+      base.window = { ...selector.window, after: scanCursor(selectorScope(base), key) };
+    }
 
     const selected = await writer.read(source.domains, async () => {
       await validatePrepared(false);
