@@ -33,10 +33,9 @@ export function declareClientModule(id: string, open: readonly ClientViewDeclara
   return { ...declareOpenModule(id, open, types), ...(resolveMissing === undefined ? {} : { resolveMissing }) };
 }
 
-/** Legacy packages can omit declarations until their side-effect producers are migrated. */
-export function publishClientExports(entry: { readonly clientModules?: readonly ClientModule[] }): void {
-  if (entry.clientModules !== undefined)
-    for (const module of entry.clientModules) publishClientModule(module);
+/** Publish the declarations exported by the owning client module. */
+export function publishClientExports(entry: { readonly clientModules: readonly ClientModule[] }): void {
+  for (const module of entry.clientModules) publishClientModule(module);
 }
 
 /** Module declarations contain code; each rendering owner owns its mutable publication. */
