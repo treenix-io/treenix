@@ -7,7 +7,7 @@ import { useTreeEffects } from '#hooks';
 import { useClientRegistry } from './client-registry-context';
 import { formatContext, parseContext } from '#context/selectors';
 import { READ_ONLY_EFFECTS, type TreeEffects } from '#tree/effects';
-import { $key, $node } from '#symbols';
+import { $key, $node, componentLocation } from '#symbols';
 import { type OnChange, scopeOnChange } from '#tree/on-change';
 import type { Actions as CoreActions } from '@treenx/core/comp';
 import {
@@ -78,9 +78,9 @@ export function viewCtx(
       ? null
       : { node: owner.node, path, execute: (action, data) => owner.execute(path, action, data) };
   }
-  const node: NodeData | undefined = (value as any)[$node];
+  const node: NodeData | undefined = componentLocation(value)[$node];
   if (!node) return null;
-  const key: string = (value as any)[$key] ?? '';
+  const key: string = componentLocation(value)[$key] ?? '';
   const path = key ? `${node.$path}#${key}` : node.$path;
   return { node, path, execute: (action, data?) => READ_ONLY_EFFECTS.execute(path, action, data) };
 }
@@ -221,15 +221,15 @@ export function RenderField({
 
   // Already component-shaped? pass through. Otherwise wrap primitive.
   const wrapped =
-    value && typeof value === 'object' && '$type' in (value as object)
+    value && typeof value === 'object' && '$type' in value
       ? value
       : { $type: type, value, ...rest };
 
   const handleChange = onChange
     ? (next: unknown) =>
         onChange(
-          next && typeof next === 'object' && 'value' in (next as object)
-            ? (next as any).value
+          next && typeof next === 'object' && 'value' in next
+            ? next.value
             : next,
         )
     : undefined;

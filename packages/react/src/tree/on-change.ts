@@ -1,9 +1,9 @@
 // OnChange: typed partial with dot-notation → MutationOp[]
 // Types + conversion utilities. No React dependency.
 
-import { isComponent, isSafeKey, type NodeData } from '@treenx/core';
+import { isComponent, isSafeKey } from '@treenx/core';
 import { KernelError } from '@treenx/core/errors';
-import { $key, $node, stampComponent } from '#symbols';
+import { $key, $node, componentLocation, stampComponent } from '#symbols';
 
 export type MutationOp = ['r', string, unknown] | ['d', string];
 
@@ -126,13 +126,13 @@ export function mergeIntoNode<T extends Record<string, unknown>>(node: T, partia
 }
 
 function preserveContext(source: object, target: Record<string, unknown>) {
-  const owner = (source as any)[$node] as NodeData | undefined;
+  const owner = componentLocation(source)[$node];
   if (!owner) return;
-  stampComponent(target, owner, ((source as any)[$key] as string | undefined) ?? '');
+  stampComponent(target, owner, componentLocation(source)[$key] ?? '');
 
   for (const [k, v] of Object.entries(target)) {
     if (k.startsWith('$') || !isComponent(v)) continue;
-    if ((v as any)[$node] !== undefined) continue;
+    if (componentLocation(v)[$node] !== undefined) continue;
     stampComponent(v, owner, k);
   }
 }

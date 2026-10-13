@@ -4,13 +4,13 @@ import { declareClientModule } from '#context/client-registry';
 import { Button } from '#components/ui/button';
 import { NodeProvider, Render, RenderContext } from '#context';
 import { usePath, useTreeEffects } from '#hooks';
-import { type NodeData } from '@treenx/core';
+import { type NodeData, type Ref } from '@treenx/core';
 import { useState } from 'react';
 
 // ── Node-level view (for ref nodes like /sys/autostart/xxx) ──
 
-function RefNodeView({ value, onSelect }: { value: NodeData; onSelect?: (p: string) => void }) {
-  const ref = (value as any).$ref as string | undefined;
+function RefNodeView({ value, onSelect }: { value: NodeData & Ref; onSelect?: (p: string) => void }) {
+  const ref = value.$ref;
   if (!ref) return <div className="text-sm text-muted-foreground">Invalid ref (no $ref)</div>;
 
   return <RefDisplay target={ref} onSelect={onSelect} />;
@@ -18,8 +18,8 @@ function RefNodeView({ value, onSelect }: { value: NodeData; onSelect?: (p: stri
 
 // ── List item content (chrome provided by observer's RenderChildren) ──
 
-function RefListItem({ value }: { value: NodeData }) {
-  const ref = (value as any).$ref as string | undefined;
+function RefListItem({ value }: { value: NodeData & Ref }) {
+  const ref = value.$ref;
   const name = value.$path.split('/').at(-1) || value.$path;
 
   return (
