@@ -2,14 +2,14 @@
 //
 // Why a subprocess: inside Vite's process Vite 8 installs sync Module.registerHooks
 // for .ts files; any later `register()` / `tsImport()` from tsx is shadowed, and
-// project-local server.ts mods load as empty stubs — registerType() never runs and
-// actions vanish from the registry. A child process avoids the conflict entirely:
+// project-local native module entries load as empty stubs, leaving their manifests
+// and actions unavailable. A child process avoids the conflict entirely:
 // tsx loads the engine + mods with no Vite interference, and Vite proxies
-// /trpc + /api to the child on port 3211.
+// /twp, /auth and /api to the child on its configured backend port.
 //
 // Usage:
 //   import treenixServer from '@treenx/core/vite-plugin';
-//   plugins: [treenixServer(), ...]
+//   plugins: [treenixServer({ configPath: 'native-deployment.json' }), ...]
 //
 // Framework-agnostic: the frontend Vite plugin lives in its renderer-specific
 // package (e.g. @treenx/react/vite-plugin).
@@ -20,9 +20,9 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 
 export type TreenixServerOpts = {
-  /** Path to root.json (default: 'root.json' in CWD). */
+  /** Native deployment config, or root.json with --deployment supplied through args. Defaults to root.json in CWD. */
   configPath?: string;
-  /** Extra args appended after configPath (forwarded to main.ts). */
+  /** Extra args appended after configPath and forwarded to the native bootstrap. */
   args?: string[];
 };
 
@@ -33,10 +33,10 @@ export default function treenixServer(opts: TreenixServerOpts = {}): Plugin {
   return {
     name: 'treenix-server',
     configureServer() {
-      // Resolve main.ts relative to this plugin file so it works from both
+      // Resolve native-main.ts relative to this plugin file so it works from both
       // dist (node_modules/@treenx/core/dist/) and src (workspace dev mode).
       const here = dirname(fileURLToPath(import.meta.url));
-      const mainTs = resolve(join(here, '..', 'src', 'server', 'main.ts'));
+      const mainTs = resolve(join(here, '..', 'src', 'server', 'native-main.ts'));
       child = spawn(
         process.execPath,
         ['--import', 'tsx', '--conditions=development', mainTs, configPath, ...(opts.args ?? [])],
