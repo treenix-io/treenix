@@ -286,7 +286,7 @@ async function buildCanonicalInstance(input: InstanceConfig): Promise<InstanceFo
     if (installBuiltins) instance.registry.publish(withTypeDescriptions(createNativeMountManifest(config.writerEpoch, config.mounts, instance.limits, config.federation, { instance: config.id, directories: config.mountDirectories ?? {}, rawfsCodecs: config.rawfsCodecs }), instance.registry))
     if (discovered === undefined) for (const module of modules) instance.registry.publish(instance.bindAutostartModule(module))
     else await publishLoadedModules(instance.registry, { ...discovered, manifests: discovered.manifests.map(module => ({
-      ...module, security: instance.bindAutostartModule(module).security,
+      ...module, ...instance.bindAutostartModule(module),
     })) }, { allowPartialMods: config.allowPartialMods })
     await instance.preparePublications()
     await instance.prepareMounts()
@@ -2408,7 +2408,7 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
       available()
     },
     bindAutostartModule(module) {
-      if (module.id !== '@treenx/core/autostart') return module
+      if (module.id !== '@treenx/core/autostart') return withTypeDescriptions(module, registry)
       return { ...module, security: [...module.security, {
         type: 't.autostart', context: 'service', handler: createAutostartHandler(servicePorts()),
       }] }

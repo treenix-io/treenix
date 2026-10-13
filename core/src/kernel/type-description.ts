@@ -1,3 +1,4 @@
+import { nativeSystemManifest } from '#system/native-actions';
 import { publishView } from '#kernel/uix-publication';
 import { publishAction } from '#kernel/action-publication';
 import { KernelError } from '#errors';
@@ -35,6 +36,12 @@ function describe(type: TypeDef, registry: Registry): NativeTypeDescription {
 
 /** The ownership node's ordinary read action supplies schema metadata under the live caller's projection. */
 export function withTypeDescriptions(manifest: ModuleManifest, registry: Registry): ModuleManifest {
+  if (manifest.id === 'treenix.system') {
+    const system = nativeSystemManifest(name => describe(registry.type(name), registry));
+    return { ...manifest, types: manifest.types.map(type => type.name === 't.system'
+      ? { ...type, actions: system.types[0].actions } : type) };
+  }
+
   return { ...manifest, types: manifest.types.map(type => type.name !== 't.type' ? type : {
     ...type, actions: { ...type.actions, publish_action: { kind: 'write', args: { type: 'object', required: ['draft', 'action'], additionalProperties: false, properties: { draft: { type: 'string' }, action: { type: 'string' }, definition: { type: 'object' }, stream: { type: 'boolean' } } }, handler: publishAction(registry) }, publish_view: { kind: 'write', args: { type: 'object', required: ['draft'], additionalProperties: false, properties: { draft: { type: 'string' } } }, handler: publishView }, describe_type: {
       kind: 'read', args: { type: 'object', additionalProperties: false },

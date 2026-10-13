@@ -4,12 +4,14 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { mkdir, mkdtemp } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { test } from 'node:test';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { openTwpHttp } from '#client/http-twp';
 import { createTwpClient } from '#client/twp';
-import { R, W, type Credential, type Pending } from '#kernel/types';
+import { R, W, A, type Credential, type ModuleManifest, type Pending } from '#kernel/types';
+import { KernelError } from '#errors';
+import { prepareCredential } from '#kernel/auth/credentials';
 import { createTwpHttpServer } from '#server/http-twp';
 import { openNativeDeployment, type NativeDeploymentConfig } from './native-deployment';
 
@@ -31,6 +33,55 @@ async function http(runtime: Awaited<ReturnType<typeof openNativeDeployment>>, c
   const welcome = await client.ready;
   return { client, welcome, async close() { client.close(); await binding.close(); } };
 }
+
+test('full caller-visible type catalog fits default read limits across 306 module types', async () => {
+  const temporary = new URL('../../../../temp/native-catalog-batch/', import.meta.url);
+  await mkdir(temporary, { recursive: true });
+  const directory = await mkdtemp(fileURLToPath(new URL('dataset-', temporary)));
+  const names = Array.from({ length: 306 }, (_, index) => `catalog.fixture${String(index).padStart(3, '0')}`);
+  const manifest: ModuleManifest = { id: 'catalog.fixture', open: [], security: [],
+    types: names.map(name => ({ name, module: 'catalog.fixture', security: 'ordinary', version: 0,
+      schema: { type: 'object', properties: {} }, actions: {} })) };
+  const entry = join(directory, 'inventory.mjs');
+  await writeFile(entry, `export default () => ({ manifest: ${JSON.stringify(manifest)} });\n`);
+  const runtime = await openNativeDeployment({
+    runtime: { id: randomUUID(), directory: join(directory, 'root'), credentialTtlMs: 60_000,
+      firstAdmin: { path: '/admin', name: 'admin', password: 'fixture-password' } },
+    modules: [
+      { id: 'platform', entry: new URL('../mods/platform/kernel.ts', import.meta.url).href },
+      { id: 'catalog.fixture', entry: pathToFileURL(entry).href },
+    ],
+  });
+  assert.equal(runtime.instance.limits().readNodes, 1000);
+  const admin = await http(runtime, runtime.instance.setupCredential);
+  try {
+    await finish(admin.client.commit({ changes: [{ op: 'put', node: { $path: '/catalog', $type: 't.system' } }] }));
+    const catalog = (await admin.client.act({ path: '/catalog', action: 'catalog', args: {} }).outcome).value;
+    assert.ok(Array.isArray(catalog));
+    assert.deepEqual(catalog.map(description => description.name).filter(name => name.startsWith('catalog.fixture')), names);
+    const root = (await admin.client.read({ node: '/' })).copies[0];
+    assert.ok('node' in root);
+    await finish(admin.client.commit({ changes: [
+      { op: 'patch', path: '/', ops: { $set: { $acl: [...root.node.$acl ?? [], { subject: { group: 'authenticated' }, grant: R }] } } },
+      { op: 'patch', path: `/sys/types/${names[1]}`, ops: { $set: { $acl: [{ subject: { group: 'authenticated' }, deny: R | W | A }] } } },
+      { op: 'put', node: { $path: '/auth/users/reader', $type: 't.user', name: 'reader', status: 'active',
+        '#groups': { $type: 't.groups', list: [] } } },
+    ] }));
+    const account = (await admin.client.read({ node: '/auth/users/reader' })).copies[0];
+    assert.ok('node' in account);
+    const issued = prepareCredential(account.node.$id, { expiresAt: Date.now() + 60_000 });
+    await finish(admin.client.commit({ changes: [{ op: 'put', node: issued.node }] }));
+    const reader = await http(runtime, issued.credential);
+    try {
+      await assert.rejects(reader.client.act({ path: '/catalog', action: 'describe_type', args: { type: names[1] } }).outcome,
+      error => error instanceof KernelError && error.code === 'NOT_FOUND');
+      const visible = (await reader.client.act({ path: '/catalog', action: 'catalog', args: {} }).outcome).value;
+      assert.ok(Array.isArray(visible));
+      assert.equal(visible.some(description => description.name === names[1]), false);
+      assert.equal(visible.some(description => description.name === names[0]), true);
+    } finally { await reader.close(); }
+  } finally { await admin.close(); await runtime.close(); }
+});
 
 test('fresh seeded filesystem mounts preserve the public HTTP key for the first action', async () => {
   const temporary = new URL('../../../../temp/native-seeded-intake/', import.meta.url);

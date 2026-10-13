@@ -1,17 +1,21 @@
+import type { NativeTypeDescription } from '#kernel/type-description';
 import { KernelError } from '#errors';
 import type { ModuleManifest, ReadActionContext } from '#kernel/types';
 
-/** Resolve visible ownership nodes through the existing caller-scoped reflection action. */
-export function nativeSystemManifest(): ModuleManifest {
+/** Reflect caller-visible ownership through the instance-bound compiled descriptions. */
+export function nativeSystemManifest(describe?: (name: string) => NativeTypeDescription): ModuleManifest {
   async function catalog(context: ReadActionContext, query?: string, name?: string) {
     const result = await context.read.read({ children: '/sys/types', ...(name === undefined ? {} : { where: { name } }) });
+    if (result.next !== undefined) throw new KernelError('BUDGET', 'Type catalog selection is incomplete');
     const descriptions: unknown[] = [];
     for (const copy of result.copies) {
       if ('error' in copy) throw copy.error;
       if (!result.list.includes(copy.node.$id)) continue;
       const typeName = copy.node.name;
       if (typeof typeName !== 'string') throw new KernelError('INVALID', 'Type ownership has no name');
-      const description = await context.act({ path: copy.node.$path, action: 'describe_type', args: {} });
+      const description = describe === undefined
+        ? await context.act({ path: copy.node.$path, action: 'describe_type', args: {} })
+        : describe(typeName);
       if (query !== undefined && !JSON.stringify(description).toLowerCase().includes(query.toLowerCase())) continue;
       descriptions.push(description);
     }
