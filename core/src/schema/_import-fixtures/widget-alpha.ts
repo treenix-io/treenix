@@ -1,4 +1,4 @@
-import { registerType } from '#comp';
+import { declareClientType } from '#comp/client-declaration';
 import type { Entry } from './entries-alpha';
 import { Mode } from './entries-beta';
 
@@ -9,4 +9,4 @@ class ImportCollisionAlpha {
   mode: Mode = Mode.Fast;
 }
 
-registerType('test.import-collision-alpha', ImportCollisionAlpha);
+declareClientType('test.import-collision-alpha', ImportCollisionAlpha);

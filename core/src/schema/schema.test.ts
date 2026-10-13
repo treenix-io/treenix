@@ -1,42 +1,41 @@
-import { registerType } from '#comp';
-import { getRegisteredTypes, register, resolve } from '#core';
-import { clearRegistry } from '#testing';
-import { loadSchemasFromDir } from '#schema/load';
+import { normalizeType } from '#core/component';
+import { declareClientType } from '#comp/client-declaration';
+import { readSchemasFromDir, visitSchemaDirectories } from '#schema/load';
+import type { TypeSchema } from '#schema/types';
 import assert from 'node:assert/strict';
-import { readdirSync } from 'node:fs';
-import { join } from 'node:path';
 import { before, describe, it } from 'node:test';
 
-// Recursively find and load all schemas/ dirs under a root
-function loadSchemasRecursive(root: string) {
-  let entries: import('node:fs').Dirent[];
-  try { entries = readdirSync(root, { withFileTypes: true }); } catch { return; }
-  for (const e of entries) {
-    if (!e.isDirectory() || e.name === 'node_modules') continue;
-    if (e.name === 'schemas') loadSchemasFromDir(join(root, e.name));
-    else loadSchemasRecursive(join(root, e.name));
-  }
+const schemas = new Map<string, TypeSchema>();
+function collectSchemas(root: string): void {
+  visitSchemaDirectories(root, directory => {
+    const entries = readSchemasFromDir(directory);
+    for (const schema of entries) schemas.set(schema.$id, schema);
+    return entries.length;
+  });
+}
+function getSchema(type: string): TypeSchema {
+  const schema = schemas.get(type);
+  if (schema === undefined) throw new Error(`schema not loaded: ${type}`);
+  return schema;
 }
 
 describe('schema loader', () => {
   before(() => {
     // engine/core/src/ — core internal mods, schema fixtures, server actions
-    loadSchemasRecursive(new URL('..', import.meta.url).pathname);
+    collectSchemas(new URL('..', import.meta.url).pathname);
     // engine/mods/ — board, cafe, agent, etc.
-    loadSchemasRecursive(new URL('../../../mods', import.meta.url).pathname);
+    collectSchemas(new URL('../../../mods', import.meta.url).pathname);
   });
 
-  it('loads JSON schemas into registry', () => {
-    const types = getRegisteredTypes('schema');
+  it('loads owned JSON schemas', () => {
+    const types = [...schemas.keys()];
     assert.ok(types.length > 0, 'no schemas loaded');
   });
 
   it('each schema has $id, type, properties', () => {
-    const types = getRegisteredTypes('schema');
+    const types = [...schemas.keys()];
     for (const type of types) {
-      const handler = resolve(type, 'schema') as (() => any) | null;
-      assert.ok(handler, `no schema handler for ${type}`);
-      const schema = handler();
+      const schema = getSchema(type);
       assert.equal(schema.$id, type, `$id mismatch for ${type}`);
       assert.equal(schema.type, 'object', `${type} should be type=object`);
       assert.ok(schema.properties !== undefined, `${type} missing properties`);
@@ -44,31 +43,26 @@ describe('schema loader', () => {
   });
 
   it('schemas with properties have titled properties', () => {
-    const types = getRegisteredTypes('schema');
+    const types = [...schemas.keys()];
     assert.ok(types.length > 0);
     let withTitles = 0;
     for (const type of types) {
-      const schema = (resolve(type, 'schema') as () => any)();
-      const props = Object.values(schema.properties ?? {}) as any[];
-      if (props.length > 0 && props.every((p: any) => p.title)) withTitles++;
+      const schema = getSchema(type);
+      const props = Object.values(schema.properties);
+      if (props.length > 0 && props.every(property => property.title)) withTitles++;
     }
     assert.ok(withTitles > 0, 'no schemas have fully titled properties');
   });
 
   it('component schemas have methods', () => {
-    const handler = resolve('autostart', 'schema') as (() => any) | null;
-    assert.ok(handler, 'autostart schema not loaded');
-    const schema = handler();
-    assert.ok(schema.methods, 'autostart missing methods');
-    assert.ok(schema.methods.start, 'autostart missing start method');
-    assert.ok(schema.methods.stop, 'autostart missing stop method');
-    assert.ok(Array.isArray(schema.methods.start.arguments), 'start should have arguments array');
+    const schema = getSchema('todo.item');
+    assert.ok(schema.methods, 'todo.item missing methods');
+    assert.ok(schema.methods.toggle, 'todo.item missing toggle method');
+    assert.ok(Array.isArray(schema.methods.toggle.arguments), 'toggle should have arguments array');
   });
 
   it('emits refType when property type is a registered component class', () => {
-    const handler = resolve('cafe.contact', 'schema') as (() => any) | null;
-    assert.ok(handler, 'cafe.contact schema not loaded');
-    const schema = handler();
+    const schema = getSchema('cafe.contact');
     const ms = schema.properties.mailService;
     assert.ok(ms, 'mailService property missing');
     assert.equal(ms.format, 'path', 'format should be path');
@@ -76,23 +70,15 @@ describe('schema loader', () => {
     assert.equal(schema.properties.recipient.refType, undefined, 'recipient should not have refType');
   });
 
-  it('defineComponent works independently of schema loader', () => {
-    clearRegistry();
-
-    register('test.type', 'schema', () => ({
-      $id: 'test.type',
-      type: 'object',
-      title: 'Test',
+  it('class declarations work independently of schema loading', () => {
+    const schema: TypeSchema = {
+      $id: 'test.type', type: 'object', title: 'Test',
       properties: { name: { type: 'string', title: 'Name' } },
-    }));
-
-    class TestType {
-      name = '';
-    }
-    registerType('test.type', TestType);
-
-    const schema = resolve('test.type', 'schema');
-    assert.ok(schema, 'schema not in registry');
-    assert.equal((schema as () => { title: string })().title, 'Test');
+    };
+    class TestType { name = ''; }
+    const declaration = declareClientType('test.type', TestType);
+    assert.equal(normalizeType(TestType), 'test.type');
+    assert.equal(declaration.type, schema.$id);
+    assert.equal(schema.title, 'Test');
   });
 });

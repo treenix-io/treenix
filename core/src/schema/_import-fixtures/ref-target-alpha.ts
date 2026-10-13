@@ -1,7 +1,7 @@
-import { registerType } from '#comp';
+import { declareClientType } from '#comp/client-declaration';
 
 export class RefTarget {
   name = '';
 }
 
-registerType('test.ref-target-alpha', RefTarget);
+declareClientType('test.ref-target-alpha', RefTarget);

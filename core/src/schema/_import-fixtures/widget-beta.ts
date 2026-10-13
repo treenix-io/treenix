@@ -1,8 +1,8 @@
-import { registerType } from '#comp';
+import { declareClientType } from '#comp/client-declaration';
 import type { Entry } from './entries-beta';
 
 class ImportCollisionBeta {
   entries: Entry[] = [];
 }
 
-registerType('test.import-collision-beta', ImportCollisionBeta);
+declareClientType('test.import-collision-beta', ImportCollisionBeta);

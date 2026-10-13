@@ -1,23 +1,23 @@
 import { validateComponent } from '@treenx/core/comp/validate';
-import { resolve } from '@treenx/core';
-import { loadSchemasFromDir } from '@treenx/core/schema/load';
+import { readSchemasFromDir } from '@treenx/core/schema/load';
 import type { TypeSchema } from '@treenx/core/schema/types';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { before, describe, it } from 'node:test';
+import { describe, it } from 'node:test';
 import './types';
 
 const SCHEMAS = join(dirname(fileURLToPath(import.meta.url)), 'schemas');
 
+const schemas = new Map(readSchemasFromDir(SCHEMAS).map(schema => [schema.$id, schema]));
+
 function getSchema(type: string): TypeSchema {
-  const handler = resolve(type, 'schema') as (() => TypeSchema) | null;
-  assert.ok(handler, `schema not registered: ${type}`);
-  return handler();
+  const schema = schemas.get(type);
+  if (schema === undefined) throw new Error(`schema not loaded: ${type}`);
+  return schema;
 }
 
 describe('router mod — t.route schema', () => {
-  before(() => { loadSchemasFromDir(SCHEMAS); });
 
   it('accepts wildcard true', () => {
     const errs = validateComponent(

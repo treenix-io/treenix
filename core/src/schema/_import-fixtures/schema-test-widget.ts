@@ -1,5 +1,5 @@
 // Test data for OXC schema extraction — covers all AST patterns
-import { registerType } from '#comp';
+import { declareClientType } from '#comp/client-declaration';
 
 type HistoryEntry = {
   action: string;
@@ -228,11 +228,11 @@ class SchemaTestWidget {
   fetchExternal = () => 'remote';
 }
 
-registerType('test.schema-widget', SchemaTestWidget);
+declareClientType('test.schema-widget', SchemaTestWidget);
 
 /** Exported class fixture for JSDoc extraction. */
 export class ExportedSchemaTestWidget {
   name = '';
 }
 
-registerType('test.exported-schema-widget', ExportedSchemaTestWidget);
+declareClientType('test.exported-schema-widget', ExportedSchemaTestWidget);

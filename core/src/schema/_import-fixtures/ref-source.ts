@@ -1,4 +1,4 @@
-import { registerType } from '#comp';
+import { declareClientType } from '#comp/client-declaration';
 import { RefTarget as AlphaRefTarget } from './ref-target-alpha';
 import { RefTarget as BetaRefTarget } from './ref-target-beta';
 
@@ -7,4 +7,4 @@ class RefSource {
   beta?: BetaRefTarget;
 }
 
-registerType('test.ref-source', RefSource);
+declareClientType('test.ref-source', RefSource);
