@@ -5,4 +5,3 @@ export { loadLocalMods, loadAllMods, publishLoadedModules, getLoadedMods, isModL
 export type { LoadTarget, LoadResult, ModuleLoadOptions } from './loader';
 export { registerPrefab, getPrefab, getModPrefabs, getRegisteredMods, getSeedPrefabs, clearPrefabs } from './prefab';
 export type { PrefabSetup, PrefabMeta, PrefabEntry } from './prefab';
-export { getTypesForMod } from './tracking';

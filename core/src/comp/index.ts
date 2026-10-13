@@ -15,7 +15,6 @@ import {
   type TypeId,
   unregister,
 } from '#core';
-import { trackType } from '#mod/tracking';
 import type { SecurityClass } from '#kernel/types';
 
 export type { Class };
@@ -157,7 +156,6 @@ export function registerType<T extends object>(type: string, cls: Class<T>, opts
 
   const compClass = Object.assign(cls, { $type: normalizeType(type) });
   register(type, 'class', cls, opts);
-  trackType(compClass.$type);
 
   registerMethods(type, cls, opts, methods, needs);
   return compClass;
