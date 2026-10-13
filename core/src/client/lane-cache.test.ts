@@ -6,10 +6,57 @@ import type { ComputedNode, ErrorCopy, Frame, NodeCopy } from '#kernel/types'
 
 const pos = (seq: number) => ({ instance: 'client', epoch: 1, seq })
 const copy = (count: number): NodeCopy => ({ node: { $path: '/counter', $id: 'counter', $type: 'counter', $rev: String(count), count }, bits: 7, ver: String(count) })
-const snapshot = (sub = 'one', gen = 1): Frame => ({ t: 'snap', sub, gen, list: ['counter'], copies: [copy(0)], at: [pos(0)] })
+const snapshot = (sub = 'one', gen = 1): Extract<Frame, { t: 'snap' }> => ({ t: 'snap', sub, gen, list: ['counter'], copies: [copy(0)], at: [pos(0)] })
 const code = (expected: KernelError['code']) => (error: unknown) => error instanceof KernelError && error.code === expected
 
 describe('native lane cache', () => {
+  it('retains selection ownership across incremental lists within the current generation', () => {
+    const cache = createLaneCache()
+    const ownership = {
+      roots: [
+        {
+          id: 'counter',
+          covered: ['counter'],
+          cursor: 'first',
+          query: { count: 0 },
+        },
+      ],
+      fixed: [],
+    }
+    cache.apply({ ...snapshot('view'), ownership })
+    cache.apply({
+      t: 'pos',
+      pos: pos(1),
+      changes: [{ op: 'list', sub: 'view', gen: 1, diff: [] }],
+    })
+    assert.deepEqual(cache.list('view')?.ownership, ownership)
+
+    const replacement = {
+      ...ownership,
+      roots: [{ ...ownership.roots[0], cursor: 'second' }],
+    }
+    cache.apply({
+      t: 'pos',
+      pos: pos(2),
+      changes: [
+        { op: 'list', sub: 'view', gen: 1, diff: [], ownership: replacement },
+      ],
+    })
+    assert.deepEqual(cache.list('view')?.ownership, replacement)
+    cache.apply({ t: 'reset', sub: 'view', gen: 2 })
+    assert.equal(cache.list('view')?.ownership, undefined)
+    cache.apply({ ...snapshot('view', 1), ownership })
+    assert.equal(cache.list('view')?.ownership, undefined)
+    cache.apply(snapshot('view', 2))
+    assert.equal(cache.list('view')?.ownership, undefined)
+    cache.apply({
+      t: 'end',
+      sub: 'view',
+      error: new KernelError('CANCELLED', 'Subscription closed'),
+    })
+    assert.equal(cache.list('view'), undefined)
+  })
+
   it('keeps View ownership inside its generation and clears it on reset, ordinary snapshots and end', () => {
     const cache = createLaneCache()
     const owner = { path: '/trash', component: '#deleted' }

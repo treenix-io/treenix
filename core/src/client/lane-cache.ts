@@ -236,9 +236,10 @@ export function createLaneCache() {
         errors = [...retainedErrors.values()]
       }
 
+      const nextOwnership = ownership ?? current.ownership
       membership.set(sub, {
         gen,
-        ...(ownership === undefined ? {} : { ownership }), at: at ?? current.at,
+        ...(nextOwnership === undefined ? {} : { ownership: nextOwnership }), at: at ?? current.at,
         phase: current.phase,
         ...((owner === undefined ? current.viewOwner : owner.value) === undefined ? {}
           : { viewOwner: owner === undefined ? current.viewOwner : owner.value }),
