@@ -1,14 +1,17 @@
-import { resolve } from '#core';
+import { normalizeType } from '#core/component';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import './index';
+import { clientModules } from './index';
 
-// Text binding registers on import, but clearRegistry would wipe them.
-// So we test after import, without clearing.
+function ownedText(type: string) {
+  const entry = clientModules[0].open.find(entry => entry.type === normalizeType(type) && entry.context === 'text');
+  assert.ok(entry);
+  return entry.handler;
+}
 
 describe('Text binding', () => {
   it('string renders value', () => {
-    const h = resolve('string', 'text');
+    const h = ownedText('string');
     assert.ok(h);
     assert.equal(h({ value: 'hello' }), 'hello');
     assert.equal(h({ value: 42 }), '42');
@@ -16,14 +19,14 @@ describe('Text binding', () => {
   });
 
   it('number renders value', () => {
-    const h = resolve('number', 'text');
+    const h = ownedText('number');
     assert.ok(h);
     assert.equal(h({ value: 3.14 }), '3.14');
     assert.equal(h({}), '0');
   });
 
   it('boolean renders yes/no', () => {
-    const h = resolve('boolean', 'text');
+    const h = ownedText('boolean');
     assert.ok(h);
     assert.equal(h({ value: true }), 'yes');
     assert.equal(h({ value: false }), 'no');

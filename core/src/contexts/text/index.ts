@@ -1,8 +1,8 @@
 // Text context — plain text rendering for CLI/server
-// Layer 2 binding. Registers "text" context handlers for primitive types.
+// Layer 2 binding. Declares "text" context handlers for primitive types.
 // Block-type text handlers belong in their mods
 
-import { normalizeType, register } from '#core';
+import { normalizeType } from '#core/component';
 import { declareOpenModule } from '#kernel/module-declaration';
 import type { OpenRegistration } from '#kernel/types';
 
@@ -30,6 +30,5 @@ const numberText = declareText('number', (data) => String(data.value ?? 0));
 // kriz: true / false, why yes/no?
 const booleanText = declareText('boolean', (data) => data.value ? 'yes' : 'no');
 const entries = [stringText, numberText, booleanText];
-for (const entry of entries) register(entry.type, entry.context, entry.handler);
 
 export const clientModules = [declareOpenModule('@treenx/core/contexts/text', entries)];
