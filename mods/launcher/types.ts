@@ -1,3 +1,5 @@
+import { declareClientType } from '@treenx/core/comp/client-declaration';
+import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 // Launcher — iPhone-like home screen for Treenix
 
 import { registerType } from '@treenx/core/comp';
@@ -25,3 +27,7 @@ export interface Launcher {
   /** Remove an app from the launcher */
   removeApp(data: { /** Child id (last path segment) */ id: string }): Promise<void>;
 }
+
+export const clientModules = [declareOpenModule('@treenx/mods/launcher/types', [], [
+  declareClientType('launcher', Launcher),
+])];

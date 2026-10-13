@@ -20,9 +20,12 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { ServerTreeSource } from '@treenx/ssr/server-tree-source';
 import { ServerLocationContext } from '#navigate';
 import { RouteParamsContext } from '#context/route-params';
-import { clientModules as todoClientModules } from '../../../../mods/todo/react';
+import { clientModules as todoClientModules } from '../../../../mods/todo/client';
+import { TodoItem } from '../../../../mods/todo/types';
+import { declareClientType } from '@treenx/core/comp/client-declaration';
+import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 import { clientModules as siteModules } from '../../../../mods/view-shell/view-site';
-import { createClientRegistry, publishClientExports } from '#context/client-registry';
+import { createClientRegistry, publishClientExports, type ClientRegistry } from '#context/client-registry';
 import { unregister } from '@treenx/core';
 import { clientModules } from '../mods/clients';
 import { PUBLICATION_PREFIX } from '@treenx/core/kernel/uix-publication';
@@ -44,11 +47,12 @@ publishClientExports({ clientModules });
 function until(
   source: ReturnType<typeof createLaneTreeSource>,
   predicate: (snapshot: PathSnapshot) => boolean,
+  path = '/document',
 ): Promise<void> {
-  if (predicate(source.getPathSnapshot('/document'))) return Promise.resolve();
+  if (predicate(source.getPathSnapshot(path))) return Promise.resolve();
   return new Promise((resolve) => {
-    const unsubscribe = source.subscribePath('/document', () => {
-      if (predicate(source.getPathSnapshot('/document'))) {
+    const unsubscribe = source.subscribePath(path, () => {
+      if (predicate(source.getPathSnapshot(path))) {
         unsubscribe();
         resolve();
       }
@@ -61,6 +65,7 @@ async function fixture(
   id: string,
   administrator: boolean,
   holdCommit?: { started: (request: Request) => void; release: Promise<void> },
+  registry?: ClientRegistry,
 ) {
   let complete: (args: unknown) => void = () => {};
   const invoked = new Promise<unknown>((resolve) => {
@@ -157,7 +162,7 @@ async function fixture(
     frames: lane.frames,
     send(request) {
       sent.push(request);
-      if (request.t === 'commit' && holdCommit !== undefined && !held) {
+      if ((request.t === 'commit' || request.t === 'act') && holdCommit !== undefined && !held) {
         held = true;
         holdCommit.started(request);
         void holdCommit.release.then(() => lane.accept(request));
@@ -176,7 +181,7 @@ async function fixture(
   };
   const client = createTwpClient(connection, { close: () => lane.close() });
   await client.ready;
-  const source = createLaneTreeSource(client);
+  const source = createLaneTreeSource(client, undefined, registry);
 
   return {
     source,
@@ -209,6 +214,50 @@ function PublicEditor() {
 }
 
 describe('public canonical editor', { timeout: 10_000 }, () => {
+  it('uses declared todo predictions and defaults on the native source without sharing presentation', async t => {
+    publishClientExports({ clientModules: todoClientModules });
+    const todo = await collectModule('@treenx/mods/todo', async () => {
+      await import('../../../../mods/todo/kernel');
+      loadSchemasRecursive(fileURLToPath(new URL('../../../../mods/todo/', import.meta.url)));
+    });
+    let release: () => void = () => {};
+    const released = new Promise<void>(resolve => { release = resolve; });
+    let started: (request: Request) => void = () => {};
+    const paused = new Promise<Request>(resolve => { started = resolve; });
+    const f = await fixture('declared-native-prediction', true, { started, release: released });
+    t.after(f.close);
+    t.after(release);
+    const key = (nonce: string) => ({ epoch: f.instance.writer.intake.epoch, time: Date.now(), nonce });
+    await f.admin.commit({ opId: key('todo-types'), changes: todo.types.map(type => ({
+      op: 'put' as const, node: { $path: `/sys/types/${type.name}`, $type: 't.type', name: type.name,
+        module: type.module, security: type.security },
+    })) });
+    f.instance.registry.publish(todo);
+    await f.admin.commit({ opId: key('todo-document'), changes: [{ op: 'put', node: {
+      $path: '/todo', $type: 'todo.item', title: 'Owned todo', done: false,
+    } }] });
+    const other = createLaneTreeSource(f.client, undefined, createClientRegistry([
+      declareOpenModule('todo-without-prediction', [], [declareClientType('todo.item', TodoItem, { noOptimistic: ['toggle'] })]),
+    ]));
+    t.after(() => other.close());
+    const firstMount = f.source.mountPath('/todo');
+    const secondMount = other.mountPath('/todo');
+    t.after(() => { firstMount.dispose(); secondMount.dispose(); });
+    await Promise.all([until(f.source, snap => snap.data?.done === false, '/todo'), until(other, snap => snap.data?.done === false, '/todo')]);
+    const mutation = f.source.effects.execute('/todo', 'toggle');
+    assert.equal((await paused).t, 'act');
+    assert.equal(f.source.getPathSnapshot('/todo').data?.done, true);
+    assert.equal(other.getPathSnapshot('/todo').data?.done, false);
+    release();
+    await mutation;
+    await until(other, snap => snap.data?.done === true, '/todo');
+    await f.source.effects.createNode('/created-todo', 'todo.item');
+    const created = (await f.client.read({ node: '/created-todo' })).copies[0];
+    assert.ok('node' in created);
+    assert.equal(created.node.title, '');
+    assert.equal(created.node.done, false);
+  });
+
   it('renders declared external views through the original site shell and request-owned native reads', async t => {
     const todo = await collectModule('@treenx/mods/todo', async () => {
       await import('../../../../mods/todo/kernel');
@@ -250,11 +299,6 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
   });
 
   it('renders native source-owned modules independently and republishes without resetting local state', async t => {
-    const first = await fixture('client-module-first', false);
-    const second = await fixture('client-module-second', false);
-    t.after(first.close);
-    t.after(second.close);
-
     function OwnedView({ value, label }: { value: Node; label?: string }) {
       const [count, setCount] = useState(0);
       return createElement('button', { onClick: () => setCount(count + 1) },
@@ -265,6 +309,10 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
     }] });
     const firstRegistry = createClientRegistry([module('first')]);
     const secondRegistry = createClientRegistry([module('second')]);
+    const first = await fixture('client-module-first', false, undefined, firstRegistry);
+    const second = await fixture('client-module-second', false, undefined, secondRegistry);
+    t.after(first.close);
+    t.after(second.close);
     function Document() {
       const { data } = usePath<Node>('/document');
       return data === undefined ? null : createElement(Render, { value: data });

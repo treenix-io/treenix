@@ -64,7 +64,7 @@ const neverAborted = new AbortController().signal;
  *  with `needs` are skipped upstream, dep resolution is server-side. */
 export function predictionCtx<Node extends { readonly $path: string; readonly $type: string }>(
   node: Node, comp?: object,
-): Omit<ExecCtx, 'node'> & { node: Node } {
+): Pick<ExecCtx, 'tree' | 'signal'> & { node: Node; comp?: object; readonly nc: never } {
   return {
     node,
     comp,

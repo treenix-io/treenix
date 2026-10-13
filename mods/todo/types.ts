@@ -1,3 +1,5 @@
+import { declareClientType } from '@treenx/core/comp/client-declaration';
+import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 import { registerType } from '@treenx/core/comp';
 
 /** Single checklist item with a title and completion flag. */
@@ -25,3 +27,8 @@ interface TodoList {
   /** @description Add a new todo item */
   add(data: { title: string }): Promise<void>;
 }
+
+export const clientModules = [declareOpenModule('@treenx/mods/todo/types', [], [
+  declareClientType('todo.item', TodoItem),
+  declareClientType('todo.list', TodoList, { noOptimistic: ['add'] }),
+])];

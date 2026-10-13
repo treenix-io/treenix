@@ -4,6 +4,7 @@ import type { ReactHandler } from '#context';
 import { normalizeType, type Class, type ContextHandler, type Handler, type TypeId } from '@treenx/core';
 import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 import type { OpenModule, OpenRegistration } from '@treenx/core/kernel/types';
+import type { ClientTypeDeclaration } from '@treenx/core/comp/client-declaration';
 
 export interface ClientViewDeclaration extends OpenRegistration<ReactHandler> {
   readonly meta?: Record<string, unknown>;
@@ -12,6 +13,7 @@ export interface ClientViewDeclaration extends OpenRegistration<ReactHandler> {
 export interface ClientModule extends OpenModule<ReactHandler> {
   readonly open: readonly ClientViewDeclaration[];
   readonly resolveMissing?: (type: string, context: string) => ClientViewDeclaration | undefined;
+  readonly types?: readonly ClientTypeDeclaration[];
 }
 
 export function declareView<T>(type: Class<T>, context: string, handler: ContextHandler<'react', T>, meta?: Record<string, unknown>): ClientViewDeclaration;
@@ -22,8 +24,8 @@ export function declareView(type: TypeId, context: string, handler: Handler, met
 }
 
 export function declareClientModule(id: string, open: readonly ClientViewDeclaration[],
-  resolveMissing?: ClientModule['resolveMissing']): ClientModule {
-  return { ...declareOpenModule(id, open), ...(resolveMissing === undefined ? {} : { resolveMissing }) };
+  resolveMissing?: ClientModule['resolveMissing'], types?: readonly ClientTypeDeclaration[]): ClientModule {
+  return { ...declareOpenModule(id, open, types), ...(resolveMissing === undefined ? {} : { resolveMissing }) };
 }
 
 /** Legacy packages can omit declarations until their side-effect producers are migrated. */
@@ -38,15 +40,22 @@ export function createClientRegistry(initial: readonly ClientModule[] = []) {
   const listeners = new Set<() => void>();
   let revision = {};
   let entries = new Map<string, ClientViewDeclaration>();
+  let types = new Map<string, ClientTypeDeclaration>();
 
   function rebuild(): void {
     const next = new Map<string, ClientViewDeclaration>();
+    const nextTypes = new Map<string, ClientTypeDeclaration>();
+    for (const module of modules.values()) for (const type of module.types ?? []) {
+      if (nextTypes.has(type.type)) throw new Error(`Duplicate client type: ${type.type}`);
+      nextTypes.set(type.type, type);
+    }
     for (const module of modules.values()) for (const entry of module.open) {
       const key = `${normalizeType(entry.type)}@${entry.context}`;
       if (next.has(key)) throw new Error(`Duplicate client view: ${key}`);
       next.set(key, entry);
     }
     entries = next;
+    types = nextTypes;
   }
 
   rebuild();
@@ -70,6 +79,9 @@ export function createClientRegistry(initial: readonly ClientModule[] = []) {
     getSnapshot: () => revision,
     exact(type: string, context: string): ClientViewDeclaration | null {
       return entries.get(`${normalizeType(type)}@${context}`) ?? null;
+    },
+    type(type: string): ClientTypeDeclaration | undefined {
+      return types.get(normalizeType(type));
     },
     contexts(type: string): string[] {
       const normalized = normalizeType(type);

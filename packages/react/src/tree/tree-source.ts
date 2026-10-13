@@ -14,6 +14,7 @@ import type { ErrorCopy, SubSelector } from '@treenx/core/kernel/types';
 import type { NativeMount, NativeSnapshot } from '#tree/native-source';
 import type { TreeEffects } from '#tree/effects';
 import type { LaneConnection } from '#tree/lane-tree-client';
+import type { ClientRegistry } from '#context/client-registry';
 
 export type PathStatus = 'loading' | 'ready' | 'not_found' | 'error';
 export type ChildrenPhase = 'idle' | 'initial' | 'refetch' | 'append' | 'ready' | 'error';
@@ -78,6 +79,7 @@ export type ChildrenHandle = {
 };
 
 export interface TreeSource {
+  readonly clientRegistry?: ClientRegistry;
   readonly effects?: TreeEffects;
   readonly connection?: LaneConnection;
   // ── Reactive snapshots (stable references; only change when underlying data does) ──

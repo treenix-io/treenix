@@ -1,5 +1,6 @@
 import { readSnapshot, type NativeHydrationState } from '#tree/read-snapshot';
 import { createLaneEffects } from '#tree/lane-effects';
+import { createDeclaredClientRegistry, mountClientRegistry, type ClientRegistry } from '#context/client-registry';
 import type { LaneConnection } from '#tree/lane-tree-client';
 import type { PresentationNode } from '#tree/presentation';
 import type { TwpClient } from '@treenx/core/client/twp';
@@ -35,14 +36,18 @@ function node(copy: NodeCopy): Node {
 export function createLaneTreeSource(
   client: TwpClient & { readonly connection?: LaneConnection },
   initial?: NativeHydrationState,
+  suppliedRegistry?: ClientRegistry,
 ): TreeSource & {
+  readonly clientRegistry: ClientRegistry;
   readonly effects: ReturnType<typeof createLaneEffects>['effects'];
   getSelectorSnapshot(selector: SubSelector): NativeSnapshot;
   mountSelector(selector: SubSelector): NativeMount;
   close(): void;
 } {
   const native = createNativeTreeSource(client);
-  const mutations = createLaneEffects(client);
+  const clientRegistry = suppliedRegistry ?? createDeclaredClientRegistry();
+  const unmountRegistry = suppliedRegistry === undefined ? mountClientRegistry(clientRegistry) : () => {};
+  const mutations = createLaneEffects(client, clientRegistry);
   const presentation = mutations.presentation;
   const resources = new Map<string, Resource>();
   const hydrated = new Map(
@@ -214,6 +219,7 @@ export function createLaneTreeSource(
   });
 
   return {
+    clientRegistry,
     connection: client.connection,
     effects: mutations.effects,
     getPathSnapshot(path) {
@@ -266,6 +272,7 @@ export function createLaneTreeSource(
     close() {
       if (closed) return;
       closed = true;
+      unmountRegistry();
       unsubscribePresentation();
       mutations.close();
       for (const resource of resources.values()) {

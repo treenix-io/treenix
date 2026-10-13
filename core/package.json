@@ -36,6 +36,11 @@
     }
   },
   "exports": {
+    "./comp/client-declaration": {
+      "development": "./src/comp/client-declaration.ts",
+      "types": "./dist/comp/client-declaration.d.ts",
+      "default": "./dist/comp/client-declaration.js"
+    },
     "./kernel/module-declaration": {
       "development": "./src/kernel/module-declaration.ts",
       "types": "./dist/kernel/module-declaration.d.ts",

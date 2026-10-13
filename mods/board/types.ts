@@ -1,3 +1,5 @@
+import { declareClientType } from '@treenx/core/comp/client-declaration';
+import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 // Board task — universal task management, dogfooded inside Treenix
 
 import { registerType } from '@treenx/core/comp';
@@ -92,3 +94,10 @@ export class BoardColumn {
 }
 
 registerType('board.column', BoardColumn);
+
+export const clientModules = [declareOpenModule('@treenx/mods/board/types', [], [
+  declareClientType('board.task', BoardTask),
+  declareClientType('board.kanban', BoardKanban),
+  declareClientType('board.order', Order),
+  declareClientType('board.column', BoardColumn),
+])];

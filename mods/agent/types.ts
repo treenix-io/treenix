@@ -1,3 +1,5 @@
+import { declareClientType } from '@treenx/core/comp/client-declaration';
+import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 // AI Agent — autonomous worker in the tree.
 // Role determines prompt + tool policy. Uses metatron's invokeClaude for LLM.
 // Agent = node, tree = protocol.
@@ -322,3 +324,19 @@ export interface AiChat {
   /** @description Clear chat history and reset session */
   clear(): Promise<void>;
 }
+
+export const clientModules = [declareOpenModule('@treenx/mods/agent/types', [], [
+  declareClientType('ai.plan', AiPlan),
+  declareClientType('ai.approval', AiApproval),
+  declareClientType('ai.approvals', AiApprovals),
+  declareClientType('ai.policy', AiPolicy),
+  declareClientType('ai.agent', AiAgent),
+  declareClientType('ai.pool', AiPool),
+  declareClientType('ai.assignment', AiAssignment),
+  declareClientType('ai.thread', AiThread),
+  declareClientType('ai.chat', AiChat),
+  declareClientType('ai.log', AiLog),
+  declareClientType('ai.run-status', AiRunStatus),
+  declareClientType('ai.cost', AiCost),
+  declareClientType('ai.run', AiRun),
+])];

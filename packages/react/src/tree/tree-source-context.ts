@@ -12,6 +12,7 @@ import { createContext, createElement, type ReactNode, useContext, useEffect, us
 import { ClientRegistryContext } from '#context/client-registry-context';
 import { createDeclaredClientRegistry, mountClientRegistry, type ClientRegistry } from '#context/client-registry';
 import { type TreeSource, TreeSourceMissingError } from './tree-source';
+import { KernelError } from '@treenx/core/errors';
 
 const Ctx = createContext<TreeSource | null>(null);
 const registries = new WeakMap<TreeSource, ClientRegistry>();
@@ -34,9 +35,11 @@ export function TreeSourceProvider({
   registry?: ClientRegistry;
   children: ReactNode;
 }) {
-  const registry = useMemo(() => suppliedRegistry ?? sourceRegistry(source), [source, suppliedRegistry]);
-  useEffect(() => suppliedRegistry === undefined ? mountClientRegistry(registry) : undefined,
-    [registry, suppliedRegistry]);
+  if (source.clientRegistry !== undefined && suppliedRegistry !== undefined && source.clientRegistry !== suppliedRegistry)
+    throw new KernelError('INVALID', 'Render registry differs from its mutation source');
+  const registry = useMemo(() => suppliedRegistry ?? source.clientRegistry ?? sourceRegistry(source), [source, suppliedRegistry]);
+  useEffect(() => suppliedRegistry === undefined && source.clientRegistry === undefined ? mountClientRegistry(registry) : undefined,
+    [source, registry, suppliedRegistry]);
   return createElement(Ctx.Provider, { value: source },
     createElement(ClientRegistryContext.Provider, { value: registry }, children));
 }
