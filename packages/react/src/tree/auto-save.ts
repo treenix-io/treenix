@@ -88,6 +88,7 @@ function useOwnedSave<T extends PresentationNode>(path: string, options: SaveOpt
   const pending = useRef<Record<string, unknown> | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inflight = useRef(false);
+  const submitted = useRef<Record<string, unknown> | null>(null);
   // In-progress flush promise — a second flush() chains on it instead of
   // resolving early (verify-index 27).
   const inflightRef = useRef<Promise<void> | null>(null);
@@ -126,6 +127,7 @@ function useOwnedSave<T extends PresentationNode>(path: string, options: SaveOpt
     pending.current = null;
     clearTimer();
     inflight.current = false;
+    submitted.current = null;
     inflightRef.current = null;
     clearEdit();
   }
@@ -166,6 +168,7 @@ function useOwnedSave<T extends PresentationNode>(path: string, options: SaveOpt
     }
 
     inflight.current = true;
+    submitted.current = partial;
     const gen = genRef.current;
     const run = (async () => {
       try {
@@ -182,7 +185,10 @@ function useOwnedSave<T extends PresentationNode>(path: string, options: SaveOpt
         throw e;
       } finally {
         // A new run owns inflight after a path change — only the current run clears it.
-        if (genRef.current === gen) inflight.current = false;
+        if (genRef.current === gen) {
+          inflight.current = false;
+          submitted.current = null;
+        }
       }
       // Stale run: the new path owns pending/timer/edit tracking now — touch none.
       if (genRef.current !== gen) return;
@@ -280,9 +286,13 @@ function useOwnedSave<T extends PresentationNode>(path: string, options: SaveOpt
   const currentRev = node?.$rev;
   const stale = dirty && editRevRef.current != null && currentRev !== editRevRef.current;
 
-  // Merged draft: cached node + local pending diff
+  // Keep submitted edits visible until their owning request settles or the selected path changes.
   const value = useMemo(
-    () => pending.current && node ? mergeIntoNode(node, pending.current) : node,
+    () => {
+      const partial = submitted.current === null ? pending.current
+        : pending.current === null ? submitted.current : foldPartial(submitted.current, pending.current);
+      return partial !== null && node !== undefined ? mergeIntoNode(node, partial) : node;
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [node, version],
   );
