@@ -203,6 +203,52 @@ test('fresh seeded filesystem mounts preserve the public HTTP key for the first 
   } finally { await connection.close(); await runtime.close(); }
 });
 
+test('fresh seeded mount declarations retain accepted revisions after prefab grants', async () => {
+  const temporary = new URL('../../../../temp/native-seeded-intake/', import.meta.url);
+  await mkdir(temporary, { recursive: true });
+  const directory = await mkdtemp(fileURLToPath(new URL('dataset-', temporary)));
+  await mkdir(join(directory, 'documents'));
+  const runtime = await openNativeDeployment({
+    runtime: { id: randomUUID(), directory: join(directory, 'root'), credentialTtlMs: 60_000,
+      firstAdmin: { path: '/admin', name: 'admin', password: 'fixture-password' },
+      mountDirectories: { documents: join(directory, 'documents') } },
+    modules: [{ id: 'boot-fixture', entry: new URL('./native-deployment-fixture.ts', import.meta.url).href }],
+    additionalModules: [{ id: '@treenx/mods/prefab', entry: new URL('../../../mods/prefab/kernel.ts', import.meta.url).href }],
+    seeds: { sources: [
+      { $path: '/sys/mods', $type: 't.dir' },
+      { $path: '/sys/mods/boot', $type: 't.dir' },
+      { $path: '/sys/mods/boot/prefabs', $type: 't.dir' },
+    ], prefabs: [{ target: '/', source: {
+      $path: '/sys/mods/boot/prefabs/seed', $type: 't.prefab', mod: 'boot', name: 'seed',
+      grants: [{ executor: 'worker', target: 'documents', grant: R }],
+      nodes: [
+        { $path: 'worker', $type: 'boot.worker' },
+        { $path: 'worker/state', $type: 'boot.state', label: '' },
+        { $path: 'documents', $type: 't.mount-point',
+          '#groups': { $type: 't.groups', list: ['admins'] },
+          '#mount': { $type: 't.mount.rawfs', directory: 'documents', pattern: '', external: 'none' } },
+      ],
+    } }] },
+  });
+  const connection = await http(runtime, runtime.instance.setupCredential);
+  try {
+    const worker = (await connection.client.read({ node: '/worker' })).copies[0];
+    const declaration = (await connection.client.read({ node: '/documents' })).copies[0];
+    assert.ok('node' in worker && 'node' in declaration);
+    assert.ok(declaration.node.$acl?.some(entry =>
+      'group' in entry.subject && entry.subject.group === `n:${worker.node.$id}`
+      && 'grant' in entry && (entry.grant & R) === R));
+    const before = (await connection.client.read({ node: '/worker/state' })).copies[0];
+    assert.ok('node' in before);
+    assert.equal(before.node.label, '');
+    assert.equal((await finish(connection.client.act({ path: '/worker', action: 'reverse', args: 'first',
+      opId: connection.client.key() }))).value, 'tsrif');
+    const after = (await connection.client.read({ node: '/worker/state' })).copies[0];
+    assert.ok('node' in after);
+    assert.equal(after.node.label, 'tsrif');
+  } finally { await connection.close(); await runtime.close(); }
+});
+
 test('native deployment cold boots accepted seeds, HTTP actions and an owned service, then reopens unchanged seeds', async () => {
   const temporary = new URL('../../../../temp/native-boot/', import.meta.url);
   await mkdir(temporary, { recursive: true });

@@ -98,6 +98,7 @@ interface Pattern {
 }
 
 interface Entry extends MountEntry {
+  node: Node
   readonly pattern: Pattern
   readonly type: TypeDef | undefined
   readonly handler: MountHandler | undefined
@@ -113,6 +114,7 @@ interface Entry extends MountEntry {
 interface StageState {
   readonly version: number
   readonly entries: Map<string, Entry>
+  readonly snapshots: ReadonlyMap<Entry, Node>
   readonly blocked: Map<string, { readonly id: NodeId; readonly range: MountRange }>
 }
 
@@ -310,6 +312,7 @@ export function createMountTable(options: MountTableOptions) {
   function stage(changes: readonly MountChange[]): MountStage {
     available()
     const updated = new Map<string, Entry>()
+    const snapshots = new Map<Entry, Node>()
     const removed = new Set<string>()
     const changed = new Set<NodeId>()
     const nextBlocked = new Map(blocked)
@@ -341,6 +344,7 @@ export function createMountTable(options: MountTableOptions) {
         const previous = entries.get(key)
         if (previous === undefined || previous.node.$path !== input.node.$path
           || stableJson(previous.declaration) !== stableJson(input.declaration)) updated.set(key, entryOf(input))
+        else if (previous.node.$rev !== input.node.$rev) snapshots.set(previous, snapshot(input).node)
       }
       for (const key of keysByNode.get(change.id) ?? []) if (!replacements.has(key)) removed.add(key)
     }
@@ -356,7 +360,7 @@ export function createMountTable(options: MountTableOptions) {
     const sameBlocks = nextBlocked.size === blocked.size && [...nextBlocked].every(([key, claim]) => blocked.get(key) === claim)
     const staged = Object.freeze({ ranges: next === entries && sameBlocks ? acceptedRanges
       : Object.freeze([...next.values()].map(entry => entry.range).concat([...nextBlocked.values()].map(claim => claim.range))) })
-    stages.set(staged, { version, entries: next, blocked: sameBlocks ? blocked : nextBlocked })
+    stages.set(staged, { version, entries: next, snapshots, blocked: sameBlocks ? blocked : nextBlocked })
     return staged
   }
 
@@ -364,7 +368,12 @@ export function createMountTable(options: MountTableOptions) {
   function publish(stage: MountStage): void {
     validateStage(stage)
     const staged = stages.get(stage)!
-    if (staged.entries === entries && staged.blocked === blocked) return
+    // Node metadata advances independently of the accepted target resource revision.
+    for (const [entry, node] of staged.snapshots) entry.node = node
+    if (staged.entries === entries && staged.blocked === blocked) {
+      if (staged.snapshots.size > 0) version++
+      return
+    }
     const before = [...entries.values()]
     const beforeRanges = acceptedRanges
     entries = staged.entries
