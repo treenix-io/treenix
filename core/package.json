@@ -437,7 +437,7 @@
     "prepack": "npm run build",
     "test": "tsx --conditions development --test --test-concurrency=4 'src/**/*.test.ts'",
     "test:client": "tsx --conditions development --test src/client/handle.test.ts",
-    "dev:server": "npm run schema && tsx --conditions development --watch src/server/main.ts ../root.json",
+    "dev:server": "tsx watch --conditions development src/server/native-main.ts",
     "schema": "tsx --conditions development src/schema/extract-schemas-oxc.ts src ../mods ../packages",
     "upgrade:kernel": "tsx --conditions development src/tools/upgrade-kernel.ts",
     "test:upgrade-kernel": "tsx --conditions development --test src/tools/upgrade-kernel.test.ts"
