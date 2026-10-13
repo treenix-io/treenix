@@ -36,7 +36,7 @@ const routeTtlMs = Number(process.env.ROUTE_TTL_MS ?? 30_000);
 const here = dirname(fileURLToPath(import.meta.url));
 const pkgRoot = resolve(here, '..');                              // src→pkg, dist→pkg
 const require_ = createRequire(import.meta.url);
-const reactPkgDir = dirname(require_.resolve('@treenx/react/package.json'));
+const reactPkgDir = dirname(dirname(require_.resolve('@treenx/react')));
 
 const clientDir = resolve(process.env.CLIENT_DIR ?? join(reactPkgDir, 'dist-spa'));
 const ssrBundle = resolve(process.env.SSR_BUNDLE ?? join(pkgRoot, 'dist-ssr/entry-server.js'));
