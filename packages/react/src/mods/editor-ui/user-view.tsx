@@ -1,7 +1,8 @@
 import { declareClientModule } from '#context/client-registry';
 import { type NodeData } from '@treenx/core';
 import { pathName } from './list-items';
-import { getComponents, getSchema } from './node-utils';
+import { getComponents } from './node-utils';
+import { SchemaReader } from '#schema-loader';
 
 function UserView({ value }: { value: NodeData }) {
   const id = pathName(value.$path);
@@ -36,21 +37,21 @@ function UserView({ value }: { value: NodeData }) {
         </div>
       </div>
       {comps.map(([name, comp]) => {
-        const ctype = (comp as any).$type;
-        const s = getSchema(ctype);
-        const fields = s ? Object.entries(s.properties) : [];
+        const ctype = comp.$type;
+        return <SchemaReader key={name} type={ctype}>{s => {
+        const fields = s?.properties === undefined ? [] : Object.entries(s.properties);
         return (
-          <div key={name} className="comp-view-card">
+          <div className="comp-view-card">
             <div className="comp-view-header">
               {name}
               {name !== ctype && <span className="comp-type">{ctype}</span>}
             </div>
             {fields.length > 0
               ? fields.map(([k, prop]) => {
-                  const val = (comp as any)[k];
+                  const val = comp[k];
                   return (
                     <div key={k} className="comp-view-row">
-                      <span className="comp-view-label">{(prop as any).title}</span>
+                      <span className="comp-view-label">{prop.title}</span>
                       <span className="comp-view-value">
                         {val === undefined || val === ''
                           ? '—'
@@ -73,6 +74,7 @@ function UserView({ value }: { value: NodeData }) {
                   ))}
           </div>
         );
+        }}</SchemaReader>;
       })}
     </div>
   );

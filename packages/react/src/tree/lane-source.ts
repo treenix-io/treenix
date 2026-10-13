@@ -220,6 +220,7 @@ export function createLaneTreeSource(
 
   return {
     clientRegistry,
+    schemaMode: 'native',
     connection: client.connection,
     effects: mutations.effects,
     getPathSnapshot(path) {

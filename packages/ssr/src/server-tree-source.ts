@@ -16,6 +16,7 @@ const noop = () => {};
 
 /** Own the request's native reads across bounded server render passes. */
 export class ServerTreeSource implements TreeSource {
+  readonly schemaMode = 'declared';
   private readonly resources = new Map<string, Resource>();
   private readonly pendingReads = new Set<Resource>();
 

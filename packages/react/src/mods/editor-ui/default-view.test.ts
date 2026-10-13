@@ -153,6 +153,7 @@ function renderWithProviders(source: TreeSource, value: ComponentData) {
 function fakeSource(childrenByPath: Record<string, NodeData[]>): TreeSource {
   const snaps = new Map<string, ChildrenSnapshot>();
   return {
+    schemaMode: 'declared',
     getPathSnapshot: () => EMPTY_PATH_SNAPSHOT,
     getChildrenSnapshot: (p) => {
       let s = snaps.get(p);

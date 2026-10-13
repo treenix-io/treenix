@@ -16,6 +16,9 @@ import {
 import { createInstanceFoundation } from '../../../../core/src/kernel/instance';
 import { createMemoryStore } from '../../../../core/src/kernel/store/memory';
 import { Render, RenderContext, RenderField } from '#context';
+import treenixPlugin from '#vite-plugin';
+import { createServer } from 'vite';
+import type { ClientModule } from '#context/client-registry';
 import { clientModules as primitiveTextModules } from '@treenx/core/contexts/text';
 import { MindMapSidebar } from '../../../../mods/mindmap/sidebar';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -221,6 +224,51 @@ function PublicEditor() {
 }
 
 describe('public canonical editor', { timeout: 10_000 }, () => {
+  it('uses native schemas when mounted and loader-owned generated schemas for reader-only rendering', async t => {
+    const server = await createServer({ configFile: false, plugins: [treenixPlugin()],
+      cacheDir: fileURLToPath(new URL('../../../../../temp/schema-render-vite-cache', import.meta.url)),
+      optimizeDeps: { noDiscovery: true, include: [] },
+      server: { middlewareMode: true }, appType: 'custom' });
+    t.after(() => server.close());
+    const loaded = await server.ssrLoadModule('virtual:mod-site-views');
+    const schemaModules: ClientModule[] = loaded.schemaModules;
+    const registry = createClientRegistry([...clientModules, ...schemaModules]);
+    assert.ok(registry.schema('todo.item')?.properties?.done);
+    const f = await fixture('mounted-detached-schema', true, undefined, registry);
+    t.after(f.close);
+    function Record() {
+      const { data } = usePath<Node>('/document');
+      return data === undefined ? null : createElement(Render, { value: data });
+    }
+    const ui = render(createElement(Record), { wrapper: f.wrapper });
+    assert.ok(await ui.findByText('value'));
+    assert.ok(f.sent.some(request => request.t === 'act' && request.action === 'describe_type'));
+    const todo = await collectModule('@treenx/mods/todo', async () => {
+      await import('../../../../mods/todo/kernel');
+      loadSchemasRecursive(fileURLToPath(new URL('../../../../mods/todo/', import.meta.url)));
+    });
+    await f.admin.commit({ opId: { epoch: f.instance.writer.intake.epoch, time: Date.now(), nonce: 'schema-owner' },
+      changes: todo.types.map(type => ({ op: 'put' as const, node: {
+        $path: `/sys/types/${type.name}`, $type: 't.type', name: type.name, module: type.module, security: type.security,
+      } })) });
+    f.instance.registry.publish(todo);
+    const source = new ServerTreeSource(f.admin);
+    assert.equal(source.schemaMode, 'declared');
+    const tree = createElement(TreeSourceProvider, { source, registry,
+      children: createElement(TooltipProvider, { children: createElement(Render, {
+        value: { $type: 'todo.item', title: 'Generated schema text', done: false, undeclared: 'hidden field' },
+      }) }) });
+    let html = renderToStaticMarkup(tree);
+    while (source.pendingCount() > 0) {
+      await source.flushPending();
+      html = renderToStaticMarkup(tree);
+    }
+    assert.ok(html.includes('Generated schema text'), html);
+    assert.ok(html.includes('done'));
+    assert.equal(html.includes('hidden field'), false);
+    assert.equal(source.pendingCount(), 0);
+  });
+
   it('renders owned text and discovers a server-only native action in the original mindmap sidebar', async t => {
     const registry = createClientRegistry([...clientModules, ...primitiveTextModules]);
     const f = await fixture('owned-text-native-description', true, undefined, registry);

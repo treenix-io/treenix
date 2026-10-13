@@ -1,5 +1,8 @@
 // Lazy registry loader — fetches type nodes from /sys/types on demand
-import { useEffect, useState } from 'react';
+import { createElement, type ReactNode, useEffect, useState } from 'react';
+import { useSchemaMode } from '#tree/tree-source-context';
+import { useClientRegistry } from '#context/client-registry-context';
+import { KernelError } from '@treenx/core/errors';
 import { usePath, useTreeEffects } from '#hooks';
 import type { JsonSchema, Node } from '@treenx/core/kernel/types';
 import type { NativeTypeDescription } from '@treenx/core/kernel/type-description';
@@ -10,6 +13,28 @@ import type { NativeTypeDescription } from '@treenx/core/kernel/type-description
 export function useSchema(type: string | null | undefined): JsonSchema | null | undefined {
   const description = useNativeTypeDescription(type);
   return type ? description?.schema : null;
+}
+
+interface SchemaReaderProps {
+  type: string;
+  authored?: JsonSchema;
+  children: (schema: JsonSchema | null, actions: readonly string[]) => ReactNode;
+}
+
+function NativeSchemaReader({ type, children }: SchemaReaderProps) {
+  const description = useNativeTypeDescription(type);
+  return description === undefined ? null : children(description.schema, Object.keys(description.actions));
+}
+
+function DeclaredSchemaReader({ type, authored, children }: SchemaReaderProps) {
+  const registry = useClientRegistry();
+  const schema = authored ?? registry.schema(type) ?? null;
+  return children(schema, Object.keys(schema?.methods ?? {}));
+}
+
+/** Detached and reader-only rendering use authored declarations; mounted lanes use native authority. */
+export function SchemaReader(props: SchemaReaderProps) {
+  return createElement(useSchemaMode() === 'native' ? NativeSchemaReader : DeclaredSchemaReader, props);
 }
 
 declare module '#hooks' {
@@ -24,7 +49,7 @@ export function useNativeTypeDescription(
   revision?: string,
 ): NativeTypeDescription | undefined {
   const effects = useTreeEffects();
-  const { data: ownership, error } = usePath<Node>(type ? `/sys/types/${type}` : null);
+  const { data: ownership, loading, error } = usePath<Node>(type ? `/sys/types/${type}` : null);
   const generation = revision ?? ownership?.$rev;
   const [loaded, setLoaded] = useState<{
     effects: typeof effects;
@@ -58,6 +83,8 @@ export function useNativeTypeDescription(
   }, [effects, type, generation, ownership === undefined, error]);
 
   if (error !== null) throw error;
+  if (type && !loading && ownership === undefined)
+    throw new KernelError('NOT_FOUND', `Type ownership is missing: ${type}`);
   if (failure?.effects === effects && failure.type === type && failure.generation === generation)
     throw failure.error;
   return loaded?.effects === effects && loaded.type === type && loaded.generation === generation

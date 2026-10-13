@@ -7,6 +7,7 @@
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import type { Plugin } from 'vite';
+import { readSchemasFromDir, visitSchemaDirectories } from '@treenx/core/schema/load';
 
 // ── Package.json resolution ──
 
@@ -126,6 +127,22 @@ const SERVER_RE = /\/mods\/[^/]+\/server(\.ts)?$/;
 const DEFAULT_CLIENT_FILES = ['types.ts', 'react.tsx', 'view.tsx'];
 
 type ModEntry = { name: string; files: string[] };
+
+function schemaPublications(roots: readonly string[]): string[] {
+  const lines: string[] = [];
+  const seen = new Set<string>();
+  for (const root of roots) visitSchemaDirectories(root, directory => {
+    const owner = realpathSync(directory);
+    if (seen.has(owner)) return 0;
+    seen.add(owner);
+    const schemas = readSchemasFromDir(directory);
+    lines.push(`declareOpenModule(${JSON.stringify(owner)}, [], [${schemas.map(schema =>
+      `declareClientSchema(${JSON.stringify(schema.$id)}, () => (${JSON.stringify(schema)}))`).join(',')} ])`);
+    return schemas.length;
+  });
+  return [`export const schemaModules = [${lines.join(',')}];`,
+    `for (const module of schemaModules) publishClientModule(module);`];
+}
 
 function scanClients(dir: string, clientFiles: string[], warnIfMissing = true): ModEntry[] {
   if (!existsSync(dir)) {
@@ -305,9 +322,15 @@ export default function treenixPlugin(opts?: { modsDirs?: string[]; clientFiles?
         const files = all.flatMap(module => module.files);
         const lines = files.map((file, index) => `import * as site${index} from '${file}';`);
         return [
-          `import { publishClientExports } from '@treenx/react/context/client-registry';`,
+          `import { publishClientExports, publishClientModule } from '@treenx/react/context/client-registry';`,
+          `import { declareClientSchema } from '@treenx/core/comp/client-declaration';`,
+          `import { declareOpenModule } from '@treenx/core/kernel/module-declaration';`,
           ...lines,
           ...files.map((_, index) => `publishClientExports(site${index});`),
+          ...schemaPublications([...(inNodeModules ? [] : [resolve(engineRoot, 'core/src/mods'),
+            ...scanClients(resolve(engineRoot, 'mods'), clientFiles, false).flatMap(mod => mod.files.map(file => dirname(file)))]),
+            ...(opts?.modsDirs ?? []).flatMap(directory => scanClients(resolve(directory), clientFiles)
+              .flatMap(mod => mod.files.map(file => dirname(file)))), ...files.map(file => dirname(file))]),
           '',
         ].join('\n');
       }
@@ -350,10 +373,14 @@ export default function treenixPlugin(opts?: { modsDirs?: string[]; clientFiles?
 
       return [
         `import { loadMod } from '@treenx/react/mod-errors';`,
-        `import { publishClientExports } from '@treenx/react/context/client-registry';`,
+        `import { publishClientExports, publishClientModule } from '@treenx/react/context/client-registry';`,
+        `import { declareClientSchema } from '@treenx/core/comp/client-declaration';`,
+        `import { declareOpenModule } from '@treenx/core/kernel/module-declaration';`,
         'await Promise.allSettled([',
         lines.join(',\n'),
         ']);',
+        ...schemaPublications([...(inNodeModules ? [] : [resolve(engineRoot, 'core/src/mods')]),
+          ...allMods.flatMap(mod => mod.files.map(file => dirname(file)))]),
         '',
       ].join('\n');
     },

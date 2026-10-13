@@ -4,15 +4,24 @@ import { declareClientModule } from '#context/client-registry';
 import { type NodeData } from '@treenx/core';
 import { useClientRegistry } from '#context/client-registry-context';
 import { TypePreview } from './preview';
+import type { JsonSchema } from '@treenx/core/kernel/types';
+import { SchemaReader } from '#schema-loader';
+
+interface TypeNodeData extends NodeData {
+  name?: string;
+  schema?: JsonSchema;
+}
+
 
 // ── Helpers ──
 
 // Type nodes can live under different mount paths (/sys/types/... or
 // /sys/mods/{mod}/types/...). Trust the schema's $id when present —
 // it's the canonical type name. Fall back to deriving from the path.
-function typeName(value: NodeData): string {
-  const schema = value.schema as { $id?: string } | undefined;
+function typeName(value: TypeNodeData): string {
+  const schema = value.schema;
   if (schema?.$id) return schema.$id;
+  if (value.name !== undefined) return value.name;
   return value.$path
     .replace(/^\/sys\/mods\/[^/]+\/types\//, '')
     .replace(/^\/sys\/types\//, '')
@@ -25,11 +34,10 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 
 // ── react (full view with live preview) ──
 
-function TypeNodeView({ value }: { value: NodeData }) {
+function TypeNodeBody({ value, schema }: { value: TypeNodeData; schema: JsonSchema | null }) {
   const name = typeName(value);
-  const schema = value.schema as Record<string, unknown> | undefined;
   const title = schema?.title ? String(schema.title) : null;
-  const props = (schema?.properties ?? {}) as Record<string, Record<string, unknown>>;
+  const props = schema?.properties ?? {};
   const contexts = useClientRegistry().allContexts(name);
   const components = Object.keys(value).filter(k => !k.startsWith('$') && k !== 'schema');
 
@@ -84,14 +92,13 @@ function TypeNodeView({ value }: { value: NodeData }) {
 
 // ── react:list (compact) ──
 
-function TypeListItem({ value }: { value: NodeData }) {
+function TypeListBody({ value, schema, methods }: { value: TypeNodeData; schema: JsonSchema | null; methods: readonly string[] }) {
   const name = typeName(value);
-  const schema = value.schema as Record<string, unknown> | undefined;
   const title = schema?.title ? String(schema.title) : null;
   const description = schema?.description ? String(schema.description) : null;
-  const props = Object.keys((schema?.properties ?? {}) as object);
-  const methods = Object.keys((schema?.methods ?? {}) as object);
-  const hasClass = !!value.class;
+  const props = Object.keys(schema?.properties ?? {});
+  const registry = useClientRegistry();
+  const hasClass = !!value.class || registry.type(name)?.kind === 'class';
 
   return (
     <div className="flex min-w-0 flex-1 flex-col">
@@ -118,6 +125,18 @@ function TypeListItem({ value }: { value: NodeData }) {
       )}
     </div>
   );
+}
+
+function TypeNodeView({ value }: { value: TypeNodeData }) {
+  return <SchemaReader type={typeName(value)} authored={value.schema}>
+    {schema => <TypeNodeBody value={value} schema={schema} />}
+  </SchemaReader>;
+}
+
+function TypeListItem({ value }: { value: TypeNodeData }) {
+  return <SchemaReader type={typeName(value)} authored={value.schema}>
+    {(schema, methods) => <TypeListBody value={value} schema={schema} methods={methods} />}
+  </SchemaReader>;
 }
 
 // ── Registration ──

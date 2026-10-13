@@ -6,16 +6,16 @@ import { useChildren } from '#hooks';
 import { type ComponentData, isComponent, isRef } from '@treenx/core';
 import type { ClientRegistry } from '#context/client-registry';
 import { useClientRegistry } from '#context/client-registry-context';
-import type { PropertySchema, TypeSchema } from '@treenx/core/schema/types';
+import type { JsonSchema } from '@treenx/core/kernel/types';
 import { createContext, type ReactNode, useContext, useState } from 'react';
 import { type ChildCtx, RenderChildren } from './list-items';
-import { getSchema } from './node-utils';
+import { SchemaReader } from '#schema-loader';
 
 const TITLE_KEYS = new Set(['title', 'name', 'label']);
 const MAX_DEPTH = 8;
 const DepthCtx = createContext(0);
 
-type PlainField = { name: string; prop?: PropertySchema; value: unknown };
+type PlainField = { name: string; prop?: JsonSchema; value: unknown };
 type SplitResult = {
   title?: PlainField;
   rest: PlainField[];
@@ -30,18 +30,18 @@ export function inferType(v: unknown): string {
   return 'object';
 }
 
-export function resolveDisplayType(prop: PropertySchema | undefined, value: unknown, registry: ClientRegistry): string {
-  const tryResolve = (t?: string) => (t && registry.exact(t, 'react') ? t : null);
+export function resolveDisplayType(prop: JsonSchema | undefined, value: unknown, registry: ClientRegistry): string {
+  const tryResolve = (t?: string | readonly string[]) => (typeof t === 'string' && registry.exact(t, 'react') ? t : null);
   return tryResolve(prop?.format) ?? tryResolve(prop?.type) ?? inferType(value);
 }
 
 /** Classify every non-$ key into ref/component/plain, applying schema order first. */
-export function splitRecord(value: ComponentData, schema: TypeSchema | null): SplitResult {
+export function splitRecord(value: ComponentData, schema: JsonSchema | null): SplitResult {
   const components: SplitResult['components'] = [];
   const plain: PlainField[] = [];
   const seen = new Set<string>();
 
-  const consider = (name: string, prop: PropertySchema | undefined, raw: unknown) => {
+  const consider = (name: string, prop: JsonSchema | undefined, raw: unknown) => {
     if (seen.has(name)) return;
     seen.add(name);
 
@@ -171,11 +171,10 @@ function NodeChildren({ path }: { path: string }) {
   );
 }
 
-export const TypedRecordView: View<ComponentData> = ({ value }) => {
+function TypedRecordBody({ value, schema }: { value: ComponentData; schema: JsonSchema | null }) {
   const depth = useContext(DepthCtx);
   if (depth > MAX_DEPTH) return <span className="text-[--text-3] text-xs">...</span>;
 
-  const schema = getSchema(value.$type);
   const { title, rest, components } = splitRecord(value, schema);
   const nodePath = typeof value.$path === 'string' ? value.$path : null;
 
@@ -202,7 +201,13 @@ export const TypedRecordView: View<ComponentData> = ({ value }) => {
       </div>
     </DepthCtx.Provider>
   );
-};
+}
+
+export const TypedRecordView: View<ComponentData> = ({ value }) => (
+  <SchemaReader type={value.$type}>
+    {schema => <TypedRecordBody value={value} schema={schema} />}
+  </SchemaReader>
+);
 
 export default declareClientModule('@treenx/react/editor-ui/default-view', [
   { type: 'default', context: 'react', handler: TypedRecordView }

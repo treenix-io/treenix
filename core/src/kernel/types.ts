@@ -588,6 +588,9 @@ export type Gate = (operation: Operation, actor: Actor) => Promise<'pass' | { re
 
 export type JsonSchema = {
   readonly [keyword: string]: unknown
+  readonly $id?: string
+  readonly label?: string
+  readonly methods?: Readonly<Record<string, unknown>>
   readonly type?: string | readonly string[]
   readonly title?: string
   readonly description?: string

@@ -15,6 +15,7 @@ import { type TreeSource, TreeSourceMissingError } from './tree-source';
 import { KernelError } from '@treenx/core/errors';
 
 const Ctx = createContext<TreeSource | null>(null);
+const SchemaMode = createContext<'native' | 'declared'>('declared');
 const registries = new WeakMap<TreeSource, ClientRegistry>();
 
 function sourceRegistry(source: TreeSource): ClientRegistry {
@@ -29,10 +30,12 @@ function sourceRegistry(source: TreeSource): ClientRegistry {
 export function TreeSourceProvider({
   source,
   registry: suppliedRegistry,
+  schemaMode,
   children,
 }: {
   source: TreeSource;
   registry?: ClientRegistry;
+  schemaMode?: 'native' | 'declared';
   children: ReactNode;
 }) {
   if (source.clientRegistry !== undefined && suppliedRegistry !== undefined && source.clientRegistry !== suppliedRegistry)
@@ -41,7 +44,12 @@ export function TreeSourceProvider({
   useEffect(() => suppliedRegistry === undefined && source.clientRegistry === undefined ? mountClientRegistry(registry) : undefined,
     [source, registry, suppliedRegistry]);
   return createElement(Ctx.Provider, { value: source },
-    createElement(ClientRegistryContext.Provider, { value: registry }, children));
+    createElement(SchemaMode.Provider, { value: schemaMode ?? source.schemaMode ?? 'native' },
+      createElement(ClientRegistryContext.Provider, { value: registry }, children)));
+}
+
+export function useSchemaMode(): 'native' | 'declared' {
+  return useContext(SchemaMode);
 }
 
 export function useTreeSource(): TreeSource {

@@ -1,8 +1,7 @@
 import type { PresentationNode } from '#tree/presentation';
-import { getComponents as getComps, type ComponentData, type NodeData, resolve } from '@treenx/core';
+import { getComponents as getComps, type ComponentData, type NodeData } from '@treenx/core';
 import type { NativeTypeDescription } from '@treenx/core/kernel/type-description';
 import type { ClientRegistry } from '#context/client-registry';
-import type { PropertySchema, TypeSchema } from '@treenx/core/schema/types';
 
 export function getComponents(node: PresentationNode): [string, ComponentData][] {
   return getComps(node).slice(1);
@@ -16,11 +15,6 @@ export function getPlainFields(node: PresentationNode): Record<string, unknown> 
     out[k] = v;
   }
   return out;
-}
-
-export function getSchema(type: string): TypeSchema | null {
-  const h = resolve(type, 'schema');
-  return h ? (h() as TypeSchema) : null;
 }
 
 const INTERNAL_CONTEXTS = new Set(['schema', 'mount', 'class']);
@@ -44,26 +38,6 @@ export function getViewContexts(registry: ClientRegistry, type: string, node?: P
 
 export function getActions(description: NativeTypeDescription | undefined): string[] {
   return description === undefined ? [] : Object.keys(description.actions).filter(name => !name.startsWith('_'));
-}
-
-// Returns action param schema from generated schema.methods[action].arguments[0].
-// null  → no schema info (show JSON textarea fallback)
-// properties={} → confirmed no params (hide params section)
-// properties={…} → typed form fields
-export function getActionSchema(type: string, action: string): TypeSchema | null {
-  const schema = getSchema(type);
-  if (!schema?.methods) return null;
-  const method = schema.methods[action];
-  if (!method) return null;
-  if (method.arguments.length === 0) return { title: action, type: 'object', properties: {} };
-  const arg = method.arguments[0];
-  if (arg.type !== 'object' || !arg.properties || Object.keys(arg.properties).length === 0)
-    return { title: action, type: 'object', properties: {} };
-  return {
-    title: method.title ?? action,
-    type: 'object',
-    properties: arg.properties as Record<string, PropertySchema>,
-  };
 }
 
 export function pickDefaultContext(_type: string): string {

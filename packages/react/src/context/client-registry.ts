@@ -4,7 +4,7 @@ import type { ReactHandler } from '#context';
 import { normalizeType, type Class, type ContextHandler, type Handler, type TypeId } from '@treenx/core';
 import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 import type { OpenModule, OpenRegistration } from '@treenx/core/kernel/types';
-import type { ClientTypeDeclaration } from '@treenx/core/comp/client-declaration';
+import type { ClientTypeDeclaration, ClientSchemaDeclaration } from '@treenx/core/comp/client-declaration';
 import type { TextHandler, TextOpenRegistration } from '@treenx/core/contexts/text';
 
 export interface ClientViewDeclaration extends OpenRegistration<ReactHandler> {
@@ -19,8 +19,8 @@ export interface ClientModule extends OpenModule<ReactHandler | TextHandler> {
 }
 
 interface OwnedSchema {
-  readonly declaration: ClientTypeDeclaration;
-  readonly value: ClientTypeDeclaration;
+  readonly declaration: ClientSchemaDeclaration;
+  readonly value: ClientSchemaDeclaration;
 }
 
 export function declareView<T>(type: Class<T>, context: string, handler: ContextHandler<'react', T>, meta?: Record<string, unknown>): ClientViewDeclaration;
@@ -62,7 +62,7 @@ export function createClientRegistry(initial: readonly ClientModule[] = []) {
         if (nextSchemas.has(type.type)) throw new Error(`Duplicate client schema: ${type.type}`);
         const previous = schemas.get(type.type);
         nextSchemas.set(type.type, previous?.declaration === type ? previous : {
-          declaration: type, value: { ...type, defaults: type.createDefaults() },
+          declaration: type, value: { ...type, ...type.createReader() },
         });
       }
     }
@@ -104,6 +104,9 @@ export function createClientRegistry(initial: readonly ClientModule[] = []) {
     type(type: string): ClientTypeDeclaration | undefined {
       const normalized = normalizeType(type);
       return types.get(normalized) ?? schemas.get(normalized)?.value;
+    },
+    schema(type: string) {
+      return schemas.get(normalizeType(type))?.value.schema();
     },
     typesForContext(context: string): string[] {
       const names: string[] = [];

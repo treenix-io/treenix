@@ -79,6 +79,7 @@ export type ChildrenHandle = {
 };
 
 export interface TreeSource {
+  readonly schemaMode?: 'native' | 'declared';
   readonly clientRegistry?: ClientRegistry;
   readonly effects?: TreeEffects;
   readonly connection?: LaneConnection;

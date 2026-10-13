@@ -1,6 +1,7 @@
 import { actionMethods, AsyncGenFn, compileNeeds, type CompOptions } from './index';
 import { predictionCtx, runWithExecCtx } from './context';
 import { normalizeType, type Class, type NodeData } from '#core/component';
+import type { JsonSchema } from '#kernel/types';
 
 interface ClientTypeBehavior {
   readonly type: string;
@@ -13,16 +14,13 @@ interface ClientClassDeclaration extends ClientTypeBehavior {
   readonly kind: 'class';
 }
 
-interface ClientSchemaDeclaration extends ClientTypeBehavior {
+export interface ClientSchemaDeclaration extends ClientTypeBehavior {
   readonly kind: 'schema';
-  readonly createDefaults: () => ClientTypeBehavior['defaults'];
+  readonly schema: () => JsonSchema;
+  readonly createReader: () => Pick<ClientSchemaDeclaration, 'schema' | 'defaults'>;
 }
 
 export type ClientTypeDeclaration = ClientClassDeclaration | ClientSchemaDeclaration;
-
-interface ClientDefaultSchema {
-  readonly properties?: Readonly<Record<string, { readonly default?: unknown }>>;
-}
 
 /** Capture authored client behavior without consulting registration state at execution time. */
 export function declareClientType<T extends object>(type: string, cls: Class<T>, options?: CompOptions<T>): ClientTypeDeclaration {
@@ -41,20 +39,20 @@ export function declareClientType<T extends object>(type: string, cls: Class<T>,
 }
 
 /** Resolve only authored top-level property defaults, without constructing a schema until needed. */
-export function declareClientSchema(type: string, schema: () => ClientDefaultSchema): ClientTypeDeclaration {
-  const createDefaults = () => {
-    let resolved: ClientDefaultSchema | undefined;
-    return () => {
-      resolved ??= schema();
+export function declareClientSchema(type: string, schema: () => JsonSchema): ClientTypeDeclaration {
+  const createReader = () => {
+    let resolved: JsonSchema | undefined;
+    const read = () => resolved ??= schema();
+    return { schema: read, defaults: () => {
       const defaults: Record<string, unknown> = {};
-      for (const [key, property] of Object.entries(resolved.properties ?? {}))
+      for (const [key, property] of Object.entries(read().properties ?? {}))
         if ('default' in property) defaults[key] = property.default;
       return defaults;
-    };
+    } };
   };
   return Object.freeze({ type: normalizeType(type), kind: 'schema',
     contexts: Object.freeze(['schema']),
-    defaults: createDefaults(), createDefaults,
+    ...createReader(), createReader,
     predictions: Object.freeze({}),
   });
 }

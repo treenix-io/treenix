@@ -10,7 +10,8 @@
     "declarationMap": true,
     "sourceMap": true,
     "types": [
-      "node"
+      "node",
+      "vite/client"
     ],
     "module": "ESNext"
   },

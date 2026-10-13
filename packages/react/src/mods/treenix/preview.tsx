@@ -3,7 +3,8 @@
 import { Button } from '#components/ui/button';
 import { Render, RenderContext } from '#context';
 import { stampNode } from '#symbols';
-import { type ComponentData, type NodeData } from '@treenx/core';
+import { createNode, type NodeData } from '@treenx/core';
+import type { JsonSchema } from '@treenx/core/kernel/types';
 import { useClientRegistry } from '#context/client-registry-context';
 import { useMemo, useState } from 'react';
 
@@ -24,14 +25,18 @@ const STRING_HINTS: [RegExp, string][] = [
   [/tag|category/i, 'featured'],
 ];
 
-function mockValue(schema: Record<string, unknown>, fieldName = ''): unknown {
-  const type = schema.type as string | undefined;
+function tupleItems(items: JsonSchema | readonly JsonSchema[]): items is readonly JsonSchema[] {
+  return Array.isArray(items);
+}
+
+function mockValue(schema: JsonSchema, fieldName = ''): unknown {
+  const type = schema.type;
   if (schema.default !== undefined && schema.default !== '' && schema.default !== 0) return schema.default;
-  if (schema.enum) return (schema.enum as unknown[])[0];
+  if (schema.enum) return schema.enum[0];
 
   switch (type) {
     case 'string': {
-      const fmt = schema.format as string | undefined;
+      const fmt = schema.format;
       if (fmt === 'date' || fmt === 'date-time') return '2026-01-15';
       if (fmt === 'email') return 'user@example.com';
       if (fmt === 'uri' || fmt === 'url') return 'https://example.com';
@@ -43,19 +48,20 @@ function mockValue(schema: Record<string, unknown>, fieldName = ''): unknown {
     }
     case 'number':
     case 'integer': {
-      const min = (schema.minimum as number) ?? 0;
-      const max = (schema.maximum as number) ?? 100;
+      const min = schema.minimum ?? 0;
+      const max = schema.maximum ?? 100;
       return Math.round((min + max) / 2) || 42;
     }
     case 'boolean':
       return true;
     case 'array': {
-      const items = schema.items as Record<string, unknown> | undefined;
+      const items = schema.items;
       if (!items) return ['alpha', 'beta', 'gamma'];
+      if (tupleItems(items)) return items.map(item => mockValue(item, fieldName));
       return [mockValue(items, fieldName), mockValue(items, fieldName), mockValue(items, fieldName)];
     }
     case 'object': {
-      const props = (schema.properties ?? {}) as Record<string, Record<string, unknown>>;
+      const props = schema.properties ?? {};
       return mockObject(props);
     }
     default:
@@ -63,7 +69,7 @@ function mockValue(schema: Record<string, unknown>, fieldName = ''): unknown {
   }
 }
 
-export function mockObject(properties: Record<string, Record<string, unknown>>): Record<string, unknown> {
+export function mockObject(properties: Readonly<Record<string, JsonSchema>>): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(properties)) result[k] = mockValue(v, k);
   return result;
@@ -73,17 +79,13 @@ export function mockObject(properties: Record<string, Record<string, unknown>>):
 
 export function TypePreview({ typeName, properties }: {
   typeName: string;
-  properties: Record<string, Record<string, unknown>>;
+  properties: Readonly<Record<string, JsonSchema>>;
 }) {
   const contexts = useClientRegistry().contexts(typeName);
   const reactContexts = contexts.filter(c => c.startsWith('react'));
 
   const initial = useMemo(() => {
-    const n = {
-      $path: `/preview/${typeName.replace(/\./g, '/')}`,
-      $type: typeName,
-      ...mockObject(properties),
-    } as NodeData;
+    const n = createNode(`/preview/${typeName.replace(/\./g, '/')}`, typeName, mockObject(properties));
     stampNode(n);
     return n;
   }, [typeName]);
@@ -95,7 +97,7 @@ export function TypePreview({ typeName, properties }: {
 
   const handleFormChange = (partial: Record<string, unknown>) => {
     setNode(prev => {
-      const next = { ...prev, ...partial, $path: initial.$path, $type: initial.$type } as NodeData;
+      const next = { ...prev, ...partial, $path: initial.$path, $type: initial.$type };
       stampNode(next);
       return next;
     });
