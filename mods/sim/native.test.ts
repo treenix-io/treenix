@@ -106,6 +106,34 @@ it(
       description: 'A mysterious glowing crystal. It hums softly when touched.',
     });
 
+    const priorLog = Array.from({ length: 50 }, (_, index) => ({
+      round: 0,
+      agent: 'Earlier',
+      icon: '',
+      action: `earlier-${index}`,
+      data: {},
+      ts: index,
+    }));
+    await admin.commit({
+      opId: key(),
+      changes: [
+        {
+          op: 'patch',
+          path: '/sim/world',
+          ops: {
+            $set: {
+              '#round': {
+                $type: 'sim.round',
+                current: 0,
+                phase: 'idle',
+                log: priorLog,
+              },
+            },
+          },
+        },
+      ],
+    }).outcome;
+
     const observer = await instance.openSession(instance.setupCredential);
     observer.sub({ node: '/sim/world' });
     let resolveRound = () => {};
@@ -150,15 +178,21 @@ it(
     assert.equal(part(alice, SimPosition).y, 350);
     assert.deepEqual(part(alice, SimMemory).entries, ['The crystal glows']);
     assert.ok(part(alice, SimNearby).agents.includes('Crystal'));
+    assert.equal(part(alice, SimNearby).agents.includes('Bob'), false);
     assert.ok(
       part(await readNode(admin, '/sim/world/eve'), SimEvents).entries.some(
         (event) => event.type === 'speak' && event.from === 'Alice',
       ),
     );
-    assert.equal(round.log.length, 3);
-    assert.equal(round.log[2].action, 'interact→Crystal.use');
+    assert.equal(round.log.length, 50);
+    assert.deepEqual(round.log.slice(0, 47), priorLog.slice(3));
+    assert.deepEqual(
+      round.log.slice(-3).map((entry) => entry.action),
+      ['speak→Eve', 'move', 'interact→Crystal.use'],
+    );
+    assert.equal(round.log[49].action, 'interact→Crystal.use');
     assert.equal(
-      JSON.stringify(round.log[2].data.result),
+      JSON.stringify(round.log[49].data.result),
       JSON.stringify({ result: 'You used Crystal. inspect' }),
     );
     await act('/sim/world', 'add-entity', { id: 'new-agent', name: 'New', type: 'sim.agent' });
