@@ -24,6 +24,7 @@ export type ClientTypeDeclaration = ClientClassDeclaration | ClientSchemaDeclara
 
 /** Capture authored client behavior without consulting registration state at execution time. */
 export function declareClientType<T extends object>(type: string, cls: Class<T>, options?: CompOptions<T>): ClientTypeDeclaration {
+  Object.assign(cls, { $type: normalizeType(type) });
   const methods = actionMethods(cls);
   const needs = compileNeeds(methods, options);
   const predictions: Record<string, ClientTypeDeclaration['predictions'][string]> = {};

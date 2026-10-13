@@ -3,7 +3,7 @@ import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 // AgentSim shared types — used by both service (backend) and view (frontend)
 // Classes per CLAUDE.md: "Exception: for entity definition could be used"
 
-import { registerType } from '@treenx/core/comp';
+
 
 /** Agent 2D map position and interaction radius */
 export class SimPosition {
@@ -79,14 +79,14 @@ export type EventEntry = {
   ts: number;
 };
 
-registerType('sim.position', SimPosition);
-registerType('sim.descriptive', SimDescriptive);
-registerType('sim.memory', SimMemory);
-registerType('sim.config', SimConfig);
-registerType('sim.round', SimRound);
-registerType('sim.events', SimEvents);
-registerType('sim.ai', SimAi);
-registerType('sim.nearby', SimNearby);
+const declaredSimPosition = declareClientType('sim.position', SimPosition);
+const declaredSimDescriptive = declareClientType('sim.descriptive', SimDescriptive);
+const declaredSimMemory = declareClientType('sim.memory', SimMemory);
+const declaredSimConfig = declareClientType('sim.config', SimConfig);
+const declaredSimRound = declareClientType('sim.round', SimRound);
+const declaredSimEvents = declareClientType('sim.events', SimEvents);
+const declaredSimAi = declareClientType('sim.ai', SimAi);
+const declaredSimNearby = declareClientType('sim.nearby', SimNearby);
 
 /** Simulation world entity — aggregates config, round, events. Actions registered separately. */
 export class SimWorld {}
@@ -95,20 +95,20 @@ export class SimAgent {}
 /** Interactable item entity in the world. */
 export class SimItem {}
 
-registerType('sim.world', SimWorld);
-registerType('sim.agent', SimAgent);
-registerType('sim.item', SimItem);
+const declaredSimWorld = declareClientType('sim.world', SimWorld);
+const declaredSimAgent = declareClientType('sim.agent', SimAgent);
+const declaredSimItem = declareClientType('sim.item', SimItem);
 
 export const clientModules = [declareOpenModule('@treenx/mods/sim/types', [], [
-  declareClientType('sim.position', SimPosition),
-  declareClientType('sim.descriptive', SimDescriptive),
-  declareClientType('sim.memory', SimMemory),
-  declareClientType('sim.config', SimConfig),
-  declareClientType('sim.round', SimRound),
-  declareClientType('sim.events', SimEvents),
-  declareClientType('sim.ai', SimAi),
-  declareClientType('sim.nearby', SimNearby),
-  declareClientType('sim.world', SimWorld),
-  declareClientType('sim.agent', SimAgent),
-  declareClientType('sim.item', SimItem),
+  declaredSimPosition,
+  declaredSimDescriptive,
+  declaredSimMemory,
+  declaredSimConfig,
+  declaredSimRound,
+  declaredSimEvents,
+  declaredSimAi,
+  declaredSimNearby,
+  declaredSimWorld,
+  declaredSimAgent,
+  declaredSimItem,
 ])];

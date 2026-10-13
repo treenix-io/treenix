@@ -2,7 +2,7 @@ import { declareClientType } from '@treenx/core/comp/client-declaration';
 import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 // Board task — universal task management, dogfooded inside Treenix
 
-import { registerType } from '@treenx/core/comp';
+
 
 /** Task card — status-driven workflow with assignment and priority */
 export class BoardTask {
@@ -72,12 +72,12 @@ export class BoardTask {
   }
 }
 
-registerType('board.task', BoardTask);
+const declaredBoardTask = declareClientType('board.task', BoardTask);
 
 /** Kanban board — container node, columns are children */
 export class BoardKanban {}
 
-registerType('board.kanban', BoardKanban);
+const declaredBoardKanban = declareClientType('board.kanban', BoardKanban);
 
 /** Sort order — reusable aspect. Composed onto columns AND task cards as `#order`.
  *  Fractional values let a drop land between neighbors without renumbering the list. */
@@ -85,7 +85,7 @@ export class Order {
   order = 0;
 }
 
-registerType('board.order', Order);
+const declaredBoardOrder = declareClientType('board.order', Order);
 
 /** Kanban column — label + color. Sort order lives in the `#order` component. */
 export class BoardColumn {
@@ -93,11 +93,11 @@ export class BoardColumn {
   color = 'border-border';
 }
 
-registerType('board.column', BoardColumn);
+const declaredBoardColumn = declareClientType('board.column', BoardColumn);
 
 export const clientModules = [declareOpenModule('@treenx/mods/board/types', [], [
-  declareClientType('board.task', BoardTask),
-  declareClientType('board.kanban', BoardKanban),
-  declareClientType('board.order', Order),
-  declareClientType('board.column', BoardColumn),
+  declaredBoardTask,
+  declaredBoardKanban,
+  declaredBoardOrder,
+  declaredBoardColumn,
 ])];

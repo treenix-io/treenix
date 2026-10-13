@@ -2,7 +2,7 @@ import { declareClientType } from '@treenx/core/comp/client-declaration';
 import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 import { getComponent, type NodeData, register } from '@treenx/core';
 import { declareText, clientModules as primitiveTextModules } from '@treenx/core/contexts/text';
-import { registerType } from '@treenx/core/comp';
+
 
 /** Speech-to-text config — Whisper model, language, audio path */
 export class WhisperConfig {
@@ -53,13 +53,13 @@ export class WhisperChannel {
   checklist?: WhisperChecklist;
 }
 
-registerType('whisper.config', WhisperConfig);
-registerType('whisper.audio', WhisperAudio);
-registerType('whisper.text', WhisperText);
-registerType('whisper.meta', WhisperMeta);
-registerType('whisper.checklist', WhisperChecklist);
-registerType('whisper.channel', WhisperChannel);
-registerType('whisper.transcription', WhisperTranscription);
+const declaredWhisperConfig = declareClientType('whisper.config', WhisperConfig);
+const declaredWhisperAudio = declareClientType('whisper.audio', WhisperAudio);
+const declaredWhisperText = declareClientType('whisper.text', WhisperText);
+const declaredWhisperMeta = declareClientType('whisper.meta', WhisperMeta);
+const declaredWhisperChecklist = declareClientType('whisper.checklist', WhisperChecklist);
+const declaredWhisperChannel = declareClientType('whisper.channel', WhisperChannel);
+const declaredWhisperTranscription = declareClientType('whisper.transcription', WhisperTranscription);
 
 // 'text' context: readable content for consumers ('' = transcription pending).
 // Registry erases types (system boundary) — data is the node.
@@ -72,11 +72,11 @@ const declaredText = declareText('whisper.transcription', (data) => {
 register(declaredText.type, declaredText.context, declaredText.handler);
 
 export const clientModules = [...primitiveTextModules, declareOpenModule('@treenx/mods/whisper/types', [declaredText], [
-  declareClientType('whisper.config', WhisperConfig),
-  declareClientType('whisper.audio', WhisperAudio),
-  declareClientType('whisper.text', WhisperText),
-  declareClientType('whisper.meta', WhisperMeta),
-  declareClientType('whisper.checklist', WhisperChecklist),
-  declareClientType('whisper.channel', WhisperChannel),
-  declareClientType('whisper.transcription', WhisperTranscription),
+  declaredWhisperConfig,
+  declaredWhisperAudio,
+  declaredWhisperText,
+  declaredWhisperMeta,
+  declaredWhisperChecklist,
+  declaredWhisperChannel,
+  declaredWhisperTranscription,
 ])];

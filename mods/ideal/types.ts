@@ -1,12 +1,12 @@
 import { declareClientType } from '@treenx/core/comp/client-declaration';
 import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
-import { registerType } from '@treenx/core/comp';
+
 
 /** Board of ideas — container that auto-approves popular ones */
 export class IdeasBoard {
   autoApproveThreshold = 5;
 }
-registerType('ideal.board', IdeasBoard);
+const declaredIdealBoard = declareClientType('ideal.board', IdeasBoard);
 
 /** A single idea with voting */
 export class Idea {
@@ -20,9 +20,9 @@ export class Idea {
 
   reject() { this.status = 'rejected'; }
 }
-registerType('ideal.idea', Idea);
+const declaredIdealIdea = declareClientType('ideal.idea', Idea);
 
 export const clientModules = [declareOpenModule('@treenx/mods/ideal/types', [], [
-  declareClientType('ideal.board', IdeasBoard),
-  declareClientType('ideal.idea', Idea),
+  declaredIdealBoard,
+  declaredIdealIdea,
 ])];

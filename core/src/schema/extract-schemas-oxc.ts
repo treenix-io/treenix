@@ -624,7 +624,7 @@ function walk(node: N, visitor: (n: N) => void) {
   }
 }
 
-const REGISTER_FNS = new Set(['defineComponent', 'registerType']);
+const REGISTER_FNS = new Set(['defineComponent', 'registerType', 'declareClientType']);
 
 function findRegistrations(ast: N, fileName: string): ComponentEntry[] {
   const entries: ComponentEntry[] = [];

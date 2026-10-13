@@ -1,6 +1,6 @@
 import { declareClientType } from '@treenx/core/comp/client-declaration';
 import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
-import { registerType } from '@treenx/core/comp';
+
 
 /** Local MCP server binding used by agent clients and external tools. */
 export class McpConfig {
@@ -15,7 +15,7 @@ export class McpConfig {
   /** @title OAuth authorization server issuer */
   authorizationServer = '';
 }
-registerType('mcp.server', McpConfig);
+const declaredMcpServer = declareClientType('mcp.server', McpConfig);
 
 /** API token manager for creating and revoking machine access credentials. */
 export class ApiTokenManager {}
@@ -32,7 +32,7 @@ export interface ApiTokenManager {
   /** @write Revoke the credential identified by its token record. */
   revoke(data: { id: string }): Promise<{ revoked: boolean }>;
 }
-registerType('t.api.tokens', ApiTokenManager, { noOptimistic: ['create', 'revoke'] });
+const declaredTApiTokens = declareClientType('t.api.tokens', ApiTokenManager, { noOptimistic: ['create', 'revoke'] });
 
 /** Single API token. Plaintext is never stored; groups live on its account.
  * @version 1
@@ -51,10 +51,10 @@ export class ApiToken {
   /** @title Created at (epoch ms) */
   createdAt = 0;
 }
-registerType('t.api.token', ApiToken);
+const declaredTApiToken = declareClientType('t.api.token', ApiToken);
 
 export const clientModules = [declareOpenModule('@treenx/mods/mcp/types', [], [
-  declareClientType('mcp.server', McpConfig),
-  declareClientType('t.api.tokens', ApiTokenManager, { noOptimistic: ['create', 'revoke'] }),
-  declareClientType('t.api.token', ApiToken),
+  declaredMcpServer,
+  declaredTApiTokens,
+  declaredTApiToken,
 ])];

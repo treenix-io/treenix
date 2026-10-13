@@ -4,7 +4,7 @@ import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 // Role determines prompt + tool policy. Uses metatron's invokeClaude for LLM.
 // Agent = node, tree = protocol.
 
-import { registerType } from '@treenx/core/comp';
+
 import { agentMethods } from '#agent/methods';
 
 // ── Active query registry ──
@@ -207,7 +207,7 @@ export class AiPlan {
   }
 }
 
-registerType('ai.plan', AiPlan);
+const declaredAiPlan = declareClientType('ai.plan', AiPlan);
 
 /** Human decision record for an agent tool call that requires approval. */
 export class AiApproval {
@@ -254,7 +254,7 @@ export class AiApproval {
   }
 }
 
-registerType('ai.approval', AiApproval);
+const declaredAiApproval = declareClientType('ai.approval', AiApproval);
 
 /** Persistent tool policy — lives on agent (per-agent) or /guardian (global) */
 export class AiPolicy {
@@ -287,12 +287,12 @@ export class AiApprovals {
   source: { $type: 'ref'; $ref: string } = { $type: 'ref', $ref: '' };
 }
 
-registerType('ai.approvals', AiApprovals);
-registerType('ai.policy', AiPolicy);
-registerType('ai.agent', AiAgent);
-registerType('ai.pool', AiPool);
-registerType('ai.assignment', AiAssignment);
-registerType('ai.thread', AiThread);
+const declaredAiApprovals = declareClientType('ai.approvals', AiApprovals);
+const declaredAiPolicy = declareClientType('ai.policy', AiPolicy);
+const declaredAiAgent = declareClientType('ai.agent', AiAgent);
+const declaredAiPool = declareClientType('ai.pool', AiPool);
+const declaredAiAssignment = declareClientType('ai.assignment', AiAssignment);
+const declaredAiThread = declareClientType('ai.thread', AiThread);
 
 /** Interactive chat session — compose with ai.thread for messages */
 export class AiChat {
@@ -309,11 +309,11 @@ export interface AiChat {
 }
 
 // New ECS components + node types
-registerType('ai.chat', AiChat);
-registerType('ai.log', AiLog);
-registerType('ai.run-status', AiRunStatus);
-registerType('ai.cost', AiCost);
-registerType('ai.run', AiRun);
+const declaredAiChat = declareClientType('ai.chat', AiChat);
+const declaredAiLog = declareClientType('ai.log', AiLog);
+const declaredAiRunStatus = declareClientType('ai.run-status', AiRunStatus);
+const declaredAiCost = declareClientType('ai.cost', AiCost);
+const declaredAiRun = declareClientType('ai.run', AiRun);
 
 export interface AiRun {
   /** @description Stop the running task */
@@ -326,17 +326,17 @@ export interface AiChat {
 }
 
 export const clientModules = [declareOpenModule('@treenx/mods/agent/types', [], [
-  declareClientType('ai.plan', AiPlan),
-  declareClientType('ai.approval', AiApproval),
-  declareClientType('ai.approvals', AiApprovals),
-  declareClientType('ai.policy', AiPolicy),
-  declareClientType('ai.agent', AiAgent),
-  declareClientType('ai.pool', AiPool),
-  declareClientType('ai.assignment', AiAssignment),
-  declareClientType('ai.thread', AiThread),
-  declareClientType('ai.chat', AiChat),
-  declareClientType('ai.log', AiLog),
-  declareClientType('ai.run-status', AiRunStatus),
-  declareClientType('ai.cost', AiCost),
-  declareClientType('ai.run', AiRun),
+  declaredAiPlan,
+  declaredAiApproval,
+  declaredAiApprovals,
+  declaredAiPolicy,
+  declaredAiAgent,
+  declaredAiPool,
+  declaredAiAssignment,
+  declaredAiThread,
+  declaredAiChat,
+  declaredAiLog,
+  declaredAiRunStatus,
+  declaredAiCost,
+  declaredAiRun,
 ])];

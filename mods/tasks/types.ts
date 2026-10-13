@@ -3,7 +3,7 @@ import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 // Task type — agents create tasks, Claude (or humans) answer them
 // Spatial routing: status change → node "moves" between query mount folders
 
-import { registerType } from '@treenx/core/comp';
+
 
 /** Agent task — question/answer workflow with status tracking */
 export class Task {
@@ -35,8 +35,8 @@ export class Task {
   }
 }
 
-registerType('task', Task);
+const declaredTask = declareClientType('task', Task);
 
 export const clientModules = [declareOpenModule('@treenx/mods/tasks/types', [], [
-  declareClientType('task', Task),
+  declaredTask,
 ])];

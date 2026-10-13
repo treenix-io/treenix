@@ -5,7 +5,7 @@ import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 // 'react'). Mounted at /sys/routes/v with a wildcard so /v/anything resolves
 // here.
 
-import { registerType } from '@treenx/core/comp';
+
 
 /** Read-only viewer route node. */
 export class ViewShell {
@@ -13,8 +13,8 @@ export class ViewShell {
   reactive?: boolean;
 }
 
-registerType('t.view.shell', ViewShell);
+const declaredTViewShell = declareClientType('t.view.shell', ViewShell);
 
 export const clientModules = [declareOpenModule('@treenx/mods/view-shell/types', [], [
-  declareClientType('t.view.shell', ViewShell),
+  declaredTViewShell,
 ])];

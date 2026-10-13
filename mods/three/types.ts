@@ -1,6 +1,6 @@
 import { declareClientType } from '@treenx/core/comp/client-declaration';
 import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
-import { registerType } from '@treenx/core/comp';
+
 
 /** @title 3D Scene — root container for the Three.js viewport */
 export class T3dScene {}
@@ -222,38 +222,38 @@ export class T3dScript {
 
 // --- Register all ---
 
-registerType('t3d.scene', T3dScene);
-registerType('t3d.object', T3dObject);
-registerType('t3d.mesh', T3dMesh);
-registerType('t3d.material', T3dMaterial);
-registerType('t3d.light', T3dLight);
-registerType('t3d.camera', T3dCamera);
-registerType('t3d.rigidbody', T3dRigidbody);
-registerType('t3d.collider', T3dCollider);
-registerType('t3d.audio', T3dAudio);
-registerType('t3d.particles', T3dParticles);
-registerType('t3d.text', T3dText);
-registerType('t3d.animator', T3dAnimator);
-registerType('t3d.lod', T3dLod);
-registerType('t3d.trail', T3dTrail);
-registerType('t3d.line', T3dLine);
-registerType('t3d.script', T3dScript);
+const declaredT3dScene = declareClientType('t3d.scene', T3dScene);
+const declaredT3dObject = declareClientType('t3d.object', T3dObject);
+const declaredT3dMesh = declareClientType('t3d.mesh', T3dMesh);
+const declaredT3dMaterial = declareClientType('t3d.material', T3dMaterial);
+const declaredT3dLight = declareClientType('t3d.light', T3dLight);
+const declaredT3dCamera = declareClientType('t3d.camera', T3dCamera);
+const declaredT3dRigidbody = declareClientType('t3d.rigidbody', T3dRigidbody);
+const declaredT3dCollider = declareClientType('t3d.collider', T3dCollider);
+const declaredT3dAudio = declareClientType('t3d.audio', T3dAudio);
+const declaredT3dParticles = declareClientType('t3d.particles', T3dParticles);
+const declaredT3dText = declareClientType('t3d.text', T3dText);
+const declaredT3dAnimator = declareClientType('t3d.animator', T3dAnimator);
+const declaredT3dLod = declareClientType('t3d.lod', T3dLod);
+const declaredT3dTrail = declareClientType('t3d.trail', T3dTrail);
+const declaredT3dLine = declareClientType('t3d.line', T3dLine);
+const declaredT3dScript = declareClientType('t3d.script', T3dScript);
 
 export const clientModules = [declareOpenModule('@treenx/mods/three/types', [], [
-  declareClientType('t3d.scene', T3dScene),
-  declareClientType('t3d.object', T3dObject),
-  declareClientType('t3d.mesh', T3dMesh),
-  declareClientType('t3d.material', T3dMaterial),
-  declareClientType('t3d.light', T3dLight),
-  declareClientType('t3d.camera', T3dCamera),
-  declareClientType('t3d.rigidbody', T3dRigidbody),
-  declareClientType('t3d.collider', T3dCollider),
-  declareClientType('t3d.audio', T3dAudio),
-  declareClientType('t3d.particles', T3dParticles),
-  declareClientType('t3d.text', T3dText),
-  declareClientType('t3d.animator', T3dAnimator),
-  declareClientType('t3d.lod', T3dLod),
-  declareClientType('t3d.trail', T3dTrail),
-  declareClientType('t3d.line', T3dLine),
-  declareClientType('t3d.script', T3dScript),
+  declaredT3dScene,
+  declaredT3dObject,
+  declaredT3dMesh,
+  declaredT3dMaterial,
+  declaredT3dLight,
+  declaredT3dCamera,
+  declaredT3dRigidbody,
+  declaredT3dCollider,
+  declaredT3dAudio,
+  declaredT3dParticles,
+  declaredT3dText,
+  declaredT3dAnimator,
+  declaredT3dLod,
+  declaredT3dTrail,
+  declaredT3dLine,
+  declaredT3dScript,
 ])];

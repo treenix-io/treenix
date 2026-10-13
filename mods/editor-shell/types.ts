@@ -4,13 +4,13 @@ import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 // for 'react' context renders the tree editor. Mounted at /sys/routes/t with
 // a wildcard route component so URLs like /t/foo/bar resolve here.
 
-import { registerType } from '@treenx/core/comp';
+
 
 /** Admin shell route node. */
 export class EditorShell {}
 
-registerType('t.editor.shell', EditorShell);
+const declaredTEditorShell = declareClientType('t.editor.shell', EditorShell);
 
 export const clientModules = [declareOpenModule('@treenx/mods/editor-shell/types', [], [
-  declareClientType('t.editor.shell', EditorShell),
+  declaredTEditorShell,
 ])];

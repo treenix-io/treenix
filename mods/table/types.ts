@@ -1,6 +1,6 @@
 import { declareClientType } from '@treenx/core/comp/client-declaration';
 import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
-import { registerType } from '@treenx/core/comp';
+
 
 export type ColumnConfig = {
   field: string
@@ -21,8 +21,8 @@ export class UITable {
   columns: Record<string, ColumnConfig[]> = {};
 }
 
-registerType('ui.table', UITable);
+const declaredUiTable = declareClientType('ui.table', UITable);
 
 export const clientModules = [declareOpenModule('@treenx/mods/table/types', [], [
-  declareClientType('ui.table', UITable),
+  declaredUiTable,
 ])];

@@ -1,6 +1,6 @@
 import { declareClientType } from '@treenx/core/comp/client-declaration';
 import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
-import { registerType } from '@treenx/core/comp';
+
 
 /** Single checklist item with a title and completion flag. */
 class TodoItem {
@@ -18,9 +18,9 @@ class TodoList {
   title = 'My Todos';
 }
 
-registerType('todo.item', TodoItem);
+const declaredTodoItem = declareClientType('todo.item', TodoItem);
 // Native child creation has no client-side prediction.
-registerType('todo.list', TodoList, { noOptimistic: ['add'] });
+const declaredTodoList = declareClientType('todo.list', TodoList, { noOptimistic: ['add'] });
 export { TodoItem, TodoList };
 
 interface TodoList {
@@ -29,6 +29,6 @@ interface TodoList {
 }
 
 export const clientModules = [declareOpenModule('@treenx/mods/todo/types', [], [
-  declareClientType('todo.item', TodoItem),
-  declareClientType('todo.list', TodoList, { noOptimistic: ['add'] }),
+  declaredTodoItem,
+  declaredTodoList,
 ])];

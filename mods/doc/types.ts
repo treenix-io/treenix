@@ -1,6 +1,6 @@
 import { declareClientType } from '@treenx/core/comp/client-declaration';
 import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
-import { registerType } from '@treenx/core/comp';
+
 
 /** Rich document — Tiptap JSON with embedded Treenix components */
 export class DocPage {
@@ -14,7 +14,7 @@ export class DocPage {
     ],
   };
 }
-registerType('doc.page', DocPage);
+const declaredDocPage = declareClientType('doc.page', DocPage);
 
 /** YAML frontmatter from a markdown file. Known keys are typed; arbitrary keys
  *  preserved in `extra` so we round-trip third-party SSG conventions losslessly. */
@@ -26,9 +26,9 @@ export class DocFrontmatter {
   /** @title Order */ order?: number;
   /** @title Extra */ extra?: Record<string, unknown>;
 }
-registerType('doc.frontmatter', DocFrontmatter);
+const declaredDocFrontmatter = declareClientType('doc.frontmatter', DocFrontmatter);
 
 export const clientModules = [declareOpenModule('@treenx/mods/doc/types', [], [
-  declareClientType('doc.page', DocPage),
-  declareClientType('doc.frontmatter', DocFrontmatter),
+  declaredDocPage,
+  declaredDocFrontmatter,
 ])];

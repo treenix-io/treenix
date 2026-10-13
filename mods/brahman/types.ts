@@ -5,7 +5,7 @@ import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 
 import { getComponent, type NodeData, register } from '@treenx/core';
 import { declareText, clientModules as primitiveTextModules } from '@treenx/core/contexts/text';
-import { registerType } from '@treenx/core/comp';
+
 
 // ── Shared types ──
 
@@ -101,7 +101,7 @@ export class BotConfig {
   /** @title Running */
   running = true;
 }
-registerType('brahman.bot', BotConfig);
+const declaredBrahmanBot = declareClientType('brahman.bot', BotConfig);
 
 // ── Page ──
 
@@ -112,7 +112,7 @@ export class PageConfig {
   /** @description Ordered child action paths */
   positions: string[] = [];
 }
-registerType('brahman.page', PageConfig);
+const declaredBrahmanPage = declareClientType('brahman.page', PageConfig);
 
 // ── Actions ──
 
@@ -131,7 +131,7 @@ export class MessageAction {
   /** @title Reply to message ID @description Session field with message ID */
   replyToMsgId = '';
 }
-registerType('brahman.action.message', MessageAction);
+const declaredBrahmanActionMessage = declareClientType('brahman.action.message', MessageAction);
 
 /** Ask question — prompt for text/photo input, save answer */
 export class QuestionAction {
@@ -144,7 +144,7 @@ export class QuestionAction {
   /** @title Delete messages @description Delete question and answer after receiving */
   deleteMessages = false;
 }
-registerType('brahman.action.question', QuestionAction);
+const declaredBrahmanActionQuestion = declareClientType('brahman.action.question', QuestionAction);
 
 /** Conditional branch — evaluate JS expression, run if/else action */
 export class IfElseAction {
@@ -157,19 +157,19 @@ export class IfElseAction {
   /** @title Stop after action */
   stopAfterAction = false;
 }
-registerType('brahman.action.ifelse', IfElseAction);
+const declaredBrahmanActionIfelse = declareClientType('brahman.action.ifelse', IfElseAction);
 
 /** Navigate to page — redirect conversation flow */
 export class PageNavAction {
   /** @title Target page @description Path to page node */
   targetPage = '';
 }
-registerType('brahman.action.page', PageNavAction);
+const declaredBrahmanActionPage = declareClientType('brahman.action.page', PageNavAction);
 
 /** Go back — return to previous page in history */
 export class BackAction {
 }
-registerType('brahman.action.back', BackAction);
+const declaredBrahmanActionBack = declareClientType('brahman.action.back', BackAction);
 
 /** Set user tag — assign key-value metadata to user */
 export class TagAction {
@@ -178,7 +178,7 @@ export class TagAction {
   /** @title Value expression */
   value = 'true';
 }
-registerType('brahman.action.tag', TagAction);
+const declaredBrahmanActionTag = declareClientType('brahman.action.tag', TagAction);
 
 /** Broadcast message — send action to users matching tag filter */
 export class BroadcastAction {
@@ -187,7 +187,7 @@ export class BroadcastAction {
   /** @title Action to broadcast @description Path to action node */
   action = '';
 }
-registerType('brahman.action.broadcast', BroadcastAction);
+const declaredBrahmanActionBroadcast = declareClientType('brahman.action.broadcast', BroadcastAction);
 
 /** Read session value — extract data from user session */
 export class GetValueAction {
@@ -196,7 +196,7 @@ export class GetValueAction {
   /** @title Save to */
   saveTo = '';
 }
-registerType('brahman.action.getvalue', GetValueAction);
+const declaredBrahmanActionGetvalue = declareClientType('brahman.action.getvalue', GetValueAction);
 
 /** Write session value — tree data in user session */
 export class SetValueAction {
@@ -205,7 +205,7 @@ export class SetValueAction {
   /** @title Save to */
   saveTo = '';
 }
-registerType('brahman.action.setvalue', SetValueAction);
+const declaredBrahmanActionSetvalue = declareClientType('brahman.action.setvalue', SetValueAction);
 
 /** Parse parameters — split and name input parts */
 export class ParamsAction {
@@ -216,7 +216,7 @@ export class ParamsAction {
   /** @title Parameter names @format tags */
   names: string[] = [];
 }
-registerType('brahman.action.params', ParamsAction);
+const declaredBrahmanActionParams = declareClientType('brahman.action.params', ParamsAction);
 
 /** Send file — deliver photo/document/video/audio to chat */
 export class FileAction {
@@ -225,7 +225,7 @@ export class FileAction {
   /** @title Override type @description photo, document, video, audio, voice */
   asType = '';
 }
-registerType('brahman.action.file', FileAction);
+const declaredBrahmanActionFile = declareClientType('brahman.action.file', FileAction);
 
 // ── Eval ──
 
@@ -234,14 +234,14 @@ export class EvalAction {
   /** @title JavaScript code @format textarea @description Async function body, receives ctx object */
   value = '';
 }
-registerType('brahman.action.eval', EvalAction);
+const declaredBrahmanActionEval = declareClientType('brahman.action.eval', EvalAction);
 
 // ── Remove message ──
 
 /** Remove message — delete bot message from chat */
 export class RemoveAction {
 }
-registerType('brahman.action.remove', RemoveAction);
+const declaredBrahmanActionRemove = declareClientType('brahman.action.remove', RemoveAction);
 
 // ── Emit text (synthetic text injection) ──
 
@@ -250,7 +250,7 @@ export class EmitTextAction {
   /** @title Text template @format textarea @description Template for text to re-process */
   from = '';
 }
-registerType('brahman.action.emittext', EmitTextAction);
+const declaredBrahmanActionEmittext = declareClientType('brahman.action.emittext', EmitTextAction);
 
 // ── Forward message ──
 
@@ -261,21 +261,21 @@ export class ForwardAction {
   /** @title Forward to @description Chat/user ID template */
   toFrom = '';
 }
-registerType('brahman.action.forward', ForwardAction);
+const declaredBrahmanActionForward = declareClientType('brahman.action.forward', ForwardAction);
 
 // ── Reset session ──
 
 /** Reset session — clear all user session data */
 export class ResetSessionAction {
 }
-registerType('brahman.action.resetsession', ResetSessionAction);
+const declaredBrahmanActionResetsession = declareClientType('brahman.action.resetsession', ResetSessionAction);
 
 // ── Reset history ──
 
 /** Reset history — clear page navigation stack */
 export class ResetHistoryAction {
 }
-registerType('brahman.action.resethistory', ResetHistoryAction);
+const declaredBrahmanActionResethistory = declareClientType('brahman.action.resethistory', ResetHistoryAction);
 
 // ── On error (conditional error handler) ──
 
@@ -286,7 +286,7 @@ export class OnErrorAction {
   /** @title Action path @description Path to action node to run */
   action = '';
 }
-registerType('brahman.action.onerror', OnErrorAction);
+const declaredBrahmanActionOnerror = declareClientType('brahman.action.onerror', OnErrorAction);
 
 // ── Keyword select ──
 
@@ -302,7 +302,7 @@ export class KeywordSelectAction {
   /** @title Keyword entries @description Array of {keywords, message} pairs */
   elements: KeywordEntry[] = [];
 }
-registerType('brahman.action.keywordselect', KeywordSelectAction);
+const declaredBrahmanActionKeywordselect = declareClientType('brahman.action.keywordselect', KeywordSelectAction);
 
 // ── Call tree action ──
 
@@ -321,7 +321,7 @@ export class CallAction {
   /** @title Save result to @description Session key for result */
   saveTo = '';
 }
-registerType('brahman.action.call', CallAction);
+const declaredBrahmanActionCall = declareClientType('brahman.action.call', CallAction);
 
 // ── Select language ──
 
@@ -330,7 +330,7 @@ export class SelectLanguageAction {
   /** @title Text @format tstring */
   text: TString = {};
 }
-registerType('brahman.action.selectlang', SelectLanguageAction);
+const declaredBrahmanActionSelectlang = declareClientType('brahman.action.selectlang', SelectLanguageAction);
 
 // ── Runtime entities ──
 
@@ -347,7 +347,7 @@ export class BrahmanUser {
   /** @title User tags */
   tags: string[] = [];
 }
-registerType('brahman.user', BrahmanUser);
+const declaredBrahmanUser = declareClientType('brahman.user', BrahmanUser);
 
 /** User conversation state — session data, history, pending callbacks */
 export class BrahmanSession {
@@ -357,7 +357,7 @@ export class BrahmanSession {
   /** @title Pending callbacks @description messageType → action path */
   callbacks: Record<string, string> = {};
 }
-registerType('brahman.session', BrahmanSession);
+const declaredBrahmanSession = declareClientType('brahman.session', BrahmanSession);
 
 /** Incoming Telegram message persisted as a node (id = tg-<chatId>-<messageId> for idempotency) */
 export class BrahmanMessage {
@@ -370,7 +370,7 @@ export class BrahmanMessage {
   text = '';
   createdAt = 0;
 }
-registerType('brahman.message', BrahmanMessage);
+const declaredBrahmanMessage = declareClientType('brahman.message', BrahmanMessage);
 
 // 'text' context = readable content extractor; consumers resolve(type, 'text') without importing this mod.
 // Registry erases types (system boundary) — data is the node.
@@ -383,30 +383,30 @@ const declaredText = declareText('brahman.message', (data) => {
 register(declaredText.type, declaredText.context, declaredText.handler);
 
 export const clientModules = [...primitiveTextModules, declareOpenModule('@treenx/mods/brahman/types', [declaredText], [
-  declareClientType('brahman.bot', BotConfig),
-  declareClientType('brahman.page', PageConfig),
-  declareClientType('brahman.action.message', MessageAction),
-  declareClientType('brahman.action.question', QuestionAction),
-  declareClientType('brahman.action.ifelse', IfElseAction),
-  declareClientType('brahman.action.page', PageNavAction),
-  declareClientType('brahman.action.back', BackAction),
-  declareClientType('brahman.action.tag', TagAction),
-  declareClientType('brahman.action.broadcast', BroadcastAction),
-  declareClientType('brahman.action.getvalue', GetValueAction),
-  declareClientType('brahman.action.setvalue', SetValueAction),
-  declareClientType('brahman.action.params', ParamsAction),
-  declareClientType('brahman.action.file', FileAction),
-  declareClientType('brahman.action.eval', EvalAction),
-  declareClientType('brahman.action.remove', RemoveAction),
-  declareClientType('brahman.action.emittext', EmitTextAction),
-  declareClientType('brahman.action.forward', ForwardAction),
-  declareClientType('brahman.action.resetsession', ResetSessionAction),
-  declareClientType('brahman.action.resethistory', ResetHistoryAction),
-  declareClientType('brahman.action.onerror', OnErrorAction),
-  declareClientType('brahman.action.keywordselect', KeywordSelectAction),
-  declareClientType('brahman.action.call', CallAction),
-  declareClientType('brahman.action.selectlang', SelectLanguageAction),
-  declareClientType('brahman.user', BrahmanUser),
-  declareClientType('brahman.session', BrahmanSession),
-  declareClientType('brahman.message', BrahmanMessage),
+  declaredBrahmanBot,
+  declaredBrahmanPage,
+  declaredBrahmanActionMessage,
+  declaredBrahmanActionQuestion,
+  declaredBrahmanActionIfelse,
+  declaredBrahmanActionPage,
+  declaredBrahmanActionBack,
+  declaredBrahmanActionTag,
+  declaredBrahmanActionBroadcast,
+  declaredBrahmanActionGetvalue,
+  declaredBrahmanActionSetvalue,
+  declaredBrahmanActionParams,
+  declaredBrahmanActionFile,
+  declaredBrahmanActionEval,
+  declaredBrahmanActionRemove,
+  declaredBrahmanActionEmittext,
+  declaredBrahmanActionForward,
+  declaredBrahmanActionResetsession,
+  declaredBrahmanActionResethistory,
+  declaredBrahmanActionOnerror,
+  declaredBrahmanActionKeywordselect,
+  declaredBrahmanActionCall,
+  declaredBrahmanActionSelectlang,
+  declaredBrahmanUser,
+  declaredBrahmanSession,
+  declaredBrahmanMessage,
 ])];

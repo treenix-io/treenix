@@ -1,6 +1,6 @@
 import { declareClientType } from '@treenx/core/comp/client-declaration';
 import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
-import { registerType } from '@treenx/core/comp';
+
 
 /** @description Mind map visualization — radial tree of Treenix nodes */
 export class MindMapConfig {
@@ -9,8 +9,8 @@ export class MindMapConfig {
   /** Max children per expanded level */
   maxChildren = 50;
 }
-registerType('mindmap.map', MindMapConfig);
+const declaredMindmapMap = declareClientType('mindmap.map', MindMapConfig);
 
 export const clientModules = [declareOpenModule('@treenx/mods/mindmap/types', [], [
-  declareClientType('mindmap.map', MindMapConfig),
+  declaredMindmapMap,
 ])];

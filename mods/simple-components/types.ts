@@ -3,7 +3,7 @@ import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 // Universal ECS components — attach to any node via named key
 // Pattern: node.checklist = { $type: 'simple.checklist', items: [...] }
 
-import { registerType } from '@treenx/core/comp';
+
 
 // ── Checklist ──
 
@@ -32,7 +32,7 @@ export class TChecklist {
   }
 }
 
-registerType('simple.checklist', TChecklist);
+const declaredSimpleChecklist = declareClientType('simple.checklist', TChecklist);
 
 // ── Tags ──
 
@@ -54,7 +54,7 @@ export class TTags {
   }
 }
 
-registerType('simple.tags', TTags);
+const declaredSimpleTags = declareClientType('simple.tags', TTags);
 
 // ── Estimate ──
 
@@ -70,7 +70,7 @@ export class TEstimate {
   }
 }
 
-registerType('simple.estimate', TEstimate);
+const declaredSimpleEstimate = declareClientType('simple.estimate', TEstimate);
 
 // ── Links ──
 
@@ -92,7 +92,7 @@ export class TLinks {
   }
 }
 
-registerType('simple.links', TLinks);
+const declaredSimpleLinks = declareClientType('simple.links', TLinks);
 
 // ── Comments ──
 
@@ -110,7 +110,7 @@ export class TComments {
   }
 }
 
-registerType('simple.comments', TComments);
+const declaredSimpleComments = declareClientType('simple.comments', TComments);
 
 // ── Time Track ──
 
@@ -134,7 +134,7 @@ export class TTimeTrack {
   }
 }
 
-registerType('simple.time-track', TTimeTrack);
+const declaredSimpleTimeTrack = declareClientType('simple.time-track', TTimeTrack);
 
 // ── Description ──
 
@@ -146,7 +146,7 @@ export class TDescription {
   text = '';
 }
 
-registerType('t.description', TDescription);
+const declaredTDescription = declareClientType('t.description', TDescription);
 
 // ── Attachable component registry ──
 
@@ -170,11 +170,11 @@ export const ATTACHABLE_COMPONENTS: AttachableComponent[] = [
 ];
 
 export const clientModules = [declareOpenModule('@treenx/mods/simple-components/types', [], [
-  declareClientType('simple.checklist', TChecklist),
-  declareClientType('simple.tags', TTags),
-  declareClientType('simple.estimate', TEstimate),
-  declareClientType('simple.links', TLinks),
-  declareClientType('simple.comments', TComments),
-  declareClientType('simple.time-track', TTimeTrack),
-  declareClientType('t.description', TDescription),
+  declaredSimpleChecklist,
+  declaredSimpleTags,
+  declaredSimpleEstimate,
+  declaredSimpleLinks,
+  declaredSimpleComments,
+  declaredSimpleTimeTrack,
+  declaredTDescription,
 ])];
