@@ -163,7 +163,7 @@
     "build:ssr": "NODE_OPTIONS='--import tsx --conditions=development' vite build --ssr src/ssr/entry-server.ts --outDir ../ssr/dist-ssr --emptyOutDir",
     "build:front": "npm run build:spa && npm run build:ssr",
     "prepack": "npm run build",
-    "test": "tsx --conditions development --experimental-test-module-mocks --import ./test/register-dom.mjs --import ./test/register-css.mjs --test 'src/**/*.test.ts'",
+    "test": "tsx --conditions development --experimental-test-module-mocks --import ./test/register-dom.mjs --import ./test/register-css.mjs --test --test-concurrency=4 'src/**/*.test.ts'",
     "test:published-views": "tsx --conditions development --experimental-test-module-mocks --import ./test/register-dom.mjs --import ./test/register-css.mjs --test --test-name-pattern='published view uses its source|compiled capabilities' src/editor/native-editor.test.ts src/mods/uix/compile.test.ts",
     "dev": "NODE_OPTIONS=\"$NODE_OPTIONS --import tsx --conditions=development\" vite",
     "dev:native": "NODE_OPTIONS='--import tsx --conditions=development' vite --config vite.native.config.ts",
