@@ -29,6 +29,22 @@ function findModsDir(): string {
   return resolve('mods');
 }
 
+function moduleOwner(modsDir: string, name: string): string {
+  let directory = modsDir;
+  for (;;) {
+    const packagePath = join(directory, 'package.json');
+    if (existsSync(packagePath)) {
+      const declaration: { name?: unknown } = JSON.parse(readFileSync(packagePath, 'utf8'));
+      if (typeof declaration.name !== 'string' || declaration.name.length === 0)
+        throw new TypeError('Native modules require a named package');
+      return `${declaration.name}/${name}`;
+    }
+    const parent = resolve(directory, '..');
+    if (parent === directory) throw new TypeError('Native modules require a named package');
+    directory = parent;
+  }
+}
+
 function addToRootSeeds(name: string) {
   let dir = process.cwd();
   for (let i = 0; i < 10; i++) {
@@ -83,37 +99,65 @@ export async function modCreate(args: string[], yes: boolean) {
   }
 
   const cls = toClassName(name);
+  const owner = moduleOwner(modsDir, name);
 
   mkdirSync(modDir, { recursive: true });
 
   writeFileSync(join(modDir, 'types.ts'),
-`import { registerType } from '@treenx/core/comp';
+`import { declareClientType } from '@treenx/core/comp/client-declaration';
+import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 
 export class ${cls} {
   title = '';
 }
 
-registerType('${name}', ${cls});
+export const clientModules = [declareOpenModule(${JSON.stringify(owner + '/types')}, [], [declareClientType('${name}', ${cls})])];
 `);
 
   writeFileSync(join(modDir, 'seed.ts'),
-`import { registerPrefab } from '@treenx/core/mod';
+`import { nativeSeed } from '@treenx/mods/prefab/seed';
 
-registerPrefab('${name}', 'seed', [
+export const seeds = nativeSeed('${name}', [
   { $path: '${name}', $type: 'dir' },
   { $path: '${name}/example', $type: '${name}', title: 'Example' },
 ]);
 `);
 
   writeFileSync(join(modDir, 'view.tsx'),
-`import { view } from '@treenx/react';
+`import React from 'react';
+import { view } from '@treenx/react';
+import { declareClientModule } from '@treenx/react/context/client-registry';
 import { ${cls} } from './types';
 
-view(${cls}, ({ value }) => (
+export const clientModules = [declareClientModule(${JSON.stringify(owner + '/view')}, [view(${cls}, ({ value }) => (
   <div className="p-4">
     <h2 className="text-lg font-bold">{value.title}</h2>
   </div>
-));
+))])];
+`);
+
+  writeFileSync(join(modDir, 'kernel.ts'),
+`import { normalizeType } from '@treenx/core';
+import { KernelError } from '@treenx/core/errors';
+import type { NativeModuleDeployment } from '@treenx/core/kernel/manifest';
+import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
+import { buildTypeDef } from '@treenx/core/kernel/typedef';
+import { readSchemasFromDir } from '@treenx/core/schema/load';
+import { ${cls} } from './types';
+import { seeds } from './seed';
+
+export default function createNativeModule(): NativeModuleDeployment {
+  const id = ${JSON.stringify(owner)};
+  const name = normalizeType(${cls});
+  const schema = readSchemasFromDir(new URL('./schemas/', import.meta.url).pathname).find(schema => schema.$id === name);
+  if (schema === undefined) throw new KernelError('INVALID', 'Generate the authored module schema before loading it');
+  const type = buildTypeDef(${cls}, { name, module: id, security: 'ordinary', schema });
+  return { manifest: { ...declareOpenModule(id, [
+    { type: name, context: 'class', handler: ${cls} },
+    { type: name, context: 'schema', handler: () => schema },
+    ...Object.entries(type.actions).map(([action, handler]) => ({ type: name, context: 'action:' + action, handler })),
+  ]), types: [type], security: [] }, seeds };
+}
 `);
 
   addToRootSeeds(name);
@@ -124,10 +168,12 @@ view(${cls}, ({ value }) => (
     types.ts   — fields and actions
     view.tsx   — custom view
     seed.ts    — initial data
+    kernel.ts  — native module factory
 
   Next:
     1. Edit types.ts
-    2. Restart the dev server
-    3. Visit /t/${name}/example
+    2. Run npm run schema
+    3. Restart the dev server
+    4. Visit /t/${name}/example
 `);
 }
