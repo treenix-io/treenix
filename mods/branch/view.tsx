@@ -1,4 +1,4 @@
-import { register } from '@treenx/core';
+import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
 import { useActions, type View } from '@treenx/react';
 import { Button } from '@treenx/react/ui/button';
 import { useEffect, useState } from 'react';
@@ -100,4 +100,8 @@ const BranchView: View<Branch> = ({ value, ctx }) => {
   );
 };
 
-register(Branch, 'react', BranchView);
+export const clientModules = [
+  declareClientModule('@treenx/mods/branch/view', [
+    declareView(Branch, 'react', BranchView)
+  ])
+];

@@ -1,3 +1,5 @@
+import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
+import * as React from 'react';
 // View shell — registered for t.view.shell. Public read-only view of any node
 // at the URL tail. Works in both `react` (client) and `site` (SSR) contexts:
 // no auth gate (SSR is anonymous-only by design), no mutations, no chrome.
@@ -20,7 +22,6 @@ import {
   type View,
   view,
 } from '@treenx/react';
-import { register } from '@treenx/core';
 import { useRouteShell } from '@treenx/react/router/use-route-shell';
 import { ViewShell } from './types';
 
@@ -68,5 +69,9 @@ const ViewShellView: View<ViewShell> = ({ value, ctx }) => {
   );
 };
 
-view(ViewShell, ViewShellView);
-register(ViewShell, 'site', ViewShellView);
+export const clientModules = [
+  declareClientModule('@treenx/mods/view-shell/view', [
+    view(ViewShell, ViewShellView),
+    declareView(ViewShell, 'site', ViewShellView)
+  ])
+];

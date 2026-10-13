@@ -1,6 +1,6 @@
 // Lazy loader: registers doc.page view but defers tiptap import until render
 
-import { register } from '@treenx/core';
+import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
 import { type View } from '@treenx/react';
 import { DocPage } from './types';
 import { lazy, Suspense } from 'react';
@@ -74,8 +74,8 @@ const DocPageCard: View<DocPage> = ({ value, ctx }) => {
   );
 }
 
-export function registerDocViews() {
-  register('doc.page', 'react', ({ onChange, ...props }) => DocPageView(props));
-  register('doc.page', 'react:edit', DocPageView);
-  register('doc.page', 'react:card', DocPageCard as any);
-}
+export const clientModules = [declareClientModule('@treenx/mods/doc/renderers', [
+  declareView('doc.page', 'react', ({ onChange, ...props }) => DocPageView(props)),
+  declareView('doc.page', 'react:edit', DocPageView),
+  declareView('doc.page', 'react:card', DocPageCard),
+])];

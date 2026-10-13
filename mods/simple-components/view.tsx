@@ -1,7 +1,8 @@
+import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
 import type { PresentationNode } from '@treenx/react';
 // Universal component views — compact, embeddable in any node
 
-import { type NodeData, register } from '@treenx/core';
+import { type NodeData } from '@treenx/core';
 import { type View, useActions } from '@treenx/react';
 import { useTreeEffects } from '@treenx/react';
 import { cn } from '@treenx/react';
@@ -89,7 +90,7 @@ const ChecklistView: View<TChecklist> = ({ value }) => {
   );
 };
 
-register(TChecklist, 'react:edit', ChecklistView);
+
 
 // ── Tags ──
 
@@ -166,7 +167,7 @@ const TagsView: View<TTags> = ({ value }) => {
   );
 };
 
-register(TTags, 'react:edit', TagsView);
+
 
 // ── Estimate ──
 
@@ -228,7 +229,7 @@ const EstimateView: View<TEstimate> = ({ value }) => {
   );
 };
 
-register(TEstimate, 'react:edit', EstimateView);
+
 
 // ── Links ──
 
@@ -292,7 +293,7 @@ const LinksView: View<TLinks> = ({ value }) => {
   );
 };
 
-register(TLinks, 'react:edit', LinksView);
+
 
 // ── Comments ──
 
@@ -340,7 +341,7 @@ const CommentsView: View<TComments> = ({ value }) => {
   );
 };
 
-register(TComments, 'react:edit', CommentsView);
+
 
 // ── Time Track ──
 
@@ -401,7 +402,7 @@ const TimeTrackView: View<TTimeTrack> = ({ value }) => {
   );
 };
 
-register(TTimeTrack, 'react:edit', TimeTrackView);
+
 
 // ── Compact view (`react:compact`) — tiny preview, no controls ──
 
@@ -438,7 +439,7 @@ const ChecklistCompact: View<TChecklist> = ({ value }) => {
   );
 };
 
-register(TChecklist, 'react:compact', ChecklistCompact);
+
 
 // ── Full view (default `react` context) — all items, toggle, progress ──
 
@@ -484,7 +485,7 @@ const ChecklistFull: View<TChecklist> = ({ value }) => {
   );
 };
 
-register(TChecklist, 'react', ChecklistFull);
+
 
 const TagsRead: View<TTags> = ({ value }) => {
   const items = value.items;
@@ -501,7 +502,7 @@ const TagsRead: View<TTags> = ({ value }) => {
   );
 };
 
-register(TTags, 'react', TagsRead);
+
 
 const EstimateRead: View<TEstimate> = ({ value }) => {
   const v = typeof value?.value === 'number' ? value.value : 0;
@@ -516,7 +517,7 @@ const EstimateRead: View<TEstimate> = ({ value }) => {
   );
 };
 
-register(TEstimate, 'react', EstimateRead);
+
 
 const LinksRead: View<TLinks> = ({ value }) => {
   const items = value.items;
@@ -541,7 +542,7 @@ const LinksRead: View<TLinks> = ({ value }) => {
   );
 };
 
-register(TLinks, 'react', LinksRead);
+
 
 const CommentsRead: View<TComments> = ({ value }) => {
   const items = value.items;
@@ -555,7 +556,7 @@ const CommentsRead: View<TComments> = ({ value }) => {
   );
 };
 
-register(TComments, 'react', CommentsRead);
+
 
 const TimeTrackRead: View<TTimeTrack> = ({ value }) => {
   const entries = value.entries;
@@ -575,7 +576,7 @@ const TimeTrackRead: View<TTimeTrack> = ({ value }) => {
   );
 };
 
-register(TTimeTrack, 'react', TimeTrackRead);
+
 
 // ── AttachMenu — universal "add component" popover ──
 
@@ -712,3 +713,21 @@ export function AttachMenu({ node }: { node: PresentationNode }) {
     </div>
   );
 }
+
+export const clientModules = [
+  declareClientModule('@treenx/mods/simple-components/view', [
+    declareView(TChecklist, 'react:edit', ChecklistView),
+    declareView(TTags, 'react:edit', TagsView),
+    declareView(TEstimate, 'react:edit', EstimateView),
+    declareView(TLinks, 'react:edit', LinksView),
+    declareView(TComments, 'react:edit', CommentsView),
+    declareView(TTimeTrack, 'react:edit', TimeTrackView),
+    declareView(TChecklist, 'react:compact', ChecklistCompact),
+    declareView(TChecklist, 'react', ChecklistFull),
+    declareView(TTags, 'react', TagsRead),
+    declareView(TEstimate, 'react', EstimateRead),
+    declareView(TLinks, 'react', LinksRead),
+    declareView(TComments, 'react', CommentsRead),
+    declareView(TTimeTrack, 'react', TimeTrackRead)
+  ])
+];

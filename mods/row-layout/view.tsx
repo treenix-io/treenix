@@ -1,5 +1,6 @@
+import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
 import type { PresentationNode } from '@treenx/react';
-import { type ComponentData, getComponents, getContextsForType, type NodeData, register } from '@treenx/core'
+import { type ComponentData, getComponents, getContextsForType, type NodeData } from '@treenx/core'
 import { Render, RenderContext, type View } from '@treenx/react'
 import { useChildren } from '@treenx/react'
 import {
@@ -259,4 +260,8 @@ const RowColLayoutView: View<RowColLayout> = ({ value, onChange, ctx }) => {
   )
 }
 
-register('layout.row-col', 'react:layout', RowColLayoutView)
+export const clientModules = [
+  declareClientModule('@treenx/mods/row-layout/view', [
+    declareView('layout.row-col', 'react:layout', RowColLayoutView)
+  ])
+];

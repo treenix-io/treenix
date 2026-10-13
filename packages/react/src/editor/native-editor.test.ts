@@ -15,7 +15,13 @@ import {
 } from '@treenx/core/kernel/types';
 import { createInstanceFoundation } from '../../../../core/src/kernel/instance';
 import { createMemoryStore } from '../../../../core/src/kernel/store/memory';
-import { Render } from '#context';
+import { Render, RenderContext } from '#context';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { ServerTreeSource } from '@treenx/ssr/server-tree-source';
+import { ServerLocationContext } from '#navigate';
+import { RouteParamsContext } from '#context/route-params';
+import { clientModules as todoClientModules } from '../../../../mods/todo/react';
+import { clientModules as siteModules } from '../../../../mods/view-shell/view-site';
 import { createClientRegistry, publishClientExports } from '#context/client-registry';
 import { unregister } from '@treenx/core';
 import { clientModules } from '../mods/clients';
@@ -203,6 +209,46 @@ function PublicEditor() {
 }
 
 describe('public canonical editor', { timeout: 10_000 }, () => {
+  it('renders declared external views through the original site shell and request-owned native reads', async t => {
+    const todo = await collectModule('@treenx/mods/todo', async () => {
+      await import('../../../../mods/todo/kernel');
+      loadSchemasRecursive(fileURLToPath(new URL('../../../../mods/todo/', import.meta.url)));
+    });
+    const viewShellManifest = await collectModule('@treenx/view-shell', () => {
+      loadSchemasRecursive(fileURLToPath(new URL('../../../../mods/view-shell/', import.meta.url)));
+    });
+    const f = await fixture('declared-native-site', false);
+    t.after(f.close);
+    const key = (nonce: string) => ({ epoch: f.instance.writer.intake.epoch, time: Date.now(), nonce });
+    await f.admin.commit({ opId: key('site-types'), changes: [...todo.types, ...viewShellManifest.types].map(type => ({
+      op: 'put' as const, node: { $path: `/sys/types/${type.name}`, $type: 't.type', name: type.name,
+        module: type.module, security: type.security },
+    })) });
+    f.instance.registry.publish(todo);
+    f.instance.registry.publish(viewShellManifest);
+    await f.admin.commit({ opId: key('site-data'), changes: [
+      { op: 'put', node: { $path: '/tasks', $type: 'todo.list', title: 'Native site tasks', $acl: [{ subject: { group: 'public' }, grant: R }] } },
+      { op: 'put', node: { $path: '/tasks/first', $type: 'todo.item', title: 'Original todo row', done: false } },
+      { op: 'put', node: { $path: '/sys/routes/v', $type: 't.view.shell', $acl: [{ subject: { group: 'public' }, grant: R }] } },
+    ] });
+    const shell = (await f.client.read({ node: '/sys/routes/v' })).copies[0];
+    assert.ok('node' in shell);
+    const source = new ServerTreeSource(f.client);
+    const registry = createClientRegistry([...todoClientModules, ...siteModules]);
+    const tree = createElement(TreeSourceProvider, { source, registry,
+      children: createElement(ServerLocationContext.Provider, { value: { pathname: '/v/tasks', search: '', href: '/v/tasks' },
+        children: createElement(RouteParamsContext.Provider, { value: { rest: 'tasks', full: '/v/tasks' },
+          children: createElement(RenderContext, { name: 'site', children: createElement(Render, { value: shell.node }) }) }) }) });
+    let html = renderToStaticMarkup(tree);
+    while (source.pendingCount() > 0) {
+      await source.flushPending();
+      html = renderToStaticMarkup(tree);
+    }
+    assert.ok(html.includes('Native site tasks'));
+    assert.ok(html.includes('Original todo row'));
+    assert.ok(html.includes('What needs to be done?'));
+  });
+
   it('renders native source-owned modules independently and republishes without resetting local state', async t => {
     const first = await fixture('client-module-first', false);
     const second = await fixture('client-module-second', false);

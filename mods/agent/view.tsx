@@ -1,6 +1,7 @@
+import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
 // Agent Office — views for ai.pool, ai.agent, ai.approval, ai.thread, ai.run
 
-import { type ComponentData, getComponent, register } from '@treenx/core';
+import { type ComponentData, getComponent } from '@treenx/core';
 import {
   cn,
   useActions,
@@ -16,8 +17,8 @@ import { useMemo, useState } from 'react';
 import { type AgentStatus, AiAgent, AiApproval, AiApprovals, AiPlan, AiPool, AiThread } from './types';
 
 // Side-effect imports — register views for sub-components
-import './views/run';
-import './views/chat';
+import { clientModules as declaredClient0 } from './views/run';
+import { clientModules as declaredClient1 } from './views/chat';
 
 // ── Status styling ──
 
@@ -549,12 +550,18 @@ const AgentLayout: View<AiAgent> = ({ value, ctx }) => {
 
 // ── Register views ──
 
-register(AiPool, 'react', PoolView);
-register(AiAgent, 'react', AgentView);
-register(AiAgent, 'react:layout', AgentLayout);
-register(AiAgent, 'react:list', AgentRow);
-register(AiApproval, 'react', ApprovalView);
-register(AiApproval, 'react:list', ApprovalRow);
-register(AiApprovals, 'react', ApprovalsView);
-register(AiThread, 'react', ThreadView);
-register(AiPlan, 'react', PlanView);
+export const clientModules = [
+  declareClientModule('@treenx/mods/agent/view', [
+    declareView(AiPool, 'react', PoolView),
+    declareView(AiAgent, 'react', AgentView),
+    declareView(AiAgent, 'react:layout', AgentLayout),
+    declareView(AiAgent, 'react:list', AgentRow),
+    declareView(AiApproval, 'react', ApprovalView),
+    declareView(AiApproval, 'react:list', ApprovalRow),
+    declareView(AiApprovals, 'react', ApprovalsView),
+    declareView(AiThread, 'react', ThreadView),
+    declareView(AiPlan, 'react', PlanView)
+  ]),
+  ...declaredClient0,
+  ...declaredClient1
+];

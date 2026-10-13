@@ -1,3 +1,4 @@
+import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
 import type { PresentationNode } from '@treenx/react';
 // Board views — kanban board + task detail (editable)
 
@@ -15,7 +16,7 @@ import {
 } from '@dnd-kit/core';
 import { arrayMove, horizontalListSortingStrategy, SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { getComponent, type NodeData, register } from '@treenx/core';
+import { getComponent, type NodeData } from '@treenx/core';
 import { Render, RenderContext, useActions, useDraft, type View } from '@treenx/react';
 import { useTreeEffects, useChildren, useNavigate, usePath } from '@treenx/react';
 import { usePathSave } from '@treenx/react';
@@ -36,7 +37,7 @@ import {
 import { Textarea } from '@treenx/react/ui/textarea';
 import { useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { AttachMenu } from '../simple-components/view';
+import { AttachMenu , clientModules as declaredClient0 } from '../simple-components/view';
 import { getNamedComponents } from './named-components';
 import { columnData, orderComponent } from './data';
 import { BoardColumn, BoardKanban, BoardTask, Order } from './types';
@@ -217,7 +218,7 @@ const TaskEdit: View<BoardTask, { draft?: boolean }> = ({ value, onChange, ctx, 
   );
 };
 
-register(BoardTask, 'react:edit', TaskEdit);
+
 
 function NamedComponents({ node }: { node: PresentationNode }) {
   const entries = getNamedComponents(node);
@@ -348,8 +349,8 @@ const TaskListItem: View<BoardTask> = ({ value, ctx }) => {
   );
 };
 
-register(BoardTask, 'react:list', TaskListItem);
-register(BoardTask, 'react:card', TaskListItem);
+
+
 
 // ── board.task read-only view (default react context) ──
 
@@ -423,7 +424,7 @@ const TaskReadView: View<BoardTask> = ({ value, ctx }) => {
   );
 };
 
-register(BoardTask, 'react', TaskReadView);
+
 
 // ── Helpers ──
 
@@ -676,15 +677,14 @@ const KanbanColumn: View<BoardColumn, ColumnExtra> = ({
 };
 
 const KanbanColumnEdit: View<BoardColumn, ColumnExtra> = (props) => <KanbanColumn {...props} editable />;
-register('board.column', 'react:edit', KanbanColumnEdit);
-register('board.column', 'react', KanbanColumn);
+
+
 
 // board.order is a positioning aspect — never rendered as a card component.
 // Exact registration per context so it wins over the generic default view.
 const OrderHidden: View<Order> = () => null;
-for (const c of ['react', 'react:compact', 'react:card', 'react:list', 'react:edit'] as const) {
-  register(Order, c, OrderHidden);
-}
+const orderViews = ['react', 'react:compact', 'react:card', 'react:list', 'react:edit']
+  .map(context => declareView(Order, context, OrderHidden));
 
 function TaskDialog({
   node,
@@ -961,5 +961,18 @@ const KanbanView: View<BoardKanban, { editable?: boolean }> = ({ value, ctx, edi
 };
 
 const KanbanEditWrap: View<BoardKanban> = (props) => <KanbanView {...props} editable />;
-register('board.kanban', 'react:edit', KanbanEditWrap);
-register('board.kanban', 'react', KanbanView);
+
+export const clientModules = [
+  declareClientModule('@treenx/mods/board/view', [
+    declareView(BoardTask, 'react:edit', TaskEdit),
+    declareView(BoardTask, 'react:list', TaskListItem),
+    declareView(BoardTask, 'react:card', TaskListItem),
+    declareView(BoardTask, 'react', TaskReadView),
+    declareView('board.column', 'react:edit', KanbanColumnEdit),
+    declareView('board.column', 'react', KanbanColumn),
+    declareView('board.kanban', 'react:edit', KanbanEditWrap),
+    declareView('board.kanban', 'react', KanbanView),
+    ...orderViews
+  ]),
+  ...declaredClient0
+];

@@ -1,10 +1,21 @@
+import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
 import { useActions, useChildren, view } from '@treenx/react';
 import { RenderChildren } from '@treenx/react/mods/editor-ui/list-items';
 import { Idea, IdeasBoard } from './types';
 
 // ── Board view — renders children in list context ──
 
-view(IdeasBoard, ({ value, ctx }) => {
+
+
+// ── Idea — full view ──
+
+
+
+// ── Idea — compact list row ──
+
+export const clientModules = [
+  declareClientModule('@treenx/mods/ideal/view', [
+    view(IdeasBoard, ({ value, ctx }) => {
   const { data: children } = useChildren(ctx.path);
 
   return (
@@ -17,11 +28,8 @@ view(IdeasBoard, ({ value, ctx }) => {
       <RenderChildren items={children} ctx="list" />
     </div>
   );
-});
-
-// ── Idea — full view ──
-
-view(Idea, ({ value }) => {
+}),
+    view(Idea, ({ value }) => {
   const { upvote, approve, reject } = useActions(value);
 
   return (
@@ -42,14 +50,13 @@ view(Idea, ({ value }) => {
       </div>
     </div>
   );
-});
-
-// ── Idea — compact list row ──
-
-view.list(Idea, ({ value }) => (
+}),
+    view.list(Idea, ({ value }) => (
   <>
     <span className="text-xs font-mono px-1.5 py-0.5 rounded bg-muted">{value.votes}</span>
     <span className="flex-1">{value.title}</span>
     <span className="text-xs text-muted-foreground">{value.status}</span>
   </>
-));
+))
+  ])
+];

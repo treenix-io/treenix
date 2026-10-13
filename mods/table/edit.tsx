@@ -1,5 +1,6 @@
+import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
 import type { PresentationNode } from '@treenx/react';
-import { type ComponentData, isComponent, type NodeData, register } from '@treenx/core';
+import { type ComponentData, isComponent, type NodeData } from '@treenx/core';
 import type { JsonSchema } from '@treenx/core/kernel/types';
 import { useCurrentNode } from '@treenx/react';
 import { useChildren } from '@treenx/react';
@@ -260,4 +261,8 @@ function TableEditView({
   );
 }
 
-register('ui.table', 'react:edit', TableEditView as any);
+export const clientModules = [
+  declareClientModule('@treenx/mods/table/edit', [
+    declareView('ui.table', 'react:edit', TableEditView)
+  ])
+];

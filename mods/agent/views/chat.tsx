@@ -1,7 +1,8 @@
+import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
 // Chat view — interactive AI chat on any node with ai.chat + ai.thread + ai.agent
 // Registered on ai.chat component. Streams through the selected tree source.
 
-import { getComponent, register } from '@treenx/core';
+import { getComponent } from '@treenx/core';
 import { cn, useActions, useCurrentNode, useTreeEffects, type View } from '@treenx/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AiChat, AiThread, type ChatChunk, type ThreadMessage } from '#agent/types';
@@ -243,4 +244,8 @@ function MessageBubble({ msg }: { msg: ThreadMessage }) {
   );
 }
 
-register(AiChat, 'react', ChatView);
+export const clientModules = [
+  declareClientModule('@treenx/mods/agent/views/chat', [
+    declareView(AiChat, 'react', ChatView)
+  ])
+];

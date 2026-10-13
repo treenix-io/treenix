@@ -1,4 +1,5 @@
 import './types';
-import { registerDocViews } from './renderers';
+import { clientModules as declaredClient0 } from './renderers';
 
-registerDocViews();
+
+export const clientModules = [...declaredClient0];

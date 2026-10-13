@@ -1,7 +1,7 @@
 // UIX Compile — integration test
 // Full pipeline: JSX/TSX source → compileComponent → real React → renderToString
 
-import { resolve } from '@treenx/core';
+import { createClientRegistry } from '#context/client-registry';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 import React from 'react';
@@ -17,11 +17,9 @@ describe('compileComponent', () => {
     const source =
       'export default function View() { return <button onClick={() => execute("/document", "inspect", {})}>Inspect</button>; }';
     const first = compileComponent('test.owned', source, {
-      skipRegister: true,
       extraScope: { execute: () => calls.push('first') },
     });
     const second = compileComponent('test.owned', source, {
-      skipRegister: true,
       extraScope: { execute: () => calls.push('second') },
     });
     try {
@@ -176,8 +174,9 @@ export default Multi;`;
 
   it('registers component and resolves via context', () => {
     const code = `export default function Reg({ value }) { return <span>registered</span>; }`;
-    compileComponent('test.resolve', code);
-    const handler = resolve('test.resolve', 'react');
+    const registry = createClientRegistry();
+    compileComponent('test.resolve', code, { registry });
+    const handler = registry.resolve('test.resolve', 'react')?.handler;
     assert.ok(handler, 'Should be resolvable after compile');
   });
 

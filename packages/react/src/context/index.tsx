@@ -94,7 +94,7 @@ export type RenderProps<T = PresentationComponent> = {
   ctx?: ViewCtx | null;
 };
 
-export type ReactHandler = FC<RenderProps<any>>;
+export type ReactHandler = FC<RenderProps<any> & Record<string, unknown>>;
 
 /** Typed view component. Use: `const MyView: View<MyType> = ({ value, ctx }) => ...` */
 export type View<T, Extra = {}> = FC<RenderProps<T> & Extra>;

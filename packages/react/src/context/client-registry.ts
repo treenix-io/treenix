@@ -1,7 +1,7 @@
 import { observeRegistrations } from '@treenx/core/core/registration';
 import type { Registration } from '@treenx/core/core/registration';
 import type { ReactHandler } from '#context';
-import { normalizeType } from '@treenx/core';
+import { normalizeType, type Class, type ContextHandler, type Handler, type TypeId } from '@treenx/core';
 import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 import type { OpenModule, OpenRegistration } from '@treenx/core/kernel/types';
 
@@ -12,6 +12,13 @@ export interface ClientViewDeclaration extends OpenRegistration<ReactHandler> {
 export interface ClientModule extends OpenModule<ReactHandler> {
   readonly open: readonly ClientViewDeclaration[];
   readonly resolveMissing?: (type: string, context: string) => ClientViewDeclaration | undefined;
+}
+
+export function declareView<T>(type: Class<T>, context: string, handler: ContextHandler<'react', T>, meta?: Record<string, unknown>): ClientViewDeclaration;
+export function declareView(type: string, context: string, handler: ContextHandler<'react'>, meta?: Record<string, unknown>): ClientViewDeclaration;
+export function declareView(type: TypeId, context: string, handler: ContextHandler<'react'>, meta?: Record<string, unknown>): ClientViewDeclaration;
+export function declareView(type: TypeId, context: string, handler: Handler, meta?: Record<string, unknown>): ClientViewDeclaration {
+  return { type: normalizeType(type), context, handler, ...(meta === undefined ? {} : { meta }) };
 }
 
 export function declareClientModule(id: string, open: readonly ClientViewDeclaration[],

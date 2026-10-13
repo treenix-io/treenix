@@ -1,6 +1,6 @@
+import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
 // Sensor feed — live view of last N readings, auto-updates via watchNew
 
-import { register } from '@treenx/core';
 import { type View, useChildren } from '@treenx/react';
 import { SensorDemo } from './types';
 
@@ -62,4 +62,8 @@ const SensorFeed: View<SensorDemo> = ({ ctx }) => {
   );
 }
 
-register(SensorDemo, 'react', SensorFeed);
+export const clientModules = [
+  declareClientModule('@treenx/mods/sensor-demo/react', [
+    declareView(SensorDemo, 'react', SensorFeed)
+  ])
+];

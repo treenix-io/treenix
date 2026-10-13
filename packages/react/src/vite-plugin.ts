@@ -302,8 +302,14 @@ export default function treenixPlugin(opts?: { modsDirs?: string[]; clientFiles?
         // Static imports (top-level await), so registry is populated before the
         // importer runs render(). Failures here MUST surface — site views missing
         // means SSR can't render that type at all.
-        const lines = all.flatMap(m => m.files.map(f => `import '${f}';`));
-        return lines.join('\n') + '\n';
+        const files = all.flatMap(module => module.files);
+        const lines = files.map((file, index) => `import * as site${index} from '${file}';`);
+        return [
+          `import { publishClientExports } from '@treenx/react/context/client-registry';`,
+          ...lines,
+          ...files.map((_, index) => `publishClientExports(site${index});`),
+          '',
+        ].join('\n');
       }
       if (id !== RESOLVED_ID) return;
 

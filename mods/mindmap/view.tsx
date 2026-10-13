@@ -1,8 +1,8 @@
+import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
 // MindMap View — Miro-style horizontal tree with organic curves
 // Each node fetches its own children via useChildren when expanded
 
 import type { NodeData } from '@treenx/core';
-import { register } from '@treenx/core';
 import type { View } from '@treenx/react';
 import { useChildren } from '@treenx/react';
 import { useTreeEffects } from '@treenx/react';
@@ -281,4 +281,8 @@ const MindMapView: View<MindMapConfig> = ({ value, ctx }) => {
   );
 };
 
-register('mindmap.map', 'react', MindMapView);
+export const clientModules = [
+  declareClientModule('@treenx/mods/mindmap/view', [
+    declareView('mindmap.map', 'react', MindMapView)
+  ])
+];

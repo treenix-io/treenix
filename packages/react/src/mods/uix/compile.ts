@@ -1,7 +1,7 @@
 // UIX Compile — JSX compilation + caching + registration pipeline
 // Turns raw JSX/TSX code string into a React component
 
-import { register } from '@treenx/core';
+import { declareClientModule, declareView, type ClientRegistry } from '#context/client-registry';
 import { Render, RenderContext, RenderField, useActions, viewCtx } from '#context';
 import { useChildren, usePath, useTreeEffects } from '#hooks';
 import { READ_ONLY_EFFECTS } from '#tree/effects';
@@ -81,13 +81,17 @@ function prepareCode(code: string): { body: string; exportName: string | null } 
 export function compileComponent(
   type: string,
   rawCode: string,
-  opts?: { extraScope?: Record<string, unknown>; skipRegister?: boolean },
+  opts?: { extraScope?: Record<string, unknown>; registry?: ClientRegistry },
 ): React.FC<any> {
+  function publish(component: React.FC<any>): React.FC<any> {
+    opts?.registry?.publish(declareClientModule(`compiled:${type}`, [declareView(type, 'react', component)]));
+    return component;
+  }
   const cacheKey = type + '\0' + rawCode;
   const scopeOwner = opts?.extraScope;
   const ownedCache = scopeOwner === undefined ? cache : scopeCache(scopeOwner);
   const cached = ownedCache.get(cacheKey);
-  if (cached) return cached;
+  if (cached) return publish(cached);
 
   const { body, exportName } = prepareCode(rawCode);
   const jsCode = compileJSX(body);
@@ -118,8 +122,7 @@ export function compileComponent(
     );
 
   ownedCache.set(cacheKey, Component);
-  if (!opts?.skipRegister) register(type, 'react', Component);
-  return Component;
+  return publish(Component);
 }
 
 export function invalidateCache(type?: string): void {

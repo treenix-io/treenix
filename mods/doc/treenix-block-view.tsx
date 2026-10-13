@@ -1,9 +1,9 @@
 import { NodeViewWrapper } from '@tiptap/react';
-import { getContextsForType, getRegistryVersion, subscribeRegistry } from '@treenx/core';
+import { useClientRegistry } from '@treenx/react/context/client-registry-context';
 import { Render, RenderContext } from '@treenx/react';
 import { usePath } from '@treenx/react';
 import { useAutoSave } from '@treenx/react/tree/auto-save';
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useState } from 'react';
 
 export function TreenixBlockView({ node, updateAttributes, deleteNode, editor, getPos }: any) {
   const ref = node.attrs.ref as string | null;
@@ -33,11 +33,11 @@ export function TreenixBlockView({ node, updateAttributes, deleteNode, editor, g
   }, [editor, node.nodeSize, getPos]);
 
   // Re-check available contexts when registry changes (views load asynchronously)
-  useSyncExternalStore(subscribeRegistry, getRegistryVersion);
+  const registry = useClientRegistry();
 
   const effectiveType = refNode?.$type ?? type ?? '';
   const availableContexts = effectiveType
-    ? getContextsForType(effectiveType).filter((c) => c.startsWith('react')).sort()
+    ? registry.contexts(effectiveType).filter((c) => c.startsWith('react')).sort()
     : [];
 
   const renderContent = () => {

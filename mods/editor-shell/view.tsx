@@ -1,3 +1,4 @@
+import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
 // Editor shell view — registered for t.editor.shell. Rendered by Router when
 // /sys/routes/t resolves. The route node's `route` component (prefix/index)
 // drives target path resolution; ?root= selects the sidebar root and is
@@ -154,4 +155,8 @@ const EditorShellView: View<EditorShell> = ({ ctx }) => {
   );
 };
 
-view(EditorShell, EditorShellView);
+export const clientModules = [
+  declareClientModule('@treenx/mods/editor-shell/view', [
+    view(EditorShell, EditorShellView)
+  ])
+];

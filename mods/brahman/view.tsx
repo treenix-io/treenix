@@ -1,7 +1,7 @@
+import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
 // Brahman — view registrations
 // Registers react + react:list handlers for all brahman types
 
-import { Class, register } from '@treenx/core';
 import './types';
 import {
   BackAction, BotConfig, BroadcastAction, EmitTextAction, EvalAction,
@@ -41,30 +41,30 @@ import { PageLayoutView } from './views/page-layout';
 
 // ── Node-level views (react context) ──
 
-register(BotConfig, 'react', BotView);
-register(PageConfig, 'react', PageLayoutView);
-register(PageConfig, 'react:chat', PageChatPreview);
-register(PageConfig, 'react:chat:edit', PageChatEditor);
-register(MessageAction, 'react', MessageEditor);
-register(QuestionAction, 'react', QuestionEditor);
-register(IfElseAction, 'react', IfElseEditor);
-register(PageNavAction, 'react', PageNavEditor);
-register(BackAction, 'react', BackEditor);
-register(TagAction, 'react', TagEditor);
-register(BroadcastAction, 'react', BroadcastEditor);
-register(GetValueAction, 'react', GetValueEditor);
-register(SetValueAction, 'react', SetValueEditor);
-register(ParamsAction, 'react', ParamsEditor);
-register(FileAction, 'react', FileEditor);
-register(EvalAction, 'react', EvalEditor);
-register(RemoveAction, 'react', RemoveEditor);
-register(EmitTextAction, 'react', EmitTextEditor);
-register(ForwardAction, 'react', ForwardEditor);
-register(ResetSessionAction, 'react', ResetSessionEditor);
-register(ResetHistoryAction, 'react', ResetHistoryEditor);
-register(OnErrorAction, 'react', OnErrorEditor);
-register(KeywordSelectAction, 'react', KeywordSelectEditor);
-register(SelectLanguageAction, 'react', SelectLanguageEditor);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 // ── Compact list items (react:list context) ──
 
@@ -77,4 +77,33 @@ const listTypes = [
   ResetSessionAction, ResetHistoryAction, OnErrorAction,
   KeywordSelectAction, SelectLanguageAction,
 ];
-for (const t of listTypes) register(t as Class, 'react:list', ActionListItem);
+
+export const clientModules = [
+  declareClientModule('@treenx/mods/brahman/view', [
+    declareView(BotConfig, 'react', BotView),
+    declareView(PageConfig, 'react', PageLayoutView),
+    declareView(PageConfig, 'react:chat', PageChatPreview),
+    declareView(PageConfig, 'react:chat:edit', PageChatEditor),
+    declareView(MessageAction, 'react', MessageEditor),
+    declareView(QuestionAction, 'react', QuestionEditor),
+    declareView(IfElseAction, 'react', IfElseEditor),
+    declareView(PageNavAction, 'react', PageNavEditor),
+    declareView(BackAction, 'react', BackEditor),
+    declareView(TagAction, 'react', TagEditor),
+    declareView(BroadcastAction, 'react', BroadcastEditor),
+    declareView(GetValueAction, 'react', GetValueEditor),
+    declareView(SetValueAction, 'react', SetValueEditor),
+    declareView(ParamsAction, 'react', ParamsEditor),
+    declareView(FileAction, 'react', FileEditor),
+    declareView(EvalAction, 'react', EvalEditor),
+    declareView(RemoveAction, 'react', RemoveEditor),
+    declareView(EmitTextAction, 'react', EmitTextEditor),
+    declareView(ForwardAction, 'react', ForwardEditor),
+    declareView(ResetSessionAction, 'react', ResetSessionEditor),
+    declareView(ResetHistoryAction, 'react', ResetHistoryEditor),
+    declareView(OnErrorAction, 'react', OnErrorEditor),
+    declareView(KeywordSelectAction, 'react', KeywordSelectEditor),
+    declareView(SelectLanguageAction, 'react', SelectLanguageEditor),
+    ...listTypes.map(type => declareView(type, 'react:list', ActionListItem))
+  ])
+];

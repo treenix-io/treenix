@@ -1,10 +1,11 @@
+import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
 import type { PresentationNode } from '@treenx/react';
 // AgentSim views — World map + Agent card + Item card
 // WorldView: controls, spatial map with entities + proximity links, event log
 // AgentView: profile, editable prompt, memory, event inbox
 // ItemView: description card
 
-import { getComponent, type NodeData, register } from '@treenx/core';
+import { getComponent, type NodeData } from '@treenx/core';
 import { useCurrentNode } from '@treenx/react';
 import { useChildren } from '@treenx/react';
 import { useTreeEffects } from '@treenx/react';
@@ -444,6 +445,10 @@ function ItemView() {
   );
 }
 
-register('sim.world', 'react', WorldView as any);
-register('sim.agent', 'react', AgentView as any);
-register('sim.item', 'react', ItemView as any);
+export const clientModules = [
+  declareClientModule('@treenx/mods/sim/view', [
+    declareView('sim.world', 'react', WorldView),
+    declareView('sim.agent', 'react', AgentView),
+    declareView('sim.item', 'react', ItemView)
+  ])
+];

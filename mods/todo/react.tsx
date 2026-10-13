@@ -1,8 +1,8 @@
-import { register } from '@treenx/core';
+import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
 import { Render, useActions, useChildren, type View } from '@treenx/react';
 import { Button } from '@treenx/react/ui/button';
 import { Input } from '@treenx/react/ui/input';
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { TodoItem, TodoList } from './types';
 
 const TodoListView: View<TodoList> = ({ value, ctx }) => {
@@ -62,5 +62,9 @@ const TodoItemRow: View<TodoItem> = ({ value }) => {
   );
 };
 
-register(TodoList, 'react', TodoListView);
-register(TodoItem, 'react', TodoItemRow);
+export const clientModules = [
+  declareClientModule('@treenx/mods/todo/react', [
+    declareView(TodoList, 'react', TodoListView),
+    declareView(TodoItem, 'react', TodoItemRow)
+  ])
+];

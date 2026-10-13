@@ -1,6 +1,7 @@
+import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
 // Sensor generator — on-demand scan, streams results through the selected native lane
 
-import { type NodeData, register } from '@treenx/core';
+import { type NodeData } from '@treenx/core';
 import { useCurrentNode, useTreeEffects } from '@treenx/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -123,4 +124,8 @@ function GeneratorDemo() {
   );
 }
 
-register('examples.demo.generator', 'react', GeneratorDemo);
+export const clientModules = [
+  declareClientModule('@treenx/mods/sensor-generator/view', [
+    declareView('examples.demo.generator', 'react', GeneratorDemo)
+  ])
+];

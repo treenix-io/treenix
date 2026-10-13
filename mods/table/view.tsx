@@ -1,3 +1,4 @@
+import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
 import type { PresentationNode } from '@treenx/react';
 import {
   type ComponentData,
@@ -370,4 +371,8 @@ function TablePagination({
   );
 }
 
-register('ui.table', 'react', TableView as any);
+export const clientModules = [
+  declareClientModule('@treenx/mods/table/view', [
+    declareView('ui.table', 'react', TableView)
+  ])
+];

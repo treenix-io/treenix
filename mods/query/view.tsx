@@ -1,6 +1,6 @@
+import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
 import type { PresentationNode } from '@treenx/react';
 import type { NodeData } from '@treenx/core';
-import { register } from '@treenx/core';
 import { type View } from '@treenx/react';
 import { useChildren, useNavigate } from '@treenx/react/hooks';
 import { RenderChildren } from '@treenx/react/mods/editor-ui/list-items';
@@ -309,5 +309,9 @@ const QueryEditView: View<QueryView> = ({ value, onChange }) => {
   );
 };
 
-register('t.query', 'react', QueryViewComponent);
-register('t.query', 'react:edit', QueryEditView);
+export const clientModules = [
+  declareClientModule('@treenx/mods/query/view', [
+    declareView('t.query', 'react', QueryViewComponent),
+    declareView('t.query', 'react:edit', QueryEditView)
+  ])
+];

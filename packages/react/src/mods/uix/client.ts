@@ -42,7 +42,7 @@ function NativeTypeView({ type, ...props }: RenderProps & { type: string }) {
     () =>
       published === undefined
         ? undefined
-        : compileComponent(type, published, { skipRegister: true, extraScope: scope }),
+        : compileComponent(type, published, { extraScope: scope }),
     [type, published, scope],
   );
   if (error !== null) return React.createElement('p', { role: 'alert' }, error.message);

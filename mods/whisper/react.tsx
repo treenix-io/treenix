@@ -1,8 +1,9 @@
+import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
 import type { PresentationNode } from '@treenx/react/tree/presentation';
 // Whisper channel view — checklist of transcribed audio notes
 
 import * as React from 'react';
-import { getComponent, type NodeData, register } from '@treenx/core';
+import { getComponent, type NodeData } from '@treenx/core';
 import { useTreeEffects, type View, useChildren } from '@treenx/react';
 import { WhisperChannel, WhisperMeta, WhisperText } from './types';
 
@@ -81,4 +82,8 @@ const ChannelView: View<WhisperChannel> = ({ value, ctx }) => {
   );
 }
 
-register('whisper.channel', 'react', ChannelView);
+export const clientModules = [
+  declareClientModule('@treenx/mods/whisper/react', [
+    declareView('whisper.channel', 'react', ChannelView)
+  ])
+];

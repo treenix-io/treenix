@@ -1,6 +1,6 @@
+import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
 // Lazy loader: registers t3d.scene view but defers three.js import until render
 
-import { register } from '@treenx/core';
 import { type View } from '@treenx/react';
 import { lazy, Suspense } from 'react';
 import { T3dScene } from './types';
@@ -15,4 +15,8 @@ const SceneView: View<T3dScene> = (props) => (
   </Suspense>
 );
 
-register(T3dScene, 'react', SceneView);
+export const clientModules = [
+  declareClientModule('@treenx/mods/three/react', [
+    declareView(T3dScene, 'react', SceneView)
+  ])
+];

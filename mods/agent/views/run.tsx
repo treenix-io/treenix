@@ -1,6 +1,7 @@
+import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
 // ai.run view — structured log with ECS components
 
-import { getComponent, register } from '@treenx/core';
+import { getComponent } from '@treenx/core';
 import { type View } from '@treenx/react';
 import { useTreeEffects } from '@treenx/react';
 import { cn } from '@treenx/react';
@@ -239,5 +240,9 @@ const RunRow: View<AiRun> = ({ value, ctx }) => {
   );
 };
 
-register(AiRun, 'react', RunView);
-register(AiRun, 'react:list', RunRow);
+export const clientModules = [
+  declareClientModule('@treenx/mods/agent/views/run', [
+    declareView(AiRun, 'react', RunView),
+    declareView(AiRun, 'react:list', RunRow)
+  ])
+];

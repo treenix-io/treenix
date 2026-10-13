@@ -1,7 +1,8 @@
+import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
 import type { PresentationNode } from '@treenx/react';
 // Launcher widgets — react:widget context for compact live views on the home screen
 
-import { type NodeData, register } from '@treenx/core';
+import { type NodeData } from '@treenx/core';
 import type { RenderProps, View } from '@treenx/react';
 import { cn, Render, useChildren } from '@treenx/react';
 import type { FC } from 'react';
@@ -44,7 +45,7 @@ function ColumnRow({ col }: { col: PresentationNode }) {
   );
 }
 
-register('board.kanban', 'react:widget', KanbanWidget as any);
+
 
 // ── todo.list widget — compact checklist ──
 
@@ -103,8 +104,8 @@ const TodoItemCompact: View<TodoItem> = ({ value }) => {
   );
 };
 
-register('todo.list', 'react:widget', TodoWidget as any);
-register(TodoItem, 'react:widget', TodoItemCompact);
+
+
 
 // ── examples.demo.sensor widget — last value + mini bars ──
 
@@ -151,7 +152,7 @@ const SensorWidget: FC<RenderProps> = ({ value }) => {
   );
 };
 
-register('examples.demo.sensor', 'react:widget', SensorWidget as any);
+
 
 // ── Default widget fallback — type + icon ──
 
@@ -168,4 +169,12 @@ const DefaultWidget: FC<RenderProps> = ({ value }) => {
   );
 };
 
-register('default', 'react:widget', DefaultWidget as any);
+export const clientModules = [
+  declareClientModule('@treenx/mods/launcher/widgets', [
+    declareView('board.kanban', 'react:widget', KanbanWidget),
+    declareView('todo.list', 'react:widget', TodoWidget),
+    declareView(TodoItem, 'react:widget', TodoItemCompact),
+    declareView('examples.demo.sensor', 'react:widget', SensorWidget),
+    declareView('default', 'react:widget', DefaultWidget)
+  ])
+];

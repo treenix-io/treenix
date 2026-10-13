@@ -1,7 +1,9 @@
+import { useClientRegistry } from '@treenx/react/context/client-registry-context';
+import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
 import type { PresentationNode } from '@treenx/react';
 // Launcher view — dashboard with drag-drop from tree + context switching
 
-import { isRef, type NodeData, register, resolveExact } from '@treenx/core';
+import { isRef, type NodeData } from '@treenx/core';
 import { Render, RenderContext, type View, useActions } from '@treenx/react';
 import { useChildren, useNavigate, usePath } from '@treenx/react';
 import { cn } from '@treenx/react';
@@ -110,6 +112,7 @@ function AppItem({
   onRemove?: () => void;
   onContextChange?: (ctx: string) => void;
 }) {
+  const registry = useClientRegistry();
   const targetPath = isRef(refNode) ? refNode.$ref : null;
   const { data: target } = usePath(targetPath);
   const navigate = useNavigate();
@@ -123,7 +126,7 @@ function AppItem({
   }
 
   const label = target.$path.split('/').at(-1) || '?';
-  const hasView = !!resolveExact(target.$type, context as 'react');
+  const hasView = registry.exact(target.$type, context) !== null;
 
   // No view registered for this context — offer AI generation
   const renderContent = hasView
@@ -402,4 +405,8 @@ const LauncherView: View<Launcher> = ({ value, ctx }) => {
   );
 };
 
-register('launcher', 'react', LauncherView);
+export const clientModules = [
+  declareClientModule('@treenx/mods/launcher/react', [
+    declareView('launcher', 'react', LauncherView)
+  ])
+];

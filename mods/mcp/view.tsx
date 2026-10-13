@@ -1,4 +1,5 @@
-import { getComponent, register } from '@treenx/core';
+import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
+import { getComponent } from '@treenx/core';
 import { type View, useActions } from '@treenx/react';
 import { useChildren } from '@treenx/react';
 import { useState } from 'react';
@@ -141,4 +142,8 @@ const ApiTokensView: View<ApiTokenManager> = ({ value, ctx }) => {
   );
 };
 
-register('t.api.tokens', 'react', ApiTokensView);
+export const clientModules = [
+  declareClientModule('@treenx/mods/mcp/view', [
+    declareView('t.api.tokens', 'react', ApiTokensView)
+  ])
+];
