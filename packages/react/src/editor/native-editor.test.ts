@@ -192,7 +192,7 @@ async function fixture(
     frames: lane.frames,
     send(request) {
       sent.push(request);
-      if ((request.t === 'commit' || request.t === 'act') && holdCommit !== undefined && !held) {
+      if (request.t === 'commit' && holdCommit !== undefined && !held) {
         held = true;
         holdCommit.started(request);
         void holdCommit.release.then(() => lane.accept(request));
@@ -246,6 +246,7 @@ function PublicEditor() {
 describe('public canonical editor', { timeout: 10_000 }, () => {
   it('uses native schemas when mounted and loader-owned generated schemas for reader-only rendering', async t => {
     const server = await createServer({ configFile: false, plugins: [treenixPlugin()],
+      resolve: { conditions: ['development'], dedupe: ['react', 'react-dom'] },
       cacheDir: fileURLToPath(new URL('../../../../../temp/schema-render-vite-cache', import.meta.url)),
       optimizeDeps: { noDiscovery: true, include: [] },
       server: { middlewareMode: true }, appType: 'custom' });
@@ -606,7 +607,7 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
     await act(async () => {
       await until(f.source, (snap) => snap.data !== undefined);
     });
-    fireEvent.click(ui.getByRole('button', { name: 'JSON' }));
+    fireEvent.mouseDown(ui.getByRole('tab', { name: 'JSON' }), { button: 0, ctrlKey: false });
     const textarea = ui.getByRole('textbox');
     assert.ok(textarea instanceof window.HTMLTextAreaElement);
     const value: Node = JSON.parse(textarea.value);
@@ -633,7 +634,7 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
       observer.observe(ui.container, { childList: true, subtree: true });
     });
     await act(async () => {
-      fireEvent.click(ui.getByRole('button', { name: 'Save node' }));
+      fireEvent.click(ui.getByRole('button', { name: 'Save JSON' }));
     });
     await refused;
     assert.equal(ui.getByRole('alert').getAttribute('data-error-code'), 'CONFLICT');
@@ -659,18 +660,18 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
     await act(async () => {
       await until(f.source, (snap) => snap.data !== undefined);
     });
-    fireEvent.click(ui.getByRole('button', { name: 'JSON' }));
+    fireEvent.mouseDown(ui.getByRole('tab', { name: 'JSON' }), { button: 0, ctrlKey: false });
     const textarea = ui.getByRole('textbox');
     assert.ok(textarea instanceof window.HTMLTextAreaElement);
     const value: Node = JSON.parse(textarea.value);
     const draft = JSON.stringify({ ...value, value: 9 });
     fireEvent.change(textarea, { target: { value: draft } });
     await act(async () => {
-      fireEvent.click(ui.getByRole('button', { name: 'Save node' }));
+      fireEvent.click(ui.getByRole('button', { name: 'Save JSON' }));
       await paused;
     });
     const reset = ui.getByRole('button', { name: 'Reset' });
-    const save = ui.getByRole('button', { name: 'Save node' });
+    const save = ui.getByRole('button', { name: 'Save JSON' });
     assert.ok(reset instanceof window.HTMLButtonElement);
     assert.ok(save instanceof window.HTMLButtonElement);
     assert.equal(reset.disabled, true);
@@ -684,9 +685,9 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
       release();
       await until(f.source, (snap) => snap.data?.value === 9);
     });
-    assert.equal(reset.disabled, false);
+    assert.equal(ui.queryByRole('button', { name: 'Reset' }), null);
     assert.equal(f.sent.filter((request) => request.t === 'commit').length, 1);
-    fireEvent.click(ui.getByRole('button', { name: 'JSON' }));
+    fireEvent.mouseDown(ui.getByRole('tab', { name: 'JSON' }), { button: 0, ctrlKey: false });
     const nextTextarea = ui.getByRole('textbox');
     assert.ok(nextTextarea instanceof window.HTMLTextAreaElement);
     const accepted: Node = JSON.parse(nextTextarea.value);
@@ -694,7 +695,7 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
       target: { value: JSON.stringify({ ...accepted, value: 10 }) },
     });
     await act(async () => {
-      fireEvent.click(save);
+      fireEvent.click(ui.getByRole('button', { name: 'Save JSON' }));
       await until(f.source, (snap) => snap.data?.value === 10);
     });
     assert.equal(f.sent.filter((request) => request.t === 'commit').length, 2);
@@ -718,7 +719,7 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
     assert.equal(description.name, 'editor.document');
     assert.deepEqual(description.schema, {
       type: 'object',
-      properties: { value: { type: 'number' } },
+      properties: { value: { type: 'number', default: 7 } },
       additionalProperties: false,
     });
     assert.equal(description.actions.inspect.kind, 'read');
