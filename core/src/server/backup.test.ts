@@ -277,7 +277,7 @@ describe('instance backup/restore (gk8.9)', () => {
     assert.ok((await readdir(join(tmp, 'tree', aside!))).includes('newer.json'));
 
     const restored = await jsonFixture(workDir);
-    assert.equal(await restored.get('/newer'), undefined, 'restored state is the backup, not the newer write');
+    await assert.rejects(restored.get('/newer'), { code: 'ENOENT' });
     assert.ok(await restored.get('/notes'));
   });
 

@@ -598,14 +598,21 @@ describe('authenticated native cache claims', { timeout: 10_000 }, () => {
     await first.ready
     previous.client.close()
     const current = await connectClient(t, f, f.credential, { cache })
-    const watching = current.client.sub({ node: '/items/a' }, () => {})
+    let initialGeneration: number | undefined
+    let projectionReady: () => void = () => {}
+    const projection = new Promise<void>(resolve => { projectionReady = resolve })
+    const watching = current.client.sub({ node: '/items/a' }, () => {
+      if (initialGeneration !== undefined && snapshot(current.seen, watching.id).gen > initialGeneration)
+        projectionReady()
+    })
     await watching.ready
     const initial = snapshot(current.seen, watching.id)
+    initialGeneration = initial.gen
     assert.deepEqual(initial.copies, [])
     f.instance.registry.publish({ ...f.module, types: f.module.types.map(def => ({ ...def,
       schema: { type: 'object', required: ['value'], properties: { value: { type: 'number' } } },
     })) })
-    await current.client.read({ node: '/items' })
+    await projection
     const renewed = snapshot(current.seen, watching.id)
     assert.ok(renewed.gen > initial.gen)
     assert.equal(renewed.copies.length, 1)

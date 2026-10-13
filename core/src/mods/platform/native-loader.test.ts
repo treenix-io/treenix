@@ -12,5 +12,5 @@ test('platform kernel entry publishes the existing native reflection owner', asy
   const manifest = loaded.manifests.find(entry => entry.id === 'treenix.system');
   assert.ok(manifest);
   assert.deepEqual(manifest.types.map(type => type.name), ['t.system']);
-  assert.deepEqual(Object.keys(manifest.types[0].actions), ['catalog', 'describe_type', 'search_types']);
+  assert.deepEqual(Object.keys(manifest.types[0].actions), ['deploy_prefab', 'catalog', 'describe_type', 'search_types']);
 });
