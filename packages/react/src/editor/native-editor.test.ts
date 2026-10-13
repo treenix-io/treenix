@@ -36,7 +36,6 @@ import { TreenixBlock } from '../../../../mods/doc/treenix-block';
 import { Editor } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import { createClientRegistry, publishClientExports, type ClientRegistry } from '#context/client-registry';
-import { unregister } from '@treenx/core';
 import { clientModules } from '../mods/clients';
 import { PUBLICATION_PREFIX } from '@treenx/core/kernel/uix-publication';
 import createNativeTodo from '../../../../mods/todo/kernel';
@@ -815,7 +814,6 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
   it('owns and releases a real native type-ownership subscription without publishing draft code', async (t) => {
     const f = await fixture('public-editor-uix-type-coverage', false);
     t.after(f.close);
-    t.after(() => unregister('editor.document', 'react'));
     const body = await f.client.read({ node: '/document' });
     const copy = body.copies[0];
     assert.ok('node' in copy);
@@ -850,7 +848,6 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
     const uixManifest = await loadNativeUix();
     const f = await fixture('public-editor-admin-publication', false);
     t.after(f.close);
-    t.after(() => unregister('editor.document', 'react'));
     let ordinal = 0;
     const key = () => ({
       epoch: f.instance.writer.intake.epoch,
@@ -1009,7 +1006,6 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
     const manifest = await loadNativeUix();
     const f = await fixture('published-view-native-owner', false);
     t.after(f.close);
-    t.after(() => unregister('editor.document', 'react'));
     let nonce = 0;
     const key = () => ({
       epoch: f.instance.writer.intake.epoch,

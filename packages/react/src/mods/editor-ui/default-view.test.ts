@@ -1,11 +1,11 @@
-import { createDeclaredClientRegistry, publishClientExports } from '#context/client-registry';
+import { createClientRegistry, declareClientModule, declareView, publishClientExports } from '#context/client-registry';
 import defaultView from './default-view';
 import listItems from './list-items';
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { createElement } from 'react';
-import { register } from '@treenx/core';
+import { ClientRegistryContext } from '#context/client-registry-context';
 import type { ComponentData, NodeData } from '@treenx/core';
 import type { TypeSchema } from '@treenx/core/schema/types';
 import { Render } from '#context';
@@ -129,11 +129,12 @@ describe('default-view helpers', () => {
   });
 
   it('falls back from unknown schema format to property type and inferred type', () => {
-    register('string', 'react', () => null);
-    register('number', 'react', () => null);
+    const registry = createClientRegistry([declareClientModule('display-types', [
+      declareView('string', 'react', () => null), declareView('number', 'react', () => null),
+    ])]);
 
-    assert.equal(resolveDisplayType({ format: 'uuid', type: 'string' }, 'x', createDeclaredClientRegistry()), 'string');
-    assert.equal(resolveDisplayType({ format: 'uuid', type: 'unknown' }, 1, createDeclaredClientRegistry()), 'number');
+    assert.equal(resolveDisplayType({ format: 'uuid', type: 'string' }, 'x', registry), 'string');
+    assert.equal(resolveDisplayType({ format: 'uuid', type: 'unknown' }, 1, registry), 'number');
   });
 });
 
@@ -212,12 +213,14 @@ describe('TypedRecordView', () => {
   });
 
   it('normalizes bare refs before rendering them through ref@react', () => {
-    register('ref', 'react', ({ value }: { value: ComponentData & { $ref: string } }) =>
+    const registry = createClientRegistry([defaultView, listItems, declareClientModule('ref-view', [declareView('ref', 'react', ({ value }: { value: ComponentData & { $ref: string } }) =>
       createElement('span', null, `${value.$type}:${value.$ref}`),
-    );
+    )])]);
 
-    render(createElement(TooltipProvider, null,
-      createElement(Render, { value: { $type: 'demo.ref-holder', target: { $ref: '/x' } } }),
+    render(createElement(ClientRegistryContext.Provider, { value: registry },
+      createElement(TooltipProvider, null,
+        createElement(Render, { value: { $type: 'demo.ref-holder', target: { $ref: '/x' } } }),
+      ),
     ));
 
     assert.equal(screen.getByText('ref:/x').textContent, 'ref:/x');

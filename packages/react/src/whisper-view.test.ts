@@ -4,12 +4,13 @@ import type { NodeData } from '@treenx/core';
 
 const { createElement } = await import('react');
 const { renderToStaticMarkup } = await import('react-dom/server');
-const { resolve } = await import('@treenx/core');
+const { createClientRegistry } = await import('#context/client-registry');
 const { NodeProvider } = await import('./context/index.tsx');
 const { TreeSourceProvider } = await import('#tree/tree-source-context');
 const { EMPTY_PATH_SNAPSHOT, EMPTY_CHILDREN_SNAPSHOT, NOOP_PATH_HANDLE, NOOP_CHILDREN_HANDLE } =
   await import('#tree/tree-source');
-await import('../../../mods/whisper/react');
+const { clientModules } = await import('../../../mods/whisper/react');
+const registry = createClientRegistry(clientModules);
 import type { TreeSource } from '#tree/tree-source';
 
 function render(children: NodeData[]): string {
@@ -22,10 +23,13 @@ function render(children: NodeData[]): string {
     mountPath: () => NOOP_PATH_HANDLE,
     mountChildren: () => NOOP_CHILDREN_HANDLE,
   };
-  const View = resolve('whisper.channel', 'react')!;
+  const declaration = registry.resolve('whisper.channel', 'react');
+  assert.ok(declaration);
+  const View = declaration.handler;
   return renderToStaticMarkup(
     createElement(TreeSourceProvider, {
       source,
+      registry,
       children: createElement(
         NodeProvider,
         { value: node },
