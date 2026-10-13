@@ -35,7 +35,6 @@ describe('native instance bootstrap', { timeout: 10_000 }, () => {
       await import('#kernel/builtins')
       assert.equal(globalThis.__treenxCoreRegistry, undefined)
       const legacy = await import('#core/registry')
-      assert.equal(legacy.getRegistryVersion(), 0)
       const { createInstanceFoundation } = await import('#kernel/instance')
       const { createMemoryStore } = await import('#kernel/store/memory')
       assert.deepEqual(legacy.mapRegistry((type, context) => [type, context]), [])
@@ -47,7 +46,6 @@ describe('native instance bootstrap', { timeout: 10_000 }, () => {
         firstAdmin: { path: '/admin', name: 'admin', password: 'isolated-password' } })
       assert.equal(instance.registry.type('t.dir').module, 'kernel')
       assert.equal(legacy.resolveExact('t.dir', 'schema'), null)
-      assert.equal(legacy.getRegistryVersion(), 0)
       assert.deepEqual(legacy.mapRegistry((type, context) => [type, context]), [])
       process.stdout.write('isolated')
     `

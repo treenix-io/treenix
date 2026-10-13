@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, it } from 'node:test'
 import { registerActions, registerType } from '#comp'
-import { getRegistryVersion, mapRegistry, register, registerLegacy, replaceHandler, resolveExact, resolveExactEntry, unregister } from '#core/registry'
+import { mapRegistry, register, registerLegacy, replaceHandler, resolveExact, resolveExactEntry, unregister } from '#core/registry'
 import { kernelManifest } from '#kernel/builtins'
 import { KernelError } from '#errors'
 import type { TypeSchema } from '#schema/types'
@@ -109,13 +109,13 @@ describe('module manifest collection', () => {
     const manifest = await collectModule('capabilities', () => {
       registerType('manifest.capability', Capability, { security: 'user-capability' })
       schema('manifest.capability')
-      const before = getRegistryVersion()
+      const before = mapRegistry((type, context) => ({ type, context, entry: resolveExactEntry(type, context) }))
       registerKernel(Capability, 'acl', rule)
       registerKernel(Capability, 'migrate', [])
       registerKernel(Capability, 'mount', mount)
       registerKernel(Capability, 'service', service)
       registerKernel(Capability, 'derive', derive)
-      assert.equal(getRegistryVersion(), before)
+      assert.deepEqual(mapRegistry((type, context) => ({ type, context, entry: resolveExactEntry(type, context) })), before)
       for (const name of ['acl', 'migrate', 'mount', 'service', 'derive']) assert.equal(resolveExact(Capability, name), null)
     })
     assert.deepEqual(manifest.legacySecurity, [])

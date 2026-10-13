@@ -12,9 +12,7 @@ type Entry = { handler: Handler; meta?: Record<string, unknown> };
 // than the trpc dispatcher (dist) — actions vanish at execute time.
 type RegistryShared = {
   registry: Map<string, Map<string, Entry>>;
-  listeners: Set<() => void>;
   missResolvers: Map<string, (type: string) => void>;
-  version: number;
 };
 
 declare global {
@@ -24,26 +22,12 @@ declare global {
 
 globalThis.__treenxCoreRegistry ??= {
   registry: createRegistryMap<Entry>(),
-  listeners: new Set(),
   missResolvers: new Map(),
-  version: 0,
 };
 const _shared = globalThis.__treenxCoreRegistry;
 const registry = _shared.registry;
-const listeners = _shared.listeners;
 
 const DEFAULT_TYPE = normalizeType('default');
-
-// Registry subscription
-function bump() {
-  _shared.version++;
-  listeners.forEach(cb => cb());
-}
-export function subscribeRegistry(cb: () => void) {
-  listeners.add(cb);
-  return () => { listeners.delete(cb); };
-}
-export function getRegistryVersion() { return _shared.version; }
 
 function validateContext(context: string): void {
   if (typeof context !== 'string') throw new Error('context must be a string');
@@ -67,7 +51,6 @@ export function registerLegacy(type: string, context: string, handler: Handler, 
   // Sealed: silent dedup matches HMR re-execution behavior of the prior implementation.
   if (inner.has(context)) return;
   inner.set(context, meta === undefined ? { handler } : { handler, meta });
-  bump();
 }
 
 export function getMeta(type: TypeId, context: string): Record<string, unknown> | null {
@@ -85,9 +68,7 @@ export function resolveEntry<C extends string>(type: TypeId, context: C, _notify
   const exact = registry.get(n)?.get(context);
   if (exact) return exact as ResolvedEntry<C>;
 
-  // Notify miss BEFORE default fallback. Async loaders (UIX) start fetching, register
-  // when done, bump() triggers re-render — next resolve() finds exact match. Sync
-  // resolvers register inline; we re-check exact below so they take effect in this call.
+  // Schema packs register inline on a miss; re-check before default fallback.
   if (_notifyMiss) {
     missResolvers.get(context)?.(n);
     const reExact = registry.get(n)?.get(context);
@@ -128,7 +109,6 @@ export function unregister(type: string, context: string): boolean {
   if (!inner?.has(context)) return false;
   inner.delete(context);
   if (!inner.size) registry.delete(t);
-  bump();
   return true;
 }
 

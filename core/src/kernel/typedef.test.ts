@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { getRegistryVersion } from '#core/registry'
+import { mapRegistry, resolveExactEntry } from '#core/registry'
 import { KernelError } from '#errors'
 import type { TypeSchema } from '#schema/types'
 import { createInstanceFoundation } from './instance'
@@ -52,7 +52,7 @@ const schema: TypeSchema = {
 
 describe('class type definitions', () => {
   it('uses generated field, argument and type metadata without publishing globally', () => {
-    const before = getRegistryVersion()
+    const before = mapRegistry((type, context) => ({ type, context, entry: resolveExactEntry(type, context) }))
     const generated: TypeSchema = { ...schema, version: 3, actionsOnly: true, aliases: ['test.old'] }
     const def = buildTypeDef(Counter, options(generated))
     assert.equal(def.name, 'test.counter')
@@ -67,7 +67,7 @@ describe('class type definitions', () => {
     assert.equal(def.actions.increment.kind, 'write')
     assert.equal(def.actions.read.kind, 'read')
     assert.deepEqual(Object.keys(def.actions).sort(), ['count', 'increment', 'read'])
-    assert.equal(getRegistryVersion(), before)
+    assert.deepEqual(mapRegistry((type, context) => ({ type, context, entry: resolveExactEntry(type, context) })), before)
   })
 
   it('invokes a method with the supplied component receiver, including named components', async () => {
