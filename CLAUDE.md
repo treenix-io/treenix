@@ -12,7 +12,7 @@ HI!
 - Prefer small focused files — large files are hard to edit and reason about.
 - Use blank lines to separate logical blocks within functions.
 - Always use ES `import`. Never use `require()`.
-- **`#` imports for package-internal paths.** Inside packages use `#core`, `#tree/cache`, `#components/ui/button` — NOT `@/`. This is Node.js native `imports` field (package.json), works in tsx, Node, Vite, everywhere. Each package maps `"#*"` → `"./src/*"`. Cross-package imports use full package name: `@treenx/core/tree`, `@treenx/react/hooks`.
+- **`#` imports for package-internal paths.** Inside packages use `#core`, `#tree/cache`, `#components/ui/button` — NOT `@/`. This is Node.js native `imports` field (package.json), works in tsx, Node, Vite, everywhere. Each package maps `"#*"` → `"./src/*"`. Cross-package imports use full package name: `@treenx/core/kernel/types`, `@treenx/react/hooks`.
 - Fix imports at source. Never create re-export wrappers.
 - Minimal comments — only for genuinely ambiguous logic. Minimal logging.
 
@@ -60,23 +60,21 @@ HI!
 
 ## Architecture Constraints
 "Core" below = Layer 0 (`core/src/core`) — the primitives. The @treenx/core PACKAGE is the
-server platform around them (~12k LOC); its upper layers may use focused deps.
-- **Layer 0 < 500 lines** (currently ~500). If more — something is wrong.
-- **Layer 0 has zero imports** (only TypeScript). Upper layers: sift (tree), immer/quickjs (server), trpc (edge) — new deps need a reason at review.
+native server platform around them; its upper layers may use focused deps.
+- **Layer 0 < 500 lines.** If more — something is wrong.
+- **Layer 0 has zero imports** (only TypeScript). Storage, action compilation, transport, and UI dependencies belong to their owning upper layers.
 - **No decorators.** Everything explicit.
 - **No classes in Layer 0.** Plain objects + functions + TS types.
 - **No Mobx, RxJS, Feathers** anywhere in the package.
-- Persistence: memory/fs adapters live in `core/src/tree` (Layer 1, in-package); heavier backends (Mongo) are separate packages.
+- Persistence: native memory/fs adapters live in `core/src/kernel/store`; Mongo is a separate package.
 - **No React in @treenx/core.** React binding is a separate package.
 
 ## Layer Model (lower layers NEVER know about upper)
 - **Layer 0**: Node + Component + Context + Ref (core)
-- **Layer 1**: Storage adapters (Mongo/FS/Memory)
-- **Layer 2**: React binding, Telegram binding
-- **Layer 3**: Queries, children filtering
-- **Layer 4**: Mounts, external API adapters
-- **Layer 5**: tRPC/REST exposure
-- **Layer 6**: LLM integration
+- **Storage**: native Store contracts and Memory/FS/Mongo adapters
+- **Kernel**: Instance, Session, admission, queries, actions, and subscriptions
+- **Bindings**: TWP/HTTP/MCP transport and React source owners
+- **Modules**: explicit manifests, owned types/actions/views, mounts, services, and external IO ports
 
 ## Three Primitives
 ```
@@ -92,8 +90,9 @@ Context   = Map<type+context, handler>
 - **`{vendor}.*` = package types** (`acme.block.hero`, `acme.template`)
 
 ## Mutations — Actions, Not set()
-- **NEVER use `tree.set()` from client code.** All client mutations go through **`execute(path, action, data)`**.
-- Direct `set` is only valid for: admin tools, form editors, seed scripts, server-side actions.
+- In React views use **`useActions(value)`**; addressed actions use source-owned `TreeEffects.execute`.
+- Server callers use `Session.act` and await `Pending.outcome`; direct admin/editor writes use `Session.commit`.
+- Native action handlers write through `ctx.change`; nested actions use `ctx.act`. No legacy Tree facade.
 
 ## Views — useActions, not ctx.execute
 - **Always use `useActions(value)`** in React views for calling actions. Never build custom `exec()` wrappers around `ctx.execute`.
@@ -101,7 +100,8 @@ Context   = Map<type+context, handler>
 - **Never `ctx.execute('action', data)`** — untyped string, no autocomplete, violates conventions.
 
 ## Node creation — use core helpers
-- **Use `createNode(path, type, data)` from `@treenx/core`** to construct NodeData. Never build `{ $path, $type, ... }` objects manually — `createNode` validates system field names and normalizes types.
+- **Use `makeNode(path, type, data)` from `@treenx/core`** to construct local NodeData. It does not persist a node.
+- Persist through the owning native Session or source effects; React form drafts use `useDraft`.
 
 ## Tech
 - TypeScript strict, ES2022, ESM
