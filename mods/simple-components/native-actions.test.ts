@@ -190,8 +190,6 @@ describe('native simple component actions', { timeout: 30_000 }, () => {
       descriptionSchema,
     ];
     assert.deepEqual(module.types.map(type => type.name).sort(), expectedSchemas.map(schema => schema.$id).sort());
-    assert.deepEqual(module.legacyActions, []);
-    assert.deepEqual(module.legacySecurity, []);
 
     const checklist = module.types.find(type => type.name === 'simple.checklist');
     const comments = module.types.find(type => type.name === 'simple.comments');

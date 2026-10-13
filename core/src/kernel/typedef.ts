@@ -1,6 +1,5 @@
 import { actionMethods, AsyncGenFn, compileNeeds, type ActionMethod, type Class, type CompOptions } from '#comp/index'
 import type { NeedSpec } from '#comp/needs'
-import type { RegisteredMethod } from '#comp/registration'
 import { assertSafeSchema } from '#comp/validate'
 import { KernelError } from '#errors'
 import type { MethodSchema, TypeSchema } from '#schema/types'
@@ -13,6 +12,10 @@ export type TypeDefOptions<T> = Pick<TypeDef, 'name' | 'module' | 'security'> & 
   needs?: CompOptions<T>['needs']
   actions?: Readonly<Record<string, ActionDef>>
   limits?: Limits
+}
+
+export interface RegisteredMethod extends ActionMethod {
+  readonly needs?: readonly NeedSpec[]
 }
 
 export type RegisteredTypeDefOptions = Pick<TypeDef, 'name' | 'module' | 'security'> & {

@@ -41,8 +41,8 @@ import { clientModules } from '../mods/clients';
 import { PUBLICATION_PREFIX } from '@treenx/core/kernel/uix-publication';
 import createNativeTodo from '../../../../mods/todo/kernel';
 import createNativeSimpleComponents from '../../../../mods/simple-components/kernel';
-import { collectModule } from '@treenx/core/kernel/manifest';
-import { loadSchemasRecursive } from '../../../../core/src/schema/load';
+import { buildRegisteredTypeDef } from '@treenx/core/kernel/typedef';
+import { readSchemasFromDir } from '../../../../core/src/schema/load';
 import { fileURLToPath } from 'node:url';
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -437,9 +437,13 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
 
   it('renders declared external views through the original site shell and request-owned native reads', async t => {
     const todo = createNativeTodo().manifest;
-    const viewShellManifest = await collectModule('@treenx/view-shell', () => {
-      loadSchemasRecursive(fileURLToPath(new URL('../../../../mods/view-shell/', import.meta.url)));
-    });
+    const id = '@treenx/view-shell';
+    const schemas = readSchemasFromDir(fileURLToPath(new URL('../../../../mods/view-shell/schemas/', import.meta.url)));
+    const viewShellManifest: ModuleManifest = { ...declareOpenModule(id,
+      schemas.map(schema => ({ type: schema.$id, context: 'schema', handler: () => schema }))),
+      security: [], types: schemas.map(schema => buildRegisteredTypeDef({
+        name: schema.$id, module: id, security: 'ordinary', schema, methods: [],
+      })) };
     const f = await fixture('declared-native-site', false);
     t.after(f.close);
     const key = (nonce: string) => ({ epoch: f.instance.writer.intake.epoch, time: Date.now(), nonce });

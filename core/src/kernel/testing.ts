@@ -2,9 +2,8 @@ import { randomUUID } from 'node:crypto'
 import { KernelError } from '#errors'
 import { createMemoryBlobStore } from '#kernel/blob-store-memory'
 import { createInstance } from '#kernel/instance'
-import { ambientModule, publishModules } from '#kernel/manifest'
 import { previewModules } from '#kernel/module-install'
-import { copyManifest, createRegistry } from '#kernel/registry'
+import { copyManifest } from '#kernel/registry'
 import { drainSession } from '#kernel/session-delivery'
 import { createMemoryStore } from '#kernel/store/memory'
 import type { Position, PositionCounter, StreamCursor, TestActor, TestInstance, TestInstanceConfig } from '#kernel/types'
@@ -48,9 +47,7 @@ export function createTestInstance<ActorName extends string>(
   input: TestInstanceConfig<ActorName>,
 ): Promise<NativeTestInstance<ActorName>>;
 export async function createTestInstance(input: TestInstanceConfig): Promise<NativeTestInstance> {
-  const ambient = ambientModule();
-  publishModules(createRegistry(), [ambient]);
-  const modules = [...input.modules, ambient].map(copyManifest);
+  const modules = input.modules.map(copyManifest);
   previewModules(modules);
   const seed = structuredClone(input.seed);
   const actorInputs = Object.entries(input.actors).map(

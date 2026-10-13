@@ -1,3 +1,8 @@
+import { instantiateModule } from '@treenx/core/kernel/manifest';
+import { nativeDeclaredModule, type NativeClassDeclaration } from '@treenx/mods/native-module';
+import { normalizeType } from '@treenx/core';
+import type { TypeSchema } from '@treenx/core/schema/types';
+import type { ActionDef, SecurityRegistration } from '@treenx/core/kernel/types';
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { it, type TestContext } from 'node:test'
@@ -6,7 +11,7 @@ import { register, unregister } from '#core/registry'
 import { KernelError } from '#errors'
 import { createMemoryBlobStore } from '#kernel/blob-store-memory'
 import { createInstance } from '#kernel/instance'
-import { collectModule, registerKernel } from '#kernel/manifest'
+
 import { drainSession } from '#kernel/session-delivery'
 import { createMemoryStore } from '#kernel/store/memory'
 import type { Node, Position, PositionCounter, ServiceHandler, Session } from '#kernel/types'
@@ -35,12 +40,21 @@ function counter(instance: string): PositionCounter {
 
 /** Start with no marker and install an actual registered service owner. */
 async function fixture(t: TestContext, handler: ServiceHandler) {
-  const module = await collectModule(`service-contract:${randomUUID()}`, () => {
+  const module = await (() => {
+    const owner = `service-contract:${randomUUID()}`;
+    return instantiateModule({ collectionId: owner, factory: () => {
+      const schemas: Record<string, TypeSchema> = {};
+      const declaredActions: Record<string, Record<string, ActionDef>> = {};
+      const classes: Record<string, NativeClassDeclaration> = {};
+      const security: SecurityRegistration[] = [];
     class Autostart {}
-    registerType('autostart', Autostart, { security: 'user-capability' })
-    register('autostart', 'schema', () => ({ $id: 'autostart', type: 'object', properties: { label: { type: 'string' } } }))
-    registerKernel('autostart', 'service', handler)
-  })
+    classes[normalizeType('autostart')] = { cls: Object.assign(Autostart, { $type: normalizeType('autostart') }), security: 'user-capability', meta: { security: 'user-capability' } }
+    schemas[normalizeType('autostart')] = (() => ({ $id: 'autostart', type: 'object', properties: { label: { type: 'string' } } }))()
+    security.push({ type: normalizeType('autostart'), context: 'service', handler: handler })
+
+      return { manifest: nativeDeclaredModule(owner, schemas, declaredActions, classes, security) };
+    } }, {});
+  })()
   const id = `service:${randomUUID()}`
   const store = createMemoryStore({ domain: id })
   const instance = await createInstance({

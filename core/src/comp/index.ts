@@ -16,7 +16,6 @@ import {
   unregister,
 } from '#core';
 import { trackType } from '#mod/tracking';
-import { recordClass, recordMethod } from '#comp/registration';
 import type { SecurityClass } from '#kernel/types';
 
 export type { Class };
@@ -142,7 +141,6 @@ function registerMethods<T>(
       const target = ctx.comp ?? ctx.node;
       return runWithExecCtx(ctx, () => method.call(target, data, ctx.deps));
     };
-    recordMethod(handler, { name, method, needs: actionNeeds });
     register(normalizedType, context, handler, Object.keys(meta).length ? meta : undefined);
   }
 }
@@ -158,7 +156,6 @@ export function registerType<T extends object>(type: string, cls: Class<T>, opts
   }
 
   const compClass = Object.assign(cls, { $type: normalizeType(type) });
-  recordClass(compClass.$type, cls, opts?.security ?? 'ordinary');
   register(type, 'class', cls, opts);
   trackType(compClass.$type);
 

@@ -1,3 +1,8 @@
+import { instantiateModule } from '@treenx/core/kernel/manifest';
+import { nativeDeclaredModule, type NativeClassDeclaration } from '@treenx/mods/native-module';
+import { normalizeType } from '@treenx/core';
+import type { TypeSchema } from '@treenx/core/schema/types';
+import type { ActionDef, SecurityRegistration } from '@treenx/core/kernel/types';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp } from 'node:fs/promises';
@@ -10,7 +15,7 @@ import { register, unregister } from '#core/registry';
 import { KernelError } from '#errors';
 import { createMemoryBlobStore } from '#kernel/blob-store-memory';
 import { createInstance } from '#kernel/instance';
-import { collectModule, registerKernelAction } from '#kernel/manifest';
+
 import { openNativeRuntime } from '#kernel/runtime';
 import { drainSession } from '#kernel/session-delivery';
 import { scanBudget } from '#kernel/store/contract';
@@ -121,18 +126,27 @@ async function moduleFor(
   actions: TypeDef['actions'],
   forms: TypeDef['actions'] = {},
 ) {
-  const module = await collectModule(`io-contract:${randomUUID()}`, () => {
-    register(workerType, 'schema', () => ({ $id: workerType, type: 'object', properties: {} }));
+  const module = await (() => {
+    const owner = `io-contract:${randomUUID()}`;
+    return instantiateModule({ collectionId: owner, factory: () => {
+      const schemas: Record<string, TypeSchema> = {};
+      const declaredActions: Record<string, Record<string, ActionDef>> = {};
+      const classes: Record<string, NativeClassDeclaration> = {};
+      const security: SecurityRegistration[] = [];
+    schemas[normalizeType(workerType)] = (() => ({ $id: workerType, type: 'object', properties: {} }))();
     for (const [name, action] of Object.entries(actions))
-      registerKernelAction(workerType, name, action);
+      (declaredActions[normalizeType(workerType)] ??= {})[name] = action;
     class IoForm {
       count = 0;
     }
-    registerType(formType, IoForm, { security: 'user-capability' });
-    register(formType, 'schema', () => ({ $id: formType, type: 'object', properties: {} }));
+    classes[normalizeType(formType)] = { cls: Object.assign(IoForm, { $type: normalizeType(formType) }), security: 'user-capability', meta: { security: 'user-capability' } };
+    schemas[normalizeType(formType)] = (() => ({ $id: formType, type: 'object', properties: {} }))();
     for (const [name, action] of Object.entries(forms))
-      registerKernelAction(formType, name, action);
-  });
+      (declaredActions[normalizeType(formType)] ??= {})[name] = action;
+
+      return { manifest: nativeDeclaredModule(owner, schemas, declaredActions, classes, security) };
+    } }, {});
+  })();
   t.after(() => {
     unregister(workerType, 'schema');
     unregister(formType, 'schema');

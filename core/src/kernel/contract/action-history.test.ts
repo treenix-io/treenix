@@ -1,3 +1,8 @@
+import { instantiateModule } from '@treenx/core/kernel/manifest';
+import { nativeDeclaredModule, type NativeClassDeclaration } from '@treenx/mods/native-module';
+import { normalizeType } from '@treenx/core';
+import type { TypeSchema } from '@treenx/core/schema/types';
+import type { ActionDef, SecurityRegistration } from '@treenx/core/kernel/types';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
@@ -9,7 +14,7 @@ import { register, unregister } from '#core/registry';
 import { KernelError } from '#errors';
 import { createMemoryBlobStore } from '#kernel/blob-store-memory';
 import { createInstance } from '#kernel/instance';
-import { collectModule, registerKernelAction } from '#kernel/manifest';
+
 import { openNativeRuntime } from '#kernel/runtime';
 import { drainSession } from '#kernel/session-delivery';
 import { createMemoryStore } from '#kernel/store/memory';
@@ -61,23 +66,32 @@ async function fixture(
   actions: TypeDef['actions'],
   forms: TypeDef['actions'] = {},
 ) {
-  const module = await collectModule(`history-contract:${randomUUID()}`, () => {
-    register(workerType, 'schema', () => ({
+  const module = await (() => {
+    const owner = `history-contract:${randomUUID()}`;
+    return instantiateModule({ collectionId: owner, factory: () => {
+      const schemas: Record<string, TypeSchema> = {};
+      const declaredActions: Record<string, Record<string, ActionDef>> = {};
+      const classes: Record<string, NativeClassDeclaration> = {};
+      const security: SecurityRegistration[] = [];
+    schemas[normalizeType(workerType)] = (() => ({
       $id: workerType,
       type: 'object',
       properties: { count: { type: 'number' } },
-    }));
+    }))();
     for (const [name, action] of Object.entries(actions))
-      registerKernelAction(workerType, name, action);
-    register(recordType, 'schema', () => ({ $id: recordType, type: 'object', properties: {} }));
+      (declaredActions[normalizeType(workerType)] ??= {})[name] = action;
+    schemas[normalizeType(recordType)] = (() => ({ $id: recordType, type: 'object', properties: {} }))();
     class HistoryForm {
       count = 0;
     }
-    registerType(formType, HistoryForm, { security: 'user-capability' });
-    register(formType, 'schema', () => ({ $id: formType, type: 'object', properties: {} }));
+    classes[normalizeType(formType)] = { cls: Object.assign(HistoryForm, { $type: normalizeType(formType) }), security: 'user-capability', meta: { security: 'user-capability' } };
+    schemas[normalizeType(formType)] = (() => ({ $id: formType, type: 'object', properties: {} }))();
     for (const [name, action] of Object.entries(forms))
-      registerKernelAction(formType, name, action);
-  });
+      (declaredActions[normalizeType(formType)] ??= {})[name] = action;
+
+      return { manifest: nativeDeclaredModule(owner, schemas, declaredActions, classes, security) };
+    } }, {});
+  })();
   const id = `history-contract:${randomUUID()}`;
   const root = createMemoryStore({ domain: id });
   let saved: Position | undefined;
@@ -628,9 +642,15 @@ describe('history reads through native actions', { timeout: 10_000 }, () => {
 
   it('uses genuine mounted filesystem history and opaque cursors through a relative need', async (t) => {
     const type = 'history-contract.fs-worker';
-    const module = await collectModule(`history-fs:${randomUUID()}`, () => {
-      register(type, 'schema', () => ({ $id: type, type: 'object', properties: {} }));
-      registerKernelAction(type, 'inspect', {
+    const module = await (() => {
+    const owner = `history-fs:${randomUUID()}`;
+    return instantiateModule({ collectionId: owner, factory: () => {
+      const schemas: Record<string, TypeSchema> = {};
+      const declaredActions: Record<string, Record<string, ActionDef>> = {};
+      const classes: Record<string, NativeClassDeclaration> = {};
+      const security: SecurityRegistration[] = [];
+      schemas[normalizeType(type)] = (() => ({ $id: type, type: 'object', properties: {} }))();
+      ;(declaredActions[normalizeType(type)] ??= {})['inspect'] = {
         kind: 'read',
         args: {},
         needs: { audit: { history: '../data', window: { limit: 1 } } },
@@ -645,8 +665,11 @@ describe('history reads through native actions', { timeout: 10_000 }, () => {
             }),
           };
         },
-      });
-    });
+      };
+
+      return { manifest: nativeDeclaredModule(owner, schemas, declaredActions, classes, security) };
+    } }, {});
+  })();
     const parent = fileURLToPath(
       new URL('../../../../../temp/k32-action-history-fs/', import.meta.url),
     );

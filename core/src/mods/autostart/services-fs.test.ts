@@ -1,3 +1,8 @@
+import { instantiateModule } from '@treenx/core/kernel/manifest';
+import { nativeDeclaredModule, type NativeClassDeclaration } from '@treenx/mods/native-module';
+import { normalizeType } from '@treenx/core';
+import type { TypeSchema } from '@treenx/core/schema/types';
+import type { ActionDef, SecurityRegistration } from '@treenx/core/kernel/types';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, readFile } from 'node:fs/promises';
@@ -6,7 +11,7 @@ import { it, type TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { registerType } from '#comp';
 import { register, unregister } from '#core/registry';
-import { collectModule, registerKernel, type CollectedModule } from '#kernel/manifest';
+import { type CollectedModule } from '#kernel/manifest';
 import { openNativeRuntime } from '#kernel/runtime';
 import { drainSession } from '#kernel/session-delivery';
 import { R, W, type Session, type Node } from '#kernel/types';
@@ -16,7 +21,7 @@ let autostartModule: Promise<CollectedModule> | undefined;
 
 /** Collect the actual cached entry once and reuse its immutable module manifest. */
 function collectAutostart(): Promise<CollectedModule> {
-  return autostartModule ??= collectModule('@treenx/core/autostart', () => import('#mods/autostart/kernel'));
+  return autostartModule ??= instantiateModule({ collectionId: '@treenx/core/autostart', factory: async () => (await import('#mods/autostart/kernel')).default() }, {});
 }
 
 it('starts the registered discovery service on canonical filesystem reopen', { timeout: 10_000 }, async (t) => {
@@ -24,28 +29,37 @@ it('starts the registered discovery service on canonical filesystem reopen', { t
   const starts: string[] = [];
   const discovered: number[] = [];
   const autostartSchema = JSON.parse(await readFile(new URL('./schemas/autostart.json', import.meta.url), 'utf8'));
-  const module = await collectModule(`startup-contract:${randomUUID()}`, () => {
+  const module = await (() => {
+    const owner = `startup-contract:${randomUUID()}`;
+    return instantiateModule({ collectionId: owner, factory: () => {
+      const schemas: Record<string, TypeSchema> = {};
+      const declaredActions: Record<string, Record<string, ActionDef>> = {};
+      const classes: Record<string, NativeClassDeclaration> = {};
+      const security: SecurityRegistration[] = [];
     class Worker {}
-    registerType(type, Worker, { security: 'user-capability' });
-    register(type, 'schema', () => ({ $id: type, type: 'object', properties: {} }));
+    classes[normalizeType(type)] = { cls: Object.assign(Worker, { $type: normalizeType(type) }), security: 'user-capability', meta: { security: 'user-capability' } };
+    schemas[normalizeType(type)] = (() => ({ $id: type, type: 'object', properties: {} }))();
     class Autostart {}
-    registerType('autostart', Autostart, { security: 'user-capability' });
-    register('autostart', 'schema', () => ({ ...autostartSchema, methods: {} }));
-    registerKernel('autostart', 'service', async (node: Node, session: Session) => {
+    classes[normalizeType('autostart')] = { cls: Object.assign(Autostart, { $type: normalizeType('autostart') }), security: 'user-capability', meta: { security: 'user-capability' } };
+    schemas[normalizeType('autostart')] = (() => ({ ...autostartSchema, methods: {} }))();
+    security.push({ type: normalizeType('autostart'), context: 'service', handler: async (node: Node, session: Session) => {
       starts.push(session.actor.principal);
       const delivery = (async () => { for await (const frame of session.lane) assert.notEqual(frame.t, 'fail'); })();
       const configured = await session.read({ children: node.$path });
       discovered.push(configured.list.length);
       return { async stop() { await delivery; } };
-    });
-    registerKernel(type, 'service', async (_node: Node, session: Session) => {
+    } });
+    security.push({ type: normalizeType(type), context: 'service', handler: async (_node: Node, session: Session) => {
       const delivery = (async () => {
         for await (const frame of session.lane) assert.notEqual(frame.t, 'fail');
       })();
       void delivery.catch(error => { console.error(error); });
       return { async stop() { await delivery; } };
-    });
-  });
+    } });
+
+      return { manifest: nativeDeclaredModule(owner, schemas, declaredActions, classes, security) };
+    } }, {});
+  })();
   const parent = fileURLToPath(new URL('../../../../../temp/native-service-functional/data/', import.meta.url));
   await mkdir(parent, { recursive: true });
   const config = {
@@ -99,19 +113,28 @@ it('starts a canonical bound child service on filesystem reopen', { timeout: 10_
   const type = `startup-contract.worker-${randomUUID()}`;
   const starts: string[] = [];
   const autostart = await collectAutostart();
-  const module = await collectModule(`startup-contract:${randomUUID()}`, () => {
+  const module = await (() => {
+    const owner = `startup-contract:${randomUUID()}`;
+    return instantiateModule({ collectionId: owner, factory: () => {
+      const schemas: Record<string, TypeSchema> = {};
+      const declaredActions: Record<string, Record<string, ActionDef>> = {};
+      const classes: Record<string, NativeClassDeclaration> = {};
+      const security: SecurityRegistration[] = [];
     class Worker {}
-    registerType(type, Worker, { security: 'user-capability' });
-    register(type, 'schema', () => ({ $id: type, type: 'object', properties: {} }));
-    registerKernel(type, 'service', async (_node: Node, session: Session) => {
+    classes[normalizeType(type)] = { cls: Object.assign(Worker, { $type: normalizeType(type) }), security: 'user-capability', meta: { security: 'user-capability' } };
+    schemas[normalizeType(type)] = (() => ({ $id: type, type: 'object', properties: {} }))();
+    security.push({ type: normalizeType(type), context: 'service', handler: async (_node: Node, session: Session) => {
       starts.push(session.actor.principal);
       const delivery = (async () => {
         for await (const frame of session.lane) assert.notEqual(frame.t, 'fail');
       })();
       void delivery.catch(error => { console.error(error); });
       return { done: delivery, async stop() { await delivery; } };
-    });
-  });
+    } });
+
+      return { manifest: nativeDeclaredModule(owner, schemas, declaredActions, classes, security) };
+    } }, {});
+  })();
   const parent = fileURLToPath(new URL('../../../../../temp/native-service-functional/data/', import.meta.url));
   await mkdir(parent, { recursive: true });
   const config = {
@@ -176,11 +199,17 @@ async function assertPausedDeclarationChange(t: TestContext, retarget: boolean):
   let replaced = () => {};
   const replacementEntered = new Promise<void>(resolve => { replaced = resolve; });
   const autostart = await collectAutostart();
-  const module = await collectModule(`startup-contract:${randomUUID()}`, () => {
+  const module = await (() => {
+    const owner = `startup-contract:${randomUUID()}`;
+    return instantiateModule({ collectionId: owner, factory: () => {
+      const schemas: Record<string, TypeSchema> = {};
+      const declaredActions: Record<string, Record<string, ActionDef>> = {};
+      const classes: Record<string, NativeClassDeclaration> = {};
+      const security: SecurityRegistration[] = [];
     class Worker {}
-    registerType(type, Worker, { security: 'user-capability' });
-    register(type, 'schema', () => ({ $id: type, type: 'object', properties: {} }));
-    registerKernel(type, 'service', async (_node: Node, session: Session) => {
+    classes[normalizeType(type)] = { cls: Object.assign(Worker, { $type: normalizeType(type) }), security: 'user-capability', meta: { security: 'user-capability' } };
+    schemas[normalizeType(type)] = (() => ({ $id: type, type: 'object', properties: {} }))();
+    security.push({ type: normalizeType(type), context: 'service', handler: async (_node: Node, session: Session) => {
       starts.push(session.actor.principal);
       owned = session;
       if (starts.length === 1) reached();
@@ -191,8 +220,11 @@ async function assertPausedDeclarationChange(t: TestContext, retarget: boolean):
       })();
       void delivery.catch(error => { console.error(error); });
       return { done: delivery, async stop() { stops++; try { await delivery; } finally { stopped(); } } };
-    });
-  });
+    } });
+
+      return { manifest: nativeDeclaredModule(owner, schemas, declaredActions, classes, security) };
+    } }, {});
+  })();
   const parent = fileURLToPath(new URL('../../../../../temp/native-service-functional/data/', import.meta.url));
   await mkdir(parent, { recursive: true });
   const config = {

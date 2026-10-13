@@ -67,8 +67,8 @@ describe('exports map (qvrt)', () => {
   it('the kernel door exports the canonical factory and native module authoring', async () => {
     const kernel = await import('@treenx/core/kernel');
     assert.deepEqual(Object.keys(kernel).sort(), [
-      'A', 'DEFAULT_LIMITS', 'R', 'W', 'collectModule', 'createInstance',
-      'getActionContext', 'registerKernel', 'registerKernelAction',
+      'A', 'DEFAULT_LIMITS', 'R', 'W', 'createInstance',
+      'getActionContext', 'instantiateModule',
     ]);
     assert.equal(kernel.createInstance, createInstance);
   });

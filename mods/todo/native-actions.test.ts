@@ -148,8 +148,6 @@ describe('native todo business actions', { timeout: 30_000 }, () => {
     assert.equal(list.security, 'ordinary');
     assert.equal(item.actions.toggle.kind, 'write');
     assert.equal(list.actions.add.kind, 'write');
-    assert.deepEqual(module.legacyActions, []);
-    assert.deepEqual(module.legacySecurity, []);
 
     const f = await fixture(t);
     for (const name of ['todo.item', 'todo.list']) {

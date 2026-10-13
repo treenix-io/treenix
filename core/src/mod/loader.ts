@@ -1,4 +1,4 @@
-// Treenix Module Loader — side-effect imports and schema discovery
+// Treenix Module Loader — explicit native factories and client convention discovery
 
 import { isInsideRoot } from '#core/path';
 import { safeJsonParse } from '#core/json';
@@ -9,7 +9,7 @@ import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { setCurrentMod } from './tracking';
 import type { LoadedMod } from './types';
-import type { CollectedModule, NativeModuleDeployment, NativeModuleExports, NativeModuleHost, NativeModuleFactory } from '#kernel/manifest';
+import type { CollectedModule, NativeModuleExports, NativeModuleHost } from '#kernel/manifest';
 import type { ActionIoBinding, Gate, Io, Registry } from '#kernel/types';
 
 const log = createLogger('mod');
@@ -167,7 +167,7 @@ export async function loadLocalMods(modsDir: string, target: LoadTarget, options
     throw error;
   }
   entries.sort((a, b) => a.name.localeCompare(b.name));
-  const native = target === 'kernel' ? { collector: await import('#kernel/manifest'), package: await modulePackageAt(modsDir) } : undefined;
+  const native = target === 'kernel' ? { api: await import('#kernel/manifest'), package: await modulePackageAt(modsDir) } : undefined;
 
   // Inside node_modules, prefer importing through the package specifier so the package's
   // `exports` map picks the compiled .js by default (and the .ts source under `development`).
@@ -205,34 +205,23 @@ export async function loadLocalMods(modsDir: string, target: LoadTarget, options
       // of the next mod's register() calls to this failed mod.
       // R4-BOOT-2: realpath-confine each file inside modDir — symlinked entry files inside
       // a real mod dir would otherwise import code outside the mod root.
-      let deployment: NativeModuleDeployment | undefined;
-      let factory: NativeModuleFactory | undefined;
-      const importModule = async () => {
-        for (const f of filesToImport) {
-          const real = await confineReal(modDir, f);
-          if (real.endsWith('.ts') || real.endsWith('.tsx')) await ensureTsxRegistered();
-          const imported: NativeModuleExports = await import(
-            pkgName ? `${pkgName}/${entry.name}/${basenameNoExt(real)}` : real);
-          if (native !== undefined && imported.default !== undefined) {
-            if (deployment !== undefined) throw new KernelError('CONFLICT', 'Module has more than one native factory');
-            factory = imported.default;
-            deployment = await native.collector.evaluateModuleFactory(imported, options.host);
-          }
-        }
-        if (deployment === undefined) loadSchemasRecursive(modDir, native?.collector.assertModuleSchema);
-      };
-      if (native) {
-        const id = `${native.package}/${entry.name}`, origin = await confineReal(modDir, filesToImport[0]);
-        const definition = native.collector.getModuleDefinition(id, origin);
-        const cached = native.collector.getCollectedModule(id, origin);
-        const manifest = definition !== undefined
-          ? await native.collector.instantiateModule(definition, options.host ?? {}, origin)
-          : cached ?? await native.collector.collectModule(id, importModule, origin, () => deployment, () => factory);
-        result.manifests.push(manifest);
+      if (native !== undefined) {
+        const id = `${native.package}/${entry.name}`;
+        const real = await confineReal(modDir, filesToImport[0]);
+        if (real.endsWith('.ts') || real.endsWith('.tsx')) await ensureTsxRegistered();
+        const imported: NativeModuleExports = await import(pkgName ? `${pkgName}/${entry.name}/${basenameNoExt(real)}` : real);
+        const deployment = await native.api.evaluateModuleFactory(imported, options.host);
+        result.manifests.push(native.api.materializeModule(id, deployment));
       } else {
         setCurrentMod(entry.name);
-        try { await importModule(); }
-        finally { setCurrentMod(null); }
+        try {
+          for (const file of filesToImport) {
+            const real = await confineReal(modDir, file);
+            if (real.endsWith('.ts') || real.endsWith('.tsx')) await ensureTsxRegistered();
+            await import(pkgName ? `${pkgName}/${entry.name}/${basenameNoExt(real)}` : real);
+          }
+          loadSchemasRecursive(modDir);
+        } finally { setCurrentMod(null); }
       }
       modEntry.state = 'loaded';
       modEntry.loadedAt = Date.now();
@@ -280,7 +269,6 @@ function moduleIo(manifests: readonly CollectedModule[]): ActionIoBinding | unde
 
 export async function publishLoadedModules(registry: Registry, result: LoadResult, options: { allowPartialMods?: boolean } = {}): Promise<void> {
   const native = await import('#kernel/manifest');
-  native.assertNoAmbientRegistrations();
   if (result.failed.length && !options.allowPartialMods) {
     throw Object.assign(new KernelError('INVALID', 'Module loading failed'), { failures: result.failed });
   }
@@ -290,7 +278,6 @@ export async function publishLoadedModules(registry: Registry, result: LoadResul
 // ── Load all mods: internal + engine + project (CWD) ──
 
 export async function loadAllMods(target: LoadTarget, options: ModuleLoadOptions = {}): Promise<LoadResult> {
-  if (target === 'kernel') (await import('#kernel/manifest')).assertNoAmbientRegistrations();
   const extraDirs = options.extraDirs ?? [];
   const internalDir = new URL('../mods', import.meta.url).pathname;
   const engineDir = new URL('../../../mods', import.meta.url).pathname;

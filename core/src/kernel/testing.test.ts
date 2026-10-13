@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { register, unregister } from '#core/registry'
 import { KernelError } from '#errors'
 import { createTestInstance } from '#kernel/testing'
 import { R, W, type ModuleManifest, type TestInstanceConfig } from '#kernel/types'
@@ -54,23 +53,6 @@ describe('real native test instance', { timeout: 10_000 }, () => {
     await first.close()
     await assert.rejects(async () => first.actors.reader.read({ node: '/work/item' }), code('CANCELLED'))
     assert.ok('node' in (await second.actors.reader.read({ node: '/work/item' })).copies[0])
-  })
-
-  it('installs ambient native types into each own Registry through an admin journaled commit', async t => {
-    register('factory.ambient', 'schema', () => ({ $id: 'factory.ambient', type: 'object', properties: {} }))
-    t.after(() => unregister('factory.ambient', 'schema'))
-    const test = await createTestInstance({ modules: [], seed: [{ $path: '/ambient', $type: 'factory.ambient',
-      $acl: [{ subject: { group: 'public' }, grant: R }] }], actors: { visitor: { kind: 'credential' } } })
-    t.after(() => test.close())
-    assert.equal(test.instance.registry.type('factory.ambient').module, 'ambient')
-    assert.ok('node' in (await test.actors.visitor.read({ node: '/ambient' })).copies[0])
-    const journal = test.instance.stream.follow(test.initialCursor)
-    const records = journal[Symbol.asyncIterator]()
-    const ownership = await records.next()
-    assert.ok(!ownership.done && ownership.value.t === 'commit')
-    assert.ok(ownership.value.record.caller.startsWith('u:'))
-    assert.ok(ownership.value.record.entries.some(entry => entry.path === '/sys/types/factory.ambient'))
-    await records.return?.()
   })
 
   it('propagates malformed seeds, forged credentials and missing capability declarations loudly', async () => {

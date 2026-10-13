@@ -1,6 +1,6 @@
 import { createTwpHttpRoutes } from '#server/http-routes';
 import { randomUUID } from 'node:crypto';
-import { assertModuleSchema, collectModule, evaluateModuleFactory, getCollectedModule, getModuleDefinition, instantiateModule, type CollectedModule, type NativeModuleDeployment, type NativeModuleExports, type NativeModuleFactory, type NativeModuleHost } from '#kernel/manifest';
+import { evaluateModuleFactory, materializeModule, type CollectedModule, type NativeModuleDeployment, type NativeModuleExports, type NativeModuleHost } from '#kernel/manifest';
 import type { NativeSeedDefinition } from '#mod/native-prefab';
 import { openNativeRuntime, type NativeRuntimeConfig } from '#kernel/runtime';
 import { bindModuleIo, loadAllMods, moduleGates, type LoadResult } from '#mod/loader';
@@ -10,7 +10,6 @@ import { provisionLogs } from '#mods/logs/provision';
 import type { ActionIoBinding } from '#kernel/types';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadSchemasRecursive } from '#schema/load';
 
 export interface NativeModuleLocation {
   readonly id: string;
@@ -41,19 +40,8 @@ export interface NativeDeploymentConfig {
 
 /** Collect an explicit entry under the same factory and ownership contract as discovered modules. */
 async function explicitModule(location: NativeModuleLocation, host: NativeModuleHost): Promise<CollectedModule> {
-  const definition = getModuleDefinition(location.id, location.entry);
-  if (definition !== undefined) return instantiateModule(definition, host, location.entry);
-  const accepted = getCollectedModule(location.id, location.entry);
-  if (accepted !== undefined) return accepted;
-  let deployment: NativeModuleDeployment | undefined;
-  let factory: NativeModuleFactory | undefined;
-  return collectModule(location.id, async () => {
-    const entry: NativeModuleExports = await import(location.entry);
-    factory = entry.default;
-    deployment = await evaluateModuleFactory(entry, host);
-    if (deployment === undefined)
-      loadSchemasRecursive(dirname(fileURLToPath(import.meta.resolve(location.entry))), assertModuleSchema);
-  }, location.entry, () => deployment, () => factory);
+  const entry: NativeModuleExports = await import(location.entry);
+  return materializeModule(location.id, await evaluateModuleFactory(entry, host));
 }
 
 /** Open a native deployment; modules and IO are resolved before persistent resources are acquired. */

@@ -1,3 +1,8 @@
+import { instantiateModule } from '@treenx/core/kernel/manifest';
+import { nativeDeclaredModule, type NativeClassDeclaration } from '@treenx/mods/native-module';
+import { normalizeType } from '@treenx/core';
+import type { TypeSchema } from '@treenx/core/schema/types';
+import type { ActionDef, SecurityRegistration } from '@treenx/core/kernel/types';
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { it, type TestContext } from 'node:test'
@@ -5,7 +10,7 @@ import { registerType } from '#comp'
 import { register, unregister } from '#core/registry'
 import { createMemoryBlobStore } from '#kernel/blob-store-memory'
 import { createInstance } from '#kernel/instance'
-import { collectModule, registerKernel, type CollectedModule } from '#kernel/manifest'
+import { type CollectedModule } from '#kernel/manifest'
 import { drainSession } from '#kernel/session-delivery'
 import { createMemoryStore } from '#kernel/store/memory'
 import { A, R, W, type ChangeMember, type Node, type Position, type PositionCounter, type Preconditions, type Session } from '#kernel/types'
@@ -14,7 +19,7 @@ let autostartModule: Promise<CollectedModule> | undefined
 
 /** Reuse the genuine cached native module manifest across isolated instances. */
 function autostart(): Promise<CollectedModule> {
-  return autostartModule ??= collectModule('@treenx/core/autostart', () => import('#mods/autostart/kernel'))
+  return autostartModule ??= instantiateModule({ collectionId: '@treenx/core/autostart', factory: async () => (await import('#mods/autostart/kernel')).default() }, {})
 }
 
 /** Wait for a real read continuation or handler invocation. */
@@ -44,11 +49,17 @@ async function fixture(t: TestContext, discoveryAdmin = false) {
   const starts: string[] = []
   const started = event()
 
-  const module = await collectModule(`acquisition:${randomUUID()}`, () => {
+  const module = await (() => {
+    const owner = `acquisition:${randomUUID()}`;
+    return instantiateModule({ collectionId: owner, factory: () => {
+      const schemas: Record<string, TypeSchema> = {};
+      const declaredActions: Record<string, Record<string, ActionDef>> = {};
+      const classes: Record<string, NativeClassDeclaration> = {};
+      const security: SecurityRegistration[] = [];
     class Worker {}
-    registerType(type, Worker, { security: 'user-capability' })
-    register(type, 'schema', () => ({ $id: type, type: 'object', properties: {} }))
-    registerKernel(type, 'service', async (node: Node, session: Session) => {
+    classes[normalizeType(type)] = { cls: Object.assign(Worker, { $type: normalizeType(type) }), security: 'user-capability', meta: { security: 'user-capability' } }
+    schemas[normalizeType(type)] = (() => ({ $id: type, type: 'object', properties: {} }))()
+    security.push({ type: normalizeType(type), context: 'service', handler: async (node: Node, session: Session) => {
       assert.equal(session.actor.principal, `n:${node.$id}`)
       starts.push(node.$id)
       const done = (async () => {
@@ -56,8 +67,11 @@ async function fixture(t: TestContext, discoveryAdmin = false) {
       })()
       started.resolve()
       return { done, async stop() { await done } }
-    })
-  })
+    } })
+
+      return { manifest: nativeDeclaredModule(owner, schemas, declaredActions, classes, security) };
+    } }, {});
+  })()
 
   const id = `acquisition:${randomUUID()}`
   const store = createMemoryStore({ domain: id })
