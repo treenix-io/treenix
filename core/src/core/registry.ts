@@ -1,7 +1,6 @@
 import { type Class, ComponentData, normalizeType, type TypeId } from './component';
 import { ContextHandler, Handler } from './context';
 import { createRegistryMap } from './registry-map';
-import { recordRegistration } from './registration';
 
 type Entry = { handler: Handler; meta?: Record<string, unknown> };
 
@@ -39,7 +38,6 @@ export function register<T, C extends string>(type: Class<T>, context: C, handle
 export function register(type: TypeId, context: string, handler: Handler, meta?: Record<string, unknown>): void {
   validateContext(context);
   const t = normalizeType(type);
-  recordRegistration({ type: t, context, handler, meta });
   registerLegacy(t, context, handler, meta);
 }
 
@@ -104,7 +102,6 @@ export function resolveExact<C extends string>(type: TypeId, context: C): Contex
 export function unregister(type: string, context: string): boolean {
   validateContext(context);
   const t = normalizeType(type);
-  recordRegistration({ type: t, context, remove: true });
   const inner = registry.get(t);
   if (!inner?.has(context)) return false;
   inner.delete(context);
@@ -121,7 +118,6 @@ export function replaceHandler<T, C extends string>(type: Class<T>, context: C, 
 export function replaceHandler(type: TypeId, context: string, handler: Handler, meta?: Record<string, unknown>): void {
   const normalized = normalizeType(type);
   unregister(normalized, context);
-  recordRegistration({ type: normalized, context, handler, meta });
   registerLegacy(normalized, context, handler, meta);
 }
 

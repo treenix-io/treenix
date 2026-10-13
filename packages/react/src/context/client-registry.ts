@@ -1,5 +1,3 @@
-import { observeRegistrations } from '@treenx/core/core/registration';
-import type { Registration } from '@treenx/core/core/registration';
 import type { ReactHandler } from '#context';
 import { normalizeType, type Class, type ContextHandler, type Handler, type TypeId } from '@treenx/core';
 import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
@@ -179,14 +177,3 @@ export function mountClientRegistry(registry: ClientRegistry): () => void {
     else owners.set(registry, count - 1);
   };
 }
-
-// Existing UI modules still emit declarations through the core registration producer.
-const importedViews = new Map<string, Registration>();
-observeRegistrations(registration => {
-  const context = registration.context;
-  if (context !== 'react' && !context.startsWith('react:') && context !== 'site' && !context.startsWith('site:')) return;
-  const key = `${registration.type}@${registration.context}`;
-  if ('remove' in registration) importedViews.delete(key);
-  else if (!importedViews.has(key)) importedViews.set(key, registration);
-  publishClientModule(declareClientModule('imported-views', [...importedViews.values()]));
-});
