@@ -126,7 +126,7 @@ export async function createMcpSession(session: Session, systemPath = '/sys/mcp/
     },
     execute,
     async deploy_prefab(input: NativeMcpToolInputs['deploy_prefab']) {
-      return (await execute({ path: input.source, action: 'deploy', args: {
+      return (await execute({ path: input.source, action: 'deploy', opId: input.opId, pre: input.pre, args: {
         target: actual(input.target), ...(input.allowAbsolute === undefined ? {} : { allowAbsolute: input.allowAbsolute }),
       } })).value;
     },

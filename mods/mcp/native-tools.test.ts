@@ -7,6 +7,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { createTwpHttpRoutes } from '@treenx/core/server/http-routes';
 import { createTwpHttpServer } from '@treenx/core/server/http-twp';
 import { nativeMcpManifest } from '#mcp/native-service';
+import type { ModuleManifest } from '@treenx/core/kernel/types';
 import { R, W, A } from '@treenx/core/kernel';
 import { prepareCredential } from '@treenx/core/kernel/auth/credentials';
 import { mkdir, mkdtemp } from 'node:fs/promises';
@@ -15,6 +16,10 @@ import { nativeSystemManifest } from '@treenx/core/system/native-actions';
 import { createMcpSession } from '#mcp/mcp-session';
 import { createNativeMcpServer } from '#mcp/native-tools';
 import prefabModule from '#prefab/kernel';
+
+const counter: ModuleManifest = { id: 'mcp-key', types: [{ name: 'mcp.counter', module: 'mcp-key', security: 'ordinary', version: 0,
+  schema: { type: 'object', properties: { value: { type: 'number' } }, required: ['value'], additionalProperties: false },
+  actions: { increment: { kind: 'write', args: { type: 'object', additionalProperties: false }, post: { '': { $inc: { value: 1 } } } } } }], security: [], open: [] };
 
 /** Exercise tool operations against the actual credential/session and native registry owners. */
 test('native MCP reads acts commits and reflects visible types', async () => {
@@ -27,7 +32,7 @@ test('native MCP reads acts commits and reflects visible types', async () => {
   const register = routes.register;
   routes.register = (path, handler) => { const retire = register(path, handler); registeredResolve(); return retire; };
   const runtime = await openNativeRuntime({ id: 'native-mcp', directory, credentialTtlMs: 60_000,
-    firstAdmin: { path: '/admin', name: 'admin', password: 'smoke-password' }, modules: [nativeSystemManifest(), nativeMcpManifest(routes), (await prefabModule()).manifest] });
+    firstAdmin: { path: '/admin', name: 'admin', password: 'smoke-password' }, modules: [nativeSystemManifest(), nativeMcpManifest(routes), (await prefabModule()).manifest, counter] });
   try {
     const session = await runtime.instance.openSession(runtime.instance.setupCredential);
     const tools = await createMcpSession(session);
@@ -35,6 +40,7 @@ test('native MCP reads acts commits and reflects visible types', async () => {
     try {
       await tools.set_node({ node: { $path: '/sys/mcp/catalog', $type: 't.system' } });
       await tools.set_node({ node: { $path: '/mcp-data', $type: 't.dir' } });
+      await tools.set_node({ node: { $path: '/mcp-counter', $type: 'mcp.counter', value: 0 } });
       await tools.set_node({ node: { $path: '/mcp-prefab', $type: 't.prefab', mod: 'demo', name: 'sample', nodes: [
         { $path: '.', $type: 't.dir', label: 'template' },
         { $path: 'child', $type: 't.dir', label: 'child' },
@@ -64,6 +70,13 @@ test('native MCP reads acts commits and reflects visible types', async () => {
       if (credential === undefined) throw Error('Missing credential');
       try {
         await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${address.port}/mcp`), { requestInit: { headers: { authorization: `Bearer ${credential.token}` } } }));
+        const opId = { epoch: runtime.instance.writer.intake.epoch, time: Date.now(), nonce: 'public-counter-once' };
+        const request = { name: 'execute', arguments: { path: '/mcp-counter', action: 'increment', args: {}, opId } };
+        assert.equal((await client.callTool(request)).isError, undefined);
+        assert.equal((await client.callTool(request)).isError, undefined);
+        const counted = (await tools.get_node({ path: '/mcp-counter' })).copies[0];
+        if ('error' in counted) throw counted.error;
+        assert.equal(counted.node.value, 1);
         const listed = await client.listTools();
         assert.equal(listed.tools.some(tool => tool.name === 'get_node'), true);
         assert.equal(listed.tools.some(tool => tool.name === 'deploy_prefab'), true);
