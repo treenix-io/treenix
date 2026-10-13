@@ -56,11 +56,6 @@
       "types": "./dist/tree.d.ts",
       "default": "./dist/tree.js"
     },
-    "./tree/branch": {
-      "development": "./src/tree/branch.ts",
-      "types": "./dist/tree/branch.d.ts",
-      "default": "./dist/tree/branch.js"
-    },
     "./util/inflight": {
       "development": "./src/util/inflight.ts",
       "types": "./dist/util/inflight.d.ts",

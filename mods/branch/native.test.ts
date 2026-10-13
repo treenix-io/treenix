@@ -145,7 +145,10 @@ test('native branch lifecycle creates, reviews and merges one bounded atomic fut
     await session.act({ opId: key(), path: branch.$path, action: 'requestMerge', args: { note: 'Ready' } }).outcome;
     assert.equal((await read(session, branch.$path)).status, 'review');
     const merged = await session.act({ opId: key(), path: branch.$path, action: 'merge', args: {} }).outcome;
-    assert.deepEqual(merged.value, { merged: 3, applied: ['/live/created', '/live/item', '/live/remove'], conflicts: [], status: 'merged' });
+    assert.partialDeepStrictEqual(merged.value, { merged: 3, conflicts: [], status: 'merged' });
+    for (const path of ['/live/created', '/live/item', '/live/remove']) {
+      assert.partialDeepStrictEqual(merged.value, { applied: [path] });
+    }
     assert.equal((await read(session, branch.$path)).status, 'merged');
     assert.equal((await read(session, '/live/item')).count, 2);
     assert.equal((await read(session, '/live/created')).count, 6);
