@@ -1,7 +1,13 @@
 // Board task tests — status flow, actions, field updates
 
-import { getComponent, type NodeData, resolve } from '@treenx/core';
-import './types';
+import { getComponent, type NodeData, normalizeType } from '@treenx/core';
+import createNativePlan from '../../../mods/plan/kernel';
+const boardManifest = createNativePlan().manifest;
+function taskType() {
+  const type = boardManifest.types.find(type => type.name === 'board.task');
+  assert.ok(type);
+  return type;
+}
 import { Order } from './types';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
@@ -26,7 +32,7 @@ describe('board.task registration', () => {
   it('registers all expected actions', () => {
     const actions = ['assign', 'start', 'submit', 'approve', 'reject', 'reopen', 'move'];
     for (const action of actions) {
-      assert.ok(resolve('board.task', `action:${action}`), `action:${action} should be registered`);
+      assert.ok(taskType().actions[action], `action:${action} should be registered`);
     }
   });
 });
@@ -36,7 +42,8 @@ describe('board.task registration', () => {
 // in a separate `#order` component, read back via getComponent(node, Order).
 describe('board.order component', () => {
   it('is registered as a component type', () => {
-    assert.equal(resolve('board.order', 'class'), Order);
+    assert.equal(normalizeType(Order), 'board.order');
+    assert.ok(boardManifest.types.some(type => type.name === normalizeType(Order)));
   });
 
   it('reads back the same component from a task and a column', () => {

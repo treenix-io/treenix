@@ -134,7 +134,8 @@ async function fixture(t: TestContext, grant = R | W, gates: readonly Gate[] = [
   return { runtime, runtimes, config, admin, adminCredential, caller, open, accepted };
 }
 
-describe('native todo business actions', { timeout: 30_000 }, () => {
+// Nine durable Fs cases share this parent budget; each native action keeps its own deadline.
+describe('native todo business actions', { timeout: 90_000 }, () => {
   it('installs the existing schemas as ordinary native types owned by the collected module', async (t) => {
     const module = await collected;
     const item = module.types.find((type) => type.name === 'todo.item');

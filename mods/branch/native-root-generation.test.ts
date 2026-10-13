@@ -39,7 +39,8 @@ test('future root recreation retires its issued identity and persists a fresh ge
       { op: 'put', node: { $path: '/branches', $type: 't.dir' } },
       { op: 'put', node: { $path: '/branches/b', $type: 't.branch', base: '/live', owner: 'fixture', status: 'open', title: '', createdAt: 0, mergedAt: 0, conflicts: [], '#mount': { $type: 't.mount.branch', pattern: 'tree' } } },
       { op: 'put', node: { $path: upper, $type: 't.dir' } },
-      { op: 'put', node: { $path: `${upper}/retained`, $type: 't.dir', value: 7 } },
+      { op: 'put', node: { $path: `${upper}/retained`, $type: 't.branch.delta', baseId: null, baseRev: null,
+        node: { $path: `${view}/retained`, $type: 't.dir', value: 7 } } },
       { op: 'put', node: { $path: view, $type: 't.dir' } },
     ] }).outcome;
     const retained = await read(session, `${upper}/retained`);

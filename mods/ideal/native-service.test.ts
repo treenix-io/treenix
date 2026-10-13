@@ -286,7 +286,7 @@ it('rejects cold Fs service startup without W and keeps the eligible idea unmodi
   await close();
   release();
   const started = await starting;
-  if (started.ended) assert.ok(started.error instanceof KernelError && started.error.code === 'CANCELLED');
+  if (started.ended) assert.ok(started.error instanceof KernelError && started.error.code === 'UNAVAILABLE');
   const cold = await openNativeRuntime({ ...config, gates: [] }).then(
     opened => ({ opened }), error => ({ error }),
   );
