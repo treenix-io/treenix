@@ -678,3 +678,101 @@ describe('nested action type selection', { timeout: 10_000 }, () => {
     assert.equal(writes, 1);
   });
 });
+
+
+describe('supplied native action descriptions', { timeout: 10_000 }, () => {
+  it('refuses every stale descriptor field before running a real handler', async (t) => {
+    let calls = 0
+    const f = await setup({
+      increment: {
+        kind: 'write',
+        args: {},
+        handler: async function (this: { count: number }) {
+          calls++
+          return ++this.count
+        },
+      },
+    })
+    t.after(() => f.instance.auth.close())
+    const result = await f.commands.read({
+      node: '/work/document',
+      action: { name: 'increment' },
+    })
+    assert.ok(result.action)
+    const pre = result.action
+    const stale = [
+      { ...pre, modules: 'another-generation' },
+      { ...pre, type: 't.dir' },
+      { ...pre, kind: 'read' as const },
+      { ...pre, id: 'another-node' },
+      { ...pre, rev: 'another-revision' },
+    ]
+    for (const descriptor of stale)
+      await assert.rejects(
+        f.commands.act({ ...f.request('increment'), pre: descriptor }),
+        code('CONFLICT'),
+      )
+    assert.equal(calls, 0)
+    assert.equal((await f.instance.source.node('/work/document'))?.count, 0)
+    await f.admin.commit({
+      opId: f.key(),
+      changes: [
+        { op: 'patch', path: '/work/document', ops: { $set: { count: 10 } } },
+      ],
+    })
+    await assert.rejects(
+      f.commands.act({ ...f.request('increment'), pre }),
+      code('CONFLICT'),
+    )
+    assert.equal(calls, 0)
+    assert.equal((await f.instance.source.node('/work/document'))?.count, 10)
+  })
+
+  it('rechecks a supplied descriptor after an awaited Gate changes the target', async (t) => {
+    let calls = 0
+    let fixture: Awaited<ReturnType<typeof setup>> | undefined
+    const f = await setup(
+      {
+        increment: {
+          kind: 'write',
+          args: {},
+          handler: async function (this: { count: number }) {
+            calls++
+            return ++this.count
+          },
+        },
+      },
+      [
+        async (operation) => {
+          if (operation.kind === 'act' && operation.action === 'increment') {
+            assert.ok(fixture)
+            await fixture.admin.commit({
+              opId: fixture.key(),
+              changes: [
+                {
+                  op: 'patch',
+                  path: '/work/document',
+                  ops: { $set: { count: 10 } },
+                },
+              ],
+            })
+          }
+          return 'pass'
+        },
+      ],
+    )
+    fixture = f
+    t.after(() => f.instance.auth.close())
+    const result = await f.commands.read({
+      node: '/work/document',
+      action: { name: 'increment' },
+    })
+    assert.ok(result.action)
+    await assert.rejects(
+      f.commands.act({ ...f.request('increment'), pre: result.action }),
+      code('CONFLICT'),
+    )
+    assert.equal(calls, 0)
+    assert.equal((await f.instance.source.node('/work/document'))?.count, 10)
+  })
+})

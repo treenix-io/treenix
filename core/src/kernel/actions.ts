@@ -20,7 +20,7 @@ import { visibleNode } from '#kernel/projection'
 import { assertPost } from '#kernel/post'
 import { createReader, createReaderLedger, readerOperationCost, type ReaderLedger } from '#kernel/reader'
 import { createRequestAdmission, serializeRequest } from '#kernel/request'
-import { R, W, type ActRequest, type Io, type ActionDef, type ActionPieceDelivery, type ActionResult, type NestedActRequest, type OpId, type Outcome, type Path, type Position, type Principal, type StoredNode } from '#kernel/types'
+import { R, W, type ActRequest, type Io, type ActionDef, type ActionPieceDelivery, type ActionResult, type NestedActRequest, type Node, type OpId, type Outcome, type Path, type Position, type Principal, type StoredNode } from '#kernel/types'
 import type { MutationSpan } from '#kernel/writer'
 import { freeze } from '#util/freeze'
 import { stableJson } from '#util/stable-json'
@@ -112,6 +112,7 @@ export function createActionRuntime(options: CommandOptions) {
                 path: request.path,
                 component,
                 ...(request.targetType === undefined ? {} : { targetType: request.targetType }),
+                ...(request.pre === undefined ? {} : { pre: request.pre }),
                 action: request.action,
                 args: request.args,
                 ...(request.anchor === undefined ? {} : { anchor: request.anchor }),
@@ -150,6 +151,14 @@ export function createActionRuntime(options: CommandOptions) {
         projector: options.projector,
       });
 
+      /** Bind a supplied description to the actual admitted definition and target image. */
+      function assertDescriptor(node: Node, type: string, kind: ActionDef['kind']): void {
+        const pre = request.pre;
+        if (pre !== undefined && (pre.modules !== registry.digest || pre.type !== type || pre.kind !== kind
+          || pre.id !== node.$id || pre.rev !== node.$rev))
+          throw new KernelError('CONFLICT', 'Action differs from its supplied description');
+      }
+
       /** Resolve the addressed component and exact action through the caller's Reader. */
       async function classifyAction() {
         const result = await callerReads.read({ node: request.path });
@@ -170,7 +179,9 @@ export function createActionRuntime(options: CommandOptions) {
         const definition = registry.type(ownComponent.$type);
         if (!Object.hasOwn(definition.actions, request.action))
           throw new KernelError('NOT_FOUND', 'Action is absent');
-        return { node, bits, ownComponent, definition, action: definition.actions[request.action] };
+        const action = definition.actions[request.action];
+        assertDescriptor(node, definition.name, action.kind);
+        return { node, bits, ownComponent, definition, action };
       }
 
       let classified: Awaited<ReturnType<typeof classifyAction>>;
@@ -260,8 +271,12 @@ export function createActionRuntime(options: CommandOptions) {
           { signal: control.signal, deadline: budget.deadline },
         );
         assertActionCurrent();
-        const current = (await callerReads.read({ node: request.path })).copies[0];
+        const current = (await createReader({ admission, writer, registry, source, budget, limits, ledger,
+          projector: options.projector }).read({ node: request.path })).copies[0];
         if (!('node' in current)) throw current.error;
+        if ((current.bits & required) !== required)
+          throw new KernelError('FORBIDDEN', 'Action call rights are missing');
+        assertDescriptor(current.node, definition.name, action.kind);
         if (current.node.$id !== node.$id || current.node.$rev !== node.$rev)
           throw new KernelError('CONFLICT', 'Action target changed during admission');
         if (action.kind === 'setuid') {
@@ -365,6 +380,7 @@ export function createActionRuntime(options: CommandOptions) {
                   path: nestedRequest.path,
                   component: nestedRequest.component,
                   targetType: nestedRequest.targetType,
+                  pre: nestedRequest.pre,
                   action: nestedRequest.action,
                   args: nestedRequest.args,
                   opId: nestedOpId,
@@ -765,6 +781,7 @@ export function createActionRuntime(options: CommandOptions) {
             path: request.path,
             component: request.component ?? '',
             ...(request.targetType === undefined ? {} : { targetType: request.targetType }),
+            ...(request.pre === undefined ? {} : { pre: request.pre }),
             action: request.action,
             args: request.args,
             ...(request.anchor === undefined ? {} : { anchor: request.anchor }),

@@ -969,3 +969,103 @@ it('dispatches nested foreign actions by owned type and refuses changed-selector
   assert.equal(writes, 1);
   assert.equal(gates, 1);
 });
+
+
+it(
+  'refuses supplied stale descriptors through actual TWP and federation before effects',
+  { timeout: 10_000 },
+  async (t) => {
+    let calls = 0
+    const remoteModule: ModuleManifest = {
+      ...module,
+      types: [
+        {
+          ...module.types[0],
+          actions: {
+            increment: {
+              kind: 'write',
+              args: {},
+              handler: async function (this: { count: number }) {
+                calls++
+                return ++this.count
+              },
+            },
+          },
+        },
+        module.types[1],
+      ],
+    }
+    const f = await federation(t, { remoteModules: [remoteModule] })
+    await f.remote.admin.commit({
+      opId: f.remote.key(),
+      changes: [
+        {
+          op: 'put',
+          node: { $path: '/counter', $type: 'foreign.counter', count: 0 },
+        },
+      ],
+    }).outcome
+    const http = createTwpHttpServer({
+      instance: f.remote.runtime,
+      allowedOrigins: [],
+      credentialTtlMs: 60_000,
+    })
+    t.after(() => http.close())
+    http.server.listen(0, '127.0.0.1')
+    await once(http.server, 'listening')
+    const address = http.server.address()
+    assert.ok(address !== null && typeof address === 'object')
+    assert.ok(f.remote.runtime.setupCredential)
+    const connection = await openTwpHttp({
+      url: `http://127.0.0.1:${address.port}`,
+      credential: f.remote.runtime.setupCredential,
+      frameBytes: DEFAULT_LIMITS.readBytes,
+    })
+    t.after(() => connection.close())
+    const client = createTwpClient(connection, {
+      credential: f.remote.runtime.setupCredential,
+    })
+    t.after(() => client.close())
+    await client.ready
+    const direct = await client.read({
+      node: '/counter',
+      action: { name: 'increment' },
+    })
+    const foreign = await f.caller.read({
+      node: '/foreign/counter',
+      action: { name: 'increment' },
+    })
+    assert.ok(direct.action)
+    assert.ok(foreign.action)
+    await f.remote.admin.commit({
+      opId: f.remote.key(),
+      changes: [
+        { op: 'patch', path: '/counter', ops: { $set: { count: 10 } } },
+      ],
+    }).outcome
+    await assert.rejects(
+      client.act({
+        path: '/counter',
+        action: 'increment',
+        args: {},
+        opId: client.key(),
+        pre: direct.action,
+      }).outcome,
+      code('CONFLICT'),
+    )
+    await assert.rejects(
+      f.caller.act({
+        path: '/foreign/counter',
+        action: 'increment',
+        args: {},
+        opId: f.origin.key(),
+        pre: foreign.action,
+      }).outcome,
+      code('CONFLICT'),
+    )
+    assert.equal(calls, 0)
+    const copy = (await f.remote.admin.read({ node: '/counter' })).copies[0]
+    assert.ok('node' in copy)
+    assert.equal(copy.node.count, 10)
+  },
+)

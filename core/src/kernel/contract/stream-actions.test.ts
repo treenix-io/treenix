@@ -489,9 +489,10 @@ describe('native streaming action contracts', { timeout: 30_000 }, () => {
         },
       },
     });
+    // Admission checks cost four nodes; the successful child read consumes the remaining three.
     await f.admin.commit({
       opId: f.key(),
-      changes: [{ op: 'patch', path: '/sys/limits', ops: { $set: { readNodes: 5 } } }],
+      changes: [{ op: 'patch', path: '/sys/limits', ops: { $set: { readNodes: 7 } } }],
     }).outcome;
     const caller = await f.open(undefined, 'BUDGET');
     const before = await f.accepted();
