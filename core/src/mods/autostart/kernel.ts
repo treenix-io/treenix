@@ -1,7 +1,8 @@
-import { registerType } from '#comp';
-import { registerNativeAutostart } from './native';
+import { nativeAutostartManifest } from './native';
+import type { NativeModuleDeployment } from '#kernel/manifest';
 
 class Autostart {}
 
-registerType('autostart', Autostart, { security: 'user-capability' });
-registerNativeAutostart();
+export default function createNativeAutostart(): NativeModuleDeployment {
+  return { manifest: nativeAutostartManifest(Autostart) };
+}

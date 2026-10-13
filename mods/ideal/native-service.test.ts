@@ -1,3 +1,4 @@
+import { instantiateModule } from '@treenx/core/kernel/manifest';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, readFile } from 'node:fs/promises';
@@ -6,7 +7,6 @@ import { it, type TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { createNode } from '@treenx/core';
 import { KernelError } from '@treenx/core/errors';
-import { collectModule } from '@treenx/core/kernel';
 import { openNativeRuntime } from '@treenx/core/kernel/runtime';
 import { R, W, type Gate, type ModuleManifest, type Node, type Path, type Session } from '@treenx/core/kernel';
 import createNativeIdeal from './kernel';
@@ -16,7 +16,7 @@ let collected: Promise<readonly ModuleManifest[]> | undefined;
 /** Collect the actual native entries without importing their legacy service implementations. */
 function modules(): Promise<readonly ModuleManifest[]> {
   return collected ??= (async () => [
-    await collectModule('@treenx/core/autostart', () => import('../../core/src/mods/autostart/kernel')),
+    await instantiateModule({ collectionId: '@treenx/core/autostart', factory: async () => (await import('../../core/src/mods/autostart/kernel')).default() }, {}),
     createNativeIdeal().manifest,
   ])();
 }

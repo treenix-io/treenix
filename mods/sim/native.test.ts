@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { it } from 'node:test';
 import type { Position } from '@treenx/core/kernel/types';
-import { collectModule } from '@treenx/core/kernel/manifest';
+import { instantiateModule } from '@treenx/core/kernel/manifest';
 import prefabModule from '@treenx/mods/prefab/kernel';
 import { createInstance } from '../../core/src/kernel/instance';
 import { installNativeSeeds } from '@treenx/mods/prefab/install';
@@ -43,10 +43,7 @@ it(
         },
       },
     });
-    const autostart = await collectModule(
-      '@treenx/core/autostart',
-      () => import('../../core/src/mods/autostart/kernel'),
-    );
+    const autostart = await instantiateModule({ collectionId: '@treenx/core/autostart', factory: async () => (await import('../../core/src/mods/autostart/kernel')).default() }, {});
     const id = randomUUID(),
       store = createMemoryStore({ domain: id });
     let saved: Position | undefined;

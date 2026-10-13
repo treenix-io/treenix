@@ -11,6 +11,7 @@ import { DEFAULT_LIMITS, type ActionDef, type Limits, type Post, type ReadAction
 export type TypeDefOptions<T> = Pick<TypeDef, 'name' | 'module' | 'security'> & {
   schema: TypeSchema
   needs?: CompOptions<T>['needs']
+  actions?: Readonly<Record<string, ActionDef>>
   limits?: Limits
 }
 
