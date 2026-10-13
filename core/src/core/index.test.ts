@@ -552,8 +552,14 @@ describe('safeJsonParse', () => {
 
 describe('assertValidType', () => {
   it('accepts treenix conventions', () => {
-    for (const t of ['dir', 'mount-point', 't.mount.fs', 'craftistry.block.hero', 'application/json', 'json+ld']) {
+    for (const t of ['dir', 'mount-point', 't.mount.fs', 'craftistry.block.hero']) {
       assert.doesNotThrow(() => assertValidType(t));
+    }
+  });
+
+  it('rejects names outside lowercase dot-separated conventions', () => {
+    for (const type of ['Example.Type', 'application/json', 'json+ld', 't..dir']) {
+      assert.throws(() => assertValidType(type), Error);
     }
   });
 

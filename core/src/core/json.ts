@@ -8,8 +8,7 @@ export function assertSafeKey(name: string) {
   if (!isSafeKey(name)) throw new Error(`Forbidden prototype key: ${name}`);
 }
 
-// kriz: should we make it case-insensitive? maybe better types all-lowers only
-const TYPE_NAME_RE = /^[a-z][a-z0-9./_+-]*$/i;
+const TYPE_NAME_RE = /^[a-z][a-z0-9_-]*(?:\.[a-z0-9_-]+)*$/;
 export function assertValidType(type: unknown): asserts type is string {
   if (typeof type !== 'string' || type.length > 200 || !TYPE_NAME_RE.test(type)) {
     throw new Error(`Invalid $type: ${JSON.stringify(type)}`);

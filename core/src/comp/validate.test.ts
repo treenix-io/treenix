@@ -1,10 +1,10 @@
-import { type ComponentData, type NodeData, register, resolveExact, unregister } from '#core';
+import { type ComponentData } from '#core';
 import { KernelError } from '#errors';
 import type { PropertySchema, TypeSchema } from '#schema/types';
 import assert from 'node:assert/strict';
-import { afterEach, beforeEach, describe, it } from 'node:test';
+import { describe, it } from 'node:test';
 import {
-  addTypeValidator, assertSafeSchema, validateComponent, validateNode, validateValue, type ValidationError,
+  addTypeValidator, assertSafeSchema, validateComponent, validateValue, type ValidationError,
 } from './validate';
 
 // Helper: collect errors from validateValue
@@ -707,57 +707,5 @@ describe('assertSafeSchema', () => {
       methods: { go: { arguments: [{ name: 'data', type: 'object', properties: {} }], return: { type: 'number' } } },
     };
     assert.doesNotThrow(() => assertSafeSchema(schema, 't'));
-  });
-});
-
-// ── validateNode ──
-
-describe('validateNode', () => {
-  const KNOWN = 'test.validate.known';
-  const UNKNOWN = 'test.validate.unknown';
-  let registeredDefault = false;
-
-  beforeEach(() => {
-    register(KNOWN, 'schema', () => ({
-      type: 'object',
-      properties: { level: { anyOf: [{ type: 'string' }, { type: 'number' }] } },
-    }));
-    // The fallback schema is registered by the server; its presence must not change strict mode.
-    if (!resolveExact('default', 'schema')) {
-      register('default', 'schema', () => ({ type: 'object', properties: {} }));
-      registeredDefault = true;
-    }
-  });
-
-  afterEach(() => {
-    unregister(KNOWN, 'schema');
-    if (registeredDefault) unregister('default', 'schema');
-    registeredDefault = false;
-  });
-
-  const node = (extra: Record<string, unknown> = {}): NodeData => ({ $path: '/n', $type: KNOWN, level: 1, ...extra });
-
-  it('reports an anyOf mismatch on any component', () => {
-    assert.equal(validateNode(node()).length, 0);
-    assert.deepEqual(validateNode(node({ level: true })).map(e => e.path), [`${KNOWN}.level`]);
-    assert.deepEqual(validateNode(node({ '#c': { $type: KNOWN, level: {} } })).map(e => e.path), ['#c.level']);
-  });
-
-  it('non-strict skips a component whose type has no schema', () => {
-    assert.equal(validateNode({ $path: '/n', $type: UNKNOWN, anything: true }).length, 0);
-    assert.equal(validateNode(node({ '#c': { $type: UNKNOWN, anything: true } })).length, 0);
-  });
-
-  it('strict rejects an unregistered main type with UNKNOWN_TYPE', () => {
-    assert.throws(() => validateNode({ $path: '/n', $type: UNKNOWN }, { strict: true }), isCode('UNKNOWN_TYPE'));
-  });
-
-  it('strict rejects an unregistered named component type with UNKNOWN_TYPE', () => {
-    assert.throws(() => validateNode(node({ '#c': { $type: UNKNOWN } }), { strict: true }), isCode('UNKNOWN_TYPE'));
-  });
-
-  it('strict validates registered types as usual', () => {
-    assert.equal(validateNode(node(), { strict: true }).length, 0);
-    assert.deepEqual(validateNode(node({ level: true }), { strict: true }).map(e => e.path), [`${KNOWN}.level`]);
   });
 });

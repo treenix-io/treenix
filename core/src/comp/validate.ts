@@ -2,10 +2,8 @@
 // Type-dispatched validator tree: type check → dispatch → type-specific constraints + recurse
 // kriz: this should be somewhere near schema!! not in comp!
 
-import { AnyType, type ComponentData, getComponents, isCompKey, type NodeData } from '#core';
-import { resolve, resolveExact } from '#core/registry';
+import { type ComponentData, isCompKey } from '#core';
 import { KernelError } from '#errors';
-import { isOrderKey } from '#kernel/order';
 import type { Component } from '#kernel/types';
 import type { PropertySchema, TypeSchema } from '#schema/types';
 import { createBoundedCache } from '#util/bounded-cache';
@@ -14,11 +12,6 @@ import { isRecord } from '#util/is-record';
 export type ValidationError = {
   path: string;
   message: string;
-};
-
-export type ValidateOptions = {
-  /** A component whose type has no schema registered for it throws UNKNOWN_TYPE instead of being skipped. */
-  strict?: boolean;
 };
 
 // ── Schema cost guard ──
@@ -273,41 +266,5 @@ export function validateComponent(comp: Component, schema: PropertySchema, field
     const fields = Object.fromEntries(Object.entries(comp).filter(([key]) => isOwnField(key)));
     validateValue(fields, { ...schema, type: schema.type === 'object' ? undefined : schema.type }, field || comp.$type, errors);
   }
-  return errors;
-}
-
-// $order of the node and of each component is an order key; it is judged before the components are
-// iterated, because iterating them throws on a non-string one.
-function orderErrors(node: NodeData): ValidationError[] {
-  const errors: ValidationError[] = [];
-  const check = (path: string, order: unknown) => {
-    if (order !== undefined && !isOrderKey(order)) errors.push({ path, message: `malformed order key ${JSON.stringify(order)}` });
-  };
-
-  check('$order', node.$order);
-  for (const [key, value] of Object.entries(node))
-    if (isCompKey(key) && isRecord(value)) check(`${key}.$order`, value.$order);
-
-  return errors;
-}
-
-// Strict takes the type's own registered schema: it never falls back to `default` and never fires
-// a miss resolver (D4). A schema a miss resolver already registered on an earlier non-strict lookup
-// does count, so a lazily registered pack must publish eagerly before strict can guard its types.
-export function validateNode(node: NodeData, opts?: ValidateOptions): ValidationError[] {
-  const errors = orderErrors(node);
-  if (errors.length) return errors;
-
-  for (const [name, comp] of getComponents(node, AnyType)) {
-    const schema = opts?.strict ? resolveExact(comp.$type, 'schema')?.() : resolve(comp.$type, 'schema')?.();
-
-    if (!schema) {
-      if (opts?.strict) throw new KernelError('UNKNOWN_TYPE', `${node.$path} ${name || 'main component'}: no schema for type "${comp.$type}"`);
-      continue;
-    }
-
-    errors.push(...validateComponent(comp, schema, name));
-  }
-
   return errors;
 }
