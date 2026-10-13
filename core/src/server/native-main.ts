@@ -65,6 +65,7 @@ async function main(): Promise<void> {
     || config.seedFilter !== undefined && (!Array.isArray(config.seedFilter)
       || !config.seedFilter.every((name: unknown): name is string => typeof name === 'string'))
     || config.modules !== undefined && (!Array.isArray(config.modules) || !config.modules.every(nativeModuleEntry))
+    || config.modsDir !== undefined && (typeof config.modsDir !== 'string' || config.modsDir.length === 0)
     || config.additionalModules !== undefined && (!Array.isArray(config.additionalModules) || !config.additionalModules.every(nativeModuleEntry)))
     throw new KernelError('INVALID', 'Malformed native server configuration')
   const port = config.port ?? 4882, host = config.host ?? '127.0.0.1'
@@ -103,7 +104,9 @@ async function main(): Promise<void> {
         )
   const runtime = await openNativeDeployment({ seedFilter: config.seedFilter, runtime: { id: config.id, directory: resolve(dirname(configPath), config.directory),
     baseDirectory: config.baseDirectory === undefined ? undefined : resolve(dirname(configPath), config.baseDirectory),
-    credentialTtlMs: config.credentialTtlMs, firstAdmin: config.firstAdmin, installerCredential: config.installerCredential, mountDirectories }, modules, additionalModules, host: moduleHost, io, persistentLogs: config.persistentLogs })
+    credentialTtlMs: config.credentialTtlMs, firstAdmin: config.firstAdmin, installerCredential: config.installerCredential, mountDirectories }, modules, additionalModules,
+    modsDir: config.modsDir === undefined ? undefined : resolve(dirname(configPath), config.modsDir),
+    host: moduleHost, io, persistentLogs: config.persistentLogs })
   const binding = createTwpHttpServer({ instance: runtime.instance, routes: runtime.httpRoutes, allowedOrigins: config.allowedOrigins, credentialTtlMs: config.credentialTtlMs })
   try {
     await new Promise<void>((done, reject) => { binding.server.once('error', reject); binding.server.listen(port, host, () => { binding.server.off('error', reject); done() }) })

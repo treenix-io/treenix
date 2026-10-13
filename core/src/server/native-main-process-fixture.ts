@@ -9,7 +9,7 @@ console.error = (error: unknown, ...rest: unknown[]) => {
 }
 console.info = (...values: unknown[]) => {
   originalInfo(...values)
-  process.send?.({ type: 'info', values })
+  if (values[0] === 'Treenix native server listening:') process.send?.({ type: 'info', values })
 }
 
 process.once('exit', () => {

@@ -212,7 +212,7 @@ describe('native CLI action I/O configuration', { timeout: 45_000 }, () => {
     }
   });
 
-  it('resolves a relative entry and invokes its real provider through the stock CLI', async (t) => {
+  it('discovers a configured relative module directory and invokes its real provider through the stock CLI', async (t) => {
     const received: string[] = [];
     const provider = createServer(async (request, response) => {
       let input = '';
@@ -233,6 +233,16 @@ describe('native CLI action I/O configuration', { timeout: 45_000 }, () => {
     const directory = await scratch();
     const configuration = join(directory, 'configuration');
     await mkdir(configuration);
+    const moduleDirectory = join(directory, 'tenant-modules', 'cli-io');
+    await mkdir(moduleDirectory, { recursive: true });
+    await writeFile(
+      join(directory, 'tenant-modules', 'package.json'),
+      JSON.stringify({ name: 'cli-configured-modules', type: 'module' }),
+    );
+    await writeFile(
+      join(moduleDirectory, 'kernel.ts'),
+      `export { default } from ${JSON.stringify(new URL('./native-main-io-fixture.ts', import.meta.url).href)};\n`,
+    );
     const entry = relative(
       configuration,
       fileURLToPath(new URL('./native-main-io-fixture.ts', import.meta.url)),
@@ -247,7 +257,7 @@ describe('native CLI action I/O configuration', { timeout: 45_000 }, () => {
         allowedOrigins: [],
         port: 0,
         firstAdmin: { path: '/admin', name: 'admin', password: 'cli-password' },
-        modules: [{ id: 'cli-io-fixture', entry }],
+        modsDir: '../tenant-modules',
         io: { entry },
       }),
     );
