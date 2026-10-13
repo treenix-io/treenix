@@ -34,6 +34,53 @@ async function http(runtime: Awaited<ReturnType<typeof openNativeDeployment>>, c
   return { client, welcome, async close() { client.close(); await binding.close(); } };
 }
 
+test('reopen authenticates configured admin for new module ownership and retains data', async () => {
+  const temporary = new URL('../../../../temp/native-module-upgrade-data/', import.meta.url);
+  await mkdir(temporary, { recursive: true });
+  const directory = await mkdtemp(fileURLToPath(new URL('dataset-', temporary)));
+  const modules = [{ id: 'boot-fixture', entry: new URL('./native-deployment-fixture.ts', import.meta.url).href }];
+  const config: NativeDeploymentConfig = {
+    runtime: { id: randomUUID(), directory: join(directory, 'root'), credentialTtlMs: 60_000,
+      firstAdmin: { path: '/admin', name: 'admin', password: 'fixture-password' } },
+    modules,
+  };
+  const fresh = await openNativeDeployment(config);
+  const initial = await http(fresh, fresh.instance.setupCredential);
+  try {
+    await finish(initial.client.commit({ changes: [{ op: 'put', node: { $path: '/retained', $type: 'boot.state', label: 'saved' } }] }));
+  } finally { await initial.close(); await fresh.close(); }
+
+  const manifest: ModuleManifest = { id: 'native.upgrade-fixture', open: [], security: [], types: [{
+    name: 'upgrade.note', module: 'native.upgrade-fixture', security: 'ordinary', version: 0,
+    schema: { type: 'object', properties: { text: { type: 'string' } } }, actions: {},
+  }] };
+  const entry = join(directory, 'upgrade.mjs');
+  await writeFile(entry, `export default () => ({ manifest: ${JSON.stringify(manifest)} });\n`);
+  const upgradedConfig = { ...config, modules: [...modules, { id: 'upgrade-fixture', entry: pathToFileURL(entry).href }] };
+  const upgraded = await openNativeDeployment(upgradedConfig);
+  const credential = upgraded.instance.setupCredential;
+  assert.ok(credential);
+  const installer = await http(upgraded, credential);
+  try {
+    await finish(installer.client.commit({ changes: [{ op: 'put', node: { $path: '/upgraded', $type: 'upgrade.note', text: 'installed' } }] }));
+    const retained = (await installer.client.read({ node: '/retained' })).copies[0];
+    assert.ok('node' in retained);
+    assert.equal(retained.node.label, 'saved');
+  } finally { await installer.close(); await upgraded.close(); }
+
+  const stable = await openNativeDeployment({ ...upgradedConfig, runtime: { ...config.runtime,
+    firstAdmin: { path: '/admin', name: 'admin', password: 'stale-password' } } });
+  assert.equal(stable.instance.setupCredential, undefined);
+  const reader = await http(stable, credential);
+  try {
+    const retained = (await reader.client.read({ node: '/retained' })).copies[0];
+    const installed = (await reader.client.read({ node: '/upgraded' })).copies[0];
+    assert.ok('node' in retained && 'node' in installed);
+    assert.equal(retained.node.label, 'saved');
+    assert.equal(installed.node.text, 'installed');
+  } finally { await reader.close(); await stable.close(); }
+});
+
 test('full caller-visible type catalog fits default read limits across 306 module types', async () => {
   const temporary = new URL('../../../../temp/native-catalog-batch/', import.meta.url);
   await mkdir(temporary, { recursive: true });

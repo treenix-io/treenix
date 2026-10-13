@@ -1573,6 +1573,9 @@ export interface ProvisionedStoreMount {
   readonly target: OpenedStoreMountTarget
 }
 
+/** Existing account credentials authorize module additions without creating an account. */
+export type InstallerLogin = Pick<AdminInput, 'path' | 'password'>
+
 /** Acquired root resources stay borrowed; instance construction owns the supplied startup mounts. */
 export interface InstanceProvisioning {
   readonly counter: PositionCounter
@@ -1582,7 +1585,7 @@ export interface InstanceProvisioning {
   readonly mounts?: readonly ProvisionedStoreMount[]
   readonly bootstrap:
     | { readonly kind: 'fresh'; readonly admin: AdminInput }
-    | { readonly kind: 'reopen'; readonly installerCredential?: Credential }
+    | { readonly kind: 'reopen'; readonly installerCredential?: Credential; readonly installerLogin?: InstallerLogin }
 }
 
 export interface InstanceConfig {

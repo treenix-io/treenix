@@ -118,7 +118,7 @@ export async function openNativeRuntime(input: NativeRuntimeConfig) {
         credentialTtlMs: config.credentialTtlMs,
         bootstrap: existing.items.length === 0 && firstAdmin !== undefined
           ? { kind: 'fresh', admin: firstAdmin }
-          : { kind: 'reopen', installerCredential: config.installerCredential },
+          : { kind: 'reopen', installerCredential: config.installerCredential, installerLogin: firstAdmin },
       },
       gates: config.gates,
       io: config.io,

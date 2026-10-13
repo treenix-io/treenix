@@ -59,7 +59,7 @@ import { runStoreQuery } from '#kernel/store/budget'
 import type { ShardConnection, ShardEnvelope } from '#kernel/types'
 import type { AuthReadSource, AuthSource } from '#kernel/session'
 import type { AuthAdmission } from '#kernel/auth-factory'
-import { A, R, W, DEFAULT_LIMITS, type FederationBinding, type ActionIoBinding, type AdminInput, type Budget, type ChangeMember, type Credential, type InstanceConfig, type ExternalEdits, type InstanceId, type Limits, type ModuleManifest, type NodeId, type BlobStore, type Gate, type InstanceStream, type Node, type Path, type Position, type PositionCounter, type ProvisionedStoreMount, type Registry, type ScanRange, type Selector, type SubSelector, type Store, type StoreCommit, type StoredNode, type StreamCursor, type StreamDomain } from '#kernel/types'
+import { A, R, W, DEFAULT_LIMITS, type FederationBinding, type ActionIoBinding, type AdminInput, type InstallerLogin, type Budget, type ChangeMember, type Credential, type InstanceConfig, type ExternalEdits, type InstanceId, type Limits, type ModuleManifest, type NodeId, type BlobStore, type Gate, type InstanceStream, type Node, type Path, type Position, type PositionCounter, type ProvisionedStoreMount, type Registry, type ScanRange, type Selector, type SubSelector, type Store, type StoreCommit, type StoredNode, type StreamCursor, type StreamDomain } from '#kernel/types'
 import type { StoreCommitGroup } from '#kernel/types'
 import type { OpenedStoreMountTarget } from '#kernel/types'
 import { assertWriterDomains, createWriter, type Writer } from '#kernel/writer'
@@ -100,6 +100,7 @@ export interface InstanceFoundationConfig {
   readonly blobs?: BlobStore
   readonly modules?: readonly ModuleManifest[]
   readonly installerCredential?: Credential
+  readonly installerLogin?: InstallerLogin
   readonly mounts?: readonly ProvisionedStoreMount[]
 }
 
@@ -205,6 +206,7 @@ async function buildCanonicalInstance(input: InstanceConfig, initialize?: Instan
     ? { kind: 'fresh' as const, admin: Object.freeze({ ...policy.admin }) }
     : {
         kind: 'reopen' as const,
+        installerLogin: policy.installerLogin === undefined ? undefined : Object.freeze({ ...policy.installerLogin }),
         installerCredential: policy.installerCredential === undefined
           ? undefined
           : Object.freeze({ ...policy.installerCredential }),
@@ -277,10 +279,11 @@ async function buildCanonicalInstance(input: InstanceConfig, initialize?: Instan
     modules,
     initialCredential: { ttlMs: config.credentialTtlMs },
     installerCredential: bootstrapPolicy.kind === 'reopen' ? bootstrapPolicy.installerCredential : undefined,
+    installerLogin: bootstrapPolicy.kind === 'reopen' ? bootstrapPolicy.installerLogin : undefined,
     ...(bootstrapPolicy.kind === 'fresh' ? { firstAdmin: bootstrapPolicy.admin } : {}),
   })
   try {
-    const installBuiltins = bootstrapPolicy.kind === 'reopen' && bootstrapPolicy.installerCredential !== undefined
+    const installBuiltins = bootstrapPolicy.kind === 'reopen' && (bootstrapPolicy.installerCredential !== undefined || instance.setupCredential !== undefined)
     await installModuleOwnership(
       instance,
       installBuiltins ? [...bootstrapModules, ...modules] : modules,
@@ -318,13 +321,14 @@ export async function createInstanceFoundation(input: InstanceFoundationConfig):
 
 /** Builds the accepted root state before exposing sessions or startup mount routes. */
 async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise<InstanceFoundation> {
-  const { firstAdmin, domains, initialCredential, gates, modules, ...options } = input
+  const { firstAdmin, installerLogin, domains, initialCredential, gates, modules, ...options } = input
   const config: InstanceFoundationConfig = Object.freeze({ ...options,
     domains: Object.freeze(domains.map(domain => Object.freeze({ ...domain }))),
     ...(gates === undefined ? {} : { gates: Object.freeze([...gates]) }),
     ...(modules === undefined ? {} : { modules: Object.freeze(modules.map(copyManifest)) }),
     ...(initialCredential === undefined ? {} : { initialCredential: Object.freeze({ ttlMs: initialCredential.ttlMs }) }),
-    ...(firstAdmin === undefined ? {} : { firstAdmin: Object.freeze({ ...firstAdmin }) }) })
+    ...(firstAdmin === undefined ? {} : { firstAdmin: Object.freeze({ ...firstAdmin }) }),
+    ...(installerLogin === undefined ? {} : { installerLogin: Object.freeze({ ...installerLogin }) }) })
   assertInstanceOptions(config)
   assertWriterDomains(config.root, config.domains)
   if (config.firstAdmin !== undefined) {
@@ -430,6 +434,7 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
   const owners = new Map<string, TypeOwnership>()
   let identity: BootstrapIdentity | undefined
   let setupCredential: Credential | undefined
+  let installationRequired = false
 
   /** Install physical-owner metadata before the accepted route can be observed. */
   function installTarget(entry: MountEntry, target: OpenedStoreMountTarget,
@@ -678,8 +683,12 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
     for (const module of config.modules ?? []) for (const type of module.types) for (const name of [type.name, ...type.aliases ?? []]) {
       const owner = owners.get(name)
       if (owner !== undefined) assertTypeOwner(owner, type)
-      else if (storedRoot !== undefined && config.installerCredential === undefined)
-        throw new KernelError('UNAUTHENTICATED', 'Module installation requires a credential')
+      else {
+        installationRequired = true
+        if (storedRoot !== undefined && config.installerCredential === undefined
+          && (config.installerLogin === undefined || config.initialCredential === undefined))
+          throw new KernelError('UNAUTHENTICATED', 'Module installation requires a credential')
+      }
     }
     const manifests = [
       ...bootstrapModules.map(module => module.id === 'kernel'
@@ -936,6 +945,12 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
         return prepared
       })
     } } })
+
+  if (storedRoot !== undefined && installationRequired && config.installerCredential === undefined) {
+    if (auth === undefined || config.installerLogin === undefined)
+      throw new KernelError('UNAUTHENTICATED', 'Module installation requires a credential')
+    setupCredential = await auth.login({ account: config.installerLogin.path, password: config.installerLogin.password })
+  }
 
   async function commit(changes: readonly ChangeMember[], who: ChangeExecutor): Promise<Position> {
     available()
