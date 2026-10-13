@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict';
 import crypto, { randomUUID } from 'node:crypto';
-import { mkdir, mkdtemp } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { describe, it, type TestContext } from 'node:test';
 import { KernelError } from '@treenx/core/errors';
 import {
-  collectModule,
   R,
   W,
   type DomainId,
@@ -18,9 +17,24 @@ import { openNativeRuntime } from '@treenx/core/kernel/runtime';
 import { scanBudget } from '@treenx/core/kernel/testing';
 import itemSchema from './schemas/todo.item.json';
 import listSchema from './schemas/todo.list.json';
+import { loadLocalMods } from '@treenx/core/mod';
 
 const listPath = '/todo/list';
-const collected = collectModule('@treenx/mods/todo', () => import('./kernel'));
+const collected = (async () => {
+  const parent = resolve(import.meta.dirname, '../../../temp/native-todo-contract');
+  await mkdir(parent, { recursive: true });
+  const directory = await mkdtemp(join(parent, 'bootstrap-'));
+  await writeFile(join(directory, 'package.json'), JSON.stringify({ name: '@treenx/mods', type: 'module' }));
+  await mkdir(join(directory, 'todo'));
+  await writeFile(join(directory, 'todo/kernel.ts'),
+    `export { default } from ${JSON.stringify(new URL('./kernel.ts', import.meta.url).href)};\n`);
+  const loaded = await loadLocalMods(directory, 'kernel');
+  assert.deepEqual(loaded.failed, []);
+  assert.deepEqual(loaded.loaded, ['todo']);
+  const module = loaded.manifests[0];
+  assert.equal(module.id, '@treenx/mods/todo');
+  return module;
+})();
 const code = (expected: KernelError['code']) => (error: unknown) =>
   error instanceof KernelError && error.code === expected;
 

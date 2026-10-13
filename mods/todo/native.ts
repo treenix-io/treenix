@@ -1,11 +1,13 @@
 import crypto from 'node:crypto';
-import { createNode, register } from '@treenx/core';
+import { createNode } from '@treenx/core';
 import { KernelError } from '@treenx/core/errors';
 import {
-  registerKernelAction,
   type ReadResult,
   type WriteActionContext,
 } from '@treenx/core/kernel';
+import { buildRegisteredTypeDef } from '@treenx/core/kernel/typedef';
+import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
+import type { ActionDef, ModuleManifest } from '@treenx/core/kernel/types';
 import type { TypeSchema } from '@treenx/core/schema/types';
 import itemSchema from './schemas/todo.item.json';
 import listSchema from './schemas/todo.list.json';
@@ -15,20 +17,32 @@ const item: TypeSchema = { ...itemSchema, type: 'object' };
 const list: TypeSchema = { ...listSchema, type: 'object' };
 const { name: _argumentName, ...argument } = listSchema.methods.add.arguments[0];
 
-/** Collect the existing schemas and native writing actions without importing legacy handlers. */
-export function registerNativeTodo(): void {
-  register('todo.item', 'schema', () => item);
-  register('todo.list', 'schema', () => list);
-  registerKernelAction('todo.list', 'add', {
+/** Own the existing schemas and native writing actions without registration capture. */
+export function nativeTodoManifest(): ModuleManifest {
+  const id = '@treenx/mods/todo';
+  const add: ActionDef = {
     kind: 'write',
     args: { ...argument, type: 'object' },
     handler: nativeAdd,
-  });
-  registerKernelAction('todo.item', 'toggle', {
+  };
+  const toggle: ActionDef = {
     kind: 'write',
     args: {},
     handler: nativeToggle,
-  });
+  };
+  return {
+    ...declareOpenModule(id, [
+      { type: 'todo.item', context: 'schema', handler: () => item },
+      { type: 'todo.list', context: 'schema', handler: () => list },
+      { type: 'todo.list', context: 'action:add', handler: add },
+      { type: 'todo.item', context: 'action:toggle', handler: toggle },
+    ]),
+    types: [
+      buildRegisteredTypeDef({ name: 'todo.item', module: id, security: 'ordinary', schema: item, methods: [], actions: { toggle } }),
+      buildRegisteredTypeDef({ name: 'todo.list', module: id, security: 'ordinary', schema: list, methods: [], actions: { add } }),
+    ],
+    security: [],
+  };
 }
 
 /** Create one authorized, incomplete child; an occupied address never replaces an accepted item. */

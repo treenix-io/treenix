@@ -39,6 +39,7 @@ import { createClientRegistry, publishClientExports, type ClientRegistry } from 
 import { unregister } from '@treenx/core';
 import { clientModules } from '../mods/clients';
 import { PUBLICATION_PREFIX } from '@treenx/core/kernel/uix-publication';
+import createNativeTodo from '../../../../mods/todo/kernel';
 import { collectModule } from '@treenx/core/kernel/manifest';
 import { loadSchemasRecursive } from '../../../../core/src/schema/load';
 import { fileURLToPath } from 'node:url';
@@ -243,10 +244,7 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
     const ui = render(createElement(Record), { wrapper: f.wrapper });
     assert.ok(await ui.findByText('value'));
     assert.ok(f.sent.some(request => request.t === 'act' && request.action === 'describe_type'));
-    const todo = await collectModule('@treenx/mods/todo', async () => {
-      await import('../../../../mods/todo/kernel');
-      loadSchemasRecursive(fileURLToPath(new URL('../../../../mods/todo/', import.meta.url)));
-    });
+    const todo = createNativeTodo().manifest;
     await f.admin.commit({ opId: { epoch: f.instance.writer.intake.epoch, time: Date.now(), nonce: 'schema-owner' },
       changes: todo.types.map(type => ({ op: 'put' as const, node: {
         $path: `/sys/types/${type.name}`, $type: 't.type', name: type.name, module: type.module, security: type.security,
@@ -293,10 +291,7 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
   });
 
   it('selects the source-owned document component menu and creates native authored defaults', async t => {
-    const todo = await collectModule('@treenx/mods/todo', async () => {
-      await import('../../../../mods/todo/kernel');
-      loadSchemasRecursive(fileURLToPath(new URL('../../../../mods/todo/', import.meta.url)));
-    });
+    const todo = createNativeTodo().manifest;
     const registry = createClientRegistry(todoClientModules);
     const f = await fixture('declared-document-picker', true, undefined, registry);
     t.after(f.close);
@@ -335,10 +330,7 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
 
   it('uses declared todo predictions and defaults on the native source without sharing presentation', async t => {
     publishClientExports({ clientModules: todoClientModules });
-    const todo = await collectModule('@treenx/mods/todo', async () => {
-      await import('../../../../mods/todo/kernel');
-      loadSchemasRecursive(fileURLToPath(new URL('../../../../mods/todo/', import.meta.url)));
-    });
+    const todo = createNativeTodo().manifest;
     let release: () => void = () => {};
     const released = new Promise<void>(resolve => { release = resolve; });
     let started: (request: Request) => void = () => {};
@@ -427,10 +419,7 @@ describe('public canonical editor', { timeout: 10_000 }, () => {
   });
 
   it('renders declared external views through the original site shell and request-owned native reads', async t => {
-    const todo = await collectModule('@treenx/mods/todo', async () => {
-      await import('../../../../mods/todo/kernel');
-      loadSchemasRecursive(fileURLToPath(new URL('../../../../mods/todo/', import.meta.url)));
-    });
+    const todo = createNativeTodo().manifest;
     const viewShellManifest = await collectModule('@treenx/view-shell', () => {
       loadSchemasRecursive(fileURLToPath(new URL('../../../../mods/view-shell/', import.meta.url)));
     });

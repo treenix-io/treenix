@@ -1,7 +1,8 @@
-import { registerNativeTodo } from './native';
-import { registerKernelSeeds } from '@treenx/core/kernel';
+import { nativeTodoManifest } from './native';
+import type { NativeModuleDeployment } from '@treenx/core/kernel/manifest';
 import { nativeSeed } from '#prefab/seed';
 import { todoSeed } from './seed-data';
 
-registerNativeTodo();
-registerKernelSeeds(nativeSeed('todo', todoSeed));
+export default function createNativeTodo(): NativeModuleDeployment {
+  return { manifest: nativeTodoManifest(), seeds: nativeSeed('todo', todoSeed) };
+}
