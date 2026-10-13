@@ -1,4 +1,5 @@
 import { NativeSchemaForm } from '#editor/NativeSchemaFields';
+import { useClientRegistry } from '#context/client-registry-context';
 import { type ComponentData, isComponent, isRef, register } from '@treenx/core';
 import type { View } from '#context';
 import { useNativeTypeDescription } from '#schema-loader';
@@ -9,6 +10,7 @@ import { renderField, StringArrayField } from './form-field';
 
 /** Keep the existing schema and raw-field forms under the actual native type owner. */
 const DefaultEditForm: View<ComponentData> = ({ value, onChange }) => {
+  const registry = useClientRegistry();
   const description = useNativeTypeDescription(value.$type);
   if (description === undefined) return null;
 
@@ -48,13 +50,14 @@ const DefaultEditForm: View<ComponentData> = ({ value, onChange }) => {
         }
         if (onChange === undefined)
           return renderField(
+            registry,
             name,
             { type: Array.isArray(field) ? 'array' : typeof field, readOnly: true },
             data,
             set,
           );
         if (typeof field === 'object' && !Array.isArray(field))
-          return renderField(name, { type: 'object' }, data, set);
+          return renderField(registry, name, { type: 'object' }, data, set);
 
         return (
           <div

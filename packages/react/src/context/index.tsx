@@ -1,9 +1,10 @@
 import type { PresentationComponent, PresentationNode } from '#tree/presentation';
 // Treenix React Binding — Layer 2
 // <Render> + <RenderContext> + <NodeProvider>
-// Depends on: core (resolve), React
+// Depends on: source-owned client contexts, React
 
 import { useTreeEffects } from '#hooks';
+import { useClientRegistry } from './client-registry-context';
 import { READ_ONLY_EFFECTS, type TreeEffects } from '#tree/effects';
 import { $key, $node } from '#symbols';
 import { type OnChange, scopeOnChange } from '#tree/on-change';
@@ -12,11 +13,6 @@ import {
   getComponentByName,
   type ComponentData,
   type NodeData,
-  resolve,
-  resolveEntry,
-  resolveExactEntry,
-  type ResolvedEntry,
-  subscribeRegistry,
 } from '@treenx/core';
 import {
   createContext,
@@ -24,9 +20,7 @@ import {
   type FC,
   type ReactNode,
   useContext,
-  useEffect,
   useMemo,
-  useState,
 } from 'react';
 
 // ── Tree context (rendering context string) ──
@@ -157,7 +151,8 @@ declare module '@treenx/core' {
 // Renders default@context without going through type-specific resolve (avoids infinite loop).
 export const UixNoView: FC<RenderProps> = ({ value, onChange, ctx }) => {
   const context = useTreeContext();
-  const def = resolve('default', context, false) as FC<RenderProps> | null;
+  const registry = useClientRegistry();
+  const def = registry.resolve('default', context, false)?.handler;
   if (!def) return null;
   return createElement(def, { value, onChange, ...(ctx === undefined ? {} : { ctx }) });
 };
@@ -174,30 +169,11 @@ export function Render<E extends Record<string, unknown> = {}>({
   const effects = useTreeEffects();
   const current = useContext(NodeCtx);
   const type = value.$type;
-
-  const ctx_ = context as 'react';
-  const sync = useMemo(() => resolveExactEntry(type, ctx_), [type, ctx_]);
-  const [async_, setAsync] = useState<ResolvedEntry<'react'> | null>(null);
-
-  useEffect(() => {
-    if (sync) return;
-    setAsync(null);
-    resolve(type, ctx_);
-
-    return subscribeRegistry(() => {
-      const e = resolveExactEntry(type, ctx_);
-      if (e) setAsync(e);
-    });
-  }, [type, ctx_, sync]);
-
-  let entry = sync ?? async_;
+  const registry = useClientRegistry();
+  const entry = registry.resolve(type, context);
 
   if (!entry) {
-    entry = resolveEntry(type, ctx_);
-  }
-
-  if (!entry) {
-    console.warn(`[Render] no handler for ${type}@${ctx_}`);
+    console.warn(`[Render] no handler for ${type}@${context}`);
     return null;
   }
 
@@ -236,7 +212,8 @@ export function RenderField({
   [k: string]: unknown;
 }) {
   const ctx = useTreeContext();
-  const handler = resolve(type, ctx);
+  const registry = useClientRegistry();
+  const handler = registry.resolve(type, ctx)?.handler;
   if (!handler) return value != null ? <span>{String(value)}</span> : null;
 
   // Already component-shaped? pass through. Otherwise wrap primitive.

@@ -1,12 +1,14 @@
 import { Button } from '#components/ui/button';
 import { Input } from '#components/ui/input';
 import { DraftTextarea } from '#mods/editor-ui/DraftTextarea';
-import { isRef, resolveExact } from '@treenx/core';
+import { isRef } from '@treenx/core';
+import type { ClientRegistry } from '#context/client-registry';
 import type { PropertySchema } from '@treenx/core/schema/types';
 import { createElement, useState } from 'react';
 import { FieldLabel, RefEditor } from './FieldLabel';
 
 export function renderField(
+  registry: ClientRegistry,
   name: string,
   prop: PropertySchema,
   data: Record<string, unknown>,
@@ -72,13 +74,13 @@ export function renderField(
   const altCtx = prop.readOnly ? 'react' : ctx;
   const tryResolve = (t: string) =>
     prop.readOnly
-      ? (resolveExact(t, 'react:compact') ?? resolveExact(t, 'react'))
-      : resolveExact(t, ctx);
+      ? (registry.exact(t, 'react:compact')?.handler ?? registry.exact(t, 'react')?.handler)
+      : registry.exact(t, ctx)?.handler;
   const resolvedType =
     (prop.format && tryResolve(prop.format) ? prop.format : null) ??
     (tryResolve(prop.type) ? prop.type : null) ??
     'string';
-  const handler = tryResolve(resolvedType) ?? resolveExact('string', altCtx);
+  const handler = tryResolve(resolvedType) ?? registry.exact('string', altCtx)?.handler;
   if (!handler)
     return (
       <div key={name} className="text-destructive text-xs">
@@ -111,7 +113,7 @@ export function renderField(
         value={rawValue}
         onChange={prop.readOnly ? undefined : (next: unknown) => set(name, next)}
       />
-      {createElement(handler as any, {
+      {createElement(handler, {
         value: fieldData,
         onChange: onFieldChange,
       })}

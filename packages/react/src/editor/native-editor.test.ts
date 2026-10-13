@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
-import { createElement, type ReactNode } from 'react';
+import { createElement, type ReactNode, useState } from 'react';
 import { createTwpClient } from '@treenx/core/client/twp';
 import { KernelError } from '@treenx/core/errors';
 import {
@@ -16,6 +16,7 @@ import {
 import { createInstanceFoundation } from '../../../../core/src/kernel/instance';
 import { createMemoryStore } from '../../../../core/src/kernel/store/memory';
 import { Render } from '#context';
+import { createClientRegistry } from '#context/client-registry';
 import { unregister } from '@treenx/core';
 import '../mods/uix/client';
 import { PUBLICATION_PREFIX } from '@treenx/core/kernel/uix-publication';
@@ -198,6 +199,43 @@ function PublicEditor() {
 }
 
 describe('public canonical editor', { timeout: 10_000 }, () => {
+  it('renders native source-owned modules independently and republishes without resetting local state', async t => {
+    const first = await fixture('client-module-first', false);
+    const second = await fixture('client-module-second', false);
+    t.after(first.close);
+    t.after(second.close);
+
+    function OwnedView({ value, label }: { value: Node; label?: string }) {
+      const [count, setCount] = useState(0);
+      return createElement('button', { onClick: () => setCount(count + 1) },
+        `${label}:${value.value}:${count}`);
+    }
+    const module = (label: string) => ({ id: 'document-view', views: [{
+      type: 'editor.document', context: 'react', handler: OwnedView, meta: { props: { label } },
+    }] });
+    const firstRegistry = createClientRegistry([module('first')]);
+    const secondRegistry = createClientRegistry([module('second')]);
+    function Document() {
+      const { data } = usePath<Node>('/document');
+      return data === undefined ? null : createElement(Render, { value: data });
+    }
+    const ui = render(createElement('div', null,
+      createElement(TreeSourceProvider, { source: first.source, registry: firstRegistry,
+        children: createElement(Document) }),
+      createElement(TreeSourceProvider, { source: second.source, registry: secondRegistry,
+        children: createElement(Document) })));
+    await act(async () => {
+      await Promise.all([until(first.source, snapshot => snapshot.data !== undefined),
+        until(second.source, snapshot => snapshot.data !== undefined)]);
+    });
+    fireEvent.click(ui.getByText('first:1:0'));
+    assert.ok(ui.getByText('first:1:1'));
+    assert.ok(ui.getByText('second:1:0'));
+    await act(async () => { firstRegistry.publish(module('republished')); });
+    assert.ok(ui.getByText('republished:1:1'));
+    assert.ok(ui.getByText('second:1:0'));
+  });
+
   it('calls an interface-only action through the public typed path hook', async (t) => {
     class Document {
       static $type = 'editor.document';

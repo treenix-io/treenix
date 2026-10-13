@@ -1,3 +1,4 @@
+import { createDeclaredClientRegistry } from '#context/client-registry';
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -127,8 +128,8 @@ describe('default-view helpers', () => {
     register('string', 'react', () => null);
     register('number', 'react', () => null);
 
-    assert.equal(resolveDisplayType({ format: 'uuid', type: 'string' }, 'x'), 'string');
-    assert.equal(resolveDisplayType({ format: 'uuid', type: 'unknown' }, 1), 'number');
+    assert.equal(resolveDisplayType({ format: 'uuid', type: 'string' }, 'x', createDeclaredClientRegistry()), 'string');
+    assert.equal(resolveDisplayType({ format: 'uuid', type: 'unknown' }, 1, createDeclaredClientRegistry()), 'number');
   });
 });
 

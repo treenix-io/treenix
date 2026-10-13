@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useClientRegistry } from '#context/client-registry-context';
 import type { Component, JsonSchema } from '@treenx/core/kernel/types';
 import type { PropertySchema } from '@treenx/core/schema/types';
 import { renderField } from '#mods/editor-ui/form-field';
@@ -112,6 +113,7 @@ export function NativeSchemaForm({
   onChange: (name: string, value: unknown) => void;
   readOnly?: boolean;
 }) {
+  const registry = useClientRegistry();
   return (
     <div className="py-0.5 pb-2.5">
       {Object.entries(schema.properties ?? {}).map(([name, schema]) => {
@@ -125,7 +127,7 @@ export function NativeSchemaForm({
             readOnly={readOnly || schema.readOnly}
           />
         ) : (
-          renderField(name, { ...widget, readOnly: readOnly || widget.readOnly }, value, onChange)
+          renderField(registry, name, { ...widget, readOnly: readOnly || widget.readOnly }, value, onChange)
         );
       })}
     </div>

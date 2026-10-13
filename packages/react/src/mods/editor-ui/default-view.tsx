@@ -2,7 +2,9 @@ import './editor-ui.css';
 import { HoverTooltip } from '#components/ui/tooltip';
 import { Render, type View } from '#context';
 import { useChildren } from '#hooks';
-import { type ComponentData, isComponent, isRef, register, resolveExact } from '@treenx/core';
+import { type ComponentData, isComponent, isRef, register } from '@treenx/core';
+import type { ClientRegistry } from '#context/client-registry';
+import { useClientRegistry } from '#context/client-registry-context';
 import type { PropertySchema, TypeSchema } from '@treenx/core/schema/types';
 import { createContext, type ReactNode, useContext, useState } from 'react';
 import { type ChildCtx, RenderChildren } from './list-items';
@@ -27,8 +29,8 @@ export function inferType(v: unknown): string {
   return 'object';
 }
 
-export function resolveDisplayType(prop: PropertySchema | undefined, value: unknown): string {
-  const tryResolve = (t?: string) => (t && resolveExact(t, 'react') ? t : null);
+export function resolveDisplayType(prop: PropertySchema | undefined, value: unknown, registry: ClientRegistry): string {
+  const tryResolve = (t?: string) => (t && registry.exact(t, 'react') ? t : null);
   return tryResolve(prop?.format) ?? tryResolve(prop?.type) ?? inferType(value);
 }
 
@@ -91,6 +93,7 @@ function FieldRow({ label, tooltip, children }: { label: string; tooltip?: strin
 }
 
 function PlainFieldRender({ field }: { field: PlainField }) {
+  const registry = useClientRegistry();
   const { name, prop, value } = field;
   const label = name;
   const tooltip = [prop?.title, prop?.description].filter(Boolean).join(' — ') || undefined;
@@ -104,7 +107,7 @@ function PlainFieldRender({ field }: { field: PlainField }) {
     );
   }
 
-  const $type = resolveDisplayType(prop, value);
+  const $type = resolveDisplayType(prop, value, registry);
   const fieldData: ComponentData = { $type, value, label };
   if (tooltip) fieldData.tooltip = tooltip;
   if (prop?.description) fieldData.placeholder = prop.description;

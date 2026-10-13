@@ -4,11 +4,13 @@
 import { type OnChange, type RenderProps } from '#context';
 import { fieldWidget, NativeSchemaForm } from '#editor/NativeSchemaFields';
 import { useSchema } from '#schema-loader';
-import { register, resolve } from '@treenx/core';
+import { register } from '@treenx/core';
+import { useClientRegistry } from '#context/client-registry-context';
 import { createElement } from 'react';
 
 /** Keep the original form layout while its selected native owner supplies schema metadata. */
 function DefaultSchemaForm({ value, onChange }: RenderProps) {
+  const registry = useClientRegistry();
   const schema = useSchema(value.$type);
   if (schema === undefined) {
     return <div className="text-xs text-muted-foreground italic">Loading schema…</div>;
@@ -44,10 +46,10 @@ function DefaultSchemaForm({ value, onChange }: RenderProps) {
         // Resolve: format widget → base type → generic string. Unknown format must
         // not mask the underlying structural type.
         const resolvedType =
-          (rawFormat && resolve(rawFormat, ctx) ? rawFormat : null) ??
-          (resolve(rawType, ctx) ? rawType : null) ??
+          (rawFormat && registry.resolve(rawFormat, ctx) ? rawFormat : null) ??
+          (registry.resolve(rawType, ctx) ? rawType : null) ??
           'string';
-        const handler = resolve(resolvedType, ctx);
+        const handler = registry.resolve(resolvedType, ctx)?.handler;
         if (!handler) {
           return (
             <div key={name} className="text-xs text-destructive">

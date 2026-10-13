@@ -4,7 +4,9 @@ import assert from 'node:assert/strict';
 import { createElement } from 'react';
 import { $key, $node, stampNode } from '#symbols';
 import { Render, RenderContext, viewCtx } from '#context';
-import { normalizeType, onResolveMiss, register, unregister, type NodeData } from '@treenx/core';
+import { type NodeData } from '@treenx/core';
+import { createClientRegistry } from './client-registry';
+import { ClientRegistryContext } from './client-registry-context';
 
 function makeNode(path: string, type: string, components?: Record<string, { $type: string }>): NodeData {
   const node = { $path: path, $type: type, ...components } as NodeData;
@@ -114,24 +116,21 @@ describe('Render — sub-context loader (C38)', () => {
   it('fires the base-context miss resolver when rendering at a sub-context', () => {
     const T = 'uix.lazy.test';
     let fired = false;
-    onResolveMiss('react', (type: string) => {
-      if (type === normalizeType(T)) {
-        fired = true;
-        register(T, 'react', () => createElement('span', null, 'loaded'));
-      }
-    });
+    const registry = createClientRegistry([{ id: 'lazy-view', views: [], resolveMissing(type, context) {
+      if (type !== T || context !== 'react') return undefined;
+      fired = true;
+      return { type, context, handler: () => createElement('span', null, 'loaded') };
+    } }]);
 
     // Rendering at a sub-context (react:zzztest) must reach the base 'react' loader.
     render(
-      createElement(RenderContext, {
+      createElement(ClientRegistryContext.Provider, { value: registry, children: createElement(RenderContext, {
         name: 'react:zzztest',
         children: createElement(Render, { value: { $type: T } }),
-      }),
+      }) }),
     );
 
     assert.ok(fired, 'sub-context render must trigger the base "react" loader');
 
-    unregister(T, 'react');
-    onResolveMiss('react', () => {});
   });
 });

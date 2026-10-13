@@ -21,7 +21,8 @@ import type { PresentationNode } from '#tree/presentation';
 import { KernelError } from '@treenx/core/errors';
 import { fieldWidget, NativeSchemaForm } from '#editor/NativeSchemaFields';
 import type { OnChange } from '#context';
-import { register, resolve as resolveHandler } from '@treenx/core';
+import { register } from '@treenx/core';
+import { useClientRegistry } from '#context/client-registry-context';
 import dayjs from 'dayjs';
 import { X } from 'lucide-react';
 import { createElement, useCallback, useEffect, useRef, useState } from 'react';
@@ -1042,6 +1043,7 @@ function EmbeddedFields({
   type: string;
   setData: (fn: (prev: Record<string, unknown>) => Record<string, unknown>) => void;
 }) {
+  const registry = useClientRegistry();
   const schema = useSchema(type);
   if (schema === undefined) return null; // loading
 
@@ -1062,11 +1064,11 @@ function EmbeddedFields({
           // Resolve: format widget → base type → generic string. Unknown format must
           // not mask the underlying structural type.
           const resolvedType =
-            (p.format && resolveHandler(p.format, 'react:form') ? p.format : null) ??
-            (p.type !== undefined && resolveHandler(p.type, 'react:form') ? p.type : null) ??
+            (p.format && registry.resolve(p.format, 'react:form') ? p.format : null) ??
+            (p.type !== undefined && registry.resolve(p.type, 'react:form') ? p.type : null) ??
             'string';
           if (resolvedType === 'path') return null; // avoid infinite nesting for now
-          const handler = resolveHandler(resolvedType, 'react:form');
+          const handler = registry.resolve(resolvedType, 'react:form')?.handler;
           if (!handler) return null;
           const fieldData = {
             $type: resolvedType,

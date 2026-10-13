@@ -36,6 +36,11 @@
     }
   },
   "exports": {
+    "./core/registration": {
+      "development": "./src/core/registration.ts",
+      "types": "./dist/core/registration.d.ts",
+      "default": "./dist/core/registration.js"
+    },
     ".": {
       "development": "./src/index.ts",
       "types": "./dist/index.d.ts",

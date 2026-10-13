@@ -1,8 +1,9 @@
 import type { PresentationNode } from '#tree/presentation';
-import { getComponents as getComps, getContextsForType, type NodeData, resolve } from '@treenx/core';
+import { getComponents as getComps, getContextsForType, type ComponentData, type NodeData, resolve } from '@treenx/core';
+import type { ClientRegistry } from '#context/client-registry';
 import type { PropertySchema, TypeSchema } from '@treenx/core/schema/types';
 
-export function getComponents(node: PresentationNode): [string, Record<string, unknown>][] {
+export function getComponents(node: PresentationNode): [string, ComponentData][] {
   return getComps(node).slice(1);
 }
 
@@ -23,14 +24,14 @@ export function getSchema(type: string): TypeSchema | null {
 
 const INTERNAL_CONTEXTS = new Set(['schema', 'mount', 'class']);
 
-export function getViewContexts(type: string, node?: PresentationNode): string[] {
-  const ctxs = getContextsForType(type).filter(
+export function getViewContexts(registry: ClientRegistry, type: string, node?: PresentationNode): string[] {
+  const ctxs = registry.contexts(type).filter(
     (c) => !INTERNAL_CONTEXTS.has(c) && !c.startsWith('action:'),
   );
   // Also collect view contexts from component types present on the node
   if (node) {
     for (const [, comp] of getComponents(node)) {
-      for (const c of getContextsForType((comp as any).$type)) {
+      for (const c of registry.contexts(comp.$type)) {
         if (!INTERNAL_CONTEXTS.has(c) && !c.startsWith('action:') && !ctxs.includes(c)) {
           ctxs.push(c);
         }

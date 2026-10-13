@@ -1,4 +1,5 @@
 import './InspectorHeader.css';
+import { useClientRegistry } from '#context/client-registry-context';
 import { PathBreadcrumb } from '#components/PathBreadcrumb';
 import {
   DropdownMenu,
@@ -35,8 +36,9 @@ export function InspectorHeader({
   onSelect,
   onSetRoot,
 }: InspectorHeaderProps) {
+  const registry = useClientRegistry();
   const nodeName = getNodeName(node.$path);
-  const viewContexts = getViewContexts(node.$type, node);
+  const viewContexts = getViewContexts(registry, node.$type, node);
 
   return (
     <div className="inspector-topbar">

@@ -1,7 +1,7 @@
 // UIX mod — dynamic JSX component engine
 // Auto-discovered via import.meta.glob('../mods/*/client.ts')
 
-import { onResolveMiss, register } from '@treenx/core';
+import { publishClientModule, type ClientViewDeclaration } from '#context/client-registry';
 import type { Node } from '@treenx/core/kernel/types';
 import { viewCtx, type RenderProps } from '#context';
 import type { PresentationComponent } from '#tree/presentation';
@@ -15,7 +15,6 @@ export { compileComponent, invalidateCache };
 
 // Published module ownership supplies every view body.
 
-register('uix.view', 'react', typeView('uix.view'));
 
 // ── Lazy loader: the mounted provider owns type coverage ──
 
@@ -69,6 +68,18 @@ function typeView(type: string): React.FC<RenderProps> {
   return OwnedTypeView;
 }
 
-onResolveMiss('react', (type) =>
-  register(type, 'react', type.includes('.') ? typeView(type) : UixNoView),
-);
+const typeViews = new Map<string, React.FC<RenderProps>>();
+
+publishClientModule({
+  id: 'uix',
+  views: [{ type: 'uix.view', context: 'react', handler: typeView('uix.view') }],
+  resolveMissing(type, context): ClientViewDeclaration | undefined {
+    if (context !== 'react') return undefined;
+    let handler = typeViews.get(type);
+    if (handler === undefined) {
+      handler = type.includes('.') ? typeView(type) : UixNoView;
+      typeViews.set(type, handler);
+    }
+    return { type, context, handler };
+  },
+});
