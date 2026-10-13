@@ -1,10 +1,9 @@
 import type { NodeData } from '#core';
 import { setCtxProvider } from '#log';
-import type { Tree } from '#tree';
 
 export type ExecCtx = {
   node: NodeData;
-  tree: Tree;
+  tree: never;
   signal: AbortSignal;
   [key: string]: unknown;
 };
@@ -70,7 +69,7 @@ export function predictionCtx<Node extends { readonly $path: string; readonly $t
     node,
     comp,
     signal: neverAborted,
-    get tree(): Tree { throw new CtxUnavailableError('ctx.tree is server-only'); },
+    get tree(): never { throw new CtxUnavailableError('ctx.tree is server-only'); },
     get nc(): never { throw new CtxUnavailableError('ctx.nc is server-only'); },
   };
 }

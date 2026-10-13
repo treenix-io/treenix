@@ -3,6 +3,7 @@ import { registerKernel, registerKernelAction } from '@treenx/core/kernel';
 import { A, R, W, type RuleInput } from '@treenx/core/kernel/types';
 import { UixSource } from './uix-source';
 import { compileDraftAction, verifyDraftAction } from './native-draft';
+import { UixMcpTools } from './mcp';
 
 /** Administrator-owned immutable snapshot, separate from its ordinary editable source draft. */
 class UixPublication {
@@ -19,9 +20,6 @@ class UixActionPublication extends UixPublication {
   stream = false;
 }
 
-/** Native action metadata binds directly to the draft owner, preserving the retiring legacy class. */
-class NativeUixMcpTools {}
-
 /** Published source is readable, while only the instance administrator may replace it. */
 function publicationRights(input: RuleInput): number {
   return input.admin ? R | W | A : R;
@@ -30,8 +28,8 @@ function publicationRights(input: RuleInput): number {
 registerType('uix.source', UixSource);
 registerType('uix.publication', UixPublication);
 registerType('uix.action-publication', UixActionPublication);
-registerType('uix.mcp', NativeUixMcpTools);
+registerType('uix.mcp', UixMcpTools);
 registerKernel(UixPublication, 'acl', publicationRights);
 registerKernel(UixActionPublication, 'acl', publicationRights);
-registerKernelAction(NativeUixMcpTools, 'compile_view', compileDraftAction);
+registerKernelAction(UixMcpTools, 'compile_view', compileDraftAction);
 registerKernelAction(UixSource, 'verify_view', verifyDraftAction);
