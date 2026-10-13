@@ -5,6 +5,7 @@ import type { PresentationComponent, PresentationNode } from '#tree/presentation
 
 import { useTreeEffects } from '#hooks';
 import { useClientRegistry } from './client-registry-context';
+import { formatContext, parseContext } from '#context/selectors';
 import { READ_ONLY_EFFECTS, type TreeEffects } from '#tree/effects';
 import { $key, $node } from '#symbols';
 import { type OnChange, scopeOnChange } from '#tree/on-change';
@@ -23,16 +24,18 @@ import {
   useMemo,
 } from 'react';
 
-// ── Tree context (rendering context string) ──
+// ── Tree context (base and inherited modifiers) ──
 
-const TreeContext = createContext<string>('react');
+const TreeContext = createContext(parseContext('react'));
 
 export function useTreeContext(): string {
-  return useContext(TreeContext);
+  return formatContext(useContext(TreeContext));
 }
 
 export function RenderContext({ name, children }: { name: string; children: ReactNode }) {
-  return <TreeContext.Provider value={name}>{children}</TreeContext.Provider>;
+  const inherited = useContext(TreeContext);
+  const context = useMemo(() => parseContext(name, inherited), [name, inherited]);
+  return <TreeContext.Provider value={context}>{children}</TreeContext.Provider>;
 }
 
 // ── Node context — gives any renderer access to the current node ──
@@ -150,7 +153,7 @@ declare module '@treenx/core' {
 // ── UixNoView — registered by UIX when a type has no custom view yet ──
 // Renders default@context without going through type-specific resolve (avoids infinite loop).
 export const UixNoView: FC<RenderProps> = ({ value, onChange, ctx }) => {
-  const context = useTreeContext();
+  const context = useContext(TreeContext);
   const registry = useClientRegistry();
   const def = registry.resolve('default', context, false)?.handler;
   if (!def) return null;
@@ -165,7 +168,7 @@ export function Render<E extends Record<string, unknown> = {}>({
   ctx: suppliedContext,
   ...extra
 }: RenderProps & E) {
-  const context = useTreeContext();
+  const context = useContext(TreeContext);
   const effects = useTreeEffects();
   const current = useContext(NodeCtx);
   const type = value.$type;
@@ -173,7 +176,7 @@ export function Render<E extends Record<string, unknown> = {}>({
   const entry = registry.resolve(type, context);
 
   if (!entry) {
-    console.warn(`[Render] no handler for ${type}@${context}`);
+    console.warn(`[Render] no handler for ${type}@${formatContext(context)}`);
     return null;
   }
 
@@ -211,7 +214,7 @@ export function RenderField({
   onChange?: (v: unknown) => void;
   [k: string]: unknown;
 }) {
-  const ctx = useTreeContext();
+  const ctx = useContext(TreeContext);
   const registry = useClientRegistry();
   const handler = registry.resolve(type, ctx)?.handler;
   if (!handler) return value != null ? <span>{String(value)}</span> : null;

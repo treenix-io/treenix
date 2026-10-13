@@ -4,6 +4,8 @@ import { declareOpenModule } from '@treenx/core/kernel/module-declaration';
 import type { OpenModule, OpenRegistration } from '@treenx/core/kernel/types';
 import type { ClientTypeDeclaration, ClientSchemaDeclaration } from '@treenx/core/comp/client-declaration';
 import type { TextHandler, TextOpenRegistration } from '@treenx/core/contexts/text';
+import { formatContext, matchesContext, parseContext, parseRegistration, prefersContext, registrationContext,
+  type ContextSelector } from '#context/selectors';
 
 export interface ClientViewDeclaration extends OpenRegistration<ReactHandler> {
   readonly binding?: 'react';
@@ -19,6 +21,29 @@ export interface ClientModule extends OpenModule<ReactHandler | TextHandler> {
 interface OwnedSchema {
   readonly declaration: ClientSchemaDeclaration;
   readonly value: ClientSchemaDeclaration;
+}
+
+interface ClientVariant {
+  readonly entry: ClientViewDeclaration;
+  readonly selector: ContextSelector;
+}
+
+function variant(entry: ClientViewDeclaration): ClientVariant {
+  const selector = parseRegistration(entry.context);
+  return { selector, entry: { ...entry, type: normalizeType(entry.type), context: registrationContext(selector) } };
+}
+
+function selectVariant(candidates: readonly ClientVariant[] | undefined, request: ContextSelector): ClientVariant | undefined {
+  let best: ClientVariant | undefined;
+  for (const candidate of candidates ?? []) {
+    if (matchesContext(candidate.selector, request) && (!best || prefersContext(candidate.selector, best.selector, request)))
+      best = candidate;
+  }
+  return best;
+}
+
+function duplicateView(key: string): never {
+  throw Object.assign(new Error(`Duplicate client view: ${key}`), { code: 'DUPLICATE_VIEW' });
 }
 
 export function declareView<T>(type: Class<T>, context: string, handler: ContextHandler<'react', T>, meta?: Record<string, unknown>): ClientViewDeclaration;
@@ -44,11 +69,13 @@ export function createClientRegistry(initial: readonly ClientModule[] = []) {
   const listeners = new Set<() => void>();
   let revision = {};
   let entries = new Map<string, ClientViewDeclaration>();
+  let variants = new Map<string, ClientVariant[]>();
   let types = new Map<string, ClientTypeDeclaration>();
   let schemas = new Map<string, OwnedSchema>();
 
   function rebuild(): void {
     const next = new Map<string, ClientViewDeclaration>();
+    const nextVariants = new Map<string, ClientVariant[]>();
     const nextTypes = new Map<string, ClientTypeDeclaration>();
     const nextSchemas = new Map<string, OwnedSchema>();
     for (const module of modules.values()) for (const type of module.types ?? []) {
@@ -64,14 +91,21 @@ export function createClientRegistry(initial: readonly ClientModule[] = []) {
       }
     }
     for (const module of modules.values()) for (const entry of module.open) {
-      const key = `${normalizeType(entry.type)}@${entry.context}`;
-      if (next.has(key)) throw new Error(`Duplicate client view: ${key}`);
+      let candidate: ClientVariant;
       if (entry.binding === 'text') {
         const text = entry.handler;
-        next.set(key, { type: entry.type, context: entry.context, handler: ({ value }) => text(value) });
-      } else next.set(key, entry);
+        candidate = variant({ type: entry.type, context: entry.context, handler: ({ value }) => text(value) });
+      } else candidate = variant(entry);
+      const key = `${candidate.entry.type}@${candidate.entry.context}`;
+      if (next.has(key)) duplicateView(key);
+      next.set(key, candidate.entry);
+      const baseKey = `${candidate.entry.type}@${candidate.selector.base}`;
+      const bucket = nextVariants.get(baseKey);
+      if (bucket) bucket.push(candidate);
+      else nextVariants.set(baseKey, [candidate]);
     }
     entries = next;
+    variants = nextVariants;
     types = nextTypes;
     schemas = nextSchemas;
   }
@@ -96,7 +130,7 @@ export function createClientRegistry(initial: readonly ClientModule[] = []) {
     },
     getSnapshot: () => revision,
     exact(type: string, context: string): ClientViewDeclaration | null {
-      return entries.get(`${normalizeType(type)}@${context}`) ?? null;
+      return entries.get(`${normalizeType(type)}@${registrationContext(parseRegistration(context))}`) ?? null;
     },
     type(type: string): ClientTypeDeclaration | undefined {
       const normalized = normalizeType(type);
@@ -106,9 +140,10 @@ export function createClientRegistry(initial: readonly ClientModule[] = []) {
       return schemas.get(normalizeType(type))?.value.schema();
     },
     typesForContext(context: string): string[] {
+      const canonical = registrationContext(parseRegistration(context));
       const names: string[] = [];
       for (const entry of entries.values())
-        if (entry.context === context) names.push(normalizeType(entry.type));
+        if (entry.context === canonical) names.push(normalizeType(entry.type));
       return names;
     },
     allContexts(type: string): string[] {
@@ -130,20 +165,39 @@ export function createClientRegistry(initial: readonly ClientModule[] = []) {
       }
       return result;
     },
-    resolve(type: string, context: string, notifyMissing = true): ClientViewDeclaration | null {
+    resolve(type: string, context: string | ContextSelector, notifyMissing = true): ClientViewDeclaration | null {
       const normalized = normalizeType(type);
-      let current = context;
+      const request = typeof context === 'string' ? parseContext(context) : context;
+      let current = request.base;
       for (;;) {
-        const exact = entries.get(`${normalized}@${current}`);
-        if (exact !== undefined) return exact;
-        if (notifyMissing) for (const module of modules.values()) {
-          const loaded = module.resolveMissing?.(normalized, current);
-          if (loaded !== undefined) return loaded;
+        let exact = selectVariant(variants.get(`${normalized}@${current}`), request);
+        if (!exact && notifyMissing) {
+          const loaded: ClientVariant[] = [];
+          const keys = new Set<string>();
+          for (const module of modules.values()) {
+            const declaration = module.resolveMissing?.(normalized, current);
+            if (declaration === undefined) continue;
+            const candidate = variant(declaration);
+            if (candidate.entry.type !== normalized || candidate.selector.base !== current)
+              throw new TypeError(`Lazy view does not match ${normalized}@${current}`);
+            const key = `${normalized}@${candidate.entry.context}`;
+            if (keys.has(key) || entries.has(key)) duplicateView(key);
+            keys.add(key);
+            loaded.push(candidate);
+          }
+          exact = selectVariant(loaded, request);
         }
-        const fallback = entries.get(`${normalizeType('default')}@${current}`);
-        if (fallback !== undefined) return fallback;
+        const fallback = selectVariant(variants.get(`${normalizeType('default')}@${current}`), request);
+        if (exact && (!fallback || exact.selector.modifiers.size >= fallback.selector.modifiers.size)) return exact.entry;
+        if (fallback) return fallback.entry;
         const suffix = current.lastIndexOf(':');
-        if (suffix <= 0) return null;
+        if (suffix <= 0) {
+          if ([...request.modifiers.values()].includes(true))
+            throw Object.assign(new Error(`Missing required view variant: ${normalized}@${formatContext(request)}`), {
+              code: 'MISSING_REQUIRED_VARIANT',
+            });
+          return null;
+        }
         current = current.slice(0, suffix);
       }
     },
