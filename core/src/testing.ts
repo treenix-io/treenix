@@ -5,7 +5,6 @@
 // effect preserved from the original core/index.test.ts home (qvrt).
 
 import { mapRegistry, register, resolve, unregister } from '#core';
-import { registerBuiltins } from '#core/builtins';
 
 const testTypes = ['test.doc', 'test.item', 'test.session', 'test.task'];
 
@@ -18,7 +17,6 @@ registerTestTypes();
 
 export function clearRegistry(): void {
   mapRegistry((t, c) => unregister(t, c));
-  registerBuiltins();
   registerTestTypes();
 }
 
