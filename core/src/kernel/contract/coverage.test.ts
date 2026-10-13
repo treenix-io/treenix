@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict'
-import { existsSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
+import ts from 'typescript'
 import { describe, it } from 'node:test'
 
-import { coverage } from './coverage'
+import { coverage, unresolvedCoverage } from './coverage'
 
 const numbered = (prefix: string, from: number, to: number) =>
   Array.from({ length: to - from + 1 }, (_, i) => `${prefix}${from + i}`)
@@ -34,10 +35,40 @@ describe('kernel contract coverage', () => {
     assert.deepEqual(Object.keys(coverage).sort(), [...DEFINITIONS, ...AXIOMS, ...THEOREMS, ...INCIDENTS].sort())
   })
 
-  it('every row is pending or names an existing test file in this directory', () => {
-    for (const [item, test] of Object.entries(coverage)) {
-      const proven = test !== 'pending' && !test.includes('/') && existsSync(new URL(test, import.meta.url))
-      assert.ok(test === 'pending' || proven, `${item}: ${test}`)
+  it('every obligation names existing authored contract cases', () => {
+    const parsed = new Map<string, ReadonlySet<string>>();
+    for (const [item, references] of Object.entries(coverage)) {
+      assert.ok(references.length > 0, item);
+      for (const reference of references) {
+        assert.ok(reference.file.endsWith('.test.ts'), item);
+        const file = new URL(reference.file, import.meta.url);
+        let names = parsed.get(file.href);
+        if (names === undefined) {
+          const source = ts.createSourceFile(file.pathname, readFileSync(file, 'utf8'),
+            ts.ScriptTarget.Latest, true);
+          const declared = new Set<string>();
+          /** Read literal test declarations without counting similarly named strings or comments. */
+          function visit(node: ts.Node): void {
+            if (ts.isCallExpression(node) && node.arguments.length > 0) {
+              const call = node.expression;
+              const name = ts.isIdentifier(call) ? call.text
+                : ts.isPropertyAccessExpression(call) ? call.name.text : undefined;
+              const title = node.arguments[0];
+              if ((name === 'it' || name === 'test') && ts.isStringLiteral(title))
+                declared.add(title.text);
+            }
+            ts.forEachChild(node, visit);
+          }
+          visit(source);
+          names = declared;
+          parsed.set(file.href, names);
+        }
+        assert.ok(names.has(reference.test), `${item}: ${reference.file}: ${reference.test}`);
+      }
     }
-  })
-})
+  });
+
+  it('leaves no normative obligation unresolved', () => {
+    assert.deepEqual(Object.keys(unresolvedCoverage), []);
+  });
+});
