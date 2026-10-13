@@ -19,6 +19,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import GridLayout from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import { Launcher } from './types';
+import { launcherIconContext } from './icons';
 
 type LauncherLayoutItem = { i: string; x: number; y: number; w: number; h: number; ctx?: string };
 
@@ -126,11 +127,14 @@ function AppItem({
   }
 
   const label = target.$path.split('/').at(-1) || '?';
-  const hasView = registry.exact(target.$type, context) !== null;
+  const renderContext = context === 'react:icon' ? launcherIconContext : context;
+  const hasView = context === 'react:icon'
+    ? registry.resolve(target.$type, renderContext, false) !== null
+    : registry.exact(target.$type, renderContext) !== null;
 
   // No view registered for this context — offer AI generation
   const renderContent = hasView
-    ? <RenderContext name={context}><Render value={target} /></RenderContext>
+    ? <RenderContext name={renderContext}><Render value={target} /></RenderContext>
     : <span className="text-xs text-muted-foreground italic">No view for {target.$type}</span>;
 
   // Icon-style: centered icon + label

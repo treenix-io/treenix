@@ -1,6 +1,6 @@
-// Launcher icons — react:icon context with iOS-style SVG icons
+// Launcher icons — react:launcher:icon context with iOS-style SVG icons
 
-import { register } from '@treenx/core';
+import { declareClientModule, declareView } from '@treenx/react/context/client-registry';
 import type { RenderProps } from '@treenx/react';
 import type { FC, ReactNode } from 'react';
 
@@ -200,13 +200,19 @@ const DefaultIcon: FC<RenderProps> = ({ value }) => {
 
 // ── Register all ──
 
-register('default', 'react:icon', DefaultIcon);
-register('dir', 'react:icon', FolderIcon);
-register('board.kanban', 'react:icon', BoardIcon);
-register('board.task', 'react:icon', BoardIcon);
-register('todo.list', 'react:icon', TodoIcon);
-register('cafe.contact', 'react:icon', ContactIcon);
-register('mount-point', 'react:icon', DocsIcon);
-register('t.system', 'react:icon', SystemIcon);
-register('whisper.service', 'react:icon', WhisperIcon);
-register('examples.demo.sensor', 'react:icon', SensorIcon);
+export const launcherIconContext = 'react:launcher:icon';
+
+export const clientModules = [
+  declareClientModule('@treenx/mods/launcher/icons', [
+    declareView('default', launcherIconContext, DefaultIcon),
+    declareView('dir', launcherIconContext, FolderIcon),
+    declareView('board.kanban', launcherIconContext, BoardIcon),
+    declareView('board.task', launcherIconContext, BoardIcon),
+    declareView('todo.list', launcherIconContext, TodoIcon),
+    declareView('cafe.contact', launcherIconContext, ContactIcon),
+    declareView('mount-point', launcherIconContext, DocsIcon),
+    declareView('t.system', launcherIconContext, SystemIcon),
+    declareView('whisper.service', launcherIconContext, WhisperIcon),
+    declareView('examples.demo.sensor', launcherIconContext, SensorIcon),
+  ]),
+];
