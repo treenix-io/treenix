@@ -20,9 +20,9 @@ export async function runStoreQuery<T>(
 }
 
 export interface OperationReadCost {
-  readonly budget: () => Budget
-  readonly charge: (nodes: number, bytes: number, exprWork?: number) => void
-  readonly refuse: (error: unknown) => never
+  readonly budget: () => Budget;
+  readonly charge: (nodes: number, bytes: number, exprWork?: number) => void;
+  readonly refuse: (error: unknown) => never;
 }
 
 /** Transfer a native scan's actual inspected cost into its enclosing operation. */
@@ -45,8 +45,7 @@ export async function runStoreScan<T>(
           };
     const result = await runStoreQuery(allowance, queryMs, run);
     if (cost !== undefined) {
-      if (result.cost === undefined)
-        throw new KernelError('INVALID', 'Store scan cost is absent');
+      if (result.cost === undefined) throw new KernelError('INVALID', 'Store scan cost is absent');
       cost.charge(result.cost.nodes, result.cost.bytes, result.cost.exprWork);
     }
     return result;

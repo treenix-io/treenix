@@ -14,14 +14,9 @@ for (const layout of ['keyed', 'flat'] as const) {
     `reconciles a ${layout} atomic replacement through the actual recursive watcher`,
     { timeout: 3_000 },
     async (t) => {
-      const parent = new URL(
-        '../../../../../temp/fs-atomic-replacement/',
-        import.meta.url,
-      );
+      const parent = new URL('../../../../../temp/fs-atomic-replacement/', import.meta.url);
       await mkdir(parent, { recursive: true });
-      const directory = await mkdtemp(
-        fileURLToPath(new URL('dataset-', parent)),
-      );
+      const directory = await mkdtemp(fileURLToPath(new URL('dataset-', parent)));
       await mkdir(join(directory, 'document'));
       const target =
         layout === 'keyed'
@@ -37,9 +32,7 @@ for (const layout of ['keyed', 'flat'] as const) {
       });
       t.after(() => runtime.close());
       assert.ok(runtime.instance.setupCredential);
-      const admin = await runtime.instance.openSession(
-        runtime.instance.setupCredential,
-      );
+      const admin = await runtime.instance.openSession(runtime.instance.setupCredential);
       const delivery = drainSession(admin);
       t.after(async () => {
         admin.close();
@@ -51,12 +44,9 @@ for (const layout of ['keyed', 'flat'] as const) {
           time: Date.now(),
           nonce: randomUUID(),
         },
-        changes: [
-          { op: 'put', node: { $path: path, $type: 't.dir', value: 1 } },
-        ],
+        changes: [{ op: 'put', node: { $path: path, $type: 't.dir', value: 1 } }],
       }).outcome;
-      if (layout === 'flat')
-        await rename(join(directory, 'document', 'item', '$'), target);
+      if (layout === 'flat') await rename(join(directory, 'document', 'item', '$'), target);
       const before = (await admin.read({ node: path })).copies[0];
       assert.ok('node' in before);
       let resolve = (_record: JournalCommit) => {};
@@ -92,8 +82,7 @@ for (const layout of ['keyed', 'flat'] as const) {
         changes: [{ op: 'patch', path, ops: { $set: { value: 3 } } }],
       }).outcome;
       assert.equal(
-        (await runtime.store.readExternal!(['/document'], scanBudget())).items
-          .length,
+        (await runtime.store.readExternal!(['/document'], scanBudget())).items.length,
         0,
       );
     },
