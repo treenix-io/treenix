@@ -49,7 +49,7 @@ function parseSegment(raw: string): PipeStep[] {
   // #field — self-ref field access (like URI fragment)
   if (s.startsWith('#') && !s.startsWith('#/')) {
     const rest = s.slice(1);
-    return rest.split('.').map(name => ({ type: 'field' as const, name }));
+    return rest.split('.').map((name) => ({ type: 'field' as const, name }));
   }
 
   // Pure field chain: .foo.bar — drill into pipe value
@@ -60,11 +60,13 @@ function parseSegment(raw: string): PipeStep[] {
   // pipe(args) optionally followed by .field chain
   const m = PIPE_RE.exec(s);
   if (m) {
-    const steps: PipeStep[] = [{
-      type: 'pipe',
-      name: m[1],
-      args: m[2] ? m[2].split(',').map(parseArg) : [],
-    }];
+    const steps: PipeStep[] = [
+      {
+        type: 'pipe',
+        name: m[1],
+        args: m[2] ? m[2].split(',').map(parseArg) : [],
+      },
+    ];
     if (m[3]) steps.push(...parseFieldChain(m[3]));
     return steps;
   }
@@ -93,7 +95,7 @@ function parseFieldChain(s: string): PipeStep[] {
 }
 
 export function parseMapExpr(expr: string): MapExpr {
-  const parts = expr.split('|').map(s => s.trim());
+  const parts = expr.split('|').map((s) => s.trim());
   const steps: PipeStep[] = [];
 
   for (const part of parts) {

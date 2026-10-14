@@ -17,7 +17,10 @@ import { Render } from './src/context';
 publishClientExports({ clientModules });
 const server = new URLSearchParams(location.search).get('server');
 if (server === null) throw new Error('Technical server address is required');
-const session = createLaneSession(server, createLanePersistence(`technical-editor-${crypto.randomUUID()}`));
+const session = createLaneSession(
+  server,
+  createLanePersistence(`technical-editor-${crypto.randomUUID()}`),
+);
 
 /** Exercise the actual public editor against a genuine authenticated HTTP lane. */
 function Editor() {
@@ -28,28 +31,97 @@ function Editor() {
   const state = session.getSnapshot();
 
   /** Show an actual effect refusal at its caller. */
-  function failed(reason: unknown): void { setFailure(reason instanceof Error ? reason.message : String(reason)); }
+  function failed(reason: unknown): void {
+    setFailure(reason instanceof Error ? reason.message : String(reason));
+  }
 
-  return createElement('main', { className: 'h-screen flex flex-col' },
-    createElement('div', { className: 'flex gap-3 p-2' },
-      createElement('button', { onClick: () => { void session.login('/admin', 'technical-editor-password').catch(failed); } }, 'Admit admin'),
-      createElement('button', { onClick: () => { void session.anonymous().catch(failed); } }, 'Admit anonymous'),
+  return createElement(
+    'main',
+    { className: 'h-screen flex flex-col' },
+    createElement(
+      'div',
+      { className: 'flex gap-3 p-2' },
+      createElement(
+        'button',
+        {
+          onClick: () => {
+            void session.login('/admin', 'technical-editor-password').catch(failed);
+          },
+        },
+        'Admit admin',
+      ),
+      createElement(
+        'button',
+        {
+          onClick: () => {
+            void session.anonymous().catch(failed);
+          },
+        },
+        'Admit anonymous',
+      ),
       createElement('button', { onClick: () => setSelected('/document') }, 'Show document'),
       createElement('button', { onClick: () => setSelected('/draft') }, 'Show draft'),
-      createElement('button', { onClick: () => setSelected('/sys/types/test.technical-counter') }, 'Show type owner'),
-      createElement('button', { onClick: () => setSelected('/uix-tools') }, 'Show agent draft tool'),
-      createElement('p', { role: 'status' }, `${state.status} · bits ${String(effects.bits(selected))}`)),
+      createElement(
+        'button',
+        { onClick: () => setSelected('/sys/types/test.technical-counter') },
+        'Show type owner',
+      ),
+      createElement(
+        'button',
+        { onClick: () => setSelected('/uix-tools') },
+        'Show agent draft tool',
+      ),
+      createElement(
+        'p',
+        { role: 'status' },
+        `${state.status} · bits ${String(effects.bits(selected))}`,
+      ),
+    ),
     failure === undefined ? null : createElement('p', { role: 'alert' }, failure),
     error === null ? null : createElement('p', { role: 'alert' }, error.message),
-    createElement(ResizablePanelGroup, { orientation: 'horizontal', children: [
-      createElement(EditorSidebar, { key: 'sidebar', authed: state.status === 'ready' ? 'ready' : '', root: '/folder', selected,
-        onSelect(path) { setSelected(path); return true; }, onSetRoot() {}, onLogout() { void session.anonymous().catch(failed); } }),
-      createElement(ResizablePanel, { key: 'editor', children: node === undefined ? createElement('p', null, 'No selected node')
-        : createElement('div', null, createElement(NodeEditor, { node, open: true, onClose() {} }),
-          createElement('section', { 'aria-label': 'Rendered current view' }, createElement(Render, { value: node }))) }),
-    ] }));
+    createElement(ResizablePanelGroup, {
+      orientation: 'horizontal',
+      children: [
+        createElement(EditorSidebar, {
+          key: 'sidebar',
+          authed: state.status === 'ready' ? 'ready' : '',
+          root: '/folder',
+          selected,
+          onSelect(path) {
+            setSelected(path);
+            return true;
+          },
+          onSetRoot() {},
+          onLogout() {
+            void session.anonymous().catch(failed);
+          },
+        }),
+        createElement(ResizablePanel, {
+          key: 'editor',
+          children:
+            node === undefined
+              ? createElement('p', null, 'No selected node')
+              : createElement(
+                  'div',
+                  null,
+                  createElement(NodeEditor, { node, open: true, onClose() {} }),
+                  createElement(
+                    'section',
+                    { 'aria-label': 'Rendered current view' },
+                    createElement(Render, { value: node }),
+                  ),
+                ),
+        }),
+      ],
+    }),
+  );
 }
 
 const target = document.getElementById('root');
 if (target === null) throw new Error('Technical root is absent');
-createRoot(target).render(createElement(LaneSessionProvider, { session, children: createElement(TooltipProvider, { children: createElement(Editor) }) }));
+createRoot(target).render(
+  createElement(LaneSessionProvider, {
+    session,
+    children: createElement(TooltipProvider, { children: createElement(Editor) }),
+  }),
+);

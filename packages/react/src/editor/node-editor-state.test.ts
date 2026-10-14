@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { NodeData } from '@treenx/core';
-import { getNodeEditorJsonText, parseNodeEditorJson, saveNodeEditorJson } from './node-editor-state';
+import {
+  getNodeEditorJsonText,
+  parseNodeEditorJson,
+  saveNodeEditorJson,
+} from './node-editor-state';
 
 describe('getNodeEditorJsonText', () => {
   it('returns the node serialized as pretty JSON', () => {
@@ -18,11 +22,13 @@ describe('getNodeEditorJsonText', () => {
 
 describe('parseNodeEditorJson', () => {
   it('parses a full node object', () => {
-    const node = parseNodeEditorJson(JSON.stringify({
-      $path: '/docs/page',
-      $type: 'doc.page',
-      title: 'Hello',
-    }));
+    const node = parseNodeEditorJson(
+      JSON.stringify({
+        $path: '/docs/page',
+        $type: 'doc.page',
+        title: 'Hello',
+      }),
+    );
 
     assert.equal(node.$path, '/docs/page');
     assert.equal(node.$type, 'doc.page');
@@ -30,13 +36,16 @@ describe('parseNodeEditorJson', () => {
   });
 
   it('keeps the underlying parser message on malformed JSON', () => {
-    assert.throws(() => parseNodeEditorJson('{'), (err: unknown) => {
-      assert.ok(err instanceof Error);
-      assert.match(err.message, /^Invalid JSON: /);
-      // Original parser message is preserved after the prefix
-      assert.ok(err.message.length > 'Invalid JSON: '.length);
-      return true;
-    });
+    assert.throws(
+      () => parseNodeEditorJson('{'),
+      (err: unknown) => {
+        assert.ok(err instanceof Error);
+        assert.match(err.message, /^Invalid JSON: /);
+        // Original parser message is preserved after the prefix
+        assert.ok(err.message.length > 'Invalid JSON: '.length);
+        return true;
+      },
+    );
   });
 
   it('rejects non-object JSON', () => {

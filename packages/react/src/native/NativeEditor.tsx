@@ -1,13 +1,13 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { openTwpHttp } from '@treenx/core/client/http-twp'
-import { createTwpClient, type TwpClient } from '@treenx/core/client/twp'
-import { KernelError } from '@treenx/core/errors'
-import { A, R, W, type Credential } from '@treenx/core/kernel/types'
-import { isNodeInput, isSelector } from '@treenx/core/protocol/twp'
-import { createNativeTreeSource } from '#tree/native-source'
-import { NativeSourceProvider, useNativeSource } from '#tree/native-source-context'
-import { useNativeChildren, useNativeNode } from '#tree/native-hooks'
-import { NativeViewOutput } from '#native/ViewOutput'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { openTwpHttp } from '@treenx/core/client/http-twp';
+import { createTwpClient, type TwpClient } from '@treenx/core/client/twp';
+import { KernelError } from '@treenx/core/errors';
+import { A, R, W, type Credential } from '@treenx/core/kernel/types';
+import { isNodeInput, isSelector } from '@treenx/core/protocol/twp';
+import { createNativeTreeSource } from '#tree/native-source';
+import { NativeSourceProvider, useNativeSource } from '#tree/native-source-context';
+import { useNativeChildren, useNativeNode } from '#tree/native-hooks';
+import { NativeViewOutput } from '#native/ViewOutput';
 
 /** Render transport and application failures as user-facing text. */
 const message = (error: unknown) =>
@@ -132,47 +132,47 @@ function NodeEditor({ path, onAccepted }: { path: string; onAccepted: () => void
               {JSON.stringify(copy.node, null, 2)}
             </pre>
             {(copy.bits & W) !== 0 && (
-                <form onSubmit={save} className="flex flex-col gap-3">
-                  <label htmlFor="node-json">Данные узла</label>
-                  <textarea
-                    id="node-json"
-                    disabled={busy}
-                    className={`${inputClass} min-h-56 font-mono text-sm`}
-                    value={draft}
-                    onChange={(event) => {
-                      if (!dirty) setBaseRev(copy.node.$rev);
-                      setDraft(event.target.value);
-                      setDirty(true);
-                    }}
-                  />
-                  <button className={buttonClass} disabled={busy || !dirty}>
-                    Сохранить
-                  </button>
-                </form>
+              <form onSubmit={save} className="flex flex-col gap-3">
+                <label htmlFor="node-json">Данные узла</label>
+                <textarea
+                  id="node-json"
+                  disabled={busy}
+                  className={`${inputClass} min-h-56 font-mono text-sm`}
+                  value={draft}
+                  onChange={(event) => {
+                    if (!dirty) setBaseRev(copy.node.$rev);
+                    setDraft(event.target.value);
+                    setDirty(true);
+                  }}
+                />
+                <button className={buttonClass} disabled={busy || !dirty}>
+                  Сохранить
+                </button>
+              </form>
             )}
             {(copy.bits & R) !== 0 && (
-                <form
-                  onSubmit={execute}
-                  className="flex flex-col gap-3 border-t border-slate-200 pt-4"
-                >
-                  <label htmlFor="action-name">Действие</label>
-                  <input
-                    id="action-name"
-                    className={inputClass}
-                    value={action}
-                    onChange={(event) => setAction(event.target.value)}
-                  />
-                  <label htmlFor="action-args">Аргументы JSON</label>
-                  <textarea
-                    id="action-args"
-                    className={`${inputClass} font-mono text-sm`}
-                    value={args}
-                    onChange={(event) => setArgs(event.target.value)}
-                  />
-                  <button className={buttonClass} disabled={busy || !action}>
-                    Выполнить
-                  </button>
-                </form>
+              <form
+                onSubmit={execute}
+                className="flex flex-col gap-3 border-t border-slate-200 pt-4"
+              >
+                <label htmlFor="action-name">Действие</label>
+                <input
+                  id="action-name"
+                  className={inputClass}
+                  value={action}
+                  onChange={(event) => setAction(event.target.value)}
+                />
+                <label htmlFor="action-args">Аргументы JSON</label>
+                <textarea
+                  id="action-args"
+                  className={`${inputClass} font-mono text-sm`}
+                  value={args}
+                  onChange={(event) => setArgs(event.target.value)}
+                />
+                <button className={buttonClass} disabled={busy || !action}>
+                  Выполнить
+                </button>
+              </form>
             )}
           </>
         ))}
@@ -201,8 +201,11 @@ export function NativeTreeBrowser() {
   function refreshChildren(): void {
     if (!listing.current.active) return;
     setPathError('');
-    try { listing.current.refetch(); }
-    catch (error) { setPathError(message(error)); }
+    try {
+      listing.current.refetch();
+    } catch (error) {
+      setPathError(message(error));
+    }
   }
   /** Open the entered address as both the child listing and selected node. */
   function open(event: FormEvent): void {
@@ -231,7 +234,9 @@ export function NativeTreeBrowser() {
           />
           <button className={buttonClass}>Открыть</button>
         </form>
-        <button className={buttonClass} onClick={refreshChildren}>Обновить список</button>
+        <button className={buttonClass} onClick={refreshChildren}>
+          Обновить список
+        </button>
         {pathError && (
           <p role="alert" className="text-red-700">
             {pathError}
@@ -242,33 +247,36 @@ export function NativeTreeBrowser() {
             {message(children.error)}
           </p>
         )}
-        {children.output === undefined && children.members.map((copy) =>
-          'node' in copy ? (
-            <div key={copy.node.$id} className="flex gap-2">
-              <button
-                className="min-w-0 flex-1 truncate text-left underline"
-                onClick={() => setPath(copy.node.$path)}
-              >
-                {copy.node.$path}
-              </button>
-              <button
-                aria-label={`Дети ${copy.node.$path}`}
-                onClick={() => {
-                  setPathDraft(copy.node.$path);
-                  setParent(copy.node.$path);
-                  setPathError('');
-                }}
-              >
-                →
-              </button>
-            </div>
-          ) : (
-            <p key={copy.id} role="alert">
-              {copy.path}: {copy.error.code}
-            </p>
-          ),
+        {children.output === undefined &&
+          children.members.map((copy) =>
+            'node' in copy ? (
+              <div key={copy.node.$id} className="flex gap-2">
+                <button
+                  className="min-w-0 flex-1 truncate text-left underline"
+                  onClick={() => setPath(copy.node.$path)}
+                >
+                  {copy.node.$path}
+                </button>
+                <button
+                  aria-label={`Дети ${copy.node.$path}`}
+                  onClick={() => {
+                    setPathDraft(copy.node.$path);
+                    setParent(copy.node.$path);
+                    setPathError('');
+                  }}
+                >
+                  →
+                </button>
+              </div>
+            ) : (
+              <p key={copy.id} role="alert">
+                {copy.path}: {copy.error.code}
+              </p>
+            ),
+          )}
+        {children.output === undefined && children.rows !== undefined && (
+          <NativeViewOutput snapshot={children} />
         )}
-        {children.output === undefined && children.rows !== undefined && <NativeViewOutput snapshot={children} />}
         {children.next !== undefined && (
           <button
             className={buttonClass}
@@ -279,9 +287,11 @@ export function NativeTreeBrowser() {
           </button>
         )}
       </aside>
-      {children.output === undefined
-        ? <NodeEditor key={path} path={path} onAccepted={refreshChildren} />
-        : <NativeViewOutput key={parent} snapshot={children} title={parent} />}
+      {children.output === undefined ? (
+        <NodeEditor key={path} path={path} onAccepted={refreshChildren} />
+      ) : (
+        <NativeViewOutput key={parent} snapshot={children} title={parent} />
+      )}
     </div>
   );
 }

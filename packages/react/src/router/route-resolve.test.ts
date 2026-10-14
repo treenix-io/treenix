@@ -3,11 +3,12 @@ import assert from 'node:assert/strict';
 import type { NodeData } from '@treenx/core';
 import { normalizeUrl, resolveRoute, resolveTarget, urlKey } from './route-resolve';
 
-const node = (path: string, wildcard?: boolean): NodeData => ({
-  $path: path,
-  $type: 'x',
-  ...(wildcard ? { '#route': { $type: 't.route', wildcard: true } } : {}),
-} as NodeData);
+const node = (path: string, wildcard?: boolean): NodeData =>
+  ({
+    $path: path,
+    $type: 'x',
+    ...(wildcard ? { '#route': { $type: 't.route', wildcard: true } } : {}),
+  }) as NodeData;
 
 describe('normalizeUrl', () => {
   it('trims leading + trailing slashes', () => {
@@ -36,11 +37,11 @@ describe('urlKey', () => {
 
 describe('resolveRoute', () => {
   const routes = [
-    node('/sys/routes/_index'),                  // root
-    node('/sys/routes/about'),                   // exact "about"
-    node('/sys/routes/t', true),                 // wildcard "t/*"
-    node('/sys/routes/v', true),                 // wildcard "v/*"
-    node('/sys/routes/blog/post', true),         // wildcard "blog/post/*"
+    node('/sys/routes/_index'), // root
+    node('/sys/routes/about'), // exact "about"
+    node('/sys/routes/t', true), // wildcard "t/*"
+    node('/sys/routes/v', true), // wildcard "v/*"
+    node('/sys/routes/blog/post', true), // wildcard "blog/post/*"
   ];
 
   it('exact match wins over any wildcard', () => {
@@ -91,10 +92,7 @@ describe('resolveRoute', () => {
   });
 
   it('root wildcard catches everything when present', () => {
-    const withRootWildcard = [
-      node('/sys/routes/about'),
-      node('/sys/routes/_index', true),
-    ];
+    const withRootWildcard = [node('/sys/routes/about'), node('/sys/routes/_index', true)];
     const r = resolveRoute('/anything/here', withRootWildcard);
     assert.ok(r);
     assert.equal(r.node.$path, '/sys/routes/_index');

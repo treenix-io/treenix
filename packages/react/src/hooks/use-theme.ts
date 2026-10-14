@@ -48,7 +48,9 @@ export function useTheme(): UseThemeResult {
       style.id = styleId;
       document.head.appendChild(style);
     }
-    const decls = Object.entries(tokens).map(([k, v]) => `  ${k}: ${v};`).join('\n');
+    const decls = Object.entries(tokens)
+      .map(([k, v]) => `  ${k}: ${v};`)
+      .join('\n');
     style.textContent = `.${className} {\n${decls}\n}\n`;
     document.documentElement.classList.add(className);
   }, []);

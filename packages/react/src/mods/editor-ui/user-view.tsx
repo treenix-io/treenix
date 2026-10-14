@@ -38,48 +38,52 @@ function UserView({ value }: { value: NodeData }) {
       </div>
       {comps.map(([name, comp]) => {
         const ctype = comp.$type;
-        return <SchemaReader key={name} type={ctype}>{s => {
-        const fields = s?.properties === undefined ? [] : Object.entries(s.properties);
         return (
-          <div className="comp-view-card">
-            <div className="comp-view-header">
-              {name}
-              {name !== ctype && <span className="comp-type">{ctype}</span>}
-            </div>
-            {fields.length > 0
-              ? fields.map(([k, prop]) => {
-                  const val = comp[k];
-                  return (
-                    <div key={k} className="comp-view-row">
-                      <span className="comp-view-label">{prop.title}</span>
-                      <span className="comp-view-value">
-                        {val === undefined || val === ''
-                          ? '—'
-                          : typeof val === 'object'
-                            ? JSON.stringify(val)
-                            : String(val)}
-                      </span>
-                    </div>
-                  );
-                })
-              : Object.entries(comp)
-                  .filter(([k]) => !k.startsWith('$'))
-                  .map(([k, v]) => (
-                    <div key={k} className="comp-view-row">
-                      <span className="comp-view-label">{k}</span>
-                      <span className="comp-view-value">
-                        {typeof v === 'string' ? v || '—' : JSON.stringify(v)}
-                      </span>
-                    </div>
-                  ))}
-          </div>
+          <SchemaReader key={name} type={ctype}>
+            {(s) => {
+              const fields = s?.properties === undefined ? [] : Object.entries(s.properties);
+              return (
+                <div className="comp-view-card">
+                  <div className="comp-view-header">
+                    {name}
+                    {name !== ctype && <span className="comp-type">{ctype}</span>}
+                  </div>
+                  {fields.length > 0
+                    ? fields.map(([k, prop]) => {
+                        const val = comp[k];
+                        return (
+                          <div key={k} className="comp-view-row">
+                            <span className="comp-view-label">{prop.title}</span>
+                            <span className="comp-view-value">
+                              {val === undefined || val === ''
+                                ? '—'
+                                : typeof val === 'object'
+                                  ? JSON.stringify(val)
+                                  : String(val)}
+                            </span>
+                          </div>
+                        );
+                      })
+                    : Object.entries(comp)
+                        .filter(([k]) => !k.startsWith('$'))
+                        .map(([k, v]) => (
+                          <div key={k} className="comp-view-row">
+                            <span className="comp-view-label">{k}</span>
+                            <span className="comp-view-value">
+                              {typeof v === 'string' ? v || '—' : JSON.stringify(v)}
+                            </span>
+                          </div>
+                        ))}
+                </div>
+              );
+            }}
+          </SchemaReader>
         );
-        }}</SchemaReader>;
       })}
     </div>
   );
 }
 
 export default declareClientModule('@treenx/react/editor-ui/user-view', [
-  { type: 'user', context: 'react', handler: UserView }
+  { type: 'user', context: 'react', handler: UserView },
 ]);

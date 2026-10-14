@@ -1,8 +1,4 @@
-import {
-  compKey,
-  getComponent,
-  getComponentByName,
-} from '@treenx/core';
+import { compKey, getComponent, getComponentByName } from '@treenx/core';
 import { createDeclaredClientRegistry, type ClientRegistry } from '#context/client-registry';
 import type { TwpClient } from '@treenx/core/client/twp';
 import { KernelError } from '@treenx/core/errors';
@@ -15,7 +11,10 @@ import { mergeToOps, type OnChange } from '#tree/on-change';
 import { createPredictionGroups } from '#tree/prediction-group';
 
 /** Bind public mutation and presentation effects to one actual admitted canonical client. */
-export function createLaneEffects(client: TwpClient, registry: ClientRegistry = createDeclaredClientRegistry()) {
+export function createLaneEffects(
+  client: TwpClient,
+  registry: ClientRegistry = createDeclaredClientRegistry(),
+) {
   let closed = false;
   const groups = createPredictionGroups<Node>(
     (error) => {
@@ -216,8 +215,12 @@ export function createLaneEffects(client: TwpClient, registry: ClientRegistry = 
     await client.ready;
     available();
     await client.commit({
-      changes: [{ op: 'put', node: { $path: path, $type: type,
-        ...registry.type(type)?.defaults(), ...data } }],
+      changes: [
+        {
+          op: 'put',
+          node: { $path: path, $type: type, ...registry.type(type)?.defaults(), ...data },
+        },
+      ],
     }).outcome;
     available();
   }

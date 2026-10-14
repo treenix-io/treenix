@@ -5,7 +5,7 @@ import type { Node } from '@treenx/core/kernel/types';
 import './Inspector.css';
 import { ErrorBoundary } from '#app/ErrorBoundary';
 import { ScrollArea } from '#components/ui/scroll-area';
-import { NodeProvider,Render,RenderContext } from '#context';
+import { NodeProvider, Render, RenderContext } from '#context';
 import { usePath } from '#hooks';
 import { pickDefaultContext } from '#mods/editor-ui/node-utils';
 import { useSave } from '#tree/auto-save';
@@ -36,7 +36,12 @@ function SelectedInspector({ path, onDelete, onAddComponent, onSelect, onSetRoot
     if (node) setContext(pickDefaultContext(node.$type));
   }
 
-  if (error !== null) return <div role="alert" className="p-4 text-destructive">{error.message}</div>;
+  if (error !== null)
+    return (
+      <div role="alert" className="p-4 text-destructive">
+        {error.message}
+      </div>
+    );
   if (loading) return <div className="p-4 text-muted-foreground">Loading node…</div>;
 
   if (!node) {
@@ -70,7 +75,9 @@ function SelectedInspector({ path, onDelete, onAddComponent, onSelect, onSetRoot
           <ErrorBoundary key={node.$path}>
             <RenderContext name={context}>
               <div className="node-view">
-                <NodeProvider value={draftNode}><Render value={draftNode} onChange={save.onChange} /></NodeProvider>
+                <NodeProvider value={draftNode}>
+                  <Render value={draftNode} onChange={save.onChange} />
+                </NodeProvider>
               </div>
             </RenderContext>
           </ErrorBoundary>

@@ -29,7 +29,7 @@ registerPipe('first', (input) => {
 registerPipe('count', (input) => (input as unknown[]).length);
 
 registerPipe('map', (input, field) => {
-  return (input as Record<string, unknown>[]).map(item => item[field as string]);
+  return (input as Record<string, unknown>[]).map((item) => item[field as string]);
 });
 
 registerPipe('sum', (input) => {
@@ -56,7 +56,8 @@ registerPipe('add', (input, n) => (input as number) + (n as number));
 registerPipe('sub', (input, n) => (input as number) - (n as number));
 
 registerPipe('clamp', (input, min, max) =>
-  Math.min(Math.max(input as number, min as number), max as number));
+  Math.min(Math.max(input as number, min as number), max as number),
+);
 
 registerPipe('round', (input) => Math.round(input as number));
 

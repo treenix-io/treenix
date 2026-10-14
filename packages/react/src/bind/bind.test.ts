@@ -19,23 +19,17 @@ describe('parseMapExpr', () => {
 
   it('parses bare pipe (no parens)', () => {
     const expr = parseMapExpr('round');
-    assert.deepEqual(expr.steps, [
-      { type: 'pipe', name: 'round', args: [] },
-    ]);
+    assert.deepEqual(expr.steps, [{ type: 'pipe', name: 'round', args: [] }]);
   });
 
   it('parses multiple args', () => {
     const expr = parseMapExpr('clamp(0, 10)');
-    assert.deepEqual(expr.steps, [
-      { type: 'pipe', name: 'clamp', args: [0, 10] },
-    ]);
+    assert.deepEqual(expr.steps, [{ type: 'pipe', name: 'clamp', args: [0, 10] }]);
   });
 
   it('parses field-only chain', () => {
     const expr = parseMapExpr('.status');
-    assert.deepEqual(expr.steps, [
-      { type: 'field', name: 'status' },
-    ]);
+    assert.deepEqual(expr.steps, [{ type: 'field', name: 'status' }]);
   });
 
   it('parses complex chain', () => {
@@ -103,13 +97,19 @@ describe('evaluateRef', () => {
     { $path: '/s/3', $type: 'reading', value: 30, seq: 2 },
   ] as NodeData[];
 
-  const selfNode = { $path: '/obj', $type: 't3d.object', width: 4, height: 3, price: 100 } as NodeData;
+  const selfNode = {
+    $path: '/obj',
+    $type: 't3d.object',
+    width: 4,
+    height: 3,
+    price: 100,
+  } as NodeData;
 
   const allNodes = [...sensors, config, selfNode];
 
   const ctx = {
-    getNode: (p: string) => allNodes.find(s => s.$path === p),
-    getChildren: (p: string) => p === '/s' ? sensors : [],
+    getNode: (p: string) => allNodes.find((s) => s.$path === p),
+    getChildren: (p: string) => (p === '/s' ? sensors : []),
   };
 
   it('resolves plain ref (no $map)', () => {
@@ -213,7 +213,10 @@ describe('isCollectionRef', () => {
 
 describe('extractArgPaths', () => {
   it('returns external paths from #/path args', () => {
-    const paths = extractArgPaths({ $ref: '/obj', $map: '#price | mul(#/config.rate) | add(#/bonus.value)' });
+    const paths = extractArgPaths({
+      $ref: '/obj',
+      $map: '#price | mul(#/config.rate) | add(#/bonus.value)',
+    });
     assert.deepEqual(paths, ['/config', '/bonus']);
   });
 
@@ -256,8 +259,8 @@ describe('once pipe in evaluation', () => {
   ] as NodeData[];
 
   const ctx = {
-    getNode: (p: string) => nodes.find(n => n.$path === p),
-    getChildren: (p: string) => p === '/s' ? nodes : [],
+    getNode: (p: string) => nodes.find((n) => n.$path === p),
+    getChildren: (p: string) => (p === '/s' ? nodes : []),
   };
 
   it('once does not alter the computed value', () => {
@@ -280,7 +283,9 @@ describe('computed store', () => {
 
   it('fires subscriber on change', () => {
     let fired = 0;
-    const unsub = subscribeComputed('/test2', () => { fired++; });
+    const unsub = subscribeComputed('/test2', () => {
+      fired++;
+    });
     setComputed('/test2', 'px', 1);
     assert.equal(fired, 1);
     setComputed('/test2', 'px', 2);
@@ -307,7 +312,9 @@ describe('computed store', () => {
 
   it('unsubscribe stops notifications', () => {
     let fired = 0;
-    const unsub = subscribeComputed('/test3', () => { fired++; });
+    const unsub = subscribeComputed('/test3', () => {
+      fired++;
+    });
     unsub();
     setComputed('/test3', 'sy', 99);
     assert.equal(fired, 0);

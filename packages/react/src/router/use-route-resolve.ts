@@ -27,11 +27,18 @@ export type RouteResolveQuery = {
 };
 
 export function useRouteResolve(pathname: string): RouteResolveQuery {
-  const { data, loading, error, errors } = useChildren('/sys/routes', { watch: true, watchNew: true });
+  const { data, loading, error, errors } = useChildren('/sys/routes', {
+    watch: true,
+    watchNew: true,
+  });
   const result = useMemo(() => resolveRoute(pathname, data), [pathname, data]);
   const target = result ? resolveTarget(getRoute(result.node), result.rest) : null;
   const isPublic = !!result && getRoute(result.node)?.public === true;
   const projectionError = errors[0];
-  const failure = error ?? (projectionError === undefined ? null : new KernelError(projectionError.error.code, projectionError.error.message));
+  const failure =
+    error ??
+    (projectionError === undefined
+      ? null
+      : new KernelError(projectionError.error.code, projectionError.error.message));
   return { result, target, loading, isPublic, error: failure };
 }

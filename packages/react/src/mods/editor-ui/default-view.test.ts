@@ -1,4 +1,9 @@
-import { createClientRegistry, declareClientModule, declareView, publishClientExports } from '#context/client-registry';
+import {
+  createClientRegistry,
+  declareClientModule,
+  declareView,
+  publishClientExports,
+} from '#context/client-registry';
 import defaultView from './default-view';
 import listItems from './list-items';
 import { cleanup, render, screen } from '@testing-library/react';
@@ -13,12 +18,7 @@ import { TooltipProvider } from '#components/ui/tooltip';
 import { TreeSourceProvider } from '#tree/tree-source-context';
 import { EMPTY_PATH_SNAPSHOT, type ChildrenSnapshot, type TreeSource } from '#tree/tree-source';
 import { makeNavigateApi, NavigateProvider } from '#navigate';
-import {
-  inferType,
-  resolveDisplayType,
-  splitRecord,
-  TypedRecordView,
-} from './default-view';
+import { inferType, resolveDisplayType, splitRecord, TypedRecordView } from './default-view';
 
 afterEach(() => cleanup());
 
@@ -95,7 +95,10 @@ describe('splitRecord', () => {
 
     const result = splitRecord(value, null);
 
-    assert.deepEqual(result.rest.map((field) => field.name), ['count']);
+    assert.deepEqual(
+      result.rest.map((field) => field.name),
+      ['count'],
+    );
     assert.deepEqual(result.components, [{ name: 'child', value: child }]);
   });
 
@@ -129,25 +132,35 @@ describe('default-view helpers', () => {
   });
 
   it('falls back from unknown schema format to property type and inferred type', () => {
-    const registry = createClientRegistry([declareClientModule('display-types', [
-      declareView('string', 'react', () => null), declareView('number', 'react', () => null),
-    ])]);
+    const registry = createClientRegistry([
+      declareClientModule('display-types', [
+        declareView('string', 'react', () => null),
+        declareView('number', 'react', () => null),
+      ]),
+    ]);
 
     assert.equal(resolveDisplayType({ format: 'uuid', type: 'string' }, 'x', registry), 'string');
     assert.equal(resolveDisplayType({ format: 'uuid', type: 'unknown' }, 1, registry), 'number');
   });
 });
 
-const noopNavigate = makeNavigateApi(() => true, () => null);
+const noopNavigate = makeNavigateApi(
+  () => true,
+  () => null,
+);
 
 // RenderChildren consumes TreeSource + Navigate contexts — provide both statically.
 function renderWithProviders(source: TreeSource, value: ComponentData) {
-  return render(createElement(NavigateProvider, { value: noopNavigate },
-    createElement(TreeSourceProvider, {
-      source,
-      children: createElement(TooltipProvider, null, createElement(TypedRecordView, { value })),
-    }),
-  ));
+  return render(
+    createElement(
+      NavigateProvider,
+      { value: noopNavigate },
+      createElement(TreeSourceProvider, {
+        source,
+        children: createElement(TooltipProvider, null, createElement(TypedRecordView, { value })),
+      }),
+    ),
+  );
 }
 
 // Static TreeSource — serves canned children, no fetch/watch side effects.
@@ -213,15 +226,27 @@ describe('TypedRecordView', () => {
   });
 
   it('normalizes bare refs before rendering them through ref@react', () => {
-    const registry = createClientRegistry([defaultView, listItems, declareClientModule('ref-view', [declareView('ref', 'react', ({ value }: { value: ComponentData & { $ref: string } }) =>
-      createElement('span', null, `${value.$type}:${value.$ref}`),
-    )])]);
+    const registry = createClientRegistry([
+      defaultView,
+      listItems,
+      declareClientModule('ref-view', [
+        declareView('ref', 'react', ({ value }: { value: ComponentData & { $ref: string } }) =>
+          createElement('span', null, `${value.$type}:${value.$ref}`),
+        ),
+      ]),
+    ]);
 
-    render(createElement(ClientRegistryContext.Provider, { value: registry },
-      createElement(TooltipProvider, null,
-        createElement(Render, { value: { $type: 'demo.ref-holder', target: { $ref: '/x' } } }),
+    render(
+      createElement(
+        ClientRegistryContext.Provider,
+        { value: registry },
+        createElement(
+          TooltipProvider,
+          null,
+          createElement(Render, { value: { $type: 'demo.ref-holder', target: { $ref: '/x' } } }),
+        ),
       ),
-    ));
+    );
 
     assert.equal(screen.getByText('ref:/x').textContent, 'ref:/x');
   });

@@ -9,7 +9,14 @@ import {
   AlertDialogTitle,
 } from '#components/ui/alert-dialog';
 
-export function ConfirmDialog({ open, onOpenChange, title, description, onConfirm, variant = 'default' }: {
+export function ConfirmDialog({
+  open,
+  onOpenChange,
+  title,
+  description,
+  onConfirm,
+  variant = 'default',
+}: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   title: string;
@@ -26,7 +33,9 @@ export function ConfirmDialog({ open, onOpenChange, title, description, onConfir
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction variant={variant} onClick={onConfirm}>Confirm</AlertDialogAction>
+          <AlertDialogAction variant={variant} onClick={onConfirm}>
+            Confirm
+          </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

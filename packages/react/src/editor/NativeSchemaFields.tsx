@@ -127,7 +127,13 @@ export function NativeSchemaForm({
             readOnly={readOnly || schema.readOnly}
           />
         ) : (
-          renderField(registry, name, { ...widget, readOnly: readOnly || widget.readOnly }, value, onChange)
+          renderField(
+            registry,
+            name,
+            { ...widget, readOnly: readOnly || widget.readOnly },
+            value,
+            onChange,
+          )
         );
       })}
     </div>

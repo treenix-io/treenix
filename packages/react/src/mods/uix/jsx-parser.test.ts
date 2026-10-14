@@ -38,7 +38,7 @@ describe('jsx-parser', () => {
 
   it('6. single-quoted attr', () => {
     const r = compileJSX("<div id='bar'></div>");
-    assert.equal(norm(r), norm("h(\"div\", {\"id\": 'bar'})"));
+    assert.equal(norm(r), norm('h("div", {"id": \'bar\'})'));
   });
 
   it('7. expression attr', () => {
@@ -236,13 +236,17 @@ return <span>{x}</span>`;
   });
 
   it('37. $path preserved in JSX attr expression', () => {
-    const r = compileJSX('{items.map(function(item) { return <Render key={item.$path} value={item} />; })}');
+    const r = compileJSX(
+      '{items.map(function(item) { return <Render key={item.$path} value={item} />; })}',
+    );
     assert.ok(r.includes('item.$path'), `$path was stripped. Got: ${r}`);
     assert.ok(r.includes('h(Render,'), `Render not compiled. Got: ${r}`);
   });
 
   it('38. JSX inside function(){} callback (depth > 1)', () => {
-    const r = compileJSX('{items.map(function(item) { return <div key={item.id}>{item.name}</div>; })}');
+    const r = compileJSX(
+      '{items.map(function(item) { return <div key={item.id}>{item.name}</div>; })}',
+    );
     assert.ok(r.includes('h("div"'), `JSX inside callback not transformed. Got: ${r}`);
     assert.ok(r.includes('"key": item.id'), `key attr lost. Got: ${r}`);
     assert.ok(r.includes('item.name'), `child expr lost. Got: ${r}`);
@@ -383,25 +387,38 @@ export default BigList;`;
     const perOp = elapsed / iterations;
     const lines = code.split('\n').length;
     const chars = code.length;
-    return { label, lines, chars, iterations, totalMs: elapsed.toFixed(1), perOpUs: (perOp * 1000).toFixed(0) };
+    return {
+      label,
+      lines,
+      chars,
+      iterations,
+      totalMs: elapsed.toFixed(1),
+      perOpUs: (perOp * 1000).toFixed(0),
+    };
   }
 
   it('small component (~8 lines)', () => {
     const r = bench('SMALL', SMALL, 10000);
-    console.log(`  ${r.label}: ${r.lines} lines, ${r.chars} chars → ${r.perOpUs} µs/op (${r.iterations} iters, ${r.totalMs} ms)`);
+    console.log(
+      `  ${r.label}: ${r.lines} lines, ${r.chars} chars → ${r.perOpUs} µs/op (${r.iterations} iters, ${r.totalMs} ms)`,
+    );
     // Must compile in under 500 µs
     assert.ok(Number(r.perOpUs) < 500, `Too slow: ${r.perOpUs} µs`);
   });
 
   it('medium component (~50 lines, TS types, ternary, map)', () => {
     const r = bench('MEDIUM', MEDIUM, 5000);
-    console.log(`  ${r.label}: ${r.lines} lines, ${r.chars} chars → ${r.perOpUs} µs/op (${r.iterations} iters, ${r.totalMs} ms)`);
+    console.log(
+      `  ${r.label}: ${r.lines} lines, ${r.chars} chars → ${r.perOpUs} µs/op (${r.iterations} iters, ${r.totalMs} ms)`,
+    );
     assert.ok(Number(r.perOpUs) < 2000, `Too slow: ${r.perOpUs} µs`);
   });
 
   it('large component (~70 lines, nested JSX, callbacks)', () => {
     const r = bench('LARGE', LARGE, 2000);
-    console.log(`  ${r.label}: ${r.lines} lines, ${r.chars} chars → ${r.perOpUs} µs/op (${r.iterations} iters, ${r.totalMs} ms)`);
+    console.log(
+      `  ${r.label}: ${r.lines} lines, ${r.chars} chars → ${r.perOpUs} µs/op (${r.iterations} iters, ${r.totalMs} ms)`,
+    );
     assert.ok(Number(r.perOpUs) < 5000, `Too slow: ${r.perOpUs} µs`);
   });
 
@@ -434,11 +451,18 @@ export default BigList;`;
       if (trimmed.startsWith('export default ')) {
         const rest = trimmed.slice('export default '.length).trim();
         const declMatch = rest.match(/^(function|class)\s+(\w+)/);
-        if (declMatch) { exportName = declMatch[2]; body.push(line.replace('export default ', '')); }
-        else { exportName = rest.replace(/;$/, '').trim(); }
+        if (declMatch) {
+          exportName = declMatch[2];
+          body.push(line.replace('export default ', ''));
+        } else {
+          exportName = rest.replace(/;$/, '').trim();
+        }
         continue;
       }
-      if (trimmed.startsWith('export ')) { body.push(line.replace('export ', '')); continue; }
+      if (trimmed.startsWith('export ')) {
+        body.push(line.replace('export ', ''));
+        continue;
+      }
       body.push(line);
     }
     return { body: body.join('\n'), exportName };
@@ -446,17 +470,36 @@ export default BigList;`;
 
   // Stub scope — real React not needed for benchmarking compilation
   const SCOPE_KEYS = [
-    'React', 'h', 'Fragment',
-    'useState', 'useEffect', 'useMemo', 'useCallback', 'useRef',
-    'Render', 'RenderContext', 'RenderField', 'usePath', 'useChildren', 'uix',
+    'React',
+    'h',
+    'Fragment',
+    'useState',
+    'useEffect',
+    'useMemo',
+    'useCallback',
+    'useRef',
+    'Render',
+    'RenderContext',
+    'RenderField',
+    'usePath',
+    'useChildren',
+    'uix',
   ];
   const noop = () => {};
   const SCOPE_VALS = [
     { createElement: noop, Fragment: 'Fragment' }, // React stub
     noop, // h
     'Fragment', // Fragment
-    noop, noop, noop, noop, noop, // hooks
-    noop, noop, noop, noop, noop, // Render, RenderContext, RenderField, usePath, useChildren
+    noop,
+    noop,
+    noop,
+    noop,
+    noop, // hooks
+    noop,
+    noop,
+    noop,
+    noop,
+    noop, // Render, RenderContext, RenderField, usePath, useChildren
     { add: noop }, // uix
   ];
 
@@ -480,24 +523,37 @@ export default BigList;`;
     const perOp = elapsed / iterations;
     const lines = code.split('\n').length;
     const chars = code.length;
-    return { label, lines, chars, iterations, totalMs: elapsed.toFixed(1), perOpUs: (perOp * 1000).toFixed(0) };
+    return {
+      label,
+      lines,
+      chars,
+      iterations,
+      totalMs: elapsed.toFixed(1),
+      perOpUs: (perOp * 1000).toFixed(0),
+    };
   }
 
   it('full pipeline small (compileJSX + new Function)', () => {
     const r = benchFull('SMALL+fn', SMALL, 5000);
-    console.log(`  ${r.label}: ${r.lines} lines, ${r.chars} chars → ${r.perOpUs} µs/op (${r.iterations} iters, ${r.totalMs} ms)`);
+    console.log(
+      `  ${r.label}: ${r.lines} lines, ${r.chars} chars → ${r.perOpUs} µs/op (${r.iterations} iters, ${r.totalMs} ms)`,
+    );
     assert.ok(Number(r.perOpUs) < 2000, `Too slow: ${r.perOpUs} µs`);
   });
 
   it('full pipeline medium (compileJSX + new Function)', () => {
     const r = benchFull('MEDIUM+fn', MEDIUM, 2000);
-    console.log(`  ${r.label}: ${r.lines} lines, ${r.chars} chars → ${r.perOpUs} µs/op (${r.iterations} iters, ${r.totalMs} ms)`);
+    console.log(
+      `  ${r.label}: ${r.lines} lines, ${r.chars} chars → ${r.perOpUs} µs/op (${r.iterations} iters, ${r.totalMs} ms)`,
+    );
     assert.ok(Number(r.perOpUs) < 5000, `Too slow: ${r.perOpUs} µs`);
   });
 
   it('full pipeline large (compileJSX + new Function)', () => {
     const r = benchFull('LARGE+fn', LARGE, 1000);
-    console.log(`  ${r.label}: ${r.lines} lines, ${r.chars} chars → ${r.perOpUs} µs/op (${r.iterations} iters, ${r.totalMs} ms)`);
+    console.log(
+      `  ${r.label}: ${r.lines} lines, ${r.chars} chars → ${r.perOpUs} µs/op (${r.iterations} iters, ${r.totalMs} ms)`,
+    );
     assert.ok(Number(r.perOpUs) < 10000, `Too slow: ${r.perOpUs} µs`);
   });
 
@@ -529,7 +585,11 @@ export default BigList;`;
     let captured: Function | null = null;
     const scopeVals = [
       ...SCOPE_VALS.slice(0, -1),
-      { add: (c: Function) => { captured = c; } },
+      {
+        add: (c: Function) => {
+          captured = c;
+        },
+      },
     ];
     const fn = new Function(...SCOPE_KEYS, fnBody);
     fn(...scopeVals);

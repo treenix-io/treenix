@@ -1,9 +1,39 @@
 // String utilities — fuzzy matching, transliteration
 
 const CYR_TO_LAT: Record<string, string> = {
-  а:'a',б:'b',в:'v',г:'g',д:'d',е:'e',ё:'yo',ж:'zh',з:'z',и:'i',й:'y',
-  к:'k',л:'l',м:'m',н:'n',о:'o',п:'p',р:'r',с:'s',т:'t',у:'u',ф:'f',
-  х:'kh',ц:'ts',ч:'ch',ш:'sh',щ:'shch',ъ:'',ы:'y',ь:'',э:'e',ю:'yu',я:'ya',
+  а: 'a',
+  б: 'b',
+  в: 'v',
+  г: 'g',
+  д: 'd',
+  е: 'e',
+  ё: 'yo',
+  ж: 'zh',
+  з: 'z',
+  и: 'i',
+  й: 'y',
+  к: 'k',
+  л: 'l',
+  м: 'm',
+  н: 'n',
+  о: 'o',
+  п: 'p',
+  р: 'r',
+  с: 's',
+  т: 't',
+  у: 'u',
+  ф: 'f',
+  х: 'kh',
+  ц: 'ts',
+  ч: 'ch',
+  ш: 'sh',
+  щ: 'shch',
+  ъ: '',
+  ы: 'y',
+  ь: '',
+  э: 'e',
+  ю: 'yu',
+  я: 'ya',
 };
 
 /** Transliterate non-latin characters to ASCII. Cyrillic built-in, extensible via custom map. */
@@ -23,13 +53,17 @@ export function transliterate(str: string, extra?: Record<string, string>): stri
 }
 
 export function cleanSlug(str: string) {
-  return transliterate(str.trim()).toLowerCase().replace(/[^a-z0-9_\-]+/g, '-').replace(/^-|-$/g, '');
+  return transliterate(str.trim())
+    .toLowerCase()
+    .replace(/[^a-z0-9_\-]+/g, '-')
+    .replace(/^-|-$/g, '');
 }
 
 // Fuzzy string matching utilities for type search
 
 export function editDistance(a: string, b: string): number {
-  const m = a.length, n = b.length;
+  const m = a.length,
+    n = b.length;
   if (!m) return n;
   if (!n) return m;
   const dp = Array.from({ length: n + 1 }, (_, i) => i);
@@ -51,11 +85,20 @@ export function matchTokens(text: string, sTokens: string[]): number {
   for (const st of sTokens) {
     let best = 0;
     for (const vt of vTokens) {
-      if (vt.startsWith(st)) { best = Math.max(best, 0.9); continue; }
-      if (vt.includes(st)) { best = Math.max(best, 0.7); continue; }
+      if (vt.startsWith(st)) {
+        best = Math.max(best, 0.9);
+        continue;
+      }
+      if (vt.includes(st)) {
+        best = Math.max(best, 0.7);
+        continue;
+      }
       if (st.length >= 2) {
         const maxDist = st.length <= 3 ? 1 : Math.floor(st.length / 3);
-        if (editDistance(st, vt) <= maxDist) { best = Math.max(best, 0.5); continue; }
+        if (editDistance(st, vt) <= maxDist) {
+          best = Math.max(best, 0.5);
+          continue;
+        }
         if (vt.length > st.length && editDistance(st, vt.slice(0, st.length + 1)) <= maxDist) {
           best = Math.max(best, 0.4);
         }

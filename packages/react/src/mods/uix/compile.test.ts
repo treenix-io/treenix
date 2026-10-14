@@ -3,11 +3,11 @@
 
 import { createClientRegistry } from '#context/client-registry';
 import assert from 'node:assert/strict';
-import { beforeEach,describe,it } from 'node:test';
+import { beforeEach, describe, it } from 'node:test';
 import React from 'react';
 import { renderToString } from 'react-dom/server';
-import { compileComponent,invalidateCache } from './compile';
-import { cleanup,fireEvent,render } from '@testing-library/react';
+import { compileComponent, invalidateCache } from './compile';
+import { cleanup, fireEvent, render } from '@testing-library/react';
 
 beforeEach(() => invalidateCache());
 

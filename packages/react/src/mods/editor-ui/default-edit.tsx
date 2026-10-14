@@ -102,5 +102,5 @@ const DefaultEditForm: View<ComponentData> = ({ value, onChange }) => {
 
 export default declareClientModule('@treenx/react/editor-ui/default-edit', [
   { type: 'default', context: 'react:edit', handler: DefaultEditForm },
-  { type: 'default', context: 'react:edit:props', handler: DefaultEditForm }
+  { type: 'default', context: 'react:edit:props', handler: DefaultEditForm },
 ]);

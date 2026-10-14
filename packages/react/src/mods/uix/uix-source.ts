@@ -10,7 +10,9 @@ export class UixSource {
   /** @description JSX/TSX source code. */
   source = '';
 }
-export const clientModules = [declareOpenModule('@treenx/react/uix/source', [], [declareClientType('uix.source', UixSource)])];
+export const clientModules = [
+  declareOpenModule('@treenx/react/uix/source', [], [declareClientType('uix.source', UixSource)]),
+];
 
 // Mirrors prepareCode from compile.ts but kept here to avoid React imports
 function prepareCode(code: string): { body: string; exportName: string | null } {
@@ -47,10 +49,19 @@ function prepareCode(code: string): { body: string; exportName: string | null } 
 
 // Scope parameter names that will be available at runtime
 const SCOPE_KEYS = [
-  'React', 'h', 'Fragment',
-  'useState', 'useEffect', 'useMemo', 'useCallback', 'useRef',
-  'Render', 'RenderContext', 'RenderField',
-  'usePath', 'useChildren',
+  'React',
+  'h',
+  'Fragment',
+  'useState',
+  'useEffect',
+  'useMemo',
+  'useCallback',
+  'useRef',
+  'Render',
+  'RenderContext',
+  'RenderField',
+  'usePath',
+  'useChildren',
   'uix',
 ];
 
@@ -59,15 +70,17 @@ export function verifyViewSource(source: string): { ok: true } | { ok: false; er
     const { body, exportName } = prepareCode(source);
     const jsCode = compileJSX(body);
 
-    const fnBody = exportName
-      ? `${jsCode}\nreturn ${exportName};`
-      : `${jsCode}\nreturn null;`;
+    const fnBody = exportName ? `${jsCode}\nreturn ${exportName};` : `${jsCode}\nreturn null;`;
 
     // Syntax check only — new Function parses but we don't execute
     new Function(...SCOPE_KEYS, fnBody);
 
     if (!exportName) {
-      return { ok: false, error: 'No export default found. Use `export default function ViewName(...)` or `export default ViewName`.' };
+      return {
+        ok: false,
+        error:
+          'No export default found. Use `export default function ViewName(...)` or `export default ViewName`.',
+      };
     }
 
     return { ok: true };

@@ -9,9 +9,11 @@ export interface NativeHydrationState {
 
 /** Present a request-owned read without admitting copies or claims to a lane cache. */
 export function readSnapshot(result: ReadResult): NativeSnapshot {
-  const copies = new Map(result.copies.map(copy => ['node' in copy ? copy.node.$id : copy.id, copy]));
-  const computed = new Map(result.computed?.map(node => [node.$id, node]));
-  const errors = new Map(result.viewErrors?.map(copy => [copy.id, copy]));
+  const copies = new Map(
+    result.copies.map((copy) => ['node' in copy ? copy.node.$id : copy.id, copy]),
+  );
+  const computed = new Map(result.computed?.map((node) => [node.$id, node]));
+  const errors = new Map(result.viewErrors?.map((copy) => [copy.id, copy]));
   const output: LaneMember[] = [];
   const members: NodeCopy[] = [];
   const memberIds = new Set(result.list);
@@ -31,8 +33,18 @@ export function readSnapshot(result: ReadResult): NativeSnapshot {
   for (const [id, node] of computed) if (!memberIds.has(id)) computedIncluded.push(node);
   for (const [id, copy] of errors) if (!memberIds.has(id)) viewErrorsIncluded.push(copy);
   for (const [id, copy] of copies) if (!memberIds.has(id)) included.push(copy);
-  return { phase: 'ready', generations: [], members, included, output,
-    viewOwner: result.viewOwner, computed: result.computed, rows: result.rows,
+  return {
+    phase: 'ready',
+    generations: [],
+    members,
+    included,
+    output,
+    viewOwner: result.viewOwner,
+    computed: result.computed,
+    rows: result.rows,
     viewErrors: result.viewErrors,
-    computedIncluded, viewErrorsIncluded, next: result.next };
+    computedIncluded,
+    viewErrorsIncluded,
+    next: result.next,
+  };
 }

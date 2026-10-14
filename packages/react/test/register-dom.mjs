@@ -4,7 +4,16 @@ import { Window } from 'happy-dom';
 
 const win = new Window({ url: 'http://localhost' });
 
-for (const key of ['window', 'document', 'navigator', 'HTMLElement', 'MutationObserver', 'customElements', 'localStorage', 'sessionStorage']) {
+for (const key of [
+  'window',
+  'document',
+  'navigator',
+  'HTMLElement',
+  'MutationObserver',
+  'customElements',
+  'localStorage',
+  'sessionStorage',
+]) {
   globalThis[key] ??= win[key];
 }
 globalThis.requestAnimationFrame ??= (cb) => setTimeout(cb, 0);

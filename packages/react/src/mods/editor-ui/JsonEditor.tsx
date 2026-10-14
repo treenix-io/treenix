@@ -100,7 +100,7 @@ function handleKeyDown(
     let comma = '';
     if (needsComma(charBefore, charAfter)) comma = ',';
 
-    const deeper = (charBefore === '{' || charBefore === '[') ? indent + '  ' : indent;
+    const deeper = charBefore === '{' || charBefore === '[' ? indent + '  ' : indent;
     const nl = comma + '\n' + deeper;
     ta.value = before + nl + after;
     ta.selectionStart = ta.selectionEnd = s + nl.length;
@@ -110,7 +110,8 @@ function handleKeyDown(
 
 function needsComma(charBefore: string, charAfter: string): boolean {
   if (!charBefore) return false;
-  if (charBefore === ',' || charBefore === '{' || charBefore === '[' || charBefore === ':') return false;
+  if (charBefore === ',' || charBefore === '{' || charBefore === '[' || charBefore === ':')
+    return false;
   if (!/["\d}\]eul]/.test(charBefore)) return false;
   if (charAfter === ',') return false;
   return true;
@@ -120,8 +121,11 @@ function needsComma(charBefore: string, charAfter: string): boolean {
 
 function validate(src: string): string | null {
   if (!src.trim()) return null;
-  try { JSON.parse(src); return null; } catch (e) {
-    const msg = (e instanceof SyntaxError) ? e.message : 'Invalid JSON';
+  try {
+    JSON.parse(src);
+    return null;
+  } catch (e) {
+    const msg = e instanceof SyntaxError ? e.message : 'Invalid JSON';
     const posMatch = msg.match(/position\s+(\d+)/);
     if (posMatch) {
       const pos = Number(posMatch[1]);
@@ -148,19 +152,30 @@ function normalizePaste(text: string): string {
     try {
       const unescaped = JSON.parse(text);
       if (typeof unescaped === 'string') {
-        try { JSON.parse(unescaped); return unescaped; } catch {}
+        try {
+          JSON.parse(unescaped);
+          return unescaped;
+        } catch {}
       }
     } catch {}
   }
 
   // JS-style: unquoted keys → quoted keys
   const jsFixed = text.replace(/(?<=[\{,\n]\s*)([a-zA-Z_$][\w$]*)\s*:/g, '"$1":');
-  try { JSON.parse(jsFixed); return jsFixed; } catch {}
+  try {
+    JSON.parse(jsFixed);
+    return jsFixed;
+  } catch {}
 
   return text;
 }
 
-function insert(ta: HTMLTextAreaElement, text: string, onChange: (t: string) => void, cursorOffset = 0) {
+function insert(
+  ta: HTMLTextAreaElement,
+  text: string,
+  onChange: (t: string) => void,
+  cursorOffset = 0,
+) {
   const { selectionStart: s, selectionEnd: end, value } = ta;
   ta.value = value.slice(0, s) + text + value.slice(end);
   ta.selectionStart = ta.selectionEnd = s + text.length + cursorOffset;
@@ -177,11 +192,20 @@ function findMatchingBracket(text: string, pos: number): number {
 
   for (let i = pos + 1; i < text.length; i++) {
     const ch = text[i];
-    if (ch === '\\' && inStr) { i++; continue; }
-    if (ch === '"') { inStr = !inStr; continue; }
+    if (ch === '\\' && inStr) {
+      i++;
+      continue;
+    }
+    if (ch === '"') {
+      inStr = !inStr;
+      continue;
+    }
     if (inStr) continue;
     if (ch === open) depth++;
-    else if (ch === close) { depth--; if (depth === 0) return i; }
+    else if (ch === close) {
+      depth--;
+      if (depth === 0) return i;
+    }
   }
   return -1;
 }
@@ -194,10 +218,7 @@ function lineAt(text: string, pos: number): number {
 }
 
 // Compute fold ranges: for each fold start line → end line (inclusive)
-function computeFoldRanges(
-  value: string,
-  foldedStarts: Set<number>,
-): Map<number, number> {
+function computeFoldRanges(value: string, foldedStarts: Set<number>): Map<number, number> {
   const ranges = new Map<number, number>();
   const lines = value.split('\n');
 
@@ -287,27 +308,33 @@ export function JsonEditor({ value, onChange }: Props) {
   const [error, setError] = useState<string | null>(null);
   useDebounce(() => setError(validate(value)), 3000, [value]);
 
-  const handleChange = useCallback((text: string) => {
-    setError(null);
-    onChange(text);
-  }, [onChange]);
+  const handleChange = useCallback(
+    (text: string) => {
+      setError(null);
+      onChange(text);
+    },
+    [onChange],
+  );
 
   const format = useCallback(() => {
     let src = value;
-    try { JSON.parse(src); } catch { src = autofix(src); }
+    try {
+      JSON.parse(src);
+    } catch {
+      src = autofix(src);
+    }
     try {
       onChangeRef.current(JSON.stringify(JSON.parse(src), null, 2));
       setFoldedStarts(new Set());
-    } catch { /* broken */ }
+    } catch {
+      /* broken */
+    }
   }, [value]);
 
   const lines = useMemo(() => value.split('\n'), [value]);
 
   // Compute fold ranges from current foldedStarts
-  const foldRanges = useMemo(
-    () => computeFoldRanges(value, foldedStarts),
-    [value, foldedStarts],
-  );
+  const foldRanges = useMemo(() => computeFoldRanges(value, foldedStarts), [value, foldedStarts]);
 
   // Build hidden line set (all lines inside a fold, excluding the start line)
   const hiddenLines = useMemo(() => {
@@ -319,20 +346,31 @@ export function JsonEditor({ value, onChange }: Props) {
   }, [foldRanges]);
 
   // Per-line fold info for the gutter
-  const getFoldInfo = useCallback((lineIdx: number): 'expanded' | 'collapsed' | null => {
-    if (foldRanges.has(lineIdx)) return 'collapsed'; // currently folded
-    const trimmed = lines[lineIdx]?.trimEnd();
-    const last = trimmed?.[trimmed.length - 1];
-    if (last === '{' || last === '[') return 'expanded'; // can fold
-    return null;
-  }, [lines, foldRanges]);
+  const getFoldInfo = useCallback(
+    (lineIdx: number): 'expanded' | 'collapsed' | null => {
+      if (foldRanges.has(lineIdx)) return 'collapsed'; // currently folded
+      const trimmed = lines[lineIdx]?.trimEnd();
+      const last = trimmed?.[trimmed.length - 1];
+      if (last === '{' || last === '[') return 'expanded'; // can fold
+      return null;
+    },
+    [lines, foldRanges],
+  );
 
   const handleFold = useCallback((lineIdx: number) => {
-    setFoldedStarts(prev => { const next = new Set(prev); next.add(lineIdx); return next; });
+    setFoldedStarts((prev) => {
+      const next = new Set(prev);
+      next.add(lineIdx);
+      return next;
+    });
   }, []);
 
   const handleUnfold = useCallback((lineIdx: number) => {
-    setFoldedStarts(prev => { const next = new Set(prev); next.delete(lineIdx); return next; });
+    setFoldedStarts((prev) => {
+      const next = new Set(prev);
+      next.delete(lineIdx);
+      return next;
+    });
   }, []);
 
   useEffect(() => {
@@ -360,7 +398,10 @@ export function JsonEditor({ value, onChange }: Props) {
         <textarea
           ref={taRef}
           defaultValue={value}
-          onChange={(e) => { handleChange(e.target.value); syncScroll(); }}
+          onChange={(e) => {
+            handleChange(e.target.value);
+            syncScroll();
+          }}
           onScroll={syncScroll}
           onKeyDown={(e) => handleKeyDown(e, handleChange)}
           onPaste={(e: ClipboardEvent<HTMLTextAreaElement>) => {
@@ -388,15 +429,22 @@ export function JsonEditor({ value, onChange }: Props) {
             return (
               <div key={i} className="json-ed-line" data-line={i + 1}>
                 {info === 'expanded' ? (
-                  <button type="button" className="json-ed-fold" onClick={() => handleFold(i)}>▼</button>
+                  <button type="button" className="json-ed-fold" onClick={() => handleFold(i)}>
+                    ▼
+                  </button>
                 ) : info === 'collapsed' ? (
-                  <button type="button" className="json-ed-fold" onClick={() => handleUnfold(i)}>▶</button>
+                  <button type="button" className="json-ed-fold" onClick={() => handleUnfold(i)}>
+                    ▶
+                  </button>
                 ) : null}
-                <span dangerouslySetInnerHTML={{
-                  __html: isFolded
-                    ? highlight(line.slice(0, line.trimEnd().length - 1)) + `<span class="jf">${esc(foldSummary(value, i))}</span>`
-                    : (highlight(line) || ' ')
-                }} />
+                <span
+                  dangerouslySetInnerHTML={{
+                    __html: isFolded
+                      ? highlight(line.slice(0, line.trimEnd().length - 1)) +
+                        `<span class="jf">${esc(foldSummary(value, i))}</span>`
+                      : highlight(line) || ' ',
+                  }}
+                />
               </div>
             );
           })}

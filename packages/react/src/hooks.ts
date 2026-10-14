@@ -285,14 +285,15 @@ function makeProxy<T extends object>(
     node,
     cls,
     path,
-    input => effects.execute(input.path, input.action, input.data, input.type, input.key),
-    input => effects.stream({
-      path: input.path,
-      type: input.type,
-      component: input.key,
-      action: input.action,
-      args: input.data,
-    }),
+    (input) => effects.execute(input.path, input.action, input.data, input.type, input.key),
+    (input) =>
+      effects.stream({
+        path: input.path,
+        type: input.type,
+        component: input.key,
+        action: input.action,
+        args: input.data,
+      }),
     key,
   );
 }

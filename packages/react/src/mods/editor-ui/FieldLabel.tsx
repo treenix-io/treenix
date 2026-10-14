@@ -27,7 +27,12 @@ function getFieldMode(v: unknown): FieldMode {
 const MODE_LABELS: Record<FieldMode, string> = { value: 'val', ref: '$ref', map: '$map' };
 
 /** Interactive field label — click for mode menu, drop target for tree nodes */
-export function FieldLabel({ label, tooltip, value, onChange }: {
+export function FieldLabel({
+  label,
+  tooltip,
+  value,
+  onChange,
+}: {
   label: string;
   tooltip?: string;
   value: unknown;
@@ -49,9 +54,7 @@ export function FieldLabel({ label, tooltip, value, onChange }: {
   }
 
   const tooltipText = tooltip || label;
-  const labelSpan = (
-    <span className="block overflow-hidden text-ellipsis">{label}</span>
-  );
+  const labelSpan = <span className="block overflow-hidden text-ellipsis">{label}</span>;
   const tooltipContent = tooltipText ? (
     <TooltipContent side="left" className="max-w-xs whitespace-pre-line">
       {tooltipText}
@@ -105,9 +108,7 @@ export function FieldLabel({ label, tooltip, value, onChange }: {
           <DropdownMenuItem onClick={() => navigator.clipboard.writeText(JSON.stringify(value))}>
             Copy
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => onChange(undefined)}>
-            Clear
-          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => onChange(undefined)}>Clear</DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
     </label>
@@ -124,7 +125,10 @@ export function FieldLabel({ label, tooltip, value, onChange }: {
 }
 
 /** Inline ref/map editor — $ref + optional $map, compact single/double row */
-export function RefEditor({ value, onChange }: {
+export function RefEditor({
+  value,
+  onChange,
+}: {
   value: { $ref: string; $map?: string };
   onChange: (next: unknown) => void;
 }) {
@@ -137,7 +141,9 @@ export function RefEditor({ value, onChange }: {
         <Input
           className="h-7 text-xs flex-1 min-w-0"
           value={value.$ref}
-          onChange={(e) => onChange(hasMap ? { $ref: e.target.value, $map: value.$map } : { $ref: e.target.value })}
+          onChange={(e) =>
+            onChange(hasMap ? { $ref: e.target.value, $map: value.$map } : { $ref: e.target.value })
+          }
           placeholder="path"
         />
       </div>

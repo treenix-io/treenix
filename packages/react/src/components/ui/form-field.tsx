@@ -4,7 +4,12 @@ import { useLayoutEffect, useRef, useState } from 'react';
 
 const STACK_THRESHOLD = 48; // px — above this, label goes on top
 
-export function FormField({ label, labelClass, className, children }: {
+export function FormField({
+  label,
+  labelClass,
+  className,
+  children,
+}: {
   label: React.ReactNode;
   labelClass?: string;
   className?: string;
@@ -22,11 +27,9 @@ export function FormField({ label, labelClass, className, children }: {
 
   return (
     <div className={cn(stacked ? 'flex flex-col gap-1' : 'flex items-center gap-4', className)}>
-      <span className={cn(
-        'text-sm text-muted-foreground shrink-0',
-        !stacked && 'w-20',
-        labelClass,
-      )}>
+      <span
+        className={cn('text-sm text-muted-foreground shrink-0', !stacked && 'w-20', labelClass)}
+      >
         {label}
       </span>
       <div ref={contentRef} className="flex-1 min-w-0">

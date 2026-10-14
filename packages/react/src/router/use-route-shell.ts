@@ -7,14 +7,10 @@ import type { PresentationNode } from '#tree/presentation';
 // makeHref returns null when a path falls outside the route's prefix → the
 // shell's navigation context blocks links to anything outside this route.
 
-import { useCallback,useMemo } from 'react';
-import {
-type NavigateApi,makeNavigateApi,navigateTo,useLocation,
-} from '#navigate';
+import { useCallback, useMemo } from 'react';
+import { type NavigateApi, makeNavigateApi, navigateTo, useLocation } from '#navigate';
 import { useRouteParams } from '#context/route-params';
-import {
-getRoute,normalizePrefix,resolveTarget,type Route,urlKey,
-} from './route-resolve';
+import { getRoute, normalizePrefix, resolveTarget, type Route, urlKey } from './route-resolve';
 
 export type RouteShellOpts = {
   /** Query keys this shell preserves across navigations. Map key → default value
@@ -42,9 +38,7 @@ export function buildHref(
   if (rel && rel === route?.index) rel = '';
 
   // key='' is the _index route — never prepend an empty segment (would yield "//foo").
-  const base = rel
-    ? (key ? `/${key}/${rel}` : `/${rel}`)
-    : (key ? `/${key}` : '/');
+  const base = rel ? (key ? `/${key}/${rel}` : `/${rel}`) : key ? `/${key}` : '/';
 
   if (!preserve) return base;
   const params = new URLSearchParams(search);
@@ -76,12 +70,15 @@ export function useRouteShell(
     [route, key, search, preserve],
   );
 
-  const navigate = useCallback((path: string) => {
-    const href = makeHref(path);
-    // makeHref returns null for outside-prefix paths; block navigation.
-    if (href === null) return false;
-    return navigateTo(href);
-  }, [makeHref]);
+  const navigate = useCallback(
+    (path: string) => {
+      const href = makeHref(path);
+      // makeHref returns null for outside-prefix paths; block navigation.
+      if (href === null) return false;
+      return navigateTo(href);
+    },
+    [makeHref],
+  );
 
   const nav = useMemo(() => makeNavigateApi(navigate, makeHref), [navigate, makeHref]);
   return { target, nav };

@@ -1,5 +1,9 @@
 import { createContext, useContext, useSyncExternalStore } from 'react';
-import { createDeclaredClientRegistry, mountClientRegistry, type ClientRegistry } from './client-registry';
+import {
+  createDeclaredClientRegistry,
+  mountClientRegistry,
+  type ClientRegistry,
+} from './client-registry';
 
 const detached = createDeclaredClientRegistry();
 mountClientRegistry(detached);

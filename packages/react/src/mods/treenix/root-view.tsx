@@ -11,7 +11,8 @@ const RootView: View<{ $type: 'root' }> = () => {
   if (!page) {
     return (
       <div className="flex items-center justify-center h-full text-neutral-500 text-sm">
-        Node <code className="mx-1 text-primary/70 font-mono">/home</code> not found — create a node at that path.
+        Node <code className="mx-1 text-primary/70 font-mono">/home</code> not found — create a node
+        at that path.
       </div>
     );
   }
@@ -24,5 +25,5 @@ const RootView: View<{ $type: 'root' }> = () => {
 };
 
 export default declareClientModule('@treenx/react/treenix/root-view', [
-  { type: 'root', context: 'react', handler: RootView }
+  { type: 'root', context: 'react', handler: RootView },
 ]);

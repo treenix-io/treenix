@@ -5,7 +5,6 @@
 // .ts (not .tsx) so cross-package importers don't need .ts→.tsx fallback
 // in the exports map.
 
-
 import { NativeRoutePage } from '#app/NativeRouter';
 import { Toaster } from '#components/ui/sonner';
 import { clientModules } from '#mods/servers';
@@ -48,21 +47,20 @@ export function render({ source, mode, pathname = '/', search = '' }: RenderArgs
   // element-for-element. ServerLocationContext is the only addition — it's a
   // pure React Context, no DOM, invisible to hydration's DOM diff.
   const queryClient = new QueryClient();
-  const tree = createElement(
-    ServerLocationContext.Provider,
-    {
-      value: loc,
-      children: createElement(
-        TreeSourceProvider,
-        {
-          source,
-          children: createElement(QueryClientProvider, {
-            client: queryClient,
-            children: createElement(Fragment, null, createElement(NativeRoutePage), createElement(Toaster)),
-          }),
-        },
-      ),
-    },
-  );
+  const tree = createElement(ServerLocationContext.Provider, {
+    value: loc,
+    children: createElement(TreeSourceProvider, {
+      source,
+      children: createElement(QueryClientProvider, {
+        client: queryClient,
+        children: createElement(
+          Fragment,
+          null,
+          createElement(NativeRoutePage),
+          createElement(Toaster),
+        ),
+      }),
+    }),
+  });
   return mode === 'hydrate' ? renderToString(tree) : renderToStaticMarkup(tree);
 }

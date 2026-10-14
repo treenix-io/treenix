@@ -20,7 +20,8 @@ function references(node: PresentationNode | undefined): ReadonlyMap<string, Ref
 
   for (const [name, component] of getComponents(node, AnyType)) {
     for (const [field, value] of Object.entries(component)) {
-      if (isRef(value) && value.$map !== undefined) result.set(name === '' ? field : `${name}.${field}`, value);
+      if (isRef(value) && value.$map !== undefined)
+        result.set(name === '' ? field : `${name}.${field}`, value);
     }
   }
   return result;
@@ -42,7 +43,7 @@ function useReferences(refs: ReadonlyMap<string, Ref>): Readonly<Record<string, 
   }, [refs]);
 
   useEffect(() => {
-    const releases = dependencies.map(dependency => {
+    const releases = dependencies.map((dependency) => {
       if (dependency.kind === 'node') {
         const handle = source.mountPath(dependency.path);
         return () => handle.dispose();
@@ -55,24 +56,42 @@ function useReferences(refs: ReadonlyMap<string, Ref>): Readonly<Record<string, 
       }
       const unsubscribe = source.subscribeChildren(dependency.path, extend);
       extend();
-      return () => { unsubscribe(); handle.dispose(); };
+      return () => {
+        unsubscribe();
+        handle.dispose();
+      };
     });
-    return () => releases.forEach(release => release());
+    return () => releases.forEach((release) => release());
   }, [source, dependencies]);
 
-  const cached = useRef<{ source: typeof source; refs: typeof refs; snapshots: readonly (PathSnapshot | ChildrenSnapshot)[]; value: Readonly<Record<string, unknown>> }>(undefined);
+  const cached = useRef<{
+    source: typeof source;
+    refs: typeof refs;
+    snapshots: readonly (PathSnapshot | ChildrenSnapshot)[];
+    value: Readonly<Record<string, unknown>>;
+  }>(undefined);
   const snapshot = useCallback(() => {
-    const snapshots = dependencies.map(dependency => dependency.kind === 'node'
-      ? source.getPathSnapshot(dependency.path) : source.getChildrenSnapshot(dependency.path));
+    const snapshots = dependencies.map((dependency) =>
+      dependency.kind === 'node'
+        ? source.getPathSnapshot(dependency.path)
+        : source.getChildrenSnapshot(dependency.path),
+    );
     const previous = cached.current;
-    if (previous?.source === source && previous.refs === refs && snapshots.every((value, index) => value === previous.snapshots[index])) return previous.value;
+    if (
+      previous?.source === source &&
+      previous.refs === refs &&
+      snapshots.every((value, index) => value === previous.snapshots[index])
+    )
+      return previous.value;
 
     let loading = false;
     for (const snapshot of snapshots) {
       if (snapshot.error !== null) throw snapshot.error;
-      if ('status' in snapshot) loading ||= snapshot.status === undefined || snapshot.status === 'loading';
+      if ('status' in snapshot)
+        loading ||= snapshot.status === undefined || snapshot.status === 'loading';
       else {
-        for (const copy of snapshot.errors ?? []) throw new KernelError(copy.error.code, copy.error.message);
+        for (const copy of snapshot.errors ?? [])
+          throw new KernelError(copy.error.code, copy.error.message);
         loading ||= snapshot.phase !== 'ready' || snapshot.nextCursor !== null;
       }
     }
@@ -85,11 +104,17 @@ function useReferences(refs: ReadonlyMap<string, Ref>): Readonly<Record<string, 
     cached.current = { source, refs, snapshots, value };
     return value;
   }, [source, refs, dependencies]);
-  const subscribe = useCallback((changed: () => void) => {
-    const releases = dependencies.map(dependency => dependency.kind === 'node'
-      ? source.subscribePath(dependency.path, changed) : source.subscribeChildren(dependency.path, changed));
-    return () => releases.forEach(release => release());
-  }, [source, dependencies]);
+  const subscribe = useCallback(
+    (changed: () => void) => {
+      const releases = dependencies.map((dependency) =>
+        dependency.kind === 'node'
+          ? source.subscribePath(dependency.path, changed)
+          : source.subscribeChildren(dependency.path, changed),
+      );
+      return () => releases.forEach((release) => release());
+    },
+    [source, dependencies],
+  );
 
   return useSyncExternalStore(subscribe, snapshot, snapshot);
 }
@@ -109,20 +134,30 @@ export function useComputed(path: string): Readonly<Record<string, unknown>> {
 }
 
 /** Merge resolved fields for rendering and retain a revision-bound canonical editor write. */
-export function useResolvedNode(path: string): [PresentationNode | undefined, (next: Node) => Promise<Node>] {
+export function useResolvedNode(
+  path: string,
+): [PresentationNode | undefined, (next: Node) => Promise<Node>] {
   const { node, computed } = useBoundNode(path);
   const effects = useTreeEffects();
-  const save = useCallback(async (next: Node): Promise<Node> => {
-    const kernel = effects.kernel;
-    if (kernel === undefined) throw new KernelError('UNAVAILABLE', 'Binding edits require a native source');
-    const { $id, $rev, ...input } = next;
-    await kernel.commit({ changes: [{ op: 'put', node: input }], expect: { nodes: [{ path: next.$path, rev: $rev }] } });
-    const copy = (await kernel.read({ node: next.$path })).copies[0];
-    if ('error' in copy) throw new KernelError(copy.error.code, copy.error.message);
-    return copy.node;
-  }, [effects]);
+  const save = useCallback(
+    async (next: Node): Promise<Node> => {
+      const kernel = effects.kernel;
+      if (kernel === undefined)
+        throw new KernelError('UNAVAILABLE', 'Binding edits require a native source');
+      const { $id, $rev, ...input } = next;
+      await kernel.commit({
+        changes: [{ op: 'put', node: input }],
+        expect: { nodes: [{ path: next.$path, rev: $rev }] },
+      });
+      const copy = (await kernel.read({ node: next.$path })).copies[0];
+      if ('error' in copy) throw new KernelError(copy.error.code, copy.error.message);
+      return copy.node;
+    },
+    [effects],
+  );
 
-  if (node === undefined || Object.values(computed).some(value => value === undefined)) return [undefined, save];
+  if (node === undefined || Object.values(computed).some((value) => value === undefined))
+    return [undefined, save];
   return [mergeIntoNode(node, computed), save];
 }
 

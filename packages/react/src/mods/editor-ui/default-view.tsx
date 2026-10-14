@@ -30,8 +30,13 @@ export function inferType(v: unknown): string {
   return 'object';
 }
 
-export function resolveDisplayType(prop: JsonSchema | undefined, value: unknown, registry: ClientRegistry): string {
-  const tryResolve = (t?: string | readonly string[]) => (typeof t === 'string' && registry.exact(t, 'react') ? t : null);
+export function resolveDisplayType(
+  prop: JsonSchema | undefined,
+  value: unknown,
+  registry: ClientRegistry,
+): string {
+  const tryResolve = (t?: string | readonly string[]) =>
+    typeof t === 'string' && registry.exact(t, 'react') ? t : null;
   return tryResolve(prop?.format) ?? tryResolve(prop?.type) ?? inferType(value);
 }
 
@@ -82,7 +87,15 @@ export function splitRecord(value: ComponentData, schema: JsonSchema | null): Sp
   return { title, rest, components };
 }
 
-function FieldRow({ label, tooltip, children }: { label: string; tooltip?: string; children: ReactNode }) {
+function FieldRow({
+  label,
+  tooltip,
+  children,
+}: {
+  label: string;
+  tooltip?: string;
+  children: ReactNode;
+}) {
   return (
     <div className="dv-meta-row">
       <HoverTooltip text={tooltip || label}>
@@ -160,7 +173,9 @@ function NodeChildren({ path }: { path: string }) {
           <button
             key={o.id}
             onClick={() => setChildCtx(o.id)}
-            className={childCtx === o.id ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'}
+            className={
+              childCtx === o.id ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
+            }
           >
             {o.label}
           </button>
@@ -205,10 +220,10 @@ function TypedRecordBody({ value, schema }: { value: ComponentData; schema: Json
 
 export const TypedRecordView: View<ComponentData> = ({ value }) => (
   <SchemaReader type={value.$type}>
-    {schema => <TypedRecordBody value={value} schema={schema} />}
+    {(schema) => <TypedRecordBody value={value} schema={schema} />}
   </SchemaReader>
 );
 
 export default declareClientModule('@treenx/react/editor-ui/default-view', [
-  { type: 'default', context: 'react', handler: TypedRecordView }
+  { type: 'default', context: 'react', handler: TypedRecordView },
 ]);

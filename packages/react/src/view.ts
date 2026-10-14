@@ -36,7 +36,11 @@ type ViewFn = {
   universal<T>(type: Class<T>, component: FC<ViewProps<T>>): readonly ClientViewDeclaration[];
 };
 
-function viewImpl(type: Class, ctxOrComponent: string | AnyView, maybeComponent?: AnyView): ClientViewDeclaration {
+function viewImpl(
+  type: Class,
+  ctxOrComponent: string | AnyView,
+  maybeComponent?: AnyView,
+): ClientViewDeclaration {
   if (typeof ctxOrComponent === 'string') {
     return declareView(type, `react:${ctxOrComponent}`, maybeComponent!);
   } else {
@@ -44,7 +48,11 @@ function viewImpl(type: Class, ctxOrComponent: string | AnyView, maybeComponent?
   }
 }
 
-function siteImpl(type: Class, suffixOrComponent: string | AnyView, maybeComponent?: AnyView): ClientViewDeclaration {
+function siteImpl(
+  type: Class,
+  suffixOrComponent: string | AnyView,
+  maybeComponent?: AnyView,
+): ClientViewDeclaration {
   if (typeof suffixOrComponent === 'string') {
     return declareView(type, `site:${suffixOrComponent}`, maybeComponent!);
   } else {

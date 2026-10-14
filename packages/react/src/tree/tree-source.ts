@@ -101,8 +101,8 @@ export interface TreeSource {
   // ── Lifecycle (ownership of fetch + watch + reset-handling) ──
   //
   // `mountPath` / `mountChildren` are the ONLY effectful entry points hooks
-// use. They acquire native subscription coverage and pagination resources.
-// `dispose()` reverses everything mount allocated.
+  // use. They acquire native subscription coverage and pagination resources.
+  // `dispose()` reverses everything mount allocated.
   //
   // For SSR (ServerTreeSource): mountPath / mountChildren record the path as
   // pending and return inert handles; the next render pass flushes pending.

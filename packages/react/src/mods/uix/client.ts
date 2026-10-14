@@ -17,7 +17,6 @@ export { compileComponent, invalidateCache };
 
 // Published module ownership supplies every view body.
 
-
 // ── Lazy loader: the mounted provider owns type coverage ──
 
 /** Keep canonical ownership under a real subscription without treating drafts as published handlers. */
@@ -72,7 +71,8 @@ function typeView(type: string): React.FC<RenderProps> {
 
 const typeViews = new Map<string, React.FC<RenderProps>>();
 
-const module = declareClientModule('@treenx/react/uix',
+const module = declareClientModule(
+  '@treenx/react/uix',
   [{ type: 'uix.view', context: 'react', handler: typeView('uix.view') }],
   (type, context): ClientViewDeclaration | undefined => {
     if (context !== 'react') return undefined;

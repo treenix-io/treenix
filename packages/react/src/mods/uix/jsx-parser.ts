@@ -49,12 +49,24 @@ function transformJSX(src: string): string {
   while (i < src.length) {
     const c = src.charCodeAt(i);
 
-    if (c === 34 || c === 39 || c === 96) { i = skipString(src, i); continue; }
+    if (c === 34 || c === 39 || c === 96) {
+      i = skipString(src, i);
+      continue;
+    }
 
-    if (c === 47) { // /
+    if (c === 47) {
+      // /
       const c2 = src.charCodeAt(i + 1);
-      if (c2 === 47) { const nl = src.indexOf('\n', i); i = nl === -1 ? src.length : nl; continue; }
-      if (c2 === 42) { const e = src.indexOf('*/', i + 2); i = e === -1 ? src.length : e + 2; continue; }
+      if (c2 === 47) {
+        const nl = src.indexOf('\n', i);
+        i = nl === -1 ? src.length : nl;
+        continue;
+      }
+      if (c2 === 42) {
+        const e = src.indexOf('*/', i + 2);
+        i = e === -1 ? src.length : e + 2;
+        continue;
+      }
     }
 
     if (c === 60 && looksLikeJSX(src, i)) {
@@ -91,7 +103,10 @@ function emitElement(src: string, start: number, out: string[]): number {
   }
 
   // Stray </
-  if (src.charCodeAt(i) === 47) { out.push(src[i]); return i + 1; }
+  if (src.charCodeAt(i) === 47) {
+    out.push(src[i]);
+    return i + 1;
+  }
 
   // Tag name
   const ts = i;
@@ -101,7 +116,11 @@ function emitElement(src: string, start: number, out: string[]): number {
 
   out.push('h(');
   if (isComp) out.push(tag);
-  else { out.push('"'); out.push(tag); out.push('"'); }
+  else {
+    out.push('"');
+    out.push(tag);
+    out.push('"');
+  }
   out.push(', ');
 
   i = emitProps(src, advWS(src, i), out);
@@ -153,20 +172,28 @@ function emitProps(src: string, start: number, out: string[]): number {
     // Attr name
     const ns = i;
     while (i < src.length && isAttrChar(src.charCodeAt(i))) i++;
-    if (i === ns) { first = true; i++; continue; } // skip unexpected char
+    if (i === ns) {
+      first = true;
+      i++;
+      continue;
+    } // skip unexpected char
     const ne = i;
 
     i = advWS(src, i);
 
     // Boolean attr (no =)
     if (src.charCodeAt(i) !== 61) {
-      out.push('"'); out.push(src.slice(ns, ne)); out.push('": true');
+      out.push('"');
+      out.push(src.slice(ns, ne));
+      out.push('": true');
       continue;
     }
 
     i = advWS(src, i + 1);
 
-    out.push('"'); out.push(src.slice(ns, ne)); out.push('": ');
+    out.push('"');
+    out.push(src.slice(ns, ne));
+    out.push('": ');
 
     const vc = src.charCodeAt(i);
     if (vc === 34 || vc === 39) {
@@ -180,7 +207,11 @@ function emitProps(src: string, start: number, out: string[]): number {
     } else {
       out.push('"');
       const vs = i;
-      while (i < src.length) { const x = src.charCodeAt(i); if (isWS(x) || x === 62 || x === 47) break; i++; }
+      while (i < src.length) {
+        const x = src.charCodeAt(i);
+        if (isWS(x) || x === 62 || x === 47) break;
+        i++;
+      }
       out.push(src.slice(vs, i));
       out.push('"');
     }
@@ -229,7 +260,10 @@ function emitChildren(src: string, start: number, out: string[]): number {
       continue;
     }
 
-    if (!hasTx) { txS = i; hasTx = true; }
+    if (!hasTx) {
+      txS = i;
+      hasTx = true;
+    }
     i++;
   }
 
@@ -242,10 +276,19 @@ function flushText(src: string, start: number, end: number, has: boolean, out: s
   if (!has) return;
   // Fast path: all whitespace?
   let allWS = true;
-  for (let k = start; k < end; k++) { if (!isWS(src.charCodeAt(k))) { allWS = false; break; } }
+  for (let k = start; k < end; k++) {
+    if (!isWS(src.charCodeAt(k))) {
+      allWS = false;
+      break;
+    }
+  }
   if (allWS) return;
   const t = src.slice(start, end).replace(/\s+/g, ' ').trim();
-  if (t) { out.push(', "'); out.push(t.replace(/\\/g, '\\\\').replace(/"/g, '\\"')); out.push('"'); }
+  if (t) {
+    out.push(', "');
+    out.push(t.replace(/\\/g, '\\\\').replace(/"/g, '\\"'));
+    out.push('"');
+  }
 }
 
 // Emit expression content from {expr} in children context (may contain nested JSX)
@@ -257,7 +300,10 @@ function emitChildExpr(src: string, start: number, out: string[]): number {
   while (i < src.length && depth > 0) {
     const c = src.charCodeAt(i);
 
-    if (c === 34 || c === 39 || c === 96) { i = skipString(src, i); continue; }
+    if (c === 34 || c === 39 || c === 96) {
+      i = skipString(src, i);
+      continue;
+    }
 
     if (c === 60 && looksLikeJSX(src, i)) {
       if (i > ps) out.push(src.slice(ps, i));
@@ -291,9 +337,15 @@ function scanBrace(src: string, start: number): number {
   let depth = 0;
   while (i < src.length) {
     const c = src.charCodeAt(i);
-    if (c === 34 || c === 39 || c === 96) { i = skipString(src, i); continue; }
+    if (c === 34 || c === 39 || c === 96) {
+      i = skipString(src, i);
+      continue;
+    }
     if (c === 123) depth++;
-    if (c === 125) { depth--; if (depth === 0) return i + 1; }
+    if (c === 125) {
+      depth--;
+      if (depth === 0) return i + 1;
+    }
     i++;
   }
   return i;
@@ -305,13 +357,19 @@ function skipString(src: string, start: number): number {
   let i = start + 1;
   while (i < src.length) {
     const c = src.charCodeAt(i);
-    if (c === 92) { i += 2; continue; }
+    if (c === 92) {
+      i += 2;
+      continue;
+    }
     if (q === 96 && c === 36 && src.charCodeAt(i + 1) === 123) {
       i += 2;
       let d = 1;
       while (i < src.length && d > 0) {
         const tc = src.charCodeAt(i);
-        if (tc === 92) { i += 2; continue; }
+        if (tc === 92) {
+          i += 2;
+          continue;
+        }
         if (tc === 123) d++;
         if (tc === 125) d--;
         if (d > 0) i++;
@@ -335,12 +393,23 @@ function stripTS(code: string): string {
   while (i < code.length) {
     const c = code.charCodeAt(i);
 
-    if (c === 34 || c === 39 || c === 96) { i = skipString(code, i); continue; }
+    if (c === 34 || c === 39 || c === 96) {
+      i = skipString(code, i);
+      continue;
+    }
 
     if (c === 47) {
       const c2 = code.charCodeAt(i + 1);
-      if (c2 === 47) { const nl = code.indexOf('\n', i); i = nl === -1 ? code.length : nl; continue; }
-      if (c2 === 42) { const e = code.indexOf('*/', i + 2); i = e === -1 ? code.length : e + 2; continue; }
+      if (c2 === 47) {
+        const nl = code.indexOf('\n', i);
+        i = nl === -1 ? code.length : nl;
+        continue;
+      }
+      if (c2 === 42) {
+        const e = code.indexOf('*/', i + 2);
+        i = e === -1 ? code.length : e + 2;
+        continue;
+      }
     }
 
     if (c === 105 && matchWord(code, i, 'interface')) {
@@ -350,7 +419,12 @@ function stripTS(code: string): string {
       continue;
     }
 
-    if (c === 116 && matchWord(code, i, 'type') && i + 4 < code.length && isWS(code.charCodeAt(i + 4))) {
+    if (
+      c === 116 &&
+      matchWord(code, i, 'type') &&
+      i + 4 < code.length &&
+      isWS(code.charCodeAt(i + 4))
+    ) {
       const eq = code.indexOf('=', i + 5);
       const semi = code.indexOf(';', i + 5);
       if (eq !== -1 && (semi === -1 || eq < semi)) {
@@ -362,7 +436,7 @@ function stripTS(code: string): string {
           if (code.charCodeAt(k) === 59) k++;
         } else {
           const nl = code.indexOf('\n', k);
-          k = semi !== -1 ? semi + 1 : (nl !== -1 ? nl : code.length);
+          k = semi !== -1 ? semi + 1 : nl !== -1 ? nl : code.length;
         }
         i = k;
         ps = i;
@@ -417,24 +491,32 @@ function isAnnotationContext(code: string, i: number): boolean {
 
   const ch = code.charCodeAt(j);
 
-  if (ch === 41) { // )
+  if (ch === 41) {
+    // )
     let pd = 0;
     for (let k = j; k >= 0; k--) {
       const kc = code.charCodeAt(k);
       if (kc === 41) pd++;
-      if (kc === 40) { if (pd > 0) pd--; else break; }
+      if (kc === 40) {
+        if (pd > 0) pd--;
+        else break;
+      }
       if (pd === 0 && kc === 63) return false;
       if (pd === 0 && kc === 59) break;
     }
     return true;
   }
 
-  if (ch === 125) { // }
+  if (ch === 125) {
+    // }
     let pd = 0;
     for (let k = j; k >= 0; k--) {
       const kc = code.charCodeAt(k);
       if (kc === 41) pd++;
-      if (kc === 40) { if (pd > 0) pd--; else return true; }
+      if (kc === 40) {
+        if (pd > 0) pd--;
+        else return true;
+      }
       if (kc === 59) break;
     }
     return false;
@@ -463,10 +545,22 @@ function skipAnnotation(code: string, start: number): number {
   let depth = 0;
   while (i < code.length) {
     const c = code.charCodeAt(i);
-    if (c === 40 || c === 60 || c === 91) { depth++; i++; continue; }
-    if (c === 41 || c === 62 || c === 93) { if (depth === 0) break; depth--; i++; continue; }
+    if (c === 40 || c === 60 || c === 91) {
+      depth++;
+      i++;
+      continue;
+    }
+    if (c === 41 || c === 62 || c === 93) {
+      if (depth === 0) break;
+      depth--;
+      i++;
+      continue;
+    }
     if (depth === 0 && (c === 44 || c === 61 || c === 123 || c === 59)) break;
-    if (c === 34 || c === 39 || c === 96) { i = skipString(code, i); continue; }
+    if (c === 34 || c === 39 || c === 96) {
+      i = skipString(code, i);
+      continue;
+    }
     i++;
   }
   return i;
@@ -482,7 +576,10 @@ function skipBraceBlock(code: string, start: number): number {
     const c = code.charCodeAt(i);
     if (c === 123) depth++;
     else if (c === 125) depth--;
-    else if (c === 34 || c === 39 || c === 96) { i = skipString(code, i); continue; }
+    else if (c === 34 || c === 39 || c === 96) {
+      i = skipString(code, i);
+      continue;
+    }
     i++;
   }
   return i;

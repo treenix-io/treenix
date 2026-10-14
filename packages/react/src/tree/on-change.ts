@@ -10,20 +10,24 @@ export type MutationOp = ['r', string, unknown] | ['d', string];
 // ── Typed dot-notation partial ──
 
 /** Dot-paths for nested objects: { meta: { title: string } } → 'meta.title' (max 3 levels) */
-type DotPaths<T, Prefix extends string = '', D extends unknown[] = []> =
-  D['length'] extends 3 ? never
+type DotPaths<T, Prefix extends string = '', D extends unknown[] = []> = D['length'] extends 3
+  ? never
   : T extends object
-    ? { [K in keyof T & string]:
-        | `${Prefix}${K}`
-        | DotPaths<T[K], `${Prefix}${K}.`, [...D, unknown]>
+    ? {
+        [K in keyof T & string]:
+          | `${Prefix}${K}`
+          | DotPaths<T[K], `${Prefix}${K}.`, [...D, unknown]>;
       }[keyof T & string]
     : never;
 
 /** Get the type at a dot-path: DotValue<{ meta: { title: string } }, 'meta.title'> = string */
-type DotValue<T, P extends string> =
-  P extends `${infer K}.${infer Rest}`
-    ? K extends keyof T ? DotValue<T[K], Rest> : never
-    : P extends keyof T ? T[P] : never;
+type DotValue<T, P extends string> = P extends `${infer K}.${infer Rest}`
+  ? K extends keyof T
+    ? DotValue<T[K], Rest>
+    : never
+  : P extends keyof T
+    ? T[P]
+    : never;
 
 type TopLevel<T> = { [K in keyof T & string]?: T[K] | undefined };
 
@@ -33,11 +37,15 @@ type DotLevel<T> = {
 
 /** What onChange accepts: top-level partial OR dot-notation paths, typed.
  *  undefined = delete field. Default T = untyped Record. */
-export type OnChange<T = Record<string, unknown>> = TopLevel<Omit<T, `$${string}`>> & DotLevel<Omit<T, `$${string}`>>;
+export type OnChange<T = Record<string, unknown>> = TopLevel<Omit<T, `$${string}`>> &
+  DotLevel<Omit<T, `$${string}`>>;
 
 // ── scopeOnChange: prefix all keys for named component ──
 
-export function scopeOnChange(onChange: (partial: OnChange) => void, key: string): (partial: OnChange) => void {
+export function scopeOnChange(
+  onChange: (partial: OnChange) => void,
+  key: string,
+): (partial: OnChange) => void {
   return (partial) => {
     const scoped: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(partial as Record<string, unknown>))
@@ -56,11 +64,13 @@ function assertPartialKeys(partial: Record<string, unknown>): void {
     if (k.startsWith('$')) throw new KernelError('INVALID', `onChange: ${k} is a system field`);
 
     for (const seg of k.split('.')) {
-      if (seg === '' || /^\d+$/.test(seg) || !isSafeKey(seg)) throw new KernelError('INVALID', `onChange: bad segment in ${JSON.stringify(k)}`);
+      if (seg === '' || /^\d+$/.test(seg) || !isSafeKey(seg))
+        throw new KernelError('INVALID', `onChange: bad segment in ${JSON.stringify(k)}`);
     }
 
     for (let i = k.indexOf('.'); i !== -1; i = k.indexOf('.', i + 1)) {
-      if (Object.hasOwn(partial, k.slice(0, i))) throw new KernelError('INVALID', `onChange: ${k} lies under ${k.slice(0, i)}`);
+      if (Object.hasOwn(partial, k.slice(0, i)))
+        throw new KernelError('INVALID', `onChange: ${k} lies under ${k.slice(0, i)}`);
     }
   }
 }
@@ -69,7 +79,10 @@ function assertPartialKeys(partial: Record<string, unknown>): void {
 
 /** A key of `later` replaces the accumulated keys under it and writes into the accumulated key it lies under,
  *  so the result keeps no key under another. Neither argument is changed. */
-export function foldPartial(acc: Record<string, unknown>, later: Record<string, unknown>): Record<string, unknown> {
+export function foldPartial(
+  acc: Record<string, unknown>,
+  later: Record<string, unknown>,
+): Record<string, unknown> {
   assertPartialKeys(later);
   const out = { ...acc };
 
@@ -95,7 +108,12 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 }
 
 // An undefined base is a pending delete of the owner; writing under it starts a fresh object.
-function withField(base: unknown, segs: string[], value: unknown, key: string): Record<string, unknown> {
+function withField(
+  base: unknown,
+  segs: string[],
+  value: unknown,
+  key: string,
+): Record<string, unknown> {
   if (base !== undefined && !isRecord(base)) {
     throw new KernelError('INVALID', `onChange: ${key} writes into a value that is not an object`);
   }
@@ -112,12 +130,17 @@ function withField(base: unknown, segs: string[], value: unknown, key: string): 
 
 export function mergeToOps(partial: Record<string, unknown>): MutationOp[] {
   assertPartialKeys(partial);
-  return Object.entries(partial).map(([k, v]): MutationOp => v === undefined ? ['d', k] : ['r', k, v]);
+  return Object.entries(partial).map(
+    ([k, v]): MutationOp => (v === undefined ? ['d', k] : ['r', k, v]),
+  );
 }
 
 // ── mergeIntoNode: optimistic local merge ──
 
-export function mergeIntoNode<T extends Record<string, unknown>>(node: T, partial: Record<string, unknown>): T {
+export function mergeIntoNode<T extends Record<string, unknown>>(
+  node: T,
+  partial: Record<string, unknown>,
+): T {
   assertPartialKeys(partial);
   const merged = { ...node };
   for (const [k, v] of Object.entries(partial)) setByPath(merged, k, v);

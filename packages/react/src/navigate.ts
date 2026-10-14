@@ -42,7 +42,9 @@ export function makeNavigateApi(navigate: NavigateFn, makeHref: MakeHrefFn): Nav
 // Uses window to share state across Vite module instances
 
 declare global {
-  interface Window { __beforeNavigateMsg?: string | null; }
+  interface Window {
+    __beforeNavigateMsg?: string | null;
+  }
 }
 
 export function checkBeforeNavigate(): boolean {
@@ -139,12 +141,17 @@ const getLocationHref = () => location.href;
 const getServerLocationHref = () => '';
 
 /** Set by entry-server so SSR reads the request URL where useLocation expects window.location. */
-export const ServerLocationContext = createContext<{ pathname: string; search: string; href: string } | null>(null);
+export const ServerLocationContext = createContext<{
+  pathname: string;
+  search: string;
+  href: string;
+} | null>(null);
 
 export function useLocation(): Location {
   useSyncExternalStore(subscribeLocation, getLocationHref, getServerLocationHref);
   if (typeof window !== 'undefined') return window.location;
   const stub = useContext(ServerLocationContext);
-  if (!stub) throw new Error('useLocation: SSR requires <ServerLocationContext.Provider> wrapping the tree');
+  if (!stub)
+    throw new Error('useLocation: SSR requires <ServerLocationContext.Provider> wrapping the tree');
   return stub as Location;
 }

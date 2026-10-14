@@ -15,11 +15,10 @@ export function parseContext(expression: string, inherited?: ContextSelector): C
   let base = inherited?.base;
   if (tokens[0] && !/^[+!-]/.test(tokens[0])) {
     const token = tokens.shift()!;
-    base = token.startsWith(':')
-      ? inherited && inherited.base.split(':', 1)[0] + token
-      : token;
+    base = token.startsWith(':') ? inherited && inherited.base.split(':', 1)[0] + token : token;
   }
-  if (!base || !basePattern.test(base)) throw new SyntaxError(`Invalid context base: ${expression}`);
+  if (!base || !basePattern.test(base))
+    throw new SyntaxError(`Invalid context base: ${expression}`);
 
   const modifiers = new Map(inherited?.modifiers);
   for (const token of tokens) {
@@ -33,7 +32,8 @@ export function parseContext(expression: string, inherited?: ContextSelector): C
 
 /** Registrations declare support; only requests can require or remove it. */
 export function parseRegistration(expression: string): ContextSelector {
-  if (/(^|\s)[!-]/.test(expression)) throw new SyntaxError(`Invalid context registration: ${expression}`);
+  if (/(^|\s)[!-]/.test(expression))
+    throw new SyntaxError(`Invalid context registration: ${expression}`);
   return parseContext(expression);
 }
 
@@ -44,7 +44,13 @@ export function formatContext(context: ContextSelector): string {
 }
 
 export function registrationContext(context: ContextSelector): string {
-  return context.base + [...context.modifiers.keys()].sort().map(name => ` +${name}`).join('');
+  return (
+    context.base +
+    [...context.modifiers.keys()]
+      .sort()
+      .map((name) => ` +${name}`)
+      .join('')
+  );
 }
 
 /** Required ⊆ supported ⊆ active. Names have no built-in meaning. */
@@ -55,12 +61,18 @@ export function matchesContext(candidate: ContextSelector, request: ContextSelec
   return true;
 }
 
-export function prefersContext(candidate: ContextSelector, current: ContextSelector, request: ContextSelector): boolean {
-  if (candidate.modifiers.size !== current.modifiers.size) return candidate.modifiers.size > current.modifiers.size;
+export function prefersContext(
+  candidate: ContextSelector,
+  current: ContextSelector,
+  request: ContextSelector,
+): boolean {
+  if (candidate.modifiers.size !== current.modifiers.size)
+    return candidate.modifiers.size > current.modifiers.size;
   let preferred = false;
   // Later differences override earlier ones; shared modifiers do not break ties.
   for (const name of request.modifiers.keys()) {
-    if (candidate.modifiers.has(name) !== current.modifiers.has(name)) preferred = candidate.modifiers.has(name);
+    if (candidate.modifiers.has(name) !== current.modifiers.has(name))
+      preferred = candidate.modifiers.has(name);
   }
   return preferred;
 }

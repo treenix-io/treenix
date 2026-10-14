@@ -38,19 +38,33 @@ export function minimd(src: string): string {
         i++;
       }
       i++; // skip closing ```
-      out.push(`<pre${lang ? ` data-lang="${esc(lang)}"` : ''}><code>${esc(code.join('\n'))}</code></pre>`);
+      out.push(
+        `<pre${lang ? ` data-lang="${esc(lang)}"` : ''}><code>${esc(code.join('\n'))}</code></pre>`,
+      );
       continue;
     }
 
     // Header
     const hm = line.match(/^(#{1,4})\s+(.+)/);
-    if (hm) { out.push(`<h${hm[1].length}>${inline(hm[2])}</h${hm[1].length}>`); i++; continue; }
+    if (hm) {
+      out.push(`<h${hm[1].length}>${inline(hm[2])}</h${hm[1].length}>`);
+      i++;
+      continue;
+    }
 
     // HR
-    if (/^[-*_]{3,}\s*$/.test(line)) { out.push('<hr>'); i++; continue; }
+    if (/^[-*_]{3,}\s*$/.test(line)) {
+      out.push('<hr>');
+      i++;
+      continue;
+    }
 
     // Blockquote
-    if (line.startsWith('> ')) { out.push(`<blockquote>${inline(line.slice(2))}</blockquote>`); i++; continue; }
+    if (line.startsWith('> ')) {
+      out.push(`<blockquote>${inline(line.slice(2))}</blockquote>`);
+      i++;
+      continue;
+    }
 
     // Unordered list
     if (/^[-*+]\s/.test(line)) {
@@ -76,13 +90,21 @@ export function minimd(src: string): string {
 
     // Table
     if (line.startsWith('|') && i + 1 < lines.length && /^\|[-\s:|]+\|/.test(lines[i + 1])) {
-      const parseRow = (r: string) => r.split('|').slice(1, -1).map(c => c.trim());
+      const parseRow = (r: string) =>
+        r
+          .split('|')
+          .slice(1, -1)
+          .map((c) => c.trim());
       const headers = parseRow(line);
       i += 2; // skip header + separator
-      out.push('<table><thead><tr>' + headers.map(h => `<th>${inline(h)}</th>`).join('') + '</tr></thead><tbody>');
+      out.push(
+        '<table><thead><tr>' +
+          headers.map((h) => `<th>${inline(h)}</th>`).join('') +
+          '</tr></thead><tbody>',
+      );
       while (i < lines.length && lines[i].startsWith('|')) {
         const cells = parseRow(lines[i]);
-        out.push('<tr>' + cells.map(c => `<td>${inline(c)}</td>`).join('') + '</tr>');
+        out.push('<tr>' + cells.map((c) => `<td>${inline(c)}</td>`).join('') + '</tr>');
         i++;
       }
       out.push('</tbody></table>');
@@ -90,7 +112,10 @@ export function minimd(src: string): string {
     }
 
     // Empty line
-    if (!line.trim()) { i++; continue; }
+    if (!line.trim()) {
+      i++;
+      continue;
+    }
 
     // Paragraph
     out.push(`<p>${inline(line)}</p>`);

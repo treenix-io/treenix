@@ -26,7 +26,9 @@ export default defineConfig({
   publicDir: 'public',
   optimizeDeps: {
     include: [
-      ...readdirSync(resolve(projectRoot, 'node_modules/@flowgram.ai')).map(d => `@flowgram.ai/${d}`),
+      ...readdirSync(resolve(projectRoot, 'node_modules/@flowgram.ai')).map(
+        (d) => `@flowgram.ai/${d}`,
+      ),
       'inversify',
       'reflect-metadata',
     ],

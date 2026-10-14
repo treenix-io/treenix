@@ -1,26 +1,43 @@
-import assert from 'node:assert/strict'
-import { describe, it } from 'node:test'
-import { act, cleanup, fireEvent, render } from '@testing-library/react'
-import { createElement, type ReactNode } from 'react'
-import { createTwpClient } from '@treenx/core/client/twp'
-import { KernelError } from '@treenx/core/errors'
-import { R, W, type Connection, type ModuleManifest, type Position, type Request } from '@treenx/core/kernel/types'
-import { createInstanceFoundation } from '../../../../core/src/kernel/instance'
-import { createMemoryStore } from '../../../../core/src/kernel/store/memory'
-import { NativeTreeBrowser } from '#native/NativeEditor'
-import { createNativeTreeSource, type NativeSnapshot, type NativeTreeSource } from '#tree/native-source'
-import { NativeSourceProvider } from '#tree/native-source-context'
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+import { act, cleanup, fireEvent, render } from '@testing-library/react';
+import { createElement, type ReactNode } from 'react';
+import { createTwpClient } from '@treenx/core/client/twp';
+import { KernelError } from '@treenx/core/errors';
+import {
+  R,
+  W,
+  type Connection,
+  type ModuleManifest,
+  type Position,
+  type Request,
+} from '@treenx/core/kernel/types';
+import { createInstanceFoundation } from '../../../../core/src/kernel/instance';
+import { createMemoryStore } from '../../../../core/src/kernel/store/memory';
+import { NativeTreeBrowser } from '#native/NativeEditor';
+import {
+  createNativeTreeSource,
+  type NativeSnapshot,
+  type NativeTreeSource,
+} from '#tree/native-source';
+import { NativeSourceProvider } from '#tree/native-source-context';
 
 /** Waits for an actual source publication without delaying the event loop. */
-function until(source: NativeTreeSource, predicate: (snapshot: NativeSnapshot) => boolean): Promise<void> {
-  const selector = { node: '/document' }
-  if (predicate(source.getSnapshot(selector))) return Promise.resolve()
+function until(
+  source: NativeTreeSource,
+  predicate: (snapshot: NativeSnapshot) => boolean,
+): Promise<void> {
+  const selector = { node: '/document' };
+  if (predicate(source.getSnapshot(selector))) return Promise.resolve();
 
-  return new Promise(resolve => {
+  return new Promise((resolve) => {
     const unsubscribe = source.subscribe(selector, () => {
-      if (predicate(source.getSnapshot(selector))) { unsubscribe(); resolve() }
-    })
-  })
+      if (predicate(source.getSnapshot(selector))) {
+        unsubscribe();
+        resolve();
+      }
+    });
+  });
 }
 
 /** Opens the production admitted lane, client, and source with either public R or admin rights. */
@@ -145,58 +162,69 @@ async function fixture(id: string, administrator: boolean) {
 }
 
 describe('native editor action invocation', { timeout: 10_000 }, () => {
-  it('invokes a real read action from an R-only node without exposing JSON save', async t => {
-    const f = await fixture('native-editor-read-action', false)
-    t.after(f.close)
-    const browser = render(createElement(NativeTreeBrowser), { wrapper: f.wrapper })
-    fireEvent.change(browser.getByLabelText('Адрес'), { target: { value: '/document' } })
-    fireEvent.click(browser.getByRole('button', { name: 'Открыть' }))
-    await act(async () => { await until(f.source, snapshot => snapshot.phase === 'ready') })
-
-    const copy = f.source.getSnapshot({ node: '/document' }).members[0]
-    assert.ok('node' in copy)
-    assert.equal(copy.bits, R)
-    assert.equal(browser.queryByLabelText('Данные узла'), null)
-    assert.equal(browser.queryByRole('button', { name: 'Сохранить' }), null)
-    fireEvent.change(browser.getByLabelText('Действие'), { target: { value: 'inspect' } })
-    fireEvent.change(browser.getByLabelText('Аргументы JSON'), { target: { value: '{"ticket":"read-only"}' } })
+  it('invokes a real read action from an R-only node without exposing JSON save', async (t) => {
+    const f = await fixture('native-editor-read-action', false);
+    t.after(f.close);
+    const browser = render(createElement(NativeTreeBrowser), { wrapper: f.wrapper });
+    fireEvent.change(browser.getByLabelText('Адрес'), { target: { value: '/document' } });
+    fireEvent.click(browser.getByRole('button', { name: 'Открыть' }));
     await act(async () => {
-      fireEvent.click(browser.getByRole('button', { name: 'Выполнить' }))
-      assert.deepEqual(await f.invoked, { ticket: 'read-only' })
-    })
+      await until(f.source, (snapshot) => snapshot.phase === 'ready');
+    });
 
-    const request = f.sent.find(request => request.t === 'act')
-    assert.ok(request?.t === 'act')
-    assert.equal(request.path, '/document')
-    assert.equal(request.action, 'inspect')
-    assert.deepEqual(request.args, { ticket: 'read-only' })
-    assert.equal(browser.queryByRole('alert'), null)
-  })
-
-  it('preserves the editable JSON form and action form for a writer', async t => {
-    const f = await fixture('native-editor-write-action', true)
-    t.after(f.close)
-    const browser = render(createElement(NativeTreeBrowser), { wrapper: f.wrapper })
-    fireEvent.change(browser.getByLabelText('Адрес'), { target: { value: '/document' } })
-    fireEvent.click(browser.getByRole('button', { name: 'Открыть' }))
-    await act(async () => { await until(f.source, snapshot => snapshot.phase === 'ready') })
-
-    const copy = f.source.getSnapshot({ node: '/document' }).members[0]
-    assert.ok('node' in copy)
-    assert.ok((copy.bits & W) !== 0)
-    assert.ok(browser.getByLabelText('Действие'))
-    const editor = browser.getByLabelText('Данные узла')
-    assert.ok(editor instanceof window.HTMLTextAreaElement)
-    const changed = JSON.parse(editor.value)
-    changed.value = 9
-    fireEvent.change(editor, { target: { value: JSON.stringify(changed) } })
+    const copy = f.source.getSnapshot({ node: '/document' }).members[0];
+    assert.ok('node' in copy);
+    assert.equal(copy.bits, R);
+    assert.equal(browser.queryByLabelText('Данные узла'), null);
+    assert.equal(browser.queryByRole('button', { name: 'Сохранить' }), null);
+    fireEvent.change(browser.getByLabelText('Действие'), { target: { value: 'inspect' } });
+    fireEvent.change(browser.getByLabelText('Аргументы JSON'), {
+      target: { value: '{"ticket":"read-only"}' },
+    });
     await act(async () => {
-      fireEvent.click(browser.getByRole('button', { name: 'Сохранить' }))
-      await until(f.source, snapshot => snapshot.members.some(copy => 'node' in copy && copy.node.value === 9))
-    })
+      fireEvent.click(browser.getByRole('button', { name: 'Выполнить' }));
+      assert.deepEqual(await f.invoked, { ticket: 'read-only' });
+    });
 
-    assert.equal(browser.queryByRole('alert'), null)
-    assert.ok(f.sent.some(request => request.t === 'commit'))
-    assert.equal(browser.getByLabelText('Текущее состояние').textContent?.includes('"value": 9'), true)
-  })
-})
+    const request = f.sent.find((request) => request.t === 'act');
+    assert.ok(request?.t === 'act');
+    assert.equal(request.path, '/document');
+    assert.equal(request.action, 'inspect');
+    assert.deepEqual(request.args, { ticket: 'read-only' });
+    assert.equal(browser.queryByRole('alert'), null);
+  });
+
+  it('preserves the editable JSON form and action form for a writer', async (t) => {
+    const f = await fixture('native-editor-write-action', true);
+    t.after(f.close);
+    const browser = render(createElement(NativeTreeBrowser), { wrapper: f.wrapper });
+    fireEvent.change(browser.getByLabelText('Адрес'), { target: { value: '/document' } });
+    fireEvent.click(browser.getByRole('button', { name: 'Открыть' }));
+    await act(async () => {
+      await until(f.source, (snapshot) => snapshot.phase === 'ready');
+    });
+
+    const copy = f.source.getSnapshot({ node: '/document' }).members[0];
+    assert.ok('node' in copy);
+    assert.ok((copy.bits & W) !== 0);
+    assert.ok(browser.getByLabelText('Действие'));
+    const editor = browser.getByLabelText('Данные узла');
+    assert.ok(editor instanceof window.HTMLTextAreaElement);
+    const changed = JSON.parse(editor.value);
+    changed.value = 9;
+    fireEvent.change(editor, { target: { value: JSON.stringify(changed) } });
+    await act(async () => {
+      fireEvent.click(browser.getByRole('button', { name: 'Сохранить' }));
+      await until(f.source, (snapshot) =>
+        snapshot.members.some((copy) => 'node' in copy && copy.node.value === 9),
+      );
+    });
+
+    assert.equal(browser.queryByRole('alert'), null);
+    assert.ok(f.sent.some((request) => request.t === 'commit'));
+    assert.equal(
+      browser.getByLabelText('Текущее состояние').textContent?.includes('"value": 9'),
+      true,
+    );
+  });
+});

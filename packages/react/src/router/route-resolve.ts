@@ -25,7 +25,10 @@ export type Route = {
   public?: boolean;
 };
 
-export type ResolveResult<N extends PresentationNode = PresentationNode> = { node: N; rest: string } | null;
+export type ResolveResult<N extends PresentationNode = PresentationNode> = {
+  node: N;
+  rest: string;
+} | null;
 
 /** Drop leading + trailing slashes; "/foo/bar/" → "foo/bar"; "/" → "". */
 export function normalizeUrl(pathname: string | null | undefined): string {
@@ -55,7 +58,10 @@ function isWildcard(node: PresentationNode): boolean {
  *  - Exact match wins over any wildcard.
  *  - Among wildcards, the longest matching prefix wins.
  *  - "_index" matches the root URL ("" / "/"). */
-export function resolveRoute<N extends PresentationNode>(pathname: string, routeNodes: readonly N[]): ResolveResult<N> {
+export function resolveRoute<N extends PresentationNode>(
+  pathname: string,
+  routeNodes: readonly N[],
+): ResolveResult<N> {
   const norm = normalizeUrl(pathname);
 
   // 1. Exact match

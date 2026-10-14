@@ -69,7 +69,9 @@ export function InspectorHeader({
                   className={active ? 'bg-accent text-accent-foreground font-medium' : ''}
                 >
                   <span>{viewContext.replace('react:', '')}</span>
-                  {active && <span className="ml-auto text-[10px] uppercase text-primary">active</span>}
+                  {active && (
+                    <span className="ml-auto text-[10px] uppercase text-primary">active</span>
+                  )}
                 </DropdownMenuItem>
               );
             })}
@@ -112,7 +114,11 @@ export function InspectorHeader({
             type="button"
             aria-pressed={context === 'react:edit'}
             className="inspector-mode-button"
-            onClick={() => onContextChange(context === 'react:edit' ? pickDefaultContext(node.$type) : 'react:edit')}
+            onClick={() =>
+              onContextChange(
+                context === 'react:edit' ? pickDefaultContext(node.$type) : 'react:edit',
+              )
+            }
           >
             <PenLine className="size-4" />
             Edit

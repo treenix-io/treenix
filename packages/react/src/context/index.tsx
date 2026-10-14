@@ -1,26 +1,17 @@
-import type { PresentationComponent,PresentationNode } from '#tree/presentation';
+import type { PresentationComponent, PresentationNode } from '#tree/presentation';
 // Treenix React Binding — Layer 2
 // <Render> + <RenderContext> + <NodeProvider>
 // Depends on: source-owned client contexts, React
 
 import { useTreeEffects } from '#hooks';
 import { useClientRegistry } from './client-registry-context';
-import { formatContext,parseContext } from '#context/selectors';
-import { READ_ONLY_EFFECTS,type TreeEffects } from '#tree/effects';
-import { $key,$node,componentLocation } from '#symbols';
-import { type OnChange,scopeOnChange } from '#tree/on-change';
+import { formatContext, parseContext } from '#context/selectors';
+import { READ_ONLY_EFFECTS, type TreeEffects } from '#tree/effects';
+import { $key, $node, componentLocation } from '#symbols';
+import { type OnChange, scopeOnChange } from '#tree/on-change';
 import type { Actions as CoreActions } from '@treenx/core/comp';
-import {
-getComponentByName,type NodeData
-} from '@treenx/core';
-import {
-createContext,
-createElement,
-type FC,
-type ReactNode,
-useContext,
-useMemo,
-} from 'react';
+import { getComponentByName, type NodeData } from '@treenx/core';
+import { createContext, createElement, type FC, type ReactNode, useContext, useMemo } from 'react';
 
 // ── Tree context (base and inherited modifiers) ──
 
@@ -106,7 +97,8 @@ type Actions<T> = {
   [K in keyof CoreActions<T>]: CoreActions<T>[K] extends (...args: infer A) => Promise<infer R>
     ? (...args: A) => Promise<R>
     : CoreActions<T>[K] extends (...args: infer A) => unknown
-      ? (...args: A) => Promise<unknown> : never;
+      ? (...args: A) => Promise<unknown>
+      : never;
 };
 
 /** Finds an admitted node or its exact named component without decorating the payload. */
@@ -225,11 +217,7 @@ export function RenderField({
 
   const handleChange = onChange
     ? (next: unknown) =>
-        onChange(
-          next && typeof next === 'object' && 'value' in next
-            ? next.value
-            : next,
-        )
+        onChange(next && typeof next === 'object' && 'value' in next ? next.value : next)
     : undefined;
 
   return createElement(handler as FC<Record<string, unknown>>, {

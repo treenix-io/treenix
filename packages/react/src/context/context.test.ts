@@ -3,12 +3,28 @@ import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { createElement, type ReactNode, useState } from 'react';
 import { $key, $node, stampNode } from '#symbols';
-import { Render, RenderContext, RenderField, type RenderProps, useTreeContext, viewCtx } from '#context';
+import {
+  Render,
+  RenderContext,
+  RenderField,
+  type RenderProps,
+  useTreeContext,
+  viewCtx,
+} from '#context';
 import { type NodeData } from '@treenx/core';
-import { createClientRegistry, declareClientModule, declareView, type ClientRegistry } from '#context/client-registry';
+import {
+  createClientRegistry,
+  declareClientModule,
+  declareView,
+  type ClientRegistry,
+} from '#context/client-registry';
 import { ClientRegistryContext } from './client-registry-context';
 
-function makeNode(path: string, type: string, components?: Record<string, { $type: string }>): NodeData {
+function makeNode(
+  path: string,
+  type: string,
+  components?: Record<string, { $type: string }>,
+): NodeData {
   const node = { $path: path, $type: type, ...components } as NodeData;
   stampNode(node);
   return node;
@@ -116,87 +132,150 @@ describe('Render — sub-context loader (C38)', () => {
   it('fires the base-context miss resolver when rendering at a sub-context', () => {
     const T = 'uix.lazy.test';
     let fired = false;
-    const registry = createClientRegistry([{ id: 'lazy-view', open: [], resolveMissing(type, context) {
-      if (type !== T || context !== 'react') return undefined;
-      fired = true;
-      return { type, context, handler: () => createElement('span', null, 'loaded') };
-    } }]);
+    const registry = createClientRegistry([
+      {
+        id: 'lazy-view',
+        open: [],
+        resolveMissing(type, context) {
+          if (type !== T || context !== 'react') return undefined;
+          fired = true;
+          return { type, context, handler: () => createElement('span', null, 'loaded') };
+        },
+      },
+    ]);
 
     // Rendering at a sub-context (react:zzztest) must reach the base 'react' loader.
     render(
-      createElement(ClientRegistryContext.Provider, { value: registry, children: createElement(RenderContext, {
-        name: 'react:zzztest',
-        children: createElement(Render, { value: { $type: T } }),
-      }) }),
+      createElement(ClientRegistryContext.Provider, {
+        value: registry,
+        children: createElement(RenderContext, {
+          name: 'react:zzztest',
+          children: createElement(Render, { value: { $type: T } }),
+        }),
+      }),
     );
 
     assert.ok(fired, 'sub-context render must trigger the base "react" loader');
-
   });
 });
 
 describe('RenderContext selectors', () => {
   afterEach(() => cleanup());
 
-  const scope = (name: string, children: ReactNode) => createElement(RenderContext, { name, children });
+  const scope = (name: string, children: ReactNode) =>
+    createElement(RenderContext, { name, children });
   const provide = (registry: ClientRegistry, children: ReactNode) =>
     createElement(ClientRegistryContext.Provider, { value: registry, children });
   const showContext = () => createElement('output', null, useTreeContext());
 
   it('inherits modifiers, replaces the base suffix, and isolates sibling scopes', () => {
-    const result = render(scope('react:table !edit +compact', createElement('div', null,
-      scope(':cell', createElement(showContext)),
-      scope(':table:cell', createElement(showContext)),
-      scope('site:card', createElement(showContext)),
-      scope('', createElement(showContext)),
-    )));
-    assert.deepEqual(result.getAllByRole('status').map(el => el.textContent), [
-      'react:cell !edit +compact', 'react:table:cell !edit +compact',
-      'site:card !edit +compact', 'react:table !edit +compact',
-    ]);
+    const result = render(
+      scope(
+        'react:table !edit +compact',
+        createElement(
+          'div',
+          null,
+          scope(':cell', createElement(showContext)),
+          scope(':table:cell', createElement(showContext)),
+          scope('site:card', createElement(showContext)),
+          scope('', createElement(showContext)),
+        ),
+      ),
+    );
+    assert.deepEqual(
+      result.getAllByRole('status').map((el) => el.textContent),
+      [
+        'react:cell !edit +compact',
+        'react:table:cell !edit +compact',
+        'site:card !edit +compact',
+        'react:table !edit +compact',
+      ],
+    );
   });
 
   it('applies the last modifier declaration and moves additions to the end', () => {
-    const result = render(scope('react !edit +compact', createElement('div', null,
-      scope('+edit', createElement(showContext)),
-      scope('-edit +acme.review !edit', createElement(showContext)),
-      scope('!compact -edit +edit -edit', createElement(showContext)),
-      createElement(showContext),
-    )));
-    assert.deepEqual(result.getAllByRole('status').map(el => el.textContent), [
-      'react +compact +edit', 'react +compact +acme.review !edit',
-      'react !compact', 'react !edit +compact',
-    ]);
+    const result = render(
+      scope(
+        'react !edit +compact',
+        createElement(
+          'div',
+          null,
+          scope('+edit', createElement(showContext)),
+          scope('-edit +acme.review !edit', createElement(showContext)),
+          scope('!compact -edit +edit -edit', createElement(showContext)),
+          createElement(showContext),
+        ),
+      ),
+    );
+    assert.deepEqual(
+      result.getAllByRole('status').map((el) => el.textContent),
+      [
+        'react +compact +edit',
+        'react +compact +acme.review !edit',
+        'react !compact',
+        'react !edit +compact',
+      ],
+    );
   });
 
   it('selects editable cells, a readonly row, and a descendant that enables editing again', () => {
     const value = { $type: 'test.cell' };
-    const registry = createClientRegistry([declareClientModule('cells', [
-      declareView(value.$type, 'react:cell +compact', () => createElement('span', null, 'readonly')),
-      declareView(value.$type, 'react:cell +compact +edit', () => createElement('span', null, 'editable')),
-    ])]);
+    const registry = createClientRegistry([
+      declareClientModule('cells', [
+        declareView(value.$type, 'react:cell +compact', () =>
+          createElement('span', null, 'readonly'),
+        ),
+        declareView(value.$type, 'react:cell +compact +edit', () =>
+          createElement('span', null, 'editable'),
+        ),
+      ]),
+    ]);
     const cell = () => scope(':cell', createElement(Render, { value }));
-    const result = render(provide(registry, scope('react:table +compact !edit', createElement('div', null,
-      cell(),
-      scope('-edit', createElement('div', null, cell(), scope('+edit', cell()))),
-      cell(),
-    ))));
+    const result = render(
+      provide(
+        registry,
+        scope(
+          'react:table +compact !edit',
+          createElement(
+            'div',
+            null,
+            cell(),
+            scope('-edit', createElement('div', null, cell(), scope('+edit', cell()))),
+            cell(),
+          ),
+        ),
+      ),
+    );
     assert.equal(result.container.textContent, 'editablereadonlyeditableeditable');
   });
 
   it('passes the full effective context through fallback to handlers and their children', () => {
-    const registry = createClientRegistry([declareClientModule('fallback', [
-      declareView('test.parent', 'react +edit', () => createElement('div', null,
-        createElement(showContext), scope(':child', createElement(Render, { value: { $type: 'test.child' } })),
-      )),
-      declareView('test.child', 'react:child +edit +acme.review', showContext),
-    ])]);
-    const result = render(provide(registry, scope('react:table:cell !edit +acme.review',
-      createElement(Render, { value: { $type: 'test.parent' } }),
-    )));
-    assert.deepEqual(result.getAllByRole('status').map(el => el.textContent), [
-      'react:table:cell !edit +acme.review', 'react:child !edit +acme.review',
+    const registry = createClientRegistry([
+      declareClientModule('fallback', [
+        declareView('test.parent', 'react +edit', () =>
+          createElement(
+            'div',
+            null,
+            createElement(showContext),
+            scope(':child', createElement(Render, { value: { $type: 'test.child' } })),
+          ),
+        ),
+        declareView('test.child', 'react:child +edit +acme.review', showContext),
+      ]),
     ]);
+    const result = render(
+      provide(
+        registry,
+        scope(
+          'react:table:cell !edit +acme.review',
+          createElement(Render, { value: { $type: 'test.parent' } }),
+        ),
+      ),
+    );
+    assert.deepEqual(
+      result.getAllByRole('status').map((el) => el.textContent),
+      ['react:table:cell !edit +acme.review', 'react:child !edit +acme.review'],
+    );
   });
 
   it('keeps handler state when contexts change and selects the new preset', () => {
@@ -204,11 +283,17 @@ describe('RenderContext selectors', () => {
       const [count, setCount] = useState(0);
       return createElement('button', { onClick: () => setCount(count + 1) }, `${label}:${count}`);
     };
-    const registry = createClientRegistry([declareClientModule('counter', [
-      declareView('test.counter', 'react', Counter, { props: { label: 'view' } }),
-      declareView('test.counter', 'react +edit', Counter, { props: { label: 'edit' } }),
-    ])]);
-    const tree = (context: string) => provide(registry, scope(context, createElement(Render, { value: { $type: 'test.counter' } })));
+    const registry = createClientRegistry([
+      declareClientModule('counter', [
+        declareView('test.counter', 'react', Counter, { props: { label: 'view' } }),
+        declareView('test.counter', 'react +edit', Counter, { props: { label: 'edit' } }),
+      ]),
+    ]);
+    const tree = (context: string) =>
+      provide(
+        registry,
+        scope(context, createElement(Render, { value: { $type: 'test.counter' } })),
+      );
     const result = render(tree('react'));
     fireEvent.click(result.getByRole('button'));
     result.rerender(tree('react +edit'));
@@ -218,13 +303,28 @@ describe('RenderContext selectors', () => {
   });
 
   it('applies required selection to primitive field handlers', () => {
-    const registry = createClientRegistry([declareClientModule('field', [
-      declareView('string', 'react +edit', ({ value }) => createElement('span', null, `edit:${value.value}`)),
-    ])]);
-    const result = render(provide(registry, scope('react:cell !edit', createElement(RenderField, { value: 'price' }))));
+    const registry = createClientRegistry([
+      declareClientModule('field', [
+        declareView('string', 'react +edit', ({ value }) =>
+          createElement('span', null, `edit:${value.value}`),
+        ),
+      ]),
+    ]);
+    const result = render(
+      provide(registry, scope('react:cell !edit', createElement(RenderField, { value: 'price' }))),
+    );
     assert.equal(result.container.textContent, 'edit:price');
-    assert.throws(() => render(provide(registry, scope('react !compact', createElement(RenderField, { value: 'price' })))), {
-      code: 'MISSING_REQUIRED_VARIANT',
-    });
+    assert.throws(
+      () =>
+        render(
+          provide(
+            registry,
+            scope('react !compact', createElement(RenderField, { value: 'price' })),
+          ),
+        ),
+      {
+        code: 'MISSING_REQUIRED_VARIANT',
+      },
+    );
   });
 });

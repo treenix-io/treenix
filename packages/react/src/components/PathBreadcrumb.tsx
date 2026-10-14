@@ -44,9 +44,13 @@ export function PathBreadcrumb({
           <span key={c.path} className="contents">
             {i > 0 && <BreadcrumbSeparator className={separatorClassName} />}
             <BreadcrumbItem className={itemClassName}>
-              {i === last
-                ? <BreadcrumbPage className={pageClassName}>{c.label}</BreadcrumbPage>
-                : <BreadcrumbLink className={linkClassName} onClick={() => onSelect(c.path)}>{c.label}</BreadcrumbLink>}
+              {i === last ? (
+                <BreadcrumbPage className={pageClassName}>{c.label}</BreadcrumbPage>
+              ) : (
+                <BreadcrumbLink className={linkClassName} onClick={() => onSelect(c.path)}>
+                  {c.label}
+                </BreadcrumbLink>
+              )}
             </BreadcrumbItem>
           </span>
         ))}

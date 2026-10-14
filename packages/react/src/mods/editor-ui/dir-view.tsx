@@ -47,11 +47,11 @@ function FolderView({ value }: { value: NodeData }) {
       )}
       {(meta || status || counter) && (
         <div className="mb-3 rounded-lg border border-border bg-card p-4">
-          {meta?.title && <div className="text-[18px] font-semibold text-foreground">{meta.title}</div>}
+          {meta?.title && (
+            <div className="text-[18px] font-semibold text-foreground">{meta.title}</div>
+          )}
           {meta?.description && (
-            <div className="mt-1 text-[13px] text-muted-foreground">
-              {meta.description}
-            </div>
+            <div className="mt-1 text-[13px] text-muted-foreground">{meta.description}</div>
           )}
           {(status || counter) && (
             <div className="mt-2 flex gap-2">
@@ -80,5 +80,5 @@ function FolderView({ value }: { value: NodeData }) {
 }
 
 export default declareClientModule('@treenx/react/editor-ui/dir-view', [
-  { type: 'dir', context: 'react', handler: FolderView }
+  { type: 'dir', context: 'react', handler: FolderView },
 ]);

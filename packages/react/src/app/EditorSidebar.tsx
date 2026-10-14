@@ -41,8 +41,22 @@ type EditorSidebarProps = {
 function SidebarToggleIcon({ collapsed }: { collapsed: boolean }) {
   return (
     <svg viewBox="0 0 16 16" className="size-4" fill="none" aria-hidden="true">
-      <rect x="2.25" y="2.5" width="11.5" height="11" rx="2.25" stroke="currentColor" strokeWidth="1.4" />
-      <path d="M6.25 3.25v9.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" opacity="0.55" />
+      <rect
+        x="2.25"
+        y="2.5"
+        width="11.5"
+        height="11"
+        rx="2.25"
+        stroke="currentColor"
+        strokeWidth="1.4"
+      />
+      <path
+        d="M6.25 3.25v9.5"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        opacity="0.55"
+      />
       <path
         d={collapsed ? 'M9 6.25 11 8l-2 1.75' : 'M11 6.25 9 8l2 1.75'}
         stroke="currentColor"
@@ -55,11 +69,7 @@ function SidebarToggleIcon({ collapsed }: { collapsed: boolean }) {
 }
 
 function MenuItemIcon({ children }: { children: ReactNode }) {
-  return (
-    <span className="flex size-4 items-center justify-center">
-      {children}
-    </span>
-  );
+  return <span className="flex size-4 items-center justify-center">{children}</span>;
 }
 
 /** Keep the existing sidebar while the selected native source owns all live coverage and writes. */
@@ -93,66 +103,83 @@ export function EditorSidebar({
   const roots = [root, '/local'];
 
   /** Mount each expanded collection once and retain its actual native subscription lifetime. */
-  const loadChildren = useCallback(async (path: string) => {
-    if (watchedItems.has(path)) return;
-    const node = source.mountPath(path);
-    const children = source.mountChildren(path);
+  const loadChildren = useCallback(
+    async (path: string) => {
+      if (watchedItems.has(path)) return;
+      const node = source.mountPath(path);
+      const children = source.mountChildren(path);
 
-    function changed(): void {
-      const snapshot = source.getChildrenSnapshot(path);
-      if (snapshot.phase === 'ready' && snapshot.nextCursor !== null) {
-        children.loadMore();
-        return;
-      }
-      if (snapshot.phase === 'ready') setLoaded(previous => new Set(previous).add(path));
+      function changed(): void {
+        const snapshot = source.getChildrenSnapshot(path);
+        if (snapshot.phase === 'ready' && snapshot.nextCursor !== null) {
+          children.loadMore();
+          return;
+        }
+        if (snapshot.phase === 'ready') setLoaded((previous) => new Set(previous).add(path));
 
-      const paths = new Set<string>();
-      for (const parent of watchedItems.keys()) {
-        if (source.getPathSnapshot(parent).data !== undefined) paths.add(parent);
-        for (const child of source.getChildrenSnapshot(parent).data) paths.add(child.$path);
+        const paths = new Set<string>();
+        for (const parent of watchedItems.keys()) {
+          if (source.getPathSnapshot(parent).data !== undefined) paths.add(parent);
+          for (const child of source.getChildrenSnapshot(parent).data) paths.add(child.$path);
+        }
+        setNodeCount(paths.size);
       }
-      setNodeCount(paths.size);
-    }
-    const unsubscribe = source.subscribeChildren(path, changed);
-    watchedItems.set(path, { dispose() { unsubscribe(); children.dispose(); node.dispose(); } });
-    changed();
-  }, [source, watchedItems]);
+      const unsubscribe = source.subscribeChildren(path, changed);
+      watchedItems.set(path, {
+        dispose() {
+          unsubscribe();
+          children.dispose();
+          node.dispose();
+        },
+      });
+      changed();
+    },
+    [source, watchedItems],
+  );
 
   // Loads ancestor children for `selected` within `root` and merges those ancestors
   // into `expanded`. Idempotent via loadChildren's early-return.
-  const ensurePathVisible = useCallback(async (rootPath: string, target: string | null) => {
-    if (!target || target === rootPath) return;
-    const insideRoot = target.startsWith(rootPath === '/' ? '/' : `${rootPath}/`);
-    if (!insideRoot) return;
-    const rel = rootPath === '/' ? target : target.slice(rootPath.length);
-    const parts = rel.split('/').filter(Boolean);
-    const ancestors: string[] = [];
-    let cur = rootPath === '/' ? '' : rootPath;
-    for (let i = 0; i < parts.length - 1; i++) {
-      cur += `/${parts[i]}`;
-      ancestors.push(cur);
-    }
-    for (const a of ancestors) await loadChildren(a);
-    if (ancestors.length) {
-      setExpanded((prev) => {
-        const next = new Set(prev);
-        for (const a of ancestors) next.add(a);
-        return next;
-      });
-    }
-  }, [loadChildren]);
+  const ensurePathVisible = useCallback(
+    async (rootPath: string, target: string | null) => {
+      if (!target || target === rootPath) return;
+      const insideRoot = target.startsWith(rootPath === '/' ? '/' : `${rootPath}/`);
+      if (!insideRoot) return;
+      const rel = rootPath === '/' ? target : target.slice(rootPath.length);
+      const parts = rel.split('/').filter(Boolean);
+      const ancestors: string[] = [];
+      let cur = rootPath === '/' ? '' : rootPath;
+      for (let i = 0; i < parts.length - 1; i++) {
+        cur += `/${parts[i]}`;
+        ancestors.push(cur);
+      }
+      for (const a of ancestors) await loadChildren(a);
+      if (ancestors.length) {
+        setExpanded((prev) => {
+          const next = new Set(prev);
+          for (const a of ancestors) next.add(a);
+          return next;
+        });
+      }
+    },
+    [loadChildren],
+  );
 
-  useEffect(() => () => {
-    if (animationTimer.current) clearTimeout(animationTimer.current);
-  }, []);
+  useEffect(
+    () => () => {
+      if (animationTimer.current) clearTimeout(animationTimer.current);
+    },
+    [],
+  );
 
   // Each root retains its own coverage; switching roots releases only these owners.
   useEffect(() => {
     setLoaded(new Set());
     setExpanded(new Set([root]));
-    void loadChildren(root).then(() => ensurePathVisible(root, selectedRef.current)).catch((e: unknown) => {
-      toast.error(e instanceof Error ? e.message : 'Failed to connect to server');
-    });
+    void loadChildren(root)
+      .then(() => ensurePathVisible(root, selectedRef.current))
+      .catch((e: unknown) => {
+        toast.error(e instanceof Error ? e.message : 'Failed to connect to server');
+      });
     return () => {
       for (const owner of watchedItems.values()) owner.dispose();
       watchedItems.clear();
@@ -231,7 +258,6 @@ export function EditorSidebar({
             watchedItems.delete(parent);
           }
         }
-
       }
     },
     [expanded, loadChildren, watchedItems],
@@ -266,10 +292,14 @@ export function EditorSidebar({
     async (path: string) => {
       try {
         const kernel = effects.kernel;
-        if (kernel === undefined) throw new KernelError('UNAVAILABLE', 'Removal requires a native source');
+        if (kernel === undefined)
+          throw new KernelError('UNAVAILABLE', 'Removal requires a native source');
         const copy = (await kernel.read({ node: path })).copies[0];
         if ('error' in copy) throw new KernelError(copy.error.code, copy.error.message);
-        await kernel.commit({ changes: [{ op: 'remove', path }], expect: { nodes: [{ path, rev: copy.node.$rev }] } });
+        await kernel.commit({
+          changes: [{ op: 'remove', path }],
+          expect: { nodes: [{ path, rev: copy.node.$rev }] },
+        });
         const parent = path === '/' ? null : path.slice(0, path.lastIndexOf('/')) || '/';
         if (parent) {
           await loadChildren(parent);
@@ -293,12 +323,16 @@ export function EditorSidebar({
 
       try {
         const kernel = effects.kernel;
-        if (kernel === undefined) throw new KernelError('UNAVAILABLE', 'Moving requires a native source');
+        if (kernel === undefined)
+          throw new KernelError('UNAVAILABLE', 'Moving requires a native source');
         const copy = (await kernel.read({ node: fromPath })).copies[0];
         if ('error' in copy) throw new KernelError(copy.error.code, copy.error.message);
-        await kernel.commit({ changes: [{ op: 'move', from: fromPath, to: newPath }],
-          expect: { nodes: [{ path: fromPath, rev: copy.node.$rev }] } });
-        const oldParent = fromPath === '/' ? '/' : fromPath.slice(0, fromPath.lastIndexOf('/')) || '/';
+        await kernel.commit({
+          changes: [{ op: 'move', from: fromPath, to: newPath }],
+          expect: { nodes: [{ path: fromPath, rev: copy.node.$rev }] },
+        });
+        const oldParent =
+          fromPath === '/' ? '/' : fromPath.slice(0, fromPath.lastIndexOf('/')) || '/';
         await loadChildren(oldParent);
         await loadChildren(toParent);
         await onSelect(newPath);
@@ -335,7 +369,9 @@ export function EditorSidebar({
       collapsedSize={`${SIDEBAR_COLLAPSED_WIDTH}px`}
       className="flex flex-col border-r border-border"
     >
-      <div className={`relative shrink-0 overflow-hidden border-b border-border ${compact ? 'h-[74px]' : 'h-[44px]'}`}>
+      <div
+        className={`relative shrink-0 overflow-hidden border-b border-border ${compact ? 'h-[74px]' : 'h-[44px]'}`}
+      >
         <div className="absolute left-0 top-1">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -349,8 +385,14 @@ export function EditorSidebar({
                 </span>
                 {!compact && (
                   <>
-                    <span className={`relative z-10 -ml-1 text-[17px] font-semibold leading-none tracking-tight ${contentClass}`}>Treenix</span>
-                    <ChevronDown className={`relative z-10 ml-2 size-3 self-center text-muted-foreground transition-[color,opacity] group-hover:text-primary ${contentClass}`} />
+                    <span
+                      className={`relative z-10 -ml-1 text-[17px] font-semibold leading-none tracking-tight ${contentClass}`}
+                    >
+                      Treenix
+                    </span>
+                    <ChevronDown
+                      className={`relative z-10 ml-2 size-3 self-center text-muted-foreground transition-[color,opacity] group-hover:text-primary ${contentClass}`}
+                    />
                   </>
                 )}
               </button>
@@ -358,7 +400,8 @@ export function EditorSidebar({
             <DropdownMenuContent align="start" side="bottom" className="inspector-debug-menu">
               <DropdownMenuLabel className="px-2 py-1.5">
                 <div className="truncate text-[11px] font-normal text-muted-foreground">
-                  {authed.startsWith('anon:') ? `anon:${authed.slice(5, 13)}` : authed} · {nodeCount} nodes
+                  {authed.startsWith('anon:') ? `anon:${authed.slice(5, 13)}` : authed} ·{' '}
+                  {nodeCount} nodes
                 </div>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
@@ -379,7 +422,11 @@ export function EditorSidebar({
               </DropdownMenuItem>
               <DropdownMenuItem onClick={onLogout}>
                 <MenuItemIcon>
-                  {authed.startsWith('anon:') ? <LogIn className="size-3.5" /> : <LogOut className="size-3.5" />}
+                  {authed.startsWith('anon:') ? (
+                    <LogIn className="size-3.5" />
+                  ) : (
+                    <LogOut className="size-3.5" />
+                  )}
                 </MenuItemIcon>
                 <span className="truncate">{authed.startsWith('anon:') ? 'Login' : 'Logout'}</span>
               </DropdownMenuItem>
@@ -389,7 +436,12 @@ export function EditorSidebar({
 
         {!compact && root !== '/' && (
           <div className="absolute left-[148px] right-12 top-1/2 flex -translate-y-1/2 items-center gap-2 overflow-hidden">
-            <Button variant="ghost" size="sm" className="h-5 px-1.5 font-mono text-[10px] text-muted-foreground" onClick={() => onSetRoot('/')}>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-5 px-1.5 font-mono text-[10px] text-muted-foreground"
+              onClick={() => onSetRoot('/')}
+            >
               &#8962; {root}
             </Button>
           </div>
@@ -406,7 +458,9 @@ export function EditorSidebar({
       </div>
 
       {!collapsed && (
-        <div className={`flex items-center gap-1 px-2 pt-2 pb-1.5 shrink-0 overflow-hidden ${contentClass}`}>
+        <div
+          className={`flex items-center gap-1 px-2 pt-2 pb-1.5 shrink-0 overflow-hidden ${contentClass}`}
+        >
           <Input
             ref={searchRef}
             placeholder="Search nodes..."
@@ -435,9 +489,12 @@ export function EditorSidebar({
             />
           </div>
 
-          <div className={`flex items-center overflow-hidden px-3 py-1.5 border-t border-border/50 text-[11px] text-muted-foreground shrink-0 ${contentClass}`}>
+          <div
+            className={`flex items-center overflow-hidden px-3 py-1.5 border-t border-border/50 text-[11px] text-muted-foreground shrink-0 ${contentClass}`}
+          >
             <span className="truncate">
-              {authed.startsWith('anon:') ? `anon:${authed.slice(5, 13)}` : authed} &middot; {nodeCount} nodes
+              {authed.startsWith('anon:') ? `anon:${authed.slice(5, 13)}` : authed} &middot;{' '}
+              {nodeCount} nodes
             </span>
           </div>
         </>

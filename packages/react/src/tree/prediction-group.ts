@@ -34,7 +34,8 @@ export function createPredictionGroups<Node extends { readonly $id: string }>(
       group = { base, operations: new Map() };
       groups.set(base.$id, group);
     }
-    if (group.operations.has(key)) throw new KernelError('CONFLICT', 'Prediction key is already pending');
+    if (group.operations.has(key))
+      throw new KernelError('CONFLICT', 'Prediction key is already pending');
 
     const owned = group;
     const operation: Prediction<Node> = { apply, pending: true };
@@ -48,7 +49,7 @@ export function createPredictionGroups<Node extends { readonly $id: string }>(
         if (!operation.pending) return;
         operation.pending = false;
         if (!accepted) owned.operations.delete(key);
-        if (![...owned.operations.values()].some(entry => entry.pending)) groups.delete(base.$id);
+        if (![...owned.operations.values()].some((entry) => entry.pending)) groups.delete(base.$id);
         owned.draft = undefined;
         changed(base.$id);
       },
@@ -57,18 +58,28 @@ export function createPredictionGroups<Node extends { readonly $id: string }>(
 
   return {
     push,
-    get version() { return version; },
+    get version() {
+      return version;
+    },
     /** Delay foreign canonical presentation while pending, then reveal the current canonical node unchanged. */
     project(node: Node): Node {
       const group = groups.get(node.$id);
       if (group === undefined) return node;
-      if (group.draft === undefined) group.draft = replayPredictions(group.base, [...group.operations.values()],
-        (candidate, operation) => operation.apply(candidate), (_operation, error) => failed(error), asynchronous);
+      if (group.draft === undefined)
+        group.draft = replayPredictions(
+          group.base,
+          [...group.operations.values()],
+          (candidate, operation) => operation.apply(candidate),
+          (_operation, error) => failed(error),
+          asynchronous,
+        );
       return group.draft;
     },
     subscribe(listener: (id: string) => void): () => void {
       listeners.add(listener);
-      return () => { listeners.delete(listener); };
+      return () => {
+        listeners.delete(listener);
+      };
     },
     /** Release captured bodies when the authenticated source ends. */
     clear(): void {

@@ -92,5 +92,5 @@ function DefaultSchemaForm({ value, onChange }: RenderProps) {
 }
 
 export default declareClientModule('@treenx/react/treenix/schema-form', [
-  { type: 'default', context: 'react:form', handler: DefaultSchemaForm }
+  { type: 'default', context: 'react:form', handler: DefaultSchemaForm },
 ]);

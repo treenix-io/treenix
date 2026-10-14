@@ -12,7 +12,6 @@ interface TypeNodeData extends NodeData {
   schema?: JsonSchema;
 }
 
-
 // ── Helpers ──
 
 // Type nodes can live under different mount paths (/sys/types/... or
@@ -29,7 +28,11 @@ function typeName(value: TypeNodeData): string {
 }
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
-  return <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">{children}</div>;
+  return (
+    <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+      {children}
+    </div>
+  );
 }
 
 // ── react (full view with live preview) ──
@@ -39,7 +42,7 @@ function TypeNodeBody({ value, schema }: { value: TypeNodeData; schema: JsonSche
   const title = schema?.title ? String(schema.title) : null;
   const props = schema?.properties ?? {};
   const contexts = useClientRegistry().allContexts(name);
-  const components = Object.keys(value).filter(k => !k.startsWith('$') && k !== 'schema');
+  const components = Object.keys(value).filter((k) => !k.startsWith('$') && k !== 'schema');
 
   return (
     <div className="max-w-xl space-y-4">
@@ -53,7 +56,9 @@ function TypeNodeBody({ value, schema }: { value: TypeNodeData; schema: JsonSche
               <div key={k} className="flex gap-2 text-sm px-2 py-1 bg-muted rounded">
                 <span className="font-mono text-primary">{k}</span>
                 <span className="text-muted-foreground">{String(v.type ?? 'string')}</span>
-                {typeof v.label === 'string' && <span className="text-muted-foreground ml-auto">{v.label}</span>}
+                {typeof v.label === 'string' && (
+                  <span className="text-muted-foreground ml-auto">{v.label}</span>
+                )}
               </div>
             ))}
           </div>
@@ -64,8 +69,13 @@ function TypeNodeBody({ value, schema }: { value: TypeNodeData; schema: JsonSche
         <div>
           <SectionLabel>Components</SectionLabel>
           <div className="flex flex-wrap gap-1.5">
-            {components.map(c => (
-              <span key={c} className="px-2.5 py-0.5 rounded-full text-xs font-mono bg-muted border border-border text-muted-foreground">{c}</span>
+            {components.map((c) => (
+              <span
+                key={c}
+                className="px-2.5 py-0.5 rounded-full text-xs font-mono bg-muted border border-border text-muted-foreground"
+              >
+                {c}
+              </span>
             ))}
           </div>
         </div>
@@ -75,8 +85,13 @@ function TypeNodeBody({ value, schema }: { value: TypeNodeData; schema: JsonSche
         <div>
           <SectionLabel>Contexts</SectionLabel>
           <div className="flex flex-wrap gap-1.5">
-            {contexts.map(c => (
-              <span key={c} className="px-2.5 py-0.5 rounded-full text-xs font-mono bg-muted border border-border text-muted-foreground">{c}</span>
+            {contexts.map((c) => (
+              <span
+                key={c}
+                className="px-2.5 py-0.5 rounded-full text-xs font-mono bg-muted border border-border text-muted-foreground"
+              >
+                {c}
+              </span>
             ))}
           </div>
         </div>
@@ -92,7 +107,15 @@ function TypeNodeBody({ value, schema }: { value: TypeNodeData; schema: JsonSche
 
 // ── react:list (compact) ──
 
-function TypeListBody({ value, schema, methods }: { value: TypeNodeData; schema: JsonSchema | null; methods: readonly string[] }) {
+function TypeListBody({
+  value,
+  schema,
+  methods,
+}: {
+  value: TypeNodeData;
+  schema: JsonSchema | null;
+  methods: readonly string[];
+}) {
   const name = typeName(value);
   const title = schema?.title ? String(schema.title) : null;
   const description = schema?.description ? String(schema.description) : null;
@@ -110,16 +133,28 @@ function TypeListBody({ value, schema, methods }: { value: TypeNodeData; schema:
       </div>
       {(title || description) && (
         <div className="text-xs text-muted-foreground mt-0.5">
-          {title}{title && description ? ' — ' : ''}{description}
+          {title}
+          {title && description ? ' — ' : ''}
+          {description}
         </div>
       )}
       {(props.length > 0 || methods.length > 0) && (
         <div className="flex gap-1 mt-1 flex-wrap">
-          {props.map(p => (
-            <span key={p} className="text-[11px] px-1.5 py-px rounded bg-muted text-muted-foreground font-mono">{p}</span>
+          {props.map((p) => (
+            <span
+              key={p}
+              className="text-[11px] px-1.5 py-px rounded bg-muted text-muted-foreground font-mono"
+            >
+              {p}
+            </span>
           ))}
-          {methods.map(m => (
-            <span key={m} className="text-[11px] px-1.5 py-px rounded bg-muted text-primary font-mono">{m}()</span>
+          {methods.map((m) => (
+            <span
+              key={m}
+              className="text-[11px] px-1.5 py-px rounded bg-muted text-primary font-mono"
+            >
+              {m}()
+            </span>
           ))}
         </div>
       )}
@@ -128,20 +163,24 @@ function TypeListBody({ value, schema, methods }: { value: TypeNodeData; schema:
 }
 
 function TypeNodeView({ value }: { value: TypeNodeData }) {
-  return <SchemaReader type={typeName(value)} authored={value.schema}>
-    {schema => <TypeNodeBody value={value} schema={schema} />}
-  </SchemaReader>;
+  return (
+    <SchemaReader type={typeName(value)} authored={value.schema}>
+      {(schema) => <TypeNodeBody value={value} schema={schema} />}
+    </SchemaReader>
+  );
 }
 
 function TypeListItem({ value }: { value: TypeNodeData }) {
-  return <SchemaReader type={typeName(value)} authored={value.schema}>
-    {(schema, methods) => <TypeListBody value={value} schema={schema} methods={methods} />}
-  </SchemaReader>;
+  return (
+    <SchemaReader type={typeName(value)} authored={value.schema}>
+      {(schema, methods) => <TypeListBody value={value} schema={schema} methods={methods} />}
+    </SchemaReader>
+  );
 }
 
 // ── Registration ──
 
 export default declareClientModule('@treenx/react/treenix/type-view', [
   { type: 'type', context: 'react', handler: TypeNodeView },
-  { type: 'type', context: 'react:list', handler: TypeListItem }
+  { type: 'type', context: 'react:list', handler: TypeListItem },
 ]);

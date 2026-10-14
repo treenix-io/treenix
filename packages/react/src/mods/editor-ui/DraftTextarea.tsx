@@ -27,7 +27,9 @@ export const DraftTextarea = forwardRef<HTMLTextAreaElement, Props>(
       <Textarea
         ref={ref}
         defaultValue={value}
-        onFocus={() => { editing.current = true; }}
+        onFocus={() => {
+          editing.current = true;
+        }}
         onBlur={() => {
           editing.current = false;
           if (ref.current && ref.current.value !== value) {

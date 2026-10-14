@@ -9,7 +9,13 @@ import { useState } from 'react';
 
 // ── Node-level view (for ref nodes like /sys/autostart/xxx) ──
 
-function RefNodeView({ value, onSelect }: { value: NodeData & Ref; onSelect?: (p: string) => void }) {
+function RefNodeView({
+  value,
+  onSelect,
+}: {
+  value: NodeData & Ref;
+  onSelect?: (p: string) => void;
+}) {
   const ref = value.$ref;
   if (!ref) return <div className="text-sm text-muted-foreground">Invalid ref (no $ref)</div>;
 
@@ -79,8 +85,21 @@ function RefDisplay({ target, onSelect }: { target: string; onSelect?: (p: strin
                 <span className="font-mono">{targetNode.$type}</span>
                 <span>{targetNode.$path}</span>
               </div>
-              <NodeProvider value={targetNode}><Render value={targetNode} ctx={effects.lane ? { node: targetNode, path: targetNode.$path,
-                execute: (action, data) => effects.execute(targetNode.$path, action, data) } : undefined} /></NodeProvider>
+              <NodeProvider value={targetNode}>
+                <Render
+                  value={targetNode}
+                  ctx={
+                    effects.lane
+                      ? {
+                          node: targetNode,
+                          path: targetNode.$path,
+                          execute: (action, data) =>
+                            effects.execute(targetNode.$path, action, data),
+                        }
+                      : undefined
+                  }
+                />
+              </NodeProvider>
             </div>
           ) : (
             <div className="text-sm text-muted-foreground">Loading...</div>
@@ -102,8 +121,20 @@ function RefRouteView({ value }: { value: { readonly $ref: string } }) {
   if (!target) return null;
   return (
     <RenderContext name="react">
-      <NodeProvider value={target}><Render value={target} ctx={effects.lane ? { node: target, path: target.$path,
-        execute: (action, data) => effects.execute(target.$path, action, data) } : undefined} /></NodeProvider>
+      <NodeProvider value={target}>
+        <Render
+          value={target}
+          ctx={
+            effects.lane
+              ? {
+                  node: target,
+                  path: target.$path,
+                  execute: (action, data) => effects.execute(target.$path, action, data),
+                }
+              : undefined
+          }
+        />
+      </NodeProvider>
     </RenderContext>
   );
 }
@@ -113,5 +144,5 @@ function RefRouteView({ value }: { value: { readonly $ref: string } }) {
 export default declareClientModule('@treenx/react/treenix/ref-view', [
   { type: 'ref', context: 'react', handler: RefNodeView },
   { type: 'ref', context: 'react:list', handler: RefListItem },
-  { type: 'ref', context: 'react:route', handler: RefRouteView }
+  { type: 'ref', context: 'react:route', handler: RefRouteView },
 ]);

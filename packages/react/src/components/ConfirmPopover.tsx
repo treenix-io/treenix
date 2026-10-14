@@ -17,9 +17,7 @@ export function ConfirmPopover({
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        {children}
-      </PopoverTrigger>
+      <PopoverTrigger asChild>{children}</PopoverTrigger>
       <PopoverContent
         align="end"
         side="bottom"
@@ -31,7 +29,15 @@ export function ConfirmPopover({
           <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setOpen(false)}>
             Cancel
           </Button>
-          <Button variant={variant} size="sm" className="h-7 text-xs" onClick={() => { onConfirm(); setOpen(false); }}>
+          <Button
+            variant={variant}
+            size="sm"
+            className="h-7 text-xs"
+            onClick={() => {
+              onConfirm();
+              setOpen(false);
+            }}
+          >
             Confirm
           </Button>
         </div>

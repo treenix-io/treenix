@@ -29,28 +29,39 @@ export function useDraft(type: string): DraftHandle {
   const state = useMemo(() => proxy<{ node: NodeData | null }>({ node: null }), []);
   const snap = useSnapshot(state);
 
-  const create = useCallback((initial?: Record<string, unknown>) => {
-    const n = makeNode(`/draft/${Date.now()}-${++draftSeq}`, type, initial);
-    stampNode(n);
-    state.node = n;
-  }, [type, state]);
+  const create = useCallback(
+    (initial?: Record<string, unknown>) => {
+      const n = makeNode(`/draft/${Date.now()}-${++draftSeq}`, type, initial);
+      stampNode(n);
+      state.node = n;
+    },
+    [type, state],
+  );
 
-  const onChange = useCallback((partial: Record<string, unknown>) => {
-    if (state.node) Object.assign(state.node, partial);
-  }, [state]);
+  const onChange = useCallback(
+    (partial: Record<string, unknown>) => {
+      if (state.node) Object.assign(state.node, partial);
+    },
+    [state],
+  );
 
-  const commit = useCallback(async (realPath: string) => {
-    const n = state.node;
-    if (!n) return;
-    const data: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(n)) {
-      if (!k.startsWith('$')) data[k] = v;
-    }
-    await createNode(realPath, type, data);
+  const commit = useCallback(
+    async (realPath: string) => {
+      const n = state.node;
+      if (!n) return;
+      const data: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(n)) {
+        if (!k.startsWith('$')) data[k] = v;
+      }
+      await createNode(realPath, type, data);
+      state.node = null;
+    },
+    [createNode, type, state],
+  );
+
+  const close = useCallback(() => {
     state.node = null;
-  }, [createNode, type, state]);
-
-  const close = useCallback(() => { state.node = null; }, [state]);
+  }, [state]);
 
   // useSnapshot returns deeply readonly — cast to mutable NodeData for Render compatibility
   // (same pattern as bind/hook.ts:24)

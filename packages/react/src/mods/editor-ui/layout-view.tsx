@@ -7,11 +7,17 @@ import { Render, RenderContext, scopeOnChange, type OnChange } from '#context';
 import { type ComponentData, type NodeData } from '@treenx/core';
 import { useMemo } from 'react';
 
-function DefaultLayout({ value, onChange }: { value: ComponentData; onChange?: (p: OnChange) => void }) {
+function DefaultLayout({
+  value,
+  onChange,
+}: {
+  value: ComponentData;
+  onChange?: (p: OnChange) => void;
+}) {
   const scopedOnChange = useMemo(
-    () => onChange ? scopeOnChange(onChange, 'layout') : undefined,
+    () => (onChange ? scopeOnChange(onChange, 'layout') : undefined),
     [onChange],
-  )
+  );
 
   if ('$path' in value) {
     const node = value as NodeData;
@@ -29,5 +35,5 @@ function DefaultLayout({ value, onChange }: { value: ComponentData; onChange?: (
 }
 
 export default declareClientModule('@treenx/react/editor-ui/layout-view', [
-  { type: 'default', context: 'react:layout', handler: DefaultLayout }
+  { type: 'default', context: 'react:layout', handler: DefaultLayout },
 ]);

@@ -25,7 +25,10 @@ class UixActionPublication extends UixPublication {
 }
 
 const publicationDeclaration = declareClientType('uix.publication', UixPublication);
-const actionPublicationDeclaration = declareClientType('uix.action-publication', UixActionPublication);
+const actionPublicationDeclaration = declareClientType(
+  'uix.action-publication',
+  UixActionPublication,
+);
 
 /** Published source is readable, while only the instance administrator may replace it. */
 function publicationRights(input: RuleInput): number {
@@ -45,17 +48,38 @@ export default function createNativeUix(): NativeModuleDeployment {
     'uix.source': { verify_view: verifyDraftAction },
     'uix.mcp': { compile_view: compileDraftAction },
   };
-  const owned = readSchemasFromDir(new URL('./schemas/', import.meta.url).pathname).map(schema => {
-    const cls = classes[schema.$id];
-    const type = buildTypeDef(cls, { name: schema.$id, module: id, security: 'ordinary', schema, actions: actions[schema.$id] });
-    return { cls, schema, type };
-  });
-  return { manifest: { ...declareOpenModule(id, owned.flatMap(({ cls, schema, type }) => [
-    { type: type.name, context: 'class', handler: cls },
-    { type: type.name, context: 'schema', handler: () => schema },
-    ...Object.entries(type.actions).map(([name, handler]) => ({ type: type.name, context: `action:${name}`, handler })),
-  ])), types: owned.map(entry => entry.type), security: [
-    { type: 'uix.publication', context: 'acl', handler: publicationRights },
-    { type: 'uix.action-publication', context: 'acl', handler: publicationRights },
-  ] } };
+  const owned = readSchemasFromDir(new URL('./schemas/', import.meta.url).pathname).map(
+    (schema) => {
+      const cls = classes[schema.$id];
+      const type = buildTypeDef(cls, {
+        name: schema.$id,
+        module: id,
+        security: 'ordinary',
+        schema,
+        actions: actions[schema.$id],
+      });
+      return { cls, schema, type };
+    },
+  );
+  return {
+    manifest: {
+      ...declareOpenModule(
+        id,
+        owned.flatMap(({ cls, schema, type }) => [
+          { type: type.name, context: 'class', handler: cls },
+          { type: type.name, context: 'schema', handler: () => schema },
+          ...Object.entries(type.actions).map(([name, handler]) => ({
+            type: type.name,
+            context: `action:${name}`,
+            handler,
+          })),
+        ]),
+      ),
+      types: owned.map((entry) => entry.type),
+      security: [
+        { type: 'uix.publication', context: 'acl', handler: publicationRights },
+        { type: 'uix.action-publication', context: 'acl', handler: publicationRights },
+      ],
+    },
+  };
 }

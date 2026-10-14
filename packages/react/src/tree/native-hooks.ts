@@ -1,6 +1,6 @@
-import { useCallback, useMemo, useSyncExternalStore } from 'react'
-import type { IncludeSpec, SubSelector } from '@treenx/core/kernel/types'
-import { useNativeSource } from '#tree/native-source-context'
+import { useCallback, useMemo, useSyncExternalStore } from 'react';
+import type { IncludeSpec, SubSelector } from '@treenx/core/kernel/types';
+import { useNativeSource } from '#tree/native-source-context';
 
 /** Subscribe to one selector and expose its paging controls. */
 export function useNativeSelector(input: SubSelector) {

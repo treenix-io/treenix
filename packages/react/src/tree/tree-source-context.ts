@@ -8,9 +8,20 @@
 // imports field's `.ts → .tsx` array fallback only fires under Vite/build,
 // not under the test runner.
 
-import { createContext, createElement, type ReactNode, useContext, useEffect, useMemo } from 'react';
+import {
+  createContext,
+  createElement,
+  type ReactNode,
+  useContext,
+  useEffect,
+  useMemo,
+} from 'react';
 import { ClientRegistryContext } from '#context/client-registry-context';
-import { createDeclaredClientRegistry, mountClientRegistry, type ClientRegistry } from '#context/client-registry';
+import {
+  createDeclaredClientRegistry,
+  mountClientRegistry,
+  type ClientRegistry,
+} from '#context/client-registry';
 import { type TreeSource, TreeSourceMissingError } from './tree-source';
 import { KernelError } from '@treenx/core/errors';
 
@@ -38,14 +49,32 @@ export function TreeSourceProvider({
   schemaMode?: 'native' | 'declared';
   children: ReactNode;
 }) {
-  if (source.clientRegistry !== undefined && suppliedRegistry !== undefined && source.clientRegistry !== suppliedRegistry)
+  if (
+    source.clientRegistry !== undefined &&
+    suppliedRegistry !== undefined &&
+    source.clientRegistry !== suppliedRegistry
+  )
     throw new KernelError('INVALID', 'Render registry differs from its mutation source');
-  const registry = useMemo(() => suppliedRegistry ?? source.clientRegistry ?? sourceRegistry(source), [source, suppliedRegistry]);
-  useEffect(() => suppliedRegistry === undefined && source.clientRegistry === undefined ? mountClientRegistry(registry) : undefined,
-    [source, registry, suppliedRegistry]);
-  return createElement(Ctx.Provider, { value: source },
-    createElement(SchemaMode.Provider, { value: schemaMode ?? source.schemaMode ?? 'native' },
-      createElement(ClientRegistryContext.Provider, { value: registry }, children)));
+  const registry = useMemo(
+    () => suppliedRegistry ?? source.clientRegistry ?? sourceRegistry(source),
+    [source, suppliedRegistry],
+  );
+  useEffect(
+    () =>
+      suppliedRegistry === undefined && source.clientRegistry === undefined
+        ? mountClientRegistry(registry)
+        : undefined,
+    [source, registry, suppliedRegistry],
+  );
+  return createElement(
+    Ctx.Provider,
+    { value: source },
+    createElement(
+      SchemaMode.Provider,
+      { value: schemaMode ?? source.schemaMode ?? 'native' },
+      createElement(ClientRegistryContext.Provider, { value: registry }, children),
+    ),
+  );
 }
 
 export function useSchemaMode(): 'native' | 'declared' {

@@ -12,7 +12,10 @@ import { useMemo, useState } from 'react';
 
 const STRING_HINTS: [RegExp, string][] = [
   [/title|heading|name/i, 'Amazing Feature Title'],
-  [/desc|subtitle|summary|text|content|body/i, 'A short description of this amazing feature that showcases its value.'],
+  [
+    /desc|subtitle|summary|text|content|body/i,
+    'A short description of this amazing feature that showcases its value.',
+  ],
   [/button|label|cta/i, 'Get Started'],
   [/url|link|href/i, 'https://example.com'],
   [/image|photo|avatar|picture|src/i, 'https://picsum.photos/seed/demo/400/200'],
@@ -31,7 +34,8 @@ function tupleItems(items: JsonSchema | readonly JsonSchema[]): items is readonl
 
 function mockValue(schema: JsonSchema, fieldName = ''): unknown {
   const type = schema.type;
-  if (schema.default !== undefined && schema.default !== '' && schema.default !== 0) return schema.default;
+  if (schema.default !== undefined && schema.default !== '' && schema.default !== 0)
+    return schema.default;
   if (schema.enum) return schema.enum[0];
 
   switch (type) {
@@ -57,8 +61,12 @@ function mockValue(schema: JsonSchema, fieldName = ''): unknown {
     case 'array': {
       const items = schema.items;
       if (!items) return ['alpha', 'beta', 'gamma'];
-      if (tupleItems(items)) return items.map(item => mockValue(item, fieldName));
-      return [mockValue(items, fieldName), mockValue(items, fieldName), mockValue(items, fieldName)];
+      if (tupleItems(items)) return items.map((item) => mockValue(item, fieldName));
+      return [
+        mockValue(items, fieldName),
+        mockValue(items, fieldName),
+        mockValue(items, fieldName),
+      ];
     }
     case 'object': {
       const props = schema.properties ?? {};
@@ -69,7 +77,9 @@ function mockValue(schema: JsonSchema, fieldName = ''): unknown {
   }
 }
 
-export function mockObject(properties: Readonly<Record<string, JsonSchema>>): Record<string, unknown> {
+export function mockObject(
+  properties: Readonly<Record<string, JsonSchema>>,
+): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(properties)) result[k] = mockValue(v, k);
   return result;
@@ -77,15 +87,22 @@ export function mockObject(properties: Readonly<Record<string, JsonSchema>>): Re
 
 // ── Preview component ──
 
-export function TypePreview({ typeName, properties }: {
+export function TypePreview({
+  typeName,
+  properties,
+}: {
   typeName: string;
   properties: Readonly<Record<string, JsonSchema>>;
 }) {
   const contexts = useClientRegistry().contexts(typeName);
-  const reactContexts = contexts.filter(c => c.startsWith('react'));
+  const reactContexts = contexts.filter((c) => c.startsWith('react'));
 
   const initial = useMemo(() => {
-    const n = createNode(`/preview/${typeName.replace(/\./g, '/')}`, typeName, mockObject(properties));
+    const n = createNode(
+      `/preview/${typeName.replace(/\./g, '/')}`,
+      typeName,
+      mockObject(properties),
+    );
     stampNode(n);
     return n;
   }, [typeName]);
@@ -96,7 +113,7 @@ export function TypePreview({ typeName, properties }: {
   if (reactContexts.length === 0) return null;
 
   const handleFormChange = (partial: Record<string, unknown>) => {
-    setNode(prev => {
+    setNode((prev) => {
       const next = { ...prev, ...partial, $path: initial.$path, $type: initial.$type };
       stampNode(next);
       return next;
@@ -106,13 +123,13 @@ export function TypePreview({ typeName, properties }: {
   return (
     <div>
       <div className="flex gap-1.5 mb-2">
-        {reactContexts.map(c => (
+        {reactContexts.map((c) => (
           <Button
             key={c}
             variant={previewCtx === c ? 'default' : 'outline'}
             size="sm"
             className="h-auto rounded-full px-2.5 py-0.5 text-xs font-mono"
-            onClick={() => setPreviewCtx(prev => prev === c ? null : c)}
+            onClick={() => setPreviewCtx((prev) => (prev === c ? null : c))}
           >
             {c}
           </Button>

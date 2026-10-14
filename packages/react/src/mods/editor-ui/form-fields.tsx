@@ -1331,7 +1331,10 @@ const fields: [string, ReactHandler, ReactHandler][] = [
 
 const open: ClientViewDeclaration[] = [];
 for (const [type, view, form] of fields) {
-  open.push({ type, context: 'react', handler: view }, { type, context: 'react:form', handler: form });
+  open.push(
+    { type, context: 'react', handler: view },
+    { type, context: 'react:form', handler: form },
+  );
 }
 
 export default declareClientModule('@treenx/react/editor-ui/form-fields', open);

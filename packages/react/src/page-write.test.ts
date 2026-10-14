@@ -6,7 +6,9 @@ import type { TreeSource } from '#tree/tree-source';
 const React = await import('react');
 const { act, cleanup, fireEvent, render } = await import('@testing-library/react');
 const { createNode } = await import('@treenx/core');
-const { createClientRegistry, declareClientModule, declareView } = await import('#context/client-registry');
+const { createClientRegistry, declareClientModule, declareView } = await import(
+  '#context/client-registry'
+);
 const { Render } = await import('./context/index.tsx');
 const { NavigateProvider, makeNavigateApi } = await import('#navigate');
 const { READ_ONLY_EFFECTS } = await import('#tree/effects');
@@ -38,9 +40,9 @@ for (const legacy of [false, true]) {
         else Reflect.deleteProperty(globalThis, 'React');
       });
       const { PageLayoutView } = await import('../../../mods/brahman/views/page-layout');
-      const registry = createClientRegistry([declareClientModule('page-write', [
-        declareView('brahman.page', 'react', PageLayoutView),
-      ])]);
+      const registry = createClientRegistry([
+        declareClientModule('page-write', [declareView('brahman.page', 'react', PageLayoutView)]),
+      ]);
       let persisted: NodeData = createNode('/page', 'brahman.page', {
         command: '/start',
         positions: [],

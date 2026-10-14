@@ -1,4 +1,9 @@
-import { DEFAULT_LIMITS, type Credential, type NodeCopy, type Principal } from '@treenx/core/kernel/types';
+import {
+  DEFAULT_LIMITS,
+  type Credential,
+  type NodeCopy,
+  type Principal,
+} from '@treenx/core/kernel/types';
 import type { PersistedLaneChange, PersistedLaneCopies } from '@treenx/core/client/lane-cache';
 import { decodeFrame } from '@treenx/core/protocol/twp';
 import { KernelError } from '@treenx/core/errors';
@@ -10,14 +15,17 @@ export interface LanePersistenceLimits {
 
 /** Preserve normative error data because IndexedDB cloning loses custom Error subclass properties. */
 function storedCopy(copy: NodeCopy): NodeCopy {
-  return 'error' in copy ? { ...copy, error: { code: copy.error.code, message: copy.error.message } } : copy;
+  return 'error' in copy
+    ? { ...copy, error: { code: copy.error.code, message: copy.error.message } }
+    : copy;
 }
 
 /** Resolve only after the complete transaction commits, including its metadata and payload rows. */
 function completed(transaction: IDBTransaction): Promise<void> {
   return new Promise((resolve, reject) => {
     transaction.oncomplete = () => resolve();
-    transaction.onabort = () => reject(transaction.error ?? new KernelError('UNAVAILABLE', 'IndexedDB transaction aborted'));
+    transaction.onabort = () =>
+      reject(transaction.error ?? new KernelError('UNAVAILABLE', 'IndexedDB transaction aborted'));
     transaction.onerror = () => reject(transaction.error);
   });
 }
@@ -31,7 +39,10 @@ function result(request: IDBRequest): Promise<unknown> {
 }
 
 /** Own one durable authenticated cache; all writes are ordered behind principal wipes. */
-export function createLanePersistence(name = 'treenix-lane', limits: LanePersistenceLimits = DEFAULT_LIMITS) {
+export function createLanePersistence(
+  name = 'treenix-lane',
+  limits: LanePersistenceLimits = DEFAULT_LIMITS,
+) {
   let database: Promise<IDBDatabase> | undefined;
   let generation = 0;
   let tail = Promise.resolve();
@@ -39,16 +50,17 @@ export function createLanePersistence(name = 'treenix-lane', limits: LanePersist
 
   /** Open independent native stores, preserving the existing legacy path-keyed cache. */
   function open(): Promise<IDBDatabase> {
-    if (database === undefined) database = new Promise((resolve, reject) => {
-      const request = indexedDB.open(name, 1);
-      request.onupgradeneeded = () => {
-        request.result.createObjectStore('owner');
-        request.result.createObjectStore('metadata');
-        request.result.createObjectStore('copies', { keyPath: 'id' });
-      };
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
+    if (database === undefined)
+      database = new Promise((resolve, reject) => {
+        const request = indexedDB.open(name, 1);
+        request.onupgradeneeded = () => {
+          request.result.createObjectStore('owner');
+          request.result.createObjectStore('metadata');
+          request.result.createObjectStore('copies', { keyPath: 'id' });
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
     return database;
   }
 
@@ -57,13 +69,17 @@ export function createLanePersistence(name = 'treenix-lane', limits: LanePersist
     generation++;
     owner = undefined;
     const prior = tail;
-    tail = prior.catch(error => { console.error('[treenix] failed persistence write before wipe', error); }).then(async () => {
-      const db = await open();
-      const transaction = db.transaction(['owner', 'metadata', 'copies'], 'readwrite');
-      const done = completed(transaction);
-      for (const store of ['owner', 'metadata', 'copies']) transaction.objectStore(store).clear();
-      await done;
-    });
+    tail = prior
+      .catch((error) => {
+        console.error('[treenix] failed persistence write before wipe', error);
+      })
+      .then(async () => {
+        const db = await open();
+        const transaction = db.transaction(['owner', 'metadata', 'copies'], 'readwrite');
+        const done = completed(transaction);
+        for (const store of ['owner', 'metadata', 'copies']) transaction.objectStore(store).clear();
+        await done;
+      });
     return tail;
   }
 
@@ -71,9 +87,16 @@ export function createLanePersistence(name = 'treenix-lane', limits: LanePersist
   function apply(change: PersistedLaneChange): Promise<void> {
     if (change.kind === 'owner') {
       if (change.credential === undefined) return wipe();
-      if (owner?.principal !== change.principal || owner.credential.token !== change.credential.token) wipe();
+      if (
+        owner?.principal !== change.principal ||
+        owner.credential.token !== change.credential.token
+      )
+        wipe();
       owner = { principal: change.principal, credential: change.credential };
-    } else if (owner?.principal !== change.principal || owner.credential.token !== change.credential.token) {
+    } else if (
+      owner?.principal !== change.principal ||
+      owner.credential.token !== change.credential.token
+    ) {
       throw new KernelError('UNAUTHENTICATED', 'Persistence change belongs to another principal');
     }
 
@@ -86,8 +109,15 @@ export function createLanePersistence(name = 'treenix-lane', limits: LanePersist
       const transaction = db.transaction(['owner', 'metadata', 'copies'], 'readwrite');
       const done = completed(transaction);
       if (change.kind === 'owner') {
-        transaction.objectStore('owner').put({ t: 'welcome', principal: change.principal,
-          credential: change.credential, intake: 'persisted' }, 'current');
+        transaction.objectStore('owner').put(
+          {
+            t: 'welcome',
+            principal: change.principal,
+            credential: change.credential,
+            intake: 'persisted',
+          },
+          'current',
+        );
       } else {
         for (const [id, copy] of change.changes) {
           if (copy === null) {
@@ -116,10 +146,17 @@ export function createLanePersistence(name = 'treenix-lane', limits: LanePersist
     const transaction = db.transaction(['owner', 'metadata', 'copies'], 'readonly');
     const done = completed(transaction);
     const raw = await result(transaction.objectStore('owner').get('current'));
-    if (epoch !== generation) { await done; return undefined; }
-    if (raw === undefined) { await done; return undefined; }
+    if (epoch !== generation) {
+      await done;
+      return undefined;
+    }
+    if (raw === undefined) {
+      await done;
+      return undefined;
+    }
     const welcome = decodeFrame(JSON.stringify(raw), limits.readBytes);
-    if (welcome.t !== 'welcome' || welcome.credential === undefined) throw new KernelError('INVALID', 'Malformed persisted owner');
+    if (welcome.t !== 'welcome' || welcome.credential === undefined)
+      throw new KernelError('INVALID', 'Malformed persisted owner');
     if (welcome.credential.token !== credential.token) {
       await done;
       if (epoch === generation) await wipe();
@@ -133,27 +170,57 @@ export function createLanePersistence(name = 'treenix-lane', limits: LanePersist
       cursor.onerror = () => reject(cursor.error);
       cursor.onsuccess = () => {
         const row = cursor.result;
-        if (row === null || copies.length >= limits.readNodes) { resolve(); return; }
-        const size: unknown = row.value;
-        if (typeof row.key !== 'string' || typeof size !== 'number' || !Number.isSafeInteger(size) || size < 0) {
-          reject(new KernelError('INVALID', 'Malformed persisted metadata')); return;
+        if (row === null || copies.length >= limits.readNodes) {
+          resolve();
+          return;
         }
-        if (bytes + size > limits.readBytes) { resolve(); return; }
+        const size: unknown = row.value;
+        if (
+          typeof row.key !== 'string' ||
+          typeof size !== 'number' ||
+          !Number.isSafeInteger(size) ||
+          size < 0
+        ) {
+          reject(new KernelError('INVALID', 'Malformed persisted metadata'));
+          return;
+        }
+        if (bytes + size > limits.readBytes) {
+          resolve();
+          return;
+        }
         bytes += size;
         const request = transaction.objectStore('copies').get(row.key);
         request.onerror = () => reject(request.error);
         request.onsuccess = () => {
           try {
             const stored: unknown = request.result;
-            if (typeof stored !== 'object' || stored === null || !('copy' in stored)) throw new KernelError('INVALID', 'Missing persisted copy');
-            const frame = decodeFrame(JSON.stringify({ t: 'snap', sub: 'persisted', gen: 1, list: [], copies: [stored.copy], at: [] }), limits.readBytes + 128);
-            if (frame.t !== 'snap' || frame.copies.length !== 1) throw new KernelError('INVALID', 'Malformed persisted copy');
+            if (typeof stored !== 'object' || stored === null || !('copy' in stored))
+              throw new KernelError('INVALID', 'Missing persisted copy');
+            const frame = decodeFrame(
+              JSON.stringify({
+                t: 'snap',
+                sub: 'persisted',
+                gen: 1,
+                list: [],
+                copies: [stored.copy],
+                at: [],
+              }),
+              limits.readBytes + 128,
+            );
+            if (frame.t !== 'snap' || frame.copies.length !== 1)
+              throw new KernelError('INVALID', 'Malformed persisted copy');
             const copy = frame.copies[0];
             const id = 'node' in copy ? copy.node.$id : copy.id;
-            if (id !== row.key || new TextEncoder().encode(JSON.stringify(copy)).byteLength !== size) throw new KernelError('INVALID', 'Persisted identity or byte accounting differs');
+            if (
+              id !== row.key ||
+              new TextEncoder().encode(JSON.stringify(copy)).byteLength !== size
+            )
+              throw new KernelError('INVALID', 'Persisted identity or byte accounting differs');
             copies.push(copy);
             row.continue();
-          } catch (error) { reject(error); }
+          } catch (error) {
+            reject(error);
+          }
         };
       };
     });

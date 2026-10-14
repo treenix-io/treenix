@@ -1,7 +1,7 @@
-import { createContext, createElement, useContext, type ReactNode } from 'react'
-import type { NativeTreeSource } from '#tree/native-source'
+import { createContext, createElement, useContext, type ReactNode } from 'react';
+import type { NativeTreeSource } from '#tree/native-source';
 
-const Context = createContext<NativeTreeSource | null>(null)
+const Context = createContext<NativeTreeSource | null>(null);
 
 /** Provide the native tree source to the editor subtree. */
 export function NativeSourceProvider({

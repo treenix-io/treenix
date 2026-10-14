@@ -84,7 +84,9 @@ export function compileComponent(
   opts?: { extraScope?: Record<string, unknown>; registry?: ClientRegistry },
 ): React.FC<any> {
   function publish(component: React.FC<any>): React.FC<any> {
-    opts?.registry?.publish(declareClientModule(`compiled:${type}`, [declareView(type, 'react', component)]));
+    opts?.registry?.publish(
+      declareClientModule(`compiled:${type}`, [declareView(type, 'react', component)]),
+    );
     return component;
   }
   const cacheKey = type + '\0' + rawCode;

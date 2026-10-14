@@ -68,7 +68,7 @@ export function evaluateRef(ref: Ref, ctx: BindCtx): unknown {
         console.warn(`[bind] unknown pipe: ${step.name}`);
         return undefined;
       }
-      const resolved = step.args.map(a => resolveArg(a, ctx, ref.$ref));
+      const resolved = step.args.map((a) => resolveArg(a, ctx, ref.$ref));
       value = fn(value, ...resolved);
     }
   }
@@ -88,7 +88,7 @@ export function isCollectionRef(ref: Ref): boolean {
 export function hasOnce(ref: Ref): boolean {
   if (!ref.$map) return false;
   const expr = getCachedExpr(ref.$map);
-  return expr.steps.some(s => s.type === 'pipe' && s.name === 'once');
+  return expr.steps.some((s) => s.type === 'pipe' && s.name === 'once');
 }
 
 /** Extract all external #/path refs from a $map expression (for subscriptions) */

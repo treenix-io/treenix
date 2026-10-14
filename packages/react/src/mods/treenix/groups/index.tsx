@@ -8,8 +8,6 @@ type FP = {
   onChange?: (next: any) => void;
 };
 
-
-
 function TagsView({ value }: FP) {
   const tags: string[] = Array.isArray(value?.value) ? (value.value as string[]) : [];
   if (tags.length === 0) return <span className="text-xs text-muted-foreground">—</span>;

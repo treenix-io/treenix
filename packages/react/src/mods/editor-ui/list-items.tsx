@@ -4,7 +4,7 @@ import type { PresentationNode } from '#tree/presentation';
 // chrome wrapper <RenderChildren>. Convention: items render CONTENT only (no border, no click,
 // no fixed width) — chrome and navigation are the observer's responsibility.
 
-import { NodeProvider,Render,RenderContext } from '#context';
+import { NodeProvider, Render, RenderContext } from '#context';
 import { useClientRegistry } from '#context/client-registry-context';
 import { componentEntries } from '@treenx/core/kernel/migrate';
 import { useNavigate } from '#navigate';
@@ -34,7 +34,9 @@ export function pathName(p: string): string {
 // ── Item content (no chrome) ──
 
 function DirListItem({ value }: { value: PresentationNode }) {
-  const meta = value.metadata as { $type: string; title?: string; description?: string } | undefined;
+  const meta = value.metadata as
+    | { $type: string; title?: string; description?: string }
+    | undefined;
   return (
     <>
       <span className="flex h-6 w-6 items-center justify-center rounded bg-secondary text-[12px]">
@@ -123,17 +125,19 @@ const ITEM_CHROME: Record<ChildCtx, string> = {
 };
 
 function targetPath(item: PresentationNode): string {
-  return ((item as { $ref?: string }).$ref) ?? item.$path;
+  return (item as { $ref?: string }).$ref ?? item.$path;
 }
 
 /** Compose each component's own list view; explicit wrappers receive the combined content. */
 export function RenderListItem({ value }: { value: PresentationNode }) {
   const registry = useClientRegistry();
-  const components = componentEntries(value).slice(1).map(([name, component]) => ({
-    name,
-    component,
-    view: registry.exact(component.$type, 'react:list'),
-  }));
+  const components = componentEntries(value)
+    .slice(1)
+    .map(([name, component]) => ({
+      name,
+      component,
+      view: registry.exact(component.$type, 'react:list'),
+    }));
 
   let content: ReactNode = (
     <>
@@ -145,10 +149,19 @@ export function RenderListItem({ value }: { value: PresentationNode }) {
   );
 
   for (const { name, component, view } of components) {
-    if (view?.meta?.wrap === true) content = <Render key={name} value={component}>{content}</Render>;
+    if (view?.meta?.wrap === true)
+      content = (
+        <Render key={name} value={component}>
+          {content}
+        </Render>
+      );
   }
 
-  return <NodeProvider value={value}><RenderContext name="react:list">{content}</RenderContext></NodeProvider>;
+  return (
+    <NodeProvider value={value}>
+      <RenderContext name="react:list">{content}</RenderContext>
+    </NodeProvider>
+  );
 }
 
 export function RenderChildren({
@@ -207,5 +220,5 @@ export default declareClientModule('@treenx/react/editor-ui/list-items', [
   { type: 'dir', context: 'react:list', handler: DirListItem },
   { type: 'default', context: 'react:list', handler: DefaultListItem },
   { type: 'default', context: 'react:card', handler: DefaultCard },
-  { type: 'default', context: 'react:icon', handler: DefaultIcon }
+  { type: 'default', context: 'react:icon', handler: DefaultIcon },
 ]);

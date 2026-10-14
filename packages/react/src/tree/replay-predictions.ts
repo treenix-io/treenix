@@ -12,9 +12,13 @@ export function replayPredictions<Node extends object, Operation>(
     const candidate = structuredClone(draft);
     try {
       const result = apply(candidate, operation);
-      if (result !== null && (typeof result === 'object' || typeof result === 'function')
-          && 'then' in result && typeof result.then === 'function') {
-        Promise.resolve(result).catch(error => failed(operation, error));
+      if (
+        result !== null &&
+        (typeof result === 'object' || typeof result === 'function') &&
+        'then' in result &&
+        typeof result.then === 'function'
+      ) {
+        Promise.resolve(result).catch((error) => failed(operation, error));
         asynchronous(operation);
         continue;
       }

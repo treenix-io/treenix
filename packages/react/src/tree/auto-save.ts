@@ -1,7 +1,13 @@
 // Editor drafts stay local until the selected source commits their partial changes.
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useSyncExternalStore } from 'react';
-import { foldPartial, mergeIntoNode, mergeToOps, type OnChange, scopeOnChange } from '#tree/on-change';
+import {
+  foldPartial,
+  mergeIntoNode,
+  mergeToOps,
+  type OnChange,
+  scopeOnChange,
+} from '#tree/on-change';
 import type { NodeData } from '@treenx/core';
 import { KernelError } from '@treenx/core/errors';
 import { READ_ONLY_EFFECTS, useTreeEffects, type TreeEffects } from '#tree/effects';
@@ -58,17 +64,24 @@ interface SaveOwner<T extends PresentationNode> {
 /** Owns local editor drafts through the selected source and its mutation capability. */
 export function useSave(path: string, options?: SaveOptions): SaveHandle<PresentationNode> {
   const source = useTreeSource();
-  const owner = useMemo<SaveOwner<PresentationNode>>(() => ({
-    effects: source.effects ?? READ_ONLY_EFFECTS,
-    read: selected => source.getPathSnapshot(selected).data,
-    subscribe: (selected, changed) => source.subscribePath(selected, changed),
-    mount: selected => source.mountPath(selected),
-  }), [source]);
+  const owner = useMemo<SaveOwner<PresentationNode>>(
+    () => ({
+      effects: source.effects ?? READ_ONLY_EFFECTS,
+      read: (selected) => source.getPathSnapshot(selected).data,
+      subscribe: (selected, changed) => source.subscribePath(selected, changed),
+      mount: (selected) => source.mountPath(selected),
+    }),
+    [source],
+  );
   return useOwnedSave(path, options, owner);
 }
 
 /** Shares draft buffering while each caller supplies its actual read and mutation owner. */
-function useOwnedSave<T extends PresentationNode>(path: string, options: SaveOptions | undefined, owner: SaveOwner<T>): SaveHandle<T> {
+function useOwnedSave<T extends PresentationNode>(
+  path: string,
+  options: SaveOptions | undefined,
+  owner: SaveOwner<T>,
+): SaveHandle<T> {
   const effects = owner.effects;
   const readNode = owner.read;
   const autoSave = options?.autoSave ?? false;
@@ -117,7 +130,9 @@ function useOwnedSave<T extends PresentationNode>(path: string, options: SaveOpt
   const mountedOwner = useRef(true);
   useEffect(() => {
     mountedOwner.current = true;
-    return () => { if (owner === prevOwnerRef.current) mountedOwner.current = false; };
+    return () => {
+      if (owner === prevOwnerRef.current) mountedOwner.current = false;
+    };
   }, [owner]);
   if (path !== prevPathRef.current || owner !== prevOwnerRef.current) {
     prevPathRef.current = path;
@@ -134,7 +149,12 @@ function useOwnedSave<T extends PresentationNode>(path: string, options: SaveOpt
   const ownerGeneration = genRef.current;
   /** Refuses callbacks retained by an editor whose selected owner or path has changed. */
   function assertOwner(): void {
-    if (owner !== prevOwnerRef.current || path !== pathRef.current || !mountedOwner.current || ownerGeneration !== genRef.current)
+    if (
+      owner !== prevOwnerRef.current ||
+      path !== pathRef.current ||
+      !mountedOwner.current ||
+      ownerGeneration !== genRef.current
+    )
       throw new KernelError('CANCELLED', 'Save owner changed');
   }
 
@@ -194,7 +214,10 @@ function useOwnedSave<T extends PresentationNode>(path: string, options: SaveOpt
       if (genRef.current !== gen) return;
       if (pending.current) {
         // Edits accumulated during the round-trip — schedule the next flush.
-        if (autoSave) timer.current = setTimeout(() => { flush().catch(() => {}); }, delay);
+        if (autoSave)
+          timer.current = setTimeout(() => {
+            flush().catch(() => {});
+          }, delay);
       } else {
         clearEdit();
       }
@@ -221,29 +244,34 @@ function useOwnedSave<T extends PresentationNode>(path: string, options: SaveOpt
     if (running) await Promise.allSettled([running]);
   }, [owner, path, ownerGeneration]);
 
-  const onChange = useCallback((partial: OnChange) => {
-    assertOwner();
-    // Folded first: an invalid partial throws INVALID to the caller before any edit state changes.
-    const next = foldPartial(pending.current ?? {}, partial);
+  const onChange = useCallback(
+    (partial: OnChange) => {
+      assertOwner();
+      // Folded first: an invalid partial throws INVALID to the caller before any edit state changes.
+      const next = foldPartial(pending.current ?? {}, partial);
 
-    // Track dirty state — capture snapshot + $rev on first edit for reset/stale detection
-    if (!pending.current) {
-      const cached = readNode(pathRef.current);
-      editRevRef.current = cached?.$rev ?? null;
-    }
+      // Track dirty state — capture snapshot + $rev on first edit for reset/stale detection
+      if (!pending.current) {
+        const cached = readNode(pathRef.current);
+        editRevRef.current = cached?.$rev ?? null;
+      }
 
-    pending.current = next;
-    bump();
+      pending.current = next;
+      bump();
 
-    // Auto-save: start throttle timer. flush rethrows on failure (already
-    // logged inside) — catch here so a background flush can't become an
-    // unhandled rejection; pending stays restored for the next attempt.
-    if (autoSave && !timer.current) {
-      timer.current = setTimeout(() => { flush().catch(() => {}); }, delay);
-    }
-    // delay/autoSave captured transitively via flush — listing them here is redundant
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [flush, readNode]);
+      // Auto-save: start throttle timer. flush rethrows on failure (already
+      // logged inside) — catch here so a background flush can't become an
+      // unhandled rejection; pending stays restored for the next attempt.
+      if (autoSave && !timer.current) {
+        timer.current = setTimeout(() => {
+          flush().catch(() => {});
+        }, delay);
+      }
+      // delay/autoSave captured transitively via flush — listing them here is redundant
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    },
+    [flush, readNode],
+  );
 
   const scope = useCallback((key: string) => scopeOnChange(onChange, key), [onChange]);
 
@@ -264,17 +292,21 @@ function useOwnedSave<T extends PresentationNode>(path: string, options: SaveOpt
   }, [clearEdit, clearTimer, effects, path, owner, ownerGeneration]);
 
   // Flush on unmount
-  useEffect(() => () => {
-    if (owner !== prevOwnerRef.current) return;
-    if (timer.current) clearTimeout(timer.current);
-    const partial = pending.current;
-    if (!partial) return;
-    const ops = mergeToOps(partial);
-    if (ops.length > 0) {
-      effects.patchNode(pathRef.current, partial)
-        .catch(e => console.error('[useSave] unmount flush failed:', e));
-    }
-  }, [effects, owner]);
+  useEffect(
+    () => () => {
+      if (owner !== prevOwnerRef.current) return;
+      if (timer.current) clearTimeout(timer.current);
+      const partial = pending.current;
+      if (!partial) return;
+      const ops = mergeToOps(partial);
+      if (ops.length > 0) {
+        effects
+          .patchNode(pathRef.current, partial)
+          .catch((e) => console.error('[useSave] unmount flush failed:', e));
+      }
+    },
+    [effects, owner],
+  );
 
   // Derived dirty — pending + inflight are the real sources of truth (bumps re-render)
   const dirty = !!pending.current || inflight.current;
@@ -289,8 +321,12 @@ function useOwnedSave<T extends PresentationNode>(path: string, options: SaveOpt
   // Keep submitted edits visible until their owning request settles or the selected path changes.
   const value = useMemo(
     () => {
-      const partial = submitted.current === null ? pending.current
-        : pending.current === null ? submitted.current : foldPartial(submitted.current, pending.current);
+      const partial =
+        submitted.current === null
+          ? pending.current
+          : pending.current === null
+            ? submitted.current
+            : foldPartial(submitted.current, pending.current);
       return partial !== null && node !== undefined ? mergeIntoNode(node, partial) : node;
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -304,7 +340,10 @@ function useOwnedSave<T extends PresentationNode>(path: string, options: SaveOpt
 }
 
 /** useSave with autoSave enabled — throttled flush on every onChange */
-export function useAutoSave(path: string, options?: Omit<SaveOptions, 'autoSave'>): SaveHandle<PresentationNode> {
+export function useAutoSave(
+  path: string,
+  options?: Omit<SaveOptions, 'autoSave'>,
+): SaveHandle<PresentationNode> {
   return useSave(path, { ...options, autoSave: true });
 }
 
@@ -344,13 +383,16 @@ export function usePathSave(options?: { delay?: number }): PathSaveHandle {
   if (ownerRef.current !== effects) {
     ownerRef.current = effects;
     generation.current++;
-    pending.current.clear(); handleCache.current.clear(); clearTimer();
+    pending.current.clear();
+    handleCache.current.clear();
+    clearTimer();
     inflight.current = null;
   }
   const ownerGeneration = generation.current;
 
   const flush = useCallback(async () => {
-    if (ownerRef.current !== effects || generation.current !== ownerGeneration) throw new KernelError('CANCELLED', 'Save owner was replaced');
+    if (ownerRef.current !== effects || generation.current !== ownerGeneration)
+      throw new KernelError('CANCELLED', 'Save owner was replaced');
     if (inflight.current) {
       await inflight.current;
       if (pending.current.size > 0) return flush();
@@ -363,17 +405,20 @@ export function usePathSave(options?: { delay?: number }): PathSaveHandle {
     if (entries.length === 0) return;
 
     const run = (async () => {
-      const settled = await Promise.allSettled(entries.map(([path, partial]) => {
-        const ops = mergeToOps(partial);
-        return ops.length === 0 ? Promise.resolve() : effects.patchNode(path, partial);
-      }));
+      const settled = await Promise.allSettled(
+        entries.map(([path, partial]) => {
+          const ops = mergeToOps(partial);
+          return ops.length === 0 ? Promise.resolve() : effects.patchNode(path, partial);
+        }),
+      );
 
       // A failed path keeps its edits pending under the ones made since, so the next change or flush resends them.
       const failures: unknown[] = [];
       settled.forEach((r, i) => {
         if (r.status === 'fulfilled') return;
         const [path, partial] = entries[i];
-        if (generation.current === epoch) pending.current.set(path, foldPartial(partial, pending.current.get(path) ?? {}));
+        if (generation.current === epoch)
+          pending.current.set(path, foldPartial(partial, pending.current.get(path) ?? {}));
         failures.push(r.reason);
       });
 
@@ -388,58 +433,68 @@ export function usePathSave(options?: { delay?: number }): PathSaveHandle {
     }
   }, [clearTimer, effects, ownerGeneration]);
 
-  const change = useCallback((path: string, partial: OnChange) => {
-    if (ownerRef.current !== effects || generation.current !== ownerGeneration) throw new KernelError('CANCELLED', 'Save owner was replaced');
-    pending.current.set(path, foldPartial(pending.current.get(path) ?? {}, partial));
+  const change = useCallback(
+    (path: string, partial: OnChange) => {
+      if (ownerRef.current !== effects || generation.current !== ownerGeneration)
+        throw new KernelError('CANCELLED', 'Save owner was replaced');
+      pending.current.set(path, foldPartial(pending.current.get(path) ?? {}, partial));
 
-    // Shared timer for all paths (delay=0 → no auto-flush). A timed flush has no caller to reject to;
-    // its failed edits are pending again.
-    if (delay > 0 && !timer.current) {
-      timer.current = setTimeout(() => {
-        flush().catch((e: unknown) => console.error('[usePathSave] save failed; edits stay pending:', e));
-      }, delay);
-    }
-  }, [flush, delay, effects, ownerGeneration]);
+      // Shared timer for all paths (delay=0 → no auto-flush). A timed flush has no caller to reject to;
+      // its failed edits are pending again.
+      if (delay > 0 && !timer.current) {
+        timer.current = setTimeout(() => {
+          flush().catch((e: unknown) =>
+            console.error('[usePathSave] save failed; edits stay pending:', e),
+          );
+        }, delay);
+      }
+    },
+    [flush, delay, effects, ownerGeneration],
+  );
 
   // Ref so cached handles always call latest change (no stale closures)
   const changeRef = useRef(change);
   changeRef.current = change;
 
-  const getHandle = useCallback((childPath: string): PathHandle => {
-    if (ownerRef.current !== effects || generation.current !== ownerGeneration) throw new KernelError('CANCELLED', 'Save owner was replaced');
-    const cached = handleCache.current.get(childPath);
-    if (cached) return cached;
+  const getHandle = useCallback(
+    (childPath: string): PathHandle => {
+      if (ownerRef.current !== effects || generation.current !== ownerGeneration)
+        throw new KernelError('CANCELLED', 'Save owner was replaced');
+      const cached = handleCache.current.get(childPath);
+      if (cached) return cached;
 
-    const ownedChange = (partial: OnChange) => {
-      if (ownerRef.current !== effects || generation.current !== ownerGeneration) throw new KernelError('CANCELLED', 'Save owner was replaced');
-      changeRef.current(childPath, partial);
-    };
-    const handle: PathHandle = {
-      onChange: ownedChange,
-      scope: (key) => scopeOnChange(ownedChange, key),
-    };
-    handleCache.current.set(childPath, handle);
-    return handle;
-  }, [effects, ownerGeneration]);
+      const ownedChange = (partial: OnChange) => {
+        if (ownerRef.current !== effects || generation.current !== ownerGeneration)
+          throw new KernelError('CANCELLED', 'Save owner was replaced');
+        changeRef.current(childPath, partial);
+      };
+      const handle: PathHandle = {
+        onChange: ownedChange,
+        scope: (key) => scopeOnChange(ownedChange, key),
+      };
+      handleCache.current.set(childPath, handle);
+      return handle;
+    },
+    [effects, ownerGeneration],
+  );
 
   // Flush on unmount
-  useEffect(() => () => {
-    if (ownerRef.current !== effects || generation.current !== ownerGeneration) return;
-    if (timer.current) clearTimeout(timer.current);
-    for (const [path, partial] of pending.current) {
-      const ops = mergeToOps(partial);
-      if (ops.length > 0) {
-        const saving = effects.patchNode(path, partial);
-        saving
-          .catch(e => console.error(`[usePathSave] unmount flush failed for ${path}:`, e));
+  useEffect(
+    () => () => {
+      if (ownerRef.current !== effects || generation.current !== ownerGeneration) return;
+      if (timer.current) clearTimeout(timer.current);
+      for (const [path, partial] of pending.current) {
+        const ops = mergeToOps(partial);
+        if (ops.length > 0) {
+          const saving = effects.patchNode(path, partial);
+          saving.catch((e) => console.error(`[usePathSave] unmount flush failed for ${path}:`, e));
+        }
       }
-    }
-    pending.current.clear();
-    handleCache.current.clear();
-  }, [effects, ownerGeneration]);
-
-  return useMemo(
-    () => ({ change, path: getHandle, flush }),
-    [change, getHandle, flush],
+      pending.current.clear();
+      handleCache.current.clear();
+    },
+    [effects, ownerGeneration],
   );
+
+  return useMemo(() => ({ change, path: getHandle, flush }), [change, getHandle, flush]);
 }

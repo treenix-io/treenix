@@ -14,7 +14,10 @@ import { readSchemasFromDir } from '@treenx/core/schema/load';
 type SpecValue = string | string[] | Record<string, string | string[]>;
 type FieldMap = Record<string, SpecValue>;
 
-const pkgCache = new Map<string, { dir: string; name?: string; imports?: FieldMap; exports?: FieldMap } | null>();
+const pkgCache = new Map<
+  string,
+  { dir: string; name?: string; imports?: FieldMap; exports?: FieldMap } | null
+>();
 
 function readPkg(startDir: string) {
   if (pkgCache.has(startDir)) return pkgCache.get(startDir)!;
@@ -25,7 +28,12 @@ function readPkg(startDir: string) {
     if (existsSync(pkgPath)) {
       const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
       if (pkg.imports || pkg.exports) {
-        const result = { dir: current, name: pkg.name as string | undefined, imports: pkg.imports as FieldMap, exports: pkg.exports as FieldMap };
+        const result = {
+          dir: current,
+          name: pkg.name as string | undefined,
+          imports: pkg.imports as FieldMap,
+          exports: pkg.exports as FieldMap,
+        };
         pkgCache.set(startDir, result);
         return result;
       }
@@ -65,7 +73,7 @@ function findTreenixPkg(name: string): { dir: string; exports: FieldMap } | null
 
 function resolveConditions(pkgDir: string, spec: SpecValue, conditions: string[]): string[] {
   if (typeof spec === 'string') return [resolve(pkgDir, spec)];
-  if (Array.isArray(spec)) return spec.map(s => resolve(pkgDir, s));
+  if (Array.isArray(spec)) return spec.map((s) => resolve(pkgDir, s));
 
   for (const cond of conditions) {
     if (spec[cond]) return resolveConditions(pkgDir, spec[cond], conditions);
@@ -84,20 +92,29 @@ const IDX = ['/index.ts', '/index.tsx', '/index.js', '/index.jsx'];
 function tryResolve(candidates: string[]): string | undefined {
   for (const c of candidates) {
     if (isFile(c)) return c;
-    for (const ext of EXT) { if (isFile(c + ext)) return c + ext; }
-    for (const idx of IDX) { if (isFile(c + idx)) return c + idx; }
+    for (const ext of EXT) {
+      if (isFile(c + ext)) return c + ext;
+    }
+    for (const idx of IDX) {
+      if (isFile(c + idx)) return c + idx;
+    }
   }
 }
 
 function expandWildcard(spec: SpecValue, matched: string): SpecValue {
   if (typeof spec === 'string') return spec.replace('*', matched);
-  if (Array.isArray(spec)) return spec.map(s => s.replace('*', matched));
+  if (Array.isArray(spec)) return spec.map((s) => s.replace('*', matched));
   return Object.fromEntries(
-    Object.entries(spec).map(([k, v]) => [k, expandWildcard(v, matched)])
+    Object.entries(spec).map(([k, v]) => [k, expandWildcard(v, matched)]),
   ) as SpecValue;
 }
 
-function matchPattern(id: string, map: FieldMap, pkgDir: string, conditions: string[]): string | undefined {
+function matchPattern(
+  id: string,
+  map: FieldMap,
+  pkgDir: string,
+  conditions: string[],
+): string | undefined {
   for (const [pattern, spec] of Object.entries(map)) {
     if (pattern === id) {
       return tryResolve(resolveConditions(pkgDir, spec, conditions));
@@ -129,17 +146,34 @@ const DEFAULT_CLIENT_FILES = ['types.ts', 'react.tsx', 'view.tsx'];
 type ModEntry = { name: string; files: string[] };
 
 /** The same authored source resolution serves schema discovery and Vite imports. */
-function resolveAuthoredImport(id: string, importer: string, conditions: string[]): string | undefined {
+function resolveAuthoredImport(
+  id: string,
+  importer: string,
+  conditions: string[],
+): string | undefined {
   if (id.startsWith('.')) return tryResolve([resolve(dirname(importer), id)]);
   if (id.startsWith('#')) {
     const pkg = readPkg(dirname(importer));
-    if (pkg?.imports) return matchPattern(id, pkg.imports, pkg.dir,
-      importer.includes('/node_modules/') ? conditions.filter(condition => condition !== 'development') : conditions);
+    if (pkg?.imports)
+      return matchPattern(
+        id,
+        pkg.imports,
+        pkg.dir,
+        importer.includes('/node_modules/')
+          ? conditions.filter((condition) => condition !== 'development')
+          : conditions,
+      );
   }
   if (id.startsWith('@treenx/')) {
     const parts = id.split('/');
     const pkg = findTreenixPkg(parts.slice(0, 2).join('/'));
-    if (pkg?.exports) return matchPattern(parts.length > 2 ? './' + parts.slice(2).join('/') : '.', pkg.exports, pkg.dir, conditions);
+    if (pkg?.exports)
+      return matchPattern(
+        parts.length > 2 ? './' + parts.slice(2).join('/') : '.',
+        pkg.exports,
+        pkg.dir,
+        conditions,
+      );
   }
 }
 
@@ -154,15 +188,28 @@ function clientSchemaRoots(files: readonly string[], conditions: string[]): stri
     seen.add(file);
     roots.add(dirname(file));
     const parsed = parseSync(file, readFileSync(file, 'utf-8'));
-    if (parsed.errors.length > 0) throw new Error(`Client import graph parse failed: ${file}: ${parsed.errors.map(error => error.message).join('; ')}`);
-    const imports = parsed.module.staticImports.map(entry => ({ source: entry.moduleRequest.value, typeOnly: entry.entries.length > 0 && entry.entries.every(binding => binding.isType) }));
-    for (const exported of parsed.module.staticExports) for (const entry of exported.entries)
-      if (entry.moduleRequest !== null) imports.push({ source: entry.moduleRequest.value, typeOnly: entry.isType });
+    if (parsed.errors.length > 0)
+      throw new Error(
+        `Client import graph parse failed: ${file}: ${parsed.errors.map((error) => error.message).join('; ')}`,
+      );
+    const imports = parsed.module.staticImports.map((entry) => ({
+      source: entry.moduleRequest.value,
+      typeOnly: entry.entries.length > 0 && entry.entries.every((binding) => binding.isType),
+    }));
+    for (const exported of parsed.module.staticExports)
+      for (const entry of exported.entries)
+        if (entry.moduleRequest !== null)
+          imports.push({ source: entry.moduleRequest.value, typeOnly: entry.isType });
     for (const { source, typeOnly } of imports) {
-      if (!source.startsWith('.') && !source.startsWith('#') && !source.startsWith('@treenx/')) continue;
-      const imported = resolveAuthoredImport(source, file, conditions) ??
-        (typeOnly && source.startsWith('.') ? tryResolve([resolve(dirname(file), source) + '.d.ts']) : undefined);
-      if (imported === undefined) throw new Error(`Client import graph cannot resolve ${source} from ${file}`);
+      if (!source.startsWith('.') && !source.startsWith('#') && !source.startsWith('@treenx/'))
+        continue;
+      const imported =
+        resolveAuthoredImport(source, file, conditions) ??
+        (typeOnly && source.startsWith('.')
+          ? tryResolve([resolve(dirname(file), source) + '.d.ts'])
+          : undefined);
+      if (imported === undefined)
+        throw new Error(`Client import graph cannot resolve ${source} from ${file}`);
       if (/\.(?:[cm]?[jt]s|[jt]sx)$/.test(imported)) pending.push(imported);
     }
   }
@@ -179,11 +226,19 @@ function schemaPublications(roots: readonly string[]): string[] {
     if (seen.has(owner)) continue;
     seen.add(owner);
     const schemas = readSchemasFromDir(directory);
-    lines.push(`declareOpenModule(${JSON.stringify(owner)}, [], [${schemas.map(schema =>
-      `declareClientSchema(${JSON.stringify(schema.$id)}, () => (${JSON.stringify(schema)}))`).join(',')} ])`);
+    lines.push(
+      `declareOpenModule(${JSON.stringify(owner)}, [], [${schemas
+        .map(
+          (schema) =>
+            `declareClientSchema(${JSON.stringify(schema.$id)}, () => (${JSON.stringify(schema)}))`,
+        )
+        .join(',')} ])`,
+    );
   }
-  return [`export const schemaModules = [${lines.join(',')}];`,
-    `for (const module of schemaModules) publishClientModule(module);`];
+  return [
+    `export const schemaModules = [${lines.join(',')}];`,
+    `for (const module of schemaModules) publishClientModule(module);`,
+  ];
 }
 
 function scanClients(dir: string, clientFiles: string[], warnIfMissing = true): ModEntry[] {
@@ -199,9 +254,7 @@ function scanClients(dir: string, clientFiles: string[], warnIfMissing = true): 
     if (existsSync(client)) {
       mods.push({ name: entry.name, files: [client] });
     } else {
-      const files = clientFiles
-        .map(f => resolve(modDir, f))
-        .filter(f => existsSync(f));
+      const files = clientFiles.map((f) => resolve(modDir, f)).filter((f) => existsSync(f));
       if (files.length) mods.push({ name: entry.name, files });
     }
   }
@@ -218,8 +271,8 @@ function scanSiteViews(dir: string): ModEntry[] {
     if (!entry.isDirectory()) continue;
     const modDir = resolve(dir, entry.name);
     const candidates = ['view-site.ts', 'view-site.tsx', 'site.ts', 'site.tsx']
-      .map(f => resolve(modDir, f))
-      .filter(f => existsSync(f));
+      .map((f) => resolve(modDir, f))
+      .filter((f) => existsSync(f));
     if (candidates.length) {
       // Also pull in types so registerType has fired before view-site registers handlers.
       const types = resolve(modDir, 'types.ts');
@@ -272,7 +325,10 @@ function discoverPackageClients(hostPkgDir: string): string[] {
 
 // ── Plugin ──
 
-export default function treenixPlugin(opts?: { modsDirs?: string[]; clientFiles?: string[] }): Plugin {
+export default function treenixPlugin(opts?: {
+  modsDirs?: string[];
+  clientFiles?: string[];
+}): Plugin {
   const engineRoot = resolve(import.meta.dirname, '../../..');
   // Host package = the package this plugin lives in (e.g. @treenx/react).
   // import.meta.dirname is .../packages/react/src → host pkg dir is one up.
@@ -296,7 +352,6 @@ export default function treenixPlugin(opts?: { modsDirs?: string[]; clientFiles?
       if (id === SITE_VIRTUAL_ID) return SITE_RESOLVED_ID;
       if (!importer) return;
 
-
       // Block server.ts from frontend + resolve relative imports in @treenx packages
       if (id.startsWith('.')) {
         const resolved = resolve(importer, '..', id).replace(/\\/g, '/');
@@ -317,30 +372,34 @@ export default function treenixPlugin(opts?: { modsDirs?: string[]; clientFiles?
         if (SERVER_RE.test(resolved)) {
           this.error(
             `Server module imported in frontend build: "${id}"\n` +
-            `  from: ${importer}\n` +
-            `  Mods must not import server.ts from client code`
+              `  from: ${importer}\n` +
+              `  Mods must not import server.ts from client code`,
           );
         }
       }
 
-      if (id.startsWith('#') || id.startsWith('@treenx/')) return resolveAuthoredImport(id, importer, conditions);
+      if (id.startsWith('#') || id.startsWith('@treenx/'))
+        return resolveAuthoredImport(id, importer, conditions);
     },
 
     load(id) {
       if (id === SITE_RESOLVED_ID) {
         // SSR-only barrel — view-site.ts files are server-safe (no window/etc).
         const engineSiteMods = inNodeModules ? [] : scanSiteViews(resolve(engineRoot, 'mods'));
-        const extraSiteMods = (opts?.modsDirs ?? []).flatMap(d => scanSiteViews(resolve(d)));
+        const extraSiteMods = (opts?.modsDirs ?? []).flatMap((d) => scanSiteViews(resolve(d)));
         const seen = new Set<string>();
         const all: ModEntry[] = [];
         for (const m of [...engineSiteMods, ...extraSiteMods]) {
           const real = realpathSync(m.files[0]);
-          if (!seen.has(real)) { seen.add(real); all.push(m); }
+          if (!seen.has(real)) {
+            seen.add(real);
+            all.push(m);
+          }
         }
         // Static imports (top-level await), so registry is populated before the
         // importer runs render(). Failures here MUST surface — site views missing
         // means SSR can't render that type at all.
-        const files = all.flatMap(module => module.files);
+        const files = all.flatMap((module) => module.files);
         const lines = files.map((file, index) => `import * as site${index} from '${file}';`);
         return [
           `import { publishClientExports, publishClientModule } from '@treenx/react/context/client-registry';`,
@@ -349,12 +408,25 @@ export default function treenixPlugin(opts?: { modsDirs?: string[]; clientFiles?
           ...lines,
           ...files.map((_, index) => `publishClientExports(site${index});`),
           ...schemaPublications([
-            ...(inNodeModules ? [] : scanClients(resolve(engineRoot, 'core/src/mods'), ['kernel.ts'], false).flatMap(mod => mod.files.map(file => dirname(file)))),
-            ...clientSchemaRoots([
-              ...(inNodeModules ? [] : scanClients(resolve(engineRoot, 'mods'), clientFiles, false).flatMap(mod => mod.files)),
-              ...(opts?.modsDirs ?? []).flatMap(directory => scanClients(resolve(directory), clientFiles).flatMap(mod => mod.files)),
-              ...files,
-            ], conditions),
+            ...(inNodeModules
+              ? []
+              : scanClients(resolve(engineRoot, 'core/src/mods'), ['kernel.ts'], false).flatMap(
+                  (mod) => mod.files.map((file) => dirname(file)),
+                )),
+            ...clientSchemaRoots(
+              [
+                ...(inNodeModules
+                  ? []
+                  : scanClients(resolve(engineRoot, 'mods'), clientFiles, false).flatMap(
+                      (mod) => mod.files,
+                    )),
+                ...(opts?.modsDirs ?? []).flatMap((directory) =>
+                  scanClients(resolve(directory), clientFiles).flatMap((mod) => mod.files),
+                ),
+                ...files,
+              ],
+              conditions,
+            ),
           ]),
           '',
         ].join('\n');
@@ -366,10 +438,12 @@ export default function treenixPlugin(opts?: { modsDirs?: string[]; clientFiles?
 
       // 2. Engine mods (sibling to this plugin's package) — monorepo-dev only.
       // Engine is an optional submodule; silent skip when its mods dir is absent.
-      const engineMods = inNodeModules ? [] : scanClients(resolve(engineRoot, 'mods'), clientFiles, false);
+      const engineMods = inNodeModules
+        ? []
+        : scanClients(resolve(engineRoot, 'mods'), clientFiles, false);
 
       // 3. Extra mods dirs (passed explicitly from project vite config)
-      const extraMods = (opts?.modsDirs ?? []).flatMap(d => scanClients(resolve(d), clientFiles));
+      const extraMods = (opts?.modsDirs ?? []).flatMap((d) => scanClients(resolve(d), clientFiles));
 
       // Dedupe by mod name (realpath of first file)
       const seen = new Set<string>();
@@ -387,12 +461,17 @@ export default function treenixPlugin(opts?: { modsDirs?: string[]; clientFiles?
 
       for (const mod of [...engineMods, ...extraMods]) {
         const real = realpathSync(mod.files[0]);
-        if (!seen.has(real)) { seen.add(real); allMods.push(mod); }
+        if (!seen.has(real)) {
+          seen.add(real);
+          allMods.push(mod);
+        }
       }
 
       // Dynamic imports — each mod loads independently, failures don't crash the app
-      const lines = allMods.map(mod => {
-        const imports = mod.files.map(f => `import('${f}').then(publishClientExports)`).join(', ');
+      const lines = allMods.map((mod) => {
+        const imports = mod.files
+          .map((f) => `import('${f}').then(publishClientExports)`)
+          .join(', ');
         return `  loadMod('${mod.name}', async () => { await Promise.all([${imports}]); })`;
       });
 
@@ -405,8 +484,15 @@ export default function treenixPlugin(opts?: { modsDirs?: string[]; clientFiles?
         lines.join(',\n'),
         ']);',
         ...schemaPublications([
-          ...(inNodeModules ? [] : scanClients(resolve(engineRoot, 'core/src/mods'), ['kernel.ts'], false).flatMap(mod => mod.files.map(file => dirname(file)))),
-          ...clientSchemaRoots(allMods.flatMap(mod => mod.files), conditions),
+          ...(inNodeModules
+            ? []
+            : scanClients(resolve(engineRoot, 'core/src/mods'), ['kernel.ts'], false).flatMap(
+                (mod) => mod.files.map((file) => dirname(file)),
+              )),
+          ...clientSchemaRoots(
+            allMods.flatMap((mod) => mod.files),
+            conditions,
+          ),
         ]),
         '',
       ].join('\n');

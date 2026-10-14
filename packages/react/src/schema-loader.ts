@@ -23,7 +23,9 @@ interface SchemaReaderProps {
 
 function NativeSchemaReader({ type, children }: SchemaReaderProps) {
   const description = useNativeTypeDescription(type);
-  return description === undefined ? null : children(description.schema, Object.keys(description.actions));
+  return description === undefined
+    ? null
+    : children(description.schema, Object.keys(description.actions));
 }
 
 function DeclaredSchemaReader({ type, authored, children }: SchemaReaderProps) {
@@ -34,7 +36,10 @@ function DeclaredSchemaReader({ type, authored, children }: SchemaReaderProps) {
 
 /** Detached and reader-only rendering use authored declarations; mounted lanes use native authority. */
 export function SchemaReader(props: SchemaReaderProps) {
-  return createElement(useSchemaMode() === 'native' ? NativeSchemaReader : DeclaredSchemaReader, props);
+  return createElement(
+    useSchemaMode() === 'native' ? NativeSchemaReader : DeclaredSchemaReader,
+    props,
+  );
 }
 
 declare module '#hooks' {

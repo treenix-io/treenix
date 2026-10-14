@@ -18,7 +18,12 @@ export function componentLocation(value: object & ComponentLocation): ComponentL
 }
 
 function hide(obj: object, sym: symbol, value: unknown): void {
-  Object.defineProperty(obj, sym, { value, enumerable: false, writable: false, configurable: true });
+  Object.defineProperty(obj, sym, {
+    value,
+    enumerable: false,
+    writable: false,
+    configurable: true,
+  });
 }
 
 export function stampNode(node: NodeData): void {
@@ -38,10 +43,7 @@ export function stampNode(node: NodeData): void {
 // Stamp a synthetic component value (constructed at render time, not from cache)
 // so views can resolve their owning node via $node / $key for useActions, viewCtx, etc.
 export function stampComponent<T extends object>(value: T, node: NodeData, key = ''): T {
-  if (
-    componentLocation(value)[$node] === node &&
-    componentLocation(value)[$key] === key
-  ) {
+  if (componentLocation(value)[$node] === node && componentLocation(value)[$key] === key) {
     return value;
   }
   hide(value, $key, key);

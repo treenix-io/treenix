@@ -2,13 +2,13 @@ import './Tree.css';
 import { ConfirmDialog } from '#components/ConfirmDialog';
 import { Badge } from '#components/ui/badge';
 import {
-DropdownMenu,
-DropdownMenuContent,
-DropdownMenuItem,
-DropdownMenuTrigger,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
 } from '#components/ui/dropdown-menu';
 import { ChevronRightIcon } from 'lucide-react';
-import { useCallback,useRef,useState,useSyncExternalStore } from 'react';
+import { useCallback, useRef, useState, useSyncExternalStore } from 'react';
 import { usePath } from '#hooks';
 import { useTreeSource } from '#tree/tree-source-context';
 import type { TreeSource } from '#tree/tree-source';
@@ -41,7 +41,11 @@ function matchesFilter(name: string, type: string, filter: string): boolean {
 
 function hasMatchingDescendant(source: TreeSource, path: string, filter: string): boolean {
   for (const child of source.getChildrenSnapshot(path).data) {
-    if (matchesFilter(nodeName(child.$path), child.$type, filter) || hasMatchingDescendant(source, child.$path, filter)) return true;
+    if (
+      matchesFilter(nodeName(child.$path), child.$type, filter) ||
+      hasMatchingDescendant(source, child.$path, filter)
+    )
+      return true;
   }
   return false;
 }
@@ -65,18 +69,16 @@ function BadgeMenu({
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
-          <Badge
-            variant="secondary"
-            className="tree-badge"
-            title={fullType}
-          >
+          <Badge variant="secondary" className="tree-badge" title={fullType}>
             {typeLabel}
           </Badge>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="min-w-[120px]" onClick={(e) => e.stopPropagation()}>
-          <DropdownMenuItem onClick={() => onCreateChild(path)}>
-            + Add child
-          </DropdownMenuItem>
+        <DropdownMenuContent
+          align="end"
+          className="min-w-[120px]"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <DropdownMenuItem onClick={() => onCreateChild(path)}>+ Add child</DropdownMenuItem>
           {onDelete && (
             <DropdownMenuItem
               className="text-destructive focus:text-destructive"
@@ -125,18 +127,21 @@ function TreeNode({
   const childrenNodes = childrenSnapshot.data;
 
   const rowRef = useRef<HTMLDivElement>(null);
-  const [dragOver, ] = useState<'above' | 'below' | null>(null);
+  const [dragOver] = useState<'above' | 'below' | null>(null);
 
   const name = nodeName(path);
   const isExp = expanded.has(path);
   const allChildren = childrenNodes;
   const knownChildren = showHidden
     ? allChildren
-    : allChildren.filter(child => !nodeName(child.$path).startsWith('_'));
+    : allChildren.filter((child) => !nodeName(child.$path).startsWith('_'));
   const showChildren = filter ? knownChildren : isExp ? knownChildren : [];
   const filteredChildren = filter
-    ? showChildren.filter(child => matchesFilter(nodeName(child.$path), child.$type, filter)
-      || hasMatchingDescendant(source, child.$path, filter))
+    ? showChildren.filter(
+        (child) =>
+          matchesFilter(nodeName(child.$path), child.$type, filter) ||
+          hasMatchingDescendant(source, child.$path, filter),
+      )
     : showChildren;
 
   if (filter && !matchesFilter(name, node.$type, filter) && filteredChildren.length === 0) {
@@ -144,7 +149,9 @@ function TreeNode({
   }
 
   const indent = depth * 16 + 6;
-  const typeLabel = node.$type.includes('.') ? node.$type.slice(node.$type.lastIndexOf('.') + 1) : node.$type;
+  const typeLabel = node.$type.includes('.')
+    ? node.$type.slice(node.$type.lastIndexOf('.') + 1)
+    : node.$type;
   const canExpand = knownChildren.length > 0 || !loaded.has(path);
 
   return (
@@ -202,7 +209,9 @@ function TreeNode({
           <span className="tree-toggle" aria-hidden="true" />
         )}
         <span className="tree-label-wrap">
-          <span className="tree-label" title={path}>{name}</span>
+          <span className="tree-label" title={path}>
+            {name}
+          </span>
         </span>
         <BadgeMenu
           path={path}
@@ -212,8 +221,15 @@ function TreeNode({
           onDelete={onDelete}
         />
       </div>
-      {isExp && childrenSnapshot.error !== null && <p role="alert">{childrenSnapshot.error.message}</p>}
-      {isExp && childrenSnapshot.errors?.map(copy => <p key={copy.id} role="alert">{copy.error.message}</p>)}
+      {isExp && childrenSnapshot.error !== null && (
+        <p role="alert">{childrenSnapshot.error.message}</p>
+      )}
+      {isExp &&
+        childrenSnapshot.errors?.map((copy) => (
+          <p key={copy.id} role="alert">
+            {copy.error.message}
+          </p>
+        ))}
       {(isExp || filter) && filteredChildren.length > 0 && (
         <div className="tree-children">
           {filteredChildren.map((c) => (
