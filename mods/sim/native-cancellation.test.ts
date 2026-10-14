@@ -141,7 +141,7 @@ it(
       types: sim.manifest.types.map((type) => {
         if (type.name !== 'sim.world') return type;
         const round = type.actions.round;
-        assert.ok(round.kind === 'write');
+        assert.ok(round.kind === 'write' && round.post === undefined);
         return {
           ...type,
           actions: {

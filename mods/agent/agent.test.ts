@@ -4,7 +4,7 @@ import { createNode, getComponent, compKey } from '@treenx/core';
 import { createInstance } from '../../core/src/kernel/instance';
 import { createMemoryBlobStore } from '@treenx/core/kernel/blob-store-memory';
 import { createMemoryStore } from '@treenx/core/kernel/store/memory';
-import type { NativeCommands, Position } from '@treenx/core/kernel/types';
+import type { Position } from '@treenx/core/kernel/types';
 import { nativeAgentTypes } from './native-manifest';
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
@@ -26,8 +26,8 @@ import {
 } from './types';
 
 const manifest = { id: 'agent-contract', types: nativeAgentTypes('agent-contract'), security: [], open: [] };
-let commands: NativeCommands;
 let instance: Awaited<ReturnType<typeof createInstance>>;
+let commands: ReturnType<typeof instance.commands>;
 let sequence = 0;
 
 before(async () => {
@@ -48,8 +48,10 @@ after(() => instance.close());
 
 /** Exercise the real native draft and copy its accepted data back to the existing fixture assertions. */
 async function callAction(node: ReturnType<typeof createNode>, action: string, args: unknown = {}, component?: string) {
+  // The fixture copies accepted nodes back for assertions; writes omit issued metadata.
+  const { $owner, $id, $rev, ...input } = node;
   const key = () => ({ epoch: instance.writer.intake.epoch, time: Date.now(), nonce: String(++sequence) });
-  await commands.commit({ opId: key(), changes: [{ op: 'put', node }] });
+  await commands.commit({ opId: key(), changes: [{ op: 'put', node: input }] });
   await commands.act({ path: node.$path, action, args, opId: key(),
     ...(component === undefined ? {} : { component: compKey(component) }) });
   const accepted = await instance.source.node(node.$path);

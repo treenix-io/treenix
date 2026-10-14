@@ -3,7 +3,7 @@ import { once } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { createNodeClient, createTwpClient, openTwpHttp } from '@treenx/core/client';
-import { createInstance } from '@treenx/core/kernel';
+import { createInstance } from '../../core/src/kernel/instance';
 import { createMemoryStore } from '@treenx/core/kernel/store/memory';
 import { createMemoryBlobStore } from '@treenx/core/kernel/blob-store-memory';
 import { R, type Position } from '@treenx/core/kernel/types';
