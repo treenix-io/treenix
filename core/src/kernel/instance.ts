@@ -25,6 +25,7 @@ import { assertAdminPath, assertAuthKey, assertBootstrapState, bootstrap, bootst
 import { createProcessCache, type Image } from '#kernel/cache'
 import { createBlobTransfers } from '#kernel/blobs'
 import { createAcceptedTargets } from '#kernel/instance-targets'
+import { initializationBudget, readStoreInitialization } from '#kernel/initialization'
 import { decodeChainNode } from '#kernel/chain-index'
 import { changeSelectors, prepareChangeSet, type ChangeExecutor } from '#kernel/changeset'
 import { type AcceptedTargetReplacement } from '#kernel/instance-targets'
@@ -359,7 +360,7 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
   let constructing = true
   let closed = false
   const pendingMounts = new Map<NodeId, Node>()
-  const mountTypes = new Set(['t.mount.memory', 't.mount.fs', 't.mount.query', ...config.modules?.flatMap(module =>
+  const mountTypes = new Set(['t.mount.memory', 't.mount.fs', 't.mount.rawfs', 't.mount.federation', 't.mount.query', ...config.modules?.flatMap(module =>
     module.security.flatMap(entry => entry.context === 'mount' ? [entry.type] : [])) ?? []])
   /** Keeps claimed unavailable ranges separate from the unclaimed root Store. */
   function resolveStore(path: Path): Store {
@@ -653,7 +654,7 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
     return false
   }
   const cache = createProcessCache({ queryMs: () => limits.queryMs, external: externalStore })
-  const initial = await cache.fill(config.root, { subtree: '/' }, budget())
+  const initial = await readStoreInitialization(config.root, mountTypes)
   let writer: Writer
   /** Migration batches release Writer barriers and retain native owner authority per accepted step. */
   function queueBackfill(store: Store): void {
@@ -677,8 +678,9 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
     backfills.set(store, task)
   }
   try {
-    for (const node of initial.nodes) put(node)
-    if (storedRoot !== undefined) identity = assertBootstrapState(config.id, new Map(initial.nodes.map(node => [node.$path, node])))
+    targets.initialize(initial.metadata)
+    for (const node of initial.nodes.values()) put(node)
+    if (storedRoot !== undefined) identity = assertBootstrapState(config.id, initial.nodes)
     else if (paths.size !== 0) throw new KernelError('INVALID', 'Bootstrap requires an empty root Store')
     for (const module of config.modules ?? []) for (const type of module.types) for (const name of [type.name, ...type.aliases ?? []]) {
       const owner = owners.get(name)
@@ -783,7 +785,7 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
           }
         },
       } })
-  } finally { initial.release() }
+  } finally { initial.nodes.clear() }
   constructing = false
   const externalOwners = new Map<Store, { readonly control: AbortController; readonly done: Promise<void> }>()
 
@@ -1601,7 +1603,7 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
     const control = new AbortController()
     const external = store.external
     /** Preserve actual invariants and accepted indexes before physical images enter the order. */
-    async function reconcile(paths: readonly Path[]): Promise<void> {
+    async function reconcile(paths: readonly Path[], startup?: Budget): Promise<void> {
       await writer.reconcile(store, paths, async (changes, unknown) => {
         control.signal.throwIfAborted()
         const guard = createGuard({ registry, executor: `external:${store.domain}`, readBefore: source.node })
@@ -1615,12 +1617,12 @@ async function buildInstanceFoundation(input: InstanceFoundationConfig): Promise
           changed.set(image.path, image.after)
         }
         validate(changed, store, true)
-      })
+      }, undefined, { budget: startup })
     }
     const reporter = external(control.signal)
     try {
       await reporter.ready
-      await reconcile([root])
+      await reconcile([root], initializationBudget())
     } catch (error) {
       control.abort(error)
       throw error

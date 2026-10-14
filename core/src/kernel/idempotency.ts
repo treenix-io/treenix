@@ -44,8 +44,7 @@ export async function createIdempotency(options: IdempotencyOptions) {
   let stores = [...new Set(options.domains.map(domain => domain.store))]
   let domains: Record<string, string> = Object.fromEntries(options.domains.map(domain => [domain.store.domain, domain.epoch]))
   const lookups = new Set<Promise<void>>()
-  const saved = await options.root.scan({ range: { journal: '/' }, where: { intake: { $exists: true } },
-    sort: [['pos.epoch', -1], ['pos.seq', -1]], limit: 1, budget: options.budget() })
+  const saved = await options.root.scan({ range: { journalHead: 'intake' }, budget: options.budget() })
   let state = saved.items[0]?.intake
   const flights = new Map<string, Flight>()
 

@@ -11,8 +11,8 @@ import { ownMountTarget } from '#kernel/mount-resource'
 import { positionToRev } from '#kernel/position'
 import { createRegistry } from '#kernel/registry'
 import { assertNodeSchema } from '#kernel/schema'
-import { runStoreQuery } from '#kernel/store/budget'
-import { DEFAULT_LIMITS, type ExternalEdits, type ComponentName, type InstanceId, type MountHandler, type ProvisionedStoreMount, type Store, type StoredNode, type Session, type Node } from '#kernel/types'
+import { readStoreInitialization } from '#kernel/initialization'
+import type { ExternalEdits, ComponentName, InstanceId, MountHandler, ProvisionedStoreMount, Store, StoredNode, Session, Node } from '#kernel/types'
 import { stableJson } from '#util/stable-json'
 
 export type FsDirectoryBindings = Readonly<Record<string, string>>
@@ -65,24 +65,15 @@ export async function provisionFsMounts(
   bindings: FsDirectoryBindings,
   rawfsCodecs: RawFsCodecs = {},
 ): Promise<readonly ProvisionedStoreMount[]> {
-  const budget = {
-    nodes: DEFAULT_LIMITS.readNodes,
-    bytes: DEFAULT_LIMITS.readBytes,
-    exprWork: DEFAULT_LIMITS.exprWork,
-    deadline: Date.now() + DEFAULT_LIMITS.queryMs,
-  }
-  const scanned = await runStoreQuery(budget, DEFAULT_LIMITS.queryMs,
-    allowance => root.scan({ range: { subtree: '/' }, budget: allowance }))
-  if (scanned.items.length === 0) return []
-
-  const nodes = new Map(scanned.items.map(node => [node.$path, node]))
+  const { metadata, nodes } = await readStoreInitialization(root, new Set([fsMountType.name, rawFsMountType.name]))
+  if (metadata.length === 0) return []
   assertBootstrapState(instance, nodes)
 
   const registry = createRegistry()
   registry.publish(kernelManifest)
   const declarations: PreparedDeclaration[] = []
 
-  for (const node of scanned.items) for (const [component, value] of componentEntries(node)) {
+  for (const node of nodes.values()) for (const [component, value] of componentEntries(node)) {
     if (value.$type !== fsMountType.name && value.$type !== rawFsMountType.name) continue
     const type = value.$type === fsMountType.name ? fsMountType : rawFsMountType
     const owner = nodes.get(`${TYPE_PATH}/${type.name}`)

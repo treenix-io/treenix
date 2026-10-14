@@ -1577,12 +1577,13 @@ async function initializeWriter(options: WriterOptions) {
     paths: readonly string[],
     validate?: (changes: readonly NodeChange[], unknown: readonly UnknownExternalImage[]) => void | Promise<void>,
     current?: NonNullable<Store['readExternal']>,
-    recovery = false
+    options: { readonly recovery?: boolean; readonly budget?: Budget } = {}
   ): Promise<Position | undefined> {
     if (store.external === undefined || store.readExternal === undefined)
       throw new KernelError('INVALID', 'External Store reporting and reads must be paired')
     const readExternal = current ?? store.readExternal
-    const allowance = budget(),
+    const recovery = options.recovery === true
+    const allowance = options.budget ?? budget(),
       cost = { nodes: 0, bytes: 0, exprWork: 0 }
     const remaining = (): Budget => ({
       ...allowance,
@@ -1687,7 +1688,7 @@ async function initializeWriter(options: WriterOptions) {
       for (const member of stores) if (member.domain === store.domain) members.push(member)
       await run(members, (member, paths, validate, current) => {
         if (member.domain !== store.domain) throw new KernelError('INVALID', 'External recovery crosses owner domains')
-        return reconcile(member, paths, validate, current, true)
+        return reconcile(member, paths, validate, current, { recovery: true })
       })
     } catch (error) {
       failedObservations.add(store.domain)

@@ -52,6 +52,7 @@ export function decodeChainNode(input: ChainInput): ChainNode & { readonly id: s
   return Object.freeze({ path: input.$path, id: input.$id, types: Object.freeze([...types]),
     acl: entries ?? [], hasAcl, hasOwner, invalid, alerts: Object.freeze(alerts),
     ...principal(owner) ? { owner } : {},
+    ...(Object.hasOwn(input, '#mount') ? { hasMount: true as const } : {}),
   })
 }
 

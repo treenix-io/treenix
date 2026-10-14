@@ -17,6 +17,7 @@ interface ChainFields {
   readonly owner?: Principal
   readonly hasAcl: boolean
   readonly hasOwner: boolean
+  readonly hasMount?: true
   readonly alerts: readonly RightsAlert[]
 }
 export type ChainNode = ChainFields & (

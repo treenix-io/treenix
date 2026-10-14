@@ -1,20 +1,20 @@
 import { decodeChainNode } from "#kernel/chain-index"
 import { createHash } from 'node:crypto'
-import { readFile, realpath } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { readFile,realpath } from 'node:fs/promises'
+import { join,resolve } from 'node:path'
 import { KernelError } from '#errors'
 import { createBlobHolds } from '#kernel/blob-holds'
 import type { PersistentWriter } from '#kernel/persistence'
 import { comparePositions } from '#kernel/position'
 import { transferImageDigest } from '#kernel/transfer-image'
 import { compactJournal } from '#kernel/journal'
-import type { StoreCensusQuery, StoreCensusRange, StoreCensusNode, JournalPositionHeadRange, JournalIntakeHeadRange, DecisionMetadataRange, JournalPositionHead, JournalIntakeHead, DecisionMetadata, Budget, BlobArchiveMutation, ExternalEdits, ExternalCandidate, StorageFault, StorageFaultChange, DecisionRange, JournalCommit, JournalRange, Path, Position, ScanQuery, ScanRange, ScanResult, Store, StoreCommit, StoredNode } from '#kernel/types'
+import type { StoreCensusQuery,StoreCensusRange,StoreCensusNode,JournalPositionHeadRange,JournalIntakeHeadRange,DecisionMetadataRange,JournalPositionHead,JournalIntakeHead,DecisionMetadata,Budget,BlobArchiveMutation,ExternalEdits,ExternalCandidate,StorageFault,StorageFaultChange,DecisionRange,JournalCommit,JournalRange,Path,Position,ScanQuery,ScanRange,ScanResult,Store,StoreCommit,StoredNode } from '#kernel/types'
 import { DEFAULT_LIMITS } from '#kernel/types'
 import { stableJson } from '#util/stable-json'
 import { assertPathSafe } from '#util/path-safety'
-import { durableDirectory, durableWrite, missing } from './fs-io'
-import { decodeCommit, decodeSnapshot, openFsJournal, readBlobArchives, selectedGeneration, validateCommit, type FsPublicationStage, type FsSnapshot } from './fs-journal'
-import { fsWriteSafe, readFsNodes, scanFsNodes, writeFsNode } from './fs-layout'
+import { durableDirectory,durableWrite,missing } from './fs-io'
+import { decodeCommit,decodeSnapshot,openFsJournal,readBlobArchives,selectedGeneration,validateCommit,type FsPublicationStage,type FsSnapshot } from './fs-journal'
+import { fsWriteSafe,scanFsNodes,writeFsNode } from './fs-layout'
 import { createFsNamespace } from './fs-namespace'
 import { createSiftTest } from '#kernel/expr'
 import type { ExprWork } from '#kernel/eval'
@@ -68,11 +68,12 @@ export async function createFsStore(options: FsStoreOptions): Promise<FsStore> {
   const acceptedPositions = new Map<Path, Position>()
   let reporter: ReturnType<typeof createFsExternalWatcher> | undefined
   let last: Position = { instance: lease.instance, epoch: 0, seq: 0 }
-  const startupBudget = (): Budget => options.external === 'trusted'
+  const maintenanceBudget = (): Budget => options.external === 'trusted'
     ? { nodes: DEFAULT_LIMITS.readNodes, bytes: DEFAULT_LIMITS.readBytes, exprWork: DEFAULT_LIMITS.exprWork,
       deadline: Date.now() + DEFAULT_LIMITS.queryMs }
-    : { nodes: Number.MAX_SAFE_INTEGER, bytes: Number.MAX_SAFE_INTEGER, exprWork: Number.MAX_SAFE_INTEGER,
-      deadline: Date.now() + 10_000 }
+    : startupBudget()
+  const startupBudget = (): Budget => ({ nodes: Number.MAX_SAFE_INTEGER, bytes: Number.MAX_SAFE_INTEGER,
+    exprWork: Number.MAX_SAFE_INTEGER, deadline: Date.now() + 10_000 })
   const assertOpen = (): void => {
     lease.assertActive()
     if (closed) throw new KernelError('UNAVAILABLE', 'Filesystem Store is closed')
@@ -175,7 +176,8 @@ export async function createFsStore(options: FsStoreOptions): Promise<FsStore> {
       for (const node of accepted.items) acceptedPositions.set(node.$path, node.$pos)
       const images = (nodes: typeof actual) => stableJson(nodes.map(({ $pos, ...node }) => node).sort((a, b) => a.$path.localeCompare(b.$path)))
       if (options.external !== 'trusted' && images(actual.map(namespace.logicalNode)) !== images([...accepted.items])) throw new KernelError('INVALID', 'Filesystem contents differ from accepted storage state')
-      if (options.external === 'trusted') reporter = createFsExternalWatcher([directory, ...(layout.externalDirectories ?? [])], namespace.logicalPath, [namespace.logicalPath('/')], layout.externalMetadata)
+      // The Instance reconciles stopped edits before consuming live notifications.
+      if (options.external === 'trusted') reporter = createFsExternalWatcher([directory, ...(layout.externalDirectories ?? [])], namespace.logicalPath, [], layout.externalMetadata)
       journal.releaseReplay()
     } catch (error) { await journal.close(); throw error }
     function scan(query: StoreCensusQuery): Promise<ScanResult<StoreCensusNode>>
@@ -335,7 +337,7 @@ export async function createFsStore(options: FsStoreOptions): Promise<FsStore> {
             publication = { ...commit, maintenanceLimits: { ...context, budget: remaining } }
           }
           const referenceWork = { exprWork: 0 }
-          let allowance = publication.maintenanceLimits?.budget ?? startupBudget()
+          let allowance = publication.maintenanceLimits?.budget ?? maintenanceBudget()
           if (options.external === 'trusted' && (commit.transferBefore !== undefined || commit.transferAbsent !== undefined)) {
             for (const original of commit.transferBefore ?? []) {
               const actual = await layout.scan(directory, last,

@@ -134,6 +134,18 @@ export function createAcceptedTargets(root: Store, resolve: (path: Path) => Stor
     ids.set(node.$id, { store, path: node.$path })
   }
 
+  /** Adopt root census metadata without retaining ordinary node bodies. */
+  function initialize(nodes: readonly StoreCensusNode[]): void {
+    for (const node of nodes) {
+      if (rootIndex.paths.has(node.$path) || ids.has(node.$id)
+        || node.chain.path !== node.$path || node.chain.id !== node.$id)
+        throw new KernelError('INVALID', 'Duplicate or inconsistent root census identity')
+      rootIndex.paths.set(node.$path, node.$id)
+      rootIndex.chains.putChain(node.chain)
+      ids.set(node.$id, { store: root, path: node.$path })
+    }
+  }
+
   /** Removes an accepted address before installing the replacement images of the same commit. */
   function remove(store: Store, path: Path): void {
     const index = target(store)
@@ -200,6 +212,7 @@ export function createAcceptedTargets(root: Store, resolve: (path: Path) => Stor
 
   return {
     root: rootIndex,
+    initialize,
     target,
     attach,
     prepare,
