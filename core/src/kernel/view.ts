@@ -141,6 +141,7 @@ export function createView(options: ViewOptions) {
       failure = error
       running = false
       notify()
+      schedule()
     })
   }
 
@@ -246,6 +247,7 @@ export function createView(options: ViewOptions) {
         selectors: reads.flatMap(read => read.selectors ?? []), dependencies: reads.flatMap(read => read.dependencies ?? []),
       } }
       dependencies = ranges
+      failure = undefined
       version++
       provisional = undefined
       notify()
@@ -254,6 +256,7 @@ export function createView(options: ViewOptions) {
       for (const drop of release) drop()
       provisional = undefined
       if (gen !== generation) return
+      dependencies = ranges
       throw error
     } finally { controls.delete(control); control.close() }
   }
@@ -343,6 +346,9 @@ export function createView(options: ViewOptions) {
           selectors.delete(changed)
           if (listeners.size === 0) {
             generation++
+            failure = undefined
+            if (timer !== undefined) { clearTimeout(timer); timer = undefined }
+            for (const control of controls) control.close()
             for (const drop of result?.release ?? []) drop()
             result = undefined
             dirty = true

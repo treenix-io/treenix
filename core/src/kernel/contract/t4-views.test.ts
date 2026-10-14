@@ -9,6 +9,7 @@ import { KernelError } from '#errors'
 import { scanBudget } from '#kernel/store/contract'
 import { LIMITS_PATH } from '#kernel/bootstrap'
 import { A, R, type ChangeMember, type DeriveHandler, type ModuleManifest, type Position, type Preconditions } from '#kernel/types'
+import type { ViewSubscription } from '#kernel/view'
 
 async function fixture(derive: DeriveHandler, executor: 'reader' | 'node' = 'reader', pattern = 'result',
   sources?: readonly string[], security: 'privileged-capability' | 'user-capability' = 'privileged-capability') {
@@ -122,6 +123,137 @@ function latch() {
   const wait = new Promise<void>(resolve => { release = resolve })
   return { wait, release }
 }
+
+
+it('clears a retained shared View failure when a fresh subscription publishes successfully', { timeout: 10_000 }, async t => {
+  const failed = latch(), recovered = latch()
+  let runs = 0
+  const f = await fixture(async (_view, _request, read) => {
+    const result = await read.read({ children: '/source' })
+    if (++runs === 1) throw new KernelError('UNAVAILABLE', 'Source cannot derive yet')
+    return { members: result.copies.map(copy => {
+      assert.ok('node' in copy)
+      return copy.node.$path
+    }), rows: [{ key: 'count', value: result.list.length }] }
+  }, 'node')
+  t.after(f.close)
+  assert.ok(f.instance.setupCredential)
+  const admission = await f.instance.auth.openCredential(f.instance.setupCredential)
+  t.after(() => admission.close())
+  const options = f.instance.nodeLaneOptions(admission)
+  assert.ok(options.openView)
+  const first = await options.openView({ children: '/view/result' }, failed.release)
+  assert.ok(first)
+  t.after(() => first.close())
+  await failed.wait
+  assert.throws(() => first.select(), error => error instanceof KernelError && error.code === 'UNAVAILABLE')
+  first.close()
+  let fresh: ViewSubscription | undefined
+  fresh = await options.openView({ children: '/view/result' }, () => {
+    assert.ok(fresh)
+    if (fresh.version === 1) recovered.release()
+  })
+  assert.ok(fresh)
+  const restored = fresh
+  t.after(() => restored.close())
+  await recovered.wait
+  assert.deepEqual(fresh.select()?.rows, [{ key: 'count', value: 1 }])
+  assert.equal(runs, 2)
+})
+
+it('retries a retained shared View when its dependency changes during a failing run', { timeout: 10_000 }, async t => {
+  const captured = latch(), resume = latch(), failed = latch(), recovered = latch()
+  let runs = 0
+  const f = await fixture(async (_node, _request, read) => {
+    const source = await read.read({ node: '/source/a' })
+    const copy = source.copies[0]
+    assert.ok(copy !== undefined && 'node' in copy)
+    if (++runs === 1) {
+      captured.release()
+      await resume.wait
+      throw new KernelError('UNAVAILABLE', 'Source cannot derive yet')
+    }
+    return { members: [copy.node.$path], rows: [{ key: 'value', value: copy.node.value }] }
+  }, 'node')
+  t.after(f.close)
+  const admission = await f.instance.auth.openCredential(f.instance.setupCredential!)
+  const options = f.instance.nodeLaneOptions(admission)
+  let subscription: ViewSubscription | undefined
+  subscription = await options.openView!({ children: '/view/result' }, () => {
+    assert.ok(subscription)
+    if (subscription.version === 0) {
+      assert.throws(() => subscription!.select(), error => error instanceof KernelError && error.code === 'UNAVAILABLE')
+      failed.release()
+    } else recovered.release()
+  })
+  assert.ok(subscription)
+  t.after(() => { subscription?.close(); admission.close() })
+  await captured.wait
+  await f.commit([{ op: 'patch', path: '/source/a', ops: { $set: { value: 2 } } }])
+  resume.release()
+  await failed.wait
+  await recovered.wait
+  assert.deepEqual(subscription.select()?.rows, [{ key: 'value', value: 2 }])
+  assert.equal(runs, 2)
+})
+
+it('keeps a fresh shared View subscription independent of a closed pending failure', { timeout: 10_000 }, async t => {
+  const captured = latch(), resume = latch(), staleDone = latch(), recovered = latch()
+  let runs = 0
+  const f = await fixture(async (_node, _request, read) => {
+    const source = await read.read({ node: '/source/a' })
+    const copy = source.copies[0]
+    assert.ok(copy !== undefined && 'node' in copy)
+    if (++runs === 1) {
+      captured.release()
+      await resume.wait
+      staleDone.release()
+      throw new KernelError('UNAVAILABLE', 'Closed run cannot publish')
+    }
+    return { members: [copy.node.$path], rows: [{ key: 'value', value: copy.node.value }] }
+  }, 'node')
+  t.after(f.close)
+  const admission = await f.instance.auth.openCredential(f.instance.setupCredential!)
+  const options = f.instance.nodeLaneOptions(admission)
+  const first = await options.openView!({ children: '/view/result' }, () => {})
+  assert.ok(first)
+  await captured.wait
+  first.close()
+  const fresh = await options.openView!({ children: '/view/result' }, recovered.release)
+  assert.ok(fresh)
+  t.after(() => { fresh.close(); admission.close() })
+  await recovered.wait
+  assert.deepEqual(fresh.select()?.rows, [{ key: 'value', value: 1 }])
+  resume.release()
+  await staleDone.wait
+  assert.deepEqual(fresh.select()?.rows, [{ key: 'value', value: 1 }])
+  assert.equal(fresh.version, 1)
+  assert.equal(runs, 2)
+})
+
+it('recovers a shared node View after transient derive failure without changing its topology', { timeout: 10_000 }, async t => {
+  let failed = true
+  const f = await fixture(async (_view, _request, read) => {
+    const result = await read.read({ children: '/source' })
+    if (failed) throw new KernelError('UNAVAILABLE', 'Source cannot derive yet')
+    return { members: result.copies.map(copy => {
+      assert.ok('node' in copy)
+      return copy.node.$path
+    }), rows: [{ key: 'count', value: result.list.length }] }
+  }, 'node')
+  t.after(f.close)
+  await assert.rejects(f.admin.read({ children: '/view/result' }), error => error instanceof KernelError && error.code === 'UNAVAILABLE')
+  failed = false
+  await f.commit([{ op: 'patch', path: '/source/a', ops: { $set: { value: 9 } } }])
+  const result = await f.admin.read({ children: '/view/result' })
+  assert.equal(result.list.length, 1)
+  assert.deepEqual(result.rows, [{ key: 'count', value: 1 }])
+  f.lane.sub({ children: '/view/result' })
+  assert.equal((await f.lane.frames.next()).value?.t, 'welcome')
+  const frame = (await f.lane.frames.next()).value
+  assert.ok(frame?.t === 'snap')
+  assert.equal(frame.list.length, 1)
+})
 
 it('charges a real long migration diagnostic at its transported byte size', { timeout: 10_000 }, async t => {
   const f = await fixture(async (_node, _request, read) => {
