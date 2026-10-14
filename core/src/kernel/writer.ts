@@ -151,7 +151,12 @@ export interface PreparedMutation extends PreparedCommit {
 }
 export interface MutationSpan {
   readonly anchor: OpDecision;
-  beginIo(executor: Principal, check: () => void): Promise<void>;
+  beginIo(
+    executor: Principal,
+    reads: readonly DomainId[],
+    validate: (position: Position) => Promise<void>,
+    check: () => void,
+  ): Promise<void>;
   beginStream(stream: NonNullable<OpDecision['stream']>): Promise<void>;
   validateAnchor(): Promise<void>;
   step(
@@ -2353,13 +2358,15 @@ async function initializeWriter(options: WriterOptions) {
           get anchor() {
             return anchor;
           },
-          async beginIo(executor, check) {
+          async beginIo(executor, reads, validate, check) {
             if (ioStarted) return;
             if (pending || outcome !== undefined)
               throw new KernelError('INVALID', 'I/O admission must precede mutation completion');
-            await commit(options.root, [options.root.domain], (pos) => {
+            await commit(options.root, reads, async (pos) => {
               check();
               intake.checkAdmitted(input.opId);
+              await validate(pos);
+              check();
               return {
                 writes: [],
                 budget: input.anchorLookupCost?.budget() ?? budget(),

@@ -294,17 +294,22 @@ export function createActionRuntime(options: CommandOptions) {
       const callerSource = source;
       const assertCallerCurrent = assertActionCurrent;
 
-      /** Rechecks caller visibility independently of the executor's projection. */
-      async function checkCallerReads(position: Position): Promise<void> {
-        await checkPreconditions(callerReads.expect(), {
+      /** Rechecks each actor's observations through its own projection. */
+      async function checkReads(
+        reader: ReturnType<typeof createReader>,
+        position: Position,
+        inclusivePosition = false,
+      ): Promise<void> {
+        await checkPreconditions(reader.expect(), {
           index: writer.influence,
           position,
-          read: callerReads.projectedNode,
-          domains: callerReads.domains,
-          dependency: callerReads.dependency,
-          project: callerReads.project,
-          historyVisible: callerReads.historyVisible,
-          work: callerReads.work,
+          inclusivePosition,
+          read: reader.projectedNode,
+          domains: reader.domains,
+          dependency: reader.dependency,
+          project: reader.project,
+          historyVisible: reader.historyVisible,
+          work: reader.work,
           limits,
         });
       }
@@ -554,27 +559,28 @@ export function createActionRuntime(options: CommandOptions) {
                 );
           const context = writeContext ?? createReadActionContext(contextOptions);
 
+          /** Gates and declared reads may await changes to either actor's admitted state. */
+          async function validateFrame(
+            position: Position,
+            inclusivePosition = false,
+          ): Promise<void> {
+            frameActive();
+            await admission.validate(source.auth);
+            if (binding !== undefined) {
+              await binding.validate(source.auth);
+              await checkReads(callerReads, position, inclusivePosition);
+            }
+            await checkReads(reads, position, inclusivePosition);
+            frameActive();
+          }
+
           /** Judge this frame at its genuine position, then retain only its accepted own image. */
           async function finishFrame(final: boolean, value: unknown): Promise<Outcome> {
             const changes = builder.finish();
             if (span === undefined) {
-              await writer.read(source.domains, async () => {
-                frameActive();
-                await admission.validate(source.auth);
-                await checkPreconditions(reads.expect(), {
-                  index: writer.influence,
-                  position: writer.stream.cursor().pos,
-                  inclusivePosition: true,
-                  read: reads.projectedNode,
-                  domains: reads.domains,
-                  dependency: reads.dependency,
-                  project: reads.project,
-                  historyVisible: reads.historyVisible,
-                  work: reads.work,
-                  limits,
-                });
-                frameActive();
-              });
+              await writer.read(source.domains, () =>
+                validateFrame(writer.stream.cursor().pos, true),
+              );
               return { value };
             }
             reads.assertLocal();
@@ -615,7 +621,7 @@ export function createActionRuntime(options: CommandOptions) {
               await admission.validate(source.auth);
               if (binding !== undefined) {
                 await binding.validate(source.auth);
-                await checkCallerReads(pos);
+                await checkReads(callerReads, pos);
               }
               frameActive();
               const acceptedReads = new Map<string, Promise<StoredNode | null>>();
@@ -835,7 +841,16 @@ export function createActionRuntime(options: CommandOptions) {
             resolved = await resolveActionNeeds(action.needs, request.path, reads, limits);
             checkPre();
             if (action.kind !== 'read' && action.io === true && span !== undefined)
-              await span.beginIo(executorAdmission.actor.principal, frameActive);
+              await span.beginIo(
+                executorAdmission.actor.principal,
+                source.domains,
+                validateFrame,
+                frameActive,
+              );
+            else if (binding !== undefined || action.needs !== undefined)
+              await writer.read(source.domains, () =>
+                validateFrame(writer.stream.cursor().pos, true),
+              );
             frameActive();
             let value: unknown;
             if (

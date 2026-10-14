@@ -293,6 +293,87 @@ async function fixture(
 }
 
 describe('native action I/O', { timeout: 10_000 }, () => {
+  for (const changed of ['configuration', 'caller rights'] as const) {
+    for (const io of [true, false]) {
+      it(`refuses ${io ? 'external' : 'nested'} effects after the executor gate changes ${changed}`, async (t) => {
+        let bodies = 0;
+        let edit = async () => {};
+        const f = await fixture(
+          t,
+          {
+            send: {
+              kind: 'write',
+              io: true,
+              args: {},
+              handler: async (ctx) => external(ctx).exchange('nested'),
+            },
+          },
+          {
+            forms: {
+              submit: {
+                kind: 'setuid',
+                io,
+                args: {},
+                handler: async (ctx) => {
+                  bodies++;
+                  return io
+                    ? external(ctx).exchange('direct')
+                    : ctx.act({ path: workerPath, action: 'send', args: {}, key: 'send' });
+                },
+              },
+            },
+            gates: [
+              async (operation, actor) => {
+                if (
+                  operation.kind === 'act' &&
+                  operation.action === 'submit' &&
+                  actor.principal.startsWith('n:')
+                )
+                  await edit();
+                return 'pass';
+              },
+            ],
+          },
+        );
+        await f.grant(workerPath, R | W);
+        const caller = await f.open();
+        const described = await caller.session.read({ node: formPath, action: { name: 'submit' } });
+        assert.ok(described.action);
+        const request = {
+          path: formPath,
+          action: 'submit',
+          args: {},
+          opId: caller.key(),
+          pre: described.action,
+        };
+        edit = async () => {
+          await f.admin.commit({
+            opId: f.key(),
+            changes: [
+              changed === 'configuration'
+                ? { op: 'patch', path: formPath, ops: { $set: { count: 10 } } }
+                : { op: 'patch', path: '/forms', ops: { $set: { $acl: [] } } },
+            ],
+          }).outcome;
+        };
+
+        await assert.rejects(caller.session.act(request).outcome, code('CONFLICT'));
+        assert.equal(bodies, 0);
+        assert.deepEqual(f.adapter.calls, []);
+        assert.equal(f.adapter.scopes.length, 0);
+        assert.deepEqual(
+          (
+            await f.root.scan({
+              range: { decision: { caller: caller.session.actor.principal, opId: request.opId } },
+              budget: scanBudget(),
+            })
+          ).items,
+          [],
+        );
+      });
+    }
+  }
+
   it('binds one capability and replays an accepted result without another external invocation', async (t) => {
     let captured: ExternalCapability | undefined;
     const f = await fixture(t, {

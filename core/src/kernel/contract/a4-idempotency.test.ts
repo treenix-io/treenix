@@ -593,7 +593,12 @@ describe('ordinary external admission', { timeout: 10_000 }, () => {
     const f = await fixture(),
       input = f.identity('external');
     const outcome = await f.writer.mutate(input, async (span) => {
-      await span.beginIo(actor.principal, () => {});
+      await span.beginIo(
+        actor.principal,
+        [],
+        async () => {},
+        () => {},
+      );
       return span.finish(f.data, [], (pos) =>
         prepared(pos, actor.principal, '/items/one', 'external-result'),
       );
