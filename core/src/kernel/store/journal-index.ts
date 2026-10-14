@@ -191,6 +191,7 @@ export function createJournalIndex() {
     const cost = { nodes: 0, bytes: 0, exprWork: 0 };
     const retired: JournalAddress[] = [],
       dropped: (IndexedEntry | JournalCommit)[] = [];
+    const retiredRecords: JournalCommit[] = [];
     const promoted = new Map<IndexedEntry, JournalEntry>();
     const pending = cursor !== undefined;
     const active = cursor ?? order.keys();
@@ -263,8 +264,10 @@ export function createJournalIndex() {
             (unit.decision === undefined || unit.decision.opId.time < intent.decisionBefore) &&
             (unit.anchorDecision === undefined ||
               unit.anchorDecision.opId.time < intent.decisionBefore)
-          )
+          ) {
             dropped.push(unit);
+            retiredRecords.push(unit);
+          }
         } catch (error) {
           if (!(error instanceof KernelError && error.code === 'BUDGET') || priorCost.nodes === 0)
             throw error;
@@ -281,6 +284,7 @@ export function createJournalIndex() {
 
     return {
       retired,
+      retiredRecords,
       retained: [...promoted].map(([unit, entry]) => ({
         pos: unit.record.pos,
         entry,

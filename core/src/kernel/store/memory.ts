@@ -446,6 +446,15 @@ export function createMemoryStore(options: MemoryStoreOptions): MemoryStore {
       }
       publishJournal.publish();
       maintenance?.publish();
+      if (maintenance !== undefined)
+        for (const record of maintenance.retiredRecords) {
+          for (const decision of [record.decision, record.anchorDecision]) {
+            if (decision === undefined) continue;
+            const key = decisionKey(record.caller, decision.opId);
+            // A continued stream may have replaced this older admission's index entry.
+            if (decisions.get(key) === record) decisions.delete(key);
+          }
+        }
       publishHolds();
       publishArchive?.();
       acceptedAt = time;
