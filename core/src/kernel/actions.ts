@@ -1,64 +1,111 @@
-import { getComponentField } from '#core/component'
-import { pairingOperation,preparePairing } from '#kernel/auth-pairing'
-import { createHash } from 'node:crypto'
-import { assertSafeSchema,validateValue,type ValidationError } from '#comp/validate'
-import { KernelError } from '#errors'
-import { createActionControl,createReadActionContext,createWriteActionContext } from '#kernel/action-context'
-import { createActionDraft } from '#kernel/action-draft'
-import { intersectActionScope,scopedActionAdmission } from '#kernel/action-scope'
-import { resolveActionNeeds,type ResolvedActionNeeds } from '#kernel/action-needs'
-import { createChangeBuilder } from '#kernel/change-builder'
-import { changeSelectors,selectChangeStore,prepareChangeSet,prepareRoutedChangeSet,type ChangeSetOptions } from '#kernel/changeset'
-import type { CommandOptions,NodeActionBinding } from '#kernel/commands'
-import { runWithActionContext } from '#kernel/current-action'
-import { createSiftTest } from '#kernel/expr'
-import { judgeGates } from '#kernel/gates'
-import { componentEntries,createMigrator } from '#kernel/migrate'
-import { checkPreconditions } from '#kernel/preconditions'
-import { positionToRev } from '#kernel/position'
-import { visibleNode } from '#kernel/projection'
-import { assertPost } from '#kernel/post'
-import { createReader,createReaderLedger,readerOperationCost,type ReaderLedger } from '#kernel/reader'
-import { createRequestAdmission,serializeRequest } from '#kernel/request'
-import { R,W,type ActRequest,type Io,type ActionDef,type ActionPieceDelivery,type ActionResult,type NestedActRequest,type Node,type OpId,type Outcome,type Path,type Position,type Principal,type StoredNode } from '#kernel/types'
-import type { MutationSpan } from '#kernel/writer'
-import { freeze } from '#util/freeze'
-import { stableJson } from '#util/stable-json'
+import { getComponentField } from '#core/component';
+import { pairingOperation, preparePairing } from '#kernel/auth-pairing';
+import { createHash } from 'node:crypto';
+import { assertSafeSchema, validateValue, type ValidationError } from '#comp/validate';
+import { KernelError } from '#errors';
+import {
+  createActionControl,
+  createReadActionContext,
+  createWriteActionContext,
+} from '#kernel/action-context';
+import { createActionDraft } from '#kernel/action-draft';
+import { intersectActionScope, scopedActionAdmission } from '#kernel/action-scope';
+import { resolveActionNeeds, type ResolvedActionNeeds } from '#kernel/action-needs';
+import { createChangeBuilder } from '#kernel/change-builder';
+import {
+  changeSelectors,
+  selectChangeStore,
+  prepareChangeSet,
+  prepareRoutedChangeSet,
+  type ChangeSetOptions,
+} from '#kernel/changeset';
+import type { CommandOptions, NodeActionBinding } from '#kernel/commands';
+import { runWithActionContext } from '#kernel/current-action';
+import { createSiftTest } from '#kernel/expr';
+import { judgeGates } from '#kernel/gates';
+import { componentEntries, createMigrator } from '#kernel/migrate';
+import { checkPreconditions } from '#kernel/preconditions';
+import { positionToRev } from '#kernel/position';
+import { visibleNode } from '#kernel/projection';
+import { assertPost } from '#kernel/post';
+import {
+  createReader,
+  createReaderLedger,
+  readerOperationCost,
+  type ReaderLedger,
+} from '#kernel/reader';
+import { createRequestAdmission, serializeRequest } from '#kernel/request';
+import {
+  R,
+  W,
+  type ActRequest,
+  type Io,
+  type ActionDef,
+  type ActionPieceDelivery,
+  type ActionResult,
+  type NestedActRequest,
+  type Node,
+  type OpId,
+  type Outcome,
+  type Path,
+  type Position,
+  type Principal,
+  type StoredNode,
+} from '#kernel/types';
+import type { MutationSpan } from '#kernel/writer';
+import { freeze } from '#util/freeze';
+import { stableJson } from '#util/stable-json';
 
 interface ParentAction {
-  readonly scope?: readonly Path[]
-  readonly writeScope?: readonly Path[]
-  readonly depth: number
-  readonly deadline: number
-  readonly active: () => void
-  readonly onlyRead: boolean
-  readonly keyNamespace: Principal
-  readonly ledger: ReaderLedger
+  readonly scope?: readonly Path[];
+  readonly writeScope?: readonly Path[];
+  readonly depth: number;
+  readonly deadline: number;
+  readonly active: () => void;
+  readonly onlyRead: boolean;
+  readonly keyNamespace: Principal;
+  readonly ledger: ReaderLedger;
 }
-const AsyncGenerator = Object.getPrototypeOf(async function* () {}).constructor
+const AsyncGenerator = Object.getPrototypeOf(async function* () {}).constructor;
 
 /** Validate the mutation key before it reaches durable dispatch. */
 function assertMutationKey(opId: OpId | undefined): asserts opId is OpId {
-  if (opId === undefined || typeof opId.epoch !== 'string' || opId.epoch.length === 0
-    || !Number.isSafeInteger(opId.time) || opId.time < 0 || typeof opId.nonce !== 'string' || opId.nonce.length === 0)
-    throw new KernelError('INVALID', 'A mutation key is required')
+  if (
+    opId === undefined ||
+    typeof opId.epoch !== 'string' ||
+    opId.epoch.length === 0 ||
+    !Number.isSafeInteger(opId.time) ||
+    opId.time < 0 ||
+    typeof opId.nonce !== 'string' ||
+    opId.nonce.length === 0
+  )
+    throw new KernelError('INVALID', 'A mutation key is required');
 }
 
 /** Reject action kinds and effects that this runtime cannot execute. */
 function assertSupportedAction(action: ActionDef, options: CommandOptions): void {
-  if (action.kind !== 'read' && action.io === true && options.io === undefined) throw new KernelError('UNAVAILABLE', 'Action I/O is not configured')
-  if (action.kind !== 'read' && action.post !== undefined && action.handler !== undefined
-    && (action.handler instanceof AsyncGenerator || Reflect.get(action.handler, 'implementation') instanceof AsyncGenerator))
-    throw new KernelError('INVALID', 'A streaming action cannot declare post')
-  if (action.kind !== 'read' && action.post !== undefined) assertPost(action.post)
+  if (action.kind !== 'read' && action.io === true && options.io === undefined)
+    throw new KernelError('UNAVAILABLE', 'Action I/O is not configured');
+  if (
+    action.kind !== 'read' &&
+    action.post !== undefined &&
+    action.handler !== undefined &&
+    (action.handler instanceof AsyncGenerator ||
+      Reflect.get(action.handler, 'implementation') instanceof AsyncGenerator)
+  )
+    throw new KernelError('INVALID', 'A streaming action cannot declare post');
+  if (action.kind !== 'read' && action.post !== undefined) assertPost(action.post);
 }
 
 /** Execute native actions through admitted reads and durable mutation decisions. */
 export function createActionRuntime(options: CommandOptions) {
-  const initialOptions = options
-  const { writer, registry } = options
-  const gates = Object.freeze([...options.gates])
-  const migrator = createMigrator(type => ({ version: registry.type(type).version, steps: registry.security(type, 'migrate') ?? [] }))
+  const initialOptions = options;
+  const { writer, registry } = options;
+  const gates = Object.freeze([...options.gates]);
+  const migrator = createMigrator((type) => ({
+    version: registry.type(type).version,
+    steps: registry.security(type, 'migrate') ?? [],
+  }));
 
   /** Own one request deadline and read set, including its nested action calls. */
   async function run(
@@ -69,7 +116,11 @@ export function createActionRuntime(options: CommandOptions) {
     deliver?: ActionPieceDelivery,
     requestId?: string,
   ): Promise<Outcome> {
-    const admission = scopedActionAdmission(createRequestAdmission(options.admission, requestSignal), parent?.scope, parent?.writeScope);
+    const admission = scopedActionAdmission(
+      createRequestAdmission(options.admission, requestSignal),
+      parent?.scope,
+      parent?.writeScope,
+    );
     if (parent?.scope !== undefined || parent?.writeScope !== undefined)
       options = options.withAdmission(admission);
     const limits = options.limits();
@@ -120,8 +171,18 @@ export function createActionRuntime(options: CommandOptions) {
             };
       if (identity !== undefined && !parent?.onlyRead) assertMutationKey(opId);
       const { targetType, ...publicRequest } = request;
-      const foreign = await options.actAuthority?.({ request: publicRequest, targetType, requestId, admission, cost: readerOperationCost(ledger), identity,
-        onlyRead: parent?.onlyRead ?? false, wait: control.wait, signal: control.signal, deliver });
+      const foreign = await options.actAuthority?.({
+        request: publicRequest,
+        targetType,
+        requestId,
+        admission,
+        cost: readerOperationCost(ledger),
+        identity,
+        onlyRead: parent?.onlyRead ?? false,
+        wait: control.wait,
+        signal: control.signal,
+        deliver,
+      });
       if (foreign !== undefined) return foreign;
       if (identity !== undefined && !parent?.onlyRead) {
         assertMutationKey(opId);
@@ -152,10 +213,21 @@ export function createActionRuntime(options: CommandOptions) {
       });
 
       /** Bind a supplied description to the actual admitted definition and target image. */
-      function assertDescriptor(node: Node, type: string, kind: ActionDef['kind'], expectedRevision = request.pre?.rev): void {
+      function assertDescriptor(
+        node: Node,
+        type: string,
+        kind: ActionDef['kind'],
+        expectedRevision = request.pre?.rev,
+      ): void {
         const pre = request.pre;
-        if (pre !== undefined && (pre.modules !== registry.digest || pre.type !== type || pre.kind !== kind
-          || pre.id !== node.$id || expectedRevision !== node.$rev))
+        if (
+          pre !== undefined &&
+          (pre.modules !== registry.digest ||
+            pre.type !== type ||
+            pre.kind !== kind ||
+            pre.id !== node.$id ||
+            expectedRevision !== node.$rev)
+        )
           throw new KernelError('CONFLICT', 'Action differs from its supplied description');
       }
 
@@ -170,7 +242,8 @@ export function createActionRuntime(options: CommandOptions) {
         const bits = copy.bits;
         if (request.targetType !== undefined) {
           const selected = getComponentField(node, request.targetType, request.component);
-          if (selected === undefined) throw new KernelError('NOT_FOUND', 'Action target type is absent');
+          if (selected === undefined)
+            throw new KernelError('NOT_FOUND', 'Action target type is absent');
           component = selected[1];
         }
         const target = componentEntries(node).find(([name]) => name === component);
@@ -245,9 +318,14 @@ export function createActionRuntime(options: CommandOptions) {
           throw new KernelError('FORBIDDEN', 'Action call rights are missing');
         const pairing = pairingOperation(definition, action);
         if (pairing !== undefined) {
-          if (component !== '') throw new KernelError('INVALID', 'Pairing requires its owning port');
+          if (component !== '')
+            throw new KernelError('INVALID', 'Pairing requires its owning port');
           if (pairing === 'initPair') {
-            if (!admission.actor.principal.startsWith('u:')) throw new KernelError('UNAUTHENTICATED', 'Pairing initialization requires an account');
+            if (!admission.actor.principal.startsWith('u:'))
+              throw new KernelError(
+                'UNAUTHENTICATED',
+                'Pairing initialization requires an account',
+              );
             await callerReads.requireReadWrite(request.path);
           } else if (pairing !== 'connect') await callerReads.requireAdmin();
         }
@@ -271,8 +349,18 @@ export function createActionRuntime(options: CommandOptions) {
           { signal: control.signal, deadline: budget.deadline },
         );
         assertActionCurrent();
-        const current = (await createReader({ admission, writer, registry, source, budget, limits, ledger,
-          projector: options.projector }).read({ node: request.path })).copies[0];
+        const current = (
+          await createReader({
+            admission,
+            writer,
+            registry,
+            source,
+            budget,
+            limits,
+            ledger,
+            projector: options.projector,
+          }).read({ node: request.path })
+        ).copies[0];
         if (!('node' in current)) throw current.error;
         if ((current.bits & required) !== required)
           throw new KernelError('FORBIDDEN', 'Action call rights are missing');
@@ -297,10 +385,16 @@ export function createActionRuntime(options: CommandOptions) {
         const executorAdmission = scopedActionAdmission(
           binding === undefined
             ? admission
-            : createRequestAdmission(binding.admission, control.signal), parent?.scope, parent?.writeScope);
-        const executorOptions = binding === undefined ? options
-          : parent?.scope === undefined && parent?.writeScope === undefined ? binding.options
-          : binding.options.withAdmission(executorAdmission);
+            : createRequestAdmission(binding.admission, control.signal),
+          parent?.scope,
+          parent?.writeScope,
+        );
+        const executorOptions =
+          binding === undefined
+            ? options
+            : parent?.scope === undefined && parent?.writeScope === undefined
+              ? binding.options
+              : binding.options.withAdmission(executorAdmission);
         const executorControl =
           binding === undefined
             ? control
@@ -350,10 +444,17 @@ export function createActionRuntime(options: CommandOptions) {
               throw new KernelError('INVALID', 'Nested mutation keys belong to the runtime');
             serializeRequest(input);
             const nestedRequest = freeze(structuredClone(input));
-            const constrained = parent?.scope !== undefined || parent?.writeScope !== undefined
-              || nestedRequest.scope !== undefined || nestedRequest.writeScope !== undefined;
-            const scope = constrained ? intersectActionScope(executorAdmission.actor.scope, nestedRequest.scope) : undefined;
-            const writeScope = constrained ? intersectActionScope(executorAdmission.actor.writeScope, nestedRequest.writeScope) : undefined;
+            const constrained =
+              parent?.scope !== undefined ||
+              parent?.writeScope !== undefined ||
+              nestedRequest.scope !== undefined ||
+              nestedRequest.writeScope !== undefined;
+            const scope = constrained
+              ? intersectActionScope(executorAdmission.actor.scope, nestedRequest.scope)
+              : undefined;
+            const writeScope = constrained
+              ? intersectActionScope(executorAdmission.actor.writeScope, nestedRequest.writeScope)
+              : undefined;
             const key = nestedRequest.key;
             if (key !== undefined) {
               if (typeof key !== 'string' || key.length === 0 || keys.has(key))
@@ -370,7 +471,14 @@ export function createActionRuntime(options: CommandOptions) {
                     nonce:
                       'nested:' +
                       createHash('sha256')
-                        .update(stableJson([keyNamespace, parentKey, key, ...(constrained ? [scope, writeScope] : [])]))
+                        .update(
+                          stableJson([
+                            keyNamespace,
+                            parentKey,
+                            key,
+                            ...(constrained ? [scope, writeScope] : []),
+                          ]),
+                        )
                         .digest('hex'),
                   }
                 : undefined;
@@ -404,11 +512,15 @@ export function createActionRuntime(options: CommandOptions) {
             frameActive();
             return outcome.value;
           }
-          const lifetime = { signal: executorControl.signal, chargeBytes(bytes: number) {
-            frameActive();
-            ledger.requestBytes += bytes;
-            if (ledger.requestBytes > ledger.requestLimit) throw new KernelError('BUDGET', 'Action request budget exceeded');
-          } };
+          const lifetime = {
+            signal: executorControl.signal,
+            chargeBytes(bytes: number) {
+              frameActive();
+              ledger.requestBytes += bytes;
+              if (ledger.requestBytes > ledger.requestLimit)
+                throw new KernelError('BUDGET', 'Action request budget exceeded');
+            },
+          };
           const contextOptions = () => ({
             node,
             needs: resolved.needs,
@@ -517,37 +629,50 @@ export function createActionRuntime(options: CommandOptions) {
                 return pending;
               }
               const pairing = pairingOperation(definition, action);
-              const acceptedPort = pairing === undefined ? undefined : await readBefore(request.path);
-              if (pairing !== undefined && (acceptedPort === undefined || acceptedPort === null || acceptedPort.$id !== node.$id))
+              const acceptedPort =
+                pairing === undefined ? undefined : await readBefore(request.path);
+              if (
+                pairing !== undefined &&
+                (acceptedPort === undefined ||
+                  acceptedPort === null ||
+                  acceptedPort.$id !== node.$id)
+              )
                 throw new KernelError('CONFLICT', 'Pairing owner changed');
-              const accepted = pairing === undefined || acceptedPort === undefined || acceptedPort === null
-                ? undefined : await preparePairing(pairing, acceptedPort, request.args, source.auth);
+              const accepted =
+                pairing === undefined || acceptedPort === undefined || acceptedPort === null
+                  ? undefined
+                  : await preparePairing(pairing, acceptedPort, request.args, source.auth);
               const preparation: ChangeSetOptions = {
-                  store,
-                  cache: writer.cache,
-                  registry,
+                store,
+                cache: writer.cache,
+                registry,
+                limits,
+                budget: reads.remainingBudget(),
+                readCost: readerOperationCost(ledger),
+                blobs: executorOptions.blobs,
+                boundary: executorOptions.boundary,
+                resolve: (path) => source.resolve(path).store,
+                readBefore,
+                capabilities: executorOptions.capabilities(budget, ledger),
+                preconditions: {
+                  index: writer.influence,
+                  read: reads.projectedNode,
+                  domains: reads.domains,
+                  dependency: reads.dependency,
+                  project: reads.project,
+                  historyVisible: reads.historyVisible,
+                  work: reads.work,
                   limits,
-                  budget: reads.remainingBudget(),
-                  readCost: readerOperationCost(ledger),
-                  blobs: executorOptions.blobs,
-                  boundary: executorOptions.boundary,
-                  resolve: (path) => source.resolve(path).store,
-                  readBefore,
-                  capabilities: executorOptions.capabilities(budget, ledger),
-                  preconditions: {
-                    index: writer.influence,
-                    read: reads.projectedNode,
-                    domains: reads.domains,
-                    dependency: reads.dependency,
-                    project: reads.project,
-                    historyVisible: reads.historyVisible,
-                    work: reads.work,
-                    limits,
-                  },
+                },
               };
               const portPrepared = await prepareRoutedChangeSet(
-                source, preparation,
-                accepted === undefined ? changes : accepted.portChange === undefined ? [] : [accepted.portChange],
+                source,
+                preparation,
+                accepted === undefined
+                  ? changes
+                  : accepted.portChange === undefined
+                    ? []
+                    : [accepted.portChange],
                 pos,
                 {
                   executor: executorAdmission.actor.principal,
@@ -569,24 +694,48 @@ export function createActionRuntime(options: CommandOptions) {
               let prepared = portPrepared;
               if (accepted !== undefined && accepted.authChanges.length !== 0) {
                 const authPrepared = await prepareChangeSet(
-                  { ...preparation, budget: portPrepared.budget }, accepted.authChanges, pos,
+                  { ...preparation, budget: portPrepared.budget },
+                  accepted.authChanges,
+                  pos,
                   { executor: 'kernel', caller: admission.actor.principal },
                 );
-                if (await selectChangeStore(accepted.authChanges, source, ownership, store) !== store)
-                  throw new KernelError('CROSS_DOMAIN', 'Pairing requires one physical Store owner');
-                if (portPrepared.transitions.length + authPrepared.transitions.length > limits.changeSet)
+                if (
+                  (await selectChangeStore(accepted.authChanges, source, ownership, store)) !==
+                  store
+                )
+                  throw new KernelError(
+                    'CROSS_DOMAIN',
+                    'Pairing requires one physical Store owner',
+                  );
+                if (
+                  portPrepared.transitions.length + authPrepared.transitions.length >
+                  limits.changeSet
+                )
                   throw new KernelError('BUDGET', 'Pairing exceeds the shared transition budget');
                 prepared = {
                   writes: [...portPrepared.writes, ...authPrepared.writes],
                   transitions: [...portPrepared.transitions, ...authPrepared.transitions],
-                  record: { ...authPrepared.record, entries: [...portPrepared.record.entries, ...authPrepared.record.entries] },
+                  record: {
+                    ...authPrepared.record,
+                    entries: [...portPrepared.record.entries, ...authPrepared.record.entries],
+                  },
                   budget: authPrepared.budget,
                 };
               }
               executorOptions.validate(prepared);
-              ownImage = (prepared.logicalWrites ?? prepared.writes).find((write) => write.path === request.path)?.node;
+              ownImage = (prepared.logicalWrites ?? prepared.writes).find(
+                (write) => write.path === request.path,
+              )?.node;
               frameActive();
-              return { ...prepared, ...(accepted === undefined ? value === undefined ? {} : { value } : { value: accepted.value }), check: frameActive };
+              return {
+                ...prepared,
+                ...(accepted === undefined
+                  ? value === undefined
+                    ? {}
+                    : { value }
+                  : { value: accepted.value }),
+                check: frameActive,
+              };
             };
             if (final) return span.finish(store, source.domains, prepare);
             const pos = await span.step(store, source.domains, prepare);
@@ -689,18 +838,25 @@ export function createActionRuntime(options: CommandOptions) {
               await span.beginIo(executorAdmission.actor.principal, frameActive);
             frameActive();
             let value: unknown;
-            if (action.handler !== undefined && pairingOperation(definition, action) === undefined) {
+            if (
+              action.handler !== undefined &&
+              pairingOperation(definition, action) === undefined
+            ) {
               let pending: ActionResult;
               if (action.kind === 'read') {
                 const handler = action.handler;
-                pending = runWithActionContext(context, frameActive, () =>
-                  handler.call(freeze(ownComponent), context, structuredClone(request.args)),
+                pending = runWithActionContext(
+                  context,
+                  frameActive,
+                  () => handler.call(freeze(ownComponent), context, structuredClone(request.args)),
                   lifetime,
                 );
               } else {
                 const handler = action.handler;
-                pending = runWithActionContext(context, frameActive, () =>
-                  handler.call(draft!.draft, writeContext!, structuredClone(request.args)),
+                pending = runWithActionContext(
+                  context,
+                  frameActive,
+                  () => handler.call(draft!.draft, writeContext!, structuredClone(request.args)),
                   lifetime,
                 );
               }
@@ -820,5 +976,12 @@ export function createActionRuntime(options: CommandOptions) {
     }
   }
 
-  return { act: (input: ActRequest, requestSignal?: AbortSignal, deliver?: ActionPieceDelivery, requestId?: string) => run(input, requestSignal, undefined, initialOptions, deliver, requestId) }
+  return {
+    act: (
+      input: ActRequest,
+      requestSignal?: AbortSignal,
+      deliver?: ActionPieceDelivery,
+      requestId?: string,
+    ) => run(input, requestSignal, undefined, initialOptions, deliver, requestId),
+  };
 }

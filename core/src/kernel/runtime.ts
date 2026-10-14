@@ -1,35 +1,49 @@
-import { join } from 'node:path'
-import { KernelError } from '#errors'
-import { createInstance, type InstanceFoundationWithAuth, type InstanceInitializer } from '#kernel/instance'
-import { openPersistentWriter } from '#kernel/persistence'
-import { copyManifest } from '#kernel/registry'
-import { previewModules } from '#kernel/module-install'
-import { provisionFsMounts, type FsDirectoryBindings } from '#kernel/mount-fs-provider'
-import { createFsStore } from '#kernel/store/fs'
-import type { RawFsCodecs } from '#kernel/store/rawfs-codec'
-import { createFsOverlayLayout } from '#kernel/store/fs-overlay'
-import { createFsBlobStore } from '#kernel/blob-store-fs'
-import { DEFAULT_LIMITS, type FederationBinding, type ActionIoBinding, type AdminInput, type Credential, type Gate, type ExternalEdits, type ModuleManifest, type ProvisionedStoreMount } from '#kernel/types'
+import { join } from 'node:path';
+import { KernelError } from '#errors';
+import {
+  createInstance,
+  type InstanceFoundationWithAuth,
+  type InstanceInitializer,
+} from '#kernel/instance';
+import { openPersistentWriter } from '#kernel/persistence';
+import { copyManifest } from '#kernel/registry';
+import { previewModules } from '#kernel/module-install';
+import { provisionFsMounts, type FsDirectoryBindings } from '#kernel/mount-fs-provider';
+import { createFsStore } from '#kernel/store/fs';
+import type { RawFsCodecs } from '#kernel/store/rawfs-codec';
+import { createFsOverlayLayout } from '#kernel/store/fs-overlay';
+import { createFsBlobStore } from '#kernel/blob-store-fs';
+import {
+  DEFAULT_LIMITS,
+  type FederationBinding,
+  type ActionIoBinding,
+  type AdminInput,
+  type Credential,
+  type Gate,
+  type ExternalEdits,
+  type ModuleManifest,
+  type ProvisionedStoreMount,
+} from '#kernel/types';
 
 export interface NativeRuntimeConfig {
   /** Deployment installation completes before mounts and background services start. */
-  readonly initialize?: InstanceInitializer
-  readonly shardPath?: string
-  readonly federation?: FederationBinding
-  readonly io?: ActionIoBinding
-  readonly id: string
-  readonly directory: string
-  readonly baseDirectory?: string
-  readonly rootExternal?: ExternalEdits
-  readonly credentialTtlMs: number
-  readonly firstAdmin?: AdminInput
-  readonly installerCredential?: Credential
+  readonly initialize?: InstanceInitializer;
+  readonly shardPath?: string;
+  readonly federation?: FederationBinding;
+  readonly io?: ActionIoBinding;
+  readonly id: string;
+  readonly directory: string;
+  readonly baseDirectory?: string;
+  readonly rootExternal?: ExternalEdits;
+  readonly credentialTtlMs: number;
+  readonly firstAdmin?: AdminInput;
+  readonly installerCredential?: Credential;
   /** This deployment binding supplies configured manifests; omission selects an empty set. */
-  readonly modules?: readonly ModuleManifest[]
-  readonly gates?: readonly Gate[]
+  readonly modules?: readonly ModuleManifest[];
+  readonly gates?: readonly Gate[];
   /** Named host-directory capabilities; declarations hold names rather than filesystem paths. */
-  readonly mountDirectories?: FsDirectoryBindings
-  readonly rawfsCodecs?: RawFsCodecs
+  readonly mountDirectories?: FsDirectoryBindings;
+  readonly rawfsCodecs?: RawFsCodecs;
 }
 
 /** Opens a filesystem-backed instance, installs its modules, and owns its resources. */
@@ -58,16 +72,27 @@ export async function openNativeRuntime(input: NativeRuntimeConfig) {
   if (!Number.isFinite(config.credentialTtlMs) || config.credentialTtlMs <= 0)
     throw new KernelError('INVALID', 'Credential lifetime must be positive and finite');
   previewModules(modules);
-  if (config.baseDirectory !== undefined && (typeof config.baseDirectory !== 'string' || config.baseDirectory.length === 0))
+  if (
+    config.baseDirectory !== undefined &&
+    (typeof config.baseDirectory !== 'string' || config.baseDirectory.length === 0)
+  )
     throw new KernelError('INVALID', 'Overlay base directory capability must be a nonempty path');
-  const layout = config.baseDirectory === undefined ? undefined : await createFsOverlayLayout(config.directory, config.baseDirectory);
+  const layout =
+    config.baseDirectory === undefined
+      ? undefined
+      : await createFsOverlayLayout(config.directory, config.baseDirectory);
   const lease = await openPersistentWriter({
     directory: join(config.directory, '.treenix'),
     instance: config.id,
   });
   let store: Awaited<ReturnType<typeof createFsStore>>;
   try {
-    store = await createFsStore({ directory: config.directory, lease, external: config.rootExternal, layout });
+    store = await createFsStore({
+      directory: config.directory,
+      lease,
+      external: config.rootExternal,
+      layout,
+    });
   } catch (error) {
     await lease.close();
     throw error;
@@ -77,17 +102,35 @@ export async function openNativeRuntime(input: NativeRuntimeConfig) {
   /** Release instance, store, and writer resources in ownership order. */
   async function release(): Promise<void> {
     const errors: unknown[] = [];
-    try { await foundation?.close(); } catch (error) { console.error(error); errors.push(error); }
-
-    const closed = await Promise.allSettled(mounts.map(mount => mount.target.close()));
-    for (const result of closed) if (result.status === 'rejected') {
-      console.error(result.reason); errors.push(result.reason);
+    try {
+      await foundation?.close();
+    } catch (error) {
+      console.error(error);
+      errors.push(error);
     }
 
-    try { await store.close(); } catch (error) { console.error(error); errors.push(error); }
-    try { await lease.close(); } catch (error) { console.error(error); errors.push(error); }
+    const closed = await Promise.allSettled(mounts.map((mount) => mount.target.close()));
+    for (const result of closed)
+      if (result.status === 'rejected') {
+        console.error(result.reason);
+        errors.push(result.reason);
+      }
+
+    try {
+      await store.close();
+    } catch (error) {
+      console.error(error);
+      errors.push(error);
+    }
+    try {
+      await lease.close();
+    } catch (error) {
+      console.error(error);
+      errors.push(error);
+    }
     if (errors.length === 1) throw errors[0];
-    if (errors.length > 1) throw new AggregateError(errors, 'Native runtime resource release failed');
+    if (errors.length > 1)
+      throw new AggregateError(errors, 'Native runtime resource release failed');
   }
   try {
     const existing = await store.scan({
@@ -106,29 +149,37 @@ export async function openNativeRuntime(input: NativeRuntimeConfig) {
     // A retained tail cannot prove that every earlier accepted decision still exists.
     await lease.renewContinuity();
 
-    foundation = await createInstance({
-      id: config.id,
-      federation: config.federation,
-      shardPath: config.shardPath,
-      root: { kind: 'store', store },
-      rootExternal: config.rootExternal,
-      mountDirectories: config.mountDirectories,
-      rawfsCodecs: config.rawfsCodecs,
-      blobs: await createFsBlobStore(join(config.directory, '.treenix', 'blobs')),
-      provisioning: {
-        counter: lease,
-        writerEpoch: lease.writerEpoch,
-        domains: [{ store, epoch: lease.epoch, persistent: true }],
-        mounts,
-        credentialTtlMs: config.credentialTtlMs,
-        bootstrap: existing.items.length === 0 && firstAdmin !== undefined
-          ? { kind: 'fresh', admin: firstAdmin }
-          : { kind: 'reopen', installerCredential: config.installerCredential, installerLogin: firstAdmin },
+    foundation = await createInstance(
+      {
+        id: config.id,
+        federation: config.federation,
+        shardPath: config.shardPath,
+        root: { kind: 'store', store },
+        rootExternal: config.rootExternal,
+        mountDirectories: config.mountDirectories,
+        rawfsCodecs: config.rawfsCodecs,
+        blobs: await createFsBlobStore(join(config.directory, '.treenix', 'blobs')),
+        provisioning: {
+          counter: lease,
+          writerEpoch: lease.writerEpoch,
+          domains: [{ store, epoch: lease.epoch, persistent: true }],
+          mounts,
+          credentialTtlMs: config.credentialTtlMs,
+          bootstrap:
+            existing.items.length === 0 && firstAdmin !== undefined
+              ? { kind: 'fresh', admin: firstAdmin }
+              : {
+                  kind: 'reopen',
+                  installerCredential: config.installerCredential,
+                  installerLogin: firstAdmin,
+                },
+        },
+        gates: config.gates,
+        io: config.io,
+        modules,
       },
-      gates: config.gates,
-      io: config.io,
-      modules,
-    }, config.initialize);
+      config.initialize,
+    );
     let closing: Promise<void> | undefined;
     return {
       instance: foundation,
@@ -140,7 +191,9 @@ export async function openNativeRuntime(input: NativeRuntimeConfig) {
     };
   } catch (error) {
     console.error(error);
-    try { await release(); } catch (cleanup) {
+    try {
+      await release();
+    } catch (cleanup) {
       throw new AggregateError([error, cleanup], 'Native runtime construction and release failed');
     }
     throw error;

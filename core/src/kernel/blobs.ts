@@ -44,7 +44,19 @@ function fieldReference(node: unknown, field: string): BlobRef {
 }
 
 /** Produces streamed transfers through the same admission, Reader and gates as other requests. */
-export type BlobTransferOptions = Pick<CommandOptions, 'admission' | 'budget' | 'limits' | 'gates' | 'source' | 'writer' | 'registry' | 'projector' | 'authority' | 'prepareSource'>;
+export type BlobTransferOptions = Pick<
+  CommandOptions,
+  | 'admission'
+  | 'budget'
+  | 'limits'
+  | 'gates'
+  | 'source'
+  | 'writer'
+  | 'registry'
+  | 'projector'
+  | 'authority'
+  | 'prepareSource'
+>;
 
 export function createBlobTransfers(options: BlobTransferOptions, store: BlobStore) {
   /** Issues an unpredictable id and forwards one chunk at a time under the operation deadline. */

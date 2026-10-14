@@ -21,9 +21,13 @@ for (const borrowedAlias of [false, true]) {
       let closes = 0;
       let counterLoads = 0;
       const target: OpenedStoreMountTarget = {
-        kind: 'store', store,
+        kind: 'store',
+        store,
         resources: {
-          writerEpoch: 1, epoch: randomUUID(), persistent: false, decisionHistory: 'fresh',
+          writerEpoch: 1,
+          epoch: randomUUID(),
+          persistent: false,
+          decisionHistory: 'fresh',
         },
         async close() {
           closes++;
@@ -32,27 +36,44 @@ for (const borrowedAlias of [false, true]) {
       };
 
       try {
-        await assert.rejects(createInstance({
-          id: 'startup-preflight', root: { kind: 'store', store: root }, modules: [],
-          blobs: createMemoryBlobStore(),
-          provisioning: {
-            writerEpoch: 1, domains: [], credentialTtlMs: 60_000,
-            counter: {
-              async load() { counterLoads++; return undefined; },
-              async save() { throw new Error('Preflight must not persist a position'); },
-              async freshEpoch() { throw new Error('Preflight must not issue an epoch'); },
+        await assert.rejects(
+          createInstance({
+            id: 'startup-preflight',
+            root: { kind: 'store', store: root },
+            modules: [],
+            blobs: createMemoryBlobStore(),
+            provisioning: {
+              writerEpoch: 1,
+              domains: [],
+              credentialTtlMs: 60_000,
+              counter: {
+                async load() {
+                  counterLoads++;
+                  return undefined;
+                },
+                async save() {
+                  throw new Error('Preflight must not persist a position');
+                },
+                async freshEpoch() {
+                  throw new Error('Preflight must not issue an epoch');
+                },
+              },
+              mounts: [{ node: randomUUID(), component: '#mount', revision: 'unadmitted', target }],
+              bootstrap: {
+                kind: 'fresh',
+                admin: { path: '/admin', name: 'admin', password: 'test-password' },
+              },
             },
-            mounts: [{ node: randomUUID(), component: '#mount', revision: 'unadmitted', target }],
-            bootstrap: {
-              kind: 'fresh',
-              admin: { path: '/admin', name: 'admin', password: 'test-password' },
-            },
-          },
-        }), error => error instanceof KernelError && error.code === 'INVALID');
+          }),
+          (error) => error instanceof KernelError && error.code === 'INVALID',
+        );
 
         assert.equal(counterLoads, 0);
         assert.equal(closes, borrowedAlias ? 0 : 1);
-        assert.deepEqual((await root.scan({ range: { node: '/' }, budget: scanBudget() })).items, []);
+        assert.deepEqual(
+          (await root.scan({ range: { node: '/' }, budget: scanBudget() })).items,
+          [],
+        );
       } finally {
         store.close();
         root.close();

@@ -1,75 +1,99 @@
-import type { StreamDomain } from '#kernel/types'
-import { createHash } from 'node:crypto'
-import { isDeepStrictEqual } from 'node:util'
-import { KernelError } from '#errors'
-import { comparePositions, positionToRev, revToPosition } from '#kernel/position'
-import { compositeIntake, shardIntakePart } from '#kernel/intake-epoch'
-import { matchingDecision } from '#kernel/journal'
-import type { OperationReadCost } from '#kernel/store/budget'
+import type { StreamDomain } from '#kernel/types';
+import { createHash } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
+import { KernelError } from '#errors';
+import { comparePositions, positionToRev, revToPosition } from '#kernel/position';
+import { compositeIntake, shardIntakePart } from '#kernel/intake-epoch';
+import { matchingDecision } from '#kernel/journal';
+import type { OperationReadCost } from '#kernel/store/budget';
 
-import { DEFAULT_LIMITS, type Actor, type Budget, type IntakeState, type JournalCommit, type Limits,
-  type OpDecision, type OpId, type Outcome, type Position, type Store } from '#kernel/types'
-import { freeze } from '#util/freeze'
-import { stableJson } from '#util/stable-json'
+import {
+  DEFAULT_LIMITS,
+  type Actor,
+  type Budget,
+  type IntakeState,
+  type JournalCommit,
+  type Limits,
+  type OpDecision,
+  type OpId,
+  type Outcome,
+  type Position,
+  type Store,
+} from '#kernel/types';
+import { freeze } from '#util/freeze';
+import { stableJson } from '#util/stable-json';
 
 export interface MutationIdentity {
-  readonly actor: Actor
-  readonly opId: OpId
-  readonly request: unknown
-  readonly stream?: OpDecision['stream']
-  readonly anchor?: OpId
-  readonly anchorLookupCost?: OperationReadCost
-  readonly lookupCost?: OperationReadCost
+  readonly actor: Actor;
+  readonly opId: OpId;
+  readonly request: unknown;
+  readonly stream?: OpDecision['stream'];
+  readonly anchor?: OpId;
+  readonly anchorLookupCost?: OperationReadCost;
+  readonly lookupCost?: OperationReadCost;
 }
-export type MutationWaiter = <T>(pending: Promise<T>) => Promise<T>
+export type MutationWaiter = <T>(pending: Promise<T>) => Promise<T>;
 export interface IdempotencyOptions {
-  readonly root: Store
-  readonly domains: readonly StreamDomain[]
-  readonly budget: () => Budget
-  readonly now?: () => number
-  readonly limits?: Pick<Limits, 'opIdWindowMs' | 'clockToleranceMs'>
+  readonly root: Store;
+  readonly domains: readonly StreamDomain[];
+  readonly budget: () => Budget;
+  readonly now?: () => number;
+  readonly limits?: Pick<Limits, 'opIdWindowMs' | 'clockToleranceMs'>;
 }
 interface Flight {
-  readonly hash: string
-  readonly outcome: Promise<Outcome>
+  readonly hash: string;
+  readonly outcome: Promise<Outcome>;
 }
 
 /** Bind the normalized request and actor semantics to a durable decision. */
-export const requestHash = (request: unknown, actor: Actor) => createHash('sha256').update(stableJson({ request, actor })).digest('hex')
+export const requestHash = (request: unknown, actor: Actor) =>
+  createHash('sha256').update(stableJson({ request, actor })).digest('hex');
 
 /** Coalesce live flights and recover outcomes already accepted by a declared Store. */
 export async function createIdempotency(options: IdempotencyOptions) {
-  const now = options.now ?? Date.now
-  const limits = options.limits ?? DEFAULT_LIMITS
-  let stores = [...new Set(options.domains.map(domain => domain.store))]
-  let domains: Record<string, string> = Object.fromEntries(options.domains.map(domain => [domain.store.domain, domain.epoch]))
-  const lookups = new Set<Promise<void>>()
-  const saved = await options.root.scan({ range: { journalHead: 'intake' }, budget: options.budget() })
-  let state = saved.items[0]?.intake
-  const flights = new Map<string, Flight>()
+  const now = options.now ?? Date.now;
+  const limits = options.limits ?? DEFAULT_LIMITS;
+  let stores = [...new Set(options.domains.map((domain) => domain.store))];
+  let domains: Record<string, string> = Object.fromEntries(
+    options.domains.map((domain) => [domain.store.domain, domain.epoch]),
+  );
+  const lookups = new Set<Promise<void>>();
+  const saved = await options.root.scan({
+    range: { journalHead: 'intake' },
+    budget: options.budget(),
+  });
+  let state = saved.items[0]?.intake;
+  const flights = new Map<string, Flight>();
 
   /** Require persisted intake before admitting a mutation key. */
   function current(): IntakeState {
-    if (state === undefined) throw new KernelError('INVALID', 'Mutation intake is not durable')
-    return state
+    if (state === undefined) throw new KernelError('INVALID', 'Mutation intake is not durable');
+    return state;
   }
 
   /** Keep the current expiry window above its durable floor. */
-  function boundary(): number { return Math.max(0, current().boundary, now() - limits.opIdWindowMs) }
+  function boundary(): number {
+    return Math.max(0, current().boundary, now() - limits.opIdWindowMs);
+  }
 
   /** Check the durable epoch and expiry for a previously admitted key. */
   function checkAdmitted(opId: OpId): void {
-    if (opId.time < current().boundary) throw new KernelError('EXPIRED', 'Mutation key has expired')
-    const accepted = current()
-    if (opId.epoch !== accepted.epoch
-      && shardIntakePart(opId.epoch, accepted.owner ?? revToPosition(accepted.epoch).instance) !== accepted.epoch)
-      throw new KernelError('UNKNOWN_OUTCOME', 'Mutation key belongs to another intake epoch')
+    if (opId.time < current().boundary)
+      throw new KernelError('EXPIRED', 'Mutation key has expired');
+    const accepted = current();
+    if (
+      opId.epoch !== accepted.epoch &&
+      shardIntakePart(opId.epoch, accepted.owner ?? revToPosition(accepted.epoch).instance) !==
+        accepted.epoch
+    )
+      throw new KernelError('UNKNOWN_OUTCOME', 'Mutation key belongs to another intake epoch');
   }
 
   /** Apply clock tolerance as well when admitting a fresh decision. */
   function checkNew(opId: OpId): void {
-    checkAdmitted(opId)
-    if (opId.time > now() + limits.clockToleranceMs) throw new KernelError('EXPIRED', 'Mutation key is outside the intake window')
+    checkAdmitted(opId);
+    if (opId.time > now() + limits.clockToleranceMs)
+      throw new KernelError('EXPIRED', 'Mutation key is outside the intake window');
   }
 
   /** Find the newest durable decision within one cumulative read budget. */
@@ -91,7 +115,8 @@ export async function createIdempotency(options: IdempotencyOptions) {
       let bytes = 0;
 
       for (const store of inventory) {
-        if (nodes >= allowance.nodes) throw new KernelError('BUDGET', 'Decision lookup exceeded the read budget');
+        if (nodes >= allowance.nodes)
+          throw new KernelError('BUDGET', 'Decision lookup exceeded the read budget');
         const found = await store.scan({
           range: { decision: { caller, opId } },
           limit: 1,
@@ -123,55 +148,74 @@ export async function createIdempotency(options: IdempotencyOptions) {
 
   /** Return a complete outcome only when its request and actor hash match. */
   function replay(record: JournalCommit, input: MutationIdentity, hash: string): Outcome {
-    const decision = matchingDecision(record, input.actor.principal, input.opId)
-    if (decision.requestHash !== hash) throw new KernelError('KEY_REUSED', 'Mutation key was used by another request or actor')
-    if (decision.outcome === undefined) throw new KernelError('UNKNOWN_OUTCOME', 'The stream has no final outcome')
-    return structuredClone(decision.outcome)
+    const decision = matchingDecision(record, input.actor.principal, input.opId);
+    if (decision.requestHash !== hash)
+      throw new KernelError('KEY_REUSED', 'Mutation key was used by another request or actor');
+    if (decision.outcome === undefined)
+      throw new KernelError('UNKNOWN_OUTCOME', 'The stream has no final outcome');
+    return structuredClone(decision.outcome);
   }
 
   /** A refused flight wait can still return success if the Store already accepted it. */
-  async function recover(input: MutationIdentity, prior: Flight, hash: string, wait?: MutationWaiter): Promise<Outcome> {
-    if (prior.hash !== hash) throw new KernelError('KEY_REUSED', 'Mutation key was used by another request or actor')
-    const value = await (wait === undefined ? prior.outcome : wait(prior.outcome)).catch(async error => {
-      const record = await lookup(input.actor.principal, input.opId)
-      if (record === undefined) throw error
-      console.error(error)
-      return replay(record, input, hash)
-    })
+  async function recover(
+    input: MutationIdentity,
+    prior: Flight,
+    hash: string,
+    wait?: MutationWaiter,
+  ): Promise<Outcome> {
+    if (prior.hash !== hash)
+      throw new KernelError('KEY_REUSED', 'Mutation key was used by another request or actor');
+    const value = await (wait === undefined ? prior.outcome : wait(prior.outcome)).catch(
+      async (error) => {
+        const record = await lookup(input.actor.principal, input.opId);
+        if (record === undefined) throw error;
+        console.error(error);
+        return replay(record, input, hash);
+      },
+    );
 
-    return structuredClone(value)
+    return structuredClone(value);
   }
 
   /** Bound the initial wait; recovery has its own query budget to find accepted success. */
-  async function lookupPrevious(input: MutationIdentity, wait?: MutationWaiter): Promise<JournalCommit | undefined> {
-    const pending = lookup(input.actor.principal, input.opId, input.lookupCost)
-    return (wait === undefined ? pending : wait(pending)).catch(async error => {
-      if (wait === undefined) throw error
-      const accepted = await lookup(input.actor.principal, input.opId)
-      if (accepted === undefined) throw error
-      console.error(error)
-      return accepted
-    })
+  async function lookupPrevious(
+    input: MutationIdentity,
+    wait?: MutationWaiter,
+  ): Promise<JournalCommit | undefined> {
+    const pending = lookup(input.actor.principal, input.opId, input.lookupCost);
+    return (wait === undefined ? pending : wait(pending)).catch(async (error) => {
+      if (wait === undefined) throw error;
+      const accepted = await lookup(input.actor.principal, input.opId);
+      if (accepted === undefined) throw error;
+      console.error(error);
+      return accepted;
+    });
   }
 
   /** Probe a prior outcome without applying fresh-write intake rules to an absent key. */
-  async function previous(input: MutationIdentity, wait?: MutationWaiter): Promise<Outcome | undefined> {
-    const hash = requestHash(input.request, input.actor)
-    const prior = flights.get(stableJson([input.actor.principal, input.opId]))
+  async function previous(
+    input: MutationIdentity,
+    wait?: MutationWaiter,
+  ): Promise<Outcome | undefined> {
+    const hash = requestHash(input.request, input.actor);
+    const prior = flights.get(stableJson([input.actor.principal, input.opId]));
     if (prior !== undefined) {
-      if (input.opId.time < boundary()) throw new KernelError('EXPIRED', 'Mutation key has expired')
-      return recover(input, prior, hash, wait)
+      if (input.opId.time < boundary())
+        throw new KernelError('EXPIRED', 'Mutation key has expired');
+      return recover(input, prior, hash, wait);
     }
 
-    const record = await lookupPrevious(input, wait)
-    if (record === undefined) return undefined
-    if (input.opId.time < boundary()) throw new KernelError('EXPIRED', 'Mutation key has expired')
-    return replay(record, input, hash)
+    const record = await lookupPrevious(input, wait);
+    if (record === undefined) return undefined;
+    if (input.opId.time < boundary()) throw new KernelError('EXPIRED', 'Mutation key has expired');
+    return replay(record, input, hash);
   }
 
   return {
     /** Return the durable intake state currently installed in this runtime. */
-    get state(): IntakeState { return current() },
+    get state(): IntakeState {
+      return current();
+    },
     boundary,
     checkNew,
     checkAdmitted,
@@ -179,68 +223,110 @@ export async function createIdempotency(options: IdempotencyOptions) {
     previous,
     /** Replace owned decision sources and drain lookups that captured their predecessors. */
     replaceDomains(next: readonly StreamDomain[]): Promise<void> {
-      stores = [...new Set(next.map(domain => domain.store))]
-      domains = Object.fromEntries(next.map(domain => [domain.store.domain, domain.epoch]))
-      return Promise.all([...lookups]).then(() => {})
+      stores = [...new Set(next.map((domain) => domain.store))];
+      domains = Object.fromEntries(next.map((domain) => [domain.store.domain, domain.epoch]));
+      return Promise.all([...lookups]).then(() => {});
     },
     /** Preserve the intake epoch while its declared domain epochs remain unchanged. */
-    next(pos: Position, force = false, inventory = domains, preserveAddition = false,
-      shards = state?.shards ?? {}): IntakeState {
-      const unchanged = state !== undefined && (isDeepStrictEqual(state.domains, inventory)
-        || preserveAddition && Object.entries(state.domains).every(([domain, epoch]) => inventory[domain] === epoch))
-      const sameShards = isDeepStrictEqual(state?.shards ?? {}, shards)
-      const local = !force && unchanged && sameShards ? state!.local ?? state!.epoch : positionToRev(pos)
-      const epoch = Object.keys(shards).length === 0 ? local : compositeIntake({ owner: pos.instance, local, shards })
-      return freeze({ owner: pos.instance, local, shards: { ...shards }, epoch,
-        boundary: Math.max(0, state?.boundary ?? 0, now() - limits.opIdWindowMs), domains: { ...inventory } })
+    next(
+      pos: Position,
+      force = false,
+      inventory = domains,
+      preserveAddition = false,
+      shards = state?.shards ?? {},
+    ): IntakeState {
+      const unchanged =
+        state !== undefined &&
+        (isDeepStrictEqual(state.domains, inventory) ||
+          (preserveAddition &&
+            Object.entries(state.domains).every(([domain, epoch]) => inventory[domain] === epoch)));
+      const sameShards = isDeepStrictEqual(state?.shards ?? {}, shards);
+      const local =
+        !force && unchanged && sameShards ? (state!.local ?? state!.epoch) : positionToRev(pos);
+      const epoch =
+        Object.keys(shards).length === 0
+          ? local
+          : compositeIntake({ owner: pos.instance, local, shards });
+      return freeze({
+        owner: pos.instance,
+        local,
+        shards: { ...shards },
+        epoch,
+        boundary: Math.max(0, state?.boundary ?? 0, now() - limits.opIdWindowMs),
+        domains: { ...inventory },
+      });
     },
     /** Install accepted intake without moving its durable expiry backward. */
     publish(next: IntakeState): void {
-      if (state !== undefined && next.boundary < state.boundary) throw new KernelError('INVALID', 'Mutation expiry cannot move backwards')
-      state = freeze(structuredClone(next))
+      if (state !== undefined && next.boundary < state.boundary)
+        throw new KernelError('INVALID', 'Mutation expiry cannot move backwards');
+      state = freeze(structuredClone(next));
     },
     /** Reserve one flight per actor and key, executing only without an accepted prior decision. */
-    run(input: MutationIdentity, advance: () => Promise<void>, execute: (decision: OpDecision) => Promise<Outcome>, wait?: MutationWaiter,
+    run(
+      input: MutationIdentity,
+      advance: () => Promise<void>,
+      execute: (decision: OpDecision) => Promise<Outcome>,
+      wait?: MutationWaiter,
       resumeForward?: (decision: OpDecision) => Promise<Outcome>,
-      authorizeForward?: (forward: NonNullable<OpDecision['forward']>) => void): Promise<Outcome> {
-      const caller = input.actor.principal
-      const hash = requestHash(input.request, input.actor)
-      const key = stableJson([caller, input.opId])
-      const prior = flights.get(key)
+      authorizeForward?: (forward: NonNullable<OpDecision['forward']>) => void,
+    ): Promise<Outcome> {
+      const caller = input.actor.principal;
+      const hash = requestHash(input.request, input.actor);
+      const key = stableJson([caller, input.opId]);
+      const prior = flights.get(key);
 
       const outcome = (async () => {
-        const expires = boundary()
-        if (input.opId.time < expires && expires > current().boundary) await advance()
-        if (input.opId.time < current().boundary) throw new KernelError('EXPIRED', 'Mutation key has expired')
+        const expires = boundary();
+        if (input.opId.time < expires && expires > current().boundary) await advance();
+        if (input.opId.time < current().boundary)
+          throw new KernelError('EXPIRED', 'Mutation key has expired');
         if (prior !== undefined) {
-          const outcome = await recover(input, prior, hash, wait)
+          const outcome = await recover(input, prior, hash, wait);
           if (authorizeForward !== undefined) {
-            const accepted = await lookupPrevious(input, wait)
-            const forward = accepted === undefined ? undefined : matchingDecision(accepted, caller, input.opId).forward
-            if (forward !== undefined) authorizeForward(forward)
+            const accepted = await lookupPrevious(input, wait);
+            const forward =
+              accepted === undefined
+                ? undefined
+                : matchingDecision(accepted, caller, input.opId).forward;
+            if (forward !== undefined) authorizeForward(forward);
           }
-          return outcome
+          return outcome;
         }
-        const record = await lookupPrevious(input, wait)
+        const record = await lookupPrevious(input, wait);
         if (record !== undefined) {
-          const decision = matchingDecision(record, input.actor.principal, input.opId)
-          if (decision.requestHash !== hash) throw new KernelError('KEY_REUSED', 'Mutation key was used by another request or actor')
-          if (decision.forward !== undefined) authorizeForward?.(decision.forward)
-          if (decision.forward !== undefined && decision.outcome === undefined && resumeForward !== undefined)
-            return resumeForward(decision)
-          return replay(record, input, hash)
+          const decision = matchingDecision(record, input.actor.principal, input.opId);
+          if (decision.requestHash !== hash)
+            throw new KernelError(
+              'KEY_REUSED',
+              'Mutation key was used by another request or actor',
+            );
+          if (decision.forward !== undefined) authorizeForward?.(decision.forward);
+          if (
+            decision.forward !== undefined &&
+            decision.outcome === undefined &&
+            resumeForward !== undefined
+          )
+            return resumeForward(decision);
+          return replay(record, input, hash);
         }
-        checkNew(input.opId)
-        return execute({ opId: { ...input.opId }, requestHash: hash, ...(input.stream === undefined ? {} : { stream: input.stream }) })
-      })()
-      if (prior !== undefined) return outcome
+        checkNew(input.opId);
+        return execute({
+          opId: { ...input.opId },
+          requestHash: hash,
+          ...(input.stream === undefined ? {} : { stream: input.stream }),
+        });
+      })();
+      if (prior !== undefined) return outcome;
 
-      const flight = { hash, outcome }
-      flights.set(key, flight)
-      return outcome.then(value => structuredClone(value)).finally(() => {
-        if (flights.get(key) === flight) flights.delete(key)
-      })
+      const flight = { hash, outcome };
+      flights.set(key, flight);
+      return outcome
+        .then((value) => structuredClone(value))
+        .finally(() => {
+          if (flights.get(key) === flight) flights.delete(key);
+        });
     },
-  }
+  };
 }
-export type Idempotency = Awaited<ReturnType<typeof createIdempotency>>
+export type Idempotency = Awaited<ReturnType<typeof createIdempotency>>;

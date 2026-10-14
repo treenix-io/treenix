@@ -1,5 +1,5 @@
-import { isIP } from 'node:net'
-import { KernelError } from '#errors'
+import { isIP } from 'node:net';
+import { KernelError } from '#errors';
 
 /** Canonicalizes socket addresses and shares one anonymous quota bucket across an IPv6 /64. */
 export function networkAddress(input: string): { address: string; bucket: string } {

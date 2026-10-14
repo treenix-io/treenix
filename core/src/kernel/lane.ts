@@ -1,16 +1,16 @@
-import type { ReadQueryCost, ReadReceipt } from '#kernel/types'
-import { KernelError } from '#errors'
-import type { AuthAdmission } from '#kernel/auth-factory'
-import type { NativeCommands, ReadAccounting } from '#kernel/commands'
-import type { BlobTransfers } from '#kernel/blobs'
-import type { createInstanceStream } from '#kernel/stream'
-import { comparePositions } from '#kernel/position'
-import { serializeKernel } from '#kernel/serialization'
-import { createSubscriptions, type NodeSubscription } from '#kernel/subscription'
-import { createLaneDelivery } from '#kernel/lane-delivery'
-import type { LaneSelectionSource, LaneProjection } from '#kernel/lane-selection'
-import type { ViewSubscription } from '#kernel/view'
-import { createChunkChannel } from '#util/chunk-channel'
+import type { ReadQueryCost, ReadReceipt } from '#kernel/types';
+import { KernelError } from '#errors';
+import type { AuthAdmission } from '#kernel/auth-factory';
+import type { NativeCommands, ReadAccounting } from '#kernel/commands';
+import type { BlobTransfers } from '#kernel/blobs';
+import type { createInstanceStream } from '#kernel/stream';
+import { comparePositions } from '#kernel/position';
+import { serializeKernel } from '#kernel/serialization';
+import { createSubscriptions, type NodeSubscription } from '#kernel/subscription';
+import { createLaneDelivery } from '#kernel/lane-delivery';
+import type { LaneSelectionSource, LaneProjection } from '#kernel/lane-selection';
+import type { ViewSubscription } from '#kernel/view';
+import { createChunkChannel } from '#util/chunk-channel';
 import type {
   Budget,
   ActionPiece,
@@ -35,99 +35,124 @@ import type {
   Session,
   Sort,
   SubSelector,
-} from '#kernel/types'
+} from '#kernel/types';
 
-export type NodeSubSelector = SubSelector
+export type NodeSubSelector = SubSelector;
 export type NodeLaneCommand =
   | Extract<Request, { readonly t: 'commit' | 'act' | 'cancel' | 'unsub' }>
   | { readonly t: 'read'; readonly req: string; readonly selector: Selector }
-  | { readonly t: 'sub'; readonly sub: string; readonly selector: SubSelector }
+  | { readonly t: 'sub'; readonly sub: string; readonly selector: SubSelector };
 
 export interface NodeLaneImage {
-  readonly copy: NodeCopy
-  readonly visible: Node
-  readonly before?: NodeCopy | null
-  readonly bytes: number
-  readonly position?: Position
-  retain(): () => void
+  readonly copy: NodeCopy;
+  readonly visible: Node;
+  readonly before?: NodeCopy | null;
+  readonly bytes: number;
+  readonly position?: Position;
+  retain(): () => void;
 }
 export interface NodeLaneRead extends LaneSelectionSource {
-  readonly pos: Position
+  readonly pos: Position;
   /** Intake epoch associated with this ordered read. */
-  readonly intake: string
+  readonly intake: string;
   /** Checks whether this ordered read may reuse a retained copy for a path. */
-  claimable(path: Path): boolean
-  image(path: Path, sort?: Sort): Promise<NodeLaneImage | null>
-  check(): void
-  authorizeView?(selector: SubSelector): Promise<void>
+  claimable(path: Path): boolean;
+  image(path: Path, sort?: Sort): Promise<NodeLaneImage | null>;
+  check(): void;
+  authorizeView?(selector: SubSelector): Promise<void>;
 }
 export interface NodeLaneOptions {
-  readonly admission: AuthAdmission
-  readonly commands: Pick<NativeCommands, 'read' | 'commit' | 'act'>
-  readonly stream: Pick<ReturnType<typeof createInstanceStream>, 'cursor' | 'observe'>
-  readonly limits: () => Limits
-  readonly intake: () => string
-  readonly read: <T>(run: (source: NodeLaneRead) => Promise<T>, selectors?: readonly SubSelector[], prepare?: (budget: Budget) => Promise<Budget>) => Promise<T>
-  readonly gateSub: (selector: NodeSubSelector, signal: AbortSignal) => Promise<void>
-  readonly registryChanged: (listener: () => void) => () => void
+  readonly admission: AuthAdmission;
+  readonly commands: Pick<NativeCommands, 'read' | 'commit' | 'act'>;
+  readonly stream: Pick<ReturnType<typeof createInstanceStream>, 'cursor' | 'observe'>;
+  readonly limits: () => Limits;
+  readonly intake: () => string;
+  readonly read: <T>(
+    run: (source: NodeLaneRead) => Promise<T>,
+    selectors?: readonly SubSelector[],
+    prepare?: (budget: Budget) => Promise<Budget>,
+  ) => Promise<T>;
+  readonly gateSub: (selector: NodeSubSelector, signal: AbortSignal) => Promise<void>;
+  readonly registryChanged: (listener: () => void) => () => void;
   /** Reports changed target ranges when the source supports dynamic mounts. */
-  readonly topologyChanged?: (listener: (intersects: (range: ScanRange) => boolean) => void) => () => void
+  readonly topologyChanged?: (
+    listener: (intersects: (range: ScanRange) => boolean) => void,
+  ) => () => void;
   /** Narrows a continuity reset to subscriptions reading that domain's logical ranges. */
-  readonly domainIntersects?: (domain: DomainId, range: ScanRange) => boolean
-  readonly issuedCredential?: Credential
-  readonly cache?: readonly CacheClaim[]
+  readonly domainIntersects?: (domain: DomainId, range: ScanRange) => boolean;
+  readonly issuedCredential?: Credential;
+  readonly cache?: readonly CacheClaim[];
   /** Kernel-owned node sessions can remain idle until their owner or authorization closes them. */
-  readonly heartbeat?: boolean
-  readonly transfers?: BlobTransfers
+  readonly heartbeat?: boolean;
+  readonly transfers?: BlobTransfers;
   readonly shard?: {
-    poll(): Promise<NodeLaneFrame | undefined>
-    observe(listener: () => void): () => void
-    close(): void
-  }
-  readonly openShard?: (selector: SubSelector, id: string, generation: number) => Promise<{ close(): void } | undefined>
-  readonly openAuthority?: (selector: SubSelector, changed: () => void) => Promise<LaneProjection | undefined>
-  readonly openView?: (selector: SubSelector, changed: () => void) => Promise<ViewSubscription | undefined>
+    poll(): Promise<NodeLaneFrame | undefined>;
+    observe(listener: () => void): () => void;
+    close(): void;
+  };
+  readonly openShard?: (
+    selector: SubSelector,
+    id: string,
+    generation: number,
+  ) => Promise<{ close(): void } | undefined>;
+  readonly openAuthority?: (
+    selector: SubSelector,
+    changed: () => void,
+  ) => Promise<LaneProjection | undefined>;
+  readonly openView?: (
+    selector: SubSelector,
+    changed: () => void,
+  ) => Promise<ViewSubscription | undefined>;
 }
-export type NodeLaneFrame = Extract<Frame, { readonly t: 'welcome' | 'snap' | 'result' | 'pos' | 'chunk' | 'done' | 'fail' | 'end' | 'reset' }>
+export type NodeLaneFrame = Extract<
+  Frame,
+  {
+    readonly t: 'welcome' | 'snap' | 'result' | 'pos' | 'chunk' | 'done' | 'fail' | 'end' | 'reset';
+  }
+>;
 
 export interface NodeLane extends Session {
-  readonly actor: AuthAdmission['actor']
-  readonly frames: AsyncIterableIterator<NodeLaneFrame, void, undefined>
-  accept(command: NodeLaneCommand): void
-  rightsChanged(): void
-  poll(): Promise<NodeLaneFrame | undefined>
-  observeReady(listener: () => void): () => void
-  read(selector: Selector, signal?: AbortSignal): ReturnType<NativeCommands['read']>
-  readOwned(selector: Selector, budget: Budget, signal?: AbortSignal): Promise<ReadReceipt>
-  sub(selector: NodeSubSelector): string
-  unsub(sub: string): void
-  commit(request: Parameters<NativeCommands['commit']>[0]): Pending
-  act(request: Parameters<NativeCommands['act']>[0]): Pending
-  cancel(id: string): void
-  upload(parts: AsyncIterable<Uint8Array>, type: string, signal?: AbortSignal): ReturnType<Session['upload']>
-  download(path: Path, field: string, signal?: AbortSignal): ReturnType<Session['download']>
-  touch(): void
-  close(reason?: KernelError): void
-  reconnect(): void
+  readonly actor: AuthAdmission['actor'];
+  readonly frames: AsyncIterableIterator<NodeLaneFrame, void, undefined>;
+  accept(command: NodeLaneCommand): void;
+  rightsChanged(): void;
+  poll(): Promise<NodeLaneFrame | undefined>;
+  observeReady(listener: () => void): () => void;
+  read(selector: Selector, signal?: AbortSignal): ReturnType<NativeCommands['read']>;
+  readOwned(selector: Selector, budget: Budget, signal?: AbortSignal): Promise<ReadReceipt>;
+  sub(selector: NodeSubSelector): string;
+  unsub(sub: string): void;
+  commit(request: Parameters<NativeCommands['commit']>[0]): Pending;
+  act(request: Parameters<NativeCommands['act']>[0]): Pending;
+  cancel(id: string): void;
+  upload(
+    parts: AsyncIterable<Uint8Array>,
+    type: string,
+    signal?: AbortSignal,
+  ): ReturnType<Session['upload']>;
+  download(path: Path, field: string, signal?: AbortSignal): ReturnType<Session['download']>;
+  touch(): void;
+  close(reason?: KernelError): void;
+  reconnect(): void;
 }
 interface Mutation {
-  readonly id: string
-  readonly controller: AbortController
-  readonly resolve: (outcome: Outcome) => void
-  readonly reject: (error: KernelError) => void
-  readonly chunks?: ReturnType<typeof createChunkChannel>
-  piece?: { readonly value: ActionPiece; readonly taken: () => void }
-  outcome?: Outcome
-  error?: KernelError
+  readonly id: string;
+  readonly controller: AbortController;
+  readonly resolve: (outcome: Outcome) => void;
+  readonly reject: (error: KernelError) => void;
+  readonly chunks?: ReturnType<typeof createChunkChannel>;
+  piece?: { readonly value: ActionPiece; readonly taken: () => void };
+  outcome?: Outcome;
+  error?: KernelError;
 }
-type Control = Extract<NodeLaneFrame, { readonly t: 'end' | 'fail' | 'reset' }>
-type CoverageChange = Extract<LaneChange, { readonly op: 'del' | 'list' }>
+type Control = Extract<NodeLaneFrame, { readonly t: 'end' | 'fail' | 'reset' }>;
+type CoverageChange = Extract<LaneChange, { readonly op: 'del' | 'list' }>;
 interface Pull {
-  readonly resolve: (result: IteratorResult<NodeLaneFrame>) => void
-  readonly reject: (error: KernelError) => void
-  readonly empty?: () => void
+  readonly resolve: (result: IteratorResult<NodeLaneFrame>) => void;
+  readonly reject: (error: KernelError) => void;
+  readonly empty?: () => void;
 }
-const noChunks: AsyncIterable<unknown> = { async *[Symbol.asyncIterator]() {} }
+const noChunks: AsyncIterable<unknown> = { async *[Symbol.asyncIterator]() {} };
 
 /** Schedules native requests and subscriptions; mutation completion follows its covering position. */
 export function createNodeLane(options: NodeLaneOptions): NodeLane {
@@ -144,7 +169,13 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
   const controls: Control[] = [];
   const removals = new Map<NodeId, CoverageChange>();
   const memberships: CoverageChange[] = [];
-  const delivery = createLaneDelivery(options, subscriptions, registered, remove, () => foreignMetadataBytes);
+  const delivery = createLaneDelivery(
+    options,
+    subscriptions,
+    registered,
+    remove,
+    () => foreignMetadataBytes,
+  );
   const pulls: Pull[] = [];
   const readyListeners = new Set<() => void>();
   const prefix = crypto.randomUUID();
@@ -156,9 +187,19 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
   let draining = false;
   let notification = 0;
   let watermark: Position | undefined;
-  const foreignOwners = new Map<string, { readonly owner: LaneProducer; readonly positions: Map<string, Position>; bytes: number }>();
+  const foreignOwners = new Map<
+    string,
+    { readonly owner: LaneProducer; readonly positions: Map<string, Position>; bytes: number }
+  >();
   let foreignMetadataBytes = 0;
-  let foreignResult: { readonly sub: NodeSubscription; readonly frame: Extract<NodeLaneFrame, { t: 'result' }>; readonly pending: readonly Position[]; index: number } | undefined;
+  let foreignResult:
+    | {
+        readonly sub: NodeSubscription;
+        readonly frame: Extract<NodeLaneFrame, { t: 'result' }>;
+        readonly pending: readonly Position[];
+        index: number;
+      }
+    | undefined;
   let deliveredIntake: string | undefined;
   let failure: KernelError | undefined;
   let takePiece: (() => void) | undefined;
@@ -252,10 +293,10 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
   }
   /** Ends an old intake lane after its accepted outcomes have passed their covering position. */
   function reconnect(): void {
-    if (closed || reconnecting) return
-    reconnecting = true
-    if (mutations.size === 0) close()
-    else wake()
+    if (closed || reconnecting) return;
+    reconnecting = true;
+    if (mutations.size === 0) close();
+    else wake();
   }
   /** Closes delivery when the admission loses authority. */
   const revoked = () => close(error(admission.signal.reason));
@@ -289,13 +330,21 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
       };
       const raw = await options.openShard?.(sub.selector, sub.id, sub.gen);
       if (raw !== undefined) {
-        if (!registered(sub) || sub.gen !== gen) { raw.close(); return; }
+        if (!registered(sub) || sub.gen !== gen) {
+          raw.close();
+          return;
+        }
         sub.raw = raw;
         wake();
         return;
       }
-      const view = await options.openAuthority?.(sub.selector, changed) ?? await options.openView?.(sub.selector, changed);
-      if (!registered(sub) || sub.gen !== gen) { view?.close(); return; }
+      const view =
+        (await options.openAuthority?.(sub.selector, changed)) ??
+        (await options.openView?.(sub.selector, changed));
+      if (!registered(sub) || sub.gen !== gen) {
+        view?.close();
+        return;
+      }
       sub.view = view;
       sub.ready = true;
       wake();
@@ -326,7 +375,9 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
     }
     const sub = subscriptions.add(subId, selector, ++generation);
     options.gateSub(selector, sub.controller.signal).then(
-      () => { if (registered(sub)) void prepareSubscription(sub); },
+      () => {
+        if (registered(sub)) void prepareSubscription(sub);
+      },
       (caught) => {
         if (registered(sub)) remove(sub, error(caught));
       },
@@ -337,7 +388,10 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
     active();
     if (mutations.has(requestId) || reads.has(requestId))
       throw new KernelError('INVALID', 'Request identifier is already active');
-    if (mutations.size + reads.size + directReads.size + transfers.size >= options.limits().laneRequests) {
+    if (
+      mutations.size + reads.size + directReads.size + transfers.size >=
+      options.limits().laneRequests
+    ) {
       const denied = new KernelError('BUDGET', 'Unfinished request limit exceeded');
       close(denied);
       throw denied;
@@ -354,24 +408,36 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
     let current: Position | undefined;
     for (const owner of foreignOwners.values()) {
       const position = owner.positions.get(instance);
-      if (position !== undefined && (current === undefined || comparePositions(position, current) > 0)) current = position;
+      if (
+        position !== undefined &&
+        (current === undefined || comparePositions(position, current) > 0)
+      )
+        current = position;
     }
     return current;
   }
   function ownForeign(owner: LaneProducer, position: Position): void {
     const key = foreignKey(owner);
     let found = foreignOwners.get(key);
-    if (found === undefined) { found = { owner, positions: new Map(), bytes: 0 }; foreignOwners.set(key, found); }
+    if (found === undefined) {
+      found = { owner, positions: new Map(), bytes: 0 };
+      foreignOwners.set(key, found);
+    }
     if (!found.positions.has(position.instance)) {
       let count = 0;
       for (const producer of foreignOwners.values()) count += producer.positions.size;
-      if (count >= options.limits().readNodes) throw new KernelError('BUDGET', 'Foreign producer metadata exceeds its allowance');
+      if (count >= options.limits().readNodes)
+        throw new KernelError('BUDGET', 'Foreign producer metadata exceeds its allowance');
     }
     const previous = found.positions.get(position.instance);
     const bytes = Buffer.byteLength(serializeKernel({ owner, position }));
-    const prior = previous === undefined ? 0 : Buffer.byteLength(serializeKernel({ owner, position: previous }));
+    const prior =
+      previous === undefined
+        ? 0
+        : Buffer.byteLength(serializeKernel({ owner, position: previous }));
     const next = foreignMetadataBytes + bytes - prior;
-    if (next + delivery.retainedBytes > options.limits().laneCoverageBytes) throw new KernelError('BUDGET', 'Foreign producer metadata exceeds its byte allowance');
+    if (next + delivery.retainedBytes > options.limits().laneCoverageBytes)
+      throw new KernelError('BUDGET', 'Foreign producer metadata exceeds its byte allowance');
     found.positions.set(position.instance, position);
     found.bytes += bytes - prior;
     foreignMetadataBytes = next;
@@ -392,8 +458,9 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
   function nextForeignResult(): NodeLaneFrame | undefined {
     const held = foreignResult;
     if (held === undefined) return undefined;
-    try { held.sub.view?.authority?.check(); }
-    catch (caught) {
+    try {
+      held.sub.view?.authority?.check();
+    } catch (caught) {
       if (registered(held.sub)) remove(held.sub, error(caught));
       return undefined;
     }
@@ -402,13 +469,18 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
       const pos = held.pending[held.index++];
       const previous = foreignWatermark(pos.instance);
       ownForeign(owner, pos);
-      if (previous === undefined || comparePositions(pos, previous) > 0) return { t: 'pos', pos, producer: owner, changes: [] };
+      if (previous === undefined || comparePositions(pos, previous) > 0)
+        return { t: 'pos', pos, producer: owner, changes: [] };
     }
     foreignResult = undefined;
     return held.frame;
   }
   function uncovered(pos: Position | undefined): boolean {
-    return pos !== undefined && !foreign(pos) && (watermark === undefined || comparePositions(pos, watermark) > 0);
+    return (
+      pos !== undefined &&
+      !foreign(pos) &&
+      (watermark === undefined || comparePositions(pos, watermark) > 0)
+    );
   }
   /** Starts a cancellable mutation whose outcome settles after its completion frame. */
   function start(
@@ -480,7 +552,7 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
         } else wake();
       },
     );
-  return { id: requestId, chunks: mutation.chunks?.chunks ?? noChunks, outcome };
+    return { id: requestId, chunks: mutation.chunks?.chunks ?? noChunks, outcome };
   }
   /** Cancels unfinished work without discarding an accepted mutation outcome. */
   function cancel(requestId: string): void {
@@ -518,7 +590,8 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
     sub: NodeSubscription,
     intersects: (range: ScanRange) => boolean,
   ): boolean {
-    const range = 'node' in sub.selector ? { node: sub.selector.node } : { children: sub.selector.children };
+    const range =
+      'node' in sub.selector ? { node: sub.selector.node } : { children: sub.selector.children };
     if (intersects(range)) return true;
     if (sub.view?.intersects(intersects)) return true;
 
@@ -533,7 +606,9 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
   function ordinaryNeeded(): boolean {
     if (options.intake() !== deliveredIntake) return true;
     if (
-      [...subscriptions.entries.values()].some((sub) => sub.view === undefined && sub.ready && !sub.initial && sub.dirty > 0)
+      [...subscriptions.entries.values()].some(
+        (sub) => sub.view === undefined && sub.ready && !sub.initial && sub.dirty > 0,
+      )
     )
       return true;
     for (const request of mutations.values())
@@ -546,10 +621,12 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
       const result = await delivery.snapshot(sub, (_pos, intake) => intake === deliveredIntake);
       if (result !== undefined) {
         for (const id of result.removed) removals.set(id, { op: 'del', id });
-        for (const id of result.frame.covered ?? result.frame.list) if (delivery.covers(id)) removals.delete(id);
-        watermark ??= result.frame.at.find(pos => !foreign(pos));
+        for (const id of result.frame.covered ?? result.frame.list)
+          if (delivery.covers(id)) removals.delete(id);
+        watermark ??= result.frame.at.find((pos) => !foreign(pos));
         releaseForeignSub(sub);
-        for (const pos of result.frame.at) if (foreign(pos)) ownForeign({ sub: sub.id, gen: sub.gen }, pos);
+        for (const pos of result.frame.at)
+          if (foreign(pos)) ownForeign({ sub: sub.id, gen: sub.gen }, pos);
       }
       return result?.frame;
     } catch (caught) {
@@ -567,11 +644,7 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
       const result = await delivery.flush(eligible, (pos) => {
         if (closed) return false;
         if (watermark !== undefined && comparePositions(pos, watermark) <= 0) {
-          if (
-            eligible.some(
-              (sub) => registered(sub) && sub.ready && !sub.initial && sub.dirty > 0,
-            )
-          )
+          if (eligible.some((sub) => registered(sub) && sub.ready && !sub.initial && sub.dirty > 0))
             reset();
           return false;
         }
@@ -618,8 +691,14 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
     if (foreignResult !== undefined) return nextForeignResult();
     for (const sub of subscriptions.entries.values()) {
       try {
-        if (sub.ready && sub.initial && (sub.view === undefined || sub.view.ready)) return snapshot(sub);
-        if (sub.ready && !sub.initial && sub.view !== undefined && sub.viewVersion !== sub.view.version) {
+        if (sub.ready && sub.initial && (sub.view === undefined || sub.view.ready))
+          return snapshot(sub);
+        if (
+          sub.ready &&
+          !sub.initial &&
+          sub.view !== undefined &&
+          sub.viewVersion !== sub.view.version
+        ) {
           const result = await delivery.result(sub);
           if (result === undefined) continue;
           for (const id of result.removed) removals.set(id, { op: 'del', id });
@@ -629,12 +708,19 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
           foreignResult = { sub, frame: result.frame, pending, index: 0 };
           return nextForeignResult();
         }
-      } catch (caught) { if (registered(sub)) remove(sub, error(caught)); }
+      } catch (caught) {
+        if (registered(sub)) remove(sub, error(caught));
+      }
     }
     for (const request of mutations.values()) {
       const pos = request.piece?.value.pos ?? request.outcome?.pos;
-      const covered = pos !== undefined && foreign(pos) ? foreignWatermark(pos.instance) : undefined;
-      if (pos !== undefined && foreign(pos) && (covered === undefined || comparePositions(pos, covered) > 0)) {
+      const covered =
+        pos !== undefined && foreign(pos) ? foreignWatermark(pos.instance) : undefined;
+      if (
+        pos !== undefined &&
+        foreign(pos) &&
+        (covered === undefined || comparePositions(pos, covered) > 0)
+      ) {
         const producer = { req: request.id };
         ownForeign(producer, pos);
         return { t: 'pos', pos, producer, changes: [] };
@@ -680,17 +766,20 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
         const sub = subscriptions.entries.get(shard.sub);
         if (sub === undefined || sub.raw === undefined)
           throw new KernelError('INVALID', 'Shard frame names an unbound subscription');
-        if (shard.gen < sub.gen) throw new KernelError('INVALID', 'Shard generation moved backwards');
+        if (shard.gen < sub.gen)
+          throw new KernelError('INVALID', 'Shard generation moved backwards');
         sub.gen = shard.gen;
         generation = Math.max(generation, shard.gen);
-        if (shard.t !== 'reset') for (const pos of shard.at) ownForeign({ sub: sub.id, gen: sub.gen }, pos);
+        if (shard.t !== 'reset')
+          for (const pos of shard.at) ownForeign({ sub: sub.id, gen: sub.gen }, pos);
       } else if (shard.t === 'end') {
         const sub = subscriptions.entries.get(shard.sub);
         if (sub === undefined || sub.raw === undefined)
           throw new KernelError('INVALID', 'Shard end names an unbound subscription');
         remove(sub);
       } else if (shard.t === 'pos' && shard.coverage !== true) {
-        if (shard.producer === undefined) throw new KernelError('INVALID', 'Shard position lacks a producer');
+        if (shard.producer === undefined)
+          throw new KernelError('INVALID', 'Shard position lacks a producer');
         ownForeign(shard.producer, shard.pos);
       }
       return shard;
@@ -716,7 +805,11 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
           if (frame === undefined) {
             if (observed !== notification) continue;
             const pull = pulls[0];
-            if (pull.empty !== undefined) { pulls.shift(); pull.empty(); continue }
+            if (pull.empty !== undefined) {
+              pulls.shift();
+              pull.empty();
+              continue;
+            }
             break;
           }
           pulls.shift()!.resolve({ done: false, value: frame });
@@ -763,9 +856,12 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
   };
   unsubscribeStream = options.stream.observe((event) => {
     if (event.t === 'reset')
-      reset(sub => options.domainIntersects === undefined
-        || sub.state.domains.includes(event.domain)
-          && intersectsSubscription(sub, range => options.domainIntersects!(event.domain, range)));
+      reset(
+        (sub) =>
+          options.domainIntersects === undefined ||
+          (sub.state.domains.includes(event.domain) &&
+            intersectsSubscription(sub, (range) => options.domainIntersects!(event.domain, range))),
+      );
     else if (event.t === 'commit') {
       for (const change of event.record.quarantine ?? [])
         subscriptions.changed(change.path, true, options.limits().readNodes);
@@ -795,23 +891,28 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
     reset();
     wake();
   });
-  unsubscribeTopology = options.topologyChanged?.(intersects => {
-    reset(sub => intersectsSubscription(sub, intersects));
-    wake();
-  }) ?? (() => {});
+  unsubscribeTopology =
+    options.topologyChanged?.((intersects) => {
+      reset((sub) => intersectsSubscription(sub, intersects));
+      wake();
+    }) ?? (() => {});
   admission.signal.addEventListener('abort', revoked, { once: true });
   admission.assertActive();
   if (options.heartbeat !== false) heartbeat();
-    /** Own a direct query slot and cancellation under the accepted lane lifetime. */
+  /** Own a direct query slot and cancellation under the accepted lane lifetime. */
   function directRead(selector: Selector, signal?: AbortSignal, accounting?: ReadAccounting) {
-      signal?.throwIfAborted();
-      touch();
-      reserve(id());
-      const controller = new AbortController();
-      directReads.add(controller);
-      return options.commands
-        .read(selector, signal === undefined ? controller.signal : AbortSignal.any([signal, controller.signal]), accounting)
-        .finally(() => directReads.delete(controller));
+    signal?.throwIfAborted();
+    touch();
+    reserve(id());
+    const controller = new AbortController();
+    directReads.add(controller);
+    return options.commands
+      .read(
+        selector,
+        signal === undefined ? controller.signal : AbortSignal.any([signal, controller.signal]),
+        accounting,
+      )
+      .finally(() => directReads.delete(controller));
   }
   return {
     actor: admission.actor,
@@ -819,7 +920,10 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
     lane: frames,
     close,
     reconnect,
-    rightsChanged() { reset(); wake() },
+    rightsChanged() {
+      reset();
+      wake();
+    },
     observeReady(listener) {
       readyListeners.add(listener);
       return () => readyListeners.delete(listener);
@@ -829,10 +933,16 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
       if (pulls.length >= options.limits().laneRequests)
         return Promise.reject(new KernelError('BUDGET', 'Lane pull limit exceeded'));
       return new Promise((resolve, reject) => {
-        pulls.push({ resolve(result) {
-          if (result.done) reject(failure ?? new KernelError('CANCELLED', 'Lane is closed'));
-          else resolve(result.value);
-        }, reject, empty() { resolve(undefined) } });
+        pulls.push({
+          resolve(result) {
+            if (result.done) reject(failure ?? new KernelError('CANCELLED', 'Lane is closed'));
+            else resolve(result.value);
+          },
+          reject,
+          empty() {
+            resolve(undefined);
+          },
+        });
         wake(false);
       });
     },
@@ -843,30 +953,51 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
       touch();
       reserve(id());
       const producer = options.transfers;
-      if (producer === undefined) throw new KernelError('UNAVAILABLE', 'Blob storage is not configured');
+      if (producer === undefined)
+        throw new KernelError('UNAVAILABLE', 'Blob storage is not configured');
       const controller = new AbortController();
       transfers.add(controller);
 
-      try { return await producer.upload(parts, type, signal === undefined ? controller.signal : AbortSignal.any([controller.signal, signal])); }
-      finally { transfers.delete(controller); }
+      try {
+        return await producer.upload(
+          parts,
+          type,
+          signal === undefined ? controller.signal : AbortSignal.any([controller.signal, signal]),
+        );
+      } finally {
+        transfers.delete(controller);
+      }
     },
     /** Holds one request slot while the consumer pulls binary content. */
     async *download(path, field, signal) {
       touch();
       reserve(id());
       const producer = options.transfers;
-      if (producer === undefined) throw new KernelError('UNAVAILABLE', 'Blob storage is not configured');
+      if (producer === undefined)
+        throw new KernelError('UNAVAILABLE', 'Blob storage is not configured');
       const controller = new AbortController();
       transfers.add(controller);
 
-      try { yield* producer.download(path, field, signal === undefined ? controller.signal : AbortSignal.any([controller.signal, signal])); }
-      finally { transfers.delete(controller); }
+      try {
+        yield* producer.download(
+          path,
+          field,
+          signal === undefined ? controller.signal : AbortSignal.any([controller.signal, signal]),
+        );
+      } finally {
+        transfers.delete(controller);
+      }
     },
     read: directRead,
     async readOwned(selector, budget, signal) {
       let cost: ReadQueryCost | undefined;
       try {
-        const result = await directRead(selector, signal, { budget, spent: value => { cost = value } });
+        const result = await directRead(selector, signal, {
+          budget,
+          spent: (value) => {
+            cost = value;
+          },
+        });
         if (cost === undefined) throw new KernelError('INVALID', 'Native query cost is absent');
         return { result, cost };
       } catch (error) {
@@ -893,7 +1024,11 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
     act: (request) => {
       touch();
       const requestId = id();
-      return start((signal, deliver) => options.commands.act(request, signal, deliver, requestId), requestId, 'pending');
+      return start(
+        (signal, deliver) => options.commands.act(request, signal, deliver, requestId),
+        requestId,
+        'pending',
+      );
     },
     /** Preserves wire correlation while scheduling an admitted native command. */
     accept(command) {
@@ -907,7 +1042,11 @@ export function createNodeLane(options: NodeLaneOptions): NodeLane {
       } else if (command.t === 'commit')
         start((signal) => options.commands.commit(command, signal, command.req), command.req);
       else if (command.t === 'act')
-        start((signal, deliver) => options.commands.act(command, signal, deliver, command.req), command.req, 'frames');
+        start(
+          (signal, deliver) => options.commands.act(command, signal, deliver, command.req),
+          command.req,
+          'frames',
+        );
       else if (command.t === 'cancel') cancel(command.req);
       else {
         reserve(command.req);

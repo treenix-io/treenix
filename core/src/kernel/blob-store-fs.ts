@@ -1,4 +1,13 @@
-import { link, mkdir, open, opendir, readFile, realpath, stat as fileStat, unlink } from 'node:fs/promises';
+import {
+  link,
+  mkdir,
+  open,
+  opendir,
+  readFile,
+  realpath,
+  stat as fileStat,
+  unlink,
+} from 'node:fs/promises';
 import { join } from 'node:path';
 import { safeJsonParse } from '#util/json';
 import { KernelError } from '#errors';
@@ -13,9 +22,11 @@ interface Transfers {
 }
 
 const physicalTransfers = new Map<string, WeakRef<Transfers>>();
-const releasedTransfers = new FinalizationRegistry<{ path: string; reference: WeakRef<Transfers> }>(owner => {
-  if (physicalTransfers.get(owner.path) === owner.reference) physicalTransfers.delete(owner.path);
-});
+const releasedTransfers = new FinalizationRegistry<{ path: string; reference: WeakRef<Transfers> }>(
+  (owner) => {
+    if (physicalTransfers.get(owner.path) === owner.reference) physicalTransfers.delete(owner.path);
+  },
+);
 
 /** Aliases of one physical carrier share transfer pins for their actual handle lifetime. */
 function transfers(path: string): Transfers {
@@ -67,7 +78,8 @@ export async function createFsBlobStore(directory: string): Promise<BlobStore> {
   /** Writes one stream with bounded in-flight memory and exclusive id ownership. */
   async function put(id: string, parts: AsyncIterable<Uint8Array>, type: string): Promise<BlobRef> {
     assertId(id);
-    if (owner.writing.has(id) || owner.retiring.has(id)) throw new KernelError('CONFLICT', 'Blob transfer is active');
+    if (owner.writing.has(id) || owner.retiring.has(id))
+      throw new KernelError('CONFLICT', 'Blob transfer is active');
     owner.writing.add(id);
     const data = join(directory, `${id}.data`);
     const pending = join(directory, `${id}.pending`);
@@ -120,7 +132,9 @@ export async function createFsBlobStore(directory: string): Promise<BlobStore> {
           throw storageError(caught);
         });
       throw storageError(error);
-    } finally { owner.writing.delete(id); }
+    } finally {
+      owner.writing.delete(id);
+    }
   }
 
   /** Checks the marker against the actual file so corruption fails loudly. */
@@ -180,8 +194,11 @@ export async function createFsBlobStore(directory: string): Promise<BlobStore> {
       assertId(id);
       const value: unknown = safeJsonParse(await readFile(join(directory, entry.name), 'utf8'));
       const ref = reference(value, id);
-      if (!isRecord(value)
-        || value.retiredAt !== undefined && (typeof value.retiredAt !== 'number' || !Number.isFinite(value.retiredAt)))
+      if (
+        !isRecord(value) ||
+        (value.retiredAt !== undefined &&
+          (typeof value.retiredAt !== 'number' || !Number.isFinite(value.retiredAt)))
+      )
         throw new KernelError('INVALID', 'Blob birth metadata is malformed');
 
       let bornAt = value.bornAt;
@@ -192,14 +209,26 @@ export async function createFsBlobStore(directory: string): Promise<BlobStore> {
         try {
           // An unknown earlier birth gains a full orphan grace period from durable adoption.
           bornAt = Date.now();
-          await durableWrite(directory, join(directory, entry.name), JSON.stringify({ ...ref, bornAt,
-            ...(value.retiredAt === undefined ? {} : { retiredAt: value.retiredAt }) }));
-        } finally { owner.writing.delete(id); }
+          await durableWrite(
+            directory,
+            join(directory, entry.name),
+            JSON.stringify({
+              ...ref,
+              bornAt,
+              ...(value.retiredAt === undefined ? {} : { retiredAt: value.retiredAt }),
+            }),
+          );
+        } finally {
+          owner.writing.delete(id);
+        }
       }
       if (typeof bornAt !== 'number' || !Number.isFinite(bornAt))
         throw new KernelError('INVALID', 'Blob birth metadata is malformed');
-      yield { reference: ref, bornAt,
-        ...(value.retiredAt === undefined ? {} : { retiredAt: value.retiredAt }) };
+      yield {
+        reference: ref,
+        bornAt,
+        ...(value.retiredAt === undefined ? {} : { retiredAt: value.retiredAt }),
+      };
     }
   }
 
@@ -216,13 +245,22 @@ export async function createFsBlobStore(directory: string): Promise<BlobStore> {
       if (!isRecord(value) || typeof value.bornAt !== 'number' || !Number.isFinite(value.bornAt))
         throw new KernelError('INVALID', 'Blob birth metadata is malformed');
       if (value.retiredAt === undefined)
-        await durableWrite(directory, file, JSON.stringify({ ...ref, bornAt: value.bornAt, retiredAt: Date.now() }));
-      try { await unlink(join(directory, `${id}.data`)); }
-      catch (error) { if (!missing(error)) throw error; }
+        await durableWrite(
+          directory,
+          file,
+          JSON.stringify({ ...ref, bornAt: value.bornAt, retiredAt: Date.now() }),
+        );
+      try {
+        await unlink(join(directory, `${id}.data`));
+      } catch (error) {
+        if (!missing(error)) throw error;
+      }
       await syncDirectory(directory);
     } catch (error) {
       throw storageError(error);
-    } finally { owner.retiring.delete(id); }
+    } finally {
+      owner.retiring.delete(id);
+    }
   }
 
   return { put, stat, get, census, delete: remove };

@@ -1,37 +1,52 @@
-import { assertSafePath } from '#core/path'
-import { KernelError } from '#errors'
-import type { createReader } from '#kernel/reader'
-import type { ActionDef, IncludeSpec, Limits, Path, ReadResult, SubSelector } from '#kernel/types'
+import { assertSafePath } from '#core/path';
+import { KernelError } from '#errors';
+import type { createReader } from '#kernel/reader';
+import type { ActionDef, IncludeSpec, Limits, Path, ReadResult, SubSelector } from '#kernel/types';
 
 export interface ResolvedActionNeeds {
-  readonly needs: Readonly<Record<string, ReadResult>>
-  readonly targets: Readonly<Record<string, readonly Path[]>>
+  readonly needs: Readonly<Record<string, ReadResult>>;
+  readonly targets: Readonly<Record<string, readonly Path[]>>;
 }
 
 function relative(base: Path, value: Path): Path {
-  let path = value
+  let path = value;
   if (!value.startsWith('/')) {
-    const segments = base === '/' ? [] : base.slice(1).split('/')
+    const segments = base === '/' ? [] : base.slice(1).split('/');
     for (const segment of value.split('/')) {
-      if (segment === '.') continue
+      if (segment === '.') continue;
       if (segment === '..') {
-        if (segments.length === 0) throw new KernelError('INVALID', 'A need traverses above the root')
-        segments.pop()
-      } else segments.push(segment)
+        if (segments.length === 0)
+          throw new KernelError('INVALID', 'A need traverses above the root');
+        segments.pop();
+      } else segments.push(segment);
     }
-    path = '/' + segments.join('/')
+    path = '/' + segments.join('/');
   }
-  try { assertSafePath(path) } catch (error) {
-    console.error(error)
-    throw new KernelError('INVALID', 'Invalid action need path')
+  try {
+    assertSafePath(path);
+  } catch (error) {
+    console.error(error);
+    throw new KernelError('INVALID', 'Invalid action need path');
   }
-  return path
+  return path;
 }
 
-function includes(base: Path, specs: readonly IncludeSpec[], limit: number, depth = 1): readonly IncludeSpec[] {
-  if (depth > limit && specs.length !== 0) throw new KernelError('BUDGET', 'Include depth exceeded')
-  return specs.map(spec => 'path' in spec ? { path: relative(base, spec.path) }
-    : { ref: spec.ref, ...(spec.then === undefined ? {} : { then: includes(base, spec.then, limit, depth + 1) }) })
+function includes(
+  base: Path,
+  specs: readonly IncludeSpec[],
+  limit: number,
+  depth = 1,
+): readonly IncludeSpec[] {
+  if (depth > limit && specs.length !== 0)
+    throw new KernelError('BUDGET', 'Include depth exceeded');
+  return specs.map((spec) =>
+    'path' in spec
+      ? { path: relative(base, spec.path) }
+      : {
+          ref: spec.ref,
+          ...(spec.then === undefined ? {} : { then: includes(base, spec.then, limit, depth + 1) }),
+        },
+  );
 }
 
 /** Resolve declared reads and the paths available to post operations. */

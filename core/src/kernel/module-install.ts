@@ -1,15 +1,15 @@
-import { randomUUID } from 'node:crypto'
-import { KernelError } from '#errors'
-import { bootstrapModules, ownershipRecord, TYPE_PATH } from '#kernel/bootstrap'
-import type { InstanceFoundationWithAuth } from '#kernel/instance'
-import { createRegistry, type TypeOwnership } from '#kernel/registry'
-import { drainSession } from '#kernel/session-delivery'
-import type { ChangeMember, Credential, ModuleManifest, TypeDef } from '#kernel/types'
+import { randomUUID } from 'node:crypto';
+import { KernelError } from '#errors';
+import { bootstrapModules, ownershipRecord, TYPE_PATH } from '#kernel/bootstrap';
+import type { InstanceFoundationWithAuth } from '#kernel/instance';
+import { createRegistry, type TypeOwnership } from '#kernel/registry';
+import { drainSession } from '#kernel/session-delivery';
+import type { ChangeMember, Credential, ModuleManifest, TypeDef } from '#kernel/types';
 
 /** Persisted type ownership survives module replacement and security-class changes. */
 export function assertTypeOwner(owner: TypeOwnership, type: TypeDef): void {
   if (owner.module !== type.module || owner.security !== type.security)
-    throw new KernelError('FORBIDDEN', 'Module differs from persisted type ownership')
+    throw new KernelError('FORBIDDEN', 'Module differs from persisted type ownership');
 }
 
 /** Checks configured manifests before provisioning or writing persisted ownership. */

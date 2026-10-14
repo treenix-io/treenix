@@ -3,10 +3,10 @@
 // database receives it; its work is counted as the evaluator tests each node (eval).
 
 import { isSafeKey } from '#core/component';
-import { KernelError } from '#errors'
-import type { ExprWork } from './eval'
-import { compileQuery, isQueryObject } from './eval-compile'
-import type { Limits, Where } from './types'
+import { KernelError } from '#errors';
+import type { ExprWork } from './eval';
+import { compileQuery, isQueryObject } from './eval-compile';
+import type { Limits, Where } from './types';
 
 // Refused in every sift query — predicates are user-authored (wire callerWhere,
 // user-authored query mounts). Code-eval operators are server-side RCE. $regex
@@ -14,25 +14,30 @@ import type { Limits, Where } from './types'
 // catastrophic pattern — a length cap + nested-quantifier heuristic let
 // ^(.|.)*$ and ^(a+){2,}$ through at seconds per node — and nothing in the
 // platform needs user regexes.
-const SIFT_FORBIDDEN = new Set(['$where', '$function', '$accumulator', '$expr', '$regex'])
+const SIFT_FORBIDDEN = new Set(['$where', '$function', '$accumulator', '$expr', '$regex']);
 
 // Mongo refuses a filter nested deeper than 200 objects and arrays, and so does the language: mapping, compiling
 // and testing an expression recurse through its nesting, which this keeps far from the end of the stack.
-const MAX_DEPTH = 200
+const MAX_DEPTH = 200;
 
-const encoder = new TextEncoder()
+const encoder = new TextEncoder();
 
 // Size is a budget, depth a rule of the language; both are judged without recursion, as JSON is read.
 function assertBounds(q: unknown, limits: Limits): void {
-  const bytes = encoder.encode(JSON.stringify(q)).byteLength
-  if (bytes > limits.exprBytes) throw new KernelError('BUDGET', `Expression is ${bytes} bytes, limit ${limits.exprBytes}`)
+  const bytes = encoder.encode(JSON.stringify(q)).byteLength;
+  if (bytes > limits.exprBytes)
+    throw new KernelError('BUDGET', `Expression is ${bytes} bytes, limit ${limits.exprBytes}`);
 
-  const stack: [unknown, number][] = [[q, 1]]
+  const stack: [unknown, number][] = [[q, 1]];
   for (let top = stack.pop(); top !== undefined; top = stack.pop()) {
-    const [v, depth] = top
-    if (typeof v !== 'object' || v === null) continue
-    if (depth > MAX_DEPTH) throw new KernelError('INVALID', `Expression nests deeper than ${MAX_DEPTH} objects and arrays`)
-    for (const child of Object.values(v)) stack.push([child, depth + 1])
+    const [v, depth] = top;
+    if (typeof v !== 'object' || v === null) continue;
+    if (depth > MAX_DEPTH)
+      throw new KernelError(
+        'INVALID',
+        `Expression nests deeper than ${MAX_DEPTH} objects and arrays`,
+      );
+    for (const child of Object.values(v)) stack.push([child, depth + 1]);
   }
 }
 
@@ -41,42 +46,48 @@ function assertBounds(q: unknown, limits: Limits): void {
  * INVALID on a forbidden operator or a shape the language refuses.
  */
 export function assertSafeSiftQuery(q: unknown, limits: Limits): asserts q is Where {
-  assertBounds(q, limits)
-  compileQuery(mapSiftQuery(q))
+  assertBounds(q, limits);
+  compileQuery(mapSiftQuery(q));
 }
 
 /** assertSafeSiftQuery for a read predicate: a hidden field is FORBIDDEN before the shape is judged. */
-export function assertSafePredicate(q: unknown, limits: Limits, where: 'callerWhere' | 'viewWhere'): void {
-  assertBounds(q, limits)
-  const mapped = mapSiftQuery(q)
-  assertVisiblePredicate(q, where)
-  compileQuery(mapped)
+export function assertSafePredicate(
+  q: unknown,
+  limits: Limits,
+  where: 'callerWhere' | 'viewWhere',
+): void {
+  assertBounds(q, limits);
+  const mapped = mapSiftQuery(q);
+  assertVisiblePredicate(q, where);
+  compileQuery(mapped);
 }
 
 /** Validate and map a sift query to storage keys. */
 export function mapSiftQuery(q: unknown): unknown {
-  if (Array.isArray(q)) return q.map(mapSiftQuery)
-  if (q instanceof RegExp) throw new KernelError('INVALID', 'Forbidden sift value: RegExp')
+  if (Array.isArray(q)) return q.map(mapSiftQuery);
+  if (q instanceof RegExp) throw new KernelError('INVALID', 'Forbidden sift value: RegExp');
   // By prototype: an own `constructor` key would otherwise pass an object through unmapped and unchecked.
   if (isQueryObject(q)) {
-    const out: Record<string, unknown> = {}
+    const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(q)) {
-      if (SIFT_FORBIDDEN.has(k)) throw new KernelError('INVALID', `Forbidden sift operator: ${k}`)
+      if (SIFT_FORBIDDEN.has(k)) throw new KernelError('INVALID', `Forbidden sift operator: ${k}`);
       // A decoded `__proto__` key would set the mapped query's prototype instead of adding a condition.
-      if (!k.split('.').every(isSafeKey)) throw new KernelError('INVALID', `Forbidden sift key: ${k}`)
-      let newKey = k
-      if (k === '$type') newKey = '_type'
-      else if (k === '$path') newKey = '_path'
-      else if (k === '$acl') newKey = '_acl'
-      else if (k === '$owner') newKey = '_owner'
-      else if (k === '$rev') newKey = '_rev'
-      else if (k === '$id') newKey = '_tid' // matches toStorageKeys — queries can find nodes by identity
-      else if (k === '$refId') newKey = '_refId' // ref-target identity — omission here fails silently (matches nothing)
-      out[newKey] = mapSiftQuery(v)
+      if (!k.split('.').every(isSafeKey))
+        throw new KernelError('INVALID', `Forbidden sift key: ${k}`);
+      let newKey = k;
+      if (k === '$type') newKey = '_type';
+      else if (k === '$path') newKey = '_path';
+      else if (k === '$acl') newKey = '_acl';
+      else if (k === '$owner') newKey = '_owner';
+      else if (k === '$rev') newKey = '_rev';
+      else if (k === '$id')
+        newKey = '_tid'; // matches toStorageKeys — queries can find nodes by identity
+      else if (k === '$refId') newKey = '_refId'; // ref-target identity — omission here fails silently (matches nothing)
+      out[newKey] = mapSiftQuery(v);
     }
-    return out
+    return out;
   }
-  return q
+  return q;
 }
 
 // Read/watch predicates are validated up front and rejected if they
@@ -94,36 +105,36 @@ export function mapSiftQuery(q: unknown): unknown {
 // The rejection is STATIC (depends only on the predicate, never on data): an
 // earlier raw-node re-check threw only when hidden data matched — a 1-bit
 // oracle that extracted hidden components character by character.
-const VISIBLE_SYSTEM_FIELDS = new Set(['$path', '$type', '$rev', '$id', '$ref', '$refId'])
-const VISIBLE_STORAGE_FIELDS = new Set(['_path', '_type', '_rev', '_tid', '_ref', '_refId'])
-const LOGICAL_OPS = new Set(['$and', '$or', '$nor'])
+const VISIBLE_SYSTEM_FIELDS = new Set(['$path', '$type', '$rev', '$id', '$ref', '$refId']);
+const VISIBLE_STORAGE_FIELDS = new Set(['_path', '_type', '_rev', '_tid', '_ref', '_refId']);
+const LOGICAL_OPS = new Set(['$and', '$or', '$nor']);
 
 /** Throw FORBIDDEN if a sift predicate references a hidden field (system field
  *  or its storage alias). Walks $and/$or/$nor branches; checks the head segment
  *  of dotted paths. Value-level operators ($exists/$gt/…) live under a field key
  *  and are not re-examined. */
 function assertVisiblePredicate(q: unknown, where: 'callerWhere' | 'viewWhere'): void {
-  if (!isQueryObject(q)) return
+  if (!isQueryObject(q)) return;
   for (const [k, v] of Object.entries(q)) {
     if (LOGICAL_OPS.has(k)) {
-      const branches = Array.isArray(v) ? v : [v]
-      for (const b of branches) assertVisiblePredicate(b, where)
-      continue
+      const branches = Array.isArray(v) ? v : [v];
+      for (const b of branches) assertVisiblePredicate(b, where);
+      continue;
     }
-    const head = k.split('.')[0]
-    const hiddenSystem = head.startsWith('$') && !VISIBLE_SYSTEM_FIELDS.has(head)
-    const hiddenStorage = head.startsWith('_') && !VISIBLE_STORAGE_FIELDS.has(head)
+    const head = k.split('.')[0];
+    const hiddenSystem = head.startsWith('$') && !VISIBLE_SYSTEM_FIELDS.has(head);
+    const hiddenStorage = head.startsWith('_') && !VISIBLE_STORAGE_FIELDS.has(head);
     if (hiddenSystem || hiddenStorage) {
-      throw new KernelError('FORBIDDEN', `${where} references a hidden field: ${k}`)
+      throw new KernelError('FORBIDDEN', `${where} references a hidden field: ${k}`);
     }
   }
 }
 
 /** A compiled expression; each test charges its steps to the operation's counter as it takes them. */
-export type SiftTest = (node: Record<string, unknown>, work: ExprWork) => boolean
+export type SiftTest = (node: Record<string, unknown>, work: ExprWork) => boolean;
 
 /** Compile a sift query over storage-shaped nodes; it is judged whole first, so a refused one evaluates nothing. */
 export function createSiftTest(match: Record<string, unknown>, limits: Limits): SiftTest {
-  assertBounds(match, limits)
-  return compileQuery(mapSiftQuery(match))
+  assertBounds(match, limits);
+  return compileQuery(mapSiftQuery(match));
 }

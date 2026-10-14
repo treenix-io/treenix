@@ -1,34 +1,34 @@
-import { KernelError } from '#errors'
-import type { AuthAdmission, AuthFactory } from '#kernel/auth-factory'
-import { createNodeLane, type NodeLane, type NodeLaneOptions } from '#kernel/lane'
-import { networkAddress } from '#kernel/session-origin'
-import type { Credential, Limits, Path, RightsPrefix, ShardEnvelope } from '#kernel/types'
-import type { AcceptedNodeRead } from '#kernel/writer'
+import { KernelError } from '#errors';
+import type { AuthAdmission, AuthFactory } from '#kernel/auth-factory';
+import { createNodeLane, type NodeLane, type NodeLaneOptions } from '#kernel/lane';
+import { networkAddress } from '#kernel/session-origin';
+import type { Credential, Limits, Path, RightsPrefix, ShardEnvelope } from '#kernel/types';
+import type { AcceptedNodeRead } from '#kernel/writer';
 
 export interface OpenedSession {
-  readonly session: NodeLane
-  readonly admission: AuthAdmission
-  readonly issuedCredential?: Credential
+  readonly session: NodeLane;
+  readonly admission: AuthAdmission;
+  readonly issuedCredential?: Credential;
 }
 
 export interface SessionFactoryOptions {
-  readonly auth: AuthFactory
-  readonly limits: () => Limits
-  readonly lane: (admission: AuthAdmission) => NodeLaneOptions
+  readonly auth: AuthFactory;
+  readonly limits: () => Limits;
+  readonly lane: (admission: AuthAdmission) => NodeLaneOptions;
 }
 
 /** Controls idle expiry for a node session whose lifetime is owned by the kernel. */
-export type NodeSessionOptions = Pick<NodeLaneOptions, 'heartbeat'>
+export type NodeSessionOptions = Pick<NodeLaneOptions, 'heartbeat'>;
 
 export interface NodeSessionReservation {
-  validate(): void
-  open(owner: AcceptedNodeRead, options?: NodeSessionOptions): Promise<OpenedSession>
-  close(): void
+  validate(): void;
+  open(owner: AcceptedNodeRead, options?: NodeSessionOptions): Promise<OpenedSession>;
+  close(): void;
 }
 interface NodeQuota {
-  readonly principal: string
-  validate(): void
-  release(): void
+  readonly principal: string;
+  validate(): void;
+  release(): void;
 }
 
 /** Opens both authentication doors into the same native lane and owns their lifetime and quota. */
@@ -72,9 +72,13 @@ export function createSessionFactory(options: SessionFactoryOptions) {
       const count = buckets.get(bucket) ?? 0;
       if (quota !== undefined) {
         quota.validate();
-        if (bucket !== quota.principal) throw new KernelError('INVALID', 'Reserved executor identity differs');
+        if (bucket !== quota.principal)
+          throw new KernelError('INVALID', 'Reserved executor identity differs');
       }
-      if (count + (reservedBuckets.get(bucket) ?? 0) - (quota === undefined ? 0 : 1) >= options.limits().lanesPerOrigin)
+      if (
+        count + (reservedBuckets.get(bucket) ?? 0) - (quota === undefined ? 0 : 1) >=
+        options.limits().lanesPerOrigin
+      )
         throw new KernelError('BUDGET', 'Origin lane limit reached');
       const issuedCredential = issueCredential ? bound.resolution.credential : undefined;
       session = createNodeLane({ ...options.lane(bound), issuedCredential, heartbeat, cache });
@@ -112,29 +116,45 @@ export function createSessionFactory(options: SessionFactoryOptions) {
   return {
     /** Uses the same lane admission, quota and owned lifetime as local sessions. */
     async openShard(envelope: ShardEnvelope) {
-      const accepted = options.auth.openShard(envelope)
+      const accepted = options.auth.openShard(envelope);
       try {
-        const opened = await open(() => Promise.resolve(accepted.admission), false, false)
-        return { ...opened, update(prefix: RightsPrefix) { accepted.update(prefix); opened.session.rightsChanged() } }
-      } catch (error) { accepted.admission.close(); throw error }
+        const opened = await open(() => Promise.resolve(accepted.admission), false, false);
+        return {
+          ...opened,
+          update(prefix: RightsPrefix) {
+            accepted.update(prefix);
+            opened.session.rightsChanged();
+          },
+        };
+      } catch (error) {
+        accepted.admission.close();
+        throw error;
+      }
     },
     /** Reserve the exact future executor's lane before its canonical declaration becomes durable. */
     reserveNode(path: Path, id: string): NodeSessionReservation {
       available();
       const principal = `n:${id}`;
-      if (sessions.size + opening >= options.limits().maxLanes
-        || (buckets.get(principal) ?? 0) + (reservedBuckets.get(principal) ?? 0) >= options.limits().lanesPerOrigin)
+      if (
+        sessions.size + opening >= options.limits().maxLanes ||
+        (buckets.get(principal) ?? 0) + (reservedBuckets.get(principal) ?? 0) >=
+          options.limits().lanesPerOrigin
+      )
         throw new KernelError('BUDGET', 'Node session quota is exhausted');
       opening++;
       reservedBuckets.set(principal, (reservedBuckets.get(principal) ?? 0) + 1);
-      let active = true, used = false;
+      let active = true,
+        used = false;
       const quota: NodeQuota = {
         principal,
         validate() {
           available();
           if (!active) throw new KernelError('UNAVAILABLE', 'Node session reservation ended');
-          if (sessions.size + opening > options.limits().maxLanes
-            || (buckets.get(principal) ?? 0) + reservedBuckets.get(principal)! > options.limits().lanesPerOrigin)
+          if (
+            sessions.size + opening > options.limits().maxLanes ||
+            (buckets.get(principal) ?? 0) + reservedBuckets.get(principal)! >
+              options.limits().lanesPerOrigin
+          )
             throw new KernelError('BUDGET', 'Node session quota changed');
         },
         release() {
@@ -153,9 +173,18 @@ export function createSessionFactory(options: SessionFactoryOptions) {
         open(owner, sessionOptions = {}) {
           quota.validate();
           if (used || owner.path !== path || owner.id !== id)
-            throw new KernelError('INVALID', 'Accepted owner differs from its reserved node session');
+            throw new KernelError(
+              'INVALID',
+              'Accepted owner differs from its reserved node session',
+            );
           used = true;
-          return open(() => options.auth.openNodeIn(owner), false, sessionOptions.heartbeat !== false, undefined, quota);
+          return open(
+            () => options.auth.openNodeIn(owner),
+            false,
+            sessionOptions.heartbeat !== false,
+            undefined,
+            quota,
+          );
         },
         close: quota.release,
       };
@@ -171,7 +200,7 @@ export function createSessionFactory(options: SessionFactoryOptions) {
         credential === undefined,
         true,
         sessionOptions.cache,
-      )
+      );
     },
     /** Opens a node-authorized lane; kernel owners may disable its network idle expiry. */
     openNode(path: Path, sessionOptions: NodeSessionOptions = {}): Promise<OpenedSession> {
@@ -179,7 +208,7 @@ export function createSessionFactory(options: SessionFactoryOptions) {
     },
     /** Gives new lanes a fresh welcome while accepted requests finish on their original lane. */
     reconnect(): void {
-      for (const session of sessions) session.reconnect()
+      for (const session of sessions) session.reconnect();
     },
     /** Close active sessions and refuse future opens. */
     close(): void {
@@ -191,4 +220,4 @@ export function createSessionFactory(options: SessionFactoryOptions) {
   };
 }
 
-export type SessionFactory = ReturnType<typeof createSessionFactory>
+export type SessionFactory = ReturnType<typeof createSessionFactory>;

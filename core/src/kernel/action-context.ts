@@ -1,6 +1,6 @@
-import { KernelError } from '#errors'
-import type { AuthAdmission } from '#kernel/auth-factory'
-import type { createReader } from '#kernel/reader'
+import { KernelError } from '#errors';
+import type { AuthAdmission } from '#kernel/auth-factory';
+import type { createReader } from '#kernel/reader';
 import type {
   Actor,
   ActionInvocation,
@@ -14,8 +14,8 @@ import type {
   ReadResult,
   Selector,
   WriteActionContext,
-} from '#kernel/types'
-import { freeze } from '#util/freeze'
+} from '#kernel/types';
+import { freeze } from '#util/freeze';
 
 /** Bind pre-effect waits and escaped context access to the request and parent lifetime. */
 export function createActionControl(
@@ -23,46 +23,46 @@ export function createActionControl(
   deadline: number,
   parent?: () => void,
 ) {
-  const controller = new AbortController()
-  const signal = AbortSignal.any([admission.signal, controller.signal])
-  let closed = false
+  const controller = new AbortController();
+  const signal = AbortSignal.any([admission.signal, controller.signal]);
+  let closed = false;
   const timer = setTimeout(
     () => controller.abort(new KernelError('BUDGET', 'Action deadline exceeded')),
     Math.max(0, deadline - Date.now()),
-  )
-  timer.unref()
+  );
+  timer.unref();
 
   /** Reject work after this request, its admission, or its parent has ended. */
   function active(): void {
-    if (closed) throw new KernelError('INVALID', 'Action context has ended')
-    parent?.()
-    admission.assertActive()
-    if (controller.signal.aborted) throw controller.signal.reason
-    if (Date.now() > deadline) throw new KernelError('BUDGET', 'Action deadline exceeded')
+    if (closed) throw new KernelError('INVALID', 'Action context has ended');
+    parent?.();
+    admission.assertActive();
+    if (controller.signal.aborted) throw controller.signal.reason;
+    if (Date.now() > deadline) throw new KernelError('BUDGET', 'Action deadline exceeded');
   }
 
   /** Race pre-effect work against cancellation; Writer owns accepted commit completion. */
   async function wait<T>(pending: Promise<T>): Promise<T> {
     // Work can already be pending when cancellation refuses admission to this waiter.
-    void pending.catch(() => {})
-    active()
-    let aborted: () => void = () => {}
+    void pending.catch(() => {});
+    active();
+    let aborted: () => void = () => {};
     const stopped = new Promise<never>((_resolve, reject) => {
       aborted = () => {
         try {
-          active()
+          active();
         } catch (error) {
-          reject(error)
+          reject(error);
         }
-      }
-      signal.addEventListener('abort', aborted, { once: true })
-    })
+      };
+      signal.addEventListener('abort', aborted, { once: true });
+    });
     try {
-      const result = await Promise.race([pending, stopped])
-      active()
-      return result
+      const result = await Promise.race([pending, stopped]);
+      active();
+      return result;
     } finally {
-      signal.removeEventListener('abort', aborted)
+      signal.removeEventListener('abort', aborted);
     }
   }
 
@@ -72,66 +72,66 @@ export function createActionControl(
     signal,
     /** Revoke escaped access and release the request deadline timer. */
     close(): void {
-      closed = true
-      clearTimeout(timer)
-      controller.abort(new KernelError('CANCELLED', 'Action context has ended'))
+      closed = true;
+      clearTimeout(timer);
+      controller.abort(new KernelError('CANCELLED', 'Action context has ended'));
     },
-  }
+  };
 }
 
 export interface ActionContextOptions {
-  readonly node: Node
-  readonly needs: Readonly<Record<string, ReadResult>>
-  readonly reads: ReturnType<typeof createReader>
-  readonly caller: Actor
-  readonly executor: Actor
-  readonly active: () => void
-  readonly nested: (request: NestedActRequest) => Promise<unknown>
+  readonly node: Node;
+  readonly needs: Readonly<Record<string, ReadResult>>;
+  readonly reads: ReturnType<typeof createReader>;
+  readonly caller: Actor;
+  readonly executor: Actor;
+  readonly active: () => void;
+  readonly nested: (request: NestedActRequest) => Promise<unknown>;
 }
-export type ActionContextSource = ActionContextOptions | (() => ActionContextOptions)
+export type ActionContextSource = ActionContextOptions | (() => ActionContextOptions);
 
 /** Expose immutable data through the same executor Reader and action lifetime. */
 export function createReadActionContext(source: ActionContextSource): ReadActionContext {
-  const current = typeof source === 'function' ? source : () => source
+  const current = typeof source === 'function' ? source : () => source;
   function act<
     T extends keyof NativeActionResults & string,
     A extends keyof NativeActionResults[T] & string,
   >(
     request: NestedActRequest & { readonly targetType: T; readonly action: A },
-  ): Promise<NativeActionResults[T][A]>
-  function act(request: NestedActRequest): Promise<unknown>
+  ): Promise<NativeActionResults[T][A]>;
+  function act(request: NestedActRequest): Promise<unknown>;
   function act(request: NestedActRequest): Promise<unknown> {
-    return current().nested(request)
+    return current().nested(request);
   }
   return Object.freeze({
     get node() {
-      const options = current()
-      options.active()
-      return freeze(options.node)
+      const options = current();
+      options.active();
+      return freeze(options.node);
     },
     get needs() {
-      const options = current()
-      options.active()
-      return freeze(options.needs)
+      const options = current();
+      options.active();
+      return freeze(options.needs);
     },
     get caller() {
-      return current().caller
+      return current().caller;
     },
     get executor() {
-      return current().executor
+      return current().executor;
     },
     read: Object.freeze({
       /** Capture additional reads in the action's shared OCC dependencies. */
       async read(selector: Selector) {
-        const options = current()
-        options.active()
-        const result = await options.reads.read(selector)
-        options.active()
-        return freeze(result)
+        const options = current();
+        options.active();
+        const result = await options.reads.read(selector);
+        options.active();
+        return freeze(result);
       },
     }),
     act,
-  })
+  });
 }
 
 /** Add the owned change builder and declared I/O to a writing action context. */
@@ -141,10 +141,10 @@ export function createWriteActionContext(
   invocation: ActionInvocation,
   io?: () => Io,
 ): WriteActionContext {
-  const current = typeof source === 'function' ? source : () => source
-  const changes = typeof change === 'function' ? change : () => change
-  const read = createReadActionContext(current)
-  const identity = freeze(structuredClone(invocation))
+  const current = typeof source === 'function' ? source : () => source;
+  const changes = typeof change === 'function' ? change : () => change;
+  const read = createReadActionContext(current);
+  const identity = freeze(structuredClone(invocation));
   const stableChange: ChangeBuilder = {
     put: (node) => changes().put(node),
     patch: (path, ops) => changes().patch(path, ops),
@@ -153,45 +153,49 @@ export function createWriteActionContext(
     adopt: (from, to) => changes().adopt(from, to),
     restore: (record) => changes().restore(record),
     undo: (record) => changes().undo(record),
-  }
+  };
   const context: WriteActionContext = {
     get invocation() {
-      current().active()
-      return identity
+      current().active();
+      return identity;
     },
     get node() {
-      return read.node
+      return read.node;
     },
     get needs() {
-      return read.needs
+      return read.needs;
     },
     get caller() {
-      return read.caller
+      return read.caller;
     },
     get executor() {
-      return read.executor
+      return read.executor;
     },
     read: read.read,
     act: read.act,
     change: Object.freeze(stableChange),
     /** Keep destination authorization in the same executor read set and action lifetime. */
     async requireReadWrite(path: Path): Promise<void> {
-      const options = current()
-      options.active()
-      await options.reads.requireReadWrite(path)
-      options.active()
+      const options = current();
+      options.active();
+      await options.reads.requireReadWrite(path);
+      options.active();
     },
     /** Keep root administration bound to the same executor, metadata span and request lifetime. */
     async requireAdmin(): Promise<void> {
-      const options = current()
-      options.active()
-      await options.reads.requireAdmin()
-      options.active()
+      const options = current();
+      options.active();
+      await options.reads.requireAdmin();
+      options.active();
     },
-  }
-  if (io !== undefined) Object.defineProperty(context, 'io', {
-    enumerable: true,
-    get() { current().active(); return io() },
-  })
-  return Object.freeze(context)
+  };
+  if (io !== undefined)
+    Object.defineProperty(context, 'io', {
+      enumerable: true,
+      get() {
+        current().active();
+        return io();
+      },
+    });
+  return Object.freeze(context);
 }

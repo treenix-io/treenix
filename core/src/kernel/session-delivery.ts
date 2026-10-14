@@ -1,5 +1,5 @@
-import { KernelError } from '#errors'
-import type { NodeLane } from '#kernel/lane'
+import { KernelError } from '#errors';
+import type { NodeLane } from '#kernel/lane';
 
 /** Orders direct Pending outcomes; their pieces stay with Pending.chunks, outside this pump. */
 export function drainSession(session: NodeLane): Promise<void> {

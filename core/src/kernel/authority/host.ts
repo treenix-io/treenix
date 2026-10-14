@@ -10,6 +10,12 @@ export function isPrivateHost(hostname: string): boolean {
   if (!v4) return false;
   const a = Number(v4[1]);
   const b = Number(v4[2]);
-  return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254)
-    || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+  return (
+    a === 0 ||
+    a === 10 ||
+    a === 127 ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168)
+  );
 }

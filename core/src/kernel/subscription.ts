@@ -59,13 +59,23 @@ export function subscriptionBranch(branch: LaneBranch): SubscriptionBranch {
     if (input.kind === 'rights') rights.add(input.key);
     else if (input.kind === 'target') paths.add(input.key);
   }
-  return { covered: branch.covered, computed: branch.computed, viewErrors: branch.viewErrors, paths: [...paths], rights: [...rights],
-    ranges: branch.reads.dependencies?.flatMap(input => input.kind === 'topology' ? [input.range] : []) };
+  return {
+    covered: branch.covered,
+    computed: branch.computed,
+    viewErrors: branch.viewErrors,
+    paths: [...paths],
+    rights: [...rights],
+    ranges: branch.reads.dependencies?.flatMap((input) =>
+      input.kind === 'topology' ? [input.range] : [],
+    ),
+  };
 }
 /** Stores direct membership separately from include coverage. */
 export function subscriptionRoot(root: LaneRoot, cursor?: Cursor): SubscriptionRoot {
   return {
-    path: root.path, cursor, query: root.member?.query,
+    path: root.path,
+    cursor,
+    query: root.member?.query,
     ...subscriptionBranch(root),
     ...(root.member === undefined ? {} : { member: root.member.id }),
   };
@@ -96,7 +106,10 @@ export function createSubscriptions() {
       const path = range.children;
       if (childBindings.get(sub)!.has(path)) continue;
       let at = children.get(path);
-      if (at === undefined) { at = new Set(); children.set(path, at); }
+      if (at === undefined) {
+        at = new Set();
+        children.set(path, at);
+      }
       at.add(sub);
       childBindings.get(sub)!.add(path);
     }

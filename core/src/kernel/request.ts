@@ -1,6 +1,6 @@
-import { isDeepStrictEqual } from 'node:util'
-import { KernelError } from '#errors'
-import type { AuthAdmission } from '#kernel/auth-factory'
+import { isDeepStrictEqual } from 'node:util';
+import { KernelError } from '#errors';
+import type { AuthAdmission } from '#kernel/auth-factory';
 
 /** Serializes owned request data while rejecting binary values before deep freezing. */
 export function serializeRequest(value: unknown): string {
@@ -17,20 +17,31 @@ export function serializeRequest(value: unknown): string {
   return serialized;
 }
 
-export function createRequestAdmission(admission: AuthAdmission, requestSignal?: AbortSignal): AuthAdmission {
-  if (requestSignal === undefined && admission.shard === undefined) return admission
-  const shard = admission.shard
-  const cancellation = requestSignal
-  const signal = cancellation === undefined ? admission.signal : AbortSignal.any([admission.signal, cancellation])
+export function createRequestAdmission(
+  admission: AuthAdmission,
+  requestSignal?: AbortSignal,
+): AuthAdmission {
+  if (requestSignal === undefined && admission.shard === undefined) return admission;
+  const shard = admission.shard;
+  const cancellation = requestSignal;
+  const signal =
+    cancellation === undefined
+      ? admission.signal
+      : AbortSignal.any([admission.signal, cancellation]);
   function assertActive(): void {
-    admission.assertActive()
+    admission.assertActive();
     if (shard !== undefined && !isDeepStrictEqual(shard, admission.shard))
-      throw new KernelError('CONFLICT', 'Shard prefix changed during the request')
-    if (cancellation?.aborted) throw new KernelError('CANCELLED', 'Request ended')
+      throw new KernelError('CONFLICT', 'Shard prefix changed during the request');
+    if (cancellation?.aborted) throw new KernelError('CANCELLED', 'Request ended');
   }
-  return { ...admission, signal, assertActive, async validate(source) {
-    assertActive()
-    await admission.validate(source)
-    assertActive()
-  } }
+  return {
+    ...admission,
+    signal,
+    assertActive,
+    async validate(source) {
+      assertActive();
+      await admission.validate(source);
+      assertActive();
+    },
+  };
 }

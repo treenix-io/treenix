@@ -1,46 +1,147 @@
-import { normalizeType } from '#core/component'
-import { rawFsTypes } from '#kernel/rawfs-types'
-import { A, DEFAULT_LIMITS, R, W, type ModuleManifest, type TypeDef } from '#kernel/types'
+import { normalizeType } from '#core/component';
+import { rawFsTypes } from '#kernel/rawfs-types';
+import { A, DEFAULT_LIMITS, R, W, type ModuleManifest, type TypeDef } from '#kernel/types';
 
 export const fsMountType: TypeDef = {
-  name: 't.mount.fs', module: 'kernel', security: 'privileged-capability', version: 0, actions: {},
-  schema: { type: 'object', required: ['pattern', 'directory'], additionalProperties: false,
-    properties: { pattern: { type: 'string' }, directory: { type: 'string', minLength: 1 }, external: { enum: ['none', 'trusted'] } } },
-}
+  name: 't.mount.fs',
+  module: 'kernel',
+  security: 'privileged-capability',
+  version: 0,
+  actions: {},
+  schema: {
+    type: 'object',
+    required: ['pattern', 'directory'],
+    additionalProperties: false,
+    properties: {
+      pattern: { type: 'string' },
+      directory: { type: 'string', minLength: 1 },
+      external: { enum: ['none', 'trusted'] },
+    },
+  },
+};
 
-export const optionalKernelTypes: readonly TypeDef[] = [{
-  name: 't.mount.memory', module: 'kernel', security: 'user-capability', version: 0, actions: {},
-  schema: { type: 'object', required: ['pattern'], additionalProperties: false,
-    properties: { pattern: { type: 'string' }, external: { enum: ['none', 'trusted'] } } },
-}, {
-  name: 't.mount.federation', module: 'kernel', security: 'privileged-capability', version: 0, actions: {},
-  schema: { type: 'object', required: ['pattern', 'url', 'credential'], additionalProperties: false,
-    properties: { pattern: { type: 'string' }, url: { type: 'string', minLength: 1 }, credential: { type: 'string', pattern: '^/' },
-      remote: { type: 'string', pattern: '^/' }, allowPrivate: { type: 'boolean' } } },
-}, {
-  name: 't.outbound-credential', module: 'kernel', security: 'ordinary', version: 0, actions: {},
-  schema: { type: 'object', required: ['token'], additionalProperties: false, properties: { token: { type: 'string', minLength: 1 } } },
-}, fsMountType, ...rawFsTypes, {
-  name: 't.mount.query', module: 'kernel', security: 'user-capability', version: 0, actions: {},
-  schema: { type: 'object', required: ['pattern', 'source', 'match'], additionalProperties: false,
-    properties: { pattern: { type: 'string' }, source: { type: 'string' }, match: { type: 'object' } } },
-}]
+export const optionalKernelTypes: readonly TypeDef[] = [
+  {
+    name: 't.mount.memory',
+    module: 'kernel',
+    security: 'user-capability',
+    version: 0,
+    actions: {},
+    schema: {
+      type: 'object',
+      required: ['pattern'],
+      additionalProperties: false,
+      properties: { pattern: { type: 'string' }, external: { enum: ['none', 'trusted'] } },
+    },
+  },
+  {
+    name: 't.mount.federation',
+    module: 'kernel',
+    security: 'privileged-capability',
+    version: 0,
+    actions: {},
+    schema: {
+      type: 'object',
+      required: ['pattern', 'url', 'credential'],
+      additionalProperties: false,
+      properties: {
+        pattern: { type: 'string' },
+        url: { type: 'string', minLength: 1 },
+        credential: { type: 'string', pattern: '^/' },
+        remote: { type: 'string', pattern: '^/' },
+        allowPrivate: { type: 'boolean' },
+      },
+    },
+  },
+  {
+    name: 't.outbound-credential',
+    module: 'kernel',
+    security: 'ordinary',
+    version: 0,
+    actions: {},
+    schema: {
+      type: 'object',
+      required: ['token'],
+      additionalProperties: false,
+      properties: { token: { type: 'string', minLength: 1 } },
+    },
+  },
+  fsMountType,
+  ...rawFsTypes,
+  {
+    name: 't.mount.query',
+    module: 'kernel',
+    security: 'user-capability',
+    version: 0,
+    actions: {},
+    schema: {
+      type: 'object',
+      required: ['pattern', 'source', 'match'],
+      additionalProperties: false,
+      properties: {
+        pattern: { type: 'string' },
+        source: { type: 'string' },
+        match: { type: 'object' },
+      },
+    },
+  },
+];
 
 export const kernelManifest: ModuleManifest = {
   id: 'kernel',
-  types: [...['dir', 'root', 'ref', 'mount-point'].map(type => ({
-    name: normalizeType(type), module: 'kernel', security: 'ordinary', version: 0,
-    schema: { type: 'object', properties: {} }, actions: {},
-  } as const)), ...optionalKernelTypes, {
-    name: 't.type', module: 'kernel', security: 'ordinary', version: 0, actions: {}, actionsOnly: true,
-    schema: { type: 'object', required: ['name', 'module', 'security'], additionalProperties: false,
-      properties: { name: { type: 'string', minLength: 1 }, module: { type: 'string', minLength: 1 },
-        security: { enum: ['ordinary', 'user-capability', 'privileged-capability'] }, viewPublication: { type: 'string' }, actionPublications: { type: 'object', additionalProperties: { type: 'string' } } } },
-  }, {
-    name: 't.limits', module: 'kernel', security: 'ordinary', version: 0, actions: {}, actionsOnly: true,
-    schema: { type: 'object', additionalProperties: false,
-      properties: Object.fromEntries(Object.keys(DEFAULT_LIMITS).map(name => [name, { type: 'number', minimum: 0 }])) },
-  }],
-  security: ['t.type', 't.limits'].map(type => ({ type, context: 'acl', handler: input => input.admin ? R | W | A : R })),
+  types: [
+    ...['dir', 'root', 'ref', 'mount-point'].map(
+      (type) =>
+        ({
+          name: normalizeType(type),
+          module: 'kernel',
+          security: 'ordinary',
+          version: 0,
+          schema: { type: 'object', properties: {} },
+          actions: {},
+        }) as const,
+    ),
+    ...optionalKernelTypes,
+    {
+      name: 't.type',
+      module: 'kernel',
+      security: 'ordinary',
+      version: 0,
+      actions: {},
+      actionsOnly: true,
+      schema: {
+        type: 'object',
+        required: ['name', 'module', 'security'],
+        additionalProperties: false,
+        properties: {
+          name: { type: 'string', minLength: 1 },
+          module: { type: 'string', minLength: 1 },
+          security: { enum: ['ordinary', 'user-capability', 'privileged-capability'] },
+          viewPublication: { type: 'string' },
+          actionPublications: { type: 'object', additionalProperties: { type: 'string' } },
+        },
+      },
+    },
+    {
+      name: 't.limits',
+      module: 'kernel',
+      security: 'ordinary',
+      version: 0,
+      actions: {},
+      actionsOnly: true,
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: Object.fromEntries(
+          Object.keys(DEFAULT_LIMITS).map((name) => [name, { type: 'number', minimum: 0 }]),
+        ),
+      },
+    },
+  ],
+  security: ['t.type', 't.limits'].map((type) => ({
+    type,
+    context: 'acl',
+    handler: (input) => (input.admin ? R | W | A : R),
+  })),
   open: [],
-}
+};

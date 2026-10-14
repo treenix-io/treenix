@@ -3,7 +3,9 @@ import type { BlobRef, Budget, JournalCommit } from '#kernel/types';
 import { isRecord } from '#util/is-record';
 
 /** Shared traversal counter for reference validation and maintenance work. */
-export interface BlobReferenceWork { exprWork: number }
+export interface BlobReferenceWork {
+  exprWork: number;
+}
 
 /** Decodes a reference at the node-write boundary, where binary data is forbidden. */
 export function decodeReference(value: unknown): BlobRef {
@@ -21,16 +23,23 @@ export function decodeReference(value: unknown): BlobRef {
 }
 
 /** Walks admitted JSON values once, with an explicit budget at node-write boundaries. */
-function visitReferences(value: unknown, accept: (item: Record<string, unknown>) => void,
-  budget?: Budget, work: BlobReferenceWork = { exprWork: 0 }): void {
-
+function visitReferences(
+  value: unknown,
+  accept: (item: Record<string, unknown>) => void,
+  budget?: Budget,
+  work: BlobReferenceWork = { exprWork: 0 },
+): void {
   /** Finds binary references without permitting embedded binary values. */
   function visit(item: unknown): void {
     work.exprWork++;
     if (budget !== undefined && (work.exprWork > budget.exprWork || Date.now() > budget.deadline))
       throw new KernelError('BUDGET', 'Blob reference validation exceeded its budget');
     if (item === null || typeof item !== 'object') return;
-    if (ArrayBuffer.isView(item) || item instanceof ArrayBuffer || item instanceof SharedArrayBuffer)
+    if (
+      ArrayBuffer.isView(item) ||
+      item instanceof ArrayBuffer ||
+      item instanceof SharedArrayBuffer
+    )
       throw new KernelError('INVALID', 'Binary content belongs in a blob');
     if (Array.isArray(item)) {
       for (const child of item) visit(child);
@@ -49,29 +58,52 @@ function visitReferences(value: unknown, accept: (item: Record<string, unknown>)
 }
 
 /** Validates each distinct reference's metadata at the authored node-write boundary. */
-export function blobReferences(value: unknown, budget?: Budget, work?: BlobReferenceWork): ReadonlyMap<string, BlobRef> {
+export function blobReferences(
+  value: unknown,
+  budget?: Budget,
+  work?: BlobReferenceWork,
+): ReadonlyMap<string, BlobRef> {
   const references = new Map<string, BlobRef>();
-  visitReferences(value, item => {
-    const ref = decodeReference(item);
-    const previous = references.get(ref.$blob);
-    if (previous !== undefined && (previous.size !== ref.size || previous.type !== ref.type))
-      throw new KernelError('INVALID', 'Conflicting blob reference metadata');
-    references.set(ref.$blob, ref);
-  }, budget, work);
+  visitReferences(
+    value,
+    (item) => {
+      const ref = decodeReference(item);
+      const previous = references.get(ref.$blob);
+      if (previous !== undefined && (previous.size !== ref.size || previous.type !== ref.type))
+        throw new KernelError('INVALID', 'Conflicting blob reference metadata');
+      references.set(ref.$blob, ref);
+    },
+    budget,
+    work,
+  );
   return references;
 }
 
 /** Holds identities in accepted data, including externally detected unresolved references. */
-export function blobIds(value: unknown, budget?: Budget, work?: BlobReferenceWork): readonly string[] {
+export function blobIds(
+  value: unknown,
+  budget?: Budget,
+  work?: BlobReferenceWork,
+): readonly string[] {
   const ids = new Set<string>();
-  visitReferences(value, item => {
-    if (typeof item.$blob !== 'string') throw new KernelError('INVALID', 'Blob identity is malformed');
-    ids.add(item.$blob);
-  }, budget, work);
+  visitReferences(
+    value,
+    (item) => {
+      if (typeof item.$blob !== 'string')
+        throw new KernelError('INVALID', 'Blob identity is malformed');
+      ids.add(item.$blob);
+    },
+    budget,
+    work,
+  );
   return [...ids];
 }
 
 /** Retains references on both sides of every canonical journal transition. */
-export function journalBlobIds(record: JournalCommit, budget?: Budget, work?: BlobReferenceWork): readonly string[] {
+export function journalBlobIds(
+  record: JournalCommit,
+  budget?: Budget,
+  work?: BlobReferenceWork,
+): readonly string[] {
   return blobIds(record.entries, budget, work);
 }

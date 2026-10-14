@@ -1,15 +1,28 @@
-import { randomUUID } from 'node:crypto'
-import { KernelError } from '#errors'
-import { createMemoryBlobStore } from '#kernel/blob-store-memory'
-import { createInstance } from '#kernel/instance'
-import { previewModules } from '#kernel/module-install'
-import { copyManifest } from '#kernel/registry'
-import { drainSession } from '#kernel/session-delivery'
-import { createMemoryStore } from '#kernel/store/memory'
-import type { Position, PositionCounter, StreamCursor, TestActor, TestInstance, TestInstanceConfig } from '#kernel/types'
+import { randomUUID } from 'node:crypto';
+import { KernelError } from '#errors';
+import { createMemoryBlobStore } from '#kernel/blob-store-memory';
+import { createInstance } from '#kernel/instance';
+import { previewModules } from '#kernel/module-install';
+import { copyManifest } from '#kernel/registry';
+import { drainSession } from '#kernel/session-delivery';
+import { createMemoryStore } from '#kernel/store/memory';
+import type {
+  Position,
+  PositionCounter,
+  StreamCursor,
+  TestActor,
+  TestInstance,
+  TestInstanceConfig,
+} from '#kernel/types';
 
-export { runStoreContract, scanBudget, position, storedNode, storeCommit } from '#kernel/store/contract'
-export type { StoreContractOptions } from '#kernel/store/contract'
+export {
+  runStoreContract,
+  scanBudget,
+  position,
+  storedNode,
+  storeCommit,
+} from '#kernel/store/contract';
+export type { StoreContractOptions } from '#kernel/store/contract';
 
 export interface NativeTestInstance<ActorName extends string = string>
   extends TestInstance<ActorName> {
@@ -74,7 +87,10 @@ export async function createTestInstance(input: TestInstanceConfig): Promise<Nat
       counter: testCounter(id),
       domains: [{ store: root, epoch: randomUUID(), persistent: false }],
       credentialTtlMs: 60_000,
-      bootstrap: { kind: 'fresh', admin: { path: '/auth/users/test-admin', name: 'test-admin', password: randomUUID() } },
+      bootstrap: {
+        kind: 'fresh',
+        admin: { path: '/auth/users/test-admin', name: 'test-admin', password: randomUUID() },
+      },
     },
     blobs: createMemoryBlobStore(),
     modules,
@@ -88,7 +104,10 @@ export async function createTestInstance(input: TestInstanceConfig): Promise<Nat
   /** Releases lanes before awaiting their pumps; setup failures use the same cleanup. */
   function close(): Promise<void> {
     if (closing !== undefined) return closing;
-    closing = instance.close().then(() => Promise.all(deliveries)).then(() => undefined);
+    closing = instance
+      .close()
+      .then(() => Promise.all(deliveries))
+      .then(() => undefined);
     return closing;
   }
 
